@@ -5,6 +5,7 @@ import { custPosSales, custPosItems, payments, customerInventory, custStockLog, 
 import { DocNumberService } from '../../common/doc-number.service';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { RecipeService } from '../menu/recipe.service';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { CreateReturnDto } from './dto';
@@ -18,6 +19,7 @@ export class ReturnsService {
     private readonly docNo: DocNumberService,
     private readonly payments: PaymentService,
     private readonly ledger: LedgerService,
+    private readonly recipe: RecipeService,
   ) {}
 
   // item-level return: refund (reuse PaymentService.refund) + restock + GL reversal, atomic.
@@ -90,6 +92,13 @@ export class ReturnsService {
       const je: any = await this.ledger.postEntry({ source: 'RTN', sourceRef: returnNo, tenantId: sale.tenantId, memo: `Return ${returnNo} of ${dto.sale_no}`, createdBy: user.username, lines: [{ account_code: '4000', debit: subtotalReturned }, { account_code: '2100', debit: vatReturned }, { account_code: '1000', credit: totalReturned }] });
       journalNo = je?.entry_no ?? null;
       await db.update(posReturns).set({ journalNo }).where(eq(posReturns.id, h.id));
+    }
+
+    // recipe/BOM: reverse ingredient deduction (restore stock) + COGS reversal Dr 1200 / Cr 5300
+    let cogsRev = 0;
+    for (const rl of retLines) { const rev = await this.recipe.reverseDeduction(db, sale.tenantId, String(rl.line.itemId ?? ''), rl.qty, returnNo, user); cogsRev = round2(cogsRev + rev.cost); }
+    if (cogsRev > 0 && !(await this.ledger.alreadyPosted('RTN-COGS', returnNo))) {
+      await this.ledger.postEntry({ source: 'RTN-COGS', sourceRef: returnNo, tenantId: sale.tenantId, memo: `COGS reversal ${returnNo}`, createdBy: user.username, lines: [{ account_code: '1200', debit: cogsRev }, { account_code: '5300', credit: cogsRev }] });
     }
 
     // credit-note (ใบลดหนี้) hook: link the original tax invoice for a future CRN issuer (Tier 2)

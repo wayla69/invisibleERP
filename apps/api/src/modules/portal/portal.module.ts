@@ -6,9 +6,10 @@ import { PortalMyErpService } from './portal.myerp.service';
 import { TaxModule } from '../tax/tax.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { LedgerModule } from '../ledger/ledger.module';
+import { MenuModule } from '../menu/menu.module';
 
 @Module({
-  imports: [TaxModule, PaymentsModule, LedgerModule],
+  imports: [TaxModule, PaymentsModule, LedgerModule, MenuModule],
   controllers: [PortalController],
   providers: [PortalService, PortalPosService, PortalMyErpService],
   exports: [PortalService],

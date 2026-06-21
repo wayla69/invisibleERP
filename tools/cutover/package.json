@@ -20,6 +20,7 @@
     "revrec": "tsx src/revrec.ts",
     "fxreval": "tsx src/fxreval.ts",
     "intercompany": "tsx src/intercompany.ts",
+    "recipe": "tsx src/recipe.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

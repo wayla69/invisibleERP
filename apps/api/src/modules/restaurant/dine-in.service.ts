@@ -11,6 +11,7 @@ import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxInvoiceService } from '../tax-docs/tax-invoice.service';
 import { MenuService } from '../menu/menu.service';
+import { RecipeService } from '../menu/recipe.service';
 import { PromoEngineService } from '../marketing/promo-engine.service';
 import { promotions, promoRedemptions } from '../../database/schema';
 import { roundCurrency } from '../tax/money';
@@ -31,6 +32,7 @@ export class DineInService {
     private readonly taxInvoice: TaxInvoiceService,
     private readonly menu: MenuService,
     private readonly promo: PromoEngineService,
+    private readonly recipe: RecipeService,
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -219,6 +221,9 @@ export class DineInService {
       status: 'Completed', notes: `Dine-in ${o.orderNo}`, createdBy: user.username,
     }).returning({ id: custPosSales.id });
     await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h.id), ...r })));
+    // recipe/BOM: deduct ingredients per sold menu line (allows negative, logs Consume); accumulate COGS if post_cogs
+    let recipeCogs = 0;
+    for (const l of items) { const ded = await this.recipe.applyDeduction(db, o.tenantId, String(l.itemId ?? ''), n(l.qty), saleNo, user); recipeCogs = roundCurrency(recipeCogs + ded.cost, 'THB'); }
     let journalNo: string | null = null;
     if (total > 0) {
       const je: any = await this.ledger.postEntry({
@@ -234,6 +239,10 @@ export class DineInService {
         if (!upd.length) throw new BadRequestException({ code: 'PROMO_EXHAUSTED', message: 'Promo usage limit reached', messageTh: 'โปรโมชันถูกใช้ครบจำนวนแล้ว' });
         await db.insert(promoRedemptions).values({ tenantId: o.tenantId ?? null, promoId: pe.promoRowId, promoCode: pe.promoCode, saleNo, orderNo: o.orderNo, discountAmount: fx(pe.discount, 2), appliedBy: user.username });
       }
+    }
+    // recipe COGS (gated by per-recipe post_cogs): Dr 5300 Recipe COGS / Cr 1200 Inventory
+    if (recipeCogs > 0 && !(await this.ledger.alreadyPosted('POS-COGS', saleNo))) {
+      await this.ledger.postEntry({ source: 'POS-COGS', sourceRef: saleNo, tenantId: o.tenantId, memo: `COGS ${saleNo}`, createdBy: user.username, lines: [{ account_code: '5300', debit: recipeCogs }, { account_code: '1200', credit: recipeCogs }] });
     }
     return { subtotal: subtotalNet, discount: orderDisc, vat, total, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal };
   }

@@ -148,6 +148,13 @@
       "when": 1782007973297,
       "tag": "0020_intercompany",
       "breakpoints": false
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1782007973298,
+      "tag": "0021_menu_recipes",
+      "breakpoints": false
     }
   ]
 }
