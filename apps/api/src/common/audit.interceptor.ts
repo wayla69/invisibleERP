@@ -9,6 +9,7 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import { Observable, tap } from 'rxjs';
+import { sql } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { auditLog } from '../database/schema';
@@ -32,13 +33,15 @@ export class AuditInterceptor implements NestInterceptor {
     const url = (req as any).originalUrl ?? req.url ?? '';
     const action = `${method} ${url}`;
     const ip = clientIp(req);
-    const user = req.user;
+    // Snapshot identity NOW — by the time tap() fires, the request tx/ALS has already exited.
+    const actor = req.user?.username ?? null;
+    const tenantId = req.user?.tenantId ?? null; // numeric; do NOT derive from customerName (a string code)
 
     return next.handle().pipe(
       tap({
-        next: () => void this.record(action, user, ip, rid, 'success'),
+        next: () => void this.record(action, actor, tenantId, ip, rid, 'success'),
         error: (err) =>
-          void this.record(action, user, ip, rid, 'fail', {
+          void this.record(action, actor, tenantId, ip, rid, 'fail', {
             error: err?.message ?? String(err),
           }),
       }),
@@ -48,7 +51,8 @@ export class AuditInterceptor implements NestInterceptor {
   // Fire-and-forget audit write. Swallows all errors.
   private async record(
     action: string,
-    user: JwtUser | undefined,
+    actor: string | null,
+    tenantId: number | null,
     ip: string | null,
     rid: string,
     status: 'success' | 'fail',
@@ -56,15 +60,14 @@ export class AuditInterceptor implements NestInterceptor {
   ): Promise<void> {
     try {
       const db = this.db as any;
-      await db.insert(auditLog).values({
-        actor: user?.username ?? null,
-        // tenantId is numeric; user.customerName is a string code → keep null unless it parses.
-        tenantId: numericTenant(user?.customerName),
-        action,
-        ip,
-        requestId: rid,
-        status,
-        meta: meta ?? null,
+      // The request tx already committed/rolled back, so the proxy routes this to the base connection.
+      // audit_log is FORCE-RLS (0002_rls.sql) — run in its own tx that sets app.bypass_rls so the
+      // WITH CHECK policy admits the row even when tenant_id is NULL (system/pre-auth events). We do
+      // NOT SET ROLE here: a swallowed SET-ROLE failure would leave the tx aborted (25P02) and drop
+      // the audit row; the base connection role already holds INSERT and the bypass GUC satisfies RLS.
+      await db.transaction(async (tx: any) => {
+        await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
+        await tx.insert(auditLog).values({ actor, tenantId, action, ip, requestId: rid, status, meta: meta ?? null });
       });
     } catch (e) {
       // Audit must never break the request. Log and move on.
@@ -78,10 +81,4 @@ function clientIp(req: FastifyRequest): string | null {
   if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
   if (Array.isArray(fwd) && fwd.length) return String(fwd[0]).trim();
   return (req as any).ip ?? null;
-}
-
-function numericTenant(customerName: string | null | undefined): number | null {
-  if (customerName == null) return null;
-  const v = Number(customerName);
-  return Number.isInteger(v) ? v : null;
 }

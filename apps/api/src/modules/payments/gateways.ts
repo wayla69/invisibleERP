@@ -3,7 +3,7 @@
 
 export interface GatewayResult {
   ref: string;
-  status: 'Captured' | 'Failed';
+  status: 'Captured' | 'Authorized' | 'Pending' | 'Failed';
 }
 
 export interface PaymentGateway {
@@ -24,10 +24,12 @@ export class MockGateway implements PaymentGateway {
   }
 }
 
-// PromptPay (TH QR) — returns a QR payload string as the ref; treated as captured.
+// PromptPay (TH QR) — QR is settled asynchronously by the payer. Return the QR payload as the
+// ref and mark the tender 'Pending' until a settlement webhook flips it to Captured. Reporting
+// Captured up-front would book funds that have not actually moved.
 export class PromptPayGateway implements PaymentGateway {
   async authorizeAndCapture(amount: number): Promise<GatewayResult> {
-    return { ref: 'promptpay_' + amount, status: 'Captured' };
+    return { ref: 'promptpay_' + amount, status: 'Pending' };
   }
 }
 

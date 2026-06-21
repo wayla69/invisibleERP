@@ -6,10 +6,11 @@ import {
   loyaltyConfig, loyaltyPoints, loyaltyTxn,
 } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
-import { ymd, n } from '../../database/queries';
+import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { PortalService } from './portal.service';
 import { TaxService } from '../tax/tax.service';
+import { roundCurrency } from '../tax/money';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 
@@ -40,15 +41,15 @@ export class PortalPosService {
     const lines = dto.items.map((it) => {
       const gross = n(it.qty) * n(it.unit_price);
       const lineDisc = gross * (n(it.discount_pct) / 100);
-      return { ...it, amount: Math.round((gross - lineDisc) * 100) / 100 };
+      return { ...it, amount: roundCurrency(gross - lineDisc, 'THB') };
     });
-    const subtotal = Math.round(lines.reduce((a, l) => a + l.amount, 0) * 100) / 100;
-    const discount = Math.round(n(dto.discount) * 100) / 100;
+    const subtotal = roundCurrency(lines.reduce((a, l) => a + l.amount, 0), 'THB');
+    const discount = roundCurrency(n(dto.discount), 'THB');
     const taxable = Math.max(0, subtotal - discount);
     // pluggable tax (move #5) — no more hard-coded VAT 7%
     const taxCalc = this.tax.calcTax({ net: taxable, country: 'TH' });
     const vat = taxCalc.tax;
-    const total = Math.round((taxable + vat) * 100) / 100;
+    const total = roundCurrency(taxable + vat, 'THB');
 
     const saleNo = this.docNo.nextTenantStamped('SALE', t.code);
     const today = ymd();
@@ -57,19 +58,19 @@ export class PortalPosService {
     // loyalty earn (parity with central POS)
     let pointsEarned = 0;
     const [cfg] = await db.select().from(loyaltyConfig).where(eq(loyaltyConfig.id, 1)).limit(1);
-    if (cfg?.enabled) pointsEarned = Math.round(total * n(cfg.pointsPerBaht) * 100) / 100;
+    if (cfg?.enabled) pointsEarned = roundCurrency(total * n(cfg.pointsPerBaht), 'THB');
 
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(custPosSales).values({
-        saleNo, saleDate: today, tenantId: t.id, subtotal: String(subtotal), discount: String(discount),
-        taxAmount: String(vat), total: String(total), paymentMethod: dto.payment_method ?? 'Cash',
+        saleNo, saleDate: today, tenantId: t.id, subtotal: fx(subtotal, 2), discount: fx(discount, 2),
+        taxAmount: fx(vat, 2), total: fx(total, 2), paymentMethod: dto.payment_method ?? 'Cash',
         pointsUsed: '0', pointsEarned: String(pointsEarned), status: 'Completed', notes: dto.notes ?? null, createdBy: user.username,
       }).returning({ id: custPosSales.id });
 
       await tx.insert(custPosItems).values(lines.map((l) => ({
         saleId: Number(h.id), itemId: l.item_id, itemDescription: l.item_description ?? null,
-        qty: String(n(l.qty)), uom: l.uom ?? null, unitPrice: String(n(l.unit_price)),
-        discountPct: String(n(l.discount_pct)), amount: String(l.amount), isCustom: false,
+        qty: String(n(l.qty)), uom: l.uom ?? null, unitPrice: fx(l.unit_price, 2),
+        discountPct: String(n(l.discount_pct)), amount: fx(l.amount, 2), isCustom: false,
       })));
 
       // decrement customer inventory (MAX(0,...)) + stock log
@@ -102,18 +103,26 @@ export class PortalPosService {
     // aborts it), so the interceptor's COMMIT becomes a ROLLBACK and we'd return 200 + sale_no for a
     // sale that was never persisted (phantom sale). Letting them propagate rolls the whole sale back
     // atomically — no sale without its money + books.
-    const tender: any = await this.payments.recordTender(
-      { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock' },
-      user,
-    );
-    const je: any = await this.ledger.postEntry({
-      source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
-      lines: [
-        { account_code: '1000', debit: total },   // Dr Cash
-        { account_code: '4000', credit: taxable }, // Cr Sales Revenue
-        { account_code: '2100', credit: vat },     // Cr Tax Payable
-      ],
-    });
+    // A zero-total sale (e.g. 100% comp/discount) has no money movement and no VAT — skip the tender
+    // and the GL posting (recordTender rejects amount<=0 and an all-zero journal has nothing to post).
+    let tender: any = null;
+    let je: any = null;
+    if (total > 0) {
+      // Link this tender to the shop's open till (if any) so closeTill sees POS cash (move #5 reconciliation).
+      const openTill = await this.payments.currentOpenTill(t.id);
+      tender = await this.payments.recordTender(
+        { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id },
+        user,
+      );
+      je = await this.ledger.postEntry({
+        source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
+        lines: [
+          { account_code: '1000', debit: total },   // Dr Cash
+          { account_code: '4000', credit: taxable }, // Cr Sales Revenue
+          { account_code: '2100', credit: vat },     // Cr Tax Payable
+        ],
+      });
+    }
 
     return { sale_no: saleNo, subtotal, discount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
   }

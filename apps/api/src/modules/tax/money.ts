@@ -33,16 +33,17 @@ export function isSupportedCurrency(code: string): boolean {
   return CURRENCY_BY_CODE.has((code || '').toUpperCase());
 }
 
-// Generic 2-decimal round — matches the money math already spread through the
-// POS/finance services (Math.round(x*100)/100). Kept for parity / convenience.
-export const round2 = (amount: number): number => Math.round((Number(amount) || 0) * 100) / 100;
-
-// Round to the currency's minor unit (e.g. JPY → 0dp, THB → 2dp).
+// Round to the currency's minor unit (e.g. JPY → 0dp, THB → 2dp). Epsilon-corrected so
+// half-cent inputs round consistently. THE single canonical money-rounding policy.
 export function roundCurrency(amount: number, currency = 'THB'): number {
   const { decimals } = getCurrency(currency);
   const f = Math.pow(10, decimals);
   return Math.round(((Number(amount) || 0) + Number.EPSILON) * f) / f;
 }
+
+// THB-default 2dp settlement round — thin alias of roundCurrency so every money path
+// (POS/finance/payments) shares ONE rounding policy. round2(1.239) === 1.24.
+export const round2 = (amount: number): number => roundCurrency(amount, 'THB');
 
 // money(amount, currency) — value snapshot for an amount in a given currency.
 // `text` is a display string; `minor` is the integer amount in minor units

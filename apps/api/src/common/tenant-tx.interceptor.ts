@@ -4,6 +4,7 @@ import { from, firstValueFrom } from 'rxjs';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { tenantALS } from './tenant-context';
+import { NO_TX_KEY } from './decorators';
 
 // Wraps each (non-SSE) request in a tenant-scoped transaction:
 //   SET LOCAL ROLE app_user  +  set_config('app.tenant_id'|'app.bypass_rls')
@@ -26,6 +27,9 @@ export class TenantTxInterceptor implements NestInterceptor {
     // do not wrap SSE/streaming endpoints in a single transaction
     const isSse = this.reflector.get<boolean>('sse', ctx.getHandler());
     if (isSse) return next.handle();
+    // @NoTx() — opt out for handlers that touch no tenant-scoped data (health/config).
+    const noTx = this.reflector.get<boolean>(NO_TX_KEY, ctx.getHandler());
+    if (noTx) return next.handle();
 
     const req = ctx.switchToHttp().getRequest();
     const user = req?.user;
@@ -54,7 +58,11 @@ export class TenantTxInterceptor implements NestInterceptor {
         }
         await tx.execute(sql`select set_config('app.bypass_rls', ${bypass ? 'on' : 'off'}, true)`);
         await tx.execute(sql`select set_config('app.tenant_id', ${tenantId != null ? String(tenantId) : ''}, true)`);
-        return tenantALS.run({ tx, tenantId, bypass }, () => firstValueFrom(next.handle()));
+        // NB: we intentionally do NOT force the tx READ ONLY for GETs — several GET handlers perform
+        // legitimate writes (dashboard auto-reorder, lazy loyalty-config seed), and Postgres rejects
+        // changing access mode after the first query anyway (25001). @NoTx is the opt-out for non-tenant
+        // handlers. defaultValue guards handlers that complete without emitting (would throw EmptyError).
+        return tenantALS.run({ tx, tenantId, bypass }, () => firstValueFrom(next.handle(), { defaultValue: undefined }));
       }),
     );
   }

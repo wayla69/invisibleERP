@@ -42,6 +42,12 @@ export class PaymentsController {
     return this.svc.voidPayment(no, u);
   }
 
+  // confirm an async tender (PromptPay/Authorized → Captured) once settlement is observed
+  @Patch(':no/settle') @Permissions('pos', 'cust_pos', 'ar')
+  settle(@Param('no') no: string, @CurrentUser() u: JwtUser) {
+    return this.svc.settle(no, u);
+  }
+
   @Post('till/open') @Permissions('pos', 'cust_pos', 'ar')
   openTill(@Body(new ZodValidationPipe(OpenTillBody)) b: OpenTillDto, @CurrentUser() u: JwtUser) {
     return this.svc.openTill(b, u);

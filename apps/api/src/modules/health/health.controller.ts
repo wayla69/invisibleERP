@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import { Public } from '../../common/decorators';
+import { Public, NoTx } from '../../common/decorators';
 
 // ค่าจาก config.json เดิม (Phase 1 จะย้ายไปตาราง/ConfigService)
 const CONFIG = {
@@ -13,13 +13,13 @@ const CONFIG = {
 
 @Controller()
 export class HealthController {
-  @Public()
+  @Public() @NoTx()
   @Get('/')
   root() {
     return { status: 'online', app: CONFIG.company_name, version: '0.1.0' };
   }
 
-  @Public()
+  @Public() @NoTx()
   @Get('api/config')
   config() {
     return CONFIG;

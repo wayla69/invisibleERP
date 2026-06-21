@@ -7,7 +7,7 @@ import {
   ThaiTaxProvider,
   ZeroTaxProvider,
 } from './tax-providers';
-import { CURRENCIES, getCurrency, round2 } from './money';
+import { CURRENCIES, getCurrency, roundCurrency } from './money';
 
 export interface CalcTaxInput extends TaxInput {
   country?: string; // ISO-3166 alpha-2 (default 'TH')
@@ -56,13 +56,13 @@ export class TaxService {
     const currency = getCurrency(input?.currency).code;
     const net = Number(input?.net) || 0;
     const provider = this.resolveProvider(country);
-    const { rate, tax, label } = provider.calc({ net, category: input?.category, date: input?.date });
+    const { rate, tax, label } = provider.calc({ net, category: input?.category, date: input?.date, currency });
     return {
       country,
-      net: round2(net),
+      net: roundCurrency(net, currency),
       rate,
-      tax: round2(tax),
-      gross: round2(net + tax),
+      tax: roundCurrency(tax, currency),
+      gross: roundCurrency(net + tax, currency),
       label,
       currency,
     };

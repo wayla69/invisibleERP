@@ -12,12 +12,15 @@ import { PasswordService } from './password.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const secret = config.get<string>('JWT_SECRET');
-        if (!secret && config.get('NODE_ENV') === 'production') {
-          throw new Error('JWT_SECRET is required in production (no insecure default — unlike V1).');
+        const nodeEnv = config.get<string>('NODE_ENV');
+        // Fail closed everywhere except explicit local dev: require JWT_SECRET unless
+        // NODE_ENV==='development'. Tests set JWT_SECRET (NODE_ENV==='test') so they pass.
+        if (!secret && nodeEnv !== 'development') {
+          throw new Error('JWT_SECRET is required (set it in env). No insecure default outside NODE_ENV=development.');
         }
         return {
           secret: secret ?? 'dev-only-insecure-secret-change-me',
-          signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '30d' },
+          signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '8h' },
         };
       },
     }),

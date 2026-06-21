@@ -3,6 +3,7 @@ import { authenticator } from 'otplib';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users } from '../../database/schema';
+import { encrypt, decrypt } from '../../common/crypto';
 import type { JwtUser } from '../../common/decorators';
 
 const ISSUER = 'Invisible ERP';
@@ -24,7 +25,8 @@ export class MfaService {
     const u = await this.userRow(user);
     const secret = authenticator.generateSecret();
     const otpauth_url = authenticator.keyuri(u.username, ISSUER, secret);
-    await db.update(users).set({ totpSecret: secret, mfaEnabled: false }).where(eq(users.id, u.id));
+    // store ciphertext; return plaintext (caller needs it to enroll an authenticator app)
+    await db.update(users).set({ totpSecret: encrypt(secret), mfaEnabled: false }).where(eq(users.id, u.id));
     return { secret, otpauth_url };
   }
 
@@ -33,7 +35,7 @@ export class MfaService {
     const db = this.db as any;
     const u = await this.userRow(user);
     if (!u.totpSecret) throw new BadRequestException({ code: 'MFA_NOT_SETUP', message: 'MFA not set up', messageTh: 'ยังไม่ได้ตั้งค่า MFA' });
-    const ok = authenticator.check(String(token), u.totpSecret);
+    const ok = authenticator.check(String(token), decrypt(u.totpSecret));
     if (!ok) throw new BadRequestException({ code: 'MFA_INVALID', message: 'Invalid MFA token', messageTh: 'รหัส MFA ไม่ถูกต้อง' });
     await db.update(users).set({ mfaEnabled: true }).where(eq(users.id, u.id));
     return { mfaEnabled: true };

@@ -4,12 +4,13 @@
 // Adapters for Avalara / Stripe Tax / EU MOSS can implement the same interface
 // and register into TaxService's Map<country, provider> without touching callers.
 
-import { round2 } from './money';
+import { roundCurrency } from './money';
 
 export interface TaxInput {
   net: number; // tax-exclusive base amount
   category?: string; // optional product/service category (for category-specific rates)
   date?: string; // optional YYYY-MM-DD effective date (for rate changes over time)
+  currency?: string; // ISO-4217 (default 'THB') — controls minor-unit rounding of tax (JPY=0dp)
 }
 
 export interface TaxResult {
@@ -31,7 +32,8 @@ export class ThaiTaxProvider implements TaxProvider {
 
   calc(input: TaxInput): TaxResult {
     const net = Number(input?.net) || 0;
-    return { rate: this.rate, tax: round2(net * this.rate), label: this.label };
+    const currency = input?.currency ?? 'THB';
+    return { rate: this.rate, tax: roundCurrency(net * this.rate, currency), label: this.label };
   }
 }
 

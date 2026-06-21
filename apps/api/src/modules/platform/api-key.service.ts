@@ -1,8 +1,9 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes, createHash } from 'node:crypto';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { apiKeys, users } from '../../database/schema';
+import { safeEqualHex } from '../../common/crypto';
 import type { JwtUser } from '../../common/decorators';
 
 export interface IssueKeyDto { name: string; scopes?: string[] }
@@ -34,16 +35,28 @@ export class ApiKeyService {
     return { id: Number(row.id), name: row.name, prefix: row.prefix, scopes: dto.scopes ?? [], key: rawKey };
   }
 
-  // ตรวจคีย์ดิบ → คืน row หรือ null (hash + lookup + เช็ค revoked)
+  // ตรวจคีย์ดิบ → คืน row หรือ null. Lookup by indexed prefix, then constant-time hash compare.
+  // Runs in a BYPASS tx: api_keys is FORCE-RLS (it has tenant_id) but key lookup is inherently
+  // cross-tenant (we don't know the tenant until the key is identified), and a FORCE policy is not
+  // exempted for the table owner — so under a non-superuser prod connection a plain SELECT would
+  // return zero rows and silently 401 every API-key request. The bypass GUC admits the lookup.
   async verify(rawKey: string) {
-    if (!rawKey) return null;
+    if (!rawKey || !rawKey.startsWith('ierp_')) return null;
+    const prefix = rawKey.slice(0, 12); // matches issue() slice(0,12)
+    const hashed = sha256(rawKey);
     const db = this.db as any;
-    const hashedKey = sha256(rawKey);
-    const [row] = await db.select().from(apiKeys)
-      .where(and(eq(apiKeys.hashedKey, hashedKey), eq(apiKeys.revoked, false))).limit(1);
-    if (!row) return null;
-    await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, row.id));
-    return row;
+    return db.transaction(async (tx: any) => {
+      try { await tx.execute(sql`SET LOCAL ROLE app_user`); } catch { /* dev base role; ignore */ }
+      await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
+      // Match ALL rows sharing the prefix (prefix is not unique), then constant-time hash compare —
+      // avoids a prefix collision rejecting a valid key.
+      const rows = await tx.select().from(apiKeys).where(and(eq(apiKeys.prefix, prefix), eq(apiKeys.revoked, false)));
+      const row = rows.find((r: any) => safeEqualHex(hashed, String(r.hashedKey)));
+      if (!row) return null;
+      // lastUsedAt bump is best-effort — must never fail authentication.
+      try { await tx.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, row.id)); } catch { /* ignore */ }
+      return row;
+    });
   }
 
   async list(tenantId: number | null) {

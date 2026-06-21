@@ -2,11 +2,24 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, Forbi
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, type JwtUser } from './decorators';
+import { ApiKeyService } from '../modules/platform/api-key.service';
+import { resolvePermissions } from '@ierp/shared';
 
-// Global guard: ทุก endpoint ต้องมี JWT ยกเว้น @Public (แก้ช่องโหว่ V1 ที่ data endpoints เปิดโล่ง)
+// Map api_keys.scopes (csv) → JwtUser.permissions. A scope is either a known alias,
+// a wildcard ('*'/'admin' → full role-default set), or a literal permission key.
+const SCOPE_ALIASES: Record<string, string[]> = {
+  read: ['dashboard', 'exec', 'cust_dash', 'cust_inventory'],
+  write: ['pos', 'order_mgt', 'warehouse', 'procurement'],
+};
+
+// Global guard: ทุก endpoint ต้องมี JWT (หรือ API key) ยกเว้น @Public (แก้ช่องโหว่ V1 ที่ data endpoints เปิดโล่ง)
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector, private readonly jwt: JwtService) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly jwt: JwtService,
+    private readonly apiKeys: ApiKeyService,
+  ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [ctx.getHandler(), ctx.getClass()]);
@@ -17,8 +30,33 @@ export class JwtAuthGuard implements CanActivate {
     if (!auth?.startsWith('Bearer ')) {
       throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Missing token', messageTh: 'ไม่พบ token' });
     }
+    const token = auth.slice(7);
+
+    // ── API-key path: Bearer ierp_... ─────────────────────────────
+    if (token.startsWith('ierp_')) {
+      const row: any = await this.apiKeys.verify(token);
+      if (!row) {
+        throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid or revoked API key', messageTh: 'API key ไม่ถูกต้องหรือถูกเพิกถอน' });
+      }
+      const tenantId: number | null = row.tenantId != null ? Number(row.tenantId) : null;
+      const scopes: string[] = row.scopes ? String(row.scopes).split(',').filter(Boolean) : [];
+      // A key is a machine principal — NEVER 'Admin' (no HQ bypass via key). role='Sales' + the key's
+      // own tenantId keeps it RLS-scoped to its tenant.
+      const role = 'Sales';
+      let permissions: string[];
+      if (scopes.includes('*') || scopes.includes('admin')) {
+        permissions = resolvePermissions(role as any);
+      } else {
+        const expanded = scopes.flatMap((s) => SCOPE_ALIASES[s] ?? [s]);
+        permissions = expanded.length ? expanded : resolvePermissions(role as any);
+      }
+      req.user = { username: `apikey:${row.prefix}`, role, customerName: null, tenantId, permissions } satisfies JwtUser;
+      return true;
+    }
+
+    // ── JWT path ──────────────────────────────────────────────────
     try {
-      const payload = await this.jwt.verifyAsync(auth.slice(7));
+      const payload = await this.jwt.verifyAsync(token);
       req.user = {
         username: payload.sub,
         role: payload.role,

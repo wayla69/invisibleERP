@@ -3,7 +3,7 @@ import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
-import { ymd, n } from '../../database/queries';
+import { ymd, n, fx } from '../../database/queries';
 
 // minimal Chart of Accounts (code, name, type)
 const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense' }[] = [
@@ -58,8 +58,25 @@ export class LedgerService {
     const lines = dto.lines ?? [];
     if (!lines.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No journal lines', messageTh: 'ไม่มีรายการบัญชี' });
 
-    const totalDebit = round4(lines.reduce((a, l) => a + n(l.debit), 0));
-    const totalCredit = round4(lines.reduce((a, l) => a + n(l.credit), 0));
+    // Drop all-zero lines BEFORE validation/balance so a zero-rated leg (e.g. POS Cr Tax Payable
+    // with vat=0) doesn't trip the per-line invariant. A sale with vat=0 still posts its other legs.
+    const nzLines = lines.filter((l) => !(n(l.debit) === 0 && n(l.credit) === 0));
+    if (!nzLines.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No non-zero journal lines', messageTh: 'ไม่มีรายการบัญชีที่มีมูลค่า' });
+
+    // Per-line invariant (service-level — applies to internal callers like POS, not just the Zod controller):
+    // each line is single-sided and non-negative.
+    for (const l of nzLines) {
+      const d = n(l.debit), c = n(l.credit);
+      if (d < 0 || c < 0) {
+        throw new BadRequestException({ code: 'INVALID_LINE', message: `Negative amount on ${l.account_code} (debit ${d}, credit ${c})`, messageTh: 'จำนวนเงินติดลบในรายการบัญชี' });
+      }
+      if (d > 0 && c > 0) {
+        throw new BadRequestException({ code: 'INVALID_LINE', message: `Line ${l.account_code} has both debit ${d} and credit ${c}`, messageTh: 'รายการบัญชีมีทั้งเดบิตและเครดิต' });
+      }
+    }
+
+    const totalDebit = round4(nzLines.reduce((a, l) => a + n(l.debit), 0));
+    const totalCredit = round4(nzLines.reduce((a, l) => a + n(l.credit), 0));
     if (totalDebit !== totalCredit) {
       throw new BadRequestException({
         code: 'UNBALANCED',
@@ -79,12 +96,12 @@ export class LedgerService {
         source: dto.source ?? 'Manual', sourceRef: dto.sourceRef ?? null,
         tenantId: dto.tenantId ?? null, currency, status: 'Posted', createdBy: dto.createdBy,
       }).returning({ id: journalEntries.id });
-      await tx.insert(journalLines).values(lines.map((l) => ({
+      await tx.insert(journalLines).values(nzLines.map((l) => ({
         entryId: Number(h.id), accountCode: l.account_code,
-        debit: String(n(l.debit)), credit: String(n(l.credit)),
+        debit: fx(l.debit, 4), credit: fx(l.credit, 4),
         currency, memo: l.memo ?? null, tenantId: dto.tenantId ?? null,
       })));
-      return lines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
+      return nzLines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
     });
 
     return { entry_no: entryNo, balanced: true, lines: inserted };

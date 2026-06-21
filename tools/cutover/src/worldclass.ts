@@ -130,12 +130,27 @@ async function main() {
   ok('Payments: over-refund rejected (60+50 > 100)', over.status === 400, `status=${over.status} ${JSON.stringify(over.json?.error?.code ?? over.json).slice(0, 50)}`);
   const rest = await inj('POST', '/api/payments/refunds', admin, { payment_no: pay2.json.payment_no, amount: 40, reason: 'rest' });
   ok('Payments: remaining partial refund allowed (60+40=100, fully)', (rest.status === 200 || rest.status === 201) && rest.json.fully_refunded === true, `${rest.status}`);
+  // Till reconciliation (move #5): POS cash links to the open till; a full refund nets to 0 variance
+  // (proves cash-IN includes 'Refunded' so the refund-OUT doesn't double-count). Uses cust2/item B so
+  // its SALE-T2-<ts> number can't collide with cust1's sale in the same second.
+  const tillOpen = await inj('POST', '/api/payments/till/open', c2, { opening_float: 100 });
+  const tillSale = await inj('POST', '/api/portal/pos/sales', c2, { items: [{ item_id: 'B', qty: 1, unit_price: 50 }] }); // total 53.5 cash
+  await inj('POST', '/api/payments/refunds', admin, { payment_no: tillSale.json.payment_no, amount: tillSale.json.total, reason: 'till-test' });
+  const tillClose = await inj('POST', '/api/payments/till/close', c2, { session_no: tillOpen.json.session_no, closing_count: 100 });
+  ok('Till: POS cash linked + full refund nets to 0 variance', near(tillClose.json.variance, 0) && near(tillClose.json.expected_cash, 100), `var=${tillClose.json.variance} exp=${tillClose.json.expected_cash}`);
+  // Async tender settlement: PromptPay returns Pending, then /settle → Captured (no dead-end).
+  const pp = await inj('POST', '/api/payments', admin, { sale_no: 'PP-1', method: 'QR', amount: 50, currency: 'THB', gateway: 'promptpay' });
+  const settled = await inj('PATCH', `/api/payments/${pp.json.payment_no}/settle`, admin, {});
+  ok('Payments: PromptPay Pending → settle → Captured', pp.json.status === 'Pending' && settled.json.status === 'Captured', `pp=${pp.json.status} settled=${settled.json.status}`);
 
   // ── Currency + Tax (move #5) ──
   const tax = await inj('GET', '/api/tax/calc?net=100&country=TH', admin);
   ok('Tax: TH VAT on 100 = 7', near(tax.json.tax, 7), JSON.stringify(tax.json).slice(0, 90));
   const cur = await inj('GET', '/api/tax/currencies', admin);
   ok('Tax: currencies include THB + USD', JSON.stringify(cur.json).includes('THB') && JSON.stringify(cur.json).includes('USD'));
+  // currency-aware rounding: JPY has 0 minor units → 105×7% = 7.35 must round to 7 (not 7.35)
+  const jpy = await inj('GET', '/api/tax/calc?net=105&country=TH&currency=JPY', admin);
+  ok('Tax: JPY 0-decimal rounding (105×7% → 7, not 7.35)', jpy.json.tax === 7, JSON.stringify(jpy.json).slice(0, 80));
 
   // ── Portal POS now wires payment + GL (moves #2,#3,#5 in the live flow) ──
   const sale = await inj('POST', '/api/portal/pos/sales', c1, { items: [{ item_id: 'A', qty: 2, unit_price: 50 }] });
@@ -148,16 +163,25 @@ async function main() {
   const newLogin = await inj('POST', '/api/login', undefined, { username: 'newadmin', password: 'secret12' });
   ok('Billing: provisioned admin can log in', newLogin.status === 200 && !!newLogin.json.token);
   ok('Billing: plans listed (public)', Array.isArray((await inj('GET', '/api/billing/plans')).json.plans ?? (await inj('GET', '/api/billing/plans')).json), '');
+  // duplicate tenant_code must be a clean 409 (was a 500 stack-trace on raced unique-violation)
+  const dup = await inj('POST', '/api/auth/signup', undefined, { company_name: 'Dup Co', tenant_code: 'NEWCO', admin_username: 'dupadmin', admin_password: 'secret12', email: 'd@e.com' });
+  ok('Billing: duplicate tenant_code signup → 409 (not 500)', dup.status === 409, `status=${dup.status}`);
 
   // ── Public API platform + MFA (move #7) ──
   const key = await inj('POST', '/api/platform/api-keys', admin, { name: 'ci', scopes: ['read'] });
   ok('Platform: API key issued (ierp_)', (key.status === 200 || key.status === 201) && /^ierp_/.test(key.json.key ?? ''), `${key.status}`);
+  // the issued key must actually AUTHENTICATE a request (was dead code before 9.3) → Bearer ierp_...
+  const meViaKey = await inj('GET', '/api/auth/me', key.json.key);
+  ok('Platform: API key authenticates a request (Bearer ierp_)', meViaKey.status === 200 && String(meViaKey.json?.username ?? '').startsWith('apikey:'), `status=${meViaKey.status} ${JSON.stringify(meViaKey.json).slice(0, 70)}`);
   const mfa = await inj('POST', '/api/platform/mfa/setup', admin, {});
   ok('Platform: MFA setup returns secret', (mfa.status === 200 || mfa.status === 201) && !!(mfa.json.secret ?? mfa.json.otpauth_url), `${mfa.status}`);
 
   // ── Audit + edge (move #4) ──
   const auditRows = (await pg.query(`SELECT count(*)::int c FROM audit_log`)).rows as any[];
   ok('Audit: mutations recorded in audit_log', Number(auditRows[0].c) > 0, `rows=${auditRows[0].c}`);
+  // tenant_id is now the numeric user.tenantId (was always NULL via customerName parse)
+  const auditT1 = (await pg.query(`SELECT count(*)::int c FROM audit_log WHERE tenant_id = ${t1}`)).rows as any[];
+  ok('Audit: tenant_id populated for scoped mutations (T1)', Number(auditT1[0].c) > 0, `T1 rows=${auditT1[0].c}`);
   const helmetRes = await inj('GET', '/', admin);
   const hasHelmet = !!(helmetRes.headers['x-frame-options'] || helmetRes.headers['content-security-policy'] || helmetRes.headers['x-content-type-options']);
   ok('Edge: helmet security headers present', hasHelmet, JSON.stringify(Object.keys(helmetRes.headers)).slice(0, 120));
