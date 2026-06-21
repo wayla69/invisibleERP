@@ -134,6 +134,13 @@
       "when": 1782007973295,
       "tag": "0018_revenue_recognition",
       "breakpoints": false
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1782007973296,
+      "tag": "0019_fx_revaluation",
+      "breakpoints": false
     }
   ]
 }

@@ -36,6 +36,7 @@ import { ReturnsModule } from './modules/returns/returns.module';
 import { BankModule } from './modules/bank/bank.module';
 import { BudgetModule } from './modules/budget/budget.module';
 import { RevenueModule } from './modules/revenue/revenue.module';
+import { FxModule } from './modules/fx/fx.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { RevenueModule } from './modules/revenue/revenue.module';
     BankModule,
     BudgetModule,
     RevenueModule,
+    FxModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions
