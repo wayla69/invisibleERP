@@ -108,6 +108,24 @@ async function main() {
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
   ok('GL: trial balance balanced after cash movements', near(tb.debit ?? tb.total_debit, tb.credit ?? tb.total_credit), JSON.stringify(tb).slice(0, 70));
 
+  // ── Finding #1: cross-till refund attribution. A cash sale rung on till A (then CLOSED) and refunded
+  //    while a different till B is open must reduce B's drawer (cash physically leaves B), NOT the
+  //    already-closed A. (Single-connection PGlite can't reproduce the concurrent shifts, so we assert
+  //    the observable attribution: which till the refund's cash is debited from.) ──
+  const tillA = await inj('POST', '/api/payments/till/open', sales1, { opening_float: 1000 });
+  const tillAId = Number((await db.select().from(s.tillSessions).where(eq(s.tillSessions.sessionNo, tillA.json.session_no)))[0].id);
+  const saleX = await cashSale(); // 107 cash, tender linked to till A (most-recent open till for T1)
+  await inj('POST', '/api/payments/till/close', sales1, { session_no: tillA.json.session_no, closing_count: 1107 }); // A balances (float 1000 + cash 107)
+  const tillB = await inj('POST', '/api/payments/till/open', sales1, { opening_float: 500 });
+  const tillBId = Number((await db.select().from(s.tillSessions).where(eq(s.tillSessions.sessionNo, tillB.json.session_no)))[0].id);
+  const refX = await inj('POST', '/api/payments/refunds', sales1, { payment_no: saleX.json.payment_no, amount: saleX.json.total, reason: 'คืนข้ามกะ' });
+  const rt = (await pg.query(`SELECT till_session_id FROM payment_refunds WHERE refund_no='${refX.json.refund_no}'`)).rows as any[];
+  ok('Refund-till: refund booked against the OPEN till B (not sale A)', Number(rt[0]?.till_session_id) === tillBId, `${JSON.stringify(rt)} B=${tillBId}`);
+  const xB = await inj('GET', `/api/payments/till/${tillBId}/x-report`, sales1);
+  ok('Refund-till: till B drawer reduced by refund (cash_refunds 107, expected 500−107=393)', near(xB.json.cash_refunds, 107) && near(xB.json.expected_cash, 393), `cr=${xB.json.cash_refunds} exp=${xB.json.expected_cash}`);
+  const zA = await inj('GET', `/api/payments/till/${tillAId}/z-report`, sales1);
+  ok('Refund-till: closed till A unaffected (cash_refunds 0, expected stays 1107 — no phantom variance)', near(zA.json.cash_refunds, 0) && near(zA.json.expected_cash, 1107), `cr=${zA.json.cash_refunds} exp=${zA.json.expected_cash}`);
+
   await app.close();
   await pg.close();
 

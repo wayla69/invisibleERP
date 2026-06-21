@@ -154,6 +154,24 @@ async function main() {
   const tbZ = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
   ok('FA: trial balance balanced after acq+dep+disposal', near(tbZ.debit ?? tbZ.total_debit, tbZ.credit ?? tbZ.total_credit), JSON.stringify(tbZ).slice(0, 80));
 
+  // ── FA per-tenant depreciation split (adversarial-verify fix #3): runDepreciation must post ONE GL
+  //    entry PER owning tenant (keyed `${tenant}:${period}`), so each shop's trial balance ties — not one
+  //    consolidated entry co-mingling every tenant's assets under the caller's id. Seed assets in T1 + T2
+  //    (acquire_date in a fresh, open period), depreciate, assert the GL splits per tenant. ──
+  const seedAsset = (tenantId: number, no: string, cost: number) =>
+    db.insert(s.fixedAssets).values({ tenantId, assetNo: no, name: no, acquireDate: '2028-01-03', acquireCost: String(cost), salvageValue: '0', usefulLifeMonths: 12, status: 'active', accumulatedDepreciation: '0', netBookValue: String(cost), acquireSource: 'cash', createdBy: 'seed' });
+  await seedAsset(t1, 'FA-T1-DEP', 12000); // 1000/mo
+  await seedAsset(t2, 'FA-T2-DEP', 6000);  //  500/mo
+  const runMt = await inj('POST', '/api/assets/depreciation/run', admin, { period: '2028-01' });
+  ok('FA(multi-tenant): depreciation splits into 2 per-tenant runs (T1 1000 + T2 500 = 1500)', Array.isArray(runMt.json.runs) && runMt.json.runs.length === 2 && near(runMt.json.total_depreciation, 1500), JSON.stringify(runMt.json).slice(0, 150));
+  const depEntries = (await pg.query(`SELECT je.tenant_id, je.source_ref, (SELECT coalesce(sum(jl.debit),0) FROM journal_lines jl WHERE jl.entry_id=je.id AND jl.account_code='5200') AS dep FROM journal_entries je WHERE je.source='DEP' AND je.period='2028-01'`)).rows as any[];
+  const depOf = (tid: number) => depEntries.find((e) => Number(e.tenant_id) === tid);
+  ok('FA(multi-tenant): T1 GL entry tagged tenant T1, Dr5200=1000, source_ref t1:2028-01', !!depOf(t1) && near(depOf(t1).dep, 1000) && depOf(t1).source_ref === `${t1}:2028-01`, JSON.stringify(depEntries));
+  ok('FA(multi-tenant): T2 GL entry tagged tenant T2, Dr5200=500, source_ref t2:2028-01', !!depOf(t2) && near(depOf(t2).dep, 500) && depOf(t2).source_ref === `${t2}:2028-01`, JSON.stringify(depEntries));
+  ok('FA(multi-tenant): no consolidated/co-mingled entry — exactly 2 DEP entries for the period', depEntries.length === 2, `n=${depEntries.length}`);
+  const runMt2 = await inj('POST', '/api/assets/depreciation/run', admin, { period: '2028-01' });
+  ok('FA(multi-tenant): re-run idempotent per tenant+period (no new postings)', runMt2.json.already === true || near(runMt2.json.total_depreciation, 0), JSON.stringify(runMt2.json).slice(0, 80));
+
   // ── Tenancy model: "HQ sees all, staff bound to shop" (Phase 9.2 bypass allowlist) ──
   await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T1', tenant_id: t1, lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
   await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T2', tenant_id: t2, lines: [{ account_code: '1000', debit: 20 }, { account_code: '4000', credit: 20 }] });
