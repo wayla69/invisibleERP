@@ -10,6 +10,7 @@ import { TaxService } from '../tax/tax.service';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxInvoiceService } from '../tax-docs/tax-invoice.service';
+import { MenuService } from '../menu/menu.service';
 import { roundCurrency } from '../tax/money';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -26,6 +27,7 @@ export class DineInService {
     private readonly payments: PaymentService,
     private readonly ledger: LedgerService,
     private readonly taxInvoice: TaxInvoiceService,
+    private readonly menu: MenuService,
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -47,13 +49,22 @@ export class DineInService {
     const db = this.db as any;
     const rows = [] as any[];
     for (const it of items) {
-      const st = await this.resolveStation(tenantId, it.station_code);
-      const amount = roundCurrency(n(it.qty) * n(it.unit_price), 'THB');
+      // menu-driven line → resolve name/price/station/modifiers from the catalog (enforces 86 + modifier rules);
+      // freeform line → use the provided name/unit_price as before.
+      let name = it.name, unitPrice = it.unit_price, stationCode = it.station_code;
+      let prep = it.est_prep_minutes, mods: any = it.modifiers ?? null, itemRef = it.item_id ?? null;
+      if (it.sku != null || it.menu_item_id != null) {
+        const r = await this.menu.resolveLine({ sku: it.sku, item_id: it.menu_item_id, qty: n(it.qty), modifier_option_ids: it.modifier_option_ids, notes: it.notes }, user);
+        name = r.name; unitPrice = r.unit_price; stationCode = it.station_code ?? r.station_code ?? undefined;
+        prep = it.est_prep_minutes ?? r.prep_minutes ?? undefined; mods = r.modifiers; itemRef = r.sku;
+      }
+      const st = await this.resolveStation(tenantId, stationCode);
+      const amount = roundCurrency(n(it.qty) * n(unitPrice), 'THB');
       rows.push({
-        tenantId, orderId, stationId: Number(st.id), itemId: it.item_id ?? null, name: it.name,
-        qty: String(n(it.qty)), unitPrice: fx(it.unit_price, 2), amount: fx(amount, 2),
-        modifiers: it.modifiers ?? null, notes: it.notes ?? null, kdsStatus: 'new',
-        estPrepMinutes: it.est_prep_minutes ?? null, createdBy: user.username,
+        tenantId, orderId, stationId: Number(st.id), itemId: itemRef, name,
+        qty: String(n(it.qty)), unitPrice: fx(n(unitPrice), 2), amount: fx(amount, 2),
+        modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new',
+        estPrepMinutes: prep ?? null, createdBy: user.username,
       });
     }
     if (rows.length) await db.insert(dineInOrderItems).values(rows);

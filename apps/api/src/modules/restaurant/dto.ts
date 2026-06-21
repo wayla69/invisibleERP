@@ -1,14 +1,22 @@
 import { z } from 'zod';
 
 const ItemInput = z.object({
+  // menu-driven (resolved against the catalog — name/price/station/modifiers derived) — preferred
+  sku: z.string().optional(),
+  menu_item_id: z.number().int().optional(),
+  modifier_option_ids: z.array(z.number().int()).optional(),
+  // freeform / ad-hoc custom item — still supported
   item_id: z.string().optional(),
-  name: z.string().min(1),
-  qty: z.number().positive().default(1),
-  unit_price: z.number().nonnegative(),
+  name: z.string().min(1).optional(),
+  unit_price: z.number().nonnegative().optional(),
   station_code: z.string().optional(),       // resolve to a kitchen station; else default
   modifiers: z.array(z.object({ label: z.string() })).optional(),
+  // common
+  qty: z.number().positive().default(1),
   notes: z.string().optional(),
   est_prep_minutes: z.number().int().positive().optional(),
+}).refine((it) => it.sku != null || it.menu_item_id != null || (it.name != null && it.unit_price != null), {
+  message: 'provide sku/menu_item_id (menu) or name+unit_price (custom item)',
 });
 
 export const CreateOrderBody = z.object({

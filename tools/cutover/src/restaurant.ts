@@ -118,6 +118,28 @@ async function main() {
   const tokAfter = await inj('GET', `/api/qr/t/${tok2}`, undefined);
   ok('Diner token rejected after session closed (401)', tokAfter.status === 401, `${tokAfter.status}`);
 
+  // ── menu-driven ordering: dine-in entry resolves the catalog (price/station/modifiers/86) ──
+  await inj('POST', '/api/menu/categories', sales1, { code: 'main', name: 'จานหลัก' });
+  await inj('POST', '/api/menu/items', sales1, { sku: 'GP01', name: 'ผัดกะเพราไก่', price: 60, station_code: 'hot', prep_minutes: 12 });
+  const mSpice = await inj('POST', '/api/menu/modifier-groups', sales1, { code: 'spice', name: 'ความเผ็ด', required: true, min_select: 1, max_select: 1, options: [{ name: 'เผ็ดน้อย', price_delta: 0 }, { name: 'เผ็ดมาก', price_delta: 0 }] });
+  const mEgg = await inj('POST', '/api/menu/modifier-groups', sales1, { code: 'egg', name: 'ไข่', min_select: 0, max_select: 1, options: [{ name: 'ไข่ดาว', price_delta: 10 }] });
+  await inj('POST', '/api/menu/items/GP01/modifier-groups', sales1, { group_id: mSpice.json.group_id });
+  await inj('POST', '/api/menu/items/GP01/modifier-groups', sales1, { group_id: mEgg.json.group_id });
+  const spicy = mSpice.json.options.find((o: any) => o.name === 'เผ็ดมาก').option_id;
+  const eggDao = mEgg.json.options.find((o: any) => o.name === 'ไข่ดาว').option_id;
+  const tblM = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'C1', seats: 2 });
+  const ordM = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblM.json.id, items: [{ sku: 'GP01', qty: 2, modifier_option_ids: [spicy, eggDao] }] });
+  const lineM = ordM.json.items?.[0];
+  ok('Menu-order: dine-in resolves name/price/station from catalog (60+ไข่10 → 70×2=140)', lineM?.name === 'ผัดกะเพราไก่' && near(lineM?.unit_price, 70) && near(lineM?.amount, 140), JSON.stringify(lineM).slice(0, 120));
+  ok('Menu-order: resolved modifiers attached to KDS line', (lineM?.modifiers ?? []).some((m: any) => m.option_name === 'ไข่ดาว'), JSON.stringify(lineM?.modifiers));
+  const ordBad = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblM.json.id, items: [{ sku: 'GP01', qty: 1 }] });
+  ok('Menu-order: missing required modifier → order rejected (400)', ordBad.status === 400 && ordBad.json.error?.code === 'MODIFIER_REQUIRED', `${ordBad.status} ${ordBad.json.error?.code}`);
+  await inj('PATCH', '/api/menu/items/GP01/availability', sales1, { available: false });
+  const ord86 = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblM.json.id, items: [{ sku: 'GP01', qty: 1, modifier_option_ids: [spicy] }] });
+  ok('Menu-order: 86\'d item blocked at order entry (400 ITEM_UNAVAILABLE)', ord86.status === 400 && ord86.json.error?.code === 'ITEM_UNAVAILABLE', `${ord86.status} ${ord86.json.error?.code}`);
+  const ordFree = await inj('POST', '/api/restaurant/orders', sales1, { items: [{ name: 'น้ำเปล่า', qty: 1, unit_price: 15, station_code: 'drinks' }] });
+  ok('Menu-order: freeform custom item still supported (backward-compat)', /^DIN-/.test(ordFree.json.order_no ?? '') && ordFree.json.items?.[0]?.name === 'น้ำเปล่า', `${ordFree.status}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);
