@@ -1,9 +1,18 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { ymd, n, fx } from '../../database/queries';
+
+// Parallel sets of books. The LEADING ledger is the statutory/primary book — reports default to it, and a
+// journal with ledger_code = NULL is shared by every ledger (so all existing postings are universal).
+const LEADING = 'TFRS';
+const LEDGERS: { code: string; name: string; gaap: string; isLeading: boolean; description: string }[] = [
+  { code: 'TFRS', name: 'TFRS (งบตามกฎหมาย)', gaap: 'TFRS', isLeading: true, description: 'Thai Financial Reporting Standards — statutory financial statements' },
+  { code: 'TAX', name: 'ฐานภาษีสรรพากร', gaap: 'TAX', isLeading: false, description: 'Revenue Department basis — depreciation/expenses per the Revenue Code (book-tax differences)' },
+  { code: 'IFRS', name: 'IFRS (กลุ่มบริษัท)', gaap: 'IFRS', isLeading: false, description: 'IFRS basis for group consolidation' },
+];
 
 // minimal Chart of Accounts (code, name, type)
 const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense' }[] = [
@@ -42,6 +51,7 @@ export interface PostEntryDto {
   memo?: string;
   lines: JournalLineDto[];
   createdBy: string;
+  ledgerCode?: string | null; // NULL/undefined = shared (all ledgers); a code = adjustment to that ledger only
 }
 
 @Injectable()
@@ -63,6 +73,35 @@ export class LedgerService {
     const db = this.db as any;
     const rows = await db.select().from(accounts).orderBy(accounts.code);
     return { accounts: rows, count: rows.length };
+  }
+
+  // ───────────────────── Ledgers (multi-GAAP) ─────────────────────
+  // idempotent seed of the parallel ledgers (TFRS leading + TAX + IFRS).
+  async seedLedgers() {
+    const db = this.db as any;
+    await db.insert(ledgers).values(LEDGERS).onConflictDoNothing({ target: ledgers.code });
+    return { seeded: LEDGERS.length };
+  }
+
+  async listLedgers() {
+    const db = this.db as any;
+    const rows = await db.select().from(ledgers).orderBy(desc(ledgers.isLeading), ledgers.code);
+    return { ledgers: rows.map((l: any) => ({ code: l.code, name: l.name, gaap: l.gaap, is_leading: !!l.isLeading, currency: l.currency, description: l.description, active: l.active })), count: rows.length, leading: LEADING };
+  }
+
+  // assert a ledger exists + is a real (non-shared) ledger for adjustment postings
+  private async assertLedger(code: string) {
+    const db = this.db as any;
+    const [l] = await db.select().from(ledgers).where(eq(ledgers.code, code)).limit(1);
+    if (!l) throw new NotFoundException({ code: 'LEDGER_NOT_FOUND', message: `Ledger ${code} not found`, messageTh: `ไม่พบสมุดบัญชี ${code}` });
+    return l;
+  }
+
+  // SQL predicate selecting the rows that belong to ledger `code` = shared (NULL) OR that ledger's own
+  // adjustments. Defaults to the LEADING book so existing (all-NULL) data + callers are unchanged.
+  private ledgerCond(code?: string | null) {
+    const c = code ?? LEADING;
+    return sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${c})`;
   }
 
   // ───────────────────── Post a balanced entry ─────────────────────
@@ -113,7 +152,7 @@ export class LedgerService {
     const inserted = await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(journalEntries).values({
         entryNo, entryDate, period, memo: dto.memo ?? null,
-        source: dto.source ?? 'Manual', sourceRef: dto.sourceRef ?? null,
+        source: dto.source ?? 'Manual', sourceRef: dto.sourceRef ?? null, ledgerCode: dto.ledgerCode ?? null,
         tenantId: dto.tenantId ?? null, currency, status: 'Posted', createdBy: dto.createdBy,
       }).returning({ id: journalEntries.id });
       await tx.insert(journalLines).values(nzLines.map((l) => ({
@@ -147,9 +186,9 @@ export class LedgerService {
 
   // ───────────────────── Trial Balance ─────────────────────
   // group journal_lines by account_code (joined to accounts) — Σdebit, Σcredit, balance
-  async trialBalance(period?: string, costCenter?: string | null) {
+  async trialBalance(period?: string, costCenter?: string | null, ledgerCode?: string | null) {
     const db = this.db as any;
-    const conds = [eq(journalEntries.status, 'Posted')];
+    const conds = [eq(journalEntries.status, 'Posted'), this.ledgerCond(ledgerCode)];
     if (period) conds.push(sql`${journalEntries.period} = ${period}`);
     if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
     else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
@@ -176,19 +215,19 @@ export class LedgerService {
     });
     const totalDebit = round4(out.reduce((a: number, r: any) => a + r.debit, 0));
     const totalCredit = round4(out.reduce((a: number, r: any) => a + r.credit, 0));
-    return { period: period ?? null, cost_center: costCenter ?? null, rows: out, totals: { debit: totalDebit, credit: totalCredit, balanced: totalDebit === totalCredit } };
+    return { period: period ?? null, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING, rows: out, totals: { debit: totalDebit, credit: totalCredit, balanced: totalDebit === totalCredit } };
   }
 
   // ───────────────────── Income Statement ─────────────────────
   // Revenue − Expense = net income, over [from,to] (entry_date inclusive)
-  async incomeStatement(from: string, to: string, costCenter?: string | null) {
+  async incomeStatement(from: string, to: string, costCenter?: string | null, ledgerCode?: string | null) {
     const db = this.db as any;
-    const rows = await this.aggregateByType(db, from, to, costCenter);
+    const rows = await this.aggregateByType(db, from, to, costCenter, ledgerCode);
     const revenue = round4(typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit'));
     const expense = round4(typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit'));
     const netIncome = round4(revenue - expense);
     return {
-      from, to, cost_center: costCenter ?? null,
+      from, to, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING,
       revenue, expense, net_income: netIncome,
       lines: rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense'),
     };
@@ -196,9 +235,9 @@ export class LedgerService {
 
   // ───────────────────── Balance Sheet ─────────────────────
   // Assets = Liabilities + Equity + retained net income (as of date, inclusive)
-  async balanceSheet(asOf: string) {
+  async balanceSheet(asOf: string, ledgerCode?: string | null) {
     const db = this.db as any;
-    const rows = await this.aggregateByType(db, null, asOf);
+    const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
     const assets = round4(typeTotal(rows, 'Asset', 'debit') - typeTotal(rows, 'Asset', 'credit'));
     const liabilities = round4(typeTotal(rows, 'Liability', 'credit') - typeTotal(rows, 'Liability', 'debit'));
     // equity INCLUDES 3100 Retained Earnings (closed-year results carried here by closeYear)
@@ -212,10 +251,46 @@ export class LedgerService {
     const retainedEarnings = round4(rows.filter((r: any) => r.account_code === '3100').reduce((a: number, r: any) => a + (n(r.credit) - n(r.debit)), 0));
     const liabilitiesEquity = round4(liabilities + equity + netIncome);
     return {
-      as_of: asOf,
+      as_of: asOf, ledger: ledgerCode ?? LEADING,
       assets, liabilities, equity, retained_earnings: retainedEarnings, net_income: netIncome,
       liabilities_plus_equity: liabilitiesEquity,
       balanced: assets === liabilitiesEquity,
+    };
+  }
+
+  // ───────────────────── GAAP adjustment posting ─────────────────────
+  // Post a balanced entry to ONE ledger only (e.g. a tax-depreciation delta, an IFRS lease adjustment).
+  // The shared books are untouched; only this ledger's reports pick it up.
+  async postAdjustment(ledgerCode: string, dto: Omit<PostEntryDto, 'ledgerCode'>) {
+    await this.assertLedger(ledgerCode);
+    return this.postEntry({ ...dto, ledgerCode, source: dto.source ?? 'GAAP-ADJ' });
+  }
+
+  // ───────────────────── Book-tax difference (ผลต่างทางบัญชี-ภาษี) ─────────────────────
+  // Compares two ledgers' P&L over a window — the temporary/permanent differences that feed deferred tax
+  // (TAS 12) and the ภ.ง.ด.50 reconciliation. Since shared entries are identical in both books, the
+  // difference comes entirely from each ledger's own adjustments.
+  async gaapComparison(from: string, to: string, base = LEADING, compare = 'TAX') {
+    await this.assertLedger(base);
+    await this.assertLedger(compare);
+    const b = await this.incomeStatement(from, to, undefined, base);
+    const c = await this.incomeStatement(from, to, undefined, compare);
+    const pnl = (l: any) => l.account_type === 'Revenue' ? round4(n(l.credit) - n(l.debit)) : round4(n(l.debit) - n(l.credit)); // revenue +, expense as cost +
+    const map = new Map<string, any>();
+    for (const l of b.lines) map.set(l.account_code, { account_code: l.account_code, account_name: l.account_name, account_type: l.account_type, base: pnl(l), compare: 0 });
+    for (const l of c.lines) {
+      const e = map.get(l.account_code) ?? { account_code: l.account_code, account_name: l.account_name, account_type: l.account_type, base: 0, compare: 0 };
+      e.compare = pnl(l); map.set(l.account_code, e);
+    }
+    const lines = [...map.values()]
+      .map((e) => ({ ...e, difference: round4(e.compare - e.base) }))
+      .filter((e) => Math.abs(e.difference) > 1e-9)
+      .sort((a, b2) => a.account_code.localeCompare(b2.account_code));
+    return {
+      from, to, base_ledger: base, compare_ledger: compare,
+      base_net_income: b.net_income, compare_net_income: c.net_income,
+      difference: round4(c.net_income - b.net_income),
+      lines,
     };
   }
 
@@ -258,13 +333,15 @@ export class LedgerService {
 
   // Year-end close: post a closing journal zeroing Revenue & Expense into 3100 Retained Earnings,
   // then close all 12 months. Idempotent (skips if FY already closed).
-  async closeYear(fiscalYear: number, createdBy: string) {
+  async closeYear(fiscalYear: number, createdBy: string, ledgerCode: string = LEADING) {
     const db = this.db as any;
-    if (await this.alreadyPosted('CLOSE', `FY${fiscalYear}`)) {
-      return { closed: true, fiscal_year: fiscalYear, already: true };
+    // per-ledger idempotency: the leading book keeps the legacy 'FY{y}' ref; non-leading books are suffixed.
+    const closeRef = ledgerCode === LEADING ? `FY${fiscalYear}` : `FY${fiscalYear}-${ledgerCode}`;
+    if (await this.alreadyPosted('CLOSE', closeRef)) {
+      return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, already: true };
     }
     const from = `${fiscalYear}-01-01`, to = `${fiscalYear}-12-31`;
-    const rows = await this.aggregateByType(db, from, to);
+    const rows = await this.aggregateByType(db, from, to, undefined, ledgerCode);
     const lines: JournalLineDto[] = [];
     let revTotal = 0, expTotal = 0;
     for (const r of rows) {
@@ -279,17 +356,20 @@ export class LedgerService {
     const netIncome = round4(revTotal - expTotal);
     if (netIncome > 0) lines.push({ account_code: '3100', credit: netIncome });
     else if (netIncome < 0) lines.push({ account_code: '3100', debit: -netIncome });
-    if (!lines.length) return { closed: true, fiscal_year: fiscalYear, net_income: 0, entry_no: null, note: 'no P&L activity' };
+    if (!lines.length) return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, net_income: 0, entry_no: null, note: 'no P&L activity' };
 
     await this.ensurePeriod(`${fiscalYear}-12`);
-    const je = await this.postEntry({ date: to, source: 'CLOSE', sourceRef: `FY${fiscalYear}`, memo: `Year-end close FY${fiscalYear}`, createdBy, lines });
-    for (let m = 1; m <= 12; m++) await this.closePeriod(`${fiscalYear}-${String(m).padStart(2, '0')}`);
-    return { closed: true, fiscal_year: fiscalYear, net_income: netIncome, entry_no: je.entry_no };
+    // tag the closing entry to its ledger so it zeroes only that book's P&L (each GAAP has its own result).
+    const je = await this.postEntry({ date: to, source: 'CLOSE', sourceRef: closeRef, ledgerCode, memo: `Year-end close FY${fiscalYear} (${ledgerCode})`, createdBy, lines });
+    // fiscal_periods is a shared calendar (no ledger dimension) — only the LEADING close locks the months,
+    // so non-leading ledgers can still post their own closing entry into December.
+    if (ledgerCode === LEADING) for (let m = 1; m <= 12; m++) await this.closePeriod(`${fiscalYear}-${String(m).padStart(2, '0')}`);
+    return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, net_income: netIncome, entry_no: je.entry_no };
   }
 
   // group Posted journal_lines by account type within optional date window
-  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null) {
-    const conds = [eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${to}`];
+  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null) {
+    const conds = [eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${to}`, this.ledgerCond(ledgerCode)];
     if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
     if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
     else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));

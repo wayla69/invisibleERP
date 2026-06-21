@@ -20,6 +20,7 @@
     "revrec": "tsx src/revrec.ts",
     "fxreval": "tsx src/fxreval.ts",
     "intercompany": "tsx src/intercompany.ts",
+    "multiledger": "tsx src/multiledger.ts",
     "recipe": "tsx src/recipe.ts",
     "loyalty": "tsx src/loyalty.ts",
     "giftcards": "tsx src/giftcards.ts",

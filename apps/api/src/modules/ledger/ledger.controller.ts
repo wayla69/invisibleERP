@@ -29,8 +29,24 @@ export class LedgerController {
   @Get('accounts')
   accounts() { return this.svc.listAccounts(); }
 
+  // ── multi-ledger / multi-GAAP ──
+  @Get('ledgers')
+  ledgers() { return this.svc.listLedgers(); }
+
+  // post a GAAP-divergent adjustment to ONE ledger (e.g. tax-depreciation delta)
+  @Post('ledgers/:code/adjustment')
+  adjustment(@Param('code') code: string, @Body(new ZodValidationPipe(JournalBody)) b: JournalBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.postAdjustment(code, { date: b.date, source: b.source ?? 'GAAP-ADJ', sourceRef: b.source_ref, tenantId: b.tenant_id ?? null, currency: b.currency, memo: b.memo, lines: b.lines, createdBy: u.username });
+  }
+
+  // book-tax difference report (TFRS vs TAX → deferred-tax / ภ.ง.ด.50 basis)
+  @Get('gaap-comparison')
+  gaapComparison(@Query('from') from: string, @Query('to') to: string, @Query('base') base?: string, @Query('compare') compare?: string) {
+    return this.svc.gaapComparison(from, to, base || undefined, compare || undefined);
+  }
+
   @Get('trial-balance')
-  trialBalance(@Query('period') period?: string, @Query('cost_center') costCenter?: string) { return this.svc.trialBalance(period, costCenter); }
+  trialBalance(@Query('period') period?: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.trialBalance(period, costCenter, ledger || undefined); }
 
   @Get('journal')
   journal(@Query('limit') limit?: string) { return this.svc.listJournal(limit ? +limit : 50); }
@@ -50,10 +66,10 @@ export class LedgerController {
   }
 
   @Get('income-statement')
-  incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string) { return this.svc.incomeStatement(from, to, costCenter); }
+  incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.incomeStatement(from, to, costCenter, ledger || undefined); }
 
   @Get('balance-sheet')
-  balanceSheet(@Query('as_of') asOf: string) { return this.svc.balanceSheet(asOf); }
+  balanceSheet(@Query('as_of') asOf: string, @Query('ledger') ledger?: string) { return this.svc.balanceSheet(asOf, ledger || undefined); }
 
   // ── fiscal periods + year-end close ──
   @Get('periods')
@@ -66,5 +82,5 @@ export class LedgerController {
   openPeriod(@Param('period') period: string) { return this.svc.openPeriod(period); }
 
   @Post('close-year')
-  closeYear(@Query('fiscal_year') fy: string, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username); }
+  closeYear(@Query('fiscal_year') fy: string, @Query('ledger') ledger: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username, ledger || undefined); }
 }

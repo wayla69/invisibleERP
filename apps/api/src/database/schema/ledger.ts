@@ -36,13 +36,14 @@ export const journalEntries = pgTable(
     memo: text('memo'),
     source: text('source'), // 'POS' | 'AR' | 'AP' | 'GR' | 'Manual' | 'Payment'
     sourceRef: text('source_ref'), // originating doc no (sale_no / invoice_no / ...)
+    ledgerCode: text('ledger_code'), // NULL = shared across ALL ledgers; a code = adjustment to that ledger only
     tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
     currency: text('currency').default('THB'),
     status: journalStatusEnum('status').default('Posted'),
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ bySource: index('idx_je_source').on(t.source, t.sourceRef) }),
+  (t) => ({ bySource: index('idx_je_source').on(t.source, t.sourceRef), byLedger: index('idx_je_ledger').on(t.ledgerCode) }),
 );
 
 export const journalLines = pgTable(

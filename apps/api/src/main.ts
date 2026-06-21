@@ -27,6 +27,7 @@ async function bootstrap() {
   // seed reference data (best-effort — skip if DB not ready)
   for (const seed of [
     () => app.get(LedgerService).seedChartOfAccounts(),
+    () => app.get(LedgerService).seedLedgers(),
     () => app.get(BillingService).seedPlans(),
   ]) {
     try { await seed(); } catch (e) { new Logger('Seed').warn(`seed skipped: ${(e as Error).message}`); }
