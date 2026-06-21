@@ -34,8 +34,9 @@ export class PortalPosService {
     private readonly recipe: RecipeService,
   ) {}
 
-  // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn
-  async createSale(dto: PortalSaleDto, user: JwtUser) {
+  // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
+  // opts.saleDate (offline sync) books the sale + its GL on the original offline day, not today.
+  async createSale(dto: PortalSaleDto, user: JwtUser, opts?: { saleDate?: string }) {
     const t = await this.portal.tenantId(user);
     const db = this.db as any;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการสินค้า' });
@@ -61,7 +62,7 @@ export class PortalPosService {
       if (!exists) break;
       saleNo = this.docNo.nextTenantStamped('SALE', t.code, new Date(Date.now() + attempt * 1000));
     }
-    const today = ymd();
+    const today = opts?.saleDate ?? ymd();
     const now = new Date();
     let recipeCogs = 0;
 
@@ -122,7 +123,7 @@ export class PortalPosService {
     let je: any = null;
     // recipe COGS (gated by post_cogs): Dr 5300 / Cr 1200 — posted alongside the sale's GL (same request tx)
     if (recipeCogs > 0 && !(await this.ledger.alreadyPosted('POS-COGS', saleNo))) {
-      await this.ledger.postEntry({ source: 'POS-COGS', sourceRef: saleNo, tenantId: t.id, memo: `COGS ${saleNo}`, createdBy: user.username, lines: [{ account_code: '5300', debit: recipeCogs }, { account_code: '1200', credit: recipeCogs }] });
+      await this.ledger.postEntry({ date: today, source: 'POS-COGS', sourceRef: saleNo, tenantId: t.id, memo: `COGS ${saleNo}`, createdBy: user.username, lines: [{ account_code: '5300', debit: recipeCogs }, { account_code: '1200', credit: recipeCogs }] });
     }
     if (total > 0) {
       // Link this tender to the shop's open till (if any) so closeTill sees POS cash (move #5 reconciliation).
@@ -132,7 +133,7 @@ export class PortalPosService {
         user,
       );
       je = await this.ledger.postEntry({
-        source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
+        date: today, source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
         lines: [
           { account_code: '1000', debit: total },   // Dr Cash
           { account_code: '4000', credit: taxable }, // Cr Sales Revenue

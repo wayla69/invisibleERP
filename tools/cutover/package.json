@@ -25,6 +25,7 @@
     "loyalty": "tsx src/loyalty.ts",
     "giftcards": "tsx src/giftcards.ts",
     "receipts": "tsx src/receipts.ts",
+    "offline-sync": "tsx src/offline-sync.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

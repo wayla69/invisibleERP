@@ -6,6 +6,7 @@ import {
   PortalService, type AddInventoryDto, type UpdateInventoryDto, type VarianceDto,
 } from './portal.service';
 import { PortalPosService, type PortalSaleDto } from './portal.pos.service';
+import { OfflineSyncService, type OfflineSyncBatchDto } from './offline-sync.service';
 import {
   PortalMyErpService, type MyCustomerDto, type MySupplierDto, type MyPoDto,
 } from './portal.myerp.service';
@@ -38,6 +39,23 @@ const VarianceBody = z.object({
   shift: z.string().optional(),
 });
 
+// Offline sync: a batch of queued offline sales. Per-OP validation is LENIENT (lines is a plain array)
+// so a single corrupt op fails on its own at processing time instead of 400-ing the whole batch.
+const OfflineSaleOp = z.object({
+  client_uuid: z.string().min(1),
+  device_id: z.string().optional(),
+  client_seq: z.number().int().nonnegative().optional(),
+  captured_at: z.string().min(1),
+  lines: z.array(z.object({
+    item_id: z.string().min(1), item_description: z.string().optional(),
+    qty: z.number().positive(), unit_price: z.number().nonnegative(),
+    uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
+  })),
+  discount: z.number().nonnegative().optional(),
+  payment_method: z.string().optional(),
+});
+const OfflineSyncBody = z.object({ sales: z.array(OfflineSaleOp).min(1).max(200) });
+
 const MyCustomerBody = z.object({ customer_name: z.string().min(1), phone: z.string().optional(), address: z.string().optional(), notes: z.string().optional() });
 const MySupplierBody = z.object({ supplier_name: z.string().min(1), contact_name: z.string().optional(), phone: z.string().optional(), address: z.string().optional() });
 const MyPoBody = z.object({
@@ -50,6 +68,7 @@ export class PortalController {
   constructor(
     private readonly svc: PortalService,
     private readonly pos: PortalPosService,
+    private readonly offline: OfflineSyncService,
     private readonly myerp: PortalMyErpService,
   ) {}
 
@@ -64,6 +83,12 @@ export class PortalController {
   @Get('pos/sales') @Permissions('cust_pos')
   listSales(@CurrentUser() u: JwtUser, @Query('limit') limit?: string, @Query('offset') offset?: string) {
     return this.pos.listSales(u, limit ? +limit : 50, offset ? +offset : 0);
+  }
+
+  // Offline sync: replay a batch of offline-queued sales idempotently (per-item savepoint isolation).
+  @Post('pos/offline-sync') @Permissions('cust_pos')
+  offlineSync(@Body(new ZodValidationPipe(OfflineSyncBody)) b: OfflineSyncBatchDto, @CurrentUser() u: JwtUser) {
+    return this.offline.syncBatch(b, u);
   }
 
   // ── Inventory ──

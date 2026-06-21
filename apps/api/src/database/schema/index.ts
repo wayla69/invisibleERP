@@ -32,3 +32,4 @@ export * from './returns';
 export * from './bank';
 export * from './giftcards';
 export * from './receipts';
+export * from './offline';
