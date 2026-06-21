@@ -11,6 +11,8 @@ import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxInvoiceService } from '../tax-docs/tax-invoice.service';
 import { MenuService } from '../menu/menu.service';
+import { PromoEngineService } from '../marketing/promo-engine.service';
+import { promotions, promoRedemptions } from '../../database/schema';
 import { roundCurrency } from '../tax/money';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -28,6 +30,7 @@ export class DineInService {
     private readonly ledger: LedgerService,
     private readonly taxInvoice: TaxInvoiceService,
     private readonly menu: MenuService,
+    private readonly promo: PromoEngineService,
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -168,7 +171,7 @@ export class DineInService {
     const o = await this.loadOrder(orderNo);
     if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
     const saleNo = await this.mintSaleNo(o.tenantId);
-    const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user);
+    const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, { orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts });
     // tender (cash → mock gateway = Captured); link to the open till so cash ties to the drawer (Z-report)
     const openTill = o.tenantId != null ? await this.payments.currentOpenTill(o.tenantId) : null;
     const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: built.total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user);
@@ -176,25 +179,46 @@ export class DineInService {
     return { order_no: orderNo, sale_no: saleNo, ...built, payment_no: tender?.payment_no ?? null, payment_status: tender?.status ?? null, tax_invoice_no: inv };
   }
 
-  // shared: insert cust_pos_sales + items + GL from a dine-in order. Returns money + journal_no.
-  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser) {
+  // shared: insert cust_pos_sales + items + GL from a dine-in order, applying line/order/promo discounts.
+  // VAT is on the discounted base (Thai rule). opts is optional → no-discount path matches the old behavior.
+  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number }) {
     const db = this.db as any;
+    const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, Number(o.id)), ne(dineInOrderItems.kdsStatus, 'voided')));
-    const subtotal = roundCurrency(items.reduce((a: number, l: any) => a + n(l.amount), 0), 'THB');
-    const disc = roundCurrency(discount, 'THB');
-    const taxable = Math.max(0, subtotal - disc);
-    const taxCalc = this.tax.calcTax({ net: taxable, country: 'TH' });
-    const vat = taxCalc.tax;
+    const lineDiscounts = opts?.lineDiscounts ?? {};
+    const maxPct = opts?.maxDiscountPct ?? 50;
+    let subtotalNet = 0, grossSum = 0, lineDiscTotal = 0;
+    const itemRows: any[] = [];
+    for (const l of items) {
+      const grossLine = roundCurrency(n(l.qty) * n(l.unitPrice), 'THB');
+      const ld = lineDiscounts[String(l.id)] ?? lineDiscounts[Number(l.id) as any];
+      let lineDisc = ld ? (ld.discount_amt != null ? roundCurrency(ld.discount_amt, 'THB') : roundCurrency(grossLine * n(ld.discount_pct) / 100, 'THB')) : 0;
+      lineDisc = Math.min(lineDisc, grossLine);
+      const netLine = roundCurrency(grossLine - lineDisc, 'THB');
+      grossSum = roundCurrency(grossSum + grossLine, 'THB'); subtotalNet = roundCurrency(subtotalNet + netLine, 'THB'); lineDiscTotal = roundCurrency(lineDiscTotal + lineDisc, 'THB');
+      itemRows.push({ itemId: l.itemId ?? l.name, itemDescription: l.name, qty: String(n(l.qty)), uom: 'จาน', unitPrice: fx(n(l.unitPrice), 2), discountPct: fx(grossLine > 0 ? r2(lineDisc / grossLine * 100) : 0, 2), amount: fx(netLine, 2), isCustom: false });
+    }
+    // order-level discount: explicit fixed amount, else percent
+    if (discount > subtotalNet + 0.01) throw new BadRequestException({ code: 'DISCOUNT_EXCEEDS_SUBTOTAL', message: `Discount ${discount} exceeds subtotal ${subtotalNet}`, messageTh: `ส่วนลด (${discount}) เกินยอดรวม (${subtotalNet})` });
+    let orderDisc = discount > 0 ? roundCurrency(discount, 'THB') : (opts?.orderDiscountPct ? roundCurrency(subtotalNet * opts.orderDiscountPct / 100, 'THB') : 0);
+    let pe: any = null;
+    if (opts?.promoCode) {
+      pe = await this.promo.applyPromo({ code: opts.promoCode, subtotalNet, itemIds: items.map((i: any) => String(i.itemId ?? i.name)), tenantId: o.tenantId ?? null });
+      orderDisc = Math.max(orderDisc, pe.discount); // promo takes over as the order discount
+    }
+    orderDisc = roundCurrency(Math.min(orderDisc, subtotalNet), 'THB');
+    const effTotalPct = grossSum > 0 ? (lineDiscTotal + orderDisc) / grossSum * 100 : 0;
+    if (effTotalPct > maxPct + 0.001) throw new BadRequestException({ code: 'DISCOUNT_OVER_LIMIT', message: `Total discount ${r2(effTotalPct)}% exceeds limit ${maxPct}%`, messageTh: 'ส่วนลดเกินเพดานที่อนุญาต' });
+
+    const taxable = Math.max(0, roundCurrency(subtotalNet - orderDisc, 'THB'));
+    const vat = this.tax.calcTax({ net: taxable, country: 'TH' }).tax;
     const total = roundCurrency(taxable + vat, 'THB');
     const [h] = await db.insert(custPosSales).values({
-      saleNo, saleDate: ymd(), tenantId: o.tenantId, subtotal: fx(subtotal, 2), discount: fx(disc, 2),
+      saleNo, saleDate: ymd(), tenantId: o.tenantId, subtotal: fx(subtotalNet, 2), discount: fx(orderDisc, 2),
       taxAmount: fx(vat, 2), total: fx(total, 2), paymentMethod: 'Dine-in', pointsUsed: '0', pointsEarned: '0',
       status: 'Completed', notes: `Dine-in ${o.orderNo}`, createdBy: user.username,
     }).returning({ id: custPosSales.id });
-    await db.insert(custPosItems).values(items.map((l: any) => ({
-      saleId: Number(h.id), itemId: l.itemId ?? l.name, itemDescription: l.name, qty: String(n(l.qty)), uom: 'จาน',
-      unitPrice: fx(n(l.unitPrice), 2), discountPct: '0', amount: fx(n(l.amount), 2), isCustom: false,
-    })));
+    await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h.id), ...r })));
     let journalNo: string | null = null;
     if (total > 0) {
       const je: any = await this.ledger.postEntry({
@@ -202,8 +226,12 @@ export class DineInService {
         lines: [{ account_code: '1000', debit: total }, { account_code: '4000', credit: taxable }, { account_code: '2100', credit: vat }],
       });
       journalNo = je?.entry_no ?? null;
+      if (pe?.ok && pe.promoRowId) {
+        await db.update(promotions).set({ usedCount: sql`${promotions.usedCount} + 1` }).where(eq(promotions.id, pe.promoRowId));
+        await db.insert(promoRedemptions).values({ tenantId: o.tenantId ?? null, promoId: pe.promoRowId, promoCode: pe.promoCode, saleNo, orderNo: o.orderNo, discountAmount: fx(pe.discount, 2), appliedBy: user.username });
+      }
     }
-    return { subtotal, discount: disc, vat, total, journal_no: journalNo };
+    return { subtotal: subtotalNet, discount: orderDisc, vat, total, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal };
   }
 
   // mark order paid + close table/session + idempotent abbreviated tax invoice

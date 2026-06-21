@@ -72,6 +72,19 @@ export const promotions = pgTable('promotions', {
   notes: text('notes'),
 });
 
+// POS discount/promo audit — one row per promo applied at checkout. tenant_id REQUIRED (RLS).
+export const promoRedemptions = pgTable('promo_redemptions', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  promoId: bigint('promo_id', { mode: 'number' }).references(() => promotions.id),
+  promoCode: text('promo_code'),
+  saleNo: text('sale_no'),
+  orderNo: text('order_no'),
+  discountAmount: numeric('discount_amount', { precision: 14, scale: 2 }),
+  appliedBy: text('applied_by'),
+  appliedAt: timestamp('applied_at', { withTimezone: true }).defaultNow(),
+});
+
 // เดิม Item_IDs CSV → junction
 export const promotionItems = pgTable(
   'promotion_items',

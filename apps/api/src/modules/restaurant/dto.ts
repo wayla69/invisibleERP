@@ -34,7 +34,13 @@ export type AddItemsDto = z.infer<typeof AddItemsBody>;
 export const KdsActionBody = z.object({ action: z.enum(['start', 'ready', 'recall', 'serve', 'void']), reason: z.string().optional() });
 export type KdsActionDto = z.infer<typeof KdsActionBody>;
 
-export const CheckoutBody = z.object({ method: z.string().optional(), discount: z.number().nonnegative().optional() });
+export const CheckoutBody = z.object({
+  method: z.string().optional(),
+  discount: z.number().nonnegative().optional(),        // order-level FIXED amount (legacy)
+  discount_pct: z.number().min(0).max(100).optional(),  // order-level PERCENT
+  promo_code: z.string().optional(),
+  line_discounts: z.record(z.string(), z.object({ discount_pct: z.number().min(0).max(100).optional(), discount_amt: z.number().nonnegative().optional() })).optional(), // { "<orderItemId>": {...} }
+}).refine((d) => !(d.discount != null && d.discount_pct != null), { message: 'provide order discount amount or percent, not both' });
 export type CheckoutDto = z.infer<typeof CheckoutBody>;
 
 // ── tables / floor-plan ──
