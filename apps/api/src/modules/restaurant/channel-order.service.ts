@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { eq, and, isNotNull } from 'drizzle-orm';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { dineInOrders, orderDeliveryDetails, channelWebhookEvents, tenants } from '../../database/schema';
+import { dineInOrders, orderDeliveryDetails, channelWebhookEvents, tenants, payments } from '../../database/schema';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxService } from '../tax/tax.service';
@@ -106,18 +106,26 @@ export class ChannelOrderService {
   }
 
   // PUBLIC: start PromptPay tender (Pending). Covers food total + delivery fee in one receipt.
+  // Idempotent: repeated calls return the SAME open Pending tender (no orphan tenders / sale-nos). Locks
+  // the order row so concurrent pay() serialize, and freezes the order to 'bill_requested' (the bill is in
+  // flight) so item changes between pay and confirm are caught.
   async pay(token: string) {
     const claim = this.claimOrThrow(token);
     return this.scope.run(claim.tenantId, async () => {
       const db = this.db as any;
-      const o = await this.loadByToken(db, claim, token);
+      const guard = await this.loadByToken(db, claim, token);
+      const o = await this.dineIn.loadOrderForUpdate(guard.orderNo); // lock → serialize concurrent pay()
       if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
       const total = roundCurrency(n(o.total) + n(o.deliveryFee), 'THB');
       if (!(total > 0)) throw new BadRequestException({ code: 'EMPTY_BILL', message: 'Bill is zero', messageTh: 'ยอดบิลเป็นศูนย์' });
+      if (o.saleNo) {
+        const [ex] = await db.select().from(payments).where(and(eq(payments.saleNo, o.saleNo), eq(payments.method, 'PromptPay'), sql`${payments.status}::text = 'Pending'`)).limit(1);
+        if (ex) return { payment_no: ex.paymentNo, status: ex.status, gateway_ref: ex.gatewayRef, total };
+      }
       const u = diner(claim.tenantId);
-      const saleNo = await this.dineIn.mintSaleNo(claim.tenantId);
+      const saleNo = o.saleNo ?? await this.dineIn.mintSaleNo(claim.tenantId); // never overwrite an existing sale_no
       const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: claim.tenantId, method: 'PromptPay', amount: total, currency: 'THB', gateway: 'promptpay' }, u);
-      await db.update(dineInOrders).set({ saleNo }).where(eq(dineInOrders.id, o.id));
+      await db.update(dineInOrders).set({ saleNo, status: 'bill_requested', billRequestedAt: new Date() }).where(eq(dineInOrders.id, o.id));
       return { payment_no: tender.payment_no, status: tender.status, gateway_ref: tender.gateway_ref, total };
     });
   }
@@ -133,6 +141,11 @@ export class ChannelOrderService {
       if (!o.saleNo) throw new BadRequestException({ code: 'NO_SALE', message: 'Call /pay first', messageTh: 'กรุณาเริ่มชำระเงินก่อน' });
       const built: any = await this.dineIn.buildSale(o, o.saleNo, 0, u);
       await this.postDeliveryFeeGL(o, o.saleNo, u);
+      // reconciliation guard: the captured tender (set at pay) must equal the freshly-built bill. If items
+      // changed between pay and confirm, the books would diverge from the money — reject instead (rolls back GL).
+      const [pmt] = await (this.db as any).select({ amount: payments.amount }).from(payments).where(eq(payments.paymentNo, paymentNo)).limit(1);
+      const expected = roundCurrency(n(built.total) + n(o.deliveryFee), 'THB');
+      if (pmt && Math.abs(n(pmt.amount) - expected) > 0.01) throw new BadRequestException({ code: 'TENDER_MISMATCH', message: `Captured ${n(pmt.amount)} != bill ${expected} — order changed after payment`, messageTh: 'ยอดที่ชำระไม่ตรงกับบิล' });
       const invNo = await this.dineIn.markPaidAndInvoice(o, o.saleNo, u);
       return { paid: true, payment_status: settled.status, sale_no: o.saleNo, total: built.total, delivery_fee: n(o.deliveryFee), journal_no: built.journal_no, tax_invoice_no: invNo };
     });
@@ -177,31 +190,42 @@ export class ChannelOrderService {
   }
 
   // 3rd-party (Grab/LineMan) ingest — idempotent at the edge (event id) AND the order (ext order id).
-  async ingestThirdParty(source: string, body: any) {
+  // Authenticated by a per-source shared secret (store_ref is a public, enumerable slug → NOT an auth factor):
+  // fail-CLOSED in production (a missing secret config rejects); lenient only in dev/test.
+  async ingestThirdParty(source: string, body: any, secret?: string) {
     if (!['grab', 'lineman'].includes(source)) throw new BadRequestException({ code: 'BAD_SOURCE', message: 'Unknown channel source', messageTh: 'ช่องทางไม่ถูกต้อง' });
+    const expected = process.env[`WEBHOOK_SECRET_${source.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_SECRET;
+    if (expected) { if (secret !== expected) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
+    else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
     if (!body?.ext_event_id || !body?.ext_order_id || !body?.store_ref) throw new BadRequestException({ code: 'BAD_PAYLOAD', message: 'ext_event_id, ext_order_id, store_ref required', messageTh: 'ข้อมูล webhook ไม่ครบ' });
     const { tenantId } = await this.resolveStore(body.store_ref);
     return this.scope.run(tenantId, async () => {
       const db = this.db as any;
       // edge idempotency: one processed event per (source, ext_event_id)
       const ins = await db.insert(channelWebhookEvents).values({ tenantId, source, extEventId: body.ext_event_id, extOrderId: body.ext_order_id, payload: body, status: 'processed' }).onConflictDoNothing({ target: [channelWebhookEvents.source, channelWebhookEvents.extEventId] }).returning({ id: channelWebhookEvents.id });
+      const findExisting = async () => (await db.select().from(dineInOrders).where(and(eq(dineInOrders.extSource, source), eq(dineInOrders.extOrderId, String(body.ext_order_id)))).limit(1))[0];
       // order idempotency: one internal order per (tenant, ext_source, ext_order_id)
-      const [existing] = await db.select().from(dineInOrders).where(and(eq(dineInOrders.extSource, source), eq(dineInOrders.extOrderId, String(body.ext_order_id)))).limit(1);
+      let existing = await findExisting();
       if (existing) {
-        if (!ins.length) return { status: 'duplicate', order_no: existing.orderNo };
-        await db.update(channelWebhookEvents).set({ orderNo: existing.orderNo, status: 'duplicate' }).where(and(eq(channelWebhookEvents.source, source), eq(channelWebhookEvents.extEventId, body.ext_event_id)));
+        if (ins.length) await db.update(channelWebhookEvents).set({ orderNo: existing.orderNo, status: 'duplicate' }).where(and(eq(channelWebhookEvents.source, source), eq(channelWebhookEvents.extEventId, body.ext_event_id)));
         return { status: 'duplicate', order_no: existing.orderNo };
       }
-      const u = diner(tenantId);
-      const items = (body.items ?? []).map((it: any) => ({ name: it.name, qty: n(it.qty), unit_price: n(it.unit_price), station_code: it.station_code ?? 'hot' }));
-      const view: any = await this.dineIn.createOrder({ items }, u);
-      await db.update(dineInOrders).set({ channel: source as any, fulfillmentType: body.fulfillment_type ?? 'delivery', fulfillmentStatus: 'accepted', extSource: source, extOrderId: String(body.ext_order_id), server: `channel:${source}` }).where(eq(dineInOrders.orderNo, view.order_no));
-      if (body.customer) {
-        const [oRow] = await db.select({ id: dineInOrders.id }).from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
-        await db.insert(orderDeliveryDetails).values({ tenantId, orderId: Number(oRow.id), contactName: body.customer.name ?? null, contactPhone: body.customer.phone ?? null, addressLine: body.customer.address ?? null });
+      try {
+        const u = diner(tenantId);
+        const items = (body.items ?? []).map((it: any) => ({ name: it.name, qty: n(it.qty), unit_price: n(it.unit_price), station_code: it.station_code ?? 'hot' }));
+        const view: any = await this.dineIn.createOrder({ items }, u);
+        await db.update(dineInOrders).set({ channel: source as any, fulfillmentType: body.fulfillment_type ?? 'delivery', fulfillmentStatus: 'accepted', extSource: source, extOrderId: String(body.ext_order_id), server: `channel:${source}` }).where(eq(dineInOrders.orderNo, view.order_no));
+        if (body.customer) {
+          const [oRow] = await db.select({ id: dineInOrders.id }).from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
+          await db.insert(orderDeliveryDetails).values({ tenantId, orderId: Number(oRow.id), contactName: body.customer.name ?? null, contactPhone: body.customer.phone ?? null, addressLine: body.customer.address ?? null });
+        }
+        await db.update(channelWebhookEvents).set({ orderNo: view.order_no }).where(and(eq(channelWebhookEvents.source, source), eq(channelWebhookEvents.extEventId, body.ext_event_id)));
+        return { status: 'processed', order_no: view.order_no, channel: source };
+      } catch (e: any) {
+        // concurrent-replay race: the partial-unique (tenant,ext_source,ext_order_id) lost → resolve to the winner
+        if (String(e?.code) === '23505') { existing = await findExisting(); if (existing) return { status: 'duplicate', order_no: existing.orderNo }; }
+        throw e;
       }
-      await db.update(channelWebhookEvents).set({ orderNo: view.order_no }).where(and(eq(channelWebhookEvents.source, source), eq(channelWebhookEvents.extEventId, body.ext_event_id)));
-      return { status: 'processed', order_no: view.order_no, channel: source };
     });
   }
 

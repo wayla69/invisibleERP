@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Headers } from '@nestjs/common';
 import { z } from 'zod';
 import { Public, NoTx } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -42,7 +42,8 @@ export class ChannelController {
   @Public() @NoTx() @Post('order/t/:token/confirm')
   confirm(@Param('token') token: string, @Body(new ZodValidationPipe(ConfirmBody)) b: { payment_no: string }) { return this.channel.confirm(token, b.payment_no); }
 
-  // 3rd-party aggregator webhook (Grab/LineMan) — @Public; idempotent on (source, ext_event_id).
+  // 3rd-party aggregator webhook (Grab/LineMan) — @Public, gated by a per-source shared secret header;
+  // idempotent on (source, ext_event_id).
   @Public() @NoTx() @Post('channel/webhook/:source')
-  webhook(@Param('source') source: string, @Body() body: any) { return this.channel.ingestThirdParty(source, body); }
+  webhook(@Param('source') source: string, @Headers('x-webhook-secret') secret: string | undefined, @Body() body: any) { return this.channel.ingestThirdParty(source, body, secret); }
 }

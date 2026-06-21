@@ -16,6 +16,7 @@ import { eq } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { ymd } from '../../../apps/api/dist/database/queries';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -42,7 +43,7 @@ async function seed(db: any) {
     await db.insert(s.items).values({ itemId: id, itemDescription: desc, uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
     await db.insert(s.stockSnapshots).values({ generateDate: now, itemId: id, itemDescription: desc, uom: 'EA', avQty: String(qty), totalStock: String(qty) });
   }
-  const today = now.toISOString().slice(0, 10);
+  const today = ymd(); // Bangkok-tz date to match the dashboard's ymd() (UTC slice flaked in the 00:00–07:00 BKK window)
   const [sale] = await db.insert(s.custPosSales).values({ saleNo: 'SALE-T1-1', saleDate: today, tenantId: t1.id, total: '107', subtotal: '100', taxAmount: '7', status: 'Completed', paymentMethod: 'Cash', createdBy: 'admin' }).returning({ id: s.custPosSales.id });
   await db.insert(s.custPosItems).values({ saleId: Number(sale.id), itemId: 'A', itemDescription: 'Apple', qty: '10', amount: '100' });
 }

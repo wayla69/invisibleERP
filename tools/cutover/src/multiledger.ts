@@ -114,10 +114,11 @@ async function main() {
   const isT2 = await inj('GET', `/api/ledger/income-statement?from=${FROM}&to=${TO}&ledger=TAX`, sales2);
   ok('RLS: T2 income statement sees 0 of T1 entries', near(isT2.json.revenue ?? 0, 0) && near(isT2.json.expense ?? 0, 0), JSON.stringify({ r: isT2.json.revenue, e: isT2.json.expense }));
 
-  // ── 14-16. per-ledger year-end close (TAX before TFRS so the leading period-close doesn't block it) ──
-  const closeTax = await inj('POST', '/api/ledger/close-year?fiscal_year=2026&ledger=TAX', admin);
+  // ── 14-16. per-ledger year-end close — NATURAL order (leading/TFRS first, which locks the shared periods;
+  // the non-leading TAX close must still succeed via allowClosedPeriod). Proves order-independence. ──
   const closeTfrs = await inj('POST', '/api/ledger/close-year?fiscal_year=2026', admin);
-  ok('Close-year per ledger: TAX net 8000, TFRS net 9000', near(closeTax.json.net_income, 8000) && closeTax.json.ledger === 'TAX' && near(closeTfrs.json.net_income, 9000) && closeTfrs.json.ledger === 'TFRS', JSON.stringify({ tax: closeTax.json.net_income, tfrs: closeTfrs.json.net_income }));
+  const closeTax = await inj('POST', '/api/ledger/close-year?fiscal_year=2026&ledger=TAX', admin);
+  ok('Close-year order-independent: TFRS first (net 9000) then TAX (net 8000) both succeed', near(closeTfrs.json.net_income, 9000) && closeTfrs.json.ledger === 'TFRS' && near(closeTax.json.net_income, 8000) && closeTax.json.ledger === 'TAX' && !!closeTax.json.entry_no, JSON.stringify({ tfrs: closeTfrs.json.net_income, tax: closeTax.json.net_income, taxEntry: closeTax.json.entry_no }));
   const bsTfrs = await inj('GET', '/api/ledger/balance-sheet?as_of=2026-12-31&ledger=TFRS', admin);
   ok('Balance sheet TFRS: retained earnings 9000, balanced', near(bsTfrs.json.retained_earnings, 9000) && bsTfrs.json.balanced === true, `re=${bsTfrs.json.retained_earnings} bal=${bsTfrs.json.balanced}`);
   const bsTax = await inj('GET', '/api/ledger/balance-sheet?as_of=2026-12-31&ledger=TAX', admin);

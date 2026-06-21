@@ -133,7 +133,14 @@ async function main() {
   const t2HasL9 = (boardT2.json.orders ?? []).some((o: any) => o.channel === 'lineman');
   ok('RLS: T2 lineman order on T2 board only, invisible to T1', !t1HasL9 && t2HasL9, `t1=${t1HasL9} t2=${t2HasL9}`);
 
-  // ── 12. trial balance balanced ──
+  // ── 12. pay() idempotency — repeated pay returns the SAME tender (no orphan tenders / sale-nos) ──
+  const ci = await inj('POST', '/api/order/T1', undefined, { fulfillment_type: 'takeaway', items: [item(90)] });
+  const p1 = await inj('POST', `/api/order/t/${ci.json.token}/pay`, undefined, {});
+  const p2 = await inj('POST', `/api/order/t/${ci.json.token}/pay`, undefined, {});
+  const pendCnt = (await pg.query(`SELECT count(*)::int n FROM payments WHERE sale_no=(SELECT sale_no FROM dine_in_orders WHERE order_no='${ci.json.order_no}') AND status='Pending'`)).rows as any[];
+  ok('pay() idempotent: repeated pay → same payment_no, exactly 1 Pending tender', p1.json.payment_no === p2.json.payment_no && pendCnt[0].n === 1, `p1=${p1.json.payment_no} p2=${p2.json.payment_no} pend=${pendCnt[0].n}`);
+
+  // ── 13. trial balance balanced ──
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after all channel activity', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
 

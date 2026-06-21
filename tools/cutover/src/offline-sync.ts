@@ -123,7 +123,20 @@ async function main() {
   const tax8 = (await pg.query(`SELECT subtotal, discount, tax_amount, total FROM cust_pos_sales WHERE sale_no='${sale8}'`)).rows as any[];
   ok('VAT on discounted base: net 100 − disc 20 → taxable 80, vat 5.60, total 85.60', near(tax8[0]?.tax_amount, 5.6) && near(tax8[0]?.total, 85.6), JSON.stringify(tax8[0]));
 
-  // ── 9. trial balance balanced ──
+  // ── 9. transient failure is RETRYABLE (not dead-lettered): closed period → failed → reopen → replay synced ──
+  const uT = uuid();
+  const opT = () => ({ client_uuid: uT, device_id: 'POS-01', captured_at: '2026-07-15T08:30:00.000Z', lines: [{ item_id: 'A', item_description: 'สินค้า', qty: 1, unit_price: 100 }] });
+  await inj('POST', '/api/ledger/periods/2026-07/close', admin);
+  const bFail = await sync(cust1, [opT()]);
+  const rFail = (bFail.json.results ?? [])[0];
+  const failRowT = await cnt(`SELECT count(*)::int n FROM pos_offline_sync WHERE client_uuid='${uT}' AND status='failed' AND sale_no IS NULL`);
+  await inj('POST', '/api/ledger/periods/2026-07/open', admin);
+  const bRetry = await sync(cust1, [opT()]); // replay after reopen — must NOT be dead-lettered as duplicate
+  const rRetry = (bRetry.json.results ?? [])[0];
+  const salesT = await cnt(`SELECT count(*)::int n FROM cust_pos_sales WHERE sale_no='${rRetry.sale_no}'`);
+  ok('Transient fail → retryable: PERIOD_CLOSED failed (no sale), reopen + replay → synced with SALE-', rFail?.status === 'failed' && rFail?.error === 'PERIOD_CLOSED' && failRowT === 1 && rRetry?.status === 'synced' && /^SALE-/.test(rRetry?.sale_no ?? '') && salesT === 1, `fail=${rFail?.status}/${rFail?.error} retry=${rRetry?.status}/${rRetry?.sale_no}`);
+
+  // ── 10. trial balance balanced ──
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after all offline-sync activity', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
 

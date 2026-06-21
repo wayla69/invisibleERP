@@ -53,6 +53,7 @@ export interface PostEntryDto {
   lines: JournalLineDto[];
   createdBy: string;
   ledgerCode?: string | null; // NULL/undefined = shared (all ledgers); a code = adjustment to that ledger only
+  allowClosedPeriod?: boolean; // only the year-end CLOSE may post into the period it is closing
 }
 
 @Injectable()
@@ -144,7 +145,8 @@ export class LedgerService {
     // Period guard: a CLOSED fiscal period rejects new postings. A missing period row defaults OPEN
     // (existing flows post into the current month without pre-seeding a period).
     const [pp] = await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(eq(fiscalPeriods.code, period)).limit(1);
-    if (pp && pp.status === 'Closed') {
+    if (pp && pp.status === 'Closed' && !dto.allowClosedPeriod) {
+      // a year-end closing journal legitimately posts INTO the period it closes; everything else is blocked
       throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${period} is closed`, messageTh: `งวดบัญชี ${period} ถูกปิดแล้ว` });
     }
     const currency = dto.currency ?? 'THB';
@@ -361,7 +363,7 @@ export class LedgerService {
 
     await this.ensurePeriod(`${fiscalYear}-12`);
     // tag the closing entry to its ledger so it zeroes only that book's P&L (each GAAP has its own result).
-    const je = await this.postEntry({ date: to, source: 'CLOSE', sourceRef: closeRef, ledgerCode, memo: `Year-end close FY${fiscalYear} (${ledgerCode})`, createdBy, lines });
+    const je = await this.postEntry({ date: to, source: 'CLOSE', sourceRef: closeRef, ledgerCode, allowClosedPeriod: true, memo: `Year-end close FY${fiscalYear} (${ledgerCode})`, createdBy, lines });
     // fiscal_periods is a shared calendar (no ledger dimension) — only the LEADING close locks the months,
     // so non-leading ledgers can still post their own closing entry into December.
     if (ledgerCode === LEADING) for (let m = 1; m <= 12; m++) await this.closePeriod(`${fiscalYear}-${String(m).padStart(2, '0')}`);

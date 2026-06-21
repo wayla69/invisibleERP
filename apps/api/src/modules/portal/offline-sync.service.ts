@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posOfflineSync } from '../../database/schema';
@@ -43,9 +43,10 @@ export class OfflineSyncService {
 
   private async syncOne(t: { id: number; code: string }, op: OfflineSaleOp, user: JwtUser): Promise<SyncResult> {
     const db = this.db as any;
-    // 1. dedup gate — RLS-scoped to this tenant; a replayed op returns its original sale_no, no re-post.
+    // 1. dedup gate — short-circuit ONLY on a genuinely-completed sale (sale_no set). A prior 'failed'
+    //    tombstone (e.g. transient PERIOD_CLOSED) must NOT block a retry, so we require sale_no IS NOT NULL.
     const [seen] = await db.select().from(posOfflineSync)
-      .where(and(eq(posOfflineSync.tenantId, t.id), eq(posOfflineSync.clientUuid, op.client_uuid))).limit(1);
+      .where(and(eq(posOfflineSync.tenantId, t.id), eq(posOfflineSync.clientUuid, op.client_uuid), isNotNull(posOfflineSync.saleNo))).limit(1);
     if (seen) return { client_uuid: op.client_uuid, status: 'duplicate', sale_no: seen.saleNo ?? null, error: null };
 
     const saleDate = ymd(new Date(op.captured_at)); // book on the offline day
@@ -56,22 +57,24 @@ export class OfflineSyncService {
           user,
           { saleDate },
         );
+        // upsert so a retry of a previously-'failed' op is PROMOTED to 'synced' (the unique key is (tenant,uuid))
         await db.insert(posOfflineSync).values({
           tenantId: t.id, clientUuid: op.client_uuid, deviceId: op.device_id ?? null, status: 'synced',
           saleNo: sale.sale_no, capturedAt: new Date(op.captured_at), clientSeq: op.client_seq ?? null,
           payloadHash: hashOp(op), createdBy: user.username,
-        });
+        }).onConflictDoUpdate({ target: [posOfflineSync.tenantId, posOfflineSync.clientUuid], set: { status: 'synced', saleNo: sale.sale_no, errorCode: null, errorMessage: null, syncedAt: new Date() } });
         return { client_uuid: op.client_uuid, status: 'synced' as const, sale_no: sale.sale_no, error: null };
       });
     } catch (e: any) {
       const code = e?.response?.code ?? e?.code ?? 'SYNC_FAILED';
-      // audit the failure in a FRESH savepoint so it commits even though the sale's savepoint rolled back
+      // audit the failure in a FRESH savepoint so it commits even though the sale's savepoint rolled back.
+      // Upsert (not DoNothing) so repeated transient failures bump attempts + keep the row replayable.
       await db.transaction(async () => {
         await db.insert(posOfflineSync).values({
           tenantId: t.id, clientUuid: op.client_uuid, deviceId: op.device_id ?? null, status: 'failed', saleNo: null,
           capturedAt: new Date(op.captured_at), clientSeq: op.client_seq ?? null, payloadHash: hashOp(op),
           errorCode: code, errorMessage: String(e?.response?.message ?? e?.message ?? e), createdBy: user.username,
-        }).onConflictDoNothing({ target: [posOfflineSync.tenantId, posOfflineSync.clientUuid] });
+        }).onConflictDoUpdate({ target: [posOfflineSync.tenantId, posOfflineSync.clientUuid], set: { status: 'failed', errorCode: code, errorMessage: String(e?.response?.message ?? e?.message ?? e), attempts: sql`${posOfflineSync.attempts} + 1`, syncedAt: new Date() } });
       }).catch(() => { /* audit is best-effort */ });
       return { client_uuid: op.client_uuid, status: 'failed', sale_no: null, error: code };
     }
