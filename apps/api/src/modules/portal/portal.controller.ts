@@ -1,0 +1,125 @@
+import { Controller, Get, Post, Patch, Delete, Param, Query, Body } from '@nestjs/common';
+import { z } from 'zod';
+import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import {
+  PortalService, type AddInventoryDto, type UpdateInventoryDto, type VarianceDto,
+} from './portal.service';
+import { PortalPosService, type PortalSaleDto } from './portal.pos.service';
+import {
+  PortalMyErpService, type MyCustomerDto, type MySupplierDto, type MyPoDto,
+} from './portal.myerp.service';
+
+// ── Zod schemas ──────────────────────────────────────────────────
+const SaleBody = z.object({
+  items: z.array(z.object({
+    item_id: z.string().min(1), item_description: z.string().optional(),
+    qty: z.number().positive(), unit_price: z.number().nonnegative(),
+    uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
+  })).min(1),
+  discount: z.number().nonnegative().optional(),
+  payment_method: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+const AddInventoryBody = z.object({
+  item_id: z.string().min(1), item_description: z.string().optional(), uom: z.string().optional(),
+  current_stock: z.number().optional(), reorder_point: z.number().optional(), reorder_qty: z.number().optional(), notes: z.string().optional(),
+});
+const UpdateInventoryBody = z.object({
+  current_stock: z.number().optional(), reorder_point: z.number().optional(), reorder_qty: z.number().optional(), notes: z.string().optional(),
+});
+
+const VarianceBody = z.object({
+  items: z.array(z.object({
+    item_id: z.string().min(1), item_description: z.string().optional(), bom_code: z.string().optional(),
+    uom: z.string().optional(), theoretical_use: z.number().optional(), actual_use: z.number(), reason: z.string().optional(),
+  })).min(1),
+  shift: z.string().optional(),
+});
+
+const MyCustomerBody = z.object({ customer_name: z.string().min(1), phone: z.string().optional(), address: z.string().optional(), notes: z.string().optional() });
+const MySupplierBody = z.object({ supplier_name: z.string().min(1), contact_name: z.string().optional(), phone: z.string().optional(), address: z.string().optional() });
+const MyPoBody = z.object({
+  supplier_name: z.string().optional(), remarks: z.string().optional(),
+  items: z.array(z.object({ item_description: z.string().min(1), qty: z.number().positive(), uom: z.string().optional(), unit_price: z.number().nonnegative() })).min(1),
+});
+
+@Controller('api/portal')
+export class PortalController {
+  constructor(
+    private readonly svc: PortalService,
+    private readonly pos: PortalPosService,
+    private readonly myerp: PortalMyErpService,
+  ) {}
+
+  // ── Dashboard ──
+  @Get('dashboard') @Permissions('cust_dash')
+  dashboard(@CurrentUser() u: JwtUser) { return this.svc.dashboard(u); }
+
+  // ── POS ──
+  @Post('pos/sales') @Permissions('cust_pos')
+  createSale(@Body(new ZodValidationPipe(SaleBody)) b: PortalSaleDto, @CurrentUser() u: JwtUser) { return this.pos.createSale(b, u); }
+
+  @Get('pos/sales') @Permissions('cust_pos')
+  listSales(@CurrentUser() u: JwtUser, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.pos.listSales(u, limit ? +limit : 50, offset ? +offset : 0);
+  }
+
+  // ── Inventory ──
+  @Get('inventory') @Permissions('cust_inventory')
+  listInventory(@CurrentUser() u: JwtUser) { return this.svc.listInventory(u); }
+
+  @Post('inventory') @Permissions('cust_inventory')
+  addInventory(@Body(new ZodValidationPipe(AddInventoryBody)) b: AddInventoryDto, @CurrentUser() u: JwtUser) { return this.svc.addInventory(b, u); }
+
+  @Patch('inventory/:id') @Permissions('cust_inventory')
+  updateInventory(@Param('id') id: string, @Body(new ZodValidationPipe(UpdateInventoryBody)) b: UpdateInventoryDto, @CurrentUser() u: JwtUser) {
+    return this.svc.updateInventory(parseInt(id, 10), b, u);
+  }
+
+  // ── Pending Orders ──
+  @Get('pending-orders') @Permissions('cust_inventory')
+  pendingOrders(@CurrentUser() u: JwtUser) { return this.svc.listPendingOrders(u); }
+
+  @Patch('pending-orders/:no/submit') @Permissions('cust_inventory')
+  submitPending(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.svc.submitPendingOrder(no, u); }
+
+  // ── Variance (EOD) ──
+  @Post('variance') @Permissions('cust_variance')
+  variance(@Body(new ZodValidationPipe(VarianceBody)) b: VarianceDto, @CurrentUser() u: JwtUser) { return this.svc.createVariance(b, u); }
+
+  // ── Track ──
+  @Get('track') @Permissions('track')
+  track(@CurrentUser() u: JwtUser) { return this.svc.track(u); }
+
+  // ── Mini-ERP: My Customers ──
+  @Get('my/customers') @Permissions('cust_my_crm')
+  listCustomers(@CurrentUser() u: JwtUser) { return this.myerp.listCustomers(u); }
+
+  @Post('my/customers') @Permissions('cust_my_crm')
+  addCustomer(@Body(new ZodValidationPipe(MyCustomerBody)) b: MyCustomerDto, @CurrentUser() u: JwtUser) { return this.myerp.addCustomer(b, u); }
+
+  @Delete('my/customers/:id') @Permissions('cust_my_crm')
+  deleteCustomer(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.myerp.deleteCustomer(parseInt(id, 10), u); }
+
+  // ── Mini-ERP: My Suppliers ──
+  @Get('my/suppliers') @Permissions('cust_my_suppliers')
+  listSuppliers(@CurrentUser() u: JwtUser) { return this.myerp.listSuppliers(u); }
+
+  @Post('my/suppliers') @Permissions('cust_my_suppliers')
+  addSupplier(@Body(new ZodValidationPipe(MySupplierBody)) b: MySupplierDto, @CurrentUser() u: JwtUser) { return this.myerp.addSupplier(b, u); }
+
+  @Delete('my/suppliers/:id') @Permissions('cust_my_suppliers')
+  deleteSupplier(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.myerp.deleteSupplier(parseInt(id, 10), u); }
+
+  // ── Mini-ERP: My Purchase Orders ──
+  @Get('my/purchase-orders') @Permissions('cust_my_pos')
+  listPurchaseOrders(@CurrentUser() u: JwtUser) { return this.myerp.listPurchaseOrders(u); }
+
+  @Post('my/purchase-orders') @Permissions('cust_my_pos')
+  createPurchaseOrder(@Body(new ZodValidationPipe(MyPoBody)) b: MyPoDto, @CurrentUser() u: JwtUser) { return this.myerp.createPurchaseOrder(b, u); }
+
+  @Delete('my/purchase-orders/:no') @Permissions('cust_my_pos')
+  deletePurchaseOrder(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.myerp.deletePurchaseOrder(no, u); }
+}

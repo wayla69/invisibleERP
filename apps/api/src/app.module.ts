@@ -16,6 +16,10 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AiModule } from './modules/ai/ai.module';
+import { PortalModule } from './modules/portal/portal.module';
+import { MarketingModule } from './modules/marketing/marketing.module';
+import { LoyaltyModule } from './modules/loyalty/loyalty.module';
+import { BomModule } from './modules/bom/bom.module';
 
 @Module({
   imports: [
@@ -34,6 +38,10 @@ import { AiModule } from './modules/ai/ai.module';
     NotificationsModule,
     AnalyticsModule,
     AiModule,
+    PortalModule,
+    MarketingModule,
+    LoyaltyModule,
+    BomModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions

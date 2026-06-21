@@ -1,4 +1,5 @@
-import { Controller, Post, Body, Module } from '@nestjs/common';
+import { Controller, Post, Body, Module, Sse, Query, type MessageEvent } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -18,6 +19,44 @@ export class AiController {
   @Post('chat') @Permissions('ai_chat', 'dashboard')
   chat(@Body(new ZodValidationPipe(ChatBody)) b: { message: string; history?: any[] }, @CurrentUser() u: JwtUser) {
     return this.agent.chat(b.message, b.history ?? [], u);
+  }
+
+  // GET /api/chat/stream — SSE: stream text deltas ของคำตอบสุดท้ายแบบ realtime
+  // auth ผ่าน JwtAuthGuard เดิม (frontend ใช้ fetch() + Authorization header ได้)
+  // history เป็น JSON string ผ่าน query (?history=...) เพราะ EventSource/GET ไม่มี body
+  @Sse('chat/stream') @Permissions('ai_chat', 'dashboard')
+  stream(
+    @Query('message') message: string,
+    @Query('history') historyRaw: string | undefined,
+    @CurrentUser() u: JwtUser,
+  ): Observable<MessageEvent> {
+    const msg = (message ?? '').trim();
+    let history: any[] = [];
+    if (historyRaw) {
+      try { const p = JSON.parse(historyRaw); if (Array.isArray(p)) history = p; } catch { /* ignore bad history */ }
+    }
+
+    return new Observable<MessageEvent>((subscriber) => {
+      let cancelled = false;
+      (async () => {
+        try {
+          if (!msg) {
+            subscriber.next({ data: { done: true, reply: '', error: 'EMPTY_MESSAGE' } });
+            subscriber.complete();
+            return;
+          }
+          for await (const chunk of this.agent.stream(msg, history, u)) {
+            if (cancelled) return;
+            subscriber.next({ data: chunk });
+          }
+          subscriber.complete();
+        } catch (e: any) {
+          subscriber.next({ data: { done: true, reply: '', error: String(e?.message ?? e) } });
+          subscriber.complete();
+        }
+      })();
+      return () => { cancelled = true; };
+    });
   }
 }
 

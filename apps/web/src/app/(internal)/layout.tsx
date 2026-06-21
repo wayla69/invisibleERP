@@ -14,6 +14,7 @@ const NAV = [
   { label: '🧾 Purchase Orders', href: '/inventory/purchase-orders', perms: ['procurement'] },
   { label: '🛒 Procurement', href: '/procurement', perms: ['procurement'] },
   { label: '💵 Finance', href: '/finance', perms: ['ar', 'creditors', 'exec'] },
+  { label: '🤖 AI Assistant', href: '/assistant', perms: ['ai_chat', 'dashboard'] },
 ];
 
 export default function InternalLayout({ children }: { children: React.ReactNode }) {

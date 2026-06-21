@@ -105,8 +105,19 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/etl start   # full 1.48M 
 
 รัน: `pnpm --filter @ierp/cutover e2e`
 
-## สรุป Phase 0–6 ครบทั้งหมด ✅
-backend (auth/read/write/analytics/AI) + frontend core + ETL + cutover tooling — ทุก test ผ่านบน Postgres จริง (PGlite). ส่วนขยายต่อไป (นอก core-first): customer-portal, marketing/loyalty/BOM, reports จริง (ExcelJS/Playwright PDF), SSE streaming chat
+## สถานะ Phase 7 (extensions นอก core) — เสร็จ ✅
+
+- ✅ **Customer Portal** (`modules/portal`, tenant-scoped): dashboard + auto-reorder, cust-POS (SALE-, VAT 7%, ตัดสต๊อก, loyalty), inventory + pending orders, variance EOD, track, mini-ERP (my customers/suppliers/POs)
+- ✅ **Marketing/Loyalty** (`modules/marketing`, `modules/loyalty`): campaigns, RFM segments, A/B, abandoned-cart, promotions, price-list, surveys; loyalty config/me/redeem
+- ✅ **BOM** (`modules/bom`): master library + costing, push to customers, submissions approval, portal BOM (dual-write), production runs
+- ✅ **Reports** (`modules/reports`): **ExcelJS** (daily-sales/monthly-pl/stock-summary `.xlsx`), **Playwright** Thai PDF (sales-confirmation/tax-invoice/receipt/statement, Sarabun, graceful fallback), **Express TXT** (VAT + baht-in-words)
+- ✅ **SSE streaming chat**: `@Sse /api/chat/stream` (Anthropic streaming deltas ผ่าน tool-loop) + frontend `/assistant` page
+- ✅ **Extension test** `tools/cutover ext` → **26/26** (18 GET smoke + ExcelJS PK-magic + portal POS sale VAT/decrement/loyalty + mini-ERP write)
+
+สร้างด้วย multi-agent workflow (5 agents ขนาน) แล้ว integrate. รัน: `pnpm --filter @ierp/cutover ext`
+
+## สรุป Phase 0–7 ครบทั้งหมด ✅
+backend ครบทุกโดเมน (core + portal + marketing/loyalty/bom + reports + AI) + frontend core (13 routes + assistant) + ETL + cutover tooling — **5 test harness ผ่านหมด** (read 10/10, write 24/24, analytics 14/14, e2e 16/16, ext 26/26) บน Postgres จริง (PGlite). เหลือ frontend UI สำหรับ portal/marketing/bom pages (API พร้อมแล้ว)
 
 ## Deploy (Railway)
 

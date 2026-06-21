@@ -75,6 +75,86 @@ export class AgentService {
     return { reply, history: out };
   }
 
+  // ── SSE streaming ─────────────────────────────────────────────────────────
+  // async generator: รัน tool-loop เดิม แต่ assistant turn สุดท้ายใช้ Anthropic
+  // streaming แล้ว yield text deltas ทีละชิ้น → controller map เป็น SSE MessageEvent
+  // event shape: { delta: string }  (ระหว่างพิมพ์)  |  { done: true, reply: string }
+  async *stream(
+    message: string,
+    history: any[] = [],
+    _user: JwtUser,
+  ): AsyncGenerator<{ delta?: string; done?: boolean; reply?: string; error?: string }> {
+    if (!this.apiKey) {
+      // ไม่มี API key → ไม่ 503 ทั้ง stream แต่ส่งข้อความไทยแจ้งเตือนแล้วจบ
+      const note = 'ระบบ AI ยังไม่พร้อมใช้งาน (ยังไม่ได้ตั้งค่า ANTHROPIC_API_KEY) กรุณาติดต่อผู้ดูแลระบบ';
+      yield { delta: note };
+      yield { done: true, reply: note };
+      return;
+    }
+
+    const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey: this.apiKey });
+    const messages: any[] = [...history.slice(-MAX_HISTORY), { role: 'user', content: message }];
+
+    let reply = THAI_FALLBACK;
+    try {
+      for (let turn = 0; turn < MAX_LOOP_TURNS; turn++) {
+        const isLast = turn === MAX_LOOP_TURNS - 1;
+        const streamed = client.messages.stream({
+          model: this.model,
+          max_tokens: 4096,
+          system: SYSTEM_TH,
+          tools: TOOLS,
+          messages,
+        });
+
+        // forward text deltas ทันทีระหว่างที่โมเดลกำลังพิมพ์ (async-iterator = ตามจังหวะจริง)
+        for await (const ev of streamed as AsyncIterable<any>) {
+          if (ev?.type === 'content_block_delta' && ev?.delta?.type === 'text_delta' && ev.delta.text) {
+            yield { delta: ev.delta.text };
+          }
+        }
+
+        const final = await streamed.finalMessage();
+        messages.push({ role: 'assistant', content: final.content });
+
+        const textOut = (final.content as any[])
+          .filter((b) => b.type === 'text')
+          .map((b) => b.text)
+          .join('\n');
+
+        if (final.stop_reason === 'end_turn' || isLast) {
+          reply = textOut || reply;
+          break;
+        }
+
+        // มี tool_use → รัน tool แล้วป้อนผลกลับเข้า loop
+        const toolResults: any[] = [];
+        for (const block of final.content as any[]) {
+          if (block.type === 'tool_use') {
+            const out = await this.exec(block.name, block.input);
+            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(out) });
+          }
+        }
+        if (toolResults.length) messages.push({ role: 'user', content: toolResults });
+        else { reply = textOut || reply; break; }
+      }
+    } catch (e: any) {
+      if (e?.constructor?.name === 'AuthenticationError') {
+        const msg = '⚠️ AI authentication ล้มเหลว — ANTHROPIC_API_KEY ไม่ถูกต้อง';
+        yield { delta: msg };
+        yield { done: true, reply: msg, error: 'AUTH' };
+        return;
+      }
+      const msg = `⚠️ ${e?.message ?? 'Unexpected error'}`;
+      yield { delta: msg };
+      yield { done: true, reply: msg, error: 'STREAM_ERROR' };
+      return;
+    }
+
+    yield { done: true, reply };
+  }
+
   private async exec(name: string, input: any): Promise<any> {
     try {
       switch (name) {
