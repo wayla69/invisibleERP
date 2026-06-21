@@ -55,3 +55,5 @@ jobs:
         run: pnpm --filter @ierp/cutover ext
       - name: world-class foundations (RLS, GL, payments, tax, billing, platform)
         run: pnpm --filter @ierp/cutover worldclass
+      - name: Thai tax documents (full/abbreviated invoice, WHT 50tawi)
+        run: pnpm --filter @ierp/cutover taxdocs

@@ -68,6 +68,17 @@ export class TaxService {
     };
   }
 
+  // VAT-inclusive back-out: a gross amount (price incl. VAT) → { net, tax, gross }.
+  // Used by abbreviated tax invoices (ม.86/6) and AR amounts stored VAT-inclusive. tax = gross×rate/(1+rate).
+  calcInclusive(input: { gross: number; country?: string; currency?: string }): { country: string; rate: number; net: number; tax: number; gross: number; currency: string } {
+    const country = (input?.country || 'TH').toUpperCase();
+    const currency = getCurrency(input?.currency).code;
+    const gross = Number(input?.gross) || 0;
+    const { rate } = this.resolveProvider(country).calc({ net: 0, currency });
+    const tax = roundCurrency((gross * rate) / (1 + rate), currency);
+    return { country, rate, net: roundCurrency(gross - tax, currency), tax, gross: roundCurrency(gross, currency), currency };
+  }
+
   // Currency catalogue passthrough (for the /currencies endpoint).
   currencies() {
     return CURRENCIES;

@@ -41,6 +41,19 @@ export const docCounters = pgTable(
   (t) => ({ pk: primaryKey({ columns: [t.docType, t.day] }) }),
 );
 
+// atomic per-(doc_type, tenant, YYYYMM) counter — for tax-doc numbers that must be
+// SEQUENTIAL PER SELLER (legal requirement, ม.86/4(4)). tenant_id → covered by RLS loop.
+export const docCountersTenant = pgTable(
+  'doc_counters_tenant',
+  {
+    docType: text('doc_type').notNull(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).notNull(),
+    period: text('period').notNull(), // 'YYYYMM'
+    n: integer('n').notNull().default(0),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.docType, t.tenantId, t.period] }) }),
+);
+
 // Append-only audit log (move #4) — tamper-evident trail of mutations (who/what/when/tenant/trace)
 export const auditLog = pgTable(
   'audit_log',

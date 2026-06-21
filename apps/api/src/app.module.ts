@@ -27,6 +27,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { TaxDocsModule } from './modules/tax-docs/tax-docs.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { PlatformModule } from './modules/platform/platform.module';
     TaxModule,
     BillingModule,
     PlatformModule,
+    TaxDocsModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions
