@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/common';
 import { sql, eq, ne, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
@@ -14,6 +14,7 @@ import { roundCurrency } from '../tax/money';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { RecipeService } from '../menu/recipe.service';
+import { CostingService } from '../costing/costing.service';
 
 export interface PortalSaleDto {
   items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number }[];
@@ -32,6 +33,7 @@ export class PortalPosService {
     private readonly payments: PaymentService,
     private readonly ledger: LedgerService,
     private readonly recipe: RecipeService,
+    @Optional() private readonly costing?: CostingService, // Phase 17A — costed COGS for configured retail items
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
@@ -65,6 +67,7 @@ export class PortalPosService {
     const today = opts?.saleDate ?? ymd();
     const now = new Date();
     let recipeCogs = 0;
+    const nonRecipeLines: { itemId: string; qty: number }[] = []; // Phase 17A — costed COGS for these
 
     // loyalty earn (parity with central POS)
     let pointsEarned = 0;
@@ -99,6 +102,7 @@ export class PortalPosService {
         // recipe/BOM: deduct ingredients for a recipe-backed menu line (ingredient item_ids differ from the dish SKU)
         const ded = await this.recipe.applyDeduction(tx, t.id, String(l.item_id), n(l.qty), saleNo, user);
         recipeCogs = roundCurrency(recipeCogs + ded.cost, 'THB');
+        if (!ded.deducted) nonRecipeLines.push({ itemId: String(l.item_id), qty: n(l.qty) }); // non-recipe → costed COGS
       }
 
       // loyalty accrual
@@ -125,6 +129,8 @@ export class PortalPosService {
     if (recipeCogs > 0 && !(await this.ledger.alreadyPosted('POS-COGS', saleNo))) {
       await this.ledger.postEntry({ date: today, source: 'POS-COGS', sourceRef: saleNo, tenantId: t.id, memo: `COGS ${saleNo}`, createdBy: user.username, lines: [{ account_code: '5300', debit: recipeCogs }, { account_code: '1200', credit: recipeCogs }] });
     }
+    // Phase 17A — costed COGS (Dr 5000 / Cr 1200) for non-recipe lines whose item has a costing method
+    if (this.costing && nonRecipeLines.length) await this.costing.onIssue({ tenantId: t.id, saleNo, date: today, lines: nonRecipeLines, createdBy: user.username });
     if (total > 0) {
       // Link this tender to the shop's open till (if any) so closeTill sees POS cash (move #5 reconciliation).
       const openTill = await this.payments.currentOpenTill(t.id);

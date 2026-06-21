@@ -225,6 +225,13 @@
       "when": 1782007973308,
       "tag": "0031_three_way_match",
       "breakpoints": false
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1782007973309,
+      "tag": "0032_inventory_costing",
+      "breakpoints": false
     }
   ]
 }

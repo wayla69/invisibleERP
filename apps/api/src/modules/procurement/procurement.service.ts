@@ -5,6 +5,7 @@ import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grIt
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
+import { CostingService } from '../costing/costing.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -22,6 +23,7 @@ export class ProcurementService {
     private readonly statusLog: StatusLogService,
     // @Optional + last so harnesses that construct this service directly (writeflow) without the engine still work
     @Optional() private readonly workflow?: WorkflowService,
+    @Optional() private readonly costing?: CostingService, // Phase 17A — inventory costing (opt-in per item)
   ) {}
 
   // ── PR ──────────────────────────────────────────────────────────────
@@ -169,6 +171,7 @@ export class ProcurementService {
     const grNo = await this.docNo.nextDaily('GR');
     const today = ymd();
     const now = new Date();
+    const costingLines: any[] = []; // Phase 17A — capitalize configured items (Dr 1200 / Cr 2000)
 
     await db.transaction(async (tx: any) => {
       const [gh] = await tx.insert(goodsReceipts).values({
@@ -184,6 +187,12 @@ export class ProcurementService {
           lotNo: it.lot_no ?? null, expiryDate: it.expiry_date ?? null, unitCost: it.unit_cost != null ? String(it.unit_cost) : (poi?.unitPrice ?? null),
         });
         if (poi) await tx.update(poItems).set({ receivedQty: sql`${poItems.receivedQty} + ${recv}` }).where(eq(poItems.id, poi.id));
+        // Phase 17A — build cost basis (FIFO layer / AVG running cost) for configured items
+        if (this.costing && user.tenantId != null) {
+          const actualCost = Number(it.unit_cost ?? poi?.unitPrice ?? 0);
+          const c = await this.costing.onReceipt(tx, { tenantId: user.tenantId, itemId: it.item_id, qty: recv, unitCost: actualCost, grNo, date: today });
+          if (c.active) costingLines.push({ itemId: it.item_id, qty: recv, actualCost, method: c.method, standardCost: c.standardCost ?? 0 });
+        }
         // stock movement (audit log; ไม่ปรับ snapshot — คง model V1)
         await tx.insert(stockMovements).values({
           moveDate: now, docNo: grNo, moveType: 'GR', itemId: it.item_id, itemDescription: poi?.itemDescription ?? null,
@@ -208,6 +217,9 @@ export class ProcurementService {
     await this.statusLog.log('GR', grNo, '', 'Open', user.username);
     await this.statusLog.log('PO', dto.po_no, po.status ?? '', newStatus, user.username, `GR ${grNo}`);
 
-    return { gr_no: grNo, po_no: dto.po_no, po_status: newStatus, lines: lines.length };
+    // Phase 17A — capitalize inventory for configured items (after the GR tx; idempotent on GRV/grNo)
+    if (this.costing && costingLines.length) await this.costing.postReceiptGl({ tenantId: user.tenantId as number, grNo, date: today, lines: costingLines, createdBy: user.username });
+
+    return { gr_no: grNo, po_no: dto.po_no, po_status: newStatus, lines: lines.length, costed: costingLines.length > 0 };
   }
 }
