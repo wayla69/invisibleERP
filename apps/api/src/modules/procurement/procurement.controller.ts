@@ -6,6 +6,7 @@ import { ProcurementService, type CreatePrDto, type CreatePoDto, type CreateGrDt
 
 const PrBody = z.object({
   remarks: z.string().optional(), priority: z.string().optional(),
+  amount: z.number().nonnegative().optional(), // estimated value → drives approval-threshold routing
   items: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), request_qty: z.number().positive(), uom: z.string().optional(), required_date: z.string().optional(), reason: z.string().optional() })).min(1),
 });
 const PoBody = z.object({

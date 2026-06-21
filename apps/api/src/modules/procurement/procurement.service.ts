@@ -1,15 +1,16 @@
-import { Inject, Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { sql, eq, and } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
+import { WorkflowService } from '../workflow/workflow.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const n = (v: unknown) => Number(v ?? 0);
 
-export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string }[]; remarks?: string; priority?: string }
+export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string }[]; remarks?: string; priority?: string; amount?: number }
 export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string }[] }
 export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
 
@@ -19,6 +20,8 @@ export class ProcurementService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly statusLog: StatusLogService,
+    // @Optional + last so harnesses that construct this service directly (writeflow) without the engine still work
+    @Optional() private readonly workflow?: WorkflowService,
   ) {}
 
   // ── PR ──────────────────────────────────────────────────────────────
@@ -37,14 +40,27 @@ export class ProcurementService {
       })));
     });
     await this.statusLog.log('PR', prNo, '', 'Pending', user.username);
+    // route into the approval engine (no active PR definition → autoApproved, legacy passthrough)
+    await this.workflow?.start({ docType: 'PR', docNo: prNo, amount: n(dto.amount), createdBy: user.username, tenantId: user.tenantId ?? null });
     return { pr_no: prNo, status: 'Pending', lines: dto.items.length };
   }
 
   async approvePr(prNo: string, approve: boolean, user: JwtUser) {
-    if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
     const db = this.db as any;
     const [pr] = await db.select().from(purchaseRequests).where(eq(purchaseRequests.prNo, prNo)).limit(1);
     if (!pr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PR not found', messageTh: 'ไม่พบ PR' });
+    // if a workflow is configured (a live instance exists), route the decision through the engine —
+    // maker-checker + multi-level + SoD all enforced there. Otherwise fall back to the legacy Admin-only flip.
+    const inst = this.workflow ? await this.workflow.pendingInstanceFor('PR', prNo) : null;
+    if (inst) {
+      await this.workflow!.act(Number(inst.id), { decision: approve ? 'approve' : 'reject' }, user);
+      const cleared = await this.workflow!.canTransition('PR', prNo);
+      const newStatus = approve ? (cleared ? 'Approved' : 'Pending') : 'Rejected'; // 'Pending' = more steps remain
+      await db.update(purchaseRequests).set({ status: newStatus, approvedBy: user.username, approvedAt: new Date() }).where(eq(purchaseRequests.id, pr.id));
+      if (newStatus !== pr.status) await this.statusLog.log('PR', prNo, pr.status ?? '', newStatus, user.username);
+      return { pr_no: prNo, status: newStatus };
+    }
+    if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
     const newStatus = approve ? 'Approved' : 'Rejected';
     await db.update(purchaseRequests).set({ status: newStatus, approvedBy: user.username, approvedAt: new Date() }).where(eq(purchaseRequests.id, pr.id));
     await this.statusLog.log('PR', prNo, pr.status ?? '', newStatus, user.username);

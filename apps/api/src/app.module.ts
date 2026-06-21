@@ -39,6 +39,7 @@ import { RevenueModule } from './modules/revenue/revenue.module';
 import { FxModule } from './modules/fx/fx.module';
 import { IntercompanyModule } from './modules/intercompany/intercompany.module';
 import { GiftCardsModule } from './modules/giftcards/gift-card.module';
+import { WorkflowModule } from './modules/workflow/workflow.module';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { GiftCardsModule } from './modules/giftcards/gift-card.module';
     FxModule,
     IntercompanyModule,
     GiftCardsModule,
+    WorkflowModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions

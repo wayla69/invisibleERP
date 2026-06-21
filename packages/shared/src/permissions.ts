@@ -8,6 +8,7 @@ export const PERMISSIONS = [
   'images', 'masterdata', 'bom_master', 'planner', 'exec', 'order_cust', 'cust_dash',
   'cust_inventory', 'cust_pos', 'cust_bom', 'cust_variance', 'loyalty', 'survey',
   'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'marketing', 'track', 'ai_chat',
+  'approvals', // Phase 15 — approval-workflow actions (my-approvals / act / delegations)
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -20,18 +21,18 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
   'Finance & AR/AP': ['ar', 'creditors'],
   'Procurement': ['procurement'],
-  'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat'],
+  'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
 };
 
 // Canonical role → default permission seed (init_db DEFAULT_PERMS, verbatim).
 // Admin is resolved to ALL permissions in code (not data-driven) — see resolvePermissions().
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Admin: [...PERMISSIONS],
-  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner'],
+  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals'],
   Customer: ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track', 'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users'],
   Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata'],
-  Procurement: ['procurement', 'creditors', 'ar', 'delivery', 'masterdata'],
-  Planner: ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata'],
+  Procurement: ['procurement', 'creditors', 'ar', 'delivery', 'masterdata', 'approvals'],
+  Planner: ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'],
 };
 
 /**
@@ -59,4 +60,5 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   order_cust: '/order', cust_pos: '/pos', cust_dash: '/dashboard', cust_inventory: '/inventory',
   cust_bom: '/bom', cust_variance: '/variance', loyalty: '/loyalty', survey: '/survey', track: '/track',
   cust_my_crm: '/my/customers', cust_my_suppliers: '/my/suppliers', cust_my_pos: '/my/purchase-orders', cust_my_users: '/my/users',
+  approvals: '/approvals',
 };
