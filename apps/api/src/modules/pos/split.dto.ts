@@ -8,6 +8,7 @@ const TenderInput = z.object({
 });
 export const MultiTenderBody = z.object({
   discount: z.number().nonnegative().optional(),
+  tip: z.number().nonnegative().optional(),    // order-level staff tip (attributed to the first tender)
   tenders: z.array(TenderInput).min(1),
 });
 export type MultiTenderDto = z.infer<typeof MultiTenderBody>;

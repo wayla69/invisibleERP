@@ -16,6 +16,7 @@ const TenderBody = z.object({
   tenant_id: z.number().optional(),
   method: z.string().min(1),
   amount: z.number().positive(),
+  tip: z.number().nonnegative().optional(),
   currency: z.string().optional(),
   gateway: z.string().optional(),
   till_session_id: z.number().optional(),

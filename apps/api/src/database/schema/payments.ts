@@ -13,6 +13,7 @@ export const payments = pgTable('payments', {
   tillSessionId: bigint('till_session_id', { mode: 'number' }),
   method: text('method').notNull(), // Cash | Card | QR | PromptPay | Transfer | Wallet
   amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
+  tip: numeric('tip', { precision: 18, scale: 4 }).default('0'), // tip portion of this tender — NOT in amount, excluded from cash recon
   currency: text('currency').default('THB'),
   gateway: text('gateway').default('mock'), // mock | stripe | promptpay | adyen
   gatewayRef: text('gateway_ref'),

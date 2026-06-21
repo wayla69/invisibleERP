@@ -14,6 +14,7 @@ export interface RecordTenderDto {
   tenant_id?: number;
   method: string;
   amount: number;
+  tip?: number;          // tip portion — persisted separately, NOT folded into amount (cash recon)
   currency?: string;
   gateway?: string;
   till_session_id?: number;
@@ -43,7 +44,7 @@ export class PaymentService {
     const now = new Date();
     await db.insert(payments).values({
       paymentNo, saleNo: dto.sale_no, tenantId: dto.tenant_id ?? null, tillSessionId: dto.till_session_id ?? null,
-      method: dto.method, amount: fx(dto.amount, 4), currency, gateway: gatewayName, gatewayRef: result.ref,
+      method: dto.method, amount: fx(dto.amount, 4), tip: fx(dto.tip ?? 0, 4), currency, gateway: gatewayName, gatewayRef: result.ref,
       status: result.status, createdBy: user.username, capturedAt: result.status === 'Captured' ? now : null,
     });
     return { payment_no: paymentNo, status: result.status, amount: n(dto.amount), gateway_ref: result.ref };

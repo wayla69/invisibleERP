@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { RecipeService } from '../menu/recipe.service';
+import { GiftCardService } from '../giftcards/gift-card.service';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { CreateReturnDto } from './dto';
@@ -20,12 +21,14 @@ export class ReturnsService {
     private readonly payments: PaymentService,
     private readonly ledger: LedgerService,
     private readonly recipe: RecipeService,
+    private readonly gift: GiftCardService,
   ) {}
 
   // item-level return: refund (reuse PaymentService.refund) + restock + GL reversal, atomic.
   async createReturn(dto: CreateReturnDto, user: JwtUser) {
     const db = this.db as any;
-    if (dto.refund_method === 'None') throw new BadRequestException({ code: 'STORE_CREDIT_UNSUPPORTED', message: 'Store credit not supported yet', messageTh: 'ยังไม่รองรับเครดิตร้านค้า (Tier 2)' });
+    if (dto.refund_method === 'None') throw new BadRequestException({ code: 'REFUND_METHOD_REQUIRED', message: 'Choose a refund method (Cash/Card/StoreCredit…)', messageTh: 'กรุณาเลือกวิธีคืนเงิน' });
+    const isStoreCredit = dto.refund_method === 'StoreCredit';
     const [sale] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, dto.sale_no)).limit(1);
     if (!sale) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sale not found', messageTh: 'ไม่พบรายการขาย' });
     // LOCK the captured payment FIRST → concurrent returns on this sale serialize, so the over-return
@@ -64,8 +67,14 @@ export class ReturnsService {
     const totalReturned = round2(subtotalReturned + vatReturned);
 
     const returnNo = await this.docNo.nextDaily('RTN');
+    // refund path: cash/card returns money via PaymentService.refund (Cr 1000); store credit issues a gift
+    // card (Cr 2200) and pays out NO cash — refundNo stays null, the card_no carries the credit.
     let refundNo: string | null = null;
-    if (totalReturned > 0) { const rf: any = await this.payments.refund({ payment_no: pay.paymentNo, amount: totalReturned, reason: dto.reason }, user); refundNo = rf.refund_no; }
+    let storeCreditCardNo: string | null = null;
+    if (totalReturned > 0) {
+      if (isStoreCredit) { const gc = await this.gift.creditFromReturn(totalReturned, sale.tenantId, returnNo, user, dto.gift_card_no, db); storeCreditCardNo = gc.card_no; }
+      else { const rf: any = await this.payments.refund({ payment_no: pay.paymentNo, amount: totalReturned, reason: dto.reason }, user); refundNo = rf.refund_no; }
+    }
 
     // restock (only for items tracked in customer_inventory) + stock log
     let restockedAny = false;
@@ -86,10 +95,12 @@ export class ReturnsService {
     }).returning({ id: posReturns.id });
     await db.insert(posReturnItems).values(retLines.map((rl) => ({ returnId: Number(h.id), tenantId: sale.tenantId, saleItemId: Number(rl.line.id), itemId: rl.line.itemId, itemDescription: rl.line.itemDescription, returnQty: String(rl.qty), uom: rl.line.uom, unitPrice: fx(n(rl.line.unitPrice), 2), amount: fx(rl.lineNet, 2), restocked: rl.restocked })));
 
-    // GL reversal: Dr 4000 net + Dr 2100 vat / Cr 1000 total (zero legs auto-dropped). Idempotent per returnNo.
+    // GL reversal: Dr 4000 net + Dr 2100 vat / Cr (1000 cash | 2200 store credit) total (zero legs
+    // auto-dropped). Store credit credits the deposit liability instead of paying cash out. Idempotent.
     let journalNo: string | null = null;
     if (totalReturned > 0 && !(await this.ledger.alreadyPosted('RTN', returnNo))) {
-      const je: any = await this.ledger.postEntry({ source: 'RTN', sourceRef: returnNo, tenantId: sale.tenantId, memo: `Return ${returnNo} of ${dto.sale_no}`, createdBy: user.username, lines: [{ account_code: '4000', debit: subtotalReturned }, { account_code: '2100', debit: vatReturned }, { account_code: '1000', credit: totalReturned }] });
+      const creditLeg = isStoreCredit ? '2200' : '1000';
+      const je: any = await this.ledger.postEntry({ source: 'RTN', sourceRef: returnNo, tenantId: sale.tenantId, memo: `Return ${returnNo} of ${dto.sale_no}`, createdBy: user.username, lines: [{ account_code: '4000', debit: subtotalReturned }, { account_code: '2100', debit: vatReturned }, { account_code: creditLeg, credit: totalReturned }] });
       journalNo = je?.entry_no ?? null;
       await db.update(posReturns).set({ journalNo }).where(eq(posReturns.id, h.id));
     }
@@ -103,7 +114,7 @@ export class ReturnsService {
 
     // credit-note (ใบลดหนี้) hook: link the original tax invoice for a future CRN issuer (Tier 2)
     const [tiv] = await db.select({ docNo: taxInvoices.docNo }).from(taxInvoices).where(and(eq(taxInvoices.sourceType, 'POS'), eq(taxInvoices.sourceRef, dto.sale_no), eq(taxInvoices.status, 'Issued'))).limit(1);
-    return { return_no: returnNo, sale_no: dto.sale_no, refund_no: refundNo, subtotal_returned: subtotalReturned, vat_returned: vatReturned, total_returned: totalReturned, restocked: restockedAny, journal_no: journalNo, credit_note_no: null, original_tax_invoice_no: tiv?.docNo ?? null };
+    return { return_no: returnNo, sale_no: dto.sale_no, refund_no: refundNo, refund_method: dto.refund_method ?? 'Cash', store_credit_card_no: storeCreditCardNo, subtotal_returned: subtotalReturned, vat_returned: vatReturned, total_returned: totalReturned, restocked: restockedAny, journal_no: journalNo, credit_note_no: null, original_tax_invoice_no: tiv?.docNo ?? null };
   }
 
   async getReturn(returnNo: string, _user: JwtUser) {

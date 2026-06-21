@@ -1,0 +1,82 @@
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { giftCards, giftCardTxns } from '../../database/schema';
+import { DocNumberService } from '../../common/doc-number.service';
+import { LedgerService } from '../ledger/ledger.service';
+import { n, fx } from '../../database/queries';
+import { roundCurrency } from '../tax/money';
+import type { JwtUser } from '../../common/decorators';
+import type { IssueGiftCardDto } from './dto';
+
+// Gift cards / store credit. A card is a 2200 Customer-Deposits liability. Issue posts GL (Dr 1000 /
+// Cr 2200); redeem-as-tender and store-credit-credit do NOT post GL here — the sale/return that calls
+// them posts the matching 2200 leg, so the card movement and the GL stay in one balanced entry.
+@Injectable()
+export class GiftCardService {
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly docNo: DocNumberService,
+    private readonly ledger: LedgerService,
+  ) {}
+
+  // Issue (sell) a card → Dr 1000 Cash / Cr 2200 Customer Deposits (NOT revenue). Idempotent per cardNo.
+  async issue(dto: IssueGiftCardDto, user: JwtUser): Promise<{ card_no: string; balance: number; journal_no: string | null }> {
+    const db = this.db as any;
+    const face = roundCurrency(dto.amount, 'THB');
+    if (face <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+    const cardNo = await this.docNo.nextDaily('GC');
+    await db.insert(giftCards).values({ cardNo, tenantId: user.tenantId ?? null, initialAmount: fx(face, 2), balance: fx(face, 2), currency: 'THB', status: 'Active', note: dto.note ?? null, createdBy: user.username });
+    let journalNo: string | null = null;
+    if (!(await this.ledger.alreadyPosted('GCISSUE', cardNo))) {
+      const je: any = await this.ledger.postEntry({ source: 'GCISSUE', sourceRef: cardNo, tenantId: user.tenantId ?? undefined, memo: `Gift card ${cardNo}`, createdBy: user.username, lines: [{ account_code: '1000', debit: face }, { account_code: '2200', credit: face }] });
+      journalNo = je?.entry_no ?? null;
+    }
+    await db.insert(giftCardTxns).values({ txnNo: await this.docNo.nextDaily('GCT'), tenantId: user.tenantId ?? null, cardNo, type: 'Issue', amount: fx(face, 2), balanceAfter: fx(face, 2), refDoc: cardNo, journalNo, createdBy: user.username });
+    return { card_no: cardNo, balance: face, journal_no: journalNo };
+  }
+
+  // Live balance + status (RLS-scoped → cross-tenant lookup 404s).
+  async balance(cardNo: string): Promise<{ card_no: string; balance: number; status: string; currency: string }> {
+    const db = this.db as any;
+    const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).limit(1);
+    if (!c) throw new NotFoundException({ code: 'GIFT_CARD_NOT_FOUND', message: 'Gift card not found', messageTh: 'ไม่พบบัตรของขวัญ' });
+    return { card_no: c.cardNo, balance: n(c.balance), status: String(c.status), currency: c.currency ?? 'THB' };
+  }
+
+  // Draw `amount` off a card as a tender against a sale. Locks the row, validates Active + sufficient
+  // balance, decrements, writes a Redeem GCT. NO GL here — the sale's buildSale posts the Dr 2200 leg.
+  async redeemForSale(cardNo: string, amount: number, saleNo: string, tenantId: number | null, user: JwtUser, tx?: any): Promise<{ applied: number; balance_after: number }> {
+    const db = (tx ?? this.db) as any;
+    const want = roundCurrency(amount, 'THB');
+    if (want <= 0) return { applied: 0, balance_after: 0 };
+    const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).for('update').limit(1);
+    if (!c) throw new NotFoundException({ code: 'GIFT_CARD_NOT_FOUND', message: 'Gift card not found', messageTh: 'ไม่พบบัตรของขวัญ' });
+    if (String(c.status) !== 'Active') throw new BadRequestException({ code: 'GIFT_CARD_INACTIVE', message: `Gift card is ${c.status}`, messageTh: 'บัตรของขวัญใช้ไม่ได้' });
+    if (want > n(c.balance) + 1e-9) throw new BadRequestException({ code: 'GIFT_CARD_INSUFFICIENT', message: `Card balance ${n(c.balance)} < ${want}`, messageTh: `ยอดในบัตรไม่พอ (มี ${n(c.balance)})` });
+    const after = roundCurrency(n(c.balance) - want, 'THB');
+    await db.update(giftCards).set({ balance: fx(after, 2), status: after <= 0 ? 'Redeemed' : 'Active', updatedAt: new Date() }).where(eq(giftCards.id, c.id));
+    await db.insert(giftCardTxns).values({ txnNo: await this.docNo.nextDaily('GCT'), tenantId: tenantId ?? c.tenantId ?? null, cardNo, type: 'Redeem', amount: fx(-want, 2), balanceAfter: fx(after, 2), refDoc: saleNo, createdBy: user.username });
+    return { applied: want, balance_after: after };
+  }
+
+  // Add store credit onto a card (used by returns store-credit refund). If cardNo omitted, mint a NEW
+  // card. Writes a Refund GCT. NO GL here — the return posts the Cr 2200 leg.
+  async creditFromReturn(amount: number, tenantId: number | null, refDoc: string, user: JwtUser, cardNo?: string, tx?: any): Promise<{ card_no: string; balance_after: number }> {
+    const db = (tx ?? this.db) as any;
+    const credit = roundCurrency(amount, 'THB');
+    if (credit <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+    if (cardNo) {
+      const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).for('update').limit(1);
+      if (!c) throw new NotFoundException({ code: 'GIFT_CARD_NOT_FOUND', message: 'Gift card not found', messageTh: 'ไม่พบบัตรของขวัญ' });
+      const after = roundCurrency(n(c.balance) + credit, 'THB');
+      await db.update(giftCards).set({ balance: fx(after, 2), status: 'Active', updatedAt: new Date() }).where(eq(giftCards.id, c.id));
+      await db.insert(giftCardTxns).values({ txnNo: await this.docNo.nextDaily('GCT'), tenantId: tenantId ?? c.tenantId ?? null, cardNo, type: 'Refund', amount: fx(credit, 2), balanceAfter: fx(after, 2), refDoc, createdBy: user.username });
+      return { card_no: cardNo, balance_after: after };
+    }
+    const newNo = await this.docNo.nextDaily('GC');
+    await db.insert(giftCards).values({ cardNo: newNo, tenantId: tenantId ?? null, initialAmount: fx(credit, 2), balance: fx(credit, 2), currency: 'THB', status: 'Active', note: `Store credit ${refDoc}`, createdBy: user.username });
+    await db.insert(giftCardTxns).values({ txnNo: await this.docNo.nextDaily('GCT'), tenantId: tenantId ?? null, cardNo: newNo, type: 'Refund', amount: fx(credit, 2), balanceAfter: fx(credit, 2), refDoc, createdBy: user.username });
+    return { card_no: newNo, balance_after: credit };
+  }
+}

@@ -49,6 +49,7 @@ export const custPosSales = pgTable('cust_pos_sales', {
   discount: numeric('discount', { precision: 14, scale: 2 }),
   taxAmount: numeric('tax_amount', { precision: 14, scale: 2 }), // VAT via TaxProvider
   total: numeric('total', { precision: 14, scale: 2 }),
+  tip: numeric('tip', { precision: 14, scale: 2 }).default('0'), // staff tip — liability (2300), excluded from subtotal+VAT
   currency: text('currency').default('THB'),
   fxRate: numeric('fx_rate', { precision: 18, scale: 8 }).default('1'),
   paymentMethod: text('payment_method').default('Cash'),

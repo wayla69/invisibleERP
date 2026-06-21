@@ -28,12 +28,16 @@ export class SplitBillService {
     const o = await this.dineIn.loadOrderForUpdate(orderNo); // lock + re-check → no concurrent double-book
     if (SETTLED.includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
     const saleNo = await this.dineIn.mintSaleNo(o.tenantId);
-    const built = await this.dineIn.buildSale(o, saleNo, dto.discount ?? 0, user); // GL posted ONCE here
+    const built = await this.dineIn.buildSale(o, saleNo, dto.discount ?? 0, user, { tip: dto.tip }); // GL posted ONCE here
+    // tenders must cover bill + tip (no tip → cash_due == total, so existing split behavior is unchanged).
+    const due = roundCurrency(built.total_with_tip, 'THB');
     const sum = roundCurrency(dto.tenders.reduce((a, t) => a + n(t.amount), 0), 'THB');
-    if (Math.abs(sum - built.total) > 0.01) throw new BadRequestException({ code: 'SPLIT_MISMATCH', message: `Tenders ${sum} != bill total ${built.total}`, messageTh: `ยอดชำระรวม (${sum}) ไม่เท่ายอดบิล (${built.total})` });
+    if (Math.abs(sum - due) > 0.01) throw new BadRequestException({ code: 'SPLIT_MISMATCH', message: `Tenders ${sum} != amount due ${due}`, messageTh: `ยอดชำระรวม (${sum}) ไม่เท่ายอดที่ต้องชำระ (${due})` });
     const tenders = [];
+    let tipLeft = roundCurrency(built.tip, 'THB'); // attribute the whole tip to the first tender
     for (const t of dto.tenders) {
-      const r: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: t.method, amount: n(t.amount), gateway: t.gateway }, user);
+      const thisTip = tipLeft; tipLeft = 0;
+      const r: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: t.method, amount: roundCurrency(n(t.amount) - thisTip, 'THB'), tip: thisTip, gateway: t.gateway }, user);
       tenders.push({ payment_no: r.payment_no, method: t.method, amount: n(t.amount), status: r.status });
     }
     const captured = roundCurrency(tenders.filter((t) => t.status === 'Captured').reduce((a, t) => a + t.amount, 0), 'THB');

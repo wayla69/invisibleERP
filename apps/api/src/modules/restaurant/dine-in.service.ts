@@ -13,6 +13,7 @@ import { TaxInvoiceService } from '../tax-docs/tax-invoice.service';
 import { MenuService } from '../menu/menu.service';
 import { RecipeService } from '../menu/recipe.service';
 import { MemberService } from '../loyalty/member.service';
+import { GiftCardService } from '../giftcards/gift-card.service';
 import { PromoEngineService } from '../marketing/promo-engine.service';
 import { promotions, promoRedemptions } from '../../database/schema';
 import { roundCurrency } from '../tax/money';
@@ -35,6 +36,7 @@ export class DineInService {
     private readonly promo: PromoEngineService,
     private readonly recipe: RecipeService,
     private readonly member: MemberService,
+    private readonly gift: GiftCardService,
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -182,12 +184,14 @@ export class DineInService {
       pointsRedeem = { memberId: dto.member_id, points: dto.redeem_points!, bahtPerPoint: q.bahtPerPoint, redeemValue: q.redeemValue };
     }
     const saleNo = await this.mintSaleNo(o.tenantId);
-    const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, { orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts, memberId: dto.member_id, pointsRedeem });
-    // tender (cash → mock gateway = Captured); link to the open till so cash ties to the drawer (Z-report).
-    // A fully points-redeemed bill (total 0) needs no tender — skip it (recordTender rejects non-positive amounts).
+    const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, { orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts, memberId: dto.member_id, pointsRedeem, tip: dto.tip, giftCardNo: dto.gift_card_no, giftCardAmount: dto.gift_card_amount });
+    // tender the SALE-MONEY cash (= total − gift draw-down on the bill); gift is already settled as the 2200
+    // draw, not a drawer payment. payments.amount excludes tip (tip rides separately) so the Z-report's
+    // cash reconciliation counts sale money only. Skip the tender when no sale-money cash is due.
+    const saleCash = roundCurrency(built.total - Math.min(built.gift_applied, built.total), 'THB');
     const openTill = o.tenantId != null ? await this.payments.currentOpenTill(o.tenantId) : null;
-    const tender: any = built.total > 0
-      ? await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: built.total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user)
+    const tender: any = saleCash > 0
+      ? await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: saleCash, tip: built.tip, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user)
       : null;
     const inv = await this.markPaidAndInvoice(o, saleNo, user);
     return { order_no: orderNo, sale_no: saleNo, ...built, payment_no: tender?.payment_no ?? null, payment_status: tender?.status ?? null, tax_invoice_no: inv };
@@ -195,7 +199,7 @@ export class DineInService {
 
   // shared: insert cust_pos_sales + items + GL from a dine-in order, applying line/order/promo discounts.
   // VAT is on the discounted base (Thai rule). opts is optional → no-discount path matches the old behavior.
-  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number; memberId?: number; pointsRedeem?: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number } }) {
+  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number; memberId?: number; pointsRedeem?: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number }; tip?: number; giftCardNo?: string; giftCardAmount?: number }) {
     const db = this.db as any;
     const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, Number(o.id)), ne(dineInOrderItems.kdsStatus, 'voided')));
@@ -236,9 +240,21 @@ export class DineInService {
     const taxable = Math.max(0, roundCurrency(subtotalNet - orderDisc - pointsDisc, 'THB'));
     const vat = this.tax.calcTax({ net: taxable, country: 'TH' }).tax;
     const total = roundCurrency(taxable + vat, 'THB');
+    // tip (staff pass-through, liability 2300 — NOT in subtotal/VAT) + gift-card redemption (draws down the
+    // 2200 deposit liability, reducing the cash leg). cashDue = bill+tip; cashLeg = what's actually tendered.
+    const tip = roundCurrency(Math.max(0, opts?.tip ?? 0), 'THB');
+    const cashDue = roundCurrency(total + tip, 'THB');
+    let giftApplied = 0;
+    if (opts?.giftCardNo) {
+      const want = opts.giftCardAmount != null ? roundCurrency(opts.giftCardAmount, 'THB') : cashDue;
+      const capped = Math.min(want, cashDue); // can't redeem more than the bill+tip
+      const r = await this.gift.redeemForSale(opts.giftCardNo, capped, saleNo, o.tenantId, user, db);
+      giftApplied = r.applied;
+    }
+    const cashLeg = roundCurrency(cashDue - giftApplied, 'THB');
     const [h] = await db.insert(custPosSales).values({
       saleNo, saleDate: ymd(), tenantId: o.tenantId, subtotal: fx(subtotalNet, 2), discount: fx(roundCurrency(orderDisc + pointsDisc, 'THB'), 2),
-      taxAmount: fx(vat, 2), total: fx(total, 2), paymentMethod: 'Dine-in', pointsUsed: String(actualRedeemPoints), pointsEarned: '0',
+      taxAmount: fx(vat, 2), total: fx(total, 2), tip: fx(tip, 2), paymentMethod: 'Dine-in', pointsUsed: String(actualRedeemPoints), pointsEarned: '0',
       status: 'Completed', notes: `Dine-in ${o.orderNo}`, createdBy: user.username,
     }).returning({ id: custPosSales.id });
     await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h.id), ...r })));
@@ -246,10 +262,18 @@ export class DineInService {
     let recipeCogs = 0;
     for (const l of items) { const ded = await this.recipe.applyDeduction(db, o.tenantId, String(l.itemId ?? ''), n(l.qty), saleNo, user); recipeCogs = roundCurrency(recipeCogs + ded.cost, 'THB'); }
     let journalNo: string | null = null;
-    if (total > 0) {
+    if (cashDue > 0) {
+      // Dr 1000 cash leg + Dr 2200 gift draw-down = Cr 4000 net + Cr 2100 vat + Cr 2300 tip (balanced;
+      // zero legs auto-dropped by postEntry). VAT base excludes tip → tip never inflates 4000/2100.
       const je: any = await this.ledger.postEntry({
         source: 'POS', sourceRef: saleNo, tenantId: o.tenantId, memo: `Dine-in ${o.orderNo}`, createdBy: user.username,
-        lines: [{ account_code: '1000', debit: total }, { account_code: '4000', credit: taxable }, { account_code: '2100', credit: vat }],
+        lines: [
+          ...(cashLeg > 0 ? [{ account_code: '1000', debit: cashLeg }] : []),
+          ...(giftApplied > 0 ? [{ account_code: '2200', debit: giftApplied }] : []),
+          { account_code: '4000', credit: taxable },
+          { account_code: '2100', credit: vat },
+          ...(tip > 0 ? [{ account_code: '2300', credit: tip }] : []),
+        ],
       });
       journalNo = je?.entry_no ?? null;
       if (pe?.ok && pe.promoRowId) {
@@ -273,7 +297,7 @@ export class DineInService {
       if (pointsEarned > 0) await db.update(custPosSales).set({ pointsEarned: String(pointsEarned) }).where(eq(custPosSales.id, h.id));
       if (actualRedeemPoints > 0) await this.member.redeemInTx(db, o.tenantId, opts.memberId, actualRedeemPoints, pointsDisc, saleNo, user.username);
     }
-    return { subtotal: subtotalNet, discount: roundCurrency(orderDisc + pointsDisc, 'THB'), vat, total, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal, points_used: actualRedeemPoints, points_earned: pointsEarned };
+    return { subtotal: subtotalNet, discount: roundCurrency(orderDisc + pointsDisc, 'THB'), vat, total, tip, total_with_tip: cashDue, gift_applied: giftApplied, cash_due: cashLeg, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal, points_used: actualRedeemPoints, points_earned: pointsEarned };
   }
 
   // mark order paid + close table/session + idempotent abbreviated tax invoice

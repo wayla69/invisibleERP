@@ -42,6 +42,9 @@ export const CheckoutBody = z.object({
   line_discounts: z.record(z.string(), z.object({ discount_pct: z.number().min(0).max(100).optional(), discount_amt: z.number().nonnegative().optional() })).optional(), // { "<orderItemId>": {...} }
   member_id: z.number().int().positive().optional(),    // loyalty member earning/redeeming on this sale
   redeem_points: z.number().int().nonnegative().optional(),
+  tip: z.number().nonnegative().optional(),             // staff tip (THB) — liability 2300, not in subtotal/VAT
+  gift_card_no: z.string().optional(),                  // redeem this gift card as a tender against the sale
+  gift_card_amount: z.number().positive().optional(),   // amount to draw (default = bill+tip)
 }).refine((d) => !(d.discount != null && d.discount_pct != null), { message: 'provide order discount amount or percent, not both' });
 export type CheckoutDto = z.infer<typeof CheckoutBody>;
 
