@@ -71,13 +71,13 @@ export class ProcurementService {
   // blocklisted or non-approved vendor → 422; unknown/freeform vendor (no master row) → allowed.
   async assertSupplierAllowed(vendorId: number | null, vendorName: string | null) {
     const db = this.db as any;
-    let v: any = null;
-    if (vendorId) [v] = await db.select().from(vendors).where(eq(vendors.id, vendorId)).limit(1);
-    else if (vendorName) [v] = await db.select().from(vendors).where(eq(vendors.name, vendorName)).limit(1);
-    if (!v) return;
-    if (v.blocklisted || String(v.approvalStatus) !== 'approved') {
-      throw new UnprocessableEntityException({ code: 'SUPPLIER_BLOCKED', message: `Supplier ${v.name} is ${v.blocklisted ? 'blocklisted' : v.approvalStatus}`, messageTh: `ผู้ขายถูกระงับ (${v.name})` });
-    }
+    // fail-CLOSED + check EVERY matching row: a blocklisted vendor must not be evadable via a duplicate-name
+    // twin (no unique on vendors.name) or a freeform name. Only a genuinely-unknown vendor (no row) is allowed.
+    let rows: any[] = [];
+    if (vendorId) rows = await db.select().from(vendors).where(eq(vendors.id, vendorId)).limit(1);
+    else if (vendorName) rows = await db.select().from(vendors).where(eq(vendors.name, vendorName));
+    const bad = rows.find((v: any) => v.blocklisted || String(v.approvalStatus) !== 'approved');
+    if (bad) throw new UnprocessableEntityException({ code: 'SUPPLIER_BLOCKED', message: `Supplier ${bad.name} is ${bad.blocklisted ? 'blocklisted' : bad.approvalStatus}`, messageTh: `ผู้ขายถูกระงับ (${bad.name})` });
   }
   async setSupplierStatus(vendorId: number, dto: { approval_status?: string; blocklisted?: boolean; reason?: string }, _user: JwtUser) {
     const db = this.db as any;

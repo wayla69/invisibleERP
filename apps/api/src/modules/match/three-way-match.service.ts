@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { apTransactions, purchaseOrders, poItems, invoiceMatchResults, invoiceMatchLines, matchTolerance } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -20,15 +20,19 @@ export interface MatchLineInput { item_id: string; qty: number; unit_price: numb
 export class ThreeWayMatchService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService, private readonly statusLog: StatusLogService) {}
 
-  async getTolerance(): Promise<{ qtyPct: number; pricePct: number; amountPct: number; amountAbs: number }> {
+  // tenant-scoped read — never rely on RLS+limit(1) (an Admin/HQ request bypasses RLS, so an unfiltered
+  // limit(1) could return another tenant's tolerance and flip the payable verdict).
+  async getTolerance(tenantId?: number | null): Promise<{ qtyPct: number; pricePct: number; amountPct: number; amountAbs: number }> {
     const db = this.db as any;
-    const [t] = await db.select().from(matchTolerance).limit(1);
+    const [t] = tenantId != null
+      ? await db.select().from(matchTolerance).where(eq(matchTolerance.tenantId, tenantId)).limit(1)
+      : await db.select().from(matchTolerance).where(isNull(matchTolerance.tenantId)).limit(1);
     return { qtyPct: n(t?.qtyPct ?? 0), pricePct: t ? n(t.pricePct) : 2, amountPct: t ? n(t.amountPct) : 2, amountAbs: t ? n(t.amountAbs) : 0.5 };
   }
   async setTolerance(dto: { qty_pct?: number; price_pct?: number; amount_pct?: number; amount_abs?: number }, user: JwtUser) {
     const db = this.db as any;
-    const [ex] = await db.select().from(matchTolerance).limit(1);
-    const cur = await this.getTolerance();
+    const [ex] = await db.select().from(matchTolerance).where(user.tenantId != null ? eq(matchTolerance.tenantId, user.tenantId) : isNull(matchTolerance.tenantId)).limit(1);
+    const cur = await this.getTolerance(user.tenantId ?? null);
     const vals = { qtyPct: String(dto.qty_pct ?? cur.qtyPct), pricePct: String(dto.price_pct ?? cur.pricePct), amountPct: String(dto.amount_pct ?? cur.amountPct), amountAbs: String(dto.amount_abs ?? cur.amountAbs), updatedBy: user.username };
     if (ex) await db.update(matchTolerance).set(vals).where(eq(matchTolerance.id, ex.id));
     else await db.insert(matchTolerance).values({ tenantId: user.tenantId ?? null, ...vals });
@@ -45,7 +49,7 @@ export class ThreeWayMatchService {
     if (!po) throw new NotFoundException({ code: 'PO_NOT_FOUND', message: `PO ${poNo} not found`, messageTh: 'ไม่พบ PO' });
     const poLines = await db.select().from(poItems).where(eq(poItems.poId, Number(po.id)));
     const byItem = new Map<string, any>(poLines.map((l: any) => [String(l.itemId), l]));
-    const tol = await this.getTolerance();
+    const tol = await this.getTolerance(tx.tenantId ?? user.tenantId ?? null);
 
     // fall back to a single header line (invoice amount vs PO total) when no lines are supplied
     const inputLines: MatchLineInput[] = lines?.length ? lines : [{ item_id: '__TOTAL__', qty: 1, unit_price: n(tx.amount) }];
@@ -68,28 +72,34 @@ export class ThreeWayMatchService {
     const headerStatus = resultLines.reduce((worst, l) => (SEVERITY.indexOf(l.lineStatus) > SEVERITY.indexOf(worst) ? l.lineStatus : worst), 'matched');
     const payable = headerStatus === 'matched';
 
-    // upsert header by txn_no (preserve override on re-match? no — a fresh match resets the verdict)
-    const [existing] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1);
-    let matchNo: string; let matchId: number;
+    // upsert header by txn_no. A fresh match RESETS the verdict INCLUDING any prior human override — a
+    // stale one-time override must not keep a now-failing invoice payable.
+    let [existing] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1);
+    let matchNo = ''; let matchId = 0;
+    if (!existing) {
+      matchNo = await this.docNo.nextDaily('MAT');
+      const ins = await db.insert(invoiceMatchResults).values({ tenantId: tx.tenantId ?? user.tenantId ?? null, matchNo, txnNo, poNo, matchStatus: headerStatus, payable, matchedBy: user.username })
+        .onConflictDoNothing({ target: invoiceMatchResults.txnNo }).returning({ id: invoiceMatchResults.id });
+      if (ins.length) matchId = Number(ins[0].id);
+      else { [existing] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1); } // concurrent first-match won
+    }
     if (existing) {
       matchNo = existing.matchNo; matchId = Number(existing.id);
-      await db.update(invoiceMatchResults).set({ poNo, matchStatus: headerStatus, payable, matchedBy: user.username, matchedAt: new Date() }).where(eq(invoiceMatchResults.id, matchId));
+      await db.update(invoiceMatchResults).set({ poNo, matchStatus: headerStatus, payable, override: false, overrideBy: null, overrideReason: null, overrideAt: null, matchedBy: user.username, matchedAt: new Date() }).where(eq(invoiceMatchResults.id, matchId));
       await db.delete(invoiceMatchLines).where(eq(invoiceMatchLines.matchId, matchId));
-    } else {
-      matchNo = await this.docNo.nextDaily('MAT');
-      const [h] = await db.insert(invoiceMatchResults).values({ tenantId: tx.tenantId ?? user.tenantId ?? null, matchNo, txnNo, poNo, matchStatus: headerStatus, payable, matchedBy: user.username }).returning({ id: invoiceMatchResults.id });
-      matchId = Number(h.id);
     }
     await db.insert(invoiceMatchLines).values(resultLines.map((l) => ({ matchId, ...l })));
     await this.statusLog.log('MATCH', matchNo, '', headerStatus, user.username);
     return { match_no: matchNo, txn_no: txnNo, po_no: poNo, match_status: headerStatus, payable, lines: resultLines.map((l) => ({ item_id: l.itemId, inv_qty: n(l.invQty), inv_price: n(l.invPrice), po_price: n(l.poPrice), gr_qty: n(l.grQty), price_var_pct: n(l.priceVarPct), qty_var_pct: n(l.qtyVarPct), line_status: l.lineStatus })) };
   }
 
-  // Payment gate — called from FinanceService.payAp.
+  // Payment gate — called from FinanceService.payAp. Fail-OPEN when no match row exists: a non-PO bill
+  // (utilities/services/reimbursements) is never matched and must remain payable. The gate only BLOCKS a
+  // PO-based invoice that was run through match() and did not pass (or was overridden).
   async assertPayable(txnNo: string) {
     const db = this.db as any;
     const [m] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1);
-    if (!m) throw new ConflictException({ code: 'MATCH_REQUIRED', message: `Invoice ${txnNo} must pass 3-way match before payment`, messageTh: 'ต้องผ่านการจับคู่ 3 ทางก่อนจ่าย' });
+    if (!m) return; // non-PO bill — not subject to the 3-way gate
     if (m.payable || m.override) return;
     throw new ConflictException({ code: 'MATCH_BLOCKED', message: `Invoice ${txnNo} blocked: ${m.matchStatus}`, messageTh: `ใบแจ้งหนี้ถูกระงับ (${m.matchStatus})`, match_status: m.matchStatus } as any);
   }

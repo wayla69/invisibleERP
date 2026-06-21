@@ -67,7 +67,9 @@ export class WorkflowService {
     const [existing] = await db.select().from(workflowInstances).where(and(eq(workflowInstances.docType, args.docType), eq(workflowInstances.docNo, args.docNo), eq(workflowInstances.status, 'pending'))).limit(1);
     if (existing) return { instanceId: Number(existing.id), status: existing.status, currentStep: existing.currentStep ?? 0, autoApproved: false };
     const steps = await this.steps(Number(def.id));
-    const engaged = this.firstEngaged(steps, args.amount, 0);
+    // an ACTIVE definition must always require at least one approval — if a (maker-supplied, optional)
+    // amount engages no step by threshold, fall back to the lowest step so the chain can't be skipped.
+    const engaged = this.firstEngaged(steps, args.amount, 0) ?? [...steps].sort((a, b) => a.stepNo - b.stepNo)[0] ?? null;
     const status = engaged ? 'pending' : 'approved';
     const [inst] = await db.insert(workflowInstances).values({ tenantId: args.tenantId ?? null, definitionId: Number(def.id), docType: args.docType, docNo: args.docNo, amount: String(args.amount), createdBy: args.createdBy, status, currentStep: engaged ? engaged.stepNo : 0, closedAt: engaged ? null : new Date() }).returning({ id: workflowInstances.id });
     return { instanceId: Number(inst.id), status, currentStep: engaged ? engaged.stepNo : 0, autoApproved: !engaged };
@@ -128,11 +130,14 @@ export class WorkflowService {
     const steps = await this.steps(Number(inst.definitionId));
     const step = steps.find((s: any) => s.stepNo === inst.currentStep);
     if (!step) throw new BadRequestException({ code: 'NO_STEP', message: 'No active step', messageTh: 'ไม่พบขั้นอนุมัติ' });
-    // maker-checker (always on) + eligibility + configurable SoD rules
-    if (user.username === inst.createdBy) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The maker cannot approve their own document', messageTh: 'ผู้สร้างเอกสารอนุมัติเองไม่ได้' });
+    // eligibility (direct OR via delegation) + maker-checker on the EFFECTIVE approver + configurable SoD.
     const who = await this.resolveActor(step, user);
     if (!who.ok) throw new ForbiddenException({ code: 'NOT_AN_APPROVER', message: 'You are not an approver for this step', messageTh: 'คุณไม่มีสิทธิ์อนุมัติขั้นนี้' });
-    await this.sod.assertActionAllowed({ tenantId: inst.tenantId, docType: inst.docType, createdBy: inst.createdBy, actor: user.username, actorPermissions: user.permissions ?? [], action: 'approve' });
+    // maker-checker (always on): NEITHER the caller NOR the person they act on behalf of may be the creator
+    // (closes the "delegate the approval back to yourself" bypass).
+    const effectiveApprover = who.onBehalfOf ?? user.username;
+    if (user.username === inst.createdBy || effectiveApprover === inst.createdBy) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The maker cannot approve their own document', messageTh: 'ผู้สร้างเอกสารอนุมัติเองไม่ได้' });
+    await this.sod.assertActionAllowed({ tenantId: inst.tenantId, docType: inst.docType, createdBy: inst.createdBy, actor: effectiveApprover, actorPermissions: user.permissions ?? [], action: 'approve' });
 
     await db.insert(approvalActions).values({ tenantId: inst.tenantId, instanceId, stepNo: inst.currentStep, actor: user.username, onBehalfOf: who.onBehalfOf, decision: args.decision, comment: args.comment ?? null });
     if (args.decision === 'reject') {
@@ -168,7 +173,8 @@ export class WorkflowService {
       const step = steps.find((s: any) => s.stepNo === i.currentStep);
       if (!step) continue;
       const who = await this.resolveActor(step, user);
-      if (who.ok) items.push({ instance_id: Number(i.id), doc_type: i.docType, doc_no: i.docNo, amount: n(i.amount), current_step: i.currentStep, created_by: i.createdBy, on_behalf_of: who.onBehalfOf });
+      // hide docs the user would only be able to approve as the maker (direct or via delegation-from-creator)
+      if (who.ok && (who.onBehalfOf ?? user.username) !== i.createdBy) items.push({ instance_id: Number(i.id), doc_type: i.docType, doc_no: i.docNo, amount: n(i.amount), current_step: i.currentStep, created_by: i.createdBy, on_behalf_of: who.onBehalfOf });
     }
     return { items };
   }

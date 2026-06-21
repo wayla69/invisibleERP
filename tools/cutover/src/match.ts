@@ -136,6 +136,19 @@ async function main() {
   const sc = await inj('POST', `/api/procurement/suppliers/${V1}/scorecard`, admin, { period: '2026-06' });
   ok('Supplier scorecard computed (score + gr_count)', sc.json.score != null && sc.json.gr_count >= 1, JSON.stringify(sc.json));
 
+  // ── K. non-PO bill (no match) is payable — gate fails OPEN, only PO-based matched invoices are gated ──
+  const nonPo = await apTxn(500);
+  const payNonPo = await payAttempt(nonPo, 500);
+  ok('Non-PO bill (no match row) pays → 200 Paid (gate fails open)', payNonPo.json.status === 'Paid', `${payNonPo.status} ${payNonPo.json.status}`);
+
+  // ── L. override does NOT survive a re-match (stale override must not keep a failing invoice payable) ──
+  const ap5 = await apTxn(1200);
+  await runMatch(ap5, poNo, [{ item_id: 'X', qty: 100, unit_price: 12 }]); // price_variance
+  await inj('POST', `/api/procurement/match/${ap5}/override`, admin, { reason: 'one-time' });
+  await runMatch(ap5, poNo, [{ item_id: 'X', qty: 100, unit_price: 12 }]); // re-match → must RESET override
+  const pay5 = await payAttempt(ap5, 1200);
+  ok('Override cleared by re-match → still-failing invoice BLOCKED again (409)', pay5.status === 409 && pay5.json.error?.code === 'MATCH_BLOCKED', `${pay5.status} ${pay5.json.error?.code}`);
+
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

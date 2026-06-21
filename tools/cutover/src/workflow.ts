@@ -45,6 +45,7 @@ async function main() {
     { username: 'mgr1', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },  // step-1 approver
     { username: 'plan1', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: t1 },      // step-2 approver + exec
     { username: 'deleg1', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 },       // delegation target (has approvals, not procurement)
+    { username: 'deleg2', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 },       // delegate holding ONLY the creator's delegation
     { username: 'sales2', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t2 },       // T2 isolation
   ]).onConflictDoNothing();
 
@@ -65,6 +66,7 @@ async function main() {
   const mgr1 = await login('mgr1', 'pw');
   const plan1 = await login('plan1', 'pw');
   const deleg1 = await login('deleg1', 'pw');
+  const deleg2 = await login('deleg2', 'pw');
   const sales2 = await login('sales2', 'pw');
   const instOf = async (prNo: string) => ((await pg.query(`SELECT id, status, current_step FROM workflow_instances WHERE doc_no='${prNo}' ORDER BY id DESC LIMIT 1`)).rows as any[])[0];
   const mkPr = (token: string, amount: number) => inj('POST', '/api/procurement/prs', token, { amount, items: [{ item_id: 'A', request_qty: 1 }] });
@@ -114,8 +116,14 @@ async function main() {
   const obo = (await pg.query(`SELECT on_behalf_of FROM approval_actions WHERE instance_id=${i4.id} ORDER BY id DESC LIMIT 1`)).rows as any[];
   ok('Delegation: Sales delegate approves on behalf of mgr1 (on_behalf_of recorded)', delAct.json.status === 'approved' && obo[0]?.on_behalf_of === 'mgr1', JSON.stringify({ st: delAct.json.status, obo: obo[0]?.on_behalf_of }));
 
-  // ── 9. my-approvals scoping ──
+  // ── 8b. maker-checker is NOT bypassable by delegating the approval back to the creator ──
   const pr5 = await mkPr(proc1, 5000);
+  await inj('POST', '/api/workflow/delegations', proc1, { to_user: 'deleg2', from_date: '2020-01-01', to_date: '2030-12-31' }); // proc1 (the maker) delegates to deleg2 (no other delegation)
+  const i5 = await instOf(pr5.json.pr_no);
+  const selfDel = await inj('POST', `/api/workflow/instances/${i5.id}/act`, deleg2, { decision: 'approve' }); // only path is on proc1's (creator) behalf
+  ok('SoD: delegate-from-creator cannot approve the creator own doc → 403 SOD_VIOLATION', selfDel.status === 403 && selfDel.json.error?.code === 'SOD_VIOLATION', `${selfDel.status} ${selfDel.json.error?.code}`);
+
+  // ── 9. my-approvals scoping ──
   const mine = await inj('GET', '/api/workflow/my-approvals', mgr1);
   const t2mine = await inj('GET', '/api/workflow/my-approvals', sales2);
   ok('my-approvals: mgr1 sees pending step-1 PRs; T2 sees none', (mine.json.items ?? []).some((x: any) => x.doc_no === pr5.json.pr_no) && (t2mine.json.items ?? []).length === 0, `mine=${(mine.json.items ?? []).length} t2=${(t2mine.json.items ?? []).length}`);
@@ -130,9 +138,18 @@ async function main() {
   const t2inst = await inj('GET', `/api/workflow/instances/${i4.id}`, sales2);
   ok('RLS: T2 cannot read a T1 instance', t2inst.status === 404, `${t2inst.status}`);
 
-  // ── 12. unknown instance + no-definition passthrough ──
+  // ── 12. active definition can't be skipped by omitting amount (engages the lowest step as fallback) ──
+  const def2id = (defs.json.definitions ?? []).find((d: any) => d.doc_type === 'PR')?.id ?? 1;
+  await inj('PATCH', `/api/workflow/definitions/${def2id}`, mgr1, { active: false });
+  await inj('POST', '/api/workflow/definitions', mgr1, { doc_type: 'PR', name: 'PR min-amount', steps: [{ step_no: 1, approver_role: 'Procurement', min_amount: 5000 }] });
+  const prNoAmt = await inj('POST', '/api/procurement/prs', proc1, { items: [{ item_id: 'A', request_qty: 1 }] }); // NO amount → would be 0
+  const iNoAmt = await instOf(prNoAmt.json.pr_no);
+  ok('Active def + omitted amount → routes to lowest step (NOT auto-approved)', iNoAmt?.status === 'pending' && iNoAmt?.current_step === 1, JSON.stringify(iNoAmt));
+
+  // ── 13. unknown instance + no-definition passthrough ──
   const unknown = await inj('POST', '/api/workflow/instances/999999/act', mgr1, { decision: 'approve' });
-  await inj('PATCH', `/api/workflow/definitions/${(defs.json.definitions ?? []).find((d: any) => d.doc_type === 'PR')?.id ?? 1}`, mgr1, { active: false }); // deactivate → legacy passthrough
+  const def3id = (await inj('GET', '/api/workflow/definitions', mgr1)).json.definitions.find((d: any) => d.doc_type === 'PR' && d.active)?.id;
+  await inj('PATCH', `/api/workflow/definitions/${def3id}`, mgr1, { active: false }); // deactivate ALL → legacy passthrough
   const prX = await mkPr(proc1, 5000);
   const instX = await instOf(prX.json.pr_no);
   const apX = await inj('PATCH', `/api/procurement/prs/${prX.json.pr_no}/approve`, admin, { approve: true }); // legacy Admin path

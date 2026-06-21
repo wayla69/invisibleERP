@@ -40,16 +40,18 @@ export class RfqService {
 
   async award(rfqNo: string, quoteNo: string, user: JwtUser) {
     const db = this.db as any;
-    const [rfq] = await db.select().from(rfqs).where(eq(rfqs.rfqNo, rfqNo)).limit(1);
+    // lock the RFQ row + re-check status under the lock so two concurrent awards can't both create a PO
+    const [rfq] = await db.select().from(rfqs).where(eq(rfqs.rfqNo, rfqNo)).for('update').limit(1);
     if (!rfq) throw new NotFoundException({ code: 'NOT_FOUND', message: 'RFQ not found', messageTh: 'ไม่พบ RFQ' });
     if (rfq.status !== 'Open') throw new ConflictException({ code: 'RFQ_CLOSED', message: 'RFQ already awarded/closed', messageTh: 'RFQ ปิดแล้ว' });
     const [q] = await db.select().from(supplierQuotes).where(and(eq(supplierQuotes.quoteNo, quoteNo), eq(supplierQuotes.rfqId, Number(rfq.id)))).limit(1);
     if (!q) throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: 'Quote not found for this RFQ', messageTh: 'ไม่พบใบเสนอราคา' });
     const items = await db.select().from(supplierQuoteItems).where(eq(supplierQuoteItems.quoteId, Number(q.id)));
-    // build a PO from the winning quote (reuse ProcurementService.createPo — no GL here)
-    const po: any = await this.procurement.createPo({ vendor_id: q.vendorId ?? undefined, vendor_name: q.vendorName ?? undefined, remarks: `Awarded from ${rfqNo}/${quoteNo}`, items: items.map((it: any) => ({ item_id: it.itemId, item_description: it.itemDescription, order_qty: n(it.qty), unit_price: n(it.unitPrice), uom: it.uom })) }, user);
+    // close the RFQ FIRST (still holding the lock) so a concurrent award fails the status re-check, THEN
+    // build the PO from the winning quote (reuse ProcurementService.createPo — no GL here).
     await db.update(supplierQuotes).set({ status: 'Awarded' }).where(eq(supplierQuotes.id, q.id));
     await db.update(rfqs).set({ status: 'Awarded', awardedQuoteId: Number(q.id) }).where(eq(rfqs.id, rfq.id));
+    const po: any = await this.procurement.createPo({ vendor_id: q.vendorId ?? undefined, vendor_name: q.vendorName ?? undefined, remarks: `Awarded from ${rfqNo}/${quoteNo}`, items: items.map((it: any) => ({ item_id: it.itemId, item_description: it.itemDescription, order_qty: n(it.qty), unit_price: n(it.unitPrice), uom: it.uom })) }, user);
     return { rfq_no: rfqNo, quote_no: quoteNo, po_no: po.po_no };
   }
 
