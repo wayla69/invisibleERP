@@ -15,6 +15,7 @@
     "pos-discount": "tsx src/pos-discount.ts",
     "returns": "tsx src/returns.ts",
     "bankrec": "tsx src/bankrec.ts",
+    "costcenter": "tsx src/costcenter.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

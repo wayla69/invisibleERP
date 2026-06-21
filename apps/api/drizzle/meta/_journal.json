@@ -113,6 +113,13 @@
       "when": 1782007973292,
       "tag": "0015_bank_reconciliation",
       "breakpoints": false
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1782007973293,
+      "tag": "0016_cost_centers",
+      "breakpoints": false
     }
   ]
 }

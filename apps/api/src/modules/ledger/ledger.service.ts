@@ -25,7 +25,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '1020', name: 'Bank — Savings', type: 'Asset' },
 ];
 
-export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string }
+export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null }
 export interface PostEntryDto {
   date?: string;
   source: string;
@@ -112,7 +112,7 @@ export class LedgerService {
       await tx.insert(journalLines).values(nzLines.map((l) => ({
         entryId: Number(h.id), accountCode: l.account_code,
         debit: fx(l.debit, 4), credit: fx(l.credit, 4),
-        currency, memo: l.memo ?? null, tenantId: dto.tenantId ?? null,
+        currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: dto.tenantId ?? null,
       })));
       return nzLines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
     });
@@ -140,11 +140,13 @@ export class LedgerService {
 
   // ───────────────────── Trial Balance ─────────────────────
   // group journal_lines by account_code (joined to accounts) — Σdebit, Σcredit, balance
-  async trialBalance(period?: string) {
+  async trialBalance(period?: string, costCenter?: string | null) {
     const db = this.db as any;
-    const where = period
-      ? and(eq(journalEntries.status, 'Posted'), sql`${journalEntries.period} = ${period}`)
-      : eq(journalEntries.status, 'Posted');
+    const conds = [eq(journalEntries.status, 'Posted')];
+    if (period) conds.push(sql`${journalEntries.period} = ${period}`);
+    if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
+    else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
+    const where = and(...conds);
     const rows = await db
       .select({
         account_code: journalLines.accountCode,
@@ -167,19 +169,19 @@ export class LedgerService {
     });
     const totalDebit = round4(out.reduce((a: number, r: any) => a + r.debit, 0));
     const totalCredit = round4(out.reduce((a: number, r: any) => a + r.credit, 0));
-    return { period: period ?? null, rows: out, totals: { debit: totalDebit, credit: totalCredit, balanced: totalDebit === totalCredit } };
+    return { period: period ?? null, cost_center: costCenter ?? null, rows: out, totals: { debit: totalDebit, credit: totalCredit, balanced: totalDebit === totalCredit } };
   }
 
   // ───────────────────── Income Statement ─────────────────────
   // Revenue − Expense = net income, over [from,to] (entry_date inclusive)
-  async incomeStatement(from: string, to: string) {
+  async incomeStatement(from: string, to: string, costCenter?: string | null) {
     const db = this.db as any;
-    const rows = await this.aggregateByType(db, from, to);
+    const rows = await this.aggregateByType(db, from, to, costCenter);
     const revenue = round4(typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit'));
     const expense = round4(typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit'));
     const netIncome = round4(revenue - expense);
     return {
-      from, to,
+      from, to, cost_center: costCenter ?? null,
       revenue, expense, net_income: netIncome,
       lines: rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense'),
     };
@@ -279,9 +281,11 @@ export class LedgerService {
   }
 
   // group Posted journal_lines by account type within optional date window
-  private async aggregateByType(db: any, from: string | null, to: string) {
+  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null) {
     const conds = [eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${to}`];
     if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
+    if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
+    else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
     const rows = await db
       .select({
         account_type: accounts.type,

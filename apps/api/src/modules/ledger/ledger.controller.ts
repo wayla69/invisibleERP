@@ -16,6 +16,7 @@ const JournalBody = z.object({
     debit: z.number().nonnegative().optional(),
     credit: z.number().nonnegative().optional(),
     memo: z.string().optional(),
+    cost_center: z.string().optional(),
   })).min(1),
 });
 type JournalBodyT = z.infer<typeof JournalBody>;
@@ -29,7 +30,7 @@ export class LedgerController {
   accounts() { return this.svc.listAccounts(); }
 
   @Get('trial-balance')
-  trialBalance(@Query('period') period?: string) { return this.svc.trialBalance(period); }
+  trialBalance(@Query('period') period?: string, @Query('cost_center') costCenter?: string) { return this.svc.trialBalance(period, costCenter); }
 
   @Get('journal')
   journal(@Query('limit') limit?: string) { return this.svc.listJournal(limit ? +limit : 50); }
@@ -49,7 +50,7 @@ export class LedgerController {
   }
 
   @Get('income-statement')
-  incomeStatement(@Query('from') from: string, @Query('to') to: string) { return this.svc.incomeStatement(from, to); }
+  incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string) { return this.svc.incomeStatement(from, to, costCenter); }
 
   @Get('balance-sheet')
   balanceSheet(@Query('as_of') asOf: string) { return this.svc.balanceSheet(asOf); }

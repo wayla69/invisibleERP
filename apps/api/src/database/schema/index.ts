@@ -12,6 +12,7 @@ export * from './marketing';
 export * from './logistics';
 export * from './system';
 export * from './ledger';
+export * from './cost-centers';
 export * from './payments';
 export * from './billing';
 export * from './tax-docs';

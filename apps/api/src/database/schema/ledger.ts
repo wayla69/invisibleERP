@@ -55,9 +55,10 @@ export const journalLines = pgTable(
     credit: numeric('credit', { precision: 18, scale: 4 }).default('0'),
     currency: text('currency').default('THB'),
     memo: text('memo'),
+    costCenterCode: text('cost_center_code'), // nullable accounting dimension (Tier 3); untagged = Unassigned
     tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   },
-  (t) => ({ byAccount: index('idx_jl_account').on(t.accountCode) }),
+  (t) => ({ byAccount: index('idx_jl_account').on(t.accountCode), byCc: index('idx_jl_cc').on(t.costCenterCode) }),
 );
 
 export type Account = typeof accounts.$inferSelect;
