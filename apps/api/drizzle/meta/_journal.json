@@ -71,6 +71,13 @@
       "when": 1782007973286,
       "tag": "0009_menu",
       "breakpoints": false
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782007973287,
+      "tag": "0010_split_bill",
+      "breakpoints": false
     }
   ]
 }

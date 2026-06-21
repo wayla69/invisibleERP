@@ -138,7 +138,7 @@ export class DineInService {
     const db = this.db as any;
     const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.id, orderId)).limit(1);
     if (!o) return null;
-    if (['bill_requested', 'paid', 'closed', 'cancelled'].includes(String(o.status))) return o.status;
+    if (['bill_requested', 'partially_paid', 'paid', 'closed', 'cancelled'].includes(String(o.status))) return o.status;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, orderId), ne(dineInOrderItems.kdsStatus, 'voided')));
     let next = o.status;
     if (items.length) {
@@ -212,16 +212,72 @@ export class DineInService {
     await db.update(dineInOrders).set({ status: 'paid', saleNo, paidAt: now, closedAt: now }).where(eq(dineInOrders.id, o.id));
     if (o.tableId) await db.update(diningTables).set({ status: 'cleaning', updatedAt: now }).where(eq(diningTables.id, o.tableId));
     if (o.sessionId) await db.update(tableSessions).set({ status: 'closed', closedAt: now, saleNo }).where(eq(tableSessions.id, o.sessionId));
-    let invNo: string | null = null;
-    try { const inv: any = await this.taxInvoice.issueAbbreviatedFromSale(saleNo, user); invNo = inv?.doc_no ?? null; } catch { /* VAT-unregistered tenant → skip slip */ }
-    return invNo;
+    return this.issueAbbreviated(saleNo, user);
   }
 
-  private async mintSaleNo(tenantId: number | null) {
+  // idempotent abbreviated tax invoice for a sale (VAT-unregistered tenant → null, no slip).
+  async issueAbbreviated(saleNo: string, user: JwtUser): Promise<string | null> {
+    try { const inv: any = await this.taxInvoice.issueAbbreviatedFromSale(saleNo, user); return inv?.doc_no ?? null; } catch { return null; }
+  }
+
+  // SALE- number, collision-safe: nextTenantStamped is second-precision, so rapid/split sales in the
+  // same second would clash on cust_pos_sales.sale_no (UNIQUE). Retry on a bumped second until unique.
+  async mintSaleNo(tenantId: number | null) {
     const db = this.db as any;
     let code = 'POS';
     if (tenantId != null) { const [t] = await db.select({ code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1); code = t?.code ?? 'POS'; }
-    return this.docNo.nextTenantStamped('SALE', code);
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const saleNo = this.docNo.nextTenantStamped('SALE', code, new Date(Date.now() + attempt * 1000));
+      const [exists] = await db.select({ id: custPosSales.id }).from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
+      if (!exists) return saleNo;
+    }
+    return this.docNo.nextTenantStamped('SALE', code) + '-' + Math.floor(Date.now() % 997);
+  }
+
+  // split bill: build a cust_pos_sales + items + ONE GL entry from a subset / pro-rated slice of an order.
+  // grossOverride present (equal split) → the share is VAT-inclusive, back out net+vat; else compute from lines.
+  async buildCheckSale(o: any, saleNo: string, lines: any[], opts: { grossOverride?: number; discount?: number }, user: JwtUser) {
+    const db = this.db as any;
+    const disc = roundCurrency(opts.discount ?? 0, 'THB');
+    let subtotal: number, vat: number, total: number;
+    if (opts.grossOverride != null) {
+      total = roundCurrency(opts.grossOverride, 'THB');
+      const inc = this.tax.calcInclusive({ gross: total, country: 'TH' });
+      subtotal = inc.net; vat = inc.tax;
+    } else {
+      const gross = roundCurrency(lines.reduce((a, l) => a + n(l.amount), 0), 'THB');
+      subtotal = Math.max(0, roundCurrency(gross - disc, 'THB'));
+      const t = this.tax.calcTax({ net: subtotal, country: 'TH' });
+      vat = t.tax; total = roundCurrency(subtotal + vat, 'THB');
+    }
+    const [h] = await db.insert(custPosSales).values({
+      saleNo, saleDate: ymd(), tenantId: o.tenantId, subtotal: fx(subtotal, 2), discount: fx(disc, 2),
+      taxAmount: fx(vat, 2), total: fx(total, 2), paymentMethod: 'Split', pointsUsed: '0', pointsEarned: '0',
+      status: 'Completed', notes: `Split ${o.orderNo}`, createdBy: user.username,
+    }).returning({ id: custPosSales.id });
+    const itemRows = lines.length ? lines : [{ itemId: 'SPLIT', name: `แบ่งบิล ${o.orderNo}`, qty: 1, unitPrice: subtotal, amount: subtotal }];
+    await db.insert(custPosItems).values(itemRows.map((l: any) => ({
+      saleId: Number(h.id), itemId: l.itemId ?? l.name, itemDescription: l.name, qty: String(n(l.qty ?? 1)), uom: 'จาน',
+      unitPrice: fx(n(l.unitPrice ?? l.amount), 2), discountPct: '0', amount: fx(n(l.amount), 2), isCustom: l.itemId == null,
+    })));
+    let journalNo: string | null = null;
+    if (total > 0) {
+      const je: any = await this.ledger.postEntry({
+        source: 'POS', sourceRef: saleNo, tenantId: o.tenantId, memo: `Split ${o.orderNo}`, createdBy: user.username,
+        lines: [{ account_code: '1000', debit: total }, { account_code: '4000', credit: subtotal }, { account_code: '2100', credit: vat }],
+      });
+      journalNo = je?.entry_no ?? null;
+    }
+    return { sale_no: saleNo, subtotal, discount: disc, vat, total, journal_no: journalNo };
+  }
+
+  // split: per-check invoices already issued — flip the order/table/session to paid/closed (no new sale).
+  async markAllChecksPaid(o: any, _user: JwtUser) {
+    const db = this.db as any;
+    const now = new Date();
+    await db.update(dineInOrders).set({ status: 'paid', paidAt: now, closedAt: now }).where(eq(dineInOrders.id, o.id));
+    if (o.tableId) await db.update(diningTables).set({ status: 'cleaning', updatedAt: now }).where(eq(diningTables.id, o.tableId));
+    if (o.sessionId) await db.update(tableSessions).set({ status: 'closed', closedAt: now }).where(eq(tableSessions.id, o.sessionId));
   }
 
   async closeTable(orderNo: string, user: JwtUser) {
@@ -241,7 +297,7 @@ export class DineInService {
     return { order_no: orderNo, status: 'cancelled' };
   }
 
-  private async loadOrder(orderNo: string) {
+  async loadOrder(orderNo: string) {
     const db = this.db as any;
     const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).limit(1);
     if (!o) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });

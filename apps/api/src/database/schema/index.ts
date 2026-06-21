@@ -18,3 +18,4 @@ export * from './tax-docs';
 export * from './restaurant';
 export * from './assets';
 export * from './menu';
+export * from './split';
