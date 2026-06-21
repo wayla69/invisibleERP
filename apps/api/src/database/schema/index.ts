@@ -19,3 +19,4 @@ export * from './restaurant';
 export * from './assets';
 export * from './menu';
 export * from './split';
+export * from './cash';

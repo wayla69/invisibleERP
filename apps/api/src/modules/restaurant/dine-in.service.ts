@@ -169,8 +169,9 @@ export class DineInService {
     if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
     const saleNo = await this.mintSaleNo(o.tenantId);
     const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user);
-    // tender (cash → mock gateway = Captured)
-    const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: built.total, currency: 'THB', gateway: 'mock' }, user);
+    // tender (cash → mock gateway = Captured); link to the open till so cash ties to the drawer (Z-report)
+    const openTill = o.tenantId != null ? await this.payments.currentOpenTill(o.tenantId) : null;
+    const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: built.total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user);
     const inv = await this.markPaidAndInvoice(o, saleNo, user);
     return { order_no: orderNo, sale_no: saleNo, ...built, payment_no: tender?.payment_no ?? null, payment_status: tender?.status ?? null, tax_invoice_no: inv };
   }

@@ -8,6 +8,7 @@ import {
   type RefundDto,
   type OpenTillDto,
   type CloseTillDto,
+  type CashMovementDto,
 } from './payments.service';
 
 const TenderBody = z.object({
@@ -21,7 +22,8 @@ const TenderBody = z.object({
 });
 const RefundBody = z.object({ payment_no: z.string().min(1), amount: z.number().positive(), reason: z.string().optional() });
 const OpenTillBody = z.object({ opening_float: z.number().nonnegative().optional() });
-const CloseTillBody = z.object({ session_no: z.string().min(1), closing_count: z.number() });
+const CloseTillBody = z.object({ session_no: z.string().min(1), closing_count: z.number(), denominations: z.record(z.string(), z.number()).optional() });
+const CashMovementBody = z.object({ type: z.enum(['paid_in', 'paid_out', 'drop']), amount: z.number().positive(), reason: z.string().optional() });
 
 @Controller('api/payments')
 export class PaymentsController {
@@ -61,5 +63,21 @@ export class PaymentsController {
   @Get() @Permissions('pos', 'cust_pos', 'ar')
   list(@Query('sale_no') saleNo: string) {
     return this.svc.listPaymentsForSale(saleNo);
+  }
+
+  // ── cash management: drawer movements + X/Z shift report ──
+  @Post('till/:id/cash-movement') @Permissions('pos', 'cust_pos', 'ar')
+  cashMovement(@Param('id') id: string, @Body(new ZodValidationPipe(CashMovementBody)) b: CashMovementDto, @CurrentUser() u: JwtUser) {
+    return this.svc.recordCashMovement(Number(id), b, u);
+  }
+
+  @Get('till/:id/x-report') @Permissions('pos', 'cust_pos', 'ar')
+  xReport(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.svc.xReport(Number(id), u);
+  }
+
+  @Get('till/:id/z-report') @Permissions('pos', 'cust_pos', 'ar')
+  zReport(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.svc.zReport(Number(id), u);
   }
 }

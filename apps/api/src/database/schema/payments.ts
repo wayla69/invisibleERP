@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Payments + tender layer (move #3) — 1 sale → N tenders; proof money moved
@@ -46,6 +46,7 @@ export const tillSessions = pgTable('till_sessions', {
   closingCount: numeric('closing_count', { precision: 18, scale: 4 }),
   expectedCash: numeric('expected_cash', { precision: 18, scale: 4 }),
   variance: numeric('variance', { precision: 18, scale: 4 }),
+  denominations: jsonb('denominations'),   // {"1000":2,"500":1,...} captured on close
   status: tillStatusEnum('status').default('Open'),
 });
 

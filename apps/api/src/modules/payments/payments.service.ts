@@ -1,10 +1,11 @@
 import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { payments, paymentRefunds, tillSessions } from '../../database/schema';
+import { payments, paymentRefunds, tillSessions, cashMovements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
+import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
-import { round2 } from '../tax/money';
+import { round2, roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 import { resolveGateway } from './gateways';
 
@@ -19,13 +20,15 @@ export interface RecordTenderDto {
 }
 export interface RefundDto { payment_no: string; amount: number; reason?: string }
 export interface OpenTillDto { opening_float?: number }
-export interface CloseTillDto { session_no: string; closing_count: number }
+export interface CloseTillDto { session_no: string; closing_count: number; denominations?: Record<string, number> }
+export interface CashMovementDto { type: 'paid_in' | 'paid_out' | 'drop'; amount: number; reason?: string }
 
 @Injectable()
 export class PaymentService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
+    private readonly ledger: LedgerService,
   ) {}
 
   // POST /api/payments — run a tender against a gateway, persist the result.
@@ -145,23 +148,81 @@ export class PaymentService {
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
     if (String(sess.status) === 'Closed') throw new BadRequestException({ code: 'ALREADY_CLOSED', message: 'Till session already closed', messageTh: 'รอบเงินสดถูกปิดแล้ว' });
 
-    // Cash-IN must include fully-refunded payments (status flips to 'Refunded') so the refund-OUT
-    // sum below nets to zero for them — otherwise a fully-refunded cash sale would be subtracted
-    // without ever being added, understating expected cash by the full amount.
-    const [cash] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments)
-      .where(and(eq(payments.tillSessionId, Number(sess.id)), sql`${payments.method}::text = 'Cash'`, sql`${payments.status}::text IN ('Captured','Refunded')`));
-    // Refunds against cash payments in THIS session reduce drawer cash (join on session+method only).
-    const [refunded] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` })
-      .from(paymentRefunds)
-      .innerJoin(payments, eq(paymentRefunds.paymentNo, payments.paymentNo))
-      .where(and(eq(payments.tillSessionId, Number(sess.id)), sql`${payments.method}::text = 'Cash'`));
-    const expectedCash = round2(n(sess.openingFloat) + n(cash?.v) - n(refunded?.v));
-    const variance = round2(n(dto.closing_count) - expectedCash);
+    // expected cash now folds in cash movements (paid-in/out/drops) via the shared aggregator.
+    const a = await this.aggregateTill(Number(sess.id));
+    const expectedCash = roundCurrency(a.expected_cash, 'THB');
+    const variance = roundCurrency(n(dto.closing_count) - expectedCash, 'THB');
     await db.update(tillSessions).set({
       closedBy: user.username, closedAt: new Date(), closingCount: fx(dto.closing_count, 4),
-      expectedCash: fx(expectedCash, 4), variance: fx(variance, 4), status: 'Closed',
+      expectedCash: fx(expectedCash, 4), variance: fx(variance, 4), denominations: dto.denominations ?? null, status: 'Closed',
     }).where(eq(tillSessions.id, sess.id));
-    return { session_no: dto.session_no, status: 'Closed', expected_cash: expectedCash, closing_count: n(dto.closing_count), variance };
+    return { session_no: dto.session_no, status: 'Closed', expected_cash: expectedCash, closing_count: n(dto.closing_count), variance, z_report: { ...a, counted_cash: n(dto.closing_count), variance, denominations: dto.denominations ?? null } };
+  }
+
+  // ── Cash management: drawer movements + X/Z shift report ──
+
+  // record a paid-in / paid-out / drop on an OPEN till; paid_in/out also post GL (drop is drawer-only).
+  async recordCashMovement(tillId: number, dto: CashMovementDto, user: JwtUser) {
+    const db = this.db as any;
+    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
+    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
+    if (String(sess.status) === 'Closed') throw new BadRequestException({ code: 'TILL_CLOSED', message: 'Till session is closed', messageTh: 'รอบเงินสดถูกปิดแล้ว' });
+    if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+    const movementNo = await this.docNo.nextDaily('CASHMOV');
+    const amt = roundCurrency(dto.amount, 'THB');
+    await db.insert(cashMovements).values({ movementNo, tenantId: sess.tenantId, tillSessionId: tillId, type: dto.type, amount: fx(amt, 4), reason: dto.reason ?? null, createdBy: user.username });
+    let journalNo: string | null = null;
+    if ((dto.type === 'paid_in' || dto.type === 'paid_out') && !(await this.ledger.alreadyPosted('CASHMOV', movementNo))) {
+      const lines = dto.type === 'paid_out'
+        ? [{ account_code: '5100', debit: amt }, { account_code: '1000', credit: amt }]
+        : [{ account_code: '1000', debit: amt }, { account_code: '5100', credit: amt }];
+      const je: any = await this.ledger.postEntry({ source: 'CASHMOV', sourceRef: movementNo, tenantId: sess.tenantId ?? null, memo: `Cash ${dto.type} ${movementNo}`, createdBy: user.username, lines });
+      journalNo = je?.entry_no ?? null;
+      await db.update(cashMovements).set({ journalNo }).where(eq(cashMovements.movementNo, movementNo));
+    }
+    return { movement_no: movementNo, type: dto.type, amount: n(amt), till_session_id: tillId, journal_no: journalNo };
+  }
+
+  // shared aggregation for X-report / Z-report / closeTill
+  private async aggregateTill(sessId: number) {
+    const db = this.db as any;
+    const captured = sql`${payments.status}::text IN ('Captured','Settled','Refunded')`;
+    const [gross] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured));
+    const byMethod = await db.select({ method: payments.method, amount: sql<string>`coalesce(sum(${payments.amount}),0)`, cnt: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured)).groupBy(payments.method);
+    const [cashSales] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`, sql`${payments.status}::text IN ('Captured','Refunded')`));
+    const [cashRefunds] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).innerJoin(payments, eq(paymentRefunds.paymentNo, payments.paymentNo)).where(and(eq(payments.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`));
+    const mv = await db.select({ type: cashMovements.type, v: sql<string>`coalesce(sum(${cashMovements.amount}),0)` }).from(cashMovements).where(eq(cashMovements.tillSessionId, sessId)).groupBy(cashMovements.type);
+    const paidIn = n(mv.find((m: any) => m.type === 'paid_in')?.v), paidOut = n(mv.find((m: any) => m.type === 'paid_out')?.v), drops = n(mv.find((m: any) => m.type === 'drop')?.v);
+    const [txn] = await db.select({ c: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured));
+    const [voids] = await db.select({ c: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), sql`${payments.status}::text = 'Voided'`));
+    const [sess] = await db.select({ f: tillSessions.openingFloat }).from(tillSessions).where(eq(tillSessions.id, sessId)).limit(1);
+    const openingFloat = n(sess?.f);
+    const expected = roundCurrency(openingFloat + n(cashSales?.v) + paidIn - paidOut - drops - n(cashRefunds?.v), 'THB');
+    return {
+      opening_float: openingFloat, gross_sales: roundCurrency(n(gross?.v), 'THB'),
+      by_method: byMethod.map((m: any) => ({ method: m.method, amount: roundCurrency(n(m.amount), 'THB'), count: Number(m.cnt) })),
+      cash_sales: roundCurrency(n(cashSales?.v), 'THB'), cash_refunds: roundCurrency(n(cashRefunds?.v), 'THB'),
+      paid_in: paidIn, paid_out: paidOut, drops, expected_cash: expected, txn_count: Number(txn?.c), void_count: Number(voids?.c),
+    };
+  }
+
+  // X-report — mid-shift, non-resetting, works on an open till. No writes.
+  async xReport(tillId: number, _user: JwtUser) {
+    const db = this.db as any;
+    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
+    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
+    const a = await this.aggregateTill(tillId);
+    return { report: 'X', session_no: sess.sessionNo, status: sess.status, ...a, counted_cash: null, variance: null };
+  }
+
+  // Z-report — shift summary at/after close.
+  async zReport(tillId: number, _user: JwtUser) {
+    const db = this.db as any;
+    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
+    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
+    const a = await this.aggregateTill(tillId);
+    const closed = String(sess.status) === 'Closed';
+    return { report: 'Z', session_no: sess.sessionNo, status: sess.status, ...a, counted_cash: closed ? n(sess.closingCount) : null, variance: closed ? n(sess.variance) : null, denominations: sess.denominations ?? null };
   }
 
   // GET /api/payments?sale_no= — all tenders attached to a sale.

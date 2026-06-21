@@ -78,6 +78,13 @@
       "when": 1782007973287,
       "tag": "0010_split_bill",
       "breakpoints": false
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1782007973288,
+      "tag": "0011_cash_management",
+      "breakpoints": false
     }
   ]
 }
