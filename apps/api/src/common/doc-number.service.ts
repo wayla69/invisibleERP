@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { docCounters, docCountersTenant } from '../database/schema';
 import { bizYmdCompact, bizStamp, bizHourMin } from './bizdate';
 
-type DailyType = 'PO' | 'GR' | 'ST' | 'PR' | 'DO' | 'RCP' | 'GRC' | 'AP' | 'RTN' | 'JE' | 'PAY' | 'REF' | 'TILL' | 'DIN' | 'TS' | 'FA' | 'DEP' | 'SPLIT' | 'CASHMOV';
+type DailyType = 'PO' | 'GR' | 'ST' | 'PR' | 'DO' | 'RCP' | 'GRC' | 'AP' | 'RTN' | 'JE' | 'PAY' | 'REF' | 'TILL' | 'DIN' | 'TS' | 'FA' | 'DEP' | 'SPLIT' | 'CASHMOV' | 'BANKSTMT' | 'BANKADJ';
 type MonthlyTenantType = 'TIV' | 'ATV' | 'WHT'; // tax invoice (full) / abbreviated / withholding cert
 
 /**

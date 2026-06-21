@@ -21,3 +21,4 @@ export * from './menu';
 export * from './split';
 export * from './cash';
 export * from './returns';
+export * from './bank';
