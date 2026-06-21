@@ -51,7 +51,14 @@ export class PortalPosService {
     const vat = taxCalc.tax;
     const total = roundCurrency(taxable + vat, 'THB');
 
-    const saleNo = this.docNo.nextTenantStamped('SALE', t.code);
+    // SALE- number, collision-safe: the second-precision stamp can clash for rapid sales → retry on a
+    // bumped second until cust_pos_sales.sale_no (UNIQUE) is free.
+    let saleNo = this.docNo.nextTenantStamped('SALE', t.code);
+    for (let attempt = 1; attempt < 12; attempt++) {
+      const [exists] = await (this.db as any).select({ id: custPosSales.id }).from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
+      if (!exists) break;
+      saleNo = this.docNo.nextTenantStamped('SALE', t.code, new Date(Date.now() + attempt * 1000));
+    }
     const today = ymd();
     const now = new Date();
 

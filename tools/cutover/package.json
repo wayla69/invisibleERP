@@ -13,6 +13,7 @@
     "splitbill": "tsx src/splitbill.ts",
     "cashreport": "tsx src/cashreport.ts",
     "pos-discount": "tsx src/pos-discount.ts",
+    "returns": "tsx src/returns.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",
