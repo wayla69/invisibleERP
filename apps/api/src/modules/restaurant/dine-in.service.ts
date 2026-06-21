@@ -168,8 +168,8 @@ export class DineInService {
 
   // staff cash checkout → convert to cust_pos_sales (tender Captured) + GL + abbreviated invoice
   async checkout(orderNo: string, dto: CheckoutDto, user: JwtUser) {
-    const o = await this.loadOrder(orderNo);
-    if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
+    const o = await this.loadOrderForUpdate(orderNo); // lock + re-check inside the request tx → no double-settle
+    if (['paid', 'closed', 'cancelled', 'partially_paid'].includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
     const saleNo = await this.mintSaleNo(o.tenantId);
     const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, { orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts });
     // tender (cash → mock gateway = Captured); link to the open till so cash ties to the drawer (Z-report)
@@ -227,7 +227,11 @@ export class DineInService {
       });
       journalNo = je?.entry_no ?? null;
       if (pe?.ok && pe.promoRowId) {
-        await db.update(promotions).set({ usedCount: sql`${promotions.usedCount} + 1` }).where(eq(promotions.id, pe.promoRowId));
+        // atomic cap: increment only while under max_uses (prevents read-then-increment over-redemption race)
+        const upd = await db.update(promotions).set({ usedCount: sql`${promotions.usedCount} + 1` })
+          .where(and(eq(promotions.id, pe.promoRowId), sql`(${promotions.maxUses} IS NULL OR ${promotions.usedCount} < ${promotions.maxUses})`))
+          .returning({ id: promotions.id });
+        if (!upd.length) throw new BadRequestException({ code: 'PROMO_EXHAUSTED', message: 'Promo usage limit reached', messageTh: 'โปรโมชันถูกใช้ครบจำนวนแล้ว' });
         await db.insert(promoRedemptions).values({ tenantId: o.tenantId ?? null, promoId: pe.promoRowId, promoCode: pe.promoCode, saleNo, orderNo: o.orderNo, discountAmount: fx(pe.discount, 2), appliedBy: user.username });
       }
     }
@@ -329,6 +333,14 @@ export class DineInService {
   async loadOrder(orderNo: string) {
     const db = this.db as any;
     const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).limit(1);
+    if (!o) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
+    return o;
+  }
+
+  // FOR UPDATE — used by settle paths so a concurrent double-submit serializes + re-checks status (no double-book).
+  async loadOrderForUpdate(orderNo: string) {
+    const db = this.db as any;
+    const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).for('update').limit(1);
     if (!o) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
     return o;
   }

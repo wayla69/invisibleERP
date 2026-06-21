@@ -37,6 +37,7 @@ export const arReceipts = pgTable('ar_receipts', {
 export const apTransactions = pgTable('ap_transactions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   txnNo: text('txn_no').notNull().unique(), // AP-
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // RLS — input VAT per shop (ภ.พ.30)
   vendorId: bigint('vendor_id', { mode: 'number' }).references(() => vendors.id),
   vendorName: text('vendor_name'), // เดิม Creditor_Name (denorm) — match by name OR id
   refDoc: text('ref_doc'),

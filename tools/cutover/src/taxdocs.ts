@@ -54,6 +54,7 @@ async function main() {
     { username: 'cust1', passwordHash: await pw.hash('pw1'), role: 'Customer', tenantId: t1 },
     { username: 'cust2', passwordHash: await pw.hash('pw2'), role: 'Customer', tenantId: t2 },
     { username: 'sales1', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 },
+    { username: 'proc2', passwordHash: await pw.hash('pw4'), role: 'Procurement', tenantId: t2 }, // T2 creditors (AP per shop)
   ]).onConflictDoNothing();
 
   // seed POS sales (VAT-separated) directly + items
@@ -167,6 +168,16 @@ async function main() {
   ok('Export รายงานภาษีขาย: title present', ovx.status === 200 && ovx.text.includes('รายงานภาษีขาย'));
   const ppx = await inj('GET', '/api/tax-reports/pp30/export?month=6&year=2026', admin);
   ok('Export ภ.พ.30: form present', ppx.status === 200 && ppx.text.includes('ภ.พ.30'));
+
+  // ── verify-fix #1 (input VAT tenant-scoped) + #6 (exempt AP = 0 input VAT) ──
+  const proc2 = await login('proc2', 'pw4');
+  await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้ขาย T2', txn_type: 'Service', invoice_no: 'PV-T2', invoice_date: '2026-06-21', amount: 2140 }); // T2 AP, input VAT 140
+  await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: 'ยกเว้นภาษี', txn_type: 'Service', invoice_no: 'PV-EX', invoice_date: '2026-06-21', amount: 1000, vat_treatment: 'exempt' }); // exempt → 0 input VAT
+  const ivT2 = await inj('GET', '/api/tax-reports/input-vat?month=6&year=2026', proc2);
+  ok('Fix#1: T2-scoped input VAT sees only T2 bill (vat 140, not T1/HQ)', near(ivT2.json.totals?.vat, 140) && ivT2.json.rows?.every((r: any) => r.doc_no?.startsWith('AP-')) && ivT2.json.rows?.some((r: any) => r.invoice_no === 'PV-T2') && !ivT2.json.rows?.some((r: any) => r.invoice_no === 'PV-1'), JSON.stringify(ivT2.json.totals));
+  const ivAll = await inj('GET', '/api/tax-reports/input-vat?month=6&year=2026', admin);
+  ok('Fix#1: HQ/bypass sees all tenants (70 + 140 + 0 = 210)', near(ivAll.json.totals?.vat, 210), JSON.stringify(ivAll.json.totals));
+  ok('Fix#6: exempt AP bill carries 0 input VAT', ivAll.json.rows?.some((r: any) => r.invoice_no === 'PV-EX' && near(r.vat, 0) && near(r.base, 1000)), JSON.stringify(ivAll.json.rows?.find((r: any) => r.invoice_no === 'PV-EX') ?? {}));
 
   await app.close();
   await pg.close();

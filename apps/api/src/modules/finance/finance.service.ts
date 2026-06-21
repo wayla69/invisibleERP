@@ -10,7 +10,7 @@ import { ymd, monthStart, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string }
-export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string }
+export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero' }
 
 @Injectable()
 export class FinanceService {
@@ -151,17 +151,20 @@ export class FinanceService {
     const paid = n(dto.paid_amount);
     const status = paid >= n(dto.amount) ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid';
     const apGross = n(dto.amount);
-    const { net, vat } = this.vatSplit(apGross); // input VAT — stored + posted to GL identically
+    // input VAT — exempt/zero-rated/non-VAT bills carry NO input VAT (else ภ.พ.30 overstates the credit).
+    const treatment = dto.vat_treatment ?? 'standard';
+    const { net, vat } = treatment === 'standard' ? this.vatSplit(apGross) : { net: apGross, vat: 0 };
+    const tenantId = user.tenantId ?? null; // input VAT is per shop (ภ.พ.30) → tenant-scoped like output VAT
     await db.insert(apTransactions).values({
-      txnNo, vendorId: dto.vendor_id ?? null, vendorName: dto.vendor_name ?? null, txnType: dto.txn_type ?? 'Invoice',
+      txnNo, tenantId, vendorId: dto.vendor_id ?? null, vendorName: dto.vendor_name ?? null, txnType: dto.txn_type ?? 'Invoice',
       invoiceNo: dto.invoice_no ?? null, invoiceDate: dto.invoice_date ?? null, dueDate: dto.due_date ?? null,
       amount: String(apGross), vatAmount: fx(vat, 2), paidAmount: String(paid), status, remarks: dto.remarks ?? null, createdBy: user.username,
     });
-    // GL: record expense + input VAT + payable (Dr 5100/1200 net / Dr 2100 vat / Cr 2000 gross)
+    // GL: record expense + input VAT + payable (Dr 5100/1200 net / Dr 2100 vat / Cr 2000 gross). Zero VAT leg auto-drops.
     if (this.ledger && apGross > 0) {
       const expenseAccount = (dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100';
       await this.ledger.postEntry({
-        date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId: null,
+        date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId,
         memo: `AP bill ${txnNo}${dto.vendor_name ? ' ' + dto.vendor_name : ''}`, createdBy: user.username,
         lines: [{ account_code: expenseAccount, debit: net }, { account_code: '2100', debit: vat }, { account_code: '2000', credit: apGross }],
       });

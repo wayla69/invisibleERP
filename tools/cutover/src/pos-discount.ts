@@ -132,6 +132,13 @@ async function main() {
   const inv = (await pg.query(`SELECT grand_total, discount FROM tax_invoices WHERE doc_no='${c4.json.tax_invoice_no}'`)).rows as any[];
   ok('Invoice grand_total = discounted total 192.60, discount 20', near(inv[0]?.grand_total, 192.60) && near(inv[0]?.discount, 20), JSON.stringify(inv));
 
+  // verify-fix #7: max_uses cap enforced (seed directly to dodge createPromotion's same-second id collision)
+  await db.insert(s.promotions).values({ promoId: 'PROMO-CAP', promoName: 'จำกัด', promoType: 'Percent', discountPct: '10', maxUses: 1, usedCount: 0, active: true }).onConflictDoNothing();
+  const cap1 = await checkout((await makeOrder(one(100))).order_no, { promo_code: 'PROMO-CAP' });
+  ok('Fix#7: promo within max_uses applies', cap1.json.promo_code === 'PROMO-CAP', `${cap1.status}`);
+  const cap2 = await checkout((await makeOrder(one(100))).order_no, { promo_code: 'PROMO-CAP' });
+  ok('Fix#7: promo over max_uses → 400 PROMO_EXHAUSTED', cap2.status === 400 && cap2.json.error?.code === 'PROMO_EXHAUSTED', `${cap2.status} ${cap2.json.error?.code}`);
+
   await app.close();
   await pg.close();
 

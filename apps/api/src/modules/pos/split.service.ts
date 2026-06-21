@@ -25,7 +25,7 @@ export class SplitBillService {
 
   // ── MULTI-TENDER: one bill, N tenders, GL posted once ──
   async payMulti(orderNo: string, dto: MultiTenderDto, user: JwtUser) {
-    const o = await this.dineIn.loadOrder(orderNo);
+    const o = await this.dineIn.loadOrderForUpdate(orderNo); // lock + re-check → no concurrent double-book
     if (SETTLED.includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
     const saleNo = await this.dineIn.mintSaleNo(o.tenantId);
     const built = await this.dineIn.buildSale(o, saleNo, dto.discount ?? 0, user); // GL posted ONCE here
@@ -64,7 +64,7 @@ export class SplitBillService {
 
   // ── SPLIT settle: N checks → N sales + N GL + N invoices ──
   async settleSplit(orderNo: string, dto: SplitSettleDto, user: JwtUser) {
-    const o = await this.dineIn.loadOrder(orderNo);
+    const o = await this.dineIn.loadOrderForUpdate(orderNo); // lock + re-check → no concurrent double-book
     if (SETTLED.includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
     const slices = await this.computeSlices(o, dto);
     const tenderBy = new Map<number, { method: string; gateway?: string }>();

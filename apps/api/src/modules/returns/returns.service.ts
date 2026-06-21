@@ -26,6 +26,10 @@ export class ReturnsService {
     if (dto.refund_method === 'None') throw new BadRequestException({ code: 'STORE_CREDIT_UNSUPPORTED', message: 'Store credit not supported yet', messageTh: 'ยังไม่รองรับเครดิตร้านค้า (Tier 2)' });
     const [sale] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, dto.sale_no)).limit(1);
     if (!sale) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sale not found', messageTh: 'ไม่พบรายการขาย' });
+    // LOCK the captured payment FIRST → concurrent returns on this sale serialize, so the over-return
+    // guard + refund + restock below all see each other's committed effect (no double-refund/restock).
+    const [pay] = await db.select().from(payments).where(and(eq(payments.saleNo, dto.sale_no), sql`${payments.status}::text IN ('Captured','Settled','Refunded')`)).orderBy(desc(payments.id)).for('update').limit(1);
+    if (!pay) throw new BadRequestException({ code: 'NO_CAPTURED_PAYMENT', message: 'No captured payment to refund', messageTh: 'คืนเงินไม่ได้: ไม่พบการชำระเงิน' });
     const saleItems = await db.select().from(custPosItems).where(eq(custPosItems.saleId, Number(sale.id)));
 
     // resolve each requested line to a sale line
@@ -56,10 +60,6 @@ export class ReturnsService {
     }
     const vatReturned = round2(n(sale.subtotal) > 0 ? n(sale.taxAmount) * (subtotalReturned / n(sale.subtotal)) : 0);
     const totalReturned = round2(subtotalReturned + vatReturned);
-
-    // resolve the captured payment for this sale
-    const [pay] = await db.select().from(payments).where(and(eq(payments.saleNo, dto.sale_no), sql`${payments.status}::text IN ('Captured','Settled','Refunded')`)).orderBy(desc(payments.id)).limit(1);
-    if (!pay) throw new BadRequestException({ code: 'NO_CAPTURED_PAYMENT', message: 'No captured payment to refund', messageTh: 'คืนเงินไม่ได้: ไม่พบการชำระเงิน' });
 
     const returnNo = await this.docNo.nextDaily('RTN');
     let refundNo: string | null = null;

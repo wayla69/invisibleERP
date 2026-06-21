@@ -5,7 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto } from './finance.service';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional() });
-const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional() });
+const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional(), vat_treatment: z.enum(['standard', 'exempt', 'zero']).optional() });
 const PayBody = z.object({ amount: z.number().positive() });
 
 @Controller('api/finance')
