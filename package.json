@@ -1,0 +1,22 @@
+{
+  "name": "invisible-erp-v2",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.8.0",
+  "description": "Invisible / Oshinei Enterprise ERP — V2 (TypeScript: NestJS + Next.js + Drizzle + PostgreSQL)",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev:api": "pnpm --filter @ierp/api dev",
+    "dev:web": "pnpm --filter @ierp/web dev",
+    "db:generate": "pnpm --filter @ierp/api db:generate",
+    "db:migrate": "pnpm --filter @ierp/api db:migrate",
+    "etl": "pnpm --filter @ierp/etl start"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

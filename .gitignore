@@ -1,0 +1,36 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build
+dist/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+secret.env
+
+# drizzle
+apps/api/drizzle/_journal*
+# (keep committed migrations under apps/api/drizzle/)
+
+# logs / os
+*.log
+.DS_Store
+Thumbs.db
+
+# workflow scaffolding (planning artifacts)
+_decision.json
+
+# data
+*.sqlite
+tools/etl/.cache/
+
+# stray compiled outputs next to TS sources
+/apps/api/drizzle.config.js
+/packages/shared/src/*.js

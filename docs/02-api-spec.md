@@ -1,0 +1,204 @@
+# 02 — V2 API / Endpoint Specification
+
+**Style:** REST, JSON. คง path `/api/*` เดิมทั้งหมด (mobile app เดิมพึ่งพา) + เพิ่ม write endpoints ที่เดิม Streamlit ทำในตัว
+**Validation:** Zod DTO ทุก endpoint (schema เดียวกับ AI tool input)
+**Auth:** `Authorization: Bearer <JWT>` ; JWT claims `{ sub, role, customerName, permissions[] }`
+**RBAC:** `@Roles()` / `@Permissions()` guard ; **TenantInterceptor** บังคับ scope ทุก resource ที่มี `tenant_id`
+**ทุก endpoint ต้อง auth** (แก้ช่องโหว่เดิมที่ data endpoints เปิดโล่ง) — ยกเว้น `POST /api/login`, `GET /`, `GET /api/config`
+
+---
+
+## Conventions
+
+**Error envelope** (สม่ำเสมอทุก endpoint):
+```json
+{ "error": { "code": "NOT_FOUND", "message": "...", "messageTh": "ไม่พบรายการ" } }
+```
+HTTP: 400 validation, 401 no/expired token, 403 RBAC/tenant, 404 not found, 409 conflict, 500.
+
+**Pagination:** `?limit=20&offset=0` → response `{ data: [...], count, total? }`
+**Filtering:** query params ตาม resource (status, search, dateFrom/dateTo)
+**Money:** `numeric(14,2)` คืนเป็น number; แสดง ฿ ที่ frontend
+**Dates:** ISO-8601 (`timestamptz`); ภายในเป็น Asia/Bangkok
+
+---
+
+## Auth & System
+
+| Method | Path | Body/Query | Response | หมายเหตุ |
+|---|---|---|---|---|
+| POST | `/api/login` | `{username, password}` | `{token, username, role, customer_name}` | argon2 verify (fallback sha256→rehash); error ไทย; JWT 30d |
+| GET | `/api/auth/me` | — | `{username, role, customer_name, permissions}` | |
+| GET | `/` | — | `{status, app, version}` | health (Railway) |
+| GET | `/api/config` | — | `{company_name, company_subtitle, theme_primary, theme_secondary, contact_tel, contact_email}` | |
+
+---
+
+## Read API (คง path เดิม — Phase 2)
+
+### Dashboard / Reports
+| Method | Path | Query | คืน |
+|---|---|---|---|
+| GET | `/api/dashboard` | — | today/month sales, low_stock_count, outstanding_ap, top_items_today, recent_orders |
+| GET | `/api/dashboard/sales-trend` | `days=7` | `{days, trend:[{date,sales,orders}]}` |
+| GET | `/api/reports/daily-sales` | `date?` | `{date, rows, count}` (LEFT JOIN lines) |
+| GET | `/api/reports/stock-summary` | — | latest snapshot items |
+
+### POS / Sales (read)
+| GET | `/api/pos/summary` | `start_date,end_date` | summary + avg_order_value + top_items + by_payment |
+| GET | `/api/pos/orders` | `limit,offset,status?` | `{orders, count}` |
+| GET | `/api/pos/orders/{sale_no}` | — | `{order, items}` (ทุกคอลัมน์) |
+| GET | `/api/pos/sessions` | — | `{sessions}` (derived Status='Open') |
+| GET | `/api/customers/{name}` | — | `{customer_name, orders, stats, ar_balance}` |
+
+### Inventory (read)
+| GET | `/api/inventory/stock` | `search?,low_only,limit` | `{snapshot_date, items, total, low_stock_count}` |
+| GET | `/api/inventory/stock/{item_id}` | — | `{item, snapshot_date, recent_sales, recent_pos, sales_30d}` |
+| GET | `/api/inventory/suppliers` `/{id}` | — | list / `{supplier, recent_pos, ap_balance, lifetime}` |
+| GET | `/api/inventory/purchase-orders` `/{po_no}` | `limit,offset,status?` | list / `{po, items}` |
+
+### Finance (read)
+| GET | `/api/finance/pl` | `month,year` | revenue/discounts/tax/net/gross_profit (คง Dec boundary หรือแก้+บันทึก) |
+| GET | `/api/finance/ap` | `status=Outstanding,limit,offset` | `{transactions, count, total_outstanding}` |
+| GET | `/api/finance/ar` | `limit,offset` | `{invoices, count, total_outstanding}` |
+| GET | `/api/finance/kpi` | — | mtd/ytd revenue+orders, ap/ar outstanding |
+
+### Notifications & Analytics
+| GET | `/api/notifications` | — | `{alerts:[{type,severity,title,subtitle,ref_id,data?}], counts}` — **ไทย** titles, ฿ format |
+| GET | `/api/analytics/replenishment` `/{item_id}` | `limit=50` | list `{items,count,critical,warning}` / `{...pred, insight}` |
+| GET | `/api/analytics/anomalies` | `days=30` | `get_anomaly_summary` shape |
+| POST | `/api/analytics/insight` | `{type, data}` | `{insight}` |
+| GET | `/api/analytics/dashboard-summary` | — | `{replenishment, anomalies, insight}` |
+
+### AI Chat
+| POST | `/api/chat` | `{message, history?, agent_type?}` | `{reply, history}` หรือ **SSE stream** — V2 ต่อ tools จริง (เดิมต่อไม่ได้) |
+
+---
+
+## Write API (ใหม่ — Phase 3) — RESTful ตาม resource
+
+> เดิม Streamlit เขียน DB ตรง ๆ; V2 ยกเป็น endpoint มี validation + RBAC + workflow state machine + DocNumberService
+
+### POS / Orders
+```
+POST   /api/pos/orders                 สร้าง sales order (cart lines) → SO-; loyalty earn; credit check
+PATCH  /api/orders/{order_no}/status   เปลี่ยนสถานะ (Pending→…→Cancelled); est_delivery rule
+DELETE /api/orders/{order_no}          (admin) ลบทั้ง order
+POST   /api/orders/{order_no}/export   {format: pdf|express_txt|csv} เอกสารไทย
+# Claims
+POST   /api/orders/{order_no}/claims          customer แจ้งเคลม (item-level + รูปบังคับ)
+PATCH  /api/claims/{id}                        admin Approve/Reject(+reason)
+POST   /api/orders/{order_no}/receive          รับครบ → Completed
+# Customer POS (portal)
+POST   /api/portal/pos/sales           SALE-; VAT 7%; ตัด customer_inventory; loyalty
+```
+
+### Procurement (PR → PO → GR)
+```
+POST   /api/procurement/prs                    PR (planner) → PR-
+PATCH  /api/procurement/prs/{pr_no}/approve    (admin)
+POST   /api/procurement/pos                     สร้าง PO → PO-
+POST   /api/procurement/pos/from-prs            แปลง PR→PO (+ blanket deliveries)
+PATCH  /api/procurement/pos/{po_no}/approve     (admin) approve/reject
+PATCH  /api/procurement/pos/{po_no}/cancel      (เหตุผลบังคับ; gate ถ้ามี GR)
+POST   /api/procurement/grs                      GR → GR-; +Received_Qty; lot ledger; auto-close PO
+POST   /api/procurement/gr-claims                GRC-; supplier claim
+PATCH  /api/procurement/gr-claims/{no}/resolve   supplier action
+POST   /api/suppliers                            (admin direct) / request→approve flow
+PATCH  /api/suppliers/{id}
+```
+
+### Warehouse / Inventory
+```
+POST   /api/inventory/movements        Issue/Transfer → MI-/TRF- (audit log, ไม่ตัด snapshot)
+POST   /api/inventory/stocktakes       ST- (Draft); save ทุกแถว
+POST   /api/inventory/scan-sessions    SCAN- (Open)
+POST   /api/inventory/scan-sessions/{no}/lines   เพิ่ม scan line
+POST   /api/inventory/scan-sessions/{no}/commit  close → stock movements
+POST   /api/inventory/adjust           ADJ- (AI/admin) stock adjustment
+# Lots / Locations
+POST   /api/inventory/locations                 add location
+POST   /api/inventory/transfers                 TRF- + update lot Location_ID
+GET    /api/inventory/lots ; /lots/{no}         ledger + trace (FEFO/FIFO)
+# Master data (เดิม CSV → ตาราง items)
+GET/POST/PATCH/DELETE /api/inventory/items      master CRUD; upsert by item_id
+POST   /api/inventory/items/import              Excel/CSV (Replace|Append)
+POST   /api/inventory/snapshots/import          ingest stock snapshot (แทน Init_Historical_DB)
+# Images → object storage
+POST   /api/inventory/items/{id}/image
+DELETE /api/inventory/items/{id}/image
+```
+
+### Finance (AR / AP)
+```
+POST   /api/finance/ar/sync            generate invoices (เดิม _sync on load) INV-{order_no}
+POST   /api/finance/ar/receipts        RCP-; update Paid_Amount/Status
+POST   /api/finance/creditors          creditor CRUD
+POST   /api/finance/ap/transactions    AP-; Invoice/Payment
+PATCH  /api/finance/ap/transactions/{no}/pay
+GET    /api/finance/ar/aging ; /ap/aging   aging buckets (Not Due/1-30/31-60/61-90/>90)
+```
+
+### Sales Ops
+```
+POST   /api/delivery-orders            DO-; POD upload; ไม่ตัด stock
+PATCH  /api/delivery-orders/{no}/status  + POD image (Delivered stamps time)
+POST   /api/returns                     RTN-; Return_To_Stock → movement
+POST   /api/price-list                  effective price rule; "All Customers"=''
+POST   /api/promotions                  6 types; Item_IDs
+PATCH  /api/promotions/{id}/toggle
+```
+
+### BOM
+```
+GET/POST/PATCH/DELETE /api/bom/master           BOM กลาง + lines (costing)
+POST   /api/bom/master/push                     push to customers (idempotent)
+GET    /api/bom/submissions                     queue
+PATCH  /api/bom/submissions/{id}/approve        → master
+# Portal BOM
+GET/POST /api/portal/bom                         tenant BOM (dual-write submissions)
+POST   /api/portal/bom/{code}/production-runs    PRD-; consume/produce inventory
+POST   /api/portal/variance                      EOD count → overwrite stock
+```
+
+### Portal — Inventory / Pending / Mini-ERP
+```
+GET/POST/PATCH /api/portal/inventory             customer_inventory + reorder rules
+POST   /api/portal/pending-orders                Draft auto-reorder
+PATCH  /api/portal/pending-orders/{no}/submit    → order_cart
+GET/POST/DELETE /api/portal/my/customers         (Owner_Customer)
+GET/POST/DELETE /api/portal/my/suppliers
+POST   /api/portal/my/purchase-orders            MPO-
+GET/POST/DELETE /api/portal/my/users             sub-account (permission bundles)
+```
+
+### Marketing / Loyalty / Survey
+```
+POST   /api/marketing/campaigns ; PATCH /{id}/toggle      Popup/Ticker/Banner; image
+POST   /api/marketing/campaigns/{id}/target               targeted push
+GET    /api/marketing/segments                            RFM segmentation
+POST   /api/marketing/ab-tests                            A/B (2 variants)
+POST   /api/marketing/abandoned-carts/remind
+PUT    /api/loyalty/config                                singleton config
+POST   /api/loyalty/redeem                                Min_Redeem; sets discount
+GET    /api/loyalty/me                                    customer balance/txn
+POST   /api/surveys ; POST /api/surveys/{id}/responses    NPS/CSAT
+GET    /api/campaigns/active                              popup/ticker สำหรับ portal load
+```
+
+### Admin (Users / RBAC)
+```
+GET/POST/PATCH/DELETE /api/admin/users           (admin delete-protected)
+PUT    /api/admin/users/{username}/permissions   per-user override (empty=inherit)
+GET/PUT /api/admin/roles/{role}/permissions      role defaults (Admin full hardcoded)
+GET/POST/PATCH/DELETE /api/customers             internal CRM (Credit_Term/Limit/Hold)
+```
+
+---
+
+## หมายเหตุการ map สำคัญ
+
+- **`/api/chat`** เดิมเป็น LLM passthrough (ดึง DB ไม่ได้) — V2 ต่อ AgentService ให้เรียก tools จริง ⇒ behavior ดีขึ้น (ระบุใน release note ว่าเป็น improvement ตั้งใจ)
+- **Page-only totals** (`/api/finance/ap|ar` รวมเฉพาะหน้า) — คงพฤติกรรมหรือเพิ่ม `grandTotal` แยก field (อย่าเปลี่ยนความหมาย field เดิมเงียบ ๆ)
+- **Supplier match by name OR id** (`/api/inventory/suppliers/{id}` drill-down) — คงตรรกะจน schema consolidate supplier/creditor เสร็จ
+- **เลขเอกสารทุกชนิด** ออกผ่าน `DocNumberService` (sequence) แต่ string ที่คืนต้องตรงรูปแบบเดิม (ดู [docs/03](03-database-schema.md) §doc-numbering)

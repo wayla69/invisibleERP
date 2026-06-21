@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": false,
+    "noUncheckedIndexedAccess": false,
+    "types": ["node", "reflect-metadata"],
+    "paths": {}
+  },
+  "include": ["src/**/*"]
+}
