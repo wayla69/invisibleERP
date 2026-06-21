@@ -12,6 +12,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { TaxInvoiceService } from '../tax-docs/tax-invoice.service';
 import { MenuService } from '../menu/menu.service';
 import { RecipeService } from '../menu/recipe.service';
+import { MemberService } from '../loyalty/member.service';
 import { PromoEngineService } from '../marketing/promo-engine.service';
 import { promotions, promoRedemptions } from '../../database/schema';
 import { roundCurrency } from '../tax/money';
@@ -33,6 +34,7 @@ export class DineInService {
     private readonly menu: MenuService,
     private readonly promo: PromoEngineService,
     private readonly recipe: RecipeService,
+    private readonly member: MemberService,
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -172,18 +174,28 @@ export class DineInService {
   async checkout(orderNo: string, dto: CheckoutDto, user: JwtUser) {
     const o = await this.loadOrderForUpdate(orderNo); // lock + re-check inside the request tx → no double-settle
     if (['paid', 'closed', 'cancelled', 'partially_paid'].includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
+    // loyalty: validate the redeem quote BEFORE building the sale (throws on disabled / not-found / cross-tenant /
+    // insufficient balance) so an over-redeem is rejected and no sale row is created.
+    let pointsRedeem: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number } | undefined;
+    if (dto.member_id && (dto.redeem_points ?? 0) > 0) {
+      const q = await this.member.quoteRedeem(dto.member_id, dto.redeem_points!, user);
+      pointsRedeem = { memberId: dto.member_id, points: dto.redeem_points!, bahtPerPoint: q.bahtPerPoint, redeemValue: q.redeemValue };
+    }
     const saleNo = await this.mintSaleNo(o.tenantId);
-    const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, { orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts });
-    // tender (cash → mock gateway = Captured); link to the open till so cash ties to the drawer (Z-report)
+    const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, { orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts, memberId: dto.member_id, pointsRedeem });
+    // tender (cash → mock gateway = Captured); link to the open till so cash ties to the drawer (Z-report).
+    // A fully points-redeemed bill (total 0) needs no tender — skip it (recordTender rejects non-positive amounts).
     const openTill = o.tenantId != null ? await this.payments.currentOpenTill(o.tenantId) : null;
-    const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: built.total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user);
+    const tender: any = built.total > 0
+      ? await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: built.total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user)
+      : null;
     const inv = await this.markPaidAndInvoice(o, saleNo, user);
     return { order_no: orderNo, sale_no: saleNo, ...built, payment_no: tender?.payment_no ?? null, payment_status: tender?.status ?? null, tax_invoice_no: inv };
   }
 
   // shared: insert cust_pos_sales + items + GL from a dine-in order, applying line/order/promo discounts.
   // VAT is on the discounted base (Thai rule). opts is optional → no-discount path matches the old behavior.
-  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number }) {
+  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number; memberId?: number; pointsRedeem?: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number } }) {
     const db = this.db as any;
     const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, Number(o.id)), ne(dineInOrderItems.kdsStatus, 'voided')));
@@ -212,12 +224,21 @@ export class DineInService {
     const effTotalPct = grossSum > 0 ? (lineDiscTotal + orderDisc) / grossSum * 100 : 0;
     if (effTotalPct > maxPct + 0.001) throw new BadRequestException({ code: 'DISCOUNT_OVER_LIMIT', message: `Total discount ${r2(effTotalPct)}% exceeds limit ${maxPct}%`, messageTh: 'ส่วนลดเกินเพดานที่อนุญาต' });
 
-    const taxable = Math.max(0, roundCurrency(subtotalNet - orderDisc, 'THB'));
+    // loyalty points redemption — applied AFTER line+order discount, clamped to the remaining bill, and
+    // EXEMPT from the markdown cap (a member spending their own points is a settlement, not a markdown).
+    // VAT is charged on the post-redemption base (Thai-correct). actualRedeemPoints back-computes what the
+    // bill could actually absorb so we never consume more points than the discount realized.
+    let pointsDisc = 0, actualRedeemPoints = 0;
+    if (opts?.pointsRedeem && opts.pointsRedeem.redeemValue > 0) {
+      pointsDisc = roundCurrency(Math.min(opts.pointsRedeem.redeemValue, subtotalNet - orderDisc), 'THB');
+      actualRedeemPoints = opts.pointsRedeem.bahtPerPoint > 0 ? Math.round(pointsDisc / opts.pointsRedeem.bahtPerPoint) : 0;
+    }
+    const taxable = Math.max(0, roundCurrency(subtotalNet - orderDisc - pointsDisc, 'THB'));
     const vat = this.tax.calcTax({ net: taxable, country: 'TH' }).tax;
     const total = roundCurrency(taxable + vat, 'THB');
     const [h] = await db.insert(custPosSales).values({
-      saleNo, saleDate: ymd(), tenantId: o.tenantId, subtotal: fx(subtotalNet, 2), discount: fx(orderDisc, 2),
-      taxAmount: fx(vat, 2), total: fx(total, 2), paymentMethod: 'Dine-in', pointsUsed: '0', pointsEarned: '0',
+      saleNo, saleDate: ymd(), tenantId: o.tenantId, subtotal: fx(subtotalNet, 2), discount: fx(roundCurrency(orderDisc + pointsDisc, 'THB'), 2),
+      taxAmount: fx(vat, 2), total: fx(total, 2), paymentMethod: 'Dine-in', pointsUsed: String(actualRedeemPoints), pointsEarned: '0',
       status: 'Completed', notes: `Dine-in ${o.orderNo}`, createdBy: user.username,
     }).returning({ id: custPosSales.id });
     await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h.id), ...r })));
@@ -244,7 +265,15 @@ export class DineInService {
     if (recipeCogs > 0 && !(await this.ledger.alreadyPosted('POS-COGS', saleNo))) {
       await this.ledger.postEntry({ source: 'POS-COGS', sourceRef: saleNo, tenantId: o.tenantId, memo: `COGS ${saleNo}`, createdBy: user.username, lines: [{ account_code: '5300', debit: recipeCogs }, { account_code: '1200', credit: recipeCogs }] });
     }
-    return { subtotal: subtotalNet, discount: orderDisc, vat, total, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal };
+    // loyalty member: earn on the net spend + redeem the actually-consumed points — both inside the request
+    // tx so a rollback un-does the points sub-ledger too. Revenue-reduction model → no GL footprint here.
+    let pointsEarned = 0;
+    if (opts?.memberId) {
+      pointsEarned = await this.member.earnInTx(db, o.tenantId, opts.memberId, taxable, saleNo, user.username);
+      if (pointsEarned > 0) await db.update(custPosSales).set({ pointsEarned: String(pointsEarned) }).where(eq(custPosSales.id, h.id));
+      if (actualRedeemPoints > 0) await this.member.redeemInTx(db, o.tenantId, opts.memberId, actualRedeemPoints, pointsDisc, saleNo, user.username);
+    }
+    return { subtotal: subtotalNet, discount: roundCurrency(orderDisc + pointsDisc, 'THB'), vat, total, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal, points_used: actualRedeemPoints, points_earned: pointsEarned };
   }
 
   // mark order paid + close table/session + idempotent abbreviated tax invoice

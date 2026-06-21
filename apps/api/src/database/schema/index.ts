@@ -17,6 +17,7 @@ export * from './budgets';
 export * from './revenue';
 export * from './fx';
 export * from './intercompany';
+export * from './loyalty-members';
 export * from './payments';
 export * from './billing';
 export * from './tax-docs';

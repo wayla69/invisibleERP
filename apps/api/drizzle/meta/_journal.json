@@ -169,6 +169,13 @@
       "when": 1782007973300,
       "tag": "0023_promotions_tenant",
       "breakpoints": false
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1782007973301,
+      "tag": "0024_loyalty_members",
+      "breakpoints": false
     }
   ]
 }

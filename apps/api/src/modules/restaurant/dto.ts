@@ -40,6 +40,8 @@ export const CheckoutBody = z.object({
   discount_pct: z.number().min(0).max(100).optional(),  // order-level PERCENT
   promo_code: z.string().optional(),
   line_discounts: z.record(z.string(), z.object({ discount_pct: z.number().min(0).max(100).optional(), discount_amt: z.number().nonnegative().optional() })).optional(), // { "<orderItemId>": {...} }
+  member_id: z.number().int().positive().optional(),    // loyalty member earning/redeeming on this sale
+  redeem_points: z.number().int().nonnegative().optional(),
 }).refine((d) => !(d.discount != null && d.discount_pct != null), { message: 'provide order discount amount or percent, not both' });
 export type CheckoutDto = z.infer<typeof CheckoutBody>;
 
