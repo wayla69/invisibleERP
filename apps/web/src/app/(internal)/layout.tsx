@@ -9,6 +9,8 @@ import { useMe, hasPerm } from '@/lib/auth';
 const NAV = [
   { label: '📊 Dashboard', href: '/dashboard', perms: ['dashboard', 'exec'] },
   { label: '🛒 POS', href: '/pos', perms: ['pos', 'order_mgt'] },
+  { label: '🍽️ โต๊ะ', href: '/tables', perms: ['pos', 'order_mgt'] },
+  { label: '🍳 ครัว (KDS)', href: '/kds', perms: ['pos'] },
   { label: '📦 Inventory', href: '/inventory', perms: ['warehouse', 'dashboard', 'planner'] },
   { label: '🏢 Suppliers', href: '/inventory/suppliers', perms: ['procurement', 'warehouse'] },
   { label: '🧾 Purchase Orders', href: '/inventory/purchase-orders', perms: ['procurement'] },

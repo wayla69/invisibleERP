@@ -30,3 +30,15 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   }
   return body as T;
 }
+
+// Public client — NO Authorization header. For the unauthenticated diner QR page (the table-session
+// token is in the URL path; the server scopes the tenant from it).
+export async function publicApi<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = body?.error?.messageTh ?? body?.error?.message ?? `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return body as T;
+}
