@@ -1,0 +1,28 @@
+{
+  "name": "@ierp/parity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-parity check: V2 services (real code) vs SQLite-derived expected, on PGlite",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "writeflow": "tsx src/writeflow.ts",
+    "analytics": "tsx src/analytics.ts",
+    "typecheck": "echo \"(parity: validated by running against dist; tsc skipped — imports compiled .js)\"",
+    "lint": "echo \"(lint placeholder)\"",
+    "build": "echo \"(parity: run via tsx)\""
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.2.13",
+    "@ierp/shared": "workspace:*",
+    "@nestjs/common": "^10.4.4",
+    "@nestjs/config": "^3.2.3",
+    "drizzle-orm": "^0.36.4",
+    "postgres": "^3.4.4",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
