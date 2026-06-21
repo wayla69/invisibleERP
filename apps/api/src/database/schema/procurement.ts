@@ -1,5 +1,6 @@
 import { pgTable, bigserial, bigint, text, numeric, integer, date, timestamp, boolean } from 'drizzle-orm/pg-core';
 import { poStatusEnum } from './enums';
+import { tenants } from './tenants';
 
 // รวม tbl_suppliers + tbl_creditors (overlapping vendor masters)
 export const vendors = pgTable('vendors', {
@@ -23,6 +24,70 @@ export const vendors = pgTable('vendors', {
   category: text('category').default('Supplier'),
   active: boolean('active').default(true),
   notes: text('notes'),
+  // Phase 16 — supplier screening
+  approvalStatus: text('approval_status').notNull().default('approved'), // approved | pending | blocked
+  blocklisted: boolean('blocklisted').notNull().default(false),
+  blocklistReason: text('blocklist_reason'),
+  scorecardScore: numeric('scorecard_score', { precision: 5, scale: 2 }),
+});
+
+// ── Phase 16 — Source-to-Pay: RFQ/sourcing, supplier scorecards, 3-way match ──
+export const rfqs = pgTable('rfqs', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  rfqNo: text('rfq_no').notNull().unique(),
+  rfqDate: date('rfq_date'), status: text('status').notNull().default('Open'), // Open | Awarded | Cancelled
+  requiredDate: date('required_date'), remarks: text('remarks'), createdBy: text('created_by'),
+  awardedQuoteId: bigint('awarded_quote_id', { mode: 'number' }),
+});
+export const rfqItems = pgTable('rfq_items', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  rfqId: bigint('rfq_id', { mode: 'number' }).references(() => rfqs.id),
+  itemId: text('item_id'), itemDescription: text('item_description'), qty: numeric('qty'), uom: text('uom'),
+});
+export const supplierQuotes = pgTable('supplier_quotes', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  quoteNo: text('quote_no').notNull().unique(), rfqId: bigint('rfq_id', { mode: 'number' }).references(() => rfqs.id),
+  vendorId: bigint('vendor_id', { mode: 'number' }).references(() => vendors.id), vendorName: text('vendor_name'),
+  quoteDate: date('quote_date'), validUntil: date('valid_until'), leadTimeDays: integer('lead_time_days'),
+  totalAmount: numeric('total_amount', { precision: 14, scale: 2 }), status: text('status').notNull().default('Submitted'), // Submitted | Awarded | Rejected
+  createdBy: text('created_by'),
+});
+export const supplierQuoteItems = pgTable('supplier_quote_items', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  quoteId: bigint('quote_id', { mode: 'number' }).references(() => supplierQuotes.id),
+  itemId: text('item_id'), itemDescription: text('item_description'), qty: numeric('qty'), unitPrice: numeric('unit_price', { precision: 14, scale: 2 }), uom: text('uom'),
+});
+export const supplierScorecards = pgTable('supplier_scorecards', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), vendorId: bigint('vendor_id', { mode: 'number' }).references(() => vendors.id),
+  period: text('period'), onTimePct: numeric('on_time_pct', { precision: 5, scale: 2 }), qualityPct: numeric('quality_pct', { precision: 5, scale: 2 }),
+  priceVarPct: numeric('price_var_pct', { precision: 5, scale: 2 }), score: numeric('score', { precision: 5, scale: 2 }),
+  grCount: integer('gr_count').default(0), claimCount: integer('claim_count').default(0), createdBy: text('created_by'),
+});
+export const matchTolerance = pgTable('match_tolerance', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  qtyPct: numeric('qty_pct', { precision: 6, scale: 3 }).notNull().default('0'), pricePct: numeric('price_pct', { precision: 6, scale: 3 }).notNull().default('2'),
+  amountPct: numeric('amount_pct', { precision: 6, scale: 3 }).notNull().default('2'), amountAbs: numeric('amount_abs', { precision: 14, scale: 2 }).notNull().default('0.50'),
+  updatedBy: text('updated_by'),
+});
+export const invoiceMatchResults = pgTable('invoice_match_results', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), matchNo: text('match_no').notNull().unique(),
+  txnNo: text('txn_no').notNull().unique(), poNo: text('po_no'), matchStatus: text('match_status').notNull(),
+  payable: boolean('payable').notNull().default(false), override: boolean('override').notNull().default(false),
+  overrideBy: text('override_by'), overrideReason: text('override_reason'), overrideAt: timestamp('override_at', { withTimezone: true }),
+  matchedBy: text('matched_by'), matchedAt: timestamp('matched_at', { withTimezone: true }).defaultNow(),
+});
+export const invoiceMatchLines = pgTable('invoice_match_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  matchId: bigint('match_id', { mode: 'number' }).references(() => invoiceMatchResults.id), itemId: text('item_id'),
+  invQty: numeric('inv_qty'), invPrice: numeric('inv_price', { precision: 14, scale: 2 }), poQty: numeric('po_qty'),
+  poPrice: numeric('po_price', { precision: 14, scale: 2 }), grQty: numeric('gr_qty'),
+  qtyVarPct: numeric('qty_var_pct', { precision: 8, scale: 3 }), priceVarPct: numeric('price_var_pct', { precision: 8, scale: 3 }),
+  lineStatus: text('line_status').notNull(),
 });
 
 export const supplierRequests = pgTable('supplier_requests', {

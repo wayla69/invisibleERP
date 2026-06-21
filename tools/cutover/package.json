@@ -28,6 +28,7 @@
     "offline-sync": "tsx src/offline-sync.ts",
     "channel": "tsx src/channel.ts",
     "workflow": "tsx src/workflow.ts",
+    "match": "tsx src/match.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

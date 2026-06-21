@@ -40,6 +40,8 @@ import { FxModule } from './modules/fx/fx.module';
 import { IntercompanyModule } from './modules/intercompany/intercompany.module';
 import { GiftCardsModule } from './modules/giftcards/gift-card.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
+import { MatchModule } from './modules/match/match.module';
+import { SourcingModule } from './modules/sourcing/sourcing.module';
 
 @Module({
   imports: [
@@ -80,6 +82,8 @@ import { WorkflowModule } from './modules/workflow/workflow.module';
     IntercompanyModule,
     GiftCardsModule,
     WorkflowModule,
+    MatchModule,
+    SourcingModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions

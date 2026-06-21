@@ -1,7 +1,7 @@
-import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -67,6 +67,39 @@ export class ProcurementService {
     return { pr_no: prNo, status: newStatus };
   }
 
+  // ── Supplier screening (Phase 16) ───────────────────────────────────
+  // blocklisted or non-approved vendor → 422; unknown/freeform vendor (no master row) → allowed.
+  async assertSupplierAllowed(vendorId: number | null, vendorName: string | null) {
+    const db = this.db as any;
+    let v: any = null;
+    if (vendorId) [v] = await db.select().from(vendors).where(eq(vendors.id, vendorId)).limit(1);
+    else if (vendorName) [v] = await db.select().from(vendors).where(eq(vendors.name, vendorName)).limit(1);
+    if (!v) return;
+    if (v.blocklisted || String(v.approvalStatus) !== 'approved') {
+      throw new UnprocessableEntityException({ code: 'SUPPLIER_BLOCKED', message: `Supplier ${v.name} is ${v.blocklisted ? 'blocklisted' : v.approvalStatus}`, messageTh: `ผู้ขายถูกระงับ (${v.name})` });
+    }
+  }
+  async setSupplierStatus(vendorId: number, dto: { approval_status?: string; blocklisted?: boolean; reason?: string }, _user: JwtUser) {
+    const db = this.db as any;
+    const set: any = {};
+    if (dto.approval_status != null) set.approvalStatus = dto.approval_status;
+    if (dto.blocklisted != null) { set.blocklisted = dto.blocklisted; set.blocklistReason = dto.reason ?? null; }
+    await db.update(vendors).set(set).where(eq(vendors.id, vendorId));
+    return { vendor_id: vendorId, approval_status: dto.approval_status, blocklisted: dto.blocklisted };
+  }
+  // simple rolling scorecard from GR activity (on-time/quality placeholders until claims feed it)
+  async recomputeScorecard(vendorId: number, period: string, user: JwtUser) {
+    const db = this.db as any;
+    const [g] = await db.select({ c: sql<string>`count(*)` }).from(goodsReceipts).where(eq(goodsReceipts.vendorId, vendorId));
+    const grCount = Number(g?.c ?? 0);
+    const onTime = 100, quality = 100, priceVar = 0;
+    const score = Math.round(((onTime + quality + (100 - priceVar)) / 3) * 100) / 100;
+    await db.insert(supplierScorecards).values({ tenantId: user.tenantId ?? null, vendorId, period, onTimePct: String(onTime), qualityPct: String(quality), priceVarPct: String(priceVar), score: String(score), grCount, claimCount: 0, createdBy: user.username })
+      .onConflictDoUpdate({ target: [supplierScorecards.vendorId, supplierScorecards.period], set: { score: String(score), grCount } });
+    await db.update(vendors).set({ scorecardScore: String(score) }).where(eq(vendors.id, vendorId));
+    return { vendor_id: vendorId, period, score, gr_count: grCount };
+  }
+
   // ── PO ──────────────────────────────────────────────────────────────
   async createPo(dto: CreatePoDto, user: JwtUser) {
     const db = this.db as any;
@@ -80,6 +113,7 @@ export class ProcurementService {
       const [v] = await db.select().from(vendors).where(eq(vendors.id, vendorId)).limit(1);
       vendorName = v?.name ?? null;
     }
+    await this.assertSupplierAllowed(vendorId, vendorName); // Phase 16 — blocklisted/unapproved vendor → 422
     const total = dto.items.reduce((a, it) => a + n(it.order_qty) * n(it.unit_price), 0);
     const poNo = await this.docNo.nextDaily('PO');
     await db.transaction(async (tx: any) => {

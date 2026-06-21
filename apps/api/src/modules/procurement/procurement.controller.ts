@@ -19,6 +19,8 @@ const GrBody = z.object({
 });
 const ApproveBody = z.object({ approve: z.boolean().default(true), reason: z.string().optional() });
 const CancelBody = z.object({ reason: z.string().min(1) });
+const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
+const ScorecardBody = z.object({ period: z.string().min(1) });
 
 @Controller('api/procurement')
 export class ProcurementController {
@@ -31,6 +33,12 @@ export class ProcurementController {
   approvePr(@Param('prNo') prNo: string, @Body(new ZodValidationPipe(ApproveBody)) b: { approve: boolean }, @CurrentUser() u: JwtUser) {
     return this.svc.approvePr(prNo, b.approve, u);
   }
+
+  // ── supplier screening (Phase 16) ──
+  @Patch('suppliers/:id/status') @Permissions('masterdata')
+  setSupplierStatus(@Param('id') id: string, @Body(new ZodValidationPipe(SupplierStatusBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setSupplierStatus(+id, b, u); }
+  @Post('suppliers/:id/scorecard') @Permissions('procurement')
+  scorecard(@Param('id') id: string, @Body(new ZodValidationPipe(ScorecardBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.recomputeScorecard(+id, b.period, u); }
 
   @Post('pos') @Permissions('procurement')
   createPo(@Body(new ZodValidationPipe(PoBody)) b: CreatePoDto, @CurrentUser() u: JwtUser) { return this.svc.createPo(b, u); }

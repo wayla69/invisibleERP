@@ -3,5 +3,5 @@ import { ProcurementController } from './procurement.controller';
 import { ProcurementService } from './procurement.service';
 import { WorkflowModule } from '../workflow/workflow.module';
 
-@Module({ imports: [WorkflowModule], controllers: [ProcurementController], providers: [ProcurementService] })
+@Module({ imports: [WorkflowModule], controllers: [ProcurementController], providers: [ProcurementService], exports: [ProcurementService] })
 export class ProcurementModule {}

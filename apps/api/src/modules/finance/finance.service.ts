@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxService } from '../tax/tax.service';
+import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { ymd, monthStart, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -22,6 +23,7 @@ export class FinanceService {
     // still compiles; when absent, GL posting is skipped (sub-ledger behaviour unchanged).
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly tax?: TaxService,
+    @Optional() private readonly matchSvc?: ThreeWayMatchService, // Phase 16 — gates AP pay on 3-way match
   ) {}
 
   // VAT back-out (7/107) — prefer TaxService.calcInclusive when injected
@@ -178,6 +180,8 @@ export class FinanceService {
     const db = this.db as any;
     const [t] = await db.select().from(apTransactions).where(eq(apTransactions.txnNo, txnNo)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
+    // Phase 16 — 3-way match gate: a PO-based invoice must pass match (or be overridden) before payment.
+    if (this.matchSvc) await this.matchSvc.assertPayable(txnNo);
     const newPaid = n(t.paidAmount) + n(amount);
     const status = newPaid >= n(t.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
     await db.update(apTransactions).set({ paidAmount: String(newPaid), status }).where(eq(apTransactions.id, t.id));
