@@ -97,29 +97,25 @@ export class PortalPosService {
       }
     });
 
-    // record the money-movement tender (move #3) + post to the General Ledger (move #2) — best-effort
-    let paymentNo: string | null = null;
-    let journalNo: string | null = null;
-    try {
-      const tender: any = await this.payments.recordTender(
-        { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock' },
-        user,
-      );
-      paymentNo = tender?.payment_no ?? null;
-    } catch { /* tender failure must not lose the committed sale; reconcile later */ }
-    try {
-      const je: any = await this.ledger.postEntry({
-        source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
-        lines: [
-          { account_code: '1000', debit: total },   // Dr Cash
-          { account_code: '4000', credit: taxable }, // Cr Sales Revenue
-          { account_code: '2100', credit: vat },     // Cr Tax Payable
-        ],
-      });
-      journalNo = je?.entry_no ?? null;
-    } catch { /* GL posting issues surface via reconciliation, not by failing the sale */ }
+    // Tender (move #3) + GL posting (move #2) are part of the sale's atomicity — same request tx.
+    // We do NOT swallow their errors: a swallowed DB failure here poisons the request tx (Postgres
+    // aborts it), so the interceptor's COMMIT becomes a ROLLBACK and we'd return 200 + sale_no for a
+    // sale that was never persisted (phantom sale). Letting them propagate rolls the whole sale back
+    // atomically — no sale without its money + books.
+    const tender: any = await this.payments.recordTender(
+      { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock' },
+      user,
+    );
+    const je: any = await this.ledger.postEntry({
+      source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
+      lines: [
+        { account_code: '1000', debit: total },   // Dr Cash
+        { account_code: '4000', credit: taxable }, // Cr Sales Revenue
+        { account_code: '2100', credit: vat },     // Cr Tax Payable
+      ],
+    });
 
-    return { sale_no: saleNo, subtotal, discount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: paymentNo, journal_no: journalNo };
+    return { sale_no: saleNo, subtotal, discount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
   }
 
   // GET /api/portal/pos/sales — history (this tenant)

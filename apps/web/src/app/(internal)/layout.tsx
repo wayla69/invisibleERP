@@ -14,10 +14,13 @@ const NAV = [
   { label: '🧾 Purchase Orders', href: '/inventory/purchase-orders', perms: ['procurement'] },
   { label: '🛒 Procurement', href: '/procurement', perms: ['procurement'] },
   { label: '💵 Finance', href: '/finance', perms: ['ar', 'creditors', 'exec'] },
+  { label: '📒 บัญชี (GL)', href: '/accounting', perms: ['exec', 'creditors', 'ar'] },
   { label: '📣 Marketing', href: '/marketing', perms: ['marketing'] },
   { label: '🔬 BoM', href: '/bom', perms: ['bom_master'] },
   { label: '⭐ Loyalty', href: '/loyalty', perms: ['loyalty', 'marketing'] },
   { label: '🤖 AI Assistant', href: '/assistant', perms: ['ai_chat', 'dashboard'] },
+  { label: '💳 แพ็กเกจ', href: '/billing', perms: ['users'] },
+  { label: '⚙️ ตั้งค่า', href: '/settings', perms: ['users'] },
 ];
 
 export default function InternalLayout({ children }: { children: React.ReactNode }) {

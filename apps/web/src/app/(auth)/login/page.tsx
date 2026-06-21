@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { api, setToken } from '@/lib/api';
 
 export default function LoginPage() {
@@ -58,6 +59,9 @@ export default function LoginPage() {
             {loading ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
           </button>
         </form>
+        <p className="label" style={{ textAlign: 'center', marginTop: 14 }}>
+          ยังไม่มีบัญชี? <Link href="/signup" style={{ color: 'var(--navy)', fontWeight: 600 }}>สมัครใช้งานฟรี</Link>
+        </p>
       </div>
     </main>
   );
