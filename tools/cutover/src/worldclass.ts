@@ -48,6 +48,7 @@ async function main() {
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'cust1', passwordHash: await pw.hash('pw1'), role: 'Customer', tenantId: t1 },
     { username: 'cust2', passwordHash: await pw.hash('pw2'), role: 'Customer', tenantId: t2 },
+    { username: 'sales1', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 }, // non-Admin staff bound to shop T1
   ]).onConflictDoNothing();
   await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1.0' }).onConflictDoNothing();
   await db.insert(s.items).values({ itemId: 'A', itemDescription: 'Apple', uom: 'EA', unitPrice: '50' }).onConflictDoNothing();
@@ -65,6 +66,11 @@ async function main() {
   const all = (await pg.query(`SELECT item_id FROM customer_inventory`)).rows as any[];
   await pg.exec('ROLLBACK');
   ok('RLS(db): staff bypass sees all tenants', all.length === 2);
+  // 0003: the `tenants` table itself is now RLS-protected (was leaking every shop's credit/tax data)
+  await pg.exec(`BEGIN; SET LOCAL ROLE app_user; SELECT set_config('app.tenant_id','${t1}',true); SELECT set_config('app.bypass_rls','off',true);`);
+  const tRows = (await pg.query(`SELECT code FROM tenants`)).rows as any[];
+  await pg.exec('ROLLBACK');
+  ok('RLS(db): tenants table scoped to own row only (0003)', tRows.length === 1 && tRows[0].code === 'T1', JSON.stringify(tRows.map((r) => r.code)));
 
   // ── boot app ──
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
@@ -85,6 +91,7 @@ async function main() {
   const admin = await login('admin', 'admin123');
   const c1 = await login('cust1', 'pw1');
   const c2 = await login('cust2', 'pw2');
+  const sales1 = await login('sales1', 'pw3');
 
   // ── RLS at the API level (cross-tenant isolation through the full stack) ──
   const inv1 = await inj('GET', '/api/portal/inventory', c1);
@@ -102,11 +109,27 @@ async function main() {
   const tbTotals = tb.json.totals ?? tb.json;
   ok('GL: trial balance debits == credits', near(tbTotals.debit ?? tbTotals.total_debit ?? tbTotals.totalDebit, tbTotals.credit ?? tbTotals.total_credit ?? tbTotals.totalCredit), JSON.stringify(tbTotals).slice(0, 100));
 
+  // ── Tenancy model: "HQ sees all, staff bound to shop" (Phase 9.2 bypass allowlist) ──
+  await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T1', tenant_id: t1, lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
+  await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T2', tenant_id: t2, lines: [{ account_code: '1000', debit: 20 }, { account_code: '4000', credit: 20 }] });
+  const refsOf = (j: any) => ((j.json.entries ?? []) as any[]).map((e) => e.source_ref);
+  const salesJ = refsOf(await inj('GET', '/api/ledger/journal?limit=100', sales1));
+  const adminJ = refsOf(await inj('GET', '/api/ledger/journal?limit=100', admin));
+  ok('RLS(api): non-Admin staff (Sales) scoped to own shop T1', salesJ.includes('SCOPE-T1') && !salesJ.includes('SCOPE-T2'), JSON.stringify(salesJ));
+  ok('RLS(api): Admin (HQ) bypasses — sees all shops', adminJ.includes('SCOPE-T1') && adminJ.includes('SCOPE-T2'));
+
   // ── Payments (move #3) ──
   const pay = await inj('POST', '/api/payments', admin, { sale_no: 'TEST-1', method: 'Cash', amount: 100, currency: 'THB' });
   ok('Payments: tender captured (PAY-)', (pay.status === 200 || pay.status === 201) && /^PAY-/.test(pay.json.payment_no ?? '') && pay.json.status === 'Captured', `${JSON.stringify(pay.json).slice(0, 90)}`);
   const refund = await inj('POST', '/api/payments/refunds', admin, { payment_no: pay.json.payment_no, amount: 100, reason: 'test' });
   ok('Payments: refund (REF-)', (refund.status === 200 || refund.status === 201) && /^REF-/.test(refund.json.refund_no ?? ''), `${refund.status}`);
+  // over-refund guard (Phase 9.2): 60 + 50 > 100 must be rejected; 60 + 40 = 100 allowed
+  const pay2 = await inj('POST', '/api/payments', admin, { sale_no: 'TEST-2', method: 'Cash', amount: 100, currency: 'THB' });
+  await inj('POST', '/api/payments/refunds', admin, { payment_no: pay2.json.payment_no, amount: 60, reason: 'partial' });
+  const over = await inj('POST', '/api/payments/refunds', admin, { payment_no: pay2.json.payment_no, amount: 50, reason: 'over' });
+  ok('Payments: over-refund rejected (60+50 > 100)', over.status === 400, `status=${over.status} ${JSON.stringify(over.json?.error?.code ?? over.json).slice(0, 50)}`);
+  const rest = await inj('POST', '/api/payments/refunds', admin, { payment_no: pay2.json.payment_no, amount: 40, reason: 'rest' });
+  ok('Payments: remaining partial refund allowed (60+40=100, fully)', (rest.status === 200 || rest.status === 201) && rest.json.fully_refunded === true, `${rest.status}`);
 
   // ── Currency + Tax (move #5) ──
   const tax = await inj('GET', '/api/tax/calc?net=100&country=TH', admin);

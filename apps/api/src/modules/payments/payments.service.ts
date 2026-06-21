@@ -46,12 +46,33 @@ export class PaymentService {
   }
 
   // POST /api/payments/refunds — refund a captured payment.
+  // Guards against over-refund by accumulation: the new refund + all prior refunds must not
+  // exceed the captured amount. Only Captured/Settled payments are refundable.
   async refund(dto: RefundDto, user: JwtUser) {
     const db = this.db as any;
     const [pay] = await db.select().from(payments).where(eq(payments.paymentNo, dto.payment_no)).limit(1);
     if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
     if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
-    if (n(dto.amount) > n(pay.amount)) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Refund exceeds payment amount', messageTh: 'จำนวนเงินคืนเกินยอดที่ชำระ' });
+
+    const status = String(pay.status ?? '');
+    if (status !== 'Captured' && status !== 'Settled' && status !== 'Refunded') {
+      // Voided/Failed/Pending/Authorized payments hold no captured funds to return.
+      throw new BadRequestException({ code: 'NOT_REFUNDABLE', message: `Payment in status ${status} cannot be refunded`, messageTh: 'รายการนี้ยังไม่ได้รับชำระ จึงคืนเงินไม่ได้' });
+    }
+
+    // sum of prior refunds against this payment
+    const [prior] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` })
+      .from(paymentRefunds).where(eq(paymentRefunds.paymentNo, dto.payment_no));
+    const already = n(prior?.v);
+    const remaining = round2(n(pay.amount) - already);
+    if (n(dto.amount) > remaining + 1e-9) {
+      throw new BadRequestException({
+        code: 'OVER_REFUND',
+        message: `Refund ${n(dto.amount)} exceeds remaining refundable ${remaining} (paid ${n(pay.amount)}, already refunded ${already})`,
+        messageTh: `จำนวนเงินคืนเกินยอดคงเหลือที่คืนได้ (${remaining})`,
+      });
+    }
+    const fullyRefunded = already + n(dto.amount) >= n(pay.amount) - 1e-9;
 
     const refundNo = await this.docNo.nextDaily('REF');
     await db.transaction(async (tx: any) => {
@@ -59,9 +80,11 @@ export class PaymentService {
         refundNo, paymentNo: dto.payment_no, tenantId: pay.tenantId, amount: String(n(dto.amount)),
         reason: dto.reason ?? null, status: 'Refunded', createdBy: user.username,
       });
-      await tx.update(payments).set({ status: 'Refunded' }).where(eq(payments.id, pay.id));
+      // Only flip the payment to Refunded once it is FULLY refunded; partials keep it Captured so
+      // further partial refunds remain possible and the payment cannot be voided.
+      if (fullyRefunded) await tx.update(payments).set({ status: 'Refunded' }).where(eq(payments.id, pay.id));
     });
-    return { refund_no: refundNo, status: 'Refunded' };
+    return { refund_no: refundNo, status: 'Refunded', refunded_total: round2(already + n(dto.amount)), remaining_refundable: round2(remaining - n(dto.amount)), fully_refunded: fullyRefunded };
   }
 
   // PATCH /api/payments/:no/void — void a payment that has not been captured/settled.
@@ -117,3 +140,5 @@ export class PaymentService {
     return { sale_no: saleNo, payments: out, count: out.length, total_captured: out.filter((r: any) => r.status === 'Captured').reduce((a: number, r: any) => a + r.amount, 0) };
   }
 }
+
+function round2(x: number): number { return Math.round((Number(x) || 0) * 100) / 100; }

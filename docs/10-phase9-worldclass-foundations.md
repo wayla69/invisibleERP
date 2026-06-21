@@ -67,6 +67,18 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/parity writeflow
 NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/parity analytics
 ```
 
+## Phase 9.2 — Hardening จากผลตรวจโค้ด (ทีม review 3 ด้าน)
+หลังทำ 7 moves เสร็จ ส่งทีม agent ตรวจแบบ adversarial 3 ด้าน (security/RLS · การเงิน · integration) แล้วแก้ Critical ทั้งหมด:
+- **Phantom-sale (เจอ 2 ด้าน):** `portal.pos.service` ห่อ tender+GL ด้วย `try/catch{}` ที่กลืน error — ใน transaction เดียวกับการขาย ถ้า DB error จะ poison tx → COMMIT กลายเป็น ROLLBACK เงียบ → คืน 200 + sale_no แต่ไม่บันทึกอะไร แก้: ทำให้ tender+GL atomic กับการขาย (ล้ม = rollback ทั้งบิล).
+- **RLS bypass allowlist:** เปลี่ยนจาก "ทุก role ที่ไม่ใช่ Customer bypass" → **เฉพาะ Admin (HQ) bypass; พนักงานอื่นผูกร้านตัวเอง** (โมเดล "HQ เห็นทุกร้าน, พนักงานผูกร้าน").
+- **tenants RLS (`0003_tenants_rls.sql`):** ตาราง `tenants` ไม่มี `tenant_id` เลย loop เดิมข้าม → เพิ่ม policy keyed บน `id` กันข้อมูล credit/tax/ติดต่อรั่วข้ามร้าน.
+- **SET ROLE fail → fatal ใน production:** ถ้า `SET ROLE app_user` ล้มเหลวบน prod จะ **ปฏิเสธ request** (503) แทนรันต่อแบบ RLS ปิดเงียบ.
+- **Over-refund guard:** refund รวมยอดเก่า ห้ามเกินยอดที่จ่าย; partial refund คงสถานะ Captured จน refund ครบ.
+
+ยืนยัน: `worldclass` ขยายเป็น **26/26** (เพิ่มพิสูจน์ tenants RLS, staff scoping, Admin bypass, over-refund) + e2e/ext/writeflow/analytics/unit เขียวทั้งหมด = **115 checks**.
+
+> ยังเหลือ High/Medium จากผลตรวจ (ApiKeyGuard ยังไม่ wire, audit tenant_id, JPY rounding, postEntry per-line validation, signup 409, till_session ผูก POS, JWT secret/expiry) — บันทึกไว้ทำรอบถัดไป.
+
 ## หมายเหตุการ deploy
 - Migration `0002_rls.sql` ต้องรันบน Postgres ที่ผู้ใช้แอป **ไม่ใช่ superuser/owner** (superuser ข้าม RLS).
   บน Railway ให้แอปต่อด้วย role ปกติ; `app_user` ถูกใช้ผ่าน `SET LOCAL ROLE` ต่อ request.

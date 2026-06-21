@@ -1,4 +1,4 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Inject, Logger } from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Inject, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { from, firstValueFrom } from 'rxjs';
 import { sql } from 'drizzle-orm';
@@ -8,7 +8,14 @@ import { tenantALS } from './tenant-context';
 // Wraps each (non-SSE) request in a tenant-scoped transaction:
 //   SET LOCAL ROLE app_user  +  set_config('app.tenant_id'|'app.bypass_rls')
 // then runs the handler inside tenantALS so the DRIZZLE proxy routes all queries to this tx.
-// Customer role -> scoped to its tenant; staff/HQ/public -> bypass (sees all). RLS enforced in DB.
+//
+// Tenancy model (chosen): "HQ sees all, staff bound to their shop".
+//   - Admin (head office / HQ)  -> bypass: sees every tenant.
+//   - public / pre-auth (login, signup) -> bypass: no user yet, needed to read users / create tenants.
+//   - everyone else (Customer AND non-Admin staff: Sales/Warehouse/…) -> scoped to their own tenant_id.
+// RLS is enforced in the DB; this only decides the per-request scope GUCs.
+const RLS_LOGGER = new Logger('RLS');
+
 @Injectable()
 export class TenantTxInterceptor implements NestInterceptor {
   private warnedRole = false;
@@ -22,7 +29,9 @@ export class TenantTxInterceptor implements NestInterceptor {
 
     const req = ctx.switchToHttp().getRequest();
     const user = req?.user;
-    const bypass = !user || user.role !== 'Customer'; // staff/public see all; customer is scoped
+    // Only HQ (Admin) and pre-auth requests bypass; all other users — including non-Admin staff —
+    // are scoped to their own tenant. This is an explicit allowlist, not "anything that isn't Customer".
+    const bypass = !user || user.role === 'Admin';
     const tenantId: number | null = user?.tenantId ?? null;
 
     const db = this.db as any;
@@ -31,9 +40,16 @@ export class TenantTxInterceptor implements NestInterceptor {
         try {
           await tx.execute(sql`SET LOCAL ROLE app_user`);
         } catch (e) {
+          // Failing to assume app_user means RLS is NOT enforced (we'd run as the connection's
+          // base role, typically the owner/superuser). In production that is a security failure —
+          // fail the request closed rather than silently serving cross-tenant data.
+          if (process.env.NODE_ENV === 'production') {
+            RLS_LOGGER.error('SET ROLE app_user failed — refusing request (RLS cannot be enforced). Grant app_user membership or connect as app_user.');
+            throw new ServiceUnavailableException({ code: 'RLS_UNAVAILABLE', message: 'Tenant isolation unavailable', messageTh: 'ระบบแยกข้อมูลผู้เช่าไม่พร้อมใช้งาน' });
+          }
           if (!this.warnedRole) {
             this.warnedRole = true;
-            new Logger('RLS').warn('Could not SET ROLE app_user — RLS not enforced (grant membership or connect as app_user in prod).');
+            RLS_LOGGER.warn('Could not SET ROLE app_user — RLS not enforced (dev only; grant membership or connect as app_user in prod).');
           }
         }
         await tx.execute(sql`select set_config('app.bypass_rls', ${bypass ? 'on' : 'off'}, true)`);
