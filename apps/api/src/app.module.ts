@@ -37,6 +37,7 @@ import { BankModule } from './modules/bank/bank.module';
 import { BudgetModule } from './modules/budget/budget.module';
 import { RevenueModule } from './modules/revenue/revenue.module';
 import { FxModule } from './modules/fx/fx.module';
+import { IntercompanyModule } from './modules/intercompany/intercompany.module';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { FxModule } from './modules/fx/fx.module';
     BudgetModule,
     RevenueModule,
     FxModule,
+    IntercompanyModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions

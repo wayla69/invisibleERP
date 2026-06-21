@@ -141,6 +141,13 @@
       "when": 1782007973296,
       "tag": "0019_fx_revaluation",
       "breakpoints": false
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1782007973297,
+      "tag": "0020_intercompany",
+      "breakpoints": false
     }
   ]
 }
