@@ -109,6 +109,27 @@ async function main() {
   const tbTotals = tb.json.totals ?? tb.json;
   ok('GL: trial balance debits == credits', near(tbTotals.debit ?? tbTotals.total_debit ?? tbTotals.totalDebit, tbTotals.credit ?? tbTotals.total_credit ?? tbTotals.totalCredit), JSON.stringify(tbTotals).slice(0, 100));
 
+  // ── Accounting Tier 1: period control + year-end close (Phase 12) ──
+  const curMonth = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 7); // business-TZ month
+  ok('GL: COA includes 3100 Retained Earnings', JSON.stringify((await inj('GET', '/api/ledger/accounts', admin)).json).includes('3100'));
+  await inj('POST', `/api/ledger/periods/${curMonth}/close`, admin, {});
+  const blockedJE = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
+  ok('Period close → posting into closed period rejected (PERIOD_CLOSED)', blockedJE.status === 400 && blockedJE.json.error?.code === 'PERIOD_CLOSED', `${blockedJE.status} ${blockedJE.json.error?.code}`);
+  await inj('POST', `/api/ledger/periods/${curMonth}/open`, admin, {}); // re-open so later sale/JE postings work
+  const reopenJE = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
+  ok('Period re-open → posting works again', reopenJE.status === 201 || reopenJE.status === 200, `${reopenJE.status}`);
+  // year-end close on a prior year (2025), isolated from current activity
+  await inj('POST', '/api/ledger/journal', admin, { date: '2025-03-15', source: 'Manual', memo: 'FY2025', lines: [{ account_code: '1000', debit: 1000 }, { account_code: '4000', credit: 1000 }] });
+  const cy = await inj('POST', '/api/ledger/close-year?fiscal_year=2025', admin, {});
+  ok('Year-end close FY2025 → P&L moved to 3100 (net 1000)', near(cy.json.net_income, 1000) && /^JE-/.test(cy.json.entry_no ?? ''), `${cy.status} ${JSON.stringify(cy.json).slice(0, 70)}`);
+  const is2025 = await inj('GET', '/api/ledger/income-statement?from=2025-01-01&to=2025-12-31', admin);
+  ok('Year-end: FY2025 P&L zeroed after close (net≈0)', near(is2025.json.net_income, 0), `net=${is2025.json.net_income}`);
+  const bs2025 = await inj('GET', '/api/ledger/balance-sheet?as_of=2025-12-31', admin);
+  ok('Year-end: balance sheet balanced + retained earnings 1000', bs2025.json.balanced === true && near(bs2025.json.retained_earnings, 1000), `bal=${bs2025.json.balanced} re=${bs2025.json.retained_earnings}`);
+  const cy2 = await inj('POST', '/api/ledger/close-year?fiscal_year=2025', admin, {});
+  ok('Year-end close idempotent (2nd run no-op)', cy2.json.already === true, JSON.stringify(cy2.json).slice(0, 40));
+  ok('Finance: sub-ledger ↔ GL reconciliation endpoint', (await inj('GET', '/api/finance/reconciliation', admin)).json.ar?.reconciled === true);
+
   // ── Tenancy model: "HQ sees all, staff bound to shop" (Phase 9.2 bypass allowlist) ──
   await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T1', tenant_id: t1, lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
   await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T2', tenant_id: t2, lines: [{ account_code: '1000', debit: 20 }, { account_code: '4000', credit: 20 }] });

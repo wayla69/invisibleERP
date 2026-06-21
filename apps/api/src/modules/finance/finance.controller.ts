@@ -25,6 +25,10 @@ export class FinanceController {
   @Get('kpi') @Permissions('exec', 'dashboard')
   kpi() { return this.svc.kpi(); }
 
+  // sub-ledger ↔ GL reconciliation (AR 1100 == open AR, AP 2000 == open AP)
+  @Get('reconciliation') @Permissions('exec', 'ar', 'creditors')
+  reconciliation() { return this.svc.reconcile(); }
+
   // WRITE
   @Post('ar/sync') @Permissions('ar')
   syncAr(@CurrentUser() u: JwtUser) { return this.svc.syncArInvoices(u); }

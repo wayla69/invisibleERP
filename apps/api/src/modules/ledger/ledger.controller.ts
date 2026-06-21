@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -53,4 +53,17 @@ export class LedgerController {
 
   @Get('balance-sheet')
   balanceSheet(@Query('as_of') asOf: string) { return this.svc.balanceSheet(asOf); }
+
+  // ── fiscal periods + year-end close ──
+  @Get('periods')
+  periods() { return this.svc.listPeriods(); }
+
+  @Post('periods/:period/close')
+  closePeriod(@Param('period') period: string) { return this.svc.closePeriod(period); }
+
+  @Post('periods/:period/open')
+  openPeriod(@Param('period') period: string) { return this.svc.openPeriod(period); }
+
+  @Post('close-year')
+  closeYear(@Query('fiscal_year') fy: string, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username); }
 }

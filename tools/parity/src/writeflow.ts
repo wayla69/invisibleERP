@@ -14,6 +14,9 @@ import { StatusLogService } from '../../../apps/api/dist/common/status-log.servi
 import { PosService } from '../../../apps/api/dist/modules/pos/pos.service';
 import { ProcurementService } from '../../../apps/api/dist/modules/procurement/procurement.service';
 import { FinanceService } from '../../../apps/api/dist/modules/finance/finance.service';
+import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
+import { TaxService } from '../../../apps/api/dist/modules/tax/tax.service';
+import { and } from 'drizzle-orm';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 
@@ -48,7 +51,17 @@ async function main() {
   const statusLog = new StatusLogService(db);
   const pos = new PosService(db, docNo, statusLog);
   const proc = new ProcurementService(db, docNo, statusLog);
-  const fin = new FinanceService(db, docNo, statusLog);
+  const ledger = new LedgerService(db, docNo);
+  await ledger.seedChartOfAccounts(); // so AR/AP GL postings resolve in trial balance
+  const fin = new FinanceService(db, docNo, statusLog, ledger, new TaxService(db));
+  // GL helpers
+  const jlines = async (source: string, ref: string) => {
+    const [je] = await db.select().from(s.journalEntries).where(and(eq(s.journalEntries.source, source), eq(s.journalEntries.sourceRef, ref)));
+    if (!je) return [] as any[];
+    return db.select().from(s.journalLines).where(eq(s.journalLines.entryId, je.id));
+  };
+  const leg = (rows: any[], code: string, side: 'debit' | 'credit') => Number(rows.filter((l: any) => l.accountCode === code).reduce((a: number, l: any) => a + Number(l[side]), 0));
+  const nearW = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
 
   // ── A. POS create order + loyalty ──
   const ord = await pos.createOrder({ customer_name: 'T1', items: [{ item_id: 'X', order_qty: 2, unit_price: 50 }] }, sales as any);
@@ -114,6 +127,24 @@ async function main() {
   ok('AP txn Unpaid + doc format', ap.status === 'Unpaid' && /^AP-\d{8}-\d{3}$/.test(ap.txn_no));
   const pay = await fin.payAp(ap.txn_no, 200, admin as any);
   ok('AP pay full → Paid', pay.status === 'Paid');
+
+  // ── F. Sub-ledger → GL auto-posting (Accounting Tier 1) ──
+  const arGl = await jlines('AR', invNo);
+  ok('GL: AR invoice Dr 1100 = 100, VAT split (Cr 4000≈93.46, Cr 2100≈6.54)', leg(arGl, '1100', 'debit') === 100 && nearW(leg(arGl, '4000', 'credit'), 93.46) && nearW(leg(arGl, '2100', 'credit'), 6.54), `1100=${leg(arGl, '1100', 'debit')} 4000=${leg(arGl, '4000', 'credit')} 2100=${leg(arGl, '2100', 'credit')}`);
+  const rcGl = await jlines('RCP', rc.receipt_no);
+  ok('GL: AR receipt Dr 1000 / Cr 1100 = 100', leg(rcGl, '1000', 'debit') === 100 && leg(rcGl, '1100', 'credit') === 100);
+  const apGl = await jlines('AP', ap.txn_no);
+  ok('GL: AP bill Cr 2000 = 200, Dr (5100+2100) = 200', leg(apGl, '2000', 'credit') === 200 && nearW(leg(apGl, '5100', 'debit') + leg(apGl, '2100', 'debit'), 200));
+  const payGl = (await db.select().from(s.journalEntries).where(eq(s.journalEntries.source, 'PAY-AP')));
+  ok('GL: AP payment posted (Dr 2000 / Cr 1000)', payGl.length === 1);
+  // idempotency: re-run AR sync does NOT double-post
+  const sync2 = await fin.syncArInvoices(admin as any);
+  const arCount = (await db.select().from(s.journalEntries).where(and(eq(s.journalEntries.source, 'AR'), eq(s.journalEntries.sourceRef, invNo)))).length;
+  ok('GL: AR sync idempotent (no double-post)', sync2.created === 0 && arCount === 1, `created2=${sync2.created} arEntries=${arCount}`);
+  const tbW = await ledger.trialBalance();
+  ok('GL: trial balance balances after all sub-ledger postings', tbW.totals.balanced === true, `D=${tbW.totals.debit} C=${tbW.totals.credit}`);
+  const rec = await fin.reconcile();
+  ok('GL: reconciliation AR/AP control = sub-ledger (both 0 after full settle)', rec.ar.reconciled && rec.ap.reconciled, JSON.stringify(rec).slice(0, 90));
 
   await pg.close();
 

@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { ymd, n, fx } from '../../database/queries';
 
@@ -13,6 +13,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '2000', name: 'Accounts Payable', type: 'Liability' },
   { code: '2100', name: 'Tax Payable', type: 'Liability' },
   { code: '3000', name: 'Equity', type: 'Equity' },
+  { code: '3100', name: 'Retained Earnings', type: 'Equity' },
   { code: '4000', name: 'Sales Revenue', type: 'Revenue' },
   { code: '5000', name: 'COGS', type: 'Expense' },
   { code: '5100', name: 'Operating Expense', type: 'Expense' },
@@ -87,6 +88,12 @@ export class LedgerService {
 
     const entryDate = dto.date ?? ymd();
     const period = entryDate.slice(0, 7); // 'YYYY-MM'
+    // Period guard: a CLOSED fiscal period rejects new postings. A missing period row defaults OPEN
+    // (existing flows post into the current month without pre-seeding a period).
+    const [pp] = await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(eq(fiscalPeriods.code, period)).limit(1);
+    if (pp && pp.status === 'Closed') {
+      throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${period} is closed`, messageTh: `งวดบัญชี ${period} ถูกปิดแล้ว` });
+    }
     const currency = dto.currency ?? 'THB';
     const entryNo = await this.docNo.nextDaily('JE');
 
@@ -179,18 +186,90 @@ export class LedgerService {
     const rows = await this.aggregateByType(db, null, asOf);
     const assets = round4(typeTotal(rows, 'Asset', 'debit') - typeTotal(rows, 'Asset', 'credit'));
     const liabilities = round4(typeTotal(rows, 'Liability', 'credit') - typeTotal(rows, 'Liability', 'debit'));
+    // equity INCLUDES 3100 Retained Earnings (closed-year results carried here by closeYear)
     const equity = round4(typeTotal(rows, 'Equity', 'credit') - typeTotal(rows, 'Equity', 'debit'));
+    // current UNCLOSED-period P&L still sits in Revenue/Expense (closed years were zeroed into 3100)
     const netIncome = round4(
       (typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit')) -
       (typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit')),
     );
+    // retained_earnings is a DISPLAY sub-total of equity (the 3100 balance) — not added again
+    const retainedEarnings = round4(rows.filter((r: any) => r.account_code === '3100').reduce((a: number, r: any) => a + (n(r.credit) - n(r.debit)), 0));
     const liabilitiesEquity = round4(liabilities + equity + netIncome);
     return {
       as_of: asOf,
-      assets, liabilities, equity, net_income: netIncome,
+      assets, liabilities, equity, retained_earnings: retainedEarnings, net_income: netIncome,
       liabilities_plus_equity: liabilitiesEquity,
       balanced: assets === liabilitiesEquity,
     };
+  }
+
+  // ───────────────────── Idempotency + Fiscal periods ─────────────────────
+  // has a GL entry already been posted for this source+ref? (used by AR/AP hooks + closeYear)
+  async alreadyPosted(source: string, sourceRef: string): Promise<boolean> {
+    const db = this.db as any;
+    const [r] = await db.select({ id: journalEntries.id }).from(journalEntries)
+      .where(and(eq(journalEntries.source, source), eq(journalEntries.sourceRef, sourceRef))).limit(1);
+    return !!r;
+  }
+
+  private periodBounds(period: string) {
+    const [y, m] = period.split('-').map(Number);
+    const start = `${period}-01`;
+    const endDate = m < 12 ? `${y}-${String(m + 1).padStart(2, '0')}-01` : `${y}-12-31`;
+    return { start, endDate };
+  }
+
+  async ensurePeriod(period: string) {
+    const db = this.db as any;
+    const { start, endDate } = this.periodBounds(period);
+    await db.insert(fiscalPeriods).values({ code: period, startDate: start, endDate, status: 'Open' }).onConflictDoNothing({ target: fiscalPeriods.code });
+  }
+
+  async listPeriods() {
+    const db = this.db as any;
+    const rows = await db.select().from(fiscalPeriods).orderBy(fiscalPeriods.code);
+    return { periods: rows.map((p: any) => ({ code: p.code, status: p.status, start_date: p.startDate, end_date: p.endDate })), count: rows.length };
+  }
+
+  async setPeriodStatus(period: string, status: 'Open' | 'Closed') {
+    const db = this.db as any;
+    await this.ensurePeriod(period);
+    await db.update(fiscalPeriods).set({ status }).where(eq(fiscalPeriods.code, period));
+    return { period, status };
+  }
+  async closePeriod(period: string) { return this.setPeriodStatus(period, 'Closed'); }
+  async openPeriod(period: string) { return this.setPeriodStatus(period, 'Open'); }
+
+  // Year-end close: post a closing journal zeroing Revenue & Expense into 3100 Retained Earnings,
+  // then close all 12 months. Idempotent (skips if FY already closed).
+  async closeYear(fiscalYear: number, createdBy: string) {
+    const db = this.db as any;
+    if (await this.alreadyPosted('CLOSE', `FY${fiscalYear}`)) {
+      return { closed: true, fiscal_year: fiscalYear, already: true };
+    }
+    const from = `${fiscalYear}-01-01`, to = `${fiscalYear}-12-31`;
+    const rows = await this.aggregateByType(db, from, to);
+    const lines: JournalLineDto[] = [];
+    let revTotal = 0, expTotal = 0;
+    for (const r of rows) {
+      if (r.account_type === 'Revenue') {
+        const bal = round4(n(r.credit) - n(r.debit)); // revenue normal credit balance
+        if (bal !== 0) { lines.push({ account_code: r.account_code, debit: bal }); revTotal += bal; }
+      } else if (r.account_type === 'Expense') {
+        const bal = round4(n(r.debit) - n(r.credit)); // expense normal debit balance
+        if (bal !== 0) { lines.push({ account_code: r.account_code, credit: bal }); expTotal += bal; }
+      }
+    }
+    const netIncome = round4(revTotal - expTotal);
+    if (netIncome > 0) lines.push({ account_code: '3100', credit: netIncome });
+    else if (netIncome < 0) lines.push({ account_code: '3100', debit: -netIncome });
+    if (!lines.length) return { closed: true, fiscal_year: fiscalYear, net_income: 0, entry_no: null, note: 'no P&L activity' };
+
+    await this.ensurePeriod(`${fiscalYear}-12`);
+    const je = await this.postEntry({ date: to, source: 'CLOSE', sourceRef: `FY${fiscalYear}`, memo: `Year-end close FY${fiscalYear}`, createdBy, lines });
+    for (let m = 1; m <= 12; m++) await this.closePeriod(`${fiscalYear}-${String(m).padStart(2, '0')}`);
+    return { closed: true, fiscal_year: fiscalYear, net_income: netIncome, entry_no: je.entry_no };
   }
 
   // group Posted journal_lines by account type within optional date window

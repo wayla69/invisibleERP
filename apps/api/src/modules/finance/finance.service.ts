@@ -1,9 +1,11 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, asc, inArray, notInArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, apTransactions, arInvoices, arReceipts, orders, orderLines, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
+import { LedgerService } from '../ledger/ledger.service';
+import { TaxService } from '../tax/tax.service';
 import { ymd, monthStart, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -16,7 +18,18 @@ export class FinanceService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly statusLog: StatusLogService,
+    // optional + last so the writeflow harness (which constructs FinanceService by hand with 3 args)
+    // still compiles; when absent, GL posting is skipped (sub-ledger behaviour unchanged).
+    @Optional() private readonly ledger?: LedgerService,
+    @Optional() private readonly tax?: TaxService,
   ) {}
+
+  // VAT back-out (7/107) — prefer TaxService.calcInclusive when injected
+  private vatSplit(gross: number): { net: number; vat: number } {
+    if (this.tax) { const r = this.tax.calcInclusive({ gross }); return { net: r.net, vat: r.tax }; }
+    const vat = Math.round((gross * 7 / 107) * 100) / 100;
+    return { net: Math.round((gross - vat) * 100) / 100, vat };
+  }
 
   // ───────────────────── READ (Phase 2) ─────────────────────
   async pl(month: number, year: number) {
@@ -84,10 +97,21 @@ export class FinanceService {
         const [t] = await db.select({ ct: tenants.creditTerm }).from(tenants).where(eq(tenants.id, o.tenantId)).limit(1);
         termDays = parseInt(String(t?.ct ?? '').replace(/\D/g, ''), 10) || 30;
       }
+      const invoiceNo = this.docNo.invoiceFromOrder(o.orderNo);
       await db.insert(arInvoices).values({
-        invoiceNo: this.docNo.invoiceFromOrder(o.orderNo), invoiceDate: o.orderDate, dueDate: addDays(o.orderDate, termDays),
+        invoiceNo, invoiceDate: o.orderDate, dueDate: addDays(o.orderDate, termDays),
         tenantId: o.tenantId, orderNo: o.orderNo, amount: amt.a, paidAmount: '0', status: 'Unpaid', createdBy: 'system',
       }).onConflictDoNothing();
+      // GL: recognize receivable + revenue + output VAT (Dr 1100 / Cr 4000 net / Cr 2100 vat)
+      const grossAmt = n(amt.a);
+      if (this.ledger && grossAmt > 0 && !(await this.ledger.alreadyPosted('AR', invoiceNo))) {
+        const { net, vat } = this.vatSplit(grossAmt);
+        await this.ledger.postEntry({
+          date: o.orderDate ?? undefined, source: 'AR', sourceRef: invoiceNo, tenantId: o.tenantId ?? null,
+          memo: `AR invoice ${invoiceNo}`, createdBy: 'system',
+          lines: [{ account_code: '1100', debit: grossAmt }, { account_code: '4000', credit: net }, { account_code: '2100', credit: vat }],
+        });
+      }
       created++;
     }
     return { created };
@@ -108,6 +132,14 @@ export class FinanceService {
       });
       await tx.update(arInvoices).set({ paidAmount: String(newPaid), status }).where(eq(arInvoices.id, inv.id));
     });
+    // GL: collect cash against the receivable (Dr 1000 Cash / Cr 1100 AR)
+    if (this.ledger && n(dto.amount) > 0) {
+      await this.ledger.postEntry({
+        date: ymd(), source: 'RCP', sourceRef: receiptNo, tenantId: inv.tenantId ?? null,
+        memo: `Receipt ${receiptNo} for ${dto.invoice_no}`, createdBy: user.username,
+        lines: [{ account_code: '1000', debit: n(dto.amount) }, { account_code: '1100', credit: n(dto.amount) }],
+      });
+    }
     await this.statusLog.log('INV', dto.invoice_no, inv.status ?? '', status, user.username, `Receipt ${receiptNo}`);
     return { receipt_no: receiptNo, invoice_no: dto.invoice_no, paid_amount: newPaid, status };
   }
@@ -123,6 +155,17 @@ export class FinanceService {
       invoiceNo: dto.invoice_no ?? null, invoiceDate: dto.invoice_date ?? null, dueDate: dto.due_date ?? null,
       amount: String(n(dto.amount)), paidAmount: String(paid), status, remarks: dto.remarks ?? null, createdBy: user.username,
     });
+    // GL: record expense + input VAT + payable (Dr 5100/1200 net / Dr 2100 vat / Cr 2000 gross)
+    const apGross = n(dto.amount);
+    if (this.ledger && apGross > 0) {
+      const expenseAccount = (dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100';
+      const { net, vat } = this.vatSplit(apGross);
+      await this.ledger.postEntry({
+        date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId: null,
+        memo: `AP bill ${txnNo}${dto.vendor_name ? ' ' + dto.vendor_name : ''}`, createdBy: user.username,
+        lines: [{ account_code: expenseAccount, debit: net }, { account_code: '2100', debit: vat }, { account_code: '2000', credit: apGross }],
+      });
+    }
     await this.statusLog.log('AP', txnNo, '', status, user.username);
     return { txn_no: txnNo, status };
   }
@@ -135,8 +178,30 @@ export class FinanceService {
     const newPaid = n(t.paidAmount) + n(amount);
     const status = newPaid >= n(t.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
     await db.update(apTransactions).set({ paidAmount: String(newPaid), status }).where(eq(apTransactions.id, t.id));
+    // GL: pay the payable (Dr 2000 AP / Cr 1000 Cash). sourceRef keyed per-payment (running paid total).
+    if (this.ledger && n(amount) > 0) {
+      await this.ledger.postEntry({
+        date: ymd(), source: 'PAY-AP', sourceRef: `${txnNo}:${newPaid}`, tenantId: null,
+        memo: `AP payment ${txnNo}`, createdBy: user.username,
+        lines: [{ account_code: '2000', debit: n(amount) }, { account_code: '1000', credit: n(amount) }],
+      });
+    }
     await this.statusLog.log('AP', txnNo, t.status ?? '', status, user.username);
     return { txn_no: txnNo, paid_amount: newPaid, status };
+  }
+
+  // Sub-ledger ↔ GL reconciliation: GL control account 1100 must equal open AR outstanding, 2000 = AP.
+  async reconcile() {
+    const db = this.db as any;
+    const [arSub] = await db.select({ v: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)),0)` }).from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
+    const [apSub] = await db.select({ v: sql<string>`coalesce(sum(${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)),0)` }).from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
+    const tb: any = this.ledger ? await this.ledger.trialBalance() : { rows: [] };
+    const glBal = (code: string) => { const r = tb.rows.find((x: any) => x.account_code === code); return r ? n(r.balance) : 0; };
+    const arGl = glBal('1100'), apGl = -glBal('2000'); // 2000 is a liability → balance negative; flip sign
+    return {
+      ar: { sub_ledger: n(arSub?.v), gl_control: arGl, reconciled: Math.abs(n(arSub?.v) - arGl) < 0.01 },
+      ap: { sub_ledger: n(apSub?.v), gl_control: apGl, reconciled: Math.abs(n(apSub?.v) - apGl) < 0.01 },
+    };
   }
 }
 
