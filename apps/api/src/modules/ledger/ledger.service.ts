@@ -23,6 +23,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '1510', name: 'Gain/Loss on Disposal', type: 'Revenue' }, // gain=credit, loss=debit
   { code: '1010', name: 'Bank — Current', type: 'Asset' }, // house-bank GL accounts (bank reconciliation)
   { code: '1020', name: 'Bank — Savings', type: 'Asset' },
+  { code: '2400', name: 'Unearned Revenue', type: 'Liability' }, // รายได้รอตัดบัญชี — deferred revenue
 ];
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null }

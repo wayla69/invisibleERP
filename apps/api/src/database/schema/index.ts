@@ -14,6 +14,7 @@ export * from './system';
 export * from './ledger';
 export * from './cost-centers';
 export * from './budgets';
+export * from './revenue';
 export * from './payments';
 export * from './billing';
 export * from './tax-docs';

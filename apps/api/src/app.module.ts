@@ -35,6 +35,7 @@ import { MenuModule } from './modules/menu/menu.module';
 import { ReturnsModule } from './modules/returns/returns.module';
 import { BankModule } from './modules/bank/bank.module';
 import { BudgetModule } from './modules/budget/budget.module';
+import { RevenueModule } from './modules/revenue/revenue.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { BudgetModule } from './modules/budget/budget.module';
     ReturnsModule,
     BankModule,
     BudgetModule,
+    RevenueModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions
