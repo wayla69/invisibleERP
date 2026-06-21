@@ -9,8 +9,9 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { PortalService } from './portal.service';
-
-const VAT_RATE = 0.07;
+import { TaxService } from '../tax/tax.service';
+import { PaymentService } from '../payments/payments.service';
+import { LedgerService } from '../ledger/ledger.service';
 
 export interface PortalSaleDto {
   items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number }[];
@@ -25,6 +26,9 @@ export class PortalPosService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly portal: PortalService,
+    private readonly tax: TaxService,
+    private readonly payments: PaymentService,
+    private readonly ledger: LedgerService,
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn
@@ -41,7 +45,9 @@ export class PortalPosService {
     const subtotal = Math.round(lines.reduce((a, l) => a + l.amount, 0) * 100) / 100;
     const discount = Math.round(n(dto.discount) * 100) / 100;
     const taxable = Math.max(0, subtotal - discount);
-    const vat = Math.round(taxable * VAT_RATE * 100) / 100;
+    // pluggable tax (move #5) — no more hard-coded VAT 7%
+    const taxCalc = this.tax.calcTax({ net: taxable, country: 'TH' });
+    const vat = taxCalc.tax;
     const total = Math.round((taxable + vat) * 100) / 100;
 
     const saleNo = this.docNo.nextTenantStamped('SALE', t.code);
@@ -91,7 +97,29 @@ export class PortalPosService {
       }
     });
 
-    return { sale_no: saleNo, subtotal, discount, vat, total, points_earned: pointsEarned, lines: lines.length };
+    // record the money-movement tender (move #3) + post to the General Ledger (move #2) — best-effort
+    let paymentNo: string | null = null;
+    let journalNo: string | null = null;
+    try {
+      const tender: any = await this.payments.recordTender(
+        { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock' },
+        user,
+      );
+      paymentNo = tender?.payment_no ?? null;
+    } catch { /* tender failure must not lose the committed sale; reconcile later */ }
+    try {
+      const je: any = await this.ledger.postEntry({
+        source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
+        lines: [
+          { account_code: '1000', debit: total },   // Dr Cash
+          { account_code: '4000', credit: taxable }, // Cr Sales Revenue
+          { account_code: '2100', credit: vat },     // Cr Tax Payable
+        ],
+      });
+      journalNo = je?.entry_no ?? null;
+    } catch { /* GL posting issues surface via reconciliation, not by failing the sale */ }
+
+    return { sale_no: saleNo, subtotal, discount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: paymentNo, journal_no: journalNo };
   }
 
   // GET /api/portal/pos/sales — history (this tenant)

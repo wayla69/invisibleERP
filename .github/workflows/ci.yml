@@ -10,23 +10,48 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 9
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
-
       - name: Build shared
         run: pnpm --filter @ierp/shared build
-
       - name: Typecheck
         run: pnpm -r typecheck
-
       - name: Build
         run: pnpm -r build
+      - name: Unit tests (vitest + coverage)
+        run: pnpm --filter @ierp/api test
+
+  # Move #4: the integration harnesses are GATES, not optional. They boot the real Nest app
+  # over PGlite (a real Postgres) and assert behaviour — green now means "it works", not "it compiles".
+  test-harnesses:
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      NODE_OPTIONS: --experimental-sqlite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ierp/shared build && pnpm --filter @ierp/api build
+      - name: write-flow (transactional)
+        run: pnpm --filter @ierp/parity writeflow
+      - name: analytics
+        run: pnpm --filter @ierp/parity analytics
+      - name: e2e (HTTP)
+        run: pnpm --filter @ierp/cutover e2e
+      - name: extensions
+        run: pnpm --filter @ierp/cutover ext
+      - name: world-class foundations (RLS, GL, payments, tax, billing, platform)
+        run: pnpm --filter @ierp/cutover worldclass

@@ -17,7 +17,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
-import { DRIZZLE } from '../../../apps/api/dist/database/database.module';
+import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
@@ -55,7 +55,7 @@ async function main() {
   await seed(db);
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(DRIZZLE).useValue(db)
+    .overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)) // services get the tenant-aware proxy (RLS tx)
     .compile();
   const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   app.useGlobalFilters(new AllExceptionsFilter());

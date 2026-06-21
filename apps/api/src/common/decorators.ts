@@ -11,6 +11,7 @@ export interface JwtUser {
   username: string;
   role: string;
   customerName: string | null;
+  tenantId: number | null;
   permissions: string[];
 }
 

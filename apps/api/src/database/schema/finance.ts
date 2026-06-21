@@ -13,6 +13,8 @@ export const arInvoices = pgTable('ar_invoices', {
   amount: numeric('amount', { precision: 14, scale: 2 }),
   paidAmount: numeric('paid_amount', { precision: 14, scale: 2 }).default('0'),
   status: invoiceStatusEnum('status').default('Unpaid'),
+  currency: text('currency').default('THB'),
+  fxRate: numeric('fx_rate', { precision: 18, scale: 8 }).default('1'),
   remarks: text('remarks'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }),

@@ -3,9 +3,25 @@ import { ConfigService } from '@nestjs/config';
 import postgres from 'postgres';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from './schema';
+import { tenantALS } from '../common/tenant-context';
 
 export const DRIZZLE = Symbol('DRIZZLE');
 export type DrizzleDb = PostgresJsDatabase<typeof schema>;
+
+// Route every query to the per-request tenant transaction (RLS-scoped) when present,
+// else the base pool. Services keep injecting DRIZZLE unchanged — isolation is transparent.
+// Exported so tests can wrap a PGlite db the same way (required for the interceptor's
+// per-request tx + the handler's queries to share one connection).
+export function tenantAwareProxy(base: DrizzleDb): DrizzleDb {
+  return new Proxy(base, {
+    get(target, prop, receiver) {
+      const tx = tenantALS.getStore()?.tx;
+      const active: any = tx ?? target;
+      const val = active[prop];
+      return typeof val === 'function' ? val.bind(active) : val ?? Reflect.get(target, prop, receiver);
+    },
+  }) as DrizzleDb;
+}
 
 @Global()
 @Module({
@@ -28,7 +44,7 @@ export type DrizzleDb = PostgresJsDatabase<typeof schema>;
         // simple-protocol mode (เช่น ต่อ PGlite-wire/บาง pooler ที่ไม่รองรับ extended protocol/type-fetch)
         if (process.env.DB_SIMPLE === '1') { opts.prepare = false; opts.fetch_types = false; }
         const client = postgres(url ?? 'postgresql://localhost:5432/_unconfigured', opts);
-        return drizzle(client, { schema });
+        return tenantAwareProxy(drizzle(client, { schema }));
       },
     },
   ],

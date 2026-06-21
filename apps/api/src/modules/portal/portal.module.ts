@@ -3,8 +3,12 @@ import { PortalController } from './portal.controller';
 import { PortalService } from './portal.service';
 import { PortalPosService } from './portal.pos.service';
 import { PortalMyErpService } from './portal.myerp.service';
+import { TaxModule } from '../tax/tax.module';
+import { PaymentsModule } from '../payments/payments.module';
+import { LedgerModule } from '../ledger/ledger.module';
 
 @Module({
+  imports: [TaxModule, PaymentsModule, LedgerModule],
   controllers: [PortalController],
   providers: [PortalService, PortalPosService, PortalMyErpService],
   exports: [PortalService],

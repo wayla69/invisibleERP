@@ -10,6 +10,8 @@ export const orders = pgTable('orders', {
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   status: orderStatusEnum('status').default('Pending'),
   estimatedDelivery: date('estimated_delivery'),
+  currency: text('currency').default('THB'),
+  fxRate: numeric('fx_rate', { precision: 18, scale: 8 }).default('1'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
@@ -45,8 +47,10 @@ export const custPosSales = pgTable('cust_pos_sales', {
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   subtotal: numeric('subtotal', { precision: 14, scale: 2 }),
   discount: numeric('discount', { precision: 14, scale: 2 }),
-  taxAmount: numeric('tax_amount', { precision: 14, scale: 2 }), // VAT 7%
+  taxAmount: numeric('tax_amount', { precision: 14, scale: 2 }), // VAT via TaxProvider
   total: numeric('total', { precision: 14, scale: 2 }),
+  currency: text('currency').default('THB'),
+  fxRate: numeric('fx_rate', { precision: 18, scale: 8 }).default('1'),
   paymentMethod: text('payment_method').default('Cash'),
   pointsUsed: numeric('points_used').default('0'),
   pointsEarned: numeric('points_earned').default('0'),

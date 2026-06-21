@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, timestamp, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, timestamp, boolean, primaryKey } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 import { roleEnum } from './enums';
 
@@ -11,6 +11,9 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(), // argon2/scrypt; legacy sha256 verified+rehashed on login
   role: roleEnum('role').notNull().default('Sales'), // เดิม PG default 'Staff' (bug) → แก้เป็น Sales
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  mfaEnabled: boolean('mfa_enabled').default(false), // move #7 — TOTP
+  totpSecret: text('totp_secret'),
+  ssoSubject: text('sso_subject'), // OIDC/SAML subject for SSO users
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

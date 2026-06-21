@@ -6,6 +6,7 @@
   "scripts": {
     "e2e": "tsx src/e2e.ts",
     "ext": "tsx src/ext.ts",
+    "worldclass": "tsx src/worldclass.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

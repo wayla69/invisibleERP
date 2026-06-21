@@ -1,0 +1,52 @@
+import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+import { tenants } from './tenants';
+
+// Payments + tender layer (move #3) — 1 sale → N tenders; proof money moved
+export const paymentStatusEnum = pgEnum('payment_status', ['Pending', 'Authorized', 'Captured', 'Failed', 'Refunded', 'Voided']);
+export const tillStatusEnum = pgEnum('till_status', ['Open', 'Closed']);
+
+export const payments = pgTable('payments', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  paymentNo: text('payment_no').notNull().unique(), // PAY-YYYYMMDD-NNN
+  saleNo: text('sale_no'), // tender attaches to a sale/order
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  tillSessionId: bigint('till_session_id', { mode: 'number' }),
+  method: text('method').notNull(), // Cash | Card | QR | PromptPay | Transfer | Wallet
+  amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
+  currency: text('currency').default('THB'),
+  gateway: text('gateway').default('mock'), // mock | stripe | promptpay | adyen
+  gatewayRef: text('gateway_ref'),
+  status: paymentStatusEnum('status').default('Captured'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  capturedAt: timestamp('captured_at', { withTimezone: true }),
+});
+
+export const paymentRefunds = pgTable('payment_refunds', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  refundNo: text('refund_no').notNull().unique(), // REF-YYYYMMDD-NNN
+  paymentNo: text('payment_no').notNull(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
+  reason: text('reason'),
+  status: text('status').default('Refunded'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const tillSessions = pgTable('till_sessions', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  sessionNo: text('session_no').notNull().unique(), // TILL-YYYYMMDDHHMMSS
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  openedBy: text('opened_by'),
+  openedAt: timestamp('opened_at', { withTimezone: true }).defaultNow(),
+  openingFloat: numeric('opening_float', { precision: 18, scale: 4 }).default('0'),
+  closedBy: text('closed_by'),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  closingCount: numeric('closing_count', { precision: 18, scale: 4 }),
+  expectedCash: numeric('expected_cash', { precision: 18, scale: 4 }),
+  variance: numeric('variance', { precision: 18, scale: 4 }),
+  status: tillStatusEnum('status').default('Open'),
+});
+
+export type Payment = typeof payments.$inferSelect;

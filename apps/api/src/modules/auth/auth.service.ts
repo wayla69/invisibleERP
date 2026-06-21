@@ -38,7 +38,7 @@ export class AuthService {
     const overrides = (await this.db.select({ perm: userPermissions.perm }).from(userPermissions).where(eq(userPermissions.userId, row.id))).map((r) => r.perm as never);
     const perms = resolvePermissions(role, overrides.length ? overrides : null);
 
-    const token = await this.jwt.signAsync({ sub: username, role, customerName, permissions: perms });
+    const token = await this.jwt.signAsync({ sub: username, role, customerName, tenantId: row.tenantId ?? null, permissions: perms });
     return { token, username, role, customer_name: customerName };
   }
 

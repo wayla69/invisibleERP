@@ -1,0 +1,152 @@
+/**
+ * Phase 9 world-class foundations validation — real Nest app over PGlite (RLS-enforced),
+ * tests all 7 moves: RLS isolation, General Ledger, payments/tender, currency/tax,
+ * self-serve billing, public-API/MFA, audit + edge.
+ *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover worldclass
+ */
+import 'reflect-metadata';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'wc-secret';
+process.env.NODE_ENV = 'test';
+
+import { Test } from '@nestjs/testing';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { eq } from 'drizzle-orm';
+import { resolve, join } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import * as s from '../../../apps/api/dist/database/schema/index';
+import { AppModule } from '../../../apps/api/dist/app.module';
+import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
+import { registerEdge } from '../../../apps/api/dist/common/edge';
+import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
+import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
+import { BillingService } from '../../../apps/api/dist/modules/billing/billing.service';
+import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
+
+const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
+const checks: { name: string; ok: boolean; detail?: string }[] = [];
+const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
+const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+
+async function main() {
+  const pg = await PGlite.create();
+  for (const f of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort())
+    await pg.exec(readFileSync(join(MIGRATIONS_DIR, f), 'utf8').replace(/-->\s*statement-breakpoint/g, ''));
+  const db: any = drizzle(pg, { schema: s });
+  const pw = new PasswordService();
+
+  // seed (as superuser — bypasses RLS)
+  await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
+  for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
+    await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'Shop One' }, { code: 'T2', name: 'Shop Two' }]).onConflictDoNothing();
+  const tid = async (code: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, code)))[0].id);
+  const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'cust1', passwordHash: await pw.hash('pw1'), role: 'Customer', tenantId: t1 },
+    { username: 'cust2', passwordHash: await pw.hash('pw2'), role: 'Customer', tenantId: t2 },
+  ]).onConflictDoNothing();
+  await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1.0' }).onConflictDoNothing();
+  await db.insert(s.items).values({ itemId: 'A', itemDescription: 'Apple', uom: 'EA', unitPrice: '50' }).onConflictDoNothing();
+  await db.insert(s.customerInventory).values([
+    { tenantId: t1, itemId: 'A', itemDescription: 'Apple (T1)', uom: 'EA', currentStock: '100', reorderPoint: '5', reorderQty: '20' },
+    { tenantId: t2, itemId: 'B', itemDescription: 'Banana (T2)', uom: 'EA', currentStock: '50', reorderPoint: '5', reorderQty: '10' },
+  ]);
+
+  // ── RLS at the DATABASE level (definitive) ──
+  await pg.exec(`BEGIN; SET LOCAL ROLE app_user; SELECT set_config('app.tenant_id','${t1}',true); SELECT set_config('app.bypass_rls','off',true);`);
+  const scoped = (await pg.query(`SELECT item_id FROM customer_inventory`)).rows as any[];
+  await pg.exec('ROLLBACK');
+  ok('RLS(db): tenant T1 sees only its rows (no WHERE)', scoped.length === 1 && scoped[0].item_id === 'A', JSON.stringify(scoped.map((r) => r.item_id)));
+  await pg.exec(`BEGIN; SET LOCAL ROLE app_user; SELECT set_config('app.bypass_rls','on',true);`);
+  const all = (await pg.query(`SELECT item_id FROM customer_inventory`)).rows as any[];
+  await pg.exec('ROLLBACK');
+  ok('RLS(db): staff bypass sees all tenants', all.length === 2);
+
+  // ── boot app ──
+  const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  app.useGlobalFilters(new AllExceptionsFilter());
+  await registerEdge(app); // helmet + rate-limit
+  await app.init();
+  await app.getHttpAdapter().getInstance().ready();
+  // startup seeds (main.ts does this in prod)
+  await app.get(LedgerService).seedChartOfAccounts();
+  await app.get(BillingService).seedPlans();
+  const inj = async (m: string, url: string, token?: string, payload?: any) => {
+    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
+    let json: any = {}; try { json = res.json(); } catch { /* */ }
+    return { status: res.statusCode, json, headers: res.headers };
+  };
+  const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
+  const admin = await login('admin', 'admin123');
+  const c1 = await login('cust1', 'pw1');
+  const c2 = await login('cust2', 'pw2');
+
+  // ── RLS at the API level (cross-tenant isolation through the full stack) ──
+  const inv1 = await inj('GET', '/api/portal/inventory', c1);
+  const inv2 = await inj('GET', '/api/portal/inventory', c2);
+  ok('RLS(api): cust1 sees only T1 inventory', inv1.json.items?.length === 1 && inv1.json.items[0].item_id === 'A', JSON.stringify(inv1.json.items?.map((i: any) => i.item_id)));
+  ok('RLS(api): cust2 sees only T2 inventory', inv2.json.items?.length === 1 && inv2.json.items[0].item_id === 'B');
+
+  // ── General Ledger (move #2) ──
+  ok('GL: chart of accounts seeded (>=9)', (await inj('GET', '/api/ledger/accounts', admin)).json.accounts?.length >= 9 || (await inj('GET', '/api/ledger/accounts', admin)).json.length >= 9, '');
+  const balanced = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', memo: 't', lines: [{ account_code: '1000', debit: 500 }, { account_code: '4000', credit: 500 }] });
+  ok('GL: balanced journal posts (JE-)', (balanced.status === 200 || balanced.status === 201) && /^JE-/.test(balanced.json.entry_no ?? ''), `status=${balanced.status} ${JSON.stringify(balanced.json).slice(0, 80)}`);
+  const unbal = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 100 }, { account_code: '4000', credit: 90 }] });
+  ok('GL: unbalanced journal rejected (400)', unbal.status === 400, `status=${unbal.status}`);
+  const tb = await inj('GET', '/api/ledger/trial-balance', admin);
+  const tbTotals = tb.json.totals ?? tb.json;
+  ok('GL: trial balance debits == credits', near(tbTotals.debit ?? tbTotals.total_debit ?? tbTotals.totalDebit, tbTotals.credit ?? tbTotals.total_credit ?? tbTotals.totalCredit), JSON.stringify(tbTotals).slice(0, 100));
+
+  // ── Payments (move #3) ──
+  const pay = await inj('POST', '/api/payments', admin, { sale_no: 'TEST-1', method: 'Cash', amount: 100, currency: 'THB' });
+  ok('Payments: tender captured (PAY-)', (pay.status === 200 || pay.status === 201) && /^PAY-/.test(pay.json.payment_no ?? '') && pay.json.status === 'Captured', `${JSON.stringify(pay.json).slice(0, 90)}`);
+  const refund = await inj('POST', '/api/payments/refunds', admin, { payment_no: pay.json.payment_no, amount: 100, reason: 'test' });
+  ok('Payments: refund (REF-)', (refund.status === 200 || refund.status === 201) && /^REF-/.test(refund.json.refund_no ?? ''), `${refund.status}`);
+
+  // ── Currency + Tax (move #5) ──
+  const tax = await inj('GET', '/api/tax/calc?net=100&country=TH', admin);
+  ok('Tax: TH VAT on 100 = 7', near(tax.json.tax, 7), JSON.stringify(tax.json).slice(0, 90));
+  const cur = await inj('GET', '/api/tax/currencies', admin);
+  ok('Tax: currencies include THB + USD', JSON.stringify(cur.json).includes('THB') && JSON.stringify(cur.json).includes('USD'));
+
+  // ── Portal POS now wires payment + GL (moves #2,#3,#5 in the live flow) ──
+  const sale = await inj('POST', '/api/portal/pos/sales', c1, { items: [{ item_id: 'A', qty: 2, unit_price: 50 }] });
+  ok('Portal POS sale wires payment_no(PAY-) + journal_no(JE-)', /^PAY-/.test(sale.json.payment_no ?? '') && /^JE-/.test(sale.json.journal_no ?? ''), `${JSON.stringify(sale.json).slice(0, 120)}`);
+  ok('Portal POS sale VAT via TaxService (107)', near(sale.json.total, 107) && near(sale.json.vat, 7));
+
+  // ── Self-serve billing/signup (move #6) ──
+  const signup = await inj('POST', '/api/auth/signup', undefined, { company_name: 'New Co', tenant_code: 'NEWCO', admin_username: 'newadmin', admin_password: 'secret12', email: 'a@b.com' });
+  ok('Billing: public signup provisions tenant', (signup.status === 200 || signup.status === 201) && (signup.json.tenant_code === 'NEWCO' || signup.json.tenant?.code === 'NEWCO'), `${signup.status} ${JSON.stringify(signup.json).slice(0, 90)}`);
+  const newLogin = await inj('POST', '/api/login', undefined, { username: 'newadmin', password: 'secret12' });
+  ok('Billing: provisioned admin can log in', newLogin.status === 200 && !!newLogin.json.token);
+  ok('Billing: plans listed (public)', Array.isArray((await inj('GET', '/api/billing/plans')).json.plans ?? (await inj('GET', '/api/billing/plans')).json), '');
+
+  // ── Public API platform + MFA (move #7) ──
+  const key = await inj('POST', '/api/platform/api-keys', admin, { name: 'ci', scopes: ['read'] });
+  ok('Platform: API key issued (ierp_)', (key.status === 200 || key.status === 201) && /^ierp_/.test(key.json.key ?? ''), `${key.status}`);
+  const mfa = await inj('POST', '/api/platform/mfa/setup', admin, {});
+  ok('Platform: MFA setup returns secret', (mfa.status === 200 || mfa.status === 201) && !!(mfa.json.secret ?? mfa.json.otpauth_url), `${mfa.status}`);
+
+  // ── Audit + edge (move #4) ──
+  const auditRows = (await pg.query(`SELECT count(*)::int c FROM audit_log`)).rows as any[];
+  ok('Audit: mutations recorded in audit_log', Number(auditRows[0].c) > 0, `rows=${auditRows[0].c}`);
+  const helmetRes = await inj('GET', '/', admin);
+  const hasHelmet = !!(helmetRes.headers['x-frame-options'] || helmetRes.headers['content-security-policy'] || helmetRes.headers['x-content-type-options']);
+  ok('Edge: helmet security headers present', hasHelmet, JSON.stringify(Object.keys(helmetRes.headers)).slice(0, 120));
+
+  await app.close();
+  await pg.close();
+
+  console.log('\n── Phase 9 world-class foundations (RLS · GL · payments · tax · billing · platform · audit/edge) ──');
+  for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
+  const failed = checks.filter((c) => !c.ok);
+  if (failed.length) { console.log(`\n❌ ${failed.length}/${checks.length} world-class checks failed`); process.exit(1); }
+  console.log(`\n✅ All ${checks.length} world-class checks passed`);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });

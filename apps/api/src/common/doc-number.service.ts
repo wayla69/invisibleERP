@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { docCounters } from '../database/schema';
 
-type DailyType = 'PO' | 'GR' | 'ST' | 'PR' | 'DO' | 'RCP' | 'GRC' | 'AP' | 'RTN';
+type DailyType = 'PO' | 'GR' | 'ST' | 'PR' | 'DO' | 'RCP' | 'GRC' | 'AP' | 'RTN' | 'JE' | 'PAY' | 'REF' | 'TILL';
 
 /**
  * เลขเอกสาร — คงรูปแบบแสดงผลเดิม แต่ atomic (upsert-returning บน doc_counters)
