@@ -23,12 +23,13 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await api<{ token: string }>('/api/login', {
+      const res = await api<{ token: string; role: string }>('/api/login', {
         method: 'POST',
         body: JSON.stringify({ username, password }),
       });
       setToken(res.token);
-      router.push('/dashboard');
+      // ลูกค้า → portal ; พนักงาน → หลังบ้าน
+      router.push(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ');
     } finally {

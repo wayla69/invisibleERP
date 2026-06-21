@@ -116,8 +116,15 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/etl start   # full 1.48M 
 
 สร้างด้วย multi-agent workflow (5 agents ขนาน) แล้ว integrate. รัน: `pnpm --filter @ierp/cutover ext`
 
-## สรุป Phase 0–7 ครบทั้งหมด ✅
-backend ครบทุกโดเมน (core + portal + marketing/loyalty/bom + reports + AI) + frontend core (13 routes + assistant) + ETL + cutover tooling — **5 test harness ผ่านหมด** (read 10/10, write 24/24, analytics 14/14, e2e 16/16, ext 26/26) บน Postgres จริง (PGlite). เหลือ frontend UI สำหรับ portal/marketing/bom pages (API พร้อมแล้ว)
+## สถานะ Phase 8 (frontend extensions) — เสร็จ ✅
+
+- ✅ **Customer Portal UI** (`/portal/*`, layout แยก nav ลูกค้า): dashboard, POS (ฟอร์มขาย + VAT live + ประวัติ), inventory (แก้ reorder + pending orders), track, loyalty (ดู/แลกแต้ม), my-business (ลูกค้า/ซัพพลายเออร์/PO)
+- ✅ **Staff UI** เพิ่มในหลังบ้าน: Marketing (แคมเปญ/RFM segments/โปรโมชั่น), BoM (คลังสูตร + สร้าง + อนุมัติคำขอ), Loyalty config
+- ✅ **Login redirect ตาม role** (Customer → `/portal`, staff → หลังบ้าน) + reusable `Tabs`/`Msg` components
+- ✅ ใช้ component kit เดียวกัน (Card/Kpi/Badge/DataTable/StateView) — minimal + ภาษาไทย; **22 routes** build ผ่าน
+
+## สรุป Phase 0–8 ครบทั้งหมด ✅
+backend ครบทุกโดเมน (core + portal + marketing/loyalty/bom + reports + AI) + **frontend ครบ 22 routes** (หลังบ้าน + portal ลูกค้า) + ETL + cutover tooling — **5 test harness ผ่านหมด** (read 10/10, write 24/24, analytics 14/14, e2e 16/16, ext 26/26) บน Postgres จริง (PGlite)
 
 ## Deploy (Railway)
 

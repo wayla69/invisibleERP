@@ -14,6 +14,9 @@ const NAV = [
   { label: '🧾 Purchase Orders', href: '/inventory/purchase-orders', perms: ['procurement'] },
   { label: '🛒 Procurement', href: '/procurement', perms: ['procurement'] },
   { label: '💵 Finance', href: '/finance', perms: ['ar', 'creditors', 'exec'] },
+  { label: '📣 Marketing', href: '/marketing', perms: ['marketing'] },
+  { label: '🔬 BoM', href: '/bom', perms: ['bom_master'] },
+  { label: '⭐ Loyalty', href: '/loyalty', perms: ['loyalty', 'marketing'] },
   { label: '🤖 AI Assistant', href: '/assistant', perms: ['ai_chat', 'dashboard'] },
 ];
 
