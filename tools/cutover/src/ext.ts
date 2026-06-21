@@ -76,6 +76,15 @@ async function main() {
     ok(`GET ${ep} → 200`, r.status === 200, `status=${r.status}`);
   }
 
+  // ── Promotion mint: two created back-to-back get distinct promo_id (same-second collision guard) ──
+  const p1 = await inj('POST', '/api/promotions', token, { promo_name: 'Promo A', promo_type: 'Percent', discount_pct: 10 });
+  const p2 = await inj('POST', '/api/promotions', token, { promo_name: 'Promo B', promo_type: 'Percent', discount_pct: 20 });
+  ok('promotion #1 create 200/201', p1.status === 200 || p1.status === 201, `status=${p1.status} ${JSON.stringify(p1.json).slice(0, 120)}`);
+  ok('promotion #2 create 200/201 (no same-second 409)', p2.status === 200 || p2.status === 201, `status=${p2.status} ${JSON.stringify(p2.json).slice(0, 120)}`);
+  ok('back-to-back promotions get distinct PROMO- ids',
+    /^PROMO-/.test(p1.json.promo_id ?? '') && /^PROMO-/.test(p2.json.promo_id ?? '') && p1.json.promo_id !== p2.json.promo_id,
+    `${p1.json.promo_id} vs ${p2.json.promo_id}`);
+
   // ── ExcelJS report export → valid .xlsx (PK zip magic) ──
   const xlsx = await inj('GET', '/api/reports/stock-summary/export', token);
   ok('reports stock-summary/export → xlsx (PK magic)', xlsx.status === 200 && xlsx.raw && xlsx.raw[0] === 0x50 && xlsx.raw[1] === 0x4b, `status=${xlsx.status} bytes=${xlsx.raw?.length}`);

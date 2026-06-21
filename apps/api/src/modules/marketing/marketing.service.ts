@@ -189,27 +189,42 @@ export class MarketingService {
     const db = this.db as any;
     if (!PROMO_TYPES.includes(dto.promo_type))
       throw new BadRequestException({ code: 'BAD_PROMO_TYPE', message: `Invalid promo type: ${dto.promo_type}`, messageTh: 'ประเภทโปรโมชันไม่ถูกต้อง' });
-    const promoId = `PROMO-${stamp()}`;
     const itemIds = Array.from(new Set((dto.item_ids ?? []).filter(Boolean)));
+    // promo_id is PROMO-<YYYYMMDDHHMMSS> (second-precision) under a UNIQUE constraint, so two
+    // promotions minted in the same second collide and the second insert fails (23505). Retry on a
+    // bumped second until the insert lands — mirrors DineInService.mintSaleNo for the SALE- collision.
+    const base = Date.now();
     let newId = 0;
-    await db.transaction(async (tx: any) => {
-      const [h] = await tx.insert(promotions).values({
-        promoId, promoName: dto.promo_name, promoType: dto.promo_type,
-        startDate: dto.start_date ?? null, endDate: dto.end_date ?? null,
-        minQty: dto.min_qty != null ? String(dto.min_qty) : null,
-        minAmount: dto.min_amount != null ? String(dto.min_amount) : null,
-        discountPct: dto.discount_pct != null ? String(dto.discount_pct) : null,
-        discountAmt: dto.discount_amt != null ? String(dto.discount_amt) : null,
-        freeItemId: dto.free_item_id ?? null,
-        freeQty: dto.free_qty != null ? String(dto.free_qty) : null,
-        customerGroup: dto.customer_group ?? 'All', category: dto.category ?? null,
-        maxUses: dto.max_uses ?? null, usedCount: 0, active: true, notes: dto.notes ?? null,
-      }).returning({ id: promotions.id });
-      newId = Number(h.id);
-      if (itemIds.length) {
-        await tx.insert(promotionItems).values(itemIds.map((itemId) => ({ promoId: newId, itemId })));
+    let promoId = '';
+    for (let attempt = 0; ; attempt++) {
+      promoId = `PROMO-${stamp(new Date(base + attempt * 1000))}`;
+      try {
+        await db.transaction(async (tx: any) => {
+          const [h] = await tx.insert(promotions).values({
+            promoId, promoName: dto.promo_name, promoType: dto.promo_type,
+            startDate: dto.start_date ?? null, endDate: dto.end_date ?? null,
+            minQty: dto.min_qty != null ? String(dto.min_qty) : null,
+            minAmount: dto.min_amount != null ? String(dto.min_amount) : null,
+            discountPct: dto.discount_pct != null ? String(dto.discount_pct) : null,
+            discountAmt: dto.discount_amt != null ? String(dto.discount_amt) : null,
+            freeItemId: dto.free_item_id ?? null,
+            freeQty: dto.free_qty != null ? String(dto.free_qty) : null,
+            customerGroup: dto.customer_group ?? 'All', category: dto.category ?? null,
+            maxUses: dto.max_uses ?? null, usedCount: 0, active: true, notes: dto.notes ?? null,
+          }).returning({ id: promotions.id });
+          newId = Number(h.id);
+          if (itemIds.length) {
+            await tx.insert(promotionItems).values(itemIds.map((itemId) => ({ promoId: newId, itemId })));
+          }
+        });
+        break;
+      } catch (e: any) {
+        // 23505 = unique_violation; only promo_id can clash here (itemIds are de-duped). Bump the
+        // second and retry, with a bounded cap so a genuinely stuck collision still surfaces.
+        if (e?.code === '23505' && attempt < 12) continue;
+        throw e;
       }
-    });
+    }
     return { promo_id: promoId, id: newId, promo_name: dto.promo_name, promo_type: dto.promo_type, item_count: itemIds.length };
   }
 
