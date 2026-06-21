@@ -43,6 +43,13 @@
       "when": 1782007973282,
       "tag": "0005_tax_docs",
       "breakpoints": false
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782007973283,
+      "tag": "0006_restaurant",
+      "breakpoints": false
     }
   ]
 }

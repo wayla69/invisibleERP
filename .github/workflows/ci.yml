@@ -57,3 +57,5 @@ jobs:
         run: pnpm --filter @ierp/cutover worldclass
       - name: Thai tax documents (full/abbreviated invoice, WHT 50tawi)
         run: pnpm --filter @ierp/cutover taxdocs
+      - name: Restaurant POS (dine-in, KDS, tables, QR pay)
+        run: pnpm --filter @ierp/cutover restaurant

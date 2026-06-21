@@ -28,6 +28,7 @@ import { TaxModule } from './modules/tax/tax.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { TaxDocsModule } from './modules/tax-docs/tax-docs.module';
+import { RestaurantModule } from './modules/restaurant/restaurant.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { TaxDocsModule } from './modules/tax-docs/tax-docs.module';
     BillingModule,
     PlatformModule,
     TaxDocsModule,
+    RestaurantModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions

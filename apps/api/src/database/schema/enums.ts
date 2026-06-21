@@ -12,3 +12,9 @@ export const invoiceStatusEnum = pgEnum('invoice_status', ['Unpaid', 'Partial', 
 export const moveTypeEnum = pgEnum('move_type', ['Issue', 'Transfer', 'GR', 'Return', 'Stock In', 'Stock Out']);
 export const lotStatusEnum = pgEnum('lot_status', ['Active', 'Consumed', 'Expired', 'Quarantine']);
 export const stocktakeStatusEnum = pgEnum('stocktake_status', ['Draft', 'Posted']);
+
+// ── Restaurant / F&B POS ──
+export const dineInOrderStatusEnum = pgEnum('dine_in_order_status', ['open', 'sent_to_kitchen', 'partially_ready', 'served', 'bill_requested', 'paid', 'closed', 'cancelled']);
+export const kdsItemStatusEnum = pgEnum('kds_item_status', ['new', 'queued', 'preparing', 'ready', 'served', 'voided']);
+export const tableStatusEnum = pgEnum('table_status', ['available', 'reserved', 'occupied', 'bill_requested', 'paying', 'cleaning', 'out_of_service']);
+export const tableSessionStatusEnum = pgEnum('table_session_status', ['open', 'bill_requested', 'paying', 'closed', 'abandoned']);

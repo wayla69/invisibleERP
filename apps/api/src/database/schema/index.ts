@@ -15,3 +15,4 @@ export * from './ledger';
 export * from './payments';
 export * from './billing';
 export * from './tax-docs';
+export * from './restaurant';

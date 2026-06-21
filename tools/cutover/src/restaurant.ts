@@ -1,0 +1,139 @@
+/**
+ * Phase 11 — Restaurant/F&B POS validation (real Nest app over PGlite, RLS-enforced):
+ * dine-in orders + KDS lifecycle + wait-time, floor-plan tables, public QR diner (HMAC token) +
+ * PromptPay pay → cust_pos_sales + GL + abbreviated tax invoice.
+ *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover restaurant
+ */
+import 'reflect-metadata';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'resto-secret';
+process.env.NODE_ENV = 'test';
+
+import { Test } from '@nestjs/testing';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { eq } from 'drizzle-orm';
+import { resolve, join } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import * as s from '../../../apps/api/dist/database/schema/index';
+import { AppModule } from '../../../apps/api/dist/app.module';
+import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
+import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
+import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
+import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
+
+const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
+const checks: { name: string; ok: boolean; detail?: string }[] = [];
+const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
+const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+const taxId = (p12: string) => { let sum = 0; for (let i = 0; i < 12; i++) sum += Number(p12[i]) * (13 - i); return p12 + String((11 - (sum % 11)) % 10); };
+
+async function main() {
+  const pg = await PGlite.create();
+  for (const f of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort())
+    await pg.exec(readFileSync(join(MIGRATIONS_DIR, f), 'utf8').replace(/-->\s*statement-breakpoint/g, ''));
+  const db: any = drizzle(pg, { schema: s });
+  const pw = new PasswordService();
+
+  await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
+  for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
+    await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
+  await db.insert(s.tenants).values([
+    { code: 'HQ', name: 'HQ' },
+    { code: 'T1', name: 'ร้านอาหารหนึ่ง', legalName: 'บจก. ร้านหนึ่ง', taxId: taxId('010555600001'), vatRegistered: true, branchCode: '00000', addressLine1: '1 ถนนอาหาร', province: 'กรุงเทพมหานคร', postalCode: '10110' },
+    { code: 'T2', name: 'ร้านอาหารสอง', taxId: taxId('010555600002'), vatRegistered: true },
+  ]).onConflictDoNothing();
+  const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
+  const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
+    { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t2 },
+  ]).onConflictDoNothing();
+
+  const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ maxParamLength: 500 }));
+  app.useGlobalFilters(new AllExceptionsFilter());
+  await app.init();
+  await app.getHttpAdapter().getInstance().ready();
+  await app.get(LedgerService).seedChartOfAccounts();
+
+  const inj = async (m: string, url: string, token?: string, payload?: any) => {
+    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
+    let json: any = {}; try { json = res.json(); } catch { /* */ }
+    return { status: res.statusCode, json };
+  };
+  const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
+  const sales1 = await login('sales1', 'pw1');
+  const sales2 = await login('sales2', 'pw2');
+
+  // ── floor-plan: create + open a table ──
+  const tbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A1', seats: 4, pos_x: 10, pos_y: 20 });
+  ok('Table created (available)', (tbl.status === 200 || tbl.status === 201) && tbl.json.table_no === 'A1' && tbl.json.status === 'available' && !!tbl.json.qr_token, `${tbl.status}`);
+  const open1 = await inj('POST', `/api/restaurant/tables/${tbl.json.id}/open`, sales1, { party_size: 2 });
+  ok('Open table → session + diner token', (open1.status === 200 || open1.status === 201) && !!open1.json.public_token && /^TS-/.test(open1.json.session_no ?? ''), `${open1.status}`);
+
+  // ── dine-in order + KDS lifecycle ──
+  const ord = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tbl.json.id, session_id: open1.json.session_id, guest_count: 2, items: [{ name: 'ผัดกะเพราหมู', qty: 2, unit_price: 60, station_code: 'hot' }, { name: 'ชาเย็น', qty: 2, unit_price: 25, station_code: 'drinks' }] });
+  ok('Order created (DIN-) + live totals', /^DIN-\d{8}-\d{3}$/.test(ord.json.order_no ?? '') && ord.json.items?.length === 2 && near(ord.json.subtotal, 170), `${ord.status} ${JSON.stringify(ord.json).slice(0, 80)}`);
+  const fired = await inj('POST', `/api/restaurant/orders/${ord.json.order_no}/fire`, sales1);
+  ok('Fire → items queued + order sent_to_kitchen', fired.json.status === 'sent_to_kitchen' && (fired.json.items ?? []).every((i: any) => i.kds_status === 'queued'), `${fired.status} ${JSON.stringify(fired.json).slice(0, 90)}`);
+  const feed = await inj('GET', '/api/restaurant/kds/feed', sales1);
+  const feedItems = (feed.json.stations ?? []).flatMap((st: any) => st.items);
+  ok('KDS feed shows fired items grouped by station', feed.json.stations?.length === 2 && feedItems.length === 2 && feedItems.every((i: any) => i.elapsed_min >= 0), `stations=${feed.json.stations?.length}`);
+  const item1 = ord.json.items[0].item_id;
+  const badJump = await inj('PATCH', `/api/restaurant/kds/items/${item1}`, sales1, { action: 'serve' }); // queued→serve illegal
+  ok('KDS rejects illegal transition (queued→serve) 400', badJump.status === 400, `${badJump.status}`);
+  await inj('PATCH', `/api/restaurant/kds/items/${item1}`, sales1, { action: 'start' });
+  const ready1 = await inj('PATCH', `/api/restaurant/kds/items/${item1}`, sales1, { action: 'ready' });
+  ok('KDS bump queued→preparing→ready', ready1.json.kds_status === 'ready' && ready1.json.order_status === 'partially_ready', `${ready1.json.order_status}`);
+
+  // ── wait-time on the diner status (via QR token) ──
+  const dinerTok = open1.json.public_token;
+  const st1 = await inj('GET', `/api/qr/t/${dinerTok}`, undefined);
+  ok('Diner status (QR token) shows order + wait-time', st1.status === 200 && st1.json.order?.items?.length === 2 && st1.json.order.waited_min >= 0 && st1.json.table_no === 'A1', `${st1.status} ${JSON.stringify(st1.json).slice(0, 80)}`);
+  ok('Diner status per-item statusTh present', (st1.json.order?.items ?? []).some((i: any) => i.status_th === 'พร้อมเสิร์ฟ' || i.status_th === 'รอคิว'));
+
+  // ── staff cash checkout → sale + GL + abbreviated invoice ──
+  await inj('POST', `/api/restaurant/orders/${ord.json.order_no}/bill`, sales1);
+  const co = await inj('POST', `/api/restaurant/orders/${ord.json.order_no}/checkout`, sales1, { method: 'Cash' });
+  ok('Checkout → sale + GL + abbreviated invoice', /^SALE-/.test(co.json.sale_no ?? '') && /^JE-/.test(co.json.journal_no ?? '') && /^ATV-/.test(co.json.tax_invoice_no ?? '') && near(co.json.total, 181.9), `${co.status} ${JSON.stringify(co.json).slice(0, 110)}`);
+  const saleRow = (await pg.query(`SELECT total FROM cust_pos_sales WHERE sale_no = '${co.json.sale_no}'`)).rows as any[];
+  ok('Checkout created cust_pos_sales row', saleRow.length === 1 && near(saleRow[0].total, 181.9), JSON.stringify(saleRow));
+  const tblAfter = (await pg.query(`SELECT status FROM dining_tables WHERE id = ${tbl.json.id}`)).rows as any[];
+  ok('Table → cleaning after checkout', tblAfter[0].status === 'cleaning', tblAfter[0].status);
+
+  // ── QR diner PromptPay flow on a second tenant's table (its own SALE-T2- series → no same-second collision) ──
+  const tbl2 = await inj('POST', '/api/restaurant/tables', sales2, { table_no: 'B1', seats: 2 });
+  const open2 = await inj('POST', `/api/restaurant/tables/${tbl2.json.id}/open`, sales2, {});
+  const tok2 = open2.json.public_token;
+  await inj('POST', '/api/restaurant/orders', sales2, { table_id: tbl2.json.id, session_id: open2.json.session_id, items: [{ name: 'ข้าวผัดกุ้ง', qty: 1, unit_price: 100, station_code: 'hot' }] });
+  const billD = await inj('POST', `/api/qr/t/${tok2}/bill`, undefined);
+  ok('Diner request bill (public)', (billD.status === 200 || billD.status === 201) && billD.json.status === 'bill_requested', `${billD.status}`);
+  const payD = await inj('POST', `/api/qr/t/${tok2}/pay`, undefined);
+  ok('Diner PromptPay pay → Pending', (payD.status === 200 || payD.status === 201) && /^PAY-/.test(payD.json.payment_no ?? '') && payD.json.status === 'Pending' && near(payD.json.total, 107), `${payD.status} ${JSON.stringify(payD.json).slice(0, 80)}`);
+  const confirmD = await inj('POST', `/api/qr/t/${tok2}/confirm`, undefined, { payment_no: payD.json.payment_no });
+  ok('Diner confirm → settled + sale + invoice + closed', confirmD.json.paid === true && /^SALE-/.test(confirmD.json.sale_no ?? '') && /^ATV-/.test(confirmD.json.tax_invoice_no ?? ''), `${confirmD.status} ${JSON.stringify(confirmD.json).slice(0, 110)}`);
+  const tokAfter = await inj('GET', `/api/qr/t/${tok2}`, undefined);
+  ok('Diner token rejected after session closed (401)', tokAfter.status === 401, `${tokAfter.status}`);
+
+  // ── security / RLS ──
+  const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
+  const t1tables = await inj('GET', '/api/restaurant/tables', sales1);
+  ok('RLS: cross-tenant table isolation (T2 not sees A1, T1 not sees B1)', (t2tables.json.tables ?? []).every((x: any) => x.table_no !== 'A1') && (t1tables.json.tables ?? []).every((x: any) => x.table_no !== 'B1'), `T2=${t2tables.json.tables?.length} T1=${t1tables.json.tables?.length}`);
+  const forged = dinerTok.slice(0, 10) + (dinerTok[10] === 'A' ? 'B' : 'A') + dinerTok.slice(11); // flip one char
+  const forgedRes = await inj('GET', `/api/qr/t/${forged}`, undefined);
+  ok('Security: forged/tampered token → 401', forgedRes.status === 401, `${forgedRes.status}`);
+
+  await app.close();
+  await pg.close();
+
+  console.log('\n── Phase 11 Restaurant POS (dine-in + KDS + ผังโต๊ะ + QR pay) ──');
+  for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
+  const failed = checks.filter((c) => !c.ok);
+  if (failed.length) { console.log(`\n❌ ${failed.length}/${checks.length} restaurant checks failed`); process.exit(1); }
+  console.log(`\n✅ All ${checks.length} restaurant checks passed`);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });

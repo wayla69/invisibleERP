@@ -1,0 +1,116 @@
+import { Inject, Injectable, UnauthorizedException, BadRequestException, NotFoundException } from '@nestjs/common';
+import { eq, and, ne, inArray, desc } from 'drizzle-orm';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { diningTables, tableSessions, dineInOrders } from '../../database/schema';
+import { PaymentService } from '../payments/payments.service';
+import { n } from '../../database/queries';
+import type { JwtUser } from '../../common/decorators';
+import { RealtimeScope } from './realtime.scope';
+import { TableService } from './table.service';
+import { DineInService } from './dine-in.service';
+import { verifyTableToken, type TableClaim } from './qr-token.util';
+
+const LIVE = ['open', 'bill_requested', 'paying'];
+const diner = (tenantId: number): JwtUser => ({ username: 'diner:qr', role: 'Sales', customerName: null, tenantId, permissions: [] });
+
+@Injectable()
+export class QrService {
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly scope: RealtimeScope,
+    private readonly tables: TableService,
+    private readonly dineIn: DineInService,
+    private readonly payments: PaymentService,
+  ) {}
+
+  // diner scans the printed QR (stable table token) → mint/join a session, return the per-session token
+  async start(qrToken: string) {
+    // controlled bypass: discover which tenant the QR belongs to (reads only id + tenant_id + status)
+    const resolved = await this.scope.bypassQuery(async () => {
+      const dbx = this.db as any;
+      const [t] = await dbx.select({ id: diningTables.id, tenantId: diningTables.tenantId }).from(diningTables).where(eq(diningTables.qrToken, qrToken)).limit(1);
+      return t ? { tenantId: Number(t.tenantId), tableId: Number(t.id) } : null;
+    });
+    if (!resolved) throw new NotFoundException({ code: 'BAD_QR', message: 'Unknown table QR', messageTh: 'ไม่พบโต๊ะของ QR นี้' });
+    return this.scope.run(resolved.tenantId, () => this.tables.openTable(resolved.tableId, undefined, 'diner:qr', null));
+  }
+
+  // verify HMAC + live session (under RLS) → claim. Throws 401 on forged/closed token.
+  private async resolve(token: string): Promise<{ claim: TableClaim; session: any; table: any }> {
+    const claim = verifyTableToken(token);
+    if (!claim) throw new UnauthorizedException({ code: 'BAD_TOKEN', message: 'Invalid table token', messageTh: 'โทเคนโต๊ะไม่ถูกต้อง' });
+    return this.scope.run(claim.tenantId, async () => {
+      const dbx = this.db as any;
+      const [session] = await dbx.select().from(tableSessions).where(and(eq(tableSessions.id, claim.sessionId), eq(tableSessions.publicToken, token), eq(tableSessions.tableId, claim.tableId), inArray(tableSessions.status, LIVE as any))).limit(1);
+      if (!session) throw new UnauthorizedException({ code: 'SESSION_ENDED', message: 'Table session ended', messageTh: 'เซสชันโต๊ะนี้สิ้นสุดแล้ว' });
+      const [table] = await dbx.select().from(diningTables).where(eq(diningTables.id, claim.tableId)).limit(1);
+      return { claim, session, table };
+    });
+  }
+
+  async status(token: string) {
+    const claim = verifyTableToken(token);
+    if (!claim) throw new UnauthorizedException({ code: 'BAD_TOKEN', message: 'Invalid table token', messageTh: 'โทเคนโต๊ะไม่ถูกต้อง' });
+    return this.scope.run(claim.tenantId, async () => {
+      const dbx = this.db as any;
+      const [session] = await dbx.select().from(tableSessions).where(and(eq(tableSessions.id, claim.sessionId), eq(tableSessions.publicToken, token), inArray(tableSessions.status, LIVE as any))).limit(1);
+      if (!session) throw new UnauthorizedException({ code: 'SESSION_ENDED', message: 'Table session ended', messageTh: 'เซสชันโต๊ะนี้สิ้นสุดแล้ว' });
+      const [table] = await dbx.select({ tableNo: diningTables.tableNo }).from(diningTables).where(eq(diningTables.id, claim.tableId)).limit(1);
+      const order = await this.dineIn.publicSummary(claim.sessionId);
+      return {
+        table_no: table?.tableNo ?? null, session_status: session.status,
+        order: order ? { order_no: order.order_no, status: order.status, waited_min: order.waited_min, ready_in_min: order.ready_in_min, items: order.items } : null,
+        bill: order ? { subtotal: order.subtotal, vat: order.vat, total: order.total, settled: session.status === 'closed' } : null,
+      };
+    });
+  }
+
+  private async openOrderForSession(sessionId: number) {
+    const dbx = this.db as any;
+    const [o] = await dbx.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, sessionId), ne(dineInOrders.status, 'cancelled'), ne(dineInOrders.status, 'closed'))).orderBy(desc(dineInOrders.id)).limit(1);
+    return o;
+  }
+
+  async requestBill(token: string) {
+    const { claim } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, async () => {
+      const o = await this.openOrderForSession(claim.sessionId);
+      if (!o) throw new BadRequestException({ code: 'NO_OPEN_ORDER', message: 'No order to bill', messageTh: 'ยังไม่มีรายการอาหารให้ชำระ' });
+      return this.dineIn.requestBill(o.orderNo, diner(claim.tenantId));
+    });
+  }
+
+  // start PromptPay tender (Pending) — returns the QR payload for the diner to scan
+  async pay(token: string) {
+    const { claim } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, async () => {
+      const dbx = this.db as any;
+      const o = await this.openOrderForSession(claim.sessionId);
+      if (!o) throw new BadRequestException({ code: 'NO_OPEN_ORDER', message: 'No order to pay', messageTh: 'ยังไม่มีรายการให้ชำระ' });
+      const total = n(o.total) > 0 ? n(o.total) : (await this.dineIn.requestBill(o.orderNo, diner(claim.tenantId))).total;
+      if (!(total > 0)) throw new BadRequestException({ code: 'EMPTY_BILL', message: 'Bill is zero', messageTh: 'ยอดบิลเป็นศูนย์' });
+      const u = diner(claim.tenantId);
+      const saleNo = await (this.dineIn as any).mintSaleNo(claim.tenantId);
+      const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: claim.tenantId, method: 'PromptPay', amount: total, currency: 'THB', gateway: 'promptpay' }, u);
+      await dbx.update(tableSessions).set({ status: 'paying', saleNo }).where(eq(tableSessions.id, claim.sessionId));
+      await dbx.update(diningTables).set({ status: 'paying', updatedAt: new Date() }).where(eq(diningTables.id, claim.tableId));
+      return { payment_no: tender.payment_no, status: tender.status, gateway_ref: tender.gateway_ref, total };
+    });
+  }
+
+  // mock settlement (real PromptPay webhook later): settle → build sale + GL + invoice + close (atomic)
+  async confirm(token: string, paymentNo: string) {
+    const { claim, session } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, async () => {
+      const u = diner(claim.tenantId);
+      const settled: any = await this.payments.settle(paymentNo, u);
+      const o = await this.openOrderForSession(claim.sessionId);
+      if (!o) throw new BadRequestException({ code: 'NO_OPEN_ORDER', message: 'No order', messageTh: 'ไม่พบออเดอร์' });
+      const saleNo = session.saleNo || o.saleNo;
+      if (!saleNo) throw new BadRequestException({ code: 'NO_SALE', message: 'No provisional sale; call /pay first', messageTh: 'กรุณาเริ่มชำระเงินก่อน' });
+      const built = await this.dineIn.buildSale(o, saleNo, 0, u);
+      const invNo = await this.dineIn.markPaidAndInvoice(o, saleNo, u);
+      return { payment_status: settled.status, sale_no: saleNo, total: built.total, journal_no: built.journal_no, tax_invoice_no: invNo, paid: true };
+    });
+  }
+}

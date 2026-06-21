@@ -14,7 +14,8 @@ import { LedgerService } from './modules/ledger/ledger.service';
 import { BillingService } from './modules/billing/billing.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter());
+  // maxParamLength 500 (default 100) — QR table-session tokens carry an HMAC and exceed 100 chars.
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ maxParamLength: 500 }));
 
   // CORS = explicit origins (เลิก wildcard "*" ของ V1)
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((s) => s.trim());
