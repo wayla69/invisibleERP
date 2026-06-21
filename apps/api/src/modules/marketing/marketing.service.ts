@@ -190,6 +190,7 @@ export class MarketingService {
     if (!PROMO_TYPES.includes(dto.promo_type))
       throw new BadRequestException({ code: 'BAD_PROMO_TYPE', message: `Invalid promo type: ${dto.promo_type}`, messageTh: 'ประเภทโปรโมชันไม่ถูกต้อง' });
     const itemIds = Array.from(new Set((dto.item_ids ?? []).filter(Boolean)));
+    const tenantId = user.tenantId ?? null; // owning shop → promo is private to it (RLS + applyPromo scope)
     // promo_id is PROMO-<YYYYMMDDHHMMSS> (second-precision) under a UNIQUE constraint, so two
     // promotions minted in the same second collide and the second insert fails (23505). Retry on a
     // bumped second until the insert lands — mirrors DineInService.mintSaleNo for the SALE- collision.
@@ -201,7 +202,7 @@ export class MarketingService {
       try {
         await db.transaction(async (tx: any) => {
           const [h] = await tx.insert(promotions).values({
-            promoId, promoName: dto.promo_name, promoType: dto.promo_type,
+            tenantId, promoId, promoName: dto.promo_name, promoType: dto.promo_type,
             startDate: dto.start_date ?? null, endDate: dto.end_date ?? null,
             minQty: dto.min_qty != null ? String(dto.min_qty) : null,
             minAmount: dto.min_amount != null ? String(dto.min_amount) : null,
@@ -214,7 +215,7 @@ export class MarketingService {
           }).returning({ id: promotions.id });
           newId = Number(h.id);
           if (itemIds.length) {
-            await tx.insert(promotionItems).values(itemIds.map((itemId) => ({ promoId: newId, itemId })));
+            await tx.insert(promotionItems).values(itemIds.map((itemId) => ({ promoId: newId, itemId, tenantId })));
           }
         });
         break;

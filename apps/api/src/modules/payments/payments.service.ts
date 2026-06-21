@@ -78,11 +78,15 @@ export class PaymentService {
     }
     const fullyRefunded = already + n(dto.amount) >= n(pay.amount) - 1e-9;
 
+    // Attribute the refund to the till open NOW (where the cash actually leaves the drawer), not the
+    // original sale's till. A cash sale on a since-closed shift refunded today must hit today's drawer.
+    const openTill = pay.tenantId != null ? await this.currentOpenTill(Number(pay.tenantId)) : null;
+
     const refundNo = await this.docNo.nextDaily('REF');
     await db.transaction(async (tx: any) => {
       await tx.insert(paymentRefunds).values({
-        refundNo, paymentNo: dto.payment_no, tenantId: pay.tenantId, amount: fx(dto.amount, 4),
-        reason: dto.reason ?? null, status: 'Refunded', createdBy: user.username,
+        refundNo, paymentNo: dto.payment_no, tenantId: pay.tenantId, tillSessionId: openTill?.id ?? null,
+        amount: fx(dto.amount, 4), reason: dto.reason ?? null, status: 'Refunded', createdBy: user.username,
       });
       // Only flip the payment to Refunded once it is FULLY refunded; partials keep it Captured so
       // further partial refunds remain possible and the payment cannot be voided.
@@ -136,7 +140,7 @@ export class PaymentService {
     const [s] = await db.select({ id: tillSessions.id, sessionNo: tillSessions.sessionNo })
       .from(tillSessions)
       .where(and(eq(tillSessions.tenantId, tenantId), sql`${tillSessions.status}::text = 'Open'`))
-      .orderBy(desc(tillSessions.openedAt))
+      .orderBy(desc(tillSessions.openedAt), desc(tillSessions.id))
       .limit(1);
     return s ? { id: Number(s.id), sessionNo: s.sessionNo } : null;
   }
@@ -190,7 +194,10 @@ export class PaymentService {
     const [gross] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured));
     const byMethod = await db.select({ method: payments.method, amount: sql<string>`coalesce(sum(${payments.amount}),0)`, cnt: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured)).groupBy(payments.method);
     const [cashSales] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`, sql`${payments.status}::text IN ('Captured','Refunded')`));
-    const [cashRefunds] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).innerJoin(payments, eq(paymentRefunds.paymentNo, payments.paymentNo)).where(and(eq(payments.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`));
+    // Cash refunds reduce THIS till's drawer only if the refund was processed against it (till the cash
+    // left), keyed by payment_refunds.till_session_id — not the original sale's till. Still gated to Cash
+    // tenders (a card refund moves no drawer cash).
+    const [cashRefunds] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).innerJoin(payments, eq(paymentRefunds.paymentNo, payments.paymentNo)).where(and(eq(paymentRefunds.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`));
     const mv = await db.select({ type: cashMovements.type, v: sql<string>`coalesce(sum(${cashMovements.amount}),0)` }).from(cashMovements).where(eq(cashMovements.tillSessionId, sessId)).groupBy(cashMovements.type);
     const paidIn = n(mv.find((m: any) => m.type === 'paid_in')?.v), paidOut = n(mv.find((m: any) => m.type === 'paid_out')?.v), drops = n(mv.find((m: any) => m.type === 'drop')?.v);
     const [txn] = await db.select({ c: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured));

@@ -43,6 +43,7 @@ async function main() {
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
+    { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t2 }, // T2 shop staff
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
@@ -58,13 +59,15 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const sales1 = await login('sales1', 'pw1');
+  const sales2 = await login('sales2', 'pw2');
   const admin = await login('admin', 'admin123');
 
   let tn = 0;
-  const makeOrder = async (items: any[]) => {
-    const t = await inj('POST', '/api/restaurant/tables', sales1, { table_no: `D${++tn}`, seats: 4 });
-    return (await inj('POST', '/api/restaurant/orders', sales1, { table_id: t.json.id, items })).json;
+  const makeOrderAs = async (token: string, items: any[]) => {
+    const t = await inj('POST', '/api/restaurant/tables', token, { table_no: `D${++tn}`, seats: 4 });
+    return (await inj('POST', '/api/restaurant/orders', token, { table_id: t.json.id, items })).json;
   };
+  const makeOrder = (items: any[]) => makeOrderAs(sales1, items);
   const checkout = (orderNo: string, body: any) => inj('POST', `/api/restaurant/orders/${orderNo}/checkout`, sales1, body);
   const one = (price: number) => [{ name: 'จานเดียว', qty: 1, unit_price: price, station_code: 'hot' }];
 
@@ -96,9 +99,11 @@ async function main() {
   ok('GL: VAT on discounted base (Cr4000=180, Cr2100=12.60, Dr1000=192.60)', near(leg('4000', 'credit'), 180) && near(leg('2100', 'credit'), 12.60) && near(leg('1000', 'debit'), 192.60), JSON.stringify(gl));
   ok('GL: balanced (Σdebit=Σcredit)', near(gl.reduce((a, l) => a + Number(l.debit || 0), 0), gl.reduce((a, l) => a + Number(l.credit || 0), 0)));
 
-  // 7 + 8. promo code Percent
-  const promo = await inj('POST', '/api/promotions', admin, { promo_name: 'สงกรานต์10', promo_type: 'Percent', discount_pct: 10, min_amount: 100 });
+  // 7 + 8. promo code Percent — created by the T1 SHOP (sales1), so the promo is owned by T1 (tenant-scoped).
+  const promo = await inj('POST', '/api/promotions', sales1, { promo_name: 'สงกรานต์10', promo_type: 'Percent', discount_pct: 10, min_amount: 100 });
   const code = promo.json.promo_id;
+  const promoRow = (await pg.query(`SELECT tenant_id FROM promotions WHERE promo_id='${code}'`)).rows as any[];
+  ok('Promo created by shop is tenant-scoped (tenant_id=T1)', Number(promoRow[0]?.tenant_id) === t1, JSON.stringify(promoRow));
   const o7 = await makeOrder(one(200));
   const c7 = await checkout(o7.order_no, { promo_code: code });
   ok('Promo Percent applied: code echoed, total 192.60', c7.json.promo_code === code && near(c7.json.total, 192.60), `${c7.status} ${JSON.stringify(c7.json).slice(0, 90)}`);
@@ -106,13 +111,21 @@ async function main() {
   const uc = (await pg.query(`SELECT used_count FROM promotions WHERE promo_id='${code}'`)).rows as any[];
   ok('Promo audited: redemption 20 + tenant T1 + used_count 1', near(red[0]?.discount_amount, 20) && Number(red[0]?.tenant_id) === t1 && Number(uc[0]?.used_count) === 1, JSON.stringify(red) + JSON.stringify(uc));
 
+  // Finding #2: promotions are tenant-scoped — a T1-owned promo is invisible to T2. sales2 (T2) redeeming
+  // T1's code must 400 PROMO_NOT_FOUND (cross-tenant lookup blocked), and T1's used_count must NOT move.
+  const o8b = await makeOrderAs(sales2, one(200));
+  const c8b = await inj('POST', `/api/restaurant/orders/${o8b.order_no}/checkout`, sales2, { promo_code: code });
+  ok('Promo tenant-scoped: T2 cannot use T1 promo → 400 PROMO_NOT_FOUND', c8b.status === 400 && c8b.json.error?.code === 'PROMO_NOT_FOUND', `${c8b.status} ${c8b.json.error?.code}`);
+  const uc2 = (await pg.query(`SELECT used_count FROM promotions WHERE promo_id='${code}'`)).rows as any[];
+  ok('Promo tenant-scoped: T2 attempt did not consume T1 promo (used_count still 1)', Number(uc2[0]?.used_count) === 1, JSON.stringify(uc2));
+
   // 9. promo min-spend rejected
   const o9 = await makeOrder(one(50));
   const c9 = await checkout(o9.order_no, { promo_code: code });
   ok('Promo min-spend not met → 400 PROMO_MIN_SPEND', c9.status === 400 && c9.json.error?.code === 'PROMO_MIN_SPEND', `${c9.status} ${c9.json.error?.code}`);
 
   // 10. promo expired rejected (seed directly — createPromotion's promoId is same-second stamp, collides with promo #7)
-  await db.insert(s.promotions).values({ promoId: 'PROMO-EXPIRED', promoName: 'เก่า', promoType: 'Percent', discountPct: '10', endDate: '2020-01-01', usedCount: 0, active: true }).onConflictDoNothing();
+  await db.insert(s.promotions).values({ tenantId: t1, promoId: 'PROMO-EXPIRED', promoName: 'เก่า', promoType: 'Percent', discountPct: '10', endDate: '2020-01-01', usedCount: 0, active: true }).onConflictDoNothing();
   const o10 = await makeOrder(one(200));
   const c10 = await checkout(o10.order_no, { promo_code: 'PROMO-EXPIRED' });
   ok('Promo expired → 400 PROMO_EXPIRED', c10.status === 400 && c10.json.error?.code === 'PROMO_EXPIRED', `${c10.status} ${c10.json.error?.code}`);
@@ -133,7 +146,7 @@ async function main() {
   ok('Invoice grand_total = discounted total 192.60, discount 20', near(inv[0]?.grand_total, 192.60) && near(inv[0]?.discount, 20), JSON.stringify(inv));
 
   // verify-fix #7: max_uses cap enforced (seed directly to dodge createPromotion's same-second id collision)
-  await db.insert(s.promotions).values({ promoId: 'PROMO-CAP', promoName: 'จำกัด', promoType: 'Percent', discountPct: '10', maxUses: 1, usedCount: 0, active: true }).onConflictDoNothing();
+  await db.insert(s.promotions).values({ tenantId: t1, promoId: 'PROMO-CAP', promoName: 'จำกัด', promoType: 'Percent', discountPct: '10', maxUses: 1, usedCount: 0, active: true }).onConflictDoNothing();
   const cap1 = await checkout((await makeOrder(one(100))).order_no, { promo_code: 'PROMO-CAP' });
   ok('Fix#7: promo within max_uses applies', cap1.json.promo_code === 'PROMO-CAP', `${cap1.status}`);
   const cap2 = await checkout((await makeOrder(one(100))).order_no, { promo_code: 'PROMO-CAP' });

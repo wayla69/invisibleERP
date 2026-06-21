@@ -62,16 +62,18 @@ export class AssetsService {
     return { asset_no: assetNo, journal_no: journalNo, net_book_value: cost };
   }
 
-  // monthly straight-line depreciation: Dr 5200 / Cr 1590 = Σ. Idempotent per period.
+  // monthly straight-line depreciation, posted PER TENANT (one balanced GL entry per shop, Dr 5200 / Cr
+  // 1590) so each shop's trial balance ties — never one consolidated entry co-mingling every tenant's
+  // assets under the caller's id. Idempotent per `${tenant}:${period}`. Null tenant = HQ-consolidated bucket.
   async runDepreciation(period: string, user: JwtUser) {
     const db = this.db as any;
-    if (await this.ledger.alreadyPosted('DEP', period)) return { run_no: null, period, total_depreciation: 0, asset_count: 0, journal_no: null, already: true };
     const [y, m] = period.split('-').map(Number);
     const endExcl = m < 12 ? `${y}-${String(m + 1).padStart(2, '0')}-01` : `${y + 1}-01-01`;
     const periodEnd = new Date(new Date(endExcl + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
 
+    // Compute each eligible asset's monthly charge, bucketed by owning tenant.
     const assets = await db.select().from(fixedAssets).where(eq(fixedAssets.status, 'active'));
-    const computed: any[] = [];
+    const groups = new Map<string, { tenantId: number | null; computed: any[] }>();
     for (const a of assets) {
       if (String(a.acquireDate) > periodEnd) continue;                       // not yet in service
       if (a.lastDepreciatedPeriod && String(a.lastDepreciatedPeriod) >= period) continue; // already done
@@ -81,24 +83,42 @@ export class AssetsService {
       const amount = Math.min(monthly, round4(nbv - salvage));
       if (amount <= 0) continue;
       const accumAfter = round4(accum + amount), nbvAfter = round4(nbv - amount);
-      computed.push({ id: Number(a.id), amount, accumAfter, nbvAfter, status: nbvAfter <= salvage + 1e-6 ? 'fully_depreciated' : 'active' });
+      const tenantId: number | null = a.tenantId != null ? Number(a.tenantId) : null;
+      const key = String(tenantId);
+      if (!groups.has(key)) groups.set(key, { tenantId, computed: [] });
+      groups.get(key)!.computed.push({ id: Number(a.id), amount, accumAfter, nbvAfter, status: nbvAfter <= salvage + 1e-6 ? 'fully_depreciated' : 'active' });
     }
-    const total = round4(computed.reduce((s, c) => s + c.amount, 0));
-    if (total === 0) return { run_no: null, period, total_depreciation: 0, asset_count: 0, journal_no: null, note: 'no depreciable assets' };
 
-    const runNo = await this.docNo.nextDaily('DEP');
-    const [run] = await db.insert(depreciationRuns).values({ tenantId: user.tenantId ?? null, runNo, period, totalDepreciation: fx(total, 4), assetCount: computed.length, createdBy: user.username }).returning({ id: depreciationRuns.id });
-    for (const c of computed) {
-      await db.update(fixedAssets).set({ accumulatedDepreciation: fx(c.accumAfter, 4), netBookValue: fx(c.nbvAfter, 4), status: c.status, lastDepreciatedPeriod: period }).where(eq(fixedAssets.id, c.id));
-      await db.insert(depreciationLines).values({ tenantId: user.tenantId ?? null, runId: Number(run.id), assetId: c.id, amount: fx(c.amount, 4), accumulatedAfter: fx(c.accumAfter, 4), nbvAfter: fx(c.nbvAfter, 4) });
+    const runs: any[] = [];
+    let aggTotal = 0, aggCount = 0;
+    for (const { tenantId, computed } of groups.values()) {
+      const srcRef = `${tenantId ?? ''}:${period}`;
+      if (await this.ledger.alreadyPosted('DEP', srcRef)) continue; // idempotent per tenant+period
+      const total = round4(computed.reduce((s, c) => s + c.amount, 0));
+      if (total === 0) continue;
+      const runNo = await this.docNo.nextDaily('DEP');
+      const [run] = await db.insert(depreciationRuns).values({ tenantId, runNo, period, totalDepreciation: fx(total, 4), assetCount: computed.length, createdBy: user.username }).returning({ id: depreciationRuns.id });
+      for (const c of computed) {
+        await db.update(fixedAssets).set({ accumulatedDepreciation: fx(c.accumAfter, 4), netBookValue: fx(c.nbvAfter, 4), status: c.status, lastDepreciatedPeriod: period }).where(eq(fixedAssets.id, c.id));
+        await db.insert(depreciationLines).values({ tenantId, runId: Number(run.id), assetId: c.id, amount: fx(c.amount, 4), accumulatedAfter: fx(c.accumAfter, 4), nbvAfter: fx(c.nbvAfter, 4) });
+      }
+      const je: any = await this.ledger.postEntry({
+        date: periodEnd, source: 'DEP', sourceRef: srcRef, tenantId,
+        memo: `Depreciation ${period} (${computed.length} assets)`, createdBy: user.username,
+        lines: [{ account_code: '5200', debit: total }, { account_code: '1590', credit: total }],
+      });
+      await db.update(depreciationRuns).set({ journalNo: je?.entry_no ?? null }).where(eq(depreciationRuns.id, run.id));
+      runs.push({ tenant_id: tenantId, run_no: runNo, journal_no: je?.entry_no ?? null, total_depreciation: total, asset_count: computed.length });
+      aggTotal = round4(aggTotal + total); aggCount += computed.length;
     }
-    const je: any = await this.ledger.postEntry({
-      date: periodEnd, source: 'DEP', sourceRef: period, tenantId: user.tenantId ?? null,
-      memo: `Depreciation ${period} (${computed.length} assets)`, createdBy: user.username,
-      lines: [{ account_code: '5200', debit: total }, { account_code: '1590', credit: total }],
-    });
-    await db.update(depreciationRuns).set({ journalNo: je?.entry_no ?? null }).where(eq(depreciationRuns.id, run.id));
-    return { run_no: runNo, period, total_depreciation: total, asset_count: computed.length, journal_no: je?.entry_no ?? null };
+
+    if (!runs.length) {
+      // either nothing depreciable, or every eligible tenant was already posted for this period
+      const already = [...groups.values()].some((g) => g.computed.length);
+      return { run_no: null, period, total_depreciation: 0, asset_count: 0, journal_no: null, runs: [], ...(already ? { already: true } : { note: 'no depreciable assets' }) };
+    }
+    // top-level run_no/journal_no kept for single-tenant callers (back-compat); `runs` carries the split.
+    return { run_no: runs[0].run_no, period, total_depreciation: aggTotal, asset_count: aggCount, journal_no: runs[0].journal_no, runs };
   }
 
   // disposal: Dr 1590 accum + Dr 1000 proceeds ± 1510 / Cr 1500 cost

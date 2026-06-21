@@ -27,6 +27,10 @@ export const paymentRefunds = pgTable('payment_refunds', {
   refundNo: text('refund_no').notNull().unique(), // REF-YYYYMMDD-NNN
   paymentNo: text('payment_no').notNull(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  // Till the cash physically LEAVES at refund time (the drawer open when the refund is processed),
+  // NOT the original sale's till — so a refund of a prior shift's cash sale reduces the current
+  // drawer, never a closed shift's expected cash (no phantom overage). Null = non-cash / no open till.
+  tillSessionId: bigint('till_session_id', { mode: 'number' }),
   amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
   reason: text('reason'),
   status: text('status').default('Refunded'),

@@ -155,6 +155,20 @@
       "when": 1782007973298,
       "tag": "0021_menu_recipes",
       "breakpoints": false
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1782007973299,
+      "tag": "0022_refund_till",
+      "breakpoints": false
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1782007973300,
+      "tag": "0023_promotions_tenant",
+      "breakpoints": false
     }
   ]
 }

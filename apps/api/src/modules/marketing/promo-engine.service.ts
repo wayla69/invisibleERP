@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { eq, or } from 'drizzle-orm';
+import { eq, or, and, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { promotions, promotionItems } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
@@ -25,7 +25,12 @@ export class PromoEngineService {
   async applyPromo(input: PromoApplyInput): Promise<PromoApplyResult> {
     const db = this.db as any;
     const bad = (code: string, message: string, messageTh: string) => { throw new BadRequestException({ code, message, messageTh }); };
-    const [p] = await db.select().from(promotions).where(or(eq(promotions.promoId, input.code), eq(promotions.promoName, input.code))).limit(1);
+    // Tenant-scope the lookup: a sale in tenant T only sees T's own promos (legacy null-tenant promos
+    // stay global). Belt-and-suspenders with RLS — also correct when an Admin/HQ caller bypasses RLS.
+    const ownScope = input.tenantId != null ? eq(promotions.tenantId, input.tenantId) : isNull(promotions.tenantId);
+    const [p] = await db.select().from(promotions)
+      .where(and(or(eq(promotions.promoId, input.code), eq(promotions.promoName, input.code)), ownScope))
+      .limit(1);
     if (!p) bad('PROMO_NOT_FOUND', `Promo ${input.code} not found`, 'ไม่พบโปรโมชัน');
     if (p.active === false) bad('PROMO_INACTIVE', 'Promo is inactive', 'โปรโมชันปิดใช้งาน');
     const today = ymd();

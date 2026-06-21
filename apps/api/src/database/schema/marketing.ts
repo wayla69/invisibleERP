@@ -53,6 +53,9 @@ export const abVariants = pgTable('ab_variants', {
 
 export const promotions = pgTable('promotions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  // Owning shop. A promo code is private to its tenant (RLS) → one shop's traffic can't exhaust or
+  // even discover another's code. Null = legacy/global (pre-tenant rows). Set at createPromotion.
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   promoId: text('promo_id').unique(),
   promoName: text('promo_name'),
   promoType: text('promo_type'),
@@ -91,6 +94,7 @@ export const promotionItems = pgTable(
   {
     promoId: bigint('promo_id', { mode: 'number' }).notNull().references(() => promotions.id),
     itemId: text('item_id').notNull(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // RLS-scope with its promo
   },
   (t) => ({ pk: primaryKey({ columns: [t.promoId, t.itemId] }) }),
 );
