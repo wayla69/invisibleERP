@@ -81,6 +81,7 @@ async function main() {
   const cust1 = await login('cust1', 'pw1');
   const cust2 = await login('cust2', 'pw2');
   const sales1 = await login('sales1', 'pw3');
+  const admin = await login('admin', 'admin123'); // HQ — exec/ar/creditors for statutory reports
 
   // ── ใบกำกับภาษีอย่างย่อ (ม.86/6) ──
   const ab1 = await inj('POST', '/api/tax-invoices/abbreviated/from-sale/S-T1-1', cust1);
@@ -136,6 +137,36 @@ async function main() {
   ok('PDF full: contains "ใบกำกับภาษี" + "ภาษีมูลค่าเพิ่ม" + Tax ID', fullPdf.status === 200 && fullPdf.text.includes('ใบกำกับภาษี') && fullPdf.text.includes('ภาษีมูลค่าเพิ่ม'));
   const whtPdf = await inj('GET', `/api/wht/certificates/${wht.json.doc_no}/pdf`, sales1);
   ok('PDF WHT: contains "มาตรา 50 ทวิ" + บาทตัวอักษร', whtPdf.status === 200 && whtPdf.text.includes('50 ทวิ') && whtPdf.text.includes('บาท'));
+
+  // ── Tier 2: รายงานภาษีขาย/ซื้อ · ภ.พ.30 · ภ.ง.ด.3/53 (Phase 13) ──
+  // AP bill 1,070 (incl) → input VAT 70, base 1000; posts Dr2100 70 to the GL (only 2100 movement here).
+  const apBill = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: 'ผู้ขายก', txn_type: 'Service', invoice_no: 'PV-1', invoice_date: '2026-06-21', amount: 1070 });
+  ok('Tax-report setup: AP bill created (AP-) with stored VAT', /^AP-/.test(apBill.json.txn_no ?? ''), JSON.stringify(apBill.json).slice(0, 70));
+  // รายงานภาษีขาย — admin (HQ/bypass) sees all issued invoices for 2026-06
+  const ov = await inj('GET', '/api/tax-reports/output-vat?month=6&year=2026', admin);
+  ok('Output-VAT: issued full TIV appears in report', ov.json.rows?.some((r: any) => r.doc_no === full.json.doc_no), JSON.stringify(ov.json.totals));
+  ok('Output-VAT: total VAT = Σ issued (7+14+3.5+7+7 = 38.5)', near(ov.json.totals?.vat, 38.5), JSON.stringify(ov.json.totals));
+  // รายงานภาษีซื้อ
+  const iv = await inj('GET', '/api/tax-reports/input-vat?month=6&year=2026', admin);
+  ok('Input-VAT: AP bill 1070 → base 1000 / vat 70', iv.json.rows?.some((r: any) => near(r.vat, 70) && near(r.base, 1000)), JSON.stringify(iv.json.totals));
+  ok('Input-VAT: total vat = 70', near(iv.json.totals?.vat, 70));
+  // ภ.พ.30
+  const pp = await inj('GET', '/api/tax-reports/pp30?month=6&year=2026', admin);
+  ok('PP30: net VAT = output − input (internally consistent)', near(pp.json.form.output_vat - pp.json.form.input_vat, pp.json.reconciliation.report_net_vat));
+  ok('PP30: GL 2100 movement reflects AP input VAT (−70)', near(pp.json.reconciliation.gl_net_movement, -70), JSON.stringify(pp.json.reconciliation));
+  ok('PP30: filing deadline = 15th of next month (2026-07-15)', pp.json.deadline === '2026-07-15');
+  // ภ.ง.ด.3 / ภ.ง.ด.53
+  const p53 = await inj('GET', '/api/tax-reports/pnd?type=PND53&month=6&year=2026', admin);
+  ok('PND53: sums company WHT (300 + 309.28 = 609.28)', near(p53.json.totals?.tax_withheld, 609.28), JSON.stringify(p53.json.totals));
+  const p3 = await inj('GET', '/api/tax-reports/pnd?type=PND3&month=6&year=2026', admin);
+  ok('PND3: sums person WHT (250)', near(p3.json.totals?.tax_withheld, 250), JSON.stringify(p3.json.totals));
+  const badPnd = await inj('GET', '/api/tax-reports/pnd?type=PND99&month=6&year=2026', admin);
+  ok('PND: rejects invalid type (400)', badPnd.status === 400, `${badPnd.status}`);
+  // exports (PDF → HTML fallback when chromium absent): Thai title present
+  const ovx = await inj('GET', '/api/tax-reports/output-vat/export?month=6&year=2026', admin);
+  ok('Export รายงานภาษีขาย: title present', ovx.status === 200 && ovx.text.includes('รายงานภาษีขาย'));
+  const ppx = await inj('GET', '/api/tax-reports/pp30/export?month=6&year=2026', admin);
+  ok('Export ภ.พ.30: form present', ppx.status === 200 && ppx.text.includes('ภ.พ.30'));
 
   await app.close();
   await pg.close();

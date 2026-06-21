@@ -6,7 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxService } from '../tax/tax.service';
-import { ymd, monthStart, n } from '../../database/queries';
+import { ymd, monthStart, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string }
@@ -150,16 +150,16 @@ export class FinanceService {
     const txnNo = await this.docNo.nextDaily('AP');
     const paid = n(dto.paid_amount);
     const status = paid >= n(dto.amount) ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid';
+    const apGross = n(dto.amount);
+    const { net, vat } = this.vatSplit(apGross); // input VAT — stored + posted to GL identically
     await db.insert(apTransactions).values({
       txnNo, vendorId: dto.vendor_id ?? null, vendorName: dto.vendor_name ?? null, txnType: dto.txn_type ?? 'Invoice',
       invoiceNo: dto.invoice_no ?? null, invoiceDate: dto.invoice_date ?? null, dueDate: dto.due_date ?? null,
-      amount: String(n(dto.amount)), paidAmount: String(paid), status, remarks: dto.remarks ?? null, createdBy: user.username,
+      amount: String(apGross), vatAmount: fx(vat, 2), paidAmount: String(paid), status, remarks: dto.remarks ?? null, createdBy: user.username,
     });
     // GL: record expense + input VAT + payable (Dr 5100/1200 net / Dr 2100 vat / Cr 2000 gross)
-    const apGross = n(dto.amount);
     if (this.ledger && apGross > 0) {
       const expenseAccount = (dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100';
-      const { net, vat } = this.vatSplit(apGross);
       await this.ledger.postEntry({
         date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId: null,
         memo: `AP bill ${txnNo}${dto.vendor_name ? ' ' + dto.vendor_name : ''}`, createdBy: user.username,

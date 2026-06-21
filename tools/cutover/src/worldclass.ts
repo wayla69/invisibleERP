@@ -130,6 +130,30 @@ async function main() {
   ok('Year-end close idempotent (2nd run no-op)', cy2.json.already === true, JSON.stringify(cy2.json).slice(0, 40));
   ok('Finance: sub-ledger ↔ GL reconciliation endpoint', (await inj('GET', '/api/finance/reconciliation', admin)).json.ar?.reconciled === true);
 
+  // ── Accounting Tier 2: Fixed Assets + Depreciation (FI-AA, Phase 13) ──
+  // Use 2027 (open, isolated from the closed FY2025 + curMonth churn above).
+  const leg = (j: any, code: string, side: 'debit' | 'credit') => (j?.lines ?? []).filter((l: any) => l.account_code === code).reduce((a: number, l: any) => a + Number(l[side]), 0);
+  const acc2 = JSON.stringify((await inj('GET', '/api/ledger/accounts', admin)).json);
+  ok('FA: COA includes 1500/1590/5200/1510', ['1500', '1590', '5200', '1510'].every((c) => acc2.includes(c)));
+  const acq = await inj('POST', '/api/assets', admin, { name: 'Laptop', acquire_date: '2027-01-05', acquire_cost: 12000, salvage_value: 0, useful_life_months: 12, acquire_source: 'cash' });
+  ok('FA: acquisition posts FA- + JE-', /^FA-/.test(acq.json.asset_no ?? '') && /^JE-/.test(acq.json.journal_no ?? ''), JSON.stringify(acq.json).slice(0, 90));
+  const jAcq = (await inj('GET', '/api/ledger/journal?limit=8', admin)).json.entries.find((e: any) => e.source === 'ASSET' && e.source_ref === acq.json.asset_no);
+  ok('FA: acquisition Dr1500 / Cr1000 = 12000', near(leg(jAcq, '1500', 'debit'), 12000) && near(leg(jAcq, '1000', 'credit'), 12000));
+  const run = await inj('POST', '/api/assets/depreciation/run', admin, { period: '2027-01' });
+  ok('FA: depreciation run posts DEP- + total 1000', /^DEP-/.test(run.json.run_no ?? '') && near(run.json.total_depreciation, 1000), JSON.stringify(run.json).slice(0, 90));
+  const jDep = (await inj('GET', '/api/ledger/journal?limit=8', admin)).json.entries.find((e: any) => e.source === 'DEP');
+  ok('FA: run Dr5200 / Cr1590 = 1000', near(leg(jDep, '5200', 'debit'), 1000) && near(leg(jDep, '1590', 'credit'), 1000));
+  const reg = (await inj('GET', '/api/assets', admin)).json;
+  ok('FA: asset nbv decreased to 11000 after 1 month', near(reg.assets.find((a: any) => a.asset_no === acq.json.asset_no)?.net_book_value, 11000), JSON.stringify(reg.assets?.[0]).slice(0, 80));
+  const run2 = await inj('POST', '/api/assets/depreciation/run', admin, { period: '2027-01' });
+  ok('FA: depreciation run idempotent per period', run2.json.already === true || near(run2.json.total_depreciation, 0), JSON.stringify(run2.json).slice(0, 60));
+  const disp = await inj('PATCH', `/api/assets/${acq.json.asset_no}/dispose`, admin, { disposal_date: '2027-02-10', proceeds: 11500 });
+  ok('FA: disposal posts gain 500', near(disp.json.gain_loss, 500) && disp.json.status === 'disposed', JSON.stringify(disp.json).slice(0, 90));
+  const jDis = (await inj('GET', '/api/ledger/journal?limit=8', admin)).json.entries.find((e: any) => e.source === 'DISP');
+  ok('FA: disposal Dr1590 1000 + Cr1500 12000 + Cr1510 gain 500', near(leg(jDis, '1590', 'debit'), 1000) && near(leg(jDis, '1500', 'credit'), 12000) && near(leg(jDis, '1510', 'credit'), 500));
+  const tbZ = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
+  ok('FA: trial balance balanced after acq+dep+disposal', near(tbZ.debit ?? tbZ.total_debit, tbZ.credit ?? tbZ.total_credit), JSON.stringify(tbZ).slice(0, 80));
+
   // ── Tenancy model: "HQ sees all, staff bound to shop" (Phase 9.2 bypass allowlist) ──
   await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T1', tenant_id: t1, lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
   await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T2', tenant_id: t2, lines: [{ account_code: '1000', debit: 20 }, { account_code: '4000', credit: 20 }] });

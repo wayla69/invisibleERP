@@ -17,6 +17,10 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '4000', name: 'Sales Revenue', type: 'Revenue' },
   { code: '5000', name: 'COGS', type: 'Expense' },
   { code: '5100', name: 'Operating Expense', type: 'Expense' },
+  { code: '1500', name: 'Fixed Assets', type: 'Asset' },
+  { code: '1590', name: 'Accumulated Depreciation', type: 'Asset' }, // contra-asset (normal credit bal)
+  { code: '5200', name: 'Depreciation Expense', type: 'Expense' },
+  { code: '1510', name: 'Gain/Loss on Disposal', type: 'Revenue' }, // gain=credit, loss=debit
 ];
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string }

@@ -16,3 +16,4 @@ export * from './payments';
 export * from './billing';
 export * from './tax-docs';
 export * from './restaurant';
+export * from './assets';

@@ -45,6 +45,7 @@ export const apTransactions = pgTable('ap_transactions', {
   invoiceDate: date('invoice_date'),
   dueDate: date('due_date'),
   amount: numeric('amount', { precision: 14, scale: 2 }),
+  vatAmount: numeric('vat_amount', { precision: 14, scale: 2 }), // input VAT (for รายงานภาษีซื้อ / ภ.พ.30)
   paidAmount: numeric('paid_amount', { precision: 14, scale: 2 }).default('0'),
   currency: text('currency').default('THB'),
   status: invoiceStatusEnum('status').default('Unpaid'),

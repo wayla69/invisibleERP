@@ -50,6 +50,20 @@
       "when": 1782007973283,
       "tag": "0006_restaurant",
       "breakpoints": false
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782007973284,
+      "tag": "0007_fixed_assets",
+      "breakpoints": false
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782007973285,
+      "tag": "0008_ap_vat",
+      "breakpoints": false
     }
   ]
 }

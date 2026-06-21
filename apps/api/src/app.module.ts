@@ -29,6 +29,8 @@ import { BillingModule } from './modules/billing/billing.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { TaxDocsModule } from './modules/tax-docs/tax-docs.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
+import { AssetsModule } from './modules/assets/assets.module';
+import { TaxReportsModule } from './modules/tax-reports/tax-reports.module';
 
 @Module({
   imports: [
@@ -58,6 +60,8 @@ import { RestaurantModule } from './modules/restaurant/restaurant.module';
     PlatformModule,
     TaxDocsModule,
     RestaurantModule,
+    AssetsModule,
+    TaxReportsModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions
