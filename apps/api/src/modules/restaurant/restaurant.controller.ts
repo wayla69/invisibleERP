@@ -5,6 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { TableService } from './table.service';
 import { DineInService } from './dine-in.service';
 import { KdsService } from './kds.service';
+import { ChannelOrderService } from './channel-order.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
   TableStatusBody, ZoneBody, StationBody,
@@ -13,6 +14,9 @@ import {
 
 const OpenTableBody = z.object({ party_size: z.number().int().positive().optional() });
 const CancelBody = z.object({ reason: z.string().optional() });
+const KioskItem = z.object({ sku: z.string().optional(), menu_item_id: z.number().int().optional(), modifier_option_ids: z.array(z.number().int()).optional(), name: z.string().optional(), unit_price: z.number().nonnegative().optional(), station_code: z.string().optional(), qty: z.number().positive().default(1), notes: z.string().optional() }).refine((it) => it.sku != null || it.menu_item_id != null || (it.name != null && it.unit_price != null), { message: 'provide sku/menu_item_id or name+unit_price' });
+const KioskBody = z.object({ fulfillment_type: z.enum(['takeaway', 'delivery', 'pickup']).optional(), items: z.array(KioskItem).min(1), delivery_fee: z.number().nonnegative().optional(), method: z.string().optional(), notes: z.string().optional() });
+const FulfillmentBody = z.object({ action: z.enum(['accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'rejected']) });
 
 @Controller('api/restaurant')
 @Permissions('pos')
@@ -21,6 +25,7 @@ export class RestaurantController {
     private readonly tables: TableService,
     private readonly dineIn: DineInService,
     private readonly kds: KdsService,
+    private readonly channel: ChannelOrderService,
   ) {}
 
   // ── floor-plan / tables ──
@@ -44,6 +49,11 @@ export class RestaurantController {
   @Post('orders/:orderNo/checkout') checkout(@Param('orderNo') o: string, @Body(new ZodValidationPipe(CheckoutBody)) b: CheckoutDto, @CurrentUser() u: JwtUser) { return this.dineIn.checkout(o, b, u); }
   @Post('orders/:orderNo/close') close(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.closeTable(o, u); }
   @Post('orders/:orderNo/cancel') cancel(@Param('orderNo') o: string, @Body(new ZodValidationPipe(CancelBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.dineIn.cancelOrder(o, b.reason, u); }
+
+  // ── online / delivery / kiosk (POS Tier 2 #10) ──
+  @Post('kiosk/checkout') kioskCheckout(@Body(new ZodValidationPipe(KioskBody)) b: any, @CurrentUser() u: JwtUser) { return this.channel.kioskCheckout(b, u); }
+  @Patch('orders/:orderNo/fulfillment') fulfillment(@Param('orderNo') o: string, @Body(new ZodValidationPipe(FulfillmentBody)) b: { action: string }, @CurrentUser() u: JwtUser) { return this.channel.advanceFulfillment(o, b.action, u); }
+  @Get('fulfillment/board') @Permissions('delivery', 'order_mgt', 'pos') fulfillmentBoard(@CurrentUser() u: JwtUser) { return this.channel.fulfillmentBoard(u); }
 
   // ── KDS ──
   @Get('kds/feed') feed(@CurrentUser() u: JwtUser) { return this.kds.feed(u); }

@@ -17,4 +17,8 @@ export const stocktakeStatusEnum = pgEnum('stocktake_status', ['Draft', 'Posted'
 export const dineInOrderStatusEnum = pgEnum('dine_in_order_status', ['open', 'sent_to_kitchen', 'partially_ready', 'served', 'bill_requested', 'partially_paid', 'paid', 'closed', 'cancelled']);
 export const kdsItemStatusEnum = pgEnum('kds_item_status', ['new', 'queued', 'preparing', 'ready', 'served', 'voided']);
 export const tableStatusEnum = pgEnum('table_status', ['available', 'reserved', 'occupied', 'bill_requested', 'paying', 'cleaning', 'out_of_service']);
+// ── Online ordering / delivery / kiosk (POS Tier 2 #10) ──
+export const orderChannelEnum = pgEnum('order_channel', ['dine_in', 'web', 'kiosk', 'grab', 'lineman', 'in_store']);
+export const fulfillmentTypeEnum = pgEnum('fulfillment_type', ['dine_in', 'takeaway', 'delivery', 'pickup']);
+export const fulfillmentStatusEnum = pgEnum('fulfillment_status', ['received', 'accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'rejected']);
 export const tableSessionStatusEnum = pgEnum('table_session_status', ['open', 'bill_requested', 'paying', 'closed', 'abandoned']);

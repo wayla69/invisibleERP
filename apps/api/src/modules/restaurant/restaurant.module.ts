@@ -11,16 +11,18 @@ import { DineInService } from './dine-in.service';
 import { KdsService } from './kds.service';
 import { TableService } from './table.service';
 import { QrService } from './qr.service';
+import { ChannelOrderService } from './channel-order.service';
 import { RealtimeScope } from './realtime.scope';
 import { RestaurantController } from './restaurant.controller';
 import { QrController } from './qr.controller';
+import { ChannelController } from './channel.controller';
 
 // Restaurant / F&B POS: dine-in orders + KDS, floor-plan tables, table QR sessions (public diner),
-// PromptPay pay → cust_pos_sales + GL + abbreviated tax invoice. DocNumberService is global (CommonModule).
+// online/delivery/kiosk channel orders, PromptPay pay → cust_pos_sales + GL + abbreviated tax invoice.
 @Module({
   imports: [TaxModule, PaymentsModule, LedgerModule, TaxDocsModule, MenuModule, MarketingModule, LoyaltyModule, GiftCardsModule],
-  controllers: [RestaurantController, QrController],
-  providers: [DineInService, KdsService, TableService, QrService, RealtimeScope],
+  controllers: [RestaurantController, QrController, ChannelController],
+  providers: [DineInService, KdsService, TableService, QrService, ChannelOrderService, RealtimeScope],
   exports: [DineInService, TableService],
 })
 export class RestaurantModule {}

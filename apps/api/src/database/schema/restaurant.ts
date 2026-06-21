@@ -3,7 +3,7 @@
 // tenant_id so the 0002 RLS loop (re-run in 0006) scopes them automatically.
 import { pgTable, bigserial, bigint, text, numeric, integer, timestamp, boolean, jsonb } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
-import { dineInOrderStatusEnum, kdsItemStatusEnum, tableStatusEnum, tableSessionStatusEnum } from './enums';
+import { dineInOrderStatusEnum, kdsItemStatusEnum, tableStatusEnum, tableSessionStatusEnum, orderChannelEnum, fulfillmentTypeEnum, fulfillmentStatusEnum } from './enums';
 
 // ── Kitchen stations (ครัวร้อน / ครัวเย็น / เครื่องดื่ม) ──
 export const kitchenStations = pgTable('kitchen_stations', {
@@ -71,6 +71,15 @@ export const dineInOrders = pgTable('dine_in_orders', {
   tableId: bigint('table_id', { mode: 'number' }).references(() => diningTables.id),
   sessionId: bigint('session_id', { mode: 'number' }).references(() => tableSessions.id),
   status: dineInOrderStatusEnum('status').notNull().default('open'),
+  // online/delivery/kiosk dimension (POS Tier 2 #10) — legacy dine-in defaults keep existing rows unchanged
+  channel: orderChannelEnum('channel').notNull().default('dine_in'),
+  fulfillmentType: fulfillmentTypeEnum('fulfillment_type').notNull().default('dine_in'),
+  fulfillmentStatus: fulfillmentStatusEnum('fulfillment_status'),  // NULL for dine-in (untouched)
+  deliveryFee: numeric('delivery_fee', { precision: 14, scale: 2 }).notNull().default('0'),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+  publicToken: text('public_token'),                              // per-order HMAC tracking credential
+  extSource: text('ext_source'),                                  // 'grab' | 'lineman'
+  extOrderId: text('ext_order_id'),                               // partner order id (idempotency)
   guestCount: integer('guest_count').default(1),
   server: text('server'),
   subtotal: numeric('subtotal', { precision: 14, scale: 2 }).default('0'),
@@ -112,7 +121,40 @@ export const dineInOrderItems = pgTable('dine_in_order_items', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
+// 1:1 delivery details (only for delivery orders; keeps the order header lean)
+export const orderDeliveryDetails = pgTable('order_delivery_details', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  orderId: bigint('order_id', { mode: 'number' }).notNull().references(() => dineInOrders.id),
+  contactName: text('contact_name'),
+  contactPhone: text('contact_phone'),
+  addressLine: text('address_line'),
+  addressNote: text('address_note'),
+  lat: numeric('lat', { precision: 10, scale: 6 }),
+  lng: numeric('lng', { precision: 10, scale: 6 }),
+  courierName: text('courier_name'),
+  courierPhone: text('courier_phone'),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// raw inbound webhook log — audit + replay-safe idempotency at the edge
+export const channelWebhookEvents = pgTable('channel_webhook_events', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  source: text('source').notNull(),            // 'grab' | 'lineman'
+  extEventId: text('ext_event_id').notNull(),  // partner event id (idempotency key)
+  extOrderId: text('ext_order_id'),
+  orderNo: text('order_no'),                   // internal DIN- once mapped
+  payload: jsonb('payload').notNull(),
+  status: text('status').notNull().default('processed'), // processed | duplicate | error
+  receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow(),
+});
+
 export type DiningTable = typeof diningTables.$inferSelect;
 export type TableSession = typeof tableSessions.$inferSelect;
 export type DineInOrder = typeof dineInOrders.$inferSelect;
 export type DineInOrderItem = typeof dineInOrderItems.$inferSelect;
+export type OrderDeliveryDetail = typeof orderDeliveryDetails.$inferSelect;
+export type ChannelWebhookEvent = typeof channelWebhookEvents.$inferSelect;
