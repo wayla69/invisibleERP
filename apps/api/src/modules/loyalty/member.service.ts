@@ -66,7 +66,10 @@ export class MemberService {
     if (!cfg.enabled || !memberId) return 0;
     const pts = Math.floor(netSpend * cfg.pointsPerBaht);
     if (pts <= 0) return 0;
-    const [m] = await tx.select().from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
+    // FOR UPDATE: this is a read-modify-write of an absolute balance. Without the lock, two concurrent
+    // sales for the same member both read the same starting balance and the last writer wins → one earn is
+    // lost (silent points/value loss). Mirrors redeemInTx's lock so earn+redeem serialize on the member row.
+    const [m] = await tx.select().from(posMembers).where(eq(posMembers.id, memberId)).for('update').limit(1);
     const bal = n(m?.balance) + pts; const life = n(m?.lifetime) + pts;
     await tx.update(posMembers).set({ balance: String(bal), lifetime: String(life), lastUpdated: new Date() }).where(eq(posMembers.id, memberId));
     await tx.insert(posMemberLedger).values({ tenantId, memberId, txnType: 'Earn', points: String(pts), balanceAfter: String(bal), refDoc: saleNo, createdBy });

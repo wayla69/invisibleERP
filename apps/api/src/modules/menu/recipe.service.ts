@@ -75,8 +75,11 @@ export class RecipeService {
   }
 
   // ── engine (called by sale / return paths; shares the caller's tx) ──
-  private async explode(db: any, sku: string) {
-    const [rec] = await db.select().from(menuRecipes).where(and(eq(menuRecipes.sku, sku), eq(menuRecipes.active, true))).limit(1);
+  // Resolve by (tenantId, sku) EXPLICITLY — sku is unique only per tenant (uq_menu_sku), and under an
+  // Admin/HQ checkout app.bypass_rls='on' makes RLS see every tenant's recipe, so a bare sku lookup could
+  // return another shop's recipe (wrong lines/costs deducted). The known order/sale tenant disambiguates.
+  private async explode(db: any, tenantId: number | null, sku: string) {
+    const [rec] = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId as any), eq(menuRecipes.sku, sku), eq(menuRecipes.active, true))).limit(1);
     if (!rec) return null;
     const lines = await db.select().from(menuRecipeLines).where(eq(menuRecipeLines.recipeId, Number(rec.id)));
     const yld = Math.max(n(rec.yieldQty), 1);
@@ -85,12 +88,14 @@ export class RecipeService {
 
   // deduct ingredients for one sold dish line. Allows negative stock (flags OVERSOLD). Returns COGS cost if post_cogs.
   async applyDeduction(db: any, tenantId: number | null, sku: string, soldQty: number, saleNo: string, user: JwtUser): Promise<{ cost: number; deducted: boolean }> {
-    const r = await this.explode(db, sku);
+    const r = await this.explode(db, tenantId, sku);
     if (!r) return { cost: 0, deducted: false };
     let cost = 0;
     for (const l of r.lines) {
       const needed = round4(l.qtyPerServing * soldQty);
-      let [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId as any), eq(customerInventory.itemId, l.itemId))).limit(1);
+      // FOR UPDATE serializes concurrent sales sharing an ingredient → no lost stock decrement (mirrors
+      // gift-card/loyalty redeem). The second tx blocks then re-reads the post-decrement balance.
+      let [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId as any), eq(customerInventory.itemId, l.itemId))).for('update').limit(1);
       if (!inv) { [inv] = await db.insert(customerInventory).values({ tenantId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, uom: l.uom ?? null, currentStock: '0' }).returning(); }
       const after = round4(n(inv.currentStock) - needed);
       await db.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));
@@ -102,12 +107,12 @@ export class RecipeService {
 
   // reverse the deduction on a return (add ingredients back). Returns COGS cost to reverse if post_cogs.
   async reverseDeduction(db: any, tenantId: number | null, sku: string, returnedQty: number, returnNo: string, user: JwtUser): Promise<{ cost: number; restored: boolean }> {
-    const r = await this.explode(db, sku);
+    const r = await this.explode(db, tenantId, sku);
     if (!r) return { cost: 0, restored: false };
     let cost = 0;
     for (const l of r.lines) {
       const back = round4(l.qtyPerServing * returnedQty);
-      const [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId as any), eq(customerInventory.itemId, l.itemId))).limit(1);
+      const [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId as any), eq(customerInventory.itemId, l.itemId))).for('update').limit(1);
       if (!inv) continue;
       const after = round4(n(inv.currentStock) + back);
       await db.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));
