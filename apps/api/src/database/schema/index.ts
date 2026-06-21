@@ -30,3 +30,4 @@ export * from './cash';
 export * from './returns';
 export * from './bank';
 export * from './giftcards';
+export * from './receipts';

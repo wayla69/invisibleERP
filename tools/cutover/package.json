@@ -23,6 +23,7 @@
     "recipe": "tsx src/recipe.ts",
     "loyalty": "tsx src/loyalty.ts",
     "giftcards": "tsx src/giftcards.ts",
+    "receipts": "tsx src/receipts.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

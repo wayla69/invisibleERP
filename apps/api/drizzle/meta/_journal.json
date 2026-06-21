@@ -183,6 +183,13 @@
       "when": 1782007973302,
       "tag": "0025_tips_giftcards",
       "breakpoints": false
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782007973303,
+      "tag": "0026_receipts",
+      "breakpoints": false
     }
   ]
 }
