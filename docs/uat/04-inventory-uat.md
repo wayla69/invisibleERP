@@ -1,0 +1,26 @@
+# UAT — Cycle 04: Inventory & Warehouse (WMS)
+
+**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `03-inventory-cogs.md` (INV-01..04, REV-07, R11), harness `tools/cutover/src/wms.ts`, `e2e.ts`.
+
+Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
+
+| Test ID | Scenario/Title | Role | Preconditions | Test steps | Test data | Expected result | Priority | Type | Traceability | Result | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| UAT-INV-001 | Stock list + low-stock count | Admin | Items A=5, B=−2, C=0 seeded | 1. `GET /api/inventory/stock?limit=50`. | — | 200; `total`=3; `low_stock_count`=2. | Med | Positive | INV-01 | Not Run | e2e.ts |
+| UAT-INV-002 | Create bins | WarehouseOperator | — | 1. `POST /api/wms/bins` storage. 2. `POST /api/wms/bins` quarantine. | `{bin_code: A-01-01, bin_type: storage}` | Bins created. | Med | Positive | INV-02 | Not Run | wms.ts |
+| UAT-INV-003 | Putaway updates bin stock + movement | WarehouseOperator | Bin A-01-01, GR-T1 | 1. `POST /api/wms/putaway` qty 10. | `{gr_no: GR-T1, bin_code: A-01-01, item_id: A, qty: 10}` | bin_stock=10; one `Transfer` stock movement. | High | Positive | INV-02 | Not Run | wms.ts |
+| UAT-INV-004 | Putaway idempotent | WarehouseOperator | Same GR already put away | 1. Repeat putaway same `gr_no`. | same payload | bin_stock stays 10 (not 20). | Med | Control | INV-02 | Not Run | wms.ts |
+| UAT-INV-005 | Wave batches orders into pick lists | WarehouseOperator | 2 POS sales SALE-W1/W2 | 1. `POST /api/wms/waves` with 2 orders. | `{orders:[{POS, SALE-W1},{POS, SALE-W2}]}` | `pick_count`=2; 2 pick lists; A line bin resolved to A-01-01. | High | Positive | INV-03 | Not Run | wms.ts |
+| UAT-INV-006 | Re-wave idempotent | WarehouseOperator | Wave already created | 1. Re-run same wave. | same orders | `pick_count`=0; total pick lists stays 2. | Med | Control | INV-03 | Not Run | wms.ts |
+| UAT-INV-007 | Pick decrements bin stock | WarehouseOperator | Pick list, bin A-01-01=10 | 1. `POST /api/wms/picks/{pick}/pick` qty 4. | `{lines:[{pick_line_id, picked_qty:4}]}` | status `Picked`; bin 10→6; one `Issue` movement. | High | Positive | INV-03 | Not Run | wms.ts |
+| UAT-INV-008 | Over-pick (last unit / no stock) blocked | WarehouseOperator | Item B has no bin stock | 1. `POST /api/wms/picks/{pick}/pick` qty 1. | `{picked_qty:1}` | 422 `PICK_SHORT`; no negative stock. | High | Control | INV-03, R11 | Not Run | wms.ts |
+| UAT-INV-009 | Pack → shipment shell | WarehouseOperator | Pick Picked | 1. `POST /api/wms/picks/{pick}/pack`. | — | `shipment_no` created; status `Packed`. | Med | Positive | INV-03 | Not Run | wms.ts |
+| UAT-INV-010 | Ship → tracking recorded | WarehouseOperator | Packed shipment | 1. `POST /api/wms/shipments/{no}/ship`. | `{carrier: Kerry, tracking_no: KX123}` | status `Shipped`; tracking + shipped_at set. | Med | Positive | INV-03 | Not Run | wms.ts |
+| UAT-INV-011 | WMS execution posts ZERO GL | Admin | After putaway/pick/ship | 1. Query/inspect journal entries with source WMS/PICK/SHIP/PUTAWAY. | — | 0 journal entries (COGS booked at sale-issue, not WMS). | High | Control | INV-04 | Not Run | wms.ts |
+| UAT-INV-012 | Min-max replenishment suggestion | Planner | R1 on_hand 3, reorder 10, qty 50 | 1. `POST /api/replenishment/suggest`. | — | R1 suggested_qty=50; urgency `warning`. | Med | Positive | INV-01 | Not Run | wms.ts |
+| UAT-INV-013 | Auto-PR consolidates suggestions | Planner | suggestions exist | 1. `POST /api/replenishment/auto-pr`. | — | `pr_no` created; R1 status `PR_Created` with that pr_no. | Med | Positive | INV-01 | Not Run | wms.ts |
+| UAT-INV-014 | RMA receive → restock to bin + credit | WarehouseOperator/ReturnsClerk | Portal sale captured | 1. `POST /api/rma`. 2. `/receive` restock disposition. 3. `/restock`. | `{sale_no, lines:[{item_id:A, qty:1}]}` | restock +1 to bin (6→7); ReturnsService `return_no`; status `Credited`. | Med | Positive | REV-07 | Not Run | wms.ts |
+| UAT-INV-015 | RMA restock idempotent | WarehouseOperator | RMA already Credited | 1. Repeat `/restock`. | — | `duplicate: true` or 400; no double restock. | Low | Control | REV-07 | Not Run | wms.ts |
+| UAT-INV-016 | Cycle-count variance review | StockCounter/InventoryController | Stock present | 1. Record a count differing from on-hand. 2. Review/approve the variance. | `<<count vs system>>` | Variance flagged for review; adjustment controlled (requires approval). | Med | Control | INV-01 | Not Run | stock-ops |
+| UAT-INV-017 | RLS — planner sees only own tenant bins | Planner (T2) | T1 has bins + suggestions | 1. `GET /api/wms/bins`. 2. `GET /api/replenishment/suggestions`. | bearer plan2 | 0 T1 bins, 0 T1 suggestions. | High | Control | ITGC-AC (RLS) | Not Run | wms.ts |
+| UAT-INV-018 | Trial balance balanced after inventory ops | Admin | After WMS + RMA | 1. `GET /api/ledger/trial-balance`. | — | `totals.balanced: true`. | Med | Detective | REC-01 | Not Run | wms.ts |

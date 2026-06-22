@@ -1,0 +1,24 @@
+# UAT — Cycle 01: Security & Access
+
+**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `08-itgc.md` (ITGC-AC-*), RCM `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`, harness `tools/cutover/src/compliance.ts` & `e2e.ts`.
+
+Result legend: Pass / Fail / Blocked / N/A / Not Run (default). Error codes/amounts are exact — a different code is a Fail.
+
+| Test ID | Scenario/Title | Role | Preconditions | Test steps | Test data | Expected result | Priority | Type | Traceability | Result | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| UAT-SEC-001 | Valid login returns JWT + role | Admin | Admin account seeded | 1. `POST /api/login`. 2. Read response. | `{username: admin, password: admin123}` | 200; body has `token` and `role: "Admin"`. | High | Positive | ITGC-AC-01 | Not Run | |
+| UAT-SEC-002 | Bad password rejected | Admin | Admin seeded | 1. `POST /api/login` with wrong password. | `{username: admin, password: x}` | 401; no token. | High | Control | ITGC-AC-01 | Not Run | e2e.ts |
+| UAT-SEC-003 | No token blocked on protected route | (none) | — | 1. `GET /api/dashboard` with no Authorization header. | — | 401. | High | Control | ITGC-AC-02 | Not Run | |
+| UAT-SEC-004 | First login forces password change | new user | User created, never logged in | 1. `POST /api/login` with temp password. | `<<newuser/temp pw>>` | 200 with `must_change_password: true`; app routes to change-password. | High | Control | ITGC-AC-04 | Not Run | |
+| UAT-SEC-005 | Change password enforces min length 8 | any | Logged in, change-password screen | 1. `POST /api/auth/change-password` new pw < 8 chars. 2. Retry ≥ 8 chars. | short=`pw123` / valid=`pw123456` | <8 rejected (400/422); ≥8 accepted; can log in with new pw. | High | Control | ITGC-AC-05 | Not Run | |
+| UAT-SEC-006 | Privileged role flagged for mandatory MFA setup | Admin | Admin has NOT enrolled MFA | 1. `POST /api/login` (admin). | `{username: admin, password: admin123}` | 200 with `must_setup_mfa: true`. | High | Control | ITGC-AC-06 | Not Run | compliance.ts |
+| UAT-SEC-007 | Non-privileged role NOT forced to MFA | Cashier | Cashier seeded (`pos_sell` only) | 1. `POST /api/login` (cashier1). | `{cashier1/pw1234}` | 200; `must_setup_mfa` not true. | Med | Control | ITGC-AC-06 | Not Run | compliance.ts |
+| UAT-SEC-008 | TOTP enrolment activates 2nd factor | FinancialController | Logged in | 1. `POST /api/auth/mfa/setup` → secret. 2. `POST /api/auth/mfa/enable` with valid TOTP. | secret → `authenticator.generate(secret)` | setup returns `secret`; enable → 200 `enabled: true`. | High | Positive | ITGC-AC-06 | Not Run | compliance.ts |
+| UAT-SEC-009 | MFA-enabled login without code blocked | FinancialController | MFA enabled (SEC-008) | 1. `POST /api/login` with password only. | `{fincon/pw}` | 401 `MFA_REQUIRED`. | High | Control | ITGC-AC-06 | Not Run | compliance.ts |
+| UAT-SEC-010 | MFA-enabled login with wrong code blocked | FinancialController | MFA enabled | 1. `POST /api/login` with bad TOTP. | `{fincon/pw, totp: 000000}` | 401 `MFA_INVALID`. | High | Control | ITGC-AC-06 | Not Run | compliance.ts |
+| UAT-SEC-011 | Password + valid TOTP authenticates | FinancialController | MFA enabled | 1. `POST /api/login` with current TOTP. | `{fincon/pw, totp: <valid>}` | 200 with `token`; `must_setup_mfa` not true. | High | Positive | ITGC-AC-06 | Not Run | compliance.ts |
+| UAT-SEC-012 | MFA can be disabled | FinancialController | MFA enabled | 1. `POST /api/auth/mfa/disable`. 2. Login with password only. | — | disable 200; subsequent login no longer requires code. | Med | Positive | ITGC-AC-06 | Not Run | |
+| UAT-SEC-013 | /auth/me returns effective permissions | Admin | Logged in | 1. `GET /api/auth/me`. | bearer admin | 200; `permissions` is a non-empty array. | Med | Positive | ITGC-AC-07 | Not Run | e2e.ts |
+| UAT-SEC-014 | RBAC denies action without permission | Warehouse | Warehouse user seeded | 1. `POST /api/pos/returns` as Warehouse (no returns/pos perm). | `{sale_no, items}` | 403 Forbidden. | High | Control | ITGC-AC-07 / R-RBAC | Not Run | returns.ts |
+| UAT-SEC-015 | RLS — tenant cannot see another tenant's data | Procurement (T2) | T1 has journal entries; T2 user authorized to read ledger | 1. `GET /api/ledger/journal?limit=100` as T2 user. 2. `GET /api/ledger/trial-balance?period=<cur>`. | bearer finT2 | T1 entries absent; T2 sees no T1 4000 credit. | High | Control | ITGC-AC (RLS) | Not Run | compliance.ts |
+| UAT-SEC-016 | Security headers present (edge hardening) | Admin | — | 1. `GET /` and inspect response headers. | — | At least one of `x-frame-options` / `content-security-policy` / `x-content-type-options` present. | Low | Control | ITGC-OP | Not Run | worldclass.ts |

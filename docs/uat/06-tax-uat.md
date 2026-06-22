@@ -1,0 +1,21 @@
+# UAT — Cycle 06: Tax Compliance (VAT / WHT / e-Tax)
+
+**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `06-tax-compliance.md` (TAX-01..03, REV-10, PAY-02), harness `tools/cutover/src/etax.ts`, `worldclass.ts`, `pos-p1.ts`, `payroll.ts`.
+
+Result legend: Pass / Fail / Blocked / N/A / Not Run. VAT = 7%. Error codes/amounts are exact.
+
+| Test ID | Scenario/Title | Role | Preconditions | Test steps | Test data | Expected result | Priority | Type | Traceability | Result | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| UAT-TAX-001 | VAT 7% on a sale | Admin/GlAccountant | — | 1. `GET /api/tax/calc?net=100&country=TH`. | net=100 | `tax`=7. | High | Positive | TAX-01 | Not Run | worldclass.ts |
+| UAT-TAX-002 | VAT flows through portal sale | Customer | item A=50 | 1. `POST /api/portal/pos/sales` qty 2. | `{items:[{item_id:A, qty:2, unit_price:50}]}` | `total`=107, `vat`=7. | High | Positive | TAX-01, REV-03 | Not Run | worldclass.ts |
+| UAT-TAX-003 | Currency-aware rounding (0-decimal JPY) | Admin | — | 1. `GET /api/tax/calc?net=105&country=TH&currency=JPY`. | net=105, JPY | `tax`=7 (not 7.35 — rounds to 0 minor units). | Med | Control | TAX-01 | Not Run | worldclass.ts |
+| UAT-TAX-004 | Supported currencies listed | Admin | — | 1. `GET /api/tax/currencies`. | — | Includes THB and USD. | Low | Positive | TAX-01 | Not Run | worldclass.ts |
+| UAT-TAX-005 | e-Tax invoice XML generated (UBL 2.1) | MasterDataAdmin/Admin | Tax invoice TIV-202606-0007 + 2 lines (sub 300, VAT 21, grand 321) | 1. `GET /api/tax-invoices/{docNo}/etax-xml`. | docNo=TIV-202606-0007 | 200; `application/xml`; attachment filename `{docNo}.xml`; starts `<?xml`, root `<Invoice>`, `UBLVersionID 2.1`. | High | Positive | TAX-02 | Not Run | etax.ts |
+| UAT-TAX-006 | e-Tax XML header fields correct | Admin | XML from TAX-005 | 1. Inspect XML header. | — | `<cbc:ID>{docNo}`, IssueDate 2026-06-22, InvoiceTypeCode 388, DocumentCurrencyCode THB. | Med | Positive | TAX-02 | Not Run | etax.ts |
+| UAT-TAX-007 | e-Tax XML parties & tax IDs | Admin | XML | 1. Inspect PartyTaxScheme. | — | Seller CompanyID 0105551234567 and buyer 0992001234567 present. | Med | Positive | TAX-02 | Not Run | etax.ts |
+| UAT-TAX-008 | e-Tax XML tax & totals | Admin | XML | 1. Inspect tax/totals. | — | Percent 7.00; TaxableAmount 300.00; TaxAmount 21.00; PayableAmount 321.00. | High | Positive | TAX-02 | Not Run | etax.ts |
+| UAT-TAX-009 | e-Tax XML lines + special-char escaping | Admin | XML | 1. Inspect invoice lines. | — | 2 `<cac:InvoiceLine>`; `<` → `&lt;`, `&` → `&amp;`; no raw angle brackets/ampersand leak. | Med | Control | TAX-02 | Not Run | etax.ts |
+| UAT-TAX-010 | e-Tax submission accepted | MasterDataAdmin | Tax invoice exists | 1. `POST /api/tax/etax/submit/{docNo}`. 2. `GET /api/tax/etax/status/{docNo}`. | docNo=TIV-202606-0001 | submit → status `Accepted`, `provider_ref` `mock-*`; status read back `Accepted`. | Med | Positive | TAX-02 | Not Run | pos-p1.ts |
+| UAT-TAX-011 | e-Tax resubmit idempotent | MasterDataAdmin | Already submitted | 1. `POST /api/tax/etax/submit/{docNo}` again. | same docNo | `idempotent: true`. | Low | Control | TAX-02 | Not Run | pos-p1.ts |
+| UAT-TAX-012 | Tax-invoice numbering sequential | Admin | Issue 2+ tax invoices | 1. Issue tax invoices. 2. Inspect doc numbers. | — | Monotonic, gapless, tenant-scoped numbering (no duplicates). | Med | Control | TAX-03 | Not Run | tax-docs |
+| UAT-TAX-013 | WHT withheld on payroll | GlAccountant | Payroll run 2026-06 | 1. `POST /api/payroll/runs?period=2026-06`. 2. `GET /api/payroll/pnd1?period=2026-06`. | gross 42000 | `wht_total`=170.83; ภ.ง.ด.1 total_wht 170.83; GL 2360 WHT payable cr 170.83. | High | Positive | PAY-02, TAX | Not Run | payroll.ts |

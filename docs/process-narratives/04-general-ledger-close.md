@@ -1,0 +1,147 @@
+# General Ledger & Financial Close — Process Narrative
+
+## 1. Document control
+
+| Field | Value |
+|---|---|
+| Process ID | PN-04-GL |
+| Process owner | `<<Controller>>` |
+| Approver | `<<CFO>>` |
+| Version | **0.1 DRAFT** |
+| Effective date | `<<effective-date>>` |
+| Review cadence | Each period close + annual |
+| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, REC-01, REC-02, REC-03, CON-01, CON-02; SoD R05, R06 |
+| Related policy | `compliance/policies/11-financial-close-policy.md`, `compliance/policies/13-segregation-of-duties-policy.md` |
+
+## 2. Purpose
+
+To control journal entry, the trial balance / financial statements, period and year-end close, and reconciliations so that the general ledger is **balanced, complete, accurate, properly cut off, and authorized**, and so that manual journals receive **independent review** (maker-checker) before they affect reported results.
+
+## 3. Scope
+
+**In scope:** manual journal entry (`/api/ledger/journal`) posting as Draft → GL-05 maker-checker approve/reject; trial balance, income statement, balance sheet; period open/close (`gl_close`); year-end close; subledger-to-GL, bank, and intercompany reconciliations; consolidation and FX revaluation.
+
+**Out of scope:** source-cycle postings (revenue, AP, inventory, payroll, tax) which are documented in their own narratives but flow into the GL here.
+
+## 4. References
+
+- ISO 9001:2015 cl. 4.4, cl. 7.5 (documented information), cl. 9.1 (monitoring/measurement).
+- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — GL-01..06, REC-01..03, CON-01/02.
+- `compliance/policies/11-financial-close-policy.md` (close calendar), `13-segregation-of-duties-policy.md` (R05, R06).
+- Code: `apps/api/src/modules/ledger/ledger.service.ts` + `ledger.controller.ts`, `apps/api/src/modules/reconciliation/reconciliation.service.ts`, `apps/api/src/modules/consolidation/`, `apps/api/src/modules/fx/fx.service.ts`.
+
+## 5. Definitions & abbreviations
+
+| Term | Meaning |
+|---|---|
+| JE | Journal Entry (JE- prefix) |
+| Maker-checker | Preparer of a JE may never approve it (GL-05) |
+| Draft / Posted / Voided | JE lifecycle states; only Posted affects balances |
+| Period close | Locking a fiscal period against further posting |
+| TB / IS / BS | Trial Balance / Income Statement / Balance Sheet |
+| RE | Retained Earnings |
+| Recon prepare → certify | Two-person reconciliation sign-off |
+
+## 6. Roles & responsibilities (RACI)
+
+SoD: the **preparer** of a manual JE (GlAccountant) is never its **approver** (FinancialController) — enforced even for Admin (**GL-05**, **R05**); the **preparer** of a reconciliation (`recon_prep`) is never its **certifier** (`approvals`) (**R06**); the role posting JEs (`gl_post`) is separated from the role that **closes the period** (`gl_close`) (**R05**).
+
+| Activity | GlAccountant | FinancialController | Controller | ExecutiveViewer / CFO |
+|---|---|---|---|---|
+| Prepare manual JE (`gl_post`) | **A/R** | I | A | I |
+| Approve / reject manual JE (`gl_close`/checker, ≠ preparer) | I | **A/R** | A | C |
+| Run TB / IS / BS | R | R | **A/R** | I |
+| Close / open fiscal period (`gl_close`) | I | **A/R** | A | I |
+| Year-end close (`exec`) | I | C | **A/R** | A |
+| Prepare reconciliation (`recon_prep`) | **A/R** | C | A | I |
+| Certify reconciliation (`approvals`) | I | **A/R** | A | C |
+
+## 7. Process narrative
+
+1. **JE invariants (decision point).** Every JE must be balanced by construction: Σdebit = Σcredit, each line single-sided and non-negative; an unbalanced entry → `UNBALANCED`, a malformed line → `INVALID_LINE` (**GL-01**).
+2. **Period-close lockout (decision point).** Posting into a **Closed** fiscal period is rejected `PERIOD_CLOSED` on both the initial post and at approval time (per-tenant fiscal calendar) (**GL-02**).
+3. **Idempotent posting.** A unique key `(tenant, source, source_ref, ledger)` with `ON CONFLICT DO NOTHING` prevents concurrent double-booking of the same source document (**GL-04**).
+4. **Manual JE maker-checker (the key control).** A manual JE submitted via `POST /api/ledger/journal` with `pendingApproval` posts as **Draft** and is **excluded from the trial balance** until approved. `approveEntry` (permission `gl_close`) sets it **Posted** only if the approver is **not** the preparer (`createdBy`); a self-approval → `SOD_VIOLATION` — enforced **even for Admin**. `rejectEntry` sets it **Voided** with the reason appended to the memo; Voided/Draft never affect balances (**GL-05**, **R05**). Posting (`gl_post`) and approval (`gl_close`) are different permissions.
+5. **Cross-tenant posting gate.** HQ cross-tenant posting (`hqTenant`) is gated to Admin (explicit tenant override, also audited); a non-Admin override is ignored and RLS pins the context (**GL-06**).
+6. **Financial statements.** Controller runs the trial balance, income statement, and balance sheet — built only from Posted entries in open/closed periods.
+7. **Reconciliations (decision point, two-person).** Subledger-to-GL reconciliation imports GL items, auto-matches, clears unmatched, and is **certified** by a different person — preparer (`recon_prep`) ≠ certifier (`approvals`) (**REC-01**, **R06**). Bank reconciliation against statements (**REC-02**, see `07-cash-treasury.md`); intercompany reconciliation/elimination on consolidation (**REC-03**).
+8. **Period close.** FinancialController closes the period via `gl_close` after reconciliations are certified, per the close calendar; the period then rejects further posting (**GL-02**, **GL-06**).
+9. **Year-end close.** Year-end close is restricted to `exec`; an attempt without it → `403`. Closing entries roll to retained earnings (**GL-03**).
+10. **Consolidation & FX.** Consolidation run (ownership %, entity currency) is gated by `approvals` (**CON-01**); period-end FX revaluation posts unrealized FX (acct 5400) (**CON-02**).
+
+## 8. Process flow
+
+```mermaid
+flowchart TD
+    A[Prepare manual JE POST /api/ledger/journal pendingApproval] --> B{Balanced? lines valid? GL-01}
+    B -- "No" --> B1[Reject UNBALANCED / INVALID_LINE]
+    B -- "Yes" --> C{Period open? GL-02}
+    C -- "Closed" --> C1[Reject PERIOD_CLOSED]
+    C -- "Open" --> D[Post as Draft - excluded from TB GL-05]
+    D --> E{Approver != preparer? GL-05/R05}
+    E -- "same person / Admin" --> E1[Reject SOD_VIOLATION]
+    E -- "reject" --> E2[Voided - never affects balances]
+    E -- "independent approve" --> F[Posted - appears in TB GL-05]
+    F --> G[Run TB / IS / BS]
+    G --> H[Subledger / bank / IC reconciliations REC-01/02/03]
+    H --> I{Preparer != certifier? R06}
+    I -- "Yes" --> J[Certify recon - approvals]
+    J --> K[Close period gl_close GL-02/06]
+    K --> L[Year-end close exec -> roll to RE GL-03]
+    L --> M[Consolidation approvals + FX reval CON-01/02]
+```
+
+**Swimlane description by role:** **GlAccountant** prepares manual JEs (Draft) and reconciliations. The **system** enforces balance/line invariants, period locks, idempotency, the maker-checker rule (even for Admin), and the cross-tenant gate. **FinancialController** independently approves JEs, certifies reconciliations, and closes periods. **Controller/CFO** owns year-end close and consolidation, gated by `exec`/`approvals`.
+
+## 9. Control matrix
+
+| Step | Risk | Control | Type | RCM ID | Evidence / Record |
+|---|---|---|---|---|---|
+| 1 | Unbalanced / one-sided JE | Double-entry balanced-by-construction | Prev / Auto | GL-01 | Invariant tests; `UNBALANCED` |
+| 2 | Posting to a closed period (cutoff) | Period-close lockout `PERIOD_CLOSED` | Prev / Auto | GL-02 | Close-lock test |
+| 3 | Concurrent double-booking | Ledger idempotency unique key + ON CONFLICT | Prev / Auto | GL-04 | Dedup test |
+| 4 | Manual JE without independent review | Maker-checker; Draft excluded from TB; preparer ≠ approver (even Admin) | Prev / Hybrid | GL-05, R05 | JE approvals; harness ToE; `SOD_VIOLATION` |
+| 5 | Mis-post to another tenant's books | HQ cross-tenant posting gated to Admin (+ RLS) | Prev / Auto | GL-06 | Override test |
+| 7 | Subledgers diverge from GL undetected | Subledger-to-GL recon + independent certify | Det / Hybrid | REC-01, R06 | Certified recon |
+| 7 | Bank balance not reconciled | Bank reconciliation vs statements | Det / Hybrid | REC-02 | Bank rec |
+| 7 | Intercompany not eliminated/agreed | IC reconciliation + elimination | Det / Hybrid | REC-03 | IC recon |
+| 9 | Unauthorized year-end close / RE roll | Year-end close restricted to `exec` | Prev / Hybrid | GL-03 | Close package; 403 test |
+| 10 | Consolidation / FX mis-stated | Consolidation gated by `approvals`; FX reval | Hybrid | CON-01, CON-02 | Consol TB; FX reval JE |
+
+## 10. Inputs & outputs
+
+**Inputs:** source-cycle postings, manual JE requests, subledger balances, bank statements, FX rates, ownership %, close calendar.
+**Outputs:** Posted JEs (JE-), trial balance, income statement, balance sheet, certified reconciliations, closed periods, year-end close package, consolidated TB.
+
+## 11. Records & retention
+
+| Record | Store | Retention |
+|---|---|---|
+| Journal entries (Draft/Posted/Voided) | Ledger (RLS-scoped) | `<<7 years>>` |
+| JE approval / rejection trail | `audit_log`, memo annotations | `<<7 years>>` |
+| Reconciliations + certifications | `reconciliation` tables | `<<7 years>>` |
+| Period/year close records | `fiscal_periods` | `<<7 years>>` |
+| Financial statements | Reports / exports | `<<7 years>>` |
+
+## 12. KPIs / metrics
+
+- Manual JEs posted: % with distinct approver (target 100%); count of `SOD_VIOLATION`.
+- Postings rejected for `PERIOD_CLOSED`.
+- Reconciliation completeness and on-time certification per close.
+- Days to close; number of post-close adjustments.
+
+## 13. Exception & error handling
+
+| Error code | Trigger | Handling |
+|---|---|---|
+| `UNBALANCED` / `INVALID_LINE` | Bad JE structure | Correct and resubmit |
+| `PERIOD_CLOSED` | Post/approve into closed period | Re-open per close policy (authorized) or post to open period |
+| `SOD_VIOLATION` | Preparer approves own JE | Route to independent approver (always, incl. Admin) |
+| `NOT_PENDING` | Approve/reject a non-Draft JE | Verify JE state |
+| `403` on year-end close | Lacks `exec` permission | CFO/Controller performs close |
+
+## 14. Revision history
+
+| Version | Date | Author | Summary |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
