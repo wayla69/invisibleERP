@@ -148,4 +148,41 @@ export class WmsService {
     if (sh.pickId) await db.update(pickLists).set({ status: 'Shipped' }).where(eq(pickLists.id, Number(sh.pickId)));
     return { shipment_no: shipmentNo, tracking_no: dto.tracking_no, status: 'Shipped' };
   }
+
+  // ── 17C: GR → putaway. Derived task list = received (GR) minus already-put-away (Transfer→BIN), per item.
+  // No new table — the existing idempotent putaway() executes each task. ──
+  async pendingPutaway(grNo: string, user: JwtUser) {
+    const db = this.db as any;
+    const recv = await db.select({ itemId: stockMovements.itemId, desc: stockMovements.itemDescription, uom: stockMovements.uom, qty: sql<string>`coalesce(sum(${stockMovements.qty}),0)` })
+      .from(stockMovements).where(and(eq(stockMovements.docNo, grNo), eq(stockMovements.moveType, 'GR'))).groupBy(stockMovements.itemId, stockMovements.itemDescription, stockMovements.uom);
+    const away = await db.select({ itemId: stockMovements.itemId, qty: sql<string>`coalesce(sum(${stockMovements.qty}),0)` })
+      .from(stockMovements).where(and(eq(stockMovements.docNo, grNo), eq(stockMovements.moveType, 'Transfer'))).groupBy(stockMovements.itemId);
+    const awayMap = new Map<string, number>(away.map((a: any) => [a.itemId, n(a.qty)]));
+    const [firstBin] = await db.select().from(bins).limit(1);
+    const tasks: any[] = [];
+    for (const r of recv) {
+      const pending = Math.round((n(r.qty) - (awayMap.get(r.itemId) ?? 0)) * 1000) / 1000;
+      if (pending <= 0) continue;
+      tasks.push({ gr_no: grNo, item_id: r.itemId, description: r.desc, pending_qty: pending, uom: r.uom, suggested_bin: firstBin?.binCode ?? null });
+    }
+    return { gr_no: grNo, tasks, count: tasks.length };
+  }
+
+  // ── 17C: wave-consolidated ship — ship all of a wave's packed shipments under ONE carrier/tracking. ──
+  async shipWave(waveNo: string, dto: { carrier: string; tracking_no: string }, user: JwtUser) {
+    const db = this.db as any;
+    const [w] = await db.select().from(pickWaves).where(eq(pickWaves.waveNo, waveNo)).limit(1);
+    if (!w) throw new NotFoundException({ code: 'WAVE_NOT_FOUND', message: `Wave ${waveNo} not found`, messageTh: 'ไม่พบเวฟ' });
+    const shps = await db.select().from(shipments).where(eq(shipments.waveId, Number(w.id)));
+    if (!shps.length) throw new BadRequestException({ code: 'NO_SHIPMENTS', message: 'No packed shipments in this wave', messageTh: 'ยังไม่มีพัสดุที่แพ็คในเวฟนี้' });
+    let shipped = 0;
+    for (const sh of shps) {
+      if (sh.status === 'Shipped') continue;
+      await db.update(shipments).set({ carrier: dto.carrier, trackingNo: dto.tracking_no, status: 'Shipped', shippedBy: user.username, shippedAt: new Date() }).where(eq(shipments.id, sh.id));
+      if (sh.pickId) await db.update(pickLists).set({ status: 'Shipped' }).where(eq(pickLists.id, Number(sh.pickId)));
+      shipped++;
+    }
+    await db.update(pickWaves).set({ status: 'Shipped' }).where(eq(pickWaves.id, Number(w.id)));
+    return { wave_no: waveNo, consolidated_shipments: shps.length, shipped, tracking_no: dto.tracking_no };
+  }
 }
