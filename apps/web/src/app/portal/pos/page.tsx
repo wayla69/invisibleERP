@@ -52,6 +52,7 @@ function NewSale() {
   const [lines, setLines] = useState<Line[]>([{ item_id: '', qty: 1, unit_price: 0, discount_pct: 0 }]);
   const [payment, setPayment] = useState('Cash');
   const [queued, setQueued] = useState('');
+  const [applyPricing, setApplyPricing] = useState(false);
   const setLine = (i: number, p: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...p } : l)));
   const reset = () => setLines([{ item_id: '', qty: 1, unit_price: 0, discount_pct: 0 }]);
 
@@ -63,7 +64,7 @@ function NewSale() {
   const mut = useMutation({
     mutationFn: (method: string) => api<{ sale_no: string; total: number; points_earned: number }>('/api/portal/pos/sales', {
       method: 'POST',
-      body: JSON.stringify({ payment_method: method, items: cleanLines() }),
+      body: JSON.stringify({ payment_method: method, items: cleanLines(), apply_pricing: applyPricing }),
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['portal-sales'] }); reset(); },
   });
@@ -122,8 +123,11 @@ function NewSale() {
               </SelectContent>
             </Select>
           </div>
+          <label className="flex items-center gap-1.5 self-end pb-2 text-sm" title="ใช้กฎราคา/โปรโมชั่นอัตโนมัติ (happy hour, ส่วนลด)">
+            <input type="checkbox" checked={applyPricing} onChange={(e) => setApplyPricing(e.target.checked)} /> ใช้โปรโมชั่น
+          </label>
           <div className="flex-1 text-right">
-            <div className="text-sm text-muted-foreground">ยอดรวม {baht(subtotal)} + VAT 7% {baht(vat)}</div>
+            <div className="text-sm text-muted-foreground">ยอดรวม {baht(subtotal)} + VAT 7% {baht(vat)}{applyPricing ? ' · ปรับตามโปรฯ ตอนชำระ' : ''}</div>
             <div className="text-2xl">สุทธิ <strong className="tabular">{baht(total)}</strong></div>
           </div>
         </div>
