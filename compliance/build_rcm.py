@@ -116,10 +116,10 @@ add("ITGC-AC-07","ITGC · Access","ITGC","All","Weak/stale credentials; sessions
     "0045_must_change_password; auth (JWT_EXPIRES_IN)","Inspect password + session policy.","Sample: forced change works; expired token rejected.","Auth config","Partial")
 add("ITGC-AC-08","ITGC · Access","ITGC","All","Access creep; terminated users retain access.","Restricted access",
     "Quarterly User Access Review — recertify every user × permission; remove on termination.","Det","Manual","Quarterly","Controller / IT","P11/P16",
-    "admin-users (export to build)","Inspect UAR procedure + sample sign-off.","Re-perform: each quarter reviewed & exceptions remediated.","UAR sign-off","Gap")
+    "admin-users.service.ts (access-review / export CSV / certify); admin-users.controller.ts; cutover/compliance.ts (ToE)","Inspect UAR procedure + sample sign-off.","Re-perform: each quarter reviewed & exceptions remediated (automated harness re-performs report/export/certify).","UAR sign-off","Implemented")
 add("ITGC-AC-09","ITGC · Access","ITGC","All","Conflicting duties in one user enable fraud (e.g., post & approve JE).","Authorization",
     "Segregation-of-Duties conflict ruleset with preventive blocks + detective conflict report.","Prev/Det","Auto+Manual","Quarterly","Controller / IT","P10/P11",
-    "/sod (web); workflow/approvals (to extend)","Inspect SoD rule set vs role design.","Run conflict report; evidence conflicts cleared/approved.","SoD report","Gap")
+    "permissions.ts (SOD_RULES, 13 rules); admin-users.service.ts (assertNoSodConflict preventive block); sod.service.ts (detective report); cutover/compliance.ts (ToE)","Inspect SoD rule set vs role design.","Run conflict report; assigning a conflicting set is blocked (422) unless justified-override+reason — re-performed by the harness.","SoD report","Implemented")
 add("ITGC-AC-10","ITGC · Access","ITGC","All","No record of who changed financial data.","Completeness",
     "Audit trail — financially-relevant create/update/delete logged with user, timestamp, before/after.","Det","Automated","Continuous","Eng Lead","P13/P16",
     "common/audit.interceptor.ts; pos-audit module; status-log.service.ts","Inspect logged actions/fields; confirm coverage of GL/AR/AP/cash.","Sample transactions traced to audit log.","Audit log","Implemented")
@@ -253,7 +253,7 @@ add("GL-04","General Ledger","Application","All","Concurrent posting double-book
     "schema/ledger.ts (ux_je_idem); ledger.service.ts; migration 0058","Inspect unique index + conflict handling.","Concurrent identical post → single entry.","Dedup test","Implemented")
 add("GL-05","General Ledger","Application","All","Manual JE posted without independent review (override risk).","Authorization",
     "Manual journal-entry maker-checker — preparer ≠ approver before a manual JE posts.","Prev","Auto+Manual","Per manual JE","Controller","P10",
-    "workflow / approvals (to extend to JE)","Inspect JE approval routing.","Sample manual JEs: approver ≠ preparer.","JE approvals","Gap")
+    "ledger.service.ts (postEntry pendingApproval→Draft; approveEntry preparer≠approver; rejectEntry); ledger.controller.ts (gl_post posts / gl_close approves); cutover/compliance.ts (ToE)","Inspect JE approval routing.","Sample manual JEs: approver ≠ preparer; Draft excluded from balances until approved (re-performed by the harness).","JE approvals","Implemented")
 add("GL-06","General Ledger","Application","All","Operator mis-posts to another tenant's books.","Validity",
     "HQ cross-tenant posting gated to Admin (explicit tenant override); others pinned to context (also RLS).","Prev","Automated","Per JE","Eng Lead","P10/P11",
     "ledger.controller.ts (hqTenant)","Inspect Admin gating of tenant_id.","Non-Admin tenant override ignored; Admin audited.","Override test","Implemented")
@@ -326,8 +326,6 @@ GAP = [
  ("ITGC-CM-03","ITGC · Change","No segregation between dev and prod deployer.","Add deploy-approval gate; deployer ≠ author.","Head of Eng","Phase 1","Month 1-2","High"),
  ("ITGC-CM-04","ITGC · Change","Change traceability not enforced.","Require ticket ID in every PR; retain ticket→deploy linkage.","Head of Eng","Phase 1","Month 2","Medium"),
  ("ITGC-CM-05","ITGC · Change","No emergency-change procedure.","Author emergency-change runbook with retroactive approval SLA.","Head of Eng","Phase 1","Month 2","Medium"),
- ("ITGC-AC-08","ITGC · Access","No periodic user access review.","Build user×permission export + quarterly recertification workflow.","Controller / IT","Phase 1-2","Month 2-3","High"),
- ("ITGC-AC-09","ITGC · Access","SoD only a UI page; no enforced ruleset.","Define SoD conflict matrix vs 37 perms/5 roles; preventive blocks + detective report.","Controller / IT","Phase 2","Month 3-4","High"),
  ("ITGC-AC-13","ITGC · Access","DB access controls / named users not formalized.","Restrict DB roles to least privilege; named users; log DBA access.","DBA / DevOps","Phase 1-2","Month 2-3","Medium"),
  ("ITGC-OP-01","ITGC · Operations","Backup/restore not proven by test.","Automate backups; perform + evidence a quarterly restore test.","DevOps","Phase 1","Month 1-2","High"),
  ("ITGC-OP-02","ITGC · Operations","No DR/BCP plan.","Author DR/BCP with RTO/RPO; schedule annual test.","CTO / DevOps","Phase 2","Month 3-5","Medium"),
@@ -335,7 +333,6 @@ GAP = [
  ("ITGC-SD-01","ITGC · SDLC","No formal SDLC policy.","Author SDLC policy with design/test/UAT/go-live sign-offs.","Head of Eng / Product","Phase 2","Month 3-4","Medium"),
  ("ITGC-SD-02","ITGC · SDLC","Cutover reconciliation not documented.","Document source→target balance tie-out + sign-off for any migration.","Controller / Eng","Phase 2","Month 4","Medium"),
  ("ITGC-SD-03","ITGC · SDLC","Test coverage of key controls partial.","Expand key-control regression tests; CI archives dated evidence.","Head of Eng","Phase 2","Month 3-5","Medium"),
- ("GL-05","General Ledger","Manual JE has no maker-checker.","Extend approvals engine to require approver ≠ preparer for manual JEs.","Controller / Eng","Phase 2","Month 3-4","High"),
  ("EXP-03","Expenditure","PR/PO approval workflow partial.","Finalize PR/PO maker-checker against DoA thresholds.","Procurement Mgr","Phase 2","Month 3-4","Medium"),
  ("INV-04","Inventory & COGS","Stocktake variance review informal.","Formalize count cadence + variance review/approval sign-off.","Warehouse Mgr","Phase 2","Month 4","Medium"),
  ("REC-03","Reconciliation","Intercompany recon partial.","Formalize IC matching + elimination sign-off each period.","Group Controller","Phase 2-3","Month 4-6","Medium"),
