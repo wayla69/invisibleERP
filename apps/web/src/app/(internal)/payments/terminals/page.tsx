@@ -30,11 +30,11 @@ function Terminals() {
   const terms = useQuery<any>({ queryKey: ['terminals'], queryFn: () => api('/api/payments/terminal/terminals') });
   const intents = useQuery<any>({ queryKey: ['intents'], queryFn: () => api('/api/payments/terminal/intents') });
   const [t, setT] = useState({ terminal_code: '', name: '' });
-  const [c, setC] = useState({ terminal_code: '', amount: '', type: 'sale' });
+  const [c, setC] = useState({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false });
   const [msg, setMsg] = useState('');
   const refresh = () => { qc.invalidateQueries({ queryKey: ['terminals'] }); qc.invalidateQueries({ queryKey: ['intents'] }); };
   const reg = useMutation({ mutationFn: () => api('/api/payments/terminal/register', { method: 'POST', body: JSON.stringify({ terminal_code: t.terminal_code, name: t.name || undefined }) }), onSuccess: () => { setMsg('✅ เพิ่มเครื่องแล้ว'); setT({ terminal_code: '', name: '' }); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const charge = useMutation({ mutationFn: () => api('/api/payments/terminal/charge', { method: 'POST', body: JSON.stringify({ terminal_code: c.terminal_code || undefined, amount: Number(c.amount), type: c.type }) }), onSuccess: (r: any) => { setMsg(`✅ ${r.intent_no} → ${r.status}`); setC({ terminal_code: '', amount: '', type: 'sale' }); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const charge = useMutation({ mutationFn: () => api('/api/payments/terminal/charge', { method: 'POST', body: JSON.stringify({ terminal_code: c.terminal_code || undefined, amount: Number(c.amount), type: c.type, sale_no: c.sale_no || undefined, record_tender: c.record_tender }) }), onSuccess: (r: any) => { setMsg(`✅ ${r.intent_no} → ${r.status}${r.payment_no ? ` · tender ${r.payment_no}` : ''}`); setC({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false }); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
   const act = useMutation({ mutationFn: (v: { no: string; op: string; body?: any }) => api(`/api/payments/terminal/intents/${v.no}/${v.op}`, { method: 'POST', body: JSON.stringify(v.body ?? {}) }), onSuccess: () => refresh(), onError: (e: any) => setMsg(`❌ ${e.message}`) });
   const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm';
 
@@ -53,6 +53,8 @@ function Terminals() {
             <Input className="max-w-[140px]" placeholder="รหัสเครื่อง" value={c.terminal_code} onChange={(e) => setC({ ...c, terminal_code: e.target.value })} />
             <Input className="max-w-[120px]" type="number" placeholder="จำนวน" value={c.amount} onChange={(e) => setC({ ...c, amount: e.target.value })} />
             <select className={selectCls} value={c.type} onChange={(e) => setC({ ...c, type: e.target.value })}><option value="sale">ขาย (capture)</option><option value="preauth">กันวงเงิน (pre-auth)</option></select>
+            <Input className="max-w-[150px]" placeholder="เลขที่บิล (เลือก)" value={c.sale_no} onChange={(e) => setC({ ...c, sale_no: e.target.value })} />
+            <label className="flex items-center gap-1.5 text-sm" title="บันทึกเป็นการชำระของบิล (ให้ปิดลิ้นชัก/รายงานเห็น)"><input type="checkbox" checked={c.record_tender} onChange={(e) => setC({ ...c, record_tender: e.target.checked })} /> ลงรายการชำระ</label>
             <Button disabled={!c.amount || charge.isPending} onClick={() => charge.mutate()}><Banknote className="size-4" /> รับชำระ</Button>
           </div>
           <Msg ok={msg.startsWith('✅')}>{msg}</Msg>

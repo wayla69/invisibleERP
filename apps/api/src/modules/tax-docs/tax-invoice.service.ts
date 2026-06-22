@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { taxInvoices, taxInvoiceLines, custPosSales, custPosItems, arInvoices, tenants } from '../../database/schema';
@@ -8,6 +8,7 @@ import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { sellerSnapshot, isValidTaxId } from './tax-docs.snapshot';
 import type { IssueFullDto } from './dto';
+import { EtaxService } from '../pos-fiscal/etax.service';
 
 @Injectable()
 export class TaxInvoiceService {
@@ -15,6 +16,7 @@ export class TaxInvoiceService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly tax: TaxService,
+    @Optional() private readonly etax?: EtaxService,   // wiring: auto-submit full tax invoices to RD e-Tax
   ) {}
 
   private async tenantRow(tenantId: number) {
@@ -108,6 +110,8 @@ export class TaxInvoiceService {
       bookNo: dto.book_no ?? null, notes: dto.notes ?? null, createdBy: user.username,
     }).returning({ id: taxInvoices.id });
     await this.insertLines(Number(head.id), tenantId, lines);
+    // wiring (best-effort): hand the full tax invoice to the RD/ETDA e-Tax provider
+    if (this.etax) { try { await this.etax.submit(docNo, undefined, user); } catch { /* e-Tax submit best-effort */ } }
     return this.getByDocNo(user, docNo);
   }
 

@@ -1,14 +1,15 @@
-import { Inject, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, Optional, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { diningTables, menuRecipes, menuRecipeLines, menuItems, customerInventory } from '../../database/schema';
 import { n } from '../../database/queries';
+import { RealtimeService } from './realtime.service';
 
 // P2a — optimistic concurrency for multi-terminal: a stale `rev` loses with 409 (two servers can't
 // silently clobber the same table), plus auto-86 that flips a dish unavailable when an ingredient is short.
 @Injectable()
 export class LockingService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, @Optional() private readonly realtime?: RealtimeService) {}
 
   // Guarded table-status write: only succeeds if the caller's rev matches → otherwise 409 STALE_WRITE.
   async setTableStatus(tableId: number, status: string, expectedRev: number) {
@@ -16,12 +17,14 @@ export class LockingService {
     const res = await db.update(diningTables)
       .set({ status, rev: sql`${diningTables.rev} + 1`, updatedAt: new Date() })
       .where(and(eq(diningTables.id, tableId), eq(diningTables.rev, expectedRev)))
-      .returning({ rev: diningTables.rev, status: diningTables.status });
+      .returning({ rev: diningTables.rev, status: diningTables.status, tenantId: diningTables.tenantId });
     if (!res.length) {
       const [cur] = await db.select().from(diningTables).where(eq(diningTables.id, tableId)).limit(1);
       if (!cur) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
       throw new ConflictException({ code: 'STALE_WRITE', message: `Table changed by another terminal (current rev ${cur.rev})`, messageTh: 'โต๊ะถูกแก้ไขโดยเครื่องอื่น', current_rev: cur.rev });
     }
+    // realtime: push table state to other terminals (SSE)
+    this.realtime?.publish({ type: 'table', tenant_id: res[0].tenantId, table_id: tableId, status: res[0].status, rev: res[0].rev, at: new Date().toISOString() });
     return { table_id: tableId, status: res[0].status, rev: res[0].rev };
   }
 

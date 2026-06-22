@@ -11,9 +11,12 @@ import { PaymentsModule } from '../payments/payments.module';
 import { LedgerModule } from '../ledger/ledger.module';
 import { MenuModule } from '../menu/menu.module';
 import { CostingModule } from '../costing/costing.module';
+import { PricingModule } from '../pricing/pricing.module';
+import { PosFiscalModule } from '../pos-fiscal/pos-fiscal.module';
+import { PosScaleModule } from '../pos-scale/pos-scale.module';
 
 @Module({
-  imports: [TaxModule, PaymentsModule, LedgerModule, MenuModule, CostingModule],
+  imports: [TaxModule, PaymentsModule, LedgerModule, MenuModule, CostingModule, PricingModule, PosFiscalModule, PosScaleModule],
   controllers: [PortalController],
   providers: [PortalService, PortalPosService, OfflineSyncService, PortalMyErpService, PortalUsersService, PasswordService],
   exports: [PortalService],

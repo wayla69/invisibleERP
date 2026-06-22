@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Optional, NotFoundException, BadRequestException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { payments, paymentRefunds, tillSessions, cashMovements, tenants } from '../../database/schema';
@@ -8,6 +8,8 @@ import { n, fx } from '../../database/queries';
 import { round2, roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 import { resolveGateway } from './gateways';
+import { PosAuditService } from '../pos-audit/pos-audit.service';
+import { JournalService } from '../pos-fiscal/journal.service';
 
 export interface RecordTenderDto {
   sale_no: string;
@@ -30,6 +32,8 @@ export class PaymentService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
+    @Optional() private readonly audit?: PosAuditService,   // wiring: central POS audit trail
+    @Optional() private readonly journal?: JournalService,   // wiring: electronic journal
   ) {}
 
   // POST /api/payments — run a tender against a gateway, persist the result.
@@ -113,11 +117,14 @@ export class PaymentService {
       // further partial refunds remain possible and the payment cannot be voided.
       if (fullyRefunded) await tx.update(payments).set({ status: 'Refunded' }).where(eq(payments.id, pay.id));
     });
+    // wiring (best-effort): central audit + electronic journal
+    if (this.audit) { try { await this.audit.record({ action: 'refund', entity: 'payment', entityId: dto.payment_no, meta: { refund_no: refundNo, amount: n(dto.amount), reason: dto.reason } }, user); } catch { /* audit best-effort */ } }
+    if (this.journal) { try { await this.journal.append({ doc_type: 'REFUND', doc_no: refundNo, payload: { payment_no: dto.payment_no, amount: n(dto.amount), fully_refunded: fullyRefunded } }, user); } catch { /* journal best-effort */ } }
     return { refund_no: refundNo, status: 'Refunded', refunded_total: round2(already + n(dto.amount)), remaining_refundable: round2(remaining - n(dto.amount)), fully_refunded: fullyRefunded };
   }
 
   // PATCH /api/payments/:no/void — void a payment that has not been captured/settled.
-  async voidPayment(paymentNo: string, _user: JwtUser) {
+  async voidPayment(paymentNo: string, user: JwtUser) {
     const db = this.db as any;
     const [pay] = await db.select().from(payments).where(eq(payments.paymentNo, paymentNo)).limit(1);
     if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
@@ -126,6 +133,9 @@ export class PaymentService {
       throw new BadRequestException({ code: 'CANNOT_VOID', message: 'Captured/settled payment cannot be voided — use refund', messageTh: 'รายการที่ชำระแล้วยกเลิกไม่ได้ ให้ใช้การคืนเงิน' });
     }
     await db.update(payments).set({ status: 'Voided' }).where(eq(payments.id, pay.id));
+    // wiring (best-effort): central audit + electronic journal
+    if (this.audit) { try { await this.audit.record({ action: 'void', entity: 'payment', entityId: paymentNo, meta: { prior_status: status } }, user); } catch { /* audit best-effort */ } }
+    if (this.journal) { try { await this.journal.append({ doc_type: 'VOID', doc_no: paymentNo, payload: { payment_no: paymentNo, prior_status: status } }, user); } catch { /* journal best-effort */ } }
     return { payment_no: paymentNo, status: 'Voided' };
   }
 
