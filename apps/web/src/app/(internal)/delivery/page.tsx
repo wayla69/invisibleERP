@@ -20,6 +20,8 @@ export default function DeliveryPage() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['deliveries'], queryFn: () => api('/api/delivery') });
   const [f, setF] = useState({ order_no: '', driver: '', vehicle: '' });
+  const [sel, setSel] = useState<string | null>(null);
+  const detail = useQuery<any>({ queryKey: ['delivery', sel], queryFn: () => api(`/api/delivery/${sel}`), enabled: !!sel });
   const [msg, setMsg] = useState('');
   const create = useMutation({
     mutationFn: () => api('/api/delivery', { method: 'POST', body: JSON.stringify({ order_no: f.order_no || undefined, driver: f.driver || undefined, vehicle: f.vehicle || undefined }) }),
@@ -61,11 +63,31 @@ export default function DeliveryPage() {
                   </select>
                 ),
               },
+              { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.do_no)}>ดูรายการ</Button> },
             ]}
             emptyText="ยังไม่มีใบส่งสินค้า"
           />
         )}
       </StateView>
+      {sel && (
+        <Card className="gap-3 p-5">
+          <div className="flex items-center justify-between"><h3 className="text-base font-semibold">รายการใน {sel}</h3><Button variant="ghost" size="sm" onClick={() => setSel(null)}>ปิด</Button></div>
+          <StateView q={detail}>
+            {detail.data && (
+              <DataTable
+                rows={detail.data.items}
+                columns={[
+                  { key: 'item_id', label: 'สินค้า' },
+                  { key: 'item_description', label: 'รายละเอียด' },
+                  { key: 'qty', label: 'จำนวน', align: 'right' },
+                  { key: 'uom', label: 'หน่วย' },
+                ]}
+                emptyText="ไม่มีรายการ"
+              />
+            )}
+          </StateView>
+        </Card>
+      )}
     </div>
   );
 }

@@ -7,6 +7,9 @@ import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
+import { StateView } from '@/components/state-view';
+import { Badge } from '@/components/ui/badge';
+import { statusVariant } from '@/components/ui';
 import { Msg } from '@/components/tabs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -26,6 +29,7 @@ export default function MobileScanPage() {
   const [msg, setMsg] = useState('');
 
   const session = useQuery<any>({ queryKey: ['scan-session', sessionNo], queryFn: () => api(`/api/scan/sessions/${sessionNo}`), enabled: !!sessionNo });
+  const recent = useQuery<any>({ queryKey: ['scan-sessions'], queryFn: () => api('/api/scan/sessions?limit=20'), enabled: !sessionNo });
 
   const open = useMutation({
     mutationFn: () => api<any>('/api/scan/sessions', { method: 'POST', body: JSON.stringify({ session_type: type, location_id: loc }) }),
@@ -47,13 +51,33 @@ export default function MobileScanPage() {
     <div className="space-y-4">
       <PageHeader title="สแกนผ่านมือถือ (Mobile Scan)" description="เปิดเซสชัน → สแกนสินค้า → ปิดเพื่อบันทึกการเคลื่อนไหว" />
       {!sessionNo ? (
-        <Card className="max-w-md gap-3 p-5">
-          <h3 className="text-base font-semibold">เปิดเซสชันใหม่</h3>
-          <div className="grid gap-1.5"><Label>ประเภท</Label><select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
-          <div className="grid gap-1.5"><Label>คลัง</Label><Input value={loc} onChange={(e) => setLoc(e.target.value)} /></div>
-          <Button disabled={open.isPending} onClick={() => open.mutate()}><ScanLine className="size-4" /> เปิดเซสชัน</Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
-        </Card>
+        <div className="space-y-4">
+          <Card className="max-w-md gap-3 p-5">
+            <h3 className="text-base font-semibold">เปิดเซสชันใหม่</h3>
+            <div className="grid gap-1.5"><Label>ประเภท</Label><select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
+            <div className="grid gap-1.5"><Label>คลัง</Label><Input value={loc} onChange={(e) => setLoc(e.target.value)} /></div>
+            <Button disabled={open.isPending} onClick={() => open.mutate()}><ScanLine className="size-4" /> เปิดเซสชัน</Button>
+            <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+          </Card>
+          <div>
+            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">เซสชันล่าสุด</h3>
+            <StateView q={recent}>
+              {recent.data && (
+                <DataTable
+                  rows={recent.data.sessions}
+                  columns={[
+                    { key: 'session_no', label: 'เลขที่' },
+                    { key: 'session_type', label: 'ประเภท' },
+                    { key: 'location_id', label: 'คลัง' },
+                    { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+                    { key: 'act', label: '', render: (r: any) => r.status === 'Open' ? <Button size="sm" variant="outline" onClick={() => setSessionNo(r.session_no)}>เปิดต่อ</Button> : null },
+                  ]}
+                  emptyText="ยังไม่มีเซสชัน"
+                />
+              )}
+            </StateView>
+          </div>
+        </div>
       ) : (
         <Card className="gap-3 p-5">
           <div className="flex items-center justify-between">

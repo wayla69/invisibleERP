@@ -50,7 +50,8 @@ export class ScanService {
   async close(sessionNo: string, user: JwtUser) {
     const db = this.db as any;
     return db.transaction(async (tx: any) => {
-      const [s] = await tx.select().from(scanSessions).where(eq(scanSessions.sessionNo, sessionNo)).limit(1);
+      // FOR UPDATE + re-check under lock so concurrent closes can't double-commit movements.
+      const [s] = await tx.select().from(scanSessions).where(eq(scanSessions.sessionNo, sessionNo)).limit(1).for('update');
       if (!s) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Session not found', messageTh: 'ไม่พบเซสชัน' });
       if (s.status === 'Closed') return { session_no: sessionNo, status: 'Closed', already: true };
       const lines = await tx.select().from(scanLines).where(eq(scanLines.sessionNo, sessionNo));

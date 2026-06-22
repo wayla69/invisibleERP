@@ -19,7 +19,7 @@ type LabelsBodyT = z.infer<typeof LabelsBody>;
 
 // Printable item QR labels (the legacy "QR Label Manager" bulk-print sheet).
 @Controller('api/inventory')
-@Permissions('warehouse', 'dashboard')
+@Permissions('warehouse', 'dashboard', 'masterdata')
 export class InventoryQrController {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,

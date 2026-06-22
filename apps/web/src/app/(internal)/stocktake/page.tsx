@@ -118,22 +118,47 @@ function NewCount() {
 
 function History() {
   const q = useQuery<any>({ queryKey: ['stocktakes'], queryFn: () => api('/api/stocktake') });
+  const [sel, setSel] = useState<string | null>(null);
+  const detail = useQuery<any>({ queryKey: ['stocktake', sel], queryFn: () => api(`/api/stocktake/${sel}`), enabled: !!sel });
   return (
-    <StateView q={q}>
-      {q.data && (
-        <DataTable
-          rows={q.data.stocktakes}
-          columns={[
-            { key: 'st_no', label: 'เลขที่' },
-            { key: 'st_date', label: 'วันที่', render: (r: any) => thaiDate(r.st_date) },
-            { key: 'counted_by', label: 'ผู้นับ' },
-            { key: 'lines', label: 'รายการ', align: 'right', render: (r: any) => <span className="tabular">{num(r.lines)}</span> },
-            { key: 'variance_lines', label: 'ผลต่าง', align: 'right', render: (r: any) => <span className="tabular">{num(r.variance_lines)}</span> },
-            { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-          ]}
-          emptyText="ยังไม่มีใบนับสต๊อก"
-        />
+    <div className="space-y-4">
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.stocktakes}
+            columns={[
+              { key: 'st_no', label: 'เลขที่' },
+              { key: 'st_date', label: 'วันที่', render: (r: any) => thaiDate(r.st_date) },
+              { key: 'counted_by', label: 'ผู้นับ' },
+              { key: 'lines', label: 'รายการ', align: 'right', render: (r: any) => <span className="tabular">{num(r.lines)}</span> },
+              { key: 'variance_lines', label: 'ผลต่าง', align: 'right', render: (r: any) => <span className="tabular">{num(r.variance_lines)}</span> },
+              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.st_no)}>ดู</Button> },
+            ]}
+            emptyText="ยังไม่มีใบนับสต๊อก"
+          />
+        )}
+      </StateView>
+      {sel && (
+        <Card className="gap-3 p-5">
+          <div className="flex items-center justify-between"><h3 className="text-base font-semibold">รายการใน {sel}</h3><Button variant="ghost" size="sm" onClick={() => setSel(null)}>ปิด</Button></div>
+          <StateView q={detail}>
+            {detail.data && (
+              <DataTable
+                rows={detail.data.lines}
+                columns={[
+                  { key: 'item_id', label: 'รหัส' },
+                  { key: 'item_description', label: 'สินค้า' },
+                  { key: 'system_qty', label: 'ระบบ', align: 'right', render: (r: any) => num(r.system_qty) },
+                  { key: 'physical_qty', label: 'นับจริง', align: 'right', render: (r: any) => num(r.physical_qty) },
+                  { key: 'difference', label: 'ผลต่าง', align: 'right', render: (r: any) => num(r.difference) },
+                ]}
+                emptyText="ไม่มีรายการ"
+              />
+            )}
+          </StateView>
+        </Card>
       )}
-    </StateView>
+    </div>
   );
 }

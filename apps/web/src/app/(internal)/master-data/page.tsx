@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, FileSpreadsheet, Upload } from 'lucide-react';
+import { Download, FileSpreadsheet, QrCode, Upload } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -32,6 +32,12 @@ export default function MasterDataPage() {
   async function dl(path: string, filename: string, label: string) {
     setMsg(''); setBusy(label);
     try { await apiDownload(path, filename); } catch (e: any) { setMsg(`❌ ${e.message}`); } finally { setBusy(''); }
+  }
+
+  async function dlPost(path: string, filename: string, body: any, label: string) {
+    setMsg(''); setBusy(label);
+    try { await apiDownload(path, filename, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+    catch (e: any) { setMsg(`❌ ${e.message}`); } finally { setBusy(''); }
   }
 
   async function onFile(file: File) {
@@ -69,6 +75,17 @@ export default function MasterDataPage() {
               </div>
             )}
             <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+          </Card>
+
+          <Card className="gap-3 p-5">
+            <h3 className="text-base font-semibold">พิมพ์ป้าย QR สินค้า (Item QR Labels)</h3>
+            <p className="text-sm text-muted-foreground">สร้างแผ่นป้าย QR (A4) สำหรับสินค้าทั้งหมด เพื่อสแกนในงานคลัง</p>
+            <Button
+              variant="outline" className="w-fit" disabled={busy === 'qr'}
+              onClick={() => dlPost('/api/inventory/qr/labels', 'item_qr_labels.pdf', { limit: 500 }, 'qr')}
+            >
+              <QrCode className="size-4" /> {busy === 'qr' ? 'กำลังสร้าง…' : 'ดาวน์โหลดป้าย QR สินค้า'}
+            </Button>
           </Card>
 
           {ent && (
