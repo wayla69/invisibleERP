@@ -127,6 +127,12 @@ export const INTERNAL_NAV: NavGroup[] = [
     ],
   },
   {
+    title: 'บุคลากร & เงินเดือน',
+    items: [
+      { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
+    ],
+  },
+  {
     title: 'ภาษี',
     items: [
       { label: 'ใบกำกับภาษี', href: '/tax/invoices', icon: FileText, perms: ['exec', 'ar', 'creditors'] },
