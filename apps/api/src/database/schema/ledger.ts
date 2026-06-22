@@ -1,4 +1,5 @@
 import { pgTable, bigserial, bigint, text, numeric, date, timestamp, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 
 // Double-entry General Ledger (move #2) — เปลี่ยน "POS add-on" → "ERP" จริง
@@ -50,7 +51,16 @@ export const journalEntries = pgTable(
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ bySource: index('idx_je_source').on(t.source, t.sourceRef), byLedger: index('idx_je_ledger').on(t.ledgerCode) }),
+  (t) => ({
+    bySource: index('idx_je_source').on(t.source, t.sourceRef),
+    byLedger: index('idx_je_ledger').on(t.ledgerCode),
+    // H4 — structural idempotency: one posting per (tenant, source, source_ref, ledger). COALESCE so a
+    // NULL tenant/ledger still collides (Postgres NULLs are otherwise distinct, which would defeat this).
+    // Partial: manual entries carry no source_ref and are intentionally exempt (many allowed).
+    uxIdem: uniqueIndex('ux_je_idem')
+      .on(sql`coalesce(${t.tenantId}, 0)`, t.source, t.sourceRef, sql`coalesce(${t.ledgerCode}, '')`)
+      .where(sql`${t.sourceRef} IS NOT NULL`),
+  }),
 );
 
 export const journalLines = pgTable(

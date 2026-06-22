@@ -10,15 +10,29 @@ export const PERMISSIONS = [
   'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'marketing', 'track', 'ai_chat',
   'approvals', // Phase 15 — approval-workflow actions (my-approvals / act / delegations)
   'branch',    // Multi-branch — manage outlets, consolidate branch sales, master-bundle for offline POS
+  // ── SoD sub-permissions (single-duty splits of coarse permissions; see PERMISSION_IMPLICATIONS) ──
+  'pos_sell', 'pos_refund', 'pos_till',
+  'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
+  'gl_post', 'gl_close', 'recon_prep', 'fin_report',
+  'md_vendor', 'md_item', 'md_config',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
+
+// The single-duty sub-permissions (excluded from the system-wide module toggle list below — they are
+// access-control granularity, not user-facing modules).
+export const SUB_PERMISSIONS: Permission[] = [
+  'pos_sell', 'pos_refund', 'pos_till',
+  'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
+  'gl_post', 'gl_close', 'recon_prep', 'fin_report',
+  'md_vendor', 'md_item', 'md_config',
+];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
 // A "module" maps 1:1 to a permission key. An admin can switch whole modules
 // off system-wide; disabled modules vanish from every user's nav and are
 // blocked at the API. These can never be disabled (admins must keep access).
 export const ALWAYS_ON_MODULES: Permission[] = ['users'];
-export const MODULE_KEYS: Permission[] = [...PERMISSIONS];
+export const MODULE_KEYS: Permission[] = PERMISSIONS.filter((p) => !SUB_PERMISSIONS.includes(p));
 
 // PERM_GROUPS taxonomy (from the legacy User-Management page) — preserve the grouping for the admin UI.
 export const PERM_GROUPS: Record<string, Permission[]> = {
@@ -41,18 +55,119 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata'],
   Procurement: ['procurement', 'creditors', 'ar', 'delivery', 'masterdata', 'approvals'],
   Planner: ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'],
+  // ── SoD-clean single-duty roles (the remediated design — each verified to produce 0 SoD conflicts) ──
+  Cashier: ['pos_sell'],
+  PosSupervisor: ['pos_refund', 'pos_till'],
+  ArClerk: ['ar', 'order_mgt', 'claim_mgt', 'delivery'],
+  ApClerk: ['creditors'],
+  Buyer: ['procurement'],
+  WarehouseOperator: ['wh_receive', 'wh_custody', 'lots', 'locations', 'mobile', 'images'],
+  InventoryController: ['wh_adjust'],
+  StockCounter: ['wh_count'],
+  GlAccountant: ['gl_post', 'recon_prep', 'fin_report'],
+  FinancialController: ['gl_close', 'approvals', 'fin_report'],
+  MasterDataAdmin: ['masterdata', 'bom_master'], // coarse 'masterdata' expands to md_vendor/item/config (conflict-free: no transactional perms)
+  PricingManager: ['pricelist', 'promos'],
+  CreditManager: ['crm'],
+  ReturnsClerk: ['returns'],
+  AccessAdmin: ['users'],
+  ExecutiveViewer: ['fin_report', 'dashboard', 'planner', 'marketing'],
 };
+
+// ── SoD sub-permission model ────────────────────────────────────────────────
+// A coarse permission IMPLIES its single-duty sub-permissions. This is the backward-compat bridge:
+// existing roles/tokens keep working (a holder of 'pos' effectively has pos_sell/pos_refund/pos_till),
+// while new granular roles can be granted just one sub-permission. The bundling is ALSO why coarse
+// permissions are flagged by SoD analysis — e.g. 'pos' alone holds both sides of the sell/refund rule.
+export const PERMISSION_IMPLICATIONS: Partial<Record<Permission, Permission[]>> = {
+  pos: ['pos_sell', 'pos_refund', 'pos_till'],
+  warehouse: ['wh_receive', 'wh_adjust', 'wh_count', 'wh_custody'],
+  exec: ['gl_post', 'gl_close', 'recon_prep', 'fin_report'],
+  masterdata: ['md_vendor', 'md_item', 'md_config'],
+};
+
+// Expand a permission set to include every implied sub-permission (idempotent, deduped). The original
+// coarse permission is RETAINED so legacy @Permissions('pos') checks still pass.
+export function expandPermissions(perms: readonly Permission[]): Permission[] {
+  const out = new Set<Permission>(perms);
+  for (const p of perms) for (const sub of PERMISSION_IMPLICATIONS[p] ?? []) out.add(sub);
+  return [...out];
+}
 
 /**
  * Permission resolution (parity-critical precedence — get_user_perms):
  *   1. Admin → ALL permissions
  *   2. per-user override (if non-empty) takes precedence over role
  *   3. role defaults
+ * The resolved set is then EXPANDED so coarse permissions imply their sub-permissions.
  */
 export function resolvePermissions(role: Role, userOverride?: Permission[] | null): Permission[] {
-  if (role === 'Admin') return [...PERMISSIONS];
-  if (userOverride && userOverride.length > 0) return userOverride;
-  return DEFAULT_ROLE_PERMISSIONS[role] ?? [];
+  const base: Permission[] =
+    role === 'Admin' ? [...PERMISSIONS]
+    : userOverride && userOverride.length > 0 ? userOverride
+    : DEFAULT_ROLE_PERMISSIONS[role] ?? [];
+  return expandPermissions(base);
+}
+
+// ── Segregation-of-Duties conflict rule registry ────────────────────────────
+// A holder of duties on BOTH sides of a rule has a conflict. Rules reference single-duty sub-permissions
+// and are evaluated against the EXPANDED permission set (so a coarse 'pos'/'exec'/'warehouse'/'masterdata'
+// holder is correctly flagged, while a granular single-duty role is not).
+export interface SodRule {
+  id: string;
+  dutyA: string;
+  dutyB: string;
+  a: Permission[];
+  b: Permission[];
+  severity: 'High' | 'Medium';
+  risk: string;
+  mitigation: string;
+}
+
+export const SOD_RULES: SodRule[] = [
+  { id: 'R01', dutyA: 'Access administration', dutyB: 'Any transactional duty',
+    a: ['users'], b: ['pos_sell', 'pos_refund', 'order_mgt', 'procurement', 'creditors', 'ar', 'returns', 'pricelist', 'promos', 'md_vendor', 'md_item', 'md_config', 'wh_receive', 'wh_adjust', 'gl_post'],
+    severity: 'High', risk: 'Grant/modify own access and also transact — self-authorize and conceal.', mitigation: 'Isolate access admin to a dedicated non-transacting role; log permission changes; quarterly UAR.' },
+  { id: 'R02', dutyA: 'Maintain vendor master', dutyB: 'Disburse AP / pay vendors',
+    a: ['md_vendor'], b: ['creditors'], severity: 'High', risk: 'Create a fictitious vendor and pay it.', mitigation: 'Separate vendor-master maintenance from AP payment; review vendor-change report.' },
+  { id: 'R03', dutyA: 'Raise purchase requisition / PO', dutyB: 'Approve & pay AP',
+    a: ['procurement'], b: ['creditors'], severity: 'High', risk: 'Originate a purchase and pay it.', mitigation: 'Split buying from paying; route via maker-checker approvals.' },
+  { id: 'R04', dutyA: 'Purchase ordering', dutyB: 'Goods receipt / custody',
+    a: ['procurement'], b: ['wh_receive'], severity: 'High', risk: 'Order goods and confirm receipt — defeats 3-way match.', mitigation: 'Separate procurement from receiving; rely on 3-way match.' },
+  { id: 'R05', dutyA: 'Post journal entries', dutyB: 'Close fiscal period / year',
+    a: ['gl_post'], b: ['gl_close'], severity: 'High', risk: 'Post entries and close the period — conceal misstatement.', mitigation: 'Restrict close to a finance approver distinct from JE preparers; JE maker-checker.' },
+  { id: 'R06', dutyA: 'Prepare reconciliation', dutyB: 'Certify reconciliation',
+    a: ['recon_prep'], b: ['approvals'], severity: 'Medium', risk: 'Prepare and self-certify a reconciliation.', mitigation: 'Preparer must differ from certifier.' },
+  { id: 'R07', dutyA: 'Initiate transactions', dutyB: 'Approve workflow items',
+    a: ['procurement', 'pos_sell', 'ar', 'creditors', 'order_mgt'], b: ['approvals'], severity: 'High', risk: 'Initiate a transaction and approve it.', mitigation: 'Approver must differ from initiator; enforce in the approval engine.' },
+  { id: 'R08', dutyA: 'Record sale', dutyB: 'Issue refund / reconcile till',
+    a: ['pos_sell'], b: ['pos_refund', 'pos_till'], severity: 'High', risk: "'pos' bundles sell + refund/void + till close — one cashier can ring, refund and reconcile their own drawer.", mitigation: 'Split pos_sell / pos_refund / pos_till; manager auth for refund/void; independent till count.' },
+  { id: 'R09', dutyA: 'Maintain customer / credit master', dutyB: 'Enter sales orders',
+    a: ['crm', 'md_vendor'], b: ['pos_sell', 'order_mgt', 'order_cust'], severity: 'Medium', risk: 'Raise a credit limit then sell on credit.', mitigation: 'Separate credit-master maintenance from order entry; review credit-change report.' },
+  { id: 'R10', dutyA: 'Maintain prices / promotions', dutyB: 'Enter sales',
+    a: ['pricelist', 'promos'], b: ['pos_sell', 'order_mgt'], severity: 'Medium', risk: 'Set a price/discount and sell at it.', mitigation: 'Separate price/promo maintenance from selling; review price-override report.' },
+  { id: 'R11', dutyA: 'Adjust inventory', dutyB: 'Stock custody & counting',
+    a: ['wh_adjust'], b: ['wh_count'], severity: 'Medium', risk: "'warehouse' bundles adjust + count — conceal shrink via adjustments.", mitigation: 'Separate adjustment authority from physical count; independent variance approval.' },
+  { id: 'R12', dutyA: 'Process returns', dutyB: 'Issue refund',
+    a: ['returns'], b: ['pos_refund'], severity: 'Medium', risk: 'Process a return and issue the matching refund unchecked.', mitigation: 'Independent refund approval on returns; over-return guard + detective review.' },
+  { id: 'R13', dutyA: 'Maintain master data / config', dutyB: 'Transact on it',
+    a: ['md_item', 'md_config', 'bom_master'], b: ['pos_sell', 'order_mgt', 'procurement', 'creditors', 'ar'], severity: 'Medium', risk: 'Change config/master data and transact against it without review.', mitigation: 'Segregate config from operations; review master-data change log.' },
+];
+
+export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }
+
+// Detect SoD conflicts in a permission set (coarse or granular — the set is expanded first).
+export function detectSodConflicts(perms: readonly Permission[]): SodConflict[] {
+  const set = new Set<Permission>(expandPermissions(perms));
+  const hits: SodConflict[] = [];
+  for (const r of SOD_RULES) {
+    const a = r.a.filter((p) => set.has(p));
+    const b = r.b.filter((p) => set.has(p));
+    if (a.length && b.length) {
+      hits.push({ ruleId: r.id, dutyA: r.dutyA, dutyB: r.dutyB, severity: r.severity, permsHeld: [...new Set([...a, ...b])] });
+    }
+  }
+  return hits;
 }
 
 // Permission → nav route (V2 App Router). null = no direct page (handled inside another).

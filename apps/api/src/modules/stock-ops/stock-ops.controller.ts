@@ -27,21 +27,25 @@ type StocktakeBodyT = z.infer<typeof StocktakeBody>;
 type IssueBodyT = z.infer<typeof IssueBody>;
 type TransferBodyT = z.infer<typeof TransferBody>;
 
-// Stocktake / cycle-count documents.
+// Stocktake / cycle-count documents. SoD R11: COUNTING (wh_count) is separated from POSTING the variance
+// adjustment (wh_adjust) — a counter records the count; an inventory controller approves/posts the
+// adjustment. Legacy 'warehouse' holders still pass (it implies wh_count + wh_adjust).
 @Controller('api/stocktake')
-@Permissions('warehouse', 'mobile')
+@Permissions('wh_count', 'mobile')
 export class StocktakeController {
   constructor(private readonly svc: StockOpsService) {}
 
   @Post() create(@Body(new ZodValidationPipe(StocktakeBody)) b: StocktakeBodyT, @CurrentUser() u: JwtUser) { return this.svc.createStocktake(b, u); }
   @Get() list(@Query('limit') limit?: string) { return this.svc.listStocktakes(limit ? +limit : 50); }
   @Get(':stNo') detail(@Param('stNo') no: string) { return this.svc.getStocktake(no); }
-  @Post(':stNo/post') post(@Param('stNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.postStocktake(no, u); }
+  @Post(':stNo/post')
+  @Permissions('wh_adjust')
+  post(@Param('stNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.postStocktake(no, u); }
 }
 
-// Manual goods issue / inter-location transfer + movement history.
+// Manual goods issue / inter-location transfer + movement history (custody movement: wh_custody).
 @Controller('api/inventory')
-@Permissions('warehouse', 'mobile')
+@Permissions('wh_custody', 'mobile')
 export class StockMovementController {
   constructor(private readonly svc: StockOpsService) {}
 
@@ -49,7 +53,7 @@ export class StockMovementController {
   @Post('transfer') transfer(@Body(new ZodValidationPipe(TransferBody)) b: TransferBodyT, @CurrentUser() u: JwtUser) { return this.svc.transfer(b, u); }
 
   @Get('movements')
-  @Permissions('warehouse', 'dashboard')
+  @Permissions('wh_custody', 'dashboard')
   movements(@Query('move_type') moveType?: string, @Query('limit') limit?: string) {
     return this.svc.listMovements({ move_type: moveType, limit: limit ? +limit : 100 });
   }

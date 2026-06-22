@@ -6,6 +6,10 @@ import { ChannelAdapterService } from './channel-adapter.service';
 
 const AdapterBody = z.object({ id: z.number().optional(), platform: z.string().min(1), store_ref: z.string().optional(), enabled: z.boolean().optional(), auto_accept: z.boolean().optional(), config: z.record(z.any()).optional() });
 const StatusBody = z.object({ status: z.string().min(1) });
+// Aggregator payloads vary per platform, so this is a minimal shape guard: reject anything that is not a
+// JSON object (array/string/null) before the per-platform normalizer runs. (Signature/secret verification
+// for inbound aggregator webhooks remains a separate follow-up — see the C4 PSP pattern.)
+const WebhookPayload = z.object({}).passthrough();
 
 @Controller('api/channels')
 @Permissions('pos', 'order_mgt', 'exec')
@@ -26,5 +30,5 @@ export class ChannelWebhookController {
 
   @Public()
   @Post(':platform/webhook')
-  webhook(@Param('platform') platform: string, @Body() payload: any) { return this.svc.ingestWebhook(platform, payload); }
+  webhook(@Param('platform') platform: string, @Body(new ZodValidationPipe(WebhookPayload)) payload: z.infer<typeof WebhookPayload>) { return this.svc.ingestWebhook(platform, payload); }
 }

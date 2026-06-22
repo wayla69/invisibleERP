@@ -159,7 +159,7 @@ export function DineInOrderDialog({
               </div>
               <div className="w-24 grid gap-1">
                 <Label htmlFor="free-price">ราคา</Label>
-                <Input id="free-price" type="number" className="tabular text-right" value={free.unit_price} onChange={(e) => setFree({ ...free, unit_price: e.target.value })} />
+                <Input id="free-price" type="number" min={0} step="0.01" className="tabular text-right" value={free.unit_price} onChange={(e) => setFree({ ...free, unit_price: e.target.value })} />
               </div>
               <Button type="button" variant="outline" disabled={!free.name} onClick={addFree}>
                 <Plus className="size-4" /> เพิ่ม
@@ -172,7 +172,7 @@ export function DineInOrderDialog({
             {!orderNo && (
               <div className="grid gap-1">
                 <Label htmlFor="guests">จำนวนลูกค้า</Label>
-                <Input id="guests" type="number" className="tabular" value={guests} onChange={(e) => setGuests(e.target.value)} placeholder="เช่น 2" />
+                <Input id="guests" type="number" min={1} step={1} className="tabular" value={guests} onChange={(e) => setGuests(e.target.value)} placeholder="เช่น 2" />
               </div>
             )}
 
@@ -217,11 +217,11 @@ export function DineInOrderDialog({
                 <div className="grid grid-cols-2 gap-2">
                   <div className="grid gap-1">
                     <Label htmlFor="discount">ส่วนลด %</Label>
-                    <Input id="discount" type="number" className="tabular" value={discount} onChange={(e) => setDiscount(e.target.value)} />
+                    <Input id="discount" type="number" min={0} max={100} step="0.01" className="tabular" value={discount} onChange={(e) => setDiscount(e.target.value)} />
                   </div>
                   <div className="grid gap-1">
                     <Label htmlFor="tip">ทิป</Label>
-                    <Input id="tip" type="number" className="tabular" value={tip} onChange={(e) => setTip(e.target.value)} />
+                    <Input id="tip" type="number" min={0} step="0.01" className="tabular" value={tip} onChange={(e) => setTip(e.target.value)} />
                   </div>
                 </div>
 

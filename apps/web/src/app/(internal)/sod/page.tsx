@@ -26,6 +26,13 @@ interface Violation {
   perm_a: string;
   perm_b: string;
 }
+interface UserConflict {
+  username: string;
+  role: string;
+  inherent: boolean;
+  conflict_count: number;
+  conflicts: { ruleId: string; dutyA: string; dutyB: string; severity: string }[];
+}
 
 const kindVariant = (kind: string) => (kind === 'MAKER_CHECKER' ? 'info' : 'warning');
 
@@ -39,7 +46,8 @@ export default function SodPage() {
       <Tabs
         tabs={[
           { key: 'rules', label: 'กฎ SoD', content: <Rules /> },
-          { key: 'violations', label: 'รายการขัดแย้ง', content: <Violations /> },
+          { key: 'violations', label: 'บทบาทขัดแย้ง', content: <Violations /> },
+          { key: 'users', label: 'ผู้ใช้ขัดแย้ง (สด)', content: <UserConflicts /> },
         ]}
       />
     </div>
@@ -80,7 +88,42 @@ function Rules() {
   );
 }
 
-// ───────────────────────── รายการขัดแย้ง ─────────────────────────
+// ─────────────── ผู้ใช้ขัดแย้ง (live, per-user effective permissions) ───────────────
+function UserConflicts() {
+  const q = useQuery<{ summary: { users_with_conflicts: number; admins_inherent: number; by_rule: Record<string, number> }; users: UserConflict[] }>(
+    { queryKey: ['sod-user-conflicts'], queryFn: () => api('/api/sod/user-conflicts') },
+  );
+  const users = (q.data?.users ?? []).filter((u) => u.conflict_count > 0 && !u.inherent);
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <StatCard label="ผู้ใช้ที่ขัดแย้ง" value={num(q.data?.summary.users_with_conflicts ?? 0)} icon={TriangleAlert} tone={(q.data?.summary.users_with_conflicts ?? 0) > 0 ? 'danger' : 'success'} hint="ตามสิทธิ์จริงของผู้ใช้ (บทบาท + สิทธิ์เฉพาะ)" />
+        <StatCard label="ผู้ดูแลระบบ (Admin)" value={num(q.data?.summary.admins_inherent ?? 0)} icon={ShieldAlert} tone="warning" hint="superuser โดยธรรมชาติ — คุมด้วย MFA + audit log" />
+      </div>
+      <StateView q={q}>
+        <DataTable
+          rows={users}
+          rowKey={(r) => r.username}
+          columns={[
+            { key: 'username', label: 'ผู้ใช้' },
+            { key: 'role', label: 'บทบาท', render: (r) => <Badge variant="outline">{r.role}</Badge> },
+            { key: 'conflict_count', label: 'จำนวน', align: 'right' },
+            { key: 'conflicts', label: 'กฎที่ขัด', render: (r) => (
+              <div className="flex flex-wrap gap-1">
+                {r.conflicts.map((c) => (
+                  <Badge key={c.ruleId} variant={c.severity === 'High' ? 'destructive' : 'warning'} title={`${c.dutyA} ✗ ${c.dutyB}`}>{c.ruleId}</Badge>
+                ))}
+              </div>
+            ) },
+          ]}
+          emptyText="ไม่มีผู้ใช้ที่ขัดกฎ SoD — ทุกผู้ใช้สิทธิ์สอดคล้องกับการแบ่งแยกหน้าที่"
+        />
+      </StateView>
+    </div>
+  );
+}
+
+// ───────────────────────── บทบาทขัดแย้ง ─────────────────────────
 function Violations() {
   const q = useQuery<{ violations: Violation[]; count: number }>({ queryKey: ['sod-violations'], queryFn: () => api('/api/sod/violations') });
   const violations = q.data?.violations ?? [];

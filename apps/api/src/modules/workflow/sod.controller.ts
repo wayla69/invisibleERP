@@ -19,4 +19,7 @@ export class SodController {
   setRuleActive(@Param('id') id: string, @Body(new ZodValidationPipe(ActiveBody)) b: { active: boolean }, @CurrentUser() u: JwtUser) { return this.svc.setRuleActive(+id, b.active, u); }
   @Get('violations') @Permissions('exec')
   violations(@CurrentUser() u: JwtUser) { return this.svc.violationReport(u); }
+  // Per-user live conflict report (effective permissions) — for SoD reviewers / quarterly UAR.
+  @Get('user-conflicts') @Permissions('exec', 'masterdata', 'users')
+  userConflicts(@CurrentUser() u: JwtUser) { return this.svc.userConflicts(u); }
 }

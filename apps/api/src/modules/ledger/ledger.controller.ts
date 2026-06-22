@@ -1,8 +1,18 @@
-import { Controller, Get, Post, Query, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { qint } from '../../common/query';
 import { LedgerService } from './ledger.service';
+
+// Only HQ/Admin may target ANOTHER tenant's books via an explicit tenant_id. Everyone else is pinned to
+// their own request context (RLS also enforces this at the DB — this is defence-in-depth at the app layer
+// so a stray tenant_id from a non-Admin can never even reach the service). Returns undefined → the service
+// falls back to the caller's tenant context.
+function hqTenant(u: JwtUser, requested?: number | null): number | undefined {
+  if (requested == null) return undefined;
+  return u.role === 'Admin' ? requested : undefined;
+}
 
 const JournalBody = z.object({
   date: z.string().optional(),
@@ -33,6 +43,8 @@ const OpeningBalancesBody = z.object({
 });
 type OpeningBalancesBody = z.infer<typeof OpeningBalancesBody>;
 
+const RejectBody = z.object({ reason: z.string().optional() });
+
 @Controller('api/ledger')
 @Permissions('exec', 'creditors', 'ar')
 export class LedgerController {
@@ -47,8 +59,9 @@ export class LedgerController {
 
   // post a GAAP-divergent adjustment to ONE ledger (e.g. tax-depreciation delta)
   @Post('ledgers/:code/adjustment')
+  @Permissions('gl_post', 'creditors', 'ar')
   adjustment(@Param('code') code: string, @Body(new ZodValidationPipe(JournalBody)) b: JournalBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.postAdjustment(code, { date: b.date, source: b.source ?? 'GAAP-ADJ', sourceRef: b.source_ref, tenantId: b.tenant_id ?? null, currency: b.currency, memo: b.memo, lines: b.lines, createdBy: u.username });
+    return this.svc.postAdjustment(code, { date: b.date, source: b.source ?? 'GAAP-ADJ', sourceRef: b.source_ref, tenantId: hqTenant(u, b.tenant_id) ?? null, currency: b.currency, memo: b.memo, lines: b.lines, createdBy: u.username, pendingApproval: true });
   }
 
   // book-tax difference report (TFRS vs TAX → deferred-tax / ภ.ง.ด.50 basis)
@@ -61,21 +74,41 @@ export class LedgerController {
   trialBalance(@Query('period') period?: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.trialBalance(period, costCenter, ledger || undefined); }
 
   @Get('journal')
-  journal(@Query('limit') limit?: string) { return this.svc.listJournal(limit ? +limit : 50); }
+  journal(@Query('limit') limit?: string) { return this.svc.listJournal(qint('limit', limit, 50)); }
 
+  // GL-05: a manual JE posts as DRAFT (pending) and does not affect balances until a DIFFERENT user
+  // approves it (maker-checker). Posting is the 'gl_post' duty; approval is 'gl_close'/'approvals'.
   @Post('journal')
+  @Permissions('gl_post', 'creditors', 'ar')
   postJournal(@Body(new ZodValidationPipe(JournalBody)) b: JournalBodyT, @CurrentUser() u: JwtUser) {
     return this.svc.postEntry({
       date: b.date,
       source: b.source ?? 'Manual',
       sourceRef: b.source_ref,
-      tenantId: b.tenant_id ?? null,
+      tenantId: hqTenant(u, b.tenant_id) ?? null,
       currency: b.currency,
       memo: b.memo,
       lines: b.lines,
       createdBy: u.username,
+      pendingApproval: true,
     });
   }
+
+  // JEs awaiting maker-checker approval (Draft).
+  @Get('journal/pending')
+  @Permissions('gl_post', 'gl_close', 'approvals')
+  pendingJournal(@Query('limit') limit?: string) { return this.svc.pendingJournal(qint('limit', limit, 50)); }
+
+  // Approve / reject a pending JE — approver must differ from preparer (enforced in the service).
+  @Post('journal/:entryNo/approve')
+  @HttpCode(200)
+  @Permissions('gl_close', 'approvals')
+  approveJournal(@Param('entryNo') entryNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveEntry(entryNo, u); }
+
+  @Post('journal/:entryNo/reject')
+  @HttpCode(200)
+  @Permissions('gl_close', 'approvals')
+  rejectJournal(@Param('entryNo') entryNo: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectEntry(entryNo, u, b.reason); }
 
   @Get('income-statement')
   incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.incomeStatement(from, to, costCenter, ledger || undefined); }
@@ -89,19 +122,25 @@ export class LedgerController {
   @Get('periods')
   periods(@Query('tenant_id') tenantId?: string) { return this.svc.listPeriods(tenantId ? Number(tenantId) : undefined); }
 
+  // Fiscal-period close/open and year-end close are the 'gl_close' duty — segregated from journal POSTING
+  // ('gl_post', above). A JE preparer cannot also close the books (resolves SoD rule R05). Legacy 'exec'
+  // holders still pass (exec implies gl_close); a single-duty GL Accountant (gl_post only) does not.
   @Post('periods/:period/close')
-  closePeriod(@Param('period') period: string, @Query('tenant_id') tenantId?: string) { return this.svc.closePeriod(period, tenantId ? Number(tenantId) : undefined); }
+  @Permissions('gl_close')
+  closePeriod(@Param('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closePeriod(period, hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
 
   @Post('periods/:period/open')
-  openPeriod(@Param('period') period: string, @Query('tenant_id') tenantId?: string) { return this.svc.openPeriod(period, tenantId ? Number(tenantId) : undefined); }
+  @Permissions('gl_close')
+  openPeriod(@Param('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.openPeriod(period, hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
 
   @Post('close-year')
-  closeYear(@Query('fiscal_year') fy: string, @Query('ledger') ledger: string | undefined, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username, ledger || undefined, tenantId ? Number(tenantId) : undefined); }
+  @Permissions('gl_close')
+  closeYear(@Query('fiscal_year') fy: string, @Query('ledger') ledger: string | undefined, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username, ledger || undefined, hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
 
   // ── Opening balances (cutover from a prior system) → one balanced JE, idempotent on batch_ref ──
   @Post('opening-balances')
-  @Permissions('exec', 'creditors', 'ar')
+  @Permissions('gl_post', 'creditors', 'ar')
   openingBalances(@Body(new ZodValidationPipe(OpeningBalancesBody)) b: OpeningBalancesBody, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
-    return this.svc.postOpeningBalances(b.rows, b.batch_ref, u.username, tenantId ? Number(tenantId) : undefined);
+    return this.svc.postOpeningBalances(b.rows, b.batch_ref, u.username, hqTenant(u, tenantId ? Number(tenantId) : undefined));
   }
 }

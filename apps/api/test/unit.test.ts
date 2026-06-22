@@ -7,6 +7,8 @@ import { buildPromptPayPayload, crc16ccitt, isValidPromptPayTarget } from '../sr
 import { socialSecurity, annualPit, computePayslip } from '../src/modules/payroll/payroll-calc';
 import { buildEtaxInvoiceXml } from '../src/modules/tax-docs/etax-xml';
 import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax-docs/etax-email.service';
+import { hmacSha256Hex, verifyWebhookSignature } from '../src/common/crypto';
+import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 describe('e-Tax by Email composer (ETDA, no CA)', () => {
   const svc = new EtaxEmailService(null as never, null as never, null as never);
@@ -140,6 +142,84 @@ describe('PromptPay QR (EMVCo)', () => {
     expect(isValidPromptPayTarget('0801234567')).toBe(true);
     expect(isValidPromptPayTarget('1234567890123')).toBe(true);
     expect(isValidPromptPayTarget('123')).toBe(false);
+  });
+});
+
+describe('PSP webhook signature (C4 — HMAC-SHA256 over raw body)', () => {
+  const secret = 'whsec_test_123';
+  const body = Buffer.from(JSON.stringify({ provider: 'mock', provider_ref: 'r1', status: 'Captured' }));
+  const sig = hmacSha256Hex(secret, body);
+  it('accepts a correct bare-hex signature', () => expect(verifyWebhookSignature(secret, body, sig)).toBe(true));
+  it('accepts the `sha256=` prefixed form', () => expect(verifyWebhookSignature(secret, body, `sha256=${sig}`)).toBe(true));
+  it('rejects a tampered body', () => expect(verifyWebhookSignature(secret, Buffer.concat([body, Buffer.from('x')]), sig)).toBe(false));
+  it('rejects a wrong secret', () => expect(verifyWebhookSignature('whsec_other', body, sig)).toBe(false));
+  it('rejects a missing/garbage signature', () => {
+    expect(verifyWebhookSignature(secret, body, undefined)).toBe(false);
+    expect(verifyWebhookSignature(secret, body, 'not-hex!!')).toBe(false);
+  });
+});
+
+describe('RBAC sub-permission expansion (backward compatibility)', () => {
+  it("'pos' implies pos_sell / pos_refund / pos_till", () => {
+    const e = expandPermissions(['pos']);
+    expect(e).toContain('pos_sell'); expect(e).toContain('pos_refund'); expect(e).toContain('pos_till');
+    expect(e).toContain('pos'); // coarse retained → legacy @Permissions('pos') still passes
+  });
+  it("'exec' implies gl_post / gl_close / recon_prep, 'masterdata' implies md_vendor", () => {
+    const e = expandPermissions(['exec', 'masterdata']);
+    for (const p of ['gl_post', 'gl_close', 'recon_prep', 'fin_report', 'md_vendor', 'md_item', 'md_config']) expect(e).toContain(p);
+  });
+  it('resolvePermissions expands role defaults (Sales has both pos and pos_sell)', () => {
+    const p = resolvePermissions('Sales');
+    expect(p).toContain('pos'); expect(p).toContain('pos_sell'); expect(p).toContain('gl_close');
+  });
+});
+
+describe('Segregation of Duties — conflict detection (ITGC-AC-09)', () => {
+  // Current (as-is) role design — documented conflict counts from the SoD matrix.
+  it('current roles produce the documented conflicts (total 18 non-admin)', () => {
+    const c = (r: keyof typeof DEFAULT_ROLE_PERMISSIONS) => detectSodConflicts(DEFAULT_ROLE_PERMISSIONS[r]).length;
+    expect(c('Sales')).toBe(7);
+    expect(c('Procurement')).toBe(4);
+    expect(c('Planner')).toBe(6);
+    expect(c('Warehouse')).toBe(1);
+    expect(c('Customer')).toBe(0);
+    expect(c('Sales') + c('Procurement') + c('Planner') + c('Warehouse') + c('Customer')).toBe(18);
+  });
+  it('Admin is the inherent superuser (violates all 13 rules)', () => {
+    expect(detectSodConflicts(resolvePermissions('Admin')).length).toBe(13);
+  });
+  it('shipped single-duty role DEFAULTS are SoD-clean (the redesign in action)', () => {
+    const NEW = ['Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',
+      'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
+      'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer'] as const;
+    for (const r of NEW) {
+      expect({ r, n: detectSodConflicts(DEFAULT_ROLE_PERMISSIONS[r]).length }).toEqual({ r, n: 0 });
+    }
+  });
+  it('proposed single-duty roles are SoD-clean (0 conflicts each)', () => {
+    const TO_BE: Record<string, string[]> = {
+      Cashier: ['pos_sell'],
+      'POS Supervisor': ['pos_refund', 'pos_till'],
+      'AR Clerk': ['ar', 'order_mgt', 'claim_mgt', 'delivery'],
+      'AP Clerk': ['creditors'],
+      Buyer: ['procurement'],
+      'Warehouse Operator': ['wh_receive', 'wh_custody', 'lots', 'locations', 'mobile', 'images'],
+      'Inventory Controller': ['wh_adjust'],
+      'Stock Counter': ['wh_count'],
+      'GL Accountant': ['gl_post', 'recon_prep', 'fin_report'],
+      'Financial Controller': ['gl_close', 'approvals', 'fin_report'],
+      'Master Data Admin': ['md_vendor', 'md_item', 'md_config', 'bom_master'],
+      'Pricing Manager': ['pricelist', 'promos'],
+      'CRM/Credit Manager': ['crm'],
+      'Returns Clerk': ['returns'],
+      'Access Administrator': ['users'],
+      'Executive (read)': ['fin_report', 'dashboard', 'planner', 'marketing'],
+      Customer: ['order_cust', 'cust_pos', 'cust_dash', 'loyalty', 'track'],
+    };
+    for (const [role, perms] of Object.entries(TO_BE)) {
+      expect({ role, n: detectSodConflicts(perms as never).length }).toEqual({ role, n: 0 });
+    }
   });
 });
 

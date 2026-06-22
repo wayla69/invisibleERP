@@ -3,7 +3,13 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 // Postgres enums — vocabulary ตรงกับระบบเดิม (string values load-bearing).
 // ใช้กับสถานะที่นิยามชัด; สถานะ/ประเภทที่หลวมกว่า (payment_method, txn_type, ...) คงเป็น text เพื่อความยืดหยุ่น.
 
-export const roleEnum = pgEnum('role_enum', ['Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner']);
+export const roleEnum = pgEnum('role_enum', [
+  'Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner',
+  // SoD-clean single-duty roles (added by migration 0059)
+  'Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',
+  'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
+  'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer',
+]);
 export const orderStatusEnum = pgEnum('order_status', ['Pending', 'Processing', 'Shipped', 'Completed', 'Claimed', 'Cancelled']);
 export const claimStatusEnum = pgEnum('claim_status', ['Waiting', 'Approved', 'Rejected']);
 export const posStatusEnum = pgEnum('pos_status', ['Completed', 'Voided', 'Open']);

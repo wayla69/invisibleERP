@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Save, ShieldCheck, X } from 'lucide-react';
+import { Check, Plus, Save, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -35,6 +35,7 @@ export default function AccountingPage() {
         tabs={[
           { key: 'tb', label: 'งบทดลอง', content: <TrialBalance /> },
           { key: 'journal', label: 'สมุดรายวัน', content: <Journal /> },
+          { key: 'approve', label: 'รออนุมัติ (JE)', content: <PendingJournal /> },
           { key: 'pl', label: 'งบกำไรขาดทุน', content: <IncomeStatement /> },
           { key: 'bs', label: 'งบดุล', content: <BalanceSheet /> },
           { key: 'opening', label: 'ยอดยกมา', content: <OpeningBalances /> },
@@ -106,10 +107,10 @@ function Journal() {
         }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ บันทึกสำเร็จ: ${r.entry_no}`);
+      setMsg(`✅ บันทึกเป็นฉบับร่าง — รออนุมัติจากผู้อื่น (maker-checker): ${r.entry_no}`);
       setMemo(''); setLines([emptyLine(), emptyLine()]);
       qc.invalidateQueries({ queryKey: ['journal'] });
-      qc.invalidateQueries({ queryKey: ['tb'] });
+      qc.invalidateQueries({ queryKey: ['je-pending'] });
     },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
@@ -193,6 +194,56 @@ function Journal() {
           )}
         </StateView>
       </div>
+    </div>
+  );
+}
+
+// ─────────────── รออนุมัติ JE (GL-05 maker-checker) ───────────────
+function PendingJournal() {
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['je-pending'], queryFn: () => api('/api/ledger/journal/pending?limit=50') });
+  const [msg, setMsg] = useState('');
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['je-pending'] }); qc.invalidateQueries({ queryKey: ['journal'] }); qc.invalidateQueries({ queryKey: ['tb'] }); };
+  const approve = useMutation({ mutationFn: (no: string) => api(`/api/ledger/journal/${no}/approve`, { method: 'POST' }), onSuccess: (r: any) => { setMsg(`✅ อนุมัติแล้ว ${r.entry_no}`); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const reject = useMutation({ mutationFn: (no: string) => { const reason = prompt('เหตุผลที่ไม่อนุมัติ (optional)') ?? undefined; return api(`/api/ledger/journal/${no}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); }, onSuccess: (r: any) => { setMsg(`↩️ ไม่อนุมัติ ${r.entry_no}`); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const entries = q.data?.entries ?? [];
+  return (
+    <div className="space-y-4">
+      <Card className="flex-row flex-wrap items-center gap-2 p-4 text-sm">
+        <ShieldCheck className="size-4 text-muted-foreground" />
+        แยกหน้าที่ (maker-checker): ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ — ต้องเป็นคนละคน. รายการที่ยังไม่อนุมัติจะ <strong>ไม่</strong> เข้างบทดลอง.
+      </Card>
+      <Msg ok={msg.startsWith('✅') || msg.startsWith('↩️')}>{msg}</Msg>
+      <StateView q={q}>
+        {entries.length === 0 ? (
+          <Card className="gap-0 p-5"><span className="text-sm text-muted-foreground">ไม่มีรายการรออนุมัติ</span></Card>
+        ) : (
+          <div className="grid gap-3">
+            {entries.map((e: any) => (
+              <Card key={e.entry_no} className="gap-2 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <strong>{e.entry_no}</strong>
+                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                    {thaiDate(e.entry_date)} · บันทึกโดย <Badge variant="outline">{e.created_by}</Badge> · <Badge variant={statusVariant(e.status)}>{e.status}</Badge>
+                  </span>
+                </div>
+                {e.memo && <div className="text-sm text-muted-foreground">{e.memo}</div>}
+                <table className="w-full text-sm">
+                  <tbody>
+                    {e.lines.map((l: any, j: number) => (
+                      <tr key={j}><td className="py-0.5">{l.account_code}</td><td className="py-0.5 text-right tabular">{l.debit ? baht(l.debit) : ''}</td><td className="py-0.5 text-right tabular">{l.credit ? baht(l.credit) : ''}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="flex gap-2">
+                  <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate(e.entry_no)}><Check className="size-4" /> อนุมัติ</Button>
+                  <Button size="sm" variant="destructive" disabled={reject.isPending} onClick={() => reject.mutate(e.entry_no)}><X className="size-4" /> ไม่อนุมัติ</Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </StateView>
     </div>
   );
 }

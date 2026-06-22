@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -81,7 +82,7 @@ function AuditLog() {
 function Held() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['held'], queryFn: () => api('/api/pos/held') });
-  const act = useMutation({ mutationFn: (v: { no: string; op: string }) => api(`/api/pos/held/${v.no}/${v.op}`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['held'] }) });
+  const act = useMutation({ mutationFn: (v: { no: string; op: string }) => api(`/api/pos/held/${v.no}/${v.op}`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['held'] }), onError: (e: any) => toast.error(e.message) });
   return (
     <StateView q={q}>
       {q.data && (
@@ -93,7 +94,7 @@ function Held() {
             { key: 'customer_name', label: 'ลูกค้า' },
             { key: 'created_by', label: 'พักโดย' },
             { key: 'created_at', label: 'เวลา', render: (r: any) => thaiDate(r.created_at) },
-            { key: 'act', label: '', render: (r: any) => <div className="flex gap-1"><Button size="sm" onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>เรียกคืน</Button><Button size="sm" variant="destructive" onClick={() => act.mutate({ no: r.hold_no, op: 'discard' })}>ทิ้ง</Button></div> },
+            { key: 'act', label: '', render: (r: any) => <div className="flex gap-1"><Button size="sm" onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>เรียกคืน</Button><Button size="sm" variant="destructive" onClick={() => { if (window.confirm(`ทิ้งบิลที่พักไว้ ${r.hold_no}? การกระทำนี้ย้อนกลับไม่ได้`)) act.mutate({ no: r.hold_no, op: 'discard' }); }}>ทิ้ง</Button></div> },
           ]}
           emptyText="ไม่มีบิลที่พักไว้"
         />
@@ -122,7 +123,14 @@ function Overrides() {
           <Input className="max-w-[110px]" type="number" placeholder="จำนวน" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
           <Input className="max-w-[160px]" placeholder="เหตุผล" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
           <Input className="max-w-[140px]" placeholder="ผู้อนุมัติ" value={f.approved_by} onChange={(e) => setF({ ...f, approved_by: e.target.value })} />
-          <Button disabled={create.isPending} onClick={() => create.mutate()}>บันทึก</Button>
+          <Button disabled={create.isPending} onClick={() => {
+            // A void reverses a sale — require a reason + approver and confirm before recording.
+            if (f.action === 'void') {
+              if (!f.reason.trim() || !f.approved_by.trim()) { setMsg('❌ การยกเลิก (void) ต้องระบุเหตุผลและผู้อนุมัติ'); return; }
+              if (!window.confirm(`ยืนยันการยกเลิกบิล ${f.sale_no || '(ไม่ระบุ)'}? การกระทำนี้ย้อนกลับไม่ได้`)) return;
+            }
+            create.mutate();
+          }}>บันทึก</Button>
         </div>
         <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>

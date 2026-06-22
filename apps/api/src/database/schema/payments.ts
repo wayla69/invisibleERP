@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Payments + tender layer (move #3) — 1 sale → N tenders; proof money moved
@@ -17,11 +17,17 @@ export const payments = pgTable('payments', {
   currency: text('currency').default('THB'),
   gateway: text('gateway').default('mock'), // mock | stripe | promptpay | adyen
   gatewayRef: text('gateway_ref'),
+  // Client-supplied idempotency token for a tender attempt. A retried POST /api/payments carrying the
+  // same key collapses to the original row instead of charging twice. NULL for keyless legacy tenders
+  // (Postgres treats NULLs as distinct, so the unique index never blocks them).
+  idempotencyKey: text('idempotency_key'),
   status: paymentStatusEnum('status').default('Captured'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   capturedAt: timestamp('captured_at', { withTimezone: true }),
-});
+}, (t) => ({
+  uxIdem: uniqueIndex('ux_payments_idem').on(t.idempotencyKey), // race backstop for double-submit
+}));
 
 export const paymentRefunds = pgTable('payment_refunds', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

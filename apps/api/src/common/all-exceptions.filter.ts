@@ -77,6 +77,7 @@ function codeFor(status: number): string {
     case 403: return 'FORBIDDEN';
     case 404: return 'NOT_FOUND';
     case 409: return 'CONFLICT';
+    case 422: return 'UNPROCESSABLE';
     default: return 'ERROR';
   }
 }

@@ -93,27 +93,30 @@ export class PosService {
 
     // tenant: Customer locked to own; staff picks dto.customer_name
     const custCode = user.role === 'Customer' ? user.customerName : dto.customer_name;
-    let tenant: any = null;
-    if (custCode) [tenant] = await db.select().from(tenants).where(eq(tenants.code, custCode)).limit(1);
-
     const total = dto.items.reduce((acc, it) => acc + n(it.order_qty) * n(it.unit_price), 0);
-
-    // credit check (parity: credit_hold block; outstanding+total > credit_limit block)
-    if (tenant) {
-      if (tenant.creditHold) throw new ConflictException({ code: 'CREDIT_HOLD', message: 'Customer is on credit hold', messageTh: 'ลูกค้าถูกระงับการสั่งซื้อ' });
-      const limit = n(tenant.creditLimit);
-      if (limit > 0) {
-        const [ar] = await db.select({ out: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)),0)` })
-          .from(arInvoices).where(and(eq(arInvoices.tenantId, tenant.id), sql`${arInvoices.status}::text <> 'Paid'`));
-        if (n(ar?.out) + total > limit)
-          throw new ConflictException({ code: 'CREDIT_LIMIT', message: 'Order exceeds credit limit', messageTh: 'เกินวงเงินเครดิต' });
-      }
-    }
-
     const orderNo = this.docNo.nextSalesOrder();
     const today = ymd();
 
-    await db.transaction(async (tx: any) => {
+    // Everything that touches credit and loyalty runs in ONE transaction. The customer row is locked
+    // FOR UPDATE before the AR read, so two concurrent orders for the same customer serialize and cannot
+    // both slip under the credit limit (H2). Loyalty earn is an atomic in-tx increment, so the order and
+    // its points commit together and concurrent earns never lose an update (H3).
+    const pointsEarned = await db.transaction(async (tx: any) => {
+      let tenant: any = null;
+      if (custCode) [tenant] = await tx.select().from(tenants).where(eq(tenants.code, custCode)).for('update').limit(1);
+
+      // credit check (parity: credit_hold block; outstanding+total > credit_limit block)
+      if (tenant) {
+        if (tenant.creditHold) throw new ConflictException({ code: 'CREDIT_HOLD', message: 'Customer is on credit hold', messageTh: 'ลูกค้าถูกระงับการสั่งซื้อ' });
+        const limit = n(tenant.creditLimit);
+        if (limit > 0) {
+          const [ar] = await tx.select({ out: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)),0)` })
+            .from(arInvoices).where(and(eq(arInvoices.tenantId, tenant.id), sql`${arInvoices.status}::text <> 'Paid'`));
+          if (n(ar?.out) + total > limit)
+            throw new ConflictException({ code: 'CREDIT_LIMIT', message: 'Order exceeds credit limit', messageTh: 'เกินวงเงินเครดิต' });
+        }
+      }
+
       const [oh] = await tx.insert(orders).values({
         orderNo, orderDate: today, tenantId: tenant?.id ?? null, status: 'Pending', createdBy: user.username,
       }).returning({ id: orders.id });
@@ -123,21 +126,27 @@ export class PosService {
         unitPrice: String(n(it.unit_price)), totalPrice: String(n(it.order_qty) * n(it.unit_price)),
         status: 'Pending', receivedQty: '0',
       })));
-    });
 
-    // loyalty earn (parity: if enabled, points = total * points_per_baht)
-    let pointsEarned = 0;
-    if (tenant) {
-      const [cfg] = await db.select().from(loyaltyConfig).where(eq(loyaltyConfig.id, 1)).limit(1);
-      if (cfg?.enabled) {
-        pointsEarned = total * n(cfg.pointsPerBaht);
-        const [lp] = await db.select().from(loyaltyPoints).where(eq(loyaltyPoints.tenantId, tenant.id)).limit(1);
-        const newBalance = n(lp?.balance) + pointsEarned;
-        await db.insert(loyaltyPoints).values({ tenantId: tenant.id, balance: String(newBalance), lifetime: String(n(lp?.lifetime) + pointsEarned) })
-          .onConflictDoUpdate({ target: loyaltyPoints.tenantId, set: { balance: String(newBalance), lifetime: String(n(lp?.lifetime) + pointsEarned) } });
-        await db.insert(loyaltyTxn).values({ tenantId: tenant.id, txnType: 'Earn', points: String(pointsEarned), balanceAfter: String(newBalance), refDoc: orderNo });
+      // loyalty earn (parity: if enabled, points = total * points_per_baht)
+      let earned = 0;
+      if (tenant) {
+        const [cfg] = await tx.select().from(loyaltyConfig).where(eq(loyaltyConfig.id, 1)).limit(1);
+        if (cfg?.enabled) {
+          earned = total * n(cfg.pointsPerBaht);
+          // Atomic relative upsert: balance/lifetime += earned. Correct under concurrency WITHOUT needing
+          // the row to pre-exist (a read-then-write absolute set would lose a concurrent earn).
+          const [row] = await tx.insert(loyaltyPoints)
+            .values({ tenantId: tenant.id, balance: String(earned), lifetime: String(earned) })
+            .onConflictDoUpdate({ target: loyaltyPoints.tenantId, set: {
+              balance: sql`${loyaltyPoints.balance} + ${earned}::numeric`,
+              lifetime: sql`${loyaltyPoints.lifetime} + ${earned}::numeric`,
+            } })
+            .returning({ balance: loyaltyPoints.balance });
+          await tx.insert(loyaltyTxn).values({ tenantId: tenant.id, txnType: 'Earn', points: String(earned), balanceAfter: String(n(row?.balance)), refDoc: orderNo });
+        }
       }
-    }
+      return earned;
+    });
 
     await this.statusLog.log('SO', orderNo, '', 'Pending', user.username);
     return { order_no: orderNo, total, lines: dto.items.length, points_earned: pointsEarned };

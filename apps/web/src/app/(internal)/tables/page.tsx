@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Armchair, Flame, Plus, Receipt, Sparkles, Utensils, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
@@ -113,7 +114,7 @@ function Board({ tables, q, onSelect, sel, onOrder }: { tables: TableRow[]; q: a
 
 function FloorPlan({ tables, onSelect, sel, onAdd }: { tables: TableRow[]; onSelect: (id: number) => void; sel: number | null; onAdd: () => void }) {
   const [no, setNo] = useState('');
-  const add = useMutation({ mutationFn: () => api('/api/restaurant/tables', { method: 'POST', body: JSON.stringify({ table_no: no, pos_x: 20 + ((tables.length % 5) * 120), pos_y: 20 + Math.floor(tables.length / 5) * 110 }) }), onSuccess: () => { setNo(''); onAdd(); } });
+  const add = useMutation({ mutationFn: () => api('/api/restaurant/tables', { method: 'POST', body: JSON.stringify({ table_no: no, pos_x: 20 + ((tables.length % 5) * 120), pos_y: 20 + Math.floor(tables.length / 5) * 110 }) }), onSuccess: () => { setNo(''); onAdd(); }, onError: (e: any) => toast.error(e.message) });
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -151,7 +152,8 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
   const [item, setItem] = useState({ name: '', qty: '1', price: '', station: 'hot' });
   const [sessionId, setSessionId] = useState<number | null>(null);
 
-  const open = useMutation({ mutationFn: () => api<{ session_id: number; public_token: string }>(`/api/restaurant/tables/${t.id}/open`, { method: 'POST', body: '{}' }), onSuccess: (r) => { setSessionId(r.session_id); setQr(`/qr/${r.public_token}`); setMsg('เปิดโต๊ะแล้ว'); onChange(); } });
+  const onErr = (e: any) => setMsg(`❌ ${e.message}`);
+  const open = useMutation({ mutationFn: () => api<{ session_id: number; public_token: string }>(`/api/restaurant/tables/${t.id}/open`, { method: 'POST', body: '{}' }), onSuccess: (r) => { setSessionId(r.session_id); setQr(`/qr/${r.public_token}`); setMsg('เปิดโต๊ะแล้ว'); onChange(); }, onError: onErr });
   const addItem = useMutation({
     mutationFn: async () => {
       const items = [{ name: item.name, qty: Number(item.qty) || 1, unit_price: Number(item.price) || 0, station_code: item.station }];
@@ -161,10 +163,10 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
     onSuccess: () => { setItem({ ...item, name: '', price: '' }); setMsg('เพิ่มรายการแล้ว'); onChange(); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
-  const fire = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/fire`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('ส่งเข้าครัวแล้ว'); onChange(); } });
-  const bill = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/bill`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('เรียกเก็บเงินแล้ว'); onChange(); } });
-  const checkout = useMutation({ mutationFn: () => api<{ tax_invoice_no: string }>(`/api/restaurant/orders/${t.order!.order_no}/checkout`, { method: 'POST', body: JSON.stringify({ method: 'Cash' }) }), onSuccess: (r) => { setMsg(`ชำระเงินสำเร็จ · ใบกำกับภาษี ${r.tax_invoice_no ?? '-'}`); onChange(); } });
-  const clear = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }), onSuccess: () => { setMsg('เคลียร์โต๊ะแล้ว'); onClose(); onChange(); } });
+  const fire = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/fire`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('ส่งเข้าครัวแล้ว'); onChange(); }, onError: onErr });
+  const bill = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/bill`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('เรียกเก็บเงินแล้ว'); onChange(); }, onError: onErr });
+  const checkout = useMutation({ mutationFn: () => api<{ tax_invoice_no: string }>(`/api/restaurant/orders/${t.order!.order_no}/checkout`, { method: 'POST', body: JSON.stringify({ method: 'Cash' }) }), onSuccess: (r) => { setMsg(`ชำระเงินสำเร็จ · ใบกำกับภาษี ${r.tax_invoice_no ?? '-'}`); onChange(); }, onError: onErr });
+  const clear = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }), onSuccess: () => { setMsg('เคลียร์โต๊ะแล้ว'); onClose(); onChange(); }, onError: onErr });
 
   return (
     <Card className={cn('mt-4 gap-4 border-t-4 p-5', tone(t.status).bar)}>
@@ -184,8 +186,8 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-2">
             <Input className="min-w-[120px] flex-[2]" placeholder="ชื่ออาหาร" value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} />
-            <Input className="w-[70px]" type="number" placeholder="จำนวน" value={item.qty} onChange={(e) => setItem({ ...item, qty: e.target.value })} />
-            <Input className="w-20" type="number" placeholder="ราคา" value={item.price} onChange={(e) => setItem({ ...item, price: e.target.value })} />
+            <Input className="w-[70px]" type="number" min={1} step={1} placeholder="จำนวน" value={item.qty} onChange={(e) => setItem({ ...item, qty: e.target.value })} />
+            <Input className="w-20" type="number" min={0} step="0.01" placeholder="ราคา" value={item.price} onChange={(e) => setItem({ ...item, price: e.target.value })} />
             <Select value={item.station} onValueChange={(v) => setItem({ ...item, station: v })}>
               <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
               <SelectContent>

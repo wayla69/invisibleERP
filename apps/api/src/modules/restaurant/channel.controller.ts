@@ -21,6 +21,8 @@ const PublicOrderBody = z.object({
   delivery: z.object({ contact_name: z.string().optional(), contact_phone: z.string().optional(), address_line: z.string().optional(), address_note: z.string().optional(), lat: z.number().optional(), lng: z.number().optional() }).optional(),
 });
 const ConfirmBody = z.object({ payment_no: z.string().min(1) });
+// Aggregator payloads vary by source — minimal guard: must be a JSON object, not an array/string/null.
+const WebhookPayload = z.object({}).passthrough();
 
 // PUBLIC online-ordering endpoints — no login (mirrors QrController). @NoTx opts out of the anonymous
 // request tx; the service re-enters RealtimeScope.run(tenant) so RLS scopes every read/write.
@@ -46,5 +48,5 @@ export class ChannelController {
   // 3rd-party aggregator webhook (Grab/LineMan) — @Public, gated by a per-source shared secret header;
   // idempotent on (source, ext_event_id).
   @Public() @NoTx() @Post('channel/webhook/:source')
-  webhook(@Param('source') source: string, @Headers('x-webhook-secret') secret: string | undefined, @Body() body: any) { return this.channel.ingestThirdParty(source, body, secret); }
+  webhook(@Param('source') source: string, @Headers('x-webhook-secret') secret: string | undefined, @Body(new ZodValidationPipe(WebhookPayload)) body: z.infer<typeof WebhookPayload>) { return this.channel.ingestThirdParty(source, body, secret); }
 }

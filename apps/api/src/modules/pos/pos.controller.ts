@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { qint } from '../../common/query';
 import { PosService, type CreateOrderDto } from './pos.service';
 
 const CreateOrderBody = z.object({
@@ -29,7 +30,7 @@ export class PosController {
 
   @Get('orders') @Permissions('pos', 'order_mgt', 'dashboard')
   orders(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('status') status?: string) {
-    return this.svc.orders(limit ? +limit : 20, offset ? +offset : 0, status);
+    return this.svc.orders(qint('limit', limit, 20), qint('offset', offset, 0), status);
   }
 
   @Get('orders/:saleNo') @Permissions('pos', 'order_mgt', 'dashboard')
