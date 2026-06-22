@@ -1,10 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { dineInOrders, orderDeliveryDetails, channelWebhookEvents, tenants, payments } from '../../database/schema';
+import { dineInOrders, orderDeliveryDetails, channelWebhookEvents, tenants, payments, posMemberLedger } from '../../database/schema';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxService } from '../tax/tax.service';
+import { MemberService } from '../loyalty/member.service';
 import { roundCurrency } from '../tax/money';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -39,6 +40,7 @@ export class ChannelOrderService {
     private readonly payments: PaymentService,
     private readonly ledger: LedgerService,
     private readonly tax: TaxService,
+    @Optional() private readonly member?: MemberService,
   ) {}
 
   // slug → tenant (controlled bypass: reads only id + name by code)
@@ -63,9 +65,11 @@ export class ChannelOrderService {
       const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
       const token = mintChannelToken({ tenantId, orderId: Number(o.id) });
       const fee = roundCurrency(n(dto.delivery_fee), 'THB');
+      const memberId = dto.member_id ? Number(dto.member_id) : null;
       await db.update(dineInOrders).set({
         channel: dto.channel ?? 'web', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received',
-        deliveryFee: fx(fee, 2), scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null, publicToken: token, server: 'channel:web',
+        deliveryFee: fx(fee, 2), scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
+        publicToken: token, server: 'channel:web', memberId,
       }).where(eq(dineInOrders.id, o.id));
       if ((dto.fulfillment_type === 'delivery') && dto.delivery) {
         await db.insert(orderDeliveryDetails).values({
@@ -147,7 +151,19 @@ export class ChannelOrderService {
       const expected = roundCurrency(n(built.total) + n(o.deliveryFee), 'THB');
       if (pmt && Math.abs(n(pmt.amount) - expected) > 0.01) throw new BadRequestException({ code: 'TENDER_MISMATCH', message: `Captured ${n(pmt.amount)} != bill ${expected} — order changed after payment`, messageTh: 'ยอดที่ชำระไม่ตรงกับบิล' });
       const invNo = await this.dineIn.markPaidAndInvoice(o, o.saleNo, u);
-      return { paid: true, payment_status: settled.status, sale_no: o.saleNo, total: built.total, delivery_fee: n(o.deliveryFee), journal_no: built.journal_no, tax_invoice_no: invNo };
+      // Loyalty earn for linked member — idempotent on saleNo (skip if already earned).
+      let pointsEarned = 0;
+      if (this.member && o.memberId) {
+        const db2 = this.db as any;
+        const [ex] = await db2.select({ id: posMemberLedger.id }).from(posMemberLedger)
+          .where(and(eq(posMemberLedger.refDoc, o.saleNo), eq(posMemberLedger.txnType, 'Earn'))).limit(1);
+        if (!ex) {
+          await db2.transaction(async (tx: any) => {
+            pointsEarned = await this.member!.earnInTx(tx, claim.tenantId, Number(o.memberId), n(built.total), o.saleNo, 'channel:confirm');
+          });
+        }
+      }
+      return { paid: true, payment_status: settled.status, sale_no: o.saleNo, total: built.total, delivery_fee: n(o.deliveryFee), journal_no: built.journal_no, tax_invoice_no: invNo, points_earned: pointsEarned };
     });
   }
 
@@ -157,7 +173,8 @@ export class ChannelOrderService {
     const view: any = await this.dineIn.createOrder({ items: dto.items, notes: dto.notes }, user);
     const [created] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
     const fee = roundCurrency(n(dto.delivery_fee), 'THB');
-    await db.update(dineInOrders).set({ channel: 'kiosk', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received', deliveryFee: fx(fee, 2) }).where(eq(dineInOrders.id, created.id));
+    const kioskMemberId = dto.member_id ? Number(dto.member_id) : null;
+    await db.update(dineInOrders).set({ channel: 'kiosk', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received', deliveryFee: fx(fee, 2), memberId: kioskMemberId }).where(eq(dineInOrders.id, created.id));
     const o = await this.dineIn.loadOrderForUpdate(view.order_no);
     const saleNo = await this.dineIn.mintSaleNo(user.tenantId ?? null);
     const built: any = await this.dineIn.buildSale(o, saleNo, 0, user);
@@ -166,7 +183,13 @@ export class ChannelOrderService {
     const openTill = user.tenantId != null ? await this.payments.currentOpenTill(user.tenantId) : null;
     const tender: any = saleCash > 0 ? await this.payments.recordTender({ sale_no: saleNo, tenant_id: user.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: saleCash, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user) : null;
     const invNo = await this.dineIn.markPaidAndInvoice(o, saleNo, user);
-    return { order_no: view.order_no, sale_no: saleNo, total: built.total, delivery_fee: fee, payment_no: tender?.payment_no ?? null, tax_invoice_no: invNo };
+    let kioskPoints = 0;
+    if (this.member && kioskMemberId && user.tenantId != null) {
+      await db.transaction(async (tx: any) => {
+        kioskPoints = await this.member!.earnInTx(tx, user.tenantId!, kioskMemberId, n(built.total), saleNo, user.username);
+      });
+    }
+    return { order_no: view.order_no, sale_no: saleNo, total: built.total, delivery_fee: fee, payment_no: tender?.payment_no ?? null, tax_invoice_no: invNo, points_earned: kioskPoints };
   }
 
   // STAFF: advance the fulfillment/handoff machine (separate from KDS item state)

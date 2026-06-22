@@ -246,6 +246,13 @@
       "when": 1782007973311,
       "tag": "0034_vendor_tenant",
       "breakpoints": false
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782007973312,
+      "tag": "0035_crm",
+      "breakpoints": false
     }
   ]
 }

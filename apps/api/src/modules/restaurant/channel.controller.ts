@@ -17,6 +17,7 @@ const PublicOrderBody = z.object({
   delivery_fee: z.number().nonnegative().optional(),
   scheduled_at: z.string().optional(),
   notes: z.string().optional(),
+  member_id: z.number().int().positive().optional(),  // loyalty member — points earned on confirm
   delivery: z.object({ contact_name: z.string().optional(), contact_phone: z.string().optional(), address_line: z.string().optional(), address_note: z.string().optional(), lat: z.number().optional(), lng: z.number().optional() }).optional(),
 });
 const ConfirmBody = z.object({ payment_no: z.string().min(1) });

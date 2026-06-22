@@ -80,6 +80,7 @@ export const dineInOrders = pgTable('dine_in_orders', {
   publicToken: text('public_token'),                              // per-order HMAC tracking credential
   extSource: text('ext_source'),                                  // 'grab' | 'lineman'
   extOrderId: text('ext_order_id'),                               // partner order id (idempotency)
+  memberId: bigint('member_id', { mode: 'number' }),              // pos_members FK — for loyalty earn on online orders
   guestCount: integer('guest_count').default(1),
   server: text('server'),
   subtotal: numeric('subtotal', { precision: 14, scale: 2 }).default('0'),
