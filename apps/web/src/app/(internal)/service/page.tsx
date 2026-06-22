@@ -19,7 +19,7 @@ import { statusVariant } from '@/components/ui';
 
 // GET /api/service/contracts → { contracts: [...], count }
 interface Contract { id: number; contract_no: string; customer_name: string; sla_tier: string; response_hours: number; resolution_hours: number; start_date: string | null; end_date: string | null; status: string; monthly_value: number }
-// GET /api/service/subscriptions → { serviceSubscriptions: [...], count }
+// GET /api/service/subscriptions → { subscriptions: [...], count }
 interface Sub { id: number; sub_no: string; customer_name: string; product_code: string; billing_cycle: string; unit_price: number; qty: number; next_billing_date: string | null; status: string }
 // GET /api/service/contracts/:id/events → { events: [...], count }
 interface SlaEvent { id: number; event_no: string; title: string; priority: string; opened_at: string | null; response_due_at: string | null; responded_at: string | null; resolved_at: string | null; resolution_due_at: string | null; response_breached: boolean; resolution_breached: boolean; status: string }
@@ -244,9 +244,9 @@ function ContractEvents({ contractId }: { contractId: number }) {
 }
 
 function Subscriptions() {
-  // NOTE: list endpoint wraps rows under `serviceSubscriptions` (not `subscriptions`)
-  const q = useQuery<{ serviceSubscriptions: Sub[]; count: number }>({ queryKey: ['svc-subs'], queryFn: () => api('/api/service/subscriptions') });
-  const subs = q.data?.serviceSubscriptions ?? [];
+  // list endpoint returns rows under `subscriptions`
+  const q = useQuery<{ subscriptions: Sub[]; count: number }>({ queryKey: ['svc-subs'], queryFn: () => api('/api/service/subscriptions') });
+  const subs = q.data?.subscriptions ?? [];
   const mrr = subs.reduce((s, x) => s + (x.status === 'Active' ? x.unit_price * x.qty : 0), 0);
 
   return (

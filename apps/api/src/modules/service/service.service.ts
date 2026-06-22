@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, sql, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { serviceContracts, slaEvents, serviceSubscriptions, serviceSubscriptionInvoices } from '../../database/schema/service';
 import { docCountersTenant } from '../../database/schema/system';
 import { n, fx } from '../../database/queries';
+import { LedgerService } from '../ledger/ledger.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
@@ -21,7 +22,12 @@ const CYCLE_MONTHS: Record<string, number> = { monthly: 1, quarterly: 3, annual:
 
 @Injectable()
 export class ServiceService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // @Optional ledger so the standalone service harness (constructs with 1 arg) still compiles;
+  // when present, subscription billing + payment post to the GL.
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly ledger?: LedgerService,
+  ) {}
 
   // ── Service Contracts ──
 
@@ -195,14 +201,29 @@ export class ServiceService {
       subUpdates.push({ id: Number(sub.id), nextBillingDate: nextDate });
     }
 
+    let posted = 0;
     if (invoiceValues.length) {
       await db.insert(serviceSubscriptionInvoices).values(invoiceValues);
       for (const u of subUpdates) {
         await db.update(serviceSubscriptions).set({ nextBillingDate: u.nextBillingDate }).where(eq(serviceSubscriptions.id, u.id));
       }
+      // recognize subscription revenue on the GL: Dr 1100 AR / Cr 4300 Subscription Revenue (idempotent per invoice)
+      if (this.ledger) {
+        for (const iv of invoiceValues) {
+          if (await this.ledger.alreadyPosted('SUB-INV', iv.invoiceNo, tenantId)) continue;
+          await this.ledger.postEntry({
+            source: 'SUB-INV', sourceRef: iv.invoiceNo, tenantId, memo: `Subscription billing ${iv.invoiceNo} (${iv.billingPeriod})`, createdBy: user.username,
+            lines: [
+              { account_code: '1100', debit: n(iv.amount), memo: 'AR — subscription' },
+              { account_code: '4300', credit: n(iv.amount), memo: 'Subscription revenue' },
+            ],
+          });
+          posted++;
+        }
+      }
     }
 
-    return { invoices_created: invoiceValues.length, serviceSubscriptions_billed: dueSubs.length };
+    return { invoices_created: invoiceValues.length, subscriptions_billed: dueSubs.length, gl_entries_posted: posted };
   }
 
   async payInvoice(invoiceId: number, user: JwtUser) {
@@ -211,7 +232,19 @@ export class ServiceService {
     if (!inv) throw new NotFoundException({ code: 'INVOICE_NOT_FOUND', message: `Invoice ${invoiceId} not found` });
     if (inv.status === 'Paid') throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Invoice already paid' });
     const [updated] = await db.update(serviceSubscriptionInvoices).set({ status: 'Paid' }).where(eq(serviceSubscriptionInvoices.id, invoiceId)).returning();
-    return { id: Number(updated.id), invoice_no: updated.invoiceNo, status: updated.status, amount: n(updated.amount) };
+    // settle on the GL: Dr 1000 Cash / Cr 1100 AR (idempotent per invoice)
+    let entryNo: string | null = null;
+    if (this.ledger && !(await this.ledger.alreadyPosted('SUB-PAY', updated.invoiceNo, user.tenantId ?? null))) {
+      const je: any = await this.ledger.postEntry({
+        source: 'SUB-PAY', sourceRef: updated.invoiceNo, tenantId: user.tenantId ?? null, memo: `Subscription payment ${updated.invoiceNo}`, createdBy: user.username,
+        lines: [
+          { account_code: '1000', debit: n(updated.amount), memo: 'Cash — subscription' },
+          { account_code: '1100', credit: n(updated.amount), memo: 'AR cleared' },
+        ],
+      });
+      entryNo = je.entry_no;
+    }
+    return { id: Number(updated.id), invoice_no: updated.invoiceNo, status: updated.status, amount: n(updated.amount), entry_no: entryNo };
   }
 
   async listInvoices(subId: number) {
@@ -223,7 +256,7 @@ export class ServiceService {
   async listSubscriptions(user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select().from(serviceSubscriptions).where(eq(serviceSubscriptions.tenantId, user.tenantId!)).orderBy(sql`${serviceSubscriptions.id} DESC`);
-    return { serviceSubscriptions: rows.map((s: any) => this.fmtSub(s)), count: rows.length };
+    return { subscriptions: rows.map((s: any) => this.fmtSub(s)), count: rows.length };
   }
 
   // ── Helpers ──

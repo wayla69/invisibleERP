@@ -42,7 +42,7 @@ async function main() {
   const [hq, t1] = [await tid('HQ'), await tid('T1')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
-    { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
+    { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: hq },
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] })

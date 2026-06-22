@@ -10,7 +10,10 @@ const EmployeeBody = z.object({
   national_id: z.string().optional(),
   sso_no: z.string().optional(),
   position: z.string().optional(),
+  department: z.string().optional(),
   monthly_salary: z.number().nonnegative(),
+  hourly_rate: z.number().nonnegative().optional(),
+  pf_rate: z.number().min(0).max(1).optional(),
   allowances: z.number().nonnegative().optional(),
   sso_eligible: z.boolean().optional(),
   bank_account: z.string().optional(),
@@ -50,5 +53,10 @@ export class PayrollController {
   @Get('pnd1')
   pnd1(@Query('period') period: string, @CurrentUser() u: JwtUser) {
     return this.svc.pnd1(period, u);
+  }
+
+  @Get('pnd1a')
+  pnd1a(@Query('year') year: string, @CurrentUser() u: JwtUser) {
+    return this.svc.pnd1a(year, u);
   }
 }

@@ -66,3 +66,42 @@ export function computePayslip(monthlySalary: number, ssoEligible = true, allowa
   const net = r2(gross - sso.employee - wht);
   return { gross, sso_employee: sso.employee, sso_employer: sso.employer, wht, net };
 }
+
+// ── Phase 19 (HCM depth): payslip with overtime, unpaid leave, and provident fund (กองทุนสำรองเลี้ยงชีพ) ──
+export interface PayslipInput {
+  monthlySalary: number;
+  otPay?: number;          // overtime pay for the period (from attendance)
+  unpaidAmount?: number;   // unpaid-leave deduction (days × daily rate)
+  ssoEligible?: boolean;
+  pfRate?: number;         // provident fund rate (employee; employer matches), e.g. 0.05
+  allowances?: number;
+}
+export interface PayslipCalcFull extends PayslipCalc {
+  base: number;
+  ot_pay: number;
+  unpaid: number;
+  pf_employee: number;
+  pf_employer: number;
+}
+
+// Provident fund is on base salary (employer matches the employee rate); SSO + PIT on gross pay.
+export function computePayslipFull(inp: PayslipInput): PayslipCalcFull {
+  const base = r2(inp.monthlySalary);
+  const ot = r2(inp.otPay ?? 0);
+  const unpaid = r2(inp.unpaidAmount ?? 0);
+  const gross = r2(base + ot - unpaid);
+  const sso = socialSecurity(gross, inp.ssoEligible !== false);
+  const pf = r2(base * (inp.pfRate ?? 0));
+  const wht = monthlyWht(gross, sso.employee, inp.allowances);
+  const net = r2(gross - sso.employee - pf - wht);
+  return {
+    base, gross, ot_pay: ot, unpaid,
+    sso_employee: sso.employee, sso_employer: sso.employer,
+    pf_employee: pf, pf_employer: pf, wht, net,
+  };
+}
+
+// Overtime pay: hours × hourly rate × multiplier (Thai LPA: ≥1.5× for OT).
+export function overtimePay(otHours: number, hourlyRate: number, multiplier = 1.5): number {
+  return r2((Number(otHours) || 0) * (Number(hourlyRate) || 0) * multiplier);
+}

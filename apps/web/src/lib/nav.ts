@@ -26,6 +26,8 @@ import {
   FileText,
   FlaskConical,
   Factory,
+  FolderKanban,
+  Network,
   Goal,
   Landmark,
   Layers,
@@ -117,6 +119,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'เติมสต๊อกอัตโนมัติ', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
       { label: 'สูตรการผลิต (BoM)', href: '/bom', icon: FlaskConical, perms: ['bom_master'] },
       { label: 'ใบสั่งผลิต (Manufacturing)', href: '/manufacturing', icon: Factory, perms: ['bom_master', 'warehouse'] },
+      { label: 'การผลิตขั้นสูง (Routing/QA/MRP)', href: '/production', icon: Network, perms: ['bom_master', 'warehouse', 'planner'] },
     ],
   },
   {
@@ -136,6 +139,7 @@ export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'บุคลากร & เงินเดือน',
     items: [
+      { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
       { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
     ],
   },
@@ -152,6 +156,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'วางแผน & วิเคราะห์',
     items: [
       { label: 'งบประมาณ & แผน', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
+      { label: 'โครงการ (Projects)', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
       { label: 'กำไรตามมิติ', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'BI Analytics', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
     ],
