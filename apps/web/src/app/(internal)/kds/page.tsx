@@ -1,8 +1,13 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ChefHat } from 'lucide-react';
 import { api } from '@/lib/api';
-import { StateView } from '@/components/ui';
+import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/page-header';
+import { StateView } from '@/components/state-view';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 
 type KdsItem = { item_id: number; order_no: string; table_label: string | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; elapsed_min: number; prep_min: number };
 type Station = { station_id: number; station_code: string; station_name: string; items: KdsItem[] };
@@ -13,6 +18,14 @@ const NEXT: Record<string, { action: string; label: string }> = {
   ready: { action: 'serve', label: 'เสิร์ฟแล้ว' },
 };
 
+// Urgency by elapsed vs prep time → semantic token classes (high contrast for kitchen).
+type Urgency = { border: string; text: string };
+const URGENCY = {
+  ok: { border: 'border-success', text: 'text-success' },
+  warn: { border: 'border-warning', text: 'text-warning-foreground dark:text-warning' },
+  late: { border: 'border-destructive', text: 'text-destructive' },
+} satisfies Record<string, Urgency>;
+
 export default function KdsPage() {
   const qc = useQueryClient();
   const feed = useQuery<{ stations: Station[] }>({ queryKey: ['kds'], queryFn: () => api('/api/restaurant/kds/feed'), refetchInterval: 3000 });
@@ -21,45 +34,49 @@ export default function KdsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['kds'] }),
   });
 
-  const color = (el: number, prep: number) => (el < prep ? '#059669' : el < prep * 1.5 ? '#d97706' : 'var(--ruby)');
+  const urgency = (el: number, prep: number): Urgency => (el < prep ? URGENCY.ok : el < prep * 1.5 ? URGENCY.warn : URGENCY.late);
 
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>🍳 จอครัว (KDS)</h1>
-      <p className="label" style={{ marginTop: -8 }}>อัปเดตอัตโนมัติทุก 3 วินาที · แตะการ์ดเพื่อเปลี่ยนสถานะ</p>
+      <PageHeader title="จอครัว (KDS)" description="อัปเดตอัตโนมัติทุก 3 วินาที · แตะการ์ดเพื่อเปลี่ยนสถานะ" />
       <StateView q={feed}>
         {feed.data && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14, alignItems: 'start' }}>
-            {feed.data.stations.length === 0 && <p className="label">ยังไม่มีออเดอร์เข้าครัว</p>}
+          <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
+            {feed.data.stations.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีออเดอร์เข้าครัว</p>}
             {feed.data.stations.map((st) => (
-              <div key={st.station_id} className="card" style={{ padding: 12 }}>
-                <h3 style={{ margin: '0 0 10px', color: 'var(--navy)' }}>{st.station_name} <span className="label">({st.items.length})</span></h3>
-                <div style={{ display: 'grid', gap: 8 }}>
+              <Card key={st.station_id} className="gap-3 p-3">
+                <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
+                  <ChefHat className="size-5 text-primary" />
+                  {st.station_name}
+                  <span className="text-sm font-normal text-muted-foreground">({st.items.length})</span>
+                </h3>
+                <div className="grid gap-2">
                   {st.items.map((it) => {
                     const nxt = NEXT[it.kds_status];
+                    const u = urgency(it.elapsed_min, it.prep_min);
                     return (
-                      <div key={it.item_id} style={{ border: `2px solid ${color(it.elapsed_min, it.prep_min)}`, borderRadius: 8, padding: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <strong>{it.qty}× {it.name}</strong>
-                          <span style={{ color: color(it.elapsed_min, it.prep_min), fontWeight: 700 }}>{it.elapsed_min}′</span>
+                      <div key={it.item_id} className={cn('rounded-lg border-2 bg-card p-2', u.border)}>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <strong className="text-base">{it.qty}× {it.name}</strong>
+                          <span className={cn('text-base font-bold tabular', u.text)}>{it.elapsed_min}′</span>
                         </div>
-                        <div className="label" style={{ fontSize: 12 }}>{it.table_label ? `โต๊ะ ${it.table_label}` : 'กลับบ้าน'} · {it.order_no}</div>
+                        <div className="text-xs text-muted-foreground">{it.table_label ? `โต๊ะ ${it.table_label}` : 'กลับบ้าน'} · {it.order_no}</div>
                         {(it.modifiers?.length > 0 || it.notes) && (
-                          <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>
+                          <div className="mt-0.5 text-xs font-medium text-warning-foreground dark:text-warning">
                             {(it.modifiers ?? []).map((m) => m.label).join(', ')}{it.notes ? ` · ${it.notes}` : ''}
                           </div>
                         )}
                         {nxt && (
-                          <button className="btn" style={{ width: '100%', marginTop: 6, padding: '6px' }} disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: nxt.action })}>
+                          <Button className="mt-1.5 w-full" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: nxt.action })}>
                             {nxt.label}
-                          </button>
+                          </Button>
                         )}
                       </div>
                     );
                   })}
-                  {st.items.length === 0 && <span className="label" style={{ fontSize: 13 }}>— ว่าง —</span>}
+                  {st.items.length === 0 && <span className="text-sm text-muted-foreground">— ว่าง —</span>}
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         )}

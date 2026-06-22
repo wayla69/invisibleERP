@@ -2,13 +2,15 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { DataTable, StateView } from '@/components/ui';
+import { PageHeader } from '@/components/page-header';
+import { DataTable } from '@/components/data-table';
+import { StateView } from '@/components/state-view';
 
 export default function SuppliersPage() {
   const q = useQuery<any>({ queryKey: ['suppliers'], queryFn: () => api('/api/inventory/suppliers') });
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>🏢 ผู้ขาย (Suppliers)</h1>
+      <PageHeader title="ผู้ขาย (Suppliers)" description="รายชื่อผู้ขายและเงื่อนไขการชำระเงิน" />
       <StateView q={q}>
         {q.data && (
           <DataTable

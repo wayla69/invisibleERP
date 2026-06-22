@@ -2,26 +2,41 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, Save, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, Kpi, DataTable, Badge, StateView } from '@/components/ui';
-import { Tabs, Msg } from '@/components/tabs';
 import { baht, thaiDate } from '@/lib/format';
+import { PageHeader } from '@/components/page-header';
+import { StatCard } from '@/components/stat-card';
+import { DataTable } from '@/components/data-table';
+import { StateView } from '@/components/state-view';
+import { Tabs, Msg } from '@/components/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { statusVariant } from '@/components/ui';
 
 type Account = { code: string; name: string; type: string };
 const today = () => new Date().toISOString().slice(0, 10);
 const monthStart = () => today().slice(0, 8) + '01';
 
+const selectCls =
+  'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
+
 export default function AccountingPage() {
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>📒 บัญชีแยกประเภท (General Ledger)</h1>
-      <p className="label" style={{ marginTop: -8 }}>บัญชีคู่ (double-entry) — ทุกการขายลงบัญชีอัตโนมัติ เดบิตต้องเท่าเครดิตเสมอ</p>
+      <PageHeader
+        title="บัญชีแยกประเภท"
+        description="บัญชีคู่ (double-entry) — ทุกการขายลงบัญชีอัตโนมัติ เดบิตต้องเท่าเครดิตเสมอ"
+      />
       <Tabs
         tabs={[
-          { key: 'tb', label: '⚖️ งบทดลอง', content: <TrialBalance /> },
-          { key: 'journal', label: '📝 สมุดรายวัน', content: <Journal /> },
-          { key: 'pl', label: '📈 งบกำไรขาดทุน', content: <IncomeStatement /> },
-          { key: 'bs', label: '🏦 งบดุล', content: <BalanceSheet /> },
+          { key: 'tb', label: 'งบทดลอง', content: <TrialBalance /> },
+          { key: 'journal', label: 'สมุดรายวัน', content: <Journal /> },
+          { key: 'pl', label: 'งบกำไรขาดทุน', content: <IncomeStatement /> },
+          { key: 'bs', label: 'งบดุล', content: <BalanceSheet /> },
         ]}
       />
     </div>
@@ -34,11 +49,14 @@ function TrialBalance() {
   return (
     <StateView q={q}>
       {q.data && (
-        <>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-            <Kpi label="รวมเดบิต" value={baht(q.data.totals.debit)} accent="var(--navy)" />
-            <Kpi label="รวมเครดิต" value={baht(q.data.totals.credit)} accent="var(--navy)" />
-            <Kpi label="สถานะ" value={<Badge value={q.data.totals.balanced ? 'สมดุล' : 'ไม่สมดุล'} />} />
+        <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatCard label="รวมเดบิต" value={baht(q.data.totals.debit)} tone="primary" />
+            <StatCard label="รวมเครดิต" value={baht(q.data.totals.credit)} tone="primary" />
+            <StatCard
+              label="สถานะ"
+              value={<Badge variant={q.data.totals.balanced ? 'success' : 'destructive'}>{q.data.totals.balanced ? 'สมดุล' : 'ไม่สมดุล'}</Badge>}
+            />
           </div>
           <DataTable
             rows={q.data.rows}
@@ -46,12 +64,12 @@ function TrialBalance() {
               { key: 'account_code', label: 'รหัส' },
               { key: 'account_name', label: 'ชื่อบัญชี' },
               { key: 'account_type', label: 'ประเภท' },
-              { key: 'debit', label: 'เดบิต', render: (r: any) => baht(r.debit) },
-              { key: 'credit', label: 'เครดิต', render: (r: any) => baht(r.credit) },
-              { key: 'balance', label: 'ยอดคงเหลือ', render: (r: any) => baht(r.balance) },
+              { key: 'debit', label: 'เดบิต', align: 'right', render: (r: any) => <span className="tabular">{baht(r.debit)}</span> },
+              { key: 'credit', label: 'เครดิต', align: 'right', render: (r: any) => <span className="tabular">{baht(r.credit)}</span> },
+              { key: 'balance', label: 'ยอดคงเหลือ', align: 'right', render: (r: any) => <span className="tabular">{baht(r.balance)}</span> },
             ]}
           />
-        </>
+        </div>
       )}
     </StateView>
   );
@@ -98,61 +116,72 @@ function Journal() {
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   return (
-    <div style={{ display: 'grid', gap: 20 }}>
-      <Card>
-        <h3 style={{ marginTop: 0 }}>✍️ ลงรายการบัญชี (Manual Journal)</h3>
-        <input className="input" placeholder="คำอธิบาย (memo)" value={memo} onChange={(e) => setMemo(e.target.value)} style={{ marginBottom: 10 }} />
-        <table>
-          <thead><tr><th>บัญชี</th><th style={{ width: 130 }}>เดบิต</th><th style={{ width: 130 }}>เครดิต</th><th style={{ width: 40 }}></th></tr></thead>
+    <div className="grid gap-5">
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">ลงรายการบัญชี (Manual Journal)</h3>
+        <Input placeholder="คำอธิบาย (memo)" value={memo} onChange={(e) => setMemo(e.target.value)} />
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="pb-2 font-medium">บัญชี</th>
+              <th className="w-[130px] pb-2 font-medium">เดบิต</th>
+              <th className="w-[130px] pb-2 font-medium">เครดิต</th>
+              <th className="w-10 pb-2" />
+            </tr>
+          </thead>
           <tbody>
             {lines.map((l, i) => (
               <tr key={i}>
-                <td>
-                  <select className="input" value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
+                <td className="py-1 pr-2">
+                  <select className={selectCls} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
                     <option value="">— เลือกบัญชี —</option>
                     {accounts.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
                   </select>
                 </td>
-                <td><input className="input" type="number" min="0" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
-                <td><input className="input" type="number" min="0" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
-                <td>{lines.length > 2 && <button className="btn" style={{ padding: '4px 8px' }} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>✕</button>}</td>
+                <td className="py-1 pr-2"><Input type="number" min="0" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
+                <td className="py-1 pr-2"><Input type="number" min="0" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
+                <td className="py-1">{lines.length > 2 && <Button variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}><X className="size-4" /></Button>}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, flexWrap: 'wrap', gap: 8 }}>
-          <button className="btn" style={{ background: 'var(--muted)' }} onClick={() => setLines((ls) => [...ls, emptyLine()])}>+ เพิ่มบรรทัด</button>
-          <span style={{ fontSize: 14 }}>
-            เดบิต <strong>{baht(sumDebit)}</strong> · เครดิต <strong>{baht(sumCredit)}</strong>{' '}
-            <Badge value={balanced ? 'สมดุล' : 'ยังไม่สมดุล'} />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, emptyLine()])}>
+            <Plus className="size-4" /> เพิ่มบรรทัด
+          </Button>
+          <span className="text-sm">
+            เดบิต <strong className="tabular">{baht(sumDebit)}</strong> · เครดิต <strong className="tabular">{baht(sumCredit)}</strong>{' '}
+            <Badge variant={balanced ? 'success' : 'warning'}>{balanced ? 'สมดุล' : 'ยังไม่สมดุล'}</Badge>
           </span>
-          <button className="btn" disabled={!balanced || post.isPending} onClick={() => post.mutate()}>
-            {post.isPending ? 'กำลังบันทึก…' : '💾 บันทึกรายการ'}
-          </button>
+          <Button disabled={!balanced || post.isPending} onClick={() => post.mutate()}>
+            <Save className="size-4" /> {post.isPending ? 'กำลังบันทึก…' : 'บันทึกรายการ'}
+          </Button>
         </div>
         <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
 
       <div>
-        <h3>รายการล่าสุด</h3>
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">รายการล่าสุด</h3>
         <StateView q={journal}>
           {journal.data && (
-            <div style={{ display: 'grid', gap: 10 }}>
-              {journal.data.entries.length === 0 && <Card><span className="label">ยังไม่มีรายการ</span></Card>}
+            <div className="grid gap-3">
+              {journal.data.entries.length === 0 && <Card className="gap-0 p-5"><span className="text-sm text-muted-foreground">ยังไม่มีรายการ</span></Card>}
               {journal.data.entries.map((e: any) => (
-                <Card key={e.entry_no}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <Card key={e.entry_no} className="gap-2 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <strong>{e.entry_no}</strong>
-                    <span className="label">{thaiDate(e.entry_date)} · {e.source}{e.source_ref ? ` · ${e.source_ref}` : ''} · <Badge value={e.status} /></span>
+                    <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                      {thaiDate(e.entry_date)} · {e.source}{e.source_ref ? ` · ${e.source_ref}` : ''} · <Badge variant={statusVariant(e.status)}>{e.status}</Badge>
+                    </span>
                   </div>
-                  {e.memo && <div className="label" style={{ marginTop: 2 }}>{e.memo}</div>}
-                  <table style={{ marginTop: 6 }}>
+                  {e.memo && <div className="text-sm text-muted-foreground">{e.memo}</div>}
+                  <table className="w-full text-sm">
                     <tbody>
                       {e.lines.map((l: any, j: number) => (
                         <tr key={j}>
-                          <td>{l.account_code}</td>
-                          <td style={{ textAlign: 'right' }}>{l.debit ? baht(l.debit) : ''}</td>
-                          <td style={{ textAlign: 'right' }}>{l.credit ? baht(l.credit) : ''}</td>
+                          <td className="py-0.5">{l.account_code}</td>
+                          <td className="py-0.5 text-right tabular">{l.debit ? baht(l.debit) : ''}</td>
+                          <td className="py-0.5 text-right tabular">{l.credit ? baht(l.credit) : ''}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -173,17 +202,23 @@ function IncomeStatement() {
   const [to, setTo] = useState(today());
   const q = useQuery<any>({ queryKey: ['pl', from, to], queryFn: () => api(`/api/ledger/income-statement?from=${from}&to=${to}`) });
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 16, flexWrap: 'wrap' }}>
-        <label className="label">ตั้งแต่<input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className="label">ถึง<input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="pl-from">ตั้งแต่</Label>
+          <Input id="pl-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="pl-to">ถึง</Label>
+          <Input id="pl-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
       </div>
       <StateView q={q}>
         {q.data && (
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <Kpi label="รายได้" value={baht(q.data.revenue)} accent="var(--navy)" />
-            <Kpi label="ค่าใช้จ่าย" value={baht(q.data.expense)} accent="var(--ruby)" />
-            <Kpi label="กำไรสุทธิ" value={baht(q.data.net_income)} accent={q.data.net_income >= 0 ? '#059669' : 'var(--ruby)'} />
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatCard label="รายได้" value={baht(q.data.revenue)} tone="primary" />
+            <StatCard label="ค่าใช้จ่าย" value={baht(q.data.expense)} tone="danger" />
+            <StatCard label="กำไรสุทธิ" value={baht(q.data.net_income)} tone={q.data.net_income >= 0 ? 'success' : 'danger'} />
           </div>
         )}
       </StateView>
@@ -196,24 +231,26 @@ function BalanceSheet() {
   const [asOf, setAsOf] = useState(today());
   const q = useQuery<any>({ queryKey: ['bs', asOf], queryFn: () => api(`/api/ledger/balance-sheet?as_of=${asOf}`) });
   return (
-    <div>
-      <label className="label" style={{ display: 'block', marginBottom: 16 }}>
-        ณ วันที่<input className="input" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ maxWidth: 200 }} />
-      </label>
+    <div className="space-y-5">
+      <div className="grid max-w-[200px] gap-1.5">
+        <Label htmlFor="bs-asof">ณ วันที่</Label>
+        <Input id="bs-asof" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+      </div>
       <StateView q={q}>
         {q.data && (
-          <>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-              <Kpi label="สินทรัพย์" value={baht(q.data.assets)} accent="var(--navy)" />
-              <Kpi label="หนี้สิน" value={baht(q.data.liabilities)} accent="var(--ruby)" />
-              <Kpi label="ส่วนของเจ้าของ" value={baht(q.data.equity)} />
-              <Kpi label="กำไรสะสม" value={baht(q.data.net_income)} />
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="สินทรัพย์" value={baht(q.data.assets)} tone="primary" />
+              <StatCard label="หนี้สิน" value={baht(q.data.liabilities)} tone="danger" />
+              <StatCard label="ส่วนของเจ้าของ" value={baht(q.data.equity)} />
+              <StatCard label="กำไรสะสม" value={baht(q.data.net_income)} />
             </div>
-            <Card>
-              สินทรัพย์ {baht(q.data.assets)} = หนี้สิน+ทุน {baht(q.data.liabilities_plus_equity)}{' '}
-              <Badge value={q.data.balanced ? 'สมดุล' : 'ไม่สมดุล'} />
+            <Card className="flex-row flex-wrap items-center gap-2 p-5 text-sm">
+              <ShieldCheck className="size-4 text-muted-foreground" />
+              สินทรัพย์ <span className="tabular">{baht(q.data.assets)}</span> = หนี้สิน+ทุน <span className="tabular">{baht(q.data.liabilities_plus_equity)}</span>{' '}
+              <Badge variant={q.data.balanced ? 'success' : 'destructive'}>{q.data.balanced ? 'สมดุล' : 'ไม่สมดุล'}</Badge>
             </Card>
-          </>
+          </div>
         )}
       </StateView>
     </div>

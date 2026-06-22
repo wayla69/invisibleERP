@@ -2,10 +2,25 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Armchair, Flame, Plus, Receipt, Sparkles, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, Badge, StateView } from '@/components/ui';
-import { Tabs, Msg } from '@/components/tabs';
+import { cn } from '@/lib/utils';
 import { baht } from '@/lib/format';
+import { PageHeader } from '@/components/page-header';
+import { StateView } from '@/components/state-view';
+import { Tabs, Msg } from '@/components/tabs';
+import { Badge } from '@/components/ui/badge';
+import { statusVariant } from '@/components/ui';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 type TableRow = {
   id: number; table_no: string; status: string; seats: number; pos_x: number; pos_y: number; width: number; height: number;
@@ -14,7 +29,18 @@ type TableRow = {
 };
 
 const STATUS_TH: Record<string, string> = { available: 'ว่าง', reserved: 'จอง', occupied: 'มีลูกค้า', bill_requested: 'เรียกเก็บเงิน', paying: 'กำลังชำระ', cleaning: 'ทำความสะอาด', out_of_service: 'งดใช้' };
-const STATUS_COLOR: Record<string, string> = { available: '#34d399', reserved: '#a78bfa', occupied: '#60a5fa', bill_requested: '#fbbf24', paying: '#f472b6', cleaning: '#9ca3af', out_of_service: '#d1d5db' };
+
+// Status → token classes. text = label color, border = left/top accent, dot = floor-plan fill, bar = panel top accent.
+const STATUS_TONE: Record<string, { text: string; border: string; fill: string; bar: string }> = {
+  available: { text: 'text-success', border: 'border-l-success', fill: 'bg-success text-success-foreground', bar: 'border-t-success' },
+  reserved: { text: 'text-info', border: 'border-l-info', fill: 'bg-info text-info-foreground', bar: 'border-t-info' },
+  occupied: { text: 'text-info', border: 'border-l-info', fill: 'bg-info text-info-foreground', bar: 'border-t-info' },
+  bill_requested: { text: 'text-warning-foreground dark:text-warning', border: 'border-l-warning', fill: 'bg-warning text-warning-foreground', bar: 'border-t-warning' },
+  paying: { text: 'text-warning-foreground dark:text-warning', border: 'border-l-warning', fill: 'bg-warning text-warning-foreground', bar: 'border-t-warning' },
+  cleaning: { text: 'text-muted-foreground', border: 'border-l-muted-foreground', fill: 'bg-muted text-muted-foreground', bar: 'border-t-muted-foreground' },
+  out_of_service: { text: 'text-muted-foreground', border: 'border-l-muted', fill: 'bg-muted text-muted-foreground', bar: 'border-t-muted' },
+};
+const tone = (s: string) => STATUS_TONE[s] ?? STATUS_TONE.out_of_service;
 
 export default function TablesPage() {
   const qc = useQueryClient();
@@ -27,11 +53,11 @@ export default function TablesPage() {
 
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>🍽️ โต๊ะ (Floor plan)</h1>
+      <PageHeader title="โต๊ะ (Floor plan)" description="สถานะโต๊ะแบบเรียลไทม์และผังร้าน" />
       <Tabs
         tabs={[
-          { key: 'board', label: '📋 สถานะโต๊ะ', content: <Board tables={tables} q={board} onSelect={setSel} sel={sel} /> },
-          { key: 'plan', label: '🗺️ ผังร้าน', content: <FloorPlan tables={tables} onSelect={setSel} sel={sel} onAdd={refresh} /> },
+          { key: 'board', label: 'สถานะโต๊ะ', content: <Board tables={tables} q={board} onSelect={setSel} sel={sel} /> },
+          { key: 'plan', label: 'ผังร้าน', content: <FloorPlan tables={tables} onSelect={setSel} sel={sel} onAdd={refresh} /> },
         ]}
       />
       {selected && <TablePanel t={selected} onChange={refresh} onClose={() => setSel(null)} />}
@@ -42,13 +68,24 @@ export default function TablesPage() {
 function Board({ tables, q, onSelect, sel }: { tables: TableRow[]; q: any; onSelect: (id: number) => void; sel: number | null }) {
   return (
     <StateView q={q}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
-        {tables.length === 0 && <p className="label">ยังไม่มีโต๊ะ — เพิ่มในแท็บ “ผังร้าน”</p>}
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+        {tables.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีโต๊ะ — เพิ่มในแท็บ “ผังร้าน”</p>}
         {tables.map((t) => (
-          <button key={t.id} onClick={() => onSelect(t.id)} style={{ textAlign: 'left', border: sel === t.id ? '2px solid var(--navy)' : '0.5px solid var(--border)', borderLeft: `6px solid ${STATUS_COLOR[t.status]}`, borderRadius: 8, padding: 10, background: 'var(--bg, #fff)', cursor: 'pointer' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>โต๊ะ {t.table_no}</strong><span className="label">{t.seats} ที่</span></div>
-            <div style={{ fontSize: 13, color: STATUS_COLOR[t.status], fontWeight: 600 }}>{STATUS_TH[t.status]}</div>
-            {t.order && <div className="label" style={{ fontSize: 12 }}>{baht(t.order.total)} · รอ {t.order.waited_min}′</div>}
+          <button
+            key={t.id}
+            onClick={() => onSelect(t.id)}
+            className={cn(
+              'rounded-lg border border-l-[6px] bg-card p-2.5 text-left transition-colors hover:bg-accent',
+              tone(t.status).border,
+              sel === t.id && 'ring-2 ring-primary',
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <strong>โต๊ะ {t.table_no}</strong>
+              <span className="text-sm text-muted-foreground">{t.seats} ที่</span>
+            </div>
+            <div className={cn('text-sm font-semibold', tone(t.status).text)}>{STATUS_TH[t.status]}</div>
+            {t.order && <div className="text-xs text-muted-foreground tabular">{baht(t.order.total)} · รอ {t.order.waited_min}′</div>}
           </button>
         ))}
       </div>
@@ -60,20 +97,32 @@ function FloorPlan({ tables, onSelect, sel, onAdd }: { tables: TableRow[]; onSel
   const [no, setNo] = useState('');
   const add = useMutation({ mutationFn: () => api('/api/restaurant/tables', { method: 'POST', body: JSON.stringify({ table_no: no, pos_x: 20 + ((tables.length % 5) * 120), pos_y: 20 + Math.floor(tables.length / 5) * 110 }) }), onSuccess: () => { setNo(''); onAdd(); } });
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <input className="input" placeholder="เลขโต๊ะ เช่น A1" value={no} onChange={(e) => setNo(e.target.value)} style={{ maxWidth: 180 }} />
-        <button className="btn" disabled={!no || add.isPending} onClick={() => add.mutate()}>+ เพิ่มโต๊ะ</button>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input className="max-w-[180px]" placeholder="เลขโต๊ะ เช่น A1" value={no} onChange={(e) => setNo(e.target.value)} />
+        <Button disabled={!no || add.isPending} onClick={() => add.mutate()}>
+          <Plus className="size-4" /> เพิ่มโต๊ะ
+        </Button>
       </div>
-      <div style={{ position: 'relative', height: 420, border: '0.5px dashed var(--border)', borderRadius: 8, background: 'var(--bg-soft, #f8fafc)', overflow: 'hidden' }}>
+      <div className="relative h-[420px] overflow-hidden rounded-lg border border-dashed bg-muted/40">
         {tables.map((t) => (
-          <button key={t.id} onClick={() => onSelect(t.id)} title={STATUS_TH[t.status]}
-            style={{ position: 'absolute', left: t.pos_x, top: t.pos_y, width: t.width, height: t.height, borderRadius: t.width === t.height ? '50%' : 8, background: STATUS_COLOR[t.status], color: '#1a1a1a', border: sel === t.id ? '3px solid var(--navy)' : '0', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-            {t.table_no}<div style={{ fontSize: 10, fontWeight: 400 }}>{STATUS_TH[t.status]}</div>
+          <button
+            key={t.id}
+            onClick={() => onSelect(t.id)}
+            title={STATUS_TH[t.status]}
+            className={cn(
+              'absolute flex flex-col items-center justify-center text-[13px] font-bold',
+              tone(t.status).fill,
+              sel === t.id && 'ring-[3px] ring-primary',
+            )}
+            style={{ left: t.pos_x, top: t.pos_y, width: t.width, height: t.height, borderRadius: t.width === t.height ? '50%' : 8 }}
+          >
+            {t.table_no}
+            <div className="text-[10px] font-normal">{STATUS_TH[t.status]}</div>
           </button>
         ))}
       </div>
-      <p className="label" style={{ fontSize: 12, marginTop: 6 }}>แตะโต๊ะเพื่อจัดการ · สีบอกสถานะ</p>
+      <p className="text-xs text-muted-foreground">แตะโต๊ะเพื่อจัดการ · สีบอกสถานะ</p>
     </div>
   );
 }
@@ -100,37 +149,42 @@ function TablePanel({ t, onChange, onClose }: { t: TableRow; onChange: () => voi
   const clear = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }), onSuccess: () => { setMsg('เคลียร์โต๊ะแล้ว'); onClose(); onChange(); } });
 
   return (
-    <Card style={{ marginTop: 16, borderTop: `4px solid ${STATUS_COLOR[t.status]}` }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0 }}>โต๊ะ {t.table_no} · <Badge value={STATUS_TH[t.status]} /></h3>
-        <button className="btn" style={{ padding: '4px 10px' }} onClick={onClose}>✕</button>
+    <Card className={cn('mt-4 gap-4 border-t-4 p-5', tone(t.status).bar)}>
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-lg font-semibold">โต๊ะ {t.table_no} · <Badge variant={statusVariant(STATUS_TH[t.status])}>{STATUS_TH[t.status]}</Badge></h3>
+        <Button variant="ghost" size="icon" onClick={onClose}><X className="size-4" /></Button>
       </div>
       <Msg ok={!msg.startsWith('❌')}>{msg}</Msg>
 
-      {t.status === 'available' && <button className="btn" onClick={() => open.mutate()} disabled={open.isPending}>🪑 เปิดโต๊ะ (รับลูกค้า)</button>}
-      {qr && <div className="label" style={{ marginTop: 8 }}>QR ลูกค้า: <a href={qr} target="_blank" style={{ color: 'var(--navy)' }}>{qr}</a></div>}
+      {t.status === 'available' && <Button onClick={() => open.mutate()} disabled={open.isPending}><Armchair className="size-4" /> เปิดโต๊ะ (รับลูกค้า)</Button>}
+      {qr && <div className="text-sm text-muted-foreground">QR ลูกค้า: <a href={qr} target="_blank" className="text-primary hover:underline">{qr}</a></div>}
 
       {(t.session || sessionId) && t.status !== 'cleaning' && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <input className="input" placeholder="ชื่ออาหาร" value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} style={{ flex: 2, minWidth: 120 }} />
-            <input className="input" type="number" placeholder="จำนวน" value={item.qty} onChange={(e) => setItem({ ...item, qty: e.target.value })} style={{ width: 70 }} />
-            <input className="input" type="number" placeholder="ราคา" value={item.price} onChange={(e) => setItem({ ...item, price: e.target.value })} style={{ width: 80 }} />
-            <select className="input" value={item.station} onChange={(e) => setItem({ ...item, station: e.target.value })} style={{ width: 110 }}>
-              <option value="hot">ครัวร้อน</option><option value="cold">ครัวเย็น</option><option value="drinks">เครื่องดื่ม</option>
-            </select>
-            <button className="btn" disabled={!item.name || addItem.isPending} onClick={() => addItem.mutate()}>+ เพิ่ม</button>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <Input className="min-w-[120px] flex-[2]" placeholder="ชื่ออาหาร" value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} />
+            <Input className="w-[70px]" type="number" placeholder="จำนวน" value={item.qty} onChange={(e) => setItem({ ...item, qty: e.target.value })} />
+            <Input className="w-20" type="number" placeholder="ราคา" value={item.price} onChange={(e) => setItem({ ...item, price: e.target.value })} />
+            <Select value={item.station} onValueChange={(v) => setItem({ ...item, station: v })}>
+              <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hot">ครัวร้อน</SelectItem>
+                <SelectItem value="cold">ครัวเย็น</SelectItem>
+                <SelectItem value="drinks">เครื่องดื่ม</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button disabled={!item.name || addItem.isPending} onClick={() => addItem.mutate()}><Plus className="size-4" /> เพิ่ม</Button>
           </div>
           {t.order && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-              <button className="btn" onClick={() => fire.mutate()} disabled={fire.isPending}>🔥 ส่งเข้าครัว</button>
-              <button className="btn" onClick={() => bill.mutate()} disabled={bill.isPending}>🧾 เรียกเก็บเงิน</button>
-              <button className="btn" style={{ background: 'var(--navy)' }} onClick={() => checkout.mutate()} disabled={checkout.isPending}>💵 เช็คบิล (เงินสด) {baht(t.order.total)}</button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => fire.mutate()} disabled={fire.isPending}><Flame className="size-4" /> ส่งเข้าครัว</Button>
+              <Button variant="outline" onClick={() => bill.mutate()} disabled={bill.isPending}><Receipt className="size-4" /> เรียกเก็บเงิน</Button>
+              <Button onClick={() => checkout.mutate()} disabled={checkout.isPending}><Wallet className="size-4" /> เช็คบิล (เงินสด) {baht(t.order.total)}</Button>
             </div>
           )}
         </div>
       )}
-      {t.status === 'cleaning' && <button className="btn" style={{ marginTop: 10 }} onClick={() => clear.mutate()} disabled={clear.isPending}>🧹 เคลียร์โต๊ะแล้ว (พร้อมรับลูกค้า)</button>}
+      {t.status === 'cleaning' && <Button onClick={() => clear.mutate()} disabled={clear.isPending}><Sparkles className="size-4" /> เคลียร์โต๊ะแล้ว (พร้อมรับลูกค้า)</Button>}
     </Card>
   );
 }

@@ -3,9 +3,16 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
+import { CalendarClock, Package, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Kpi, DataTable, StateView } from '@/components/ui';
 import { num, thaiDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/page-header';
+import { StatCard } from '@/components/stat-card';
+import { DataTable } from '@/components/data-table';
+import { StateView } from '@/components/state-view';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 interface StockResp {
   snapshot_date: string | null;
@@ -24,32 +31,42 @@ export default function InventoryPage() {
   const d = q.data;
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>📦 สต๊อกสินค้า</h1>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
-        <input className="input" style={{ maxWidth: 280 }} placeholder="ค้นหา Item ID / ชื่อ" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <label className="label" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input type="checkbox" checked={lowOnly} onChange={(e) => setLowOnly(e.target.checked)} /> เฉพาะสต๊อกต่ำ
-        </label>
+      <PageHeader title="สินค้าคงคลัง" description="ระดับสต๊อกและวันหมดอายุ" />
+
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <Input
+          className="max-w-xs"
+          placeholder="ค้นหา Item ID / ชื่อ"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Button
+          variant={lowOnly ? 'default' : 'outline'}
+          onClick={() => setLowOnly((v) => !v)}
+        >
+          <TriangleAlert className="size-4" /> เฉพาะสต๊อกต่ำ
+        </Button>
       </div>
+
       <StateView q={q}>
         {d && (
-          <>
-            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-              <Kpi label="Snapshot" value={d.snapshot_date ? thaiDate(d.snapshot_date) : '—'} />
-              <Kpi label="รายการ" value={num(d.total)} />
-              <Kpi label="สต๊อกต่ำ" value={num(d.low_stock_count)} accent="var(--ruby)" />
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StatCard label="Snapshot" value={d.snapshot_date ? thaiDate(d.snapshot_date) : '—'} icon={CalendarClock} />
+              <StatCard label="รายการทั้งหมด" value={num(d.total)} icon={Package} tone="primary" />
+              <StatCard label="สต๊อกต่ำ" value={num(d.low_stock_count)} icon={TriangleAlert} tone={d.low_stock_count > 0 ? 'warning' : 'success'} />
             </div>
             <DataTable
               rows={d.items}
               columns={[
-                { key: 'Item_ID', label: 'Item ID', render: (r) => <Link href={`/inventory/${encodeURIComponent(r.Item_ID)}`}>{r.Item_ID}</Link> },
+                { key: 'Item_ID', label: 'Item ID', render: (r) => <Link className="font-medium text-primary hover:underline" href={`/inventory/${encodeURIComponent(r.Item_ID)}`}>{r.Item_ID}</Link> },
                 { key: 'Item_Description', label: 'ชื่อสินค้า' },
                 { key: 'UOM', label: 'หน่วย' },
-                { key: 'AV_QTY', label: 'คงเหลือ', render: (r) => <span style={{ color: Number(r.AV_QTY) <= 0 ? 'var(--ruby)' : undefined }}>{num(r.AV_QTY)}</span> },
+                { key: 'AV_QTY', label: 'คงเหลือ', align: 'right', render: (r) => <span className={cn('tabular', Number(r.AV_QTY) <= 0 && 'font-semibold text-destructive')}>{num(r.AV_QTY)}</span> },
                 { key: 'Expiry_Date', label: 'หมดอายุ', render: (r) => (r.Expiry_Date ? thaiDate(r.Expiry_Date) : '—') },
               ]}
             />
-          </>
+          </div>
         )}
       </StateView>
     </div>

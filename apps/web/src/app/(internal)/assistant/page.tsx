@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Bot, Send, Sparkles, Square } from 'lucide-react';
 import { getToken } from '@/lib/api';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 // ── SSE assistant ───────────────────────────────────────────────────────────
 // ใช้ fetch() + ReadableStream reader (ไม่ใช่ EventSource) เพราะ EventSource
@@ -160,64 +164,68 @@ export default function AssistantPage() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 48px)' }}>
-      <h1 style={{ marginTop: 0 }}>🤖 AI Assistant</h1>
-      <p className="label" style={{ marginTop: -8 }}>
-        ถาม AI เกี่ยวกับยอดขาย สต๊อก การเงิน และการสั่งซื้อ — ดึงข้อมูลจริงจากระบบ
-      </p>
+    <div className="flex h-[calc(100vh-3rem)] flex-col">
+      {/* slim title bar */}
+      <div className="mb-3 flex items-center gap-3">
+        <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Bot className="size-5" />
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight">AI Assistant</h1>
+          <p className="text-sm text-muted-foreground">
+            ถาม AI เกี่ยวกับยอดขาย สต๊อก การเงิน และการสั่งซื้อ — ดึงข้อมูลจริงจากระบบ
+          </p>
+        </div>
+      </div>
 
       {/* quick prompts */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0 12px' }}>
+      <div className="mb-3 flex flex-wrap gap-2">
         {QUICK_PROMPTS.map((p) => (
-          <button
-            key={p}
-            className="btn"
-            disabled={streaming}
-            onClick={() => send(p)}
-            style={{ fontSize: 13, padding: '6px 12px', background: 'var(--card)', color: 'var(--navy)', border: '1px solid var(--border)' }}
-          >
+          <Button key={p} variant="outline" size="sm" disabled={streaming} onClick={() => send(p)}>
             {p}
-          </button>
+          </Button>
         ))}
       </div>
 
       {/* message list */}
       <div
         ref={listRef}
-        className="card"
-        style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, padding: 16 }}
+        className="flex flex-1 flex-col gap-4 overflow-y-auto rounded-xl border bg-card p-4"
       >
         {messages.length === 0 && (
-          <p className="label" style={{ margin: 'auto', textAlign: 'center' }}>
-            เริ่มสนทนาด้วยการพิมพ์คำถาม หรือเลือกปุ่มลัดด้านบน
-          </p>
+          <div className="m-auto flex flex-col items-center gap-3 text-center text-muted-foreground">
+            <Sparkles className="size-8 opacity-40" />
+            <p className="text-sm">เริ่มสนทนาด้วยการพิมพ์คำถาม หรือเลือกปุ่มลัดด้านบน</p>
+          </div>
         )}
         {messages.map((m, i) => (
           <div
             key={i}
-            style={{
-              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '78%',
-              background: m.role === 'user' ? 'linear-gradient(135deg, var(--navy), var(--navy2))' : 'var(--bg)',
-              color: m.role === 'user' ? '#fff' : 'var(--text)',
-              border: m.role === 'user' ? '0' : '1px solid var(--border)',
-              borderRadius: 12,
-              padding: '10px 14px',
-              fontSize: 15,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              lineHeight: 1.55,
-            }}
+            className={cn('flex items-end gap-2', m.role === 'user' ? 'justify-end' : 'justify-start')}
           >
-            {m.content || (streaming && m.role === 'assistant' ? <span className="label">กำลังคิด…</span> : '')}
+            {m.role === 'assistant' && (
+              <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <Bot className="size-4" />
+              </div>
+            )}
+            <div
+              className={cn(
+                'max-w-[78%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap',
+                m.role === 'user'
+                  ? 'rounded-br-sm bg-primary text-primary-foreground'
+                  : 'rounded-bl-sm bg-muted text-foreground',
+              )}
+            >
+              {m.content || (streaming && m.role === 'assistant' ? (
+                <span className="text-muted-foreground">กำลังคิด…</span>
+              ) : '')}
+            </div>
           </div>
         ))}
       </div>
 
       {error && (
-        <div className="label" style={{ color: 'var(--ruby)', marginTop: 8 }}>
-          ⚠️ {error}
-        </div>
+        <p className="mt-2 text-sm text-destructive">⚠️ {error}</p>
       )}
 
       {/* composer */}
@@ -226,24 +234,23 @@ export default function AssistantPage() {
           e.preventDefault();
           send(input);
         }}
-        style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'flex-end' }}
+        className="sticky bottom-0 mt-3 flex items-center gap-2 bg-background pt-1"
       >
-        <input
-          className="input"
-          style={{ marginTop: 0, flex: 1 }}
+        <Input
+          className="flex-1"
           placeholder="พิมพ์คำถาม… (เช่น สรุปยอดขายเดือนนี้)"
           value={input}
           disabled={streaming}
           onChange={(e) => setInput(e.target.value)}
         />
         {streaming ? (
-          <button type="button" className="btn" onClick={stop} style={{ background: 'var(--ruby)' }}>
-            ⏹ หยุด
-          </button>
+          <Button type="button" variant="destructive" onClick={stop}>
+            <Square className="size-4" /> หยุด
+          </Button>
         ) : (
-          <button type="submit" className="btn" disabled={!input.trim()}>
-            ส่ง ➤
-          </button>
+          <Button type="submit" disabled={!input.trim()}>
+            <Send className="size-4" /> ส่ง
+          </Button>
         )}
       </form>
     </div>

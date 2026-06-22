@@ -2,18 +2,31 @@
 
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
+import { Plus } from 'lucide-react';
 import { api } from '@/lib/api';
-import { DataTable, Badge, StateView } from '@/components/ui';
 import { baht, thaiDate } from '@/lib/format';
+import { PageHeader } from '@/components/page-header';
+import { DataTable } from '@/components/data-table';
+import { StateView } from '@/components/state-view';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { statusVariant } from '@/components/ui';
 
 export default function PosPage() {
   const q = useQuery<any>({ queryKey: ['orders'], queryFn: () => api('/api/pos/orders?limit=50') });
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ marginTop: 0 }}>🛒 ออเดอร์</h1>
-        <Link href="/pos/new" className="btn" style={{ textDecoration: 'none' }}>+ สร้างออเดอร์</Link>
-      </div>
+      <PageHeader
+        title="ออเดอร์"
+        description="รายการขายและสถานะการชำระเงิน"
+        actions={
+          <Button asChild>
+            <Link href="/pos/new">
+              <Plus className="size-4" /> สร้างออเดอร์
+            </Link>
+          </Button>
+        }
+      />
       <StateView q={q}>
         {q.data && (
           <DataTable
@@ -22,9 +35,9 @@ export default function PosPage() {
               { key: 'Sale_No', label: 'เลขที่' },
               { key: 'Sale_Date', label: 'วันที่', render: (r: any) => thaiDate(r.Sale_Date) },
               { key: 'Customer_Name', label: 'ลูกค้า' },
-              { key: 'Total', label: 'ยอด', render: (r: any) => baht(r.Total) },
+              { key: 'Total', label: 'ยอด', align: 'right', render: (r: any) => baht(r.Total) },
               { key: 'Payment_Method', label: 'ชำระ' },
-              { key: 'Status', label: 'สถานะ', render: (r: any) => <Badge value={r.Status} /> },
+              { key: 'Status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
             ]}
           />
         )}

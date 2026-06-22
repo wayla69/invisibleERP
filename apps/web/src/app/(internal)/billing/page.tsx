@@ -2,10 +2,18 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { CalendarClock, CircleDollarSign, Package, ShieldCheck } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, Kpi, Badge, StateView } from '@/components/ui';
-import { Msg } from '@/components/tabs';
 import { baht, thaiDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/page-header';
+import { StatCard } from '@/components/stat-card';
+import { StateView } from '@/components/state-view';
+import { Msg } from '@/components/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { statusVariant } from '@/components/ui';
 
 type Plan = { code: string; name: string; price_monthly: number; features?: any };
 
@@ -26,53 +34,56 @@ export default function BillingPage() {
 
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>💳 แพ็กเกจการใช้งาน (Subscription)</h1>
+      <PageHeader title="แพ็กเกจการใช้งาน" description="จัดการการสมัครสมาชิกและแพ็กเกจ" />
+      <div className="space-y-6">
+        <StateView q={sub}>
+          {sub.data && (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="แพ็กเกจปัจจุบัน" value={(currentCode ?? '—').toUpperCase()} icon={Package} tone="primary" />
+              <StatCard label="สถานะ" value={<Badge variant={statusVariant(sub.data.status ?? 'Active')}>{sub.data.status ?? 'Active'}</Badge>} icon={ShieldCheck} />
+              {sub.data.price_monthly != null && <StatCard label="ราคา/เดือน" value={baht(sub.data.price_monthly)} icon={CircleDollarSign} />}
+              {sub.data.trial_ends_at && <StatCard label="ทดลองถึง" value={thaiDate(sub.data.trial_ends_at)} icon={CalendarClock} tone="warning" />}
+            </div>
+          )}
+        </StateView>
 
-      <StateView q={sub}>
-        {sub.data && (
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-            <Kpi label="แพ็กเกจปัจจุบัน" value={(currentCode ?? '—').toUpperCase()} accent="var(--navy)" />
-            <Kpi label="สถานะ" value={<Badge value={sub.data.status ?? 'Active'} />} />
-            {sub.data.price_monthly != null && <Kpi label="ราคา/เดือน" value={baht(sub.data.price_monthly)} />}
-            {sub.data.trial_ends_at && <Kpi label="ทดลองถึง" value={thaiDate(sub.data.trial_ends_at)} accent="var(--ruby)" />}
-          </div>
-        )}
-      </StateView>
-
-      <h3>เลือกแพ็กเกจ</h3>
-      <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
-      <StateView q={plans}>
-        {plans.data && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
-            {plans.data.plans.map((p) => {
-              const current = p.code === currentCode;
-              return (
-                <Card key={p.code} style={{ border: current ? '2px solid var(--navy)' : undefined }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong style={{ fontSize: 18 }}>{p.name}</strong>
-                    {current && <Badge value="ปัจจุบัน" />}
-                  </div>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--navy)', margin: '8px 0' }}>
-                    {p.price_monthly > 0 ? baht(p.price_monthly) : 'ฟรี'}
-                    {p.price_monthly > 0 && <span style={{ fontSize: 13, fontWeight: 400 }}> /เดือน</span>}
-                  </div>
-                  <ul style={{ paddingLeft: 18, margin: '8px 0', fontSize: 13, color: 'var(--muted)', minHeight: 60 }}>
-                    {featureList(p.features).map((f, i) => <li key={i}>{f}</li>)}
-                  </ul>
-                  <button
-                    className="btn"
-                    style={{ width: '100%', background: current ? 'var(--muted)' : undefined }}
-                    disabled={current || change.isPending}
-                    onClick={() => change.mutate(p.code)}
-                  >
-                    {current ? 'กำลังใช้งาน' : 'เลือกแพ็กเกจนี้'}
-                  </button>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </StateView>
+        <div>
+          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">เลือกแพ็กเกจ</h3>
+          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+          <StateView q={plans}>
+            {plans.data && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {plans.data.plans.map((p) => {
+                  const current = p.code === currentCode;
+                  return (
+                    <Card key={p.code} className={cn('gap-3 p-5', current && 'border-2 border-primary')}>
+                      <div className="flex items-center justify-between">
+                        <strong className="text-lg">{p.name}</strong>
+                        {current && <Badge variant="success">ปัจจุบัน</Badge>}
+                      </div>
+                      <div className="text-2xl font-bold text-primary">
+                        {p.price_monthly > 0 ? baht(p.price_monthly) : 'ฟรี'}
+                        {p.price_monthly > 0 && <span className="text-sm font-normal text-muted-foreground"> /เดือน</span>}
+                      </div>
+                      <ul className="min-h-[60px] list-disc pl-5 text-sm text-muted-foreground">
+                        {featureList(p.features).map((f, i) => <li key={i}>{f}</li>)}
+                      </ul>
+                      <Button
+                        className="w-full"
+                        variant={current ? 'secondary' : 'default'}
+                        disabled={current || change.isPending}
+                        onClick={() => change.mutate(p.code)}
+                      >
+                        {current ? 'กำลังใช้งาน' : 'เลือกแพ็กเกจนี้'}
+                      </Button>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </StateView>
+        </div>
+      </div>
     </div>
   );
 }

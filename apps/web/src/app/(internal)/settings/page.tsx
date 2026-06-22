@@ -2,18 +2,27 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { KeyRound, Plus, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, DataTable, Badge, StateView } from '@/components/ui';
+import { PageHeader } from '@/components/page-header';
+import { DataTable } from '@/components/data-table';
+import { StateView } from '@/components/state-view';
 import { Tabs, Msg } from '@/components/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { statusVariant } from '@/components/ui';
 
 export default function SettingsPage() {
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>⚙️ ตั้งค่า (Settings)</h1>
+      <PageHeader title="ตั้งค่า" description="API Keys และความปลอดภัย" />
       <Tabs
         tabs={[
-          { key: 'keys', label: '🔑 API Keys', content: <ApiKeys /> },
-          { key: 'mfa', label: '🔐 ความปลอดภัย (MFA)', content: <Mfa /> },
+          { key: 'keys', label: 'API Keys', content: <ApiKeys /> },
+          { key: 'mfa', label: 'ความปลอดภัย (MFA)', content: <Mfa /> },
         ]}
       />
     </div>
@@ -41,21 +50,25 @@ function ApiKeys() {
   });
 
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <Card>
-        <h3 style={{ marginTop: 0 }}>สร้าง API Key ใหม่</h3>
-        <p className="label" style={{ marginTop: -6 }}>สำหรับเชื่อมต่อระบบภายนอกกับ ERP ของคุณ</p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input className="input" placeholder="ชื่อ key (เช่น Zapier)" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1, minWidth: 180 }} />
-          <button className="btn" disabled={!name || create.isPending} onClick={() => create.mutate()}>
-            {create.isPending ? 'กำลังสร้าง…' : '+ สร้าง Key'}
-          </button>
+    <div className="space-y-4">
+      <Card className="gap-3 p-5">
+        <div>
+          <h3 className="text-base font-semibold">สร้าง API Key ใหม่</h3>
+          <p className="text-sm text-muted-foreground">สำหรับเชื่อมต่อระบบภายนอกกับ ERP ของคุณ</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Input className="min-w-[180px] flex-1" placeholder="ชื่อ key (เช่น Zapier)" value={name} onChange={(e) => setName(e.target.value)} />
+          <Button disabled={!name || create.isPending} onClick={() => create.mutate()}>
+            <Plus className="size-4" /> {create.isPending ? 'กำลังสร้าง…' : 'สร้าง Key'}
+          </Button>
         </div>
         <Msg>{msg}</Msg>
         {newKey && (
-          <div style={{ marginTop: 12, padding: 12, background: '#fef9c3', borderRadius: 8, border: '1px solid #fde047' }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>⚠️ คัดลอกเก็บไว้ตอนนี้ — จะแสดงเพียงครั้งเดียว</div>
-            <code style={{ display: 'block', wordBreak: 'break-all', marginTop: 6, fontSize: 14 }}>{newKey}</code>
+          <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-warning-foreground dark:text-warning">
+              <TriangleAlert className="size-4" /> คัดลอกเก็บไว้ตอนนี้ — จะแสดงเพียงครั้งเดียว
+            </div>
+            <code className="mt-1.5 block break-all text-sm">{newKey}</code>
           </div>
         )}
       </Card>
@@ -67,8 +80,8 @@ function ApiKeys() {
             { key: 'name', label: 'ชื่อ' },
             { key: 'prefix', label: 'Prefix', render: (r: any) => <code>{r.prefix}…</code> },
             { key: 'scopes', label: 'สิทธิ์', render: (r: any) => (Array.isArray(r.scopes) ? r.scopes.join(', ') : String(r.scopes ?? '')) },
-            { key: 'revoked', label: 'สถานะ', render: (r: any) => <Badge value={r.revoked ? 'Cancelled' : 'Open'} /> },
-            { key: 'act', label: '', render: (r: any) => !r.revoked && <button className="btn" style={{ padding: '4px 10px', background: 'var(--ruby)' }} onClick={() => revoke.mutate(r.id)}>เพิกถอน</button> },
+            { key: 'revoked', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.revoked ? 'Cancelled' : 'Open')}>{r.revoked ? 'Cancelled' : 'Open'}</Badge> },
+            { key: 'act', label: '', render: (r: any) => !r.revoked && <Button variant="destructive" size="sm" onClick={() => revoke.mutate(r.id)}>เพิกถอน</Button> },
           ]}
         />
       </StateView>
@@ -94,25 +107,28 @@ function Mfa() {
   });
 
   return (
-    <Card style={{ maxWidth: 480 }}>
-      <h3 style={{ marginTop: 0 }}>ยืนยันตัวตนสองชั้น (Two-Factor / TOTP)</h3>
-      <p className="label" style={{ marginTop: -6 }}>เพิ่มความปลอดภัยด้วยแอป Google Authenticator / Authy</p>
+    <Card className="max-w-[480px] gap-4 p-5">
+      <div>
+        <h3 className="text-base font-semibold">ยืนยันตัวตนสองชั้น (Two-Factor / TOTP)</h3>
+        <p className="text-sm text-muted-foreground">เพิ่มความปลอดภัยด้วยแอป Google Authenticator / Authy</p>
+      </div>
       {!setup ? (
-        <button className="btn" disabled={begin.isPending} onClick={() => begin.mutate()}>
-          {begin.isPending ? 'กำลังเริ่ม…' : '🔐 เริ่มตั้งค่า MFA'}
-        </button>
+        <Button disabled={begin.isPending} onClick={() => begin.mutate()}>
+          <ShieldCheck className="size-4" /> {begin.isPending ? 'กำลังเริ่ม…' : 'เริ่มตั้งค่า MFA'}
+        </Button>
       ) : (
-        <div style={{ display: 'grid', gap: 10 }}>
-          <div>
-            <div className="label">1) เพิ่มลงในแอป Authenticator ด้วยรหัสลับนี้:</div>
-            <code style={{ display: 'block', wordBreak: 'break-all', padding: 8, background: 'var(--bg-soft, #f3f4f6)', borderRadius: 6, marginTop: 4 }}>{setup.secret}</code>
+        <div className="grid gap-3">
+          <div className="grid gap-1.5">
+            <span className="text-sm text-muted-foreground">1) เพิ่มลงในแอป Authenticator ด้วยรหัสลับนี้:</span>
+            <code className="block break-all rounded-md bg-muted p-2 text-sm">{setup.secret}</code>
           </div>
-          <label className="label">2) ใส่รหัส 6 หลักจากแอปเพื่อยืนยัน
-            <input className="input" inputMode="numeric" maxLength={6} placeholder="000000" value={token} onChange={(e) => setToken(e.target.value)} />
-          </label>
-          <button className="btn" disabled={token.length < 6 || verify.isPending} onClick={() => verify.mutate()}>
+          <div className="grid gap-1.5">
+            <Label htmlFor="mfa-token">2) ใส่รหัส 6 หลักจากแอปเพื่อยืนยัน</Label>
+            <Input id="mfa-token" inputMode="numeric" maxLength={6} placeholder="000000" value={token} onChange={(e) => setToken(e.target.value)} />
+          </div>
+          <Button disabled={token.length < 6 || verify.isPending} onClick={() => verify.mutate()}>
             {verify.isPending ? 'กำลังยืนยัน…' : 'ยืนยันเปิดใช้งาน'}
-          </button>
+          </Button>
         </div>
       )}
       <Msg ok={msg.startsWith('✅')}>{msg}</Msg>

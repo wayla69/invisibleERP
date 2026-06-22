@@ -1,58 +1,56 @@
 'use client';
 
+/**
+ * Compatibility layer — preserves the original ui.tsx API (Card, Kpi, Badge,
+ * StateView, DataTable) so existing pages keep working, but renders the new
+ * shadcn/Tailwind design. New pages should prefer the dedicated components
+ * (StatCard, DataTable, Badge from ui/badge, etc.) directly.
+ */
 import type { ReactNode } from 'react';
 
-export function Card({ children, style }: { children: ReactNode; style?: React.CSSProperties }) {
-  return <div className="card" style={style}>{children}</div>;
+import { cn } from '@/lib/utils';
+import { Card as ShadcnCard } from '@/components/ui/card';
+import { Badge as ShadcnBadge } from '@/components/ui/badge';
+import { StatCard } from '@/components/stat-card';
+
+export { StateView } from '@/components/state-view';
+export { DataTable } from '@/components/data-table';
+
+export function Card({ children, style, className }: { children: ReactNode; style?: React.CSSProperties; className?: string }) {
+  return (
+    <ShadcnCard style={style} className={cn('gap-4 p-5', className)}>
+      {children}
+    </ShadcnCard>
+  );
+}
+
+/** Legacy accent strings → semantic tone. */
+function accentTone(accent?: string): 'default' | 'primary' | 'danger' {
+  if (!accent) return 'default';
+  if (accent.includes('ruby') || accent.includes('red')) return 'danger';
+  return 'primary';
 }
 
 export function Kpi({ label, value, accent }: { label: string; value: ReactNode; accent?: string }) {
-  return (
-    <div className="card" style={{ minWidth: 160 }}>
-      <div className="label">{label}</div>
-      <strong style={{ fontSize: 22, color: accent }}>{value}</strong>
-    </div>
-  );
+  return <StatCard label={label} value={value} tone={accentTone(accent)} className="min-w-[160px]" />;
 }
 
-const BADGE_COLORS: Record<string, string> = {
-  Pending: '#fbbf24', Processing: '#60a5fa', Shipped: '#a78bfa', Completed: '#34d399',
-  Claimed: '#f87171', Cancelled: '#9ca3af', Paid: '#34d399', Partial: '#fbbf24', Unpaid: '#f87171',
-  Open: '#60a5fa', Closed: '#34d399', Received: '#a78bfa', Approved: '#34d399', Draft: '#9ca3af',
-};
+/** Map a status string to a Badge variant. Shared brand-wide. */
+export function statusVariant(
+  value: string,
+): 'default' | 'secondary' | 'destructive' | 'success' | 'warning' | 'info' | 'muted' {
+  const v = (value || '').toLowerCase();
+  if (['completed', 'paid', 'closed', 'received', 'approved', 'active', 'done', 'success', 'resolved'].some((s) => v.includes(s)))
+    return 'success';
+  if (['pending', 'partial', 'processing…', 'hold', 'waiting', 'sent', 'draft pending'].some((s) => v.includes(s)))
+    return 'warning';
+  if (['unpaid', 'claimed', 'cancelled', 'canceled', 'rejected', 'failed', 'overdue', 'breach', 'error'].some((s) => v.includes(s)))
+    return 'destructive';
+  if (['open', 'processing', 'shipped', 'new', 'in progress', 'submitted'].some((s) => v.includes(s))) return 'info';
+  if (['draft', 'closed period', 'inactive', 'archived'].some((s) => v.includes(s))) return 'muted';
+  return 'secondary';
+}
+
 export function Badge({ value }: { value: string }) {
-  const bg = BADGE_COLORS[value] ?? '#cbd5e1';
-  return <span style={{ background: bg, color: '#1a1a1a', padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>{value}</span>;
-}
-
-export function StateView({ q, children }: { q: { isLoading: boolean; error: unknown }; children: ReactNode }) {
-  if (q.isLoading) return <p className="label">กำลังโหลด…</p>;
-  if (q.error) return <Card style={{ color: 'var(--ruby)' }}>เกิดข้อผิดพลาด: {String((q.error as Error)?.message ?? q.error)}</Card>;
-  return <>{children}</>;
-}
-
-export function DataTable<T extends Record<string, any>>({
-  rows, columns,
-}: {
-  rows: T[];
-  columns: { key: string; label: string; render?: (row: T) => ReactNode }[];
-}) {
-  return (
-    <Card>
-      <table>
-        <thead>
-          <tr>{columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr><td colSpan={columns.length} className="label">ไม่มีข้อมูล</td></tr>
-          ) : (
-            rows.map((row, i) => (
-              <tr key={i}>{columns.map((c) => <td key={c.key}>{c.render ? c.render(row) : String(row[c.key] ?? '')}</td>)}</tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </Card>
-  );
+  return <ShadcnBadge variant={statusVariant(value)}>{value}</ShadcnBadge>;
 }
