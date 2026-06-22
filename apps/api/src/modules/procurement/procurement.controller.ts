@@ -34,8 +34,9 @@ export class ProcurementController {
     return this.svc.approvePr(prNo, b.approve, u);
   }
 
-  // ── supplier screening (Phase 16) ──
-  @Patch('suppliers/:id/status') @Permissions('masterdata')
+  // ── supplier screening (Phase 16) ── vendor-master duty = md_vendor (segregated from AP payment).
+  // Legacy 'masterdata' holders still pass (it implies md_vendor/md_item/md_config).
+  @Patch('suppliers/:id/status') @Permissions('md_vendor')
   setSupplierStatus(@Param('id') id: string, @Body(new ZodValidationPipe(SupplierStatusBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setSupplierStatus(+id, b, u); }
   @Post('suppliers/:id/scorecard') @Permissions('procurement')
   scorecard(@Param('id') id: string, @Body(new ZodValidationPipe(ScorecardBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.recomputeScorecard(+id, b.period, u); }

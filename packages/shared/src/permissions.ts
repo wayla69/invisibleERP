@@ -54,6 +54,23 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata'],
   Procurement: ['procurement', 'creditors', 'ar', 'delivery', 'masterdata', 'approvals'],
   Planner: ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'],
+  // ── SoD-clean single-duty roles (the remediated design — each verified to produce 0 SoD conflicts) ──
+  Cashier: ['pos_sell'],
+  PosSupervisor: ['pos_refund', 'pos_till'],
+  ArClerk: ['ar', 'order_mgt', 'claim_mgt', 'delivery'],
+  ApClerk: ['creditors'],
+  Buyer: ['procurement'],
+  WarehouseOperator: ['wh_receive', 'wh_custody', 'lots', 'locations', 'mobile', 'images'],
+  InventoryController: ['wh_adjust'],
+  StockCounter: ['wh_count'],
+  GlAccountant: ['gl_post', 'recon_prep', 'fin_report'],
+  FinancialController: ['gl_close', 'approvals', 'fin_report'],
+  MasterDataAdmin: ['masterdata', 'bom_master'], // coarse 'masterdata' expands to md_vendor/item/config (conflict-free: no transactional perms)
+  PricingManager: ['pricelist', 'promos'],
+  CreditManager: ['crm'],
+  ReturnsClerk: ['returns'],
+  AccessAdmin: ['users'],
+  ExecutiveViewer: ['fin_report', 'dashboard', 'planner', 'marketing'],
 };
 
 // ── SoD sub-permission model ────────────────────────────────────────────────

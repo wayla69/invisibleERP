@@ -14,7 +14,13 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-const ROLES = ['Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner'];
+const ROLES = [
+  'Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner',
+  // SoD-clean single-duty roles
+  'Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',
+  'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
+  'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer',
+];
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function AdminUsersPage() {

@@ -1,7 +1,8 @@
 import { Inject, Injectable, ForbiddenException } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { sodRules, rolePermissions } from '../../database/schema';
+import { sodRules, rolePermissions, users, userPermissions } from '../../database/schema';
+import { resolvePermissions, detectSodConflicts, SOD_RULES, type Role, type Permission } from '@ierp/shared';
 import type { JwtUser } from '../../common/decorators';
 
 // Segregation of Duties. Two rule kinds: MAKER_CHECKER (a doc's creator may not approve it — also hardcoded
@@ -44,6 +45,42 @@ export class SodService {
         }
       }
     }
+  }
+
+  // Detective control (ITGC-AC-09): per-USER conflict report from the code-level SoD rule registry,
+  // evaluated on EFFECTIVE permissions (role defaults + per-user overrides, expanded for sub-permissions).
+  // Complements violationReport() (configurable role-level PERM_PAIR rules). Admins are flagged inherent.
+  async userConflicts(_user: JwtUser) {
+    const db = this.db as any;
+    const us = await db.select({ id: users.id, username: users.username, role: users.role }).from(users).orderBy(users.username);
+    const ups = await db.select({ userId: userPermissions.userId, perm: userPermissions.perm }).from(userPermissions);
+    const byUser = new Map<number, string[]>();
+    for (const r of ups) {
+      const k = Number(r.userId);
+      const arr = byUser.get(k) ?? [];
+      arr.push(r.perm);
+      byUser.set(k, arr);
+    }
+    const evaluated = us.map((u: any) => {
+      const overrides = byUser.get(Number(u.id)) ?? [];
+      const effective = resolvePermissions(u.role as Role, overrides.length ? (overrides as Permission[]) : null);
+      const conflicts = detectSodConflicts(effective);
+      return { username: u.username, role: u.role, inherent: u.role === 'Admin', conflict_count: conflicts.length, conflicts };
+    });
+    const flagged = evaluated.filter((x: any) => x.conflict_count > 0 && !x.inherent);
+    const byRule: Record<string, number> = {};
+    for (const x of flagged) for (const c of x.conflicts) byRule[c.ruleId] = (byRule[c.ruleId] ?? 0) + 1;
+    return {
+      report: 'Per-user SoD conflict report (effective permissions)',
+      rules: SOD_RULES.map((r) => ({ id: r.id, duty_a: r.dutyA, duty_b: r.dutyB, severity: r.severity })),
+      summary: {
+        total_users: evaluated.length,
+        users_with_conflicts: flagged.length,
+        admins_inherent: evaluated.filter((x: any) => x.inherent).length,
+        by_rule: byRule,
+      },
+      users: evaluated,
+    };
   }
 
   // Oversight: which ROLES violate an active PERM_PAIR rule (hold both conflicting perms) — read-only.

@@ -1,7 +1,14 @@
 // Domain enums ported verbatim from the legacy system (string values are load-bearing).
 // In V2 these become Postgres enums; keep the exact string vocabulary for parity.
 
-export const ROLES = ['Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner'] as const;
+export const ROLES = [
+  // Legacy broad roles (retained for transition; flagged by SoD until users migrate).
+  'Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner',
+  // SoD-clean single-duty roles (the remediated design — see DEFAULT_ROLE_PERMISSIONS).
+  'Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',
+  'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
+  'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer',
+] as const;
 export type Role = (typeof ROLES)[number];
 
 // Sales order lifecycle (6 states) + derived "Partial Claim" at the UI layer

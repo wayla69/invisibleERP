@@ -414,6 +414,13 @@
       "when": 1782210000000,
       "tag": "0058_ledger_idem",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1782220000000,
+      "tag": "0059_sod_roles",
+      "breakpoints": true
     }
   ]
 }

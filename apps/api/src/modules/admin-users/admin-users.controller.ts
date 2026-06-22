@@ -4,9 +4,14 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AdminUsersService } from './admin-users.service';
 
-const ROLES = ['Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner'] as const;
-const CreateBody = z.object({ username: z.string().min(1), password: z.string().min(6), role: z.enum(ROLES), customer_name: z.string().optional(), permissions: z.array(z.string()).optional() });
-const UpdateBody = z.object({ role: z.enum(ROLES).optional(), customer_name: z.string().optional(), permissions: z.array(z.string()).optional() });
+const ROLES = [
+  'Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner',
+  'Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',
+  'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
+  'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer',
+] as const;
+const CreateBody = z.object({ username: z.string().min(1), password: z.string().min(6), role: z.enum(ROLES), customer_name: z.string().optional(), permissions: z.array(z.string()).optional(), allow_sod_override: z.boolean().optional(), sod_reason: z.string().optional() });
+const UpdateBody = z.object({ role: z.enum(ROLES).optional(), customer_name: z.string().optional(), permissions: z.array(z.string()).optional(), allow_sod_override: z.boolean().optional(), sod_reason: z.string().optional() });
 const ResetBody = z.object({ password: z.string().min(6) });
 
 @Controller('api/admin/users')
@@ -15,8 +20,6 @@ export class AdminUsersController {
   constructor(private readonly svc: AdminUsersService) {}
 
   @Get() list() { return this.svc.list(); }
-  // Detective SoD report (Admin-only via class-level @Permissions('users')) — feeds the quarterly UAR.
-  @Get('sod/conflicts') sodConflicts() { return this.svc.sodConflicts(); }
   @Post() create(@Body(new ZodValidationPipe(CreateBody)) b: z.infer<typeof CreateBody>) { return this.svc.create(b); }
   @Patch(':username') update(@Param('username') u: string, @Body(new ZodValidationPipe(UpdateBody)) b: z.infer<typeof UpdateBody>) { return this.svc.update(u, b); }
   @Post(':username/reset-password') reset(@Param('username') u: string, @Body(new ZodValidationPipe(ResetBody)) b: z.infer<typeof ResetBody>) { return this.svc.resetPassword(u, b.password); }

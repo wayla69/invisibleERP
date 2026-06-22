@@ -189,6 +189,14 @@ describe('Segregation of Duties — conflict detection (ITGC-AC-09)', () => {
   it('Admin is the inherent superuser (violates all 13 rules)', () => {
     expect(detectSodConflicts(resolvePermissions('Admin')).length).toBe(13);
   });
+  it('shipped single-duty role DEFAULTS are SoD-clean (the redesign in action)', () => {
+    const NEW = ['Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',
+      'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
+      'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer'] as const;
+    for (const r of NEW) {
+      expect({ r, n: detectSodConflicts(DEFAULT_ROLE_PERMISSIONS[r]).length }).toEqual({ r, n: 0 });
+    }
+  });
   it('proposed single-duty roles are SoD-clean (0 conflicts each)', () => {
     const TO_BE: Record<string, string[]> = {
       Cashier: ['pos_sell'],

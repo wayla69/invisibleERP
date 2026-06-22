@@ -19,21 +19,23 @@ export class WmsController {
   createBin(@Body(new ZodValidationPipe(BinBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.createBin(b, u); }
   @Get('bins') @Permissions('locations', 'warehouse')
   listBins(@CurrentUser() u: JwtUser) { return this.wms.listBins(u); }
-  @Get('bins/:binCode/stock') @Permissions('warehouse', 'lots')
+  // SoD warehouse sub-duties: receiving (wh_receive) vs picking/packing/shipping custody (wh_custody).
+  // Legacy 'warehouse' holders still pass (it implies all wh_* sub-permissions).
+  @Get('bins/:binCode/stock') @Permissions('warehouse', 'wh_custody', 'lots')
   binStock(@Param('binCode') c: string, @CurrentUser() u: JwtUser) { return this.wms.binStockOf(c, u); }
-  @Post('putaway') @Permissions('warehouse', 'mobile')
+  @Post('putaway') @Permissions('wh_receive', 'mobile')
   putaway(@Body(new ZodValidationPipe(PutawayBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.putaway(b, u); }
-  @Get('putaway/pending/:grNo') @Permissions('warehouse', 'mobile')
+  @Get('putaway/pending/:grNo') @Permissions('wh_receive', 'mobile')
   pendingPutaway(@Param('grNo') grNo: string, @CurrentUser() u: JwtUser) { return this.wms.pendingPutaway(grNo, u); }
-  @Post('waves') @Permissions('warehouse')
+  @Post('waves') @Permissions('wh_custody')
   wave(@Body(new ZodValidationPipe(WaveBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.createWave(b, u); }
-  @Post('waves/:waveNo/ship') @Permissions('warehouse', 'delivery')
+  @Post('waves/:waveNo/ship') @Permissions('wh_custody', 'delivery')
   shipWave(@Param('waveNo') w: string, @Body(new ZodValidationPipe(ShipBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.shipWave(w, b, u); }
-  @Post('picks/:pickNo/pick') @Permissions('warehouse', 'mobile')
+  @Post('picks/:pickNo/pick') @Permissions('wh_custody', 'mobile')
   pick(@Param('pickNo') p: string, @Body(new ZodValidationPipe(PickBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.pick(p, b, u); }
-  @Post('picks/:pickNo/pack') @Permissions('warehouse', 'mobile')
+  @Post('picks/:pickNo/pack') @Permissions('wh_custody', 'mobile')
   pack(@Param('pickNo') p: string, @CurrentUser() u: JwtUser) { return this.wms.pack(p, u); }
-  @Post('shipments/:shipmentNo/ship') @Permissions('warehouse', 'delivery')
+  @Post('shipments/:shipmentNo/ship') @Permissions('wh_custody', 'delivery')
   ship(@Param('shipmentNo') s: string, @Body(new ZodValidationPipe(ShipBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.ship(s, b, u); }
 }
 
@@ -57,7 +59,7 @@ export class RmaController {
   constructor(private readonly rma: RmaService) {}
   @Post() @Permissions('returns', 'warehouse')
   create(@Body(new ZodValidationPipe(RmaBody)) b: any, @CurrentUser() u: JwtUser) { return this.rma.create(b, u); }
-  @Post(':rmaNo/receive') @Permissions('warehouse', 'lots')
+  @Post(':rmaNo/receive') @Permissions('wh_receive', 'lots')
   receive(@Param('rmaNo') r: string, @Body(new ZodValidationPipe(RmaReceiveBody)) b: any, @CurrentUser() u: JwtUser) { return this.rma.receive(r, b, u); }
   @Post(':rmaNo/restock') @Permissions('returns', 'warehouse')
   restock(@Param('rmaNo') r: string, @Body(new ZodValidationPipe(RmaRestockBody)) b: any, @CurrentUser() u: JwtUser) { return this.rma.restock(r, b, u); }
