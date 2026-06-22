@@ -76,10 +76,13 @@ export interface NavGroup {
   workspace?: Workspace[];
 }
 
-export const WORKSPACES: { id: Workspace; label: string; icon: LucideIcon }[] = [
-  { id: 'erp', label: 'ERP', icon: Building2 },
-  { id: 'pos', label: 'POS', icon: Store },
+export const WORKSPACES: { id: Workspace; label: string; icon: LucideIcon; home: string }[] = [
+  { id: 'erp', label: 'ERP', icon: Building2, home: '/dashboard' },
+  { id: 'pos', label: 'POS', icon: Store, home: '/pos-home' },
 ];
+
+/** The landing route for a workspace. */
+export const workspaceHome = (ws: Workspace): string => WORKSPACES.find((w) => w.id === ws)?.home ?? '/dashboard';
 
 const BOTH: Workspace[] = ['erp', 'pos'];
 
@@ -88,7 +91,10 @@ export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'ภาพรวม',
     workspace: BOTH,
-    items: [{ label: 'แดชบอร์ด', href: '/dashboard', icon: LayoutDashboard, perms: ['dashboard', 'exec'] }],
+    items: [
+      { label: 'แดชบอร์ด', href: '/dashboard', icon: LayoutDashboard, perms: ['dashboard', 'exec'], workspace: ['erp'] },
+      { label: 'ภาพรวมหน้าร้าน', href: '/pos-home', icon: Store, perms: ['pos', 'pos_sell', 'order_mgt', 'dashboard'], workspace: ['pos'] },
+    ],
   },
   {
     title: 'การขาย',

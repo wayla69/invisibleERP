@@ -8,7 +8,7 @@ import { LogOut, Search } from 'lucide-react';
 import { getToken, clearToken } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { useModuleFlags } from '@/lib/modules';
-import { navForWorkspace, defaultWorkspace, WORKSPACES, type NavGroup, type Workspace } from '@/lib/nav';
+import { navForWorkspace, defaultWorkspace, workspaceHome, WORKSPACES, type NavGroup, type Workspace } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 import {
   Sidebar,
@@ -76,11 +76,18 @@ export function AppShell({
   React.useEffect(() => {
     if (!enableWorkspaces || wsResolved.current || !me.data) return;
     wsResolved.current = true;
-    if (!localStorage.getItem(WORKSPACE_KEY)) setWorkspace(defaultWorkspace(me.data.permissions, me.data.role));
-  }, [enableWorkspaces, me.data]);
+    if (localStorage.getItem(WORKSPACE_KEY)) return; // a saved preference wins
+    const def = defaultWorkspace(me.data.permissions, me.data.role);
+    setWorkspace(def);
+    // First-time landing only: if we're sitting on the OTHER workspace's home (e.g. login → /dashboard
+    // for a POS-only operator), send them to their workspace's home. Deep links elsewhere are untouched.
+    const otherHome = workspaceHome(def === 'erp' ? 'pos' : 'erp');
+    if (pathname === otherHome) router.replace(workspaceHome(def));
+  }, [enableWorkspaces, me.data, pathname, router]);
   const selectWorkspace = (w: Workspace) => {
     setWorkspace(w);
     if (typeof window !== 'undefined') localStorage.setItem(WORKSPACE_KEY, w);
+    router.push(workspaceHome(w));
   };
 
   React.useEffect(() => {
