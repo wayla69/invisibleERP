@@ -9,6 +9,7 @@ export const PERMISSIONS = [
   'cust_inventory', 'cust_pos', 'cust_bom', 'cust_variance', 'loyalty', 'survey',
   'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'marketing', 'track', 'ai_chat',
   'approvals', // Phase 15 — approval-workflow actions (my-approvals / act / delegations)
+  'branch',    // Multi-branch — manage outlets, consolidate branch sales, master-bundle for offline POS
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -22,7 +23,7 @@ export const MODULE_KEYS: Permission[] = [...PERMISSIONS];
 // PERM_GROUPS taxonomy (from the legacy User-Management page) — preserve the grouping for the admin UI.
 export const PERM_GROUPS: Record<string, Permission[]> = {
   'Customer Portal': ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track'],
-  'My Business': ['cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users'],
+  'My Business': ['cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
   'Sales & Orders': ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
   'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
@@ -36,7 +37,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Admin: [...PERMISSIONS],
   Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals'],
-  Customer: ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track', 'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users'],
+  Customer: ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track', 'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
   Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata'],
   Procurement: ['procurement', 'creditors', 'ar', 'delivery', 'masterdata', 'approvals'],
   Planner: ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'],
@@ -68,4 +69,5 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   cust_bom: '/bom', cust_variance: '/variance', loyalty: '/loyalty', survey: '/survey', track: '/track',
   cust_my_crm: '/my/customers', cust_my_suppliers: '/my/suppliers', cust_my_pos: '/my/purchase-orders', cust_my_users: '/my/users',
   approvals: '/approvals',
+  branch: '/branches',
 };

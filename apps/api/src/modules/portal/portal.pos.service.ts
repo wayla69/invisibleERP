@@ -3,7 +3,7 @@ import { sql, eq, ne, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
   custPosSales, custPosItems, customerInventory, custStockLog,
-  loyaltyConfig, loyaltyPoints, loyaltyTxn,
+  loyaltyConfig, loyaltyPoints, loyaltyTxn, branches,
 } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { ymd, n, fx } from '../../database/queries';
@@ -27,6 +27,7 @@ export interface PortalSaleDto {
   apply_pricing?: boolean;   // opt-in: fold pricing-engine rule discounts into the order discount
   channel?: string;
   party_size?: number;
+  branch_id?: number;        // multi-branch: tag the sale to an outlet (must belong to this tenant)
 }
 
 @Injectable()
@@ -47,10 +48,19 @@ export class PortalPosService {
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
   // opts.saleDate (offline sync) books the sale + its GL on the original offline day, not today.
-  async createSale(dto: PortalSaleDto, user: JwtUser, opts?: { saleDate?: string }) {
+  async createSale(dto: PortalSaleDto, user: JwtUser, opts?: { saleDate?: string; branchId?: number }) {
     const t = await this.portal.tenantId(user);
     const db = this.db as any;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการสินค้า' });
+
+    // multi-branch tag: validate the outlet belongs to this tenant (explicit tenant predicate even under
+    // Admin RLS-bypass) so a sale can't be mis-tagged to a foreign branch. NULL = untagged (backward-compat).
+    const branchId = opts?.branchId ?? dto.branch_id ?? null;
+    if (branchId != null) {
+      const [br] = await db.select({ id: branches.id }).from(branches)
+        .where(and(eq(branches.id, Number(branchId)), eq(branches.tenantId, t.id), eq(branches.active, true))).limit(1);
+      if (!br) throw new BadRequestException({ code: 'BRANCH_NOT_FOUND', message: `Branch ${branchId} not found for this tenant`, messageTh: 'ไม่พบสาขาของร้านนี้' });
+    }
 
     const lines = dto.items.map((it) => {
       const gross = n(it.qty) * n(it.unit_price);
@@ -94,7 +104,7 @@ export class PortalPosService {
 
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(custPosSales).values({
-        saleNo, saleDate: today, tenantId: t.id, subtotal: fx(subtotal, 2), discount: fx(discount, 2),
+        saleNo, saleDate: today, tenantId: t.id, branchId, subtotal: fx(subtotal, 2), discount: fx(discount, 2),
         taxAmount: fx(vat, 2), total: fx(total, 2), paymentMethod: dto.payment_method ?? 'Cash',
         pointsUsed: '0', pointsEarned: String(pointsEarned), status: 'Completed', notes: dto.notes ?? null, createdBy: user.username,
       }).returning({ id: custPosSales.id });
@@ -113,7 +123,7 @@ export class PortalPosService {
           const newStock = Math.max(0, n(inv.currentStock) - n(l.qty));
           await tx.update(customerInventory).set({ currentStock: String(newStock), lastUpdated: now }).where(eq(customerInventory.id, inv.id));
           await tx.insert(custStockLog).values({
-            tenantId: t.id, itemId: l.item_id, itemDescription: inv.itemDescription, logDate: now, logType: 'Sale',
+            tenantId: t.id, branchId, itemId: l.item_id, itemDescription: inv.itemDescription, logDate: now, logType: 'Sale',
             qtyChange: String(-n(l.qty)), balanceAfter: String(newStock), refDoc: saleNo, notes: null, createdBy: user.username,
           });
         }
@@ -172,7 +182,7 @@ export class PortalPosService {
     if (this.journal) { try { await this.journal.append({ doc_type: 'SALE', doc_no: saleNo, payload: { subtotal, discount, vat, total, lines: lines.length, payment_method: dto.payment_method ?? 'Cash' } }, ju); } catch { /* journal best-effort */ } }
     if (this.locking) { try { await this.locking.recomputeAvailability(); } catch { /* auto-86 best-effort */ } }
 
-    return { sale_no: saleNo, subtotal, discount, pricing_discount: pricingDiscount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
+    return { sale_no: saleNo, branch_id: branchId, subtotal, discount, pricing_discount: pricingDiscount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
   }
 
   // GET /api/portal/pos/sales — history (this tenant)

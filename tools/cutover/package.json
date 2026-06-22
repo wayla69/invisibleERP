@@ -42,6 +42,7 @@
     "giftcards": "tsx src/giftcards.ts",
     "receipts": "tsx src/receipts.ts",
     "offline-sync": "tsx src/offline-sync.ts",
+    "branch": "tsx src/branch.ts",
     "channel": "tsx src/channel.ts",
     "workflow": "tsx src/workflow.ts",
     "match": "tsx src/match.ts",

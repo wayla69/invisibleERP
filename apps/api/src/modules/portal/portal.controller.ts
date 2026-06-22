@@ -25,6 +25,7 @@ const SaleBody = z.object({
   apply_pricing: z.boolean().optional(),
   channel: z.string().optional(),
   party_size: z.number().int().optional(),
+  branch_id: z.number().int().positive().optional(),
 });
 
 const AddInventoryBody = z.object({
@@ -47,6 +48,7 @@ const VarianceBody = z.object({
 // so a single corrupt op fails on its own at processing time instead of 400-ing the whole batch.
 const OfflineSaleOp = z.object({
   client_uuid: z.string().min(1),
+  branch_id: z.number().int().positive().optional(),
   device_id: z.string().optional(),
   client_seq: z.number().int().nonnegative().optional(),
   captured_at: z.string().min(1),

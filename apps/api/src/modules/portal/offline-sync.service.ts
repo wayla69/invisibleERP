@@ -10,6 +10,7 @@ import { PortalPosService } from './portal.pos.service';
 
 export interface OfflineSaleOp {
   client_uuid: string;
+  branch_id?: number;             // multi-branch: outlet that queued this offline sale
   device_id?: string;
   client_seq?: number;
   captured_at: string;            // ISO — preserved verbatim
@@ -55,14 +56,14 @@ export class OfflineSyncService {
         const sale: any = await this.portalPos.createSale(
           { items: op.lines, discount: op.discount, payment_method: op.payment_method ?? 'Cash', notes: `offline ${op.device_id ?? ''}`.trim() },
           user,
-          { saleDate },
+          { saleDate, branchId: op.branch_id },
         );
         // upsert so a retry of a previously-'failed' op is PROMOTED to 'synced' (the unique key is (tenant,uuid))
         await db.insert(posOfflineSync).values({
-          tenantId: t.id, clientUuid: op.client_uuid, deviceId: op.device_id ?? null, status: 'synced',
+          tenantId: t.id, clientUuid: op.client_uuid, branchId: op.branch_id ?? null, deviceId: op.device_id ?? null, status: 'synced',
           saleNo: sale.sale_no, capturedAt: new Date(op.captured_at), clientSeq: op.client_seq ?? null,
           payloadHash: hashOp(op), createdBy: user.username,
-        }).onConflictDoUpdate({ target: [posOfflineSync.tenantId, posOfflineSync.clientUuid], set: { status: 'synced', saleNo: sale.sale_no, errorCode: null, errorMessage: null, syncedAt: new Date() } });
+        }).onConflictDoUpdate({ target: [posOfflineSync.tenantId, posOfflineSync.clientUuid], set: { status: 'synced', saleNo: sale.sale_no, branchId: op.branch_id ?? null, errorCode: null, errorMessage: null, syncedAt: new Date() } });
         return { client_uuid: op.client_uuid, status: 'synced' as const, sale_no: sale.sale_no, error: null };
       });
     } catch (e: any) {
@@ -71,7 +72,7 @@ export class OfflineSyncService {
       // Upsert (not DoNothing) so repeated transient failures bump attempts + keep the row replayable.
       await db.transaction(async () => {
         await db.insert(posOfflineSync).values({
-          tenantId: t.id, clientUuid: op.client_uuid, deviceId: op.device_id ?? null, status: 'failed', saleNo: null,
+          tenantId: t.id, clientUuid: op.client_uuid, branchId: op.branch_id ?? null, deviceId: op.device_id ?? null, status: 'failed', saleNo: null,
           capturedAt: new Date(op.captured_at), clientSeq: op.client_seq ?? null, payloadHash: hashOp(op),
           errorCode: code, errorMessage: String(e?.response?.message ?? e?.message ?? e), createdBy: user.username,
         }).onConflictDoUpdate({ target: [posOfflineSync.tenantId, posOfflineSync.clientUuid], set: { status: 'failed', errorCode: code, errorMessage: String(e?.response?.message ?? e?.message ?? e), attempts: sql`${posOfflineSync.attempts} + 1`, syncedAt: new Date() } });

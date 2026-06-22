@@ -45,6 +45,7 @@ export const custPosSales = pgTable('cust_pos_sales', {
   saleNo: text('sale_no').notNull().unique(), // SALE-{tenant4}-{ts}
   saleDate: date('sale_date'),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  branchId: bigint('branch_id', { mode: 'number' }), // multi-branch — which outlet rang this sale (NULL = untagged/HQ)
   subtotal: numeric('subtotal', { precision: 14, scale: 2 }),
   discount: numeric('discount', { precision: 14, scale: 2 }),
   taxAmount: numeric('tax_amount', { precision: 14, scale: 2 }), // VAT via TaxProvider
