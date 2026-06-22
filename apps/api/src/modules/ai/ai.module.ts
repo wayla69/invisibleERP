@@ -8,6 +8,11 @@ import { PosModule } from '../pos/pos.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { FinanceModule } from '../finance/finance.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { BiModule } from '../bi/bi.module';
+import { PipelineModule } from '../pipeline/pipeline.module';
+import { CpqModule } from '../cpq/cpq.module';
+import { ServiceModule } from '../service/service.module';
+import { ProfitabilityModule } from '../profitability/profitability.module';
 
 const ChatBody = z.object({ message: z.string().min(1), history: z.array(z.any()).optional(), agent_type: z.string().optional() });
 
@@ -61,7 +66,7 @@ export class AiController {
 }
 
 @Module({
-  imports: [PosModule, InventoryModule, FinanceModule, AnalyticsModule],
+  imports: [PosModule, InventoryModule, FinanceModule, AnalyticsModule, BiModule, PipelineModule, CpqModule, ServiceModule, ProfitabilityModule],
   controllers: [AiController],
   providers: [AgentService],
 })

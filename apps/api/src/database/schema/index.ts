@@ -38,3 +38,8 @@ export * from './costing';
 export * from './wms';
 export * from './crm';
 export * from './planning';
+export * from './consolidation';
+export * from './reconciliation';
+export * from './pipeline';
+export * from './cpq';
+export * from './service';

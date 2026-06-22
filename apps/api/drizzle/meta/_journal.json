@@ -260,6 +260,48 @@
       "when": 1782007973313,
       "tag": "0036_planning",
       "breakpoints": false
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1782007973314,
+      "tag": "0037_consolidation",
+      "breakpoints": false
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1782007973315,
+      "tag": "0038_recon_profitability",
+      "breakpoints": false
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1782007973316,
+      "tag": "0039_pipeline",
+      "breakpoints": false
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1782007973317,
+      "tag": "0040_cpq",
+      "breakpoints": false
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1782007973318,
+      "tag": "0041_service_subscriptions",
+      "breakpoints": false
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1782007973319,
+      "tag": "0042_bi",
+      "breakpoints": false
     }
   ]
 }

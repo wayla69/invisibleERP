@@ -1,0 +1,184 @@
+/**
+ * Phase 20 Batch 1B — Financial Consolidation over PGlite.
+ * Multi-entity GL roll-up, IC elimination, NCI (minority interest).
+ *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover consolidation
+ */
+import 'reflect-metadata';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'consol-secret';
+process.env.NODE_ENV = 'test';
+
+import { Test } from '@nestjs/testing';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { eq } from 'drizzle-orm';
+import { resolve, join } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import * as s from '../../../apps/api/dist/database/schema/index';
+import { AppModule } from '../../../apps/api/dist/app.module';
+import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
+import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
+import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
+import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
+
+const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
+const checks: { name: string; ok: boolean; detail?: string }[] = [];
+const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
+const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+
+async function main() {
+  const pg = await PGlite.create();
+  for (const f of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort())
+    await pg.exec(readFileSync(join(MIGRATIONS_DIR, f), 'utf8').replace(/-->\s*statement-breakpoint/g, ''));
+  const db: any = drizzle(pg, { schema: s });
+  const pw = new PasswordService();
+
+  await db.insert(s.permissions).values(PERMISSIONS.map((k: string) => ({ key: k }))).onConflictDoNothing();
+  for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
+    await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
+  await db.insert(s.tenants).values([
+    { code: 'HQ', name: 'Head Office' },
+    { code: 'T1', name: 'Sub 1' },
+    { code: 'T2', name: 'Sub 2 (80%)' },
+  ]).onConflictDoNothing();
+  const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
+  const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+  ]).onConflictDoNothing();
+
+  const ref = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ maxParamLength: 500 }));
+  app.useGlobalFilters(new AllExceptionsFilter());
+  await app.init();
+  await app.getHttpAdapter().getInstance().ready();
+  await app.get(LedgerService).seedChartOfAccounts();
+
+  const inj = async (m: string, url: string, token?: string, payload?: any) => {
+    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
+    let json: any = {}; try { json = res.json(); } catch { /**/ }
+    return { status: res.statusCode, json };
+  };
+  const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
+  const admin = await login('admin', 'admin123');
+
+  // ── Seed GL for T1: Revenue 5000, Expense 3000 → net income 2000 ──
+  await db.insert(s.journalEntries).values({ entryNo: 'JE-T1-001', entryDate: '2026-01-10', period: '2026-01', memo: 'T1 Jan', source: 'Manual', tenantId: t1, status: 'Posted' }).onConflictDoNothing();
+  const [jeT1] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, 'JE-T1-001'));
+  await db.insert(s.journalLines).values([
+    { entryId: Number(jeT1.id), accountCode: '1000', debit: '5000', credit: '0', tenantId: t1 },
+    { entryId: Number(jeT1.id), accountCode: '4000', debit: '0', credit: '5000', tenantId: t1 },
+    { entryId: Number(jeT1.id), accountCode: '5100', debit: '3000', credit: '0', tenantId: t1 },
+    { entryId: Number(jeT1.id), accountCode: '2000', debit: '0', credit: '3000', tenantId: t1 },
+  ]).onConflictDoNothing();
+
+  // ── Seed GL for T2: Revenue 4000, Expense 2500 → net income 1500 ──
+  await db.insert(s.journalEntries).values({ entryNo: 'JE-T2-001', entryDate: '2026-01-10', period: '2026-01', memo: 'T2 Jan', source: 'Manual', tenantId: t2, status: 'Posted' }).onConflictDoNothing();
+  const [jeT2] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, 'JE-T2-001'));
+  await db.insert(s.journalLines).values([
+    { entryId: Number(jeT2.id), accountCode: '1000', debit: '4000', credit: '0', tenantId: t2 },
+    { entryId: Number(jeT2.id), accountCode: '4000', debit: '0', credit: '4000', tenantId: t2 },
+    { entryId: Number(jeT2.id), accountCode: '5100', debit: '2500', credit: '0', tenantId: t2 },
+    { entryId: Number(jeT2.id), accountCode: '2000', debit: '0', credit: '2500', tenantId: t2 },
+  ]).onConflictDoNothing();
+
+  // ── Seed IC transaction T1→T2, amount=1000 (creates 1150/2150 entries) ──
+  await db.insert(s.icTransactions).values({
+    icNo: 'IC-20260110-001', tenantId: t1, fromTenantId: t1, toTenantId: t2,
+    txnDate: '2026-01-10', amount: '1000', settledAmount: '0', currency: 'THB',
+    category: 'shared-cost', status: 'Open',
+  }).onConflictDoNothing();
+  // Seed the 1150/2150 GL lines manually (since we're bypassing the full IC service)
+  await db.insert(s.journalEntries).values({ entryNo: 'JE-IC-001', entryDate: '2026-01-10', period: '2026-01', memo: 'IC from T1', source: 'IC', tenantId: t1, status: 'Posted' }).onConflictDoNothing();
+  const [jeIcFrom] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, 'JE-IC-001'));
+  await db.insert(s.journalLines).values([
+    { entryId: Number(jeIcFrom.id), accountCode: '1150', debit: '1000', credit: '0', tenantId: t1 },
+    { entryId: Number(jeIcFrom.id), accountCode: '5100', debit: '0', credit: '1000', tenantId: t1 },
+  ]).onConflictDoNothing();
+  await db.insert(s.journalEntries).values({ entryNo: 'JE-IC-002', entryDate: '2026-01-10', period: '2026-01', memo: 'IC to T2', source: 'IC', tenantId: t2, status: 'Posted' }).onConflictDoNothing();
+  const [jeIcTo] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, 'JE-IC-002'));
+  await db.insert(s.journalLines).values([
+    { entryId: Number(jeIcTo.id), accountCode: '5100', debit: '1000', credit: '0', tenantId: t2 },
+    { entryId: Number(jeIcTo.id), accountCode: '2150', debit: '0', credit: '1000', tenantId: t2 },
+  ]).onConflictDoNothing();
+
+  // ── Checks ──
+
+  // 1. Create consolidation group
+  const grp = await inj('POST', '/api/consolidation/groups', admin, { name: 'Oshinei Group 2026', fiscal_year: 2026 });
+  ok('Create group → has id + name', grp.status === 201 && grp.json.id > 0 && grp.json.name === 'Oshinei Group 2026', JSON.stringify(grp.json));
+  const groupId = grp.json.id;
+
+  // 2. Add T1 entity (100% ownership)
+  const addT1 = await inj('POST', `/api/consolidation/groups/${groupId}/entities`, admin, { entity_tenant_id: t1, ownership_pct: 100 });
+  ok('Add T1 entity (100% owned)', addT1.status === 201 && Number(addT1.json.entity_tenant_id) === t1, JSON.stringify(addT1.json));
+
+  // 3. Add T2 entity (80% ownership)
+  const addT2 = await inj('POST', `/api/consolidation/groups/${groupId}/entities`, admin, { entity_tenant_id: t2, ownership_pct: 80 });
+  ok('Add T2 entity (80% owned)', addT2.status === 201 && near(addT2.json.ownership_pct, 80), JSON.stringify(addT2.json));
+
+  // 4. List entities → 2 active
+  const ents = await inj('GET', `/api/consolidation/groups/${groupId}/entities`, admin);
+  ok('List entities → 2 active', ents.json.entities?.length === 2, JSON.stringify(ents.json));
+
+  // 5. Non-admin cannot create group
+  const other = await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' });
+  // We only have admin user; test that POST without token returns 401
+  const unauth = await inj('POST', '/api/consolidation/groups', undefined, { name: 'X', fiscal_year: 2026 });
+  ok('Unauthenticated request → 401', unauth.status === 401, `status=${unauth.status}`);
+
+  // 6. Run consolidation for 2026-01
+  const run = await inj('POST', `/api/consolidation/groups/${groupId}/run`, admin, { period: '2026-01' });
+  ok('Run consolidation → status Final', run.status === 200 && run.json.status === 'Final', JSON.stringify(run.json));
+  const runId = run.json.run_id;
+
+  // 7. Entity count = 2
+  ok('Run covers 2 entities', run.json.entity_count === 2, `count=${run.json.entity_count}`);
+
+  // 8. IC elimination found (1 ic transaction seeded)
+  ok('IC elimination detected (1 transaction)', run.json.ic_eliminations === 1, `eliminations=${run.json.ic_eliminations}`);
+
+  // 9. Run lines include Entity lines for 4000 (revenue)
+  const lines = await inj('GET', `/api/consolidation/runs/${runId}/lines`, admin);
+  ok('Get run lines → has lines', lines.json.lines?.length > 0, `lines=${lines.json.lines?.length}`);
+  const entityLines = lines.json.lines.filter((l: any) => l.line_type === 'Entity' && l.account_code === '4000');
+  ok('Entity lines exist for 4000 (revenue)', entityLines.length === 2, `4000 entity lines=${entityLines.length}`);
+
+  // 10. Consolidated 4000 revenue = -9000 (T1=-5000 + T2=-4000; net = debit-credit = 0-9000)
+  const consol = run.json.consolidated_accounts.find((a: any) => a.account_code === '4000');
+  ok('Consolidated revenue 4000 = -9000', near(consol?.net_thb, -9000), `net=${consol?.net_thb}`);
+
+  // 11. Elimination lines for 1150 and 2150 both present
+  const elimLines = lines.json.lines.filter((l: any) => l.line_type === 'Elimination');
+  const elim1150 = elimLines.find((l: any) => l.account_code === '1150');
+  const elim2150 = elimLines.find((l: any) => l.account_code === '2150');
+  ok('Elimination line for 1150 (Due-From) exists', !!elim1150, JSON.stringify(elim1150));
+  ok('Elimination line for 2150 (Due-To) exists', !!elim2150, JSON.stringify(elim2150));
+
+  // 12. NCI line for T2 (20% of net income = 20% of 1500 = 300) — T2 net income from GL seeded above
+  // T2 GL: 4000 net = -4000, 5100 net = 3500 (2500 expense + 1000 IC debit)
+  // plNetSum_T2 = (-4000) + 3500 = -500; netIncome_T2 = -(-500) = 500; NCI = 20% * 500 = 100
+  const nciLine = lines.json.lines.find((l: any) => l.line_type === 'NCI');
+  ok('NCI line for T2 exists in run (3300)', !!nciLine && nciLine.account_code === '3300', JSON.stringify(nciLine));
+
+  // 13. List runs → 1 run with status Final
+  const runs = await inj('GET', `/api/consolidation/groups/${groupId}/runs`, admin);
+  ok('List runs → 1 run, status Final', runs.json.runs?.length === 1 && runs.json.runs[0].status === 'Final', JSON.stringify(runs.json));
+
+  // 14. List groups → 1 group
+  const groups = await inj('GET', '/api/consolidation/groups', admin);
+  ok('List groups → 1 group', groups.json.groups?.length === 1, `count=${groups.json.groups?.length}`);
+
+  await app.close();
+}
+
+main().catch((e) => { console.error(e); process.exit(1); }).finally(() => {
+  const pass = checks.filter((c) => c.ok).length;
+  const fail = checks.filter((c) => !c.ok).length;
+  console.log(`\n${'─'.repeat(60)}`);
+  for (const c of checks) console.log(`${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
+  console.log(`${'─'.repeat(60)}\n${pass}/${checks.length} passed${fail ? ` (${fail} failed)` : ' 🎉'}`);
+  if (fail) process.exit(1);
+});

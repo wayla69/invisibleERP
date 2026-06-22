@@ -1,8 +1,13 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { PosService } from '../pos/pos.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { BiService } from '../bi/bi.service';
+import { PipelineService } from '../pipeline/pipeline.service';
+import { CpqService } from '../cpq/cpq.service';
+import { ServiceService } from '../service/service.service';
+import { ProfitabilityService } from '../profitability/profitability.service';
 import type { JwtUser } from '../../common/decorators';
 
 // port จาก agents/base_agent.py + erp_agent.py
@@ -25,6 +30,19 @@ const TOOLS = [
   { name: 'get_kpi_dashboard', description: 'KPI การเงิน (MTD/YTD, AR/AP)', input_schema: { type: 'object', properties: {} } },
   { name: 'get_accounts_payable', description: 'รายการเจ้าหนี้ค้างชำระ', input_schema: { type: 'object', properties: {} } },
   { name: 'get_replenishment_list', description: 'รายการสินค้าที่ควรสั่งซื้อ (forecast)', input_schema: { type: 'object', properties: { limit: { type: 'number' } } } },
+  // Phase 20 — BI
+  { name: 'get_kpi_board', description: 'KPI board รวม: ยอดขาย MTD/YTD, AR/AP, pipeline (real-time)', input_schema: { type: 'object', properties: {} } },
+  { name: 'get_sales_cube', description: 'วิเคราะห์ยอดขายตามช่วงเวลา (day/week/month)', input_schema: { type: 'object', properties: { period: { type: 'string', enum: ['day','week','month'] }, months: { type: 'number' } } } },
+  { name: 'get_finance_trend', description: 'แนวโน้ม P&L รายเดือน (revenue/expense/gross profit)', input_schema: { type: 'object', properties: { months: { type: 'number' } } } },
+  // Phase 20 — Pipeline
+  { name: 'get_pipeline_forecast', description: 'พยากรณ์ sales pipeline แบ่งตาม stage + weighted value', input_schema: { type: 'object', properties: {} } },
+  { name: 'list_open_opportunities', description: 'รายการ opportunity ที่ยังเปิดอยู่', input_schema: { type: 'object', properties: { limit: { type: 'number' } } } },
+  // Phase 20 — CPQ
+  { name: 'get_open_quotes', description: 'ใบเสนอราคาที่รอการตอบรับ (Sent)', input_schema: { type: 'object', properties: {} } },
+  // Phase 20 — Service
+  { name: 'get_sla_breaches', description: 'SLA event ที่ถูก breach (response หรือ resolution เกินกำหนด)', input_schema: { type: 'object', properties: {} } },
+  // Phase 20 — Profitability
+  { name: 'get_profitability_report', description: 'รายงาน contribution margin ต่อ segment', input_schema: { type: 'object', properties: { run_id: { type: 'number' } } } },
 ];
 
 @Injectable()
@@ -34,6 +52,11 @@ export class AgentService {
     private readonly inv: InventoryService,
     private readonly fin: FinanceService,
     private readonly analytics: AnalyticsService,
+    @Optional() private readonly bi: BiService,
+    @Optional() private readonly pipeline: PipelineService,
+    @Optional() private readonly cpq: CpqService,
+    @Optional() private readonly svc: ServiceService,
+    @Optional() private readonly profitability: ProfitabilityService,
   ) {}
 
   private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
@@ -59,7 +82,7 @@ export class AgentService {
         const toolResults: any[] = [];
         for (const block of res.content as any[]) {
           if (block.type === 'tool_use') {
-            const out = await this.exec(block.name, block.input);
+            const out = await this.exec(block.name, block.input, _user);
             toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(out) });
           }
         }
@@ -132,7 +155,7 @@ export class AgentService {
         const toolResults: any[] = [];
         for (const block of final.content as any[]) {
           if (block.type === 'tool_use') {
-            const out = await this.exec(block.name, block.input);
+            const out = await this.exec(block.name, block.input, _user);
             toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(out) });
           }
         }
@@ -155,7 +178,8 @@ export class AgentService {
     yield { done: true, reply };
   }
 
-  private async exec(name: string, input: any): Promise<any> {
+  private async exec(name: string, input: any, _user?: JwtUser): Promise<any> {
+    const user = _user as JwtUser;
     try {
       switch (name) {
         case 'get_sales_summary': return await this.pos.summary(input.start_date, input.end_date);
@@ -166,6 +190,26 @@ export class AgentService {
         case 'get_kpi_dashboard': return await this.fin.kpi();
         case 'get_accounts_payable': return await this.fin.ap('Unpaid', 50, 0);
         case 'get_replenishment_list': return await this.analytics.replenishmentList(input.limit ?? 10);
+        // Phase 20 tools
+        case 'get_kpi_board': return this.bi ? await this.bi.kpiBoard(user) : { error: 'BI module unavailable' };
+        case 'get_sales_cube': return this.bi ? await this.bi.salesCube({ period: input.period ?? 'month', months: input.months ?? 3 }, user) : { error: 'BI module unavailable' };
+        case 'get_finance_trend': return this.bi ? await this.bi.financeTrend({ months: input.months ?? 6 }, user) : { error: 'BI module unavailable' };
+        case 'get_pipeline_forecast': return this.pipeline ? await this.pipeline.forecast(user) : { error: 'Pipeline module unavailable' };
+        case 'list_open_opportunities': { const r = this.pipeline ? await this.pipeline.listOpportunities({ status: 'Open' }, user) : { opportunities: [], count: 0 }; return { ...r, opportunities: (r as any).opportunities?.slice(0, input.limit ?? 10) }; }
+        case 'get_open_quotes': return this.cpq ? await this.cpq.listQuotes({ status: 'Sent' }, user) : { error: 'CPQ module unavailable' };
+        case 'get_sla_breaches': {
+          if (!this.svc) return { error: 'Service module unavailable' };
+          const contracts = await this.svc.listContracts(user);
+          const breaches: any[] = [];
+          for (const c of (contracts as any).contracts ?? []) {
+            const evts = await this.svc.listEvents(c.id);
+            for (const e of (evts as any).events ?? []) {
+              if (e.response_breached || e.resolution_breached) breaches.push({ contract: c.contract_no, ...e });
+            }
+          }
+          return { breaches, count: breaches.length };
+        }
+        case 'get_profitability_report': return this.profitability ? await this.profitability.profitabilityReport({ run_id: input.run_id }, user) : { error: 'Profitability module unavailable' };
         default: return { error: `unknown tool ${name}` };
       }
     } catch (e: any) {

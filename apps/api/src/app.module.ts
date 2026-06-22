@@ -46,6 +46,13 @@ import { CostingModule } from './modules/costing/costing.module';
 import { WmsModule } from './modules/wms/wms.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { PlanningModule } from './modules/planning/planning.module';
+import { ConsolidationModule } from './modules/consolidation/consolidation.module';
+import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
+import { ProfitabilityModule } from './modules/profitability/profitability.module';
+import { PipelineModule } from './modules/pipeline/pipeline.module';
+import { CpqModule } from './modules/cpq/cpq.module';
+import { ServiceModule } from './modules/service/service.module';
+import { BiModule } from './modules/bi/bi.module';
 
 @Module({
   imports: [
@@ -92,6 +99,13 @@ import { PlanningModule } from './modules/planning/planning.module';
     WmsModule,
     CrmModule,
     PlanningModule,
+    ConsolidationModule,
+    ReconciliationModule,
+    ProfitabilityModule,
+    PipelineModule,
+    CpqModule,
+    ServiceModule,
+    BiModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions
