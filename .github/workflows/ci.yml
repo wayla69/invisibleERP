@@ -59,3 +59,75 @@ jobs:
         run: pnpm --filter @ierp/cutover taxdocs
       - name: Restaurant POS (dine-in, KDS, tables, QR pay)
         run: pnpm --filter @ierp/cutover restaurant
+      - name: COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability)
+        run: pnpm --filter @ierp/cutover compliance
+
+  # ITGC vulnerability management: dependency advisories + secret scanning. Evidence for the IT auditor /
+  # IPO security review. The dependency audit is a HARD GATE at --audit-level high: any NEW high/critical
+  # advisory fails the build. Known, triaged advisories are accepted via auditConfig.ignoreGhsas in
+  # pnpm-workspace.yaml and documented in compliance/vulnerability-triage.md (re-reviewed quarterly).
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks scans full history
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Dependency audit (fails on new high/critical; triaged items in vulnerability-triage.md)
+        run: pnpm audit --audit-level high
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # SAST — CodeQL static analysis for JavaScript/TypeScript.
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
+  # Web UI smoke (Playwright) — exercises interactions build/unit checks can't, e.g. the ERP/POS
+  # workspace switcher (toggle, role-based landing redirect, localStorage persistence, menu filtering).
+  # The backend is stubbed in the specs, so no API/DB is needed; the config builds + serves the web app.
+  web-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build shared (web build dependency)
+        run: pnpm --filter @ierp/shared build
+      - name: Install Playwright browser
+        run: pnpm --filter @ierp/web exec playwright install --with-deps chromium
+      - name: Web E2E smoke (ERP/POS workspace switcher)
+        run: pnpm --filter @ierp/web test:e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7

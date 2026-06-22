@@ -1,0 +1,20 @@
+# UAT — Cycle 10: Customer Portal (Self-Serve)
+
+**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `01-order-to-cash.md` (REV-03, REV-07), `08-itgc.md` (RLS); harness `tools/cutover/src/worldclass.ts`, `returns.ts`, `wms.ts`. Endpoints under `/api/portal`.
+
+Result legend: Pass / Fail / Blocked / N/A / Not Run. VAT = 7%. Error codes/amounts are exact.
+
+| Test ID | Scenario/Title | Role | Preconditions | Test steps | Test data | Expected result | Priority | Type | Traceability | Result | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| UAT-POR-001 | Customer login | Customer | Customer cust1 (T1) | 1. `POST /api/login`. | `{username: cust1, password: pw1}` | 200; token; role Customer. | High | Positive | ITGC-AC-01 | Not Run | worldclass.ts |
+| UAT-POR-002 | Portal shows only own inventory (RLS) | Customer | cust1→T1 item A, cust2→T2 item B | 1. `GET /api/portal/inventory` as cust1. 2. as cust2. | bearers cust1/cust2 | cust1 sees only A; cust2 sees only B. | High | Control | ITGC-AC (RLS) | Not Run | worldclass.ts |
+| UAT-POR-003 | Self-serve POS sale with VAT 7% | Customer | item A=50, loyalty 1pt/baht | 1. `POST /api/portal/pos/sales` qty 2. | `{items:[{item_id:A, qty:2, unit_price:50}]}` | 201; `total`=107, `vat`=7; `payment_no` PAY-, `journal_no` JE-. | High | Positive | REV-03, GL-01 | Not Run | worldclass.ts |
+| UAT-POR-004 | Loyalty points accrue on sale | Customer | loyalty enabled | 1. Place portal sale. 2. Check points balance. | sale total 107 | Points accrued per `pointsPerBaht` (1/baht). | Med | Positive | REV-03 | Not Run | worldclass.ts |
+| UAT-POR-005 | Portal sale wires GL + payment | Customer | — | 1. Place sale. 2. Verify journal + payment created. | — | Sale links a `JE-` journal and a `PAY-` payment (Captured). | High | Positive | REV-06, GL-01 | Not Run | worldclass.ts |
+| UAT-POR-006 | Portal sale links to open till | Customer | PosSupervisor opened a till | 1. PosSupervisor `POST /api/payments/till/open` float 100. 2. cust2 portal cash sale. 3. close till. | sale 1×B@50 → 53.5 | Cash linked to till; on close `expected_cash`=100 after full refund nets to 0. | Med | Control | REV-11 | Not Run | worldclass.ts |
+| UAT-POR-007 | Portal sale → full POS return + restock | Customer + ReturnsClerk | Portal sale 2×A (total 214) | 1. cust1 sale qty 2. 2. ReturnsClerk `POST /api/pos/returns` full. | `{sale_no, items:[{item_id:A, qty:2}]}` | RTN-/REF- 214; stock restocked; GL reversal balanced. | Med | Positive | REV-09 | Not Run | returns.ts |
+| UAT-POR-008 | RMA from portal sale → credit | Customer + WarehouseOperator | Portal sale captured | 1. cust portal sale. 2. `POST /api/rma`, `/receive`, `/restock`. | `{sale_no, lines:[{item_id:A, qty:1}]}` | restock +1 to bin; ReturnsService `return_no`; status `Credited`. | Med | Positive | REV-07 | Not Run | wms.ts |
+| UAT-POR-009 | RLS — customer cannot see another tenant's sale | Customer (T2) | T1 sale exists | 1. cust2 attempts to view/return T1 sale. | bearer cust2 | 404 NOT_FOUND / not visible. | High | Control | ITGC-AC (RLS) | Not Run | returns.ts |
+| UAT-POR-010 | Over-return guard on portal sale | ReturnsClerk | Portal sale qty 2 | 1. `POST /api/pos/returns` qty 3. | `{items:[{item_id:A, qty:3}]}` | 400 `OVER_RETURN`. | Med | Control | REV-09 | Not Run | returns.ts |
+| UAT-POR-011 | Billing plans listed (public) | (public) | Plans seeded | 1. `GET /api/billing/plans`. | — | 200; array of plans. | Low | Positive | RPT | Not Run | worldclass.ts |
+| UAT-POR-012 | Portal sale respects credit hold/limit | Customer | customer on hold or near limit | 1. Place sale exceeding limit / on hold. | `<<over-limit / held customer>>` | 409 `CREDIT_LIMIT` or `CREDIT_HOLD`. | High | Control | REV-08 | Not Run | compliance.ts |
