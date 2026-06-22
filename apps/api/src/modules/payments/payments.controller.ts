@@ -35,62 +35,63 @@ const CashMovementBody = z.object({ type: z.enum(['paid_in', 'paid_out', 'drop']
 export class PaymentsController {
   constructor(private readonly svc: PaymentService) {}
 
-  @Post() @Permissions('pos', 'cust_pos', 'ar')
+  // Granular SoD sub-permissions: selling vs refund/void vs till are separable. Legacy holders of the
+  // coarse 'pos' permission still pass (it implies pos_sell/pos_refund/pos_till); a single-duty Cashier
+  // (pos_sell only) can tender but cannot refund/void or reconcile the drawer.
+  @Post() @Permissions('pos_sell', 'cust_pos', 'ar')
   tender(@Body(new ZodValidationPipe(TenderBody)) b: RecordTenderDto, @CurrentUser() u: JwtUser) {
     return this.svc.recordTender(b, u);
   }
 
-  // Destructive / drawer ops are STAFF-only — 'cust_pos' is a customer-portal permission and must not
-  // reach refunds, voids, settlement, or till management (only tendering/QR/list stay customer-reachable).
-  @Post('refunds') @Permissions('pos', 'ar')
+  @Post('refunds') @Permissions('pos_refund', 'ar')
   refund(@Body(new ZodValidationPipe(RefundBody)) b: RefundDto, @CurrentUser() u: JwtUser) {
     return this.svc.refund(b, u);
   }
 
-  @Patch(':no/void') @Permissions('pos', 'ar')
+  @Patch(':no/void') @Permissions('pos_refund', 'ar')
   void(@Param('no') no: string, @CurrentUser() u: JwtUser) {
     return this.svc.voidPayment(no, u);
   }
 
   // confirm an async tender (PromptPay/Authorized → Captured) once settlement is observed
-  @Patch(':no/settle') @Permissions('pos', 'ar')
+  @Patch(':no/settle') @Permissions('pos_sell', 'ar')
   settle(@Param('no') no: string, @CurrentUser() u: JwtUser) {
     return this.svc.settle(no, u);
   }
 
-  @Post('till/open') @Permissions('pos', 'ar')
+  @Post('till/open') @Permissions('pos_till', 'ar')
   openTill(@Body(new ZodValidationPipe(OpenTillBody)) b: OpenTillDto, @CurrentUser() u: JwtUser) {
     return this.svc.openTill(b, u);
   }
 
-  @Post('till/close') @Permissions('pos', 'ar')
+  @Post('till/close') @Permissions('pos_till', 'ar')
   closeTill(@Body(new ZodValidationPipe(CloseTillBody)) b: CloseTillDto, @CurrentUser() u: JwtUser) {
     return this.svc.closeTill(b, u);
   }
 
-  @Get() @Permissions('pos', 'cust_pos', 'ar')
+  @Get() @Permissions('pos_sell', 'cust_pos', 'ar')
   list(@Query('sale_no') saleNo: string) {
     return this.svc.listPaymentsForSale(saleNo);
   }
 
   // scannable PromptPay QR for the tenant (before a tender is recorded) — POS shows it to the customer
-  @Get('promptpay-qr') @Permissions('pos', 'cust_pos', 'ar')
+  @Get('promptpay-qr') @Permissions('pos_sell', 'cust_pos', 'ar')
   promptPayQr(@Query('amount') amount: string, @CurrentUser() u: JwtUser) {
     return this.svc.promptPayQr(qnum('amount', amount), u);
   }
 
-  // ── cash management: drawer movements + X/Z shift report (staff-only) ──
-  @Post('till/:id/cash-movement') @Permissions('pos', 'ar')
+  // ── cash management: drawer movements + X/Z shift report (till duty: pos_till) ──
+  @Post('till/:id/cash-movement') @Permissions('pos_till', 'ar')
   cashMovement(@Param('id') id: string, @Body(new ZodValidationPipe(CashMovementBody)) b: CashMovementDto, @CurrentUser() u: JwtUser) {
     return this.svc.recordCashMovement(Number(id), b, u);
   }
 
-  @Get('till/:id/x-report') @Permissions('pos', 'ar')
+  @Get('till/:id/x-report') @Permissions('pos_till', 'ar')
   xReport(@Param('id') id: string, @CurrentUser() u: JwtUser) {
     return this.svc.xReport(Number(id), u);
   }
 
-  @Get('till/:id/z-report') @Permissions('pos', 'ar')
+  @Get('till/:id/z-report') @Permissions('pos_till', 'ar')
   zReport(@Param('id') id: string, @CurrentUser() u: JwtUser) {
     return this.svc.zReport(Number(id), u);
   }

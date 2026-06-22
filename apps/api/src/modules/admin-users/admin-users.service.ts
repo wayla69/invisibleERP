@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users, userPermissions, tenants } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
+import { resolvePermissions, detectSodConflicts, SOD_RULES, type Role, type Permission } from '@ierp/shared';
 import type { JwtUser } from '../../common/decorators';
 
 export interface CreateUserDto { username: string; password: string; role: string; customer_name?: string; permissions?: string[] }
@@ -65,6 +66,42 @@ export class AdminUsersService {
     const hash = await this.passwords.hash(newPassword);
     await db.update(users).set({ passwordHash: hash, mustChangePassword: true }).where(eq(users.id, u.id));
     return { username, reset: true };
+  }
+
+  // Detective SoD control (ITGC-AC-09): report every user holding duties on both sides of a conflict rule,
+  // evaluated on their EFFECTIVE permissions (role defaults + per-user overrides, expanded). Admins are
+  // reported separately as inherent superusers (expected, mitigated by compensating controls).
+  async sodConflicts() {
+    const db = this.db as any;
+    const us = await db.select({ id: users.id, username: users.username, role: users.role }).from(users).orderBy(users.username);
+    const ups = await db.select({ userId: userPermissions.userId, perm: userPermissions.perm }).from(userPermissions);
+    const byUser = new Map<number, string[]>();
+    for (const r of ups) {
+      const k = Number(r.userId);
+      const arr = byUser.get(k) ?? [];
+      arr.push(r.perm);
+      byUser.set(k, arr);
+    }
+    const evaluated = us.map((u: any) => {
+      const overrides = byUser.get(Number(u.id)) ?? [];
+      const effective = resolvePermissions(u.role as Role, overrides.length ? (overrides as Permission[]) : null);
+      const conflicts = detectSodConflicts(effective);
+      return { username: u.username, role: u.role, inherent: u.role === 'Admin', conflict_count: conflicts.length, conflicts };
+    });
+    const flagged = evaluated.filter((x: any) => x.conflict_count > 0 && !x.inherent);
+    const byRule: Record<string, number> = {};
+    for (const x of flagged) for (const c of x.conflicts) byRule[c.ruleId] = (byRule[c.ruleId] ?? 0) + 1;
+    return {
+      report: 'Segregation-of-Duties conflict report (per-user effective permissions)',
+      rules: SOD_RULES.map((r) => ({ id: r.id, duty_a: r.dutyA, duty_b: r.dutyB, severity: r.severity })),
+      summary: {
+        total_users: evaluated.length,
+        users_with_conflicts: flagged.length,
+        admins_inherent: evaluated.filter((x: any) => x.inherent).length,
+        by_rule: byRule,
+      },
+      users: evaluated,
+    };
   }
 
   async remove(username: string, actor: JwtUser) {

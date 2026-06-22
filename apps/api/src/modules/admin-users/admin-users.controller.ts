@@ -15,6 +15,8 @@ export class AdminUsersController {
   constructor(private readonly svc: AdminUsersService) {}
 
   @Get() list() { return this.svc.list(); }
+  // Detective SoD report (Admin-only via class-level @Permissions('users')) — feeds the quarterly UAR.
+  @Get('sod/conflicts') sodConflicts() { return this.svc.sodConflicts(); }
   @Post() create(@Body(new ZodValidationPipe(CreateBody)) b: z.infer<typeof CreateBody>) { return this.svc.create(b); }
   @Patch(':username') update(@Param('username') u: string, @Body(new ZodValidationPipe(UpdateBody)) b: z.infer<typeof UpdateBody>) { return this.svc.update(u, b); }
   @Post(':username/reset-password') reset(@Param('username') u: string, @Body(new ZodValidationPipe(ResetBody)) b: z.infer<typeof ResetBody>) { return this.svc.resetPassword(u, b.password); }

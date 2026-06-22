@@ -57,6 +57,7 @@ export class LedgerController {
 
   // post a GAAP-divergent adjustment to ONE ledger (e.g. tax-depreciation delta)
   @Post('ledgers/:code/adjustment')
+  @Permissions('gl_post', 'creditors', 'ar')
   adjustment(@Param('code') code: string, @Body(new ZodValidationPipe(JournalBody)) b: JournalBodyT, @CurrentUser() u: JwtUser) {
     return this.svc.postAdjustment(code, { date: b.date, source: b.source ?? 'GAAP-ADJ', sourceRef: b.source_ref, tenantId: hqTenant(u, b.tenant_id) ?? null, currency: b.currency, memo: b.memo, lines: b.lines, createdBy: u.username });
   }
@@ -74,6 +75,7 @@ export class LedgerController {
   journal(@Query('limit') limit?: string) { return this.svc.listJournal(qint('limit', limit, 50)); }
 
   @Post('journal')
+  @Permissions('gl_post', 'creditors', 'ar')
   postJournal(@Body(new ZodValidationPipe(JournalBody)) b: JournalBodyT, @CurrentUser() u: JwtUser) {
     return this.svc.postEntry({
       date: b.date,
@@ -99,23 +101,24 @@ export class LedgerController {
   @Get('periods')
   periods(@Query('tenant_id') tenantId?: string) { return this.svc.listPeriods(tenantId ? Number(tenantId) : undefined); }
 
-  // Fiscal-period close/open and year-end close are restricted to 'exec' (finance) — a clerk with only
-  // AR/AP/creditors must not be able to close the books (the controller default would otherwise allow it).
+  // Fiscal-period close/open and year-end close are the 'gl_close' duty — segregated from journal POSTING
+  // ('gl_post', above). A JE preparer cannot also close the books (resolves SoD rule R05). Legacy 'exec'
+  // holders still pass (exec implies gl_close); a single-duty GL Accountant (gl_post only) does not.
   @Post('periods/:period/close')
-  @Permissions('exec')
+  @Permissions('gl_close')
   closePeriod(@Param('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closePeriod(period, hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
 
   @Post('periods/:period/open')
-  @Permissions('exec')
+  @Permissions('gl_close')
   openPeriod(@Param('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.openPeriod(period, hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
 
   @Post('close-year')
-  @Permissions('exec')
+  @Permissions('gl_close')
   closeYear(@Query('fiscal_year') fy: string, @Query('ledger') ledger: string | undefined, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username, ledger || undefined, hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
 
   // ── Opening balances (cutover from a prior system) → one balanced JE, idempotent on batch_ref ──
   @Post('opening-balances')
-  @Permissions('exec', 'creditors', 'ar')
+  @Permissions('gl_post', 'creditors', 'ar')
   openingBalances(@Body(new ZodValidationPipe(OpeningBalancesBody)) b: OpeningBalancesBody, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
     return this.svc.postOpeningBalances(b.rows, b.batch_ref, u.username, hqTenant(u, tenantId ? Number(tenantId) : undefined));
   }

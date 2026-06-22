@@ -18,8 +18,10 @@ export class ReconciliationController {
     return this.svc.listPeriods(user);
   }
 
+  // Reconciliation PREPARATION (open/import/add/auto-match) = 'recon_prep' duty; CERTIFY = 'approvals'.
+  // Preparer must differ from certifier (SoD rule R06). Legacy 'exec' implies recon_prep (back-compat).
   @Post('periods')
-  @Permissions('exec')
+  @Permissions('recon_prep')
   openPeriod(@Body(new ZodValidationPipe(OpenPeriodBody)) dto: z.infer<typeof OpenPeriodBody>, @CurrentUser() user: JwtUser) {
     return this.svc.openPeriod(dto, user);
   }
@@ -31,20 +33,20 @@ export class ReconciliationController {
   }
 
   @Post('periods/:id/import-gl')
-  @Permissions('exec')
+  @Permissions('recon_prep')
   @HttpCode(200)
   importGl(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
     return this.svc.importGlItems(id, user);
   }
 
   @Post('periods/:id/items')
-  @Permissions('exec')
+  @Permissions('recon_prep')
   addItem(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(AddItemBody)) dto: z.infer<typeof AddItemBody>, @CurrentUser() user: JwtUser) {
     return this.svc.addItem(id, dto, user);
   }
 
   @Post('periods/:id/auto-match')
-  @Permissions('exec')
+  @Permissions('recon_prep')
   @HttpCode(200)
   autoMatch(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
     return this.svc.autoMatch(id, user);
