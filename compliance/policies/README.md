@@ -18,6 +18,7 @@
 | 10 | Incident Response | `10-incident-response-policy.md` | ITGC-OP-03 | DevOps / CISO | Annual + after each incident |
 | 11 | Financial Close & Reporting | `11-financial-close-policy.md` | GL-01..06 | Controller | Each period |
 | 12 | Third-Party / Vendor Management | `12-third-party-vendor-management-policy.md` | EXP-02, OP, sub-service orgs | Procurement / CFO | Annual |
+| 13 | Segregation of Duties | `13-segregation-of-duties-policy.md` | ITGC-AC-09, R01–R13 | Controller / IT Security | Annual + quarterly review |
 
 **Document control convention (every policy):** Policy ID · Owner · Approver · Version · Effective date · Last reviewed · Review cadence · Related RCM controls · Revision history table.
 

@@ -78,7 +78,7 @@ pnpm --filter @ierp/cutover compliance      # tools/cutover/src/compliance.ts �
 | **GL period-lock** | Posting into a **closed** fiscal period is rejected (`PERIOD_CLOSED`). |
 | **RLS isolation** | A tenant-2 finance user cannot see tenant-1 journal entries or balances. |
 
-**Vulnerability management (new):** `ci.yml` now runs a `security` job (dependency advisories via `pnpm audit`, secret scanning via gitleaks) and a `codeql` SAST job — evidence for the IT-audit / IPO security review. The dependency audit currently surfaces advisories informationally; tighten it to a hard gate (and triage the open high/critical findings) before fieldwork.
+**Vulnerability management (new):** `ci.yml` runs a `security` job and a `codeql` SAST job. The dependency audit is a **hard gate** (`pnpm audit --audit-level high`): any *new* high/critical advisory fails the build. The current high/criticals are triaged in **`compliance/vulnerability-triage.md`** — `lodash`/`tmp` were patched via safe overrides; the remaining 16 (dev-only tooling, or the fastify-5/Nest-11/drizzle-0.45 ecosystem upgrades) are accepted under documented remediation via `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml`. Re-review quarterly. Secret scanning (gitleaks) runs on full history.
 
 > **Status reconciliation (done):** GL-05, ITGC-AC-06, ITGC-AC-08, ITGC-AC-09 and ITGC-AC-10 are **implemented in code and evidenced by the harness above**. `build_rcm.py` has been updated to score them *Implemented* (with code + harness references) and they have been removed from the Gap Remediation tab; `Oshinei_ERP_SOX_RCM_v1.xlsx` was regenerated. The remediation backlog in §3 lists only the controls that remain genuinely open.
 
@@ -192,6 +192,7 @@ Auditors weight the "tone at the top." **DRAFT templates now exist in `complianc
 | Incident Response | `policies/10-incident-response-policy.md` | ITGC-OP-03 |
 | Financial Close & Reporting (close calendar) | `policies/11-financial-close-policy.md` | GL-06 |
 | Third-Party / Vendor & Sub-Service Orgs (SOC reports) | `policies/12-third-party-vendor-management-policy.md` | EXP-02, sub-service reliance |
+| Segregation of Duties (rules R01–R13) | `policies/13-segregation-of-duties-policy.md` | ITGC-AC-09 |
 
 ---
 
@@ -204,6 +205,7 @@ Stand up a single, access-controlled evidence repository, organized by control I
 | **Access** | User-access listing (user × role × permission export); quarterly UAR sign-offs; joiner/mover/leaver tickets; MFA-enforcement screenshots; secrets-vault config |
 | **SoD** | `Oshinei_ERP_SoD_Matrix_v1.xlsx`; `GET /api/admin/sod/conflicts` output over time; preventive-block audit-log samples |
 | **Change Mgmt** | Sample PRs with reviewer + ticket ID; CI run logs; deploy-approval records (deployer ≠ author) |
+| **Vuln mgmt** | CI `security`/`codeql` run logs; `vulnerability-triage.md` (quarterly); pen-test report |
 | **Operations** | Backup schedules + **restore-test** results; DR/BCP test report; batch-job monitoring/alert evidence |
 | **Revenue/AR** | Walkthrough of order→invoice→receipt→GL; credit-hold examples; document-numbering uniqueness proof |
 | **Expenditure/AP** | PR→PO→GR→3-way-match→payment sample; approval thresholds evidence |

@@ -63,8 +63,9 @@ jobs:
         run: pnpm --filter @ierp/cutover compliance
 
   # ITGC vulnerability management: dependency advisories + secret scanning. Evidence for the IT auditor /
-  # IPO security review. Dependency audit is informational for now (continue-on-error) so a new upstream
-  # advisory doesn't block unrelated work; tighten to a hard gate (--audit-level high) before fieldwork.
+  # IPO security review. The dependency audit is a HARD GATE at --audit-level high: any NEW high/critical
+  # advisory fails the build. Known, triaged advisories are accepted via auditConfig.ignoreGhsas in
+  # pnpm-workspace.yaml and documented in compliance/vulnerability-triage.md (re-reviewed quarterly).
   security:
     runs-on: ubuntu-latest
     steps:
@@ -79,9 +80,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Dependency audit (advisories)
+      - name: Dependency audit (fails on new high/critical; triaged items in vulnerability-triage.md)
         run: pnpm audit --audit-level high
-        continue-on-error: true
       - name: Secret scanning (gitleaks)
         uses: gitleaks/gitleaks-action@v2
         env:
