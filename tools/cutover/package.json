@@ -5,6 +5,8 @@
   "description": "Phase 6 — e2e (in-process Nest over PGlite), parallel-run shadow diff, reconcile gate",
   "scripts": {
     "e2e": "tsx src/e2e.ts",
+    "pos-p1": "tsx src/pos-p1.ts",
+    "pos-p2": "tsx src/pos-p2.ts",
     "module-qr": "tsx src/module-qr.ts",
     "stock-ops": "tsx src/stock-ops.ts",
     "gaps": "tsx src/gaps.ts",
