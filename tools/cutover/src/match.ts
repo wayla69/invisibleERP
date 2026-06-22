@@ -26,6 +26,7 @@ const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+const truthy = (v: any) => v === true || v === 't' || v === 'true' || v === 1; // pg boolean coercion (PGlite/raw)
 
 async function main() {
   const pg = await PGlite.create();
@@ -37,12 +38,23 @@ async function main() {
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง' }]).onConflictDoNothing();
-  const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง' }, { code: 'T2', name: 'ร้านสอง' }]).onConflictDoNothing();
+  const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
+  const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    // non-Admin (RLS-scoped) procurement users — Procurement role carries both procurement + masterdata
+    { username: 'procT1', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },
+    { username: 'procT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },
+  ]).onConflictDoNothing();
   await db.insert(s.items).values({ itemId: 'X', itemDescription: 'วัตถุดิบ X', uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
+  // V1 = legacy shared master (tenant_id NULL). Seeded via the raw superuser db so RLS WITH CHECK is bypassed.
   const [v1] = await db.insert(s.vendors).values({ name: 'ผู้ขาย V1', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
   const V1 = Number(v1.id);
+  // per-tenant owned vendors for the isolation assertions (section M)
+  const [va] = await db.insert(s.vendors).values({ tenantId: t1, name: 'ผู้ขายของ T1', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
+  const [vb] = await db.insert(s.vendors).values({ tenantId: t2, name: 'ผู้ขายของ T2', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
+  const VA = Number(va.id), VB = Number(vb.id);
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -55,7 +67,10 @@ async function main() {
     let json: any = {}; try { json = res.json(); } catch { /* */ }
     return { status: res.statusCode, json };
   };
-  const admin = await (async () => (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token as string)();
+  const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
+  const admin = await login('admin', 'admin123');
+  const procT1 = await login('procT1', 'pw'); // RLS-scoped to t1
+  const procT2 = await login('procT2', 'pw'); // RLS-scoped to t2
   const apTxn = async (amount: number) => (await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: V1, txn_type: 'Goods', amount })).json.txn_no as string;
   const payAttempt = (txnNo: string, amount: number) => inj('PATCH', `/api/finance/ap/transactions/${txnNo}/pay`, admin, { amount });
   const runMatch = (txnNo: string, poNo: string, lines: any[]) => inj('POST', '/api/procurement/match/run', admin, { txn_no: txnNo, po_no: poNo, lines });
@@ -148,6 +163,31 @@ async function main() {
   await runMatch(ap5, poNo, [{ item_id: 'X', qty: 100, unit_price: 12 }]); // re-match → must RESET override
   const pay5 = await payAttempt(ap5, 1200);
   ok('Override cleared by re-match → still-failing invoice BLOCKED again (409)', pay5.status === 409 && pay5.json.error?.code === 'MATCH_BLOCKED', `${pay5.status} ${pay5.json.error?.code}`);
+
+  // ── M. multi-tenant vendor isolation (vendors gap fix — adversarial-verify follow-up) ──
+  // (a) cross-tenant MUTATION blocked: T1 tries to blocklist T2's vendor → 404, and the row is untouched.
+  const crossMut = await inj('PATCH', `/api/procurement/suppliers/${VB}/status`, procT1, { blocklisted: true, reason: 'sabotage' });
+  const vbAfter = (await pg.query(`SELECT blocklisted FROM vendors WHERE id=${VB}`)).rows as any[];
+  ok('Tenant A cannot mutate tenant B vendor (404, row untouched)', crossMut.status === 404 && !truthy(vbAfter[0]?.blocklisted), `st=${crossMut.status} blk=${vbAfter[0]?.blocklisted}`);
+
+  // (b) DoS closed: T2 blocklists its OWN vendor → ok; T1's createPo for ITS OWN vendor still succeeds.
+  const ownBlock = await inj('PATCH', `/api/procurement/suppliers/${VB}/status`, procT2, { blocklisted: true, reason: 'คุณภาพต่ำ' });
+  const vbOwn = (await pg.query(`SELECT blocklisted FROM vendors WHERE id=${VB}`)).rows as any[];
+  const t1Po = await inj('POST', '/api/procurement/pos', procT1, { vendor_id: VA, items: [{ item_id: 'X', order_qty: 3, unit_price: 10 }] });
+  ok("Tenant B blocklists own vendor → ok; tenant A's PO for its own vendor still succeeds (no cross-tenant DoS)",
+    ownBlock.status === 200 && truthy(vbOwn[0]?.blocklisted) && (t1Po.status === 200 || t1Po.status === 201) && /^PO-/.test(t1Po.json.po_no ?? ''),
+    `block=${ownBlock.status} blk=${vbOwn[0]?.blocklisted} po=${t1Po.status}`);
+
+  // (c) cross-tenant VISIBILITY blocked: an RLS-scoped read as T1 cannot see T2's vendor; the shared (NULL) master still can.
+  const t1Sees = await pg.transaction(async (tx: any) => {
+    await tx.query('SET LOCAL ROLE app_user');
+    await tx.query(`SELECT set_config('app.bypass_rls','off',true)`);
+    await tx.query(`SELECT set_config('app.tenant_id',$1,true)`, [String(t1)]);
+    const foreign = await tx.query(`SELECT id FROM vendors WHERE id=$1`, [VB]); // T2's vendor → hidden
+    const shared = await tx.query(`SELECT id FROM vendors WHERE id=$1`, [V1]);  // legacy shared → visible
+    return { foreign: foreign.rows.length, shared: shared.rows.length };
+  });
+  ok('RLS: tenant A cannot SEE tenant B vendor, but the shared (NULL) master stays visible', t1Sees.foreign === 0 && t1Sees.shared === 1, JSON.stringify(t1Sees));
 
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

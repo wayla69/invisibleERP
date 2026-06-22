@@ -239,6 +239,13 @@
       "when": 1782007973310,
       "tag": "0033_wms",
       "breakpoints": false
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782007973311,
+      "tag": "0034_vendor_tenant",
+      "breakpoints": false
     }
   ]
 }
