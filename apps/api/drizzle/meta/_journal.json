@@ -351,6 +351,13 @@
       "when": 1782130000000,
       "tag": "0049_tenant_promptpay",
       "breakpoints": false
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1782140000000,
+      "tag": "0050_manufacturing",
+      "breakpoints": false
     }
   ]
 }

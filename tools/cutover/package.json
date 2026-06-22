@@ -14,6 +14,7 @@
     "onboarding": "tsx src/onboarding.ts",
     "opening-balances": "tsx src/opening-balances.ts",
     "payroll": "tsx src/payroll.ts",
+    "manufacturing": "tsx src/manufacturing.ts",
     "promptpay": "tsx src/promptpay.ts",
     "etax": "tsx src/etax.ts",
     "etax-email": "tsx src/etax-email.ts",

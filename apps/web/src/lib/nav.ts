@@ -25,6 +25,7 @@ import {
   FileSpreadsheet,
   FileText,
   FlaskConical,
+  Factory,
   Goal,
   Landmark,
   Layers,
@@ -110,6 +111,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ต้นทุนสินค้า', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
       { label: 'เติมสต๊อกอัตโนมัติ', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
       { label: 'สูตรการผลิต (BoM)', href: '/bom', icon: FlaskConical, perms: ['bom_master'] },
+      { label: 'ใบสั่งผลิต (Manufacturing)', href: '/manufacturing', icon: Factory, perms: ['bom_master', 'warehouse'] },
     ],
   },
   {
