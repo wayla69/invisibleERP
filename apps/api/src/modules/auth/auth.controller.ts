@@ -1,12 +1,25 @@
 import { Body, Controller, Get, Post, HttpCode } from '@nestjs/common';
+import { z } from 'zod';
 import { LoginRequest, type LoginResponse, type AuthUser } from '@ierp/shared';
 import { Public, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AuthService } from './auth.service';
 
+const ChangePasswordBody = z.object({
+  current_password: z.string().min(1),
+  new_password: z.string().min(8),
+});
+type ChangePasswordBody = z.infer<typeof ChangePasswordBody>;
+
 @Controller('api')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
+
+  @Post('auth/change-password')
+  @HttpCode(200)
+  changePassword(@Body(new ZodValidationPipe(ChangePasswordBody)) b: ChangePasswordBody, @CurrentUser() user: JwtUser) {
+    return this.auth.changePassword(user.username, b.current_password, b.new_password);
+  }
 
   @Public()
   @Post('login')

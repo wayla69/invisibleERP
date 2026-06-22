@@ -14,6 +14,7 @@ export const LoginResponse = z.object({
   username: z.string(),
   role: z.enum(ROLES),
   customer_name: z.string().nullable(),
+  must_change_password: z.boolean().optional(),
 });
 export type LoginResponse = z.infer<typeof LoginResponse>;
 
@@ -22,6 +23,7 @@ export const AuthUser = z.object({
   role: z.enum(ROLES),
   customer_name: z.string().nullable(),
   permissions: z.array(z.string()),
+  must_change_password: z.boolean().optional(),
 });
 export type AuthUser = z.infer<typeof AuthUser>;
 

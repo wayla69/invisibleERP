@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq } from 'drizzle-orm';
 import { resolvePermissions, type Role, type LoginResponse, type AuthUser } from '@ierp/shared';
@@ -39,10 +39,26 @@ export class AuthService {
     const perms = resolvePermissions(role, overrides.length ? overrides : null);
 
     const token = await this.jwt.signAsync({ sub: username, role, customerName, tenantId: row.tenantId ?? null, permissions: perms });
-    return { token, username, role, customer_name: customerName };
+    return { token, username, role, customer_name: customerName, must_change_password: !!row.mustChangePassword };
   }
 
   async me(user: AuthUser): Promise<AuthUser> {
-    return user;
+    const [row] = await this.db.select({ m: users.mustChangePassword }).from(users).where(eq(users.username, user.username)).limit(1);
+    return { ...user, must_change_password: !!row?.m };
+  }
+
+  // A5 — rotate password (verify current, set new, clear the force-change flag). Min 8 chars.
+  async changePassword(username: string, currentPassword: string, newPassword: string): Promise<{ ok: true }> {
+    if (!newPassword || newPassword.length < 8)
+      throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'New password must be at least 8 characters', messageTh: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร' });
+    const [row] = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
+    if (!row) throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'User not found' });
+    const { ok } = await this.passwords.verify(currentPassword, row.passwordHash);
+    if (!ok) throw new BadRequestException({ code: 'BAD_CURRENT_PASSWORD', message: 'Current password is incorrect', messageTh: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' });
+    if (currentPassword === newPassword)
+      throw new BadRequestException({ code: 'SAME_PASSWORD', message: 'New password must differ from current', messageTh: 'รหัสผ่านใหม่ต้องต่างจากเดิม' });
+    const hash = await this.passwords.hash(newPassword);
+    await this.db.update(users).set({ passwordHash: hash, mustChangePassword: false }).where(eq(users.id, row.id));
+    return { ok: true };
   }
 }

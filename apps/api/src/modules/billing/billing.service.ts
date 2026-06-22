@@ -1,8 +1,10 @@
-import { Inject, Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, ConflictException, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { plans, subscriptions, tenants, users } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
+import { LedgerService } from '../ledger/ledger.service';
+import { ymd } from '../../database/queries';
 
 export interface SignupDto {
   company_name: string;
@@ -11,6 +13,11 @@ export interface SignupDto {
   admin_password: string;
   email: string;
   plan_code?: string;
+  // optional tax identity (the setup wizard can fill these later via PATCH /api/tenant/profile)
+  legal_name?: string;
+  tax_id?: string;
+  vat_registered?: boolean;
+  vat_rate?: number;
 }
 
 interface PlanSeed {
@@ -35,6 +42,7 @@ export class BillingService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly password: PasswordService,
+    @Optional() private readonly ledger?: LedgerService, // optional so hand-constructed test instances still work
   ) {}
 
   // ───────────────────── Seed (idempotent — run at startup) ─────────────────────
@@ -90,6 +98,11 @@ export class BillingService {
     const tenant = await db.transaction(async (tx: any) => {
       const [t] = await tx.insert(tenants).values({
         code, name: dto.company_name, contactName: username, email: dto.email,
+        // tax identity — legalName defaults to the company name; the rest the setup wizard completes
+        legalName: dto.legal_name ?? dto.company_name,
+        taxId: dto.tax_id ?? null,
+        vatRegistered: dto.vat_registered ?? false,
+        vatRate: dto.vat_rate != null ? String(dto.vat_rate) : '0.0700',
       }).returning({ id: tenants.id, code: tenants.code, name: tenants.name });
 
       await tx.insert(users).values({
@@ -103,6 +116,9 @@ export class BillingService {
       return t;
     });
 
+    // provision the current fiscal year's periods so the new tenant can post immediately (A4)
+    if (this.ledger) await this.ledger.provisionFiscalYear(Number(ymd().slice(0, 4)), Number(tenant.id));
+
     return {
       tenant_id: Number(tenant.id),
       tenant_code: tenant.code,
@@ -110,6 +126,7 @@ export class BillingService {
       admin_username: username,
       plan: planCode,
       trial_ends_at: trialEndsAt.toISOString(),
+      fiscal_year_provisioned: Number(ymd().slice(0, 4)),
     };
   }
 

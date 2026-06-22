@@ -1,5 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { tenants } from '../../database/schema';
 import {
   type TaxProvider,
   type TaxInput,
@@ -56,7 +58,7 @@ export class TaxService {
     const currency = getCurrency(input?.currency).code;
     const net = Number(input?.net) || 0;
     const provider = this.resolveProvider(country);
-    const { rate, tax, label } = provider.calc({ net, category: input?.category, date: input?.date, currency });
+    const { rate, tax, label } = provider.calc({ net, category: input?.category, date: input?.date, currency, rate: input?.rate });
     return {
       country,
       net: roundCurrency(net, currency),
@@ -70,13 +72,46 @@ export class TaxService {
 
   // VAT-inclusive back-out: a gross amount (price incl. VAT) → { net, tax, gross }.
   // Used by abbreviated tax invoices (ม.86/6) and AR amounts stored VAT-inclusive. tax = gross×rate/(1+rate).
-  calcInclusive(input: { gross: number; country?: string; currency?: string }): { country: string; rate: number; net: number; tax: number; gross: number; currency: string } {
+  calcInclusive(input: { gross: number; country?: string; currency?: string; rate?: number }): { country: string; rate: number; net: number; tax: number; gross: number; currency: string } {
     const country = (input?.country || 'TH').toUpperCase();
     const currency = getCurrency(input?.currency).code;
     const gross = Number(input?.gross) || 0;
-    const { rate } = this.resolveProvider(country).calc({ net: 0, currency });
+    const { rate } = this.resolveProvider(country).calc({ net: 0, currency, rate: input?.rate });
     const tax = roundCurrency((gross * rate) / (1 + rate), currency);
     return { country, rate, net: roundCurrency(gross - tax, currency), tax, gross: roundCurrency(gross, currency), currency };
+  }
+
+  // ── Per-tenant VAT (0044) ──
+  // Resolve a tenant's configured rate + country (cached) and apply it. Defaults to TH 7% when the
+  // tenant or columns are absent, so callers that don't yet pass a tenant are unchanged.
+  private readonly tenantTaxCache = new Map<number, { rate: number; country: string }>();
+
+  async tenantTaxConfig(tenantId: number): Promise<{ rate: number; country: string }> {
+    const hit = this.tenantTaxCache.get(tenantId);
+    if (hit) return hit;
+    let cfg = { rate: 0.07, country: 'TH' };
+    if (this.db) {
+      const [t] = await (this.db as any).select({ vatRate: tenants.vatRate, taxCountry: tenants.taxCountry })
+        .from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+      if (t) cfg = { rate: t.vatRate != null ? Number(t.vatRate) : 0.07, country: (t.taxCountry || 'TH').toUpperCase() };
+    }
+    this.tenantTaxCache.set(tenantId, cfg);
+    return cfg;
+  }
+
+  // call after a tenant's vat_rate/tax_country changes (e.g. setup wizard) to drop the stale cache entry
+  invalidateTenantTax(tenantId: number): void {
+    this.tenantTaxCache.delete(tenantId);
+  }
+
+  async calcTaxForTenant(tenantId: number, input: CalcTaxInput): Promise<CalcTaxResult> {
+    const { rate, country } = await this.tenantTaxConfig(tenantId);
+    return this.calcTax({ ...input, rate: input?.rate ?? rate, country: input?.country ?? country });
+  }
+
+  async calcInclusiveForTenant(tenantId: number, input: { gross: number; currency?: string }): Promise<{ country: string; rate: number; net: number; tax: number; gross: number; currency: string }> {
+    const { rate, country } = await this.tenantTaxConfig(tenantId);
+    return this.calcInclusive({ ...input, rate, country });
   }
 
   // Currency catalogue passthrough (for the /currencies endpoint).

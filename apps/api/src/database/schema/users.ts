@@ -11,6 +11,7 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(), // argon2/scrypt; legacy sha256 verified+rehashed on login
   role: roleEnum('role').notNull().default('Sales'), // เดิม PG default 'Staff' (bug) → แก้เป็น Sales
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  mustChangePassword: boolean('must_change_password').default(false), // A5 — force rotate default/weak password
   mfaEnabled: boolean('mfa_enabled').default(false), // move #7 — TOTP
   totpSecret: text('totp_secret'),
   ssoSubject: text('sso_subject'), // OIDC/SAML subject for SSO users

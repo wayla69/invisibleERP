@@ -20,6 +20,8 @@ export const tenants = pgTable('tenants', {
   branchLabelTh: text('branch_label_th').default('สำนักงานใหญ่'),
   vatRegistered: boolean('vat_registered').default(false),         // เฉพาะผู้จด VAT จึงออกใบกำกับภาษีได้
   vatRegDate: date('vat_reg_date'),
+  vatRate: numeric('vat_rate', { precision: 6, scale: 4 }).default('0.0700'), // per-tenant VAT (0044) — TH 7% default
+  taxCountry: text('tax_country').default('TH'),                    // ISO-3166 alpha-2 for TaxService provider
   addressLine1: text('address_line1'),
   addressLine2: text('address_line2'),
   subDistrict: text('sub_district'),                              // ตำบล/แขวง

@@ -360,6 +360,13 @@ export class LedgerService {
   async closePeriod(period: string, tenantId?: number | null) { return this.setPeriodStatus(period, 'Closed', tenantId); }
   async openPeriod(period: string, tenantId?: number | null) { return this.setPeriodStatus(period, 'Open', tenantId); }
 
+  // Provision all 12 (Open) periods of a fiscal year for a tenant — called at signup so a new tenant
+  // can post immediately into the current year. Idempotent.
+  async provisionFiscalYear(year: number, tenantId: number) {
+    for (let m = 1; m <= 12; m++) await this.ensurePeriod(`${year}-${String(m).padStart(2, '0')}`, tenantId);
+    return { year, tenant_id: tenantId, provisioned: 12 };
+  }
+
   // Year-end close: post a closing journal zeroing Revenue & Expense into 3100 Retained Earnings,
   // then close all 12 months. Idempotent (skips if FY already closed).
   async closeYear(fiscalYear: number, createdBy: string, ledgerCode: string = LEADING, tenantId?: number | null) {

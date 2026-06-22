@@ -11,6 +11,7 @@ export interface TaxInput {
   category?: string; // optional product/service category (for category-specific rates)
   date?: string; // optional YYYY-MM-DD effective date (for rate changes over time)
   currency?: string; // ISO-4217 (default 'THB') — controls minor-unit rounding of tax (JPY=0dp)
+  rate?: number; // optional per-tenant rate override (decimal, 0.07 = 7%) — provider default if omitted
 }
 
 export interface TaxResult {
@@ -24,16 +25,16 @@ export interface TaxProvider {
   calc(input: TaxInput): TaxResult;
 }
 
-// Thailand — standard 7% VAT.
+// Thailand — standard 7% VAT, or a per-tenant override rate when provided.
 export class ThaiTaxProvider implements TaxProvider {
   readonly country = 'TH';
   private readonly rate = 0.07;
-  private readonly label = 'VAT 7%';
 
   calc(input: TaxInput): TaxResult {
     const net = Number(input?.net) || 0;
     const currency = input?.currency ?? 'THB';
-    return { rate: this.rate, tax: roundCurrency(net * this.rate, currency), label: this.label };
+    const rate = input?.rate != null && input.rate >= 0 ? input.rate : this.rate;
+    return { rate, tax: roundCurrency(net * rate, currency), label: `VAT ${+(rate * 100).toFixed(2)}%` };
   }
 }
 

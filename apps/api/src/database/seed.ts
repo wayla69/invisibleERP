@@ -52,7 +52,7 @@ async function main() {
   const hash = await pw.hash('admin123');
   await db
     .insert(schema.users)
-    .values({ username: 'admin', passwordHash: hash, role: 'Admin', tenantId: hq?.id })
+    .values({ username: 'admin', passwordHash: hash, role: 'Admin', tenantId: hq?.id, mustChangePassword: true })
     .onConflictDoNothing();
 
   console.log('✅ Seed complete: permissions, role_permissions, tenant HQ, admin user (admin/admin123 — change it!)');

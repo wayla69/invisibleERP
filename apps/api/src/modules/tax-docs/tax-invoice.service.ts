@@ -56,7 +56,7 @@ export class TaxInvoiceService {
     const [head] = await db.insert(taxInvoices).values({
       tenantId: Number(sale.tenantId), docNo, type: 'abbreviated', issueDate: ymd(),
       sourceType: 'POS', sourceRef: saleNo, ...sellerSnapshot(seller),
-      subtotal: fx(subtotal, 2), discount: fx(n(sale.discount), 2), vatRate: '0.0700',
+      subtotal: fx(subtotal, 2), discount: fx(n(sale.discount), 2), vatRate: fx(n(seller.vatRate ?? 0.07), 4),
       vatAmount: fx(vat, 2), grandTotal: fx(total, 2), isVatInclusive: true,
       createdBy: user.username,
     }).returning({ id: taxInvoices.id });
@@ -92,7 +92,7 @@ export class TaxInvoiceService {
       const [inv] = await db.select().from(arInvoices).where(eq(arInvoices.invoiceNo, dto.source_ref)).limit(1);
       if (!inv) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AR invoice not found', messageTh: 'ไม่พบใบแจ้งหนี้' });
       tenantId = Number(inv.tenantId);
-      const inc = this.tax.calcInclusive({ gross: n(inv.amount), country: 'TH', currency: inv.currency ?? 'THB' }); // AR amount = VAT-inclusive
+      const inc = await this.tax.calcInclusiveForTenant(tenantId, { gross: n(inv.amount), currency: inv.currency ?? 'THB' }); // AR amount = VAT-inclusive, tenant rate
       subtotal = inc.net; vat = inc.tax; total = inc.gross;
       lines = [{ lineNo: 1, itemId: null, description: `สินค้า/บริการตามใบแจ้งหนี้ ${dto.source_ref}`, qty: 1, uom: null, unitPrice: subtotal, discount: 0, amount: subtotal }];
     }
@@ -104,7 +104,7 @@ export class TaxInvoiceService {
       tenantId, docNo, type: 'full', issueDate: ymd(), sourceType: dto.source_type, sourceRef: dto.source_ref,
       ...sellerSnapshot(seller),
       buyerName: dto.buyer.name, buyerTaxId: dto.buyer.tax_id ?? null, buyerBranchCode: dto.buyer.branch_code ?? null, buyerAddress: dto.buyer.address,
-      subtotal: fx(subtotal, 2), vatRate: '0.0700', vatAmount: fx(vat, 2), grandTotal: fx(total, 2), isVatInclusive: false,
+      subtotal: fx(subtotal, 2), vatRate: fx(n(seller.vatRate ?? 0.07), 4), vatAmount: fx(vat, 2), grandTotal: fx(total, 2), isVatInclusive: false,
       bookNo: dto.book_no ?? null, notes: dto.notes ?? null, createdBy: user.username,
     }).returning({ id: taxInvoices.id });
     await this.insertLines(Number(head.id), tenantId, lines);

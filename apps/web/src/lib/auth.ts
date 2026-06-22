@@ -8,6 +8,7 @@ export interface Me {
   role: string;
   customer_name: string | null;
   permissions: string[];
+  must_change_password?: boolean;
 }
 
 export function useMe() {

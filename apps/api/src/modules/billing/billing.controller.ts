@@ -11,6 +11,10 @@ const SignupBody = z.object({
   admin_password: z.string().min(8),
   email: z.string().email(),
   plan_code: z.string().optional(),
+  legal_name: z.string().optional(),
+  tax_id: z.string().optional(),
+  vat_registered: z.boolean().optional(),
+  vat_rate: z.number().optional(),
 });
 
 const CheckoutBody = z.object({ plan_code: z.string().min(1) });

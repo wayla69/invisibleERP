@@ -63,6 +63,11 @@ export function AppShell({
     if (typeof window !== 'undefined' && !getToken()) router.replace('/login');
   }, [router]);
 
+  // A5 — force a default/weak password change before any back-office use
+  React.useEffect(() => {
+    if (me.data?.must_change_password) router.replace('/change-password');
+  }, [me.data?.must_change_password, router]);
+
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {

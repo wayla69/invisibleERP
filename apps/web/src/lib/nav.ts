@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowLeftRight,
+  BadgeCheck,
   BarChart3,
   Banknote,
   BookOpen,
@@ -143,6 +144,7 @@ export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'ระบบ',
     items: [
+      { label: 'ตั้งค่ากิจการ', href: '/setup', icon: BadgeCheck, perms: ['users'] },
       { label: 'แพ็กเกจ', href: '/billing', icon: CreditCard, perms: ['users'] },
       { label: 'ตั้งค่า', href: '/settings', icon: Settings, perms: ['users'] },
     ],
