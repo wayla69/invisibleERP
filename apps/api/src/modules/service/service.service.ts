@@ -223,7 +223,7 @@ export class ServiceService {
       }
     }
 
-    return { invoices_created: invoiceValues.length, serviceSubscriptions_billed: dueSubs.length, gl_entries_posted: posted };
+    return { invoices_created: invoiceValues.length, subscriptions_billed: dueSubs.length, gl_entries_posted: posted };
   }
 
   async payInvoice(invoiceId: number, user: JwtUser) {
@@ -256,7 +256,7 @@ export class ServiceService {
   async listSubscriptions(user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select().from(serviceSubscriptions).where(eq(serviceSubscriptions.tenantId, user.tenantId!)).orderBy(sql`${serviceSubscriptions.id} DESC`);
-    return { serviceSubscriptions: rows.map((s: any) => this.fmtSub(s)), count: rows.length };
+    return { subscriptions: rows.map((s: any) => this.fmtSub(s)), count: rows.length };
   }
 
   // ── Helpers ──
