@@ -139,6 +139,11 @@ flowchart TD
 - Sales-to-GL posting exceptions (target: 0 unposted/unbalanced).
 - AR days sales outstanding (DSO); AR aging > `<<n>>` days.
 
+> **Monitoring access:** Store-level shift KPIs are surfaced on the **POS home dashboard** (`/pos-home`,
+> in the POS workspace) via the read-only endpoints `GET /api/pos/summary`, `/sessions`, `/orders`. These
+> reads are available to POS operators (`pos_sell`/`pos_till`) as well as `pos`/`dashboard` holders;
+> transacting still requires the respective write permissions (least-privilege).
+
 ## 13. Exception & error handling
 
 | Error code | Trigger | Handling |
@@ -155,3 +160,4 @@ flowchart TD
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.1.1 DRAFT | 2026-06-22 | `<<author>>` | Note POS home dashboard + read-only shift-KPI access for POS operators (`pos_sell`/`pos_till`). |

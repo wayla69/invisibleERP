@@ -129,6 +129,34 @@ Common starting points by role:
 
 [screenshot: main app shell with side navigation]
 
+### Workspaces — ERP and POS
+
+The back office is split into two **workspaces**, chosen with the **ERP | POS toggle** at the top of the
+side menu:
+
+- **POS** — front-of-house / store operations: the POS till, tables, kitchen display (KDS), menu, POS
+  control (park/approve), card terminals & shift totals, delivery channels, loyalty, branches.
+- **ERP** — back office: procurement, inventory & warehouse, finance & general ledger, payroll, tax,
+  manufacturing, planning, CRM, and administration.
+
+Switching workspace only changes which menu groups are shown — it does **not** change your permissions.
+A few items used by both (price & promotions, loyalty, branches, e-Tax/fiscal, approvals, AI, settings)
+appear in **both** workspaces.
+
+- **Where you land:** you start in the workspace that matches your role — front-line POS staff (e.g.
+  Cashier, POS Supervisor) land in **POS**; back-office and dual-role users (and Admin) land in **ERP**.
+  Your last choice is remembered.
+- **Each workspace has its own home dashboard:** **ERP → `/dashboard`** (business/finance overview) and
+  **POS → `/pos-home`** (store overview — today's sales, bill count, average ticket, top items, sales by
+  payment method, open tills, and recent bills). Switching workspace takes you to its home.
+- **Search is global:** the command palette searches every screen you can access, regardless of the
+  active workspace.
+
+[screenshot: ERP/POS workspace switcher in the sidebar header]
+
+> **Note:** The **Customer Portal** (`/portal/...`) is a separate experience for customer/shop users and
+> is not part of the ERP/POS toggle.
+
 ---
 
 ## 5. Switching language

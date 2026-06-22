@@ -8,6 +8,25 @@ and opening / closing the cash drawer with the Z-report.
 
 ---
 
+## 0. The POS home (store overview)
+
+**Screen:** `/pos-home` · **Required permission:** `pos`, `pos_sell`, `pos_till`, or `dashboard`
+
+When you are in the **POS workspace** (see *Getting Started → Workspaces*), your landing screen is the
+**store overview**. It shows, for **today**:
+
+- **Sales today**, **bill count**, **average bill**, **VAT**, and **discounts**.
+- **Top-selling items** and **sales by payment method**.
+- **Open tills** (by cashier) and the **most recent bills**.
+- Quick buttons to **open the POS till**, **POS control**, **card terminals**, and **branches**.
+
+> **Note:** Cashiers and POS Supervisors (single-duty roles holding `pos_sell` / `pos_till`) can view this
+> overview for their own shop — the figures are read-only. To ring up a sale, use **POS** (`/pos`).
+
+[screenshot: POS home / store overview]
+
+---
+
 ## 1. Ringing up a sale at the till
 
 **Screen:** `/pos` (list) → `/pos/new` (new sale) · **Required permission:**

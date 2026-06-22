@@ -50,6 +50,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-017 | Blind drawer close | REV-11 | 07 §9 |
 | UAT-O2C-018 | PromptPay async settlement | REV-06 | 07 §7 |
 | UAT-O2C-019 | RLS return isolation | ITGC-AC (RLS) | 08 §9 |
+| UAT-O2C-020 | POS home store overview | Feature (POS dashboard) | 01 §0 |
+| UAT-O2C-021 | Cashier read-only shift KPIs | RBAC (least-privilege read) | 01 §0 |
+| UAT-O2C-022 | ERP/POS workspace switcher | Feature (ERP/POS workspaces) | 00 §4 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
