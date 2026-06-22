@@ -4,6 +4,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { DatabaseModule } from './database/database.module';
 import { CommonModule } from './common/common.module';
 import { JwtAuthGuard, PermissionsGuard } from './common/guards';
+import { ModuleEnabledGuard } from './modules/admin-config/module.guard';
 import { TenantTxInterceptor } from './common/tenant-tx.interceptor';
 import { AuditInterceptor } from './common/audit.interceptor';
 import { HealthModule } from './modules/health/health.module';
@@ -53,6 +54,8 @@ import { PipelineModule } from './modules/pipeline/pipeline.module';
 import { CpqModule } from './modules/cpq/cpq.module';
 import { ServiceModule } from './modules/service/service.module';
 import { BiModule } from './modules/bi/bi.module';
+import { AdminConfigModule } from './modules/admin-config/admin-config.module';
+import { MasterDataModule } from './modules/masterdata/masterdata.module';
 
 @Module({
   imports: [
@@ -106,11 +109,14 @@ import { BiModule } from './modules/bi/bi.module';
     CpqModule,
     ServiceModule,
     BiModule,
+    AdminConfigModule,
+    MasterDataModule,
   ],
   providers: [
-    // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions
+    // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: ModuleEnabledGuard },
     // Audit (outermost — writes outside the tenant tx so failures are still recorded),
     // then TenantTx (inner — wraps the handler in an RLS-scoped transaction).
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },

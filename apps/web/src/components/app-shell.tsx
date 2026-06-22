@@ -7,6 +7,7 @@ import { LogOut, Search } from 'lucide-react';
 
 import { getToken, clearToken } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
+import { useModuleFlags } from '@/lib/modules';
 import type { NavGroup } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 import {
@@ -57,6 +58,7 @@ export function AppShell({
   const router = useRouter();
   const pathname = usePathname();
   const me = useMe();
+  const moduleFlags = useModuleFlags();
   const [paletteOpen, setPaletteOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -79,14 +81,22 @@ export function AppShell({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Filter groups/items by permission (back-office); drop empty groups.
+  // Filter groups/items by permission AND module enable/disable (back-office); drop empty groups.
+  // A disabled module hides for EVERYONE (incl. Admin) — faithful to the legacy "hides for all".
+  const disabledModules = React.useMemo(() => new Set(moduleFlags.data?.disabled ?? []), [moduleFlags.data]);
   const groups = React.useMemo(() => {
     if (!filterPerms) return nav;
+    const visible = (it: NavGroup['items'][number]) => {
+      if (!hasPerm(me.data, ...(it.perms ?? []))) return false;
+      const perms = it.perms ?? [];
+      if (perms.length && perms.every((p) => disabledModules.has(p))) return false; // all its modules off
+      return true;
+    };
     const filtered = nav
-      .map((g) => ({ ...g, items: g.items.filter((it) => hasPerm(me.data, ...(it.perms ?? []))) }))
+      .map((g) => ({ ...g, items: g.items.filter(visible) }))
       .filter((g) => g.items.length > 0);
     return filtered.length ? filtered : nav; // fall back to full nav while loading
-  }, [nav, filterPerms, me.data]);
+  }, [nav, filterPerms, me.data, disabledModules]);
 
   const isActive = (href: string) =>
     pathname === href || (href !== '/dashboard' && href !== '/portal/dashboard' && pathname.startsWith(href + '/'));

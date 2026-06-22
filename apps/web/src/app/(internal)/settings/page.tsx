@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, Plus, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Lock, Plus, Power, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
+import { humanizeModule } from '@/lib/modules';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -21,10 +22,72 @@ export default function SettingsPage() {
       <PageHeader title="ตั้งค่า" description="API Keys และความปลอดภัย" />
       <Tabs
         tabs={[
+          { key: 'modules', label: 'โมดูล (เปิด/ปิด)', content: <Modules /> },
           { key: 'keys', label: 'API Keys', content: <ApiKeys /> },
           { key: 'mfa', label: 'ความปลอดภัย (MFA)', content: <Mfa /> },
         ]}
       />
+    </div>
+  );
+}
+
+// ───────────────────────── Modules (system-wide on/off) ─────────────────────────
+function Modules() {
+  const qc = useQueryClient();
+  const list = useQuery<{ modules: { key: string; enabled: boolean; always_on: boolean }[] }>({
+    queryKey: ['admin-modules'],
+    queryFn: () => api('/api/admin/modules'),
+  });
+  const [msg, setMsg] = useState('');
+
+  const toggle = useMutation({
+    mutationFn: (v: { key: string; enabled: boolean }) => api('/api/admin/modules', { method: 'POST', body: JSON.stringify(v) }),
+    onSuccess: (_r, v) => {
+      setMsg(`✅ ${humanizeModule(v.key)} → ${v.enabled ? 'เปิด' : 'ปิด'}`);
+      qc.invalidateQueries({ queryKey: ['admin-modules'] });
+      qc.invalidateQueries({ queryKey: ['module-flags'] }); // refresh the sidebar nav
+    },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+
+  const mods = list.data?.modules ?? [];
+  const disabledCount = mods.filter((m) => !m.enabled).length;
+
+  return (
+    <div className="space-y-4">
+      <Card className="gap-2 p-5">
+        <h3 className="text-base font-semibold">เปิด / ปิด การใช้งานโมดูล (ทั้งระบบ)</h3>
+        <p className="text-sm text-muted-foreground">
+          เมื่อปิดโมดูล จะถูกซ่อนจากเมนูของผู้ใช้ทุกคนและเข้าใช้งานไม่ได้ — โมดูล “Users” ปิดไม่ได้เพื่อให้ผู้ดูแลเข้าถึงได้เสมอ
+        </p>
+        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+        {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>ปิดอยู่ {disabledCount} โมดูล</Badge>}
+      </Card>
+
+      <StateView q={list}>
+        <DataTable
+          rows={mods}
+          columns={[
+            { key: 'key', label: 'โมดูล', render: (r: any) => <span className="font-medium">{humanizeModule(r.key)}</span> },
+            { key: 'code', label: 'รหัส', render: (r: any) => <code className="text-xs text-muted-foreground">{r.key}</code> },
+            {
+              key: 'enabled', label: 'สถานะ',
+              render: (r: any) => <Badge variant={statusVariant(r.enabled ? 'Open' : 'Cancelled')}>{r.enabled ? 'เปิดอยู่' : 'ปิดอยู่'}</Badge>,
+            },
+            {
+              key: 'act', label: '',
+              render: (r: any) => r.always_on ? (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Lock className="size-3.5" /> always-on</span>
+              ) : (
+                <Button variant={r.enabled ? 'destructive' : 'default'} size="sm" disabled={toggle.isPending}
+                  onClick={() => toggle.mutate({ key: r.key, enabled: !r.enabled })}>
+                  <Power className="size-4" /> {r.enabled ? 'ปิด' : 'เปิด'}
+                </Button>
+              ),
+            },
+          ]}
+        />
+      </StateView>
     </div>
   );
 }

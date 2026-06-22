@@ -12,6 +12,13 @@ export const PERMISSIONS = [
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
+// ── Module enable/disable (system-wide feature flags) ──────────────────────
+// A "module" maps 1:1 to a permission key. An admin can switch whole modules
+// off system-wide; disabled modules vanish from every user's nav and are
+// blocked at the API. These can never be disabled (admins must keep access).
+export const ALWAYS_ON_MODULES: Permission[] = ['users'];
+export const MODULE_KEYS: Permission[] = [...PERMISSIONS];
+
 // PERM_GROUPS taxonomy (from the legacy User-Management page) — preserve the grouping for the admin UI.
 export const PERM_GROUPS: Record<string, Permission[]> = {
   'Customer Portal': ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track'],

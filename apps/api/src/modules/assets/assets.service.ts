@@ -1,10 +1,12 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, asc, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { assetCategories, fixedAssets, depreciationRuns, depreciationLines } from '../../database/schema';
+import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { QrService } from '../qr/qr.service';
 import { n, fx, ymd } from '../../database/queries';
+import { buildAssetQrPayload, parseQrPayload } from '@ierp/shared';
 import type { JwtUser } from '../../common/decorators';
 import type { CreateCategoryDto, AcquireAssetDto, DisposeAssetDto } from './dto';
 
@@ -16,6 +18,7 @@ export class AssetsService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
+    private readonly qr: QrService,
   ) {}
 
   async createCategory(dto: CreateCategoryDto, user: JwtUser) {
@@ -141,6 +144,60 @@ export class AssetsService {
     return { asset_no: assetNo, status: 'disposed', nbv_at_disposal: nbv, proceeds, gain_loss: gainLoss, journal_no: je?.entry_no ?? null };
   }
 
+  // ── QR asset tags ──────────────────────────────────────────────────────
+  private async findAsset(assetNo: string, user: JwtUser) {
+    const db = this.db as any;
+    const conds = [eq(fixedAssets.assetNo, assetNo)];
+    if (user.tenantId != null) conds.push(eq(fixedAssets.tenantId, user.tenantId)); // explicit predicate under Admin bypass
+    const [a] = await db.select().from(fixedAssets).where(and(...conds)).limit(1);
+    if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Asset not found', messageTh: 'ไม่พบสินทรัพย์' });
+    return a;
+  }
+
+  async assetQr(assetNo: string, user: JwtUser) {
+    const a = await this.findAsset(assetNo, user);
+    const payload = buildAssetQrPayload({ assetNo: a.assetNo, name: a.name, loc: a.location ?? '', cat: '' });
+    return { asset_no: a.assetNo, payload, data_url: await this.qr.dataUrl(payload) };
+  }
+
+  async assetLabels(_user: JwtUser, opts: { status?: string; cols?: number; rows?: number }) {
+    const db = this.db as any;
+    const where = opts.status ? eq(fixedAssets.status, opts.status as any) : undefined;
+    const rows = await db.select().from(fixedAssets).where(where).orderBy(asc(fixedAssets.assetNo));
+    const labels = rows.map((a: any) => ({
+      payload: buildAssetQrPayload({ assetNo: a.assetNo, name: a.name, loc: a.location ?? '', cat: '' }),
+      title: a.assetNo,
+      subtitle: a.name,
+      lines: [a.location ? `📍 ${a.location}` : '', a.status].filter(Boolean) as string[],
+      badge: 'ASSET TAG',
+    }));
+    return this.qr.labelsPdf(labels, opts.cols ?? 2, opts.rows ?? 4);
+  }
+
+  // Scan an asset tag → update its physical LOCATION / holder (not the accounting status enum).
+  async scanUpdate(dto: { code: string; location?: string; assigned_to?: string; note?: string }, user: JwtUser) {
+    const parsed = parseQrPayload(dto.code);
+    const assetNo = (parsed.ASSET_ID || parsed.ITEM_ID || dto.code || '').trim();
+    if (!assetNo) throw new BadRequestException({ code: 'NO_CODE', message: 'No asset code in QR', messageTh: 'ไม่พบรหัสทรัพย์สินใน QR' });
+    const db = this.db as any;
+    return db.transaction(async (tx: any) => {
+      const conds = [eq(fixedAssets.assetNo, assetNo)];
+      if (user.tenantId != null) conds.push(eq(fixedAssets.tenantId, user.tenantId));
+      const [a] = await tx.select().from(fixedAssets).where(and(...conds)).limit(1).for('update');
+      if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: `Asset ${assetNo} not found`, messageTh: 'ไม่พบสินทรัพย์' });
+      const toLoc = dto.location ?? a.location ?? null;
+      const set: any = { location: toLoc };
+      if (dto.assigned_to !== undefined) set.assignedTo = dto.assigned_to;
+      await tx.update(fixedAssets).set(set).where(eq(fixedAssets.id, a.id));
+      await tx.insert(assetMovements).values({
+        tenantId: a.tenantId ?? user.tenantId ?? null, assetId: Number(a.id), assetNo: a.assetNo,
+        moveType: 'Scan Update', fromLocation: a.location ?? null, toLocation: toLoc,
+        fromStatus: a.status, toStatus: a.status, note: dto.note ?? null, byUser: user.username,
+      });
+      return { asset_no: a.assetNo, location: toLoc, assigned_to: set.assignedTo ?? a.assignedTo ?? null };
+    });
+  }
+
   async assetRegister(_user: JwtUser, status?: string) {
     const db = this.db as any;
     const where = status ? eq(fixedAssets.status, status as any) : undefined;
@@ -172,5 +229,5 @@ export class AssetsService {
 
 function shapeCat(c: any) { return { id: Number(c.id), code: c.code, name: c.name, default_useful_life_years: c.defaultUsefulLifeYears, asset_account: c.assetAccount, accum_dep_account: c.accumDepAccount, dep_expense_account: c.depExpenseAccount }; }
 function shapeAsset(a: any) {
-  return { asset_no: a.assetNo, name: a.name, category_id: a.categoryId, status: a.status, acquire_date: a.acquireDate, acquire_cost: n(a.acquireCost), salvage_value: n(a.salvageValue), useful_life_months: a.usefulLifeMonths, accumulated_depreciation: n(a.accumulatedDepreciation), net_book_value: n(a.netBookValue), last_depreciated_period: a.lastDepreciatedPeriod, disposed_date: a.disposedDate, disposal_proceeds: a.disposalProceeds != null ? n(a.disposalProceeds) : null, disposal_gain_loss: a.disposalGainLoss != null ? n(a.disposalGainLoss) : null };
+  return { asset_no: a.assetNo, name: a.name, category_id: a.categoryId, status: a.status, acquire_date: a.acquireDate, acquire_cost: n(a.acquireCost), salvage_value: n(a.salvageValue), useful_life_months: a.usefulLifeMonths, accumulated_depreciation: n(a.accumulatedDepreciation), net_book_value: n(a.netBookValue), last_depreciated_period: a.lastDepreciatedPeriod, disposed_date: a.disposedDate, disposal_proceeds: a.disposalProceeds != null ? n(a.disposalProceeds) : null, disposal_gain_loss: a.disposalGainLoss != null ? n(a.disposalGainLoss) : null, location: a.location ?? null, department: a.department ?? null, serial_no: a.serialNo ?? null, assigned_to: a.assignedTo ?? null };
 }

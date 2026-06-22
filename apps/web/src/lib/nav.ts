@@ -17,6 +17,7 @@ import {
   ClipboardList,
   Coins,
   CreditCard,
+  Database,
   FileMinus,
   FileSignature,
   FileSpreadsheet,
@@ -144,6 +145,7 @@ export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'ระบบ',
     items: [
+      { label: 'ข้อมูลหลัก (Master Data)', href: '/master-data', icon: Database, perms: ['masterdata'] },
       { label: 'ตั้งค่ากิจการ', href: '/setup', icon: BadgeCheck, perms: ['users'] },
       { label: 'แพ็กเกจ', href: '/billing', icon: CreditCard, perms: ['users'] },
       { label: 'ตั้งค่า', href: '/settings', icon: Settings, perms: ['users'] },

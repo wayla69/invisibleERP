@@ -1,0 +1,115 @@
+import { items, locations, bomMaster, vendors, priceList, promotions } from '../../database/schema';
+import { tenants } from '../../database/schema';
+import { fixedAssets } from '../../database/schema';
+
+export type MdType = 'str' | 'num' | 'int' | 'bool' | 'date';
+export interface MdCol { header: string; prop: string; type: MdType }
+export interface MdEntity {
+  key: string;
+  labelEn: string;
+  labelTh: string;
+  table: any;
+  required: string[]; // header names required on import
+  cols: MdCol[];
+  tenantScoped: boolean; // stamp tenantId on insert + RLS-scoped delete
+  allowReplace: boolean; // permit destructive "replace all" import
+}
+
+const C = (header: string, prop: string, type: MdType = 'str'): MdCol => ({ header, prop, type });
+
+// Generic master-data registry (mirrors the legacy ERPPOS MASTER_REGISTRY).
+// Import upserts by natural key (onConflictDoNothing) or appends; export/template via exceljs.
+export const MASTER_REGISTRY: MdEntity[] = [
+  {
+    key: 'items', labelEn: 'Items / Products', labelTh: 'สินค้า / Master',
+    table: items, tenantScoped: false, allowReplace: false,
+    required: ['Item_ID', 'Item_Description'],
+    cols: [
+      C('Item_ID', 'itemId'), C('Item_Description', 'itemDescription'), C('UOM', 'uom'),
+      C('Base_UOM', 'baseUom'), C('Conversion_Factor', 'conversionFactor', 'num'),
+      C('Unit_Price', 'unitPrice', 'num'), C('Category', 'category'),
+      C('Min_Stock', 'minStock', 'num'), C('Max_Stock', 'maxStock', 'num'),
+      C('Lead_Time_Days', 'leadTimeDays', 'int'),
+    ],
+  },
+  {
+    key: 'customers', labelEn: 'Customers', labelTh: 'ลูกค้า',
+    table: tenants, tenantScoped: false, allowReplace: false,
+    required: ['Code', 'Name'],
+    cols: [
+      C('Code', 'code'), C('Name', 'name'), C('Contact_Name', 'contactName'),
+      C('Phone', 'phone'), C('Email', 'email'), C('Tax_ID', 'taxId'), C('Address', 'address'),
+      C('Credit_Term', 'creditTerm'), C('Credit_Limit', 'creditLimit', 'num'),
+    ],
+  },
+  {
+    key: 'vendors', labelEn: 'Vendors (Suppliers/Creditors)', labelTh: 'ผู้ขาย / เจ้าหนี้',
+    table: vendors, tenantScoped: true, allowReplace: true,
+    required: ['Vendor_Code', 'Name'],
+    cols: [
+      C('Vendor_Code', 'vendorCode'), C('Name', 'name'), C('Is_Supplier', 'isSupplier', 'bool'),
+      C('Is_Creditor', 'isCreditor', 'bool'), C('Contact', 'contact'), C('Phone', 'phone'),
+      C('Email', 'email'), C('Address', 'address'), C('Tax_ID', 'taxId'),
+      C('Payment_Terms', 'paymentTerms'), C('Lead_Time_Days', 'leadTimeDays', 'int'),
+      C('Credit_Limit', 'creditLimit', 'num'), C('Category', 'category'), C('Active', 'active', 'bool'),
+    ],
+  },
+  {
+    key: 'locations', labelEn: 'Warehouse Locations', labelTh: 'คลัง / ตำแหน่งเก็บ',
+    table: locations, tenantScoped: false, allowReplace: true,
+    required: ['Location_ID', 'Location_Name'],
+    cols: [
+      C('Location_ID', 'locationId'), C('Location_Name', 'locationName'), C('Zone', 'zone'),
+      C('Type', 'type'), C('Capacity', 'capacity', 'num'), C('Temperature', 'temperature'),
+      C('Active', 'active', 'bool'), C('Notes', 'notes'),
+    ],
+  },
+  {
+    key: 'price_list', labelEn: 'Price List', labelTh: 'ราคาพิเศษ',
+    table: priceList, tenantScoped: true, allowReplace: true,
+    required: ['Item_ID', 'Special_Price'],
+    cols: [
+      C('List_Name', 'listName'), C('Item_ID', 'itemId'), C('Item_Description', 'itemDescription'),
+      C('Base_Price', 'basePrice', 'num'), C('Special_Price', 'specialPrice', 'num'),
+      C('Discount_Pct', 'discountPct', 'num'), C('Min_Qty', 'minQty', 'num'),
+      C('Valid_From', 'validFrom', 'date'), C('Valid_To', 'validTo', 'date'),
+    ],
+  },
+  {
+    key: 'promotions', labelEn: 'Promotions', labelTh: 'โปรโมชั่น',
+    table: promotions, tenantScoped: true, allowReplace: true,
+    required: ['Promo_ID', 'Promo_Name'],
+    cols: [
+      C('Promo_ID', 'promoId'), C('Promo_Name', 'promoName'), C('Promo_Type', 'promoType'),
+      C('Start_Date', 'startDate', 'date'), C('End_Date', 'endDate', 'date'),
+      C('Min_Amount', 'minAmount', 'num'), C('Discount_Pct', 'discountPct', 'num'),
+      C('Discount_Amt', 'discountAmt', 'num'), C('Active', 'active', 'bool'),
+    ],
+  },
+  {
+    key: 'bom_master', labelEn: 'BoM Master (headers)', labelTh: 'สูตรผลิตกลาง (หัว)',
+    table: bomMaster, tenantScoped: false, allowReplace: true,
+    required: ['BoM_Code', 'Product_Name'],
+    cols: [
+      C('BoM_Code', 'bomCode'), C('Product_Name', 'productName'), C('Yield_Qty', 'yieldQty', 'num'),
+      C('Yield_UOM', 'yieldUom'), C('Labor_Cost', 'laborCost', 'num'),
+      C('Overhead_Cost', 'overheadCost', 'num'), C('Selling_Price', 'sellingPrice', 'num'),
+    ],
+  },
+  {
+    key: 'assets', labelEn: 'Fixed Assets', labelTh: 'ทะเบียนทรัพย์สิน',
+    table: fixedAssets, tenantScoped: true, allowReplace: false,
+    required: ['Asset_No', 'Name', 'Acquire_Date', 'Acquire_Cost', 'Useful_Life_Months'],
+    cols: [
+      C('Asset_No', 'assetNo'), C('Name', 'name'), C('Acquire_Date', 'acquireDate', 'date'),
+      C('Acquire_Cost', 'acquireCost', 'num'), C('Salvage_Value', 'salvageValue', 'num'),
+      C('Useful_Life_Months', 'usefulLifeMonths', 'int'), C('Location', 'location'),
+      C('Department', 'department'), C('Serial_No', 'serialNo'), C('Assigned_To', 'assignedTo'),
+      C('Status', 'status'), C('Notes', 'notes'),
+    ],
+  },
+];
+
+export function findEntity(key: string): MdEntity | undefined {
+  return MASTER_REGISTRY.find((e) => e.key === key);
+}

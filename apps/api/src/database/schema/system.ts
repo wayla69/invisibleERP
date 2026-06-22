@@ -98,6 +98,17 @@ export const webhooks = pgTable('webhooks', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
+// Module enable/disable — system-wide feature flags (admin toggles whole
+// modules on/off; disabled modules vanish from nav + blocked at the API).
+// Global on purpose (no tenant_id → no RLS): a platform-wide switch, mirroring
+// the legacy ERPPOS tbl_module_config. module_key == permission key.
+export const moduleConfigs = pgTable('module_configs', {
+  moduleKey: text('module_key').primaryKey(),
+  enabled: boolean('enabled').notNull().default(true),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  updatedBy: text('updated_by'),
+});
+
 export const webhookDeliveries = pgTable('webhook_deliveries', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   webhookId: bigint('webhook_id', { mode: 'number' }).references(() => webhooks.id),

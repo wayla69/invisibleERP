@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Boxes, Coins, Landmark, Play, X } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Boxes, Coins, Landmark, Play, QrCode, ScanLine, X } from 'lucide-react';
+import { api, apiDownload } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -13,6 +13,7 @@ import { Tabs, Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 
@@ -29,6 +30,7 @@ export default function AssetsPage() {
       <Tabs
         tabs={[
           { key: 'register', label: 'ทะเบียนสินทรัพย์', content: <Register /> },
+          { key: 'qr', label: 'QR ป้ายทรัพย์สิน', content: <QrTags /> },
           { key: 'categories', label: 'หมวดหมู่', content: <Categories /> },
           { key: 'runs', label: 'รอบค่าเสื่อมราคา', content: <DepreciationRuns /> },
         ]}
@@ -125,6 +127,86 @@ function ScheduleDrill({ assetNo, onClose }: { assetNo: string; onClose: () => v
         )}
       </StateView>
     </Card>
+  );
+}
+
+// ───────────────────────── QR asset tags + scan-to-update ─────────────────────────
+function QrTags() {
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['assets', ''], queryFn: () => api('/api/assets') });
+  const [assetNo, setAssetNo] = useState('');
+  const single = useQuery<any>({
+    queryKey: ['asset-qr', assetNo],
+    queryFn: () => api(`/api/assets/${assetNo}/qr`),
+    enabled: !!assetNo,
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const [scanCode, setScanCode] = useState('');
+  const [scanLoc, setScanLoc] = useState('');
+  const scan = useMutation({
+    mutationFn: () => api('/api/assets/scan-update', { method: 'POST', body: JSON.stringify({ code: scanCode, location: scanLoc || undefined }) }),
+    onSuccess: (r: any) => { setMsg(`✅ อัปเดต ${r.asset_no} → 📍 ${r.location ?? '—'}`); setScanCode(''); setScanLoc(''); qc.invalidateQueries({ queryKey: ['assets'] }); },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+
+  async function downloadLabels() {
+    setMsg(''); setBusy(true);
+    try { await apiDownload('/api/assets/qr/labels', 'asset_tags.pdf'); }
+    catch (e: any) { setMsg(`❌ ${e.message}`); }
+    finally { setBusy(false); }
+  }
+
+  const assets = q.data?.assets ?? [];
+
+  return (
+    <div className="space-y-4">
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">พิมพ์ป้าย QR ทรัพย์สิน</h3>
+        <p className="text-sm text-muted-foreground">ดาวน์โหลดแผ่นป้าย QR (A4) สำหรับติดบนทรัพย์สินทุกชิ้น</p>
+        <div>
+          <Button disabled={busy} onClick={downloadLabels}><QrCode className="size-4" /> {busy ? 'กำลังสร้าง…' : 'ดาวน์โหลดป้าย QR ทั้งหมด'}</Button>
+        </div>
+        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="gap-3 p-5">
+          <h3 className="text-base font-semibold">ดู QR รายชิ้น</h3>
+          <div className="grid gap-1.5 max-w-sm">
+            <Label htmlFor="qr-asset">ทรัพย์สิน</Label>
+            <select id="qr-asset" className={selectCls} value={assetNo} onChange={(e) => setAssetNo(e.target.value)}>
+              <option value="">— เลือก —</option>
+              {assets.map((a: any) => <option key={a.asset_no} value={a.asset_no}>{a.asset_no} — {a.name}</option>)}
+            </select>
+          </div>
+          {single.data?.data_url && (
+            <div className="flex flex-col items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={single.data.data_url} alt="QR" width={200} height={200} />
+              <code className="break-all text-center text-xs text-muted-foreground">{single.data.payload}</code>
+            </div>
+          )}
+        </Card>
+
+        <Card className="gap-3 p-5">
+          <h3 className="text-base font-semibold">สแกน & อัปเดตตำแหน่ง</h3>
+          <p className="text-sm text-muted-foreground">สแกน (หรือวาง) โค้ดจากป้าย QR แล้วระบุตำแหน่งใหม่</p>
+          <div className="grid gap-1.5">
+            <Label htmlFor="scan-code">โค้ดจาก QR</Label>
+            <Input id="scan-code" placeholder="ASSET_ID:FA-0001|…" value={scanCode} onChange={(e) => setScanCode(e.target.value)} />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="scan-loc">ตำแหน่งใหม่</Label>
+            <Input id="scan-loc" placeholder="เช่น ห้องครัวกลาง" value={scanLoc} onChange={(e) => setScanLoc(e.target.value)} />
+          </div>
+          <div>
+            <Button disabled={!scanCode || scan.isPending} onClick={() => scan.mutate()}><ScanLine className="size-4" /> {scan.isPending ? 'กำลังอัปเดต…' : 'อัปเดต'}</Button>
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }
 

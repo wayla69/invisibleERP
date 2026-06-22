@@ -38,10 +38,33 @@ export const fixedAssets = pgTable('fixed_assets', {
   disposalProceeds: numeric('disposal_proceeds', { precision: 18, scale: 4 }),
   disposalGainLoss: numeric('disposal_gain_loss', { precision: 18, scale: 4 }),
   acquireSource: text('acquire_source').notNull().default('cash'),
+  // Physical-tracking fields (for QR asset tags + scan-to-locate). Accounting
+  // status stays in `status`; these track where the asset physically is / who holds it.
+  location: text('location'),
+  department: text('department'),
+  serialNo: text('serial_no'),
+  assignedTo: text('assigned_to'),
   notes: text('notes'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqAssetPerTenant: unique('uq_fixed_asset_no').on(t.tenantId, t.assetNo), byStatus: index('idx_fa_status').on(t.status) }));
+
+// Audit trail of physical asset moves (location/status changes via QR scan).
+// tenant-scoped → covered by the RLS loop re-run in the migration.
+export const assetMovements = pgTable('asset_movements', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  assetId: bigint('asset_id', { mode: 'number' }).references(() => fixedAssets.id),
+  assetNo: text('asset_no'),
+  moveDate: timestamp('move_date', { withTimezone: true }).defaultNow(),
+  moveType: text('move_type'), // 'Scan Update' | 'Transfer' | 'Status Change'
+  fromLocation: text('from_location'),
+  toLocation: text('to_location'),
+  fromStatus: text('from_status'),
+  toStatus: text('to_status'),
+  note: text('note'),
+  byUser: text('by_user'),
+});
 
 export const depreciationRuns = pgTable('depreciation_runs', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

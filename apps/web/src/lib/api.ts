@@ -31,6 +31,32 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   return body as T;
 }
 
+// Download a file (xlsx/csv/pdf export, QR labels) with auth → save via a blob anchor.
+export async function apiDownload(path: string, filename: string, init: RequestInit = {}): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.headers ?? {}) },
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      msg = j?.error?.messageTh ?? j?.error?.message ?? msg;
+    } catch { /* non-json */ }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // Public client — NO Authorization header. For the unauthenticated diner QR page (the table-session
 // token is in the URL path; the server scopes the tenant from it).
 export async function publicApi<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {

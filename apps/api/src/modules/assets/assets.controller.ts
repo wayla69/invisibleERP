@@ -1,13 +1,30 @@
-import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
+import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AssetsService } from './assets.service';
 import { CreateCategoryBody, AcquireAssetBody, RunDepreciationBody, DisposeAssetBody, type CreateCategoryDto, type AcquireAssetDto, type DisposeAssetDto } from './dto';
 
+const ScanUpdateBody = z.object({ code: z.string().min(1), location: z.string().optional(), assigned_to: z.string().optional(), note: z.string().optional() });
+type ScanUpdateBodyT = z.infer<typeof ScanUpdateBody>;
+
 @Controller('api/assets')
 @Permissions('exec', 'creditors')
 export class AssetsController {
   constructor(private readonly svc: AssetsService) {}
+
+  // ── QR asset tags ──────────────────────────────────────────────
+  @Get(':assetNo/qr') qr(@Param('assetNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.assetQr(no, u); }
+
+  @Get('qr/labels')
+  async labels(@Query('status') status: string | undefined, @Query('cols') cols: string | undefined, @Query('rows') rows: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const { pdf, html } = await this.svc.assetLabels(u, { status, cols: cols ? +cols : undefined, rows: rows ? +rows : undefined });
+    if (pdf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', 'attachment; filename="asset_tags.pdf"').header('Content-Length', pdf.length).send(pdf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  }
+
+  @Post('scan-update') scanUpdate(@Body(new ZodValidationPipe(ScanUpdateBody)) b: ScanUpdateBodyT, @CurrentUser() u: JwtUser) { return this.svc.scanUpdate(b, u); }
 
   @Post('categories') createCategory(@Body(new ZodValidationPipe(CreateCategoryBody)) b: CreateCategoryDto, @CurrentUser() u: JwtUser) { return this.svc.createCategory(b, u); }
   @Get('categories') listCategories(@CurrentUser() u: JwtUser) { return this.svc.listCategories(u); }
