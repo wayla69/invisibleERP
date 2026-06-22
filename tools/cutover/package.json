@@ -19,6 +19,7 @@
     "projects": "tsx src/projects.ts",
     "mfg-depth": "tsx src/mfg-depth.ts",
     "hcm": "tsx src/hcm.ts",
+    "sub-billing": "tsx src/sub-billing.ts",
     "promptpay": "tsx src/promptpay.ts",
     "etax": "tsx src/etax.ts",
     "etax-email": "tsx src/etax-email.ts",
