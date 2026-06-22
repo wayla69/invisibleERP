@@ -6,15 +6,18 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { TaxInvoiceService } from './tax-invoice.service';
 import { TaxDocsPdfService } from './tax-docs-pdf.service';
 import { buildEtaxInvoiceXml } from './etax-xml';
+import { EtaxEmailService } from './etax-email.service';
 import { IssueFullBody, type IssueFullDto } from './dto';
 
 const VoidBody = z.object({ reason: z.string().optional() });
+const SendEmailBody = z.object({ to_email: z.string().email() });
 
 @Controller('api/tax-invoices')
 export class TaxDocsController {
   constructor(
     private readonly svc: TaxInvoiceService,
     private readonly pdf: TaxDocsPdfService,
+    private readonly etaxEmail: EtaxEmailService,
   ) {}
 
   // ใบกำกับภาษีเต็มรูป (ม.86/4)
@@ -42,6 +45,13 @@ export class TaxDocsController {
   @Patch(':docNo/void') @Permissions('ar', 'pos')
   void(@Param('docNo') docNo: string, @Body(new ZodValidationPipe(VoidBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
     return this.svc.void(u, docNo, b.reason ?? '');
+  }
+
+  // ETDA "e-Tax Invoice by Email" (income ≤ 30M/yr, no CA cert): email the invoice to the buyer with a
+  // CC to ETDA's time-stamp mailbox, which stamps it and returns it.
+  @Post(':docNo/send-etax-email') @Permissions('ar', 'pos')
+  sendEtaxEmail(@Param('docNo') docNo: string, @Body(new ZodValidationPipe(SendEmailBody)) b: { to_email: string }, @CurrentUser() u: JwtUser) {
+    return this.etaxEmail.sendByEmail(u, docNo, b.to_email);
   }
 
   // ETDA e-Tax Invoice XML (UBL 2.1) — unsigned instance document; XAdES signing added with the RD cert.

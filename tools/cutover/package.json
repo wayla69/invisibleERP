@@ -16,6 +16,7 @@
     "payroll": "tsx src/payroll.ts",
     "promptpay": "tsx src/promptpay.ts",
     "etax": "tsx src/etax.ts",
+    "etax-email": "tsx src/etax-email.ts",
     "worldclass": "tsx src/worldclass.ts",
     "taxdocs": "tsx src/taxdocs.ts",
     "restaurant": "tsx src/restaurant.ts",

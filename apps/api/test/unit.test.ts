@@ -6,6 +6,25 @@ import { DocNumberService } from '../src/common/doc-number.service';
 import { buildPromptPayPayload, crc16ccitt, isValidPromptPayTarget } from '../src/modules/payments/promptpay-qr';
 import { socialSecurity, annualPit, computePayslip } from '../src/modules/payroll/payroll-calc';
 import { buildEtaxInvoiceXml } from '../src/modules/tax-docs/etax-xml';
+import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax-docs/etax-email.service';
+
+describe('e-Tax by Email composer (ETDA, no CA)', () => {
+  const svc = new EtaxEmailService(null as never, null as never, null as never);
+  const inv = {
+    doc_no: 'TIV-202606-0009', issue_date: '2026-06-22', currency: 'THB',
+    seller: { name: 'ร้านโอชิเนอิ', tax_id: '0105551234567', address: 'กทม.' },
+    buyer: { name: 'ลูกค้า' }, subtotal: 100, vat_rate: 0.07, vat_amount: 7, grand_total: 107,
+    lines: [{ line_no: 1, description: 'อาหาร', amount: 100 }],
+  };
+  const msg = svc.compose(inv as never, 'shop@oshinei.co.th', 'buyer@example.com');
+  it('CC goes to the ETDA time-stamp mailbox', () => expect(msg.cc).toBe(ETAX_TIMESTAMP_EMAIL));
+  it('from seller → to buyer', () => { expect(msg.from).toBe('shop@oshinei.co.th'); expect(msg.to).toBe('buyer@example.com'); });
+  it('subject carries the doc no', () => expect(msg.subject).toContain('TIV-202606-0009'));
+  it('attaches the e-Tax XML', () => {
+    expect(msg.attachments?.[0].filename).toBe('TIV-202606-0009.xml');
+    expect(String(msg.attachments?.[0].content)).toContain('<Invoice ');
+  });
+});
 
 describe('e-Tax Invoice XML (ETDA / UBL 2.1)', () => {
   const inv = {

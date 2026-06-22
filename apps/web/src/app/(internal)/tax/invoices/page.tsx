@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileText, Receipt, Coins, Ban, Plus, ExternalLink, FileCode } from 'lucide-react';
+import { FileText, Receipt, Coins, Ban, Plus, ExternalLink, FileCode, Mail } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -73,6 +74,21 @@ export default function TaxInvoicesPage() {
   });
 
   const canIssue = !!srcRef && !!buyerName && !!buyerAddr && !issue.isPending;
+
+  // ── ส่ง e-Tax Invoice by Email (ETDA, ไม่ต้องมีใบรับรอง CA) ──
+  const [emailDoc, setEmailDoc] = useState<string | null>(null);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailMsg, setEmailMsg] = useState('');
+  const sendEmail = useMutation({
+    mutationFn: () =>
+      api<{ cc: string }>(`/api/tax-invoices/${emailDoc}/send-etax-email`, {
+        method: 'POST',
+        body: JSON.stringify({ to_email: emailTo }),
+      }),
+    onSuccess: (r) => setEmailMsg(`✅ ส่งแล้ว — สำเนาถึงระบบประทับเวลา ETDA (${r.cc})`),
+    onError: (e: any) => setEmailMsg(`❌ ${e.message}`),
+  });
+  const openEmail = (docNo: string) => { setEmailDoc(docNo); setEmailTo(''); setEmailMsg(''); };
 
   return (
     <div>
@@ -188,6 +204,16 @@ export default function TaxInvoicesPage() {
                     </Button>
                   ),
                 },
+                {
+                  key: 'email',
+                  label: 'ส่งอีเมล',
+                  sortable: false,
+                  render: (r: Invoice) => (
+                    <Button variant="ghost" size="sm" title="ส่ง e-Tax ทางอีเมล (ประทับเวลา ETDA)" onClick={() => openEmail(r.doc_no)}>
+                      <Mail className="size-4" />
+                    </Button>
+                  ),
+                },
               ]}
               emptyText="ยังไม่มีใบกำกับภาษี"
             />
@@ -197,6 +223,28 @@ export default function TaxInvoicesPage() {
           </div>
         )}
       </StateView>
+
+      <Dialog open={!!emailDoc} onOpenChange={(o) => !o && setEmailDoc(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ส่ง e-Tax ทางอีเมล — {emailDoc}</DialogTitle>
+            <DialogDescription>
+              ระบบ e-Tax Invoice by Email (สำหรับกิจการรายได้ ≤ 30 ล้าน/ปี) — ส่งใบกำกับให้ผู้ซื้อ พร้อมสำเนา (CC) ถึงระบบประทับรับรองเวลาของ ETDA โดยไม่ต้องมีใบรับรองอิเล็กทรอนิกส์ (CA)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="email-to">อีเมลผู้ซื้อ</Label>
+            <Input id="email-to" type="email" placeholder="buyer@example.com" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} />
+            <Msg ok={emailMsg.startsWith('✅')}>{emailMsg}</Msg>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEmailDoc(null)}>ปิด</Button>
+            <Button onClick={() => sendEmail.mutate()} disabled={!emailTo.includes('@') || sendEmail.isPending}>
+              <Mail className="size-4" /> ส่งอีเมล
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
