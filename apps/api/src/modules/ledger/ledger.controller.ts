@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -43,6 +43,8 @@ const OpeningBalancesBody = z.object({
 });
 type OpeningBalancesBody = z.infer<typeof OpeningBalancesBody>;
 
+const RejectBody = z.object({ reason: z.string().optional() });
+
 @Controller('api/ledger')
 @Permissions('exec', 'creditors', 'ar')
 export class LedgerController {
@@ -59,7 +61,7 @@ export class LedgerController {
   @Post('ledgers/:code/adjustment')
   @Permissions('gl_post', 'creditors', 'ar')
   adjustment(@Param('code') code: string, @Body(new ZodValidationPipe(JournalBody)) b: JournalBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.postAdjustment(code, { date: b.date, source: b.source ?? 'GAAP-ADJ', sourceRef: b.source_ref, tenantId: hqTenant(u, b.tenant_id) ?? null, currency: b.currency, memo: b.memo, lines: b.lines, createdBy: u.username });
+    return this.svc.postAdjustment(code, { date: b.date, source: b.source ?? 'GAAP-ADJ', sourceRef: b.source_ref, tenantId: hqTenant(u, b.tenant_id) ?? null, currency: b.currency, memo: b.memo, lines: b.lines, createdBy: u.username, pendingApproval: true });
   }
 
   // book-tax difference report (TFRS vs TAX → deferred-tax / ภ.ง.ด.50 basis)
@@ -74,6 +76,8 @@ export class LedgerController {
   @Get('journal')
   journal(@Query('limit') limit?: string) { return this.svc.listJournal(qint('limit', limit, 50)); }
 
+  // GL-05: a manual JE posts as DRAFT (pending) and does not affect balances until a DIFFERENT user
+  // approves it (maker-checker). Posting is the 'gl_post' duty; approval is 'gl_close'/'approvals'.
   @Post('journal')
   @Permissions('gl_post', 'creditors', 'ar')
   postJournal(@Body(new ZodValidationPipe(JournalBody)) b: JournalBodyT, @CurrentUser() u: JwtUser) {
@@ -86,8 +90,25 @@ export class LedgerController {
       memo: b.memo,
       lines: b.lines,
       createdBy: u.username,
+      pendingApproval: true,
     });
   }
+
+  // JEs awaiting maker-checker approval (Draft).
+  @Get('journal/pending')
+  @Permissions('gl_post', 'gl_close', 'approvals')
+  pendingJournal(@Query('limit') limit?: string) { return this.svc.pendingJournal(qint('limit', limit, 50)); }
+
+  // Approve / reject a pending JE — approver must differ from preparer (enforced in the service).
+  @Post('journal/:entryNo/approve')
+  @HttpCode(200)
+  @Permissions('gl_close', 'approvals')
+  approveJournal(@Param('entryNo') entryNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveEntry(entryNo, u); }
+
+  @Post('journal/:entryNo/reject')
+  @HttpCode(200)
+  @Permissions('gl_close', 'approvals')
+  rejectJournal(@Param('entryNo') entryNo: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectEntry(entryNo, u, b.reason); }
 
   @Get('income-statement')
   incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.incomeStatement(from, to, costCenter, ledger || undefined); }

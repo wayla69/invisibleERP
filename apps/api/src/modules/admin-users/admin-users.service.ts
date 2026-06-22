@@ -1,9 +1,10 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, UnprocessableEntityException, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { users, userPermissions, tenants } from '../../database/schema';
+import { users, userPermissions, tenants, accessReviews } from '../../database/schema';
+import { desc } from 'drizzle-orm';
 import { PasswordService } from '../auth/password.service';
-import { detectSodConflicts, type Permission } from '@ierp/shared';
+import { resolvePermissions, detectSodConflicts, type Role, type Permission } from '@ierp/shared';
 import type { JwtUser } from '../../common/decorators';
 
 export interface CreateUserDto { username: string; password: string; role: string; customer_name?: string; permissions?: string[]; allow_sod_override?: boolean; sod_reason?: string }
@@ -87,6 +88,70 @@ export class AdminUsersService {
     const hash = await this.passwords.hash(newPassword);
     await db.update(users).set({ passwordHash: hash, mustChangePassword: true }).where(eq(users.id, u.id));
     return { username, reset: true };
+  }
+
+  // ── ITGC-AC-08: User Access Review ──────────────────────────────────────────
+  // Build the recertification dataset: every user with role, effective (resolved+expanded) permissions,
+  // and any SoD conflicts — the population a reviewer signs off each quarter.
+  private async buildReview() {
+    const db = this.db as any;
+    const us = await db.select({ id: users.id, username: users.username, role: users.role, code: tenants.code })
+      .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).orderBy(users.username);
+    const ups = await db.select({ userId: userPermissions.userId, perm: userPermissions.perm }).from(userPermissions);
+    const byUser = new Map<number, string[]>();
+    for (const r of ups) { const k = Number(r.userId); const arr = byUser.get(k) ?? []; arr.push(r.perm); byUser.set(k, arr); }
+    return us.map((u: any) => {
+      const overrides = byUser.get(Number(u.id)) ?? [];
+      const effective = resolvePermissions(u.role as Role, overrides.length ? (overrides as Permission[]) : null);
+      const conflicts = detectSodConflicts(effective);
+      return {
+        username: u.username, role: u.role, customer_name: u.code ?? null,
+        has_override: overrides.length > 0,
+        permission_count: effective.length,
+        permissions: [...effective].sort(),
+        sod_conflict_count: conflicts.length,
+        sod_conflicts: conflicts.map((c) => c.ruleId),
+      };
+    });
+  }
+
+  async accessReview() {
+    const rows = await this.buildReview();
+    return {
+      report: 'User Access Review (effective permissions + SoD conflicts)',
+      generated: true,
+      summary: { total_users: rows.length, users_with_conflicts: rows.filter((r: any) => r.sod_conflict_count > 0).length, users_with_override: rows.filter((r: any) => r.has_override).length },
+      users: rows,
+    };
+  }
+
+  // CSV export for the reviewer to annotate keep/revoke and retain as audit evidence.
+  async exportReviewCsv(): Promise<string> {
+    const rows = await this.buildReview();
+    const esc = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const header = ['username', 'role', 'customer_name', 'has_override', 'permission_count', 'sod_conflict_count', 'sod_conflicts', 'permissions', 'decision_keep_revoke', 'reviewer_note'];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push([r.username, r.role, r.customer_name, r.has_override, r.permission_count, r.sod_conflict_count, r.sod_conflicts.join('|'), r.permissions.join('|'), '', ''].map(esc).join(','));
+    }
+    return lines.join('\n');
+  }
+
+  // Record the periodic recertification sign-off (attestation evidence).
+  async certifyReview(dto: { period: string; notes?: string }, user: JwtUser) {
+    const db = this.db as any;
+    const rows = await this.buildReview();
+    const [r] = await db.insert(accessReviews).values({
+      period: dto.period, reviewedBy: user.username, tenantId: user.tenantId ?? null, notes: dto.notes ?? null,
+      userCount: rows.length, conflictUserCount: rows.filter((x: any) => x.sod_conflict_count > 0).length,
+    }).returning({ id: accessReviews.id });
+    return { id: Number(r.id), period: dto.period, reviewed_by: user.username, user_count: rows.length, certified: true };
+  }
+
+  async listReviews() {
+    const db = this.db as any;
+    const rows = await db.select().from(accessReviews).orderBy(desc(accessReviews.id)).limit(50);
+    return { reviews: rows.map((r: any) => ({ id: Number(r.id), period: r.period, reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt, user_count: r.userCount, conflict_user_count: r.conflictUserCount, notes: r.notes })), count: rows.length };
   }
 
   async remove(username: string, actor: JwtUser) {

@@ -421,6 +421,13 @@
       "when": 1782220000000,
       "tag": "0059_sod_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1782230000000,
+      "tag": "0060_access_reviews",
+      "breakpoints": true
     }
   ]
 }

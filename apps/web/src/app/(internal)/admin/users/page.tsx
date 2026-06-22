@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserPlus } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Download, ShieldCheck, UserPlus } from 'lucide-react';
+import { api, apiDownload } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -49,9 +49,27 @@ export default function AdminUsersPage() {
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 
+  // ── ITGC-AC-08: User Access Review ──
+  const certs = useQuery<any>({ queryKey: ['uar-certs'], queryFn: () => api('/api/admin/users/access-review/certifications') });
+  const lastCert = certs.data?.reviews?.[0];
+  const certify = useMutation({
+    mutationFn: () => { const period = prompt('ช่วงที่ทบทวน (เช่น 2026-Q2)'); if (!period) return Promise.resolve(null); const notes = prompt('หมายเหตุ (optional)') ?? undefined; return api('/api/admin/users/access-review/certify', { method: 'POST', body: JSON.stringify({ period, notes }) }); },
+    onSuccess: (r: any) => { if (r) { setMsg(`✅ รับรองการทบทวนสิทธิ์ ${r.period} (${r.user_count} ผู้ใช้)`); qc.invalidateQueries({ queryKey: ['uar-certs'] }); } },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+
   return (
     <div className="space-y-4">
       <PageHeader title="จัดการผู้ใช้ (User Management)" description="สร้าง / แก้ไขสิทธิ์ / รีเซ็ตรหัสผ่าน / ลบบัญชีผู้ใช้" />
+      <Card className="gap-3 p-5">
+        <h3 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-4" /> การทบทวนสิทธิ์ผู้ใช้ (Access Review · ITGC-AC-08)</h3>
+        <p className="text-sm text-muted-foreground">ส่งออกสิทธิ์จริงของผู้ใช้ทุกคน (พร้อมความขัดแย้ง SoD) เพื่อทบทวน แล้วบันทึกการรับรองรายไตรมาส.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => apiDownload('/api/admin/users/access-review/export', 'access-review.csv').catch((e) => setMsg(`❌ ${e.message}`))}><Download className="size-4" /> ส่งออก CSV</Button>
+          <Button size="sm" disabled={certify.isPending} onClick={() => certify.mutate()}><ShieldCheck className="size-4" /> รับรองการทบทวน</Button>
+          {lastCert && <span className="text-sm text-muted-foreground">ล่าสุด: {lastCert.period} · โดย {lastCert.reviewed_by} · {lastCert.user_count} ผู้ใช้ ({lastCert.conflict_user_count} ขัดแย้ง)</span>}
+        </div>
+      </Card>
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">สร้างบัญชีใหม่</h3>
         <div className="grid gap-2 sm:grid-cols-4">

@@ -1,5 +1,6 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
+import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -78,6 +79,7 @@ export interface PostEntryDto {
   createdBy: string;
   ledgerCode?: string | null; // NULL/undefined = shared (all ledgers); a code = adjustment to that ledger only
   allowClosedPeriod?: boolean; // only the year-end CLOSE may post into the period it is closing
+  pendingApproval?: boolean; // GL-05: post as DRAFT (excluded from balances) until a different user approves
 }
 
 @Injectable()
@@ -192,7 +194,7 @@ export class LedgerService {
       const [h] = await tx.insert(journalEntries).values({
         entryNo, entryDate, period, memo: dto.memo ?? null,
         source: dto.source ?? 'Manual', sourceRef: dto.sourceRef ?? null, ledgerCode: dto.ledgerCode ?? null,
-        tenantId: entryTenantId, currency, status: 'Posted', createdBy: dto.createdBy,
+        tenantId: entryTenantId, currency, status: dto.pendingApproval ? 'Draft' : 'Posted', createdBy: dto.createdBy,
       }).onConflictDoNothing().returning({ id: journalEntries.id });
       if (!h) return null;
       await tx.insert(journalLines).values(nzLines.map((l) => ({
@@ -207,13 +209,15 @@ export class LedgerService {
 
     // Lost the race to a concurrent identical posting → the entry already exists, do not double-count.
     if (inserted === null) return { entry_no: null, balanced: true, deduped: true, lines: [] };
-    return { entry_no: entryNo, balanced: true, lines: inserted };
+    const status = dto.pendingApproval ? 'Draft' : 'Posted';
+    return { entry_no: entryNo, balanced: true, status, pending: !!dto.pendingApproval, lines: inserted };
   }
 
   // ───────────────────── Journal listing ─────────────────────
-  async listJournal(limit: number) {
+  private async entriesList(limit: number, status?: 'Draft' | 'Posted' | 'Voided') {
     const db = this.db as any;
-    const heads = await db.select().from(journalEntries).orderBy(desc(journalEntries.id)).limit(limit);
+    const where = status ? eq(journalEntries.status, status) : undefined;
+    const heads = await db.select().from(journalEntries).where(where).orderBy(desc(journalEntries.id)).limit(limit);
     const out: any[] = [];
     for (const h of heads) {
       const lines = await db.select({
@@ -226,6 +230,38 @@ export class LedgerService {
       });
     }
     return { entries: out, count: out.length };
+  }
+  async listJournal(limit: number) { return this.entriesList(limit); }
+  // GL-05: journal entries awaiting maker-checker approval (Draft).
+  async pendingJournal(limit: number) { return this.entriesList(limit, 'Draft'); }
+
+  // GL-05 maker-checker: approve a Draft JE → Posted. The approver MUST differ from the preparer
+  // (segregation of duties) regardless of permissions held — even an Admin cannot approve their own.
+  async approveEntry(entryNo: string, approver: JwtUser) {
+    const db = this.db as any;
+    const [e] = await db.select().from(journalEntries).where(eq(journalEntries.entryNo, entryNo)).limit(1);
+    if (!e) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal entry not found', messageTh: 'ไม่พบรายการบัญชี' });
+    if (e.status !== 'Draft') throw new BadRequestException({ code: 'NOT_PENDING', message: `Entry ${entryNo} is ${e.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
+    if (e.createdBy && e.createdBy === approver.username) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a journal entry you prepared', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
+    // Re-check the period is still open at approval time (it may have closed since the draft was prepared).
+    const [pp] = e.tenantId == null ? [undefined]
+      : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.code, e.period), eq(fiscalPeriods.tenantId, e.tenantId))).limit(1);
+    if (pp && pp.status === 'Closed') throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${e.period} is closed`, messageTh: `งวดบัญชี ${e.period} ถูกปิดแล้ว` });
+    await db.update(journalEntries).set({ status: 'Posted' }).where(eq(journalEntries.id, e.id));
+    return { entry_no: entryNo, status: 'Posted', approved_by: approver.username, prepared_by: e.createdBy };
+  }
+
+  // GL-05: reject a Draft JE → Voided (with a reason appended to the memo).
+  async rejectEntry(entryNo: string, approver: JwtUser, reason?: string) {
+    const db = this.db as any;
+    const [e] = await db.select().from(journalEntries).where(eq(journalEntries.entryNo, entryNo)).limit(1);
+    if (!e) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal entry not found', messageTh: 'ไม่พบรายการบัญชี' });
+    if (e.status !== 'Draft') throw new BadRequestException({ code: 'NOT_PENDING', message: `Entry ${entryNo} is ${e.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
+    const memo = `${e.memo ?? ''} [REJECTED by ${approver.username}${reason ? `: ${reason}` : ''}]`.trim();
+    await db.update(journalEntries).set({ status: 'Voided', memo }).where(eq(journalEntries.id, e.id));
+    return { entry_no: entryNo, status: 'Voided', rejected_by: approver.username };
   }
 
   // ───────────────────── Trial Balance ─────────────────────
