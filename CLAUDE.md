@@ -32,6 +32,8 @@ For every such change, review and update as needed:
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
 - Shared: `pnpm --filter @ierp/shared build` (build before harnesses that import dist)
+- Web E2E (Playwright UI smoke, e.g. ERP/POS switcher): `pnpm --filter @ierp/web test:e2e`
+  (one-time `pnpm --filter @ierp/web exec playwright install chromium`; needs browser-download network access)
 - Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`):
   `pnpm --filter @ierp/cutover compliance` (ICFR controls), `e2e`, `ext`, `worldclass`, `taxdocs`,
   `restaurant`; `pnpm --filter @ierp/parity writeflow|analytics`. Keep these green.
