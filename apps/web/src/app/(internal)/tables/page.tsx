@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Armchair, Flame, Plus, Receipt, Sparkles, Wallet, X } from 'lucide-react';
+import { Armchair, Flame, Plus, Receipt, Sparkles, Utensils, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
 import { cn } from '@/lib/utils';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -46,47 +47,64 @@ export default function TablesPage() {
   const qc = useQueryClient();
   const board = useQuery<{ tables: TableRow[] }>({ queryKey: ['tables-status'], queryFn: () => api('/api/restaurant/tables/status'), refetchInterval: 4000 });
   const [sel, setSel] = useState<number | null>(null);
+  const [orderTable, setOrderTable] = useState<number | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ['tables-status'] });
 
   const tables = board.data?.tables ?? [];
   const selected = tables.find((t) => t.id === sel) ?? null;
+  const ordering = tables.find((t) => t.id === orderTable) ?? null;
 
   return (
     <div>
       <PageHeader title="โต๊ะ (Floor plan)" description="สถานะโต๊ะแบบเรียลไทม์และผังร้าน" />
       <Tabs
         tabs={[
-          { key: 'board', label: 'สถานะโต๊ะ', content: <Board tables={tables} q={board} onSelect={setSel} sel={sel} /> },
+          { key: 'board', label: 'สถานะโต๊ะ', content: <Board tables={tables} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
           { key: 'plan', label: 'ผังร้าน', content: <FloorPlan tables={tables} onSelect={setSel} sel={sel} onAdd={refresh} /> },
         ]}
       />
-      {selected && <TablePanel t={selected} onChange={refresh} onClose={() => setSel(null)} />}
+      {selected && <TablePanel t={selected} onChange={refresh} onClose={() => setSel(null)} onOrder={() => setOrderTable(selected.id)} />}
+      {ordering && (
+        <DineInOrderDialog
+          tableId={ordering.id}
+          tableNo={ordering.table_no}
+          orderNo={ordering.order?.order_no ?? null}
+          onChange={refresh}
+          onClose={() => setOrderTable(null)}
+        />
+      )}
     </div>
   );
 }
 
-function Board({ tables, q, onSelect, sel }: { tables: TableRow[]; q: any; onSelect: (id: number) => void; sel: number | null }) {
+function Board({ tables, q, onSelect, sel, onOrder }: { tables: TableRow[]; q: any; onSelect: (id: number) => void; sel: number | null; onOrder: (id: number) => void }) {
   return (
     <StateView q={q}>
       <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
         {tables.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีโต๊ะ — เพิ่มในแท็บ “ผังร้าน”</p>}
         {tables.map((t) => (
-          <button
+          <div
             key={t.id}
-            onClick={() => onSelect(t.id)}
             className={cn(
-              'rounded-lg border border-l-[6px] bg-card p-2.5 text-left transition-colors hover:bg-accent',
+              'rounded-lg border border-l-[6px] bg-card transition-colors',
               tone(t.status).border,
               sel === t.id && 'ring-2 ring-primary',
             )}
           >
-            <div className="flex items-center justify-between">
-              <strong>โต๊ะ {t.table_no}</strong>
-              <span className="text-sm text-muted-foreground">{t.seats} ที่</span>
+            <button onClick={() => onSelect(t.id)} className="w-full rounded-t-lg p-2.5 text-left hover:bg-accent">
+              <div className="flex items-center justify-between">
+                <strong>โต๊ะ {t.table_no}</strong>
+                <span className="text-sm text-muted-foreground">{t.seats} ที่</span>
+              </div>
+              <div className={cn('text-sm font-semibold', tone(t.status).text)}>{STATUS_TH[t.status]}</div>
+              {t.order && <div className="text-xs text-muted-foreground tabular">{baht(t.order.total)} · รอ {t.order.waited_min}′</div>}
+            </button>
+            <div className="px-2.5 pb-2.5">
+              <Button variant="outline" size="sm" className="w-full" onClick={() => onOrder(t.id)}>
+                <Utensils className="size-4" /> สั่งอาหาร
+              </Button>
             </div>
-            <div className={cn('text-sm font-semibold', tone(t.status).text)}>{STATUS_TH[t.status]}</div>
-            {t.order && <div className="text-xs text-muted-foreground tabular">{baht(t.order.total)} · รอ {t.order.waited_min}′</div>}
-          </button>
+          </div>
         ))}
       </div>
     </StateView>
@@ -127,7 +145,7 @@ function FloorPlan({ tables, onSelect, sel, onAdd }: { tables: TableRow[]; onSel
   );
 }
 
-function TablePanel({ t, onChange, onClose }: { t: TableRow; onChange: () => void; onClose: () => void }) {
+function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: () => void; onClose: () => void; onOrder: () => void }) {
   const [msg, setMsg] = useState('');
   const [qr, setQr] = useState('');
   const [item, setItem] = useState({ name: '', qty: '1', price: '', station: 'hot' });
@@ -152,7 +170,10 @@ function TablePanel({ t, onChange, onClose }: { t: TableRow; onChange: () => voi
     <Card className={cn('mt-4 gap-4 border-t-4 p-5', tone(t.status).bar)}>
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-2 text-lg font-semibold">โต๊ะ {t.table_no} · <Badge variant={statusVariant(STATUS_TH[t.status])}>{STATUS_TH[t.status]}</Badge></h3>
-        <Button variant="ghost" size="icon" onClick={onClose}><X className="size-4" /></Button>
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={onOrder}><Utensils className="size-4" /> สั่งอาหาร</Button>
+          <Button variant="ghost" size="icon" onClick={onClose}><X className="size-4" /></Button>
+        </div>
       </div>
       <Msg ok={!msg.startsWith('❌')}>{msg}</Msg>
 

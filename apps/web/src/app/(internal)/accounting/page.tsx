@@ -37,6 +37,7 @@ export default function AccountingPage() {
           { key: 'journal', label: 'สมุดรายวัน', content: <Journal /> },
           { key: 'pl', label: 'งบกำไรขาดทุน', content: <IncomeStatement /> },
           { key: 'bs', label: 'งบดุล', content: <BalanceSheet /> },
+          { key: 'opening', label: 'ยอดยกมา', content: <OpeningBalances /> },
         ]}
       />
     </div>
@@ -222,6 +223,131 @@ function IncomeStatement() {
           </div>
         )}
       </StateView>
+    </div>
+  );
+}
+
+// ───────────────────────── ยอดยกมา (Opening balances) ─────────────────────────
+type ObLine = { account_code: string; debit: string; credit: string };
+const emptyObLine = (): ObLine => ({ account_code: '', debit: '', credit: '' });
+
+function OpeningBalances() {
+  const qc = useQueryClient();
+  const accounts = useQuery<{ accounts: Account[] }>({ queryKey: ['accounts'], queryFn: () => api('/api/ledger/accounts') });
+
+  const [batchRef, setBatchRef] = useState('');
+  const [lines, setLines] = useState<ObLine[]>([emptyObLine(), emptyObLine()]);
+  const [msg, setMsg] = useState('');
+  const [errs, setErrs] = useState<{ row: number; error: string }[]>([]);
+
+  const sumDebit = lines.reduce((a, l) => a + (Number(l.debit) || 0), 0);
+  const sumCredit = lines.reduce((a, l) => a + (Number(l.credit) || 0), 0);
+  // net imbalance auto-posts to account 3000 (Opening Balance Equity)
+  const diff = sumDebit - sumCredit;
+  const equityDebit = diff < 0 ? -diff : 0;
+  const equityCredit = diff > 0 ? diff : 0;
+
+  const setLine = (i: number, patch: Partial<ObLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+
+  const post = useMutation({
+    mutationFn: () =>
+      api<{ batch_ref?: string; entry_no?: string; balanced?: boolean; lines_posted?: number; row_errors?: { row: number; error: string }[]; already?: boolean }>(
+        '/api/ledger/opening-balances',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            batch_ref: batchRef || undefined,
+            rows: lines
+              .filter((l) => l.account_code && (Number(l.debit) || Number(l.credit)))
+              .map((l) => ({ account_code: l.account_code, debit: Number(l.debit) || undefined, credit: Number(l.credit) || undefined })),
+          }),
+        },
+      ),
+    onSuccess: (r) => {
+      setErrs(r.row_errors ?? []);
+      if (r.already) {
+        setMsg(`⚠️ batch_ref นี้ถูกใช้ลงยอดยกมาแล้ว`);
+        return;
+      }
+      setMsg(`✅ ลงยอดยกมาสำเร็จ: ${r.entry_no} (${r.lines_posted ?? 0} บรรทัด)`);
+      setBatchRef(''); setLines([emptyObLine(), emptyObLine()]);
+      qc.invalidateQueries({ queryKey: ['tb'] });
+      qc.invalidateQueries({ queryKey: ['journal'] });
+    },
+    onError: (e: any) => { setErrs([]); setMsg(`❌ ${e.message}`); },
+  });
+
+  const hasRows = lines.some((l) => l.account_code && (Number(l.debit) || Number(l.credit)));
+
+  return (
+    <div className="grid gap-5">
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">ลงยอดยกมา (Opening Balances)</h3>
+        <p className="text-sm text-muted-foreground">ผลต่างเดบิต/เครดิตจะลงบัญชี 3000 (ส่วนทุนยอดยกมา) อัตโนมัติ</p>
+        <div className="grid max-w-sm gap-1.5">
+          <Label htmlFor="ob-batch">อ้างอิงชุด (batch ref)</Label>
+          <Input id="ob-batch" placeholder="เช่น OB-2026 (กันลงซ้ำ)" value={batchRef} onChange={(e) => setBatchRef(e.target.value)} />
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="pb-2 font-medium">บัญชี</th>
+              <th className="w-[130px] pb-2 text-right font-medium">เดบิต</th>
+              <th className="w-[130px] pb-2 text-right font-medium">เครดิต</th>
+              <th className="w-10 pb-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={i}>
+                <td className="py-1 pr-2">
+                  <select className={selectCls} value={l.account_code} onChange={(e) => setLine(i, { account_code: e.target.value })}>
+                    <option value="">— เลือกบัญชี —</option>
+                    {accounts.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+                  </select>
+                </td>
+                <td className="py-1 pr-2"><Input className="text-right tabular" type="number" min="0" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} /></td>
+                <td className="py-1 pr-2"><Input className="text-right tabular" type="number" min="0" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} /></td>
+                <td className="py-1">{lines.length > 1 && <Button variant="ghost" size="icon" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}><X className="size-4" /></Button>}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t text-muted-foreground">
+              <td className="py-1.5">3000 · ส่วนทุนยอดยกมา (อัตโนมัติ)</td>
+              <td className="py-1.5 text-right tabular">{equityDebit ? baht(equityDebit) : ''}</td>
+              <td className="py-1.5 text-right tabular">{equityCredit ? baht(equityCredit) : ''}</td>
+              <td />
+            </tr>
+            <tr className="border-t font-medium">
+              <td className="py-1.5 text-right">รวม</td>
+              <td className="py-1.5 text-right tabular">{baht(sumDebit + equityDebit)}</td>
+              <td className="py-1.5 text-right tabular">{baht(sumCredit + equityCredit)}</td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, emptyObLine()])}>
+            <Plus className="size-4" /> เพิ่มบรรทัด
+          </Button>
+          <span className="text-sm">
+            เดบิต <strong className="tabular">{baht(sumDebit)}</strong> · เครดิต <strong className="tabular">{baht(sumCredit)}</strong>{' '}
+            <Badge variant={Math.abs(diff) < 0.005 ? 'success' : 'warning'}>
+              {Math.abs(diff) < 0.005 ? 'สมดุล' : `ลง 3000 ${baht(Math.abs(diff))}`}
+            </Badge>
+          </span>
+          <Button disabled={!hasRows || post.isPending} onClick={() => { setMsg(''); setErrs([]); post.mutate(); }}>
+            <Save className="size-4" /> {post.isPending ? 'กำลังลงยอด…' : 'ลงยอดยกมา'}
+          </Button>
+        </div>
+        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+        {errs.length > 0 && (
+          <div className="grid gap-1 text-sm text-destructive">
+            {errs.map((e, j) => <div key={j}>แถว {e.row}: {e.error}</div>)}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
