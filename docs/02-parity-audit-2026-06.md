@@ -33,6 +33,8 @@ Gaps **#1 (module flags)**, **#2 (master-data import/export)**, **#4 (inventory 
 
 **Gap #3 also done (2026-06-22):** stocktake + goods-issue/transfer built with QR scan-to-fill — `StockOpsService` (uses the existing service-less `stocktakes`/`stock_movements` tables), `POST /api/stocktake` (+`/post`), `POST /api/inventory/issue|transfer`, `GET /api/inventory/movements`; `MI` doc-prefix added; web `/stocktake` + `/goods-issue` pages. Audit model preserved (snapshots untouched). `tools/cutover/src/stock-ops.ts` 13/13.
 
+**ALL remaining gaps closed (2026-06-22):** Claims (sales `order_claims` + supplier `gr_claims`), Delivery Orders (logistics tables, create-from-order + status + POD), Lot/batch read (ledger/expiry-buckets/FEFO), AP/AR aging buckets + AP-aging xlsx export, Mobile scan sessions (open→scan→close-commit), Image manager (`item_images` data-URLs, migration 0047), User-CRUD (`/api/admin/users`), Mini-ERP sub-accounts (`/api/portal/my/users`). Web pages added for all internal ones + portal variance/my-users + nav. `tools/cutover/src/gaps.ts` 33/33. **Deferred slivers** (not blocking): survey portal respondent (backend gated to staff `marketing` perm), portal BoM (no backend endpoint), campaign popups on portal dashboard, finance-page aging widget (aging API + export are done) — left to avoid clobbering the concurrent Phase B/C session editing those files.
+
 ## 1. Consolidated gap register (port checklist)
 
 | # | Gap | ERPPOS evidence | V2 status | Pri |
