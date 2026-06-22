@@ -27,6 +27,7 @@ import {
   FlaskConical,
   Factory,
   FolderKanban,
+  Network,
   Goal,
   Landmark,
   Layers,
@@ -115,6 +116,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'เติมสต๊อกอัตโนมัติ', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
       { label: 'สูตรการผลิต (BoM)', href: '/bom', icon: FlaskConical, perms: ['bom_master'] },
       { label: 'ใบสั่งผลิต (Manufacturing)', href: '/manufacturing', icon: Factory, perms: ['bom_master', 'warehouse'] },
+      { label: 'การผลิตขั้นสูง (Routing/QA/MRP)', href: '/production', icon: Network, perms: ['bom_master', 'warehouse', 'planner'] },
     ],
   },
   {

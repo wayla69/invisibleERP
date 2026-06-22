@@ -68,6 +68,7 @@ import { ManufacturingModule } from './modules/manufacturing/manufacturing.modul
 import { PosControlModule } from './modules/pos-control/pos-control.module';
 import { PosTerminalModule } from './modules/pos-terminal/pos-terminal.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
 
 @Module({
   imports: [
@@ -135,6 +136,7 @@ import { ProjectsModule } from './modules/projects/projects.module';
     PosControlModule,
     PosTerminalModule,
     ProjectsModule,
+    MfgDepthModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

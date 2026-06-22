@@ -372,6 +372,13 @@
       "when": 1782155000000,
       "tag": "0052_projects",
       "breakpoints": false
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1782160000000,
+      "tag": "0053_mfg_depth",
+      "breakpoints": false
     }
   ]
 }

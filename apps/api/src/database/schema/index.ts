@@ -49,3 +49,4 @@ export * from './manufacturing';
 export * from './pos-control';
 export * from './pos-terminal';
 export * from './projects';
+export * from './mfg-depth';

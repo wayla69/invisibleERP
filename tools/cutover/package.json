@@ -17,6 +17,7 @@
     "payroll": "tsx src/payroll.ts",
     "manufacturing": "tsx src/manufacturing.ts",
     "projects": "tsx src/projects.ts",
+    "mfg-depth": "tsx src/mfg-depth.ts",
     "promptpay": "tsx src/promptpay.ts",
     "etax": "tsx src/etax.ts",
     "etax-email": "tsx src/etax-email.ts",
