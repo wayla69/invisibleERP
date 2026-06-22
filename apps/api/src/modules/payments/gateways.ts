@@ -1,6 +1,8 @@
 // Payment gateway abstraction — select by `gateway` field (default 'mock').
 // Each gateway proves money moved: authorizeAndCapture returns a ref + final status.
 
+import { buildPromptPayPayload } from './promptpay-qr';
+
 export interface GatewayResult {
   ref: string;
   status: 'Captured' | 'Authorized' | 'Pending' | 'Failed';
@@ -28,8 +30,12 @@ export class MockGateway implements PaymentGateway {
 // ref and mark the tender 'Pending' until a settlement webhook flips it to Captured. Reporting
 // Captured up-front would book funds that have not actually moved.
 export class PromptPayGateway implements PaymentGateway {
-  async authorizeAndCapture(amount: number): Promise<GatewayResult> {
-    return { ref: 'promptpay_' + amount, status: 'Pending' };
+  async authorizeAndCapture(amount: number, _currency: string, _method: string, meta?: Record<string, unknown>): Promise<GatewayResult> {
+    // When the merchant's PromptPay ID is supplied (from tenant config), emit a REAL scannable EMVCo QR
+    // as the ref. Otherwise fall back to the placeholder so existing flows keep working.
+    const ppId = (meta?.promptpay_id ?? meta?.promptPayId) as string | undefined;
+    const ref = ppId ? buildPromptPayPayload(ppId, amount) : 'promptpay_' + amount;
+    return { ref, status: 'Pending' };
   }
 }
 

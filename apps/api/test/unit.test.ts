@@ -3,6 +3,7 @@ import { ThaiTaxProvider, ZeroTaxProvider } from '../src/modules/tax/tax-provide
 import { TaxService } from '../src/modules/tax/tax.service';
 import { round2, getCurrency, isSupportedCurrency } from '../src/modules/tax/money';
 import { DocNumberService } from '../src/common/doc-number.service';
+import { buildPromptPayPayload, crc16ccitt, isValidPromptPayTarget } from '../src/modules/payments/promptpay-qr';
 
 describe('tax providers', () => {
   it('Thai VAT 7% on 100 = 7', () => {
@@ -26,6 +27,33 @@ describe('money / ISO-4217', () => {
   it('round2', () => expect(round2(1.239)).toBe(1.24));
   it('JPY has 0 minor units', () => expect(getCurrency('JPY').decimals).toBe(0));
   it('THB supported', () => expect(isSupportedCurrency('THB')).toBe(true));
+});
+
+describe('PromptPay QR (EMVCo)', () => {
+  it('CRC16-CCITT standard check "123456789" → 29B1', () => expect(crc16ccitt('123456789')).toBe('29B1'));
+  it('dynamic QR: header, AID, mobile-formatted, THB, amount, country, valid CRC', () => {
+    const qr = buildPromptPayPayload('0801234567', 125.5);
+    expect(qr.startsWith('000201')).toBe(true);     // payload format indicator
+    expect(qr).toContain('010212');                 // dynamic (amount present)
+    expect(qr).toContain('A000000677010111');       // PromptPay AID
+    expect(qr).toContain('0066801234567');          // mobile → 0066 + number
+    expect(qr).toContain('5303764');                // THB
+    expect(qr).toContain('5406125.50');             // amount
+    expect(qr).toContain('5802TH');                 // country
+    expect(qr.slice(-4)).toBe(crc16ccitt(qr.slice(0, -4))); // CRC self-consistent
+  });
+  it('static QR (national ID, no amount): point-of-init 11, no amount tag', () => {
+    const qr = buildPromptPayPayload('1234567890123');
+    expect(qr).toContain('010211');                 // static
+    expect(qr).not.toContain('5406');               // no amount tag
+    expect(qr).toContain('02131234567890123');      // national-id sub-tag 02 + len 13
+    expect(qr.slice(-4)).toBe(crc16ccitt(qr.slice(0, -4)));
+  });
+  it('target validation', () => {
+    expect(isValidPromptPayTarget('0801234567')).toBe(true);
+    expect(isValidPromptPayTarget('1234567890123')).toBe(true);
+    expect(isValidPromptPayTarget('123')).toBe(false);
+  });
 });
 
 describe('DocNumberService formats', () => {
