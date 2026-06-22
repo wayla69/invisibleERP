@@ -51,3 +51,4 @@ export * from './pos-terminal';
 export * from './pricing';
 export * from './pos-fiscal';
 export * from './pos-audit';
+export * from './pos-scale';

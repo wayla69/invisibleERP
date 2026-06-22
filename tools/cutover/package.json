@@ -11,6 +11,7 @@
     "portal-extra": "tsx src/portal-extra.ts",
     "pos-p0": "tsx src/pos-p0.ts",
     "pos-p1": "tsx src/pos-p1.ts",
+    "pos-p2": "tsx src/pos-p2.ts",
     "ext": "tsx src/ext.ts",
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "onboarding": "tsx src/onboarding.ts",

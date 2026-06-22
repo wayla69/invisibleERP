@@ -15,6 +15,7 @@ export const giftCards = pgTable('gift_cards', {
   balance: numeric('balance', { precision: 14, scale: 2 }).notNull(),
   currency: text('currency').default('THB'),
   status: giftCardStatusEnum('status').default('Active'),
+  pin: text('pin'),                                             // optional activation/balance-check PIN (P2c)
   issuedSaleNo: text('issued_sale_no'),                         // sale where sold (issue) — null for refund-credit
   note: text('note'),
   createdBy: text('created_by'),

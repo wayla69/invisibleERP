@@ -70,6 +70,9 @@ import { PosTerminalModule } from './modules/pos-terminal/pos-terminal.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { PosAuditModule } from './modules/pos-audit/pos-audit.module';
 import { PosFiscalModule } from './modules/pos-fiscal/pos-fiscal.module';
+import { PosScaleModule } from './modules/pos-scale/pos-scale.module';
+import { ChannelAdapterModule } from './modules/channel-adapter/channel-adapter.module';
+import { PosLoyaltyLaborModule } from './modules/pos-loyalty-labor/pos-loyalty-labor.module';
 
 @Module({
   imports: [
@@ -139,6 +142,9 @@ import { PosFiscalModule } from './modules/pos-fiscal/pos-fiscal.module';
     PricingModule,
     PosAuditModule,
     PosFiscalModule,
+    PosScaleModule,
+    ChannelAdapterModule,
+    PosLoyaltyLaborModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

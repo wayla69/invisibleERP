@@ -43,6 +43,7 @@ export const diningTables = pgTable('dining_tables', {
   status: tableStatusEnum('status').default('available'),
   qrToken: text('qr_token'),                 // stable opaque QR (identifies the table)
   active: boolean('active').default(true),
+  rev: integer('rev').default(0),            // optimistic-lock version (P2a)
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -93,6 +94,7 @@ export const dineInOrders = pgTable('dine_in_orders', {
   billRequestedAt: timestamp('bill_requested_at', { withTimezone: true }),
   paidAt: timestamp('paid_at', { withTimezone: true }),
   closedAt: timestamp('closed_at', { withTimezone: true }),
+  rev: integer('rev').default(0),            // optimistic-lock version (P2a)
   createdBy: text('created_by'),
 });
 

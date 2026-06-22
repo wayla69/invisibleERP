@@ -372,6 +372,13 @@
       "when": 1782160000000,
       "tag": "0052_pos_p1",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1782170000000,
+      "tag": "0053_pos_p2",
+      "breakpoints": true
     }
   ]
 }
