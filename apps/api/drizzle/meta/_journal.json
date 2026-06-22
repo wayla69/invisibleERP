@@ -379,6 +379,13 @@
       "when": 1782160000000,
       "tag": "0053_mfg_depth",
       "breakpoints": false
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1782170000000,
+      "tag": "0054_hcm",
+      "breakpoints": false
     }
   ]
 }

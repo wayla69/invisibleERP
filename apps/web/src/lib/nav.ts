@@ -136,6 +136,7 @@ export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'บุคลากร & เงินเดือน',
     items: [
+      { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
       { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
     ],
   },

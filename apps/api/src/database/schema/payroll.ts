@@ -12,7 +12,10 @@ export const employees = pgTable(
     nationalId: text('national_id'),           // เลขบัตรประชาชน (13 หลัก) — for ภ.ง.ด.1
     ssoNo: text('sso_no'),                      // เลขประกันสังคม
     position: text('position'),
+    department: text('department'),
     monthlySalary: numeric('monthly_salary', { precision: 14, scale: 2 }).notNull().default('0'),
+    hourlyRate: numeric('hourly_rate', { precision: 12, scale: 2 }).default('0'),      // for OT pay
+    pfRate: numeric('pf_rate', { precision: 6, scale: 4 }).default('0'),               // provident fund % (ee=er)
     allowances: numeric('allowances', { precision: 14, scale: 2 }).default('0'), // extra tax allowances (annual)
     ssoEligible: boolean('sso_eligible').default(true),
     bankAccount: text('bank_account'),
@@ -56,8 +59,12 @@ export const payslips = pgTable(
     empName: text('emp_name'),
     nationalId: text('national_id'),
     gross: numeric('gross', { precision: 14, scale: 2 }).default('0'),
+    otPay: numeric('ot_pay', { precision: 14, scale: 2 }).default('0'),
+    unpaid: numeric('unpaid', { precision: 14, scale: 2 }).default('0'),
     ssoEmployee: numeric('sso_employee', { precision: 14, scale: 2 }).default('0'),
     ssoEmployer: numeric('sso_employer', { precision: 14, scale: 2 }).default('0'),
+    pfEmployee: numeric('pf_employee', { precision: 14, scale: 2 }).default('0'),
+    pfEmployer: numeric('pf_employer', { precision: 14, scale: 2 }).default('0'),
     wht: numeric('wht', { precision: 14, scale: 2 }).default('0'),
     net: numeric('net', { precision: 14, scale: 2 }).default('0'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

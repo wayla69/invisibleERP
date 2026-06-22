@@ -1,17 +1,17 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { employees, payruns, payslips } from '../../database/schema';
+import { employees, payruns, payslips, timesheets, leaveRequests } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
-import { computePayslip } from './payroll-calc';
+import { computePayslipFull, overtimePay } from './payroll-calc';
 
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
 export interface EmployeeDto {
-  emp_code?: string; name: string; national_id?: string; sso_no?: string; position?: string;
-  monthly_salary: number; allowances?: number; sso_eligible?: boolean; bank_account?: string; start_date?: string;
+  emp_code?: string; name: string; national_id?: string; sso_no?: string; position?: string; department?: string;
+  monthly_salary: number; hourly_rate?: number; pf_rate?: number; allowances?: number; sso_eligible?: boolean; bank_account?: string; start_date?: string;
 }
 
 @Injectable()
@@ -27,7 +27,8 @@ export class PayrollService {
     const code = (dto.emp_code?.trim()) || `EMP${String(Date.now()).slice(-6)}`;
     const [row] = await db.insert(employees).values({
       tenantId: user.tenantId ?? null, empCode: code, name: dto.name, nationalId: dto.national_id ?? null,
-      ssoNo: dto.sso_no ?? null, position: dto.position ?? null, monthlySalary: fx(dto.monthly_salary ?? 0, 2),
+      ssoNo: dto.sso_no ?? null, position: dto.position ?? null, department: dto.department ?? null, monthlySalary: fx(dto.monthly_salary ?? 0, 2),
+      hourlyRate: fx(dto.hourly_rate ?? 0, 2), pfRate: fx(dto.pf_rate ?? 0, 4),
       allowances: fx(dto.allowances ?? 0, 2), ssoEligible: dto.sso_eligible ?? true,
       bankAccount: dto.bank_account ?? null, startDate: dto.start_date ?? null, active: true,
     }).returning();
@@ -53,22 +54,36 @@ export class PayrollService {
     const emps = await db.select().from(employees).where(eq(employees.active, true));
     if (!emps.length) throw new BadRequestException({ code: 'NO_EMPLOYEES', message: 'No active employees to pay', messageTh: 'ไม่มีพนักงานที่ใช้งานอยู่' });
 
-    const slips = emps.map((e: any) => {
-      const c = computePayslip(n(e.monthlySalary), e.ssoEligible !== false, n(e.allowances));
-      return { e, ...c };
-    });
-    const sum = (k: keyof (typeof slips)[number]) => r2(slips.reduce((a: number, s: any) => a + Number(s[k]), 0));
+    const like = `${period}%`;
+    const slips: any[] = [];
+    for (const e of emps) {
+      // overtime hours from attendance + unpaid-leave days from approved requests, for this period
+      const [otRow] = await db.select({ h: sql<string>`coalesce(sum(${timesheets.otHours}),0)` }).from(timesheets)
+        .where(and(eq(timesheets.employeeId, Number(e.id)), sql`${timesheets.workDate}::text like ${like}`));
+      const [lvRow] = await db.select({ d: sql<string>`coalesce(sum(${leaveRequests.days}),0)` }).from(leaveRequests)
+        .where(and(eq(leaveRequests.employeeId, Number(e.id)), eq(leaveRequests.paid, false), sql`${leaveRequests.status}::text = 'Approved'`, sql`${leaveRequests.fromDate}::text like ${like}`));
+      const otPay = overtimePay(n(otRow?.h), n(e.hourlyRate));
+      const unpaidAmount = r2(n(lvRow?.d) * (n(e.monthlySalary) / 30));
+      const c = computePayslipFull({ monthlySalary: n(e.monthlySalary), otPay, unpaidAmount, ssoEligible: e.ssoEligible !== false, pfRate: n(e.pfRate), allowances: n(e.allowances) });
+      slips.push({ e, ...c });
+    }
+    const sum = (k: string) => r2(slips.reduce((a: number, s: any) => a + Number(s[k]), 0));
     const grossTotal = sum('gross'), ssoEe = sum('sso_employee'), ssoEr = sum('sso_employer'), whtTotal = sum('wht'), netTotal = sum('net');
+    const pfEe = sum('pf_employee'), pfEr = sum('pf_employer'), otTotal = sum('ot_pay'), unpaidTotal = sum('unpaid');
 
-    // GL: Dr 5600 salaries + Dr 5610 employer SSO / Cr 1000 cash(net) + Cr 2350 SSO payable(ee+er) + Cr 2360 WHT payable.
-    // Balanced by construction: Dr (gross + er) == Cr (net + ee + er + wht), since net = gross - ee - wht.
-    const lines = [
-      { account_code: '5600', debit: grossTotal, memo: 'Salaries' },
+    // GL: Dr 5600 salaries + 5610 employer-SSO (+ 5620 employer-PF) / Cr 1000 net + 2350 SSO-payable
+    // + 2360 WHT-payable (+ 2370 PF-payable). Balanced: Dr (gross+erSSO+erPF) == Cr (net+ssoBoth+wht+pfBoth).
+    const lines: { account_code: string; debit?: number; credit?: number; memo?: string }[] = [
+      { account_code: '5600', debit: grossTotal, memo: 'Salaries + OT − unpaid' },
       { account_code: '5610', debit: ssoEr, memo: 'Employer social security' },
       { account_code: '1000', credit: netTotal, memo: 'Net pay' },
       { account_code: '2350', credit: r2(ssoEe + ssoEr), memo: 'Social security payable' },
       { account_code: '2360', credit: whtTotal, memo: 'Payroll WHT payable (PND1)' },
     ];
+    if (pfEr > 0 || pfEe > 0) {
+      lines.push({ account_code: '5620', debit: pfEr, memo: 'Employer provident fund' });
+      lines.push({ account_code: '2370', credit: r2(pfEe + pfEr), memo: 'Provident fund payable' });
+    }
     const je: any = await this.ledger.postEntry({
       date: `${period}-28`, source: 'PAYROLL', sourceRef: period, tenantId,
       memo: `Payroll ${period} (${slips.length} staff)`, createdBy: user.username, lines,
@@ -82,12 +97,32 @@ export class PayrollService {
 
     await db.insert(payslips).values(slips.map((s: any) => ({
       payrunId: Number(run.id), tenantId, employeeId: Number(s.e.id), empCode: s.e.empCode, empName: s.e.name, nationalId: s.e.nationalId,
-      gross: fx(s.gross, 2), ssoEmployee: fx(s.sso_employee, 2), ssoEmployer: fx(s.sso_employer, 2), wht: fx(s.wht, 2), net: fx(s.net, 2),
+      gross: fx(s.gross, 2), otPay: fx(s.ot_pay, 2), unpaid: fx(s.unpaid, 2), ssoEmployee: fx(s.sso_employee, 2), ssoEmployer: fx(s.sso_employer, 2),
+      pfEmployee: fx(s.pf_employee, 2), pfEmployer: fx(s.pf_employer, 2), wht: fx(s.wht, 2), net: fx(s.net, 2),
     })));
 
     return {
       period, entry_no: je.entry_no, headcount: slips.length,
-      gross_total: grossTotal, sso_employee_total: ssoEe, sso_employer_total: ssoEr, wht_total: whtTotal, net_total: netTotal,
+      gross_total: grossTotal, ot_total: otTotal, unpaid_total: unpaidTotal,
+      sso_employee_total: ssoEe, sso_employer_total: ssoEr, pf_employee_total: pfEe, pf_employer_total: pfEr,
+      wht_total: whtTotal, net_total: netTotal,
+    };
+  }
+
+  // ภ.ง.ด.1ก — annual withholding summary per employee (income + WHT for the year).
+  async pnd1a(year: string, user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select({
+      empName: payslips.empName, nationalId: payslips.nationalId,
+      income: sql<string>`coalesce(sum(${payslips.gross}),0)`, wht: sql<string>`coalesce(sum(${payslips.wht}),0)`,
+    }).from(payslips).innerJoin(payruns, eq(payslips.payrunId, payruns.id))
+      .where(sql`${payruns.period}::text like ${year + '-%'}`).groupBy(payslips.empName, payslips.nationalId);
+    const lines = rows.map((r: any) => ({ emp_name: r.empName, national_id: r.nationalId, income: n(r.income), wht: n(r.wht) }));
+    return {
+      year, form: 'PND1A', headcount: lines.length, lines,
+      total_income: r2(lines.reduce((a: number, l: any) => a + l.income, 0)),
+      total_wht: r2(lines.reduce((a: number, l: any) => a + l.wht, 0)),
+      deadline: 'ยื่นแบบ ภ.ง.ด.1ก ภายในเดือนกุมภาพันธ์ของปีถัดไป',
     };
   }
 
