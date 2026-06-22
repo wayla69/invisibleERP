@@ -5,6 +5,44 @@ import { round2, getCurrency, isSupportedCurrency } from '../src/modules/tax/mon
 import { DocNumberService } from '../src/common/doc-number.service';
 import { buildPromptPayPayload, crc16ccitt, isValidPromptPayTarget } from '../src/modules/payments/promptpay-qr';
 import { socialSecurity, annualPit, computePayslip } from '../src/modules/payroll/payroll-calc';
+import { buildEtaxInvoiceXml } from '../src/modules/tax-docs/etax-xml';
+
+describe('e-Tax Invoice XML (ETDA / UBL 2.1)', () => {
+  const inv = {
+    doc_no: 'TIV-202606-0001', type: 'full', issue_date: '2026-06-22', currency: 'THB',
+    seller: { name: 'ร้าน A & B', tax_id: '0105551234567', branch_code: '00000', address: '1 ถนนสุข กทม.' },
+    buyer: { name: 'ลูกค้า', tax_id: '0992001234567', branch_code: '00000', address: '2 ถนนดี' },
+    subtotal: 100, vat_rate: 0.07, vat_amount: 7, grand_total: 107,
+    lines: [{ line_no: 1, description: 'สินค้า <X>', qty: 2, uom: 'EA', unit_price: 50, amount: 100 }],
+  };
+  const xml = buildEtaxInvoiceXml(inv as never);
+  it('declares XML + UBL Invoice root', () => {
+    expect(xml.startsWith('<?xml')).toBe(true);
+    expect(xml).toContain('<Invoice ');
+    expect(xml).toContain('<cbc:UBLVersionID>2.1</cbc:UBLVersionID>');
+  });
+  it('carries doc id, dates, type 388, currency', () => {
+    expect(xml).toContain('<cbc:ID>TIV-202606-0001</cbc:ID>');
+    expect(xml).toContain('<cbc:IssueDate>2026-06-22</cbc:IssueDate>');
+    expect(xml).toContain('>388</cbc:InvoiceTypeCode>');
+    expect(xml).toContain('<cbc:DocumentCurrencyCode>THB</cbc:DocumentCurrencyCode>');
+  });
+  it('seller + buyer tax ids via PartyTaxScheme', () => {
+    expect(xml).toContain('<cbc:CompanyID>0105551234567</cbc:CompanyID>');
+    expect(xml).toContain('<cbc:CompanyID>0992001234567</cbc:CompanyID>');
+  });
+  it('tax total: 7% percent, taxable 100.00, tax 7.00; payable 107.00', () => {
+    expect(xml).toContain('<cbc:Percent>7.00</cbc:Percent>');
+    expect(xml).toContain('<cbc:TaxableAmount currencyID="THB">100.00</cbc:TaxableAmount>');
+    expect(xml).toContain('<cbc:PayableAmount currencyID="THB">107.00</cbc:PayableAmount>');
+  });
+  it('line item + XML-escapes special chars', () => {
+    expect(xml).toContain('<cac:InvoiceLine>');
+    expect(xml).toContain('สินค้า &lt;X&gt;');     // < > escaped
+    expect(xml).toContain('ร้าน A &amp; B');        // & escaped
+    expect(xml).not.toContain('<X>');               // raw angle brackets must not leak
+  });
+});
 
 describe('Payroll — Thai social security + PIT (ภ.ง.ด.1)', () => {
   it('SSO 5% capped at 750 (base ceiling 15,000)', () => {

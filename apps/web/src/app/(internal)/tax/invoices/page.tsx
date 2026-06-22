@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileText, Receipt, Coins, Ban, Plus, ExternalLink } from 'lucide-react';
+import { FileText, Receipt, Coins, Ban, Plus, ExternalLink, FileCode } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -172,6 +172,18 @@ export default function TaxInvoicesPage() {
                     <Button variant="ghost" size="sm" asChild>
                       <a href={`${BASE}/api/tax-invoices/${r.doc_no}/pdf`} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="size-4" />
+                      </a>
+                    </Button>
+                  ),
+                },
+                {
+                  key: 'xml',
+                  label: 'e-Tax XML',
+                  sortable: false,
+                  render: (r: Invoice) => (
+                    <Button variant="ghost" size="sm" asChild title="ดาวน์โหลด e-Tax XML (UBL 2.1)">
+                      <a href={`${BASE}/api/tax-invoices/${r.doc_no}/etax-xml`} target="_blank" rel="noopener noreferrer">
+                        <FileCode className="size-4" />
                       </a>
                     </Button>
                   ),

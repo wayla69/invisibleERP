@@ -5,6 +5,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { TaxInvoiceService } from './tax-invoice.service';
 import { TaxDocsPdfService } from './tax-docs-pdf.service';
+import { buildEtaxInvoiceXml } from './etax-xml';
 import { IssueFullBody, type IssueFullDto } from './dto';
 
 const VoidBody = z.object({ reason: z.string().optional() });
@@ -41,6 +42,17 @@ export class TaxDocsController {
   @Patch(':docNo/void') @Permissions('ar', 'pos')
   void(@Param('docNo') docNo: string, @Body(new ZodValidationPipe(VoidBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
     return this.svc.void(u, docNo, b.reason ?? '');
+  }
+
+  // ETDA e-Tax Invoice XML (UBL 2.1) — unsigned instance document; XAdES signing added with the RD cert.
+  @Get(':docNo/etax-xml') @Permissions('ar', 'pos', 'cust_pos')
+  async etaxXml(@Param('docNo') docNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const inv = await this.svc.getByDocNo(u, docNo);
+    const xml = buildEtaxInvoiceXml(inv as never);
+    reply
+      .header('Content-Type', 'application/xml; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="${docNo}.xml"`)
+      .send(xml);
   }
 
   @Get(':docNo/pdf') @Permissions('ar', 'pos', 'cust_pos')
