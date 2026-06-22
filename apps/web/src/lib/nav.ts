@@ -152,6 +152,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'วางแผน & วิเคราะห์',
     items: [
       { label: 'งบประมาณ & แผน', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
+      { label: 'โครงการ (PSA)', href: '/projects', icon: Briefcase, perms: ['exec', 'ar', 'planner'] },
       { label: 'กำไรตามมิติ', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'BI Analytics', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
     ],
