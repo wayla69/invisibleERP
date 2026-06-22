@@ -49,6 +49,7 @@ async function main() {
     { username: 'cust1', passwordHash: await pw.hash('pw1'), role: 'Customer', tenantId: t1 },
     { username: 'cust2', passwordHash: await pw.hash('pw2'), role: 'Customer', tenantId: t2 },
     { username: 'sales1', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 }, // non-Admin staff bound to shop T1
+    { username: 'posT2', passwordHash: await pw.hash('pw4'), role: 'PosSupervisor', tenantId: t2 }, // T2 till operator (pos_till) — SoD sub-perm split moved till ops off cust_pos
   ]).onConflictDoNothing();
   await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1.0' }).onConflictDoNothing();
   await db.insert(s.items).values({ itemId: 'A', itemDescription: 'Apple', uom: 'EA', unitPrice: '50' }).onConflictDoNothing();
@@ -92,6 +93,7 @@ async function main() {
   const c1 = await login('cust1', 'pw1');
   const c2 = await login('cust2', 'pw2');
   const sales1 = await login('sales1', 'pw3');
+  const posT2 = await login('posT2', 'pw4');
 
   // ── RLS at the API level (cross-tenant isolation through the full stack) ──
   const inv1 = await inj('GET', '/api/portal/inventory', c1);
@@ -118,15 +120,19 @@ async function main() {
   await inj('POST', `/api/ledger/periods/${curMonth}/open`, admin, {}); // re-open so later sale/JE postings work
   const reopenJE = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
   ok('Period re-open → posting works again', reopenJE.status === 201 || reopenJE.status === 200, `${reopenJE.status}`);
-  // year-end close on a prior year (2025), isolated from current activity
-  await inj('POST', '/api/ledger/journal', admin, { date: '2025-03-15', source: 'Manual', memo: 'FY2025', lines: [{ account_code: '1000', debit: 1000 }, { account_code: '4000', credit: 1000 }] });
-  const cy = await inj('POST', '/api/ledger/close-year?fiscal_year=2025', admin, {});
+  // year-end close on a prior year (2025), isolated from current activity. A manual JE posts as Draft
+  // (GL-05 maker-checker) and must be APPROVED by a different user before it hits the books — so post it
+  // tenant-scoped (T1) and approve as sales1 (gl_close via exec; ≠ the admin preparer) before closing.
+  const fy25je = await inj('POST', '/api/ledger/journal', admin, { date: '2025-03-15', source: 'Manual', tenant_id: t1, memo: 'FY2025', lines: [{ account_code: '1000', debit: 1000 }, { account_code: '4000', credit: 1000 }] });
+  const fy25approve = await inj('POST', `/api/ledger/journal/${fy25je.json.entry_no}/approve`, sales1, {});
+  ok('Year-end: manual FY2025 JE posts Draft then approved by a different user (GL-05)', fy25je.json.status === 'Draft' && fy25approve.status === 200 && fy25approve.json.status === 'Posted', `draft=${fy25je.json.status} approve=${fy25approve.status}/${fy25approve.json.status}`);
+  const cy = await inj('POST', `/api/ledger/close-year?fiscal_year=2025&tenant_id=${t1}`, admin, {});
   ok('Year-end close FY2025 → P&L moved to 3100 (net 1000)', near(cy.json.net_income, 1000) && /^JE-/.test(cy.json.entry_no ?? ''), `${cy.status} ${JSON.stringify(cy.json).slice(0, 70)}`);
   const is2025 = await inj('GET', '/api/ledger/income-statement?from=2025-01-01&to=2025-12-31', admin);
   ok('Year-end: FY2025 P&L zeroed after close (net≈0)', near(is2025.json.net_income, 0), `net=${is2025.json.net_income}`);
   const bs2025 = await inj('GET', '/api/ledger/balance-sheet?as_of=2025-12-31', admin);
   ok('Year-end: balance sheet balanced + retained earnings 1000', bs2025.json.balanced === true && near(bs2025.json.retained_earnings, 1000), `bal=${bs2025.json.balanced} re=${bs2025.json.retained_earnings}`);
-  const cy2 = await inj('POST', '/api/ledger/close-year?fiscal_year=2025', admin, {});
+  const cy2 = await inj('POST', `/api/ledger/close-year?fiscal_year=2025&tenant_id=${t1}`, admin, {});
   ok('Year-end close idempotent (2nd run no-op)', cy2.json.already === true, JSON.stringify(cy2.json).slice(0, 40));
   ok('Finance: sub-ledger ↔ GL reconciliation endpoint', (await inj('GET', '/api/finance/reconciliation', admin)).json.ar?.reconciled === true);
 
@@ -196,10 +202,12 @@ async function main() {
   // Till reconciliation (move #5): POS cash links to the open till; a full refund nets to 0 variance
   // (proves cash-IN includes 'Refunded' so the refund-OUT doesn't double-count). Uses cust2/item B so
   // its SALE-T2-<ts> number can't collide with cust1's sale in the same second.
-  const tillOpen = await inj('POST', '/api/payments/till/open', c2, { opening_float: 100 });
+  // Till ops require pos_till (SoD sub-perm split — no longer covered by cust_pos): a T2 staff member
+  // (posT2) opens/closes the till; the customer-portal sale (c2) still links its cash to that open till.
+  const tillOpen = await inj('POST', '/api/payments/till/open', posT2, { opening_float: 100 });
   const tillSale = await inj('POST', '/api/portal/pos/sales', c2, { items: [{ item_id: 'B', qty: 1, unit_price: 50 }] }); // total 53.5 cash
   await inj('POST', '/api/payments/refunds', admin, { payment_no: tillSale.json.payment_no, amount: tillSale.json.total, reason: 'till-test' });
-  const tillClose = await inj('POST', '/api/payments/till/close', c2, { session_no: tillOpen.json.session_no, closing_count: 100 });
+  const tillClose = await inj('POST', '/api/payments/till/close', posT2, { session_no: tillOpen.json.session_no, closing_count: 100 });
   ok('Till: POS cash linked + full refund nets to 0 variance', near(tillClose.json.variance, 0) && near(tillClose.json.expected_cash, 100), `var=${tillClose.json.variance} exp=${tillClose.json.expected_cash}`);
   // Async tender settlement: PromptPay returns Pending, then /settle → Captured (no dead-end).
   const pp = await inj('POST', '/api/payments', admin, { sale_no: 'PP-1', method: 'QR', amount: 50, currency: 'THB', gateway: 'promptpay' });
