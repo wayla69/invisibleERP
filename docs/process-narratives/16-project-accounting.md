@@ -1,0 +1,142 @@
+# Project Accounting — Process Narrative
+
+## 1. Document control
+
+| Field | Value |
+|---|---|
+| Process ID | PN-16-PROJ |
+| Process owner | `<<Project Controller>>` |
+| Approver | `<<CFO>>` |
+| Version | **0.1 DRAFT** |
+| Effective date | `<<effective-date>>` |
+| Review cadence | Annual + on significant change |
+| Related RCM controls | PROJ-01, PROJ-02, PROJ-03, GL-01; SoD R07 |
+| Related policy | `compliance/policies/03-delegation-of-authority.md`, `compliance/policies/11-financial-close-policy.md` |
+
+## 2. Purpose
+
+To define and control the project / job-costing lifecycle — project setup, accumulation of time and expense cost into unbilled WIP, customer billing, and project revenue recognition with WIP relief — so that project WIP, project revenue, and project cost of services are **valid, complete, accurate, properly cut off, and authorized**, that project margin is fairly stated, and that every project posting reaches the general ledger as a balanced journal entry.
+
+## 3. Scope
+
+**In scope:** project creation and configuration (`POST /api/projects`; billing type TM or Fixed), the project register and detail with entries (`GET /api/projects`, `GET /api/projects/:code`), cost capture of time / expense into unbilled WIP (`POST /api/projects/:code/cost`), customer billing with revenue recognition and WIP relief (`POST /api/projects/:code/bill`), and the unbilled-WIP (1260) and project-costs-applied (2390) clearing tie-outs.
+
+**Out of scope:** general revenue-recognition policy and contract-based deferral mechanics (see `12-revenue-recognition-billing.md`), inventory cost flowing into a project (see `03-inventory-cogs.md`), AR collection and cash application (see `01-order-to-cash.md` / `07-cash-treasury.md`), and the period-close that project postings flow through (see `04-general-ledger-close.md`).
+
+## 4. References
+
+- ISO 9001:2015 cl. 4.4 (process approach), cl. 8.1 (operational planning & control), cl. 8.2 (requirements for products & services), cl. 8.5 (production & service provision).
+- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — PROJ-01..03, GL-01.
+- `compliance/policies/03-delegation-of-authority.md` (billing authority), `11-financial-close-policy.md` (revenue cutoff / WIP relief).
+- Code: `apps/api/src/modules/projects/projects.service.ts` + `projects.controller.ts`, `apps/api/src/database/schema/projects.ts`, `apps/api/src/modules/ledger/ledger.service.ts`, `apps/api/src/common/doc-number.service.ts`.
+
+## 5. Definitions & abbreviations
+
+| Term | Meaning |
+|---|---|
+| Project | A costed job; `project_code`, `name`, `billing_type`, `status` |
+| TM / Fixed | Billing types — Time-and-Materials / Fixed-price |
+| Cost entry | A logged time / expense line accumulating to project cost-to-date |
+| Unbilled WIP | `cost_to_date − recognized_cost`, carried in account 1260 |
+| Recognized cost | Project cost relieved from WIP into cost of services on billing |
+| Margin | `billed_to_date − recognized_cost` |
+| Idempotency (bill) | Amount-based: re-billing the same cumulative amount does not double-post |
+| PRJ-COST / PRJ-BILL | GL source tags (cost capture / billing) |
+
+GL accounts used: **1100** AR, **1260** Project WIP / Unbilled Cost, **2390** Project Costs Applied (clearing), **4200** Project Revenue, **5800** Project Cost of Services.
+
+## 6. Roles & responsibilities (RACI)
+
+Single-duty roles enforce SoD: the role that **initiates / logs** project cost is never the sole role that **approves the billing** that recognizes revenue against it (rule **R07** — initiate vs approve).
+
+| Activity | ProjectPlanner | ProjectAccountant | ProjectController | ArSpecialist | FinancialController / CFO |
+|---|---|---|---|---|---|
+| Create / configure project (TM / Fixed) | **A/R** | C | A | I | C |
+| Log time / expense cost (PRJ-COST) | **A/R** | C | I | I | I |
+| Review cost-capture postings | I | **A/R** | A | I | I |
+| Authorize billing (PRJ-BILL) | C | I | **A/R** | C | A |
+| Raise customer invoice / AR | I | C | C | **A/R** | I |
+| Review unbilled-WIP (1260) aging | I | **A/R** | A | I | C |
+| Review 2390 clearing tie-out | I | **A/R** | A | I | C |
+
+## 7. Process narrative
+
+1. **Project setup (decision point).** ProjectPlanner creates a project via `POST /api/projects` (permissions `exec` / `planner` / `ar`), specifying `billing_type` **TM** or **Fixed**. The project opens in status **Open**. Billing authority is segregated from cost initiation (**R07**).
+2. **Project register & detail.** `GET /api/projects` lists projects; `GET /api/projects/:code` returns the detail with its cost / billing entries. This is the system of record for cost-to-date, recognized cost, and billed-to-date.
+3. **Cost capture (decision point).** ProjectPlanner logs a time or expense cost entry via `POST /api/projects/:code/cost` (source **PRJ-COST**, `sourceRef = code:entryId`). A balanced JE posts **Dr 1260 Project WIP-Unbilled Cost** and **Cr 2390 Project Costs Applied**; Σdebit = Σcredit by construction (**PROJ-01**, **GL-01**). On the first cost the project status moves **Open → Active**. A non-positive amount is rejected `BAD_AMOUNT`; an unknown project is rejected `PROJECT_NOT_FOUND`. Cost-to-date accumulates.
+4. **Billing & revenue recognition (decision point).** ProjectController authorizes billing via `POST /api/projects/:code/bill` (source **PRJ-BILL**, `sourceRef = code:billedAmount`). The posting is **idempotent on the cumulative billed amount** — re-billing the same amount does not double-post. A balanced JE posts **Dr 1100 AR Cr 4200 Project Revenue** (**PROJ-02**, **GL-01**). Billing is authorized separately from cost initiation (**R07**).
+5. **WIP relief on billing.** When unbilled cost exceeds recognized cost, the same billing event relieves WIP up to the unrecognized cost: **Dr 5800 Project Cost of Services Cr 1260** (relieving Project WIP). This matches cost of services to recognized revenue and reduces the 1260 balance (**PROJ-02**, **GL-01**).
+6. **Margin & WIP measurement.** Project **margin = billed_to_date − recognized_cost**; project **WIP = cost_to_date − recognized_cost**, carried in account **1260**. ProjectAccountant reviews 1260 aging and the 2390 clearing tie-out at close (**PROJ-03**).
+
+## 8. Process flow
+
+```mermaid
+flowchart TD
+    A[ProjectPlanner POST /api/projects billing_type TM or Fixed status Open] --> B[Project register GET /api/projects]
+    B --> C{Log cost POST /:code/cost amount valid? PROJ-01}
+    C -- "No - non-positive" --> C1[Reject BAD_AMOUNT]
+    C -- "No - unknown project" --> C2[Reject PROJECT_NOT_FOUND]
+    C -- "Yes" --> D[Post PRJ-COST Dr 1260 Cr 2390 GL-01]
+    D --> E[Status Open to Active on first cost]
+    E --> F{Bill POST /:code/bill authorized? PROJ-02}
+    F -- "duplicate amount" --> F1[Idempotent - skip no double-post]
+    F -- "new amount" --> G[Post PRJ-BILL Dr 1100 Cr 4200 GL-01]
+    G --> H{Unbilled cost greater than recognized cost?}
+    H -- "Yes" --> I[Relieve WIP Dr 5800 Cr 1260 up to unrecognized cost]
+    H -- "No" --> J[No WIP relief this billing]
+    I --> K[Margin billed_to_date less recognized_cost - review 1260 and 2390 PROJ-03]
+    J --> K
+```
+
+**Swimlane description by role:** **ProjectPlanner** creates projects and logs time / expense cost into unbilled WIP. The **system** enforces the `BAD_AMOUNT` and `PROJECT_NOT_FOUND` guards, the Open → Active status flip on first cost, the balanced PRJ-COST and PRJ-BILL postings, amount-based billing idempotency, and the WIP relief that matches cost of services to recognized revenue. **ProjectController** authorizes billing (segregated from cost initiation under R07). **ArSpecialist** owns the resulting customer invoice / AR. **ProjectAccountant** reviews cost-capture postings, unbilled-WIP (1260) aging, and the project-costs-applied (2390) clearing tie-out, with **FinancialController / CFO** approving setup and reviewing margin at close.
+
+## 9. Control matrix
+
+| Step | Risk | Control | Type | RCM ID | Evidence / Record |
+|---|---|---|---|---|---|
+| 3 | Cost captured unbalanced / invalid amount | Balanced PRJ-COST Dr 1260 Cr 2390; `BAD_AMOUNT` guard | Prev / Auto | PROJ-01, GL-01 | Cost JE tie-out; `BAD_AMOUNT` rejections |
+| 3 | Cost logged to non-existent project | `PROJECT_NOT_FOUND` guard | Prev / Auto | PROJ-01 | Rejection log |
+| 4 | Revenue not recognized / unbalanced | Balanced PRJ-BILL Dr 1100 Cr 4200 | Prev / Auto | PROJ-02, GL-01 | Billing JE tie-out |
+| 4 | Same billing double-posted | Amount-based idempotency on cumulative billed amount | Prev / Auto | PROJ-02 | Re-bill test |
+| 5 | Cost not matched to revenue / WIP overstated | WIP relief Dr 5800 Cr 1260 up to unrecognized cost | Prev / Auto | PROJ-02, GL-01 | WIP relief entry; cutoff review |
+| 6 | Unbilled WIP (1260) stale / misstated | 1260 aging & tie-out review | Det / Hybrid | PROJ-03 | 1260 aging report |
+| 6 | Project-costs-applied (2390) not cleared | 2390 clearing-account review | Det / Hybrid | PROJ-02, GL-01 | 2390 clearing tie-out |
+| 1,4 | Self-authorized billing | SoD: initiate cost vs approve billing segregated | Prev / Manual | R07 | SoD conflict report |
+
+## 10. Inputs & outputs
+
+**Inputs:** project setup (name, billing type TM/Fixed), time / expense cost entries (qty × rate or amount), billing authorization (cumulative billed amount).
+**Outputs:** project register & detail, cost-capture JEs (PRJ-COST), billing JEs with revenue recognition (PRJ-BILL), WIP relief postings, project margin and unbilled-WIP (1260) reporting.
+
+## 11. Records & retention
+
+| Record | Store | Retention |
+|---|---|---|
+| Projects & status | `projects` (RLS-scoped) | `<<7 years / per Thai law>>` |
+| Project cost / billing entries | `project_entries` | `<<7 years>>` |
+| PRJ-COST / PRJ-BILL JEs | Ledger | `<<7 years>>` |
+| Project setup / config changes | `audit_log` (immutable) | `<<7 years>>` |
+
+## 12. KPIs / metrics
+
+- PRJ-BILL re-bill double-posts detected (target: 0; idempotency holds).
+- Unbilled-WIP (1260) aging — value and days outstanding by project.
+- Project-costs-applied (2390) clearing balance at close (target: cleared).
+- Project margin (`billed_to_date − recognized_cost`) vs budget by project.
+- Cost entries rejected for `BAD_AMOUNT` (data-quality signal).
+
+## 13. Exception & error handling
+
+| Error code | Trigger | Handling |
+|---|---|---|
+| `BAD_AMOUNT` | Cost or bill amount ≤ 0 | Originator supplies positive amount; resubmit |
+| `PROJECT_NOT_FOUND` | Cost / bill against unknown `code` | Verify / create project first |
+| (idempotent skip) | Re-bill the same cumulative amount | No double-post; verify intended amount |
+| `PERIOD_CLOSED` | PRJ-COST / PRJ-BILL into a closed period | Re-open per close policy (authorized) or post to open period (see `04-general-ledger-close.md`) |
+| `SOD_VIOLATION` / SoD conflict | Same user logs cost and authorizes billing | AccessAdmin remediates (see `08-itgc.md`) |
+
+## 14. Revision history
+
+| Version | Date | Author | Summary |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |

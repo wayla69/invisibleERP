@@ -63,7 +63,25 @@ Control IDs use the RCM taxonomy: `ITGC-AC/CM/SD/OP-nn` (IT general controls), `
 | 05 | Payroll | [`05-payroll.md`](./05-payroll.md) | PAY-01..02, GL-01 | 03-delegation-of-authority, 11-financial-close |
 | 06 | Tax Compliance (VAT / WHT / e-Tax) | [`06-tax-compliance.md`](./06-tax-compliance.md) | TAX-01..03, REV-10, PAY-02 | 11-financial-close |
 | 07 | Cash & Treasury (POS till, payments, bank rec) | [`07-cash-treasury.md`](./07-cash-treasury.md) | REV-02/03/05/06/09/11, REC-02, R08 | 11-financial-close, 03-delegation-of-authority |
-| 08 | IT General Controls (Access / Change / Operations) | [`08-itgc.md`](./08-itgc.md) | ITGC-AC-01..13, ITGC-CM-01..05, ITGC-SD-01..03, ITGC-OP-01..04, ITGC-SD/R01–R13 | 06-information-security, 07-access-control, 08-change-management-sdlc, 09-backup-dr-bcp, 10-incident-response, 13-segregation-of-duties |
+| 08 | IT General Controls (Access / Change / Operations) | [`08-itgc.md`](./08-itgc.md) | ITGC-AC-01..13, ITGC-CM-01..05, ITGC-SD-01..03, ITGC-OP-01..04, R01–R13 | 06-information-security, 07-access-control, 08-change-management-sdlc, 09-backup-dr-bcp, 10-incident-response, 13-segregation-of-duties |
+| 09 | Fixed Assets & Depreciation | [`09-fixed-assets-depreciation.md`](./09-fixed-assets-depreciation.md) | GL-01..06, R05, R07 | 03-delegation-of-authority, 11-financial-close |
+| 10 | Multi-Ledger / Multi-GAAP & Book-Tax | [`10-multi-ledger-gaap.md`](./10-multi-ledger-gaap.md) | GL-01..06, TAX-03 | 11-financial-close |
+| 11 | Intercompany & Consolidation | [`11-intercompany-consolidation.md`](./11-intercompany-consolidation.md) | GL-01, REC-03, CON-01..02 | 11-financial-close, 13-segregation-of-duties |
+| 12 | Revenue Recognition & Subscription Billing | [`12-revenue-recognition-billing.md`](./12-revenue-recognition-billing.md) | REV-01, GL-01 | 11-financial-close |
+| 13 | Budgeting, Planning & Forecasting (EPM) | [`13-budgeting-planning-forecasting.md`](./13-budgeting-planning-forecasting.md) | Operational, R07 | 03-delegation-of-authority |
+| 14 | FX Revaluation | [`14-fx-revaluation.md`](./14-fx-revaluation.md) | GL-01..06 | 11-financial-close |
+| 15 | Manufacturing & Costing (BOM / WIP / PPV) | [`15-manufacturing-costing.md`](./15-manufacturing-costing.md) | INV-01..04, GL-01 | 11-financial-close, 13-segregation-of-duties |
+| 16 | Project Accounting | [`16-project-accounting.md`](./16-project-accounting.md) | REV-01, GL-01 | 11-financial-close |
+| 17 | Master Data Management & Governance | [`17-master-data-management.md`](./17-master-data-management.md) | ITGC-AC-09, R02, R09, R13 | 07-access-control, 13-segregation-of-duties |
+| 18 | CRM, Pipeline & CPQ (Quote-to-Order) | [`18-crm-pipeline-cpq.md`](./18-crm-pipeline-cpq.md) | REV-01, R09 | 03-delegation-of-authority |
+| 19 | Marketing, Pricing, Promotions & Loyalty | [`19-marketing-pricing-loyalty.md`](./19-marketing-pricing-loyalty.md) | REV-10, R10 | 13-segregation-of-duties |
+| 20 | Restaurant Operations (Dine-in / KDS / QR) | [`20-restaurant-operations.md`](./20-restaurant-operations.md) | REV-02..06, ITGC-AC-11 | 11-financial-close |
+| 21 | Returns, Claims & Refunds | [`21-returns-claims-refunds.md`](./21-returns-claims-refunds.md) | REV-05, REV-06, R12 | 13-segregation-of-duties |
+| 22 | Gift Cards & Store Credit | [`22-gift-cards-store-credit.md`](./22-gift-cards-store-credit.md) | REV-01, GL-01 | 11-financial-close |
+| 23 | Customer Onboarding & Tenant Provisioning | [`23-customer-onboarding-provisioning.md`](./23-customer-onboarding-provisioning.md) | ITGC-AC-01..09, GL-01 | 07-access-control, 11-financial-close |
+| 24 | Multi-Branch & Offline POS Sync | [`24-multi-branch-offline-pos.md`](./24-multi-branch-offline-pos.md) | REV-01, ITGC-OP-01..04 | 09-backup-dr-bcp, 11-financial-close |
+| 25 | HCM / Time & Labor | [`25-hcm-time-labor.md`](./25-hcm-time-labor.md) | PAY-01..02 | 03-delegation-of-authority |
+| 26 | Reporting, BI & AI Analytics | [`26-reporting-bi-ai.md`](./26-reporting-bi-ai.md) | ITGC-SD-03, Operational (IPE) | 06-information-security |
 
 ---
 
@@ -84,4 +102,4 @@ Control IDs use the RCM taxonomy: `ITGC-AC/CM/SD/OP-nn` (IT general controls), `
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
-| 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft of all eight cycle narratives + index. |
+| 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft — index + 26 cycle narratives (01–08 core financial cycles + ITGC; 09–26 extended cycles: fixed assets, multi-GAAP, intercompany/consolidation, rev-rec/billing, EPM, FX, manufacturing/costing, projects, master data, CRM/CPQ, marketing/loyalty, restaurant, returns, gift cards, onboarding, multi-branch, HCM, reporting/BI/AI). |
