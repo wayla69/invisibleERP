@@ -1,16 +1,22 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, sql, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { productConfigs, configOptions, pricingRules, quotes, quoteLines } from '../../database/schema/cpq';
 import { docCountersTenant } from '../../database/schema/system';
 import { n, fx } from '../../database/queries';
+import { LedgerService } from '../ledger/ledger.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
 @Injectable()
 export class CpqService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // @Optional ledger so the standalone cpq harness still compiles; when present, an accepted quote
+  // is booked to AR + revenue (quote-to-cash).
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly ledger?: LedgerService,
+  ) {}
 
   // ── Product Configs ──
 
@@ -146,7 +152,22 @@ export class CpqService {
     if (q.expiresDate && new Date(q.expiresDate) < new Date()) {
       throw new BadRequestException({ code: 'QUOTE_EXPIRED', message: 'Cannot accept expired quote', messageTh: 'ใบเสนอราคาหมดอายุแล้ว' });
     }
-    return this.transitionQuote(quoteId, 'Accepted', ['Sent'], user);
+    const res = await this.transitionQuote(quoteId, 'Accepted', ['Sent'], user);
+    // quote-to-cash: book the won quote to AR + revenue (idempotent per quote)
+    if (this.ledger && n(q.total) > 0) {
+      const tenantId = user.tenantId ?? null;
+      if (!(await this.ledger.alreadyPosted('CPQ-WIN', q.quoteNo, tenantId))) {
+        const je: any = await this.ledger.postEntry({
+          source: 'CPQ-WIN', sourceRef: q.quoteNo, tenantId, memo: `Quote accepted ${q.quoteNo}`, createdBy: user.username,
+          lines: [
+            { account_code: '1100', debit: n(q.total), memo: `AR — ${q.customerName}` },
+            { account_code: '4000', credit: n(q.total), memo: 'Sales revenue (CPQ)' },
+          ],
+        });
+        return { ...res, entry_no: je.entry_no, ar_posted: n(q.total) };
+      }
+    }
+    return res;
   }
 
   async rejectQuote(quoteId: number, user: JwtUser) {
