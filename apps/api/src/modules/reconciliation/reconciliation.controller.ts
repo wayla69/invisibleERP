@@ -1,7 +1,12 @@
 import { Controller, Get, Post, Body, Param, ParseIntPipe, HttpCode } from '@nestjs/common';
+import { z } from 'zod';
 import { ReconciliationService } from './reconciliation.service';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+
+const OpenPeriodBody = z.object({ account_code: z.string().min(1), period: z.string().min(1) });
+const AddItemBody = z.object({ source: z.enum(['Subledger', 'Adjustment']), amount: z.number(), ref_doc: z.string().optional(), notes: z.string().optional() });
 
 @Controller('api/recon')
 export class ReconciliationController {
@@ -15,7 +20,7 @@ export class ReconciliationController {
 
   @Post('periods')
   @Permissions('exec')
-  openPeriod(@Body() dto: any, @CurrentUser() user: JwtUser) {
+  openPeriod(@Body(new ZodValidationPipe(OpenPeriodBody)) dto: z.infer<typeof OpenPeriodBody>, @CurrentUser() user: JwtUser) {
     return this.svc.openPeriod(dto, user);
   }
 
@@ -34,7 +39,7 @@ export class ReconciliationController {
 
   @Post('periods/:id/items')
   @Permissions('exec')
-  addItem(@Param('id', ParseIntPipe) id: number, @Body() dto: any, @CurrentUser() user: JwtUser) {
+  addItem(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(AddItemBody)) dto: z.infer<typeof AddItemBody>, @CurrentUser() user: JwtUser) {
     return this.svc.addItem(id, dto, user);
   }
 

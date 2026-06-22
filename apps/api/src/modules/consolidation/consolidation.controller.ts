@@ -1,7 +1,13 @@
 import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpCode } from '@nestjs/common';
+import { z } from 'zod';
 import { ConsolidationService } from './consolidation.service';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+
+const CreateGroupBody = z.object({ name: z.string().min(1), fiscal_year: z.number().int(), base_currency: z.string().optional(), notes: z.string().optional() });
+const AddEntityBody = z.object({ entity_tenant_id: z.number().int(), ownership_pct: z.number().min(0).max(100).optional(), entity_currency: z.string().optional() });
+const RunBody = z.object({ period: z.string().min(1) });
 
 @Controller('api/consolidation')
 export class ConsolidationController {
@@ -9,7 +15,7 @@ export class ConsolidationController {
 
   @Post('groups')
   @Permissions('exec')
-  createGroup(@Body() dto: any, @CurrentUser() user: JwtUser) {
+  createGroup(@Body(new ZodValidationPipe(CreateGroupBody)) dto: z.infer<typeof CreateGroupBody>, @CurrentUser() user: JwtUser) {
     return this.svc.createGroup(dto, user);
   }
 
@@ -27,7 +33,7 @@ export class ConsolidationController {
 
   @Post('groups/:groupId/entities')
   @Permissions('exec')
-  addEntity(@Param('groupId', ParseIntPipe) groupId: number, @Body() dto: any, @CurrentUser() user: JwtUser) {
+  addEntity(@Param('groupId', ParseIntPipe) groupId: number, @Body(new ZodValidationPipe(AddEntityBody)) dto: z.infer<typeof AddEntityBody>, @CurrentUser() user: JwtUser) {
     return this.svc.addEntity(groupId, dto, user);
   }
 
@@ -40,7 +46,7 @@ export class ConsolidationController {
   @Post('groups/:groupId/run')
   @Permissions('approvals')
   @HttpCode(200)
-  run(@Param('groupId', ParseIntPipe) groupId: number, @Body() dto: any, @CurrentUser() user: JwtUser) {
+  run(@Param('groupId', ParseIntPipe) groupId: number, @Body(new ZodValidationPipe(RunBody)) dto: z.infer<typeof RunBody>, @CurrentUser() user: JwtUser) {
     return this.svc.runConsolidation(groupId, dto, user);
   }
 

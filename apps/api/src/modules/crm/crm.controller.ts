@@ -1,7 +1,11 @@
 import { Controller, Get, Post, Body, Param, ParseIntPipe, HttpCode } from '@nestjs/common';
+import { z } from 'zod';
 import { CrmService } from './crm.service';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+
+const AudienceRuleBody = z.object({ promo_id: z.number().int(), rfm_segment: z.string().optional(), min_lifetime: z.number().optional(), min_frequency: z.number().optional(), preferred_channel: z.string().optional() });
 
 @Controller('api/crm')
 export class CrmController {
@@ -40,7 +44,7 @@ export class CrmController {
   // POST /api/crm/audience-rules — create/update targeting rule (AI personalization)
   @Post('audience-rules')
   @Permissions('marketing')
-  upsertAudienceRule(@Body() dto: any, @CurrentUser() user: JwtUser) {
+  upsertAudienceRule(@Body(new ZodValidationPipe(AudienceRuleBody)) dto: z.infer<typeof AudienceRuleBody>, @CurrentUser() user: JwtUser) {
     return this.crm.upsertAudienceRule(dto, user);
   }
 }

@@ -1,7 +1,12 @@
 import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, Query, HttpCode } from '@nestjs/common';
+import { z } from 'zod';
 import { BiService } from './bi.service';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+
+const RefreshBody = z.object({ date: z.string().optional() });
+const SubscriptionBody = z.object({ name: z.string().min(1), report_type: z.string().min(1), frequency: z.string().min(1), filters: z.record(z.any()).optional(), recipients: z.array(z.record(z.any())).optional() });
 
 @Controller('api/bi')
 export class BiController {
@@ -32,7 +37,7 @@ export class BiController {
   @Post('snapshots/refresh')
   @Permissions('exec')
   @HttpCode(200)
-  refresh(@Body() dto: any, @CurrentUser() user: JwtUser) { return this.svc.refreshSnapshot(dto, user); }
+  refresh(@Body(new ZodValidationPipe(RefreshBody)) dto: z.infer<typeof RefreshBody>, @CurrentUser() user: JwtUser) { return this.svc.refreshSnapshot(dto, user); }
 
   @Get('snapshots')
   @Permissions('exec')
@@ -46,7 +51,7 @@ export class BiController {
 
   @Post('subscriptions')
   @Permissions('exec')
-  createSub(@Body() dto: any, @CurrentUser() user: JwtUser) { return this.svc.createSubscription(dto, user); }
+  createSub(@Body(new ZodValidationPipe(SubscriptionBody)) dto: z.infer<typeof SubscriptionBody>, @CurrentUser() user: JwtUser) { return this.svc.createSubscription(dto, user); }
 
   @Delete('subscriptions/:id')
   @Permissions('exec')
