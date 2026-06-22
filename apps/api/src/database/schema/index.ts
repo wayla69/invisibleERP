@@ -46,3 +46,5 @@ export * from './service';
 export * from './item-images';
 export * from './payroll';
 export * from './manufacturing';
+export * from './pos-control';
+export * from './pos-terminal';

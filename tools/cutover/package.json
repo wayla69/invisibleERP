@@ -9,6 +9,7 @@
     "stock-ops": "tsx src/stock-ops.ts",
     "gaps": "tsx src/gaps.ts",
     "portal-extra": "tsx src/portal-extra.ts",
+    "pos-p0": "tsx src/pos-p0.ts",
     "ext": "tsx src/ext.ts",
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "onboarding": "tsx src/onboarding.ts",

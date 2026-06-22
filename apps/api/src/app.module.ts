@@ -65,6 +65,8 @@ import { ImagesModule } from './modules/images/images.module';
 import { AdminUsersModule } from './modules/admin-users/admin-users.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
+import { PosControlModule } from './modules/pos-control/pos-control.module';
+import { PosTerminalModule } from './modules/pos-terminal/pos-terminal.module';
 
 @Module({
   imports: [
@@ -129,6 +131,8 @@ import { ManufacturingModule } from './modules/manufacturing/manufacturing.modul
     AdminUsersModule,
     PayrollModule,
     ManufacturingModule,
+    PosControlModule,
+    PosTerminalModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
