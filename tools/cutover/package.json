@@ -32,6 +32,7 @@
     "costing": "tsx src/costing.ts",
     "wms": "tsx src/wms.ts",
     "crm": "tsx src/crm.ts",
+    "epm-planning": "tsx src/epm-planning.ts",
     "shadow": "tsx src/shadow.ts",
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",

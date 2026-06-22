@@ -37,3 +37,4 @@ export * from './workflow';
 export * from './costing';
 export * from './wms';
 export * from './crm';
+export * from './planning';

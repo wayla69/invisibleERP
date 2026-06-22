@@ -253,6 +253,13 @@
       "when": 1782007973312,
       "tag": "0035_crm",
       "breakpoints": false
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1782007973313,
+      "tag": "0036_planning",
+      "breakpoints": false
     }
   ]
 }

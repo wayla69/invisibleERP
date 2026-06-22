@@ -45,6 +45,7 @@ import { SourcingModule } from './modules/sourcing/sourcing.module';
 import { CostingModule } from './modules/costing/costing.module';
 import { WmsModule } from './modules/wms/wms.module';
 import { CrmModule } from './modules/crm/crm.module';
+import { PlanningModule } from './modules/planning/planning.module';
 
 @Module({
   imports: [
@@ -90,6 +91,7 @@ import { CrmModule } from './modules/crm/crm.module';
     CostingModule,
     WmsModule,
     CrmModule,
+    PlanningModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions
