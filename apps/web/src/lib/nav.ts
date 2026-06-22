@@ -14,6 +14,7 @@ import {
   CheckCheck,
   ChefHat,
   CircleDollarSign,
+  ClipboardCheck,
   ClipboardList,
   Coins,
   CreditCard,
@@ -90,6 +91,8 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'สต๊อก & จัดซื้อ',
     items: [
       { label: 'สินค้าคงคลัง', href: '/inventory', icon: Package, perms: ['warehouse', 'dashboard', 'planner'] },
+      { label: 'ตรวจนับสต๊อก', href: '/stocktake', icon: ClipboardCheck, perms: ['warehouse', 'mobile'] },
+      { label: 'เบิก / โอนสินค้า', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
       { label: 'ซัพพลายเออร์', href: '/inventory/suppliers', icon: Building2, perms: ['procurement', 'warehouse'] },
       { label: 'ใบสั่งซื้อ', href: '/inventory/purchase-orders', icon: ReceiptText, perms: ['procurement'] },
       { label: 'จัดซื้อจัดจ้าง', href: '/procurement', icon: ShoppingBag, perms: ['procurement'] },

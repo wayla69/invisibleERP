@@ -6,6 +6,7 @@
   "scripts": {
     "e2e": "tsx src/e2e.ts",
     "module-qr": "tsx src/module-qr.ts",
+    "stock-ops": "tsx src/stock-ops.ts",
     "ext": "tsx src/ext.ts",
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "onboarding": "tsx src/onboarding.ts",

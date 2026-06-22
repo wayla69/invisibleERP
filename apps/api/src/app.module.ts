@@ -56,6 +56,7 @@ import { ServiceModule } from './modules/service/service.module';
 import { BiModule } from './modules/bi/bi.module';
 import { AdminConfigModule } from './modules/admin-config/admin-config.module';
 import { MasterDataModule } from './modules/masterdata/masterdata.module';
+import { StockOpsModule } from './modules/stock-ops/stock-ops.module';
 
 @Module({
   imports: [
@@ -111,6 +112,7 @@ import { MasterDataModule } from './modules/masterdata/masterdata.module';
     BiModule,
     AdminConfigModule,
     MasterDataModule,
+    StockOpsModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
