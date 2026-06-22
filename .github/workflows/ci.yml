@@ -102,3 +102,32 @@ jobs:
           languages: javascript-typescript
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
+
+  # Web UI smoke (Playwright) — exercises interactions build/unit checks can't, e.g. the ERP/POS
+  # workspace switcher (toggle, role-based landing redirect, localStorage persistence, menu filtering).
+  # The backend is stubbed in the specs, so no API/DB is needed; the config builds + serves the web app.
+  web-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build shared (web build dependency)
+        run: pnpm --filter @ierp/shared build
+      - name: Install Playwright browser
+        run: pnpm --filter @ierp/web exec playwright install --with-deps chromium
+      - name: Web E2E smoke (ERP/POS workspace switcher)
+        run: pnpm --filter @ierp/web test:e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
