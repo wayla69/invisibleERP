@@ -174,17 +174,24 @@ For each key control the auditor performs **Test of Design (ToD)** and **Test of
 
 ---
 
-## 6. Entity-level controls & policies to author (COSO Control Environment)
+## 6. Entity-level controls & policies (COSO Control Environment)
 
-Auditors weight the "tone at the top." Draft and approve these (templates in Phase 1):
+Auditors weight the "tone at the top." **DRAFT templates now exist in `compliance/policies/`** (see `policies/README.md` for the register) — each mapped to RCM control IDs and the implemented system controls. Next step: assign owners, fill `<<placeholders>>`, review with the SOX advisor + counsel, obtain documented approval, and communicate (with acknowledgement registers).
 
-- Information Security Policy · Access Control & Provisioning/Deprovisioning Policy
-- Change Management / SDLC Policy · Data Backup, Retention & DR/BCP Policy
-- Segregation-of-Duties Policy (linked to `Oshinei_ERP_SoD_Matrix_v1.xlsx`)
-- Financial Close & Reporting Policy (period-close calendar)
-- Vendor/Third-party & PSP management · Incident Response Policy
-- Code of Conduct, Whistleblower policy, Delegation-of-Authority matrix
-- Audit Committee charter & cadence
+| Policy | File | Open gap it closes |
+|---|---|---|
+| Code of Conduct & Ethics | `policies/01-code-of-conduct.md` | ELC-01 |
+| Whistleblower & Non-Retaliation | `policies/02-whistleblower-policy.md` | ELC-04 |
+| Delegation of Authority + approval matrix | `policies/03-delegation-of-authority.md` | ELC-03 |
+| Audit Committee Charter | `policies/04-audit-committee-charter.md` | ELC-02 |
+| Fraud Risk Assessment + register | `policies/05-fraud-risk-assessment.md` | ELC-05 |
+| Information Security | `policies/06-information-security-policy.md` | ITGC-AC-12 et al. |
+| Access Control & Identity (incl. UAR procedure) | `policies/07-access-control-policy.md` | ITGC-AC-* |
+| Change Management & SDLC | `policies/08-change-management-sdlc-policy.md` | ITGC-CM/SD-* |
+| Backup, Retention & DR/BCP | `policies/09-backup-dr-bcp-policy.md` | ITGC-OP-01/02 |
+| Incident Response | `policies/10-incident-response-policy.md` | ITGC-OP-03 |
+| Financial Close & Reporting (close calendar) | `policies/11-financial-close-policy.md` | GL-06 |
+| Third-Party / Vendor & Sub-Service Orgs (SOC reports) | `policies/12-third-party-vendor-management-policy.md` | EXP-02, sub-service reliance |
 
 ---
 
@@ -223,7 +230,7 @@ Stand up a single, access-controlled evidence repository, organized by control I
 2. **Kick off Phase 1 High items:** MFA enforcement (AC-06), secrets→vault (AC-12), branch protection + deploy gate (CM-03), automated backup + restore test (OP-01).
 3. **Run the control harness** (`pnpm --filter @ierp/cutover compliance`) and retain the output as ToE evidence for GL-05 / AC-08 / AC-09 (the SoD engineering issue in `ISSUE_sod_rule_engine.md` is now delivered).
 4. **Stand up the evidence repository** (§7) and start capturing evidence as controls go live.
-5. **Begin entity-level policy drafting** (§6).
+5. **Adopt the entity-level policies** — DRAFT templates exist in `compliance/policies/`; assign owners, complete `<<placeholders>>`, review with counsel/SOX advisor, and obtain board/management approval (§6).
 
 ---
 

@@ -209,6 +209,27 @@ async function main() {
   const t2SeesT1Credit = (t2tb.json.rows ?? []).some((r: any) => r.account_code === '4000' && Number(r.credit) > 0);
   ok('ITGC RLS: tenant-2 finance user cannot see tenant-1 journal entries or balances', !leak && !t2SeesT1Credit, `leak=${leak} sees4000=${t2SeesT1Credit}`);
 
+  // ════════════════════ REV-08 — credit-limit / credit-hold enforcement on order entry ════════════════════
+  // A customer's OUTSTANDING AR + the new order may not exceed its credit limit; a customer on credit hold
+  // cannot order at all. The check is in pos.service.createOrder (customer row locked FOR UPDATE).
+  const [tcr] = await db.insert(s.tenants).values({ code: 'TCR', name: 'เครดิตจำกัด', creditLimit: '1000', creditHold: false }).returning({ id: s.tenants.id });
+  const tcrId = Number(tcr.id);
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-TCR-OPEN', tenantId: tcrId, amount: '800', paidAmount: '0', status: 'Unpaid' });
+  const order = (amount: number) => inj('POST', '/api/pos/orders', admin, { customer_name: 'TCR', items: [{ item_id: 'X', order_qty: 1, unit_price: amount }] });
+
+  // 1. Outstanding 800 + order 150 = 950 ≤ 1000 → allowed.
+  const within = await order(150);
+  ok('REV-08: order within credit limit (outstanding 800 + 150 ≤ 1000) allowed', (within.status === 200 || within.status === 201) && !!within.json.order_no, `${within.status} ${within.json.order_no ?? within.json.error?.code}`);
+
+  // 2. Outstanding 800 + order 300 = 1100 > 1000 → blocked (CREDIT_LIMIT).
+  const over = await order(300);
+  ok('REV-08: order breaching credit limit (800 + 300 > 1000) blocked → CREDIT_LIMIT', over.status === 409 && over.json.error?.code === 'CREDIT_LIMIT', `${over.status} ${over.json.error?.code}`);
+
+  // 3. Credit hold blocks any order regardless of amount.
+  await db.update(s.tenants).set({ creditHold: true }).where(eq(s.tenants.id, tcrId));
+  const held = await order(1);
+  ok('REV-08: customer on credit hold cannot order → CREDIT_HOLD', held.status === 409 && held.json.error?.code === 'CREDIT_HOLD', `${held.status} ${held.json.error?.code}`);
+
   // ════════════════════ ITGC-AC-06 — multi-factor authentication (TOTP) ════════════════════
   // 1. A privileged role (Admin) that has not enrolled MFA is flagged for mandatory setup at login.
   const adminLogin = await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' });
@@ -249,7 +270,7 @@ async function main() {
   ok('ITGC-AC-10: audit_log UPDATE blocked by DB trigger (append-only)', updateBlocked, `blocked=${updateBlocked}`);
   ok('ITGC-AC-10: audit_log DELETE blocked by DB trigger (append-only)', deleteBlocked && after === before, `blocked=${deleteBlocked} rows=${after}`);
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · AC-09 · AC-08 · AC-06 · AC-10) ──');
+  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} compliance checks failed` : `\n✅ All ${checks.length} compliance control checks passed`);

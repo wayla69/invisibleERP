@@ -199,7 +199,7 @@ add("REV-07","Revenue & Cash","Application","Revenue; Inventory","Refund posts b
     "returns.service.ts (createReturn)","Inspect single-transaction boundary.","Inject mid-flow failure → full rollback.","Atomicity test","Implemented")
 add("REV-08","Revenue & Cash","Application","Accounts Receivable","Orders accepted beyond customer credit limit.","Valuation",
     "Credit-limit check at order — outstanding AR + order ≤ limit, under tenant-row lock; credit-hold block.","Prev","Automated","Per order","Controller","P10",
-    "pos.service.ts (createOrder)","Inspect AR sum + lock + limit logic.","Concurrent orders cannot jointly breach limit.","Credit test","Implemented")
+    "pos.service.ts (createOrder, FOR UPDATE); cutover/compliance.ts (ToE)","Inspect AR sum + lock + limit logic.","Sample: outstanding+order ≤ limit allowed, > limit → CREDIT_LIMIT, credit-hold → CREDIT_HOLD (re-performed by the harness).","Credit test","Implemented")
 add("REV-09","Revenue & Cash","Application","Cash","Forged payment-gateway callback flips a payment to captured.","Occurrence",
     "PSP webhook HMAC-SHA256 signature over raw body; fail-closed in production; out-of-band status re-verify.","Prev","Automated","Per callback","Eng Lead","P10/P11",
     "pos-terminal.controller.ts (PspWebhookController); crypto.verifyWebhookSignature","Inspect signature check + prod gate.","Replay/forged signature → 401; valid → accepted.","Webhook tests","Implemented")
