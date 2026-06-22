@@ -60,6 +60,22 @@ The RCM scores **75 controls: 39 Implemented · 15 Partial · 21 Gap.** The syst
 
 **Takeaway for the auditor meeting:** lead with these. They demonstrate a control-conscious design and give the auditor confidence the gaps are execution, not architecture.
 
+### 2.1 Automated control-test evidence (Test of Operating Effectiveness)
+
+Three key controls now have a **dedicated automated test harness** that boots the real application over a real Postgres and proves the control *prevents the risk* — runnable evidence the IT auditor can re-execute:
+
+```
+pnpm --filter @ierp/cutover compliance      # tools/cutover/src/compliance.ts — runs in CI as a gate
+```
+
+| Control | What the harness proves |
+|---|---|
+| **GL-05** (manual-JE maker-checker) | Manual JE posts as `Draft` and is **excluded from the trial balance** until approved; the preparer cannot approve their own entry (403 `SOD_VIOLATION`) — **even an Admin**; an independent approver posts it and the balance then appears; reject → `Voided`, never affecting balances. |
+| **ITGC-AC-09** (SoD preventive block) | Assigning a conflicting permission set (e.g. `procurement`+`creditors`, rule R03) is blocked (422 `SOD_CONFLICT`) and nothing is persisted; the offending rule is named; a justified override (`allow_sod_override`+`sod_reason`) is honoured and logged; override without a reason is still rejected; the guard also fires on permission **update**. |
+| **ITGC-AC-08** (user access review) | The recertification report exposes effective permissions + SoD conflicts per user; CSV export carries reviewer decision columns; a period sign-off is recorded and retrievable. |
+
+> **Status reconciliation:** GL-05, ITGC-AC-08 and ITGC-AC-09 are marked **Gap** in `Oshinei_ERP_SOX_RCM_v1.xlsx` but are in fact **implemented in code and now evidenced by the harness above**. Re-score these to *Implemented* on the next RCM refresh (update `build_rcm.py` and regenerate). The remediation backlog in §3 stands for the controls that remain genuinely open.
+
 ---
 
 ## 3. The open items — gaps & partials to close before/ during the audit

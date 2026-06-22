@@ -59,3 +59,5 @@ jobs:
         run: pnpm --filter @ierp/cutover taxdocs
       - name: Restaurant POS (dine-in, KDS, tables, QR pay)
         run: pnpm --filter @ierp/cutover restaurant
+      - name: COSO/ICFR controls (GL-05 maker-checker, SoD preventive block, access review)
+        run: pnpm --filter @ierp/cutover compliance
