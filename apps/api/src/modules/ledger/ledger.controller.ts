@@ -21,6 +21,18 @@ const JournalBody = z.object({
 });
 type JournalBodyT = z.infer<typeof JournalBody>;
 
+const OpeningBalancesBody = z.object({
+  batch_ref: z.string().optional(),
+  // account_code intentionally not .min(1): the service reports bad rows per-row (CSV resilience)
+  // rather than rejecting the whole batch.
+  rows: z.array(z.object({
+    account_code: z.string(),
+    debit: z.number().optional(),
+    credit: z.number().optional(),
+  })).min(1),
+});
+type OpeningBalancesBody = z.infer<typeof OpeningBalancesBody>;
+
 @Controller('api/ledger')
 @Permissions('exec', 'creditors', 'ar')
 export class LedgerController {
@@ -85,4 +97,11 @@ export class LedgerController {
 
   @Post('close-year')
   closeYear(@Query('fiscal_year') fy: string, @Query('ledger') ledger: string | undefined, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username, ledger || undefined, tenantId ? Number(tenantId) : undefined); }
+
+  // ── Opening balances (cutover from a prior system) → one balanced JE, idempotent on batch_ref ──
+  @Post('opening-balances')
+  @Permissions('exec', 'creditors', 'ar')
+  openingBalances(@Body(new ZodValidationPipe(OpeningBalancesBody)) b: OpeningBalancesBody, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.postOpeningBalances(b.rows, b.batch_ref, u.username, tenantId ? Number(tenantId) : undefined);
+  }
 }

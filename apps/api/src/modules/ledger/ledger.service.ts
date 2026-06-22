@@ -367,6 +367,35 @@ export class LedgerService {
     return { year, tenant_id: tenantId, provisioned: 12 };
   }
 
+  // Opening balances → ONE balanced journal entry for the tenant (cutover from a prior system).
+  // rows: {account_code, debit?, credit?}. Any net imbalance posts to 3000 (Opening Balance Equity).
+  // Idempotent on (tenant, OPENING, batchRef). Invalid rows are reported, not silently dropped.
+  async postOpeningBalances(rows: { account_code: string; debit?: number; credit?: number }[], batchRef: string | undefined, createdBy: string, tenantId?: number | null) {
+    const tid = resolveTenantId(tenantId);
+    const ref = (batchRef?.trim()) || `OPENING-${ymd().slice(0, 7)}`;
+    if (await this.alreadyPosted('OPENING', ref, tid)) return { already: true, batch_ref: ref };
+
+    const lines: JournalLineDto[] = [];
+    const rowErrors: { row: number; error: string }[] = [];
+    let netDebit = 0;
+    rows.forEach((r, i) => {
+      const acct = String(r.account_code ?? '').trim();
+      const d = n(r.debit), c = n(r.credit);
+      if (!acct) { rowErrors.push({ row: i + 1, error: 'account_code required' }); return; }
+      if (d === 0 && c === 0) { rowErrors.push({ row: i + 1, error: 'debit or credit required' }); return; }
+      lines.push({ account_code: acct, debit: d || undefined, credit: c || undefined });
+      netDebit += d - c;
+    });
+    if (!lines.length) throw new BadRequestException({ code: 'NO_VALID_ROWS', message: 'No valid opening-balance rows', messageTh: 'ไม่มีรายการยอดยกมาที่ถูกต้อง' });
+
+    const bal = round4(netDebit); // balance against 3000 Equity (Opening Balance Equity)
+    if (bal > 0) lines.push({ account_code: '3000', credit: bal });
+    else if (bal < 0) lines.push({ account_code: '3000', debit: -bal });
+
+    const je = await this.postEntry({ date: ymd(), source: 'OPENING', sourceRef: ref, tenantId: tid, memo: `Opening balances ${ref}`, createdBy, lines });
+    return { batch_ref: ref, entry_no: je.entry_no, balanced: true, lines_posted: lines.length, row_errors: rowErrors };
+  }
+
   // Year-end close: post a closing journal zeroing Revenue & Expense into 3100 Retained Earnings,
   // then close all 12 months. Idempotent (skips if FY already closed).
   async closeYear(fiscalYear: number, createdBy: string, ledgerCode: string = LEADING, tenantId?: number | null) {
