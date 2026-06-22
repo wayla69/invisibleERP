@@ -101,10 +101,10 @@ export class ProfitabilityService {
       if (driver === 'percent') {
         const weights = await db.select().from(allocationWeights).where(eq(allocationWeights.ruleId, ruleId));
         const weightMap = new Map(weights.map((w: any) => [w.segmentCode, n(w.weight)]));
-        const totalWeight = [...weightMap.values()].reduce((a: number, b: number) => a + b, 0) || 1;
+        const totalWeight = ([...weightMap.values()] as number[]).reduce((a, b) => a + b, 0) || 1;
 
         for (const seg of segs) {
-          const w = weightMap.get(seg.code) ?? 0;
+          const w = (weightMap.get(seg.code) ?? 0) as number;
           if (w <= 0) continue;
           lineValues.push({ runId, ruleId, segmentCode: seg.code, segmentType: seg.segmentType, accountCode: rule.fromAccountCode, allocatedAmount: fx(round4(totalAmount * w / totalWeight), 4) });
         }

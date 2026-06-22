@@ -209,7 +209,7 @@ export class AgentService {
           }
           return { breaches, count: breaches.length };
         }
-        case 'get_profitability_report': return this.profitability ? await this.profitability.profitabilityReport({ run_id: input.run_id }, user) : { error: 'Profitability module unavailable' };
+        case 'get_profitability_report': return this.profitability ? await this.profitability.profitabilityReport({ period: input.period, segment_type: input.segment_type }, user) : { error: 'Profitability module unavailable' };
         default: return { error: `unknown tool ${name}` };
       }
     } catch (e: any) {

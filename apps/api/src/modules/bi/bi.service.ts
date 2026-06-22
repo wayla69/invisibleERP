@@ -187,7 +187,7 @@ export class BiService {
       count: sql<string>`count(*)`,
       value: sql<string>`coalesce(sum(${opportunities.expectedValue}),0)`,
     }).from(opportunities)
-      .where(and(eq(opportunities.tenantId, tid), gte(opportunities.createdAt, start + 'T00:00:00Z')))
+      .where(and(eq(opportunities.tenantId, tid), gte(opportunities.createdAt, new Date(start + 'T00:00:00Z'))))
       .groupBy(sql`date_trunc('month', ${opportunities.createdAt})`, opportunities.status)
       .orderBy(sql`date_trunc('month', ${opportunities.createdAt})`);
 

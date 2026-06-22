@@ -101,7 +101,7 @@ export class CpqService {
       // Apply best matching pricing rule (volume discount)
       const rules = await db.select().from(pricingRules)
         .where(and(eq(pricingRules.configId, dto.config_id), eq(pricingRules.isActive, true), lte(pricingRules.minQty, qty)))
-        .orderBy(sql`${pricingRules.discount_pct} DESC`);
+        .orderBy(sql`${pricingRules.discountPct} DESC`);
       const bestRule = rules[0];
       const discountPct = bestRule ? n(bestRule.discountPct) : 0;
 
