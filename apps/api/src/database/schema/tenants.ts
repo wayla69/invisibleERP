@@ -28,6 +28,7 @@ export const tenants = pgTable('tenants', {
   district: text('district'),                                     // อำเภอ/เขต
   province: text('province'),                                     // จังหวัด
   postalCode: text('postal_code'),
+  promptpayId: text('promptpay_id'),                              // PromptPay merchant target (mobile/13-digit ID) for QR (0049)
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

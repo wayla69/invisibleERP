@@ -19,12 +19,14 @@ interface Profile {
   phone: string | null; email: string | null;
   address_line1: string | null; address_line2: string | null; sub_district: string | null;
   district: string | null; province: string | null; postal_code: string | null;
+  promptpay_id: string | null;
   setup_complete: boolean;
 }
 
 const FIELDS_IDENTITY = [
   ['legal_name', 'ชื่อนิติบุคคล (ตามทะเบียน)'], ['tax_id', 'เลขประจำตัวผู้เสียภาษี (13 หลัก)'],
   ['branch_code', 'รหัสสาขา (00000 = สำนักงานใหญ่)'], ['phone', 'โทรศัพท์'], ['email', 'อีเมล'],
+  ['promptpay_id', 'พร้อมเพย์ (เบอร์มือถือ/เลขบัตร 13 หลัก) — สำหรับ QR รับเงิน'],
 ] as const;
 const FIELDS_ADDRESS = [
   ['address_line1', 'ที่อยู่ (บรรทัด 1)'], ['address_line2', 'ที่อยู่ (บรรทัด 2)'],
@@ -49,6 +51,7 @@ export default function SetupPage() {
         phone: form.phone, email: form.email,
         address_line1: form.address_line1, address_line2: form.address_line2, sub_district: form.sub_district,
         district: form.district, province: form.province, postal_code: form.postal_code,
+        promptpay_id: form.promptpay_id || undefined,
       }),
     }),
     onSuccess: (p) => { setMsg('✅ บันทึกข้อมูลกิจการเรียบร้อย'); qc.setQueryData(['tenant-profile'], p); setForm(p as any); },

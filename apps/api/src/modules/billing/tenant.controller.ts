@@ -7,6 +7,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BillingService } from './billing.service';
 import { TaxService } from '../tax/tax.service';
+import { isValidPromptPayTarget } from '../payments/promptpay-qr';
 
 // Company identity / tax profile for the current tenant — backs the setup wizard. RLS scopes a tenant
 // admin to their own row; HQ/Admin edits their own tenant (we resolve the id from the user explicitly).
@@ -26,6 +27,8 @@ const ProfileBody = z.object({
   district: z.string().optional(),
   province: z.string().optional(),
   postal_code: z.string().optional(),
+  // PromptPay merchant id — mobile (0xxxxxxxxx) or 13-digit national/tax id; '' clears it.
+  promptpay_id: z.string().refine((v) => v === '' || isValidPromptPayTarget(v), 'invalid PromptPay id').optional(),
 });
 type ProfileBody = z.infer<typeof ProfileBody>;
 
@@ -54,7 +57,7 @@ export class TenantController {
       legal_name: 'legalName', name: 'name', tax_id: 'taxId', branch_code: 'branchCode',
       vat_registered: 'vatRegistered', tax_country: 'taxCountry', phone: 'phone', email: 'email',
       address_line1: 'addressLine1', address_line2: 'addressLine2', sub_district: 'subDistrict',
-      district: 'district', province: 'province', postal_code: 'postalCode',
+      district: 'district', province: 'province', postal_code: 'postalCode', promptpay_id: 'promptpayId',
     };
     for (const [k, col] of Object.entries(map)) if (b[k as keyof ProfileBody] !== undefined) patch[col] = b[k as keyof ProfileBody];
     if (b.vat_rate !== undefined) patch.vatRate = String(b.vat_rate);
@@ -75,6 +78,7 @@ export class TenantController {
       phone: t.phone, email: t.email,
       address_line1: t.addressLine1, address_line2: t.addressLine2, sub_district: t.subDistrict,
       district: t.district, province: t.province, postal_code: t.postalCode,
+      promptpay_id: t.promptpayId ?? null,
       setup_complete: setupComplete,
     };
   }

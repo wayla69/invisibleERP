@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { payments, paymentRefunds, tillSessions, cashMovements } from '../../database/schema';
+import { payments, paymentRefunds, tillSessions, cashMovements, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
@@ -37,17 +37,37 @@ export class PaymentService {
     const db = this.db as any;
     if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     const currency = dto.currency ?? 'THB';
+    const tenantId = dto.tenant_id ?? user.tenantId ?? null;
     const { gateway, name: gatewayName } = resolveGateway(dto.gateway);
-    const result = await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no });
+    // For PromptPay, hand the tenant's merchant id to the gateway so it emits a real scannable EMVCo QR.
+    const promptpayId = gatewayName === 'promptpay' ? await this.tenantPromptPayId(tenantId) : undefined;
+    const result = await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId });
 
     const paymentNo = await this.docNo.nextDaily('PAY');
     const now = new Date();
     await db.insert(payments).values({
-      paymentNo, saleNo: dto.sale_no, tenantId: dto.tenant_id ?? null, tillSessionId: dto.till_session_id ?? null,
+      paymentNo, saleNo: dto.sale_no, tenantId, tillSessionId: dto.till_session_id ?? null,
       method: dto.method, amount: fx(dto.amount, 4), tip: fx(dto.tip ?? 0, 4), currency, gateway: gatewayName, gatewayRef: result.ref,
       status: result.status, createdBy: user.username, capturedAt: result.status === 'Captured' ? now : null,
     });
-    return { payment_no: paymentNo, status: result.status, amount: n(dto.amount), gateway_ref: result.ref };
+    // gateway_ref is the EMVCo payload for PromptPay → surface it as qr_payload for the POS to render.
+    return { payment_no: paymentNo, status: result.status, amount: n(dto.amount), gateway_ref: result.ref, qr_payload: gatewayName === 'promptpay' && promptpayId ? result.ref : null };
+  }
+
+  // Current tenant's stored PromptPay merchant id (null if unset).
+  private async tenantPromptPayId(tenantId: number | null): Promise<string | undefined> {
+    if (tenantId == null) return undefined;
+    const [t] = await (this.db as any).select({ pp: tenants.promptpayId }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    return t?.pp ?? undefined;
+  }
+
+  // GET /api/payments/promptpay-qr?amount= — a scannable EMVCo QR for the tenant, before any tender is recorded.
+  async promptPayQr(amount: number, user: JwtUser) {
+    const ppId = await this.tenantPromptPayId(user.tenantId ?? null);
+    if (!ppId) throw new BadRequestException({ code: 'NO_PROMPTPAY', message: 'No PromptPay id configured for this business', messageTh: 'ยังไม่ได้ตั้งค่าพร้อมเพย์ของกิจการ' });
+    const { gateway } = resolveGateway('promptpay');
+    const r = await gateway.authorizeAndCapture(n(amount), 'THB', 'PromptPay', { promptpay_id: ppId });
+    return { promptpay_id: ppId, amount: n(amount), qr_payload: r.ref };
   }
 
   // POST /api/payments/refunds — refund a captured payment.

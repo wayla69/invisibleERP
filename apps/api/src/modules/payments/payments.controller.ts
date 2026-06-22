@@ -66,6 +66,12 @@ export class PaymentsController {
     return this.svc.listPaymentsForSale(saleNo);
   }
 
+  // scannable PromptPay QR for the tenant (before a tender is recorded) — POS shows it to the customer
+  @Get('promptpay-qr') @Permissions('pos', 'cust_pos', 'ar')
+  promptPayQr(@Query('amount') amount: string, @CurrentUser() u: JwtUser) {
+    return this.svc.promptPayQr(Number(amount), u);
+  }
+
   // ── cash management: drawer movements + X/Z shift report ──
   @Post('till/:id/cash-movement') @Permissions('pos', 'cust_pos', 'ar')
   cashMovement(@Param('id') id: string, @Body(new ZodValidationPipe(CashMovementBody)) b: CashMovementDto, @CurrentUser() u: JwtUser) {

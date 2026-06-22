@@ -14,6 +14,7 @@
     "onboarding": "tsx src/onboarding.ts",
     "opening-balances": "tsx src/opening-balances.ts",
     "payroll": "tsx src/payroll.ts",
+    "promptpay": "tsx src/promptpay.ts",
     "worldclass": "tsx src/worldclass.ts",
     "taxdocs": "tsx src/taxdocs.ts",
     "restaurant": "tsx src/restaurant.ts",
