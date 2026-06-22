@@ -5,7 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { PosTerminalService } from './pos-terminal.service';
 
 const TerminalBody = z.object({ terminal_code: z.string().min(1), name: z.string().optional(), provider: z.string().optional() });
-const ChargeBody = z.object({ terminal_code: z.string().optional(), sale_no: z.string().optional(), amount: z.number().positive(), type: z.enum(['sale', 'preauth']).optional(), currency: z.string().optional() });
+const ChargeBody = z.object({ terminal_code: z.string().optional(), sale_no: z.string().optional(), amount: z.number().positive(), type: z.enum(['sale', 'preauth']).optional(), currency: z.string().optional(), token: z.string().optional() });
 const CaptureBody = z.object({ amount: z.number().positive().optional() });
 const RefundBody = z.object({ amount: z.number().positive() });
 const SettleBody = z.object({ fee_pct: z.number().min(0).max(100).optional(), date: z.string().optional() });

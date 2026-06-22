@@ -87,6 +87,11 @@ async function main() {
   const pre2 = await inj('POST', '/api/payments/terminal/charge', token, { amount: 20, type: 'preauth' });
   ok('void authorized → Voided', (await inj('POST', `/api/payments/terminal/intents/${pre2.json.intent_no}/void`, token)).json.status === 'Voided');
 
+  // ── P0b: real-provider switch is wired (Omise terminal, no key set → guarded) ──
+  await inj('POST', '/api/payments/terminal/register', token, { terminal_code: 'OMTERM', provider: 'omise' });
+  const omCharge = await inj('POST', '/api/payments/terminal/charge', token, { terminal_code: 'OMTERM', amount: 99 });
+  ok('omise charge w/o key → PROVIDER_NOT_CONFIGURED 400', omCharge.status === 400 && /NOT_CONFIGURED/.test(JSON.stringify(omCharge.json)), `st=${omCharge.status}`);
+
   // ── P0b: PSP webhook (public, idempotent) ──
   const pre3 = await inj('POST', '/api/payments/terminal/charge', token, { amount: 15, type: 'preauth' });
   const wh = await inj('POST', '/api/payments/psp/webhook', undefined, { provider: 'mock', provider_ref: pre3.json.provider_ref, status: 'Captured' });
