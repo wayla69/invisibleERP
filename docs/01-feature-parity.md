@@ -1,8 +1,10 @@
-# 01 — Feature-Parity Matrix (Checklist 100%)
+# 01 — Feature-Parity Matrix (Checklist)
 
 ทุกแถวคือฟีเจอร์/endpoint/tool ของระบบเดิม → ปลายทางใน V2 ใช้เป็น **checklist ปิดเฟส** (ฟีเจอร์จะถือว่า "ครบ" เมื่อมี V2 module + endpoint + UI + test)
 
-สัญลักษณ์โดเมน V2: `pos` `inventory` `procurement` `finance` `bom` `portal` `marketing` `loyalty` `admin` `ai` `reports` `notifications`
+> ⚠️ **อัปเดต 2026-06-22:** การ audit แบบ endpoint-by-endpoint พบว่ายัง **ไม่ครบ 100%** — ดูช่องว่างจริงและลำดับการพอร์ตที่ [02-parity-audit-2026-06.md](02-parity-audit-2026-06.md). ช่องว่างหลัก: module enable/disable, master-data import/export (in-app), stocktake workflow, inventory/asset QR, claims, delivery orders, และ portal UI ของ BoM/variance/survey. นอกจากนี้ ERPPOS มีฟีเจอร์ใหม่ (2026-06-22) ที่ยังไม่มีใน V2 — ดูแถว 37–38 และ §E ด้านล่าง
+
+สัญลักษณ์โดเมน V2: `pos` `inventory` `procurement` `finance` `bom` `portal` `marketing` `loyalty` `admin` `ai` `reports` `notifications` `assets`
 
 ---
 
@@ -25,7 +27,7 @@
 | 13 | `nav_warehouse` | 4 (issue/stocktake/QR/history) | issue/transfer/นับ/QR | `(internal)/warehouse` | `inventory` | movement = audit (ไม่ตัด raw_inventory); MI-/ST- no; QR payload format; stocktake Draft-only |
 | 14 | `nav_procurement` | 7 | PR→PO→GR→claims→suppliers | `(internal)/procurement` | `procurement` | **tab bindings สลับ** (แก้จงใจ); 3 PO numbering schemes; GR→PO close + lot ledger; GRC- |
 | 15 | `nav_images` | 3 | จัดการรูปสินค้า | `(internal)/images` | `inventory` | filename=Item_ID; replace ลบทุก ext ก่อน; → object storage |
-| 16 | `nav_masterdata` | 4 | CRUD master catalog (**CSV ไฟล์**) | `(internal)/master-data` | `inventory` | master = CSV ไม่ใช่ DB → V2 ทำเป็นตาราง `items`; upsert by Item_ID; 5 styled templates |
+| 16 | `nav_masterdata` | 5 | CRUD master catalog (**CSV ไฟล์**) + **Import/Export ALL** | `(internal)/master-data` | `inventory`+`admin` | master = CSV ไม่ใช่ DB → V2 ทำเป็นตาราง `items`; upsert by Item_ID; 5 styled templates; **NEW (2026-06): generic import/export ทุก entity** (`MASTER_REGISTRY` 11 ชนิด, `_md_import`, `_export_all_master_excel`) — ยังไม่มีใน V2 (มีแค่ `tools/etl` ครั้งเดียว) |
 | 17 | `nav_bom_master` | 5 | BOM กลาง + push + approve | `(internal)/bom-master` | `bom` | costing; push to customer (delete+insert); submission approve |
 | 18 | `nav_ar` | 4 | ลูกหนี้ + aging | `(internal)/ar` | `finance` | `_sync_ar_invoices` on load (INV-{Order_No}); credit-term digit extract; aging buckets; receipt RCP- |
 | 19 | `nav_delivery` | 2 | ใบส่งของ + POD | `(internal)/delivery` | `finance`/`logistics` | DO-; POD image; ไม่ตัด stock |
@@ -36,7 +38,7 @@
 | 24 | `nav_promos` | 3 | กฎโปรโมชั่น | `(internal)/promotions` | `marketing` | 6 promo types; Item_IDs CSV→junction; Max_Uses |
 | 25 | `nav_mobile` | 3 | QR scanner → stock | `(internal)/mobile-scan` | `inventory` | QR parse `KEY:VALUE\|...`; SCAN- session; close→commit movements |
 | 26 | `nav_creditors` | 4 | เจ้าหนี้ AP + aging | `(internal)/creditors` | `finance` | AP- txn; creditor vs supplier (consolidate); aging |
-| 27 | `nav_users` | 5 (add/edit/perm/role/del) | จัดการผู้ใช้ + RBAC | `(internal)/admin/users` | `admin` | **PERM_GROUPS taxonomy**; per-user override; Admin full hardcoded; admin delete-protected |
+| 27 | `nav_users` | 6 (add/edit/perm/role/**modules**/del) | จัดการผู้ใช้ + RBAC + **module on/off** | `(internal)/admin/users` | `admin` | **PERM_GROUPS taxonomy**; per-user override; Admin full hardcoded; admin delete-protected; **NEW (2026-06): "Modules On/Off" tab** (ดูแถว 38) |
 | 28 | `nav_marketing` | 9 | campaigns/AB/segment/push/loyalty cfg/abandoned/survey | `(internal)/marketing` | `marketing` | RFM segment rules; AB CTR/CVR; loyalty config singleton; abandon rate |
 | 29 | `nav_loyalty` | 2 | ลูกค้าดู/แลกแต้ม | `(portal)/loyalty` | `loyalty` | gating on Enabled; Min_Redeem; sets `loyalty_discount` (cross-page) |
 | 30 | `nav_survey` | — | ลูกค้าตอบ survey (ไทยล้วน) | `(portal)/survey` | `marketing` | NPS/CSAT; Q1-Q3 fixed; recommend enum ไทย |
@@ -46,8 +48,12 @@
 | 34 | `nav_cust_my_users` | — | ลูกค้าสร้าง sub-account | `(portal)/my/users` | `portal`+`admin` | **hash sha256 inline** (ไม่ใช่ make_hash); permission bundles; scope same customer |
 | 35 | `nav_crm` | 3 | customer master ภายใน | `(internal)/customers` | `pos`/`admin` | Credit_Term/Limit/Hold feed AR + POS gating |
 | 36 | `nav_ai_chat` | — | Claude chat over ERP | `(internal)/assistant` + `(portal)/assistant` | `ai` | ERPAgent 19 tools; quick prompts ไทย; history 20 |
+| 37 | `nav_assets` 🆕 | 4 (register/add-edit/QR/scan) | ทะเบียนทรัพย์สิน + QR tag | `(internal)/assets` (❌ ยังไม่มี) | `assets` | **NEW (2026-06):** `tbl_assets`+`tbl_asset_movements`; QR asset tags (`_make_qr_label_pdf` id_key=ASSET_ID, badge "ASSET TAG"); scan→update location/status. V2 มี `assets` module แต่เป็น **บัญชีอย่างเดียว** (acquire/depreciate/dispose) — ไม่มี QR/scan/movement |
+| 38 | `nav_users` → Modules On/Off 🆕 | — | เปิด/ปิดโมดูลทั้งระบบ (admin) | (❌ ยังไม่มีใน V2) | `admin` | **NEW (2026-06):** `tbl_module_config` + `_module_enabled`/`_set_module_enabled`; `ALWAYS_ON_MODULES={'users'}`; gate ที่ menu filter. V2 **ไม่มี** feature-flag system |
 
 > **หมายเหตุ dead/legacy:** `_build_menu_for_role`/`ALL_NAV_KEYS` (RBAC ระบบเก่า) ไม่ต้องพอร์ต — ใช้ `MENU_GROUPS`+`ALL_PERMISSIONS` (ระบบ live) เป็นแหล่งจริง
+>
+> **🆕 = ฟีเจอร์ที่เพิ่มใน ERPPOS เมื่อ 2026-06-22 (ยังไม่มีใน V2):** Fixed Assets + QR (แถว 37), Module on/off (แถว 38), generic master-data import/export (แถว 16). รายละเอียดช่องว่างทั้งหมด → [02-parity-audit-2026-06.md](02-parity-audit-2026-06.md)
 
 ---
 
@@ -123,3 +129,6 @@
 | Notifications | `tbl_notifications` (bilingual) + sidebar badge | `notifications` module + realtime/poll |
 | Thai documents | fpdf + bahttext + Express TXT | Playwright+Sarabun + baht-in-words lib + Express TXT exporter |
 | Snapshot stock | `tbl_raw_inventory` `MAX(Generate_Date)` | `stock_snapshots` (partitioned) + `latestSnapshotDate()` service |
+| **Module enable/disable** 🆕 | `tbl_module_config` + `_module_enabled` + "Modules On/Off" tab; `ALWAYS_ON_MODULES={'users'}` | ❌ **ยังไม่มี** — ต้องทำ `module_configs` (tenant_id,key,enabled) + guard ที่ nav/route + admin UI |
+| **Master-data import/export (in-app)** 🆕 | `MASTER_REGISTRY` (11 entity) + `_md_import` (upsert by PK) + `_export_all_master_excel` + per-entity styled template | ❌ **ยังไม่มี** (มีแค่ `tools/etl` ครั้งเดียว) — ต้องทำ `POST /api/admin/master-data/import`, `GET .../export`, `GET .../template/:entity` |
+| **Inventory/Asset QR** 🆕 | `_make_qr_png_b64`, `_make_qr_label_pdf` (Thai, 4 sizes), `_parse_qr_payload`, `_qr_scan_box` | ❌ QR เดิมมีแค่ restaurant tables/shipments — ต้องทำ label PDF + scan-to-fill สำหรับ count/receive/transfer/issue + asset tags |
