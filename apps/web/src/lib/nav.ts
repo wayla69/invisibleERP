@@ -26,6 +26,7 @@ import {
   FileText,
   FlaskConical,
   Factory,
+  FolderKanban,
   Goal,
   Landmark,
   Layers,
@@ -148,6 +149,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'วางแผน & วิเคราะห์',
     items: [
       { label: 'งบประมาณ & แผน', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
+      { label: 'โครงการ (Projects)', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
       { label: 'กำไรตามมิติ', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'BI Analytics', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
     ],
