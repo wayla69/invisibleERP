@@ -35,3 +35,4 @@ export * from './receipts';
 export * from './offline';
 export * from './workflow';
 export * from './costing';
+export * from './wms';

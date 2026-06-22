@@ -86,7 +86,12 @@ export class ProcurementService {
     const set: any = {};
     if (dto.approval_status != null) set.approvalStatus = dto.approval_status;
     if (dto.blocklisted != null) { set.blocklisted = dto.blocklisted; set.blocklistReason = dto.reason ?? null; }
-    await db.update(vendors).set(set).where(eq(vendors.id, vendorId));
+    if (!Object.keys(set).length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No fields to update', messageTh: 'ไม่มีข้อมูลให้แก้ไข' });
+    // RLS-scoped: a non-HQ tenant only sees/writes its own vendor rows (vendor_tenant_write, migration 0034),
+    // so mutating another tenant's vendor — or a shared NULL-tenant master — updates 0 rows. Surface that as a
+    // clean 404 rather than echoing a success that never happened (this is what closes the cross-tenant DoS).
+    const updated = await db.update(vendors).set(set).where(eq(vendors.id, vendorId)).returning({ id: vendors.id });
+    if (!updated.length) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
     return { vendor_id: vendorId, approval_status: dto.approval_status, blocklisted: dto.blocklisted };
   }
   // simple rolling scorecard from GR activity (on-time/quality placeholders until claims feed it)

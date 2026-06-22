@@ -43,6 +43,7 @@ import { WorkflowModule } from './modules/workflow/workflow.module';
 import { MatchModule } from './modules/match/match.module';
 import { SourcingModule } from './modules/sourcing/sourcing.module';
 import { CostingModule } from './modules/costing/costing.module';
+import { WmsModule } from './modules/wms/wms.module';
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { CostingModule } from './modules/costing/costing.module';
     MatchModule,
     SourcingModule,
     CostingModule,
+    WmsModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions

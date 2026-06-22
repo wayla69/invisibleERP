@@ -5,7 +5,13 @@ import { tenants } from './tenants';
 // รวม tbl_suppliers + tbl_creditors (overlapping vendor masters)
 export const vendors = pgTable('vendors', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  vendorCode: text('vendor_code').unique(),
+  // Tenant ownership (migration 0034). NULL = legacy/shared master row: readable by every tenant but
+  // writable only by HQ/bypass (custom RLS vendor_tenant_read/vendor_tenant_write). A row with a tenant_id
+  // is fully isolated to that tenant. Set tenantId on any tenant-scoped vendor INSERT path.
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  // Per-tenant uniqueness is enforced by migration 0034 via a partial unique index on
+  // (COALESCE(tenant_id,0), vendor_code) — NOT a global unique (that leaked codes across tenants).
+  vendorCode: text('vendor_code'),
   name: text('name').notNull(),
   isSupplier: boolean('is_supplier').default(true),
   isCreditor: boolean('is_creditor').default(false),

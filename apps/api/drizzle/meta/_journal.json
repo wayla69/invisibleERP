@@ -232,6 +232,13 @@
       "when": 1782007973309,
       "tag": "0032_inventory_costing",
       "breakpoints": false
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1782007973310,
+      "tag": "0033_wms",
+      "breakpoints": false
     }
   ]
 }
