@@ -55,26 +55,44 @@ import {
   Workflow,
 } from 'lucide-react';
 
+/** Top-level workspace. The internal app is split into two surfaces selectable via the sidebar
+ *  switcher: POS (front-of-house / store ops) and ERP (back office). The customer PORTAL_NAV is a
+ *  separate third surface and is unaffected. Items/groups tagged with both workspaces are cross-listed. */
+export type Workspace = 'erp' | 'pos';
+
 export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
   perms?: string[];
+  /** Workspaces this item belongs to. Defaults to the parent group's `workspace` when omitted. */
+  workspace?: Workspace[];
 }
 
 export interface NavGroup {
   title: string;
   items: NavItem[];
+  /** Workspaces this group belongs to. Items may override per-item. Defaults to both. */
+  workspace?: Workspace[];
 }
 
-/** Back-office navigation, grouped. `perms` gate visibility via hasPerm(). */
+export const WORKSPACES: { id: Workspace; label: string; icon: LucideIcon }[] = [
+  { id: 'erp', label: 'ERP', icon: Building2 },
+  { id: 'pos', label: 'POS', icon: Store },
+];
+
+const BOTH: Workspace[] = ['erp', 'pos'];
+
+/** Back-office navigation, grouped. `perms` gate visibility via hasPerm(); `workspace` gates the ERP/POS switcher. */
 export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'ภาพรวม',
+    workspace: BOTH,
     items: [{ label: 'แดชบอร์ด', href: '/dashboard', icon: LayoutDashboard, perms: ['dashboard', 'exec'] }],
   },
   {
     title: 'การขาย',
+    workspace: ['pos'],
     items: [
       { label: 'POS', href: '/pos', icon: ShoppingCart, perms: ['pos', 'order_mgt'] },
       { label: 'โต๊ะ', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
@@ -83,26 +101,30 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'จัดการเคลม', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
       { label: 'ใบส่งสินค้า', href: '/delivery', icon: Truck, perms: ['delivery'] },
       { label: 'ควบคุม POS (พักบิล/อนุมัติ)', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
-      { label: 'กฎราคา & โปรโมชั่น', href: '/pricing', icon: Coins, perms: ['pos', 'order_mgt', 'exec'] },
+      // dual-use: pricing & branches are configured back-office but used at POS → cross-listed
+      { label: 'กฎราคา & โปรโมชั่น', href: '/pricing', icon: Coins, perms: ['pos', 'order_mgt', 'exec'], workspace: BOTH },
       { label: 'ช่องทางเดลิเวอรี (Aggregators)', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },
       { label: 'ลอยัลตี้ & แรงงาน (POS Ops)', href: '/pos-ops', icon: Star, perms: ['pos', 'loyalty', 'users', 'exec'] },
       { label: 'เครื่องรับบัตร & สรุปยอด', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
-      { label: 'สาขา & ยอดขายรวม (Branches)', href: '/branches', icon: Store, perms: ['branch', 'exec'] },
+      { label: 'สาขา & ยอดขายรวม (Branches)', href: '/branches', icon: Store, perms: ['branch', 'exec'], workspace: BOTH },
     ],
   },
   {
     title: 'ลูกค้า & การขาย',
+    workspace: ['erp'],
     items: [
       { label: 'โอกาสการขาย', href: '/pipeline', icon: Target, perms: ['marketing', 'exec'] },
       { label: 'ใบเสนอราคา', href: '/cpq', icon: FileSignature, perms: ['marketing', 'exec'] },
       { label: 'บริการ & SLA', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
       { label: 'CRM 360', href: '/crm', icon: Users, perms: ['marketing', 'exec'] },
       { label: 'การตลาด', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
-      { label: 'สมาชิก & แต้ม', href: '/loyalty', icon: Star, perms: ['loyalty', 'marketing'] },
+      // dual-use: loyalty program is run from POS but configured/analysed in ERP → cross-listed
+      { label: 'สมาชิก & แต้ม', href: '/loyalty', icon: Star, perms: ['loyalty', 'marketing'], workspace: BOTH },
     ],
   },
   {
     title: 'สต๊อก & จัดซื้อ',
+    workspace: ['erp'],
     items: [
       { label: 'สินค้าคงคลัง', href: '/inventory', icon: Package, perms: ['warehouse', 'dashboard', 'planner'] },
       { label: 'ตรวจนับสต๊อก', href: '/stocktake', icon: ClipboardCheck, perms: ['warehouse', 'mobile'] },
@@ -125,6 +147,7 @@ export const INTERNAL_NAV: NavGroup[] = [
   },
   {
     title: 'การเงิน',
+    workspace: ['erp'],
     items: [
       { label: 'การเงิน', href: '/finance', icon: Banknote, perms: ['ar', 'creditors', 'exec'] },
       { label: 'บัญชีแยกประเภท', href: '/accounting', icon: BookText, perms: ['exec', 'creditors', 'ar'] },
@@ -139,6 +162,7 @@ export const INTERNAL_NAV: NavGroup[] = [
   },
   {
     title: 'บุคลากร & เงินเดือน',
+    workspace: ['erp'],
     items: [
       { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
       { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
@@ -146,15 +170,18 @@ export const INTERNAL_NAV: NavGroup[] = [
   },
   {
     title: 'ภาษี',
+    workspace: ['erp'],
     items: [
       { label: 'ใบกำกับภาษี', href: '/tax/invoices', icon: FileText, perms: ['exec', 'ar', 'creditors'] },
       { label: 'รายงานภาษี', href: '/tax/reports', icon: FileSpreadsheet, perms: ['exec', 'ar', 'creditors'] },
       { label: 'หัก ณ ที่จ่าย', href: '/tax/wht', icon: FileMinus, perms: ['exec', 'creditors'] },
-      { label: 'ภาษีอิเล็กทรอนิกส์ (e-Tax/Journal)', href: '/pos-fiscal', icon: FileSpreadsheet, perms: ['exec', 'ar', 'pos'] },
+      // dual-use: the fiscal/e-Tax journal is generated at POS, reconciled in ERP → cross-listed
+      { label: 'ภาษีอิเล็กทรอนิกส์ (e-Tax/Journal)', href: '/pos-fiscal', icon: FileSpreadsheet, perms: ['exec', 'ar', 'pos'], workspace: BOTH },
     ],
   },
   {
     title: 'วางแผน & วิเคราะห์',
+    workspace: ['erp'],
     items: [
       { label: 'งบประมาณ & แผน', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
       { label: 'โครงการ (Projects)', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
@@ -164,6 +191,7 @@ export const INTERNAL_NAV: NavGroup[] = [
   },
   {
     title: 'การควบคุม',
+    workspace: BOTH, // approvals & SoD apply to both POS managers and back-office
     items: [
       { label: 'อนุมัติงาน', href: '/workflow', icon: Workflow, perms: ['exec', 'creditors', 'procurement', 'users'] },
       { label: 'แยกหน้าที่ (SoD)', href: '/sod', icon: ShieldAlert, perms: ['exec', 'users'] },
@@ -171,10 +199,12 @@ export const INTERNAL_NAV: NavGroup[] = [
   },
   {
     title: 'ผู้ช่วย AI',
+    workspace: BOTH,
     items: [{ label: 'AI Assistant', href: '/assistant', icon: Bot, perms: ['ai_chat', 'dashboard'] }],
   },
   {
     title: 'ระบบ',
+    workspace: BOTH, // settings/users/master-data are reachable from either workspace
     items: [
       { label: 'ข้อมูลหลัก (Master Data)', href: '/master-data', icon: Database, perms: ['masterdata'] },
       { label: 'จัดการผู้ใช้', href: '/admin/users', icon: UserCog, perms: ['users'] },
@@ -184,6 +214,26 @@ export const INTERNAL_NAV: NavGroup[] = [
     ],
   },
 ];
+
+/** Filter a nav tree to one workspace: keep items whose workspace (item override, else group, else both)
+ *  includes `ws`; drop groups left empty. */
+export function navForWorkspace(nav: NavGroup[], ws: Workspace): NavGroup[] {
+  return nav
+    .map((g) => ({ ...g, items: g.items.filter((it) => (it.workspace ?? g.workspace ?? BOTH).includes(ws)) }))
+    .filter((g) => g.items.length > 0);
+}
+
+/** Pick the landing workspace from a user's permissions: POS-only operators land in POS; everyone else
+ *  (back-office, dual-role, Admin) lands in ERP. Admin/dual users can switch freely. */
+const POS_PERMS = ['pos', 'pos_sell', 'pos_refund', 'pos_till', 'order_mgt', 'claim_mgt', 'delivery'];
+const ERP_PERMS = ['ar', 'creditors', 'procurement', 'warehouse', 'wh_receive', 'exec', 'gl_post', 'gl_close', 'masterdata', 'bom_master', 'planner', 'users'];
+export function defaultWorkspace(perms: string[] | undefined, role?: string): Workspace {
+  if (role === 'Admin') return 'erp';
+  const set = new Set(perms ?? []);
+  const hasPos = POS_PERMS.some((p) => set.has(p));
+  const hasErp = ERP_PERMS.some((p) => set.has(p));
+  return hasPos && !hasErp ? 'pos' : 'erp';
+}
 
 /** Customer-portal navigation (no permission gating). */
 export const PORTAL_NAV: NavGroup[] = [

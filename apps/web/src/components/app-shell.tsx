@@ -8,7 +8,7 @@ import { LogOut, Search } from 'lucide-react';
 import { getToken, clearToken } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { useModuleFlags } from '@/lib/modules';
-import type { NavGroup } from '@/lib/nav';
+import { navForWorkspace, defaultWorkspace, WORKSPACES, type NavGroup, type Workspace } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 import {
   Sidebar,
@@ -44,15 +44,20 @@ function initials(name?: string | null) {
   return name.slice(0, 2).toUpperCase();
 }
 
+const WORKSPACE_KEY = 'ie-workspace';
+
 export function AppShell({
   nav,
   brand,
   filterPerms = false,
+  enableWorkspaces = false,
   children,
 }: {
   nav: NavGroup[];
   brand: string;
   filterPerms?: boolean;
+  /** Show the ERP/POS workspace switcher and filter the sidebar to the active workspace. */
+  enableWorkspaces?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -60,6 +65,23 @@ export function AppShell({
   const me = useMe();
   const moduleFlags = useModuleFlags();
   const [paletteOpen, setPaletteOpen] = React.useState(false);
+
+  // Active top-level workspace (ERP | POS). Seed from the saved preference; otherwise default by role
+  // once the user profile loads. A manual choice is persisted and wins thereafter.
+  const [workspace, setWorkspace] = React.useState<Workspace>(() => {
+    if (typeof window === 'undefined') return 'erp';
+    return (localStorage.getItem(WORKSPACE_KEY) as Workspace) || 'erp';
+  });
+  const wsResolved = React.useRef(false);
+  React.useEffect(() => {
+    if (!enableWorkspaces || wsResolved.current || !me.data) return;
+    wsResolved.current = true;
+    if (!localStorage.getItem(WORKSPACE_KEY)) setWorkspace(defaultWorkspace(me.data.permissions, me.data.role));
+  }, [enableWorkspaces, me.data]);
+  const selectWorkspace = (w: Workspace) => {
+    setWorkspace(w);
+    if (typeof window !== 'undefined') localStorage.setItem(WORKSPACE_KEY, w);
+  };
 
   React.useEffect(() => {
     if (typeof window !== 'undefined' && !getToken()) router.replace('/login');
@@ -84,19 +106,30 @@ export function AppShell({
   // Filter groups/items by permission AND module enable/disable (back-office); drop empty groups.
   // A disabled module hides for EVERYONE (incl. Admin) — faithful to the legacy "hides for all".
   const disabledModules = React.useMemo(() => new Set(moduleFlags.data?.disabled ?? []), [moduleFlags.data]);
+  const filterByPerm = React.useCallback(
+    (groupsIn: NavGroup[]) => {
+      if (!filterPerms) return groupsIn;
+      const visible = (it: NavGroup['items'][number]) => {
+        if (!hasPerm(me.data, ...(it.perms ?? []))) return false;
+        const perms = it.perms ?? [];
+        if (perms.length && perms.every((p) => disabledModules.has(p))) return false; // all its modules off
+        return true;
+      };
+      return groupsIn.map((g) => ({ ...g, items: g.items.filter(visible) })).filter((g) => g.items.length > 0);
+    },
+    [filterPerms, me.data, disabledModules],
+  );
+
+  // Sidebar = permission-filtered within the active workspace; ⌘K palette stays global (all workspaces).
+  const wsNav = React.useMemo(() => (enableWorkspaces ? navForWorkspace(nav, workspace) : nav), [enableWorkspaces, nav, workspace]);
   const groups = React.useMemo(() => {
-    if (!filterPerms) return nav;
-    const visible = (it: NavGroup['items'][number]) => {
-      if (!hasPerm(me.data, ...(it.perms ?? []))) return false;
-      const perms = it.perms ?? [];
-      if (perms.length && perms.every((p) => disabledModules.has(p))) return false; // all its modules off
-      return true;
-    };
-    const filtered = nav
-      .map((g) => ({ ...g, items: g.items.filter(visible) }))
-      .filter((g) => g.items.length > 0);
-    return filtered.length ? filtered : nav; // fall back to full nav while loading
-  }, [nav, filterPerms, me.data, disabledModules]);
+    const filtered = filterByPerm(wsNav);
+    return filtered.length ? filtered : wsNav; // fall back while loading
+  }, [filterByPerm, wsNav]);
+  const paletteGroups = React.useMemo(() => {
+    const filtered = filterByPerm(nav);
+    return filtered.length ? filtered : nav;
+  }, [filterByPerm, nav]);
 
   const isActive = (href: string) =>
     pathname === href || (href !== '/dashboard' && href !== '/portal/dashboard' && pathname.startsWith(href + '/'));
@@ -122,6 +155,30 @@ export function AppShell({
               <span className="truncate text-xs text-muted-foreground">Enterprise ERP</span>
             </div>
           </div>
+          {enableWorkspaces && (
+            <div className="px-1 pb-1 group-data-[collapsible=icon]:hidden">
+              <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-0.5" role="tablist" aria-label="Workspace">
+                {WORKSPACES.map((w) => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={workspace === w.id}
+                    onClick={() => selectWorkspace(w.id)}
+                    className={cn(
+                      'flex items-center justify-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors',
+                      workspace === w.id
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <w.icon className="size-3.5" />
+                    {w.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </SidebarHeader>
 
         <SidebarContent>
@@ -220,7 +277,7 @@ export function AppShell({
         <div className={cn('flex-1 p-4 sm:p-6')}>{children}</div>
       </SidebarInset>
 
-      <CommandPalette groups={groups} open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette groups={paletteGroups} open={paletteOpen} onOpenChange={setPaletteOpen} />
     </SidebarProvider>
   );
 }
