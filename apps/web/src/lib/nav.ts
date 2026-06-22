@@ -181,6 +181,8 @@ export const PORTAL_NAV: NavGroup[] = [
       { label: 'สต๊อก & สั่งซื้อ', href: '/portal/inventory', icon: Package },
       { label: 'ติดตามคำสั่งซื้อ', href: '/portal/track', icon: Truck },
       { label: 'ตรวจนับสิ้นวัน', href: '/portal/variance', icon: ClipboardCheck },
+      { label: 'สูตรการผลิต (BoM)', href: '/portal/bom', icon: FlaskConical },
+      { label: 'แบบสำรวจ', href: '/portal/survey', icon: FileText },
       { label: 'แต้มสะสม', href: '/portal/loyalty', icon: Star },
       { label: 'ธุรกิจของฉัน', href: '/portal/my', icon: Briefcase },
       { label: 'พนักงานของฉัน', href: '/portal/my/users', icon: Users },

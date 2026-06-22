@@ -8,6 +8,7 @@
     "module-qr": "tsx src/module-qr.ts",
     "stock-ops": "tsx src/stock-ops.ts",
     "gaps": "tsx src/gaps.ts",
+    "portal-extra": "tsx src/portal-extra.ts",
     "ext": "tsx src/ext.ts",
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "onboarding": "tsx src/onboarding.ts",

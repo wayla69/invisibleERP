@@ -99,4 +99,13 @@ export class MarketingController {
 
   @Post('surveys/:id/responses') @Permissions('marketing')
   createSurveyResponse(@Param('id') id: string, @Body(new ZodValidationPipe(SurveyResponseBody)) b: SurveyResponseDto) { return this.svc.createSurveyResponse(id, b); }
+
+  // ── Customer-facing survey (portal): list + submit, gated by the customer 'survey' perm ──
+  @Get('portal/surveys') @Permissions('survey')
+  portalSurveys() { return this.svc.listSurveys(); }
+
+  @Post('portal/surveys/:id/responses') @Permissions('survey')
+  portalSurveyResponse(@Param('id') id: string, @Body(new ZodValidationPipe(SurveyResponseBody)) b: SurveyResponseDto, @CurrentUser() u: JwtUser) {
+    return this.svc.createSurveyResponse(id, { ...b, tenant_id: b.tenant_id ?? u.tenantId ?? null });
+  }
 }
