@@ -31,7 +31,7 @@ Gaps **#1 (module flags)**, **#2 (master-data import/export)**, **#4 (inventory 
 - **QR:** `QrService` (qrcode + Playwright→PDF) · assets `GET :assetNo/qr`, `GET qr/labels`, `POST scan-update` (+ `asset_movements` table, physical-tracking columns) · inventory `POST /api/inventory/qr/labels` · shared `parseQrPayload`/`buildItemQrPayload`/`buildAssetQrPayload` for scan-to-fill.
 - **Migration:** `0046_module_qr.sql` (journaled) re-runs the RLS loop for `asset_movements`.
 
-**Still pending** from this cluster: scan-to-fill wired into stocktake/goods-issue forms (those op forms — gap #3 — are not yet built in V2).
+**Gap #3 also done (2026-06-22):** stocktake + goods-issue/transfer built with QR scan-to-fill — `StockOpsService` (uses the existing service-less `stocktakes`/`stock_movements` tables), `POST /api/stocktake` (+`/post`), `POST /api/inventory/issue|transfer`, `GET /api/inventory/movements`; `MI` doc-prefix added; web `/stocktake` + `/goods-issue` pages. Audit model preserved (snapshots untouched). `tools/cutover/src/stock-ops.ts` 13/13.
 
 ## 1. Consolidated gap register (port checklist)
 
