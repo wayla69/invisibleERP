@@ -3,7 +3,15 @@ import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
+import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
+
+// Resolve the tenant a period/close operation belongs to: explicit arg wins, else the request's
+// own tenant (the interceptor's ALS). null only when called outside any request (bootstrap/seed).
+function resolveTenantId(explicit?: number | null): number | null {
+  if (explicit !== undefined && explicit !== null) return explicit;
+  return currentTenantStore()?.tenantId ?? null;
+}
 
 // Parallel sets of books. The LEADING ledger is the statutory/primary book — reports default to it, and a
 // journal with ledger_code = NULL is shared by every ledger (so all existing postings are universal).
@@ -141,11 +149,17 @@ export class LedgerService {
       });
     }
 
+    // An entry belongs to its explicit tenant, else the poster's own tenant (ALS). Avoid NULL-tenant
+    // entries in a multi-tenant SaaS — they'd escape both RLS scoping and the per-tenant close calendar.
+    const entryTenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? null;
     const entryDate = dto.date ?? ymd();
     const period = entryDate.slice(0, 7); // 'YYYY-MM'
-    // Period guard: a CLOSED fiscal period rejects new postings. A missing period row defaults OPEN
-    // (existing flows post into the current month without pre-seeding a period).
-    const [pp] = await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(eq(fiscalPeriods.code, period)).limit(1);
+    // Period guard: a CLOSED fiscal period (this entry's tenant calendar, per 0043) rejects new postings.
+    // A missing period row defaults OPEN (existing flows post into the current month without pre-seeding).
+    const [pp] = entryTenantId == null
+      ? [undefined]
+      : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods)
+          .where(and(eq(fiscalPeriods.code, period), eq(fiscalPeriods.tenantId, entryTenantId))).limit(1);
     if (pp && pp.status === 'Closed' && !dto.allowClosedPeriod) {
       // a year-end closing journal legitimately posts INTO the period it closes; everything else is blocked
       throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${period} is closed`, messageTh: `งวดบัญชี ${period} ถูกปิดแล้ว` });
@@ -157,12 +171,12 @@ export class LedgerService {
       const [h] = await tx.insert(journalEntries).values({
         entryNo, entryDate, period, memo: dto.memo ?? null,
         source: dto.source ?? 'Manual', sourceRef: dto.sourceRef ?? null, ledgerCode: dto.ledgerCode ?? null,
-        tenantId: dto.tenantId ?? null, currency, status: 'Posted', createdBy: dto.createdBy,
+        tenantId: entryTenantId, currency, status: 'Posted', createdBy: dto.createdBy,
       }).returning({ id: journalEntries.id });
       await tx.insert(journalLines).values(nzLines.map((l) => ({
         entryId: Number(h.id), accountCode: l.account_code,
         debit: fx(l.debit, 4), credit: fx(l.credit, 4),
-        currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: dto.tenantId ?? null,
+        currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: entryTenantId,
       })));
       return nzLines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
     });
@@ -300,10 +314,12 @@ export class LedgerService {
 
   // ───────────────────── Idempotency + Fiscal periods ─────────────────────
   // has a GL entry already been posted for this source+ref? (used by AR/AP hooks + closeYear)
-  async alreadyPosted(source: string, sourceRef: string): Promise<boolean> {
+  // tenantId scopes the check so two tenants can share a ref (e.g. 'FY2026') without colliding.
+  async alreadyPosted(source: string, sourceRef: string, tenantId?: number | null): Promise<boolean> {
     const db = this.db as any;
-    const [r] = await db.select({ id: journalEntries.id }).from(journalEntries)
-      .where(and(eq(journalEntries.source, source), eq(journalEntries.sourceRef, sourceRef))).limit(1);
+    const conds = [eq(journalEntries.source, source), eq(journalEntries.sourceRef, sourceRef)];
+    if (tenantId !== undefined && tenantId !== null) conds.push(eq(journalEntries.tenantId, tenantId));
+    const [r] = await db.select({ id: journalEntries.id }).from(journalEntries).where(and(...conds)).limit(1);
     return !!r;
   }
 
@@ -314,38 +330,49 @@ export class LedgerService {
     return { start, endDate };
   }
 
-  async ensurePeriod(period: string) {
+  // All period ops are per-tenant (0043). tenantId defaults to the request's own tenant (ALS),
+  // so the existing controller endpoints scope correctly with no signature change.
+  async ensurePeriod(period: string, tenantId?: number | null) {
     const db = this.db as any;
+    const tid = resolveTenantId(tenantId);
     const { start, endDate } = this.periodBounds(period);
-    await db.insert(fiscalPeriods).values({ code: period, startDate: start, endDate, status: 'Open' }).onConflictDoNothing({ target: fiscalPeriods.code });
+    await db.insert(fiscalPeriods).values({ code: period, startDate: start, endDate, status: 'Open', tenantId: tid })
+      .onConflictDoNothing({ target: [fiscalPeriods.tenantId, fiscalPeriods.code] });
   }
 
-  async listPeriods() {
+  async listPeriods(tenantId?: number | null) {
     const db = this.db as any;
-    const rows = await db.select().from(fiscalPeriods).orderBy(fiscalPeriods.code);
+    const tid = resolveTenantId(tenantId);
+    const rows = await db.select().from(fiscalPeriods)
+      .where(tid == null ? undefined : eq(fiscalPeriods.tenantId, tid))
+      .orderBy(fiscalPeriods.code);
     return { periods: rows.map((p: any) => ({ code: p.code, status: p.status, start_date: p.startDate, end_date: p.endDate })), count: rows.length };
   }
 
-  async setPeriodStatus(period: string, status: 'Open' | 'Closed') {
+  async setPeriodStatus(period: string, status: 'Open' | 'Closed', tenantId?: number | null) {
     const db = this.db as any;
-    await this.ensurePeriod(period);
-    await db.update(fiscalPeriods).set({ status }).where(eq(fiscalPeriods.code, period));
+    const tid = resolveTenantId(tenantId);
+    await this.ensurePeriod(period, tid);
+    await db.update(fiscalPeriods).set({ status })
+      .where(tid == null ? eq(fiscalPeriods.code, period) : and(eq(fiscalPeriods.code, period), eq(fiscalPeriods.tenantId, tid)));
     return { period, status };
   }
-  async closePeriod(period: string) { return this.setPeriodStatus(period, 'Closed'); }
-  async openPeriod(period: string) { return this.setPeriodStatus(period, 'Open'); }
+  async closePeriod(period: string, tenantId?: number | null) { return this.setPeriodStatus(period, 'Closed', tenantId); }
+  async openPeriod(period: string, tenantId?: number | null) { return this.setPeriodStatus(period, 'Open', tenantId); }
 
   // Year-end close: post a closing journal zeroing Revenue & Expense into 3100 Retained Earnings,
   // then close all 12 months. Idempotent (skips if FY already closed).
-  async closeYear(fiscalYear: number, createdBy: string, ledgerCode: string = LEADING) {
+  async closeYear(fiscalYear: number, createdBy: string, ledgerCode: string = LEADING, tenantId?: number | null) {
     const db = this.db as any;
+    const tid = resolveTenantId(tenantId);
     // per-ledger idempotency: the leading book keeps the legacy 'FY{y}' ref; non-leading books are suffixed.
+    // Scoped to THIS tenant so each tenant closes its own FY independently (shared 'FY2026' ref is fine).
     const closeRef = ledgerCode === LEADING ? `FY${fiscalYear}` : `FY${fiscalYear}-${ledgerCode}`;
-    if (await this.alreadyPosted('CLOSE', closeRef)) {
+    if (await this.alreadyPosted('CLOSE', closeRef, tid)) {
       return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, already: true };
     }
     const from = `${fiscalYear}-01-01`, to = `${fiscalYear}-12-31`;
-    const rows = await this.aggregateByType(db, from, to, undefined, ledgerCode);
+    const rows = await this.aggregateByType(db, from, to, undefined, ledgerCode, tid);
     const lines: JournalLineDto[] = [];
     let revTotal = 0, expTotal = 0;
     for (const r of rows) {
@@ -362,19 +389,21 @@ export class LedgerService {
     else if (netIncome < 0) lines.push({ account_code: '3100', debit: -netIncome });
     if (!lines.length) return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, net_income: 0, entry_no: null, note: 'no P&L activity' };
 
-    await this.ensurePeriod(`${fiscalYear}-12`);
-    // tag the closing entry to its ledger so it zeroes only that book's P&L (each GAAP has its own result).
-    const je = await this.postEntry({ date: to, source: 'CLOSE', sourceRef: closeRef, ledgerCode, allowClosedPeriod: true, memo: `Year-end close FY${fiscalYear} (${ledgerCode})`, createdBy, lines });
-    // fiscal_periods is a shared calendar (no ledger dimension) — only the LEADING close locks the months,
+    await this.ensurePeriod(`${fiscalYear}-12`, tid);
+    // tag the closing entry to its ledger + tenant so it zeroes only that book's P&L (each GAAP has its own result).
+    const je = await this.postEntry({ date: to, source: 'CLOSE', sourceRef: closeRef, ledgerCode, tenantId: tid, allowClosedPeriod: true, memo: `Year-end close FY${fiscalYear} (${ledgerCode})`, createdBy, lines });
+    // the tenant's fiscal calendar has no ledger dimension — only the LEADING close locks the months,
     // so non-leading ledgers can still post their own closing entry into December.
-    if (ledgerCode === LEADING) for (let m = 1; m <= 12; m++) await this.closePeriod(`${fiscalYear}-${String(m).padStart(2, '0')}`);
+    if (ledgerCode === LEADING) for (let m = 1; m <= 12; m++) await this.closePeriod(`${fiscalYear}-${String(m).padStart(2, '0')}`, tid);
     return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, net_income: netIncome, entry_no: je.entry_no };
   }
 
   // group Posted journal_lines by account type within optional date window
-  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null) {
+  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null, tenantId?: number | null) {
     const conds = [eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${to}`, this.ledgerCond(ledgerCode)];
     if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
+    // Explicit tenant scope for writes like closeYear (which may run under HQ/bypass where RLS won't narrow).
+    if (tenantId !== undefined && tenantId !== null) conds.push(eq(journalEntries.tenantId, tenantId));
     if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
     else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
     const rows = await db

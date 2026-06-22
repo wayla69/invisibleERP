@@ -302,6 +302,13 @@
       "when": 1782007973319,
       "tag": "0042_bi",
       "breakpoints": false
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1782007973320,
+      "tag": "0043_tenant_fiscal_periods",
+      "breakpoints": false
     }
   ]
 }

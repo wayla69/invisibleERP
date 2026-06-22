@@ -6,6 +6,7 @@
   "scripts": {
     "e2e": "tsx src/e2e.ts",
     "ext": "tsx src/ext.ts",
+    "tenant-isolation": "tsx src/tenant-isolation.ts",
     "worldclass": "tsx src/worldclass.ts",
     "taxdocs": "tsx src/taxdocs.ts",
     "restaurant": "tsx src/restaurant.ts",

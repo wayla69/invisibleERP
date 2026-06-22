@@ -185,10 +185,13 @@ export class FinanceService {
     const newPaid = n(t.paidAmount) + n(amount);
     const status = newPaid >= n(t.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
     await db.update(apTransactions).set({ paidAmount: String(newPaid), status }).where(eq(apTransactions.id, t.id));
-    // GL: pay the payable (Dr 2000 AP / Cr 1000 Cash). sourceRef keyed per-payment (running paid total).
-    if (this.ledger && n(amount) > 0) {
+    // GL: pay the payable (Dr 2000 AP / Cr 1000 Cash). Tag the entry to the AP txn's tenant (not null),
+    // keyed per-payment (running paid total) and guarded so a retry of the same installment posts once.
+    const apTenant = t.tenantId ?? user.tenantId ?? null;
+    const payRef = `${txnNo}:${newPaid}`;
+    if (this.ledger && n(amount) > 0 && !(await this.ledger.alreadyPosted('PAY-AP', payRef, apTenant))) {
       await this.ledger.postEntry({
-        date: ymd(), source: 'PAY-AP', sourceRef: `${txnNo}:${newPaid}`, tenantId: null,
+        date: ymd(), source: 'PAY-AP', sourceRef: payRef, tenantId: apTenant,
         memo: `AP payment ${txnNo}`, createdBy: user.username,
         lines: [{ account_code: '2000', debit: n(amount) }, { account_code: '1000', credit: n(amount) }],
       });

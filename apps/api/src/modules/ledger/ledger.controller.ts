@@ -72,15 +72,17 @@ export class LedgerController {
   balanceSheet(@Query('as_of') asOf: string, @Query('ledger') ledger?: string) { return this.svc.balanceSheet(asOf, ledger || undefined); }
 
   // ── fiscal periods + year-end close ──
+  // Periods are per-tenant (0043). Operations default to the caller's own tenant; HQ/Admin may target a
+  // specific shop with ?tenant_id= (used when one operator manages several tenants' books).
   @Get('periods')
-  periods() { return this.svc.listPeriods(); }
+  periods(@Query('tenant_id') tenantId?: string) { return this.svc.listPeriods(tenantId ? Number(tenantId) : undefined); }
 
   @Post('periods/:period/close')
-  closePeriod(@Param('period') period: string) { return this.svc.closePeriod(period); }
+  closePeriod(@Param('period') period: string, @Query('tenant_id') tenantId?: string) { return this.svc.closePeriod(period, tenantId ? Number(tenantId) : undefined); }
 
   @Post('periods/:period/open')
-  openPeriod(@Param('period') period: string) { return this.svc.openPeriod(period); }
+  openPeriod(@Param('period') period: string, @Query('tenant_id') tenantId?: string) { return this.svc.openPeriod(period, tenantId ? Number(tenantId) : undefined); }
 
   @Post('close-year')
-  closeYear(@Query('fiscal_year') fy: string, @Query('ledger') ledger: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username, ledger || undefined); }
+  closeYear(@Query('fiscal_year') fy: string, @Query('ledger') ledger: string | undefined, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.closeYear(parseInt(fy, 10), u.username, ledger || undefined, tenantId ? Number(tenantId) : undefined); }
 }

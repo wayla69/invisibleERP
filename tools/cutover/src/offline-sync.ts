@@ -126,11 +126,11 @@ async function main() {
   // ── 9. transient failure is RETRYABLE (not dead-lettered): closed period → failed → reopen → replay synced ──
   const uT = uuid();
   const opT = () => ({ client_uuid: uT, device_id: 'POS-01', captured_at: '2026-07-15T08:30:00.000Z', lines: [{ item_id: 'A', item_description: 'สินค้า', qty: 1, unit_price: 100 }] });
-  await inj('POST', '/api/ledger/periods/2026-07/close', admin);
+  await inj('POST', `/api/ledger/periods/2026-07/close?tenant_id=${t1}`, admin); // close T1's calendar (cust1 → T1)
   const bFail = await sync(cust1, [opT()]);
   const rFail = (bFail.json.results ?? [])[0];
   const failRowT = await cnt(`SELECT count(*)::int n FROM pos_offline_sync WHERE client_uuid='${uT}' AND status='failed' AND sale_no IS NULL`);
-  await inj('POST', '/api/ledger/periods/2026-07/open', admin);
+  await inj('POST', `/api/ledger/periods/2026-07/open?tenant_id=${t1}`, admin);
   const bRetry = await sync(cust1, [opT()]); // replay after reopen — must NOT be dead-lettered as duplicate
   const rRetry = (bRetry.json.results ?? [])[0];
   const salesT = await cnt(`SELECT count(*)::int n FROM cust_pos_sales WHERE sale_no='${rRetry.sale_no}'`);

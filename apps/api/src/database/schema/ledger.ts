@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, timestamp, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Double-entry General Ledger (move #2) — เปลี่ยน "POS add-on" → "ERP" จริง
@@ -17,13 +17,20 @@ export const accounts = pgTable('accounts', {
   active: text('active').default('true'),
 });
 
-export const fiscalPeriods = pgTable('fiscal_periods', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
-  code: text('code').notNull().unique(), // 'YYYY-MM'
-  startDate: date('start_date').notNull(),
-  endDate: date('end_date').notNull(),
-  status: periodStatusEnum('status').default('Open'),
-});
+// Per-tenant fiscal calendar. tenant_id added in 0043 so one tenant's period/year-end close
+// no longer locks every other tenant (the old global `code` unique did exactly that).
+export const fiscalPeriods = pgTable(
+  'fiscal_periods',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    code: text('code').notNull(), // 'YYYY-MM'
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    status: periodStatusEnum('status').default('Open'),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  },
+  (t) => ({ uqTenantCode: uniqueIndex('uq_fiscal_periods_tenant_code').on(t.tenantId, t.code) }),
+);
 
 // Journal entry header — balanced by construction (Σdebit = Σcredit), enforced in LedgerService
 export const journalEntries = pgTable(
