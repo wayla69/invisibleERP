@@ -44,3 +44,4 @@ export * from './pipeline';
 export * from './cpq';
 export * from './service';
 export * from './item-images';
+export * from './payroll';

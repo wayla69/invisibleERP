@@ -4,6 +4,36 @@ import { TaxService } from '../src/modules/tax/tax.service';
 import { round2, getCurrency, isSupportedCurrency } from '../src/modules/tax/money';
 import { DocNumberService } from '../src/common/doc-number.service';
 import { buildPromptPayPayload, crc16ccitt, isValidPromptPayTarget } from '../src/modules/payments/promptpay-qr';
+import { socialSecurity, annualPit, computePayslip } from '../src/modules/payroll/payroll-calc';
+
+describe('Payroll — Thai social security + PIT (ภ.ง.ด.1)', () => {
+  it('SSO 5% capped at 750 (base ceiling 15,000)', () => {
+    expect(socialSecurity(30000)).toEqual({ employee: 750, employer: 750 }); // capped
+    expect(socialSecurity(10000)).toEqual({ employee: 500, employer: 500 }); // 5%
+    expect(socialSecurity(12000)).toEqual({ employee: 600, employer: 600 });
+    expect(socialSecurity(0)).toEqual({ employee: 0, employer: 0 });
+    expect(socialSecurity(30000, false)).toEqual({ employee: 0, employer: 0 }); // not eligible
+  });
+  it('progressive annual PIT', () => {
+    expect(annualPit(100000)).toBe(0);                 // under 150k
+    expect(annualPit(191000)).toBe(2050);              // (191000-150000)*5%
+    expect(annualPit(400000)).toBe(7500 + 10000);      // 150k@0 +150k@5%(7500) +100k@10%(10000) = 17500
+  });
+  it('payslip: 30,000 salary → SSO 750, WHT 170.83, net 29,079.17', () => {
+    const s = computePayslip(30000);
+    expect(s.gross).toBe(30000);
+    expect(s.sso_employee).toBe(750);
+    expect(s.sso_employer).toBe(750);
+    expect(s.wht).toBe(170.83);                        // annual taxable 191k → 2050/12
+    expect(s.net).toBe(29079.17);                      // 30000 - 750 - 170.83
+  });
+  it('payslip: low earner (12,000) → no WHT', () => {
+    const s = computePayslip(12000);
+    expect(s.sso_employee).toBe(600);
+    expect(s.wht).toBe(0);                             // taxable below 150k
+    expect(s.net).toBe(11400);                        // 12000 - 600
+  });
+});
 
 describe('tax providers', () => {
   it('Thai VAT 7% on 100 = 7', () => {

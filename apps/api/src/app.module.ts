@@ -63,6 +63,7 @@ import { LotsModule } from './modules/lots/lots.module';
 import { ScanModule } from './modules/scan/scan.module';
 import { ImagesModule } from './modules/images/images.module';
 import { AdminUsersModule } from './modules/admin-users/admin-users.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
 
 @Module({
   imports: [
@@ -125,6 +126,7 @@ import { AdminUsersModule } from './modules/admin-users/admin-users.module';
     ScanModule,
     ImagesModule,
     AdminUsersModule,
+    PayrollModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
