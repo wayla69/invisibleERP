@@ -22,6 +22,9 @@ const SaleBody = z.object({
   discount: z.number().nonnegative().optional(),
   payment_method: z.string().optional(),
   notes: z.string().optional(),
+  apply_pricing: z.boolean().optional(),
+  channel: z.string().optional(),
+  party_size: z.number().int().optional(),
 });
 
 const AddInventoryBody = z.object({

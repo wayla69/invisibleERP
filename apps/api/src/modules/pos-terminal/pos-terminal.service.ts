@@ -2,21 +2,27 @@ import { Inject, Injectable, NotFoundException, BadRequestException } from '@nes
 import { eq, and, desc, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { paymentTerminals, paymentIntents, settlementBatches } from '../../database/schema';
+import { Optional } from '@nestjs/common';
 import { DocNumberService } from '../../common/doc-number.service';
 import { getProvider } from './providers';
+import { PaymentService } from '../payments/payments.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
-export interface ChargeDto { terminal_code?: string; sale_no?: string; amount: number; type?: 'sale' | 'preauth'; currency?: string; token?: string }
+export interface ChargeDto { terminal_code?: string; sale_no?: string; amount: number; type?: 'sale' | 'preauth'; currency?: string; token?: string; record_tender?: boolean }
 
 // Card terminal abstraction: charge / pre-auth / capture / void / refund + settlement.
 // Providers are pluggable; only 'mock' is wired (real Opn/2C2P/GBPrime drop in via chargeViaProvider).
 // This is the card-acceptance/settlement ledger — GL tender is still posted by PaymentService at sale time.
 @Injectable()
 export class PosTerminalService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly docNo: DocNumberService,
+    @Optional() private readonly payments?: PaymentService,  // wiring: record a card tender on capture
+  ) {}
 
   // ── Terminals ─────────────────────────────────────────────────────────────
   async registerTerminal(dto: { terminal_code: string; name?: string; provider?: string }, user: JwtUser) {
@@ -48,7 +54,17 @@ export class PosTerminalService {
       provider, providerRef: ref, type, amount: String(round2(dto.amount)), capturedAmount: captured ? String(round2(dto.amount)) : '0',
       currency: dto.currency ?? 'THB', status, createdBy: user.username, capturedAt: captured ? new Date() : null,
     });
-    return { intent_no: intentNo, provider, provider_ref: ref, status, type, amount: round2(dto.amount) };
+    // wiring (opt-in): on a captured card charge tied to a sale, record the tender so closeTill/X-Z
+    // reports see card sales. recordTender posts no GL itself (the sale flow owns revenue GL).
+    let paymentNo: string | null = null;
+    if (captured && dto.sale_no && dto.record_tender && this.payments) {
+      try {
+        const openTill = user.tenantId != null ? await this.payments.currentOpenTill(user.tenantId) : null;
+        const tender = await this.payments.recordTender({ sale_no: dto.sale_no, tenant_id: user.tenantId ?? undefined, method: 'Card', amount: round2(dto.amount), currency: dto.currency ?? 'THB', gateway: 'mock', till_session_id: openTill?.id }, user);
+        paymentNo = tender.payment_no;
+      } catch { /* tender recording best-effort */ }
+    }
+    return { intent_no: intentNo, provider, provider_ref: ref, status, type, amount: round2(dto.amount), payment_no: paymentNo };
   }
 
   async capture(intentNo: string, amount: number | undefined, user: JwtUser) {

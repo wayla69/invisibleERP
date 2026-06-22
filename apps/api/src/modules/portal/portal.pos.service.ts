@@ -15,12 +15,18 @@ import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { RecipeService } from '../menu/recipe.service';
 import { CostingService } from '../costing/costing.service';
+import { PricingService } from '../pricing/pricing.service';
+import { JournalService } from '../pos-fiscal/journal.service';
+import { LockingService } from '../pos-scale/locking.service';
 
 export interface PortalSaleDto {
   items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number }[];
   discount?: number;
   payment_method?: string;
   notes?: string;
+  apply_pricing?: boolean;   // opt-in: fold pricing-engine rule discounts into the order discount
+  channel?: string;
+  party_size?: number;
 }
 
 @Injectable()
@@ -34,6 +40,9 @@ export class PortalPosService {
     private readonly ledger: LedgerService,
     private readonly recipe: RecipeService,
     @Optional() private readonly costing?: CostingService, // Phase 17A — costed COGS for configured retail items
+    @Optional() private readonly pricing?: PricingService,  // wiring: rule discounts at checkout (opt-in)
+    @Optional() private readonly journal?: JournalService,  // wiring: append electronic journal per sale
+    @Optional() private readonly locking?: LockingService,  // wiring: auto-86 recompute after stock decrement
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
@@ -49,7 +58,16 @@ export class PortalPosService {
       return { ...it, amount: roundCurrency(gross - lineDisc, 'THB') };
     });
     const subtotal = roundCurrency(lines.reduce((a, l) => a + l.amount, 0), 'THB');
-    const discount = roundCurrency(n(dto.discount), 'THB');
+    // wiring: opt-in pricing engine — fold rule discounts (happy-hour/BOGO/qty-break/order) into the
+    // order discount. GL stays balanced (cash leg = total = taxable + vat). Advisory: never block a sale.
+    let pricingDiscount = 0;
+    if (dto.apply_pricing && this.pricing) {
+      try {
+        const q = await this.pricing.quote({ channel: dto.channel, party_size: dto.party_size, lines: lines.map((l) => ({ sku: String(l.item_id), qty: n(l.qty), unit_price: n(l.unit_price) })) }, user);
+        pricingDiscount = roundCurrency(n(q.line_discount_total) + n(q.order_discount), 'THB');
+      } catch { /* pricing is advisory at checkout */ }
+    }
+    const discount = roundCurrency(n(dto.discount) + pricingDiscount, 'THB');
     const taxable = Math.max(0, subtotal - discount);
     // pluggable tax (move #5) — no more hard-coded VAT 7%
     const taxCalc = this.tax.calcTax({ net: taxable, country: 'TH' });
@@ -148,7 +166,13 @@ export class PortalPosService {
       });
     }
 
-    return { sale_no: saleNo, subtotal, discount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
+    // wiring (best-effort, never poison the sale): append the hash-chained electronic journal, then
+    // recompute auto-86 in case this sale depleted a recipe ingredient.
+    const ju = { ...user, tenantId: t.id };
+    if (this.journal) { try { await this.journal.append({ doc_type: 'SALE', doc_no: saleNo, payload: { subtotal, discount, vat, total, lines: lines.length, payment_method: dto.payment_method ?? 'Cash' } }, ju); } catch { /* journal best-effort */ } }
+    if (this.locking) { try { await this.locking.recomputeAvailability(); } catch { /* auto-86 best-effort */ } }
+
+    return { sale_no: saleNo, subtotal, discount, pricing_discount: pricingDiscount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
   }
 
   // GET /api/portal/pos/sales — history (this tenant)
