@@ -3,6 +3,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posHeldOrders, posOverrides } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
+import { PosAuditService } from '../pos-audit/pos-audit.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -12,7 +13,7 @@ export interface OverrideDto { action: string; sale_no?: string; reason_code?: s
 // Park/recall held carts + manager-override audit. Cart is opaque JSON owned by the POS client.
 @Injectable()
 export class PosControlService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService, private readonly audit: PosAuditService) {}
 
   async hold(dto: HoldDto, user: JwtUser) {
     if (!dto.cart) throw new BadRequestException({ code: 'NO_CART', message: 'cart required', messageTh: 'ไม่มีตะกร้า' });
@@ -55,6 +56,8 @@ export class PosControlService {
       reasonCode: dto.reason_code ?? null, reason: dto.reason ?? null, amount: dto.amount != null ? String(dto.amount) : null,
       requestedBy: user.username, approvedBy: dto.approved_by ?? null,
     });
+    // central, cross-module POS audit trail
+    await this.audit.record({ action: dto.action, entity: 'sale', entityId: dto.sale_no, meta: { override_no: overrideNo, reason_code: dto.reason_code, reason: dto.reason, amount: dto.amount, approved_by: dto.approved_by } }, user);
     return { override_no: overrideNo, action: dto.action, approved_by: dto.approved_by ?? null };
   }
 

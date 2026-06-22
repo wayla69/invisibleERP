@@ -81,6 +81,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'จัดการเคลม', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
       { label: 'ใบส่งสินค้า', href: '/delivery', icon: Truck, perms: ['delivery'] },
       { label: 'ควบคุม POS (พักบิล/อนุมัติ)', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
+      { label: 'กฎราคา & โปรโมชั่น', href: '/pricing', icon: Coins, perms: ['pos', 'order_mgt', 'exec'] },
       { label: 'เครื่องรับบัตร & สรุปยอด', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
     ],
   },
@@ -142,6 +143,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ใบกำกับภาษี', href: '/tax/invoices', icon: FileText, perms: ['exec', 'ar', 'creditors'] },
       { label: 'รายงานภาษี', href: '/tax/reports', icon: FileSpreadsheet, perms: ['exec', 'ar', 'creditors'] },
       { label: 'หัก ณ ที่จ่าย', href: '/tax/wht', icon: FileMinus, perms: ['exec', 'creditors'] },
+      { label: 'ภาษีอิเล็กทรอนิกส์ (e-Tax/Journal)', href: '/pos-fiscal', icon: FileSpreadsheet, perms: ['exec', 'ar', 'pos'] },
     ],
   },
   {

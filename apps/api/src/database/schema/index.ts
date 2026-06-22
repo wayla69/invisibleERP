@@ -48,3 +48,6 @@ export * from './payroll';
 export * from './manufacturing';
 export * from './pos-control';
 export * from './pos-terminal';
+export * from './pricing';
+export * from './pos-fiscal';
+export * from './pos-audit';
