@@ -13,7 +13,6 @@
     "pos-p1": "tsx src/pos-p1.ts",
     "pos-p2": "tsx src/pos-p2.ts",
     "pos-wiring": "tsx src/pos-wiring.ts",
-    "projects": "tsx src/projects.ts",
     "ext": "tsx src/ext.ts",
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "onboarding": "tsx src/onboarding.ts",

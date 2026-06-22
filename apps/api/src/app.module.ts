@@ -73,7 +73,6 @@ import { PosFiscalModule } from './modules/pos-fiscal/pos-fiscal.module';
 import { PosScaleModule } from './modules/pos-scale/pos-scale.module';
 import { ChannelAdapterModule } from './modules/channel-adapter/channel-adapter.module';
 import { PosLoyaltyLaborModule } from './modules/pos-loyalty-labor/pos-loyalty-labor.module';
-import { ProjectsModule } from './modules/projects/projects.module';
 
 @Module({
   imports: [
@@ -146,7 +145,6 @@ import { ProjectsModule } from './modules/projects/projects.module';
     PosScaleModule,
     ChannelAdapterModule,
     PosLoyaltyLaborModule,
-    ProjectsModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
