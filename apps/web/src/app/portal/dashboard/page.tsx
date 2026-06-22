@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Banknote, Receipt, ShoppingCart, TrendingUp, TriangleAlert, Bell } from 'lucide-react';
+import { Banknote, Receipt, ShoppingCart, TrendingUp, TriangleAlert, Bell, Megaphone } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -16,6 +16,7 @@ export default function PortalDashboard() {
   return (
     <div>
       <PageHeader title={`สวัสดี 👋 ${d?.tenant ?? ''}`} description="ภาพรวมธุรกิจของคุณ" />
+      <Campaigns />
       <StateView q={q}>
         {d && (
           <div className="space-y-6">
@@ -44,6 +45,29 @@ export default function PortalDashboard() {
           </div>
         )}
       </StateView>
+    </div>
+  );
+}
+
+// Active Popup/Ticker campaigns shown to the customer (api/marketing/campaigns/active is cust-accessible).
+function Campaigns() {
+  const q = useQuery<any>({ queryKey: ['portal-campaigns'], queryFn: () => api('/api/marketing/campaigns/active') });
+  const list = q.data?.campaigns ?? [];
+  if (!list.length) return null;
+  const g = (c: any, ...keys: string[]) => keys.map((k) => c[k]).find((v) => v != null && v !== '') ?? '';
+  return (
+    <div className="mb-4 space-y-2">
+      {list.map((c: any, i: number) => (
+        <Card key={i} className="gap-0 border-primary/30 bg-primary/5 p-4">
+          <CardContent className="flex items-start gap-3 px-0 text-sm">
+            <Megaphone className="mt-0.5 size-5 shrink-0 text-primary" />
+            <div>
+              <div className="font-semibold text-foreground">{g(c, 'campaignName', 'campaign_name', 'name', 'title')}</div>
+              <div className="text-muted-foreground">{g(c, 'content', 'message', 'body', 'description')}</div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }

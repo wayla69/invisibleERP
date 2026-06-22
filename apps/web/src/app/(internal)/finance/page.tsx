@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Banknote, HandCoins, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Banknote, CalendarClock, Download, HandCoins, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
+import { api, apiDownload } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -176,6 +176,8 @@ export default function FinancePage() {
             )}
           </StateView>
         </div>
+
+        <AgingSection />
       </div>
 
       {/* AP pay dialog */}
@@ -193,6 +195,37 @@ export default function FinancePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ── AR/AP aging buckets (Current / 1-30 / 31-60 / 61-90 / 90+) + AP-aging export ──
+function AgingSection() {
+  const arA = useQuery<any>({ queryKey: ['fin-ar-aging'], queryFn: () => api('/api/finance/ar/aging') });
+  const apA = useQuery<any>({ queryKey: ['fin-ap-aging'], queryFn: () => api('/api/finance/ap/aging') });
+  const [busy, setBusy] = useState(false);
+  const B = [
+    { k: 'current', l: 'ยังไม่ครบกำหนด' }, { k: 'd1_30', l: '1–30 วัน' }, { k: 'd31_60', l: '31–60 วัน' },
+    { k: 'd61_90', l: '61–90 วัน' }, { k: 'd90_plus', l: '90+ วัน' },
+  ];
+  const row = (title: string, data: any) => data && (
+    <div>
+      <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{title} · รวมคงค้าง {baht(data.total)}</h3>
+      <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
+        {B.map((b, i) => <StatCard key={b.k} label={b.l} value={baht(data.buckets?.[b.k])} icon={CalendarClock} tone={i >= 3 ? 'danger' : i === 2 ? 'warning' : 'default'} />)}
+      </div>
+    </div>
+  );
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold">วิเคราะห์อายุหนี้ (Aging)</h2>
+        <Button variant="outline" size="sm" disabled={busy} onClick={async () => { setBusy(true); try { await apiDownload('/api/reports/ap-aging/export', 'ap-aging.xlsx'); } finally { setBusy(false); } }}>
+          <Download className="size-4" /> ส่งออก AP Aging (Excel)
+        </Button>
+      </div>
+      <StateView q={arA}>{row('อายุลูกหนี้ (AR)', arA.data)}</StateView>
+      <StateView q={apA}>{row('อายุเจ้าหนี้ (AP)', apA.data)}</StateView>
     </div>
   );
 }
