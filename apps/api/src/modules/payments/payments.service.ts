@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Optional, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { payments, paymentRefunds, tillSessions, cashMovements, tenants } from '../../database/schema';
@@ -20,6 +20,7 @@ export interface RecordTenderDto {
   currency?: string;
   gateway?: string;
   till_session_id?: number;
+  idempotency_key?: string;   // C1: retries with the same key return the original tender, never re-charge
 }
 export interface RefundDto { payment_no: string; amount: number; reason?: string }
 export interface OpenTillDto { opening_float?: number }
@@ -37,25 +38,74 @@ export class PaymentService {
   ) {}
 
   // POST /api/payments — run a tender against a gateway, persist the result.
+  //
+  // C1 (idempotency): a retried/double-submitted tender carrying the same idempotency_key returns the
+  //   ORIGINAL tender instead of capturing again. The unique index ux_payments_idem makes concurrent
+  //   retries collapse to a single row (the loser of the insert race reads back the winner).
+  // C2 (capture safety): the row is persisted BEFORE the gateway is contacted, so a capture that
+  //   succeeds at the PSP but fails to persist is never an orphaned, unrecorded charge — it survives as
+  //   a row to reconcile. A gateway error flips the row to 'Failed' rather than leaving it dangling.
   async recordTender(dto: RecordTenderDto, user: JwtUser) {
     const db = this.db as any;
     if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     const currency = dto.currency ?? 'THB';
-    const tenantId = dto.tenant_id ?? user.tenantId ?? null;
+    // Tenant is derived from the authenticated user, never from the request body (no cross-tenant tender).
+    const tenantId = user.tenantId ?? dto.tenant_id ?? null;
     const { gateway, name: gatewayName } = resolveGateway(dto.gateway);
-    // For PromptPay, hand the tenant's merchant id to the gateway so it emits a real scannable EMVCo QR.
-    const promptpayId = gatewayName === 'promptpay' ? await this.tenantPromptPayId(tenantId) : undefined;
-    const result = await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId });
+    const key = dto.idempotency_key ?? null;
 
+    // Fast path: a retry whose tender already landed returns the original result — no second capture.
+    if (key) {
+      const existing = await this.findByIdempotencyKey(key);
+      if (existing) return this.tenderResult(existing, gatewayName);
+    }
+
+    const promptpayId = gatewayName === 'promptpay' ? await this.tenantPromptPayId(tenantId) : undefined;
     const paymentNo = await this.docNo.nextDaily('PAY');
-    const now = new Date();
-    await db.insert(payments).values({
+
+    // Persist a Pending row first. ON CONFLICT DO NOTHING absorbs the concurrent-retry race on the key.
+    const inserted = await db.insert(payments).values({
       paymentNo, saleNo: dto.sale_no, tenantId, tillSessionId: dto.till_session_id ?? null,
-      method: dto.method, amount: fx(dto.amount, 4), tip: fx(dto.tip ?? 0, 4), currency, gateway: gatewayName, gatewayRef: result.ref,
-      status: result.status, createdBy: user.username, capturedAt: result.status === 'Captured' ? now : null,
-    });
+      method: dto.method, amount: fx(dto.amount, 4), tip: fx(dto.tip ?? 0, 4), currency, gateway: gatewayName,
+      status: 'Pending', idempotencyKey: key, createdBy: user.username,
+    }).onConflictDoNothing({ target: payments.idempotencyKey }).returning({ id: payments.id });
+
+    // Lost the insert race → the winner already (will) capture; return its row.
+    if (!inserted.length) {
+      const existing = key ? await this.findByIdempotencyKey(key) : null;
+      if (existing) return this.tenderResult(existing, gatewayName);
+      throw new ConflictException({ code: 'DUPLICATE_TENDER', message: 'Duplicate tender already in progress', messageTh: 'มีรายการชำระซ้ำกำลังดำเนินการ' });
+    }
+
+    let result;
+    try {
+      result = await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId });
+    } catch (e) {
+      // The capture call failed (or its outcome is unknown): mark the row Failed so it is never a silent
+      // Pending limbo, and surface the error. A later PSP webhook can still settle a truly-captured tender.
+      await db.update(payments).set({ status: 'Failed' }).where(eq(payments.paymentNo, paymentNo));
+      throw e;
+    }
+    await db.update(payments).set({
+      status: result.status, gatewayRef: result.ref, capturedAt: result.status === 'Captured' ? new Date() : null,
+    }).where(eq(payments.paymentNo, paymentNo));
+
     // gateway_ref is the EMVCo payload for PromptPay → surface it as qr_payload for the POS to render.
     return { payment_no: paymentNo, status: result.status, amount: n(dto.amount), gateway_ref: result.ref, qr_payload: gatewayName === 'promptpay' && promptpayId ? result.ref : null };
+  }
+
+  // Look up a tender by its idempotency key (globally unique). Used to replay a retried capture.
+  private async findByIdempotencyKey(key: string): Promise<any | null> {
+    const [row] = await (this.db as any).select().from(payments).where(eq(payments.idempotencyKey, key)).limit(1);
+    return row ?? null;
+  }
+
+  // Shape an existing payment row into the recordTender response (replayed=true marks the dedupe).
+  private tenderResult(row: any, gatewayName: string) {
+    return {
+      payment_no: row.paymentNo, status: row.status, amount: n(row.amount), gateway_ref: row.gatewayRef,
+      qr_payload: gatewayName === 'promptpay' ? row.gatewayRef : null, replayed: true,
+    };
   }
 
   // Current tenant's stored PromptPay merchant id (null if unset).
@@ -77,38 +127,42 @@ export class PaymentService {
   // POST /api/payments/refunds — refund a captured payment.
   // Guards against over-refund by accumulation: the new refund + all prior refunds must not
   // exceed the captured amount. Only Captured/Settled payments are refundable.
-  async refund(dto: RefundDto, user: JwtUser) {
-    const db = this.db as any;
-    const [pay] = await db.select().from(payments).where(eq(payments.paymentNo, dto.payment_no)).limit(1);
-    if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
+  // `outerTx` lets a caller (e.g. ReturnsService) run the refund inside ITS transaction so the refund,
+  // restock and return record commit atomically. When present we reuse that tx; otherwise we own one.
+  // Either way the payment row is locked FOR UPDATE and prior refunds are summed UNDER the lock, so two
+  // concurrent refunds against the same payment can never jointly exceed the captured amount (over-refund).
+  async refund(dto: RefundDto, user: JwtUser, outerTx?: any) {
     if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
-
-    const status = String(pay.status ?? '');
-    if (status !== 'Captured' && status !== 'Settled' && status !== 'Refunded') {
-      // Voided/Failed/Pending/Authorized payments hold no captured funds to return.
-      throw new BadRequestException({ code: 'NOT_REFUNDABLE', message: `Payment in status ${status} cannot be refunded`, messageTh: 'รายการนี้ยังไม่ได้รับชำระ จึงคืนเงินไม่ได้' });
-    }
-
-    // sum of prior refunds against this payment
-    const [prior] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` })
-      .from(paymentRefunds).where(eq(paymentRefunds.paymentNo, dto.payment_no));
-    const already = n(prior?.v);
-    const remaining = round2(n(pay.amount) - already);
-    if (n(dto.amount) > remaining + 1e-9) {
-      throw new BadRequestException({
-        code: 'OVER_REFUND',
-        message: `Refund ${n(dto.amount)} exceeds remaining refundable ${remaining} (paid ${n(pay.amount)}, already refunded ${already})`,
-        messageTh: `จำนวนเงินคืนเกินยอดคงเหลือที่คืนได้ (${remaining})`,
-      });
-    }
-    const fullyRefunded = already + n(dto.amount) >= n(pay.amount) - 1e-9;
-
-    // Attribute the refund to the till open NOW (where the cash actually leaves the drawer), not the
-    // original sale's till. A cash sale on a since-closed shift refunded today must hit today's drawer.
-    const openTill = pay.tenantId != null ? await this.currentOpenTill(Number(pay.tenantId)) : null;
-
     const refundNo = await this.docNo.nextDaily('REF');
-    await db.transaction(async (tx: any) => {
+
+    const run = async (tx: any) => {
+      const [pay] = await tx.select().from(payments).where(eq(payments.paymentNo, dto.payment_no)).for('update').limit(1);
+      if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
+
+      const status = String(pay.status ?? '');
+      if (status !== 'Captured' && status !== 'Settled' && status !== 'Refunded') {
+        // Voided/Failed/Pending/Authorized payments hold no captured funds to return.
+        throw new BadRequestException({ code: 'NOT_REFUNDABLE', message: `Payment in status ${status} cannot be refunded`, messageTh: 'รายการนี้ยังไม่ได้รับชำระ จึงคืนเงินไม่ได้' });
+      }
+
+      // sum of prior refunds against this payment — read under the row lock to defeat the TOCTOU race
+      const [prior] = await tx.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` })
+        .from(paymentRefunds).where(eq(paymentRefunds.paymentNo, dto.payment_no));
+      const already = n(prior?.v);
+      const remaining = round2(n(pay.amount) - already);
+      if (n(dto.amount) > remaining + 1e-9) {
+        throw new BadRequestException({
+          code: 'OVER_REFUND',
+          message: `Refund ${n(dto.amount)} exceeds remaining refundable ${remaining} (paid ${n(pay.amount)}, already refunded ${already})`,
+          messageTh: `จำนวนเงินคืนเกินยอดคงเหลือที่คืนได้ (${remaining})`,
+        });
+      }
+      const fullyRefunded = already + n(dto.amount) >= n(pay.amount) - 1e-9;
+
+      // Attribute the refund to the till open NOW (where the cash actually leaves the drawer), not the
+      // original sale's till. A cash sale on a since-closed shift refunded today must hit today's drawer.
+      const openTill = pay.tenantId != null ? await this.currentOpenTill(Number(pay.tenantId)) : null;
+
       await tx.insert(paymentRefunds).values({
         refundNo, paymentNo: dto.payment_no, tenantId: pay.tenantId, tillSessionId: openTill?.id ?? null,
         amount: fx(dto.amount, 4), reason: dto.reason ?? null, status: 'Refunded', createdBy: user.username,
@@ -116,11 +170,19 @@ export class PaymentService {
       // Only flip the payment to Refunded once it is FULLY refunded; partials keep it Captured so
       // further partial refunds remain possible and the payment cannot be voided.
       if (fullyRefunded) await tx.update(payments).set({ status: 'Refunded' }).where(eq(payments.id, pay.id));
-    });
-    // wiring (best-effort): central audit + electronic journal
-    if (this.audit) { try { await this.audit.record({ action: 'refund', entity: 'payment', entityId: dto.payment_no, meta: { refund_no: refundNo, amount: n(dto.amount), reason: dto.reason } }, user); } catch { /* audit best-effort */ } }
-    if (this.journal) { try { await this.journal.append({ doc_type: 'REFUND', doc_no: refundNo, payload: { payment_no: dto.payment_no, amount: n(dto.amount), fully_refunded: fullyRefunded } }, user); } catch { /* journal best-effort */ } }
-    return { refund_no: refundNo, status: 'Refunded', refunded_total: round2(already + n(dto.amount)), remaining_refundable: round2(remaining - n(dto.amount)), fully_refunded: fullyRefunded };
+      return { refund_no: refundNo, status: 'Refunded', refunded_total: round2(already + n(dto.amount)), remaining_refundable: round2(remaining - n(dto.amount)), fully_refunded: fullyRefunded };
+    };
+
+    const res = outerTx ? await run(outerTx) : await (this.db as any).transaction(run);
+
+    // wiring (best-effort): central audit + electronic journal. Only fired when WE own the tx — when
+    // nested, the refund commits with the caller's tx and the caller owns the post-commit side effects,
+    // so we must not record an audit/journal line for a refund that may still be rolled back.
+    if (!outerTx) {
+      if (this.audit) { try { await this.audit.record({ action: 'refund', entity: 'payment', entityId: dto.payment_no, meta: { refund_no: refundNo, amount: n(dto.amount), reason: dto.reason } }, user); } catch { /* audit best-effort */ } }
+      if (this.journal) { try { await this.journal.append({ doc_type: 'REFUND', doc_no: refundNo, payload: { payment_no: dto.payment_no, amount: n(dto.amount), fully_refunded: res.fully_refunded } }, user); } catch { /* journal best-effort */ } }
+    }
+    return res;
   }
 
   // PATCH /api/payments/:no/void — void a payment that has not been captured/settled.

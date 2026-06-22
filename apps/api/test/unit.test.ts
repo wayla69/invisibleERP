@@ -7,6 +7,7 @@ import { buildPromptPayPayload, crc16ccitt, isValidPromptPayTarget } from '../sr
 import { socialSecurity, annualPit, computePayslip } from '../src/modules/payroll/payroll-calc';
 import { buildEtaxInvoiceXml } from '../src/modules/tax-docs/etax-xml';
 import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax-docs/etax-email.service';
+import { hmacSha256Hex, verifyWebhookSignature } from '../src/common/crypto';
 
 describe('e-Tax by Email composer (ETDA, no CA)', () => {
   const svc = new EtaxEmailService(null as never, null as never, null as never);
@@ -140,6 +141,20 @@ describe('PromptPay QR (EMVCo)', () => {
     expect(isValidPromptPayTarget('0801234567')).toBe(true);
     expect(isValidPromptPayTarget('1234567890123')).toBe(true);
     expect(isValidPromptPayTarget('123')).toBe(false);
+  });
+});
+
+describe('PSP webhook signature (C4 — HMAC-SHA256 over raw body)', () => {
+  const secret = 'whsec_test_123';
+  const body = Buffer.from(JSON.stringify({ provider: 'mock', provider_ref: 'r1', status: 'Captured' }));
+  const sig = hmacSha256Hex(secret, body);
+  it('accepts a correct bare-hex signature', () => expect(verifyWebhookSignature(secret, body, sig)).toBe(true));
+  it('accepts the `sha256=` prefixed form', () => expect(verifyWebhookSignature(secret, body, `sha256=${sig}`)).toBe(true));
+  it('rejects a tampered body', () => expect(verifyWebhookSignature(secret, Buffer.concat([body, Buffer.from('x')]), sig)).toBe(false));
+  it('rejects a wrong secret', () => expect(verifyWebhookSignature('whsec_other', body, sig)).toBe(false));
+  it('rejects a missing/garbage signature', () => {
+    expect(verifyWebhookSignature(secret, body, undefined)).toBe(false);
+    expect(verifyWebhookSignature(secret, body, 'not-hex!!')).toBe(false);
   });
 });
 

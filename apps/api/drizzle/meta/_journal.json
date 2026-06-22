@@ -400,6 +400,20 @@
       "when": 1782190000000,
       "tag": "0056_pos_p2",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1782200000000,
+      "tag": "0057_pos_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1782210000000,
+      "tag": "0058_ledger_idem",
+      "breakpoints": true
     }
   ]
 }

@@ -99,29 +99,33 @@ export class WmsService {
 
   // ── PICK — confirm physical pick; decrement bin_stock. NO GL. Idempotent (re-pick a Picked line no-ops). ──
   async pick(pickNo: string, dto: { lines: { pick_line_id: number; picked_qty: number; bin_code?: string }[] }, user: JwtUser) {
-    const db = this.db as any;
     const tenantId = user.tenantId as number;
-    const [p] = await db.select().from(pickLists).where(eq(pickLists.pickNo, pickNo)).for('update').limit(1);
-    if (!p) throw new NotFoundException({ code: 'PICK_NOT_FOUND', message: 'Pick list not found', messageTh: 'ไม่พบใบหยิบ' });
-    let picked = 0;
-    for (const dl of dto.lines) {
-      const [line] = await db.select().from(pickListLines).where(eq(pickListLines.id, dl.pick_line_id)).limit(1);
-      if (!line || line.status === 'Picked') continue; // idempotent
-      const want = n(dl.picked_qty);
-      let bin: any = dl.bin_code ? await this.binByCode(db, tenantId, dl.bin_code) : (line.binId ? (await db.select().from(bins).where(eq(bins.id, Number(line.binId))).limit(1))[0] : await this.suggestPickBin(db, tenantId, line.itemId).then((bs: any) => bs ? { id: bs.binId } : null));
-      const lot = line.lotNo ?? '';
-      const [bs] = bin ? await db.select().from(binStock).where(and(eq(binStock.binId, Number(bin.id)), eq(binStock.itemId, line.itemId), eq(binStock.lotNo, lot || ''))).for('update').limit(1) : [null];
-      if (!bs || n(bs.qty) < want) { await db.update(pickListLines).set({ status: 'Short', pickedQty: String(n(bs?.qty)) }).where(eq(pickListLines.id, line.id)); throw new UnprocessableEntityException({ code: 'PICK_SHORT', message: `Insufficient bin stock for ${line.itemId} (have ${n(bs?.qty)}, need ${want})`, messageTh: 'สต็อกในช่องไม่พอ' }); }
-      await db.update(binStock).set({ qty: String(n(bs.qty) - want), lastUpdated: new Date() }).where(eq(binStock.id, bs.id));
-      await db.insert(stockMovements).values({ moveDate: new Date(), docNo: pickNo, moveType: 'Issue', itemId: line.itemId, uom: line.uom ?? null, qty: String(-want), fromLocation: `BIN:${bin.binCode ?? ''}`, toLocation: 'Shipping', refDoc: p.sourceRef, createdBy: user.username });
-      if (line.lotNo) await db.insert(lotLedger).values({ lotNo: line.lotNo, itemId: line.itemId, qtyIn: '0', qtyOut: String(want), balance: String(n(bs.qty) - want), status: 'Active', moveDate: new Date(), refDoc: pickNo, createdBy: user.username });
-      await db.update(pickListLines).set({ pickedQty: String(want), status: 'Picked' }).where(eq(pickListLines.id, line.id));
-      picked += want;
-    }
-    const remaining = await db.select({ id: pickListLines.id }).from(pickListLines).where(and(eq(pickListLines.pickId, Number(p.id)), eq(pickListLines.status, 'Open')));
-    const status = remaining.length ? 'Picking' : 'Picked';
-    await db.update(pickLists).set({ status }).where(eq(pickLists.id, p.id));
-    return { pick_no: pickNo, status, picked };
+    // ONE transaction so the FOR UPDATE locks on the pick list and each bin-stock row are HELD through the
+    // decrement. Otherwise (autocommit) the lock released at statement end and two pickers on the last unit
+    // could both pass the sufficiency check and drive bin stock negative / overship (H5).
+    return await (this.db as any).transaction(async (tx: any) => {
+      const [p] = await tx.select().from(pickLists).where(eq(pickLists.pickNo, pickNo)).for('update').limit(1);
+      if (!p) throw new NotFoundException({ code: 'PICK_NOT_FOUND', message: 'Pick list not found', messageTh: 'ไม่พบใบหยิบ' });
+      let picked = 0;
+      for (const dl of dto.lines) {
+        const [line] = await tx.select().from(pickListLines).where(eq(pickListLines.id, dl.pick_line_id)).limit(1);
+        if (!line || line.status === 'Picked') continue; // idempotent
+        const want = n(dl.picked_qty);
+        let bin: any = dl.bin_code ? await this.binByCode(tx, tenantId, dl.bin_code) : (line.binId ? (await tx.select().from(bins).where(eq(bins.id, Number(line.binId))).limit(1))[0] : await this.suggestPickBin(tx, tenantId, line.itemId).then((bs: any) => bs ? { id: bs.binId } : null));
+        const lot = line.lotNo ?? '';
+        const [bs] = bin ? await tx.select().from(binStock).where(and(eq(binStock.binId, Number(bin.id)), eq(binStock.itemId, line.itemId), eq(binStock.lotNo, lot || ''))).for('update').limit(1) : [null];
+        if (!bs || n(bs.qty) < want) { await tx.update(pickListLines).set({ status: 'Short', pickedQty: String(n(bs?.qty)) }).where(eq(pickListLines.id, line.id)); throw new UnprocessableEntityException({ code: 'PICK_SHORT', message: `Insufficient bin stock for ${line.itemId} (have ${n(bs?.qty)}, need ${want})`, messageTh: 'สต็อกในช่องไม่พอ' }); }
+        await tx.update(binStock).set({ qty: String(n(bs.qty) - want), lastUpdated: new Date() }).where(eq(binStock.id, bs.id));
+        await tx.insert(stockMovements).values({ moveDate: new Date(), docNo: pickNo, moveType: 'Issue', itemId: line.itemId, uom: line.uom ?? null, qty: String(-want), fromLocation: `BIN:${bin.binCode ?? ''}`, toLocation: 'Shipping', refDoc: p.sourceRef, createdBy: user.username });
+        if (line.lotNo) await tx.insert(lotLedger).values({ lotNo: line.lotNo, itemId: line.itemId, qtyIn: '0', qtyOut: String(want), balance: String(n(bs.qty) - want), status: 'Active', moveDate: new Date(), refDoc: pickNo, createdBy: user.username });
+        await tx.update(pickListLines).set({ pickedQty: String(want), status: 'Picked' }).where(eq(pickListLines.id, line.id));
+        picked += want;
+      }
+      const remaining = await tx.select({ id: pickListLines.id }).from(pickListLines).where(and(eq(pickListLines.pickId, Number(p.id)), eq(pickListLines.status, 'Open')));
+      const status = remaining.length ? 'Picking' : 'Picked';
+      await tx.update(pickLists).set({ status }).where(eq(pickLists.id, p.id));
+      return { pick_no: pickNo, status, picked };
+    });
   }
 
   // ── PACK — create the shipment shell. Requires pick Picked. Idempotent (returns existing). ──

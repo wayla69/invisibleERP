@@ -1,7 +1,9 @@
-import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, Req, Headers, UnauthorizedException, Logger } from '@nestjs/common';
 import { z } from 'zod';
+import type { FastifyRequest } from 'fastify';
 import { Permissions, Public, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { verifyWebhookSignature } from '../../common/crypto';
 import { PosTerminalService } from './pos-terminal.service';
 
 const TerminalBody = z.object({ terminal_code: z.string().min(1), name: z.string().optional(), provider: z.string().optional() });
@@ -30,12 +32,42 @@ export class PosTerminalController {
   @Post('settlements/:batchNo/reconcile') @Permissions('creditors', 'exec') reconcile(@Param('batchNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.reconcile(no, u); }
 }
 
-// PSP callback — no JWT (HMAC verification belongs here for real providers).
+// PSP callback — no JWT. Authenticity is established by an HMAC-SHA256 signature over the raw body,
+// keyed by a per-provider shared secret. The handler ALSO re-verifies status out-of-band via the
+// provider API (see PosTerminalService.webhook), so this is defence-in-depth on a public, money-moving
+// endpoint that can flip a payment to Captured.
 @Controller('api/payments/psp')
 export class PspWebhookController {
+  private readonly logger = new Logger('PspWebhook');
   constructor(private readonly svc: PosTerminalService) {}
 
   @Public()
   @Post('webhook')
-  webhook(@Body(new ZodValidationPipe(WebhookBody)) b: z.infer<typeof WebhookBody>) { return this.svc.webhook(b.provider, b.provider_ref, b.status); }
+  webhook(
+    @Req() req: FastifyRequest & { rawBody?: Buffer },
+    @Headers('x-psp-signature') signature: string | undefined,
+    @Body(new ZodValidationPipe(WebhookBody)) b: z.infer<typeof WebhookBody>,
+  ) {
+    this.verifySignature(b.provider, req.rawBody, signature);
+    return this.svc.webhook(b.provider, b.provider_ref, b.status);
+  }
+
+  // Resolve the provider's webhook secret (PSP_WEBHOOK_SECRET_<PROVIDER>, else PSP_WEBHOOK_SECRET) and
+  // verify the signature over the raw body. Fail closed when a secret IS configured and the signature is
+  // missing/invalid. When NO secret is configured: reject in production (cannot authenticate the caller),
+  // but allow in dev/test so mock/local flows work — mirroring the APP_ENC_KEY / JWT_SECRET gates.
+  private verifySignature(provider: string, rawBody: Buffer | undefined, signature: string | undefined): void {
+    const secret = process.env[`PSP_WEBHOOK_SECRET_${provider.toUpperCase()}`] ?? process.env.PSP_WEBHOOK_SECRET;
+    if (!secret) {
+      const env = process.env.NODE_ENV;
+      if (env !== 'development' && env !== 'test') {
+        throw new UnauthorizedException({ code: 'WEBHOOK_UNVERIFIED', message: 'PSP webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่ารหัสยืนยัน webhook' });
+      }
+      this.logger.warn(`PSP webhook accepted UNVERIFIED for "${provider}" (no secret configured; dev/test only)`);
+      return;
+    }
+    if (!verifyWebhookSignature(secret, rawBody ?? Buffer.from(''), signature)) {
+      throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIGNATURE', message: 'Invalid PSP webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' });
+    }
+  }
 }

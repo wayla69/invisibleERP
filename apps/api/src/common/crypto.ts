@@ -1,7 +1,7 @@
 // AES-256-GCM AEAD for encryption-at-rest (TOTP seeds, webhook secrets).
 // Output format: v1:<iv_b64>:<tag_b64>:<ct_b64>. decrypt() passes through any value
 // that is not in this format (legacy plaintext) so existing rows keep working.
-import { createCipheriv, createDecipheriv, randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 const ALG = 'aes-256-gcm';
 const VERSION = 'v1';
@@ -46,4 +46,18 @@ export function safeEqualHex(a: string, b: string): boolean {
   const ba = Buffer.from(a, 'hex');
   const bb = Buffer.from(b, 'hex');
   return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+
+// HMAC-SHA256 of a payload as lowercase hex — for verifying signed inbound webhooks (PSP callbacks).
+export function hmacSha256Hex(secret: string, payload: string | Buffer): string {
+  return createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+// Verify a webhook signature header against the raw body. The provided signature may be bare hex or
+// prefixed `sha256=<hex>` (common PSP convention). Returns false on any malformed/short input.
+export function verifyWebhookSignature(secret: string, rawBody: Buffer | string, signature: string | undefined): boolean {
+  if (!signature) return false;
+  const provided = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+  if (!/^[0-9a-fA-F]+$/.test(provided)) return false;
+  return safeEqualHex(hmacSha256Hex(secret, rawBody), provided.toLowerCase());
 }

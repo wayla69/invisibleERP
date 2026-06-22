@@ -88,22 +88,23 @@ export class LoyaltyService {
 
     const minRedeem = n(cfg.minRedeem);
     const bahtPerPoint = n(cfg.bahtPerPoint);
-
-    const [lp] = await db.select().from(loyaltyPoints).where(eq(loyaltyPoints.tenantId, tenant.id)).limit(1);
-    const balance = n(lp?.balance);
-    if (balance < minRedeem) throw new ConflictException({ code: 'MIN_REDEEM', message: `Balance below minimum redeem (${minRedeem})`, messageTh: 'แต้มไม่ถึงขั้นต่ำที่แลกได้' });
-    if (points > balance) throw new ConflictException({ code: 'INSUFFICIENT_POINTS', message: 'Insufficient points', messageTh: 'แต้มไม่เพียงพอ' });
-
     const redeemVal = round2(points * bahtPerPoint);
-    const newBalance = balance - points;
     const refDoc = `RDM-${stamp()}`;
 
-    await db.transaction(async (tx: any) => {
-      await tx.update(loyaltyPoints).set({ balance: String(newBalance), lastUpdated: new Date() }).where(eq(loyaltyPoints.tenantId, tenant.id));
+    // Lock the balance row FOR UPDATE, then read+validate+decrement UNDER the lock so two concurrent
+    // redemptions can never both pass the balance check and double-spend the same points (H3).
+    const newBalance = await db.transaction(async (tx: any) => {
+      const [lp] = await tx.select().from(loyaltyPoints).where(eq(loyaltyPoints.tenantId, tenant.id)).for('update').limit(1);
+      const balance = n(lp?.balance);
+      if (balance < minRedeem) throw new ConflictException({ code: 'MIN_REDEEM', message: `Balance below minimum redeem (${minRedeem})`, messageTh: 'แต้มไม่ถึงขั้นต่ำที่แลกได้' });
+      if (points > balance) throw new ConflictException({ code: 'INSUFFICIENT_POINTS', message: 'Insufficient points', messageTh: 'แต้มไม่เพียงพอ' });
+      const nb = balance - points;
+      await tx.update(loyaltyPoints).set({ balance: String(nb), lastUpdated: new Date() }).where(eq(loyaltyPoints.tenantId, tenant.id));
       await tx.insert(loyaltyTxn).values({
         tenantId: tenant.id, txnDate: new Date(), txnType: 'Redeem',
-        points: String(-points), balanceAfter: String(newBalance), refDoc, notes: `Redeemed ${points} pts → ${redeemVal} THB`,
+        points: String(-points), balanceAfter: String(nb), refDoc, notes: `Redeemed ${points} pts → ${redeemVal} THB`,
       });
+      return nb;
     });
 
     return { tenant_id: tenant.id, points_redeemed: points, redeem_val: redeemVal, balance: newBalance, ref_doc: refDoc };

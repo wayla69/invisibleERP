@@ -132,8 +132,11 @@ export class LedgerService {
 
   // ───────────────────── Post a balanced entry ─────────────────────
   // BALANCED BY CONSTRUCTION — throw UNBALANCED if Σdebit !== Σcredit (round 4) or empty.
-  async postEntry(dto: PostEntryDto) {
-    const db = this.db as any;
+  // `outerTx` lets a caller post this entry INSIDE its own transaction (e.g. a return reversing money +
+  // stock + GL atomically). When present, the header/lines insert on that tx and roll back with it;
+  // otherwise postEntry owns its own transaction as before.
+  async postEntry(dto: PostEntryDto, outerTx?: any) {
+    const db = (outerTx ?? this.db) as any;
     const lines = dto.lines ?? [];
     if (!lines.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No journal lines', messageTh: 'ไม่มีรายการบัญชี' });
 
@@ -182,20 +185,28 @@ export class LedgerService {
     const currency = dto.currency ?? 'THB';
     const entryNo = await this.docNo.nextDaily('JE');
 
-    const inserted = await db.transaction(async (tx: any) => {
+    const doInsert = async (tx: any) => {
+      // ON CONFLICT DO NOTHING backstops the pre-check (alreadyPosted): if a concurrent caller already
+      // posted this (tenant, source, source_ref, ledger), the header insert no-ops and `h` is undefined,
+      // so we skip the lines and report a dedupe instead of double-posting the GL. ux_je_idem enforces it.
       const [h] = await tx.insert(journalEntries).values({
         entryNo, entryDate, period, memo: dto.memo ?? null,
         source: dto.source ?? 'Manual', sourceRef: dto.sourceRef ?? null, ledgerCode: dto.ledgerCode ?? null,
         tenantId: entryTenantId, currency, status: 'Posted', createdBy: dto.createdBy,
-      }).returning({ id: journalEntries.id });
+      }).onConflictDoNothing().returning({ id: journalEntries.id });
+      if (!h) return null;
       await tx.insert(journalLines).values(nzLines.map((l) => ({
         entryId: Number(h.id), accountCode: l.account_code,
         debit: fx(l.debit, 4), credit: fx(l.credit, 4),
         currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: entryTenantId,
       })));
       return nzLines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
-    });
+    };
+    // Reuse the caller's tx when nested; else open our own.
+    const inserted = outerTx ? await doInsert(outerTx) : await (this.db as any).transaction(doInsert);
 
+    // Lost the race to a concurrent identical posting → the entry already exists, do not double-count.
+    if (inserted === null) return { entry_no: null, balanced: true, deduped: true, lines: [] };
     return { entry_no: entryNo, balanced: true, lines: inserted };
   }
 
@@ -330,8 +341,8 @@ export class LedgerService {
   // ───────────────────── Idempotency + Fiscal periods ─────────────────────
   // has a GL entry already been posted for this source+ref? (used by AR/AP hooks + closeYear)
   // tenantId scopes the check so two tenants can share a ref (e.g. 'FY2026') without colliding.
-  async alreadyPosted(source: string, sourceRef: string, tenantId?: number | null): Promise<boolean> {
-    const db = this.db as any;
+  async alreadyPosted(source: string, sourceRef: string, tenantId?: number | null, outerTx?: any): Promise<boolean> {
+    const db = (outerTx ?? this.db) as any;
     const conds = [eq(journalEntries.source, source), eq(journalEntries.sourceRef, sourceRef)];
     if (tenantId !== undefined && tenantId !== null) conds.push(eq(journalEntries.tenantId, tenantId));
     const [r] = await db.select({ id: journalEntries.id }).from(journalEntries).where(and(...conds)).limit(1);
