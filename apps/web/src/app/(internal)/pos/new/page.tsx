@@ -29,7 +29,7 @@ export default function NewOrderPage() {
         method: 'POST',
         body: JSON.stringify({
           customer_name: customer || undefined,
-          items: lines.filter((l) => l.item_id).map((l) => ({ item_id: l.item_id, order_qty: Number(l.order_qty), unit_price: Number(l.unit_price) })),
+          items: lines.filter((l) => l.item_id && Number(l.order_qty) > 0).map((l) => ({ item_id: l.item_id, order_qty: Number(l.order_qty), unit_price: Number(l.unit_price) })),
         }),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['orders'] }),
@@ -84,6 +84,8 @@ export default function NewOrderPage() {
                   />
                   <Input
                     type="number"
+                    min={1}
+                    step={1}
                     className="tabular text-right"
                     placeholder="จำนวน"
                     value={l.order_qty}
@@ -91,6 +93,8 @@ export default function NewOrderPage() {
                   />
                   <Input
                     type="number"
+                    min={0}
+                    step="0.01"
                     className="tabular text-right"
                     placeholder="ราคา"
                     value={l.unit_price}
@@ -139,7 +143,7 @@ export default function NewOrderPage() {
 
             <Button
               className="w-full"
-              disabled={mut.isPending || !lines.some((l) => l.item_id)}
+              disabled={mut.isPending || !lines.some((l) => l.item_id && Number(l.order_qty) > 0)}
               onClick={() => mut.mutate()}
             >
               {mut.isPending ? 'กำลังบันทึก…' : 'ยืนยันออเดอร์'}

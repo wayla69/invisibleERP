@@ -32,6 +32,9 @@ interface DataTableProps<T extends Record<string, any>> {
   className?: string;
   rowKey?: (row: T, i: number) => string | number;
   onRowClick?: (row: T) => void;
+  // Client-side page size — caps how many rows are in the DOM at once (a 500-row catalog renders 50 nodes,
+  // not 500). Set to 0 to disable paging and render everything. Default 50.
+  pageSize?: number;
 }
 
 function cmp(a: unknown, b: unknown): number {
@@ -50,8 +53,10 @@ export function DataTable<T extends Record<string, any>>({
   className,
   rowKey,
   onRowClick,
+  pageSize = 50,
 }: DataTableProps<T>) {
   const [sort, setSort] = React.useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [page, setPage] = React.useState(0);
 
   const sorted = React.useMemo(() => {
     if (!sort) return rows;
@@ -60,6 +65,13 @@ export function DataTable<T extends Record<string, any>>({
     const out = [...rows].sort((ra, rb) => cmp(ra[sort.key], rb[sort.key]));
     return sort.dir === 'desc' ? out.reverse() : out;
   }, [rows, sort, columns]);
+
+  const paginate = pageSize > 0 && sorted.length > pageSize;
+  const pageCount = paginate ? Math.ceil(sorted.length / pageSize) : 1;
+  const pageClamped = Math.min(page, pageCount - 1);
+  const visible = paginate ? sorted.slice(pageClamped * pageSize, pageClamped * pageSize + pageSize) : sorted;
+  // Reset to the first page whenever the underlying data or sort changes (avoids a stale empty page).
+  React.useEffect(() => { setPage(0); }, [rows, sort]);
 
   function toggleSort(c: Column<T>) {
     if (c.sortable === false) return;
@@ -128,9 +140,9 @@ export function DataTable<T extends Record<string, any>>({
               </TableCell>
             </TableRow>
           ) : (
-            sorted.map((row, i) => (
+            visible.map((row, i) => (
               <TableRow
-                key={rowKey ? rowKey(row, i) : i}
+                key={rowKey ? rowKey(row, i) : pageClamped * pageSize + i}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 className={cn(onRowClick && 'cursor-pointer')}
               >
@@ -144,6 +156,32 @@ export function DataTable<T extends Record<string, any>>({
           )}
         </TableBody>
       </Table>
+      {paginate && !loading && (
+        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-sm text-muted-foreground">
+          <span className="tabular">
+            {pageClamped * pageSize + 1}–{Math.min((pageClamped + 1) * pageSize, sorted.length)} จาก {sorted.length}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="rounded-md border px-2 py-1 text-xs disabled:opacity-40 hover:bg-accent"
+              disabled={pageClamped <= 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              ก่อนหน้า
+            </button>
+            <span className="tabular px-1 text-xs">{pageClamped + 1}/{pageCount}</span>
+            <button
+              type="button"
+              className="rounded-md border px-2 py-1 text-xs disabled:opacity-40 hover:bg-accent"
+              disabled={pageClamped >= pageCount - 1}
+              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+            >
+              ถัดไป
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
