@@ -23,8 +23,12 @@ export class WmsController {
   binStock(@Param('binCode') c: string, @CurrentUser() u: JwtUser) { return this.wms.binStockOf(c, u); }
   @Post('putaway') @Permissions('warehouse', 'mobile')
   putaway(@Body(new ZodValidationPipe(PutawayBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.putaway(b, u); }
+  @Get('putaway/pending/:grNo') @Permissions('warehouse', 'mobile')
+  pendingPutaway(@Param('grNo') grNo: string, @CurrentUser() u: JwtUser) { return this.wms.pendingPutaway(grNo, u); }
   @Post('waves') @Permissions('warehouse')
   wave(@Body(new ZodValidationPipe(WaveBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.createWave(b, u); }
+  @Post('waves/:waveNo/ship') @Permissions('warehouse', 'delivery')
+  shipWave(@Param('waveNo') w: string, @Body(new ZodValidationPipe(ShipBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.shipWave(w, b, u); }
   @Post('picks/:pickNo/pick') @Permissions('warehouse', 'mobile')
   pick(@Param('pickNo') p: string, @Body(new ZodValidationPipe(PickBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.pick(p, b, u); }
   @Post('picks/:pickNo/pack') @Permissions('warehouse', 'mobile')

@@ -121,12 +121,12 @@ async function main() {
   // ── PROFITABILITY CHECKS ──
 
   // 11. Create two Brand segments
-  const segA = await inj('POST', '/api/profitability/segments', admin, { segment_type: 'Brand', code: 'THAI', name: 'Thai Cuisine' });
-  const segB = await inj('POST', '/api/profitability/segments', admin, { segment_type: 'Brand', code: 'INTL', name: 'International' });
+  const segA = await inj('POST', '/api/profitability/segments', prep, { segment_type: 'Brand', code: 'THAI', name: 'Thai Cuisine' });
+  const segB = await inj('POST', '/api/profitability/segments', prep, { segment_type: 'Brand', code: 'INTL', name: 'International' });
   ok('Create segments A + B', segA.status === 201 && segB.status === 201, `A=${segA.json.id} B=${segB.json.id}`);
 
   // 12. Create allocation rule: expense 5100 → Brand, equal split
-  const rule = await inj('POST', '/api/profitability/rules', admin, { name: 'COGS to Brand', from_account_code: '5100', to_segment_type: 'Brand', driver: 'equal' });
+  const rule = await inj('POST', '/api/profitability/rules', prep, { name: 'COGS to Brand', from_account_code: '5100', to_segment_type: 'Brand', driver: 'equal' });
   ok('Create allocation rule', rule.status === 201 && rule.json.driver === 'equal', JSON.stringify(rule.json));
 
   // 13. Seed 5100 GL for T1 (expense 3000) — needed for allocation

@@ -67,6 +67,9 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { PosControlModule } from './modules/pos-control/pos-control.module';
 import { PosTerminalModule } from './modules/pos-terminal/pos-terminal.module';
+import { ProjectsModule } from './modules/projects/projects.module';
+import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
+import { HcmModule } from './modules/hcm/hcm.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { PosAuditModule } from './modules/pos-audit/pos-audit.module';
 import { PosFiscalModule } from './modules/pos-fiscal/pos-fiscal.module';
@@ -140,6 +143,9 @@ import { BranchModule } from './modules/branch/branch.module';
     ManufacturingModule,
     PosControlModule,
     PosTerminalModule,
+    ProjectsModule,
+    MfgDepthModule,
+    HcmModule,
     PricingModule,
     PosAuditModule,
     PosFiscalModule,
