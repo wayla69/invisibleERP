@@ -1,6 +1,7 @@
 // Drizzle schema — full V2 model (~70 tables) per docs/03-database-schema.md
 export * from './enums';
 export * from './tenants';
+export * from './branch';
 export * from './users';
 export * from './inventory';
 export * from './sales';

@@ -56,6 +56,7 @@ export class PosControlService {
       reasonCode: dto.reason_code ?? null, reason: dto.reason ?? null, amount: dto.amount != null ? String(dto.amount) : null,
       requestedBy: user.username, approvedBy: dto.approved_by ?? null,
     });
+    // central, cross-module POS audit trail
     await this.audit.record({ action: dto.action, entity: 'sale', entityId: dto.sale_no, meta: { override_no: overrideNo, reason_code: dto.reason_code, reason: dto.reason, amount: dto.amount, approved_by: dto.approved_by } }, user);
     return { override_no: overrideNo, action: dto.action, approved_by: dto.approved_by ?? null };
   }

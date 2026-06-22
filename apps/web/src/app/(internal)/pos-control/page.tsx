@@ -9,18 +9,73 @@ import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs, Msg } from '@/components/tabs';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { statusVariant } from '@/components/ui';
 
 const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm';
 
 export default function PosControlPage() {
   return (
     <div>
-      <PageHeader title="ควบคุม POS (พักบิล & อนุมัติ)" description="บิลที่พักไว้ (park/recall) และบันทึกการอนุมัติของผู้จัดการ (void/ส่วนลด/แก้ราคา)" />
-      <Tabs tabs={[{ key: 'held', label: 'บิลที่พัก', content: <Held /> }, { key: 'override', label: 'การอนุมัติ', content: <Overrides /> }]} />
+      <PageHeader title="ควบคุม POS (พักบิล & อนุมัติ)" description="บิลที่พักไว้ (park/recall), การอนุมัติของผู้จัดการ, รหัสเหตุผล และบันทึกการตรวจสอบ (audit)" />
+      <Tabs tabs={[
+        { key: 'held', label: 'บิลที่พัก', content: <Held /> },
+        { key: 'override', label: 'การอนุมัติ', content: <Overrides /> },
+        { key: 'reasons', label: 'รหัสเหตุผล', content: <ReasonCodes /> },
+        { key: 'audit', label: 'บันทึกตรวจสอบ', content: <AuditLog /> },
+      ]} />
     </div>
+  );
+}
+
+function ReasonCodes() {
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['reason-codes'], queryFn: () => api('/api/pos/audit/reason-codes') });
+  const [f, setF] = useState({ code: '', label: '', applies_to: 'all' });
+  const [msg, setMsg] = useState('');
+  const save = useMutation({
+    mutationFn: () => api('/api/pos/audit/reason-codes', { method: 'POST', body: JSON.stringify({ code: f.code, label: f.label, applies_to: f.applies_to }) }),
+    onSuccess: () => { setMsg('✅ บันทึกแล้ว'); setF({ code: '', label: '', applies_to: 'all' }); qc.invalidateQueries({ queryKey: ['reason-codes'] }); },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+  const del = useMutation({ mutationFn: (id: number) => api(`/api/pos/audit/reason-codes/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['reason-codes'] }) });
+  return (
+    <div className="space-y-4">
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">เพิ่มรหัสเหตุผล</h3>
+        <div className="flex flex-wrap gap-2">
+          <Input className="max-w-[140px]" placeholder="รหัส" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />
+          <Input className="max-w-[200px]" placeholder="คำอธิบาย" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+          <select className={selectCls} value={f.applies_to} onChange={(e) => setF({ ...f, applies_to: e.target.value })}>{['all', 'void', 'discount', 'price_override', 'no_sale', 'return', 'refund', 'paid_out'].map((a) => <option key={a} value={a}>{a}</option>)}</select>
+          <Button disabled={!f.code || !f.label || save.isPending} onClick={() => save.mutate()}>บันทึก</Button>
+        </div>
+        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+      </Card>
+      <StateView q={q}>
+        {q.data && <DataTable rows={q.data.reason_codes} columns={[
+          { key: 'code', label: 'รหัส' }, { key: 'label', label: 'คำอธิบาย' }, { key: 'applies_to', label: 'ใช้กับ' },
+          { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="destructive" onClick={() => del.mutate(r.id)}>ปิดใช้</Button> },
+        ]} emptyText="ยังไม่มีรหัสเหตุผล" />}
+      </StateView>
+    </div>
+  );
+}
+
+function AuditLog() {
+  const q = useQuery<any>({ queryKey: ['pos-audit'], queryFn: () => api('/api/pos/audit?limit=100') });
+  return (
+    <StateView q={q}>
+      {q.data && <DataTable rows={q.data.entries} columns={[
+        { key: 'ts', label: 'เวลา', render: (r: any) => thaiDate(r.ts) },
+        { key: 'actor', label: 'ผู้ทำ' },
+        { key: 'action', label: 'การทำงาน', render: (r: any) => <Badge variant={statusVariant('open')}>{r.action}</Badge> },
+        { key: 'entity_id', label: 'อ้างอิง' },
+        { key: 'meta', label: 'เหตุผล/ผู้อนุมัติ', render: (r: any) => r.meta ? `${r.meta.reason_code ?? ''} ${r.meta.approved_by ? '· ' + r.meta.approved_by : ''}`.trim() || '—' : '—' },
+      ]} emptyText="ยังไม่มีบันทึกตรวจสอบ" />}
+    </StateView>
   );
 }
 

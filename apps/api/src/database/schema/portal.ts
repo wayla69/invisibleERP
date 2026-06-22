@@ -30,6 +30,7 @@ export const customerInventory = pgTable('customer_inventory', {
 export const custStockLog = pgTable('cust_stock_log', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  branchId: bigint('branch_id', { mode: 'number' }), // multi-branch — outlet whose stock moved (NULL = untagged/HQ)
   itemId: text('item_id'),
   itemDescription: text('item_description'),
   logDate: timestamp('log_date', { withTimezone: true }),

@@ -9,6 +9,7 @@ export const posOfflineSync = pgTable('pos_offline_sync', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   clientUuid: text('client_uuid').notNull(),          // client-generated idempotency key (UUID v4)
+  branchId: bigint('branch_id', { mode: 'number' }),  // which branch/outlet queued the offline sale
   deviceId: text('device_id'),                        // which POS device captured/queued the sale
   status: offlineSyncStatusEnum('status').default('synced'),
   saleNo: text('sale_no'),                            // server-minted SALE-… (NULL when failed)
