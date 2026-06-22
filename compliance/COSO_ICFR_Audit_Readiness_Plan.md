@@ -44,7 +44,7 @@ You are an **EGC under the JOBS Act**, which changes *when* certain things are r
 
 ## 2. Current state — where we already stand
 
-The RCM scores **66 controls: 39 Implemented · 12 Partial · 15 Gap** (after re-scoring GL-05, ITGC-AC-08 and ITGC-AC-09 to *Implemented* — see §2.1). The system already has materially strong foundations that auditors will credit:
+The RCM scores **66 controls: 40 Implemented · 12 Partial · 14 Gap** (after re-scoring GL-05, ITGC-AC-06/08/09/10 to *Implemented* — see §2.1). The system already has materially strong foundations that auditors will credit:
 
 | Control area | What exists today | Evidence (code) |
 |---|---|---|
@@ -62,7 +62,7 @@ The RCM scores **66 controls: 39 Implemented · 12 Partial · 15 Gap** (after re
 
 ### 2.1 Automated control-test evidence (Test of Operating Effectiveness)
 
-Three key controls now have a **dedicated automated test harness** that boots the real application over a real Postgres and proves the control *prevents the risk* — runnable evidence the IT auditor can re-execute:
+Key controls now have a **dedicated automated test harness** (27 checks) that boots the real application over a real Postgres and proves each control *prevents the risk* — runnable evidence the IT auditor can re-execute:
 
 ```
 pnpm --filter @ierp/cutover compliance      # tools/cutover/src/compliance.ts — runs in CI as a gate
@@ -71,10 +71,16 @@ pnpm --filter @ierp/cutover compliance      # tools/cutover/src/compliance.ts �
 | Control | What the harness proves |
 |---|---|
 | **GL-05** (manual-JE maker-checker) | Manual JE posts as `Draft` and is **excluded from the trial balance** until approved; the preparer cannot approve their own entry (403 `SOD_VIOLATION`) — **even an Admin**; an independent approver posts it and the balance then appears; reject → `Voided`, never affecting balances. |
+| **ITGC-AC-06** (MFA) | TOTP enrolment (setup→enable) activates a 2nd factor; an MFA-enabled login on password alone → 401 `MFA_REQUIRED`; a wrong code → 401 `MFA_INVALID`; password+valid code authenticates; a privileged/finance role without MFA is flagged `must_setup_mfa`, a Cashier is not. |
 | **ITGC-AC-09** (SoD preventive block) | Assigning a conflicting permission set (e.g. `procurement`+`creditors`, rule R03) is blocked (422 `SOD_CONFLICT`) and nothing is persisted; the offending rule is named; a justified override (`allow_sod_override`+`sod_reason`) is honoured and logged; override without a reason is still rejected; the guard also fires on permission **update**. |
 | **ITGC-AC-08** (user access review) | The recertification report exposes effective permissions + SoD conflicts per user; CSV export carries reviewer decision columns; a period sign-off is recorded and retrievable. |
+| **ITGC-AC-10** (tamper-evident audit trail) | Mutating requests are captured in `audit_log`; `UPDATE`/`DELETE` on `audit_log` are **rejected by a DB trigger** (`0062_audit_log_immutable.sql`) — the trail is append-only. |
+| **GL period-lock** | Posting into a **closed** fiscal period is rejected (`PERIOD_CLOSED`). |
+| **RLS isolation** | A tenant-2 finance user cannot see tenant-1 journal entries or balances. |
 
-> **Status reconciliation (done):** GL-05, ITGC-AC-08 and ITGC-AC-09 are **implemented in code and evidenced by the harness above**. `build_rcm.py` has been updated to score them *Implemented* (with code + harness references) and they have been removed from the Gap Remediation tab; `Oshinei_ERP_SOX_RCM_v1.xlsx` was regenerated. The remediation backlog in §3 lists only the controls that remain genuinely open.
+**Vulnerability management (new):** `ci.yml` now runs a `security` job (dependency advisories via `pnpm audit`, secret scanning via gitleaks) and a `codeql` SAST job — evidence for the IT-audit / IPO security review. The dependency audit currently surfaces advisories informationally; tighten it to a hard gate (and triage the open high/critical findings) before fieldwork.
+
+> **Status reconciliation (done):** GL-05, ITGC-AC-06, ITGC-AC-08, ITGC-AC-09 and ITGC-AC-10 are **implemented in code and evidenced by the harness above**. `build_rcm.py` has been updated to score them *Implemented* (with code + harness references) and they have been removed from the Gap Remediation tab; `Oshinei_ERP_SOX_RCM_v1.xlsx` was regenerated. The remediation backlog in §3 lists only the controls that remain genuinely open.
 
 ---
 
@@ -86,7 +92,7 @@ These are the controls the RCM marks **Gap** or **Partial**. They are the remedi
 
 | ID | Gap | Remediation | Owner | Target | Priority |
 |---|---|---|---|---|---|
-| **ITGC-AC-06** | MFA not enforced for privileged/finance users | Enforce TOTP for Admin + finance roles; block login without 2nd factor (schema columns `mfaEnabled`/`totpSecret` already exist) | IT Security | Month 1 | **High** |
+| ~~**ITGC-AC-06**~~ | ✅ *Done* — TOTP MFA enforced at login for enrolled users; privileged roles flagged for mandatory enrolment | Implemented & evidenced (`auth.service.ts`, harness). **Operating step:** enrol all privileged/finance users | IT Security | Rollout | — |
 | **ITGC-AC-12** | Secrets in env files, no rotation | Move JWT / `APP_ENC_KEY` / PSP / DB secrets to KMS/vault; rotate; remove dev fallbacks from prod paths | DevOps / Security | Month 1 | **High** |
 | ~~**ITGC-AC-08**~~ | ✅ *Done* — quarterly user access review (report + CSV export + certification) | Implemented & evidenced (`admin-users.service.ts`, harness) | — | Closed | — |
 | ~~**ITGC-AC-09**~~ | ✅ *Done* — SoD **preventive** block on permission assignment | Implemented & evidenced (`assertNoSodConflict`, harness) | — | Closed | — |
@@ -135,7 +141,7 @@ Month 1        Month 2        Month 3        Month 4        Month 5        Month
 ```
 
 **Phase 1 — Foundation & high-risk (Months 1–2)**
-- MFA for privileged/finance users (AC-06); secrets → vault + rotation (AC-12)
+- ✅ *Done:* MFA enforcement (AC-06) — now **enrol all privileged/finance users** as the operating rollout. Secrets → vault + rotation (AC-12)
 - Branch protection + deploy-approval gate, deployer ≠ author (CM-01/02/03)
 - Automated backups + first evidenced restore test (OP-01)
 - httpOnly-cookie auth migration begins (AC-07)

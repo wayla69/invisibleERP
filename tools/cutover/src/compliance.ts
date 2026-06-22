@@ -30,6 +30,7 @@ import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exception
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
+import { authenticator } from 'otplib';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
@@ -45,14 +46,15 @@ async function main() {
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง' }]).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง' }, { code: 'T2', name: 'ร้านสอง' }]).onConflictDoNothing();
   const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
-  const [hq, t1] = [await tid('HQ'), await tid('T1')];
+  const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'glacct', passwordHash: await pw.hash('pw'), role: 'GlAccountant', tenantId: t1 },      // gl_post (preparer)
     { username: 'fincon', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: t1 }, // gl_close + approvals (checker)
     { username: 'execu', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 },              // legacy 'exec' → holds BOTH gl_post and gl_close (residual-risk case maker-checker backstops)
+    { username: 'finT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },        // tenant-2 finance reader (creditors/ar) — RLS isolation probe
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
@@ -74,6 +76,7 @@ async function main() {
   const glacct = await login('glacct', 'pw');
   const fincon = await login('fincon', 'pw');
   const execu = await login('execu', 'pw');
+  const finT2 = await login('finT2', 'pw');
 
   // Trial-balance credit on a given account in a period (read as Admin — bypasses RLS; only our JEs exist).
   const tbCredit = async (period: string, account: string): Promise<number> => {
@@ -186,7 +189,67 @@ async function main() {
   ok('ITGC-AC-08: quarterly certification recorded + retrievable',
     (certify.status === 200 || certify.status === 201) && certify.json.certified === true && (certs.json.reviews ?? []).some((r: any) => r.period === '2026-Q2'), `${certify.status} certs=${(certs.json.reviews ?? []).length}`);
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · ITGC-AC-09 · ITGC-AC-08) ──');
+  // ════════════════════ GL — closed-period posting lock (period-close control) ════════════════════
+  // A closed fiscal period must reject new postings. fincon (gl_close) closes a period; glacct (gl_post)
+  // then cannot post into it. This is the system gate behind the financial-close calendar.
+  const lockPeriod = '2020-01';
+  const closeP = await inj('POST', `/api/ledger/periods/${lockPeriod}/close`, fincon);
+  const intoClosed = await inj('POST', '/api/ledger/journal', glacct, {
+    date: `${lockPeriod}-15`, memo: 'into closed period', source: 'Manual',
+    lines: [{ account_code: '1000', debit: 5 }, { account_code: '4000', credit: 5 }],
+  });
+  ok('GL period control: posting into a CLOSED period is rejected (PERIOD_CLOSED)',
+    (closeP.status === 200 || closeP.status === 201) && intoClosed.status === 400 && intoClosed.json.error?.code === 'PERIOD_CLOSED', `close=${closeP.status} post=${intoClosed.status} ${intoClosed.json.error?.code}`);
+
+  // ════════════════════ ITGC — RLS isolation of financial data (cross-tenant) ════════════════════
+  // A tenant-2 finance user (authorized to read the ledger) must NOT see tenant-1's journal entries.
+  const t2Journal = await inj('GET', '/api/ledger/journal?limit=100', finT2);
+  const leak = (t2Journal.json.entries ?? []).some((e: any) => e.entry_no === entryNo);
+  const t2tb = await inj('GET', `/api/ledger/trial-balance?period=${period}`, finT2);
+  const t2SeesT1Credit = (t2tb.json.rows ?? []).some((r: any) => r.account_code === '4000' && Number(r.credit) > 0);
+  ok('ITGC RLS: tenant-2 finance user cannot see tenant-1 journal entries or balances', !leak && !t2SeesT1Credit, `leak=${leak} sees4000=${t2SeesT1Credit}`);
+
+  // ════════════════════ ITGC-AC-06 — multi-factor authentication (TOTP) ════════════════════
+  // 1. A privileged role (Admin) that has not enrolled MFA is flagged for mandatory setup at login.
+  const adminLogin = await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' });
+  ok('ITGC-AC-06: privileged user without MFA is flagged must_setup_mfa at login', adminLogin.json.must_setup_mfa === true, JSON.stringify({ setup: adminLogin.json.must_setup_mfa }));
+
+  // 2. A non-privileged role (a Cashier — pos_sell only) is NOT required to enrol.
+  await inj('POST', '/api/admin/users', admin, { username: 'cashier1', password: 'pw1234', role: 'Cashier' });
+  const cashierLogin = await inj('POST', '/api/login', undefined, { username: 'cashier1', password: 'pw1234' });
+  ok('ITGC-AC-06: non-privileged role not flagged for MFA', cashierLogin.json.must_setup_mfa !== true, JSON.stringify({ setup: cashierLogin.json.must_setup_mfa }));
+
+  // 3. Enrol TOTP for fincon: setup → secret; enable with a valid code activates the factor.
+  const setup = await inj('POST', '/api/auth/mfa/setup', fincon);
+  const secret = setup.json.secret as string;
+  const enable = await inj('POST', '/api/auth/mfa/enable', fincon, { code: authenticator.generate(secret) });
+  ok('ITGC-AC-06: TOTP enrolment (setup → enable) activates the second factor', !!secret && enable.status === 200 && enable.json.enabled === true, `${enable.status} ${enable.json.enabled}`);
+
+  // 4. With MFA enabled, password alone is rejected → 401 MFA_REQUIRED.
+  const noCode = await inj('POST', '/api/login', undefined, { username: 'fincon', password: 'pw' });
+  ok('ITGC-AC-06: MFA-enabled login without a code → 401 MFA_REQUIRED', noCode.status === 401 && noCode.json.error?.code === 'MFA_REQUIRED', `${noCode.status} ${noCode.json.error?.code}`);
+
+  // 5. A wrong code is rejected → 401 MFA_INVALID.
+  const badCode = await inj('POST', '/api/login', undefined, { username: 'fincon', password: 'pw', totp: '000000' });
+  ok('ITGC-AC-06: MFA-enabled login with a wrong code → 401 MFA_INVALID', badCode.status === 401 && badCode.json.error?.code === 'MFA_INVALID', `${badCode.status} ${badCode.json.error?.code}`);
+
+  // 6. Password + a valid TOTP code authenticates (and the enrolled user is no longer flagged for setup).
+  const goodCode = await inj('POST', '/api/login', undefined, { username: 'fincon', password: 'pw', totp: authenticator.generate(secret) });
+  ok('ITGC-AC-06: password + valid TOTP authenticates; setup flag cleared', goodCode.status === 200 && !!goodCode.json.token && goodCode.json.must_setup_mfa !== true, `${goodCode.status} setup=${goodCode.json.must_setup_mfa}`);
+
+  // ════════════════════ ITGC-AC-10 — audit trail is tamper-evident (append-only) ════════════════════
+  // The mutating calls above (user create/update, JE post/approve) are logged by the AuditInterceptor.
+  const auditCount = async () => Number(((await pg.query(`SELECT count(*)::int n FROM audit_log`)).rows as any[])[0].n);
+  const before = await auditCount();
+  let updateBlocked = false, deleteBlocked = false;
+  try { await pg.query(`UPDATE audit_log SET actor='tamper' WHERE id=(SELECT id FROM audit_log LIMIT 1)`); } catch { updateBlocked = true; }
+  try { await pg.query(`DELETE FROM audit_log WHERE id=(SELECT id FROM audit_log LIMIT 1)`); } catch { deleteBlocked = true; }
+  const after = await auditCount();
+  ok('ITGC-AC-10: audit_log captured the mutating requests', before > 0, `rows=${before}`);
+  ok('ITGC-AC-10: audit_log UPDATE blocked by DB trigger (append-only)', updateBlocked, `blocked=${updateBlocked}`);
+  ok('ITGC-AC-10: audit_log DELETE blocked by DB trigger (append-only)', deleteBlocked && after === before, `blocked=${deleteBlocked} rows=${after}`);
+
+  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · AC-09 · AC-08 · AC-06 · AC-10) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} compliance checks failed` : `\n✅ All ${checks.length} compliance control checks passed`);

@@ -435,6 +435,13 @@
       "when": 1782240000000,
       "tag": "0061_access_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1782250000000,
+      "tag": "0062_audit_log_immutable",
+      "breakpoints": true
     }
   ]
 }

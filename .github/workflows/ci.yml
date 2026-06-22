@@ -59,5 +59,46 @@ jobs:
         run: pnpm --filter @ierp/cutover taxdocs
       - name: Restaurant POS (dine-in, KDS, tables, QR pay)
         run: pnpm --filter @ierp/cutover restaurant
-      - name: COSO/ICFR controls (GL-05 maker-checker, SoD preventive block, access review)
+      - name: COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability)
         run: pnpm --filter @ierp/cutover compliance
+
+  # ITGC vulnerability management: dependency advisories + secret scanning. Evidence for the IT auditor /
+  # IPO security review. Dependency audit is informational for now (continue-on-error) so a new upstream
+  # advisory doesn't block unrelated work; tighten to a hard gate (--audit-level high) before fieldwork.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks scans full history
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Dependency audit (advisories)
+        run: pnpm audit --audit-level high
+        continue-on-error: true
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # SAST — CodeQL static analysis for JavaScript/TypeScript.
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3

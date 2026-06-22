@@ -110,7 +110,7 @@ add("ITGC-AC-05","ITGC · Access","ITGC","All","Machine credential escalates to 
     "guards.ts (api-key path); platform/api-key.service.ts","Inspect key→role mapping (role='Sales', no bypass).","Attempt admin action with API key → denied.","Code + test","Implemented")
 add("ITGC-AC-06","ITGC · Access","ITGC","All","Stolen password yields full access to finance functions.","Restricted access",
     "Multi-factor authentication (TOTP) enforced for Admin and finance roles.","Prev","Automated","Continuous","IT Security","P11",
-    "otplib (auth); enforcement TBD","Inspect MFA enforcement policy for privileged roles.","Sample privileged logins require 2nd factor.","MFA config","Gap")
+    "auth.service.ts (login TOTP gate; setup/enable/disable); permissions.ts (requiresMfa policy); crypto.ts (AES-256-GCM seed); cutover/compliance.ts (ToE)","Inspect MFA enforcement policy for privileged roles.","Sample privileged logins require 2nd factor (MFA-enabled login w/o code → 401; un-enrolled privileged user flagged must_setup_mfa) — re-performed by the harness.","MFA config","Implemented")
 add("ITGC-AC-07","ITGC · Access","ITGC","All","Weak/stale credentials; sessions never expire.","Restricted access",
     "Password policy, forced change on first login, JWT/session expiry, lockout on repeated failure.","Prev","Automated","Continuous","IT Security","P11",
     "0045_must_change_password; auth (JWT_EXPIRES_IN)","Inspect password + session policy.","Sample: forced change works; expired token rejected.","Auth config","Partial")
@@ -122,7 +122,7 @@ add("ITGC-AC-09","ITGC · Access","ITGC","All","Conflicting duties in one user e
     "permissions.ts (SOD_RULES, 13 rules); admin-users.service.ts (assertNoSodConflict preventive block); sod.service.ts (detective report); cutover/compliance.ts (ToE)","Inspect SoD rule set vs role design.","Run conflict report; assigning a conflicting set is blocked (422) unless justified-override+reason — re-performed by the harness.","SoD report","Implemented")
 add("ITGC-AC-10","ITGC · Access","ITGC","All","No record of who changed financial data.","Completeness",
     "Audit trail — financially-relevant create/update/delete logged with user, timestamp, before/after.","Det","Automated","Continuous","Eng Lead","P13/P16",
-    "common/audit.interceptor.ts; pos-audit module; status-log.service.ts","Inspect logged actions/fields; confirm coverage of GL/AR/AP/cash.","Sample transactions traced to audit log.","Audit log","Implemented")
+    "common/audit.interceptor.ts; status-log.service.ts; drizzle/0062_audit_log_immutable.sql (append-only trigger); cutover/compliance.ts (ToE)","Inspect logged actions/fields; confirm coverage of GL/AR/AP/cash; verify append-only trigger.","Sample transactions traced to audit log; UPDATE/DELETE on audit_log rejected (re-performed by the harness).","Audit log","Implemented")
 add("ITGC-AC-11","ITGC · Access","ITGC","Revenue / Cash","Past financial records altered/deleted undetectably.","Integrity",
     "Append-only, per-tenant HASH-CHAINED electronic journal — altering any row breaks later hashes (tamper-evident).","Prev/Det","Automated","Continuous","Eng Lead","P13",
     "pos-fiscal/journal.service.ts (prevHash→hash chain, FOR UPDATE)","Inspect chaining logic; recompute a chain segment.","Re-verify chain integrity over a period; test tamper detection.","Chain verify","Implemented")
@@ -321,7 +321,6 @@ gw = [11,17,34,46,16,10,16,11]
 # phase mapping per earlier plan; priority H/M
 GAP = [
  ("ITGC-AC-12","ITGC · Access","Secrets in env files; risk of exposure/no rotation.","Move JWT/APP_ENC/PSP/DB secrets to KMS/vault; rotate; remove dev fallbacks in prod paths.","DevOps / Security","Phase 1","Month 1","High"),
- ("ITGC-AC-06","ITGC · Access","MFA not enforced for privileged/finance users.","Enforce TOTP for Admin + finance roles; block login without 2nd factor.","IT Security","Phase 1","Month 1","High"),
  ("ITGC-CM-01","ITGC · Change","Branch protection / required review not enforced on main.","Enable branch protection, required reviews, required CI; forbid self-merge.","Head of Eng","Phase 1","Month 1","High"),
  ("ITGC-CM-03","ITGC · Change","No segregation between dev and prod deployer.","Add deploy-approval gate; deployer ≠ author.","Head of Eng","Phase 1","Month 1-2","High"),
  ("ITGC-CM-04","ITGC · Change","Change traceability not enforced.","Require ticket ID in every PR; retain ticket→deploy linkage.","Head of Eng","Phase 1","Month 2","Medium"),
