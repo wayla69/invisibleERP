@@ -25,6 +25,12 @@ export class FinanceController {
   @Get('kpi') @Permissions('exec', 'dashboard')
   kpi() { return this.svc.kpi(); }
 
+  @Get('ar/aging') @Permissions('ar', 'exec')
+  arAging() { return this.svc.arAging(); }
+
+  @Get('ap/aging') @Permissions('creditors', 'exec')
+  apAging() { return this.svc.apAging(); }
+
   // sub-ledger ↔ GL reconciliation (AR 1100 == open AR, AP 2000 == open AP)
   @Get('reconciliation') @Permissions('exec', 'ar', 'creditors')
   reconciliation() { return this.svc.reconcile(); }

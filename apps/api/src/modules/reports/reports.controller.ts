@@ -72,6 +72,14 @@ export class ReportsController {
     this.sendDownload(reply, buf, XLSX_MIME, `stock-summary${lowOnly ? '-low' : ''}.xlsx`);
   }
 
+  // GET /api/reports/ap-aging/export
+  @Get('api/reports/ap-aging/export')
+  @Permissions('creditors', 'exec')
+  async apAgingExport(@Res() reply: FastifyReply) {
+    const buf = await this.excel.apAgingXlsx();
+    this.sendDownload(reply, buf, XLSX_MIME, 'ap-aging.xlsx');
+  }
+
   // ───────────────────── per-order export (PDF / Express TXT) ─────────────────────
   // POST /api/orders/:orderNo/export  body {format:'pdf'|'express_txt'}
   @Post('api/orders/:orderNo/export')

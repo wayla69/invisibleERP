@@ -57,6 +57,12 @@ import { BiModule } from './modules/bi/bi.module';
 import { AdminConfigModule } from './modules/admin-config/admin-config.module';
 import { MasterDataModule } from './modules/masterdata/masterdata.module';
 import { StockOpsModule } from './modules/stock-ops/stock-ops.module';
+import { ClaimsModule } from './modules/claims/claims.module';
+import { DeliveryModule } from './modules/delivery/delivery.module';
+import { LotsModule } from './modules/lots/lots.module';
+import { ScanModule } from './modules/scan/scan.module';
+import { ImagesModule } from './modules/images/images.module';
+import { AdminUsersModule } from './modules/admin-users/admin-users.module';
 
 @Module({
   imports: [
@@ -113,6 +119,12 @@ import { StockOpsModule } from './modules/stock-ops/stock-ops.module';
     AdminConfigModule,
     MasterDataModule,
     StockOpsModule,
+    ClaimsModule,
+    DeliveryModule,
+    LotsModule,
+    ScanModule,
+    ImagesModule,
+    AdminUsersModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

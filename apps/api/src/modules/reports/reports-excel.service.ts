@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, asc, lte } from 'drizzle-orm';
 import * as ExcelJS from 'exceljs';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, stockSnapshots, tenants } from '../../database/schema';
+import { custPosSales, stockSnapshots, tenants, apTransactions } from '../../database/schema';
 import { latestSnapshotDate, ymd, n } from '../../database/queries';
 
 const HEADER_FILL = 'FF1E3C72'; // brand navy (ARGB)
@@ -145,6 +145,43 @@ export class ReportExcelService {
     totalRow.font = { bold: true };
 
     this.formatMoneyColumns(ws, ['subtotal', 'discount', 'tax', 'revenue']);
+    return this.toBuffer(wb);
+  }
+
+  // GET /api/reports/ap-aging/export — open AP bucketed by days overdue
+  async apAgingXlsx(): Promise<Buffer> {
+    const db = this.db as any;
+    const today = ymd();
+    const rows = await db.select({
+      txn: apTransactions.txnNo, vendor: apTransactions.vendorName, due: apTransactions.dueDate,
+      outstanding: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)`,
+    }).from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Invisible ERP';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('AP Aging');
+    ws.columns = [
+      { header: 'Txn No', key: 'txn', width: 22 },
+      { header: 'Vendor', key: 'vendor', width: 28 },
+      { header: 'Due Date', key: 'due', width: 14 },
+      { header: 'Days Overdue', key: 'days', width: 14 },
+      { header: 'Bucket', key: 'bucket', width: 12 },
+      { header: 'Outstanding', key: 'amt', width: 16 },
+    ];
+    this.styleHeader(ws);
+    let tot = 0;
+    for (const r of rows) {
+      const out = n(r.outstanding);
+      if (out <= 0.0001) continue;
+      const overdue = r.due ? Math.round((Date.parse(today) - Date.parse(String(r.due))) / 86400000) : 0;
+      const bucket = overdue <= 0 ? 'Current' : overdue <= 30 ? '1-30' : overdue <= 60 ? '31-60' : overdue <= 90 ? '61-90' : '90+';
+      tot += out;
+      ws.addRow({ txn: r.txn, vendor: r.vendor ?? '-', due: r.due, days: Math.max(0, overdue), bucket, amt: out });
+    }
+    const tr = ws.addRow({ vendor: 'TOTAL', amt: round2(tot) });
+    tr.font = { bold: true };
+    this.formatMoneyColumns(ws, ['amt']);
     return this.toBuffer(wb);
   }
 

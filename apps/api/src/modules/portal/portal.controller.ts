@@ -10,6 +10,7 @@ import { OfflineSyncService, type OfflineSyncBatchDto } from './offline-sync.ser
 import {
   PortalMyErpService, type MyCustomerDto, type MySupplierDto, type MyPoDto,
 } from './portal.myerp.service';
+import { PortalUsersService, type SubUserDto } from './portal.users.service';
 
 // ── Zod schemas ──────────────────────────────────────────────────
 const SaleBody = z.object({
@@ -56,6 +57,7 @@ const OfflineSaleOp = z.object({
 });
 const OfflineSyncBody = z.object({ sales: z.array(OfflineSaleOp).min(1).max(200) });
 
+const SubUserBody = z.object({ username: z.string().min(1), password: z.string().min(6), permissions: z.array(z.string()).optional() });
 const MyCustomerBody = z.object({ customer_name: z.string().min(1), phone: z.string().optional(), address: z.string().optional(), notes: z.string().optional() });
 const MySupplierBody = z.object({ supplier_name: z.string().min(1), contact_name: z.string().optional(), phone: z.string().optional(), address: z.string().optional() });
 const MyPoBody = z.object({
@@ -70,6 +72,7 @@ export class PortalController {
     private readonly pos: PortalPosService,
     private readonly offline: OfflineSyncService,
     private readonly myerp: PortalMyErpService,
+    private readonly subUsers: PortalUsersService,
   ) {}
 
   // ── Dashboard ──
@@ -147,4 +150,14 @@ export class PortalController {
 
   @Delete('my/purchase-orders/:no') @Permissions('cust_my_pos')
   deletePurchaseOrder(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.myerp.deletePurchaseOrder(no, u); }
+
+  // ── Mini-ERP: My sub-account users ──
+  @Get('my/users') @Permissions('cust_my_users')
+  listMyUsers(@CurrentUser() u: JwtUser) { return this.subUsers.list(u); }
+
+  @Post('my/users') @Permissions('cust_my_users')
+  createMyUser(@Body(new ZodValidationPipe(SubUserBody)) b: SubUserDto, @CurrentUser() u: JwtUser) { return this.subUsers.create(b, u); }
+
+  @Delete('my/users/:username') @Permissions('cust_my_users')
+  deleteMyUser(@Param('username') username: string, @CurrentUser() u: JwtUser) { return this.subUsers.remove(username, u); }
 }

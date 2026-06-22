@@ -83,6 +83,42 @@ export class FinanceService {
     return { mtd_revenue: n(mtd?.rev), mtd_orders: n(mtd?.ord), ytd_revenue: n(ytd?.rev), ytd_orders: n(ytd?.ord), ap_outstanding: n(ap?.v), ar_outstanding: n(ar?.v) };
   }
 
+  // Aging buckets (Current / 1-30 / 31-60 / 61-90 / 90+) by due date vs today.
+  private bucketize(rows: { ref: string; party: string | null; due_date: string | null; outstanding: number }[]) {
+    const today = ymd();
+    const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 };
+    const detail = rows.filter((r) => r.outstanding > 0.0001).map((r) => {
+      const overdue = r.due_date ? Math.round((Date.parse(today) - Date.parse(String(r.due_date))) / 86400000) : 0;
+      let bucket: keyof typeof buckets;
+      if (overdue <= 0) bucket = 'current';
+      else if (overdue <= 30) bucket = 'd1_30';
+      else if (overdue <= 60) bucket = 'd31_60';
+      else if (overdue <= 90) bucket = 'd61_90';
+      else bucket = 'd90_plus';
+      buckets[bucket] = round2(buckets[bucket] + r.outstanding);
+      return { ...r, days_overdue: Math.max(0, overdue), bucket };
+    });
+    return { buckets, total: round2(detail.reduce((a, r) => a + r.outstanding, 0)), rows: detail };
+  }
+
+  async arAging() {
+    const db = this.db as any;
+    const rows = await db.select({
+      ref: arInvoices.invoiceNo, party: tenants.code, due_date: arInvoices.dueDate,
+      outstanding: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)`,
+    }).from(arInvoices).leftJoin(tenants, eq(arInvoices.tenantId, tenants.id)).where(sql`${arInvoices.status}::text <> 'Paid'`);
+    return this.bucketize(rows.map((r: any) => ({ ref: r.ref, party: r.party, due_date: r.due_date, outstanding: n(r.outstanding) })));
+  }
+
+  async apAging() {
+    const db = this.db as any;
+    const rows = await db.select({
+      ref: apTransactions.txnNo, party: apTransactions.vendorName, due_date: apTransactions.dueDate,
+      outstanding: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)`,
+    }).from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
+    return this.bucketize(rows.map((r: any) => ({ ref: r.ref, party: r.party, due_date: r.due_date, outstanding: n(r.outstanding) })));
+  }
+
   // ───────────────────── WRITE (Phase 3) ─────────────────────
   // POST /api/finance/ar/sync — สร้าง INV-{order_no} จาก order ที่ Shipped/Completed ที่ยังไม่มี invoice
   async syncArInvoices(user: JwtUser) {

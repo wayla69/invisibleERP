@@ -1,0 +1,21 @@
+{
+  "name": "@ierp/erp-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Invisible ERP V2 — MCP server exposing ERP tools to Claude",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
