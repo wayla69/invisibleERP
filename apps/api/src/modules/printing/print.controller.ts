@@ -5,7 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { PrintService } from './print.service';
 
 const EnqueueBody = z.object({
-  job_type: z.enum(['receipt', 'kitchen']),
+  job_type: z.enum(['receipt', 'kitchen', 'drawer']),
   sale_no: z.string().optional(), order_no: z.string().optional(), station: z.string().optional(),
   format: z.enum(['escpos', 'html']).optional(), printer_id: z.string().optional(), payload: z.string().optional(),
 });

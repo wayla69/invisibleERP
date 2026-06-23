@@ -9,6 +9,7 @@ import {
   Bot,
   Boxes,
   Briefcase,
+  Cable,
   Building2,
   Calculator,
   Camera,
@@ -112,6 +113,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ใบส่งสินค้า', href: '/delivery', icon: Truck, perms: ['delivery'] },
       { label: 'ควบคุม POS (พักบิล/อนุมัติ)', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
       { label: 'ใบเสร็จ & งานพิมพ์', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
+      { label: 'อุปกรณ์ฮาร์ดแวร์ (Peripherals)', href: '/peripherals', icon: Cable, perms: ['pos', 'order_mgt'] },
       // dual-use: pricing & branches are configured back-office but used at POS → cross-listed
       { label: 'กฎราคา & โปรโมชั่น', href: '/pricing', icon: Coins, perms: ['pos', 'order_mgt', 'exec'], workspace: BOTH },
       { label: 'ช่องทางเดลิเวอรี (Aggregators)', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },

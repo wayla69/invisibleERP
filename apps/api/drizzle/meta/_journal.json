@@ -526,6 +526,13 @@
       "when": 1782370000000,
       "tag": "0074_print_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1782380000000,
+      "tag": "0075_pos_peripherals",
+      "breakpoints": true
     }
   ]
 }

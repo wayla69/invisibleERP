@@ -6,7 +6,7 @@ import type { JwtUser } from '../../common/decorators';
 import { ReceiptService } from './receipt.service';
 import { MessagingService } from '../messaging/messaging.service';
 
-type EnqueueDto = { job_type: 'receipt' | 'kitchen'; sale_no?: string; order_no?: string; station?: string; format?: 'escpos' | 'html'; printer_id?: string; payload?: string };
+type EnqueueDto = { job_type: 'receipt' | 'kitchen' | 'drawer'; sale_no?: string; order_no?: string; station?: string; format?: 'escpos' | 'html'; printer_id?: string; payload?: string };
 
 // Print-job queue: receipts (and kitchen tickets) are rendered server-side and queued; a CloudPRNT printer
 // or local agent pulls the next job for its tenant (and optional printer id), prints it, then acks. Also

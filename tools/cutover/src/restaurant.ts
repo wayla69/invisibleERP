@@ -386,6 +386,37 @@ async function main() {
   const t2pull = await inj('GET', '/api/print/jobs', sales2);
   ok('Printing: print jobs are tenant-isolated (T2 sees none of T1’s)', (t2pull.json.jobs ?? []).every((j: any) => j.sale_no !== rcSale), `T2 jobs=${(t2pull.json.jobs ?? []).length}`);
 
+  // ── hardware peripherals (Phase 5): cash drawer + customer display + weighing scale ──
+  const dev = await inj('POST', '/api/peripherals/devices', sales1, { device_code: 'DRW1', kind: 'cash_drawer', terminal: 'T01', printer_id: 'PRN1' });
+  ok('Peripherals: register a cash-drawer device', (dev.status === 200 || dev.status === 201) && !!dev.json.id, `${dev.status}`);
+  const devList = await inj('GET', '/api/peripherals/devices', sales1);
+  ok('Peripherals: device registry lists the drawer', (devList.json.devices ?? []).some((d: any) => d.device_code === 'DRW1' && d.kind === 'cash_drawer'), `${(devList.json.devices ?? []).length}`);
+  // the cash checkout above (co) should have auto-popped the drawer as a 'sale' open
+  const drawerEvts = await inj('GET', '/api/peripherals/drawer/events', sales1);
+  ok('Cash drawer: cash checkout auto-logged a sale open', (drawerEvts.json.events ?? []).some((e: any) => e.reason === 'sale' && e.sale_no === rcSale), `events=${(drawerEvts.json.events ?? []).length}`);
+  const kick = await inj('POST', '/api/peripherals/drawer/kick', sales1, { terminal: 'T01', reason: 'no_sale' });
+  ok('Cash drawer: no-sale open kicks the drawer (via print queue) + audits it', (kick.status === 200 || kick.status === 201) && kick.json.reason === 'no_sale' && kick.json.kicked === true && !!kick.json.print_job_id, `${kick.status} kicked=${kick.json.kicked}`);
+  const drawerJob = await inj('GET', '/api/print/jobs', sales1);
+  ok('Cash drawer: the kick is a drawer print job (escpos)', (drawerJob.json.jobs ?? []).some((j: any) => j.id === kick.json.print_job_id && j.job_type === 'drawer' && j.format === 'escpos'), `job=${kick.json.print_job_id}`);
+  const recon = await inj('GET', '/api/peripherals/drawer/reconciliation', sales1);
+  ok('Cash drawer: reconciliation counts opens by reason incl. no-sale (REST-11 control)', recon.status === 200 && recon.json.no_sale_opens >= 1 && recon.json.total_opens >= 2, `total=${recon.json.total_opens} no_sale=${recon.json.no_sale_opens}`);
+
+  const disp = await inj('POST', '/api/peripherals/display/T01', sales1, { message: 'ชำระเงิน', total: 181.9, amount_due: 200, change: 18.1, lines: [{ name: 'ผัดกะเพรา', qty: 2, amount: 120 }] });
+  ok('Customer display: set per-terminal state', (disp.status === 200 || disp.status === 201) && disp.json.ok === true, `${disp.status}`);
+  const dispGet = await inj('GET', '/api/peripherals/display/T01', sales1);
+  ok('Customer display: device polls the current state', dispGet.json.state?.total === 181.9 && near(dispGet.json.state?.change, 18.1) && (dispGet.json.state?.lines ?? []).length === 1, `${JSON.stringify(dispGet.json.state ?? {}).slice(0, 80)}`);
+
+  await inj('POST', '/api/menu/items', sales1, { sku: 'WGH1', name: 'หมูสามชั้น', price: 180, station_code: 'main' }); // price = per kg once weighed
+  const setW = await inj('PATCH', '/api/peripherals/scale/items/WGH1', sales1, { sold_by_weight: true, weight_unit: 'kg' });
+  ok('Scale: mark a catalog item sold-by-weight', setW.json.sold_by_weight === true && setW.json.weight_unit === 'kg', `${setW.status}`);
+  const wread = await inj('POST', '/api/peripherals/scale/read', sales1, { sku: 'WGH1', gross_weight: 1.25, tare_weight: 0.05, terminal: 'T01' });
+  ok('Scale: net weight × catalog unit price computed server-side (1.2kg × 180 = 216)', wread.status === 200 || wread.status === 201 ? (near(wread.json.net_weight, 1.2) && near(wread.json.amount, 216) && near(wread.json.line?.unit_price, 216)) : false, `net=${wread.json.net_weight} amt=${wread.json.amount}`);
+  const wbad = await inj('POST', '/api/peripherals/scale/read', sales1, { sku: 'AL01', gross_weight: 1 }); // AL01 is not sold by weight
+  ok('Scale: reading a non-weighed item rejected (400 NOT_WEIGHED)', wbad.status === 400 && wbad.json.error?.code === 'NOT_WEIGHED', `${wbad.status} ${wbad.json.error?.code}`);
+
+  const t2dev = await inj('GET', '/api/peripherals/devices', sales2);
+  ok('Peripherals: device registry is tenant-isolated (T2 sees none of T1’s)', (t2dev.json.devices ?? []).every((d: any) => d.device_code !== 'DRW1'), `T2 devices=${(t2dev.json.devices ?? []).length}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

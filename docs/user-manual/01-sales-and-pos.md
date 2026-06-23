@@ -364,5 +364,39 @@ campaigns safely.
 
 ---
 
+## 9. Hardware peripherals (cash drawer, customer display, scale)
+
+**Screen:** `/peripherals` (**อุปกรณ์ฮาร์ดแวร์**) · **Required permission:** `pos` /
+`order_mgt`.
+
+Register each outlet's hardware once (printers, cash drawers, customer displays,
+scales) under **ทะเบียนอุปกรณ์**, tagging the **terminal** each belongs to and —
+for a cash drawer — the **printer** that opens it.
+
+- **Cash drawer (ลิ้นชักเก็บเงิน).** A cash sale **opens the drawer
+  automatically**. To open it without a sale (e.g. to make change), use
+  **เปิดลิ้นชัก (No-sale)** — this is **always logged**. The drawer tab shows
+  every open by reason and counts **no-sale** opens, which managers reconcile
+  against the **Z-report** at close. *(Control: every drawer open is recorded
+  with who/when/why and the till session.)*
+- **Customer-facing display (จอลูกค้า).** Open **เปิดจอลูกค้า** on the screen
+  that faces the customer; it shows the live cart, total, amount due and change
+  as you ring up. It refreshes by itself.
+- **Weighing scale (เครื่องชั่ง).** First mark an item **sold by weight** (its
+  price becomes the price per kg/100 g). At the counter, enter the weight on the
+  **เครื่องชั่ง** tab (or read it from a connected scale) and the system computes
+  the line price from the catalog — staff can't override the per-kg price.
+
+**Expected result:** Drawers open at the right moments and are fully audited;
+the customer sees their order on a second screen; weighed items are priced
+accurately from the scale.
+
+> **Troubleshooting:** “NOT_WEIGHED” — the item isn't flagged sold-by-weight;
+> “DEVICE_NOT_FOUND” — register the device (or send a heartbeat from the agent)
+> first. If the drawer doesn't open, check the linked printer is online (the
+> open is still logged either way).
+
+---
+
 **Next:** [Customer Portal](./02-customer-portal.md) ·
 [Finance — AR & AP](./05-finance-ar-ap.md)
