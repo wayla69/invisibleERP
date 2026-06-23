@@ -18,7 +18,7 @@ export class KdsService {
       itemId: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, kdsStatus: dineInOrderItems.kdsStatus,
       firedAt: dineInOrderItems.firedAt, estPrep: dineInOrderItems.estPrepMinutes,
-      isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy,
+      isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy, course: dineInOrderItems.course,
       stationId: kitchenStations.id, stationCode: kitchenStations.code, stationName: kitchenStations.name, stationSort: kitchenStations.sort, stationPrep: kitchenStations.defaultPrepMinutes,
       orderNo: dineInOrders.orderNo, tableNo: diningTables.tableNo,
     }).from(dineInOrderItems)
@@ -26,7 +26,7 @@ export class KdsService {
       .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
       .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
       .where(inArray(dineInOrderItems.kdsStatus, ['queued', 'preparing', 'ready'] as any))
-      .orderBy(asc(kitchenStations.sort), asc(dineInOrderItems.firedAt));
+      .orderBy(asc(kitchenStations.sort), asc(dineInOrderItems.course), asc(dineInOrderItems.firedAt));
 
     const now = Date.now();
     const stations = new Map<number, any>();
@@ -39,7 +39,7 @@ export class KdsService {
       stations.get(sid).items.push({
         item_id: Number(r.itemId), order_no: r.orderNo, table_label: r.tableNo ?? null, name: r.name, qty: n(r.qty),
         modifiers: r.modifiers ?? [], notes: r.notes, kds_status: r.kdsStatus, fired_at: r.firedAt,
-        is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr',
+        is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr', course: r.course ?? 1,
         elapsed_min: elapsedMin, prep_min: prep, remaining_min: Math.max(0, prep - elapsedMin),
       });
     }

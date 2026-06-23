@@ -498,6 +498,27 @@
       "when": 1782330000000,
       "tag": "0070_buffet_analytics",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1782340000000,
+      "tag": "0071_kds_courses",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1782350000000,
+      "tag": "0072_menu_scheduling",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1782360000000,
+      "tag": "0073_crm_messaging",
+      "breakpoints": true
     }
   ]
 }

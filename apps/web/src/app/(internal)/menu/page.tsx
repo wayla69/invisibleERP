@@ -86,7 +86,12 @@ function Items() {
   const [type, setType] = useState('food');
   const [taxType, setTaxType] = useState('standard');
   const [categoryId, setCategoryId] = useState('');
+  const [startT, setStartT] = useState('');
+  const [endT, setEndT] = useState('');
+  const [days, setDays] = useState<boolean[]>([true, true, true, true, true, true, true]);
   const [msg, setMsg] = useState('');
+
+  const toMin = (t: string) => (t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : undefined);
 
   const create = useMutation({
     mutationFn: () =>
@@ -99,11 +104,14 @@ function Items() {
           type,
           tax_type: taxType,
           category_id: categoryId ? Number(categoryId) : undefined,
+          avail_start_min: toMin(startT),
+          avail_end_min: toMin(endT),
+          avail_days: days.every(Boolean) ? undefined : days.map((d) => (d ? '1' : '0')).join(''),
         }),
       }),
     onSuccess: (it) => {
       setMsg(`✅ เพิ่มเมนู ${it.sku} · ${it.name}`);
-      setSku(''); setName(''); setPrice(''); setCategoryId('');
+      setSku(''); setName(''); setPrice(''); setCategoryId(''); setStartT(''); setEndT(''); setDays([true, true, true, true, true, true, true]);
       qc.invalidateQueries({ queryKey: ['menu'] });
     },
     onError: (e: Error) => setMsg(`❌ ${e.message}`),
@@ -164,6 +172,19 @@ function Items() {
                 <option value="exempt">ยกเว้น (exempt)</option>
                 <option value="zero">ศูนย์ (zero)</option>
               </select>
+            </div>
+            <div className="grid gap-2 sm:col-span-2">
+              <Label>ช่วงเวลาขาย (เว้นว่าง = ขายทั้งวัน)</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input type="time" className="w-32" value={startT} onChange={(e) => setStartT(e.target.value)} />
+                <span className="text-sm text-muted-foreground">ถึง</span>
+                <Input type="time" className="w-32" value={endT} onChange={(e) => setEndT(e.target.value)} />
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((d, i) => (
+                  <Button key={i} type="button" size="sm" variant={days[i] ? 'default' : 'outline'} onClick={() => setDays((p) => p.map((v, j) => (j === i ? !v : v)))}>{d}</Button>
+                ))}
+              </div>
             </div>
           </div>
           <Button disabled={!sku || !name || price === '' || create.isPending} onClick={() => create.mutate()}>

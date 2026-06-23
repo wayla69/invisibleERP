@@ -84,6 +84,18 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-048 | Staff starts buffet from the POS | REST-09 | 20 §6 |
 | UAT-O2C-049 | Public diner endpoint rate-limited | Anti-abuse | 20 §6, §13 |
 | UAT-O2C-050 | Diner self-order UI smoke (Playwright) | Feature (diner UI) | 20 §6 |
+| UAT-O2C-051 | Move a live tab to a free table | Feature (table ops) | 20 §6 |
+| UAT-O2C-052 | Move onto an occupied table blocked | Feature (table ops) | 20 §6, §13 |
+| UAT-O2C-053 | Transfer line items between tables | Feature (table ops) | 20 §6 |
+| UAT-O2C-054 | Merge two tabs into a combined bill | Feature (table ops) | 20 §6 |
+| UAT-O2C-055 | Fire one course (hold the rest) | Feature (course firing) | 20 §5 |
+| UAT-O2C-056 | Fire next course / empty course | Feature (course firing) | 20 §5, §13 |
+| UAT-O2C-057 | Day-parting: menu flags availability | Feature (day-parting) | 20 §6 |
+| UAT-O2C-058 | Day-parting: order outside window blocked | Feature (day-parting) | 20 §6, §13 |
+| UAT-O2C-059 | CRM: enrol member + messaging send | MKT-04 | 19 §7 |
+| UAT-O2C-060 | CRM: marketing-consent enforced | MKT-04 | 19 §7, §9 |
+| UAT-O2C-061 | Food-cost: per-menu margin from recipe | Feature (food-cost) | 20 §12 |
+| UAT-O2C-062 | Food-cost: ingredient cost contribution | Feature (food-cost) | 20 §12 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

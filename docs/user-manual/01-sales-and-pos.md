@@ -119,6 +119,20 @@ Staff can also start a buffet for guests from the floor: on the **โต๊ะ**
 pick **เริ่มบุฟเฟต์**, choose the tier and number of diners, and confirm — the
 per-head charge and time window start just as with QR self-start.
 
+**Moving a table.** If guests change seats, open the table and tap **ย้ายโต๊ะ**,
+pick a free table, and confirm — the whole tab (order + bill) moves across, the
+old table is freed and the new one becomes occupied.
+
+**Merging tables.** To combine two tabs onto one bill (e.g. two tables join up),
+open the table you want to keep and tap **รวมโต๊ะ**, then pick the other table —
+its items move onto this table's order, the other table is freed, and you settle
+one combined bill. (Buffet tables can't be merged.)
+
+**Transferring items.** To move individual dishes between tabs (e.g. an item
+rung on the wrong table), open the table and tap **ย้ายรายการ**, tick the
+dishes, pick a table that has guests, and confirm — the chosen items and their
+charges move to that table's bill.
+
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).
@@ -127,6 +141,19 @@ The **พฤติกรรมตามแพ็กเกจ** tab on the same p
 actually behave: the **most-ordered dishes**, number of **sessions and covers**,
 **dishes per head**, **average bill per session**, and how often tables run into
 **overtime** — so you can tune pricing, time limits and the dish line-up per tier.
+
+**Day-parting (time-limited menus).** When adding a menu item in **เมนูอาหาร**
+you can set a **ช่วงเวลาขาย** (selling window) — a start/end time and which days
+of the week — for breakfast, lunch or happy-hour items. Outside that window the
+item shows **ยังไม่ถึงเวลาขาย** and can't be ordered (by staff or guests); leave
+the window blank to sell it all day. Times follow shop time (Asia/Bangkok).
+
+**Courses (serve in stages).** When taking an order you can set a **คอร์ส**
+number for the dishes you add (e.g. 1 = appetisers, 2 = mains, 3 = dessert). On
+the table you can then **ส่งเข้าครัว (ทั้งหมด)** to fire everything, or type a
+course number and tap **ส่งคอร์ส** to fire just that course — the rest stay held
+until you fire them. The KDS shows each ticket's course and lists them in course
+order, so the kitchen cooks in the right sequence.
 
 **Kitchen (KDS).** Open **จอครัว (KDS)** (back-of-house). Tickets are grouped by
 station and refresh automatically; tap a card to advance it
@@ -290,6 +317,24 @@ Record any cash added or removed:
 **Expected result:** The claim status changes to *Approved* or *Rejected*.
 
 (Supplier / goods-receipt claims are covered in [Procurement](./03-procurement.md).)
+
+---
+
+## 8. Customer messaging & birthdays (CRM)
+
+On the **CRM 360** screen you can reach out to members:
+
+- **Birthdays:** see who has a birthday today / this month, for a "happy
+  birthday" offer.
+- **Send a message** to a group — **วันเกิดวันนี้** (today's birthdays), an
+  **RFM segment** (Champions, Loyal, At Risk, …), or **all members** — over
+  **SMS / LINE / email**, then read the delivery log.
+
+Two things to know: a member must have **opted in** to marketing (set when you
+enrol or edit them) — anyone opted out is automatically skipped and never
+contacted; and until a real SMS/LINE/email provider is configured, messages are
+recorded as **mock** sends (the log shows the provider) so you can rehearse
+campaigns safely.
 
 ---
 

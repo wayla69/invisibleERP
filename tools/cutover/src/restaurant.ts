@@ -255,6 +255,114 @@ async function main() {
   for (let i = 0; i < 16; i++) { const r = await inj('POST', `/api/qr/t/${openRl.json.public_token}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] }); if (r.status === 429) limited = true; else if (r.status < 300) okCount++; }
   ok('Anti-abuse: diner order endpoint throttled per session (429 after burst)', limited && okCount <= 15, `ok=${okCount} limited=${limited}`);
 
+  // ── table operations: move a live tab to another table ──
+  const mvFrom = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A10', seats: 2 });
+  const mvOpen = await inj('POST', `/api/restaurant/tables/${mvFrom.json.id}/open`, sales1, {});
+  const mvOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: mvFrom.json.id, session_id: mvOpen.json.session_id, items: [{ name: 'น้ำส้ม', qty: 1, unit_price: 40, station_code: 'drinks' }] });
+  const mvTo = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A11', seats: 4 });
+  const moved = await inj('POST', `/api/restaurant/tables/${mvFrom.json.id}/move`, sales1, { to_table_id: mvTo.json.id });
+  ok('Table move: relocates the live tab to a free table', (moved.status === 200 || moved.status === 201) && moved.json.to_table_no === 'A11' && moved.json.session_no === mvOpen.json.session_no, `${moved.status} ${JSON.stringify(moved.json).slice(0, 80)}`);
+  const mvBoard = await inj('GET', '/api/restaurant/tables/status', sales1);
+  const a11 = (mvBoard.json.tables ?? []).find((t: any) => t.table_no === 'A11');
+  const a10 = (mvBoard.json.tables ?? []).find((t: any) => t.table_no === 'A10');
+  ok('Table move: target occupied + carries the order; source freed', a11?.status === 'occupied' && a11?.order?.order_no === mvOrd.json.order_no && a10?.status === 'available', `to=${a11?.status}/${a11?.order?.order_no} from=${a10?.status}`);
+  const occ = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A12', seats: 2 });
+  await inj('POST', `/api/restaurant/tables/${occ.json.id}/open`, sales1, {});
+  const moveBusy = await inj('POST', `/api/restaurant/tables/${mvTo.json.id}/move`, sales1, { to_table_id: occ.json.id });
+  ok('Table move: onto an occupied table rejected (400 TABLE_BUSY)', moveBusy.status === 400 && moveBusy.json.error?.code === 'TABLE_BUSY', `${moveBusy.status} ${moveBusy.json.error?.code}`);
+
+  // ── table operations: transfer items between tables ──
+  const tfFrom = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A13', seats: 4 });
+  const tfOpen = await inj('POST', `/api/restaurant/tables/${tfFrom.json.id}/open`, sales1, {});
+  const tfOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tfFrom.json.id, session_id: tfOpen.json.session_id, items: [{ name: 'สเต๊ก', qty: 1, unit_price: 200, station_code: 'hot' }, { name: 'สลัด', qty: 1, unit_price: 80, station_code: 'cold' }] });
+  const tfTo = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A14', seats: 2 });
+  await inj('POST', `/api/restaurant/tables/${tfTo.json.id}/open`, sales1, {});
+  const steakId = (tfOrd.json.items ?? []).find((i: any) => i.name === 'สเต๊ก')?.item_id;
+  const tf = await inj('POST', `/api/restaurant/orders/${tfOrd.json.order_no}/transfer-items`, sales1, { item_ids: [steakId], to_table_id: tfTo.json.id });
+  ok('Transfer items: moves a line to another table', (tf.status === 200 || tf.status === 201) && tf.json.moved === 1 && tf.json.to_table_id === tfTo.json.id, `${tf.status} ${JSON.stringify(tf.json).slice(0, 90)}`);
+  const tfSrc = await inj('GET', `/api/restaurant/orders/${tfOrd.json.order_no}`, sales1);
+  ok('Transfer items: source keeps the remaining line (80); target carries the moved one (200)', tfSrc.json.items?.length === 1 && near(tfSrc.json.subtotal, 80) && (await inj('GET', '/api/restaurant/orders', sales1)).json.orders.some((o: any) => o.table_id === tfTo.json.id && near(o.total, 214)), `src=${tfSrc.json.items?.length}/${tfSrc.json.subtotal}`);
+
+  // ── table operations: merge two tabs into one (combined bill) ──
+  const mgT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A15', seats: 4 });
+  const mgTo = await inj('POST', `/api/restaurant/tables/${mgT.json.id}/open`, sales1, {});
+  const mgTord = await inj('POST', '/api/restaurant/orders', sales1, { table_id: mgT.json.id, session_id: mgTo.json.session_id, items: [{ name: 'ข้าวผัด', qty: 1, unit_price: 100, station_code: 'hot' }] });
+  const mgF = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A16', seats: 2 });
+  const mgFo = await inj('POST', `/api/restaurant/tables/${mgF.json.id}/open`, sales1, {});
+  await inj('POST', '/api/restaurant/orders', sales1, { table_id: mgF.json.id, session_id: mgFo.json.session_id, items: [{ name: 'น้ำเปล่า', qty: 1, unit_price: 50, station_code: 'drinks' }] });
+  const merged = await inj('POST', `/api/restaurant/tables/${mgT.json.id}/merge`, sales1, { from_table_id: mgF.json.id });
+  ok('Merge tables: absorbs the other tab into one order', (merged.status === 200 || merged.status === 201) && merged.json.into_order_no === mgTord.json.order_no && merged.json.moved === 1, `${merged.status} ${JSON.stringify(merged.json).slice(0, 90)}`);
+  const mgCombined = await inj('GET', `/api/restaurant/orders/${mgTord.json.order_no}`, sales1);
+  ok('Merge tables: combined bill = sum of both tabs (subtotal 150)', mgCombined.json.items?.length === 2 && near(mgCombined.json.subtotal, 150), `lines=${mgCombined.json.items?.length} sub=${mgCombined.json.subtotal}`);
+  const mgBoard = await inj('GET', '/api/restaurant/tables/status', sales1);
+  const a16 = (mgBoard.json.tables ?? []).find((t: any) => t.table_no === 'A16');
+  ok('Merge tables: source table freed after merge', a16?.status === 'available' && !a16?.session, `${a16?.status} session=${!!a16?.session}`);
+
+  // ── KDS course firing (hold-and-fire course-by-course) ──
+  const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
+  const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});
+  const csOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: csTbl.json.id, session_id: csOpen.json.session_id, items: [{ name: 'ปอเปี๊ยะ', qty: 1, unit_price: 60, station_code: 'hot', course: 1 }, { name: 'สเต๊กปลา', qty: 1, unit_price: 220, station_code: 'hot', course: 2 }] });
+  ok('Course firing: lines carry their course number', csOrd.json.items?.find((i: any) => i.name === 'ปอเปี๊ยะ')?.course === 1 && csOrd.json.items?.find((i: any) => i.name === 'สเต๊กปลา')?.course === 2, JSON.stringify((csOrd.json.items ?? []).map((i: any) => [i.name, i.course])));
+  const fc1 = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=1`, sales1);
+  const c1 = fc1.json.items?.find((i: any) => i.name === 'ปอเปี๊ยะ'); const c2 = fc1.json.items?.find((i: any) => i.name === 'สเต๊กปลา');
+  ok('Course firing: fire course 1 queues only course 1 (course 2 held)', c1?.kds_status === 'queued' && c2?.kds_status === 'new', `c1=${c1?.kds_status} c2=${c2?.kds_status}`);
+  const csFeed = (await inj('GET', '/api/restaurant/kds/feed', sales1)).json;
+  const csFeedItems = (csFeed.stations ?? []).flatMap((s: any) => s.items);
+  ok('Course firing: only the fired course hits the KDS feed, tagged with course', csFeedItems.some((i: any) => i.name === 'ปอเปี๊ยะ' && i.course === 1) && !csFeedItems.some((i: any) => i.name === 'สเต๊กปลา'), `feed=${csFeedItems.filter((i: any) => ['ปอเปี๊ยะ', 'สเต๊กปลา'].includes(i.name)).map((i: any) => i.name)}`);
+  const fc2 = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=2`, sales1);
+  ok('Course firing: firing the next course queues the held items', fc2.json.items?.find((i: any) => i.name === 'สเต๊กปลา')?.kds_status === 'queued', `${fc2.json.items?.find((i: any) => i.name === 'สเต๊กปลา')?.kds_status}`);
+  const fcBad = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=5`, sales1);
+  ok('Course firing: firing an empty course rejected (400 NO_COURSE_ITEMS)', fcBad.status === 400 && fcBad.json.error?.code === 'NO_COURSE_ITEMS', `${fcBad.status} ${fcBad.json.error?.code}`);
+
+  // ── day-parting / menu scheduling (Asia/Bangkok) ──
+  const bkk = new Date(Date.now() + 7 * 3600 * 1000);
+  const nowMin = bkk.getUTCHours() * 60 + bkk.getUTCMinutes();
+  const closedStart = (nowMin + 120) % 1440, closedEnd = (closedStart + 1) % 1440;        // 1-min window ~2h from now → closed now
+  const dayMaskClosed = Array.from({ length: 7 }, (_, i) => (i === bkk.getUTCDay() ? '0' : '1')).join(''); // today off
+  await inj('POST', '/api/menu/items', sales1, { sku: 'BRK1', name: 'ข้าวต้มเช้า', price: 50, station_code: 'hot', avail_start_min: closedStart, avail_end_min: closedEnd });
+  await inj('POST', '/api/menu/items', sales1, { sku: 'DAYX', name: 'เมนูเฉพาะวัน', price: 60, station_code: 'hot', avail_days: dayMaskClosed });
+  const menuNow = (await inj('GET', '/api/menu', sales1)).json;
+  const dpItems = [...(menuNow.categories ?? []).flatMap((c: any) => c.items), ...(menuNow.uncategorized ?? [])];
+  const brk = dpItems.find((i: any) => i.sku === 'BRK1'); const dayx = dpItems.find((i: any) => i.sku === 'DAYX'); const al = dpItems.find((i: any) => i.sku === 'AL01');
+  ok('Day-parting: menu flags available_now per schedule (time window + day mask + always)', brk?.available_now === false && dayx?.available_now === false && al?.available_now === true, `brk=${brk?.available_now} dayx=${dayx?.available_now} al=${al?.available_now}`);
+  const dpTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A18', seats: 2 });
+  const dpOpen = await inj('POST', `/api/restaurant/tables/${dpTbl.json.id}/open`, sales1, {});
+  const dpBad = await inj('POST', `/api/qr/t/${dpOpen.json.public_token}/order`, undefined, { items: [{ sku: 'BRK1', qty: 1 }] });
+  ok('Day-parting: ordering outside the time window rejected (400 OUTSIDE_HOURS)', dpBad.status === 400 && dpBad.json.error?.code === 'OUTSIDE_HOURS', `${dpBad.status} ${dpBad.json.error?.code}`);
+  const dpDay = await inj('POST', `/api/qr/t/${dpOpen.json.public_token}/order`, undefined, { items: [{ sku: 'DAYX', qty: 1 }] });
+  ok('Day-parting: ordering on an excluded day rejected (400 OUTSIDE_HOURS)', dpDay.status === 400 && dpDay.json.error?.code === 'OUTSIDE_HOURS', `${dpDay.status} ${dpDay.json.error?.code}`);
+  const dpOk = await inj('POST', `/api/qr/t/${dpOpen.json.public_token}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] });
+  ok('Day-parting: an always-available item is still orderable', dpOk.status === 200 || dpOk.status === 201, `${dpOk.status}`);
+
+  // ── CRM messaging + birthdays (Phase 6) ──
+  const bkkNow = new Date(Date.now() + 7 * 3600 * 1000);
+  const todayBday = `1990-${String(bkkNow.getUTCMonth() + 1).padStart(2, '0')}-${String(bkkNow.getUTCDate()).padStart(2, '0')}`;
+  const mem1 = await inj('POST', '/api/loyalty/members', sales1, { name: 'คุณวันเกิด', phone: '0810000001', birthday: todayBday, marketing_opt_in: true });
+  ok('CRM: enroll member with birthday + marketing consent', (mem1.status === 200 || mem1.status === 201) && !!mem1.json.id, `${mem1.status}`);
+  const send1 = await inj('POST', '/api/messaging/send', sales1, { member_id: mem1.json.id, channel: 'sms', body: 'สวัสดีค่ะ' });
+  ok('CRM messaging: send to a member logged as sent (mock provider)', (send1.status === 200 || send1.status === 201) && send1.json.status === 'sent' && send1.json.provider === 'mock', `${send1.status} ${send1.json.status}/${send1.json.provider}`);
+  const mem2 = await inj('POST', '/api/loyalty/members', sales1, { name: 'คุณไม่รับโปร', phone: '0810000002', birthday: todayBday, marketing_opt_in: false });
+  const send2 = await inj('POST', '/api/messaging/send', sales1, { member_id: mem2.json.id, channel: 'sms', body: 'โปรโมชั่น' });
+  ok('CRM messaging: opted-out member is skipped (consent respected)', send2.json.status === 'skipped', `${send2.json.status}`);
+  const bdays = await inj('GET', '/api/loyalty/members/birthdays?window=today', sales1);
+  ok('CRM: birthdays-today lists the opted-in member, excludes opted-out', (bdays.json.members ?? []).some((m: any) => m.id === mem1.json.id) && !(bdays.json.members ?? []).some((m: any) => m.id === mem2.json.id), `count=${bdays.json.count}`);
+  const blast = await inj('POST', '/api/messaging/blast', sales1, { audience: 'birthdays_today', channel: 'sms', body: 'สุขสันต์วันเกิด 🎂' });
+  ok('CRM messaging: birthday blast sends to opted-in only (skips opted-out)', blast.status < 300 && blast.json.sent >= 1 && blast.json.skipped >= 1, `sent=${blast.json.sent} skipped=${blast.json.skipped} targeted=${blast.json.targeted}`);
+  const mlog = await inj('GET', '/api/messaging/log', sales1);
+  ok('CRM messaging: deliveries recorded in the message log', (mlog.json.messages ?? []).length >= 3, `${(mlog.json.messages ?? []).length}`);
+  const updMem = await inj('PATCH', `/api/loyalty/members/${mem1.json.id}`, sales1, { marketing_opt_in: false });
+  ok('CRM: member consent can be updated', updMem.json.marketing_opt_in === false, `${updMem.json.marketing_opt_in}`);
+
+  // ── food-cost / margin analytics (Phase 7) ──
+  await inj('POST', '/api/menu/items', sales1, { sku: 'FC01', name: 'ก๋วยเตี๋ยวต้มยำ', price: 100, station_code: 'hot' });
+  await inj('POST', '/api/menu/items/FC01/recipe', sales1, { yield_qty: 1, lines: [{ ingredient_item_id: 'NOODLE', ingredient_description: 'เส้น', qty_per: 2, unit_cost: 15 }] });
+  const fc = await inj('GET', '/api/menu/food-cost', sales1);
+  const fc01 = (fc.json.items ?? []).find((i: any) => i.sku === 'FC01');
+  ok('Food-cost: per-item margin from recipe (cost 30, margin 70, food-cost 30%)', !!fc01 && near(fc01.cost, 30) && near(fc01.margin, 70) && near(fc01.margin_pct, 70) && near(fc01.food_cost_pct, 30) && fc01.has_recipe === true, `${JSON.stringify(fc01 ?? {}).slice(0, 130)}`);
+  ok('Food-cost: menu summary reports avg food-cost % + costed count', fc.status === 200 && fc.json.summary?.costed >= 1 && fc.json.summary?.avg_food_cost_pct >= 0, `${JSON.stringify(fc.json.summary ?? {})}`);
+  const ic = await inj('GET', '/api/menu/ingredient-cost', sales1);
+  ok('Food-cost: ingredient cost-contribution lists the ingredient (30/serving)', (ic.json.ingredients ?? []).some((g: any) => g.ingredient_item_id === 'NOODLE' && near(g.cost, 30) && g.recipes_using >= 1), `${JSON.stringify((ic.json.ingredients ?? []).slice(0, 2))}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

@@ -8,6 +8,19 @@ import type { CreateCategoryDto, CreateItemDto, UpdateItemDto, CreateModifierGro
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
+// Day-parting: is the item sellable right now on Asia/Bangkok business time (UTC+7, no DST)?
+// null window/day-mask ⇒ always available; a start>end window wraps past midnight.
+function availableNow(it: any, atMs = Date.now()): boolean {
+  const bkk = new Date(atMs + 7 * 3600 * 1000);
+  const day = bkk.getUTCDay();                          // 0=Sun..6=Sat (Bangkok)
+  const minOfDay = bkk.getUTCHours() * 60 + bkk.getUTCMinutes();
+  if (typeof it.availDays === 'string' && it.availDays.length === 7 && it.availDays[day] !== '1') return false;
+  const s = it.availStartMin, e = it.availEndMin;
+  if (s == null && e == null) return true;
+  const start = s ?? 0, end = e ?? 1440;
+  return start <= end ? (minOfDay >= start && minOfDay < end) : (minOfDay >= start || minOfDay < end);
+}
+
 @Injectable()
 export class MenuService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
@@ -32,6 +45,7 @@ export class MenuService {
       type: dto.type, price: fx(dto.price, 2), cost: dto.cost != null ? fx(dto.cost, 2) : null, stationCode: dto.station_code ?? 'main',
       prepMinutes: dto.prep_minutes ?? 10, taxType: dto.tax_type, trackStock: dto.track_stock ?? false, imageUrl: dto.image_url ?? null,
       description: dto.description ?? null, sort: dto.sort ?? 0,
+      availDays: dto.avail_days ?? null, availStartMin: dto.avail_start_min ?? null, availEndMin: dto.avail_end_min ?? null,
     }).onConflictDoNothing().returning();
     if (!it) throw new BadRequestException({ code: 'SKU_EXISTS', message: 'SKU already exists', messageTh: 'รหัสสินค้าซ้ำ' });
     if (dto.modifier_group_ids?.length) for (const gid of dto.modifier_group_ids) await this.attachGroupRow(Number(it.id), gid, user);
@@ -55,6 +69,9 @@ export class MenuService {
     if (dto.description != null) set.description = dto.description;
     if (dto.sort != null) set.sort = dto.sort;
     if (dto.active != null) set.active = dto.active;
+    if (dto.avail_days !== undefined) set.availDays = dto.avail_days;
+    if (dto.avail_start_min !== undefined) set.availStartMin = dto.avail_start_min;
+    if (dto.avail_end_min !== undefined) set.availEndMin = dto.avail_end_min;
     await db.update(menuItems).set(set).where(eq(menuItems.id, it.id));
     return this.getItem(sku, user);
   }
@@ -146,6 +163,7 @@ export class MenuService {
     const [it] = await db.select().from(menuItems).where(and(where, eq(menuItems.active, true))).limit(1);
     if (!it) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Menu item not found', messageTh: 'ไม่พบเมนู' });
     if (!it.isAvailable) throw new BadRequestException({ code: 'ITEM_UNAVAILABLE', message: 'Item is unavailable (86)', messageTh: 'เมนูนี้หมด/ปิดการขาย' });
+    if (!availableNow(it)) throw new BadRequestException({ code: 'OUTSIDE_HOURS', message: 'Item is not available at this time', messageTh: 'ยังไม่ถึงเวลาขายของเมนูนี้' });
 
     const groups = await this.itemGroups(Number(it.id));
     const optById = new Map<number, any>();
@@ -204,5 +222,5 @@ export class MenuService {
 
 function shapeCat(c: any) { return { id: Number(c.id), code: c.code, name: c.name, name_en: c.nameEn, color: c.color, sort: c.sort }; }
 function shapeItem(it: any) {
-  return { id: Number(it.id), sku: it.sku, name: it.name, name_en: it.nameEn, category_id: it.categoryId != null ? Number(it.categoryId) : null, type: it.type, price: n(it.price), cost: it.cost != null ? n(it.cost) : null, station_code: it.stationCode, prep_minutes: it.prepMinutes, tax_type: it.taxType, track_stock: it.trackStock, is_available: it.isAvailable, image_url: it.imageUrl, description: it.description, sort: it.sort };
+  return { id: Number(it.id), sku: it.sku, name: it.name, name_en: it.nameEn, category_id: it.categoryId != null ? Number(it.categoryId) : null, type: it.type, price: n(it.price), cost: it.cost != null ? n(it.cost) : null, station_code: it.stationCode, prep_minutes: it.prepMinutes, tax_type: it.taxType, track_stock: it.trackStock, is_available: it.isAvailable, avail_days: it.availDays ?? null, avail_start_min: it.availStartMin ?? null, avail_end_min: it.availEndMin ?? null, available_now: availableNow(it), image_url: it.imageUrl, description: it.description, sort: it.sort };
 }

@@ -3,6 +3,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { MenuService } from './menu.service';
 import { RecipeService } from './recipe.service';
+import { FoodCostService } from './food-cost.service';
 import { UpsertRecipeBody, type UpsertRecipeDto } from './recipe.dto';
 import {
   CreateCategoryBody, CreateItemBody, UpdateItemBody, SetAvailabilityBody, CreateModifierGroupBody, OptionBody, AttachGroupBody, ResolveLineBody,
@@ -15,7 +16,13 @@ const RECIPE_MANAGE = ['bom_master', 'masterdata', 'exec'] as const;
 
 @Controller('api/menu')
 export class MenuController {
-  constructor(private readonly svc: MenuService, private readonly recipe: RecipeService) {}
+  constructor(private readonly svc: MenuService, private readonly recipe: RecipeService, private readonly foodCost: FoodCostService) {}
+
+  // ── food-cost / margin analytics (menu engineering) ──
+  @Get('food-cost') @Permissions('pos', 'order_mgt', 'masterdata', 'exec')
+  foodCostReport(@CurrentUser() u: JwtUser) { return this.foodCost.menuMargins(u); }
+  @Get('ingredient-cost') @Permissions('pos', 'order_mgt', 'masterdata', 'exec')
+  ingredientCost(@CurrentUser() u: JwtUser) { return this.foodCost.ingredientCost(u); }
 
   // ── categories ──
   @Post('categories') @Permissions(...MANAGE)

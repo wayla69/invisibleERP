@@ -142,4 +142,16 @@ sales, finance and other modules.
 
 ---
 
+## Food cost & menu margins
+
+The **ต้นทุนอาหาร (Food cost)** screen shows, for each menu item, its **cost**
+(from the item's recipe, or the item's cost field if it has no recipe), the
+**margin** and **margin %**, and the **food-cost %** against your target — so you
+can spot low-margin dishes (menu engineering). A second tab lists **ingredient
+cost-contribution** (which ingredients drive cost across your recipes). Numbers
+are *theoretical* (recipe-based); comparing them to physical stock counts
+(actual variance) is part of inventory.
+
+---
+
 **Next:** [Approvals](./10-approvals.md) · [Administration](./11-administration.md)

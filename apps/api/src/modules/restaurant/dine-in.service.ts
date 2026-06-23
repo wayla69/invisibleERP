@@ -79,7 +79,7 @@ export class DineInService {
         tenantId, orderId, stationId: Number(st.id), itemId: itemRef, name,
         qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
         modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
-        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null,
+        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as any).course ?? 1,
         estPrepMinutes: prep ?? null, createdBy: user.username,
       });
     }
@@ -120,12 +120,77 @@ export class DineInService {
     return this.getOrder(orderNo, user);
   }
 
+  // ── table operations: transfer items / merge tabs (Phase 1) ──
+  private async liveSessionForTable(tableId: number) {
+    const db = this.db as any;
+    const [s] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, tableId), inArray(tableSessions.status, ['open', 'bill_requested', 'paying'] as any))).orderBy(desc(tableSessions.id)).limit(1);
+    return s;
+  }
+
+  // the live session's open order for a table — created empty if the table is seated but has none yet
+  async ensureOpenOrder(tableId: number, user: JwtUser) {
+    const db = this.db as any;
+    const s = await this.liveSessionForTable(tableId);
+    if (!s) throw new BadRequestException({ code: 'NO_SESSION', message: 'Target table has no live session', messageTh: 'โต๊ะปลายทางไม่มีลูกค้า' });
+    const [o] = await db.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, Number(s.id)), ne(dineInOrders.status, 'closed'), ne(dineInOrders.status, 'cancelled'))).orderBy(desc(dineInOrders.id)).limit(1);
+    if (o) return o;
+    const orderNo = await this.docNo.nextDaily('DIN');
+    await db.insert(dineInOrders).values({ orderNo, tenantId: user.tenantId, tableId, sessionId: Number(s.id), status: 'open', server: user.username, createdBy: user.username });
+    await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(eq(diningTables.id, tableId));
+    return this.loadOrder(orderNo);
+  }
+
+  // move selected (non-voided) line items from one order to another table's open order; bill follows the items
+  async transferItems(orderNo: string, itemIds: number[], toTableId: number, user: JwtUser) {
+    const db = this.db as any;
+    const src = await this.loadOrder(orderNo);
+    if (['paid', 'closed', 'cancelled'].includes(String(src.status))) throw new BadRequestException({ code: 'ORDER_CLOSED', message: 'Order is closed', messageTh: 'ออเดอร์ปิดแล้ว' });
+    const tgt = await this.ensureOpenOrder(toTableId, user);
+    if (Number(tgt.id) === Number(src.id)) throw new BadRequestException({ code: 'SAME_TABLE', message: 'Items are already on that table', messageTh: 'รายการอยู่ที่โต๊ะนั้นอยู่แล้ว' });
+    const moved = await db.update(dineInOrderItems).set({ orderId: Number(tgt.id), updatedAt: new Date() })
+      .where(and(eq(dineInOrderItems.orderId, Number(src.id)), inArray(dineInOrderItems.id, itemIds.map(Number)), ne(dineInOrderItems.kdsStatus, 'voided'))).returning({ id: dineInOrderItems.id });
+    if (!moved.length) throw new BadRequestException({ code: 'NO_ITEMS', message: 'No matching items to transfer', messageTh: 'ไม่พบรายการที่จะย้าย' });
+    for (const id of [Number(src.id), Number(tgt.id)]) { await this.refreshTotals(id); await this.recomputeOrderStatus(id); }
+    return { moved: moved.length, from_order_no: src.orderNo, to_order_no: tgt.orderNo, to_table_id: toTableId };
+  }
+
+  // merge another table's tab into this one: move its items into the target order, close the source session/table
+  async mergeTables(targetTableId: number, fromTableId: number, user: JwtUser) {
+    const db = this.db as any;
+    if (targetTableId === fromTableId) throw new BadRequestException({ code: 'SAME_TABLE', message: 'Cannot merge a table into itself', messageTh: 'รวมโต๊ะกับตัวเองไม่ได้' });
+    const tgtSess = await this.liveSessionForTable(targetTableId);
+    if (!tgtSess) throw new BadRequestException({ code: 'NO_SESSION', message: 'Target table has no live session', messageTh: 'โต๊ะปลายทางไม่มีลูกค้า' });
+    const srcSess = await this.liveSessionForTable(fromTableId);
+    if (!srcSess) throw new BadRequestException({ code: 'NO_SESSION', message: 'Source table has no live session', messageTh: 'โต๊ะต้นทางไม่มีลูกค้า' });
+    if (tgtSess.orderMode === 'buffet' || srcSess.orderMode === 'buffet') throw new BadRequestException({ code: 'BUFFET_MERGE', message: 'Buffet tables cannot be merged', messageTh: 'รวมโต๊ะบุฟเฟต์ไม่ได้' });
+    const tgt = await this.ensureOpenOrder(targetTableId, user);
+    const now = new Date();
+    const srcOrders = await db.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, Number(srcSess.id)), ne(dineInOrders.status, 'closed'), ne(dineInOrders.status, 'cancelled')));
+    let moved = 0;
+    for (const o of srcOrders) {
+      if (Number(o.id) === Number(tgt.id)) continue;
+      const r = await db.update(dineInOrderItems).set({ orderId: Number(tgt.id), updatedAt: now }).where(and(eq(dineInOrderItems.orderId, Number(o.id)), ne(dineInOrderItems.kdsStatus, 'voided'))).returning({ id: dineInOrderItems.id });
+      moved += r.length;
+      await db.update(dineInOrders).set({ status: 'cancelled', notes: `merged into ${tgt.orderNo}`, closedAt: now }).where(eq(dineInOrders.id, Number(o.id)));
+    }
+    await db.update(tableSessions).set({ status: 'closed', closedAt: now }).where(eq(tableSessions.id, Number(srcSess.id)));
+    await db.update(diningTables).set({ status: 'available', updatedAt: now }).where(eq(diningTables.id, fromTableId));
+    await this.refreshTotals(Number(tgt.id));
+    await this.recomputeOrderStatus(Number(tgt.id));
+    return { into_order_no: tgt.orderNo, into_table_id: targetTableId, merged_from_table_id: fromTableId, moved };
+  }
+
   // ส่งครัว: new → queued, set firedAt
-  async fire(orderNo: string, user: JwtUser) {
+  // Fire the kitchen. With no course → fire ALL pending lines (legacy). With a course → fire only that
+  // course's 'new' lines (course-by-course / hold-and-fire); others stay 'new' and off the KDS feed.
+  async fire(orderNo: string, user: JwtUser, course?: number) {
     const db = this.db as any;
     const o = await this.loadOrder(orderNo);
     const now = new Date();
-    await db.update(dineInOrderItems).set({ kdsStatus: 'queued', firedAt: now, updatedAt: now }).where(and(eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'new')));
+    const where = [eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'new')];
+    if (course != null) where.push(eq(dineInOrderItems.course, course));
+    const fired = await db.update(dineInOrderItems).set({ kdsStatus: 'queued', firedAt: now, updatedAt: now }).where(and(...where)).returning({ id: dineInOrderItems.id });
+    if (course != null && !fired.length) throw new BadRequestException({ code: 'NO_COURSE_ITEMS', message: `No pending items in course ${course}`, messageTh: `ไม่มีรายการรอส่งในคอร์ส ${course}` });
     if (!o.firedAt) await db.update(dineInOrders).set({ firedAt: now }).where(eq(dineInOrders.id, o.id));
     await this.recomputeOrderStatus(Number(o.id));
     return this.getOrder(orderNo, user);
@@ -481,7 +546,7 @@ export class DineInService {
     const db = this.db as any;
     const items = await db.select({
       id: dineInOrderItems.id, itemId: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty, unitPrice: dineInOrderItems.unitPrice,
-      amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet,
+      amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet, course: dineInOrderItems.course,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, firedAt: dineInOrderItems.firedAt,
       startedAt: dineInOrderItems.startedAt, readyAt: dineInOrderItems.readyAt, estPrep: dineInOrderItems.estPrepMinutes,
     }).from(dineInOrderItems).where(eq(dineInOrderItems.orderId, Number(o.id))).orderBy(dineInOrderItems.id);
@@ -494,7 +559,7 @@ export class DineInService {
       const base = i.startedAt ? Math.floor((now - new Date(i.startedAt).getTime()) / 60000) : elapsedMin;
       const remainingMin = ['ready', 'served', 'voided'].includes(i.kdsStatus) ? 0 : Math.max(0, prep - base);
       const charge = i.itemId === '__buffet_charge__' || i.itemId === '__buffet_overtime__';
-      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
+      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, course: i.course ?? 1, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
     });
     const waitedMin = o.firedAt ? Math.floor((now - new Date(o.firedAt).getTime()) / 60000) : 0;
     const readyInMin = Math.max(0, ...viewItems.filter((v: any) => !['served', 'voided'].includes(v.kds_status)).map((v: any) => v.remaining_min), 0);

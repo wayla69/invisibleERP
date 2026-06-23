@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Put, Post, Patch, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -14,8 +14,10 @@ const ConfigBody = z.object({
 });
 
 const RedeemBody = z.object({ points: z.number().positive() });
-const EnrollBody = z.object({ name: z.string().optional(), phone: z.string().optional(), card_no: z.string().optional(), email: z.string().optional() })
+const bday = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const EnrollBody = z.object({ name: z.string().optional(), phone: z.string().optional(), card_no: z.string().optional(), email: z.string().optional(), birthday: bday.optional(), marketing_opt_in: z.boolean().optional() })
   .refine((d) => d.phone || d.card_no, { message: 'phone or card_no required' });
+const UpdateMemberBody = z.object({ name: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), birthday: bday.nullable().optional(), marketing_opt_in: z.boolean().optional(), tier: z.string().optional(), active: z.boolean().optional() });
 
 @Controller('api/loyalty')
 export class LoyaltyController {
@@ -38,6 +40,10 @@ export class LoyaltyController {
   enroll(@Body(new ZodValidationPipe(EnrollBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.enroll(b, u); }
   @Get('members/lookup') @Permissions('loyalty', 'pos')
   lookup(@Query('phone') phone: string | undefined, @Query('card') card: string | undefined, @Query('code') code: string | undefined, @CurrentUser() u: JwtUser) { return this.member.lookup({ phone, card, code }, u); }
+  @Get('members/birthdays') @Permissions('loyalty', 'marketing', 'crm')
+  birthdays(@Query('window') window: string | undefined, @CurrentUser() u: JwtUser) { return this.member.birthdays(window === 'today' ? 'today' : 'month', u); }
+  @Patch('members/:id') @Permissions('loyalty', 'pos')
+  update(@Param('id') id: string, @Body(new ZodValidationPipe(UpdateMemberBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.update(+id, b, u); }
   @Get('members/:id') @Permissions('loyalty', 'pos')
   getMember(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.member.balance(+id, u); }
   @Get('members/:id/history') @Permissions('loyalty', 'pos')

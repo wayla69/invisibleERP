@@ -15,6 +15,7 @@ const ItemInput = z.object({
   qty: z.number().positive().default(1),
   notes: z.string().optional(),
   est_prep_minutes: z.number().int().positive().optional(),
+  course: z.number().int().min(1).max(9).optional(),   // KDS course (default 1) — for course-by-course firing
 }).refine((it) => it.sku != null || it.menu_item_id != null || (it.name != null && it.unit_price != null), {
   message: 'provide sku/menu_item_id (menu) or name+unit_price (custom item)',
 });
@@ -101,6 +102,15 @@ export const UpdateTableBody = CreateTableBody.partial();
 export type UpdateTableDto = z.infer<typeof UpdateTableBody>;
 
 export const TableStatusBody = z.object({ status: z.enum(['available', 'reserved', 'occupied', 'bill_requested', 'paying', 'cleaning', 'out_of_service']) });
+
+// move a live tab to another (free) table
+export const MoveTableBody = z.object({ to_table_id: z.number().int().positive() });
+
+// move selected line items to another table's open order
+export const TransferItemsBody = z.object({ item_ids: z.array(z.number().int().positive()).min(1).max(100), to_table_id: z.number().int().positive() });
+
+// merge another table's tab into this one (combined bill)
+export const MergeTablesBody = z.object({ from_table_id: z.number().int().positive() });
 
 export const ZoneBody = z.object({ name: z.string().min(1), sort_order: z.number().int().optional() });
 
