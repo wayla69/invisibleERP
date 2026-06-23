@@ -29,6 +29,43 @@ For every such change, review and update as needed:
 - If a change genuinely has no doc impact, say so explicitly in your summary rather than skipping silently.
 - Prefer one commit (or a tightly-coupled series) that contains both the code and the doc updates.
 
+## 🐞 Debug mantra (follow in order)
+
+1. **Reproduce first.** Get a deterministic failing signal before changing anything. Read the actual
+   error/log — don't guess.
+2. **Is it even mine?** Before assuming your change broke it, check whether the failure **pre-exists on
+   `main`** or is **environmental**. Verify on a clean baseline (`git worktree add /tmp/wt origin/main`)
+   and use `git log -S"<string>"` / `git log -p <file>` to find *when/why* behaviour changed.
+3. **Root cause, not symptom.** Keep digging until you can *explain* the failure (instrument it — print
+   the real value, e.g. a series length or a computed date — rather than theorise). Do **not** paper over
+   it by loosening assertions or rewriting expected values to match buggy output.
+4. **Fix at the right layer, smallest change.** Don't mask: never edit parity-locked code
+   (`forecasting.service.ts` says `ห้ามเปลี่ยน — parity`), and prefer fixing the test seeding/harness over
+   bending the product. If a "fix" causes new regressions, **revert** and record why (see the drizzle 0.45
+   note below) rather than forcing it.
+5. **Verify the fix.** Re-run the *exact* failing check to green, then run the broader suite for
+   regressions (harnesses + typecheck + build). State results honestly, with the output.
+6. **Leave it greener.** If you find a pre-existing failure, fix it or clearly flag it to the user; never
+   silently step over a red gate. Reconcile docs per the policy above.
+
+## ⚠️ Known constraints & gotchas (this environment / codebase)
+
+- **Business timezone = Asia/Bangkok (UTC+7).** `ymd()`/`bizYmdDash` date everything on the business day,
+  not UTC. Seed/compare dates on that basis or you get off-by-one window drift (root cause of the
+  `analytics` flake).
+- **GL-05:** a manual JE via `POST /api/ledger/journal` posts as **Draft** and is excluded from balances
+  until a *different* user approves it; `closeYear`/aggregations scope to the caller's tenant (HQ/Admin
+  ⇒ pass an explicit `tenant_id`). These bit the `worldclass` year-end harness when its setup went stale.
+- **drizzle-orm is pinned at `^0.36.4`.** 0.45 fixes a non-exploitable SQLi advisory but **regresses an
+  insert path** (see `compliance/vulnerability-triage.md`) — do not bump casually; it needs its own tested
+  workstream.
+- **CI runner pnpm version comes from `package.json` `packageManager` (pnpm@11.8.0).** Do **not** also pin
+  `version:` in `pnpm/action-setup` — the two conflict (`ERR_PNPM_BAD_PM_VERSION`) and break every job.
+- **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
+  GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
+  Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
+  blocked (403), and the commit-signing server is occasionally flaky (retry the commit).
+
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
 - Shared: `pnpm --filter @ierp/shared build` (build before harnesses that import dist)
