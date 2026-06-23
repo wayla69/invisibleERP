@@ -184,6 +184,8 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
   const fire = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/fire`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('ส่งเข้าครัวแล้ว'); onChange(); }, onError: onErr });
+  const [fireCourse, setFireCourse] = useState('');
+  const fireCourseM = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/fire?course=${Number(fireCourse)}`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg(`ส่งครัวคอร์ส ${fireCourse} แล้ว`); setFireCourse(''); onChange(); }, onError: onErr });
   const bill = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/bill`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('เรียกเก็บเงินแล้ว'); onChange(); }, onError: onErr });
   const checkout = useMutation({ mutationFn: () => api<{ tax_invoice_no: string }>(`/api/restaurant/orders/${t.order!.order_no}/checkout`, { method: 'POST', body: JSON.stringify({ method: 'Cash' }) }), onSuccess: (r) => { setMsg(`ชำระเงินสำเร็จ · ใบกำกับภาษี ${r.tax_invoice_no ?? '-'}`); onChange(); }, onError: onErr });
   const clear = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }), onSuccess: () => { setMsg('เคลียร์โต๊ะแล้ว'); onClose(); onChange(); }, onError: onErr });
@@ -310,8 +312,12 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
             <Button disabled={!item.name || addItem.isPending} onClick={() => addItem.mutate()}><Plus className="size-4" /> เพิ่ม</Button>
           </div>
           {t.order && (
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => fire.mutate()} disabled={fire.isPending}><Flame className="size-4" /> ส่งเข้าครัว</Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={() => fire.mutate()} disabled={fire.isPending}><Flame className="size-4" /> ส่งเข้าครัว (ทั้งหมด)</Button>
+              <span className="flex items-center gap-1">
+                <Input className="w-16" type="number" min={1} step={1} placeholder="คอร์ส" value={fireCourse} onChange={(e) => setFireCourse(e.target.value)} />
+                <Button variant="outline" disabled={!fireCourse || fireCourseM.isPending} onClick={() => fireCourseM.mutate()}><Flame className="size-4" /> ส่งคอร์ส</Button>
+              </span>
               <Button variant="outline" onClick={() => bill.mutate()} disabled={bill.isPending}><Receipt className="size-4" /> เรียกเก็บเงิน</Button>
               <Button onClick={() => checkout.mutate()} disabled={checkout.isPending}><Wallet className="size-4" /> เช็คบิล (เงินสด) {baht(t.order.total)}</Button>
             </div>

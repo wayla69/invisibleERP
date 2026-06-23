@@ -79,7 +79,7 @@ export class DineInService {
         tenantId, orderId, stationId: Number(st.id), itemId: itemRef, name,
         qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
         modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
-        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null,
+        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as any).course ?? 1,
         estPrepMinutes: prep ?? null, createdBy: user.username,
       });
     }
@@ -181,11 +181,16 @@ export class DineInService {
   }
 
   // ส่งครัว: new → queued, set firedAt
-  async fire(orderNo: string, user: JwtUser) {
+  // Fire the kitchen. With no course → fire ALL pending lines (legacy). With a course → fire only that
+  // course's 'new' lines (course-by-course / hold-and-fire); others stay 'new' and off the KDS feed.
+  async fire(orderNo: string, user: JwtUser, course?: number) {
     const db = this.db as any;
     const o = await this.loadOrder(orderNo);
     const now = new Date();
-    await db.update(dineInOrderItems).set({ kdsStatus: 'queued', firedAt: now, updatedAt: now }).where(and(eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'new')));
+    const where = [eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'new')];
+    if (course != null) where.push(eq(dineInOrderItems.course, course));
+    const fired = await db.update(dineInOrderItems).set({ kdsStatus: 'queued', firedAt: now, updatedAt: now }).where(and(...where)).returning({ id: dineInOrderItems.id });
+    if (course != null && !fired.length) throw new BadRequestException({ code: 'NO_COURSE_ITEMS', message: `No pending items in course ${course}`, messageTh: `ไม่มีรายการรอส่งในคอร์ส ${course}` });
     if (!o.firedAt) await db.update(dineInOrders).set({ firedAt: now }).where(eq(dineInOrders.id, o.id));
     await this.recomputeOrderStatus(Number(o.id));
     return this.getOrder(orderNo, user);
@@ -541,7 +546,7 @@ export class DineInService {
     const db = this.db as any;
     const items = await db.select({
       id: dineInOrderItems.id, itemId: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty, unitPrice: dineInOrderItems.unitPrice,
-      amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet,
+      amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet, course: dineInOrderItems.course,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, firedAt: dineInOrderItems.firedAt,
       startedAt: dineInOrderItems.startedAt, readyAt: dineInOrderItems.readyAt, estPrep: dineInOrderItems.estPrepMinutes,
     }).from(dineInOrderItems).where(eq(dineInOrderItems.orderId, Number(o.id))).orderBy(dineInOrderItems.id);
@@ -554,7 +559,7 @@ export class DineInService {
       const base = i.startedAt ? Math.floor((now - new Date(i.startedAt).getTime()) / 60000) : elapsedMin;
       const remainingMin = ['ready', 'served', 'voided'].includes(i.kdsStatus) ? 0 : Math.max(0, prep - base);
       const charge = i.itemId === '__buffet_charge__' || i.itemId === '__buffet_overtime__';
-      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
+      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, course: i.course ?? 1, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
     });
     const waitedMin = o.firedAt ? Math.floor((now - new Date(o.firedAt).getTime()) / 60000) : 0;
     const readyInMin = Math.max(0, ...viewItems.filter((v: any) => !['served', 'voided'].includes(v.kds_status)).map((v: any) => v.remaining_min), 0);

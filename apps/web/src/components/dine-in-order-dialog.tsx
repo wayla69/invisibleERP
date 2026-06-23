@@ -19,7 +19,7 @@ type MenuItem = { sku: string; name: string; price: number };
 type MenuCategory = { name?: string; items: MenuItem[] };
 type Menu = { categories: MenuCategory[] };
 
-type Line = { key: string; item_id?: string; name: string; unit_price: number; qty: number };
+type Line = { key: string; item_id?: string; name: string; unit_price: number; qty: number; course: number };
 
 export function DineInOrderDialog({
   tableId,
@@ -38,6 +38,7 @@ export function DineInOrderDialog({
   const [lines, setLines] = useState<Line[]>([]);
   const [free, setFree] = useState({ name: '', unit_price: '' });
   const [guests, setGuests] = useState('');
+  const [course, setCourse] = useState(1);   // course assigned to newly-added lines (fire course-by-course)
   const [discount, setDiscount] = useState('');
   const [tip, setTip] = useState('');
   const [msg, setMsg] = useState('');
@@ -48,9 +49,9 @@ export function DineInOrderDialog({
 
   const addLine = (name: string, unit_price: number, item_id?: string) =>
     setLines((ls) => {
-      const idx = ls.findIndex((l) => l.item_id === item_id && l.name === name && (item_id || true));
+      const idx = ls.findIndex((l) => l.item_id === item_id && l.name === name && l.course === course && (item_id || true));
       if (item_id && idx >= 0) return ls.map((l, j) => (j === idx ? { ...l, qty: l.qty + 1 } : l));
-      return [...ls, { key: `${Date.now()}-${ls.length}`, item_id, name, unit_price, qty: 1 }];
+      return [...ls, { key: `${Date.now()}-${ls.length}`, item_id, name, unit_price, qty: 1, course }];
     });
 
   const setQty = (key: string, delta: number) =>
@@ -66,7 +67,7 @@ export function DineInOrderDialog({
   };
 
   const payload = () =>
-    lines.map((l) => ({ item_id: l.item_id, name: l.name, unit_price: l.unit_price, qty: l.qty }));
+    lines.map((l) => ({ item_id: l.item_id, name: l.name, unit_price: l.unit_price, qty: l.qty, course: l.course }));
 
   const createOrAdd = useMutation({
     mutationFn: () => {
@@ -165,6 +166,12 @@ export function DineInOrderDialog({
                 <Plus className="size-4" /> เพิ่ม
               </Button>
             </div>
+
+            {/* Course for items added next (apps → mains → dessert), fired course-by-course on the KDS */}
+            <div className="flex items-center gap-2 pt-1">
+              <Label htmlFor="course" className="text-xs text-muted-foreground">คอร์สสำหรับรายการที่เพิ่ม</Label>
+              <Input id="course" type="number" min={1} step={1} className="tabular w-16" value={course} onChange={(e) => setCourse(Math.max(1, Number(e.target.value) || 1))} />
+            </div>
           </div>
 
           {/* Cart */}
@@ -180,7 +187,7 @@ export function DineInOrderDialog({
               {lines.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีรายการ — เลือกจากเมนู</p>}
               {lines.map((l) => (
                 <div key={l.key} className="flex items-center gap-2 text-sm">
-                  <span className="flex-1 truncate">{l.name}</span>
+                  <span className="flex-1 truncate">{l.name}{l.course > 1 && <span className="ml-1 text-xs text-muted-foreground">· คอร์ส {l.course}</span>}</span>
                   <div className="flex items-center gap-1">
                     <Button type="button" variant="ghost" size="icon" className="size-6" aria-label="ลด" onClick={() => setQty(l.key, -1)}><Minus className="size-3" /></Button>
                     <span className="tabular w-6 text-center">{l.qty}</span>

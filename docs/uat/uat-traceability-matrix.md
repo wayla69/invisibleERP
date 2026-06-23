@@ -88,6 +88,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-052 | Move onto an occupied table blocked | Feature (table ops) | 20 §6, §13 |
 | UAT-O2C-053 | Transfer line items between tables | Feature (table ops) | 20 §6 |
 | UAT-O2C-054 | Merge two tabs into a combined bill | Feature (table ops) | 20 §6 |
+| UAT-O2C-055 | Fire one course (hold the rest) | Feature (course firing) | 20 §5 |
+| UAT-O2C-056 | Fire next course / empty course | Feature (course firing) | 20 §5, §13 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

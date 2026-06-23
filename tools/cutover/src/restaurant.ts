@@ -298,6 +298,22 @@ async function main() {
   const a16 = (mgBoard.json.tables ?? []).find((t: any) => t.table_no === 'A16');
   ok('Merge tables: source table freed after merge', a16?.status === 'available' && !a16?.session, `${a16?.status} session=${!!a16?.session}`);
 
+  // ── KDS course firing (hold-and-fire course-by-course) ──
+  const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
+  const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});
+  const csOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: csTbl.json.id, session_id: csOpen.json.session_id, items: [{ name: 'ปอเปี๊ยะ', qty: 1, unit_price: 60, station_code: 'hot', course: 1 }, { name: 'สเต๊กปลา', qty: 1, unit_price: 220, station_code: 'hot', course: 2 }] });
+  ok('Course firing: lines carry their course number', csOrd.json.items?.find((i: any) => i.name === 'ปอเปี๊ยะ')?.course === 1 && csOrd.json.items?.find((i: any) => i.name === 'สเต๊กปลา')?.course === 2, JSON.stringify((csOrd.json.items ?? []).map((i: any) => [i.name, i.course])));
+  const fc1 = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=1`, sales1);
+  const c1 = fc1.json.items?.find((i: any) => i.name === 'ปอเปี๊ยะ'); const c2 = fc1.json.items?.find((i: any) => i.name === 'สเต๊กปลา');
+  ok('Course firing: fire course 1 queues only course 1 (course 2 held)', c1?.kds_status === 'queued' && c2?.kds_status === 'new', `c1=${c1?.kds_status} c2=${c2?.kds_status}`);
+  const csFeed = (await inj('GET', '/api/restaurant/kds/feed', sales1)).json;
+  const csFeedItems = (csFeed.stations ?? []).flatMap((s: any) => s.items);
+  ok('Course firing: only the fired course hits the KDS feed, tagged with course', csFeedItems.some((i: any) => i.name === 'ปอเปี๊ยะ' && i.course === 1) && !csFeedItems.some((i: any) => i.name === 'สเต๊กปลา'), `feed=${csFeedItems.filter((i: any) => ['ปอเปี๊ยะ', 'สเต๊กปลา'].includes(i.name)).map((i: any) => i.name)}`);
+  const fc2 = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=2`, sales1);
+  ok('Course firing: firing the next course queues the held items', fc2.json.items?.find((i: any) => i.name === 'สเต๊กปลา')?.kds_status === 'queued', `${fc2.json.items?.find((i: any) => i.name === 'สเต๊กปลา')?.kds_status}`);
+  const fcBad = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=5`, sales1);
+  ok('Course firing: firing an empty course rejected (400 NO_COURSE_ITEMS)', fcBad.status === 400 && fcBad.json.error?.code === 'NO_COURSE_ITEMS', `${fcBad.status} ${fcBad.json.error?.code}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

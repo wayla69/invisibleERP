@@ -10,7 +10,7 @@
 | Process owner | `<<Operations / Revenue Controller>>` |
 | Approver | `<<approver-name / title>>` |
 | Version | **0.1 DRAFT** |
-| Revision date | 2026-06-23 (v1.0) |
+| Revision date | 2026-06-23 (v1.1) |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
 | Related RCM controls | REST-01 … REST-09; GL-01 |
@@ -106,7 +106,7 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
 
 4. **Close.** `POST /api/restaurant/orders/:orderNo/close` (and `/cancel`) terminate the order. *Operational, governed by the non-downgrading automaton.*
 
-5. **KDS (`/api/restaurant/kds`).** `GET /kds/feed`; `PATCH /kds/items/:id` advances state (new → queued → preparing → ready → served) or **void**; stations are configurable. Voided items are excluded from the order total. The feed flags each line's origin (`from_diner` for QR self-orders) and `is_buffet`, so the kitchen sees at a glance which tickets came from a guest's phone and which are buffet refills (the per-pax buffet charge stays off the feed). *Operational, but the void-exclusion is an accuracy control.*
+5. **KDS (`/api/restaurant/kds`).** `GET /kds/feed`; `PATCH /kds/items/:id` advances state (new → queued → preparing → ready → served) or **void**; stations are configurable. Voided items are excluded from the order total. The feed flags each line's origin (`from_diner` for QR self-orders), `is_buffet`, and its **course** number, and is ordered by course so the kitchen works apps → mains → dessert. **Course firing (hold-and-fire):** lines carry a `course` (default 1); `POST /api/restaurant/orders/:orderNo/fire` fires all pending lines, or only one course with `?course=N` (others stay `new`, held off the feed) — `NO_COURSE_ITEMS` if that course has nothing pending. *Operational, but the void-exclusion is an accuracy control.*
 
 6. **Tables & QR.** Tables/zones are CRUD-managed. Each table carries a **stable printed QR** encoding `…/qr/start/:qrToken`; scanning it opens (or idempotently re-joins) the table session and lands the diner on the order page — staff print it from `GET /api/restaurant/tables/:id/qr` (returns the landing URL + a rendered QR image; the web origin is supplied as `?base=`, else `WEB_PUBLIC_URL`). Staff can also open a table directly (`/tables/:id/open`) and reorganise tabs: **move a live tab** to another free table — `POST /api/restaurant/tables/:id/move` (reassigns the session + its open orders, frees the source, occupies the target); **transfer line items** between tables — `POST /api/restaurant/orders/:orderNo/transfer-items` `{item_ids, to_table_id}` (re-parents the chosen non-voided items to the target table's open order, creating one if needed; the bill follows the items); and **merge two tabs into one combined bill** — `POST /api/restaurant/tables/:id/merge` `{from_table_id}` (moves the source's items into this table's order, cancels the emptied source orders, closes the source session and frees its table). All `pos`/`order_mgt`; à la carte only (`BUFFET_MERGE` rejects buffet). Errors: `NO_SESSION`, `TABLE_BUSY` (move target occupied — use merge), `SAME_TABLE`, `NO_ITEMS`. Public QR flow: `POST /api/qr/start/:qrToken`, `/t/:token/bill`, `POST /t/:token/pay` (creates a **PromptPay Pending tender** and returns a **real scannable EMVCo QR image** when the tenant has a PromptPay id). Settlement is **out-of-band**: in production a PSP calls `POST /api/qr/webhook/promptpay` (shared-secret `x-webhook-secret`, **fail-closed** in prod, idempotent) which settles the tender → builds sale + GL + invoice + closes; the diner page polls `GET /t/:token/payment-status` (tolerates the just-closed session) and shows success. In dev (no webhook secret) the diner page offers a **simulate** button → `POST /t/:token/confirm` (same finalize path). A **reconciliation guard** raises `TENDER_MISMATCH` if items changed after payment. Errors: `BAD_QR`, `SESSION_ENDED`, `NO_OPEN_ORDER`, `EMPTY_BILL`, `NO_SALE`, `BAD_WEBHOOK_SIG`, `WEBHOOK_NOT_CONFIGURED`. *Control: REST-04 (PromptPay tender reconciliation guard + secret-gated, fail-closed settlement webhook).*
 
@@ -221,6 +221,7 @@ flowchart TD
 | RATE_LIMITED (429) | Too many public diner requests on one session | Throttle; retry after a moment. |
 | NO_SESSION / TABLE_BUSY / SAME_TABLE | Invalid table-move request | No live tab to move / target occupied (merge instead) / same table. |
 | NO_ITEMS / BUFFET_MERGE | Invalid transfer/merge | No matching items to transfer / buffet tabs can't be merged. |
+| NO_COURSE_ITEMS | Fired a course with nothing pending | Pick a course that still has unfired items. |
 
 ## 14. Revision History
 
@@ -236,3 +237,4 @@ flowchart TD
 | 0.8 | 2026-06-23 | Platform | **Hardening + staff buffet:** §6 — public diner endpoints rate-limited per session (`RATE_LIMITED`); staff can start a buffet from the POS (`POST /api/restaurant/tables/:id/buffet`). |
 | 0.9 | 2026-06-23 | Platform | **Table operations (POS customization Phase 1):** §6 — move a live tab to a free table (`POST /api/restaurant/tables/:id/move`); errors `NO_SESSION`/`TABLE_BUSY`/`SAME_TABLE`. |
 | 1.0 | 2026-06-23 | Platform | **Table operations complete (Phase 1):** §6 — transfer line items between tables (`POST /api/restaurant/orders/:orderNo/transfer-items`) and merge two tabs into a combined bill (`POST /api/restaurant/tables/:id/merge`); errors `NO_ITEMS`/`BUFFET_MERGE`. |
+| 1.1 | 2026-06-23 | Platform | **Course firing (POS customization Phase 2):** §5 — order lines carry a `course`; KDS feed is course-ordered and course-tagged; fire all or one course via `POST …/fire?course=N` (`NO_COURSE_ITEMS`). |

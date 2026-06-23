@@ -142,6 +142,13 @@ actually behave: the **most-ordered dishes**, number of **sessions and covers**,
 **dishes per head**, **average bill per session**, and how often tables run into
 **overtime** — so you can tune pricing, time limits and the dish line-up per tier.
 
+**Courses (serve in stages).** When taking an order you can set a **คอร์ส**
+number for the dishes you add (e.g. 1 = appetisers, 2 = mains, 3 = dessert). On
+the table you can then **ส่งเข้าครัว (ทั้งหมด)** to fire everything, or type a
+course number and tap **ส่งคอร์ส** to fire just that course — the rest stay held
+until you fire them. The KDS shows each ticket's course and lists them in course
+order, so the kitchen cooks in the right sequence.
+
 **Kitchen (KDS).** Open **จอครัว (KDS)** (back-of-house). Tickets are grouped by
 station and refresh automatically; tap a card to advance it
 **เริ่มทำ → เสร็จแล้ว → เสิร์ฟแล้ว**. The colour border flags how long a ticket has
