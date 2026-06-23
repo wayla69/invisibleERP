@@ -40,7 +40,9 @@ async function bootAs(page: Page, me: Me) {
 
 const tabs = (page: Page) => page.getByRole('tablist', { name: 'Workspace' });
 const tab = (page: Page, name: 'ERP' | 'POS') => tabs(page).getByRole('tab', { name, exact: true });
-const navLink = (page: Page, href: string) => page.locator(`a[href="${href}"]`);
+// Scope to SIDEBAR menu links only — the POS home also renders quick-action <a href> buttons
+// (e.g. /pos, /branches), so an unscoped `a[href=...]` would match 2 elements (strict-mode violation).
+const navLink = (page: Page, href: string) => page.locator(`a[data-sidebar="menu-button"][href="${href}"]`);
 
 test('POS-only operator is redirected from the ERP home to the POS home on first landing', async ({ page }) => {
   await bootAs(page, CASHIER); // no saved workspace → role-based default = POS
