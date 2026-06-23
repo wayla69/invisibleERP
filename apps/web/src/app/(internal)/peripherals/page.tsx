@@ -162,8 +162,9 @@ function Display() {
       <CardContent className="space-y-3 text-sm text-muted-foreground">
         <p>จอแสดงผลลูกค้า (pole display / จอที่สอง) จะดึงสถานะของเครื่อง POS แบบเรียลไทม์ — รายการสินค้า ยอดรวม ยอดที่ต้องชำระ และเงินทอน เปิดหน้าจอนี้บนจอที่หันไปทางลูกค้า</p>
         <div className="flex items-end gap-3">
-          <div><Label>เครื่อง POS</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.trim())} className="w-32" /></div>
-          <a href={`/display/${terminal}`} target="_blank" rel="noreferrer"><Button variant="outline" disabled={!terminal}>เปิดจอลูกค้า ↗</Button></a>
+          {/* terminal is a device code — restrict to a safe charset so it can never carry markup into the href */}
+          <div><Label>เครื่อง POS</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} className="w-32" /></div>
+          <a href={`/display/${encodeURIComponent(terminal)}`} target="_blank" rel="noreferrer"><Button variant="outline" disabled={!terminal}>เปิดจอลูกค้า ↗</Button></a>
         </div>
       </CardContent>
     </Card>
