@@ -22,12 +22,13 @@
 ## 2. Two supported substrates
 
 ### A. Railway (primary) — `apps/api/railway.json`, `apps/web/railway.json`
-NIXPACKS build; `api` runs migrations via **`preDeployCommand`** (`db:migrate`) so migrations apply
-**once per release**, not per replica. Health checks: api `/` (and now `/healthz`/`/readyz`), web `/login`.
-Node is pinned to **22** via `.node-version` at the repo root — Nixpacks otherwise auto-selects Node 24,
-which is incompatible with the bundled Corepack and crashes pnpm (`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`)
-before install. Each service must set its **config-as-code path** to its `railway.json` (monorepo:
-root directory stays `/` so the workspace install + lockfile resolve).
+**RAILPACK** build (Railway's current default); `api` runs migrations via **`preDeployCommand`**
+(`db:migrate`) so migrations apply **once per release**, not per replica. Health checks: api `/`
+(and now `/healthz`/`/readyz`), web `/login`. Node is pinned to **22** via `.node-version` / `.nvmrc` /
+`engines.node`. **Do not use the NIXPACKS builder** — it bundles Corepack 0.24.1, which is incompatible
+with pnpm 11.8.0 and crashes (`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`) before install. Each service must
+set its **config-as-code path** to its `railway.json` (monorepo: root directory stays `/` so the
+workspace install + lockfile resolve).
 First-deploy walkthrough (project + Postgres + the two services, env matrix, CORS/`NEXT_PUBLIC_API_URL`
 build-order, CI deploy): **`docs/ops/railway-setup.md`**.
 
