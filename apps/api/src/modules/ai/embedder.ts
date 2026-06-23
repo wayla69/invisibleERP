@@ -7,6 +7,9 @@ import { createHash } from 'node:crypto';
 // to a real model (Voyage/OpenAI/Cohere) behind this same interface; cosine similarity + the stored
 // number[] embeddings move to a pgvector index unchanged at the call sites.
 export const EMBED_DIM = 256;
+// Hard cap on tokens processed per embed call — bounds the work on user-controlled input (a huge
+// query/document can't drive an unbounded loop). 4000 tokens far exceeds any real chunk/query.
+const MAX_TOKENS = 4000;
 
 @Injectable()
 export class EmbedderService {
@@ -30,12 +33,15 @@ function tokenize(text: string): string[] {
 // cosine == dot product. Token overlap → higher cosine; disjoint vocab → ~0 (drives cite-or-refuse).
 function localEmbed(text: string): number[] {
   const v = new Array(EMBED_DIM).fill(0);
-  const toks = tokenize(text);
+  // Truncate first, then cap the loop with a constant bound so user-controlled input cannot drive an
+  // unbounded loop (CodeQL: loop-bound injection / DoS).
+  const toks = tokenize(text).slice(0, MAX_TOKENS);
+  const n = Math.min(toks.length, MAX_TOKENS);
   const bump = (s: string, w: number) => {
     const h = parseInt(createHash('sha1').update(s).digest('hex').slice(0, 8), 16);
     v[h % EMBED_DIM] += w;
   };
-  for (let i = 0; i < toks.length; i++) {
+  for (let i = 0; i < n; i++) {
     bump(toks[i], 1);
     if (i > 0) bump(toks[i - 1] + ' ' + toks[i], 0.5); // bigram for a little phrase sensitivity
   }
