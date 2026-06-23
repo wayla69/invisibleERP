@@ -28,3 +28,5 @@ export const orderChannelEnum = pgEnum('order_channel', ['dine_in', 'web', 'kios
 export const fulfillmentTypeEnum = pgEnum('fulfillment_type', ['dine_in', 'takeaway', 'delivery', 'pickup']);
 export const fulfillmentStatusEnum = pgEnum('fulfillment_status', ['received', 'accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'rejected']);
 export const tableSessionStatusEnum = pgEnum('table_session_status', ['open', 'bill_requested', 'paying', 'closed', 'abandoned']);
+// ── Buffet self-ordering (Phase 2): a session runs in one mode ──
+export const orderModeEnum = pgEnum('order_mode', ['a_la_carte', 'buffet']);

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, Clock, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Utensils } from 'lucide-react';
+import { CheckCircle2, Clock, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Timer, Utensils } from 'lucide-react';
 import { publicApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -12,9 +12,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // ── types (mirror the public QR endpoints) ──
+type Item = { item_id: number; name: string; qty: number; kds_status: string; status_th: string; amount: number; is_buffet: boolean; charge: boolean };
+type Buffet = { package_name: string | null; pax: number | null; expires_at: string | null; minutes_left: number | null; expired: boolean };
 type Status = {
-  table_no: string | null; session_status: string;
-  order: { order_no: string; status: string; waited_min: number; ready_in_min: number; items: { item_id: number; name: string; qty: number; kds_status: string; status_th: string }[] } | null;
+  table_no: string | null; session_status: string; order_mode: 'a_la_carte' | 'buffet'; buffet: Buffet | null;
+  order: { order_no: string; status: string; waited_min: number; ready_in_min: number; items: Item[] } | null;
   bill: { subtotal: number; vat: number; total: number; settled: boolean } | null;
 };
 type Option = { option_id: number; name: string; price_delta: number; is_default: boolean };
@@ -22,6 +24,7 @@ type Group = { group_id: number; code: string; name: string; min_select: number;
 type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; description: string | null; has_modifiers: boolean; modifier_groups: Group[] };
 type Category = { id: number; code: string; name: string; items: MenuItem[] };
 type Menu = { categories: Category[]; uncategorized: MenuItem[]; item_count: number };
+type Tier = { id: number; code: string; name: string; name_en: string | null; price_per_pax: number; time_limit_min: number; overtime_fee_per_pax: number };
 type CartLine = { key: string; sku: string; name: string; qty: number; unitPrice: number; optionIds: number[]; optionLabels: string[] };
 
 const ITEM_COLOR: Record<string, string> = {
@@ -38,13 +41,18 @@ export default function DinerPage() {
   const [tab, setTab] = useState<'menu' | 'order'>('order');
   const [st, setSt] = useState<Status | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [tiers, setTiers] = useState<Tier[] | null>(null);
   const [err, setErr] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [picker, setPicker] = useState<MenuItem | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
+  const [buffetOpen, setBuffetOpen] = useState(false);
   const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number } | null>(null);
   const [paid, setPaid] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const isBuffet = st?.order_mode === 'buffet';
+  const hasOrder = !!st?.order;
 
   const load = useCallback(async () => {
     try { setSt(await publicApi<Status>(`/api/qr/t/${token}`)); setErr(''); }
@@ -53,11 +61,12 @@ export default function DinerPage() {
 
   useEffect(() => { load(); const i = setInterval(load, 5000); return () => clearInterval(i); }, [load]);
 
-  // menu is fetched lazily on first switch to the menu tab
+  // menu + buffet tiers fetched lazily on first switch to the menu tab
   useEffect(() => {
-    if (tab !== 'menu' || menu) return;
-    publicApi<Menu>(`/api/qr/t/${token}/menu`).then(setMenu).catch((e) => setErr(String((e as Error).message)));
-  }, [tab, menu, token]);
+    if (tab !== 'menu') return;
+    if (!menu) publicApi<Menu>(`/api/qr/t/${token}/menu`).then(setMenu).catch((e) => setErr(String((e as Error).message)));
+    if (!tiers) publicApi<{ tiers: Tier[] }>(`/api/qr/t/${token}/buffet/tiers`).then((r) => setTiers(r.tiers)).catch(() => setTiers([]));
+  }, [tab, menu, tiers, token]);
 
   const cartCount = cart.reduce((a, c) => a + c.qty, 0);
   const cartTotal = cart.reduce((a, c) => a + c.unitPrice * c.qty, 0);
@@ -72,7 +81,7 @@ export default function DinerPage() {
   const onItemTap = (it: MenuItem) => {
     if (!it.is_available) return;
     if (it.modifier_groups.length) { setPicker(it); return; }
-    addToCart({ key: `${it.sku}`, sku: it.sku, name: it.name, qty: 1, unitPrice: it.price, optionIds: [], optionLabels: [] });
+    addToCart({ key: `${it.sku}`, sku: it.sku, name: it.name, qty: 1, unitPrice: isBuffet ? 0 : it.price, optionIds: [], optionLabels: [] });
   };
 
   const submitOrder = async () => {
@@ -82,6 +91,13 @@ export default function DinerPage() {
       await publicApi(`/api/qr/t/${token}/order`, { method: 'POST', body: JSON.stringify({ items: cart.map((c) => ({ sku: c.sku, modifier_option_ids: c.optionIds, qty: c.qty })) }) });
       setCart([]); setCartOpen(false); setTab('order'); await load();
     } catch (e) { setErr(String((e as Error).message)); }
+    finally { setBusy(false); }
+  };
+
+  const startBuffet = async (packageId: number, pax: number) => {
+    setBusy(true);
+    try { await publicApi(`/api/qr/t/${token}/buffet/start`, { method: 'POST', body: JSON.stringify({ package_id: packageId, pax }) }); setBuffetOpen(false); await load(); }
+    catch (e) { setErr(String((e as Error).message)); }
     finally { setBusy(false); }
   };
 
@@ -101,6 +117,9 @@ export default function DinerPage() {
     );
 
   const allItems = menu ? [...menu.categories.flatMap((c) => c.items), ...menu.uncategorized] : [];
+  const dishes = st?.order?.items.filter((i) => !i.charge) ?? [];
+  const chargeLines = st?.order?.items.filter((i) => i.charge) ?? [];
+  const canStartBuffet = !isBuffet && !hasOrder && (tiers?.length ?? 0) > 0;
 
   return (
     <main className="mx-auto min-h-svh max-w-md bg-muted/30 p-4 pb-24">
@@ -109,6 +128,7 @@ export default function DinerPage() {
           <Utensils className="size-5" />
         </div>
         <h2 className="text-lg font-semibold">โต๊ะ {st?.table_no ?? '…'}</h2>
+        {isBuffet && st?.buffet && <BuffetChip b={st.buffet} />}
       </div>
       {err && <p className="mb-3 text-sm text-destructive">{err}</p>}
 
@@ -118,8 +138,24 @@ export default function DinerPage() {
           <TabsTrigger value="order"><ReceiptText className="mr-1.5 size-4" /> ออเดอร์ของฉัน</TabsTrigger>
         </TabsList>
 
-        {/* ── เมนู: browse + add to cart ── */}
+        {/* ── เมนู ── */}
         <TabsContent value="menu">
+          {canStartBuffet && (
+            <Card className="mb-4 gap-2 border-primary/40 bg-primary/5 p-4">
+              <strong className="text-sm">เลือกบุฟเฟต์ (ทานได้ไม่อั้นตามเวลา)</strong>
+              <p className="text-xs text-muted-foreground">เลือกแพ็กเกจบุฟเฟต์ก่อนเริ่มสั่งอาหาร หรือเลื่อนลงเพื่อสั่งแบบรายจาน</p>
+              <Button onClick={() => setBuffetOpen(true)} className="mt-1 h-11 w-full"><Timer className="size-4" /> เริ่มบุฟเฟต์</Button>
+            </Card>
+          )}
+          {isBuffet && st?.buffet && (
+            <Card className="mb-4 gap-1 border-primary/40 bg-primary/5 p-3 text-sm">
+              <div className="flex items-center justify-between">
+                <strong>{st.buffet.package_name} · {st.buffet.pax} ท่าน</strong>
+                <BuffetChip b={st.buffet} />
+              </div>
+              <p className="text-xs text-muted-foreground">เลือกอาหารได้ไม่อั้นภายในเวลาที่กำหนด · ทุกจานรวมในบุฟเฟต์แล้ว</p>
+            </Card>
+          )}
           {!menu ? (
             <p className="text-sm text-muted-foreground">กำลังโหลดเมนู…</p>
           ) : allItems.length === 0 ? (
@@ -137,7 +173,7 @@ export default function DinerPage() {
                         {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
                       </div>
                       <div className="ml-3 flex shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold tabular">{baht(it.price)}</span>
+                        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">บุฟเฟต์</span> : baht(it.price)}</span>
                         {it.is_available && <span className="grid size-6 place-items-center rounded-full bg-primary/10 text-primary"><Plus className="size-4" /></span>}
                       </div>
                     </button>
@@ -148,7 +184,7 @@ export default function DinerPage() {
           )}
         </TabsContent>
 
-        {/* ── ออเดอร์ของฉัน: live status + bill + pay (existing flow) ── */}
+        {/* ── ออเดอร์ของฉัน ── */}
         <TabsContent value="order">
           {st?.order ? (
             <>
@@ -164,8 +200,9 @@ export default function DinerPage() {
                     <Clock className="size-4" /> อาหารพร้อมในอีกประมาณ {st.order.ready_in_min} นาที
                   </div>
                 )}
+                {dishes.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่ได้สั่งอาหาร — เปิดแท็บเมนูเพื่อสั่ง</p>}
                 <div className="divide-y">
-                  {st.order.items.map((it) => (
+                  {dishes.map((it) => (
                     <div key={it.item_id} className="flex items-center justify-between py-1.5">
                       <span className="text-sm">{it.qty}× {it.name}</span>
                       <span className={cn('text-xs font-semibold', ITEM_COLOR[it.status_th] ?? 'text-muted-foreground')}>
@@ -178,6 +215,9 @@ export default function DinerPage() {
 
               {st.bill && (
                 <Card className="mb-3 gap-1.5 p-4 text-sm">
+                  {chargeLines.map((c) => (
+                    <div key={c.item_id} className="flex justify-between text-muted-foreground"><span>{c.name}</span><span className="tabular">{baht(c.amount)}</span></div>
+                  ))}
                   <div className="flex justify-between text-muted-foreground"><span>มูลค่าสินค้า</span><span className="tabular">{baht(st.bill.subtotal)}</span></div>
                   <div className="flex justify-between text-muted-foreground"><span>VAT 7%</span><span className="tabular">{baht(st.bill.vat)}</span></div>
                   <div className="mt-1 flex justify-between border-t pt-2 text-lg font-bold text-primary"><span>รวมทั้งสิ้น</span><span className="tabular">{baht(st.bill.total)}</span></div>
@@ -226,19 +266,25 @@ export default function DinerPage() {
         <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md p-4">
           <Button onClick={() => setCartOpen(true)} className="h-14 w-full justify-between text-base shadow-lg">
             <span className="flex items-center gap-2"><ShoppingCart className="size-5" /> ตะกร้า ({cartCount})</span>
-            <span className="tabular">{baht(cartTotal)}</span>
+            <span className="tabular">{isBuffet ? 'บุฟเฟต์' : baht(cartTotal)}</span>
           </Button>
         </div>
       )}
 
-      {picker && <ModifierPicker item={picker} onClose={() => setPicker(null)} onAdd={(line) => { addToCart(line); setPicker(null); }} />}
-      <CartDialog open={cartOpen} onOpenChange={setCartOpen} cart={cart} setCart={setCart} total={cartTotal} busy={busy} onSubmit={submitOrder} />
+      {picker && <ModifierPicker item={picker} buffet={isBuffet} onClose={() => setPicker(null)} onAdd={(line) => { addToCart(line); setPicker(null); }} />}
+      <CartDialog open={cartOpen} onOpenChange={setCartOpen} cart={cart} setCart={setCart} total={cartTotal} buffet={isBuffet} busy={busy} onSubmit={submitOrder} />
+      {buffetOpen && tiers && <BuffetStartDialog tiers={tiers} defaultPax={2} busy={busy} onClose={() => setBuffetOpen(false)} onStart={startBuffet} />}
     </main>
   );
 }
 
+function BuffetChip({ b }: { b: Buffet }) {
+  if (b.expired) return <Badge variant="destructive" className="text-[10px]">หมดเวลา</Badge>;
+  return <Badge variant="secondary" className="gap-1 text-[10px]"><Timer className="size-3" /> เหลือ {b.minutes_left} นาที</Badge>;
+}
+
 // ── modifier picker (one item) ──
-function ModifierPicker({ item, onClose, onAdd }: { item: MenuItem; onClose: () => void; onAdd: (l: CartLine) => void }) {
+function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buffet: boolean; onClose: () => void; onAdd: (l: CartLine) => void }) {
   const [sel, setSel] = useState<Record<number, number[]>>(() => {
     const init: Record<number, number[]> = {};
     for (const g of item.modifier_groups) { const d = g.options.find((o) => o.is_default); init[g.group_id] = d ? [d.option_id] : []; }
@@ -259,7 +305,7 @@ function ModifierPicker({ item, onClose, onAdd }: { item: MenuItem; onClose: () 
   });
   const optionIds = Object.values(sel).flat();
   const byId = new Map(item.modifier_groups.flatMap((g) => g.options).map((o) => [o.option_id, o]));
-  const unitPrice = useMemo(() => item.price + optionIds.reduce((a, id) => a + (byId.get(id)?.price_delta ?? 0), 0), [item.price, optionIds, byId]);
+  const unitPrice = useMemo(() => (buffet ? 0 : item.price + optionIds.reduce((a, id) => a + (byId.get(id)?.price_delta ?? 0), 0)), [buffet, item.price, optionIds, byId]);
 
   const confirm = () => {
     if (missing) return;
@@ -290,7 +336,7 @@ function ModifierPicker({ item, onClose, onAdd }: { item: MenuItem; onClose: () 
                         </span>
                         {o.name}
                       </span>
-                      {o.price_delta > 0 && <span className="text-xs text-muted-foreground tabular">+{baht(o.price_delta)}</span>}
+                      {!buffet && o.price_delta > 0 && <span className="text-xs text-muted-foreground tabular">+{baht(o.price_delta)}</span>}
                     </button>
                   );
                 })}
@@ -300,7 +346,7 @@ function ModifierPicker({ item, onClose, onAdd }: { item: MenuItem; onClose: () 
         </div>
         <DialogFooter>
           <Button onClick={confirm} disabled={!!missing} className="h-12 w-full justify-between text-base">
-            <span>เพิ่มลงตะกร้า</span><span className="tabular">{baht(unitPrice)}</span>
+            <span>เพิ่มลงตะกร้า</span><span className="tabular">{buffet ? 'บุฟเฟต์' : baht(unitPrice)}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -309,8 +355,8 @@ function ModifierPicker({ item, onClose, onAdd }: { item: MenuItem; onClose: () 
 }
 
 // ── cart review + submit ──
-function CartDialog({ open, onOpenChange, cart, setCart, total, busy, onSubmit }: {
-  open: boolean; onOpenChange: (o: boolean) => void; cart: CartLine[]; setCart: (f: (c: CartLine[]) => CartLine[]) => void; total: number; busy: boolean; onSubmit: () => void;
+function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, onSubmit }: {
+  open: boolean; onOpenChange: (o: boolean) => void; cart: CartLine[]; setCart: (f: (c: CartLine[]) => CartLine[]) => void; total: number; buffet: boolean; busy: boolean; onSubmit: () => void;
 }) {
   const setQty = (key: string, delta: number) =>
     setCart((cur) => cur.flatMap((c) => (c.key === key ? (c.qty + delta <= 0 ? [] : [{ ...c, qty: c.qty + delta }]) : [c])));
@@ -328,7 +374,7 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, busy, onSubmit }
                 <div className="min-w-0">
                   <div className="text-sm font-medium">{c.name}</div>
                   {c.optionLabels.length > 0 && <p className="text-xs text-muted-foreground">{c.optionLabels.join(' · ')}</p>}
-                  <p className="text-xs text-muted-foreground tabular">{baht(c.unitPrice)}</p>
+                  <p className="text-xs text-muted-foreground tabular">{buffet ? 'บุฟเฟต์' : baht(c.unitPrice)}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Button size="icon" variant="outline" className="size-7" onClick={() => setQty(c.key, -1)}><Minus className="size-3.5" /></Button>
@@ -341,7 +387,51 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, busy, onSubmit }
         )}
         <DialogFooter>
           <Button onClick={onSubmit} disabled={busy || cart.length === 0} className="h-12 w-full justify-between text-base">
-            <span>ส่งออเดอร์เข้าครัว</span><span className="tabular">{baht(total)}</span>
+            <span>ส่งออเดอร์เข้าครัว</span><span className="tabular">{buffet ? 'บุฟเฟต์' : baht(total)}</span>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── buffet tier picker (choose tier + headcount) ──
+function BuffetStartDialog({ tiers, defaultPax, busy, onClose, onStart }: {
+  tiers: Tier[]; defaultPax: number; busy: boolean; onClose: () => void; onStart: (packageId: number, pax: number) => void;
+}) {
+  const [pax, setPax] = useState(defaultPax);
+  const [sel, setSel] = useState<number | null>(tiers[0]?.id ?? null);
+  const tier = tiers.find((t) => t.id === sel);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>เริ่มบุฟเฟต์</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <span className="text-sm font-medium">จำนวนคน</span>
+            <div className="flex items-center gap-2">
+              <Button size="icon" variant="outline" className="size-8" onClick={() => setPax((p) => Math.max(1, p - 1))}><Minus className="size-4" /></Button>
+              <span className="w-6 text-center text-base tabular">{pax}</span>
+              <Button size="icon" variant="outline" className="size-8" onClick={() => setPax((p) => p + 1)}><Plus className="size-4" /></Button>
+            </div>
+          </div>
+          <div className="grid gap-2">
+            {tiers.map((t) => (
+              <button key={t.id} type="button" onClick={() => setSel(t.id)}
+                className={cn('flex items-center justify-between rounded-lg border p-3 text-left transition', t.id === sel ? 'border-primary bg-primary/5' : 'hover:border-primary/40')}>
+                <div>
+                  <div className="text-sm font-medium">{t.name}</div>
+                  <p className="text-xs text-muted-foreground">{t.time_limit_min} นาที{t.overtime_fee_per_pax > 0 ? ` · เกินเวลา +${baht(t.overtime_fee_per_pax)}/ท่าน` : ''}</p>
+                </div>
+                <span className="text-sm font-semibold tabular">{baht(t.price_per_pax)}/ท่าน</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={() => sel && onStart(sel, pax)} disabled={busy || !sel} className="h-12 w-full justify-between text-base">
+            <span>เริ่มบุฟเฟต์</span><span className="tabular">{tier ? baht(tier.price_per_pax * pax) : ''}</span>
           </Button>
         </DialogFooter>
       </DialogContent>

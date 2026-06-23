@@ -3,7 +3,8 @@
 // tenant_id so the 0002 RLS loop (re-run in 0006) scopes them automatically.
 import { pgTable, bigserial, bigint, text, numeric, integer, timestamp, boolean, jsonb } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
-import { dineInOrderStatusEnum, kdsItemStatusEnum, tableStatusEnum, tableSessionStatusEnum, orderChannelEnum, fulfillmentTypeEnum, fulfillmentStatusEnum } from './enums';
+import { dineInOrderStatusEnum, kdsItemStatusEnum, tableStatusEnum, tableSessionStatusEnum, orderChannelEnum, fulfillmentTypeEnum, fulfillmentStatusEnum, orderModeEnum } from './enums';
+import { buffetPackages } from './menu';
 
 // ── Kitchen stations (ครัวร้อน / ครัวเย็น / เครื่องดื่ม) ──
 export const kitchenStations = pgTable('kitchen_stations', {
@@ -62,6 +63,12 @@ export const tableSessions = pgTable('table_sessions', {
   openedBy: text('opened_by'),
   saleNo: text('sale_no'),
   notes: text('notes'),
+  // ── buffet (Phase 2): a session runs in one mode; buffet fields set when a tier is started ──
+  orderMode: orderModeEnum('order_mode').notNull().default('a_la_carte'),
+  buffetPackageId: bigint('buffet_package_id', { mode: 'number' }).references(() => buffetPackages.id),
+  pax: integer('pax'),
+  buffetStartedAt: timestamp('buffet_started_at', { withTimezone: true }),
+  buffetExpiresAt: timestamp('buffet_expires_at', { withTimezone: true }),
 });
 
 // ── ออเดอร์ทานที่ร้าน (kitchen ticket header) ──
@@ -111,6 +118,7 @@ export const dineInOrderItems = pgTable('dine_in_order_items', {
   amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
   modifiers: jsonb('modifiers'),
   notes: text('notes'),
+  isBuffet: boolean('is_buffet').notNull().default(false),  // buffet food line (priced ฿0, still hits KDS)
   kdsStatus: kdsItemStatusEnum('kds_status').notNull().default('new'),
   estPrepMinutes: integer('est_prep_minutes'),
   firedAt: timestamp('fired_at', { withTimezone: true }),

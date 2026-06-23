@@ -44,6 +44,25 @@ const PublicItemInput = z.object({
 export const PublicOrderBody = z.object({ items: z.array(PublicItemInput).min(1).max(50) });
 export type PublicOrderDto = z.infer<typeof PublicOrderBody>;
 
+// ── buffet packages / tiers (Phase 2) ──
+export const BuffetPackageBody = z.object({
+  code: z.string().min(1),
+  name: z.string().min(1),
+  name_en: z.string().optional(),
+  price_per_pax: z.number().nonnegative(),
+  time_limit_min: z.number().int().positive().optional(),
+  overtime_fee_per_pax: z.number().nonnegative().optional(),
+  item_skus: z.array(z.string()).optional(),       // menu items included in this tier
+});
+export type BuffetPackageDto = z.infer<typeof BuffetPackageBody>;
+
+export const BuffetPackageUpdateBody = BuffetPackageBody.partial().extend({ active: z.boolean().optional() });
+export type BuffetPackageUpdateDto = z.infer<typeof BuffetPackageUpdateBody>;
+
+// PUBLIC diner: start a buffet on the table
+export const StartBuffetBody = z.object({ package_id: z.number().int().positive(), pax: z.number().int().positive().max(99).optional() });
+export type StartBuffetDto = z.infer<typeof StartBuffetBody>;
+
 export const KdsActionBody = z.object({ action: z.enum(['start', 'ready', 'recall', 'serve', 'void']), reason: z.string().optional() });
 export type KdsActionDto = z.infer<typeof KdsActionBody>;
 

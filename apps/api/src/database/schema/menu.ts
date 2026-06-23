@@ -75,6 +75,29 @@ export const menuItemModifierGroups = pgTable('menu_item_modifier_groups', {
   sort: integer('sort').default(0),
 }, (t) => ({ uqLink: unique('uq_item_group').on(t.menuItemId, t.groupId) }));
 
+// ── Buffet packages / tiers (Phase 2) — per-pax price + dining time window; food billed at ฿0 ──
+export const buffetPackages = pgTable('buffet_packages', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  nameEn: text('name_en'),
+  pricePerPax: numeric('price_per_pax', { precision: 14, scale: 2 }).notNull(),
+  timeLimitMin: integer('time_limit_min').notNull().default(90),
+  overtimeFeePerPax: numeric('overtime_fee_per_pax', { precision: 14, scale: 2 }).notNull().default('0'),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uqPkg: unique('buffet_packages_tenant_code_uq').on(t.tenantId, t.code) }));
+
+// which menu items a tier includes (eligibility) — anything not listed can't be ordered on that tier
+export const buffetPackageItems = pgTable('buffet_package_items', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  packageId: bigint('package_id', { mode: 'number' }).notNull().references(() => buffetPackages.id),
+  menuItemId: bigint('menu_item_id', { mode: 'number' }).notNull().references(() => menuItems.id),
+}, (t) => ({ uqLink: unique('buffet_package_items_uq').on(t.packageId, t.menuItemId) }));
+
 export type MenuItem = typeof menuItems.$inferSelect;
 export type MenuCategory = typeof menuCategories.$inferSelect;
 export type ModifierGroup = typeof modifierGroups.$inferSelect;
+export type BuffetPackage = typeof buffetPackages.$inferSelect;

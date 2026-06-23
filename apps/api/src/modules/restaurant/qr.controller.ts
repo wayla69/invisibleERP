@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Public, NoTx } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { QrService } from './qr.service';
-import { PublicOrderBody, type PublicOrderDto } from './dto';
+import { PublicOrderBody, StartBuffetBody, type PublicOrderDto, type StartBuffetDto } from './dto';
 
 const ConfirmBody = z.object({ payment_no: z.string().min(1) });
 
@@ -25,6 +25,12 @@ export class QrController {
 
   @Public() @NoTx() @Post('t/:token/order')
   order(@Param('token') token: string, @Body(new ZodValidationPipe(PublicOrderBody)) b: PublicOrderDto) { return this.qr.order(token, b); }
+
+  @Public() @NoTx() @Get('t/:token/buffet/tiers')
+  buffetTiers(@Param('token') token: string) { return this.qr.buffetTiers(token); }
+
+  @Public() @NoTx() @Post('t/:token/buffet/start')
+  startBuffet(@Param('token') token: string, @Body(new ZodValidationPipe(StartBuffetBody)) b: StartBuffetDto) { return this.qr.startBuffet(token, b.package_id, b.pax); }
 
   @Public() @NoTx() @Post('t/:token/bill')
   bill(@Param('token') token: string) { return this.qr.requestBill(token); }

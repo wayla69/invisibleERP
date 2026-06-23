@@ -67,6 +67,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-031 | Freeform/priced self-order rejected | REST-08 | 20 §7, §9 |
 | UAT-O2C-032 | 86'd item self-order blocked | REST-08 | 20 §7, §9 |
 | UAT-O2C-033 | Menu/order on ended session rejected | REST-08 | 20 §7, §13 |
+| UAT-O2C-034 | Admin creates a buffet tier | REST-09 | 20 §7 |
+| UAT-O2C-035 | Diner starts buffet (per-pax charge + window) | REST-09 | 20 §7, §8 |
+| UAT-O2C-036 | Buffet food ฿0 but hits KDS | REST-09 | 20 §7, §9 |
+| UAT-O2C-037 | Off-tier buffet item rejected | REST-09 | 20 §7, §9, §13 |
+| UAT-O2C-038 | One mode per session (no mixing) | REST-09 | 20 §7, §9, §13 |
+| UAT-O2C-039 | Ordering after buffet window blocked | REST-09 | 20 §7, §9, §13 |
+| UAT-O2C-040 | Overtime surcharge billed past window | REST-09 | 20 §7, §9 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

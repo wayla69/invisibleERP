@@ -97,6 +97,23 @@ Guests can order from their own phone — no app, no login:
    (**รอคิว → กำลังปรุง → พร้อมเสิร์ฟ → เสิร์ฟแล้ว**) and the estimated wait,
    then can **เรียกเก็บเงิน** and pay by **PromptPay** themselves.
 
+**Buffet ordering.** If the shop offers buffet, the guest can tap **เริ่มบุฟเฟต์**,
+pick a **tier** and the **number of diners**, and confirm. The table is charged a
+single **per-head buffet price** and a **dining time limit** starts (a countdown
+shows on the guest's screen). After that, every buffet dish the guest orders is
+**฿0** but still goes to the kitchen as normal. A few rules keep it clean:
+
+- A table is **either buffet or à la carte** — once à la carte ordering has
+  started you can't switch it to buffet (start a fresh session instead).
+- Only items that belong to the chosen tier can be ordered (others are hidden);
+  ordering after the time is up is blocked.
+- If the tier has an **overtime fee** and the guest runs over time, the surcharge
+  is added automatically when the bill is requested.
+
+Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
+time limit, optional overtime fee, and the menu SKUs included. Creating/editing
+tiers is a master-data task (separate from front-of-house roles).
+
 **Kitchen (KDS).** Open **จอครัว (KDS)** (back-of-house). Tickets are grouped by
 station and refresh automatically; tap a card to advance it
 **เริ่มทำ → เสร็จแล้ว → เสิร์ฟแล้ว**. The colour border flags how long a ticket has
