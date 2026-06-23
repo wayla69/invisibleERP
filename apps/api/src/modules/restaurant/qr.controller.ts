@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Headers } from '@nestjs/common';
 import { z } from 'zod';
 import { Public, NoTx } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -6,6 +6,7 @@ import { QrService } from './qr.service';
 import { PublicOrderBody, StartBuffetBody, type PublicOrderDto, type StartBuffetDto } from './dto';
 
 const ConfirmBody = z.object({ payment_no: z.string().min(1) });
+const WebhookBody = z.object({ payment_no: z.string().min(1), status: z.string().optional() });
 
 // PUBLIC diner endpoints — no login. @NoTx() opts out of the per-request tenant tx (which would set
 // bypass_rls='on' for an anonymous request); the service sets app.tenant_id from the verified HMAC
@@ -40,4 +41,11 @@ export class QrController {
 
   @Public() @NoTx() @Post('t/:token/confirm')
   confirm(@Param('token') token: string, @Body(new ZodValidationPipe(ConfirmBody)) b: { payment_no: string }) { return this.qr.confirm(token, b.payment_no); }
+
+  @Public() @NoTx() @Get('t/:token/payment-status')
+  paymentStatus(@Param('token') token: string) { return this.qr.paymentStatus(token); }
+
+  // PSP settlement webhook (real PromptPay) — shared-secret gated, fail-closed in prod, idempotent.
+  @Public() @NoTx() @Post('webhook/promptpay')
+  promptpayWebhook(@Headers('x-webhook-secret') secret: string | undefined, @Body(new ZodValidationPipe(WebhookBody)) b: z.infer<typeof WebhookBody>) { return this.qr.promptPayWebhook(b.payment_no, secret); }
 }

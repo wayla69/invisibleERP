@@ -84,9 +84,10 @@ the full flow.
 
 Guests can order from their own phone — no app, no login:
 
-1. **Open the table** as usual (floor plan → **เปิดโต๊ะ**, or the guest scans the
-   printed table QR to open the session themselves). This starts a table session
-   and a unique link.
+1. **Open the table.** Each table has a **printed QR sticker** (print it from
+   **โต๊ะ → QR ติดโต๊ะ**); when a guest scans it the session opens (or re-joins)
+   automatically and their phone lands on the order page. Staff can also open the
+   table from the floor plan (**เปิดโต๊ะ**).
 2. The guest opens the **เมนู** tab, browses by category, picks options
    (size, spice, add-ons) where offered, reviews the **ตะกร้า** (cart) and taps
    **ส่งออเดอร์เข้าครัว** (send order to kitchen).
@@ -95,7 +96,11 @@ Guests can order from their own phone — no app, no login:
    the same bill during the visit.
 4. On the **ออเดอร์ของฉัน** tab the guest sees live progress per dish
    (**รอคิว → กำลังปรุง → พร้อมเสิร์ฟ → เสิร์ฟแล้ว**) and the estimated wait,
-   then can **เรียกเก็บเงิน** and pay by **PromptPay** themselves.
+   then **เรียกเก็บเงิน** and pay by **PromptPay**: a real QR appears, the guest
+   scans it in their banking app, and the page confirms **automatically** once the
+   bank notifies us — no staff step. (For this to settle automatically the
+   business needs a PromptPay ID set and the payment webhook configured; without
+   it, a simulate button completes the demo.)
 
 **Buffet ordering.** If the shop offers buffet, the guest can tap **เริ่มบุฟเฟต์**,
 pick a **tier** and the **number of diners**, and confirm. The table is charged a

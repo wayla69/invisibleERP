@@ -1,5 +1,6 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
+import QRCode from 'qrcode';
 import { eq, and, asc, desc, inArray, ne } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { diningTables, floorZones, tableSessions, dineInOrders } from '../../database/schema';
@@ -91,6 +92,21 @@ export class TableService {
     await db.update(tableSessions).set({ publicToken }).where(eq(tableSessions.id, s.id));
     await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, tableId), inArray(diningTables.status, ['available', 'reserved'] as any)));
     return { session_id: Number(s.id), session_no: sessionNo, public_token: publicToken, table_no: t.tableNo, qr_token: t.qrToken, reused: false };
+  }
+
+  // Printable diner QR for a table — encodes the STABLE landing URL (…/qr/start/:qrToken). Scanning it
+  // opens/joins the table session and drops the guest on the order page. `base` = the web origin
+  // (passed by the admin UI as window.location.origin), else WEB_PUBLIC_URL, else a relative path.
+  async qrSticker(tableId: number, base: string | undefined, _user: JwtUser) {
+    const db = this.db as any;
+    const [t] = await db.select().from(diningTables).where(eq(diningTables.id, tableId)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
+    if (!t.qrToken) throw new BadRequestException({ code: 'NO_QR', message: 'Table has no QR token', messageTh: 'โต๊ะนี้ยังไม่มี QR' });
+    const origin = (base && /^https?:\/\//.test(base) ? base.replace(/\/+$/, '') : (process.env.WEB_PUBLIC_URL || '').replace(/\/+$/, ''));
+    const path = `/qr/start/${t.qrToken}`;
+    const url = origin ? `${origin}${path}` : path;
+    const qrImage = await QRCode.toDataURL(url, { margin: 1, width: 320 });
+    return { table_no: t.tableNo, qr_token: t.qrToken, url, qr_image: qrImage };
   }
 
   // staff status board: table + live session + its open order summary
