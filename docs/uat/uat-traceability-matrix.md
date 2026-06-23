@@ -128,6 +128,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-016 | Sub-ledger reconciliation | REC-01 | 04 §9 |
 | UAT-GL-017 | Reconciliation prepare→certify | REC-02/03 | 04 §9 |
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
+| UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
+| UAT-GL-020 | Bank reconciliation tenant-scoped | ITGC-AC-03 / REC-02 | 07 §7 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -245,7 +247,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 02 Order-to-Cash | 19 | 9 |
 | 03 Procure-to-Pay | 17 | 9 |
 | 04 Inventory & WMS | 23 | 6 |
-| 05 GL & Close | 18 | 9 |
+| 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
 | 08 Admin / SoD / Audit | 16 | 10 |

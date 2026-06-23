@@ -42,6 +42,7 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'hqadmin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: null }, // HQ super-admin (no tenant)
     { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
     { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t2 },
   ]).onConflictDoNothing();
@@ -105,6 +106,17 @@ async function main() {
   await inj('POST', '/api/revenue/schedules', sales2, { total_amount: 700, start_period: '2034-01', months: 7 });
   const l1 = await inj('GET', '/api/revenue/schedules', sales1);
   ok('RLS: T1 sees only its own schedule (600, not 700)', (l1.json.schedules ?? []).some((x: any) => near(x.total_amount, 600)) && !(l1.json.schedules ?? []).some((x: any) => near(x.total_amount, 700)), JSON.stringify((l1.json.schedules ?? []).map((x: any) => x.total_amount)));
+
+  // ── cross-tenant guard (W2/M1): HQ super-admin (no tenant) must name a tenant; recognition is scoped ──
+  await inj('POST', '/api/revenue/schedules', sales1, { total_amount: 300, start_period: '2035-01', months: 1 }); // T1 due line in 2035-01
+  await inj('POST', '/api/revenue/schedules', sales2, { total_amount: 400, start_period: '2035-01', months: 1 }); // T2 due line in 2035-01
+  const hqadmin = await login('hqadmin', 'admin123');
+  const recNoTenant = await inj('POST', '/api/revenue/recognize?period=2035-01', hqadmin);
+  ok('HQ admin recognize without tenant_id → 400 TENANT_REQUIRED', recNoTenant.status === 400 && recNoTenant.json.error?.code === 'TENANT_REQUIRED', `${recNoTenant.status} ${recNoTenant.json.error?.code}`);
+  const recT1 = await inj('POST', `/api/revenue/recognize?period=2035-01&tenant_id=${t1}`, hqadmin);
+  ok('HQ admin recognize tenant_id=T1 → ONLY T1 line (count 1, amount 300)', recT1.json.recognized_count === 1 && near(recT1.json.total_recognized, 300), JSON.stringify({ c: recT1.json.recognized_count, t: recT1.json.total_recognized }));
+  const recT2 = await inj('POST', `/api/revenue/recognize?period=2035-01&tenant_id=${t2}`, hqadmin);
+  ok('T2 line untouched by the T1 run → recognized only now (count 1, amount 400)', recT2.json.recognized_count === 1 && near(recT2.json.total_recognized, 400), JSON.stringify({ c: recT2.json.recognized_count, t: recT2.json.total_recognized }));
 
   await app.close();
   await pg.close();

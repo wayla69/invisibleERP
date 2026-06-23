@@ -48,9 +48,13 @@ export class BankService {
     const db = this.db as any;
     const acct = await this.loadAccount(bankAccountId);
     const bankGl = acct.glAccountCode;
+    // Scope book lines to THIS account's tenant — the bank GL (e.g. 1010) is shared across tenants, so an
+    // Admin caller (RLS-bypass) would otherwise match/aggregate another tenant's cash movements. (null
+    // tenant = an HQ-level account → no scope predicate, by the HQ-sees-all model.)
+    const tenantPred = acct.tenantId != null ? [eq(journalEntries.tenantId, acct.tenantId)] : [];
     const bookLines = await db.select({ id: journalLines.id, debit: journalLines.debit, credit: journalLines.credit, entryDate: journalEntries.entryDate, source: journalEntries.source, sourceRef: journalEntries.sourceRef })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, bankGl), eq(journalEntries.status, 'Posted')));
+      .where(and(eq(journalLines.accountCode, bankGl), eq(journalEntries.status, 'Posted'), ...tenantPred));
     const matchedRows = await db.select({ jl: bankStatementLines.matchedJournalLineId }).from(bankStatementLines).where(and(eq(bankStatementLines.bankAccountId, bankAccountId), isNotNull(bankStatementLines.matchedJournalLineId)));
     const usedJl = new Set<number>(matchedRows.map((r: any) => Number(r.jl)));
     const stmtLines = await db.select().from(bankStatementLines).where(and(eq(bankStatementLines.bankAccountId, bankAccountId), eq(bankStatementLines.reconciled, 'false'))).orderBy(asc(bankStatementLines.lineDate));
@@ -110,9 +114,11 @@ export class BankService {
     const acct = await this.loadAccount(bankAccountId);
     const bankGl = acct.glAccountCode;
     const cutoff = asOf ?? '9999-12-31';
+    // Scope to this account's tenant (shared bank GL across tenants) — see autoMatch.
+    const tenantPred = acct.tenantId != null ? [eq(journalEntries.tenantId, acct.tenantId)] : [];
     const bookLines = await db.select({ id: journalLines.id, debit: journalLines.debit, credit: journalLines.credit, entryNo: journalEntries.entryNo, entryDate: journalEntries.entryDate, memo: journalLines.memo })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, bankGl), eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${cutoff}`));
+      .where(and(eq(journalLines.accountCode, bankGl), eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${cutoff}`, ...tenantPred));
     const glBalance = round4(n(acct.openingBalance) + bookLines.reduce((a: number, l: any) => a + (n(l.debit) - n(l.credit)), 0));
     const [stmt] = await db.select().from(bankStatements).where(and(eq(bankStatements.bankAccountId, bankAccountId), sql`${bankStatements.statementDate} <= ${cutoff}`)).orderBy(desc(bankStatements.statementDate), desc(bankStatements.id)).limit(1);
     const statementBalance = stmt ? round4(n(stmt.closingBal)) : round4(n(acct.openingBalance));
