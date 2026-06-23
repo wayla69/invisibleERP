@@ -1,12 +1,12 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
+    "builder": "RAILPACK",
     "buildCommand": "pnpm install && pnpm --filter @ierp/shared build && pnpm --filter @ierp/api build"
   },
   "deploy": {
     "startCommand": "node apps/api/dist/main.js",
-    "preDeployCommand": "pnpm --filter @ierp/api db:migrate",
+    "preDeployCommand": "pnpm --filter @ierp/api db:migrate && pnpm --filter @ierp/api db:seed",
     "healthcheckPath": "/",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",

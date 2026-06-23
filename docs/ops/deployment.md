@@ -22,8 +22,17 @@
 ## 2. Two supported substrates
 
 ### A. Railway (primary) — `apps/api/railway.json`, `apps/web/railway.json`
-NIXPACKS build; `api` runs migrations via **`preDeployCommand`** (`db:migrate`) so migrations apply
-**once per release**, not per replica. Health checks: api `/` (and now `/healthz`/`/readyz`), web `/login`.
+**RAILPACK** build (Railway's current default); `api` runs **migrate + seed** via **`preDeployCommand`**
+(`db:migrate && db:seed`) so the schema applies and the baseline rows (permissions, HQ tenant, the
+`admin` user with a forced first-login password change) exist **once per release**, not per replica. The
+seed is idempotent (`onConflictDoNothing`) — it never resets a changed admin password. Health checks: api `/`
+(and now `/healthz`/`/readyz`), web `/login`. Node is pinned to **22** via `.node-version` / `.nvmrc` /
+`engines.node`. **Do not use the NIXPACKS builder** — it bundles Corepack 0.24.1, which is incompatible
+with pnpm 11.8.0 and crashes (`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`) before install. Each service must
+set its **config-as-code path** to its `railway.json` (monorepo: root directory stays `/` so the
+workspace install + lockfile resolve).
+First-deploy walkthrough (project + Postgres + the two services, env matrix, CORS/`NEXT_PUBLIC_API_URL`
+build-order, CI deploy): **`docs/ops/railway-setup.md`**.
 
 ### B. Containers (portable / local prod-like) — Dockerfiles + `docker-compose.yml`
 - `apps/api/Dockerfile`, `apps/web/Dockerfile` — multi-stage, non-root `node` user, `HEALTHCHECK`
@@ -35,6 +44,21 @@ NIXPACKS build; `api` runs migrations via **`preDeployCommand`** (`db:migrate`) 
 ```bash
 docker compose up --build           # local full stack on :3000 / :8000 / :5432
 ```
+
+### C. GitHub Codespaces (cloud, browser-accessible) — `.devcontainer/` + `docker-compose.codespaces.yml`
+For a hands-on run with no local install: open the repo in a Codespace. `.devcontainer/devcontainer.json`
+provisions docker-in-docker, brings the stack up on create, and forwards port **3000** to a
+`https://*.github.dev` URL. Because the browser is **not** on `localhost` there, the Codespaces overlay
+`docker-compose.codespaces.yml` builds web with `NEXT_PUBLIC_API_URL=""` and sets `API_PROXY_TARGET=http://api:8000`
+so the web app makes **same-origin** `/api/*` calls that Next forwards to the api container — making :3000
+self-contained (single port). The same overlay works for any single-port preview/tunnel.
+
+```bash
+# what the devcontainer runs (also usable for any cloud single-port preview):
+docker compose -f docker-compose.yml -f docker-compose.codespaces.yml up --build
+```
+The opt-in proxy is gated behind `API_PROXY_TARGET` in `apps/web/next.config.mjs`, so it is a **no-op in
+prod** (Railway keeps web and API on separate origins via `NEXT_PUBLIC_API_URL`).
 
 ## 3. Migrations on deploy
 Hand-written SQL in `apps/api/drizzle/` applied by `drizzle-kit migrate` (`pnpm --filter @ierp/api db:migrate`).
@@ -56,3 +80,5 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
+| 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
+| 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
