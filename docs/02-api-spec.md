@@ -191,7 +191,7 @@ GET    /api/campaigns/active                              popup/ticker สำห
 GET/POST/PATCH/DELETE /api/admin/users           (admin delete-protected)
 PUT    /api/admin/users/{username}/permissions   per-user override (empty=inherit)
 GET/PUT /api/admin/roles/{role}/permissions      role defaults (Admin full hardcoded)
-GET/POST/PATCH/DELETE /api/customers             internal CRM (Credit_Term/Limit/Hold)
+GET    /api/customers/{name}                     internal CRM detail (orders/stats/ar_balance)
 ```
 
 ---

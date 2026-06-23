@@ -125,6 +125,7 @@ jobs:
           - { pkg: cutover, script: epm-planning }
           - { pkg: cutover, script: bi }
           - { pkg: cutover, script: demand-ml }
+          - { pkg: cutover, script: customers }
           - { pkg: cutover, script: branch }
           - { pkg: cutover, script: channel }
           - { pkg: cutover, script: offline-sync }

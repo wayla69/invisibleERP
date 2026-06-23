@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.1 · 2026-06-22**
+**Status: DRAFT v0.2 · 2026-06-23**
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R13) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -56,6 +56,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-020 | POS home store overview | Feature (POS dashboard) | 01 §0 |
 | UAT-O2C-021 | Cashier read-only shift KPIs | RBAC (least-privilege read) | 01 §0 |
 | UAT-O2C-022 | ERP/POS workspace switcher | Feature (ERP/POS workspaces) | 00 §4 |
+| UAT-O2C-023 | Pricing rules apply at dine-in checkout | REV-01, GL-01 | 20 §8 |
+| UAT-O2C-024 | Service charge + satang rounding post & balance | GL-01 | 20 §8 |
+| UAT-O2C-025 | Pricing rules NOT applied unless opted in | REV-01 | 20 §8 |
+| UAT-O2C-026 | Cashier-speed quick-tender & change (UI) | Feature (cashier speed) | 01 §0 |
 | UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
@@ -79,6 +83,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-015 | Match idempotency | EXP-03 | 02 §7 |
 | UAT-P2P-016 | RLS vendor isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-P2P-017 | AP↔GL reconciliation | REC-01 | 04 §9 |
+| UAT-P2P-018 | Supplier portal: vendor sees only own POs | Feature (supplier portal) | 02 §7 |
+| UAT-P2P-019 | Supplier acknowledge + submit invoice | Feature (supplier portal) | 02 §7 |
+| UAT-P2P-020 | Supplier cannot invoice another vendor's PO | Feature (supplier portal) | 02 §7 |
+| UAT-P2P-021 | Supplier portal unlinked user refused | Feature (supplier portal) | 02 §7 |
 | UAT-P2P-022 | AP bill idempotency | EXP-03 / GL-01 | 02 §7 |
 | UAT-P2P-023 | AP payment idempotency | EXP-03 / GL-01 | 02 §7 |
 
@@ -197,6 +205,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-014 | Self-serve signup | ITGC-AC-04 | 08 §7 |
 | UAT-ADM-015 | Duplicate tenant 409 | ITGC-AC-04 | 08 §13 |
 | UAT-ADM-016 | SoD conflict report | ITGC-AC-08/09 | 08 §9 |
+| UAT-ADM-017 | AI-proposed action requires human approval | ITGC-AC-09, GL-01 | 08 §7 |
+| UAT-ADM-018 | AI action — self-approval blocked (SoD) | ITGC-AC-09 | 08 §7 |
+| UAT-ADM-019 | AI action — approver lacks kind permission | ITGC-AC-02/09 | 08 §7 |
+| UAT-ADM-020 | AI action — tenant isolation (RLS) | ITGC-AC-03 | 08 §7 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -226,6 +238,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-022 | Demand forecast auto-select + persist | BI-04 (advisory) | 26 §8a |
 | UAT-RPT-023 | Demand forecast input guards | Feature (demand ML guard) | 26 §8a |
 | UAT-RPT-024 | Demand forecasts tenant-isolated (RLS) | ITGC-AC (RLS) | 26 §8a |
+| UAT-RPT-025 | Customer-360 detail + RLS + perm gate | Feature (CRM 360), ITGC-AC | 26 §7 |
+| UAT-RPT-026 | Analytics HTTP layer (guard stack) | ITGC-AC-02 | 26 §7 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 
@@ -249,13 +263,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 19 | 9 |
-| 03 Procure-to-Pay | 17 | 9 |
+| 02 Order-to-Cash | 27 | 9 |
+| 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 16 | 10 |
-| 09 Reports & Analytics | 24 | 5 |
+| 08 Admin / SoD / Audit | 20 | 10 |
+| 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **159** | **69** |
+| **Total** | **202** | **70** |

@@ -96,7 +96,7 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
 
 4. **Sales cube & finance trend (perm `exec`).** `GET /api/bi/sales-cube?period=day|week|month` aggregates `custPosSales`. `GET /api/bi/finance-trend?months=&ledger=` aggregates `journal_lines` by period and account type (revenue / expense / gross profit), multi-ledger with the default leading ledger (TFRS). Both are **derived from the posted ledger / POS sales**, so their accuracy depends on source completeness. *Control: BI-01 — finance-trend/P&L tie to trial balance; daily-sales/cube tie to the POS journal.*
 
-5. **Pipeline trend, snapshots & subscriptions (perm `exec`).** `GET /api/bi/pipeline-trend`; `POST /api/bi/snapshots/refresh` and `GET /api/bi/snapshots`; report subscriptions CRUD (`GET`/`POST`/`DELETE /api/bi/subscriptions`). *Operational.*
+5. **Pipeline trend, snapshots & subscriptions (perm `exec`).** `GET /api/bi/pipeline-trend`; `POST /api/bi/snapshots/refresh` and `GET /api/bi/snapshots`; report subscriptions CRUD (`GET`/`POST /api/bi/subscriptions`, `DELETE /api/bi/subscriptions/:id`). *Operational.*
 
 6. **Analytics — replenishment (perm `planner`/`dashboard`/`warehouse`).** `GET /api/analytics/replenishment` returns items with urgency critical/warning; reorder point = `avg_daily_sales × lead_time_days + stdev_daily × 1.5`, with `days_of_stock` and predicted stockout. *Operational / advisory.*
 
@@ -186,3 +186,4 @@ flowchart TD
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | D4: added step 8a — demand ML (multi-model forecasting + walk-forward backtesting, `/api/demand/*`), WAPE/MASE definitions, control rows (BI-01 backtest accuracy gate, BI-04 advisory boundary), accuracy KPI and `INSUFFICIENT_HISTORY`/`UNKNOWN_ALGORITHM` error codes. Verified by the `demand-ml` harness. |
+| 0.3 | 2026-06-23 | Platform | Doc-drift fix: §5 — BI report-subscription delete corrected to `DELETE /api/bi/subscriptions/:id` (route is keyed by id). |
