@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, Public, NoTx, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ChannelAdapterService } from './channel-adapter.service';
+import { qint, qintOpt } from '../../common/query';
 
 const AdapterBody = z.object({ id: z.number().optional(), platform: z.string().min(1), store_ref: z.string().optional(), enabled: z.boolean().optional(), auto_accept: z.boolean().optional(), config: z.record(z.any()).optional() });
 const StatusBody = z.object({ status: z.string().min(1) });
@@ -19,7 +20,7 @@ export class ChannelAdapterController {
   @Get('adapters') list() { return this.svc.listAdapters(); }
   @Post('adapters') upsert(@Body(new ZodValidationPipe(AdapterBody)) b: z.infer<typeof AdapterBody>, @CurrentUser() u: JwtUser) { return this.svc.upsertAdapter(b, u); }
   @Post(':platform/menu-sync') menuSync(@Param('platform') p: string, @CurrentUser() u: JwtUser) { return this.svc.menuSyncOut(p, u); }
-  @Get('orders') orders(@Query('limit') limit?: string) { return this.svc.listChannelOrders(limit ? +limit : 50); }
+  @Get('orders') orders(@Query('limit') limit?: string) { return this.svc.listChannelOrders(qint('limit', limit, 50)); }
   @Post('orders/:orderNo/status') status(@Param('orderNo') no: string, @Body(new ZodValidationPipe(StatusBody)) b: z.infer<typeof StatusBody>) { return this.svc.updateStatus(no, b.status); }
 }
 

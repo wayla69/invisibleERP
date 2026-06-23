@@ -5,6 +5,7 @@ import { Permissions, Public, NoTx, CurrentUser, type JwtUser } from '../../comm
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { verifyWebhookSignature } from '../../common/crypto';
 import { PosTerminalService } from './pos-terminal.service';
+import { qint, qintOpt } from '../../common/query';
 
 const TerminalBody = z.object({ terminal_code: z.string().min(1), name: z.string().optional(), provider: z.string().optional() });
 const ChargeBody = z.object({ terminal_code: z.string().optional(), sale_no: z.string().optional(), amount: z.number().positive(), type: z.enum(['sale', 'preauth']).optional(), currency: z.string().optional(), token: z.string().optional(), record_tender: z.boolean().optional() });
@@ -28,7 +29,7 @@ export class PosTerminalController {
   @Get('intents') intents(@Query('sale_no') saleNo?: string) { return this.svc.listIntents(saleNo); }
 
   @Post('settle') @Permissions('creditors', 'exec') settle(@Body(new ZodValidationPipe(SettleBody)) b: z.infer<typeof SettleBody>, @CurrentUser() u: JwtUser) { return this.svc.settle(b, u); }
-  @Get('settlements') @Permissions('creditors', 'exec') settlements(@Query('limit') limit?: string) { return this.svc.listSettlements(limit ? +limit : 50); }
+  @Get('settlements') @Permissions('creditors', 'exec') settlements(@Query('limit') limit?: string) { return this.svc.listSettlements(qint('limit', limit, 50)); }
   @Post('settlements/:batchNo/reconcile') @Permissions('creditors', 'exec') reconcile(@Param('batchNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.reconcile(no, u); }
 }
 

@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Put, Body, Param, ParseIntPipe, Query, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, ParseIntPipe, Query, HttpCode, BadRequestException } from '@nestjs/common';
 import { z } from 'zod';
 import { PlanningService } from './planning.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { qint } from '../../common/query';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
 
@@ -112,7 +113,7 @@ export class PlanningController {
     @Query('period') period: string,
     @CurrentUser() user: JwtUser,
   ) {
-    if (!scenarioId || !period) throw new Error('scenario_id and period are required query params');
-    return this.planning.threeWayVariance(id, parseInt(scenarioId, 10), period, user);
+    if (!scenarioId || !period) throw new BadRequestException({ code: 'VALIDATION_ERROR', message: 'scenario_id and period are required query params', messageTh: 'ต้องระบุ scenario_id และ period' });
+    return this.planning.threeWayVariance(id, qint('scenario_id', scenarioId, 0), period, user);
   }
 }

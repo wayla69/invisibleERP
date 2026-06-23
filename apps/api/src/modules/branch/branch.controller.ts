@@ -1,6 +1,11 @@
 import { Controller, Get, Post, Patch, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
+import { z } from 'zod';
 import { BranchService, type CreateBranchDto, type UpdateBranchDto } from './branch.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+
+const CreateBranchBody = z.object({ code: z.string().min(1), name: z.string().min(1), is_hq: z.boolean().optional(), address: z.string().optional(), phone: z.string().optional() });
+const UpdateBranchBody = z.object({ name: z.string().min(1).optional(), active: z.boolean().optional(), is_hq: z.boolean().optional(), address: z.string().optional(), phone: z.string().optional() });
 
 @Controller('api/branches')
 export class BranchController {
@@ -12,12 +17,12 @@ export class BranchController {
   }
 
   @Post() @Permissions('branch')
-  create(@Body() dto: CreateBranchDto, @CurrentUser() user: JwtUser) {
+  create(@Body(new ZodValidationPipe(CreateBranchBody)) dto: CreateBranchDto, @CurrentUser() user: JwtUser) {
     return this.svc.createBranch(dto, user);
   }
 
   @Patch(':id') @Permissions('branch')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateBranchDto, @CurrentUser() user: JwtUser) {
+  update(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(UpdateBranchBody)) dto: UpdateBranchDto, @CurrentUser() user: JwtUser) {
     return this.svc.updateBranch(id, dto, user);
   }
 

@@ -89,7 +89,9 @@ export class EssService {
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Claim not found', messageTh: 'ไม่พบรายการเบิก' });
     if (c.status !== 'Pending') throw new ConflictException({ code: 'NOT_PENDING', message: `Claim is ${c.status}`, messageTh: 'รายการนี้ตัดสินแล้ว' });
     const [emp] = await db.select().from(employees).where(eq(employees.id, Number(c.employeeId))).limit(1);
-    if (emp?.userName && emp.userName === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Cannot approve your own expense claim', messageTh: 'อนุมัติรายการเบิกของตนเองไม่ได้' });
+    // SoD: block self-approval. me() resolves a user to their employee by user_name OR emp_code, so match
+    // on BOTH here — otherwise an employee linked only by emp_code (user_name null) could approve their own.
+    if (emp && (emp.userName === user.username || emp.empCode === user.username)) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Cannot approve your own expense claim', messageTh: 'อนุมัติรายการเบิกของตนเองไม่ได้' });
     if (!approve) {
       await db.update(expenseClaims).set({ status: 'Rejected', decidedBy: user.username, decidedAt: new Date() }).where(eq(expenseClaims.id, id));
       return { id, status: 'Rejected' };

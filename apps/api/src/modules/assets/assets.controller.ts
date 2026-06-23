@@ -5,6 +5,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AssetsService } from './assets.service';
 import { CreateCategoryBody, AcquireAssetBody, RunDepreciationBody, DisposeAssetBody, type CreateCategoryDto, type AcquireAssetDto, type DisposeAssetDto } from './dto';
+import { qint, qintOpt } from '../../common/query';
 
 const ScanUpdateBody = z.object({ code: z.string().min(1), location: z.string().optional(), assigned_to: z.string().optional(), note: z.string().optional() });
 type ScanUpdateBodyT = z.infer<typeof ScanUpdateBody>;
@@ -19,7 +20,7 @@ export class AssetsController {
 
   @Get('qr/labels')
   async labels(@Query('status') status: string | undefined, @Query('cols') cols: string | undefined, @Query('rows') rows: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
-    const { pdf, html } = await this.svc.assetLabels(u, { status, cols: cols ? +cols : undefined, rows: rows ? +rows : undefined });
+    const { pdf, html } = await this.svc.assetLabels(u, { status, cols: qintOpt('cols', cols), rows: qintOpt('rows', rows) });
     if (pdf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', 'attachment; filename="asset_tags.pdf"').header('Content-Length', pdf.length).send(pdf);
     else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
   }
@@ -35,5 +36,5 @@ export class AssetsController {
   @Patch(':assetNo/dispose') dispose(@Param('assetNo') no: string, @Body(new ZodValidationPipe(DisposeAssetBody)) b: DisposeAssetDto, @CurrentUser() u: JwtUser) { return this.svc.dispose(no, b, u); }
 
   @Post('depreciation/run') runDep(@Body(new ZodValidationPipe(RunDepreciationBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.runDepreciation(b.period, u); }
-  @Get('depreciation/runs') runs(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listRuns(u, limit ? +limit : 50); }
+  @Get('depreciation/runs') runs(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listRuns(u, qint('limit', limit, 50)); }
 }

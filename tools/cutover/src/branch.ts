@@ -141,6 +141,9 @@ async function main() {
 
   // ── 12. trial balance still balanced after branch-tagged sales ──
   const admin = await login('admin', 'admin123');
+  // validation (W5/M8): branch POST is now Zod-validated — a malformed body is rejected 400, not 500
+  const badBranch = await inj('POST', '/api/branches', cust1, { code: '', name: 123 });
+  ok('Branch create with bad body → 400 (Zod validation, not 500)', badBranch.status === 400, `status=${badBranch.status}`);
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after branch activity', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
 

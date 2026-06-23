@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BudgetService } from './budget.service';
+import { qint, qintOpt } from '../../common/query';
 
 const BudgetBody = z.object({
   fiscal_year: z.number().int(),
@@ -28,7 +29,7 @@ export class BudgetController {
 
   @Get('budgets')
   list(@Query('fiscal_year') fy?: string, @Query('account_code') account?: string, @Query('cost_center_code') cc?: string) {
-    return this.svc.listBudgets({ fiscal_year: fy ? +fy : undefined, account_code: account, cost_center_code: cc });
+    return this.svc.listBudgets({ fiscal_year: qintOpt('fiscal_year', fy), account_code: account, cost_center_code: cc });
   }
 
   @Delete('budgets')

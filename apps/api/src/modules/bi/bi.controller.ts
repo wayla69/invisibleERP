@@ -4,6 +4,7 @@ import { BiService } from './bi.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+import { qint, qintOpt } from '../../common/query';
 
 const RefreshBody = z.object({ date: z.string().optional() });
 const SubscriptionBody = z.object({ name: z.string().min(1), report_type: z.string().min(1), frequency: z.string().min(1), filters: z.record(z.any()).optional(), recipients: z.array(z.record(z.any())).optional() });
@@ -19,19 +20,19 @@ export class BiController {
   @Get('sales-cube')
   @Permissions('exec')
   salesCube(@Query('period') period?: string, @Query('months') months?: string, @Query('start') start?: string, @Query('end') end?: string, @CurrentUser() user?: JwtUser) {
-    return this.svc.salesCube({ period: period as any, months: months ? Number(months) : undefined, start_date: start, end_date: end }, user!);
+    return this.svc.salesCube({ period: period as any, months: qintOpt('months', months), start_date: start, end_date: end }, user!);
   }
 
   @Get('finance-trend')
   @Permissions('exec')
   financeTrend(@Query('months') months?: string, @Query('ledger') ledger?: string, @CurrentUser() user?: JwtUser) {
-    return this.svc.financeTrend({ months: months ? Number(months) : undefined, ledger_code: ledger }, user!);
+    return this.svc.financeTrend({ months: qintOpt('months', months), ledger_code: ledger }, user!);
   }
 
   @Get('pipeline-trend')
   @Permissions('exec')
   pipelineTrend(@Query('months') months?: string, @CurrentUser() user?: JwtUser) {
-    return this.svc.pipelineTrend({ months: months ? Number(months) : undefined }, user!);
+    return this.svc.pipelineTrend({ months: qintOpt('months', months) }, user!);
   }
 
   @Post('snapshots/refresh')
@@ -42,7 +43,7 @@ export class BiController {
   @Get('snapshots')
   @Permissions('exec')
   getSnapshots(@Query('days') days?: string, @Query('start') start?: string, @Query('end') end?: string, @CurrentUser() user?: JwtUser) {
-    return this.svc.getSnapshots({ days: days ? Number(days) : undefined, start_date: start, end_date: end }, user!);
+    return this.svc.getSnapshots({ days: qintOpt('days', days), start_date: start, end_date: end }, user!);
   }
 
   @Get('subscriptions')

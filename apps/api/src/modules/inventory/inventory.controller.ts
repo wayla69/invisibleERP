@@ -3,6 +3,7 @@ import { StockQuery } from '@ierp/shared';
 import { Permissions } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { InventoryService } from './inventory.service';
+import { qint, qintOpt } from '../../common/query';
 
 @Controller('api/inventory')
 export class InventoryController {
@@ -29,6 +30,6 @@ export class InventoryController {
   @Get('purchase-orders')
   @Permissions('procurement', 'warehouse', 'dashboard')
   getPurchaseOrders(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('status') status?: string) {
-    return this.svc.getPurchaseOrders(limit ? +limit : 20, offset ? +offset : 0, status);
+    return this.svc.getPurchaseOrders(qint('limit', limit, 20), qint('offset', offset, 0), status);
   }
 }

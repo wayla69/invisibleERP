@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto } from './finance.service';
+import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
 const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional(), vat_treatment: z.enum(['standard', 'exempt', 'zero']).optional(), idempotency_key: z.string().optional() });
@@ -17,10 +18,10 @@ export class FinanceController {
   pl(@Query('month') month: string, @Query('year') year: string) { return this.svc.pl(parseInt(month, 10), parseInt(year, 10)); }
 
   @Get('ap') @Permissions('creditors', 'exec')
-  ap(@Query('status') status = 'Outstanding', @Query('limit') limit?: string, @Query('offset') offset?: string) { return this.svc.ap(status, limit ? +limit : 20, offset ? +offset : 0); }
+  ap(@Query('status') status = 'Outstanding', @Query('limit') limit?: string, @Query('offset') offset?: string) { return this.svc.ap(status, qint('limit', limit, 20), qint('offset', offset, 0)); }
 
   @Get('ar') @Permissions('ar', 'exec')
-  ar(@Query('limit') limit?: string, @Query('offset') offset?: string) { return this.svc.ar(limit ? +limit : 20, offset ? +offset : 0); }
+  ar(@Query('limit') limit?: string, @Query('offset') offset?: string) { return this.svc.ar(qint('limit', limit, 20), qint('offset', offset, 0)); }
 
   @Get('kpi') @Permissions('exec', 'dashboard')
   kpi() { return this.svc.kpi(); }

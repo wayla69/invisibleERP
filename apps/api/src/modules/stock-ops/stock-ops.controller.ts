@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { StockOpsService } from './stock-ops.service';
+import { qint, qintOpt } from '../../common/query';
 
 const Line = z.object({ item_id: z.string().min(1), item_description: z.string().optional(), uom: z.string().optional() });
 const StocktakeBody = z.object({
@@ -36,7 +37,7 @@ export class StocktakeController {
   constructor(private readonly svc: StockOpsService) {}
 
   @Post() create(@Body(new ZodValidationPipe(StocktakeBody)) b: StocktakeBodyT, @CurrentUser() u: JwtUser) { return this.svc.createStocktake(b, u); }
-  @Get() list(@Query('limit') limit?: string) { return this.svc.listStocktakes(limit ? +limit : 50); }
+  @Get() list(@Query('limit') limit?: string) { return this.svc.listStocktakes(qint('limit', limit, 50)); }
   @Get(':stNo') detail(@Param('stNo') no: string) { return this.svc.getStocktake(no); }
   @Post(':stNo/post')
   @Permissions('wh_adjust')
@@ -55,6 +56,6 @@ export class StockMovementController {
   @Get('movements')
   @Permissions('wh_custody', 'dashboard')
   movements(@Query('move_type') moveType?: string, @Query('limit') limit?: string) {
-    return this.svc.listMovements({ move_type: moveType, limit: limit ? +limit : 100 });
+    return this.svc.listMovements({ move_type: moveType, limit: qint('limit', limit, 100) });
   }
 }

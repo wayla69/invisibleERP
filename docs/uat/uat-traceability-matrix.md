@@ -28,6 +28,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-016 | Edge security headers | ITGC-OP | 08 §9 |
 | UAT-SEC-017 | Aggregator webhook requires secret | ITGC-AC-03 | 08 §7 |
 | UAT-SEC-018 | PSP webhook tenant-scoped | ITGC-AC-03 | 08 §7 |
+| UAT-SEC-019 | Input-validation hardening (qint/Zod) | ITGC-AC-02 | 08 §7 |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 
@@ -246,7 +247,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 
 | Cycle | Cases | Control-type cases |
 |---|---|---|
-| 01 Security & Access | 18 | 12 |
+| 01 Security & Access | 19 | 13 |
 | 02 Order-to-Cash | 19 | 9 |
 | 03 Procure-to-Pay | 17 | 9 |
 | 04 Inventory & WMS | 23 | 6 |
