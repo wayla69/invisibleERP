@@ -34,6 +34,10 @@ export const menuItems = pgTable('menu_items', {
   taxType: menuTaxTypeEnum('tax_type').notNull().default('standard'),
   trackStock: boolean('track_stock').notNull().default(false),
   isAvailable: boolean('is_available').notNull().default(true), // 86 toggle
+  // day-parting: time-of-day + day-of-week availability (Asia/Bangkok). null = always available.
+  availDays: text('avail_days'),                               // 7-char mask, index 0=Sunday
+  availStartMin: integer('avail_start_min'),                   // minutes from midnight (inclusive)
+  availEndMin: integer('avail_end_min'),                       // minutes from midnight (exclusive)
   imageUrl: text('image_url'),
   description: text('description'),
   sort: integer('sort').default(0),

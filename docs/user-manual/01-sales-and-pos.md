@@ -142,6 +142,12 @@ actually behave: the **most-ordered dishes**, number of **sessions and covers**,
 **dishes per head**, **average bill per session**, and how often tables run into
 **overtime** — so you can tune pricing, time limits and the dish line-up per tier.
 
+**Day-parting (time-limited menus).** When adding a menu item in **เมนูอาหาร**
+you can set a **ช่วงเวลาขาย** (selling window) — a start/end time and which days
+of the week — for breakfast, lunch or happy-hour items. Outside that window the
+item shows **ยังไม่ถึงเวลาขาย** and can't be ordered (by staff or guests); leave
+the window blank to sell it all day. Times follow shop time (Asia/Bangkok).
+
 **Courses (serve in stages).** When taking an order you can set a **คอร์ส**
 number for the dishes you add (e.g. 1 = appetisers, 2 = mains, 3 = dessert). On
 the table you can then **ส่งเข้าครัว (ทั้งหมด)** to fire everything, or type a

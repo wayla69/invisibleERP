@@ -314,6 +314,26 @@ async function main() {
   const fcBad = await inj('POST', `/api/restaurant/orders/${csOrd.json.order_no}/fire?course=5`, sales1);
   ok('Course firing: firing an empty course rejected (400 NO_COURSE_ITEMS)', fcBad.status === 400 && fcBad.json.error?.code === 'NO_COURSE_ITEMS', `${fcBad.status} ${fcBad.json.error?.code}`);
 
+  // ── day-parting / menu scheduling (Asia/Bangkok) ──
+  const bkk = new Date(Date.now() + 7 * 3600 * 1000);
+  const nowMin = bkk.getUTCHours() * 60 + bkk.getUTCMinutes();
+  const closedStart = (nowMin + 120) % 1440, closedEnd = (closedStart + 1) % 1440;        // 1-min window ~2h from now → closed now
+  const dayMaskClosed = Array.from({ length: 7 }, (_, i) => (i === bkk.getUTCDay() ? '0' : '1')).join(''); // today off
+  await inj('POST', '/api/menu/items', sales1, { sku: 'BRK1', name: 'ข้าวต้มเช้า', price: 50, station_code: 'hot', avail_start_min: closedStart, avail_end_min: closedEnd });
+  await inj('POST', '/api/menu/items', sales1, { sku: 'DAYX', name: 'เมนูเฉพาะวัน', price: 60, station_code: 'hot', avail_days: dayMaskClosed });
+  const menuNow = (await inj('GET', '/api/menu', sales1)).json;
+  const dpItems = [...(menuNow.categories ?? []).flatMap((c: any) => c.items), ...(menuNow.uncategorized ?? [])];
+  const brk = dpItems.find((i: any) => i.sku === 'BRK1'); const dayx = dpItems.find((i: any) => i.sku === 'DAYX'); const al = dpItems.find((i: any) => i.sku === 'AL01');
+  ok('Day-parting: menu flags available_now per schedule (time window + day mask + always)', brk?.available_now === false && dayx?.available_now === false && al?.available_now === true, `brk=${brk?.available_now} dayx=${dayx?.available_now} al=${al?.available_now}`);
+  const dpTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A18', seats: 2 });
+  const dpOpen = await inj('POST', `/api/restaurant/tables/${dpTbl.json.id}/open`, sales1, {});
+  const dpBad = await inj('POST', `/api/qr/t/${dpOpen.json.public_token}/order`, undefined, { items: [{ sku: 'BRK1', qty: 1 }] });
+  ok('Day-parting: ordering outside the time window rejected (400 OUTSIDE_HOURS)', dpBad.status === 400 && dpBad.json.error?.code === 'OUTSIDE_HOURS', `${dpBad.status} ${dpBad.json.error?.code}`);
+  const dpDay = await inj('POST', `/api/qr/t/${dpOpen.json.public_token}/order`, undefined, { items: [{ sku: 'DAYX', qty: 1 }] });
+  ok('Day-parting: ordering on an excluded day rejected (400 OUTSIDE_HOURS)', dpDay.status === 400 && dpDay.json.error?.code === 'OUTSIDE_HOURS', `${dpDay.status} ${dpDay.json.error?.code}`);
+  const dpOk = await inj('POST', `/api/qr/t/${dpOpen.json.public_token}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] });
+  ok('Day-parting: an always-available item is still orderable', dpOk.status === 200 || dpOk.status === 201, `${dpOk.status}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

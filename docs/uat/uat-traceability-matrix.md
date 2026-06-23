@@ -90,6 +90,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-054 | Merge two tabs into a combined bill | Feature (table ops) | 20 §6 |
 | UAT-O2C-055 | Fire one course (hold the rest) | Feature (course firing) | 20 §5 |
 | UAT-O2C-056 | Fire next course / empty course | Feature (course firing) | 20 §5, §13 |
+| UAT-O2C-057 | Day-parting: menu flags availability | Feature (day-parting) | 20 §6 |
+| UAT-O2C-058 | Day-parting: order outside window blocked | Feature (day-parting) | 20 §6, §13 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

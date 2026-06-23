@@ -505,6 +505,13 @@
       "when": 1782340000000,
       "tag": "0071_kds_courses",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1782350000000,
+      "tag": "0072_menu_scheduling",
+      "breakpoints": true
     }
   ]
 }
