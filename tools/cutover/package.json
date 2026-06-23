@@ -73,7 +73,8 @@
     "rag": "tsx src/rag.ts",
     "mrp": "tsx src/mrp.ts",
     "ess": "tsx src/ess.ts",
-    "supplier": "tsx src/supplier.ts"
+    "supplier": "tsx src/supplier.ts",
+    "demand-ml": "tsx src/demand-ml.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.13",

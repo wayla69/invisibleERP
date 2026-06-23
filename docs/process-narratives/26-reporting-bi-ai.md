@@ -26,6 +26,7 @@ This narrative documents the reporting, business-intelligence (BI) and AI/analyt
 - Operational and financial reports + Excel/PDF/Express exports (reports, `/api/reports`, `/api/orders/:orderNo/export`).
 - BI dashboards, sales cube, finance trend, pipeline trend, snapshots and report subscriptions (bi, `/api/bi`).
 - Analytics — replenishment, anomaly detection, insights, dashboard summary (analytics, `/api/analytics`).
+- Demand ML — multi-model demand forecasting + walk-forward backtesting (demand-ml, `/api/demand`).
 - The AI agent (ai, `agent.service`) — tool-based, read-only, advisory.
 
 **Out of scope**
@@ -43,6 +44,7 @@ This narrative documents the reporting, business-intelligence (BI) and AI/analyt
   - `apps/api/src/modules/reports/reports.controller.ts`, `reports.service.ts`, `reports-excel.service.ts`, `reports-pdf.service.ts`, `reports-export.service.ts`
   - `apps/api/src/modules/bi/bi.controller.ts`, `bi.service.ts`
   - `apps/api/src/modules/analytics/analytics.controller.ts`, `analytics.service.ts`, `anomalies.service.ts`, `forecasting.service.ts`
+  - `apps/api/src/modules/demand-ml/demand-ml.controller.ts`, `demand-forecast.service.ts`, `forecast-algorithms.ts`
   - `apps/api/src/modules/ai/agent.service.ts`
 
 ## 5. Definitions & Abbreviations
@@ -60,6 +62,11 @@ This narrative documents the reporting, business-intelligence (BI) and AI/analyt
 | Snapshot | A refreshed BI point-in-time dataset. |
 | Z-score | Standardised deviation used to flag stock-movement anomalies (threshold 2.5; critical 3.5). |
 | Reorder point | `avg_daily_sales × lead_time_days + stdev_daily × 1.5` (safety stock). |
+| Demand ML | Multi-model demand forecasting (SMA, SES, Holt, seasonal-naive, Croston) that auto-selects the most accurate model by backtest. |
+| Walk-forward backtest | Rolling-origin one-step-ahead evaluation on a held-out window; each model is refit on history up to each test point. |
+| WAPE | Weighted absolute percentage error = `Σ|actual − forecast| / Σ|actual|`; scale-free, well-defined with zero demand days. |
+| MASE | Mean absolute scaled error = test MAE / in-sample seasonal-naive MAE; `< 1` beats the naive baseline. |
+| Croston | Intermittent-demand method: separately smooths demand size and inter-arrival interval; forecast = size / interval. |
 | Advisory | Decision-support output requiring human review; not authoritative for financial reporting. |
 | RLS | Row-Level Security (tenant isolation). |
 | SoD | Segregation of Duties. |
@@ -97,6 +104,8 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
 
 8. **Analytics — insight & dashboard summary.** `POST /api/analytics/insight` and `GET /api/analytics/dashboard-summary` provide decision-support summaries. *Operational / advisory.*
 
+8a. **Demand ML — multi-model forecasting + backtesting (perm `planner`/`exec`/`warehouse`).** `POST /api/demand/backtest` builds a dense daily demand series from POS sales and **walk-forward backtests** five classic, explainable models (SMA, SES, Holt linear-trend, seasonal-naive, Croston for intermittent demand), reporting **WAPE / MASE / RMSE / bias** per model on a held-out window. `POST /api/demand/forecast` **auto-selects the lowest-WAPE model** (or honours a pinned `algorithm`), emits the horizon point forecast (clamped non-negative), and persists the run (tenant-scoped) for an accuracy audit trail. `GET /api/demand/forecasts` lists recent runs and `GET /api/demand/accuracy` is the forecast-accuracy KPI (avg WAPE/MASE, overall and per model). Too little history is rejected `INSUFFICIENT_HISTORY`; a bad model name is rejected `UNKNOWN_ALGORITHM`. The forecast is **advisory** — it does not post and is not authoritative for financial statements; it feeds replenishment/planning decisions that a human owns. *Control: BI-04 — advisory boundary (no GL posting); BI-01 — model accuracy is evidenced by the backtest metrics and gated in CI (the `demand-ml` harness asserts the trend-aware/intermittent models beat the naive baseline).* This is a **new** service; the parity-locked `forecasting.service.ts` (reorder points, step 6) is unchanged.
+
 9. **AI agent (read-only, advisory).** A tool-based loop (max 15 turns) exposes a fixed set of **read-only** tools (sales summary, recent orders, stock levels/item, P&L, KPI dashboard/board, accounts payable, replenishment, sales cube, finance trend, pipeline forecast, open opportunities, open quotes, SLA breaches, profitability). Responses can stream; LLM insights are produced via Claude with a **rule-based Thai fallback** when no API key is configured. The AI tools are **read-only — they cannot post to the GL**: this is the control boundary. Forecasts, anomalies and AI insights are advisory decision-support and require human review; they are not authoritative for financial statements. *Control: BI-04 — AI read-only & advisory boundary.*
 
 10. **IPE & access boundary.** Every report and BI endpoint is permission-gated and tenant-scoped by RLS. Anything used in financial reporting must carry the IPE completeness-and-accuracy control: reconcile to source, evidence the parameters, and have a human owner sign off. *Control: BI-01 / R01; ITGC scoping per `08-itgc.md`.*
@@ -130,7 +139,8 @@ flowchart TD
 | 1, 4, 10 | Incomplete / inaccurate report relied upon (IPE) | Reports reconcile to source ledger — finance-trend/P&L to trial balance, daily-sales to POS journal; owner sign-off | Detective | BI-01 | Reconciliation working papers; sign-off |
 | 2 | Statutory PDF (tax invoice/receipt) inaccurate or mis-numbered | Statutory templates governed; accuracy & numbering controlled (cross-ref `06-tax-compliance.md`) | Preventive | BI-02 | Issued documents; numbering register |
 | 1, 2 | Invalid report parameters produce misleading output | Parameter validation (`VALIDATION_ERROR` on bad month/year/format) | Preventive | BI-03 | Validation rejection log |
-| 9 | AI/analytics output treated as authoritative or able to post | AI tools read-only; advisory boundary; human review of forecasts/anomalies | Preventive | BI-04 | Tool-definition (read-only); review notes |
+| 8a, 9 | AI/analytics output treated as authoritative or able to post | AI/forecast outputs read-only & advisory; demand forecast does not post to GL; human review of forecasts/anomalies | Preventive | BI-04 | Tool-definition (read-only); persisted forecast runs; review notes |
+| 8a | Demand forecast inaccurate / model not validated | Walk-forward backtest (WAPE/MASE) selects the model; accuracy gated in CI (`demand-ml` harness asserts trend/intermittent models beat naive) | Detective | BI-01 | Backtest metrics per run (`demand_forecasts`); CI gate result |
 | 3-8, 10 | Cross-tenant or unauthorised report access | Permission gating + RLS tenant isolation on all endpoints | Preventive | ITGC-01 / R01 | Access logs; RLS policy (cross-ref `08-itgc.md`) |
 
 ## 10. Inputs & Outputs
@@ -156,6 +166,7 @@ flowchart TD
 - Report parameter validation rejection rate.
 - PDF render fallback-to-HTML rate (chromium availability).
 - AI tool-boundary violations — any attempt to post (target: 0); proportion of AI outputs human-reviewed before use.
+- Demand-forecast accuracy — avg WAPE / MASE across persisted runs (`GET /api/demand/accuracy`); trend over time and per model.
 
 ## 13. Exception & Error Handling
 
@@ -165,6 +176,8 @@ flowchart TD
 | NOT_FOUND | Per-order export for an unknown order | Reject; verify order number. |
 | Chromium unavailable | PDF renderer returns null | Caller falls back to HTML; statutory-PDF control still applies on re-issue (BI-02). |
 | No API key | AI agent invoked without LLM credentials | Rule-based Thai fallback message returned; no failure of the stream. |
+| INSUFFICIENT_HISTORY (400) | Demand forecast/backtest with < 14 days of demand history | Reject; accumulate more sales history before forecasting (step 8a). |
+| UNKNOWN_ALGORITHM (400) | Demand forecast pins an unrecognised `algorithm` | Reject; use one of sma / ses / holt / seasonal_naive / croston, or omit to auto-select. |
 | Access denied | Permission/RLS check fails | Block; report access is gated and tenant-scoped (R01, cross-ref `08-itgc.md`). |
 
 ## 14. Revision History
@@ -172,3 +185,4 @@ flowchart TD
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 | 2026-06-23 | Platform | D4: added step 8a — demand ML (multi-model forecasting + walk-forward backtesting, `/api/demand/*`), WAPE/MASE definitions, control rows (BI-01 backtest accuracy gate, BI-04 advisory boundary), accuracy KPI and `INSUFFICIENT_HISTORY`/`UNKNOWN_ALGORITHM` error codes. Verified by the `demand-ml` harness. |
