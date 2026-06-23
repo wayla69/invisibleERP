@@ -17,6 +17,11 @@ export const items = pgTable('items', {
   maxStock: numeric('max_stock').default('9999'),
   avgDailyUsage: numeric('avg_daily_usage').default('0'),
   leadTimeDays: numeric('lead_time_days').default('3'),
+  // Lot-sizing / EOQ inputs (Phase D3) — used by MRP planned-buy lot-sizing.
+  minOrderQty: numeric('min_order_qty', { precision: 14, scale: 3 }).default('0'),
+  orderMultiple: numeric('order_multiple', { precision: 14, scale: 3 }).default('0'),
+  orderCost: numeric('order_cost', { precision: 14, scale: 2 }).default('0'),   // S: per-PO cost
+  holdingCost: numeric('holding_cost', { precision: 14, scale: 4 }).default('0'), // H: per unit/yr
   imageKey: text('image_key'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

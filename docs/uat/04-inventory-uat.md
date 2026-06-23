@@ -1,6 +1,6 @@
 # UAT — Cycle 04: Inventory & Warehouse (WMS)
 
-**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `03-inventory-cogs.md` (INV-01..04, REV-07, R11), harness `tools/cutover/src/wms.ts`, `e2e.ts`.
+**Status: DRAFT v0.2 · 2026-06-23** · Cross-ref: process narratives `03-inventory-cogs.md` (INV-01..04, REV-07, R11) and `15-manufacturing-costing.md` §5a (MRP), harnesses `tools/cutover/src/wms.ts`, `e2e.ts`, `mrp.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -27,3 +27,5 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-INV-019 | Multi-level MRP explosion + netting (D3) | Planner | 2-level BOM (CAKE→SPONGE→FLOUR/EGG); on-hand SPONGE 4, FLOUR 5 | 1. `POST /api/mrp/run` demand 10 CAKE. | `{demand:[{item_id:BOM-CAKE,qty:10}]}` | Make CAKE(L0)+SPONGE(L1, net 6); buy FLOUR 7 (gross 12−5), EGG 18, FROSTING 10; `summary.max_level`=1. | High | Positive | Feature (MRP) | Not Run | mrp.ts |
 | UAT-INV-020 | MRP plan-to-PR creates a real PR | Procurement/Planner | same BOM | 1. `POST /api/mrp/plan-to-pr` demand 10 CAKE. | as left | `pr_no` `PR-…`; PR has the 3 planned-buy lines (FLOUR/EGG/FROSTING). | High | Positive | Feature (MRP→PR) | Not Run | mrp.ts |
 | UAT-INV-021 | Circular BOM rejected | Planner | BOM-X↔BOM-Y cycle | 1. `POST /api/mrp/run` demand BOM-X. | — | 400 `CIRCULAR_BOM`. | Med | Control | Feature (MRP guard) | Not Run | mrp.ts |
+| UAT-INV-022 | MRP lot-sizing — min-order-qty / order-multiple / EOQ (D3) | Planner | item masters: FLOUR min_order_qty 20; EGG order_multiple 12; FROSTING avg_daily_usage 1, order_cost 40, holding_cost 5 | 1. `POST /api/mrp/run` demand 10 CAKE with `lot_sizing:true`. | `{demand:[{item_id:BOM-CAKE,qty:10}],lot_sizing:true}` | Buy FLOUR `ordered_qty`=20 (`lot_policy` min), EGG=24 (multiple, rounded from 18), FROSTING=77 (`eoq` √(2·365·40/5), policy eoq). | High | Positive | Feature (MRP lot-sizing) | Not Run | mrp.ts |
+| UAT-INV-023 | Rough-cut capacity flags overloaded work-centre (D3) | Planner | routing RT-CAKE: MIX setup 30 + run 5/unit; BAKE run 10/unit; make qty 10 | 1. `POST /api/mrp/capacity` demand 10 CAKE, work_centers MIX=100, BAKE=60. | `{demand:[{item_id:BOM-CAKE,qty:10}],work_centers:[{code:MIX,available_minutes:100},{code:BAKE,available_minutes:60}]}` | MIX `load_minutes`=80 (30+5×10), `overloaded`=false; BAKE=100 (10×10) > 60 → `overloaded`=true; `summary.overloaded`=1. | High | Positive | Feature (RCCP) | Not Run | mrp.ts |

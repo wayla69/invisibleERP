@@ -65,6 +65,18 @@ async function main() {
     { generateDate: snapDate, itemId: 'SPONGE', itemDescription: 'เนื้อเค้ก', uom: 'ชิ้น', avQty: '4', totalStock: '4' },
     { generateDate: snapDate, itemId: 'FLOUR', itemDescription: 'แป้ง', uom: 'kg', avQty: '5', totalStock: '5' },
   ]);
+  // item master with lot-sizing policies: FLOUR=min-order, EGG=order-multiple, FROSTING=EOQ
+  await db.insert(s.items).values([
+    { itemId: 'FLOUR', itemDescription: 'แป้ง', minOrderQty: '20', orderMultiple: '0', avgDailyUsage: '0', orderCost: '0', holdingCost: '0' },
+    { itemId: 'EGG', itemDescription: 'ไข่', minOrderQty: '0', orderMultiple: '12', avgDailyUsage: '0', orderCost: '0', holdingCost: '0' },
+    { itemId: 'FROSTING', itemDescription: 'ครีม', minOrderQty: '0', orderMultiple: '0', avgDailyUsage: '1', orderCost: '40', holdingCost: '5' },
+  ]).onConflictDoNothing();
+  // routing for BOM-CAKE: MIX (setup 30 + 5/unit) + BAKE (10/unit) — for rough-cut capacity
+  const rt = await db.insert(s.routings).values({ routingCode: 'RT-CAKE', productItemId: 'BOM-CAKE', name: 'Cake routing' }).returning({ id: s.routings.id });
+  await db.insert(s.routingOperations).values([
+    { routingId: Number(rt[0].id), opNo: '10', workCenter: 'MIX', setupMin: '30', runMinPerUnit: '5' },
+    { routingId: Number(rt[0].id), opNo: '20', workCenter: 'BAKE', setupMin: '0', runMinPerUnit: '10' },
+  ]);
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -99,6 +111,20 @@ async function main() {
   // ── 3. circular BOM guarded ──
   const circ = await inj('POST', '/api/mrp/run', admin, { demand: [{ item_id: 'BOM-X', qty: 1 }] });
   ok('Circular BOM → 400 CIRCULAR_BOM', circ.status === 400 && circ.json.error?.code === 'CIRCULAR_BOM', `${circ.status} ${circ.json.error?.code}`);
+
+  // ── 4. lot-sizing: net qty raised to min-order / order-multiple / EOQ ──
+  const ls = await inj('POST', '/api/mrp/run', admin, { demand: [{ item_id: 'BOM-CAKE', qty: 10 }], lot_sizing: true });
+  const lb = (id: string) => (ls.json.planned_buy ?? []).find((b: any) => b.item_id === id);
+  ok('Lot-size FLOUR → min-order 20 (net 7 < min)', near(lb('FLOUR')?.ordered_qty, 20) && lb('FLOUR')?.lot_policy === 'min', JSON.stringify(lb('FLOUR')));
+  ok('Lot-size EGG → round up to multiple 24 (net 18, mult 12)', near(lb('EGG')?.ordered_qty, 24) && lb('EGG')?.lot_policy === 'multiple', JSON.stringify(lb('EGG')));
+  ok('Lot-size FROSTING → EOQ 77 (net 10 < eoq)', near(lb('FROSTING')?.ordered_qty, 77) && near(lb('FROSTING')?.eoq, 77) && lb('FROSTING')?.lot_policy === 'eoq', JSON.stringify(lb('FROSTING')));
+
+  // ── 5. rough-cut capacity: load per work-centre vs available minutes ──
+  const cap = await inj('POST', '/api/mrp/capacity', admin, { demand: [{ item_id: 'BOM-CAKE', qty: 10 }], work_centers: [{ code: 'MIX', available_minutes: 100 }, { code: 'BAKE', available_minutes: 60 }] });
+  const wc = (code: string) => (cap.json.work_centers ?? []).find((w: any) => w.work_center === code);
+  ok('Capacity MIX load 80 (30 setup + 5×10), not overloaded', near(wc('MIX')?.load_minutes, 80) && wc('MIX')?.overloaded === false, JSON.stringify(wc('MIX')));
+  ok('Capacity BAKE load 100 (10×10) > 60 → overloaded', near(wc('BAKE')?.load_minutes, 100) && wc('BAKE')?.overloaded === true, JSON.stringify(wc('BAKE')));
+  ok('Capacity summary: 1 overloaded centre', cap.json.summary?.overloaded === 1, JSON.stringify(cap.json.summary));
 
   await app.close();
   await pg.close();

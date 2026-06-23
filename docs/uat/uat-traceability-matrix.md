@@ -98,6 +98,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-016 | Cycle-count variance review | INV-01 | 03 §7, §9 |
 | UAT-INV-017 | RLS bin/suggestion isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-INV-018 | Trial balance balanced | REC-01 | 04 §9 |
+| UAT-INV-019 | Multi-level MRP explosion + netting | Feature (MRP) | 15 §5a |
+| UAT-INV-020 | MRP plan-to-PR creates a real PR | Feature (MRP→PR) | 15 §5a |
+| UAT-INV-021 | Circular BOM rejected | Feature (MRP guard) | 15 §5a |
+| UAT-INV-022 | MRP lot-sizing (min/multiple/EOQ) | Feature (MRP lot-sizing) | 15 §5a |
+| UAT-INV-023 | Rough-cut capacity overload flag | Feature (RCCP) | 15 §5a |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 
@@ -225,7 +230,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 01 Security & Access | 16 | 10 |
 | 02 Order-to-Cash | 19 | 9 |
 | 03 Procure-to-Pay | 17 | 9 |
-| 04 Inventory & WMS | 18 | 6 |
+| 04 Inventory & WMS | 23 | 6 |
 | 05 GL & Close | 18 | 9 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 13 | 5 |
