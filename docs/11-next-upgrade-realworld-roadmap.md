@@ -236,8 +236,13 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   `procurement`), then executes through `LedgerService.postEntry`/`ProcurementService.createPo` with
   `result_ref` + audit. New `ai-actions` harness (14 checks); approval-queue UI shipped. *Next: stock-
   adjust/tax-file kinds, $-threshold escalation, agent-action attribution in audit (`source='ai'`).*
-- **D2 — RAG over policies/SOPs/contracts** (pgvector, cite-or-refuse). *Not started — needs pgvector in
-  a migration (note: PGlite harnesses may not load the extension, so verification needs a real PG).*
+- **D2 — RAG over policies/SOPs/contracts (cite-or-refuse).** ✅ **Delivered.** `kb_documents`/`kb_chunks`
+  (migration 0064, RLS-scoped); pluggable `EmbedderService` (default deterministic local embedder → no
+  API key, no pgvector) with embeddings as `number[]` + in-service cosine; `KnowledgeService.search/ask`
+  retrieves the tenant's own docs and **refuses** below `KB_MIN_SCORE` (no hallucinated policy); agent
+  tool `search_knowledge_base` + cite-or-refuse system prompt; endpoints `/api/ai/kb/*`. New `rag`
+  harness (8 checks). *Prod upgrade: swap `EMBED_PROVIDER` for a real model + move `embedding` to a
+  pgvector ANN column behind the same API.*
 - **D3 — Close the ERP depth gaps where the market is.** MRP / supply planning / multi-level BOM +
   capacity (if pursuing manufacturing); employee self-service + expense mgmt; supplier portal.
 - **D4 — Analytics plane + demand ML.** dbt + semantic layer + embedded BI; seasonality/Croston

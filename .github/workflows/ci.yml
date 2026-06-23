@@ -128,6 +128,7 @@ jobs:
           - { pkg: cutover, script: offline-sync }
           - { pkg: cutover, script: workflow }
           - { pkg: cutover, script: ai-actions }
+          - { pkg: cutover, script: rag }
           - { pkg: cutover, script: hcm }
           - { pkg: cutover, script: payroll }
           - { pkg: cutover, script: portal-extra }
