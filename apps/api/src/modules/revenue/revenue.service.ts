@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { revRecSchedules, revRecLines } from '../../database/schema';
+import { revRecSchedules, revRecLines, journalEntries } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { DocNumberService } from '../../common/doc-number.service';
 import { n, fx, ymd } from '../../database/queries';
@@ -50,9 +50,13 @@ export class RevenueService {
   }
 
   // recognize all due (unrecognized) lines for one period: Dr 2400 / Cr 4000
-  async runRecognition(period: string, user: string) {
+  async runRecognition(period: string, user: JwtUser, explicitTenantId?: number | null) {
     const db = this.db as any;
-    const rows = await db.select({ line: revRecLines, sched: revRecSchedules }).from(revRecLines).innerJoin(revRecSchedules, eq(revRecLines.scheduleId, revRecSchedules.id)).where(and(eq(revRecLines.period, period), eq(revRecLines.recognized, false)));
+    // Scope to one tenant: a tenant-bound user recognizes their own; an HQ/Admin caller (whose request
+    // bypasses RLS) MUST name a tenant — otherwise this would recognize EVERY tenant's due lines in one call.
+    const tenantId = user.tenantId ?? (explicitTenantId != null ? Number(explicitTenantId) : null);
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id to run revenue recognition', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id' });
+    const rows = await db.select({ line: revRecLines, sched: revRecSchedules }).from(revRecLines).innerJoin(revRecSchedules, eq(revRecLines.scheduleId, revRecSchedules.id)).where(and(eq(revRecLines.period, period), eq(revRecLines.recognized, false), eq(revRecSchedules.tenantId, tenantId)));
     const journals: any[] = []; const skipped: any[] = []; let total = 0;
     for (const r of rows) {
       const sched = r.sched, line = r.line;
@@ -60,8 +64,13 @@ export class RevenueService {
       try {
         let journalNo: string | null = null;
         if (!(await this.ledger.alreadyPosted('REVREC', ref))) {
-          const je: any = await this.ledger.postEntry({ date: `${line.period}-01`, source: 'REVREC', sourceRef: ref, tenantId: sched.tenantId, currency: sched.currency, memo: `Revenue recognition ${sched.scheduleNo} ${line.period}`, createdBy: user, lines: [{ account_code: sched.deferredAccount, debit: n(line.amount) }, { account_code: sched.revenueAccount, credit: n(line.amount) }] });
+          const je: any = await this.ledger.postEntry({ date: `${line.period}-01`, source: 'REVREC', sourceRef: ref, tenantId: sched.tenantId, currency: sched.currency, memo: `Revenue recognition ${sched.scheduleNo} ${line.period}`, createdBy: user.username, lines: [{ account_code: sched.deferredAccount, debit: n(line.amount) }, { account_code: sched.revenueAccount, credit: n(line.amount) }] });
           journalNo = je?.entry_no ?? null;
+        } else {
+          // crash-recovery: the JE posted but the line wasn't marked — recover the existing entry_no so the
+          // audit link is preserved instead of persisting journalNo = null.
+          const [existing] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries).where(and(eq(journalEntries.source, 'REVREC'), eq(journalEntries.sourceRef, ref))).limit(1);
+          journalNo = existing?.entryNo ?? null;
         }
         await db.update(revRecLines).set({ recognized: true, journalNo }).where(eq(revRecLines.id, line.id));
         journals.push({ schedule_no: sched.scheduleNo, journal_no: journalNo, amount: n(line.amount) });

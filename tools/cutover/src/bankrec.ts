@@ -117,10 +117,21 @@ async function main() {
   ok('Trial balance balanced after bank postings', near(tb.debit ?? tb.total_debit, tb.credit ?? tb.total_credit), JSON.stringify(tb).slice(0, 60));
 
   // RLS: T2 staff cannot see T1's bank account
-  await inj('POST', '/api/bank/accounts', sales1, { bank_name: 'T1 bank', account_no: 'T1-AAA', gl_account_code: '1010' });
+  const t1acc = await inj('POST', '/api/bank/accounts', sales1, { bank_name: 'T1 bank', account_no: 'T1-AAA', gl_account_code: '1010' });
   await inj('POST', '/api/bank/accounts', sales2, { bank_name: 'T2 bank', account_no: 'T2-BBB', gl_account_code: '1010' });
   const l1 = await inj('GET', '/api/bank/accounts', sales1);
   ok('RLS: T1 sees its bank account, not T2 (and vice versa)', (l1.json.accounts ?? []).some((a: any) => a.account_no === 'T1-AAA') && !(l1.json.accounts ?? []).some((a: any) => a.account_no === 'T2-BBB'), JSON.stringify((l1.json.accounts ?? []).map((a: any) => a.account_no)));
+
+  // ── cross-tenant guard (W2/M2): a T2 movement on the shared 1010 GL must NOT leak into T1's reconciliation ──
+  // seed a Posted T2 journal entry on 1010 directly (distinctive 9999) — admin reconciling T1 bypasses RLS,
+  // so only the explicit acct-tenant filter keeps it out.
+  const [t2je] = await db.insert(s.journalEntries).values({ entryNo: 'JE-T2-LEAK', tenantId: t2, entryDate: '2028-03-10', source: 'Manual', status: 'Posted', memo: 'T2 deposit' }).returning({ id: s.journalEntries.id });
+  await db.insert(s.journalLines).values([
+    { entryId: Number(t2je.id), tenantId: t2, accountCode: '1010', debit: '9999', credit: '0' },
+    { entryId: Number(t2je.id), tenantId: t2, accountCode: '4000', debit: '0', credit: '9999' },
+  ]);
+  const t1recon = await inj('GET', `/api/bank/accounts/${t1acc.json.id}/reconciliation`, admin);
+  ok('Cross-tenant: T1 reconciliation (run by admin) excludes T2 9999 movement', near(t1recon.json.gl_balance, 0) && !(t1recon.json.unmatched_book ?? []).some((l: any) => near(l.amount, 9999)), JSON.stringify({ gl: t1recon.json.gl_balance, ub: (t1recon.json.unmatched_book ?? []).map((l: any) => l.amount) }));
 
   await app.close();
   await pg.close();

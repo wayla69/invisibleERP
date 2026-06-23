@@ -30,7 +30,7 @@ export class RevenueController {
   list(@Query('status') status?: string, @Query('source_ref') ref?: string) { return this.svc.listSchedules({ status, source_ref: ref }); }
 
   @Post('recognize')
-  recognize(@Query('period') period: string, @CurrentUser() u: JwtUser) { return this.svc.runRecognition(period, u.username); }
+  recognize(@Query('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.runRecognition(period, u, tenantId != null && tenantId !== '' ? Number(tenantId) : null); }
 
   @Get('deferred')
   deferred(@Query('as_of') asOf?: string) { return this.svc.remainingDeferred(asOf); }
