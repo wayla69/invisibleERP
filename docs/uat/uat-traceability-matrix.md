@@ -105,6 +105,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-021 | Circular BOM rejected | Feature (MRP guard) | 15 §5a |
 | UAT-INV-022 | MRP lot-sizing (min/multiple/EOQ) | Feature (MRP lot-sizing) | 15 §5a |
 | UAT-INV-023 | Rough-cut capacity overload flag | Feature (RCCP) | 15 §5a |
+| UAT-INV-024 | STD GR PPV balanced under rounding | MFG-03 / GL-01 | 15 §9 |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 
@@ -246,7 +247,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 01 Security & Access | 18 | 12 |
 | 02 Order-to-Cash | 19 | 9 |
 | 03 Procure-to-Pay | 17 | 9 |
-| 04 Inventory & WMS | 23 | 6 |
+| 04 Inventory & WMS | 24 | 7 |
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |

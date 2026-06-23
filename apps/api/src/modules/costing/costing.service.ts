@@ -65,22 +65,24 @@ export class CostingService {
   async postReceiptGl(p: { tenantId: number; grNo: string; date: string; lines: { itemId: string; qty: number; actualCost: number; method: Method; standardCost: number }[]; createdBy: string }) {
     if (!p.lines.length) return;
     if (await this.ledger.alreadyPosted('GRV', p.grNo)) return;
-    let invDr = 0, apCr = 0, ppvDr = 0, ppvCr = 0;
+    let invDr = 0, apCr = 0;
     for (const l of p.lines) {
       const ext = l.qty * l.actualCost;
       apCr += ext;
-      if (l.method === 'STD') {
-        const std = l.qty * (l.standardCost || 0);
-        invDr += std;
-        const v = ext - std; // unfavorable (actual>std) → PPV debit; favorable → PPV credit
-        if (v > 0) ppvDr += v; else ppvCr += -v;
-      } else invDr += ext;
+      // STD: capitalize at standard; FIFO/AVG: capitalize at actual.
+      invDr += l.method === 'STD' ? l.qty * (l.standardCost || 0) : ext;
     }
+    // Round the two "real" legs, then make PPV (5500) the single balancing plug = actual − standard value,
+    // so Σdebit == Σcredit by construction. Rounding each leg independently could otherwise leave a 0.01
+    // imbalance and the JE would be rejected UNBALANCED.
+    const invDrR = r2(invDr);
+    const apCrR = r2(apCr);
+    const ppvNet = r2(apCrR - invDrR); // >0 unfavorable (actual>std) → PPV debit; <0 favorable → PPV credit
     const lines = [
-      { account_code: '1200', debit: r2(invDr) },
-      ...(ppvDr > 0 ? [{ account_code: '5500', debit: r2(ppvDr) }] : []),
-      ...(ppvCr > 0 ? [{ account_code: '5500', credit: r2(ppvCr) }] : []),
-      { account_code: '2000', credit: r2(apCr) },
+      { account_code: '1200', debit: invDrR },
+      ...(ppvNet > 0 ? [{ account_code: '5500', debit: ppvNet }] : []),
+      ...(ppvNet < 0 ? [{ account_code: '5500', credit: -ppvNet }] : []),
+      { account_code: '2000', credit: apCrR },
     ];
     await this.ledger.postEntry({ date: p.date, source: 'GRV', sourceRef: p.grNo, tenantId: p.tenantId, memo: `Inventory receipt ${p.grNo}`, createdBy: p.createdBy, lines });
   }
