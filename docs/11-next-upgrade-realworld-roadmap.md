@@ -247,8 +247,13 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   (recursive) BOM explosion** with per-item on-hand netting (shared pool), planned Make orders at every
   level + Buy orders for leaves, a circular-BOM guard, and **`POST /api/mrp/plan-to-pr`** that turns the
   planned Buy into a real consolidated PR (reuses the PR→PO→GR workflow). New `mrp` harness (10 checks);
-  `mfg-depth`/`manufacturing` stay green. *Remaining D3: capacity scheduling/lot-sizing (EOQ),
-  employee self-service + expense mgmt, supplier (vendor-facing) portal.*
+  `mfg-depth`/`manufacturing` stay green.
+  ✅ **Employee self-service (ESS)** — `/api/ess/*` self-scopes from the JWT (own timesheets/leave/
+  payslips/expenses); expense claims approve with SoD (approver ≠ claimant) + GL (Dr 5100/Cr 2000). New
+  `ess` harness (9). ✅ **Supplier portal** — `/api/supplier/*` vendor-facing self-scoped: own POs,
+  acknowledge, submit invoice → pending AP (can't touch another vendor's PO). New `supplier` harness (8).
+  Linkage via `employees.user_name`/`vendors.user_name` (migration 0065). *Remaining D3: capacity
+  scheduling / lot-sizing (EOQ).*
 - **D4 — Analytics plane + demand ML.** dbt + semantic layer + embedded BI; seasonality/Croston
   demand model with a backtesting harness (WAPE/MASE) as a CI gate.
 

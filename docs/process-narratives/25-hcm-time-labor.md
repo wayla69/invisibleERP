@@ -153,3 +153,4 @@ flowchart TD
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 | 2026-06-23 | Platform | D3: Employee Self-Service (`/api/ess/*`, perm `ess`) — employees view/submit ONLY their own timesheets/leave/payslips/expenses (resolved from the JWT username via `employees.user_name`, never a body param). Expense claims (`expense_claims`, migration 0065) approve as a manager action (perm `approvals`) with SoD (approver ≠ claimant) and post the reimbursement to GL (Dr 5100 / Cr 2000). Verified by the `ess` harness. |
