@@ -1,0 +1,16 @@
+{
+  "name": "Invisible ERP V2 — full stack (Codespaces)",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "// onCreateCommand": "Build + start db/api/web once when the Codespace is created. The Codespaces overlay makes :3000 self-contained (same-origin /api proxy), so only port 3000 needs forwarding. First run pulls images + builds (a few minutes).",
+  "onCreateCommand": "docker compose -f docker-compose.yml -f docker-compose.codespaces.yml up --build -d",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "Invisible ERP (web + API, single port)",
+      "onAutoForward": "openBrowser"
+    }
+  }
+}

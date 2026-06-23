@@ -1,0 +1,15 @@
+# Codespaces / single-port overlay for docker-compose.yml. Use when the browser is NOT on the same host
+# as the containers (e.g. a Codespaces forwarded https://*.github.dev URL, or any cloud port-preview that
+# exposes one port). It makes :3000 self-contained: the web app issues same-origin /api/* calls and Next
+# forwards them to the api container — so only port 3000 needs to be exposed.
+#   docker compose -f docker-compose.yml -f docker-compose.codespaces.yml up --build
+services:
+  web:
+    build:
+      args:
+        # Empty ⇒ the browser calls /api/* on its own origin (no hard-coded localhost:8000).
+        NEXT_PUBLIC_API_URL: ""
+    environment:
+      NODE_ENV: production
+      # Next rewrites run inside the web container, so reach the api service over the compose network.
+      API_PROXY_TARGET: http://api:8000
