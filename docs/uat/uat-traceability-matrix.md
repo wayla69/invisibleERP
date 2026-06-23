@@ -113,6 +113,17 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-077 | Scale computes price server-side | REST-11 | 20 §7, §9 |
 | UAT-O2C-078 | Scale read on non-weighed item rejected | REST-11 | 20 §7, §9 |
 | UAT-O2C-079 | Peripheral registry tenant-isolated (RLS) | REST-11 | 20 §7 |
+| UAT-O2C-080 | Take a customer deposit | REST-12 | 20 §7 |
+| UAT-O2C-081 | Apply a deposit (recognise revenue) | REST-12 | 20 §7 |
+| UAT-O2C-082 | Deposit over-apply rejected | REST-12 | 20 §7, §9 |
+| UAT-O2C-083 | Refund the unused deposit | REST-12 | 20 §7 |
+| UAT-O2C-084 | Open house account + charge within limit | REST-12 | 20 §7 |
+| UAT-O2C-085 | Charge over credit limit rejected | REST-12 | 20 §7, §9 |
+| UAT-O2C-086 | Settle a house account (THB) | REST-12 | 20 §7 |
+| UAT-O2C-087 | FX settlement books realised FX gain | REST-12 | 20 §7, §9 |
+| UAT-O2C-088 | Statement reconciles + over-settle rejected | REST-12 | 20 §7, §9 |
+| UAT-O2C-089 | Card surcharge quote + charge | REST-12 | 20 §7 |
+| UAT-O2C-090 | Payments-depth tenant isolation (RLS) | REST-12 | 20 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

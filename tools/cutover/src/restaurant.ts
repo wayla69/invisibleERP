@@ -417,6 +417,42 @@ async function main() {
   const t2dev = await inj('GET', '/api/peripherals/devices', sales2);
   ok('Peripherals: device registry is tenant-isolated (T2 sees none of T1’s)', (t2dev.json.devices ?? []).every((d: any) => d.device_code !== 'DRW1'), `T2 devices=${(t2dev.json.devices ?? []).length}`);
 
+  // ── payments depth (Phase 8): deposits + house accounts (+ FX settle) + card surcharge ──
+  const dep = await inj('POST', '/api/payments/deposits', sales1, { amount: 500, customer_name: 'คุณจอง', purpose: 'booking' });
+  ok('Deposits: take a deposit posts a balanced JE (Dr 1000 / Cr 2210)', (dep.status === 200 || dep.status === 201) && /^DEP-/.test(dep.json.deposit_no ?? '') && /^JE-/.test(dep.json.journal_no ?? '') && near(dep.json.amount, 500), `${dep.status} ${JSON.stringify(dep.json).slice(0, 80)}`);
+  const apply = await inj('POST', `/api/payments/deposits/${dep.json.deposit_no}/apply`, sales1, { amount: 200, sale_no: rcSale });
+  ok('Deposits: apply recognises revenue (Dr 2210 / Cr 4000+2100); remaining 300', apply.json.remaining != null && near(apply.json.remaining, 300) && /^JE-/.test(apply.json.journal_no ?? ''), `applied=${apply.json.applied} remaining=${apply.json.remaining}`);
+  const overApply = await inj('POST', `/api/payments/deposits/${dep.json.deposit_no}/apply`, sales1, { amount: 400 });
+  ok('Deposits: over-apply rejected (400 OVER_APPLY)', overApply.status === 400 && overApply.json.error?.code === 'OVER_APPLY', `${overApply.status} ${overApply.json.error?.code}`);
+  const refund = await inj('POST', `/api/payments/deposits/${dep.json.deposit_no}/refund`, sales1, {});
+  ok('Deposits: refund the unused balance closes the deposit (Dr 2210 / Cr 1000)', (refund.status === 200 || refund.status === 201) && near(refund.json.refunded, 300) && refund.json.status === 'closed', `${refund.status} refunded=${refund.json.refunded} status=${refund.json.status}`);
+
+  const ha = await inj('POST', '/api/payments/house-accounts', sales1, { name: 'บริษัท เครดิต จำกัด', credit_limit: 1000 });
+  ok('House account: open with a credit limit', (ha.status === 200 || ha.status === 201) && /^HA-/.test(ha.json.account_no ?? '') && near(ha.json.credit_limit, 1000), `${ha.status} ${JSON.stringify(ha.json).slice(0, 80)}`);
+  const charge1 = await inj('POST', `/api/payments/house-accounts/${ha.json.account_no}/charge`, sales1, { amount: 600, sale_no: rcSale });
+  ok('House account: charge a credit sale (Dr 1100 AR / Cr 4000+2100); balance 600', (charge1.status === 200 || charge1.status === 201) && near(charge1.json.balance, 600) && /^JE-/.test(charge1.json.journal_no ?? ''), `bal=${charge1.json.balance}`);
+  const overLimit = await inj('POST', `/api/payments/house-accounts/${ha.json.account_no}/charge`, sales1, { amount: 600 });
+  ok('House account: charge over the credit limit rejected (400 CREDIT_LIMIT_EXCEEDED) — REST-12 control', overLimit.status === 400 && overLimit.json.error?.code === 'CREDIT_LIMIT_EXCEEDED', `${overLimit.status} ${overLimit.json.error?.code}`);
+  const settle1 = await inj('POST', `/api/payments/house-accounts/${ha.json.account_no}/settle`, sales1, { amount: 600 });
+  ok('House account: THB settlement pays down the balance to 0 (Dr 1000 / Cr 1100)', near(settle1.json.balance, 0) && near(settle1.json.fx_gain_loss, 0) && /^JE-/.test(settle1.json.journal_no ?? ''), `bal=${settle1.json.balance}`);
+  await inj('POST', `/api/payments/house-accounts/${ha.json.account_no}/charge`, sales1, { amount: 340 });
+  const fxSettle = await inj('POST', `/api/payments/house-accounts/${ha.json.account_no}/settle`, sales1, { amount: 340, currency: 'USD', fx_rate: 34, foreign_tendered: 10.5 });
+  ok('House account: FX settlement books realised FX gain (10.5 USD × 34 = 357 vs 340 → +17 to 5410)', near(fxSettle.json.received_thb, 357) && near(fxSettle.json.fx_gain_loss, 17) && near(fxSettle.json.balance, 0), `recv=${fxSettle.json.received_thb} fx=${fxSettle.json.fx_gain_loss}`);
+  const stmt = await inj('GET', `/api/payments/house-accounts/${ha.json.account_no}/statement`, sales1);
+  ok('House account: statement reconciles entries to a zero balance', stmt.status === 200 && near(stmt.json.balance, 0) && (stmt.json.entries ?? []).length === 4 && near(stmt.json.available_credit, 1000), `bal=${stmt.json.balance} entries=${(stmt.json.entries ?? []).length}`);
+  const overSettle = await inj('POST', `/api/payments/house-accounts/${ha.json.account_no}/settle`, sales1, { amount: 100 });
+  ok('House account: settling more than owed rejected (400 OVER_SETTLE)', overSettle.status === 400 && overSettle.json.error?.code === 'OVER_SETTLE', `${overSettle.status} ${overSettle.json.error?.code}`);
+
+  await inj('POST', '/api/payments/surcharges', sales1, { method: 'Card', pct: 3 });
+  const quote = await inj('GET', '/api/payments/surcharges/quote?method=Card&amount=1000', sales1);
+  ok('Card surcharge: quote computes 3% (1000 → 30, total 1030)', near(quote.json.surcharge, 30) && near(quote.json.total, 1030), `${JSON.stringify(quote.json)}`);
+  const scCharge = await inj('POST', '/api/payments/surcharges/charge', sales1, { method: 'Card', amount: 1000, sale_no: rcSale });
+  ok('Card surcharge: charge posts VATable income (Dr 1000 / Cr 4500+2100)', (scCharge.status === 200 || scCharge.status === 201) && near(scCharge.json.surcharge, 30) && near(scCharge.json.net, 28.04) && near(scCharge.json.vat, 1.96) && /^JE-/.test(scCharge.json.journal_no ?? ''), `${JSON.stringify(scCharge.json).slice(0, 90)}`);
+
+  const t2ha = await inj('GET', '/api/payments/house-accounts', sales2);
+  const t2dep = await inj('GET', '/api/payments/deposits', sales2);
+  ok('Payments depth: deposits + house accounts are tenant-isolated (T2 sees none of T1’s)', (t2ha.json.accounts ?? []).every((a: any) => a.account_no !== ha.json.account_no) && (t2dep.json.deposits ?? []).every((d: any) => d.deposit_no !== dep.json.deposit_no), `T2 ha=${(t2ha.json.accounts ?? []).length} dep=${(t2dep.json.deposits ?? []).length}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

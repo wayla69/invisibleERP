@@ -62,3 +62,4 @@ export * from './kb';
 export * from './demand';
 export * from './printing';
 export * from './peripherals';
+export * from './payments-depth';
