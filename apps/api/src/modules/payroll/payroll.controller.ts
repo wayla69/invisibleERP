@@ -36,8 +36,8 @@ export class PayrollController {
   }
 
   @Post('runs')
-  runPayroll(@Query('period') period: string, @CurrentUser() u: JwtUser) {
-    return this.svc.runPayroll(period, u);
+  runPayroll(@Query('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.runPayroll(period, u, tenantId != null && tenantId !== '' ? Number(tenantId) : null);
   }
 
   @Get('runs')

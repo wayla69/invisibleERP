@@ -26,6 +26,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-014 | RBAC deny without permission | ITGC-AC-07 | 08 §9 |
 | UAT-SEC-015 | RLS cross-tenant isolation | ITGC-AC (RLS) | 08 §7, §9 |
 | UAT-SEC-016 | Edge security headers | ITGC-OP | 08 §9 |
+| UAT-SEC-017 | Aggregator webhook requires secret | ITGC-AC-03 | 08 §7 |
+| UAT-SEC-018 | PSP webhook tenant-scoped | ITGC-AC-03 | 08 §7 |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 
@@ -162,6 +164,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-011 | PIT/WHT withholding | PAY-02 | 05 §9 |
 | UAT-PAY-012 | RLS payroll isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-PAY-013 | RBAC non-HCM block | ITGC-AC-07 | 08 §9 |
+| UAT-PAY-014 | ESS self-service own data | Feature (ESS), ITGC-AC | 25 §7 |
+| UAT-PAY-015 | ESS expense → GL on approve | Feature (ESS), GL-01 | 25 §7 |
+| UAT-PAY-016 | ESS expense self-approval blocked | ITGC-AC-09 | 25 §7 |
+| UAT-PAY-017 | ESS unlinked user refused | Feature (ESS) | 25 §7 |
+| UAT-PAY-018 | Payroll run tenant-scoped | ITGC-AC-03 | 05 §7 |
 
 ## 08 — Admin / SoD / Audit → `08-itgc.md`
 
@@ -234,13 +241,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 
 | Cycle | Cases | Control-type cases |
 |---|---|---|
-| 01 Security & Access | 16 | 10 |
+| 01 Security & Access | 18 | 12 |
 | 02 Order-to-Cash | 19 | 9 |
 | 03 Procure-to-Pay | 17 | 9 |
 | 04 Inventory & WMS | 23 | 6 |
 | 05 GL & Close | 18 | 9 |
 | 06 Tax | 13 | 4 |
-| 07 Payroll | 13 | 5 |
+| 07 Payroll | 18 | 7 |
 | 08 Admin / SoD / Audit | 16 | 10 |
 | 09 Reports & Analytics | 24 | 5 |
 | 10 Customer Portal | 12 | 5 |

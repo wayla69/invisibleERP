@@ -6,6 +6,7 @@ import { Optional } from '@nestjs/common';
 import { DocNumberService } from '../../common/doc-number.service';
 import { getProvider } from './providers';
 import { PaymentService } from '../payments/payments.service';
+import { RealtimeScope } from '../restaurant/realtime.scope';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -21,6 +22,7 @@ export class PosTerminalService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
+    private readonly scope: RealtimeScope,
     @Optional() private readonly payments?: PaymentService,  // wiring: record a card tender on capture
   ) {}
 
@@ -109,18 +111,29 @@ export class PosTerminalService {
   }
 
   // PSP webhook (idempotent on provider_ref). Public — derive nothing from auth.
+  // PSP webhook — runs under @NoTx (public, no JWT). Resolve the intent (+ its tenant) via a controlled
+  // bypass read on the globally-unique providerRef, then flip status RLS-scoped to THAT tenant, so a
+  // webhook can never mutate another tenant's payment even if the signature secret were compromised.
   async webhook(provider: string, providerRef: string, status: string) {
-    const db = this.db as any;
-    const [i] = await db.select().from(paymentIntents).where(and(eq(paymentIntents.provider, provider), eq(paymentIntents.providerRef, providerRef))).limit(1);
-    if (!i) return { ok: true, note: 'no matching intent' }; // idempotent / unknown → ack
-    // Trust the PSP API, not the webhook payload: re-fetch authoritative status (mock returns null → use payload).
-    const verified = await getProvider(provider).verifyWebhook(providerRef);
-    const finalStatus = verified ?? status;
-    if (i.status === finalStatus) return { ok: true, note: 'already' };
-    const set: any = { status: finalStatus };
-    if (finalStatus === 'Captured') { set.capturedAmount = i.amount; set.capturedAt = new Date(); }
-    await db.update(paymentIntents).set(set).where(eq(paymentIntents.id, i.id));
-    return { ok: true, intent_no: i.intentNo, status };
+    const intent = await this.scope.bypassQuery(async () => {
+      const db = this.db as any;
+      const [i] = await db.select().from(paymentIntents).where(and(eq(paymentIntents.provider, provider), eq(paymentIntents.providerRef, providerRef))).limit(1);
+      return i ?? null;
+    });
+    if (!intent) return { ok: true, note: 'no matching intent' }; // idempotent / unknown → ack
+    const doUpdate = async () => {
+      const db = this.db as any;
+      // Trust the PSP API, not the webhook payload: re-fetch authoritative status (mock returns null → use payload).
+      const verified = await getProvider(provider).verifyWebhook(providerRef);
+      const finalStatus = verified ?? status;
+      if (intent.status === finalStatus) return { ok: true, note: 'already' };
+      const set: any = { status: finalStatus };
+      if (finalStatus === 'Captured') { set.capturedAmount = intent.amount; set.capturedAt = new Date(); }
+      await db.update(paymentIntents).set(set).where(eq(paymentIntents.id, intent.id));
+      return { ok: true, intent_no: intent.intentNo, status };
+    };
+    // Scope to the intent's tenant; a legacy null-tenant intent falls back to a bypass update.
+    return intent.tenantId != null ? this.scope.run(Number(intent.tenantId), doUpdate) : this.scope.bypassQuery(doUpdate);
   }
 
   // ── Settlement ─────────────────────────────────────────────────────────────

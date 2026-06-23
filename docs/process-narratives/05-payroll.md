@@ -63,7 +63,7 @@ SoD: the person who **prepares** the payroll run is never the sole person who **
 3. **Statutory items.** Provident fund, overtime, leave accrual, and ภ.ง.ด.1ก figures are computed for statutory reporting (**PAY-02**).
 4. **Independent review (decision point).** Payroll Manager / FinancialController performs an independent review of the run before disbursement — the preparer does not self-approve (**PAY-02**, **R07**). Material variances vs the prior period are investigated.
 5. **Approval & disbursement.** On approval the run is released for disbursement (bank file / payment); the payslips are issued to employees.
-6. **GL posting.** Payroll expense, SSO/PIT liabilities, and net-pay payable post as a **balanced** journal entry to the GL (**GL-01**; period controls per `04-general-ledger-close.md`).
+6. **GL posting (tenant-scoped).** Payroll expense, SSO/PIT liabilities, and net-pay payable post as a **balanced** journal entry to the GL (**GL-01**; period controls per `04-general-ledger-close.md`). The run is **scoped to a single tenant**: a tenant-bound user runs for their own tenant, while an HQ/Admin caller (whose request bypasses RLS) **must** name the tenant via `tenant_id` on `POST /api/payroll/runs` — otherwise the run is rejected `TENANT_REQUIRED`. The employee selection and the JE are filtered to that tenant so payroll can never consolidate employees of multiple tenants into one entry (**ITGC-AC-03**).
 7. **Statutory filing & reconciliation.** PND1 / ภ.ง.ด.1ก are generated and filed; withholding is reconciled to the GL liability accounts (links to **TAX-03**).
 
 ## 8. Process flow
@@ -120,9 +120,12 @@ flowchart TD
 | Calculation variance | Run differs materially from prior | Reviewer investigates before approval |
 | Missing review | Run not independently approved | Disbursement held |
 | Filing discrepancy | PND1 ≠ GL liability | Reconcile and adjust before filing |
+| `TENANT_REQUIRED` (400) | HQ/Admin runs payroll without a `tenant_id` | Specify the tenant; the run is scoped to one tenant (ITGC-AC-03) |
+| `BAD_PERIOD` (400) | `period` not `YYYY-MM` | Supply a valid period |
 
 ## 14. Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 | 2026-06-23 | Platform | Security review W1: payroll run is now tenant-scoped — HQ/Admin must pass `tenant_id` (`TENANT_REQUIRED`), employee selection + JE filtered to that tenant (ITGC-AC-03). Verified by the `payroll` harness cross-tenant case. |

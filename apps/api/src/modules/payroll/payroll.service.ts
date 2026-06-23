@@ -42,16 +42,21 @@ export class PayrollService {
   }
 
   // ── Run payroll for a period → balanced GL entry + payslips. Idempotent per (tenant, period). ──
-  async runPayroll(period: string, user: JwtUser) {
+  async runPayroll(period: string, user: JwtUser, explicitTenantId?: number | null) {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
     const db = this.db as any;
-    const tenantId = user.tenantId ?? null;
+    // Resolve the tenant to run for. A scoped (non-HQ) user always runs for their own tenant; an HQ/Admin
+    // caller (tenantId null, RLS-bypass) MUST name a tenant_id — otherwise the employee query below spans
+    // EVERY tenant and posts one cross-tenant JE under tenant_id null (escaping RLS + the close calendar).
+    const tenantId = user.tenantId ?? (explicitTenantId != null ? Number(explicitTenantId) : null);
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id to run payroll', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id เพื่อรันเงินเดือน' });
     if (await this.ledger.alreadyPosted('PAYROLL', period, tenantId)) {
-      const [existing] = await db.select().from(payruns).where(and(eq(payruns.period, period))).orderBy(desc(payruns.id)).limit(1);
+      const [existing] = await db.select().from(payruns).where(and(eq(payruns.period, period), eq(payruns.tenantId, tenantId))).orderBy(desc(payruns.id)).limit(1);
       return { already: true, period, entry_no: existing?.entryNo ?? null };
     }
 
-    const emps = await db.select().from(employees).where(eq(employees.active, true));
+    // Explicit tenant filter so the run is correct even for an Admin caller whose request bypasses RLS.
+    const emps = await db.select().from(employees).where(and(eq(employees.active, true), eq(employees.tenantId, tenantId)));
     if (!emps.length) throw new BadRequestException({ code: 'NO_EMPLOYEES', message: 'No active employees to pay', messageTh: 'ไม่มีพนักงานที่ใช้งานอยู่' });
 
     const like = `${period}%`;
