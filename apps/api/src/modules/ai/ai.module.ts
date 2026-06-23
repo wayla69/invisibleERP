@@ -5,6 +5,8 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AgentService } from './agent.service';
 import { AiActionService } from './ai-action.service';
+import { EmbedderService } from './embedder';
+import { KnowledgeService } from './knowledge.service';
 import { PosModule } from '../pos/pos.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { FinanceModule } from '../finance/finance.module';
@@ -20,6 +22,7 @@ import { ProcurementModule } from '../procurement/procurement.module';
 const ChatBody = z.object({ message: z.string().min(1), history: z.array(z.any()).optional(), agent_type: z.string().optional() });
 const ProposeBody = z.object({ kind: z.enum(['journal_entry', 'purchase_order']), payload: z.any(), rationale: z.string().optional(), source: z.enum(['ai', 'human']).optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
+const IngestBody = z.object({ title: z.string().min(1), source: z.string().optional(), content: z.string().min(1) });
 
 @Controller('api')
 export class AiController {
@@ -94,9 +97,25 @@ export class AiActionController {
   reject(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.actions.reject(+id, b.reason, u); }
 }
 
+// Phase D2 — RAG knowledge base. Ingest policies/SOPs (perm masterdata), then search/ask with
+// cite-or-refuse (perm ai_chat). The agent's `search_knowledge_base` tool uses the same service.
+@Controller('api/ai/kb')
+export class KnowledgeController {
+  constructor(private readonly kb: KnowledgeService) {}
+
+  @Post('documents') @Permissions('masterdata', 'ai_chat')
+  ingest(@Body(new ZodValidationPipe(IngestBody)) b: z.infer<typeof IngestBody>, @CurrentUser() u: JwtUser) { return this.kb.ingest(b, u); }
+
+  @Get('search') @Permissions('ai_chat', 'dashboard')
+  search(@Query('q') q: string, @Query('k') k: string | undefined, @CurrentUser() u: JwtUser) { return this.kb.search(q ?? '', k ? +k : 5, u); }
+
+  @Get('ask') @Permissions('ai_chat', 'dashboard')
+  ask(@Query('q') q: string, @CurrentUser() u: JwtUser) { return this.kb.ask(q ?? '', u); }
+}
+
 @Module({
   imports: [PosModule, InventoryModule, FinanceModule, AnalyticsModule, BiModule, PipelineModule, CpqModule, ServiceModule, ProfitabilityModule, LedgerModule, ProcurementModule],
-  controllers: [AiController, AiActionController],
-  providers: [AgentService, AiActionService],
+  controllers: [AiController, AiActionController, KnowledgeController],
+  providers: [AgentService, AiActionService, EmbedderService, KnowledgeService],
 })
 export class AiModule {}

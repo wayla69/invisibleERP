@@ -449,6 +449,13 @@
       "when": 1782260000000,
       "tag": "0063_ai_action_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1782270000000,
+      "tag": "0064_kb_rag",
+      "breakpoints": true
     }
   ]
 }

@@ -134,6 +134,33 @@ a human approves. There is no path for the model to mutate ledgers/POs directly.
 
 ---
 
+## 4b. RAG over policies/SOPs/contracts (Phase D2) — cite-or-refuse
+
+The assistant answers policy/procedure questions **only from the tenant's own documents**, citing them —
+or it declines. No hallucinated policy.
+
+- **Ingest.** `POST /api/ai/kb/documents` (perm `masterdata`/`ai_chat`) chunks a document (paragraph-
+  aware, ~80 words) and embeds each chunk, storing `kb_documents` + `kb_chunks` (migration `0064`,
+  tenant-scoped via RLS).
+- **Embedder.** `EmbedderService` is pluggable (`EMBED_PROVIDER`); the **default is a deterministic,
+  dependency-free local embedder** (hashed bag-of-words + bigrams, stopword-filtered, L2-normalized) so
+  retrieval is testable offline with no API key. Embeddings are stored as a plain `number[]` (jsonb) and
+  cosine is computed in-service — **no pgvector dependency**, so the PGlite harnesses run unchanged.
+  *Prod path:* set `EMBED_PROVIDER` to a real model and move `embedding` to a pgvector column + ANN
+  index behind the same call sites.
+- **Retrieve + cite-or-refuse.** `KnowledgeService.search` ranks the tenant's chunks by cosine;
+  `ask()` returns citations only when the top score clears `KB_MIN_SCORE` (default 0.15) — otherwise it
+  **refuses** (no citation ⇒ no answer). Agent tool `search_knowledge_base` exposes this to the chat
+  loop, and the system prompt instructs the model to answer only from results and cite the source.
+- **Endpoints:** `POST /api/ai/kb/documents`, `GET /api/ai/kb/search?q=`, `GET /api/ai/kb/ask?q=`.
+- **Verified by** `tools/cutover/src/rag.ts` (ingest→chunks, relevant retrieval + citation, off-topic
+  **refusal**, tenant isolation).
+
+> **Scale/perf note:** in-service cosine over all tenant chunks is fine for modest corpora and keeps the
+> feature verifiable here; pgvector + ANN is the drop-in upgrade for large knowledge bases.
+
+---
+
 ## 5. การยกระดับ (เพิ่มจากเดิม — ระบุเป็น improvement ตั้งใจ)
 
 - **Prompt caching** บน system prompt ขนาดใหญ่ + tool schemas (ลด cost/latency)

@@ -69,7 +69,8 @@
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",
     "lint": "echo \"(lint placeholder)\"",
     "build": "echo \"(cutover: run via tsx)\"",
-    "ai-actions": "tsx src/ai-actions.ts"
+    "ai-actions": "tsx src/ai-actions.ts",
+    "rag": "tsx src/rag.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.13",
