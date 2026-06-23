@@ -1,0 +1,44 @@
+# ITGC-CM-03 — segregated, approval-gated production deploy.
+# Runs ONLY on a push to main (post-merge) or manual dispatch, and is pinned to the GitHub
+# `production` Environment. Configure that Environment with REQUIRED REVIEWERS (a person other than
+# the change author) so a deploy cannot proceed without an independent approval — i.e. deployer ≠ author.
+#
+# Secrets required on the `production` Environment:
+#   RAILWAY_TOKEN  — Railway project token used by the CLI to trigger the deploy.
+name: Deploy (production)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # ← gate: required reviewers + protected secrets live here
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Build + typecheck as a last gate before shipping (CI already ran on the PR).
+      - run: pnpm --filter @ierp/shared build && pnpm -r typecheck && pnpm -r build
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "RAILWAY_TOKEN not configured on the production environment — aborting." >&2
+            exit 1
+          fi
+          npx -y @railway/cli up --service api --detach
+          npx -y @railway/cli up --service web --detach

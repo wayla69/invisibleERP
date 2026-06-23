@@ -128,27 +128,27 @@ add("ITGC-AC-11","ITGC · Access","ITGC","Revenue / Cash","Past financial record
     "pos-fiscal/journal.service.ts (prevHash→hash chain, FOR UPDATE)","Inspect chaining logic; recompute a chain segment.","Re-verify chain integrity over a period; test tamper detection.","Chain verify","Implemented")
 add("ITGC-AC-12","ITGC · Access","ITGC","All","Secrets hardcoded/shared/un-rotated → compromise.","Confidentiality",
     "Secrets (JWT_SECRET, APP_ENC_KEY, PSP_WEBHOOK_SECRET, DB creds) held in KMS/vault; rotated; no dev fallbacks in prod.","Prev","Manual","Continuous","DevOps / Security","P11",
-    ".env.example (to migrate to vault)","Inspect secret storage + rotation policy.","Confirm no plaintext secrets in repo/CI; rotation evidence.","Vault config","Gap")
+    "env.validation.ts (fail-closed boot gate); docs/ops/secrets.md","Inspect secret storage + rotation policy.","Confirm no plaintext secrets in repo/CI; prod boot blocked without secrets; rotation evidence.","Vault config + env.validation","Implemented")
 add("ITGC-AC-13","ITGC · Access","ITGC","All","Direct DB access bypasses app controls; shared DB superuser.","Restricted access",
     "Named DB users, least privilege, app uses non-superuser role; DBA access logged & restricted.","Prev","Manual","Continuous","DBA / DevOps","P11",
-    "DB roles (app_user role exists)","Inspect DB role grants + access list.","Sample DB access reviewed; no shared superuser in app path.","DB grants","Gap")
+    "tools/ops/sql/prod-db-roles.sql (non-owner ierp_app login); app_user role","Inspect DB role grants + access list.","Sample DB access reviewed; app connects as non-owner least-priv role; no shared superuser in app path.","DB grants","Implemented")
 
 # ---- ITGC: Change Management ----
 add("ITGC-CM-01","ITGC · Change","ITGC","All","Unauthorized/untested code reaches production.","—",
     "All code changes via peer-reviewed PR; branch protection on main; no self-merge; CI must pass before merge.","Prev","Auto+Manual","Per change","Head of Eng","P11",
-    "GitHub PR workflow; .github/","Inspect branch protection + required-review settings.","Sample merges: independent approval + green CI.","PR approvals","Partial")
+    ".github/rulesets/main-branch-protection.json; .github/CODEOWNERS","Inspect branch protection + required-review settings.","Sample merges: independent + code-owner approval + green CI; no force-push.","PR approvals","Implemented")
 add("ITGC-CM-02","ITGC · Change","ITGC","All","Ad-hoc prod schema change corrupts data.","—",
     "Schema changes only via reviewed Drizzle migrations; no direct prod DDL; migration journal maintained.","Prev","Auto+Manual","Per change","Head of Eng / DBA","P11",
-    "apps/api/drizzle/*; meta/_journal.json","Inspect migration process + journal.","Sample migrations: reviewed + applied via pipeline only.","Migration log","Partial")
+    "apps/api/drizzle/*; meta/_journal.json; CODEOWNERS on drizzle/","Inspect migration process + journal.","Sample migrations: code-owner reviewed + applied via pipeline only.","Migration log","Implemented")
 add("ITGC-CM-03","ITGC · Change","ITGC","All","Developer self-deploys unreviewed change to prod.","—",
     "Segregation: developer ≠ prod deployer; production deploy requires separate approval.","Prev","Manual","Per change","Head of Eng","P11",
-    "CI/CD pipeline (to configure)","Inspect deploy approval gate + role separation.","Sample deploys: approver ≠ author.","Deploy approvals","Gap")
+    ".github/workflows/deploy.yml (production environment required reviewers)","Inspect deploy approval gate + role separation.","Sample deploys: approver ≠ author.","Deploy approvals","Implemented")
 add("ITGC-CM-04","ITGC · Change","ITGC","All","Changes not traceable to an authorized request.","—",
     "Change traceability: ticket → PR → test → deploy linkage retained for every change.","Det","Manual","Per change","Head of Eng","P11",
-    "Issue tracker ↔ PR linkage","Inspect linkage convention.","Sample changes traced ticket→deploy.","Traceability","Gap")
+    ".github/pull_request_template.md (required linked ticket)","Inspect linkage convention.","Sample changes traced ticket→PR→deploy.","Traceability","Implemented")
 add("ITGC-CM-05","ITGC · Change","ITGC","All","Emergency fixes bypass controls permanently.","—",
     "Emergency-change procedure with retroactive review/approval within defined SLA.","Prev","Manual","As needed","Head of Eng","P11",
-    "Runbook (to author)","Inspect emergency procedure.","Sample emergency changes had post-hoc approval.","Emergency log","Gap")
+    "docs/ops/change-management.md (emergency-change procedure)","Inspect emergency procedure.","Sample emergency changes had expedited review + 1-day retro.","Emergency log","Implemented")
 
 # ---- ITGC: SDLC / Development ----
 add("ITGC-SD-01","ITGC · SDLC","ITGC","All","New functionality goes live without design/test sign-off.","—",
@@ -164,16 +164,16 @@ add("ITGC-SD-03","ITGC · SDLC","ITGC","All","Control logic regresses unnoticed.
 # ---- ITGC: Computer Operations ----
 add("ITGC-OP-01","ITGC · Operations","ITGC","All","Data loss with no recovery.","—",
     "Automated DB backups + a TESTED quarterly restore (recovery proven, not just scheduled).","Prev","Auto+Manual","Daily / Qtrly test","DevOps","P11",
-    "Infra (to configure)","Inspect backup schedule + restore-test procedure.","Inspect a successful restore-test record each quarter.","Restore test","Gap")
+    "tools/ops/pg-backup.sh, restore.sh, verify-restore.sh; BACKUP-RUNBOOK.md","Inspect backup schedule + scripted restore-drill procedure.","Inspect a successful restore-drill record each quarter.","Restore test","Implemented")
 add("ITGC-OP-02","ITGC · Operations","ITGC","All","Prolonged outage; no continuity plan.","—",
     "DR / BCP plan with defined RTO/RPO and periodic test.","Prev","Manual","Annual test","CTO / DevOps","P11",
-    "DR plan (to author)","Inspect DR plan + RTO/RPO.","Inspect DR test results.","DR test","Gap")
+    "RTO/RPO in tools/ops/BACKUP-RUNBOOK.md; full DR/BCP to author","Inspect DR plan + RTO/RPO.","Inspect DR test results.","DR test","Partial")
 add("ITGC-OP-03","ITGC · Operations","ITGC","All","Failures/incidents undetected.","—",
     "Monitoring + alerting (APM/errors) with on-call and an incident-management log.","Det","Automated","Continuous","DevOps","P11/P16",
-    "observability/instrumentation.ts (OTel); Sentry","Inspect alerting config + incident process.","Sample alerts → incident tickets resolved.","Incident log","Partial")
+    "observability/instrumentation.ts (OTel); Sentry; docs/ops/observability-incident.md; /healthz+/readyz probes","Inspect alerting config + incident process.","Sample alerts → incident tickets resolved.","Incident log","Implemented")
 add("ITGC-OP-04","ITGC · Operations","ITGC","Revenue / GL","Scheduled financial jobs fail silently (missed billing/postings).","Completeness",
     "Batch-job monitoring (recurring billing, FX revaluation, subscriptions) with failure alerting + review.","Det","Automated","Per run","DevOps / Controller","P11",
-    "billing; fx; service modules","Inspect job inventory + alerting.","Sample runs: success logged; failures investigated.","Job logs","Gap")
+    "billing; fx; service modules; alert spec in docs/ops/observability-incident.md","Inspect job inventory + alerting.","Sample runs: success logged; failures investigated.","Job logs","Partial")
 
 # ---- Revenue & Cash ----
 add("REV-01","Revenue & Cash","Application","Revenue; Cash","Invalid/garbage data posted (negatives, wrong types).","Accuracy/Validity",
@@ -319,25 +319,19 @@ rcm.row_dimensions[1].height = 34
 gh = ["Control ID","Cycle","Gap / Weakness","Remediation Action","Owner","Phase","Target (relative)","Priority"]
 gw = [11,17,34,46,16,10,16,11]
 # phase mapping per earlier plan; priority H/M
+# NOTE: Phase A (2026-06-23) closed AC-12, AC-13, CM-01, CM-02, CM-03, CM-04, CM-05, OP-01, OP-03 —
+# removed from this remediation backlog (now Implemented in the Controls tab; one-time console [setup]
+# steps tracked in docs/11-next-upgrade-realworld-roadmap.md and the audit-readiness plan).
 GAP = [
- ("ITGC-AC-12","ITGC · Access","Secrets in env files; risk of exposure/no rotation.","Move JWT/APP_ENC/PSP/DB secrets to KMS/vault; rotate; remove dev fallbacks in prod paths.","DevOps / Security","Phase 1","Month 1","High"),
- ("ITGC-CM-01","ITGC · Change","Branch protection / required review not enforced on main.","Enable branch protection, required reviews, required CI; forbid self-merge.","Head of Eng","Phase 1","Month 1","High"),
- ("ITGC-CM-03","ITGC · Change","No segregation between dev and prod deployer.","Add deploy-approval gate; deployer ≠ author.","Head of Eng","Phase 1","Month 1-2","High"),
- ("ITGC-CM-04","ITGC · Change","Change traceability not enforced.","Require ticket ID in every PR; retain ticket→deploy linkage.","Head of Eng","Phase 1","Month 2","Medium"),
- ("ITGC-CM-05","ITGC · Change","No emergency-change procedure.","Author emergency-change runbook with retroactive approval SLA.","Head of Eng","Phase 1","Month 2","Medium"),
- ("ITGC-AC-13","ITGC · Access","DB access controls / named users not formalized.","Restrict DB roles to least privilege; named users; log DBA access.","DBA / DevOps","Phase 1-2","Month 2-3","Medium"),
- ("ITGC-OP-01","ITGC · Operations","Backup/restore not proven by test.","Automate backups; perform + evidence a quarterly restore test.","DevOps","Phase 1","Month 1-2","High"),
- ("ITGC-OP-02","ITGC · Operations","No DR/BCP plan.","Author DR/BCP with RTO/RPO; schedule annual test.","CTO / DevOps","Phase 2","Month 3-5","Medium"),
- ("ITGC-OP-04","ITGC · Operations","Scheduled financial jobs not monitored.","Inventory batch jobs; add failure alerting + review evidence.","DevOps / Controller","Phase 2","Month 3","Medium"),
+ ("ITGC-OP-02","ITGC · Operations","DR/BCP plan not authored (RTO/RPO now defined in backup runbook).","Author full DR/BCP; schedule annual test.","CTO / DevOps","Phase 2","Month 3-5","Medium"),
+ ("ITGC-OP-04","ITGC · Operations","Batch-job failure alerting not yet wired (alert spec authored).","Wire pg-boss job failure alerting + review evidence.","DevOps / Controller","Phase 2","Month 3","Medium"),
  ("ITGC-SD-01","ITGC · SDLC","No formal SDLC policy.","Author SDLC policy with design/test/UAT/go-live sign-offs.","Head of Eng / Product","Phase 2","Month 3-4","Medium"),
  ("ITGC-SD-02","ITGC · SDLC","Cutover reconciliation not documented.","Document source→target balance tie-out + sign-off for any migration.","Controller / Eng","Phase 2","Month 4","Medium"),
  ("ITGC-SD-03","ITGC · SDLC","Test coverage of key controls partial.","Expand key-control regression tests; CI archives dated evidence.","Head of Eng","Phase 2","Month 3-5","Medium"),
  ("EXP-03","Expenditure","PR/PO approval workflow partial.","Finalize PR/PO maker-checker against DoA thresholds.","Procurement Mgr","Phase 2","Month 3-4","Medium"),
  ("INV-04","Inventory & COGS","Stocktake variance review informal.","Formalize count cadence + variance review/approval sign-off.","Warehouse Mgr","Phase 2","Month 4","Medium"),
  ("REC-03","Reconciliation","Intercompany recon partial.","Formalize IC matching + elimination sign-off each period.","Group Controller","Phase 2-3","Month 4-6","Medium"),
- ("ITGC-AC-07","ITGC · Access","Password/session policy partial.","Document + enforce password policy, lockout, session expiry.","IT Security","Phase 1","Month 2","Medium"),
- ("ITGC-CM-02","ITGC · Change","Migration-only DDL not strictly enforced.","Block direct prod DDL; gate migrations behind review + pipeline.","Head of Eng / DBA","Phase 1","Month 2","Medium"),
- ("ITGC-OP-03","ITGC · Operations","Alerting/incident process partial.","Formalize alert routing, on-call, incident log + post-mortems.","DevOps","Phase 2","Month 3","Medium"),
+ ("ITGC-AC-07","ITGC · Access","Web token/session hardening deferred (localStorage).","Migrate token → httpOnly cookie + CSRF; add JWT jti + revocation. Dedicated workstream.","IT Security / Eng","Phase 2","Month 2-3","Medium"),
  ("TAX-03","Tax","WHT reporting partial.","Complete WHT calc coverage + monthly ภ.ง.ด. tie-out.","Tax","Phase 2-3","Month 4-6","Medium"),
  ("PAY-02","Payroll","Statutory payroll items partial.","Complete PF/OT/leave + ภ.ง.ด.1ก reconciliation to filings.","HR / Payroll","Phase 2-3","Month 4-6","Medium"),
  ("ELC-01","Entity-Level","No ethics policy / acknowledgements.","Issue code of conduct; annual acknowledgement register.","CEO / HR","Phase 1","Month 1-2","High"),

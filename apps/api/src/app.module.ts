@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { validateEnv } from './common/env.validation';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { DatabaseModule } from './database/database.module';
 import { CommonModule } from './common/common.module';
@@ -80,7 +81,7 @@ import { BranchModule } from './modules/branch/branch.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     DatabaseModule,
     CommonModule,
     AuthModule, // exports JwtModule → JwtAuthGuard can inject JwtService

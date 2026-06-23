@@ -44,7 +44,7 @@ You are an **EGC under the JOBS Act**, which changes *when* certain things are r
 
 ## 2. Current state — where we already stand
 
-The RCM scores **66 controls: 40 Implemented · 12 Partial · 14 Gap** (after re-scoring GL-05, ITGC-AC-06/08/09/10 to *Implemented* — see §2.1). The system already has materially strong foundations that auditors will credit:
+The RCM scores **66 controls: 49 Implemented · 11 Partial · 6 Gap** (after the Phase A ITGC hardening of 2026-06-23 — backup/restore drill OP-01, fail-closed secrets AC-12, least-privilege DB role AC-13, branch protection + deploy gate + traceability + emergency procedure CM-01/02/03/04/05, incident/observability OP-03 — on top of the earlier GL-05, ITGC-AC-06/08/09/10 — see §2.1 and `docs/11-next-upgrade-realworld-roadmap.md`). The system already has materially strong foundations that auditors will credit:
 
 | Control area | What exists today | Evidence (code) |
 |---|---|---|
@@ -93,30 +93,30 @@ These are the controls the RCM marks **Gap** or **Partial**. They are the remedi
 | ID | Gap | Remediation | Owner | Target | Priority |
 |---|---|---|---|---|---|
 | ~~**ITGC-AC-06**~~ | ✅ *Done* — TOTP MFA enforced at login for enrolled users; privileged roles flagged for mandatory enrolment | Implemented & evidenced (`auth.service.ts`, harness). **Operating step:** enrol all privileged/finance users | IT Security | Rollout | — |
-| **ITGC-AC-12** | Secrets in env files, no rotation | Move JWT / `APP_ENC_KEY` / PSP / DB secrets to KMS/vault; rotate; remove dev fallbacks from prod paths | DevOps / Security | Month 1 | **High** |
+| ~~**ITGC-AC-12**~~ | ✅ *Implemented* — fail-closed boot validation refuses prod start without required secrets (`env.validation.ts`); secrets store/matrix/rotation documented (`docs/ops/secrets.md`) | **[setup]** place values in a managed vault; KMS-envelope + auto-rotation for `APP_ENC_KEY` is the remaining follow-up | DevOps / Security | Vault placement | **High** |
 | ~~**ITGC-AC-08**~~ | ✅ *Done* — quarterly user access review (report + CSV export + certification) | Implemented & evidenced (`admin-users.service.ts`, harness) | — | Closed | — |
 | ~~**ITGC-AC-09**~~ | ✅ *Done* — SoD **preventive** block on permission assignment | Implemented & evidenced (`assertNoSodConflict`, harness) | — | Closed | — |
 | **ITGC-AC-07** | (Partial) Session/token hardening | Migrate frontend token from `localStorage` → httpOnly cookie + CSRF; add JWT `jti` + revocation for pre-expiry logout | Eng | Month 2–3 | Medium |
-| **ITGC-AC-13** | DB access / named users not formalized | Least-privilege DB roles, named users, log DBA access | DBA / DevOps | Month 2–3 | Medium |
+| ~~**ITGC-AC-13**~~ | ✅ *Implemented* — dedicated non-owner `ierp_app` login in the least-priv `app_user` group; FORCE-RLS re-asserted; PUBLIC revoked (`tools/ops/sql/prod-db-roles.sql`) | **[setup]** run at provisioning; log DBA access | DBA / DevOps | Provisioning | Medium |
 
 ### 3.2 ITGC — Change Management
 
 | ID | Gap | Remediation | Owner | Target |
 |---|---|---|---|---|
-| **ITGC-CM-03** | No segregation between author and prod deployer | Deploy-approval gate; **deployer ≠ author** | Head of Eng | Month 1–2 |
-| **ITGC-CM-04** | Change traceability not enforced | Require ticket ID in every PR; retain ticket→deploy linkage | Head of Eng | Month 2 |
-| **ITGC-CM-05** | No emergency-change procedure | Emergency-change runbook with retroactive-approval SLA | Head of Eng | Month 2 |
-| **ITGC-CM-01/02** | (Partial) Branch protection / review evidence | Enforce branch protection on `main`, required reviews, retain CI evidence | Head of Eng | Month 1–2 |
+| ~~**ITGC-CM-03**~~ | ✅ *Implemented* — approval-gated `deploy.yml` pinned to GitHub `production` Environment (**deployer ≠ author**) | **[setup]** set Environment required reviewers + `RAILWAY_TOKEN` | Head of Eng | Setup |
+| ~~**ITGC-CM-04**~~ | ✅ *Implemented* — PR template requires linked ticket + control/docs checklist (ticket → PR → review → gated deploy) | Operating step: enforce on every PR | Head of Eng | — |
+| ~~**ITGC-CM-05**~~ | ✅ *Implemented* — emergency-change procedure (expedited 2nd review + retro within 1 business day) in `docs/ops/change-management.md` | Operating step | Head of Eng | — |
+| ~~**ITGC-CM-01/02**~~ | ✅ *Implemented* — importable branch-protection ruleset + CODEOWNERS (required reviews, code-owner, required CI, no force-push/delete) | **[setup]** import the ruleset on `main` | Head of Eng | Setup |
 
 ### 3.3 ITGC — Operations & SDLC
 
 | ID | Gap | Remediation | Owner | Target |
 |---|---|---|---|---|
-| **ITGC-OP-01** | Backup/restore not proven by test | Automate backups; perform + **evidence a quarterly restore test** | DevOps | Month 1–2 |
-| **ITGC-OP-02** | No DR/BCP plan | Author DR/BCP with RTO/RPO; schedule annual test | CTO / DevOps | Month 3–5 |
-| **ITGC-OP-04** | Scheduled financial jobs not monitored | Inventory `pg-boss` jobs; failure alerting + review evidence | DevOps / Controller | Month 3 |
+| ~~**ITGC-OP-01**~~ | ✅ *Implemented* — automated backup + **scripted, repeatable restore drill** (`pg-backup.sh`/`restore.sh`/`verify-restore.sh`); RTO/RPO + evidence table in `tools/ops/BACKUP-RUNBOOK.md` | **[setup]** run the first quarterly drill; enable provider PITR | DevOps | First drill |
+| **ITGC-OP-02** | No DR/BCP plan (RTO/RPO defined) | RTO/RPO now defined in the backup runbook; author full DR/BCP + schedule annual test | CTO / DevOps | Month 3–5 |
+| **ITGC-OP-04** | Scheduled financial jobs not monitored | Alert spec for `pg-boss` jobs in `docs/ops/observability-incident.md`; **[setup]** wire failure alerting + review evidence | DevOps / Controller | Setup |
 | **ITGC-SD-01** | No formal SDLC policy | Author SDLC policy with design/test/UAT/go-live sign-offs | Head of Eng / Product | Month 3–4 |
-| **ITGC-OP-03 / SD-02/03** | (Partial) Monitoring, test-coverage gates | Enable Sentry + OTel in prod; add test-coverage reporting/threshold to CI | DevOps / Eng | Month 2–3 |
+| ~~**ITGC-OP-03**~~ / SD-02/03 | ✅ *Implemented (OP-03)* — incident process + severity matrix + alert rules (`docs/ops/observability-incident.md`); prod boot warns when OTel/Sentry unset; `/healthz`+`/readyz` probes. SD-02/03 (coverage gates) ongoing | **[setup]** wire dashboards + on-call; add coverage threshold to CI | DevOps / Eng | Setup |
 
 ### 3.4 Application / process controls
 

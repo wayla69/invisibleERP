@@ -1,0 +1,22 @@
+# ITGC-CM-01 — required reviewers. A PR touching these paths needs review from the listed owner(s)
+# before merge (enforced together with the branch-protection ruleset in .github/rulesets/).
+# Replace the placeholder handles with real GitHub usernames/teams.
+
+# Default owner for everything
+*                       @wayla69
+
+# Financial / control-sensitive code — extra scrutiny
+/apps/api/src/modules/ledger/      @wayla69
+/apps/api/src/modules/payments/    @wayla69
+/apps/api/drizzle/                 @wayla69
+/packages/shared/src/permissions.ts @wayla69
+
+# Controls, policies & compliance evidence
+/compliance/                       @wayla69
+/docs/process-narratives/          @wayla69
+
+# CI/CD, infra & ops runbooks
+/.github/                          @wayla69
+/tools/ops/                        @wayla69
+/**/Dockerfile                     @wayla69
+/docker-compose.yml                @wayla69

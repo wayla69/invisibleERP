@@ -21,26 +21,31 @@ Produces `ierp-YYYYMMDD-HHMMSS.dump.gz`, **verifies it is restorable** (`pg_rest
 - **GitHub Actions**: scheduled workflow (`on: schedule: - cron: '0 * * * *'`) with the DB URL + cloud creds in repo secrets, `apt-get install postgresql-client`, run the script, no artifact retention of the dump itself (push to object storage).
 
 ## Restore (disaster recovery)
-1. Provision a fresh empty Postgres (new Railway DB) and get its `DATABASE_URL`.
-2. Fetch the newest good dump (`aws s3 cp …` or local), `gunzip ierp-*.dump.gz`.
-3. Restore:
-   ```bash
-   pg_restore --no-owner --no-privileges --clean --if-exists -d "$NEW_DATABASE_URL" ierp-*.dump
-   ```
-4. **Re-apply the RLS role + policies** if restoring into a brand-new cluster: migrations 0002/0003/0043
+Scripted: [`tools/ops/restore.sh`](restore.sh) handles gunzip + `pg_restore --clean --if-exists`.
+```bash
+TARGET_DATABASE_URL="$NEW_DATABASE_URL" tools/ops/restore.sh ierp-<stamp>.dump.gz
+```
+Then:
+1. **Re-apply the RLS role + policies** if restoring into a brand-new cluster: migrations 0002/0003/0043
    create the `app_user` role and `tenant_isolation` policies. If the role is missing, run
    `pnpm --filter @ierp/api db:migrate` against the restored DB (idempotent) before pointing the app at it.
-5. Point the API's `DATABASE_URL` at the restored DB and redeploy.
+   (Prod login-role/least-privilege setup is separate: `tools/ops/sql/prod-db-roles.sql`.)
+2. Point the API's `DATABASE_URL` at the restored DB and redeploy; confirm `/readyz` is `ready`.
 
-## Verify a restore (monthly drill — do NOT skip)
-Restore the latest dump into a throwaway DB and sanity-check, then drop it:
+Manual fallback (equivalent): `gunzip ierp-*.dump.gz && pg_restore --no-owner --no-privileges --clean --if-exists -d "$NEW_DATABASE_URL" ierp-*.dump`.
+
+## Verify a restore (quarterly drill — do NOT skip)
+Scripted: [`tools/ops/verify-restore.sh`](verify-restore.sh) restores the latest dump into a throwaway
+scratch DB, sanity-checks core tables (`tenants`, `users`, `accounts`, `journal_entries`), prints
+row counts, then drops the scratch DB — a repeatable, evidence-producing command.
 ```bash
-pg_restore --no-owner --no-privileges -d "$SCRATCH_URL" ierp-*.dump
-psql "$SCRATCH_URL" -c "select count(*) from tenants;"            # tenants present
-psql "$SCRATCH_URL" -c "select code,status from fiscal_periods limit 5;"  # per-tenant periods intact
-psql "$SCRATCH_URL" -c "select source,count(*) from journal_entries group by 1;"  # GL intact
+SCRATCH_ADMIN_URL=postgresql://…/postgres tools/ops/verify-restore.sh
 ```
-A backup you have never restored is not a backup.
+A backup you have never restored is not a backup. **Capture the output as ITGC-OP-01 evidence:**
+
+| Drill date | Dump tested | Result | Row counts | Operator | Evidence link |
+|---|---|---|---|---|---|
+| _pending first drill_ | | | | | |
 
 ## Notes / gotchas
 - The dump is logical (`pg_dump -Fc`), portable across Postgres minor versions and Railway moves.
