@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Utensils, Wallet, X } from 'lucide-react';
+import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Split, Utensils, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
 import { cn } from '@/lib/utils';
@@ -164,9 +164,15 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
   const [moveTo, setMoveTo] = useState('');
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeFrom, setMergeFrom] = useState('');
-  const allTables = useQuery<{ tables: { id: number; table_no: string; status: string }[] }>({ queryKey: ['tables-list'], queryFn: () => api('/api/restaurant/tables'), enabled: moveOpen || mergeOpen });
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [tItems, setTItems] = useState<number[]>([]);
+  const [tTo, setTTo] = useState('');
+  const allTables = useQuery<{ tables: { id: number; table_no: string; status: string }[] }>({ queryKey: ['tables-list'], queryFn: () => api('/api/restaurant/tables'), enabled: moveOpen || mergeOpen || transferOpen });
+  const orderDetail = useQuery<{ items: { item_id: number; name: string; qty: number; amount: number; charge: boolean }[] }>({ queryKey: ['order-detail', t.order?.order_no], queryFn: () => api(`/api/restaurant/orders/${t.order!.order_no}`), enabled: transferOpen && !!t.order });
   const move = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/move`, { method: 'POST', body: JSON.stringify({ to_table_id: Number(moveTo) }) }), onSuccess: () => { setMsg('ย้ายโต๊ะแล้ว'); setMoveOpen(false); onClose(); onChange(); }, onError: onErr });
   const merge = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/merge`, { method: 'POST', body: JSON.stringify({ from_table_id: Number(mergeFrom) }) }), onSuccess: () => { setMsg('รวมโต๊ะแล้ว'); setMergeOpen(false); onChange(); }, onError: onErr });
+  const transfer = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/transfer-items`, { method: 'POST', body: JSON.stringify({ item_ids: tItems, to_table_id: Number(tTo) }) }), onSuccess: () => { setMsg('ย้ายรายการแล้ว'); setTransferOpen(false); setTItems([]); setTTo(''); onChange(); }, onError: onErr });
+  const toggleItem = (id: number) => setTItems((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const open = useMutation({ mutationFn: () => api<{ session_id: number; public_token: string }>(`/api/restaurant/tables/${t.id}/open`, { method: 'POST', body: '{}' }), onSuccess: (r) => { setSessionId(r.session_id); setQr(`/qr/${r.public_token}`); setMsg('เปิดโต๊ะแล้ว'); onChange(); }, onError: onErr });
   const addItem = useMutation({
     mutationFn: async () => {
@@ -231,9 +237,10 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
 
       {(t.session || sessionId) && t.status !== 'cleaning' && (
         <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setMoveOpen((v) => !v); setMergeOpen(false); }}><ArrowLeftRight className="size-4" /> ย้ายโต๊ะ</Button>
-            <Button variant="outline" size="sm" onClick={() => { setMergeOpen((v) => !v); setMoveOpen(false); }}><Sparkles className="size-4" /> รวมโต๊ะ</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setMoveOpen((v) => !v); setMergeOpen(false); setTransferOpen(false); }}><ArrowLeftRight className="size-4" /> ย้ายโต๊ะ</Button>
+            <Button variant="outline" size="sm" onClick={() => { setMergeOpen((v) => !v); setMoveOpen(false); setTransferOpen(false); }}><Sparkles className="size-4" /> รวมโต๊ะ</Button>
+            {t.order && <Button variant="outline" size="sm" onClick={() => { setTransferOpen((v) => !v); setMoveOpen(false); setMergeOpen(false); }}><Split className="size-4" /> ย้ายรายการ</Button>}
           </div>
           {moveOpen && (
             <div className="flex flex-wrap items-end gap-2 rounded-lg border p-3">
@@ -255,6 +262,32 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
                 </SelectContent>
               </Select>
               <Button disabled={!mergeFrom || merge.isPending} onClick={() => merge.mutate()}>รวม</Button>
+            </div>
+          )}
+          {transferOpen && t.order && (
+            <div className="flex flex-col gap-2 rounded-lg border p-3">
+              <div className="grid max-h-48 gap-1 overflow-y-auto">
+                {(orderDetail.data?.items ?? []).filter((i) => !i.charge).map((i) => (
+                  <label key={i.item_id} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="flex items-center gap-2">
+                      <input type="checkbox" className="size-4" checked={tItems.includes(i.item_id)} onChange={() => toggleItem(i.item_id)} />
+                      {i.qty}× {i.name}
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular">{baht(i.amount)}</span>
+                  </label>
+                ))}
+                {orderDetail.isLoading && <span className="text-xs text-muted-foreground">กำลังโหลด…</span>}
+                {orderDetail.data && (orderDetail.data.items ?? []).filter((i) => !i.charge).length === 0 && <span className="text-xs text-muted-foreground">ไม่มีรายการให้ย้าย</span>}
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <Select value={tTo} onValueChange={setTTo}>
+                  <SelectTrigger className="w-[200px]"><SelectValue placeholder="ย้ายไปโต๊ะที่มีลูกค้า…" /></SelectTrigger>
+                  <SelectContent>
+                    {(allTables.data?.tables ?? []).filter((x) => x.id !== t.id && ['occupied', 'bill_requested', 'paying'].includes(x.status)).map((x) => <SelectItem key={x.id} value={String(x.id)}>โต๊ะ {x.table_no}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button disabled={!tItems.length || !tTo || transfer.isPending} onClick={() => transfer.mutate()}>ย้าย {tItems.length} รายการ</Button>
+              </div>
             </div>
           )}
         </div>

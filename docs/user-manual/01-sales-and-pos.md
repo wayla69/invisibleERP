@@ -128,9 +128,10 @@ open the table you want to keep and tap **รวมโต๊ะ**, then pick the
 its items move onto this table's order, the other table is freed, and you settle
 one combined bill. (Buffet tables can't be merged.)
 
-**Transferring items.** Individual dishes can be moved between tabs via
-`transfer-items` (e.g. an item rung on the wrong table) — the bill follows the
-moved items.
+**Transferring items.** To move individual dishes between tabs (e.g. an item
+rung on the wrong table), open the table and tap **ย้ายรายการ**, tick the
+dishes, pick a table that has guests, and confirm — the chosen items and their
+charges move to that table's bill.
 
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
