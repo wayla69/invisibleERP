@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.8.0",
-  "description": "Invisible / Oshinei Enterprise ERP — V2 (TypeScript: NestJS + Next.js + Drizzle + PostgreSQL)",
+  "description": "Invisible / Oshinei Enterprise ERP \u2014 V2 (TypeScript: NestJS + Next.js + Drizzle + PostgreSQL)",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
@@ -17,6 +17,6 @@
     "etl": "pnpm --filter @ierp/etl start"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   }
 }
