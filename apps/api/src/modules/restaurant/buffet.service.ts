@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { DineInService } from './dine-in.service';
+import { TableService } from './table.service';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const CHARGE_REF = '__buffet_charge__';
@@ -20,7 +21,14 @@ export class BuffetService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly dineIn: DineInService,
+    private readonly tables: TableService,
   ) {}
+
+  // staff at the POS/floor start a buffet on a table: open (or re-join) the session, then start the tier.
+  async startBuffetForTable(tableId: number, packageId: number, pax: number, user: JwtUser) {
+    const opened: any = await this.tables.openTable(tableId, pax, user.username, user);
+    return this.startBuffet({ tenantId: user.tenantId as number, tableId, sessionId: Number(opened.session_id) }, packageId, pax, user);
+  }
 
   // ── admin (back office) ──
   async listPackages(_user: JwtUser) {

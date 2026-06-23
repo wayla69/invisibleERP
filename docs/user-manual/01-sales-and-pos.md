@@ -115,6 +115,10 @@ shows on the guest's screen). After that, every buffet dish the guest orders is
 - If the tier has an **overtime fee** and the guest runs over time, the surcharge
   is added automatically when the bill is requested.
 
+Staff can also start a buffet for guests from the floor: on the **โต๊ะ** screen
+pick **เริ่มบุฟเฟต์**, choose the tier and number of diners, and confirm — the
+per-head charge and time window start just as with QR self-start.
+
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).

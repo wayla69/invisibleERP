@@ -81,6 +81,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-045 | PromptPay pay returns scannable QR | REST-04 | 20 §6 |
 | UAT-O2C-046 | PromptPay settlement webhook (auth + finalize) | REST-04 | 20 §6, §13 |
 | UAT-O2C-047 | Webhook idempotent + payment-status poll | REST-04 | 20 §6 |
+| UAT-O2C-048 | Staff starts buffet from the POS | REST-09 | 20 §6 |
+| UAT-O2C-049 | Public diner endpoint rate-limited | Anti-abuse | 20 §6, §13 |
+| UAT-O2C-050 | Diner self-order UI smoke (Playwright) | Feature (diner UI) | 20 §6 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

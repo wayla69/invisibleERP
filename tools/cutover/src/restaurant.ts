@@ -241,6 +241,20 @@ async function main() {
   const whAgain = await wh('whsec'); const whAgainJson: any = (() => { try { return whAgain.json(); } catch { return {}; } })();
   ok('PromptPay webhook: idempotent on re-delivery (no double-post)', whAgain.statusCode < 300 && (whAgainJson.paid === true || whAgainJson.settled === true), `${whAgain.statusCode}`);
 
+  // ── staff-initiated buffet (from POS/floor) ──
+  const tblSb = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A7', seats: 4 });
+  const sbStart = await inj('POST', `/api/restaurant/tables/${tblSb.json.id}/buffet`, sales1, { package_id: pkg.json.id, pax: 2 });
+  ok('Staff buffet: start from POS opens session + tier (299×2 charge)', (sbStart.status === 200 || sbStart.status === 201) && sbStart.json.package?.code === 'STD' && sbStart.json.pax === 2 && !!sbStart.json.expires_at, `${sbStart.status} ${JSON.stringify(sbStart.json).slice(0, 90)}`);
+  const sbOrders = await inj('GET', '/api/restaurant/orders', sales1);
+  ok('Staff buffet: per-pax charge order is open on the table', (sbOrders.json.orders ?? []).some((o: any) => o.table_id === tblSb.json.id && near(o.total, 598 * 1.07)), `${(sbOrders.json.orders ?? []).filter((o: any) => o.table_id === tblSb.json.id).map((o: any) => o.total)}`);
+
+  // ── anti-abuse: public order endpoint is rate-limited per session ──
+  const tblRl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A8', seats: 2 });
+  const openRl = await inj('POST', `/api/restaurant/tables/${tblRl.json.id}/open`, sales1, {});
+  let limited = false, okCount = 0;
+  for (let i = 0; i < 16; i++) { const r = await inj('POST', `/api/qr/t/${openRl.json.public_token}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] }); if (r.status === 429) limited = true; else if (r.status < 300) okCount++; }
+  ok('Anti-abuse: diner order endpoint throttled per session (429 after burst)', limited && okCount <= 15, `ok=${okCount} limited=${limited}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

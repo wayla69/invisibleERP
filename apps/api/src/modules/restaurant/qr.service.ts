@@ -12,6 +12,7 @@ import { DineInService } from './dine-in.service';
 import { MenuService } from '../menu/menu.service';
 import { BuffetService } from './buffet.service';
 import { verifyTableToken, type TableClaim } from './qr-token.util';
+import { rateLimit } from './rate-limit.util';
 import type { PublicOrderDto } from './dto';
 
 const LIVE = ['open', 'bill_requested', 'paying'];
@@ -98,6 +99,7 @@ export class QrService {
 
   // diner picks a buffet tier + headcount → session switches to buffet mode, charge line + time window set
   async startBuffet(token: string, packageId: number, pax?: number) {
+    this.throttle(token, 'buffet', 5);
     const { claim, session } = await this.resolve(token);
     return this.scope.run(claim.tenantId, async () => {
       await this.buffet.startBuffet({ tenantId: claim.tenantId, tableId: claim.tableId, sessionId: claim.sessionId }, packageId, pax ?? session.partySize ?? 1, diner(claim.tenantId));
@@ -114,6 +116,7 @@ export class QrService {
   // diner submits menu-driven items → append to (or open) the session's order, then AUTO-FIRE to the KDS so the
   // kitchen sees it immediately. Price/station/86/modifier rules are resolved server-side (diner can't set price).
   async order(token: string, dto: PublicOrderDto) {
+    this.throttle(token, 'order', 15);            // anti-abuse: cap diner order bursts per session
     const { claim } = await this.resolve(token);
     return this.scope.run(claim.tenantId, async () => {
       const u = diner(claim.tenantId);
@@ -138,6 +141,12 @@ export class QrService {
     });
   }
 
+  // per-session throttle for public diner endpoints — keyed off the verified HMAC token (no DB hit)
+  private throttle(token: string, action: string, perMinute: number) {
+    const c = verifyTableToken(token);
+    if (c) rateLimit(`qr:${action}:${c.sessionId}`, perMinute, 60_000);
+  }
+
   private async openOrderForSession(sessionId: number) {
     const dbx = this.db as any;
     const [o] = await dbx.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, sessionId), ne(dineInOrders.status, 'cancelled'), ne(dineInOrders.status, 'closed'))).orderBy(desc(dineInOrders.id)).limit(1);
@@ -156,6 +165,7 @@ export class QrService {
 
   // start PromptPay tender (Pending) — returns the QR payload for the diner to scan
   async pay(token: string) {
+    this.throttle(token, 'pay', 8);
     const { claim } = await this.resolve(token);
     return this.scope.run(claim.tenantId, async () => {
       const dbx = this.db as any;
