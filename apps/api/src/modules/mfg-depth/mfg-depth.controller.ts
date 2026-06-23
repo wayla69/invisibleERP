@@ -5,7 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { RoutingService, type CreateRoutingDto } from './routing.service';
 import { ShopFloorService, type ReportOpDto } from './shopfloor.service';
 import { QualityService, type InspectDto } from './quality.service';
-import { MrpService, type MrpRunDto } from './mrp.service';
+import { MrpService, type MrpRunDto, type MrpCapacityDto } from './mrp.service';
 
 const PERMS = ['bom_master', 'warehouse', 'exec'] as const;
 
@@ -17,7 +17,8 @@ const InspectBody = z.object({
   qty_inspected: z.number().nonnegative(), qty_passed: z.number().nonnegative(), qty_failed: z.number().nonnegative().optional(),
   disposition: z.enum(['Accept', 'Rework', 'Quarantine', 'Scrap']).optional(), unit_cost: z.number().nonnegative().optional(), notes: z.string().optional(),
 });
-const MrpBody = z.object({ demand: z.array(z.object({ item_id: z.string(), qty: z.number(), need_by: z.string().optional() })), lead_time_days: z.number().optional() });
+const MrpBody = z.object({ demand: z.array(z.object({ item_id: z.string(), qty: z.number(), need_by: z.string().optional() })), lead_time_days: z.number().optional(), lot_sizing: z.boolean().optional() });
+const CapacityBody = z.object({ demand: z.array(z.object({ item_id: z.string(), qty: z.number(), need_by: z.string().optional() })), lead_time_days: z.number().optional(), work_centers: z.array(z.object({ code: z.string(), available_minutes: z.number() })).optional() });
 
 // ── Routings ──
 @Controller('api/routings')
@@ -56,4 +57,6 @@ export class MrpController {
   @Post('run') run(@Body(new ZodValidationPipe(MrpBody)) b: MrpRunDto, @CurrentUser() u: JwtUser) { return this.svc.run(b, u); }
   // Multi-level MRP → consolidated PR for the planned Buy (needs procurement to raise the PR).
   @Post('plan-to-pr') @Permissions('procurement', 'planner') planToPr(@Body(new ZodValidationPipe(MrpBody)) b: MrpRunDto, @CurrentUser() u: JwtUser) { return this.svc.planToPr(b, u); }
+  // Rough-cut capacity: load each work centre from routings vs available minutes.
+  @Post('capacity') capacity(@Body(new ZodValidationPipe(CapacityBody)) b: MrpCapacityDto, @CurrentUser() u: JwtUser) { return this.svc.capacity(b, u); }
 }

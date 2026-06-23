@@ -252,8 +252,11 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   payslips/expenses); expense claims approve with SoD (approver ≠ claimant) + GL (Dr 5100/Cr 2000). New
   `ess` harness (9). ✅ **Supplier portal** — `/api/supplier/*` vendor-facing self-scoped: own POs,
   acknowledge, submit invoice → pending AP (can't touch another vendor's PO). New `supplier` harness (8).
-  Linkage via `employees.user_name`/`vendors.user_name` (migration 0065). *Remaining D3: capacity
-  scheduling / lot-sizing (EOQ).*
+  Linkage via `employees.user_name`/`vendors.user_name` (migration 0065). ✅ **Lot-sizing (EOQ)** — MRP
+  `lot_sizing` flag raises each planned-buy to the item's min-order-qty / order-multiple / EOQ
+  (`sqrt(2DS/H)`); item master gains those fields (migration 0066). ✅ **Rough-cut capacity** —
+  `POST /api/mrp/capacity` loads each work-centre from routings (setup + run·qty) vs supplied available
+  minutes and flags overloads. `mrp` harness now 16 checks. **D3 is complete.**
 - **D4 — Analytics plane + demand ML.** dbt + semantic layer + embedded BI; seasonality/Croston
   demand model with a backtesting harness (WAPE/MASE) as a CI gate.
 

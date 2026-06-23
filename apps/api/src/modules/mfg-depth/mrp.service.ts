@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { bomMaster, bomMasterLines, stockSnapshots } from '../../database/schema';
+import { bomMaster, bomMasterLines, stockSnapshots, items, routings, routingOperations } from '../../database/schema';
 import { latestSnapshotDate, n } from '../../database/queries';
 import { ProcurementService } from '../procurement/procurement.service';
 import type { JwtUser } from '../../common/decorators';
@@ -10,7 +10,8 @@ const r3 = (x: number) => Math.round(x * 1000) / 1000;
 const MAX_BOM_DEPTH = 25; // guard against circular BOMs
 
 export interface DemandLine { item_id: string; qty: number; need_by?: string }
-export interface MrpRunDto { demand: DemandLine[]; lead_time_days?: number }
+export interface MrpRunDto { demand: DemandLine[]; lead_time_days?: number; lot_sizing?: boolean }
+export interface MrpCapacityDto extends MrpRunDto { work_centers?: { code: string; available_minutes: number }[] }
 
 // Material Requirements Planning: explode demand through BOMs (MULTI-LEVEL / recursive), net against
 // on-hand once per item (shared on-hand pool), and emit planned Make orders (items that have a BOM, at
@@ -78,13 +79,62 @@ export class MrpService {
     for (const d of dto.demand ?? []) await require_(d.item_id, n(d.qty), d.need_by ?? null, null, 0, [], 'demand');
 
     const planned_make = [...makeMap.entries()].map(([item_id, v]) => ({ item_id, qty: v.qty, gross_qty: v.gross, on_hand: onHand.get(item_id) ?? 0, need_by: v.needBy, level: v.level, source: v.source }));
-    const planned_buy = [...buyMap.entries()].map(([item_id, v]) => ({ item_id, description: v.desc, qty: v.qty, gross_qty: v.gross, on_hand: onHand.get(item_id) ?? 0, need_by: v.needBy }));
+    const planned_buy: any[] = [...buyMap.entries()].map(([item_id, v]) => ({ item_id, description: v.desc, qty: v.qty, gross_qty: v.gross, on_hand: onHand.get(item_id) ?? 0, need_by: v.needBy }));
 
+    // Lot-sizing (opt-in): raise the net qty to the item's EOQ / minimum-order-qty and round up to the
+    // order multiple, so planned buys respect economic + packaging constraints (not pure lot-for-lot).
+    if (dto.lot_sizing && planned_buy.length) {
+      const masters = await db.select().from(items);
+      const byItem = new Map<string, any>(masters.map((m: any) => [String(m.itemId), m] as [string, any]));
+      for (const b of planned_buy) {
+        const m = byItem.get(b.item_id);
+        const minQ = n(m?.minOrderQty), mult = n(m?.orderMultiple), S = n(m?.orderCost), H = n(m?.holdingCost);
+        const annualD = n(m?.avgDailyUsage) * 365;
+        const eoq = annualD > 0 && S > 0 && H > 0 ? Math.ceil(Math.sqrt((2 * annualD * S) / H)) : 0;
+        let q = b.qty;
+        if (minQ > 0) q = Math.max(q, minQ);
+        if (eoq > q) q = eoq;
+        if (mult > 0) q = Math.ceil(q / mult) * mult;
+        b.eoq = eoq || null;
+        b.ordered_qty = r3(q);
+        b.lot_policy = eoq && b.ordered_qty === eoq ? 'eoq' : mult > 0 ? 'multiple' : minQ > 0 ? 'min' : 'lot-for-lot';
+      }
+    }
+
+    const buyTotal = planned_buy.reduce((a, b) => a + (dto.lot_sizing ? n(b.ordered_qty) : b.qty), 0);
     return {
       on_hand_date: snap, lead_time_days: lead,
       planned_make, planned_buy,
-      summary: { make_orders: planned_make.length, buy_orders: planned_buy.length, total_buy_qty: r3(planned_buy.reduce((a, b) => a + b.qty, 0)), max_level: planned_make.reduce((mx, m) => Math.max(mx, m.level), 0) },
+      summary: { make_orders: planned_make.length, buy_orders: planned_buy.length, total_buy_qty: r3(buyTotal), max_level: planned_make.reduce((mx, m) => Math.max(mx, m.level), 0) },
     };
+  }
+
+  // Rough-cut capacity planning (RCCP): explode demand to planned Make orders, then load each work
+  // centre from the product's routing (setup + run·qty minutes) and compare to the available minutes
+  // supplied per work centre — flags overloaded centres so a planner can re-time or offload.
+  async capacity(dto: MrpCapacityDto, user: JwtUser) {
+    const db = this.db as any;
+    const plan = await this.run(dto, user);
+    const avail = new Map<string, number>((dto.work_centers ?? []).map((w) => [w.code, n(w.available_minutes)]));
+    const load = new Map<string, number>();
+    for (const mk of plan.planned_make) {
+      // routing for the make item (by product_item_id, else routing_code)
+      let [rt] = await db.select().from(routings).where(eq(routings.productItemId, mk.item_id)).limit(1);
+      if (!rt) [rt] = await db.select().from(routings).where(eq(routings.routingCode, mk.item_id)).limit(1);
+      if (!rt) continue;
+      const ops = await db.select().from(routingOperations).where(eq(routingOperations.routingId, Number(rt.id)));
+      for (const op of ops) {
+        const wc = op.workCenter ?? 'UNASSIGNED';
+        const mins = n(op.setupMin) + n(op.runMinPerUnit) * mk.qty;
+        load.set(wc, (load.get(wc) ?? 0) + mins);
+      }
+    }
+    const work_centers = [...load.entries()].map(([work_center, load_minutes]) => {
+      const available_minutes = avail.has(work_center) ? avail.get(work_center)! : null;
+      const utilization_pct = available_minutes && available_minutes > 0 ? r3((load_minutes / available_minutes) * 100) : null;
+      return { work_center, load_minutes: r3(load_minutes), available_minutes, utilization_pct, overloaded: available_minutes != null && load_minutes > available_minutes };
+    });
+    return { planned_make: plan.planned_make, work_centers, summary: { centers: work_centers.length, overloaded: work_centers.filter((w) => w.overloaded).length, total_load_minutes: r3([...load.values()].reduce((a, b) => a + b, 0)) } };
   }
 
   // Run MRP and turn the planned Buy orders into a single consolidated Purchase Requisition (reuses the
@@ -94,7 +144,7 @@ export class MrpService {
     if (!plan.planned_buy.length) return { pr_no: null as string | null, message: 'No buy requirements', messageTh: 'ไม่มีรายการต้องสั่งซื้อ', planned_make: plan.planned_make, planned_buy: plan.planned_buy, summary: plan.summary };
     const pr: any = await this.procurement.createPr({
       remarks: 'MRP planned buy',
-      items: plan.planned_buy.map((b) => ({ item_id: b.item_id, item_description: b.description ?? undefined, request_qty: b.qty, reason: 'MRP' })),
+      items: plan.planned_buy.map((b) => ({ item_id: b.item_id, item_description: b.description ?? undefined, request_qty: dto.lot_sizing ? n(b.ordered_qty) : b.qty, reason: dto.lot_sizing ? `MRP (${b.lot_policy})` : 'MRP' })),
     }, user);
     return { pr_no: pr.pr_no as string | null, pr_status: pr.status, planned_make: plan.planned_make, planned_buy: plan.planned_buy, summary: plan.summary };
   }
