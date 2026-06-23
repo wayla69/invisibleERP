@@ -47,7 +47,7 @@ export default function DinerPage() {
   const [picker, setPicker] = useState<MenuItem | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [buffetOpen, setBuffetOpen] = useState(false);
-  const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number } | null>(null);
+  const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number; qr_image: string | null; mock_settle: boolean } | null>(null);
   const [paid, setPaid] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -60,6 +60,15 @@ export default function DinerPage() {
   }, [token]);
 
   useEffect(() => { load(); const i = setInterval(load, 5000); return () => clearInterval(i); }, [load]);
+
+  // real PromptPay: settlement is out-of-band (PSP webhook). Poll until the tender settles, then show success.
+  useEffect(() => {
+    if (!pay || pay.mock_settle || paid) return;
+    const check = async () => {
+      try { const r = await publicApi<{ settled: boolean }>(`/api/qr/t/${token}/payment-status`); if (r.settled) setPaid(true); } catch { /* keep polling */ }
+    };
+    check(); const i = setInterval(check, 4000); return () => clearInterval(i);
+  }, [pay, paid, token]);
 
   // menu + buffet tiers fetched lazily on first switch to the menu tab
   useEffect(() => {
@@ -241,14 +250,23 @@ export default function DinerPage() {
               {pay && (
                 <Card className="items-center gap-3 p-5 text-center">
                   <div className="font-medium">สแกนเพื่อชำระ {baht(pay.total)}</div>
-                  <div className="grid size-44 place-items-center gap-1 rounded-xl border-2 border-dashed border-primary/60 p-2 text-xs text-muted-foreground">
-                    <QrCode className="size-10 text-primary/70" />
-                    PromptPay QR<br />({pay.gateway_ref})
-                  </div>
-                  <p className="text-xs text-muted-foreground">กำลังรอยืนยันการชำระเงิน…</p>
-                  <Button onClick={doConfirm} disabled={busy} className="h-12 w-full bg-success text-base text-success-foreground hover:bg-success/90">
-                    ยืนยันการชำระเงิน (จำลอง)
-                  </Button>
+                  {pay.qr_image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={pay.qr_image} alt="PromptPay QR" className="size-48 rounded-xl border bg-white p-2" />
+                  ) : (
+                    <div className="grid size-44 place-items-center gap-1 rounded-xl border-2 border-dashed border-primary/60 p-2 text-xs text-muted-foreground">
+                      <QrCode className="size-10 text-primary/70" />
+                      PromptPay QR<br />({pay.gateway_ref})
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">เปิดแอปธนาคารแล้วสแกน QR เพื่อชำระด้วย PromptPay</p>
+                  {pay.mock_settle ? (
+                    <Button onClick={doConfirm} disabled={busy} className="h-12 w-full bg-success text-base text-success-foreground hover:bg-success/90">
+                      ยืนยันการชำระเงิน (จำลอง)
+                    </Button>
+                  ) : (
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock className="size-4" /> กำลังรอยืนยันการชำระเงินอัตโนมัติ…</p>
+                  )}
                 </Card>
               )}
             </>

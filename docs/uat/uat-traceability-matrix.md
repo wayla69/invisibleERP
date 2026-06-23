@@ -76,6 +76,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-040 | Overtime surcharge billed past window | REST-09 | 20 §7, §9 |
 | UAT-O2C-041 | KDS flags ticket origin (diner / buffet) | REST-08, REST-09 | 20 §5 |
 | UAT-O2C-042 | Buffet behaviour analytics per tier | Feature (buffet analytics) | 20 §6, §12 |
+| UAT-O2C-043 | Printed table-QR sticker | Feature (printed QR) | 20 §6 |
+| UAT-O2C-044 | Scan printed QR opens/joins session | REST-04 | 20 §6 |
+| UAT-O2C-045 | PromptPay pay returns scannable QR | REST-04 | 20 §6 |
+| UAT-O2C-046 | PromptPay settlement webhook (auth + finalize) | REST-04 | 20 §6, §13 |
+| UAT-O2C-047 | Webhook idempotent + payment-status poll | REST-04 | 20 §6 |
+| UAT-O2C-048 | Staff starts buffet from the POS | REST-09 | 20 §6 |
+| UAT-O2C-049 | Public diner endpoint rate-limited | Anti-abuse | 20 §6, §13 |
+| UAT-O2C-050 | Diner self-order UI smoke (Playwright) | Feature (diner UI) | 20 §6 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

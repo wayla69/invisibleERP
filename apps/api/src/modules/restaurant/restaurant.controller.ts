@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -9,9 +9,9 @@ import { ChannelOrderService } from './channel-order.service';
 import { BuffetService } from './buffet.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
-  TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody,
+  TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody,
   type CreateOrderDto, type AddItemsDto, type KdsActionDto, type CheckoutDto, type CreateTableDto, type UpdateTableDto,
-  type BuffetPackageDto, type BuffetPackageUpdateDto,
+  type BuffetPackageDto, type BuffetPackageUpdateDto, type StartBuffetDto,
 } from './dto';
 
 const OpenTableBody = z.object({ party_size: z.number().int().positive().optional() });
@@ -41,6 +41,8 @@ export class RestaurantController {
   @Patch('tables/:id') updateTable(@Param('id') id: string, @Body(new ZodValidationPipe(UpdateTableBody)) b: UpdateTableDto, @CurrentUser() u: JwtUser) { return this.tables.updateTable(+id, b, u); }
   @Patch('tables/:id/status') setStatus(@Param('id') id: string, @Body(new ZodValidationPipe(TableStatusBody)) b: { status: string }, @CurrentUser() u: JwtUser) { return this.tables.setStatus(+id, b.status, u); }
   @Post('tables/:id/open') openTable(@Param('id') id: string, @Body(new ZodValidationPipe(OpenTableBody)) b: { party_size?: number }, @CurrentUser() u: JwtUser) { return this.tables.openTable(+id, b.party_size, u.username, u); }
+  @Get('tables/:id/qr') tableQr(@Param('id') id: string, @Query('base') base: string | undefined, @CurrentUser() u: JwtUser) { return this.tables.qrSticker(+id, base, u); }
+  @Post('tables/:id/buffet') startBuffet(@Param('id') id: string, @Body(new ZodValidationPipe(StartBuffetBody)) b: StartBuffetDto, @CurrentUser() u: JwtUser) { return this.buffet.startBuffetForTable(+id, b.package_id, b.pax ?? 1, u); }
 
   // ── dine-in orders ──
   @Post('orders') createOrder(@Body(new ZodValidationPipe(CreateOrderBody)) b: CreateOrderDto, @CurrentUser() u: JwtUser) { return this.dineIn.createOrder(b, u); }

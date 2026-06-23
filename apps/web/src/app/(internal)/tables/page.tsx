@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Armchair, Flame, Plus, Receipt, Sparkles, Utensils, Wallet, X } from 'lucide-react';
+import { Armchair, Flame, Plus, QrCode, Receipt, Sparkles, Utensils, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
 import { cn } from '@/lib/utils';
@@ -149,10 +149,17 @@ function FloorPlan({ tables, onSelect, sel, onAdd }: { tables: TableRow[]; onSel
 function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: () => void; onClose: () => void; onOrder: () => void }) {
   const [msg, setMsg] = useState('');
   const [qr, setQr] = useState('');
+  const [sticker, setSticker] = useState<{ url: string; qr_image: string } | null>(null);
   const [item, setItem] = useState({ name: '', qty: '1', price: '', station: 'hot' });
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [buffetOpen, setBuffetOpen] = useState(false);
+  const [bPkg, setBPkg] = useState('');
+  const [bPax, setBPax] = useState('2');
 
   const onErr = (e: any) => setMsg(`❌ ${e.message}`);
+  const printQr = useMutation({ mutationFn: () => api<{ url: string; qr_image: string }>(`/api/restaurant/tables/${t.id}/qr?base=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin : '')}`), onSuccess: setSticker, onError: onErr });
+  const tiers = useQuery<{ packages: { id: number; name: string; price_per_pax: number }[] }>({ queryKey: ['buffet-packages'], queryFn: () => api('/api/restaurant/buffet/packages'), enabled: buffetOpen });
+  const startBuffet = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/buffet`, { method: 'POST', body: JSON.stringify({ package_id: Number(bPkg), pax: Number(bPax) || 1 }) }), onSuccess: () => { setMsg('เริ่มบุฟเฟต์แล้ว'); setBuffetOpen(false); onChange(); }, onError: onErr });
   const open = useMutation({ mutationFn: () => api<{ session_id: number; public_token: string }>(`/api/restaurant/tables/${t.id}/open`, { method: 'POST', body: '{}' }), onSuccess: (r) => { setSessionId(r.session_id); setQr(`/qr/${r.public_token}`); setMsg('เปิดโต๊ะแล้ว'); onChange(); }, onError: onErr });
   const addItem = useMutation({
     mutationFn: async () => {
@@ -181,6 +188,39 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
 
       {t.status === 'available' && <Button onClick={() => open.mutate()} disabled={open.isPending}><Armchair className="size-4" /> เปิดโต๊ะ (รับลูกค้า)</Button>}
       {qr && <div className="text-sm text-muted-foreground">QR ลูกค้า: <a href={qr} target="_blank" className="text-primary hover:underline">{qr}</a></div>}
+
+      <div>
+        <Button variant="outline" size="sm" onClick={() => printQr.mutate()} disabled={printQr.isPending}><QrCode className="size-4" /> QR ติดโต๊ะ (สำหรับพิมพ์)</Button>
+        {sticker && (
+          <div className="mt-2 flex items-center gap-3 rounded-lg border p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={sticker.qr_image} alt={`QR โต๊ะ ${t.table_no}`} className="size-28 rounded bg-white p-1" />
+            <div className="min-w-0 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">สแกนเพื่อสั่งอาหาร — โต๊ะ {t.table_no}</p>
+              <p className="break-all">{sticker.url}</p>
+              <p className="mt-1">พิมพ์สติกเกอร์นี้ติดที่โต๊ะ — ลูกค้าสแกนเพื่อเปิดเซสชันและสั่งอาหารเอง</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!t.order && t.status !== 'cleaning' && (
+        <div>
+          <Button variant="outline" size="sm" onClick={() => setBuffetOpen((v) => !v)}><Utensils className="size-4" /> เริ่มบุฟเฟต์</Button>
+          {buffetOpen && (
+            <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border p-3">
+              <Select value={bPkg} onValueChange={setBPkg}>
+                <SelectTrigger className="w-[200px]"><SelectValue placeholder="เลือกแพ็กเกจบุฟเฟต์" /></SelectTrigger>
+                <SelectContent>
+                  {(tiers.data?.packages ?? []).map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name} · {baht(p.price_per_pax)}/ท่าน</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input className="w-[90px]" type="number" min={1} step={1} placeholder="จำนวนคน" value={bPax} onChange={(e) => setBPax(e.target.value)} />
+              <Button disabled={!bPkg || startBuffet.isPending} onClick={() => startBuffet.mutate()}>เริ่ม</Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {(t.session || sessionId) && t.status !== 'cleaning' && (
         <div className="space-y-3">

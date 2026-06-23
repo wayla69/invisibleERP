@@ -1,7 +1,8 @@
 import { Inject, Injectable, UnauthorizedException, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, ne, inArray, desc } from 'drizzle-orm';
+import QRCode from 'qrcode';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { diningTables, tableSessions, dineInOrders, buffetPackages } from '../../database/schema';
+import { diningTables, tableSessions, dineInOrders, buffetPackages, payments } from '../../database/schema';
 import { PaymentService } from '../payments/payments.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -11,6 +12,7 @@ import { DineInService } from './dine-in.service';
 import { MenuService } from '../menu/menu.service';
 import { BuffetService } from './buffet.service';
 import { verifyTableToken, type TableClaim } from './qr-token.util';
+import { rateLimit } from './rate-limit.util';
 import type { PublicOrderDto } from './dto';
 
 const LIVE = ['open', 'bill_requested', 'paying'];
@@ -97,6 +99,7 @@ export class QrService {
 
   // diner picks a buffet tier + headcount → session switches to buffet mode, charge line + time window set
   async startBuffet(token: string, packageId: number, pax?: number) {
+    this.throttle(token, 'buffet', 5);
     const { claim, session } = await this.resolve(token);
     return this.scope.run(claim.tenantId, async () => {
       await this.buffet.startBuffet({ tenantId: claim.tenantId, tableId: claim.tableId, sessionId: claim.sessionId }, packageId, pax ?? session.partySize ?? 1, diner(claim.tenantId));
@@ -113,6 +116,7 @@ export class QrService {
   // diner submits menu-driven items → append to (or open) the session's order, then AUTO-FIRE to the KDS so the
   // kitchen sees it immediately. Price/station/86/modifier rules are resolved server-side (diner can't set price).
   async order(token: string, dto: PublicOrderDto) {
+    this.throttle(token, 'order', 15);            // anti-abuse: cap diner order bursts per session
     const { claim } = await this.resolve(token);
     return this.scope.run(claim.tenantId, async () => {
       const u = diner(claim.tenantId);
@@ -137,6 +141,12 @@ export class QrService {
     });
   }
 
+  // per-session throttle for public diner endpoints — keyed off the verified HMAC token (no DB hit)
+  private throttle(token: string, action: string, perMinute: number) {
+    const c = verifyTableToken(token);
+    if (c) rateLimit(`qr:${action}:${c.sessionId}`, perMinute, 60_000);
+  }
+
   private async openOrderForSession(sessionId: number) {
     const dbx = this.db as any;
     const [o] = await dbx.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, sessionId), ne(dineInOrders.status, 'cancelled'), ne(dineInOrders.status, 'closed'))).orderBy(desc(dineInOrders.id)).limit(1);
@@ -155,6 +165,7 @@ export class QrService {
 
   // start PromptPay tender (Pending) — returns the QR payload for the diner to scan
   async pay(token: string) {
+    this.throttle(token, 'pay', 8);
     const { claim } = await this.resolve(token);
     return this.scope.run(claim.tenantId, async () => {
       const dbx = this.db as any;
@@ -169,23 +180,78 @@ export class QrService {
       const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: claim.tenantId, method: 'PromptPay', amount: total, currency: 'THB', gateway: 'promptpay' }, u);
       await dbx.update(tableSessions).set({ status: 'paying', saleNo }).where(eq(tableSessions.id, claim.sessionId));
       await dbx.update(diningTables).set({ status: 'paying', updatedAt: new Date() }).where(eq(diningTables.id, claim.tableId));
-      return { payment_no: tender.payment_no, status: tender.status, gateway_ref: tender.gateway_ref, total };
+      // Render the gateway ref (a real EMVCo PromptPay payload when the tenant has a PromptPay id) as a
+      // scannable QR. When a settlement webhook is wired (PROMPTPAY_WEBHOOK_SECRET), the diner pays in
+      // their banking app and we settle out-of-band; without it (dev), the UI offers a simulate button.
+      const qrImage = tender.gateway_ref ? await QRCode.toDataURL(String(tender.gateway_ref), { margin: 1, width: 320 }) : null;
+      return { payment_no: tender.payment_no, status: tender.status, gateway_ref: tender.gateway_ref, qr_payload: tender.qr_payload ?? null, qr_image: qrImage, mock_settle: !webhookSecret(), total };
     });
   }
 
-  // mock settlement (real PromptPay webhook later): settle → build sale + GL + invoice + close (atomic)
-  async confirm(token: string, paymentNo: string) {
-    const { claim, session } = await this.resolve(token);
+  // diner-facing poll: tolerates a just-closed session (unlike status()) so the page can show "paid"
+  // once an out-of-band PromptPay webhook has settled + closed the table.
+  async paymentStatus(token: string) {
+    const claim = verifyTableToken(token);
+    if (!claim) throw new UnauthorizedException({ code: 'BAD_TOKEN', message: 'Invalid table token', messageTh: 'โทเคนโต๊ะไม่ถูกต้อง' });
     return this.scope.run(claim.tenantId, async () => {
-      const u = diner(claim.tenantId);
-      const settled: any = await this.payments.settle(paymentNo, u);
-      const o = await this.openOrderForSession(claim.sessionId);
-      if (!o) throw new BadRequestException({ code: 'NO_OPEN_ORDER', message: 'No order', messageTh: 'ไม่พบออเดอร์' });
-      const saleNo = session.saleNo || o.saleNo;
-      if (!saleNo) throw new BadRequestException({ code: 'NO_SALE', message: 'No provisional sale; call /pay first', messageTh: 'กรุณาเริ่มชำระเงินก่อน' });
-      const built = await this.dineIn.buildSale(o, saleNo, 0, u);
-      const invNo = await this.dineIn.markPaidAndInvoice(o, saleNo, u);
-      return { payment_status: settled.status, sale_no: saleNo, total: built.total, journal_no: built.journal_no, tax_invoice_no: invNo, paid: true };
+      const dbx = this.db as any;
+      const [session] = await dbx.select().from(tableSessions).where(and(eq(tableSessions.id, claim.sessionId), eq(tableSessions.publicToken, token))).limit(1);
+      if (!session) throw new UnauthorizedException({ code: 'BAD_TOKEN', message: 'Invalid table token', messageTh: 'โทเคนโต๊ะไม่ถูกต้อง' });
+      const [o] = await dbx.select({ status: dineInOrders.status, saleNo: dineInOrders.saleNo }).from(dineInOrders).where(and(eq(dineInOrders.sessionId, claim.sessionId), ne(dineInOrders.status, 'cancelled'))).orderBy(desc(dineInOrders.id)).limit(1);
+      const settled = ['paid', 'closed'].includes(String(o?.status)) || session.status === 'closed';
+      return { session_status: session.status, settled, sale_no: o?.saleNo ?? session.saleNo ?? null };
     });
   }
+
+  // diner taps "confirm" in DEV (mock gateway): settle + finalise. Real deployments use the webhook below.
+  async confirm(token: string, paymentNo: string) {
+    const { claim, session } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, () => this.settleAndFinalize(claim, paymentNo, session));
+  }
+
+  // PSP settlement webhook (real PromptPay): the bank/aggregator calls this when the diner has paid.
+  // Shared-secret gated + fail-closed in prod (mirrors the channel webhook); idempotent on re-delivery.
+  async promptPayWebhook(paymentNo: string, secret?: string) {
+    const expected = webhookSecret();
+    if (expected) { if (secret !== expected) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
+    else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
+    // controlled bypass: discover which tenant + sale this payment belongs to (reads no tenant-private data)
+    const found = await this.scope.bypassQuery(async () => {
+      const dbx = this.db as any;
+      const [p] = await dbx.select({ tenantId: payments.tenantId, saleNo: payments.saleNo }).from(payments).where(eq(payments.paymentNo, paymentNo)).limit(1);
+      return p ? { tenantId: Number(p.tenantId), saleNo: p.saleNo as string | null } : null;
+    });
+    if (!found) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
+    return this.scope.run(found.tenantId, async () => {
+      const dbx = this.db as any;
+      const [session] = found.saleNo ? await dbx.select().from(tableSessions).where(eq(tableSessions.saleNo, found.saleNo)).limit(1) : [];
+      if (!session) { await this.payments.settle(paymentNo, diner(found.tenantId)); return { settled: true, note: 'no live session (already finalised)' }; }
+      const claim = { tenantId: found.tenantId, tableId: Number(session.tableId), sessionId: Number(session.id) };
+      return this.settleAndFinalize(claim, paymentNo, session);
+    });
+  }
+
+  // settle the tender → build sale + GL + invoice + close (idempotent). Assumes inside scope.run(tenantId).
+  private async settleAndFinalize(claim: { tenantId: number; tableId: number; sessionId: number }, paymentNo: string, sessionRow?: any) {
+    const dbx = this.db as any;
+    const u = diner(claim.tenantId);
+    const settled: any = await this.payments.settle(paymentNo, u); // idempotent (Captured stays Captured)
+    const o = await this.openOrderForSession(claim.sessionId);
+    const saleNo = sessionRow?.saleNo || o?.saleNo;
+    if (!o) {
+      // re-delivery after the order already closed → report success without re-posting
+      if (saleNo) { const [done] = await dbx.select({ id: dineInOrders.id }).from(dineInOrders).where(eq(dineInOrders.saleNo, saleNo)).limit(1); if (done) return { payment_status: settled.status, sale_no: saleNo, paid: true, already: true }; }
+      throw new BadRequestException({ code: 'NO_OPEN_ORDER', message: 'No order', messageTh: 'ไม่พบออเดอร์' });
+    }
+    if (['paid', 'closed'].includes(String(o.status))) return { payment_status: settled.status, sale_no: saleNo, paid: true, already: true };
+    if (!saleNo) throw new BadRequestException({ code: 'NO_SALE', message: 'No provisional sale; call /pay first', messageTh: 'กรุณาเริ่มชำระเงินก่อน' });
+    const built = await this.dineIn.buildSale(o, saleNo, 0, u);
+    const invNo = await this.dineIn.markPaidAndInvoice(o, saleNo, u);
+    return { payment_status: settled.status, sale_no: saleNo, total: built.total, journal_no: built.journal_no, tax_invoice_no: invNo, paid: true };
+  }
+}
+
+// The PromptPay settlement webhook is enabled (real, out-of-band) when a shared secret is configured.
+function webhookSecret(): string | undefined {
+  return process.env.PROMPTPAY_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET || undefined;
 }

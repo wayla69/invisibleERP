@@ -8,6 +8,7 @@
  */
 import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'resto-secret';
+process.env.PROMPTPAY_WEBHOOK_SECRET = process.env.PROMPTPAY_WEBHOOK_SECRET || 'whsec';
 process.env.NODE_ENV = 'test';
 
 import { Test } from '@nestjs/testing';
@@ -218,6 +219,41 @@ async function main() {
   const stdTier = (an.json.tiers ?? []).find((t: any) => t.tier?.code === 'STD');
   ok('Buffet analytics: per-tier sessions/covers + top item + items-per-head', an.status === 200 && stdTier?.sessions === 1 && stdTier?.covers === 4 && stdTier?.top_items?.[0]?.name === 'หมูสไลด์' && near(stdTier?.top_items?.[0]?.qty, 3) && near(stdTier?.items_per_head, 0.75), `${an.status} ${JSON.stringify(stdTier ?? {}).slice(0, 130)}`);
   ok('Buffet analytics: per-tier revenue (charge+overtime) + overtime rate', near(stdTier?.revenue, 1596) && near(stdTier?.avg_bill_per_session, 1596) && stdTier?.overtime_sessions === 1 && near(stdTier?.overtime_rate_pct, 100), `rev=${stdTier?.revenue} avg=${stdTier?.avg_bill_per_session} otRate=${stdTier?.overtime_rate_pct}`);
+
+  // ── printed-QR entry + real PromptPay (webhook settlement) ──
+  const tblX = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6', seats: 2 });
+  const stk = await inj('GET', `/api/restaurant/tables/${tblX.json.id}/qr?base=${encodeURIComponent('https://app.example')}`, sales1);
+  ok('Printed QR: sticker endpoint returns landing URL + image', stk.status === 200 && stk.json.url === `https://app.example/qr/start/${tblX.json.qr_token}` && String(stk.json.qr_image).startsWith('data:image'), `${stk.status} ${String(stk.json.url).slice(0, 60)}`);
+  const startX = await inj('POST', `/api/qr/start/${tblX.json.qr_token}`, undefined, {});
+  ok('Printed QR: scanning the stable token opens/joins a session', (startX.status === 200 || startX.status === 201) && !!startX.json.public_token, `${startX.status}`);
+  const xTok = startX.json.public_token;
+  await inj('POST', `/api/qr/t/${xTok}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] });
+  const payX = await inj('POST', `/api/qr/t/${xTok}/pay`, undefined, {});
+  ok('PromptPay pay: returns a scannable QR image + real-settle mode (secret configured)', (payX.status === 200 || payX.status === 201) && String(payX.json.qr_image).startsWith('data:image') && payX.json.mock_settle === false, `${payX.status} mock=${payX.json.mock_settle}`);
+
+  const wh = (secret: string | undefined) => app.inject({ method: 'POST', url: '/api/qr/webhook/promptpay', headers: secret ? { 'x-webhook-secret': secret } : {}, payload: { payment_no: payX.json.payment_no, status: 'paid' } });
+  const whBad = await wh('nope');
+  ok('PromptPay webhook: bad/missing secret rejected (401)', whBad.statusCode === 401, `${whBad.statusCode}`);
+  const whOk = await wh('whsec'); const whJson: any = (() => { try { return whOk.json(); } catch { return {}; } })();
+  ok('PromptPay webhook: valid secret settles + finalises (sale + invoice + paid)', whOk.statusCode < 300 && whJson.paid === true && /^SALE-/.test(whJson.sale_no ?? '') && !!whJson.tax_invoice_no, `${whOk.statusCode} ${JSON.stringify(whJson).slice(0, 90)}`);
+  const psX = await inj('GET', `/api/qr/t/${xTok}/payment-status`, undefined);
+  ok('Diner payment-status reflects the settled bill (tolerates closed session)', psX.status === 200 && psX.json.settled === true, `${psX.status} ${JSON.stringify(psX.json).slice(0, 70)}`);
+  const whAgain = await wh('whsec'); const whAgainJson: any = (() => { try { return whAgain.json(); } catch { return {}; } })();
+  ok('PromptPay webhook: idempotent on re-delivery (no double-post)', whAgain.statusCode < 300 && (whAgainJson.paid === true || whAgainJson.settled === true), `${whAgain.statusCode}`);
+
+  // ── staff-initiated buffet (from POS/floor) ──
+  const tblSb = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A7', seats: 4 });
+  const sbStart = await inj('POST', `/api/restaurant/tables/${tblSb.json.id}/buffet`, sales1, { package_id: pkg.json.id, pax: 2 });
+  ok('Staff buffet: start from POS opens session + tier (299×2 charge)', (sbStart.status === 200 || sbStart.status === 201) && sbStart.json.package?.code === 'STD' && sbStart.json.pax === 2 && !!sbStart.json.expires_at, `${sbStart.status} ${JSON.stringify(sbStart.json).slice(0, 90)}`);
+  const sbOrders = await inj('GET', '/api/restaurant/orders', sales1);
+  ok('Staff buffet: per-pax charge order is open on the table', (sbOrders.json.orders ?? []).some((o: any) => o.table_id === tblSb.json.id && near(o.total, 598 * 1.07)), `${(sbOrders.json.orders ?? []).filter((o: any) => o.table_id === tblSb.json.id).map((o: any) => o.total)}`);
+
+  // ── anti-abuse: public order endpoint is rate-limited per session ──
+  const tblRl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A8', seats: 2 });
+  const openRl = await inj('POST', `/api/restaurant/tables/${tblRl.json.id}/open`, sales1, {});
+  let limited = false, okCount = 0;
+  for (let i = 0; i < 16; i++) { const r = await inj('POST', `/api/qr/t/${openRl.json.public_token}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] }); if (r.status === 429) limited = true; else if (r.status < 300) okCount++; }
+  ok('Anti-abuse: diner order endpoint throttled per session (429 after burst)', limited && okCount <= 15, `ok=${okCount} limited=${limited}`);
 
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
