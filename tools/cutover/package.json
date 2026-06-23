@@ -71,7 +71,9 @@
     "build": "echo \"(cutover: run via tsx)\"",
     "ai-actions": "tsx src/ai-actions.ts",
     "rag": "tsx src/rag.ts",
-    "mrp": "tsx src/mrp.ts"
+    "mrp": "tsx src/mrp.ts",
+    "ess": "tsx src/ess.ts",
+    "supplier": "tsx src/supplier.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.13",

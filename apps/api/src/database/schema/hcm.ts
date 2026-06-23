@@ -54,3 +54,24 @@ export const leaveBalances = pgTable(
 );
 
 export type Timesheet = typeof timesheets.$inferSelect;
+
+// ── Expense claims (เบิกค่าใช้จ่าย) — ESS reimbursement: employee submits, manager approves → GL (Phase D3) ──
+export const expenseClaims = pgTable(
+  'expense_claims',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    employeeId: bigint('employee_id', { mode: 'number' }).references(() => employees.id),
+    claimDate: date('claim_date'),
+    category: text('category'),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
+    description: text('description'),
+    status: text('status').notNull().default('Pending'), // Pending | Approved | Rejected
+    decidedBy: text('decided_by'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    entryNo: text('entry_no'),                           // GL JE on approval (Dr 5100 / Cr 2000)
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byEmp: index('idx_expense_claims_emp2').on(t.employeeId) }),
+);

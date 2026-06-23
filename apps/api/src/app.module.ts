@@ -78,6 +78,8 @@ import { PosScaleModule } from './modules/pos-scale/pos-scale.module';
 import { ChannelAdapterModule } from './modules/channel-adapter/channel-adapter.module';
 import { PosLoyaltyLaborModule } from './modules/pos-loyalty-labor/pos-loyalty-labor.module';
 import { BranchModule } from './modules/branch/branch.module';
+import { EssModule } from './modules/ess/ess.module';
+import { SupplierModule } from './modules/supplier/supplier.module';
 
 @Module({
   imports: [
@@ -154,6 +156,8 @@ import { BranchModule } from './modules/branch/branch.module';
     ChannelAdapterModule,
     PosLoyaltyLaborModule,
     BranchModule,
+    EssModule,
+    SupplierModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
