@@ -55,6 +55,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-020 | POS home store overview | Feature (POS dashboard) | 01 §0 |
 | UAT-O2C-021 | Cashier read-only shift KPIs | RBAC (least-privilege read) | 01 §0 |
 | UAT-O2C-022 | ERP/POS workspace switcher | Feature (ERP/POS workspaces) | 00 §4 |
+| UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -77,6 +78,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-015 | Match idempotency | EXP-03 | 02 §7 |
 | UAT-P2P-016 | RLS vendor isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-P2P-017 | AP↔GL reconciliation | REC-01 | 04 §9 |
+| UAT-P2P-022 | AP bill idempotency | EXP-03 / GL-01 | 02 §7 |
+| UAT-P2P-023 | AP payment idempotency | EXP-03 / GL-01 | 02 §7 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
 

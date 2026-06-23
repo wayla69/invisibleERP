@@ -65,7 +65,7 @@ SoD: the **Buyer** who raises PR/PO never maintains the **vendor master** (Maste
 5. **Goods receipt.** WarehouseOperator records the GR (`POST /api/procurement/grs`, GR-) against the PO; quantities feed the perpetual stock ledger (see `03-inventory-cogs.md`). Segregated from ordering (**R04**).
 6. **Three-way match (decision point).** ApClerk runs `POST /api/procurement/match/run`: PO ↔ GR ↔ Invoice are matched within configured tolerance. Variances beyond tolerance → `MATCH_BLOCKED` (matched = false) (**EXP-01**).
 7. **Tolerance / override control.** Changing the match tolerance requires the `creditors` permission (`PUT` tolerance) — an unauthorized change → `403`; changes are logged (**EXP-04**). Any documented override of a failed match requires a justification and is recorded.
-8. **AP payment gate.** AP disbursement (`/api/finance/ap/transactions`) is permitted only on a successful 3-way match; an unmatched invoice cannot be paid (**EXP-01**, target hard-gate per readiness plan). WHT is computed on payment (see `06-tax-compliance.md`); the expense + AP + tax journal is posted to the GL (GL-01).
+8. **AP payment gate.** AP disbursement (`/api/finance/ap/transactions`) is permitted only on a successful 3-way match; an unmatched invoice cannot be paid (**EXP-01**, target hard-gate per readiness plan). WHT is computed on payment (see `06-tax-compliance.md`); the expense + AP + tax journal is posted to the GL (GL-01). **Retry-safety:** a bill and a payment each accept an optional `idempotency_key`; a retried request (a second HTTP call after a timeout) with the same key returns the original bill / leaves the paid amount applied once — no duplicate payable and no double cash-out (the payment guard is evaluated **before** the paid-amount update, keyed on the client key) (**EXP-03**, **GL-01**).
 
 ## 8. Process flow
 
@@ -132,6 +132,7 @@ flowchart TD
 | `SUPPLIER_BLOCKED` (422) | PO to blocklisted/unapproved vendor | MasterDataAdmin reviews vendor status per vendor policy |
 | `MATCH_BLOCKED` | Variance exceeds tolerance | ApClerk investigates; documented override w/ reason or correct GR/invoice |
 | `403` on tolerance change | Lacks `creditors` permission | Controller performs change |
+| (idempotent replay) | Bill/payment retried with the same `idempotency_key` | Returns the original result (`idempotent: true`); no duplicate payable / double payment (EXP-03) |
 
 ## 14. Revision history
 
@@ -139,3 +140,4 @@ flowchart TD
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | D3: Supplier (vendor-facing) portal (`/api/supplier/*`, perm `vendor_portal`) — a vendor, resolved from the JWT username via `vendors.user_name` (migration 0065), sees ONLY their own POs, acknowledges them (`purchase_orders.vendor_ack_at`), and submits invoices → a PENDING AP transaction (Unpaid) the buyer's AP clerk then 3-way-matches/pays (EXP-01..04). A vendor cannot view or invoice another vendor's PO. Verified by the `supplier` harness. |
+| 0.3 | 2026-06-23 | Platform | Security review W3 (EXP-03 / GL-01): AP bill + AP payment accept an `idempotency_key` (migration 0068) so a retried request cannot duplicate a payable or double-pay; the payment guard is evaluated before the paid-amount update. Verified by the `match` harness idempotency cases. |

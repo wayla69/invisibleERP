@@ -189,6 +189,25 @@ async function main() {
   });
   ok('RLS: tenant A cannot SEE tenant B vendor, but the shared (NULL) master stays visible', t1Sees.foreign === 0 && t1Sees.shared === 1, JSON.stringify(t1Sees));
 
+  // ── N. AR/AP idempotency (W3): a retried request with the same key must not double-post ──
+  const countEntries = async (source: string, refLike: string) => Number((await pg.query(`SELECT count(*)::int n FROM journal_entries WHERE source='${source}' AND source_ref LIKE '${refLike}'`)).rows[0].n);
+  // (a) AP bill dedup (M3): same idempotency_key → one bill, one AP GL entry
+  const bill1 = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: V1, txn_type: 'Goods', amount: 500, idempotency_key: 'bill-k1' });
+  const bill2 = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: V1, txn_type: 'Goods', amount: 500, idempotency_key: 'bill-k1' });
+  const billRows = Number((await pg.query(`SELECT count(*)::int n FROM ap_transactions WHERE idempotency_key='bill-k1'`)).rows[0].n);
+  ok('AP bill idempotent: same key → same txn_no, 1 row, 1 AP GL entry', bill1.json.txn_no === bill2.json.txn_no && bill2.json.idempotent === true && billRows === 1 && (await countEntries('AP', bill1.json.txn_no)) === 1, JSON.stringify({ t1: bill1.json.txn_no, t2: bill2.json.txn_no, rows: billRows }));
+  // (b) AP payment idempotency (H2): same key → paid once, one PAY-AP GL entry, even across "retries"
+  const payIdem = await apTxn(800);
+  const p1 = await inj('PATCH', `/api/finance/ap/transactions/${payIdem}/pay`, admin, { amount: 800, idempotency_key: 'pay-k1' });
+  const p2 = await inj('PATCH', `/api/finance/ap/transactions/${payIdem}/pay`, admin, { amount: 800, idempotency_key: 'pay-k1' });
+  ok('AP payment idempotent: retried key → paid once (800), 2nd idempotent, 1 PAY-AP entry', near(p1.json.paid_amount, 800) && p2.json.idempotent === true && near(p2.json.paid_amount, 800) && (await countEntries('PAY-AP', `${payIdem}:k:pay-k1`)) === 1, JSON.stringify({ p1: p1.json.paid_amount, p2: p2.json.paid_amount, idem: p2.json.idempotent }));
+  // (c) AR receipt idempotency (H1): same key → cash collected once, one RCP GL entry
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-IDEM-1', tenantId: hq, amount: '500', paidAmount: '0', status: 'Unpaid' }).onConflictDoNothing();
+  const rc1 = await inj('POST', '/api/finance/ar/receipts', admin, { invoice_no: 'INV-IDEM-1', amount: 500, idempotency_key: 'rcp-k1' });
+  const rc2 = await inj('POST', '/api/finance/ar/receipts', admin, { invoice_no: 'INV-IDEM-1', amount: 500, idempotency_key: 'rcp-k1' });
+  const invPaid = Number((await pg.query(`SELECT paid_amount FROM ar_invoices WHERE invoice_no='INV-IDEM-1'`)).rows[0].paid_amount);
+  ok('AR receipt idempotent: retried key → collected once (paid 500), same receipt, 1 RCP entry', rc1.json.receipt_no === rc2.json.receipt_no && rc2.json.idempotent === true && near(invPaid, 500) && (await countEntries('RCP', rc1.json.receipt_no)) === 1, JSON.stringify({ r1: rc1.json.receipt_no, r2: rc2.json.receipt_no, paid: invPaid }));
+
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
