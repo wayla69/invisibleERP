@@ -1,9 +1,10 @@
-import { Controller, Post, Body, Module, Sse, Query, type MessageEvent } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Module, Sse, Query, type MessageEvent } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AgentService } from './agent.service';
+import { AiActionService } from './ai-action.service';
 import { PosModule } from '../pos/pos.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { FinanceModule } from '../finance/finance.module';
@@ -13,8 +14,12 @@ import { PipelineModule } from '../pipeline/pipeline.module';
 import { CpqModule } from '../cpq/cpq.module';
 import { ServiceModule } from '../service/service.module';
 import { ProfitabilityModule } from '../profitability/profitability.module';
+import { LedgerModule } from '../ledger/ledger.module';
+import { ProcurementModule } from '../procurement/procurement.module';
 
 const ChatBody = z.object({ message: z.string().min(1), history: z.array(z.any()).optional(), agent_type: z.string().optional() });
+const ProposeBody = z.object({ kind: z.enum(['journal_entry', 'purchase_order']), payload: z.any(), rationale: z.string().optional(), source: z.enum(['ai', 'human']).optional() });
+const RejectBody = z.object({ reason: z.string().optional() });
 
 @Controller('api')
 export class AiController {
@@ -65,9 +70,33 @@ export class AiController {
   }
 }
 
+// Phase D1 — agentic write-ops queue. Propose (anyone with ai_chat) → list/approve/reject (approvals).
+// The service enforces SoD (approver ≠ proposer) + the kind-specific permission (e.g. gl_post) on approve.
+@Controller('api/ai/actions')
+export class AiActionController {
+  constructor(private readonly actions: AiActionService) {}
+
+  @Post() @Permissions('ai_chat')
+  propose(@Body(new ZodValidationPipe(ProposeBody)) b: z.infer<typeof ProposeBody>, @CurrentUser() u: JwtUser) {
+    return this.actions.propose({ kind: b.kind, payload: b.payload, rationale: b.rationale, source: b.source }, u);
+  }
+
+  @Get() @Permissions('ai_chat', 'approvals', 'dashboard')
+  list(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.actions.list(status, u); }
+
+  @Get(':id') @Permissions('ai_chat', 'approvals', 'dashboard')
+  get(@Param('id') id: string) { return this.actions.get(+id); }
+
+  @Post(':id/approve') @Permissions('approvals')
+  approve(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.actions.approve(+id, u); }
+
+  @Post(':id/reject') @Permissions('approvals')
+  reject(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.actions.reject(+id, b.reason, u); }
+}
+
 @Module({
-  imports: [PosModule, InventoryModule, FinanceModule, AnalyticsModule, BiModule, PipelineModule, CpqModule, ServiceModule, ProfitabilityModule],
-  controllers: [AiController],
-  providers: [AgentService],
+  imports: [PosModule, InventoryModule, FinanceModule, AnalyticsModule, BiModule, PipelineModule, CpqModule, ServiceModule, ProfitabilityModule, LedgerModule, ProcurementModule],
+  controllers: [AiController, AiActionController],
+  providers: [AgentService, AiActionService],
 })
 export class AiModule {}

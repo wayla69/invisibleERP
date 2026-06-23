@@ -13,9 +13,6 @@
     "gaps": "tsx src/gaps.ts",
     "portal-extra": "tsx src/portal-extra.ts",
     "pos-p0": "tsx src/pos-p0.ts",
-    "pos-p1": "tsx src/pos-p1.ts",
-    "pos-p2": "tsx src/pos-p2.ts",
-    "pos-wiring": "tsx src/pos-wiring.ts",
     "ext": "tsx src/ext.ts",
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "onboarding": "tsx src/onboarding.ts",
@@ -71,7 +68,8 @@
     "reconcile": "tsx src/reconcile.ts",
     "typecheck": "echo \"(cutover: validated by running against dist; tsc skipped)\"",
     "lint": "echo \"(lint placeholder)\"",
-    "build": "echo \"(cutover: run via tsx)\""
+    "build": "echo \"(cutover: run via tsx)\"",
+    "ai-actions": "tsx src/ai-actions.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.13",

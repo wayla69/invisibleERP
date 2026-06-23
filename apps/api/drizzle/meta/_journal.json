@@ -442,6 +442,13 @@
       "when": 1782250000000,
       "tag": "0062_audit_log_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1782260000000,
+      "tag": "0063_ai_action_requests",
+      "breakpoints": true
     }
   ]
 }

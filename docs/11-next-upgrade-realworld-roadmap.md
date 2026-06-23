@@ -226,12 +226,18 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
 - **Exit:** a non-THB tenant transacts and reports correctly; clears one non-TH e-invoice mandate in
   sandbox; SOC 2 Type I report or readiness assessment in hand; policies board-approved.
 
-### Phase D — Differentiate (agentic ERP, deepen verticals) · ongoing
+### Phase D — Differentiate (agentic ERP, deepen verticals) · **STARTED (2026-06-23)**
 *Goal: the moat — an ERP that does the work, governed and auditable, on a now-trustworthy base.*
 
-- **D1 — Agentic write-ops.** Let the AI *execute* (raise the PO, post the JE, reconcile the till,
-  file the tax) behind RBAC + human-in-the-loop + the existing immutable audit trail + SoD checks.
-- **D2 — RAG over policies/SOPs/contracts** (pgvector, cite-or-refuse).
+- **D1 — Agentic write-ops.** ✅ **Delivered (propose → approve → execute).** The agent is read-only by
+  default; its write-tools (`propose_journal_entry`/`propose_purchase_order`) file a **PENDING**
+  `ai_action_requests` row (RLS-scoped, migration 0063). A **different** authorized human approves via
+  `/ai-actions`; `approve()` enforces SoD (approver ≠ proposer) + the kind permission (`gl_post`/
+  `procurement`), then executes through `LedgerService.postEntry`/`ProcurementService.createPo` with
+  `result_ref` + audit. New `ai-actions` harness (14 checks); approval-queue UI shipped. *Next: stock-
+  adjust/tax-file kinds, $-threshold escalation, agent-action attribution in audit (`source='ai'`).*
+- **D2 — RAG over policies/SOPs/contracts** (pgvector, cite-or-refuse). *Not started — needs pgvector in
+  a migration (note: PGlite harnesses may not load the extension, so verification needs a real PG).*
 - **D3 — Close the ERP depth gaps where the market is.** MRP / supply planning / multi-level BOM +
   capacity (if pursuing manufacturing); employee self-service + expense mgmt; supplier portal.
 - **D4 — Analytics plane + demand ML.** dbt + semantic layer + embedded BI; seasonality/Croston
