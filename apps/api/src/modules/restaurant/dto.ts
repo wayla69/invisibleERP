@@ -45,6 +45,15 @@ export const CheckoutBody = z.object({
   tip: z.number().nonnegative().optional(),             // staff tip (THB) — liability 2300, not in subtotal/VAT
   gift_card_no: z.string().optional(),                  // redeem this gift card as a tender against the sale
   gift_card_amount: z.number().positive().optional(),   // amount to draw (default = bill+tip)
+  // B4 pricing rules at the till (opt-in). When set, time/day/BOGO/qty-break/item/category rules apply,
+  // plus an auto service charge for large parties (VATable, 4400) and satang rounding (4900).
+  apply_pricing_rules: z.boolean().optional(),
+  channel: z.string().optional(),                       // 'dine_in'|'takeaway'|'delivery' — scopes rules
+  location: z.string().optional(),                      // outlet/branch — scopes rules
+  party_size: z.number().int().positive().optional(),   // for the auto service-charge threshold
+  service_charge_pct: z.number().min(0).max(100).optional(),
+  service_min_party: z.number().int().positive().optional(),
+  rounding: z.number().positive().optional(),           // satang rounding multiple (e.g. 0.25, 1)
 }).refine((d) => !(d.discount != null && d.discount_pct != null), { message: 'provide order discount amount or percent, not both' });
 export type CheckoutDto = z.infer<typeof CheckoutBody>;
 

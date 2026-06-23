@@ -65,6 +65,8 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '5620', name: 'Provident Fund (Employer)', type: 'Expense' },  // เงินสมทบกองทุนสำรองเลี้ยงชีพส่วนนายจ้าง
   { code: '2370', name: 'Provident Fund Payable', type: 'Liability' },   // กองทุนสำรองเลี้ยงชีพค้างจ่าย (ลูกจ้าง+นายจ้าง)
   { code: '4300', name: 'Subscription & Service Revenue', type: 'Revenue' }, // รายได้ค่าบริการ/สมาชิกแบบเรียกเก็บประจำ
+  { code: '4400', name: 'Service Charge Income', type: 'Revenue' },          // รายได้ค่าบริการ (เซอร์วิสชาร์จ) — VATable, auto for large parties
+  { code: '4900', name: 'Rounding Adjustment', type: 'Revenue' },            // ปัดเศษสตางค์ — rounded up=credit (gain), down=debit (loss)
 ];
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null }

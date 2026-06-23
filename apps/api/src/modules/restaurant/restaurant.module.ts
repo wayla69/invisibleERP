@@ -7,6 +7,7 @@ import { MenuModule } from '../menu/menu.module';
 import { MarketingModule } from '../marketing/marketing.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { GiftCardsModule } from '../giftcards/gift-card.module';
+import { PricingModule } from '../pricing/pricing.module';
 import { DineInService } from './dine-in.service';
 import { KdsService } from './kds.service';
 import { TableService } from './table.service';
@@ -20,7 +21,7 @@ import { ChannelController } from './channel.controller';
 // Restaurant / F&B POS: dine-in orders + KDS, floor-plan tables, table QR sessions (public diner),
 // online/delivery/kiosk channel orders, PromptPay pay → cust_pos_sales + GL + abbreviated tax invoice.
 @Module({
-  imports: [TaxModule, PaymentsModule, LedgerModule, TaxDocsModule, MenuModule, MarketingModule, LoyaltyModule, GiftCardsModule],
+  imports: [TaxModule, PaymentsModule, LedgerModule, TaxDocsModule, MenuModule, MarketingModule, LoyaltyModule, GiftCardsModule, PricingModule],
   controllers: [RestaurantController, QrController, ChannelController],
   providers: [DineInService, KdsService, TableService, QrService, ChannelOrderService, RealtimeScope],
   exports: [DineInService, TableService],
