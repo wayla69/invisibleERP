@@ -97,14 +97,16 @@ export class TableService {
   // Printable diner QR for a table — encodes the STABLE landing URL (…/qr/start/:qrToken). Scanning it
   // opens/joins the table session and drops the guest on the order page. `base` = the web origin
   // (passed by the admin UI as window.location.origin), else WEB_PUBLIC_URL, else a relative path.
-  async qrSticker(tableId: number, base: string | undefined, _user: JwtUser) {
+  async qrSticker(tableId: number, base: unknown, _user: JwtUser) {
     const db = this.db as any;
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, tableId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     if (!t.qrToken) throw new BadRequestException({ code: 'NO_QR', message: 'Table has no QR token', messageTh: 'โต๊ะนี้ยังไม่มี QR' });
-    // strip trailing slashes without a regex (the input is uncontrolled — avoid polynomial backtracking)
+    // `base` is an uncontrolled query param (could be tampered to an array) — accept a string only.
+    const baseStr = typeof base === 'string' ? base : '';
+    // strip trailing slashes without a regex (avoid polynomial backtracking on uncontrolled input)
     const trimSlash = (s: string) => { let e = s.length; while (e > 0 && s.charCodeAt(e - 1) === 47) e--; return s.slice(0, e); };
-    const origin = base && /^https?:\/\//.test(base) ? trimSlash(base) : trimSlash(process.env.WEB_PUBLIC_URL || '');
+    const origin = baseStr && /^https?:\/\//.test(baseStr) ? trimSlash(baseStr) : trimSlash(process.env.WEB_PUBLIC_URL || '');
     const path = `/qr/start/${t.qrToken}`;
     const url = origin ? `${origin}${path}` : path;
     const qrImage = await QRCode.toDataURL(url, { margin: 1, width: 320 });
