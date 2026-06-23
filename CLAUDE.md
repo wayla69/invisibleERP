@@ -33,12 +33,19 @@ For every such change, review and update as needed:
 
 1. **Reproduce first.** Get a deterministic failing signal before changing anything. Read the actual
    error/log — don't guess.
-2. **Is it even mine?** Before assuming your change broke it, check whether the failure **pre-exists on
-   `main`** or is **environmental**. Verify on a clean baseline (`git worktree add /tmp/wt origin/main`)
-   and use `git log -S"<string>"` / `git log -p <file>` to find *when/why* behaviour changed.
-3. **Root cause, not symptom.** Keep digging until you can *explain* the failure (instrument it — print
-   the real value, e.g. a series length or a computed date — rather than theorise). Do **not** paper over
-   it by loosening assertions or rewriting expected values to match buggy output.
+2. **Is it even mine? Did it even run?** Before assuming your change broke it, check whether the failure
+   **pre-exists on `main`** or is **environmental**. Verify on a clean baseline (`git worktree add /tmp/wt
+   origin/main`) and use `git log -S"<string>"` / `git log -p <file>` to find *when/why* behaviour changed.
+   Also confirm the check was **actually executing**: a "gated" job that silently never runs rots unnoticed
+   (the harness matrix was dead for weeks because CI died upstream at `pnpm/action-setup` and skipped the
+   whole job). Inspect the *run's jobs*, not just that a workflow file exists.
+3. **Root cause, not symptom — don't guess the label.** Keep digging until you can *explain* the failure
+   (instrument it — print the real value: a series length, a computed date, an HTTP `status`/response body —
+   rather than theorise). A long-unrun test that fails is usually **stale against a shipped feature**, not a
+   wall-clock/"date bomb" or flake: reproduce against the *real app* and read what it actually returns (e.g.
+   a manual JE coming back `status: 'Draft'` ⇒ maker-checker; an SoD `403`; a count vs `MODULE_KEYS`) before
+   blaming the clock or the environment. Never commit a *guessed* cause (a quarantine comment, a loosened
+   assertion, or expected values rewritten to match buggy output).
 4. **Fix at the right layer, smallest change.** Don't mask: never edit parity-locked code
    (`forecasting.service.ts` says `ห้ามเปลี่ยน — parity`), and prefer fixing the test seeding/harness over
    bending the product. If a "fix" causes new regressions, **revert** and record why (see the drizzle 0.45
@@ -71,9 +78,12 @@ For every such change, review and update as needed:
 - Shared: `pnpm --filter @ierp/shared build` (build before harnesses that import dist)
 - Web E2E (Playwright UI smoke, e.g. ERP/POS switcher): `pnpm --filter @ierp/web test:e2e`
   (one-time `pnpm --filter @ierp/web exec playwright install chromium`; needs browser-download network access)
-- Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`):
-  `pnpm --filter @ierp/cutover compliance` (ICFR controls), `e2e`, `ext`, `worldclass`, `taxdocs`,
-  `restaurant`; `pnpm --filter @ierp/parity writeflow|analytics`. Keep these green.
+- Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`): **every**
+  `tools/cutover/src/*.ts` + `tools/parity/{writeflow,analytics}` now runs as its own parallel job in the
+  `harnesses` matrix in `.github/workflows/ci.yml` (one check per harness) — add a matrix entry whenever you
+  add a harness. Run one locally with e.g. `pnpm --filter @ierp/cutover compliance` (ICFR controls), `e2e`,
+  `worldclass`. Excluded (need external services, not self-contained on PGlite): `shadow`, `reconcile`,
+  `smoke-http`. Keep these green.
 
 ## Key references
 - RCM / readiness / policies: `compliance/` (`Oshinei_ERP_SOX_RCM_v1.xlsx`, `build_rcm.py`,
