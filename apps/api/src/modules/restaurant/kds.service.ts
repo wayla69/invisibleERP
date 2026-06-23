@@ -18,6 +18,7 @@ export class KdsService {
       itemId: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, kdsStatus: dineInOrderItems.kdsStatus,
       firedAt: dineInOrderItems.firedAt, estPrep: dineInOrderItems.estPrepMinutes,
+      isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy,
       stationId: kitchenStations.id, stationCode: kitchenStations.code, stationName: kitchenStations.name, stationSort: kitchenStations.sort, stationPrep: kitchenStations.defaultPrepMinutes,
       orderNo: dineInOrders.orderNo, tableNo: diningTables.tableNo,
     }).from(dineInOrderItems)
@@ -38,6 +39,7 @@ export class KdsService {
       stations.get(sid).items.push({
         item_id: Number(r.itemId), order_no: r.orderNo, table_label: r.tableNo ?? null, name: r.name, qty: n(r.qty),
         modifiers: r.modifiers ?? [], notes: r.notes, kds_status: r.kdsStatus, fired_at: r.firedAt,
+        is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr',
         elapsed_min: elapsedMin, prep_min: prep, remaining_min: Math.max(0, prep - elapsedMin),
       });
     }

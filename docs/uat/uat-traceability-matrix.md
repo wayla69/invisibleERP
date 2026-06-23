@@ -74,6 +74,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-038 | One mode per session (no mixing) | REST-09 | 20 §7, §9, §13 |
 | UAT-O2C-039 | Ordering after buffet window blocked | REST-09 | 20 §7, §9, §13 |
 | UAT-O2C-040 | Overtime surcharge billed past window | REST-09 | 20 §7, §9 |
+| UAT-O2C-041 | KDS flags ticket origin (diner / buffet) | REST-08, REST-09 | 20 §5 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

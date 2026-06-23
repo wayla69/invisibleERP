@@ -153,7 +153,10 @@ async function main() {
   const dOrder = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ sku: 'QR01', qty: 2 }] });
   ok('Diner self-order: submit → order auto-fired to kitchen (items queued)', (dOrder.status === 200 || dOrder.status === 201) && dOrder.json.order?.items?.length === 1 && dOrder.json.order.items[0].kds_status === 'queued', `${dOrder.status} ${JSON.stringify(dOrder.json.order?.items?.[0] ?? {}).slice(0, 70)}`);
   const dFeed = await inj('GET', '/api/restaurant/kds/feed', sales1);
-  ok('Diner self-order: item appears on the KDS feed', (dFeed.json.stations ?? []).flatMap((s: any) => s.items).some((i: any) => i.name === 'ข้าวมันไก่' && i.order_no === dOrder.json.order.order_no));
+  const dFeedItems = (dFeed.json.stations ?? []).flatMap((s: any) => s.items);
+  ok('Diner self-order: item appears on the KDS feed', dFeedItems.some((i: any) => i.name === 'ข้าวมันไก่' && i.order_no === dOrder.json.order.order_no));
+  const dFeedItem = dFeedItems.find((i: any) => i.name === 'ข้าวมันไก่');
+  ok('KDS badges: à la carte diner item flagged from_diner (not buffet); staff items unflagged', dFeedItem?.from_diner === true && dFeedItem?.is_buffet === false && dFeedItems.filter((i: any) => i.order_no === ord.json.order_no).every((i: any) => i.from_diner === false), JSON.stringify({ d: dFeedItem?.from_diner, b: dFeedItem?.is_buffet }));
   const dAdd = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ sku: 'QR01', qty: 1 }] });
   ok('Diner self-order: a second submit appends to the same open order', (dAdd.status === 200 || dAdd.status === 201) && dAdd.json.order.order_no === dOrder.json.order.order_no && dAdd.json.order.items.length === 2, `${dAdd.status} lines=${dAdd.json.order?.items?.length}`);
   const dFree = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ name: 'ของแถมฟรี', unit_price: 0, qty: 1 }] });
@@ -187,6 +190,8 @@ async function main() {
   const feedItemsB = (feedB.json.stations ?? []).flatMap((s: any) => s.items);
   ok('Buffet: ฿0 food still routes to the KDS feed', feedItemsB.some((i: any) => i.name === 'หมูสไลด์'));
   ok('Buffet: per-pax charge line stays OFF the KDS feed', !feedItemsB.some((i: any) => String(i.name).startsWith('บุฟเฟต์')));
+  const bfFeedItem = feedItemsB.find((i: any) => i.name === 'หมูสไลด์');
+  ok('KDS badges: diner-ordered buffet item flagged (from_diner + is_buffet)', bfFeedItem?.from_diner === true && bfFeedItem?.is_buffet === true, JSON.stringify({ d: bfFeedItem?.from_diner, b: bfFeedItem?.is_buffet }));
   const ordIneligible = await inj('POST', `/api/qr/t/${bTok}/order`, undefined, { items: [{ sku: 'BF02', qty: 1 }] });
   ok('Buffet: ineligible item rejected (400 NOT_IN_PACKAGE)', ordIneligible.status === 400 && ordIneligible.json.error?.code === 'NOT_IN_PACKAGE', `${ordIneligible.status} ${ordIneligible.json.error?.code}`);
 

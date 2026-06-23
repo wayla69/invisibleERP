@@ -117,7 +117,9 @@ tiers is a master-data task (separate from front-of-house roles).
 **Kitchen (KDS).** Open **จอครัว (KDS)** (back-of-house). Tickets are grouped by
 station and refresh automatically; tap a card to advance it
 **เริ่มทำ → เสร็จแล้ว → เสิร์ฟแล้ว**. The colour border flags how long a ticket has
-been waiting against its prep time, so late dishes stand out. Marking an item
+been waiting against its prep time, so late dishes stand out. Tickets that came
+from a guest's phone show a **ลูกค้าสั่ง** badge, and buffet dishes show a
+**บุฟเฟต์** badge, so the kitchen can tell them apart at a glance. Marking an item
 **พร้อมเสิร์ฟ / เสิร์ฟแล้ว** is what updates the guest's screen.
 
 > **Prices are protected.** Guests can only order real menu items; the system
