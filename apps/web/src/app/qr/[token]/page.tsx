@@ -50,6 +50,9 @@ export default function DinerPage() {
   const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number; qr_image: string | null; mock_settle: boolean } | null>(null);
   const [paid, setPaid] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [lang, setLang] = useState<'th' | 'en'>('th');
+  // show the English name when the diner picks EN (falls back to the Thai name)
+  const nm = useCallback((o: { name: string; name_en?: string | null }) => (lang === 'en' ? (o.name_en || o.name) : o.name), [lang]);
 
   const isBuffet = st?.order_mode === 'buffet';
   const hasOrder = !!st?.order;
@@ -137,8 +140,12 @@ export default function DinerPage() {
         <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Utensils className="size-5" />
         </div>
-        <h2 className="text-lg font-semibold">โต๊ะ {st?.table_no ?? '…'}</h2>
+        <h2 className="text-lg font-semibold">{lang === 'en' ? 'Table' : 'โต๊ะ'} {st?.table_no ?? '…'}</h2>
         {isBuffet && st?.buffet && <BuffetChip b={st.buffet} />}
+        <button type="button" onClick={() => setLang((l) => (l === 'th' ? 'en' : 'th'))}
+          className="ml-auto rounded-md border px-2 py-1 text-xs font-semibold uppercase" aria-label="language">
+          {lang === 'th' ? 'EN' : 'ไทย'}
+        </button>
       </div>
       {err && <p className="mb-3 text-sm text-destructive">{err}</p>}
 
@@ -179,7 +186,7 @@ export default function DinerPage() {
                     <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
                       className={cn('flex items-center justify-between rounded-lg border bg-card p-3 text-left transition', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-sm font-medium">{it.name}
+                        <div className="flex items-center gap-2 text-sm font-medium">{nm(it)}
                           {!it.is_available && <Badge variant="secondary" className="text-[10px]">หมด</Badge>}
                           {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">ยังไม่ถึงเวลาขาย</Badge>}
                         </div>

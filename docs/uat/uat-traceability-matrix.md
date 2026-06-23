@@ -124,6 +124,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-088 | Statement reconciles + over-settle rejected | REST-12 | 20 §7, §9 |
 | UAT-O2C-089 | Card surcharge quote + charge | REST-12 | 20 §7 |
 | UAT-O2C-090 | Payments-depth tenant isolation (RLS) | REST-12 | 20 §7 |
+| UAT-O2C-091 | Receipt defaults to tenant language | Feature (i18n) | 20 §7 |
+| UAT-O2C-092 | Receipt renders in English | Feature (i18n) | 20 §7 |
+| UAT-O2C-093 | Bilingual (TH/EN) receipt | Feature (i18n) | 20 §7 |
+| UAT-O2C-094 | Per-tenant default language persists | Feature (i18n) | 20 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

@@ -26,9 +26,10 @@ const statusVariant: Record<string, 'success' | 'warning' | 'destructive' | 'mut
 };
 
 // Open the server-rendered receipt HTML in a new window (auth header → can't be a plain link).
-async function openReceipt(saleNo: string) {
+async function openReceipt(saleNo: string, lang?: string) {
   const token = getToken();
-  const res = await fetch(`${BASE}/api/print/receipt/${encodeURIComponent(saleNo)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const qs = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+  const res = await fetch(`${BASE}/api/print/receipt/${encodeURIComponent(saleNo)}${qs}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   const html = await res.text();
   const w = window.open('', '_blank', 'width=420,height=640');
   if (w) { w.document.open(); w.document.write(html); w.document.close(); }
@@ -38,11 +39,12 @@ export default function PrintPage() {
   const qc = useQueryClient();
   const [saleNo, setSaleNo] = useState('');
   const [email, setEmail] = useState('');
+  const [lang, setLang] = useState('');   // '' = tenant default; th | en | both
   const [msg, setMsg] = useState('');
   const q = useQuery<{ jobs: Job[] }>({ queryKey: ['print-jobs'], queryFn: () => api('/api/print/jobs?limit=100'), refetchInterval: 10_000 });
 
   const reprint = useMutation({
-    mutationFn: (s: string) => api(`/api/print/reprint/${encodeURIComponent(s)}`, { method: 'POST' }),
+    mutationFn: (s: string) => api(`/api/print/reprint/${encodeURIComponent(s)}${lang ? `?lang=${lang}` : ''}`, { method: 'POST' }),
     onSuccess: () => { setMsg(`✅ ส่งพิมพ์ใบเสร็จซ้ำแล้ว (${saleNo}) — สำเนา`); qc.invalidateQueries({ queryKey: ['print-jobs'] }); },
     onError: (e: Error) => setMsg(`❌ ${e.message}`),
   });
@@ -64,8 +66,17 @@ export default function PrintPage() {
               <Label>เลขที่การขาย (SALE-…)</Label>
               <Input value={saleNo} onChange={(e) => setSaleNo(e.target.value.trim())} placeholder="SALE-T1-…" />
             </div>
+            <div>
+              <Label>ภาษาใบเสร็จ (Receipt language)</Label>
+              <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={lang} onChange={(e) => setLang(e.target.value)}>
+                <option value="">ค่าเริ่มต้นของร้าน (tenant default)</option>
+                <option value="th">ไทย</option>
+                <option value="en">English</option>
+                <option value="both">ไทย / English</option>
+              </select>
+            </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" disabled={!saleNo} onClick={() => openReceipt(saleNo)}><FileText className="mr-1 h-4 w-4" />เปิดดู / พิมพ์</Button>
+              <Button variant="outline" disabled={!saleNo} onClick={() => openReceipt(saleNo, lang || undefined)}><FileText className="mr-1 h-4 w-4" />เปิดดู / พิมพ์</Button>
               <Button disabled={!saleNo || reprint.isPending} onClick={() => reprint.mutate(saleNo)}><Printer className="mr-1 h-4 w-4" />พิมพ์ซ้ำ (สำเนา)</Button>
             </div>
             <div className="flex items-end gap-2">

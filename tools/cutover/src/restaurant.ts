@@ -386,6 +386,18 @@ async function main() {
   const t2pull = await inj('GET', '/api/print/jobs', sales2);
   ok('Printing: print jobs are tenant-isolated (T2 sees none of T1’s)', (t2pull.json.jobs ?? []).every((j: any) => j.sale_no !== rcSale), `T2 jobs=${(t2pull.json.jobs ?? []).length}`);
 
+  // ── i18n: bilingual receipts + per-tenant locale (Phase 9) ──
+  const rcThai = await inj('GET', `/api/print/receipt/${rcSale}/data`, sales1);
+  ok('i18n: receipt defaults to the tenant language (TH)', rcThai.json.data?.lang === 'th', `lang=${rcThai.json.data?.lang}`);
+  const rcEn = await inj('GET', `/api/print/receipt/${rcSale}?lang=en`, sales1);
+  ok('i18n: receipt renders in English on ?lang=en (Subtotal/Total/Thank you, no Thai total)', rcEn.status === 200 && typeof rcEn.body === 'string' && rcEn.body.includes('Subtotal') && rcEn.body.includes('Total') && rcEn.body.includes('Thank you') && !rcEn.body.includes('รวมสุทธิ'), `${rcEn.status}`);
+  const rcBoth = await inj('GET', `/api/print/receipt/${rcSale}?lang=both`, sales1);
+  ok('i18n: bilingual receipt shows TH / EN labels', !!rcBoth.body && rcBoth.body.includes('ยอดรวม') && rcBoth.body.includes('Subtotal') && rcBoth.body.includes('รวมสุทธิ / Total'), `${rcBoth.status}`);
+  const adminTok = await login('admin', 'admin123');
+  const setLang = await inj('PATCH', '/api/tenant/profile', adminTok, { default_language: 'en' });
+  const getLang = await inj('GET', '/api/tenant/profile', adminTok);
+  ok('i18n: per-tenant default language is saved + returned on the profile', (setLang.status === 200 || setLang.status === 201) && getLang.json.default_language === 'en', `set=${setLang.status} got=${getLang.json.default_language}`);
+
   // ── hardware peripherals (Phase 5): cash drawer + customer display + weighing scale ──
   const dev = await inj('POST', '/api/peripherals/devices', sales1, { device_code: 'DRW1', kind: 'cash_drawer', terminal: 'T01', printer_id: 'PRN1' });
   ok('Peripherals: register a cash-drawer device', (dev.status === 200 || dev.status === 201) && !!dev.json.id, `${dev.status}`);

@@ -429,5 +429,24 @@ converted and any FX difference is recorded.
 
 ---
 
+## 11. Language (Thai / English)
+
+The system can present customer-facing output in **Thai or English**.
+
+- **Default language.** Set your shop's default under company settings
+  (`default_language`). It drives receipts and other customer-facing output.
+- **Receipts.** On the **ใบเสร็จ & งานพิมพ์** screen, pick the **receipt
+  language** — *tenant default*, **ไทย**, **English**, or **ไทย / English**
+  (bilingual) — before viewing, printing, or reprinting.
+- **Diner QR menu.** Diners can tap **EN / ไทย** on the QR ordering page to switch
+  the menu language (English names fall back to Thai when not set).
+- **Web app.** Use the **language toggle** in the top bar to switch the app
+  between Thai and English; your choice is remembered on that device.
+
+**Expected result:** Thai and foreign customers each see receipts and menus in a
+language they can read.
+
+---
+
 **Next:** [Customer Portal](./02-customer-portal.md) ·
 [Finance — AR & AP](./05-finance-ar-ap.md)

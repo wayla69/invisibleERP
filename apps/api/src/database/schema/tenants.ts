@@ -29,6 +29,7 @@ export const tenants = pgTable('tenants', {
   province: text('province'),                                     // จังหวัด
   postalCode: text('postal_code'),
   promptpayId: text('promptpay_id'),                              // PromptPay merchant target (mobile/13-digit ID) for QR (0049)
+  defaultLanguage: text('default_language').default('th'),         // 'th' | 'en' — customer-facing output language (receipts, display, QR) (0077)
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
