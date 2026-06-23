@@ -63,6 +63,7 @@ export class PipelineService {
     const stages = await this.listStages(user);
     const stageName = dto.stage_name ?? 'Prospect';
     const stage = stages.find((s: any) => s.name === stageName) ?? stages[0];
+    if (!stage) throw new BadRequestException({ code: 'NO_STAGES', message: 'No pipeline stages configured', messageTh: 'ยังไม่ได้ตั้งค่าขั้นตอน pipeline' });
 
     const [opp] = await db.insert(opportunities).values({
       tenantId, oppNo, name: dto.name,
@@ -98,6 +99,7 @@ export class PipelineService {
     const db = this.db as any;
     const stages = await this.listStages(user);
     const targetStage = stages.find((s: any) => dto.outcome === 'Won' ? s.isWon : s.isLost) ?? stages[0];
+    if (!targetStage) throw new BadRequestException({ code: 'NO_STAGES', message: 'No pipeline stages configured', messageTh: 'ยังไม่ได้ตั้งค่าขั้นตอน pipeline' });
     const set: any = { status: dto.outcome, stageId: Number(targetStage.id), probability: targetStage.defaultProbability, updatedAt: new Date() };
     if (dto.outcome === 'Won') set.winReason = dto.reason ?? null;
     if (dto.outcome === 'Lost') set.lossReason = dto.reason ?? null;

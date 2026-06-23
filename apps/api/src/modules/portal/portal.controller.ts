@@ -11,6 +11,7 @@ import {
   PortalMyErpService, type MyCustomerDto, type MySupplierDto, type MyPoDto,
 } from './portal.myerp.service';
 import { PortalUsersService, type SubUserDto } from './portal.users.service';
+import { qint, qintOpt } from '../../common/query';
 
 // ── Zod schemas ──────────────────────────────────────────────────
 const SaleBody = z.object({
@@ -90,7 +91,7 @@ export class PortalController {
 
   @Get('pos/sales') @Permissions('cust_pos')
   listSales(@CurrentUser() u: JwtUser, @Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.pos.listSales(u, limit ? +limit : 50, offset ? +offset : 0);
+    return this.pos.listSales(u, qint('limit', limit, 50), qint('offset', offset, 0));
   }
 
   // Offline sync: replay a batch of offline-queued sales idempotently (per-item savepoint isolation).

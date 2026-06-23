@@ -6,6 +6,7 @@ import { LoyaltyTierService } from './loyalty-tier.service';
 import { HouseAccountService } from './house-account.service';
 import { GiftCardExtraService } from './giftcard-extra.service';
 import { TimeClockService } from './timeclock.service';
+import { qint, qintOpt } from '../../common/query';
 
 const TierBody = z.object({ id: z.number().optional(), tier: z.string().min(1), min_lifetime: z.number().optional(), earn_mult: z.number().optional(), redeem_mult: z.number().optional() });
 const HouseBody = z.object({ sale_no: z.string().min(1), amount: z.number().positive(), due_date: z.string().optional() });
@@ -19,7 +20,7 @@ export class LoyaltyTierController {
   constructor(private readonly svc: LoyaltyTierService) {}
   @Get('tiers') tiers() { return this.svc.listTiers(); }
   @Post('tiers') upsert(@Body(new ZodValidationPipe(TierBody)) b: z.infer<typeof TierBody>, @CurrentUser() u: JwtUser) { return this.svc.upsertTier(b, u); }
-  @Get('members/:id/earn-quote') earnQuote(@Param('id') id: string, @Query('spend') spend?: string) { return this.svc.quoteEarn(+id, spend ? +spend : 0); }
+  @Get('members/:id/earn-quote') earnQuote(@Param('id') id: string, @Query('spend') spend?: string) { return this.svc.quoteEarn(+id, qint('spend', spend, 0)); }
   @Get('members/:id/redeemable') redeemable(@Param('id') id: string) { return this.svc.redeemable(+id); }
 }
 

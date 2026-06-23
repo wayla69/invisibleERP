@@ -5,6 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import {
   BomService, type BomMasterDto, type PushDto, type PortalBomDto, type ProductionRunDto,
 } from './bom.service';
+import { qint, qintOpt } from '../../common/query';
 
 const LineSchema = z.object({
   item_id: z.string().min(1),
@@ -42,7 +43,7 @@ export class BomController {
 
   @Get('master') @Permissions('bom_master')
   list(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.svc.listMaster(limit ? +limit : 50, offset ? +offset : 0);
+    return this.svc.listMaster(qint('limit', limit, 50), qint('offset', offset, 0));
   }
 
   @Get('master/:bomCode') @Permissions('bom_master')
@@ -66,7 +67,7 @@ export class BomController {
 
   @Get('submissions') @Permissions('bom_master')
   submissions(@Query('status') status?: string, @Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.svc.listSubmissions(status, limit ? +limit : 50, offset ? +offset : 0);
+    return this.svc.listSubmissions(status, qint('limit', limit, 50), qint('offset', offset, 0));
   }
 
   @Patch('submissions/:id/approve') @Permissions('bom_master')

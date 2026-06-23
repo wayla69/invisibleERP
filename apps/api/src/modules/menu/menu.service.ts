@@ -185,6 +185,7 @@ export class MenuService {
   private async getGroup(groupId: number) {
     const db = this.db as any;
     const [g] = await db.select().from(modifierGroups).where(eq(modifierGroups.id, groupId)).limit(1);
+    if (!g) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Modifier group not found', messageTh: 'ไม่พบกลุ่มตัวเลือก' });
     const opts = await db.select().from(modifierOptions).where(and(eq(modifierOptions.groupId, groupId), eq(modifierOptions.active, true))).orderBy(asc(modifierOptions.sort));
     return { group_id: Number(g.id), code: g.code, name: g.name, min_select: g.minSelect, max_select: g.maxSelect, required: g.required, options: opts.map((o: any) => ({ option_id: Number(o.id), name: o.name, price_delta: n(o.priceDelta), is_default: o.isDefault })) };
   }

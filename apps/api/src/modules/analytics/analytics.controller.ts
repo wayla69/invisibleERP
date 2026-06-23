@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AnalyticsService } from './analytics.service';
+import { qint, qintOpt } from '../../common/query';
 
 const InsightBody = z.object({ type: z.string(), data: z.record(z.any()) });
 
@@ -11,13 +12,13 @@ export class AnalyticsController {
   constructor(private readonly svc: AnalyticsService) {}
 
   @Get('replenishment') @Permissions('planner', 'dashboard', 'warehouse')
-  replenishment(@Query('limit') limit?: string) { return this.svc.replenishmentList(limit ? +limit : 50); }
+  replenishment(@Query('limit') limit?: string) { return this.svc.replenishmentList(qint('limit', limit, 50)); }
 
   @Get('replenishment/:itemId') @Permissions('planner', 'dashboard', 'warehouse')
   replItem(@Param('itemId') itemId: string) { return this.svc.replenishmentItem(itemId); }
 
   @Get('anomalies') @Permissions('planner', 'dashboard', 'exec')
-  anomalies(@Query('days') days?: string) { return this.svc.anomalySummary(days ? +days : 30); }
+  anomalies(@Query('days') days?: string) { return this.svc.anomalySummary(qint('days', days, 30)); }
 
   @Post('insight') @Permissions('planner', 'dashboard')
   insight(@Body(new ZodValidationPipe(InsightBody)) b: { type: string; data: any }) { return this.svc.insight(b.type, b.data); }

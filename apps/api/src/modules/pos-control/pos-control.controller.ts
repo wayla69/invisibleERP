@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { PosControlService } from './pos-control.service';
+import { qint, qintOpt } from '../../common/query';
 
 const HoldBody = z.object({ label: z.string().optional(), customer_name: z.string().optional(), cart: z.any() });
 const OverrideBody = z.object({
@@ -24,5 +25,5 @@ export class PosControlController {
 
   // Manager override audit
   @Post('override') override(@Body(new ZodValidationPipe(OverrideBody)) b: z.infer<typeof OverrideBody>, @CurrentUser() u: JwtUser) { return this.svc.override(b, u); }
-  @Get('overrides') listOverrides(@Query('limit') limit?: string) { return this.svc.listOverrides(limit ? +limit : 50); }
+  @Get('overrides') listOverrides(@Query('limit') limit?: string) { return this.svc.listOverrides(qint('limit', limit, 50)); }
 }

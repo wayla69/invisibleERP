@@ -47,12 +47,14 @@ async function main() {
     { username: 'emp1', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },
     { username: 'mgr1', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },
     { username: 'ghost', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },
+    { username: 'E777', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 }, // links to employee by emp_code (no user_name)
   ]).onConflictDoNothing();
-  // employees linked to logins by user_name
+  // employees linked to logins by user_name (E777 is linked only by emp_code → exercises the GL-9 SoD path)
   await db.insert(s.employees).values([
     { tenantId: t1, empCode: 'E001', name: 'Somchai', position: 'Cook', userName: 'emp1', monthlySalary: '20000' },
     { tenantId: t1, empCode: 'E002', name: 'Manager', position: 'GM', userName: 'mgr1', monthlySalary: '40000' },
     { tenantId: t1, empCode: 'E003', name: 'Other', position: 'Cook', userName: 'nobody', monthlySalary: '18000' },
+    { tenantId: t1, empCode: 'E777', name: 'CodeLinked', position: 'Cook', monthlySalary: '15000' }, // user_name NULL
   ]).onConflictDoNothing();
   const empId = async (code: string) => Number((await db.select().from(s.employees).where(eq(s.employees.empCode, code)))[0].id);
   const [e1, e3] = [await empId('E001'), await empId('E003')];
@@ -108,6 +110,12 @@ async function main() {
   const ex2 = await inj('POST', '/api/ess/expenses', mgr1, { category: 'meal', amount: 200 });
   const self = await inj('POST', `/api/ess/expenses/${ex2.json.id}/decide`, mgr1, { approve: true });
   ok('Self-approve own expense → 400 SOD_SELF_APPROVAL', self.status === 400 && self.json.error?.code === 'SOD_SELF_APPROVAL', `${self.status} ${self.json.error?.code}`);
+
+  // 6b. SoD via emp_code link only (no user_name): claimant STILL cannot self-approve (W5/GL-9 fix)
+  const ecTok = (await inj('POST', '/api/login', undefined, { username: 'E777', password: 'pw' })).json.token as string;
+  const ex3 = await inj('POST', '/api/ess/expenses', ecTok, { category: 'meal', amount: 150 });
+  const self2 = await inj('POST', `/api/ess/expenses/${ex3.json.id}/decide`, ecTok, { approve: true });
+  ok('Self-approve via emp_code link (user_name NULL) → 400 SOD_SELF_APPROVAL', self2.status === 400 && self2.json.error?.code === 'SOD_SELF_APPROVAL', `${self2.status} ${self2.json.error?.code}`);
 
   await app.close();
   await pg.close();

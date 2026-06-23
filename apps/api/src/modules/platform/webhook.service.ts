@@ -77,6 +77,8 @@ export class WebhookService {
             'X-IERP-Event': event,
           },
           body,
+          // Bound the outbound call — a hung/slow subscriber must not block the request (deliveries are sequential).
+          signal: AbortSignal.timeout(10_000),
         });
         const ok = res.ok;
         await db.update(webhookDeliveries).set({
