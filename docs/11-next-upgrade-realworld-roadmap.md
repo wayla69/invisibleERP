@@ -257,8 +257,16 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   (`sqrt(2DS/H)`); item master gains those fields (migration 0066). ✅ **Rough-cut capacity** —
   `POST /api/mrp/capacity` loads each work-centre from routings (setup + run·qty) vs supplied available
   minutes and flags overloads. `mrp` harness now 16 checks. **D3 is complete.**
-- **D4 — Analytics plane + demand ML.** dbt + semantic layer + embedded BI; seasonality/Croston
-  demand model with a backtesting harness (WAPE/MASE) as a CI gate.
+- **D4 — Analytics plane + demand ML.** ✅ **Demand ML shipped.** A new `DemandForecastService`
+  (`/api/demand/*`) builds a dense daily demand series from POS sales and **walk-forward backtests** five
+  classic, explainable models (SMA, SES, Holt linear-trend, seasonal-naive, Croston for intermittent
+  demand), scoring **WAPE / MASE / RMSE / bias** per model; `forecast` **auto-selects the lowest-WAPE
+  model** (or honours a pinned one), clamps the horizon non-negative, and persists each run (tenant-scoped,
+  migration 0067) for an accuracy audit trail. `GET /api/demand/accuracy` is the forecast-accuracy KPI for
+  the analytics plane. The parity-locked `forecasting.service.ts` (reorder points) is untouched. New
+  `demand-ml` harness (14 checks) is a **CI gate** — it asserts Holt beats SMA on trend and Croston beats
+  SMA on intermittent demand, plus RLS isolation. *Deferred (heavier infra): dbt + external semantic layer
+  / embedded BI — the in-app BI module (`/api/bi/*`) + this accuracy KPI cover the near-term need.*
 
 ---
 

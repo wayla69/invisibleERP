@@ -1,6 +1,6 @@
 # UAT — Cycle 09: Reports & Analytics
 
-**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narratives `01-order-to-cash.md`, `04-general-ledger-close.md`; harness `tools/cutover/src/e2e.ts`, `worldclass.ts`. Endpoints under `/api/reports`, `/api/analytics`, `/api/bi`, `/api/finance`, `/api/dashboard`.
+**Status: DRAFT v0.2 · 2026-06-23** · Cross-ref: process narratives `01-order-to-cash.md`, `04-general-ledger-close.md`, `26-reporting-bi-ai.md` §8a (demand ML); harness `tools/cutover/src/e2e.ts`, `worldclass.ts`, `rag.ts`, `demand-ml.ts`. Endpoints under `/api/reports`, `/api/analytics`, `/api/bi`, `/api/demand`, `/api/finance`, `/api/dashboard`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Amounts are exact (seed: today's sales = 107, low-stock items = 2).
 
@@ -26,3 +26,7 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Amounts are exact (seed: t
 | UAT-RPT-018 | RAG ingest + retrieve a policy (D2) | masterdata/ai_chat | — | 1. `POST /api/ai/kb/documents` (refund policy). 2. `GET /api/ai/kb/search?q=refund within 14 days`. | policy text | Doc chunked; top hit is the policy with score > 0.15. | High | Positive | Feature (RAG) | Not Run | rag.ts |
 | UAT-RPT-019 | RAG cite-or-refuse — off-topic refused | ai_chat | Policy ingested | 1. `GET /api/ai/kb/ask?q=<unrelated question>`. | — | `refused: true`, no citations (no hallucinated answer). | High | Control | Feature (RAG safety) | Not Run | rag.ts |
 | UAT-RPT-020 | RAG tenant isolation (RLS) | ai_chat (T2) | T1 has KB docs | 1. `GET /api/ai/kb/search`/`ask` as T2. | bearer T2 | 0 results; ask refuses — no T1 leakage. | High | Control | ITGC-AC-03 | Not Run | rag.ts |
+| UAT-RPT-021 | Demand ML backtest — models beat naive (D4) | Planner | ≥14d POS history; trend + intermittent items | 1. `POST /api/demand/backtest` (trend item). 2. (intermittent item). | `{item_id:DM-TREND}` / `{item_id:DM-INTER}` | 200; 5 candidates scored with WAPE/MASE; Holt WAPE < SMA on trend; Croston WAPE < SMA on intermittent. | High | Positive | Feature (demand ML) | Not Run | demand-ml.ts |
+| UAT-RPT-022 | Demand forecast auto-selects best model + persists (D4) | Planner | trend item history | 1. `POST /api/demand/forecast` horizon 10. 2. `GET /api/demand/accuracy`. | `{item_id:DM-TREND,horizon:10}` | `selected_by`=lowest_wape; forecast length 10, all ≥ 0, trends upward; run persisted; accuracy KPI returns avg WAPE/MASE. | High | Positive | Feature (demand ML) | Not Run | demand-ml.ts |
+| UAT-RPT-023 | Demand forecast — input guards | Planner | item with no history | 1. `POST /api/demand/forecast` unknown item. 2. pin `algorithm:wizardry`. | — | 400 `INSUFFICIENT_HISTORY`; 400 `UNKNOWN_ALGORITHM`. | Med | Control | Feature (demand ML guard) | Not Run | demand-ml.ts |
+| UAT-RPT-024 | Demand forecasts tenant-isolated (RLS) | Planner (T2) | HQ has a persisted forecast | 1. `GET /api/demand/forecasts` as each tenant. | bearer per tenant | Each tenant sees only its own runs — no cross-tenant forecast leakage. | High | Control | ITGC-AC (RLS) | Not Run | demand-ml.ts |

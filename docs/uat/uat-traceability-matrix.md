@@ -205,6 +205,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-015 | Reconciliation dashboard | REC-01 | 04 §9 |
 | UAT-RPT-016 | RLS report isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-RPT-017 | Read-only role cannot mutate | ITGC-AC-07 | 08 §9 |
+| UAT-RPT-018 | RAG ingest + retrieve a policy | Feature (RAG) | 26 §7 |
+| UAT-RPT-019 | RAG cite-or-refuse (off-topic) | Feature (RAG safety) | 26 §7 |
+| UAT-RPT-020 | RAG tenant isolation (RLS) | ITGC-AC-03 | 26 §7 |
+| UAT-RPT-021 | Demand ML backtest beats naive | BI-01 (backtest accuracy) | 26 §8a |
+| UAT-RPT-022 | Demand forecast auto-select + persist | BI-04 (advisory) | 26 §8a |
+| UAT-RPT-023 | Demand forecast input guards | Feature (demand ML guard) | 26 §8a |
+| UAT-RPT-024 | Demand forecasts tenant-isolated (RLS) | ITGC-AC (RLS) | 26 §8a |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 
@@ -235,6 +242,6 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 13 | 5 |
 | 08 Admin / SoD / Audit | 16 | 10 |
-| 09 Reports & Analytics | 17 | 2 |
+| 09 Reports & Analytics | 24 | 5 |
 | 10 Customer Portal | 12 | 5 |
 | **Total** | **159** | **69** |

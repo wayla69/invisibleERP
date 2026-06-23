@@ -80,6 +80,7 @@ import { PosLoyaltyLaborModule } from './modules/pos-loyalty-labor/pos-loyalty-l
 import { BranchModule } from './modules/branch/branch.module';
 import { EssModule } from './modules/ess/ess.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
+import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
 
 @Module({
   imports: [
@@ -158,6 +159,7 @@ import { SupplierModule } from './modules/supplier/supplier.module';
     BranchModule,
     EssModule,
     SupplierModule,
+    DemandMlModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
