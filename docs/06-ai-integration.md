@@ -107,6 +107,30 @@ export class AgentService {
 | `GET /api/analytics/anomalies` | `getAnomalySummary` |
 | `POST /api/analytics/insight` | `getReplenishmentInsight`/`getAnomalyInsight` |
 | `GET /api/analytics/dashboard-summary` | repl + anomaly + `getBulkInsight` |
+| `POST /api/ai/actions` | `AiActionService.propose` — file a PENDING write-op (Phase D1) |
+| `GET /api/ai/actions?status=pending` | `AiActionService.list` — approval queue |
+| `POST /api/ai/actions/:id/approve` · `/reject` | `AiActionService.approve`/`reject` — execute on approval |
+
+---
+
+## 4a. Agentic write-ops (Phase D1) — propose → approve → execute
+
+The agent is **read-only by default**; the only way it can change data is to **propose** an action that
+a human approves. There is no path for the model to mutate ledgers/POs directly.
+
+- **Propose.** Agent write-tools `propose_journal_entry` / `propose_purchase_order` call
+  `AiActionService.propose`, which validates the payload (JE must balance) and writes a **PENDING** row to
+  `ai_action_requests` (tenant-scoped via RLS, migration `0063`). The system prompt forbids the model from
+  claiming it executed — it must say the action awaits approval.
+- **Approve (human-in-the-loop + SoD).** `approve()` enforces: the action is still pending; the **approver
+  ≠ the proposer** (`SOD_SELF_APPROVAL`); and the approver holds the **permission for that kind**
+  (`gl_post` for a JE, `procurement` for a PO) — else `403`. On approval it executes through the normal
+  service (`LedgerService.postEntry` / `ProcurementService.createPo`), records `result_ref` (e.g. `JE-…` /
+  `PO-…`), and the standard audit interceptor logs the mutation. Failures flip the row to `failed`.
+- **Reject** records `decided_by` + reason. Re-deciding a non-pending action → `409`.
+- **UI.** `/ai-actions` (perm `approvals`/`ai_chat`) is the approval queue.
+- **Verified by** `tools/cutover/src/ai-actions.ts` (propose, balance guard, self-approval block,
+  missing-permission block, execute→JE/PO + balanced GL, re-approve guard, reject, RLS isolation).
 
 ---
 

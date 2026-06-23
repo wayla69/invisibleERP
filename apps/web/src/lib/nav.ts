@@ -206,7 +206,10 @@ export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'ผู้ช่วย AI',
     workspace: BOTH,
-    items: [{ label: 'AI Assistant', href: '/assistant', icon: Bot, perms: ['ai_chat', 'dashboard'] }],
+    items: [
+      { label: 'AI Assistant', href: '/assistant', icon: Bot, perms: ['ai_chat', 'dashboard'] },
+      { label: 'AI Actions (อนุมัติ)', href: '/ai-actions', icon: Bot, perms: ['approvals', 'ai_chat'] },
+    ],
   },
   {
     title: 'ระบบ',
