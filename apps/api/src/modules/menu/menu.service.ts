@@ -93,6 +93,17 @@ export class MenuService {
     return { categories, uncategorized, item_count: items.length };
   }
 
+  // full menu for the diner self-order UI: same as listMenu but each item carries its modifier groups +
+  // options inlined, so the phone can render the modifier picker without a second (permissioned) round-trip.
+  async listMenuForOrder(user: JwtUser) {
+    const base = await this.listMenu(user);
+    const augment = async (it: any) => ({ ...it, modifier_groups: it.has_modifiers ? await this.itemGroups(Number(it.id)) : [] });
+    const categories = [];
+    for (const c of base.categories) categories.push({ ...c, items: await Promise.all(c.items.map(augment)) });
+    const uncategorized = await Promise.all(base.uncategorized.map(augment));
+    return { categories, uncategorized, item_count: base.item_count };
+  }
+
   // ── modifier groups + options ──
   async createModifierGroup(dto: CreateModifierGroupDto, user: JwtUser) {
     const db = this.db as any;

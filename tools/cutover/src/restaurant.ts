@@ -1,6 +1,7 @@
 /**
  * Phase 11 — Restaurant/F&B POS validation (real Nest app over PGlite, RLS-enforced):
  * dine-in orders + KDS lifecycle + wait-time, floor-plan tables, public QR diner (HMAC token) +
+ * diner self-ordering (public menu + menu-driven order auto-fired to KDS) +
  * PromptPay pay → cust_pos_sales + GL + abbreviated tax invoice.
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover restaurant
  */
@@ -140,6 +141,28 @@ async function main() {
   const ordFree = await inj('POST', '/api/restaurant/orders', sales1, { items: [{ name: 'น้ำเปล่า', qty: 1, unit_price: 15, station_code: 'drinks' }] });
   ok('Menu-order: freeform custom item still supported (backward-compat)', /^DIN-/.test(ordFree.json.order_no ?? '') && ordFree.json.items?.[0]?.name === 'น้ำเปล่า', `${ordFree.status}`);
 
+  // ── diner QR SELF-ORDERING: public menu + menu-driven order that AUTO-FIRES to the KDS ──
+  const tblQ = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A2', seats: 2 });
+  const openQ = await inj('POST', `/api/restaurant/tables/${tblQ.json.id}/open`, sales1, {});
+  const qTok = openQ.json.public_token;
+  await inj('POST', '/api/menu/items', sales1, { sku: 'QR01', name: 'ข้าวมันไก่', price: 50, station_code: 'hot', prep_minutes: 8 });
+  const dMenu = await inj('GET', `/api/qr/t/${qTok}/menu`, undefined);
+  const dMenuItems = [...(dMenu.json.categories ?? []).flatMap((c: any) => c.items), ...(dMenu.json.uncategorized ?? [])];
+  ok('Diner self-order: public menu lists the available item', dMenu.status === 200 && dMenuItems.some((i: any) => i.sku === 'QR01' && i.is_available), `${dMenu.status} items=${dMenuItems.length}`);
+  const dOrder = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ sku: 'QR01', qty: 2 }] });
+  ok('Diner self-order: submit → order auto-fired to kitchen (items queued)', (dOrder.status === 200 || dOrder.status === 201) && dOrder.json.order?.items?.length === 1 && dOrder.json.order.items[0].kds_status === 'queued', `${dOrder.status} ${JSON.stringify(dOrder.json.order?.items?.[0] ?? {}).slice(0, 70)}`);
+  const dFeed = await inj('GET', '/api/restaurant/kds/feed', sales1);
+  ok('Diner self-order: item appears on the KDS feed', (dFeed.json.stations ?? []).flatMap((s: any) => s.items).some((i: any) => i.name === 'ข้าวมันไก่' && i.order_no === dOrder.json.order.order_no));
+  const dAdd = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ sku: 'QR01', qty: 1 }] });
+  ok('Diner self-order: a second submit appends to the same open order', (dAdd.status === 200 || dAdd.status === 201) && dAdd.json.order.order_no === dOrder.json.order.order_no && dAdd.json.order.items.length === 2, `${dAdd.status} lines=${dAdd.json.order?.items?.length}`);
+  const dFree = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ name: 'ของแถมฟรี', unit_price: 0, qty: 1 }] });
+  ok('Diner self-order: freeform/priced line rejected — must be menu-driven (no price tampering)', dFree.status === 400, `${dFree.status}`);
+  await inj('PATCH', '/api/menu/items/QR01/availability', sales1, { available: false });
+  const d86 = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ sku: 'QR01', qty: 1 }] });
+  ok('Diner self-order: 86\'d item blocked at submit (400 ITEM_UNAVAILABLE)', d86.status === 400 && d86.json.error?.code === 'ITEM_UNAVAILABLE', `${d86.status} ${d86.json.error?.code}`);
+  const dClosed = await inj('GET', `/api/qr/t/${dinerTok}/menu`, undefined);
+  ok('Diner self-order: menu/order on an ended session → 401', dClosed.status === 401, `${dClosed.status}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);
@@ -151,7 +174,7 @@ async function main() {
   await app.close();
   await pg.close();
 
-  console.log('\n── Phase 11 Restaurant POS (dine-in + KDS + ผังโต๊ะ + QR pay) ──');
+  console.log('\n── Phase 11 Restaurant POS (dine-in + KDS + ผังโต๊ะ + QR self-order + QR pay) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok);
   if (failed.length) { console.log(`\n❌ ${failed.length}/${checks.length} restaurant checks failed`); process.exit(1); }

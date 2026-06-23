@@ -8,7 +8,9 @@ import type { JwtUser } from '../../common/decorators';
 import { RealtimeScope } from './realtime.scope';
 import { TableService } from './table.service';
 import { DineInService } from './dine-in.service';
+import { MenuService } from '../menu/menu.service';
 import { verifyTableToken, type TableClaim } from './qr-token.util';
+import type { PublicOrderDto } from './dto';
 
 const LIVE = ['open', 'bill_requested', 'paying'];
 const diner = (tenantId: number): JwtUser => ({ username: 'diner:qr', role: 'Sales', customerName: null, tenantId, permissions: [] });
@@ -20,6 +22,7 @@ export class QrService {
     private readonly scope: RealtimeScope,
     private readonly tables: TableService,
     private readonly dineIn: DineInService,
+    private readonly menuSvc: MenuService,
     private readonly payments: PaymentService,
   ) {}
 
@@ -51,17 +54,46 @@ export class QrService {
   async status(token: string) {
     const claim = verifyTableToken(token);
     if (!claim) throw new UnauthorizedException({ code: 'BAD_TOKEN', message: 'Invalid table token', messageTh: 'โทเคนโต๊ะไม่ถูกต้อง' });
+    return this.scope.run(claim.tenantId, () => this.snapshot(token, claim));
+  }
+
+  // current order + bill snapshot for the diner page — assumes we are already inside scope.run(tenantId).
+  private async snapshot(token: string, claim: TableClaim) {
+    const dbx = this.db as any;
+    const [session] = await dbx.select().from(tableSessions).where(and(eq(tableSessions.id, claim.sessionId), eq(tableSessions.publicToken, token), inArray(tableSessions.status, LIVE as any))).limit(1);
+    if (!session) throw new UnauthorizedException({ code: 'SESSION_ENDED', message: 'Table session ended', messageTh: 'เซสชันโต๊ะนี้สิ้นสุดแล้ว' });
+    const [table] = await dbx.select({ tableNo: diningTables.tableNo }).from(diningTables).where(eq(diningTables.id, claim.tableId)).limit(1);
+    const order = await this.dineIn.publicSummary(claim.sessionId);
+    return {
+      table_no: table?.tableNo ?? null, session_status: session.status,
+      order: order ? { order_no: order.order_no, status: order.status, waited_min: order.waited_min, ready_in_min: order.ready_in_min, items: order.items } : null,
+      bill: order ? { subtotal: order.subtotal, vat: order.vat, total: order.total, settled: session.status === 'closed' } : null,
+    };
+  }
+
+  // diner pulls the menu to order from — full catalog with modifier groups inlined, scoped to the table's tenant.
+  async menu(token: string) {
+    const { claim } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, () => this.menuSvc.listMenuForOrder(diner(claim.tenantId)));
+  }
+
+  // diner submits menu-driven items → append to (or open) the session's order, then AUTO-FIRE to the KDS so the
+  // kitchen sees it immediately. Price/station/86/modifier rules are resolved server-side (diner can't set price).
+  async order(token: string, dto: PublicOrderDto) {
+    const { claim } = await this.resolve(token);
     return this.scope.run(claim.tenantId, async () => {
-      const dbx = this.db as any;
-      const [session] = await dbx.select().from(tableSessions).where(and(eq(tableSessions.id, claim.sessionId), eq(tableSessions.publicToken, token), inArray(tableSessions.status, LIVE as any))).limit(1);
-      if (!session) throw new UnauthorizedException({ code: 'SESSION_ENDED', message: 'Table session ended', messageTh: 'เซสชันโต๊ะนี้สิ้นสุดแล้ว' });
-      const [table] = await dbx.select({ tableNo: diningTables.tableNo }).from(diningTables).where(eq(diningTables.id, claim.tableId)).limit(1);
-      const order = await this.dineIn.publicSummary(claim.sessionId);
-      return {
-        table_no: table?.tableNo ?? null, session_status: session.status,
-        order: order ? { order_no: order.order_no, status: order.status, waited_min: order.waited_min, ready_in_min: order.ready_in_min, items: order.items } : null,
-        bill: order ? { subtotal: order.subtotal, vat: order.vat, total: order.total, settled: session.status === 'closed' } : null,
-      };
+      const u = diner(claim.tenantId);
+      const existing = await this.openOrderForSession(claim.sessionId);
+      let orderNo: string;
+      if (existing) {
+        await this.dineIn.addItems(existing.orderNo, { items: dto.items as any }, u);
+        orderNo = existing.orderNo;
+      } else {
+        const created = await this.dineIn.createOrder({ table_id: claim.tableId, session_id: claim.sessionId, items: dto.items as any }, u);
+        orderNo = created.order_no;
+      }
+      await this.dineIn.fire(orderNo, u); // diner orders fire straight to the kitchen
+      return this.snapshot(token, claim);
     });
   }
 

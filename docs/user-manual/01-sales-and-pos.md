@@ -80,6 +80,35 @@ rounded** to a cash-friendly total. Cashiers *apply* rules; only Pricing/Marketi
 roles may *create* them (segregation of duties). See **Dine-in / restaurant** for
 the full flow.
 
+### QR self-ordering & the kitchen display (KDS)
+
+Guests can order from their own phone — no app, no login:
+
+1. **Open the table** as usual (floor plan → **เปิดโต๊ะ**, or the guest scans the
+   printed table QR to open the session themselves). This starts a table session
+   and a unique link.
+2. The guest opens the **เมนู** tab, browses by category, picks options
+   (size, spice, add-ons) where offered, reviews the **ตะกร้า** (cart) and taps
+   **ส่งออเดอร์เข้าครัว** (send order to kitchen).
+3. The order is sent **straight to the kitchen** — it appears on the **จอครัว
+   (KDS)** screen automatically; no cashier re-keying. Guests can keep adding to
+   the same bill during the visit.
+4. On the **ออเดอร์ของฉัน** tab the guest sees live progress per dish
+   (**รอคิว → กำลังปรุง → พร้อมเสิร์ฟ → เสิร์ฟแล้ว**) and the estimated wait,
+   then can **เรียกเก็บเงิน** and pay by **PromptPay** themselves.
+
+**Kitchen (KDS).** Open **จอครัว (KDS)** (back-of-house). Tickets are grouped by
+station and refresh automatically; tap a card to advance it
+**เริ่มทำ → เสร็จแล้ว → เสิร์ฟแล้ว**. The colour border flags how long a ticket has
+been waiting against its prep time, so late dishes stand out. Marking an item
+**พร้อมเสิร์ฟ / เสิร์ฟแล้ว** is what updates the guest's screen.
+
+> **Prices are protected.** Guests can only order real menu items; the system
+> always prices them from the catalog, so a guest can never change a price. A
+> sold-out item shows **หมด** and can't be added (**ITEM_UNAVAILABLE**). If a
+> guest's link stops working they'll see *เซสชันโต๊ะนี้สิ้นสุดแล้ว*
+> (**SESSION_ENDED**) — re-open the table to start a fresh session.
+
 ---
 
 ## 2. Credit checks (account customers)
