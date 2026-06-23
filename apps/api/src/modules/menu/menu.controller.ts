@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query } from '@nestjs/common';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { MenuService } from './menu.service';
@@ -23,6 +23,9 @@ export class MenuController {
   foodCostReport(@CurrentUser() u: JwtUser) { return this.foodCost.menuMargins(u); }
   @Get('ingredient-cost') @Permissions('pos', 'order_mgt', 'masterdata', 'exec')
   ingredientCost(@CurrentUser() u: JwtUser) { return this.foodCost.ingredientCost(u); }
+  // actual-vs-theoretical food-cost variance (costed EOD-count roll-up over a date window)
+  @Get('food-cost/variance') @Permissions('pos', 'order_mgt', 'masterdata', 'exec')
+  foodCostVariance(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) { return this.foodCost.foodCostVariance(u, { from: from || undefined, to: to || undefined }); }
 
   // ── categories ──
   @Post('categories') @Permissions(...MANAGE)

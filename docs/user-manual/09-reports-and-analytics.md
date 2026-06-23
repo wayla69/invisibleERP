@@ -149,8 +149,16 @@ The **ต้นทุนอาหาร (Food cost)** screen shows, for each men
 **margin** and **margin %**, and the **food-cost %** against your target — so you
 can spot low-margin dishes (menu engineering). A second tab lists **ingredient
 cost-contribution** (which ingredients drive cost across your recipes). Numbers
-are *theoretical* (recipe-based); comparing them to physical stock counts
-(actual variance) is part of inventory.
+are *theoretical* (recipe-based).
+
+A third tab, **ส่วนต่าง (จริง vs ทฤษฎี) — variance**, closes the loop against
+reality: pick a date range and it values your **EOD stock-count** variances
+(actual vs theoretical usage) at each ingredient's cost. You see the **theoretical
+cost**, the **net variance** (฿ and % of theoretical), how much is **unfavourable**
+(used more than the recipe predicted — waste, over-portioning, shrinkage) vs
+**favourable**, and the ingredients flagged as anomalies (≥ 5% Medium, ≥ 10%
+High). This turns the inventory cycle-count variance into a money figure a manager
+can act on. *(The underlying counts come from the inventory EOD count.)*
 
 ---
 

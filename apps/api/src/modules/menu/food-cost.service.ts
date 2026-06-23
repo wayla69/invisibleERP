@@ -1,12 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, and, gte, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { menuItems, menuRecipes, menuRecipeLines } from '../../database/schema';
-import { n } from '../../database/queries';
+import { menuItems, menuRecipes, menuRecipeLines, custVariance, items as inventoryItems } from '../../database/schema';
+import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const r1 = (x: number) => Math.round((Number(x) || 0) * 10) / 10;
+// variance anomaly bands (|variance %| of theoretical usage)
+const HIGH_VAR = 10, MED_VAR = 5;
 
 // Food-cost / margin analytics — theoretical (recipe-based). Computes per-item cost from the recipe
 // (falling back to menu_items.cost), margin %, food-cost %, and an ingredient cost-contribution view.
@@ -72,5 +74,64 @@ export class FoodCostService {
       agg.set(key, e);
     }
     return { ingredients: [...agg.values()].sort((a, b) => b.cost - a.cost) };
+  }
+
+  // Actual-vs-theoretical food-cost VARIANCE (the deferred inventory layer). EOD physical counts record a
+  // per-ingredient quantity variance (actual − theoretical use) in cust_variance; this VALUES that variance
+  // at the ingredient's cost and rolls it up over a date window, so a manager sees the baht impact of
+  // over-portioning / waste / shrinkage beyond what recipes predicted, plus the % off theoretical.
+  // Sign: variance > 0 ⇒ used MORE than the recipe theoretical ⇒ unfavorable (extra cost).
+  async foodCostVariance(_user: JwtUser, opts?: { from?: string; to?: string }) {
+    const db = this.db as any;
+    const to = opts?.to ?? ymd();
+    const from = opts?.from ?? to; // default: a single day
+    // cost basis per ingredient: the item master cost, falling back to a recipe line's unit cost
+    const invRows = await db.select({ itemId: inventoryItems.itemId, cost: inventoryItems.unitPrice }).from(inventoryItems);
+    const costByItem = new Map<string, number>(invRows.map((r: any) => [String(r.itemId), n(r.cost)]));
+    const recLines = await db.select({ itemId: menuRecipeLines.ingredientItemId, cost: menuRecipeLines.unitCost }).from(menuRecipeLines);
+    for (const l of recLines) { const k = String(l.itemId); if (!costByItem.get(k)) costByItem.set(k, n(l.cost)); }
+
+    const rows = await db.select().from(custVariance).where(and(gte(custVariance.varDate, from), lte(custVariance.varDate, to)));
+    // aggregate per ingredient across the window
+    const byItem = new Map<string, { item_id: string; description: string | null; theoretical_use: number; actual_use: number; variance_qty: number; unit_cost: number }>();
+    for (const v of rows) {
+      const k = String(v.itemId);
+      const e = byItem.get(k) ?? { item_id: k, description: v.itemDescription ?? null, theoretical_use: 0, actual_use: 0, variance_qty: 0, unit_cost: costByItem.get(k) ?? 0 };
+      e.theoretical_use = r2(e.theoretical_use + n(v.theoreticalUse));
+      e.actual_use = r2(e.actual_use + n(v.actualUse));
+      e.variance_qty = r2(e.variance_qty + n(v.variance));
+      byItem.set(k, e);
+    }
+    const items = [...byItem.values()].map((e) => {
+      const theoretical_cost = r2(e.theoretical_use * e.unit_cost);
+      const actual_cost = r2(e.actual_use * e.unit_cost);
+      const variance_cost = r2(e.variance_qty * e.unit_cost);
+      const variance_pct = e.theoretical_use !== 0 ? r1((e.variance_qty / e.theoretical_use) * 100) : 0;
+      const absPct = Math.abs(variance_pct);
+      return {
+        item_id: e.item_id, description: e.description, unit_cost: e.unit_cost,
+        theoretical_use: e.theoretical_use, actual_use: e.actual_use, variance_qty: e.variance_qty,
+        theoretical_cost, actual_cost, variance_cost,
+        variance_pct, anomaly: absPct >= HIGH_VAR ? 'High' : absPct >= MED_VAR ? 'Medium' : 'Normal',
+      };
+    }).sort((a, b) => Math.abs(b.variance_cost) - Math.abs(a.variance_cost));
+
+    const theoreticalCost = r2(items.reduce((a, i) => a + i.theoretical_cost, 0));
+    const actualCost = r2(items.reduce((a, i) => a + i.actual_cost, 0));
+    const varianceCost = r2(items.reduce((a, i) => a + i.variance_cost, 0));
+    return {
+      from, to,
+      summary: {
+        items: items.length,
+        theoretical_cost: theoreticalCost,
+        actual_cost: actualCost,
+        variance_cost: varianceCost,                                            // + = unfavorable (extra usage cost)
+        variance_pct: theoreticalCost !== 0 ? r1((varianceCost / theoreticalCost) * 100) : 0,
+        unfavorable_cost: r2(items.filter((i) => i.variance_cost > 0).reduce((a, i) => a + i.variance_cost, 0)),
+        favorable_cost: r2(items.filter((i) => i.variance_cost < 0).reduce((a, i) => a + i.variance_cost, 0)),
+        anomalies: items.filter((i) => i.anomaly !== 'Normal').length,
+      },
+      items,
+    };
   }
 }
