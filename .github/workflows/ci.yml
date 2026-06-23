@@ -24,14 +24,111 @@ jobs:
         run: pnpm -r build
       - name: Unit tests (vitest + coverage)
         run: pnpm --filter @ierp/api test
+      # Hand the compiled output to the harness matrix so 50+ jobs don't each rebuild.
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            apps/api/dist
+            packages/shared/dist
+          retention-days: 1
+          if-no-files-found: error
 
-  # Move #4: the integration harnesses are GATES, not optional. They boot the real Nest app
-  # over PGlite (a real Postgres) and assert behaviour — green now means "it works", not "it compiles".
-  test-harnesses:
-    runs-on: ubuntu-latest
+  # The integration harnesses boot the real Nest app over PGlite (a real Postgres),
+  # run the Drizzle migrations and assert behaviour — green means "it works", not
+  # "it compiles". Previously only a handful ran inline; the rest existed but were
+  # never gated, so they could rot silently. This matrix runs each one as its own
+  # required check, in parallel, with per-harness visibility.
+  #
+  # Harnesses reconciled with shipped features so they can be gated:
+  #   - GL-05 maker-checker: a manual JE/GAAP-adjustment posts as Draft and only affects balances once
+  #     a DIFFERENT user approves it (tenant-isolation/multiledger/bankrec/costcenter/budget post-then-approve).
+  #   - SoD preventive guard: the coarse `warehouse` perm self-conflicts (R11); gaps assigns single-duty perms.
+  #   - module-qr asserts modules == MODULE_KEYS (diverged from PERMISSIONS once sub-permissions were added).
+  #   - parity analytics derives sale dates in business-TZ (UTC+7), the same basis ForecastingService bins by.
+  # Still NOT gated (need external services, not self-contained on PGlite): shadow, reconcile, smoke-http.
+  harnesses:
     needs: build
+    runs-on: ubuntu-latest
     env:
       NODE_OPTIONS: --experimental-sqlite
+      JWT_SECRET: ci-harness-secret
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── read/write parity (services vs expected, on PGlite) ──
+          - { pkg: parity, script: writeflow }
+          - { pkg: parity, script: analytics }
+          # ── end-to-end / platform foundations ──
+          - { pkg: cutover, script: e2e }
+          - { pkg: cutover, script: ext }
+          - { pkg: cutover, script: worldclass }
+          - { pkg: cutover, script: tenant-isolation }
+          - { pkg: cutover, script: module-qr }
+          - { pkg: cutover, script: gaps }
+          - { pkg: cutover, script: onboarding }
+          - { pkg: cutover, script: opening-balances }
+          # ── COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability) ──
+          - { pkg: cutover, script: compliance }
+          # ── POS ──
+          - { pkg: cutover, script: pos-p0 }
+          - { pkg: cutover, script: pos-p1 }
+          - { pkg: cutover, script: pos-p2 }
+          - { pkg: cutover, script: pos-wiring }
+          - { pkg: cutover, script: pos-discount }
+          - { pkg: cutover, script: splitbill }
+          - { pkg: cutover, script: cashreport }
+          - { pkg: cutover, script: returns }
+          # ── restaurant ──
+          - { pkg: cutover, script: restaurant }
+          - { pkg: cutover, script: menu }
+          - { pkg: cutover, script: recipe }
+          # ── tax / Thai compliance ──
+          - { pkg: cutover, script: taxdocs }
+          - { pkg: cutover, script: etax }
+          - { pkg: cutover, script: etax-email }
+          - { pkg: cutover, script: promptpay }
+          # ── finance / accounting ──
+          - { pkg: cutover, script: revrec }
+          - { pkg: cutover, script: fxreval }
+          - { pkg: cutover, script: intercompany }
+          - { pkg: cutover, script: consolidation }
+          - { pkg: cutover, script: recon-profitability }
+          - { pkg: cutover, script: multiledger }
+          - { pkg: cutover, script: bankrec }
+          - { pkg: cutover, script: costcenter }
+          - { pkg: cutover, script: budget }
+          # ── supply chain / inventory / manufacturing ──
+          - { pkg: cutover, script: stock-ops }
+          - { pkg: cutover, script: match }
+          - { pkg: cutover, script: costing }
+          - { pkg: cutover, script: wms }
+          - { pkg: cutover, script: scm17c }
+          - { pkg: cutover, script: manufacturing }
+          - { pkg: cutover, script: mfg-depth }
+          # ── CRM / billing / projects / loyalty ──
+          - { pkg: cutover, script: crm }
+          - { pkg: cutover, script: cpq }
+          - { pkg: cutover, script: cpq-gl }
+          - { pkg: cutover, script: sub-billing }
+          - { pkg: cutover, script: projects }
+          - { pkg: cutover, script: pipeline }
+          - { pkg: cutover, script: service }
+          - { pkg: cutover, script: loyalty }
+          - { pkg: cutover, script: giftcards }
+          - { pkg: cutover, script: receipts }
+          # ── planning / analytics / channels / HR ──
+          - { pkg: cutover, script: epm-planning }
+          - { pkg: cutover, script: bi }
+          - { pkg: cutover, script: branch }
+          - { pkg: cutover, script: channel }
+          - { pkg: cutover, script: offline-sync }
+          - { pkg: cutover, script: workflow }
+          - { pkg: cutover, script: hcm }
+          - { pkg: cutover, script: payroll }
+          - { pkg: cutover, script: portal-extra }
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager" (pnpm@11.8.0)
@@ -40,23 +137,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @ierp/shared build && pnpm --filter @ierp/api build
-      - name: write-flow (transactional)
-        run: pnpm --filter @ierp/parity writeflow
-      - name: analytics
-        run: pnpm --filter @ierp/parity analytics
-      - name: e2e (HTTP)
-        run: pnpm --filter @ierp/cutover e2e
-      - name: extensions
-        run: pnpm --filter @ierp/cutover ext
-      - name: world-class foundations (RLS, GL, payments, tax, billing, platform)
-        run: pnpm --filter @ierp/cutover worldclass
-      - name: Thai tax documents (full/abbreviated invoice, WHT 50tawi)
-        run: pnpm --filter @ierp/cutover taxdocs
-      - name: Restaurant POS (dine-in, KDS, tables, QR pay)
-        run: pnpm --filter @ierp/cutover restaurant
-      - name: COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability)
-        run: pnpm --filter @ierp/cutover compliance
+      - name: Restore dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+      - name: ${{ matrix.pkg }} → ${{ matrix.script }}
+        run: pnpm --filter @ierp/${{ matrix.pkg }} ${{ matrix.script }}
 
   # ITGC vulnerability management: dependency advisories + secret scanning. Evidence for the IT auditor /
   # IPO security review. The dependency audit is a HARD GATE at --audit-level high: any NEW high/critical

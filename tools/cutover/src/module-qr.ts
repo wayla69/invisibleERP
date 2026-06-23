@@ -20,7 +20,7 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
-import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
+import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS, MODULE_KEYS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const grpOf = (k: string) => Object.entries(PERM_GROUPS).find(([, ks]) => (ks as string[]).includes(k))?.[0] ?? null;
@@ -72,7 +72,9 @@ async function main() {
 
   // ── 1. MODULE FLAGS ─────────────────────────────────────────────────────
   const mods = await inj('GET', '/api/admin/modules', token);
-  ok('GET /admin/modules lists modules', mods.status === 200 && Array.isArray(mods.json.modules) && mods.json.modules.length === PERMISSIONS.length, `n=${mods.json.modules?.length}`);
+  // /admin/modules lists MODULE_KEYS (feature toggles), which diverged from PERMISSIONS once
+  // granular sub-permissions (pos_sell, wh_count, …) were added. Assert against MODULE_KEYS.
+  ok('GET /admin/modules lists modules', mods.status === 200 && Array.isArray(mods.json.modules) && mods.json.modules.length === MODULE_KEYS.length, `n=${mods.json.modules?.length} expected=${MODULE_KEYS.length}`);
 
   const eff = await inj('GET', '/api/modules/effective', token);
   ok('GET /api/modules/effective (nav, any role)', eff.status === 200 && Array.isArray(eff.json.disabled), `status=${eff.status}`);

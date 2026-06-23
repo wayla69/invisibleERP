@@ -42,6 +42,7 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // GL-05 maker-checker approver
     { username: 'plan1', passwordHash: await pw.hash('pw1'), role: 'Planner', tenantId: t1 },
     { username: 'plan2', passwordHash: await pw.hash('pw2'), role: 'Planner', tenantId: t2 },
   ]).onConflictDoNothing();
@@ -59,7 +60,14 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const [admin, plan1, plan2] = [await login('admin', 'admin123'), await login('plan1', 'pw1'), await login('plan2', 'pw2')];
-  const J = (date: string, lines: any[]) => inj('POST', '/api/ledger/journal', admin, { date, source: 'Manual', lines });
+  const approver = await login('approver', 'admin123');
+  // GL-05 maker-checker: a manual JE posts as Draft; a DIFFERENT user must approve it to affect balances.
+  const postJE = async (preparer: string, payload: any) => {
+    const r = await inj('POST', '/api/ledger/journal', preparer, payload);
+    if (r.json?.entry_no && r.json?.pending) await inj('POST', `/api/ledger/journal/${r.json.entry_no}/approve`, preparer === approver ? admin : approver, {});
+    return r;
+  };
+  const J = (date: string, lines: any[]) => postJE(admin, { date, source: 'Manual', lines });
   const row = (rep: any, code: string) => (rep.json.rows ?? []).find((r: any) => r.account_code === code);
 
   // ── Phase 1: monthly budgets + actuals (tenant-wide, untagged) ──

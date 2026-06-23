@@ -42,6 +42,7 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // GL-05 maker-checker approver
     { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
     { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t2 },
   ]).onConflictDoNothing();
@@ -59,6 +60,13 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const [admin, sales1, sales2] = [await login('admin', 'admin123'), await login('sales1', 'pw1'), await login('sales2', 'pw2')];
+  const approver = await login('approver', 'admin123');
+  // GL-05 maker-checker: a manual JE posts as Draft; a DIFFERENT user must approve it to affect balances.
+  const postJE = async (preparer: string, payload: any) => {
+    const r = await inj('POST', '/api/ledger/journal', preparer, payload);
+    if (r.json?.entry_no && r.json?.pending) await inj('POST', `/api/ledger/journal/${r.json.entry_no}/approve`, preparer === approver ? admin : approver, {});
+    return r;
+  };
 
   const accJson = JSON.stringify((await inj('GET', '/api/ledger/accounts', admin)).json);
   ok('COA seeded with 1010 + 1020', ['1010', '1020'].every((c) => accJson.includes(c)));
@@ -69,8 +77,8 @@ async function main() {
   const bankId = acc.json.id;
 
   // seed 2 GL cash movements on 1010: deposit +1000, payment -200
-  await inj('POST', '/api/ledger/journal', admin, { date: '2028-03-05', source: 'Manual', memo: 'deposit', lines: [{ account_code: '1010', debit: 1000 }, { account_code: '4000', credit: 1000 }] });
-  await inj('POST', '/api/ledger/journal', admin, { date: '2028-03-06', source: 'Manual', memo: 'payment', lines: [{ account_code: '5100', debit: 200 }, { account_code: '1010', credit: 200 }] });
+  await postJE(admin, { date: '2028-03-05', source: 'Manual', memo: 'deposit', lines: [{ account_code: '1010', debit: 1000 }, { account_code: '4000', credit: 1000 }] });
+  await postJE(admin, { date: '2028-03-06', source: 'Manual', memo: 'payment', lines: [{ account_code: '5100', debit: 200 }, { account_code: '1010', credit: 200 }] });
 
   // import statement: 2 matching lines + 1 unmatched fee. closing = 1000 - 200 - 35 = 765
   const stmt = await inj('POST', `/api/bank/accounts/${bankId}/statements`, admin, { statement_date: '2028-03-31', opening_bal: 0, closing_bal: 765, lines: [
