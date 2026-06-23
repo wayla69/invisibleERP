@@ -22,8 +22,10 @@
 ## 2. Two supported substrates
 
 ### A. Railway (primary) — `apps/api/railway.json`, `apps/web/railway.json`
-**RAILPACK** build (Railway's current default); `api` runs migrations via **`preDeployCommand`**
-(`db:migrate`) so migrations apply **once per release**, not per replica. Health checks: api `/`
+**RAILPACK** build (Railway's current default); `api` runs **migrate + seed** via **`preDeployCommand`**
+(`db:migrate && db:seed`) so the schema applies and the baseline rows (permissions, HQ tenant, the
+`admin` user with a forced first-login password change) exist **once per release**, not per replica. The
+seed is idempotent (`onConflictDoNothing`) — it never resets a changed admin password. Health checks: api `/`
 (and now `/healthz`/`/readyz`), web `/login`. Node is pinned to **22** via `.node-version` / `.nvmrc` /
 `engines.node`. **Do not use the NIXPACKS builder** — it bundles Corepack 0.24.1, which is incompatible
 with pnpm 11.8.0 and crashes (`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`) before install. Each service must

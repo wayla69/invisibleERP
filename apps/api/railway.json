@@ -6,7 +6,7 @@
   },
   "deploy": {
     "startCommand": "node apps/api/dist/main.js",
-    "preDeployCommand": "pnpm --filter @ierp/api db:migrate",
+    "preDeployCommand": "pnpm --filter @ierp/api db:migrate && pnpm --filter @ierp/api db:seed",
     "healthcheckPath": "/",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",
