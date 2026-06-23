@@ -1,0 +1,244 @@
+# 11 — Next Upgrade Roadmap: Real-World Production Use vs. Global POS & ERP Standards
+
+> **Date:** 2026-06-23 · **Status:** DRAFT v0.1 · **Owner:** Platform / Controller
+> **Scope:** Define the *next* upgrade cycle now that the prior world-class roadmaps
+> (`09-worldclass-roadmap.md`, `pos-worldclass-roadmap.md`) are substantially **delivered**.
+> This plan benchmarks the as-built system against global POS (Square/Toast/Lightspeed/Oracle
+> Simphony) and ERP (SAP S/4HANA, Oracle Fusion, NetSuite, Odoo) standards, identifies what
+> actually blocks real-world go-live, and sequences the work.
+
+---
+
+## 0. Read this first — the roadmaps are stale, the app moved
+
+The two earlier roadmaps were written when the system was "a Thai sales-order tracker with no
+GL, no payments, and RLS designed-but-not-enforced." **That is no longer true.** A fresh code
+inventory (2026-06-23) confirms the T0/T1 "table-stakes" and most of "POS P0" are now built and
+CI-gated:
+
+| Prior roadmap claimed missing | Actual current state (verified) |
+|---|---|
+| RLS designed but not enforced | ✅ `FORCE ROW LEVEL SECURITY`, `app_user` non-superuser role, per-request `SET LOCAL app.tenant_id`, fail-closed in prod, cross-tenant test in `worldclass`/`compliance` harness |
+| No double-entry GL | ✅ `ledger` module: balanced JE, 3 parallel books (TFRS/TAX/IFRS), idempotent posting, period close, **GL-05 maker-checker** (Draft until a *different* user approves) |
+| No payment capture | ✅ `payments` module: multi-tender, auth→capture→settle, refunds/voids, idempotency keys, gateway abstraction (mock/Stripe/PromptPay/Adyen), **terminal layer** (Opn/2C2P/GBPrime), settlement batches |
+| Tracker, not POS | ✅ Till sessions, X/Z reports, cash movements, split bills, KDS (SSE), table/floor management, public QR diner flow, gift cards, loyalty, ESC/POS receipts, **hash-chained fiscal journal + Thai e-Tax submission** |
+| Tests = "it compiles" | ✅ 59 cutover harnesses (8.5k LOC) boot the real app over PGlite; 8+ are **required CI gates** alongside CodeQL, gitleaks, `pnpm audit`, Playwright |
+| No compliance posture | ✅ COSO 2013 RCM (66 controls, 40 implemented), 26 ISO/SOX process narratives, 13 SoD rules enforced in code, 159 UAT cases, ICFR audit-readiness plan |
+
+**Conclusion:** the differentiation problem is solved. The remaining problem is **operational
+maturity and breadth** — the unglamorous layer that separates "passes a demo and a code review"
+from "a regulated multi-site customer runs their business on it, 24/7, and an auditor signs off."
+That is what this roadmap targets.
+
+---
+
+## 1. Honest verdict (2026-06-23)
+
+This is now a **genuine multi-tenant ERP + POS with a credible Thai-compliance and SOX-controls
+story** — tier-1 on isolation, audit controls, and F&B/retail verticalization; tier-2 on
+manufacturing depth and supply planning. It is **feature-complete enough to pilot** with a real
+Thai restaurant/retail group today.
+
+What stops it from being *operated* at real-world scale and sold beyond a friendly pilot is **not
+features — it's the run-time and trust envelope**:
+
+1. **No deployment substrate.** No Dockerfile, no Kubernetes/IaC, no documented runtime topology.
+   You cannot reproducibly ship or scale it.
+2. **No business-continuity story.** No automated backups, no tested restore, no DR/RTO/RPO. One
+   bad `DROP` or disk failure = the customer's books are gone. This is a go-live blocker, full stop.
+3. **Secrets in `.env`, observability opt-in.** Vault/KMS deferred; OTel + Sentry wired but not
+   enforced in prod. You'd run a financial system effectively blind.
+4. **POS offline-first still not done.** The single biggest real-world POS gap — a restaurant
+   cannot stop selling when the internet drops. Foundations (idempotency keys) exist; the client
+   outbox + sync engine does not.
+5. **Global breadth is Thailand-deep but one-country-wide.** Multi-currency ledger, non-Thai tax/
+   e-invoicing, and a real i18n framework are not there yet — fine for Thailand, blocking for export.
+
+The fix is **not** more modules. It is a disciplined ~6–9 month sequence: **harden to operate
+(Phase A) → close the POS/ERP standard gaps that real customers hit (Phase B) → globalize and
+certify (Phase C)** — with the agentic-write differentiator (Phase D) layered on a now-trustworthy
+base.
+
+---
+
+## 2. Benchmark vs. global POS standard
+
+Reference set: **Square, Toast, Lightspeed, Oracle Simphony, Shopify POS.**
+
+| Capability | Global standard | Invisible POS today | Gap / next move |
+|---|---|---|---|
+| Multi-tender, split bill, tips | ✅ baseline | ✅ multi-tender, equal/by-item split, tips | — |
+| KDS, coursing, table mgmt | ✅ | ✅ multi-station KDS (SSE), tables/zones, QR diner | Add **coursing/seat-level firing**, course holds |
+| Card present (EMV/tap), pre-auth/tabs | ✅ | ✅ terminal abstraction (Opn/2C2P/GBPrime), pre-auth, capture, settlement | Certify against a **real acquirer sandbox**; tip-on-terminal |
+| QR / local rails | ✅ regional | ✅ PromptPay EMVCo | Add e-wallets (LINE Pay, TrueMoney, Alipay+) |
+| **Offline-first selling** | ✅ **table-stakes** | 🟡 saleDate replay only; no client outbox | ⛔ **Phase B1** — true offline (IndexedDB/PGlite outbox + idempotent sync). *Biggest gap.* |
+| Hardware: printer, drawer, scanner, scale, CFD | ✅ | 🟡 ESC/POS render, scale module, CFD endpoint | Build **peripheral bridge** (WebUSB/WebSerial or local agent); drawer kick, scanner wedge |
+| Pricing: happy-hour, BOGO, combos, surcharge | ✅ | 🟡 promo engine + markdown cap | Build **time/day pricing rules**, combos explode, auto service charge, satang rounding |
+| Cashier speed (hotkeys, quick-tender, favorites) | ✅ | 🟡 basic cart UI | **Phase B2** — keypad, hotkeys, quick-tender, favorites grid |
+| Park/recall, bar tabs | ✅ | ✅ held orders | Wire tabs to pre-auth |
+| Manager overrides + reason codes + audit | ✅ | ✅ overrides, reason codes, append-only audit | — (strong) |
+| Fiscal/e-invoice compliance | regional | ✅✅ **best-in-class for TH** (hash-chained journal, RD/ETDA e-Tax) | Extend pattern to other jurisdictions (Phase C) |
+| Loyalty, gift cards, house accounts | ✅ | ✅ all three, GL-posted | — |
+| Inventory deduction at sale | ✅ | ✅ recipe→ingredient, `FOR UPDATE`, COGS GL, oversold flag | — (strong) |
+| Self-order kiosk / online channel | ✅ | 🟡 channel fields + public diner QR | Productionize kiosk + online ordering UX |
+| Multi-site mgmt, central menu push | ✅ | 🟡 branch module | Central menu/price publish to branches; per-site reporting |
+
+**POS verdict:** at parity or ahead on transactions, fiscal compliance, and inventory; **behind on
+offline-first, hardware integration, pricing depth, and cashier ergonomics** — exactly the things a
+busy floor feels on day one.
+
+---
+
+## 3. Benchmark vs. global ERP standard
+
+Reference set: **SAP S/4HANA, Oracle Fusion, NetSuite, Odoo.**
+
+| Module area | Global standard | Invisible ERP today | Gap / next move |
+|---|---|---|---|
+| Financials: GL/AR/AP, multi-book, consolidation, FX reval | ✅ | ✅ GL (3 books), AR/AP, intercompany, consolidation, FX reval | Deepen **multi-currency** (functional/transaction/reporting + reval already present; widen coverage) |
+| Controlling/costing | ✅ | ✅ standard/actual costing, PPV, profitability, project WIP | Add cost-center allocations, activity-based costing |
+| Procure-to-Pay + 3-way match | ✅ | ✅ PR/PO/GR, 3-way match, sourcing/RFQ | **Hard-gate** match on AP payment (control EXP-03) |
+| Inventory / WMS | ✅ | ✅ lots, locations, stock-ops, WMS, scan | Add **bin-level WMS**, wave picking, cycle-count SoD |
+| Manufacturing / MRP | ✅ (deep) | 🟡 BOM, work orders, recipe costing | ⛔ **No MRP / supply planning / multi-level BOM explosion / capacity scheduling** — biggest ERP gap |
+| Fixed assets | ✅ | ✅ register, depreciation, disposal | — |
+| HCM / payroll | ✅ (deep) | 🟡 payroll, timesheets, leave | Add **employee self-service portal**, org structure, expense mgmt |
+| Tax engine | regional | ✅✅ TH VAT/WHT/e-Tax | **Pluggable tax engine** (Avalara/Stripe Tax) + non-TH e-invoicing (Phase C) |
+| Revenue recognition / billing | ✅ | ✅ subscription, deferred rev, milestones | ASC 606 / IFRS 15 multi-element schedules — verify depth |
+| Planning / budgeting / BI | ✅ | 🟡 budgets, forecasting, analytics, BI cubes | Semantic layer (dbt/Cube) + embedded BI; demand ML |
+| CRM / CPQ / pipeline | ✅ | ✅ CRM, pipeline, CPQ, marketing | — |
+| Projects / PSA | ✅ | ✅ project accounting, WIP, billing | — |
+| Quality mgmt (QM) | ✅ (SAP/Oracle) | ❌ none | Add inspection/non-conformance if targeting mfg |
+| Vendor/supplier portal | ✅ | ❌ none | Supplier collaboration portal |
+| Localization packs (multi-country) | ✅ (Odoo l10n) | ❌ TH only | Country packs (Phase C) |
+
+**ERP verdict:** financial-accounting breadth rivals NetSuite/Odoo and **exceeds them on Thai
+statutory compliance and built-in SOX controls**. The real gaps are **MRP/advanced manufacturing,
+HR self-service, multi-country localization, and supplier/employee portals** — plus the
+production-ops layer covered next.
+
+---
+
+## 4. The real-world go-live blockers (prioritized)
+
+These are ranked by "what stops a paying customer from running their business on this safely."
+
+| # | Blocker | Why it blocks real-world use | Control ID | Effort |
+|---|---|---|---|---|
+| **1** | **No backup + tested restore** | A financial system with no recoverable backups cannot go live. Period. | ITGC-OP-01 | **M** |
+| **2** | **No deployment substrate (Docker/IaC)** | Can't reproducibly ship, scale, or hand to ops/SRE | — | **M** |
+| **3** | **Secrets in `.env`, no KMS/vault/rotation** | One leaked repo/host = full breach; fails every security questionnaire | ITGC-AC-12 | **M** |
+| **4** | **Observability not enforced in prod** | Running a money system blind; no alerting/on-call/incident process | ITGC-OP-03/04 | **S/M** |
+| **5** | **POS not offline-first** | Restaurants/shops lose sales (and trust) the moment the link drops | — | **L** |
+| **6** | **No deploy-approval gate / branch protection** | Author can self-deploy to prod; fails change-management ICFR | ITGC-CM-01/03 | **S** |
+| **7** | **Entity-level policies still DRAFT** | ELC-01/02/03 (Code of Conduct, Audit Committee, DoA) needed for IPO/audit | ELC-01..05 | **M** |
+| **8** | **DB least-privilege roles + token hardening incomplete** | `app_user` exists but prod roles unformalized; tokens in localStorage | ITGC-AC-13/07 | **M** |
+
+Items 1–4 and 6 are **cheap relative to their stakes** and should be the next sprint. Item 5 is the
+single highest-ROI *feature* for POS customers.
+
+---
+
+## 5. Phased upgrade plan
+
+Effort key: **S** ≈ 1–3 days · **M** ≈ 1–2 weeks · **L** ≈ 3–6 weeks. Every phase follows repo
+conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; tenant tables get
+`tenant_id` + RLS; GL only via `ledger.postEntry`; `FOR UPDATE` on RMW; `ymd()`/Bangkok dates; a
+`tools/cutover/*` harness green on PGlite; web page + nav; `tsc` clean; **docs synced per CLAUDE.md**.
+
+### Phase A — Operate it for real (production hardening) · ~4–6 weeks · **HIGHEST PRIORITY**
+*Goal: a customer's data is safe, the system is observable, and we can ship it reproducibly.*
+
+- **A1 — Backup & restore (ITGC-OP-01).** Automated logical + PITR backups (e.g. `pg_dump` +
+  WAL/`pgBackRest`); documented + **rehearsed quarterly restore**; RTO/RPO defined. *Blocker #1.*
+- **A2 — Containerize + IaC.** Dockerfile(s) for api/web, `docker-compose` for local, a Helm chart
+  or Terraform module for one target (managed Postgres + container runtime). Document topology.
+- **A3 — Secrets → KMS/vault (ITGC-AC-12).** Move `JWT_SECRET`/`APP_ENC_KEY`/PSP secrets/DB URL to
+  a managed secret store; add rotation runbook.
+- **A4 — Observability on by default (ITGC-OP-03/04).** Enforce OTel + Sentry in prod; dashboards
+  for latency/error/saturation; **alerting + on-call + incident log**; batch-job (`pg-boss`)
+  failure alerts.
+- **A5 — Change-management gates (ITGC-CM-01/03/04).** Branch protection on `main`, required
+  reviews, deploy-approval gate (deployer ≠ author), ticket→PR→deploy traceability.
+- **A6 — DB least-privilege + token hardening (ITGC-AC-13/07).** Formalize prod DB roles/grants;
+  migrate web auth from localStorage → httpOnly cookie + CSRF.
+- **Exit:** restore drill passes; one-command reproducible deploy; no plaintext secrets; alerts
+  fire on synthetic failure; `main` protected.
+
+### Phase B — Close the POS standard gaps customers hit · ~6–8 weeks
+*Goal: the floor experience matches Square/Toast on the things staff feel hourly.*
+
+- **B1 — Offline-first POS (`L`).** Client outbox (IndexedDB/Dexie or in-browser PGlite) with menu/
+  price/tax snapshot + client-generated `client_uuid`; service worker; online/offline + pending-sync
+  UI. Backend: accept `client_uuid`, dedup via `UNIQUE(tenant_id, client_uuid)`, batch
+  `POST /api/pos/sync` with per-item savepoints; conflicts resolved under lock at replay. Harness
+  `offline-pos`: N sales offline → exactly N on replay, GL balanced, idempotent. *Highest POS ROI.*
+- **B2 — Cashier speed & control (`M`).** Hotkeys, numeric keypad, quick-tender (exact/฿100/฿500),
+  favorites grid, barcode quick-add; POS-native returns/exchange wrapper.
+- **B3 — Peripheral bridge (`M/L`).** WebUSB/WebSerial (or small local agent) for ESC/POS printer,
+  cash-drawer kick, scanner, customer display, scale; certify one acquirer terminal end-to-end.
+- **B4 — Pricing engine (`M`).** `price_rules` (item/category/all × channel × location × time/day ×
+  percent/amount/BOGO/qty-break, priority/stacking); combos explode; auto service charge; satang
+  rounding. Integrate into `menu.resolveLine`/dine-in/portal so all channels price identically.
+- **Exit:** sell through a 30-min network outage with deterministic sync; sub-second tender on
+  hotkeys; printer/drawer/scanner working; happy-hour + combo + service-charge priced correctly.
+
+### Phase C — Globalize & certify · ~8–12 weeks
+*Goal: legally and operationally sellable beyond Thailand; passes enterprise security review.*
+
+- **C1 — Multi-currency depth.** Confirm functional/transaction/reporting currency on every money
+  row; FX reval coverage across AR/AP/GL/inventory; rounding policy per currency.
+- **C2 — Pluggable tax + e-invoicing.** `TaxProvider` interface (Avalara/Stripe Tax adapter beyond
+  TH 7%); e-invoicing adapters following the proven TH pattern (Peppol / India IRN / Italy SdI /
+  MX CFDI).
+- **C3 — Real i18n framework.** Replace hardcoded TH/EN dicts with ICU/`next-intl`; abstract
+  locale/currency/date/number formatting; extract strings.
+- **C4 — Certifications.** SOC 2 Type II + ISO 27001 readiness (leverage existing RCM/policies);
+  PCI-DSS scope design (SAQ-A via tokenized PSPs); third-party pen test.
+- **C5 — Entity-level policies finalized (ELC-01..05).** Move DRAFT policies to approved; Code of
+  Conduct + Audit Committee charter + Delegation of Authority + whistleblower + fraud-risk register;
+  acknowledgement registers. *Needed for IPO/audit track.*
+- **Exit:** a non-THB tenant transacts and reports correctly; clears one non-TH e-invoice mandate in
+  sandbox; SOC 2 Type I report or readiness assessment in hand; policies board-approved.
+
+### Phase D — Differentiate (agentic ERP, deepen verticals) · ongoing
+*Goal: the moat — an ERP that does the work, governed and auditable, on a now-trustworthy base.*
+
+- **D1 — Agentic write-ops.** Let the AI *execute* (raise the PO, post the JE, reconcile the till,
+  file the tax) behind RBAC + human-in-the-loop + the existing immutable audit trail + SoD checks.
+- **D2 — RAG over policies/SOPs/contracts** (pgvector, cite-or-refuse).
+- **D3 — Close the ERP depth gaps where the market is.** MRP / supply planning / multi-level BOM +
+  capacity (if pursuing manufacturing); employee self-service + expense mgmt; supplier portal.
+- **D4 — Analytics plane + demand ML.** dbt + semantic layer + embedded BI; seasonality/Croston
+  demand model with a backtesting harness (WAPE/MASE) as a CI gate.
+
+---
+
+## 6. Sequenced summary & the strategic bet
+
+**Now (next sprint):** Phase A1–A6 — *operate it safely.* Backups+restore, containerize, secrets→
+vault, observability+alerting, change-management gates, DB roles/token hardening. Cheap relative to
+stakes; unblocks every customer conversation and the audit track.
+
+**Next (1 quarter):** Phase B — *win the floor.* Offline-first POS (B1) is the headline; pair with
+cashier speed, peripheral bridge, and the pricing engine.
+
+**Then (2 quarters):** Phase C — *go global & get certified.* Multi-currency depth, pluggable tax/
+e-invoicing, real i18n, SOC 2 / ISO 27001 / PCI scope, entity-level policies finalized.
+
+**Throughout:** Phase D — *the differentiator.* Agentic write-ops + RAG on top of trustworthy books
+and DB-enforced isolation; deepen MRP/HR/portals where the target market demands.
+
+> **The bet (one line):** The hard parts — DB-enforced isolation, double-entry GL with maker-checker,
+> real payments, Thai fiscal compliance, and a SOX controls framework — are **already built and
+> tested**. The next dollar should buy **operational trust (backups, deploy, secrets, observability)
+> and floor-grade POS (offline-first, hardware, pricing)** — the unglamorous layer that turns a
+> demo-perfect system into one a multi-site customer bets their business on — *then* layer the
+> agentic-write moat that incumbents can't quickly copy.
+
+---
+
+## 7. Revision history
+
+| Version | Date | Author | Notes |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-06-23 | Platform / Controller | Initial next-upgrade roadmap; benchmarks as-built system vs global POS/ERP; supersedes the "missing GL/payments/RLS" premise of `09-worldclass-roadmap.md` and `pos-worldclass-roadmap.md`, which are now substantially delivered. |
