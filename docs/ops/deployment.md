@@ -24,6 +24,8 @@
 ### A. Railway (primary) — `apps/api/railway.json`, `apps/web/railway.json`
 NIXPACKS build; `api` runs migrations via **`preDeployCommand`** (`db:migrate`) so migrations apply
 **once per release**, not per replica. Health checks: api `/` (and now `/healthz`/`/readyz`), web `/login`.
+First-deploy walkthrough (project + Postgres + the two services, env matrix, CORS/`NEXT_PUBLIC_API_URL`
+build-order, CI deploy): **`docs/ops/railway-setup.md`**.
 
 ### B. Containers (portable / local prod-like) — Dockerfiles + `docker-compose.yml`
 - `apps/api/Dockerfile`, `apps/web/Dockerfile` — multi-stage, non-root `node` user, `HEALTHCHECK`
@@ -72,3 +74,4 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 |---|---|---|---|
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
 | 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
+| 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
