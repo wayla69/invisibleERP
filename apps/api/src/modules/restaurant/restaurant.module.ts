@@ -12,6 +12,7 @@ import { DineInService } from './dine-in.service';
 import { KdsService } from './kds.service';
 import { TableService } from './table.service';
 import { QrService } from './qr.service';
+import { BuffetService } from './buffet.service';
 import { ChannelOrderService } from './channel-order.service';
 import { RealtimeScope } from './realtime.scope';
 import { RestaurantController } from './restaurant.controller';
@@ -23,7 +24,7 @@ import { ChannelController } from './channel.controller';
 @Module({
   imports: [TaxModule, PaymentsModule, LedgerModule, TaxDocsModule, MenuModule, MarketingModule, LoyaltyModule, GiftCardsModule, PricingModule],
   controllers: [RestaurantController, QrController, ChannelController],
-  providers: [DineInService, KdsService, TableService, QrService, ChannelOrderService, RealtimeScope],
+  providers: [DineInService, KdsService, TableService, QrService, BuffetService, ChannelOrderService, RealtimeScope],
   exports: [DineInService, TableService],
 })
 export class RestaurantModule {}

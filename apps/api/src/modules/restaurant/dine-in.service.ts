@@ -56,8 +56,9 @@ export class DineInService {
     return { subtotal, vat: t.tax, total: roundCurrency(subtotal + t.tax, 'THB') };
   }
 
-  private async insertItems(orderId: number, tenantId: number | null, items: AddItemsDto['items'], user: JwtUser) {
+  private async insertItems(orderId: number, tenantId: number | null, items: AddItemsDto['items'], user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
     const db = this.db as any;
+    const buffet = !!opts?.buffet;
     const rows = [] as any[];
     for (const it of items) {
       // menu-driven line → resolve name/price/station/modifiers from the catalog (enforces 86 + modifier rules);
@@ -69,17 +70,24 @@ export class DineInService {
         name = r.name; unitPrice = r.unit_price; stationCode = it.station_code ?? r.station_code ?? undefined;
         prep = it.est_prep_minutes ?? r.prep_minutes ?? undefined; mods = r.modifiers; itemRef = r.sku;
       }
+      // buffet food still routes to the kitchen (station + prep), but is billed at ฿0 — the per-pax buffet
+      // charge covers it. The 86/modifier rules above still apply.
+      const effUnit = buffet ? 0 : n(unitPrice);
       const st = await this.resolveStation(tenantId, stationCode);
-      const amount = roundCurrency(n(it.qty) * n(unitPrice), 'THB');
+      const amount = roundCurrency(n(it.qty) * effUnit, 'THB');
       rows.push({
         tenantId, orderId, stationId: Number(st.id), itemId: itemRef, name,
-        qty: String(n(it.qty)), unitPrice: fx(n(unitPrice), 2), amount: fx(amount, 2),
-        modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new',
+        qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
+        modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
+        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null,
         estPrepMinutes: prep ?? null, createdBy: user.username,
       });
     }
     if (rows.length) await db.insert(dineInOrderItems).values(rows);
   }
+
+  // public wrapper so the buffet service can recompute totals after inserting charge / overtime lines
+  async refreshOrderTotals(orderId: number) { return this.refreshTotals(orderId); }
 
   private async refreshTotals(orderId: number) {
     const db = this.db as any;
@@ -89,25 +97,25 @@ export class DineInService {
     return t;
   }
 
-  async createOrder(dto: CreateOrderDto, user: JwtUser) {
+  async createOrder(dto: CreateOrderDto, user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
     const db = this.db as any;
     const orderNo = await this.docNo.nextDaily('DIN');
     const [h] = await db.insert(dineInOrders).values({
       orderNo, tenantId: user.tenantId, tableId: dto.table_id ?? null, sessionId: dto.session_id ?? null,
       status: 'open', guestCount: dto.guest_count ?? 1, server: user.username, notes: dto.notes ?? null, createdBy: user.username,
     }).returning({ id: dineInOrders.id });
-    await this.insertItems(Number(h.id), user.tenantId, dto.items, user);
+    await this.insertItems(Number(h.id), user.tenantId, dto.items, user, opts);
     await this.refreshTotals(Number(h.id));
     // opening an order occupies the table
     if (dto.table_id) await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, dto.table_id), inArray(diningTables.status, ['available', 'reserved'] as any)));
     return this.getOrder(orderNo, user);
   }
 
-  async addItems(orderNo: string, dto: AddItemsDto, user: JwtUser) {
+  async addItems(orderNo: string, dto: AddItemsDto, user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
     const db = this.db as any;
     const o = await this.loadOrder(orderNo);
     if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ORDER_CLOSED', message: 'Order is closed', messageTh: 'ออเดอร์ปิดแล้ว' });
-    await this.insertItems(Number(o.id), o.tenantId, dto.items, user);
+    await this.insertItems(Number(o.id), o.tenantId, dto.items, user, opts);
     await this.refreshTotals(Number(o.id));
     return this.getOrder(orderNo, user);
   }
@@ -472,8 +480,8 @@ export class DineInService {
   private async viewOrder(o: any) {
     const db = this.db as any;
     const items = await db.select({
-      id: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty, unitPrice: dineInOrderItems.unitPrice,
-      amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId,
+      id: dineInOrderItems.id, itemId: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty, unitPrice: dineInOrderItems.unitPrice,
+      amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, firedAt: dineInOrderItems.firedAt,
       startedAt: dineInOrderItems.startedAt, readyAt: dineInOrderItems.readyAt, estPrep: dineInOrderItems.estPrepMinutes,
     }).from(dineInOrderItems).where(eq(dineInOrderItems.orderId, Number(o.id))).orderBy(dineInOrderItems.id);
@@ -485,7 +493,8 @@ export class DineInService {
       const elapsedMin = fired && !['served', 'voided'].includes(i.kdsStatus) ? Math.floor((now - fired) / 60000) : (i.readyAt && fired ? Math.floor((new Date(i.readyAt).getTime() - fired) / 60000) : 0);
       const base = i.startedAt ? Math.floor((now - new Date(i.startedAt).getTime()) / 60000) : elapsedMin;
       const remainingMin = ['ready', 'served', 'voided'].includes(i.kdsStatus) ? 0 : Math.max(0, prep - base);
-      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
+      const charge = i.itemId === '__buffet_charge__' || i.itemId === '__buffet_overtime__';
+      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
     });
     const waitedMin = o.firedAt ? Math.floor((now - new Date(o.firedAt).getTime()) / 60000) : 0;
     const readyInMin = Math.max(0, ...viewItems.filter((v: any) => !['served', 'voided'].includes(v.kds_status)).map((v: any) => v.remaining_min), 0);

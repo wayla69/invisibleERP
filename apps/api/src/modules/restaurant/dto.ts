@@ -31,6 +31,38 @@ export type CreateOrderDto = z.infer<typeof CreateOrderBody>;
 export const AddItemsBody = z.object({ items: z.array(ItemInput).min(1) });
 export type AddItemsDto = z.infer<typeof AddItemsBody>;
 
+// PUBLIC diner self-order (QR): menu-driven ONLY — the diner may never set a freeform name/price/station.
+// Price/station/prep/86/modifier rules are resolved server-side from the catalog. Unknown keys are stripped
+// by zod, so a tampered body cannot smuggle a unit_price or station_code.
+const PublicItemInput = z.object({
+  sku: z.string().optional(),
+  menu_item_id: z.number().int().optional(),
+  modifier_option_ids: z.array(z.number().int()).max(20).optional(),
+  qty: z.number().int().positive().max(99).default(1),
+  notes: z.string().max(200).optional(),
+}).refine((it) => it.sku != null || it.menu_item_id != null, { message: 'menu item (sku or menu_item_id) required' });
+export const PublicOrderBody = z.object({ items: z.array(PublicItemInput).min(1).max(50) });
+export type PublicOrderDto = z.infer<typeof PublicOrderBody>;
+
+// ── buffet packages / tiers (Phase 2) ──
+export const BuffetPackageBody = z.object({
+  code: z.string().min(1),
+  name: z.string().min(1),
+  name_en: z.string().optional(),
+  price_per_pax: z.number().nonnegative(),
+  time_limit_min: z.number().int().positive().optional(),
+  overtime_fee_per_pax: z.number().nonnegative().optional(),
+  item_skus: z.array(z.string()).optional(),       // menu items included in this tier
+});
+export type BuffetPackageDto = z.infer<typeof BuffetPackageBody>;
+
+export const BuffetPackageUpdateBody = BuffetPackageBody.partial().extend({ active: z.boolean().optional() });
+export type BuffetPackageUpdateDto = z.infer<typeof BuffetPackageUpdateBody>;
+
+// PUBLIC diner: start a buffet on the table
+export const StartBuffetBody = z.object({ package_id: z.number().int().positive(), pax: z.number().int().positive().max(99).optional() });
+export type StartBuffetDto = z.infer<typeof StartBuffetBody>;
+
 export const KdsActionBody = z.object({ action: z.enum(['start', 'ready', 'recall', 'serve', 'void']), reason: z.string().optional() });
 export type KdsActionDto = z.infer<typeof KdsActionBody>;
 

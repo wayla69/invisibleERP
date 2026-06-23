@@ -1,6 +1,8 @@
 /**
  * Phase 11 — Restaurant/F&B POS validation (real Nest app over PGlite, RLS-enforced):
  * dine-in orders + KDS lifecycle + wait-time, floor-plan tables, public QR diner (HMAC token) +
+ * diner self-ordering (public menu + menu-driven order auto-fired to KDS) +
+ * buffet self-ordering (per-pax tier + time window, ฿0 food, overtime surcharge) +
  * PromptPay pay → cust_pos_sales + GL + abbreviated tax invoice.
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover restaurant
  */
@@ -140,6 +142,83 @@ async function main() {
   const ordFree = await inj('POST', '/api/restaurant/orders', sales1, { items: [{ name: 'น้ำเปล่า', qty: 1, unit_price: 15, station_code: 'drinks' }] });
   ok('Menu-order: freeform custom item still supported (backward-compat)', /^DIN-/.test(ordFree.json.order_no ?? '') && ordFree.json.items?.[0]?.name === 'น้ำเปล่า', `${ordFree.status}`);
 
+  // ── diner QR SELF-ORDERING: public menu + menu-driven order that AUTO-FIRES to the KDS ──
+  const tblQ = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A2', seats: 2 });
+  const openQ = await inj('POST', `/api/restaurant/tables/${tblQ.json.id}/open`, sales1, {});
+  const qTok = openQ.json.public_token;
+  await inj('POST', '/api/menu/items', sales1, { sku: 'QR01', name: 'ข้าวมันไก่', price: 50, station_code: 'hot', prep_minutes: 8 });
+  const dMenu = await inj('GET', `/api/qr/t/${qTok}/menu`, undefined);
+  const dMenuItems = [...(dMenu.json.categories ?? []).flatMap((c: any) => c.items), ...(dMenu.json.uncategorized ?? [])];
+  ok('Diner self-order: public menu lists the available item', dMenu.status === 200 && dMenuItems.some((i: any) => i.sku === 'QR01' && i.is_available), `${dMenu.status} items=${dMenuItems.length}`);
+  const dOrder = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ sku: 'QR01', qty: 2 }] });
+  ok('Diner self-order: submit → order auto-fired to kitchen (items queued)', (dOrder.status === 200 || dOrder.status === 201) && dOrder.json.order?.items?.length === 1 && dOrder.json.order.items[0].kds_status === 'queued', `${dOrder.status} ${JSON.stringify(dOrder.json.order?.items?.[0] ?? {}).slice(0, 70)}`);
+  const dFeed = await inj('GET', '/api/restaurant/kds/feed', sales1);
+  const dFeedItems = (dFeed.json.stations ?? []).flatMap((s: any) => s.items);
+  ok('Diner self-order: item appears on the KDS feed', dFeedItems.some((i: any) => i.name === 'ข้าวมันไก่' && i.order_no === dOrder.json.order.order_no));
+  const dFeedItem = dFeedItems.find((i: any) => i.name === 'ข้าวมันไก่');
+  ok('KDS badges: à la carte diner item flagged from_diner (not buffet); staff items unflagged', dFeedItem?.from_diner === true && dFeedItem?.is_buffet === false && dFeedItems.filter((i: any) => i.order_no === ord.json.order_no).every((i: any) => i.from_diner === false), JSON.stringify({ d: dFeedItem?.from_diner, b: dFeedItem?.is_buffet }));
+  const dAdd = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ sku: 'QR01', qty: 1 }] });
+  ok('Diner self-order: a second submit appends to the same open order', (dAdd.status === 200 || dAdd.status === 201) && dAdd.json.order.order_no === dOrder.json.order.order_no && dAdd.json.order.items.length === 2, `${dAdd.status} lines=${dAdd.json.order?.items?.length}`);
+  const dFree = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ name: 'ของแถมฟรี', unit_price: 0, qty: 1 }] });
+  ok('Diner self-order: freeform/priced line rejected — must be menu-driven (no price tampering)', dFree.status === 400, `${dFree.status}`);
+  await inj('PATCH', '/api/menu/items/QR01/availability', sales1, { available: false });
+  const d86 = await inj('POST', `/api/qr/t/${qTok}/order`, undefined, { items: [{ sku: 'QR01', qty: 1 }] });
+  ok('Diner self-order: 86\'d item blocked at submit (400 ITEM_UNAVAILABLE)', d86.status === 400 && d86.json.error?.code === 'ITEM_UNAVAILABLE', `${d86.status} ${d86.json.error?.code}`);
+  const dClosed = await inj('GET', `/api/qr/t/${dinerTok}/menu`, undefined);
+  ok('Diner self-order: menu/order on an ended session → 401', dClosed.status === 401, `${dClosed.status}`);
+
+  // ── BUFFET self-ordering: per-pax tier + dining time window, ฿0 food, overtime surcharge ──
+  await inj('POST', '/api/menu/items', sales1, { sku: 'BF01', name: 'หมูสไลด์', price: 0, station_code: 'hot', prep_minutes: 5 });
+  await inj('POST', '/api/menu/items', sales1, { sku: 'BF02', name: 'เนื้อวากิว', price: 0, station_code: 'hot', prep_minutes: 5 }); // NOT in the tier
+  await inj('POST', '/api/menu/items', sales1, { sku: 'AL01', name: 'ต้มยำกุ้ง', price: 120, station_code: 'hot' });               // à la carte
+  const pkg = await inj('POST', '/api/restaurant/buffet/packages', sales1, { code: 'STD', name: 'บุฟเฟต์มาตรฐาน', price_per_pax: 299, time_limit_min: 90, overtime_fee_per_pax: 100, item_skus: ['BF01'] });
+  ok('Buffet: admin creates a tier (price/pax + eligible items)', (pkg.status === 200 || pkg.status === 201) && pkg.json.price_per_pax === 299 && (pkg.json.item_skus ?? []).includes('BF01'), `${pkg.status}`);
+
+  const tblB = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A3', seats: 4 });
+  const openB = await inj('POST', `/api/restaurant/tables/${tblB.json.id}/open`, sales1, {});
+  const bTok = openB.json.public_token;
+  const tiers = await inj('GET', `/api/qr/t/${bTok}/buffet/tiers`, undefined);
+  ok('Buffet: diner sees the offered tiers', tiers.status === 200 && (tiers.json.tiers ?? []).some((t: any) => t.id === pkg.json.id), `${tiers.status}`);
+  const startB = await inj('POST', `/api/qr/t/${bTok}/buffet/start`, undefined, { package_id: pkg.json.id, pax: 4 });
+  ok('Buffet: start sets mode + per-pax charge (299×4=1196) + time window', (startB.status === 200 || startB.status === 201) && startB.json.order_mode === 'buffet' && near(startB.json.bill?.subtotal, 1196) && startB.json.buffet?.pax === 4 && startB.json.buffet?.minutes_left > 0, `${startB.status} sub=${startB.json.bill?.subtotal} left=${startB.json.buffet?.minutes_left}`);
+
+  const ordB = await inj('POST', `/api/qr/t/${bTok}/order`, undefined, { items: [{ sku: 'BF01', qty: 3 }] });
+  const foodLine = (ordB.json.order?.items ?? []).find((i: any) => i.name === 'หมูสไลด์');
+  ok('Buffet: eligible food → ฿0 line, is_buffet, auto-fired', (ordB.status === 200 || ordB.status === 201) && foodLine && foodLine.amount === 0 && foodLine.is_buffet === true && foodLine.kds_status === 'queued', `${ordB.status} ${JSON.stringify(foodLine ?? {}).slice(0, 80)}`);
+  ok('Buffet: ฿0 food does not change the bill (still 1196)', near(ordB.json.bill?.subtotal, 1196), `sub=${ordB.json.bill?.subtotal}`);
+  const feedB = await inj('GET', '/api/restaurant/kds/feed', sales1);
+  const feedItemsB = (feedB.json.stations ?? []).flatMap((s: any) => s.items);
+  ok('Buffet: ฿0 food still routes to the KDS feed', feedItemsB.some((i: any) => i.name === 'หมูสไลด์'));
+  ok('Buffet: per-pax charge line stays OFF the KDS feed', !feedItemsB.some((i: any) => String(i.name).startsWith('บุฟเฟต์')));
+  const bfFeedItem = feedItemsB.find((i: any) => i.name === 'หมูสไลด์');
+  ok('KDS badges: diner-ordered buffet item flagged (from_diner + is_buffet)', bfFeedItem?.from_diner === true && bfFeedItem?.is_buffet === true, JSON.stringify({ d: bfFeedItem?.from_diner, b: bfFeedItem?.is_buffet }));
+  const ordIneligible = await inj('POST', `/api/qr/t/${bTok}/order`, undefined, { items: [{ sku: 'BF02', qty: 1 }] });
+  ok('Buffet: ineligible item rejected (400 NOT_IN_PACKAGE)', ordIneligible.status === 400 && ordIneligible.json.error?.code === 'NOT_IN_PACKAGE', `${ordIneligible.status} ${ordIneligible.json.error?.code}`);
+
+  // one mode per session: à la carte first then buffet → rejected
+  const tblL = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A4', seats: 2 });
+  const openL = await inj('POST', `/api/restaurant/tables/${tblL.json.id}/open`, sales1, {});
+  const lTok = openL.json.public_token;
+  await inj('POST', `/api/qr/t/${lTok}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] });
+  const lockB = await inj('POST', `/api/qr/t/${lTok}/buffet/start`, undefined, { package_id: pkg.json.id, pax: 2 });
+  ok('Buffet: cannot start after à la carte ordering (400 MODE_LOCKED)', lockB.status === 400 && lockB.json.error?.code === 'MODE_LOCKED', `${lockB.status} ${lockB.json.error?.code}`);
+
+  // force the time window to have elapsed → orders blocked, overtime billed
+  await db.update(s.tableSessions).set({ buffetExpiresAt: new Date(Date.now() - 60000) }).where(eq(s.tableSessions.id, Number(openB.json.session_id)));
+  const ordExpired = await inj('POST', `/api/qr/t/${bTok}/order`, undefined, { items: [{ sku: 'BF01', qty: 1 }] });
+  ok('Buffet: ordering after the window blocked (400 BUFFET_EXPIRED)', ordExpired.status === 400 && ordExpired.json.error?.code === 'BUFFET_EXPIRED', `${ordExpired.status} ${ordExpired.json.error?.code}`);
+  await inj('POST', `/api/qr/t/${bTok}/bill`, undefined);
+  const afterBill = await inj('GET', `/api/qr/t/${bTok}`, undefined);
+  const overLine = (afterBill.json.order?.items ?? []).find((i: any) => String(i.name).includes('เกินเวลา'));
+  ok('Buffet: overtime surcharge (100×4=400) added at bill → subtotal 1596', near(afterBill.json.bill?.subtotal, 1596), `sub=${afterBill.json.bill?.subtotal}`);
+  ok('Buffet: overtime is a charge line (off-kitchen)', !!overLine && overLine.charge === true && near(overLine.amount, 400), JSON.stringify(overLine ?? {}).slice(0, 80));
+
+  // ── buffet behaviour analytics (per-tier menu mix, covers, consumption, revenue) ──
+  const an = await inj('GET', '/api/restaurant/buffet/analytics', sales1);
+  const stdTier = (an.json.tiers ?? []).find((t: any) => t.tier?.code === 'STD');
+  ok('Buffet analytics: per-tier sessions/covers + top item + items-per-head', an.status === 200 && stdTier?.sessions === 1 && stdTier?.covers === 4 && stdTier?.top_items?.[0]?.name === 'หมูสไลด์' && near(stdTier?.top_items?.[0]?.qty, 3) && near(stdTier?.items_per_head, 0.75), `${an.status} ${JSON.stringify(stdTier ?? {}).slice(0, 130)}`);
+  ok('Buffet analytics: per-tier revenue (charge+overtime) + overtime rate', near(stdTier?.revenue, 1596) && near(stdTier?.avg_bill_per_session, 1596) && stdTier?.overtime_sessions === 1 && near(stdTier?.overtime_rate_pct, 100), `rev=${stdTier?.revenue} avg=${stdTier?.avg_bill_per_session} otRate=${stdTier?.overtime_rate_pct}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);
@@ -151,7 +230,7 @@ async function main() {
   await app.close();
   await pg.close();
 
-  console.log('\n── Phase 11 Restaurant POS (dine-in + KDS + ผังโต๊ะ + QR pay) ──');
+  console.log('\n── Phase 11 Restaurant POS (dine-in + KDS + ผังโต๊ะ + QR self-order + buffet + QR pay) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok);
   if (failed.length) { console.log(`\n❌ ${failed.length}/${checks.length} restaurant checks failed`); process.exit(1); }

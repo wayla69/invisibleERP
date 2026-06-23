@@ -1,15 +1,16 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChefHat } from 'lucide-react';
+import { ChefHat, Smartphone, Utensils } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
+import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
-type KdsItem = { item_id: number; order_no: string; table_label: string | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; elapsed_min: number; prep_min: number };
+type KdsItem = { item_id: number; order_no: string; table_label: string | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; elapsed_min: number; prep_min: number; is_buffet?: boolean; from_diner?: boolean };
 type Station = { station_id: number; station_code: string; station_name: string; items: KdsItem[] };
 
 const NEXT: Record<string, { action: string; label: string }> = {
@@ -60,7 +61,13 @@ export default function KdsPage() {
                           <strong className="text-base">{it.qty}× {it.name}</strong>
                           <span className={cn('text-base font-bold tabular', u.text)}>{it.elapsed_min}′</span>
                         </div>
-                        <div className="text-xs text-muted-foreground">{it.table_label ? `โต๊ะ ${it.table_label}` : 'กลับบ้าน'} · {it.order_no}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs text-muted-foreground">{it.table_label ? `โต๊ะ ${it.table_label}` : 'กลับบ้าน'} · {it.order_no}</div>
+                          <div className="flex gap-1">
+                            {it.is_buffet && <Badge variant="secondary" className="gap-0.5 px-1.5 text-[10px]"><Utensils className="size-2.5" /> บุฟเฟต์</Badge>}
+                            {it.from_diner && <Badge variant="outline" className="gap-0.5 px-1.5 text-[10px]"><Smartphone className="size-2.5" /> ลูกค้าสั่ง</Badge>}
+                          </div>
+                        </div>
                         {(it.modifiers?.length > 0 || it.notes) && (
                           <div className="mt-0.5 text-xs font-medium text-warning-foreground dark:text-warning">
                             {(it.modifiers ?? []).map((m) => m.label).join(', ')}{it.notes ? ` · ${it.notes}` : ''}

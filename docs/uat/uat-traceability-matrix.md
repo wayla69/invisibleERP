@@ -61,6 +61,21 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-025 | Pricing rules NOT applied unless opted in | REV-01 | 20 §8 |
 | UAT-O2C-026 | Cashier-speed quick-tender & change (UI) | Feature (cashier speed) | 01 §0 |
 | UAT-O2C-027 | AR receipt idempotency | REC-01 / GL-01 | 01 §7 |
+| UAT-O2C-028 | Diner pulls QR menu | REST-08 | 20 §7 |
+| UAT-O2C-029 | Diner self-order auto-fires to KDS | REST-08 | 20 §7, §8 |
+| UAT-O2C-030 | Second submit appends to same order | REST-08 | 20 §7 |
+| UAT-O2C-031 | Freeform/priced self-order rejected | REST-08 | 20 §7, §9 |
+| UAT-O2C-032 | 86'd item self-order blocked | REST-08 | 20 §7, §9 |
+| UAT-O2C-033 | Menu/order on ended session rejected | REST-08 | 20 §7, §13 |
+| UAT-O2C-034 | Admin creates a buffet tier | REST-09 | 20 §7 |
+| UAT-O2C-035 | Diner starts buffet (per-pax charge + window) | REST-09 | 20 §7, §8 |
+| UAT-O2C-036 | Buffet food ฿0 but hits KDS | REST-09 | 20 §7, §9 |
+| UAT-O2C-037 | Off-tier buffet item rejected | REST-09 | 20 §7, §9, §13 |
+| UAT-O2C-038 | One mode per session (no mixing) | REST-09 | 20 §7, §9, §13 |
+| UAT-O2C-039 | Ordering after buffet window blocked | REST-09 | 20 §7, §9, §13 |
+| UAT-O2C-040 | Overtime surcharge billed past window | REST-09 | 20 §7, §9 |
+| UAT-O2C-041 | KDS flags ticket origin (diner / buffet) | REST-08, REST-09 | 20 §5 |
+| UAT-O2C-042 | Buffet behaviour analytics per tier | Feature (buffet analytics) | 20 §6, §12 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
