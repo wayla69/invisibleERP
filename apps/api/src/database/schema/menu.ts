@@ -40,6 +40,10 @@ export const menuItems = pgTable('menu_items', {
   availEndMin: integer('avail_end_min'),                       // minutes from midnight (exclusive)
   imageUrl: text('image_url'),
   description: text('description'),
+  // weighed items (deli/produce): when true, `price` is the price per `weightUnit` and the line amount
+  // comes from a scale reading (Phase 5 peripherals).
+  soldByWeight: boolean('sold_by_weight').notNull().default(false),
+  weightUnit: text('weight_unit').default('kg'),               // kg | g
   sort: integer('sort').default(0),
   active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

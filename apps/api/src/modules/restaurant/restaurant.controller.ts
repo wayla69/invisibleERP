@@ -8,6 +8,7 @@ import { KdsService } from './kds.service';
 import { ChannelOrderService } from './channel-order.service';
 import { BuffetService } from './buffet.service';
 import { PrintService } from '../printing/print.service';
+import { PeripheralsService } from '../peripherals/peripherals.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
   TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
@@ -31,6 +32,7 @@ export class RestaurantController {
     private readonly channel: ChannelOrderService,
     private readonly buffet: BuffetService,
     private readonly print: PrintService,
+    private readonly peripherals: PeripheralsService,
   ) {}
 
   // ── floor-plan / tables ──
@@ -58,8 +60,13 @@ export class RestaurantController {
   @Post('orders/:orderNo/bill') bill(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.requestBill(o, u); }
   @Post('orders/:orderNo/checkout') async checkout(@Param('orderNo') o: string, @Body(new ZodValidationPipe(CheckoutBody)) b: CheckoutDto, @CurrentUser() u: JwtUser) {
     const res: any = await this.dineIn.checkout(o, b, u);
-    // best-effort: auto-queue the customer receipt (failure must never block a settled sale)
-    if (res?.sale_no) { try { await this.print.enqueue({ job_type: 'receipt', sale_no: res.sale_no }, u, { taxInvoiceNo: res.tax_invoice_no }); } catch { /* receipt is non-fiscal — never block checkout */ } }
+    if (res?.sale_no) {
+      // best-effort: auto-queue the customer receipt (failure must never block a settled sale)
+      try { await this.print.enqueue({ job_type: 'receipt', sale_no: res.sale_no }, u, { taxInvoiceNo: res.tax_invoice_no }); } catch { /* receipt is non-fiscal — never block checkout */ }
+      // cash sale → pop the drawer (audited as reason 'sale'); never block the sale on a peripheral
+      const method = (b.method ?? 'Cash');
+      if (/cash|เงินสด/i.test(String(method))) { try { await this.peripherals.kickDrawer({ reason: 'sale', sale_no: res.sale_no, amount: res.total_with_tip ?? res.total }, u); } catch { /* drawer is a peripheral — never block checkout */ } }
+    }
     return res;
   }
   @Post('orders/:orderNo/close') close(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.closeTable(o, u); }

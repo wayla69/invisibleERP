@@ -104,6 +104,15 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-068 | Reprint flagged a COPY (สำเนา) | REST-10 | 20 §7, §9 |
 | UAT-O2C-069 | Send receipt out-of-band (email) | REST-10 | 20 §7 |
 | UAT-O2C-070 | Print jobs tenant-isolated (RLS) | REST-10 | 20 §7 |
+| UAT-O2C-071 | Register a cash-drawer device | REST-11 | 20 §7 |
+| UAT-O2C-072 | Cash checkout auto-pops the drawer | REST-11 | 20 §7, §9 |
+| UAT-O2C-073 | No-sale open kicks + audits the drawer | REST-11 | 20 §7, §9 |
+| UAT-O2C-074 | Drawer reconciliation by reason | REST-11 | 20 §7, §9 |
+| UAT-O2C-075 | Set + poll customer display | Feature (display) | 20 §7 |
+| UAT-O2C-076 | Mark an item sold-by-weight | REST-11 | 20 §7 |
+| UAT-O2C-077 | Scale computes price server-side | REST-11 | 20 §7, §9 |
+| UAT-O2C-078 | Scale read on non-weighed item rejected | REST-11 | 20 §7, §9 |
+| UAT-O2C-079 | Peripheral registry tenant-isolated (RLS) | REST-11 | 20 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
