@@ -10,6 +10,8 @@ export const PERMISSIONS = [
   'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'marketing', 'track', 'ai_chat',
   'approvals', // Phase 15 — approval-workflow actions (my-approvals / act / delegations)
   'branch',    // Multi-branch — manage outlets, consolidate branch sales, master-bundle for offline POS
+  'ess',           // Phase D3 — employee self-service (own timesheets/leave/payslips/expenses)
+  'vendor_portal', // Phase D3 — supplier portal (own POs, acknowledge, submit invoice)
   // ── SoD sub-permissions (single-duty splits of coarse permissions; see PERMISSION_IMPLICATIONS) ──
   'pos_sell', 'pos_refund', 'pos_till',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
@@ -44,6 +46,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Finance & AR/AP': ['ar', 'creditors'],
   'Procurement': ['procurement'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
+  'Self-Service & Suppliers': ['ess', 'vendor_portal'],
 };
 
 // Canonical role → default permission seed (init_db DEFAULT_PERMS, verbatim).

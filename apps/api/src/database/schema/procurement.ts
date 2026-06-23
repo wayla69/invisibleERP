@@ -18,6 +18,7 @@ export const vendors = pgTable('vendors', {
   contact: text('contact'),
   phone: text('phone'),
   email: text('email'),
+  userName: text('user_name'),  // supplier portal: link to users.username for vendor self-service (Phase D3)
   address: text('address'),
   taxId: text('tax_id'),
   paymentTerms: text('payment_terms').default('Cash'),
@@ -147,6 +148,7 @@ export const purchaseOrders = pgTable('purchase_orders', {
   status: poStatusEnum('status').default('Draft'),
   approvedBy: text('approved_by'),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
+  vendorAckAt: timestamp('vendor_ack_at', { withTimezone: true }), // supplier portal PO acknowledgement (Phase D3)
   remarks: text('remarks'),
   totalAmount: numeric('total_amount', { precision: 14, scale: 2 }),
   createdBy: text('created_by'),

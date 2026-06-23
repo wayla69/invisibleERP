@@ -19,6 +19,7 @@ export const employees = pgTable(
     allowances: numeric('allowances', { precision: 14, scale: 2 }).default('0'), // extra tax allowances (annual)
     ssoEligible: boolean('sso_eligible').default(true),
     bankAccount: text('bank_account'),
+    userName: text('user_name'),                // ESS: link to users.username for self-service (Phase D3)
     startDate: date('start_date'),
     active: boolean('active').default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

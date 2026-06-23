@@ -131,6 +131,8 @@ jobs:
           - { pkg: cutover, script: ai-actions }
           - { pkg: cutover, script: rag }
           - { pkg: cutover, script: hcm }
+          - { pkg: cutover, script: ess }
+          - { pkg: cutover, script: supplier }
           - { pkg: cutover, script: payroll }
           - { pkg: cutover, script: portal-extra }
     steps:
