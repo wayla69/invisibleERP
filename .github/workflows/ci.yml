@@ -109,6 +109,7 @@ jobs:
           - { pkg: cutover, script: scm17c }
           - { pkg: cutover, script: manufacturing }
           - { pkg: cutover, script: mfg-depth }
+          - { pkg: cutover, script: mrp }
           # ── CRM / billing / projects / loyalty ──
           - { pkg: cutover, script: crm }
           - { pkg: cutover, script: cpq }
