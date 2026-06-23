@@ -48,6 +48,7 @@ import { CostingModule } from './modules/costing/costing.module';
 import { WmsModule } from './modules/wms/wms.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
+import { PrintingModule } from './modules/printing/printing.module';
 import { PlanningModule } from './modules/planning/planning.module';
 import { ConsolidationModule } from './modules/consolidation/consolidation.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
@@ -128,6 +129,7 @@ import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
     WmsModule,
     CrmModule,
     MessagingModule,
+    PrintingModule,
     PlanningModule,
     ConsolidationModule,
     ReconciliationModule,

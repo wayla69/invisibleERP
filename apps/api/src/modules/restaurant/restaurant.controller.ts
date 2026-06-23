@@ -7,6 +7,7 @@ import { DineInService } from './dine-in.service';
 import { KdsService } from './kds.service';
 import { ChannelOrderService } from './channel-order.service';
 import { BuffetService } from './buffet.service';
+import { PrintService } from '../printing/print.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
   TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
@@ -29,6 +30,7 @@ export class RestaurantController {
     private readonly kds: KdsService,
     private readonly channel: ChannelOrderService,
     private readonly buffet: BuffetService,
+    private readonly print: PrintService,
   ) {}
 
   // ── floor-plan / tables ──
@@ -54,7 +56,12 @@ export class RestaurantController {
   @Post('orders/:orderNo/transfer-items') transferItems(@Param('orderNo') o: string, @Body(new ZodValidationPipe(TransferItemsBody)) b: { item_ids: number[]; to_table_id: number }, @CurrentUser() u: JwtUser) { return this.dineIn.transferItems(o, b.item_ids, b.to_table_id, u); }
   @Post('orders/:orderNo/fire') fire(@Param('orderNo') o: string, @Query('course') course: string | undefined, @CurrentUser() u: JwtUser) { return this.dineIn.fire(o, u, course != null && course !== '' ? +course : undefined); }
   @Post('orders/:orderNo/bill') bill(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.requestBill(o, u); }
-  @Post('orders/:orderNo/checkout') checkout(@Param('orderNo') o: string, @Body(new ZodValidationPipe(CheckoutBody)) b: CheckoutDto, @CurrentUser() u: JwtUser) { return this.dineIn.checkout(o, b, u); }
+  @Post('orders/:orderNo/checkout') async checkout(@Param('orderNo') o: string, @Body(new ZodValidationPipe(CheckoutBody)) b: CheckoutDto, @CurrentUser() u: JwtUser) {
+    const res: any = await this.dineIn.checkout(o, b, u);
+    // best-effort: auto-queue the customer receipt (failure must never block a settled sale)
+    if (res?.sale_no) { try { await this.print.enqueue({ job_type: 'receipt', sale_no: res.sale_no }, u, { taxInvoiceNo: res.tax_invoice_no }); } catch { /* receipt is non-fiscal — never block checkout */ } }
+    return res;
+  }
   @Post('orders/:orderNo/close') close(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.closeTable(o, u); }
   @Post('orders/:orderNo/cancel') cancel(@Param('orderNo') o: string, @Body(new ZodValidationPipe(CancelBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.dineIn.cancelOrder(o, b.reason, u); }
 

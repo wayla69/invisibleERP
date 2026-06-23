@@ -65,7 +65,7 @@ async function main() {
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
-    return { status: res.statusCode, json };
+    return { status: res.statusCode, json, body: res.body };
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const sales1 = await login('sales1', 'pw1');
@@ -362,6 +362,29 @@ async function main() {
   ok('Food-cost: menu summary reports avg food-cost % + costed count', fc.status === 200 && fc.json.summary?.costed >= 1 && fc.json.summary?.avg_food_cost_pct >= 0, `${JSON.stringify(fc.json.summary ?? {})}`);
   const ic = await inj('GET', '/api/menu/ingredient-cost', sales1);
   ok('Food-cost: ingredient cost-contribution lists the ingredient (30/serving)', (ic.json.ingredients ?? []).some((g: any) => g.ingredient_item_id === 'NOODLE' && near(g.cost, 30) && g.recipes_using >= 1), `${JSON.stringify((ic.json.ingredients ?? []).slice(0, 2))}`);
+
+  // ── receipts & printing (Phase 4) ──
+  const rcSale = co.json.sale_no; // sale settled at checkout above
+  const jobsAfterCheckout = await inj('GET', '/api/print/jobs', sales1);
+  ok('Printing: checkout auto-queues a receipt print job for the sale', (jobsAfterCheckout.json.jobs ?? []).some((j: any) => j.sale_no === rcSale && j.job_type === 'receipt' && j.status === 'queued'), `jobs=${(jobsAfterCheckout.json.jobs ?? []).length}`);
+  const tie = await inj('GET', `/api/print/tie-out/${rcSale}`, sales1);
+  ok('Printing: receipt ties out to the fiscal sale (REST-10 control)', tie.status === 200 && tie.json.matched === true && near(tie.json.total, 181.9), `matched=${tie.json.matched} total=${tie.json.total}`);
+  const rcData = await inj('GET', `/api/print/receipt/${rcSale}/data`, sales1);
+  ok('Printing: receipt data renders seller header + VAT line + items', rcData.json.data?.seller?.vat_registered === true && (rcData.json.data?.items ?? []).length === 2 && near(rcData.json.data?.vat, 11.9), `${JSON.stringify(rcData.json.data?.seller ?? {}).slice(0, 80)}`);
+  const rcHtml = await inj('GET', `/api/print/receipt/${rcSale}`, sales1);
+  ok('Printing: HTML receipt document served', rcHtml.status === 200 && typeof rcHtml.body === 'string' && rcHtml.body.includes(rcSale) && rcHtml.body.includes('ใบเสร็จ'), `${rcHtml.status}`);
+  const pull1 = await inj('GET', '/api/print/jobs/next', sales1);
+  ok('Printing: agent pulls the next queued job (claimed → sent, payload present)', !!pull1.json.job && pull1.json.job.sale_no === rcSale && pull1.json.job.format === 'escpos' && !!pull1.json.job.payload, `${JSON.stringify(pull1.json.job ?? {}).slice(0, 60)}`);
+  const ackOk = await inj('POST', `/api/print/jobs/${pull1.json.job.id}/ack`, sales1, { ok: true });
+  ok('Printing: agent acks job printed', ackOk.json.status === 'printed', `${ackOk.json.status}`);
+  const reprint = await inj('POST', `/api/print/reprint/${rcSale}`, sales1);
+  ok('Printing: reprint enqueues a fresh (copy) receipt job', (reprint.status === 200 || reprint.status === 201) && !!reprint.json.id, `${reprint.status}`);
+  const reData = await inj('GET', `/api/print/receipt/${rcSale}/data`, sales1);
+  ok('Printing: a re-render after the original is flagged as a COPY (สำเนา)', reData.json.data?.is_copy === true, `is_copy=${reData.json.data?.is_copy}`);
+  const sendRc = await inj('POST', `/api/print/receipt/${rcSale}/send`, sales1, { channel: 'email', to: 'guest@example.com' });
+  ok('Printing: receipt delivered out-of-band via messaging gateway', (sendRc.status === 200 || sendRc.status === 201) && sendRc.json.status === 'sent', `${sendRc.status} ${sendRc.json.status}`);
+  const t2pull = await inj('GET', '/api/print/jobs', sales2);
+  ok('Printing: print jobs are tenant-isolated (T2 sees none of T1’s)', (t2pull.json.jobs ?? []).every((j: any) => j.sale_no !== rcSale), `T2 jobs=${(t2pull.json.jobs ?? []).length}`);
 
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);

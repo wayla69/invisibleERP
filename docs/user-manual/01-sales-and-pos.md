@@ -56,9 +56,35 @@ sent.
 
 ### Printing / sending the receipt
 
-- Print or download the receipt from the sale (HTML, PDF or receipt-printer
-  format).
-- To email or SMS it, use **Send receipt** and enter the customer's contact.
+**Screen:** `/print` (**ใบเสร็จ & งานพิมพ์**) · **Required permission:** `pos` /
+`order_mgt`.
+
+When a sale is settled the **customer receipt is queued for printing
+automatically**. A receipt is a courtesy document over the sale — the
+**abbreviated tax invoice** is the official fiscal record — so reprinting a
+receipt never changes the accounts.
+
+How printing works:
+
+- **Automatic print.** A receipt-printer or a small in-store print agent **pulls
+  the next queued job**, prints it, and reports back. Failed jobs are retried
+  (up to 5 times) before being marked **failed**. The queue and each job's
+  status (queued / sent / printed / failed) are visible on the **ใบเสร็จ &
+  งานพิมพ์** screen.
+- **View / print on screen.** Enter the sale number (SALE-…) and click **เปิดดู /
+  พิมพ์** to open the receipt in a window and print it from the browser.
+- **Reprint.** Click **พิมพ์ซ้ำ (สำเนา)** to re-queue the receipt. The first
+  issuance is the original; **every later copy is marked สำเนา / COPY**.
+- **Send electronically.** Enter the customer's email (or LINE / SMS contact) and
+  click **ส่ง** to deliver the receipt out-of-band.
+
+**Expected result:** The customer gets a printed or electronic receipt; the
+receipt always **ties out** to the fiscal sale (line total − discount + VAT +
+tip = total).
+
+> **Troubleshooting:** “SALE_NOT_FOUND” — the sale number is mistyped or belongs
+> to another branch/tenant. If a job stays **queued**, the printer/agent isn't
+> pulling — check it is online and pointed at this outlet.
 
 ### Cashier speed: quick-tender, change & hotkeys
 
