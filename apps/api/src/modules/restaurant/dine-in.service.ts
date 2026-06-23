@@ -56,7 +56,7 @@ export class DineInService {
     return { subtotal, vat: t.tax, total: roundCurrency(subtotal + t.tax, 'THB') };
   }
 
-  private async insertItems(orderId: number, tenantId: number | null, items: AddItemsDto['items'], user: JwtUser, opts?: { buffet?: boolean }) {
+  private async insertItems(orderId: number, tenantId: number | null, items: AddItemsDto['items'], user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
     const db = this.db as any;
     const buffet = !!opts?.buffet;
     const rows = [] as any[];
@@ -79,6 +79,7 @@ export class DineInService {
         tenantId, orderId, stationId: Number(st.id), itemId: itemRef, name,
         qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
         modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
+        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null,
         estPrepMinutes: prep ?? null, createdBy: user.username,
       });
     }
@@ -96,7 +97,7 @@ export class DineInService {
     return t;
   }
 
-  async createOrder(dto: CreateOrderDto, user: JwtUser, opts?: { buffet?: boolean }) {
+  async createOrder(dto: CreateOrderDto, user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
     const db = this.db as any;
     const orderNo = await this.docNo.nextDaily('DIN');
     const [h] = await db.insert(dineInOrders).values({
@@ -110,7 +111,7 @@ export class DineInService {
     return this.getOrder(orderNo, user);
   }
 
-  async addItems(orderNo: string, dto: AddItemsDto, user: JwtUser, opts?: { buffet?: boolean }) {
+  async addItems(orderNo: string, dto: AddItemsDto, user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
     const db = this.db as any;
     const o = await this.loadOrder(orderNo);
     if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ORDER_CLOSED', message: 'Order is closed', messageTh: 'ออเดอร์ปิดแล้ว' });

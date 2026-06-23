@@ -114,6 +114,11 @@ Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office):
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).
 
+The **พฤติกรรมตามแพ็กเกจ** tab on the same page shows, for each tier, how guests
+actually behave: the **most-ordered dishes**, number of **sessions and covers**,
+**dishes per head**, **average bill per session**, and how often tables run into
+**overtime** — so you can tune pricing, time limits and the dish line-up per tier.
+
 **Kitchen (KDS).** Open **จอครัว (KDS)** (back-of-house). Tickets are grouped by
 station and refresh automatically; tap a card to advance it
 **เริ่มทำ → เสร็จแล้ว → เสิร์ฟแล้ว**. The colour border flags how long a ticket has

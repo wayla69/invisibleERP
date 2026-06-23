@@ -118,17 +118,18 @@ export class QrService {
       const u = diner(claim.tenantId);
       const session = await this.loadSession(claim.sessionId);
       const buffet = session?.orderMode === 'buffet';
+      const buffetPackageId = buffet ? Number(session.buffetPackageId) : undefined;
       if (buffet) {
         this.buffet.assertActive(session);                               // BUFFET_EXPIRED after the window
-        await this.buffet.assertEligible(Number(session.buffetPackageId), dto.items); // tier eligibility
+        await this.buffet.assertEligible(buffetPackageId!, dto.items);   // tier eligibility
       }
       const existing = await this.openOrderForSession(claim.sessionId);
       let orderNo: string;
       if (existing) {
-        await this.dineIn.addItems(existing.orderNo, { items: dto.items as any }, u, { buffet });
+        await this.dineIn.addItems(existing.orderNo, { items: dto.items as any }, u, { buffet, buffetPackageId });
         orderNo = existing.orderNo;
       } else {
-        const created = await this.dineIn.createOrder({ table_id: claim.tableId, session_id: claim.sessionId, items: dto.items as any }, u, { buffet });
+        const created = await this.dineIn.createOrder({ table_id: claim.tableId, session_id: claim.sessionId, items: dto.items as any }, u, { buffet, buffetPackageId });
         orderNo = created.order_no;
       }
       await this.dineIn.fire(orderNo, u); // diner orders fire straight to the kitchen

@@ -65,6 +65,7 @@ export class RestaurantController {
 
   // ── buffet packages / tiers (Phase 2) — read for POS/floor, manage for master-data roles (SoD) ──
   @Get('buffet/packages') @Permissions('pos', 'order_mgt', 'masterdata') listBuffet(@CurrentUser() u: JwtUser) { return this.buffet.listPackages(u); }
+  @Get('buffet/analytics') @Permissions('pos', 'order_mgt', 'masterdata', 'exec') buffetAnalytics(@CurrentUser() u: JwtUser) { return this.buffet.analytics(u); }
   @Post('buffet/packages') @Permissions('masterdata', 'pricelist', 'exec') createBuffet(@Body(new ZodValidationPipe(BuffetPackageBody)) b: BuffetPackageDto, @CurrentUser() u: JwtUser) { return this.buffet.createPackage(b, u); }
   @Patch('buffet/packages/:id') @Permissions('masterdata', 'pricelist', 'exec') updateBuffet(@Param('id') id: string, @Body(new ZodValidationPipe(BuffetPackageUpdateBody)) b: BuffetPackageUpdateDto, @CurrentUser() u: JwtUser) { return this.buffet.updatePackage(+id, b, u); }
   @Post('kds/stations') upsertStation(@Body(new ZodValidationPipe(StationBody)) b: z.infer<typeof StationBody>, @CurrentUser() u: JwtUser) { return this.kds.upsertStation(b, u); }

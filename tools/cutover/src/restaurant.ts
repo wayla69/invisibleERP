@@ -213,6 +213,12 @@ async function main() {
   ok('Buffet: overtime surcharge (100×4=400) added at bill → subtotal 1596', near(afterBill.json.bill?.subtotal, 1596), `sub=${afterBill.json.bill?.subtotal}`);
   ok('Buffet: overtime is a charge line (off-kitchen)', !!overLine && overLine.charge === true && near(overLine.amount, 400), JSON.stringify(overLine ?? {}).slice(0, 80));
 
+  // ── buffet behaviour analytics (per-tier menu mix, covers, consumption, revenue) ──
+  const an = await inj('GET', '/api/restaurant/buffet/analytics', sales1);
+  const stdTier = (an.json.tiers ?? []).find((t: any) => t.tier?.code === 'STD');
+  ok('Buffet analytics: per-tier sessions/covers + top item + items-per-head', an.status === 200 && stdTier?.sessions === 1 && stdTier?.covers === 4 && stdTier?.top_items?.[0]?.name === 'หมูสไลด์' && near(stdTier?.top_items?.[0]?.qty, 3) && near(stdTier?.items_per_head, 0.75), `${an.status} ${JSON.stringify(stdTier ?? {}).slice(0, 130)}`);
+  ok('Buffet analytics: per-tier revenue (charge+overtime) + overtime rate', near(stdTier?.revenue, 1596) && near(stdTier?.avg_bill_per_session, 1596) && stdTier?.overtime_sessions === 1 && near(stdTier?.overtime_rate_pct, 100), `rev=${stdTier?.revenue} avg=${stdTier?.avg_bill_per_session} otRate=${stdTier?.overtime_rate_pct}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

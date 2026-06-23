@@ -119,6 +119,7 @@ export const dineInOrderItems = pgTable('dine_in_order_items', {
   modifiers: jsonb('modifiers'),
   notes: text('notes'),
   isBuffet: boolean('is_buffet').notNull().default(false),  // buffet food line (priced ฿0, still hits KDS)
+  buffetPackageId: bigint('buffet_package_id', { mode: 'number' }).references(() => buffetPackages.id), // tier this line belongs to (food + charge/overtime) → per-tier behaviour analytics
   kdsStatus: kdsItemStatusEnum('kds_status').notNull().default('new'),
   estPrepMinutes: integer('est_prep_minutes'),
   firedAt: timestamp('fired_at', { withTimezone: true }),

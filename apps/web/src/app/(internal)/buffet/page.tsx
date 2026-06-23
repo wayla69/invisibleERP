@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Timer, Utensils } from 'lucide-react';
+import { BarChart3, Plus, Timer, Users, Utensils } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -35,8 +35,69 @@ export default function BuffetPage() {
         title="บุฟเฟต์ (Buffet packages)"
         description="จัดการแพ็กเกจบุฟเฟต์แบบต่อหัว + เวลาทานต่อโต๊ะ — ลูกค้าเลือกได้จากหน้าสั่งอาหารผ่าน QR"
       />
-      <Tabs tabs={[{ key: 'pkgs', label: 'แพ็กเกจบุฟเฟต์', content: <Packages /> }]} />
+      <Tabs
+        tabs={[
+          { key: 'pkgs', label: 'แพ็กเกจบุฟเฟต์', content: <Packages /> },
+          { key: 'behaviour', label: 'พฤติกรรมตามแพ็กเกจ', content: <Behaviour /> },
+        ]}
+      />
     </div>
+  );
+}
+
+interface TopItem { name: string; qty: number; orders: number }
+interface TierStat {
+  tier: { id: number; code: string; name: string; price_per_pax: number };
+  sessions: number; covers: number; food_qty: number; items_per_head: number;
+  top_items: TopItem[]; revenue: number; avg_bill_per_session: number; overtime_sessions: number; overtime_rate_pct: number;
+}
+
+// ───────────────────────── พฤติกรรมตามแพ็กเกจ (behaviour by tier) ─────────────────────────
+function Behaviour() {
+  const q = useQuery<{ tiers: TierStat[] }>({ queryKey: ['buffet-analytics'], queryFn: () => api('/api/restaurant/buffet/analytics') });
+  const tiers = q.data?.tiers ?? [];
+
+  return (
+    <StateView q={q}>
+      {tiers.length === 0 ? (
+        <p className="text-sm text-muted-foreground">ยังไม่มีข้อมูลบุฟเฟต์</p>
+      ) : (
+        <div className="space-y-6">
+          {tiers.map((t) => (
+            <Card key={t.tier.id} className="gap-4">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between text-base">
+                  <span>{t.tier.name} <span className="text-sm font-normal text-muted-foreground">· {baht(t.tier.price_per_pax)}/ท่าน</span></span>
+                  <Badge variant="secondary" className="gap-1"><Users className="size-3" /> {num(t.covers)} ท่าน</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
+                  <StatCard label="เซสชัน" value={num(t.sessions)} icon={Timer} tone="primary" />
+                  <StatCard label="ลูกค้า (ท่าน)" value={num(t.covers)} icon={Users} tone="info" />
+                  <StatCard label="จาน/ท่าน" value={t.items_per_head.toFixed(2)} icon={Utensils} tone="default" hint={`รวม ${num(t.food_qty)} จาน`} />
+                  <StatCard label="บิลเฉลี่ย/เซสชัน" value={baht(t.avg_bill_per_session)} icon={BarChart3} tone="success" hint={`รายได้รวม ${baht(t.revenue)}`} />
+                  <StatCard label="เกินเวลา" value={`${t.overtime_rate_pct.toFixed(0)}%`} icon={Timer} tone={t.overtime_rate_pct > 0 ? 'warning' : 'default'} hint={`${num(t.overtime_sessions)} เซสชัน`} />
+                </div>
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold text-muted-foreground">เมนูยอดนิยมในแพ็กเกจนี้</h4>
+                  <DataTable
+                    rows={t.top_items}
+                    rowKey={(r) => r.name}
+                    columns={[
+                      { key: 'name', label: 'เมนู' },
+                      { key: 'qty', label: 'จำนวนที่สั่ง', align: 'right', render: (r) => num(r.qty) },
+                      { key: 'orders', label: 'ครั้งที่สั่ง', align: 'right', render: (r) => num(r.orders) },
+                    ]}
+                    emptyText="ยังไม่มีการสั่งอาหารในแพ็กเกจนี้"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </StateView>
   );
 }
 

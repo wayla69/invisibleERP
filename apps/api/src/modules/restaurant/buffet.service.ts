@@ -86,7 +86,7 @@ export class BuffetService {
       orderNo, tenantId: claim.tenantId, tableId: claim.tableId, sessionId: claim.sessionId,
       status: 'open', guestCount: seats, server: user.username, createdBy: user.username,
     }).returning({ id: dineInOrders.id });
-    await this.insertChargeLine(Number(h.id), claim.tenantId, CHARGE_REF, `บุฟเฟต์ ${pkg.name} × ${seats}`, n(pkg.pricePerPax), seats, user);
+    await this.insertChargeLine(Number(h.id), claim.tenantId, packageId, CHARGE_REF, `บุฟเฟต์ ${pkg.name} × ${seats}`, n(pkg.pricePerPax), seats, user);
     await this.dineIn.refreshOrderTotals(Number(h.id));
 
     await db.update(tableSessions).set({ orderMode: 'buffet', buffetPackageId: packageId, pax: seats, buffetStartedAt: now, buffetExpiresAt: expires }).where(eq(tableSessions.id, claim.sessionId));
@@ -126,18 +126,59 @@ export class BuffetService {
     const [dupe] = await db.select({ id: dineInOrderItems.id }).from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.itemId, OVERTIME_REF))).limit(1);
     if (dupe) return;
     const pax = Number(s.pax) || 1;
-    await this.insertChargeLine(Number(o.id), Number(o.tenantId), OVERTIME_REF, 'ค่าปรับเกินเวลา (บุฟเฟต์)', n(pkg.overtimeFeePerPax), pax, user);
+    await this.insertChargeLine(Number(o.id), Number(o.tenantId), Number(s.buffetPackageId), OVERTIME_REF, 'ค่าปรับเกินเวลา (บุฟเฟต์)', n(pkg.overtimeFeePerPax), pax, user);
     await this.dineIn.refreshOrderTotals(Number(o.id));
   }
 
+  // per-tier behaviour analytics: menu mix, covers, consumption per head, revenue + overtime (tenant-scoped)
+  async analytics(_user: JwtUser) {
+    const db = this.db as any;
+    const pkgs = await db.select().from(buffetPackages).orderBy(buffetPackages.id);
+    const tiers = [];
+    for (const p of pkgs) {
+      const pid = Number(p.id);
+      const sess = await db.select().from(tableSessions).where(eq(tableSessions.buffetPackageId, pid));
+      const sessions = sess.length;
+      const covers = sess.reduce((a: number, s: any) => a + (Number(s.pax) || 0), 0);
+
+      const food = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.buffetPackageId, pid), eq(dineInOrderItems.isBuffet, true)));
+      const byItem = new Map<string, { name: string; qty: number; orders: number }>();
+      let foodQty = 0;
+      for (const it of food) {
+        const q = n(it.qty); foodQty += q;
+        const key = it.itemId || it.name;
+        const e = byItem.get(key) ?? { name: it.name, qty: 0, orders: 0 };
+        e.qty += q; e.orders += 1; byItem.set(key, e);
+      }
+      const topItems = [...byItem.values()].sort((a, b) => b.qty - a.qty).slice(0, 10).map((x) => ({ name: x.name, qty: round2(x.qty), orders: x.orders }));
+
+      const charges = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.buffetPackageId, pid), eq(dineInOrderItems.isBuffet, false)));
+      let revenue = 0; const overtimeOrders = new Set<number>();
+      for (const c of charges) { revenue += n(c.amount); if (c.itemId === OVERTIME_REF) overtimeOrders.add(Number(c.orderId)); }
+
+      tiers.push({
+        tier: shapePkg(p),
+        sessions, covers,
+        food_qty: round2(foodQty),
+        items_per_head: covers > 0 ? round2(foodQty / covers) : 0,
+        top_items: topItems,
+        revenue: round2(revenue),
+        avg_bill_per_session: sessions > 0 ? round2(revenue / sessions) : 0,
+        overtime_sessions: overtimeOrders.size,
+        overtime_rate_pct: sessions > 0 ? round2((overtimeOrders.size / sessions) * 100) : 0,
+      });
+    }
+    return { tiers, generated_at: new Date().toISOString() };
+  }
+
   // ── helpers ──
-  private async insertChargeLine(orderId: number, tenantId: number | null, ref: string, name: string, unit: number, qty: number, user: JwtUser) {
+  private async insertChargeLine(orderId: number, tenantId: number | null, packageId: number, ref: string, name: string, unit: number, qty: number, user: JwtUser) {
     const db = this.db as any;
     const now = new Date();
     await db.insert(dineInOrderItems).values({
       tenantId, orderId, stationId: null, itemId: ref, name,
       qty: String(qty), unitPrice: fx(unit, 2), amount: fx(round2(unit * qty), 2),
-      modifiers: null, notes: null, isBuffet: false, kdsStatus: 'served', servedAt: now,
+      modifiers: null, notes: null, isBuffet: false, buffetPackageId: packageId, kdsStatus: 'served', servedAt: now,
       createdBy: user.username, // non-kitchen line: 'served' keeps it off the KDS feed but in the bill
     });
   }
