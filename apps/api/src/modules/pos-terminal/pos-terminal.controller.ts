@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Query, Body, Req, Headers, UnauthorizedException, Logger } from '@nestjs/common';
 import { z } from 'zod';
 import type { FastifyRequest } from 'fastify';
-import { Permissions, Public, CurrentUser, type JwtUser } from '../../common/decorators';
+import { Permissions, Public, NoTx, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { verifyWebhookSignature } from '../../common/crypto';
 import { PosTerminalService } from './pos-terminal.service';
@@ -42,6 +42,7 @@ export class PspWebhookController {
   constructor(private readonly svc: PosTerminalService) {}
 
   @Public()
+  @NoTx()
   @Post('webhook')
   webhook(
     @Req() req: FastifyRequest & { rawBody?: Buffer },

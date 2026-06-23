@@ -37,9 +37,13 @@ async function main() {
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T2', name: 'อีกบริษัท' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  const t2 = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'T2')))[0].id);
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'hqadmin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: null }, // HQ super-admin: no tenant → must name one to run payroll
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -98,6 +102,15 @@ async function main() {
   ok('Payslips: Somchai net 29,079.17 (30k − 750 SSO − 170.83 WHT)',
     slips.json.count === 2 && near(somchai?.net, 29079.17),
     JSON.stringify({ n: slips.json.count, net: somchai?.net }));
+
+  // ── 7. cross-tenant guard (C2): an HQ super-admin (no tenant) must name a tenant; the run is scoped ──
+  // seed an active employee under ANOTHER tenant — it must NOT be swept into an HQ payroll run.
+  await db.insert(s.employees).values({ tenantId: t2, empCode: 'EMP-T2-1', name: 'OtherCo Staff', monthlySalary: '20000', active: true }).onConflictDoNothing();
+  const hqadmin = (await inj('POST', '/api/login', undefined, { username: 'hqadmin', password: 'admin123' })).json.token;
+  const noTenant = await inj('POST', '/api/payroll/runs?period=2026-07', hqadmin);
+  ok('HQ admin without tenant_id → 400 TENANT_REQUIRED', noTenant.status === 400 && noTenant.json.error?.code === 'TENANT_REQUIRED', `${noTenant.status} ${noTenant.json.error?.code}`);
+  const scoped = await inj('POST', `/api/payroll/runs?period=2026-07&tenant_id=${hq}`, hqadmin);
+  ok('HQ admin with tenant_id=HQ → runs ONLY HQ staff (headcount 2, excludes other tenant)', /^JE-/.test(scoped.json.entry_no ?? '') && scoped.json.headcount === 2, JSON.stringify({ e: scoped.json.entry_no, h: scoped.json.headcount }));
 
   console.log('\n── C2b — payroll (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

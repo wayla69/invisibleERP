@@ -95,6 +95,18 @@ async function main() {
   ok('status callback round-trip', stRT.json.fulfillment_status === 'preparing' && stRT.json.posted_to_platform === 'grab');
   ok('menu sync-out push', (await inj('POST', '/api/channels/grab/menu-sync', token)).json.pushed === true);
 
+  // ── P2b security: aggregator webhook requires the per-platform shared secret (fail-closed) ──
+  process.env.CHANNEL_WEBHOOK_SECRET = 'agg-sekret';
+  const wbBody = { eventID: 'E-SEC', orderID: 'O-SEC', merchantID: 'S1', items: [{ name: 'x', quantity: 1, price: 10 }] };
+  const secMiss = await app.inject({ method: 'POST', url: '/api/channels/grab/webhook', payload: wbBody });
+  ok('webhook without secret (secret configured) → 401', secMiss.statusCode === 401, `${secMiss.statusCode}`);
+  const secWrong = await app.inject({ method: 'POST', url: '/api/channels/grab/webhook', headers: { 'x-webhook-secret': 'nope' }, payload: wbBody });
+  ok('webhook with wrong secret → 401', secWrong.statusCode === 401, `${secWrong.statusCode}`);
+  const secOk = await app.inject({ method: 'POST', url: '/api/channels/grab/webhook', headers: { 'x-webhook-secret': 'agg-sekret' }, payload: { ...wbBody, eventID: 'E-SEC2', orderID: 'O-SEC2' } });
+  const secOkJson = (() => { try { return secOk.json(); } catch { return {}; } })();
+  ok('webhook with correct secret → processed (RLS-scoped write)', secOk.statusCode < 300 && secOkJson.status === 'processed', `${secOk.statusCode} ${secOkJson.status}`);
+  delete process.env.CHANNEL_WEBHOOK_SECRET;
+
   // ── P2c: tiered loyalty + expiry ──
   await inj('POST', '/api/loyalty/tiers', token, { tier: 'Gold', min_lifetime: 1000, earn_mult: 2, redeem_mult: 1 });
   const eq2 = await inj('GET', `/api/loyalty/members/${mem.id}/earn-quote?spend=100`, token);
