@@ -23,7 +23,7 @@ CI-gated:
 | No payment capture | ✅ `payments` module: multi-tender, auth→capture→settle, refunds/voids, idempotency keys, gateway abstraction (mock/Stripe/PromptPay/Adyen), **terminal layer** (Opn/2C2P/GBPrime), settlement batches |
 | Tracker, not POS | ✅ Till sessions, X/Z reports, cash movements, split bills, KDS (SSE), table/floor management, public QR diner flow, gift cards, loyalty, ESC/POS receipts, **hash-chained fiscal journal + Thai e-Tax submission** |
 | Tests = "it compiles" | ✅ 59 cutover harnesses (8.5k LOC) boot the real app over PGlite; 8+ are **required CI gates** alongside CodeQL, gitleaks, `pnpm audit`, Playwright |
-| No compliance posture | ✅ COSO 2013 RCM (66 controls, 40 implemented), 26 ISO/SOX process narratives, 13 SoD rules enforced in code, 159 UAT cases, ICFR audit-readiness plan |
+| No compliance posture | ✅ COSO 2013 RCM (66 controls, **49 implemented** after Phase A · 11 partial · 6 gap), 26 ISO/SOX process narratives, 13 SoD rules enforced in code, 159 UAT cases, ICFR audit-readiness plan |
 
 **Conclusion:** the differentiation problem is solved. The remaining problem is **operational
 maturity and breadth** — the unglamorous layer that separates "passes a demo and a code review"
@@ -145,24 +145,40 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
 `tenant_id` + RLS; GL only via `ledger.postEntry`; `FOR UPDATE` on RMW; `ymd()`/Bangkok dates; a
 `tools/cutover/*` harness green on PGlite; web page + nav; `tsc` clean; **docs synced per CLAUDE.md**.
 
-### Phase A — Operate it for real (production hardening) · ~4–6 weeks · **HIGHEST PRIORITY**
+### Phase A — Operate it for real (production hardening) · **DELIVERED 2026-06-23 (config/setup follow-ups noted)**
 *Goal: a customer's data is safe, the system is observable, and we can ship it reproducibly.*
 
-- **A1 — Backup & restore (ITGC-OP-01).** Automated logical + PITR backups (e.g. `pg_dump` +
-  WAL/`pgBackRest`); documented + **rehearsed quarterly restore**; RTO/RPO defined. *Blocker #1.*
-- **A2 — Containerize + IaC.** Dockerfile(s) for api/web, `docker-compose` for local, a Helm chart
-  or Terraform module for one target (managed Postgres + container runtime). Document topology.
-- **A3 — Secrets → KMS/vault (ITGC-AC-12).** Move `JWT_SECRET`/`APP_ENC_KEY`/PSP secrets/DB URL to
-  a managed secret store; add rotation runbook.
-- **A4 — Observability on by default (ITGC-OP-03/04).** Enforce OTel + Sentry in prod; dashboards
-  for latency/error/saturation; **alerting + on-call + incident log**; batch-job (`pg-boss`)
-  failure alerts.
-- **A5 — Change-management gates (ITGC-CM-01/03/04).** Branch protection on `main`, required
-  reviews, deploy-approval gate (deployer ≠ author), ticket→PR→deploy traceability.
-- **A6 — DB least-privilege + token hardening (ITGC-AC-13/07).** Formalize prod DB roles/grants;
-  migrate web auth from localStorage → httpOnly cookie + CSRF.
-- **Exit:** restore drill passes; one-command reproducible deploy; no plaintext secrets; alerts
-  fire on synthetic failure; `main` protected.
+> Phase A landed as code + ops artifacts + docs. Items needing a one-time action in the GitHub/cloud
+> console (apply the ruleset, set Environment reviewers, point secrets at a vault, run the first drill)
+> are flagged **[setup]**; everything else is in the repo and CI-verified.
+
+- **A1 — Backup & restore (ITGC-OP-01).** ✅ `tools/ops/pg-backup.sh` (existing) + **new scripted
+  `restore.sh` and automated drill `verify-restore.sh`** (restore into scratch DB → sanity-check core
+  tables → evidence). RTO/RPO + evidence table in `tools/ops/BACKUP-RUNBOOK.md`. **[setup]** run the
+  first quarterly drill; enable provider PITR. *Blocker #1 closed.*
+- **A2 — Containerize + IaC.** ✅ Multi-stage non-root `apps/api/Dockerfile` + `apps/web/Dockerfile`,
+  `docker-compose.yml` (Postgres+api+web), `.dockerignore`, entrypoint with optional migrate; topology
+  in `docs/ops/deployment.md`. (Helm/Terraform left as a later infra choice; Railway remains primary.)
+- **A3 — Secrets (ITGC-AC-12).** ✅ Boot-time **fail-closed** validation `apps/api/src/common/env.validation.ts`
+  (refuses prod boot without `DATABASE_URL`/`JWT_SECRET`/`APP_ENC_KEY`/PSP secret; verified). Policy +
+  matrix + rotation in `docs/ops/secrets.md`. **[setup]** move values into a managed vault; KMS-envelope
+  for `APP_ENC_KEY` tracked as follow-up.
+- **A4 — Observability + health (ITGC-OP-03/04).** ✅ Prod warns at boot when OTel/Sentry unset;
+  new `/healthz` (liveness) + `/readyz` (DB readiness) probes; alerting/on-call/incident +
+  batch-job-failure runbook in `docs/ops/observability-incident.md`. **[setup]** wire the dashboards/
+  alert rules + on-call rotation.
+- **A5 — Change-management gates (ITGC-CM-01/03/04).** ✅ `.github/CODEOWNERS`, PR template (ticket +
+  control-impact + docs-sync), approval-gated `deploy.yml` (GitHub `production` env ⇒ deployer ≠ author),
+  importable `.github/rulesets/main-branch-protection.json`, runbook `docs/ops/change-management.md`.
+  **[setup]** import the ruleset + set Environment required reviewers + `RAILWAY_TOKEN`.
+- **A6 — DB least-privilege + token hardening (ITGC-AC-13/07).** ✅ `tools/ops/sql/prod-db-roles.sql`
+  (dedicated non-owner `ierp_app` login in the `app_user` group; FORCE-RLS re-assert; revoke PUBLIC) —
+  run by the DBA, intentionally outside the migration chain so it can't hit the PGlite harnesses.
+  🟡 **Deferred:** web auth `localStorage` → httpOnly cookie + CSRF is a cross-cutting web+api change;
+  scheduled as its own tested workstream.
+- **Exit:** ✅ restore drill scripted + repeatable; one-command reproducible build (compose/Docker);
+  prod boot blocked without secrets (verified); change/deploy gates in repo; `main` ruleset ready to
+  import. Verified: `pnpm -r typecheck` + API build clean; `e2e`/`compliance`/`worldclass` harnesses green.
 
 ### Phase B — Close the POS standard gaps customers hit · ~6–8 weeks
 *Goal: the floor experience matches Square/Toast on the things staff feel hourly.*
@@ -242,3 +258,4 @@ and DB-enforced isolation; deepen MRP/HR/portals where the target market demands
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-23 | Platform / Controller | Initial next-upgrade roadmap; benchmarks as-built system vs global POS/ERP; supersedes the "missing GL/payments/RLS" premise of `09-worldclass-roadmap.md` and `pos-worldclass-roadmap.md`, which are now substantially delivered. |
+| 0.2 | 2026-06-23 | Platform | **Phase A delivered** (production hardening): Docker/compose, scripted restore + automated restore-drill, fail-closed secret validation, `/healthz`+`/readyz`, observability/incident + change-management + secrets + deployment runbooks, CODEOWNERS + PR template + approval-gated deploy + branch-protection ruleset, prod DB least-privilege SQL. Marked `[setup]` items (console actions) + deferred httpOnly-cookie workstream. |

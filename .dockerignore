@@ -1,0 +1,20 @@
+# Keep build context small + reproducible. Source is copied explicitly in the Dockerfiles;
+# never ship local installs, build output, secrets, or VCS metadata into an image.
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+**/playwright-report
+**/test-results
+.git
+.github
+.env
+.env.*
+!.env.example
+*.log
+legacy_inventory
+docs
+**/*.md
+!apps/api/README.md
+!apps/web/README.md

@@ -1,0 +1,54 @@
+# Local production-like stack: Postgres + API + Web. Mirrors the Railway topology so the same
+# images/config can be exercised before deploy. NOT for production hosting (use Railway / a managed
+# Postgres for that — see docs/ops/deployment.md). Bring up with:  docker compose up --build
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ierp
+      POSTGRES_PASSWORD: ierp_local_pw
+      POSTGRES_DB: invisible_erp_v2
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ierp -d invisible_erp_v2"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ierp:ierp_local_pw@db:5432/invisible_erp_v2
+      JWT_SECRET: local-compose-jwt-secret-change-me
+      APP_ENC_KEY: local-compose-enc-key-change-me
+      PSP_WEBHOOK_SECRET: local-compose-psp-secret
+      CORS_ORIGINS: http://localhost:3000
+      PORT: "8000"
+      RUN_MIGRATIONS: "1" # entrypoint applies drizzle migrations before boot (single-node local only)
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    environment:
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
