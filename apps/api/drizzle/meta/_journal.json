@@ -540,6 +540,13 @@
       "when": 1782390000000,
       "tag": "0076_payments_depth",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1782400000000,
+      "tag": "0077_tenant_locale",
+      "breakpoints": true
     }
   ]
 }

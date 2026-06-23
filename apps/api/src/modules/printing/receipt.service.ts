@@ -7,10 +7,28 @@ const n = (x: any) => Number(x) || 0;
 const baht = (x: any) => n(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+export type ReceiptLang = 'th' | 'en' | 'both';
+
+// Receipt label dictionary. `both` renders "TH / EN" so a bilingual slip is one toggle away.
+const L = {
+  th: { subtotal: 'ยอดรวม', discount: 'ส่วนลด', vat: 'ภาษีมูลค่าเพิ่ม', total: 'รวมสุทธิ', tip: 'ทิป', paidBy: 'ชำระโดย', copy: 'สำเนา', taxInv: 'ใบกำกับภาษีอย่างย่อ', taxId: 'เลขประจำตัวผู้เสียภาษี', no: 'เลขที่', thanks: 'ขอบคุณที่ใช้บริการ', print: 'พิมพ์', receipt: 'ใบเสร็จรับเงิน' },
+  en: { subtotal: 'Subtotal', discount: 'Discount', vat: 'VAT', total: 'Total', tip: 'Tip', paidBy: 'Paid by', copy: 'COPY', taxInv: 'Abbreviated tax invoice', taxId: 'Tax ID', no: 'No.', thanks: 'Thank you', print: 'Print', receipt: 'Receipt' },
+} as const;
+
+// Resolve labels for a language; `both` joins TH / EN.
+function labels(lang: ReceiptLang) {
+  if (lang === 'th') return L.th;
+  if (lang === 'en') return L.en;
+  const both: Record<string, string> = {};
+  for (const k of Object.keys(L.th) as (keyof typeof L.th)[]) both[k] = `${L.th[k]} / ${L.en[k]}`;
+  return both as typeof L.th;
+}
+
 export type ReceiptData = {
   sale_no: string;
   date: string | null;
   is_copy: boolean;
+  lang: ReceiptLang;
   seller: { name: string; legal_name?: string | null; branch_label?: string | null; tax_id?: string | null; address?: string | null; vat_registered: boolean };
   items: { description: string; qty: number; unit_price: number; amount: number }[];
   subtotal: number;
@@ -30,7 +48,7 @@ export type ReceiptData = {
 export class ReceiptService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
-  async loadData(saleNo: string, opts?: { isCopy?: boolean; taxInvoiceNo?: string | null }): Promise<ReceiptData> {
+  async loadData(saleNo: string, opts?: { isCopy?: boolean; taxInvoiceNo?: string | null; lang?: ReceiptLang }): Promise<ReceiptData> {
     const db = this.db as any;
     const [sale] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
     if (!sale) throw new NotFoundException({ code: 'SALE_NOT_FOUND', message: 'Sale not found', messageTh: 'ไม่พบรายการขาย' });
@@ -38,10 +56,13 @@ export class ReceiptService {
     let seller: any = null;
     if (sale.tenantId != null) [seller] = await db.select().from(tenants).where(eq(tenants.id, Number(sale.tenantId))).limit(1);
     const addr = seller ? [seller.addressLine1, seller.addressLine2, seller.subDistrict, seller.district, seller.province, seller.postalCode].filter(Boolean).join(' ') : '';
+    // language: explicit override > tenant default > th
+    const lang: ReceiptLang = opts?.lang ?? ((seller?.defaultLanguage === 'en' ? 'en' : 'th'));
     return {
       sale_no: sale.saleNo,
       date: sale.saleDate ?? null,
       is_copy: !!opts?.isCopy,
+      lang,
       seller: {
         name: seller?.name ?? 'ร้านค้า',
         legal_name: seller?.legalName ?? null,
@@ -72,12 +93,14 @@ export class ReceiptService {
   }
 
   html(d: ReceiptData): string {
+    const t = labels(d.lang);
+    const htmlLang = d.lang === 'en' ? 'en' : 'th';
     const rows = d.items.map((l) => `<tr><td>${esc(l.description)}</td><td class="q">${l.qty}</td><td class="m">${baht(l.amount)}</td></tr>`).join('');
-    const copy = d.is_copy ? '<div class="copy">สำเนา / COPY</div>' : '';
-    const vatLine = d.seller.vat_registered ? `<tr><td colspan="2">ภาษีมูลค่าเพิ่ม VAT</td><td class="m">${baht(d.vat)}</td></tr>` : '';
-    const tipLine = d.tip > 0 ? `<tr><td colspan="2">ทิป Tip</td><td class="m">${baht(d.tip)}</td></tr>` : '';
-    const inv = d.tax_invoice_no ? `<div class="muted">ใบกำกับภาษีอย่างย่อ ${esc(d.tax_invoice_no)}</div>` : '';
-    return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบเสร็จ ${esc(d.sale_no)}</title>
+    const copy = d.is_copy ? `<div class="copy">${esc(t.copy)}</div>` : '';
+    const vatLine = d.seller.vat_registered ? `<tr><td colspan="2">${esc(t.vat)}</td><td class="m">${baht(d.vat)}</td></tr>` : '';
+    const tipLine = d.tip > 0 ? `<tr><td colspan="2">${esc(t.tip)}</td><td class="m">${baht(d.tip)}</td></tr>` : '';
+    const inv = d.tax_invoice_no ? `<div class="muted">${esc(t.taxInv)} ${esc(d.tax_invoice_no)}</div>` : '';
+    return `<!doctype html><html lang="${htmlLang}"><head><meta charset="utf-8"><title>${esc(t.receipt)} ${esc(d.sale_no)}</title>
 <style>@page{size:80mm auto;margin:4mm}body{font-family:'TH Sarabun New',Tahoma,monospace;width:72mm;margin:0 auto;font-size:13px;color:#000}
 h1{font-size:16px;text-align:center;margin:0}.muted{color:#444;font-size:11px;text-align:center}.copy{text-align:center;font-weight:bold;border:1px dashed #000;margin:4px 0;padding:2px}
 table{width:100%;border-collapse:collapse;margin-top:6px}td{padding:1px 0;vertical-align:top}.q{text-align:center;width:24px}.m{text-align:right;width:64px}
@@ -86,25 +109,26 @@ table{width:100%;border-collapse:collapse;margin-top:6px}td{padding:1px 0;vertic
 <h1>${esc(d.seller.legal_name || d.seller.name)}</h1>
 ${d.seller.branch_label ? `<div class="muted">${esc(d.seller.branch_label)}</div>` : ''}
 ${d.seller.address ? `<div class="muted">${esc(d.seller.address)}</div>` : ''}
-${d.seller.tax_id ? `<div class="muted">เลขประจำตัวผู้เสียภาษี ${esc(d.seller.tax_id)}</div>` : ''}
+${d.seller.tax_id ? `<div class="muted">${esc(t.taxId)} ${esc(d.seller.tax_id)}</div>` : ''}
 ${copy}
-<div class="muted">เลขที่ ${esc(d.sale_no)} · ${esc(d.date ?? '')}</div>${inv}
+<div class="muted">${esc(t.no)} ${esc(d.sale_no)} · ${esc(d.date ?? '')}</div>${inv}
 <table><tbody>${rows}</tbody></table>
 <table class="sep"><tbody>
-<tr><td colspan="2">ยอดรวม Subtotal</td><td class="m">${baht(d.subtotal)}</td></tr>
-${d.discount > 0 ? `<tr><td colspan="2">ส่วนลด Discount</td><td class="m">-${baht(d.discount)}</td></tr>` : ''}
+<tr><td colspan="2">${esc(t.subtotal)}</td><td class="m">${baht(d.subtotal)}</td></tr>
+${d.discount > 0 ? `<tr><td colspan="2">${esc(t.discount)}</td><td class="m">-${baht(d.discount)}</td></tr>` : ''}
 ${vatLine}
-<tr class="tot"><td colspan="2">รวมสุทธิ Total</td><td class="m">${baht(d.total)}</td></tr>
+<tr class="tot"><td colspan="2">${esc(t.total)}</td><td class="m">${baht(d.total)}</td></tr>
 ${tipLine}
-<tr><td colspan="2">ชำระโดย ${esc(d.payment_method)}</td><td class="m"></td></tr>
+<tr><td colspan="2">${esc(t.paidBy)} ${esc(d.payment_method)}</td><td class="m"></td></tr>
 </tbody></table>
-<button onclick="window.print()">พิมพ์ / Print</button>
-<div class="foot">ขอบคุณที่ใช้บริการ · Thank you</div>
+<button onclick="window.print()">${esc(t.print)}</button>
+<div class="foot">${esc(t.thanks)}</div>
 </body></html>`;
   }
 
   // Minimal ESC/POS: init, centered header, left body, right-aligned totals, feed + full cut.
   escpos(d: ReceiptData): string {
+    const t = labels(d.lang);
     const ESC = '\x1b', GS = '\x1d';
     const init = ESC + '@';
     const center = ESC + 'a' + '\x01', left = ESC + 'a' + '\x00';
@@ -115,21 +139,21 @@ ${tipLine}
     let s = init + center + boldOn + (d.seller.legal_name || d.seller.name) + '\n' + boldOff;
     if (d.seller.branch_label) s += d.seller.branch_label + '\n';
     if (d.seller.address) s += d.seller.address + '\n';
-    if (d.seller.tax_id) s += 'TAX ID ' + d.seller.tax_id + '\n';
-    if (d.is_copy) s += boldOn + '*** สำเนา / COPY ***\n' + boldOff;
+    if (d.seller.tax_id) s += t.taxId + ' ' + d.seller.tax_id + '\n';
+    if (d.is_copy) s += boldOn + `*** ${t.copy} ***\n` + boldOff;
     s += left + '-'.repeat(W) + '\n';
     s += d.sale_no + '  ' + (d.date ?? '') + '\n';
-    if (d.tax_invoice_no) s += 'TAX INV ' + d.tax_invoice_no + '\n';
+    if (d.tax_invoice_no) s += t.taxInv + ' ' + d.tax_invoice_no + '\n';
     s += '-'.repeat(W) + '\n';
     for (const l of d.items) s += row(`${l.qty}x ${l.description}`.slice(0, W - 10), baht(l.amount));
     s += '-'.repeat(W) + '\n';
-    s += row('Subtotal', baht(d.subtotal));
-    if (d.discount > 0) s += row('Discount', '-' + baht(d.discount));
-    if (d.seller.vat_registered) s += row('VAT', baht(d.vat));
-    s += boldOn + row('TOTAL', baht(d.total)) + boldOff;
-    if (d.tip > 0) s += row('Tip', baht(d.tip));
-    s += row('Paid by', d.payment_method);
-    s += '\n' + center + 'ขอบคุณ / Thank you\n\n\n' + cut;
+    s += row(t.subtotal, baht(d.subtotal));
+    if (d.discount > 0) s += row(t.discount, '-' + baht(d.discount));
+    if (d.seller.vat_registered) s += row(t.vat, baht(d.vat));
+    s += boldOn + row(t.total, baht(d.total)) + boldOff;
+    if (d.tip > 0) s += row(t.tip, baht(d.tip));
+    s += row(t.paidBy, d.payment_method);
+    s += '\n' + center + t.thanks + '\n\n\n' + cut;
     return s;
   }
 }

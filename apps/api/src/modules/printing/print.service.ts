@@ -6,7 +6,7 @@ import type { JwtUser } from '../../common/decorators';
 import { ReceiptService } from './receipt.service';
 import { MessagingService } from '../messaging/messaging.service';
 
-type EnqueueDto = { job_type: 'receipt' | 'kitchen' | 'drawer'; sale_no?: string; order_no?: string; station?: string; format?: 'escpos' | 'html'; printer_id?: string; payload?: string };
+type EnqueueDto = { job_type: 'receipt' | 'kitchen' | 'drawer'; sale_no?: string; order_no?: string; station?: string; format?: 'escpos' | 'html'; printer_id?: string; payload?: string; lang?: 'th' | 'en' | 'both' };
 
 // Print-job queue: receipts (and kitchen tickets) are rendered server-side and queued; a CloudPRNT printer
 // or local agent pulls the next job for its tenant (and optional printer id), prints it, then acks. Also
@@ -21,14 +21,14 @@ export class PrintService {
 
   // Enqueue a job. For a receipt with no explicit payload, render it from the sale now (so the queued bytes
   // are a stable snapshot). A second+ receipt job for the same sale is flagged as a COPY (สำเนา).
-  async enqueue(dto: EnqueueDto, user: JwtUser, opts?: { taxInvoiceNo?: string | null }) {
+  async enqueue(dto: EnqueueDto, user: JwtUser, opts?: { taxInvoiceNo?: string | null; lang?: 'th' | 'en' | 'both' }) {
     const db = this.db as any;
     const format = dto.format ?? 'escpos';
     let payload = dto.payload ?? '';
     if (dto.job_type === 'receipt') {
       if (!dto.sale_no) throw new BadRequestException({ code: 'NO_SALE_NO', message: 'sale_no required', messageTh: 'ต้องระบุเลขที่ขาย' });
       const prior = await db.select({ id: printJobs.id }).from(printJobs).where(and(eq(printJobs.saleNo, dto.sale_no), eq(printJobs.jobType, 'receipt'))).limit(1);
-      const d = await this.receipts.loadData(dto.sale_no, { isCopy: prior.length > 0, taxInvoiceNo: opts?.taxInvoiceNo });
+      const d = await this.receipts.loadData(dto.sale_no, { isCopy: prior.length > 0, taxInvoiceNo: opts?.taxInvoiceNo, lang: dto.lang ?? opts?.lang });
       payload = format === 'html' ? this.receipts.html(d) : this.receipts.escpos(d);
     }
     if (!payload) throw new BadRequestException({ code: 'NO_PAYLOAD', message: 'payload required', messageTh: 'ไม่มีเนื้อหาสำหรับพิมพ์' });
@@ -73,8 +73,8 @@ export class PrintService {
   }
 
   // Reprint a receipt → enqueues a fresh job; flagged as a COPY because the original already exists.
-  async reprint(saleNo: string, user: JwtUser, format?: 'escpos' | 'html') {
-    return this.enqueue({ job_type: 'receipt', sale_no: saleNo, format }, user);
+  async reprint(saleNo: string, user: JwtUser, format?: 'escpos' | 'html', lang?: 'th' | 'en' | 'both') {
+    return this.enqueue({ job_type: 'receipt', sale_no: saleNo, format, lang }, user);
   }
 
   // Deliver a receipt out-of-band (email / LINE / SMS) via the messaging gateway. Text receipt only.
@@ -94,9 +94,9 @@ export class PrintService {
   }
 
   // Receipt previews (no queue) — used by the web printable page and the tie-out control.
-  async preview(saleNo: string, format: 'html' | 'data', user: JwtUser) {
+  async preview(saleNo: string, format: 'html' | 'data', user: JwtUser, lang?: 'th' | 'en' | 'both') {
     const prior = await (this.db as any).select({ id: printJobs.id }).from(printJobs).where(and(eq(printJobs.saleNo, saleNo), eq(printJobs.jobType, 'receipt'))).limit(1);
-    const d = await this.receipts.loadData(saleNo, { isCopy: prior.length > 0 });
+    const d = await this.receipts.loadData(saleNo, { isCopy: prior.length > 0, lang });
     return format === 'html' ? { html: this.receipts.html(d) } : { data: d, tie_out: this.receipts.tieOut(d) };
   }
 

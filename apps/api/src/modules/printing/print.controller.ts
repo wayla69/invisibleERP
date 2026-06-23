@@ -25,11 +25,11 @@ export class PrintController {
   @Get('jobs') list(@Query('status') s: string | undefined, @Query('limit') l: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.list(u, s || undefined, l ? +l : 50); }
 
   // receipts
-  @Post('reprint/:saleNo') reprint(@Param('saleNo') s: string, @Query('format') f: 'escpos' | 'html' | undefined, @CurrentUser() u: JwtUser) { return this.svc.reprint(s, u, f); }
+  @Post('reprint/:saleNo') reprint(@Param('saleNo') s: string, @Query('format') f: 'escpos' | 'html' | undefined, @Query('lang') lang: 'th' | 'en' | 'both' | undefined, @CurrentUser() u: JwtUser) { return this.svc.reprint(s, u, f, lang); }
   @Post('receipt/:saleNo/send') send(@Param('saleNo') s: string, @Body(new ZodValidationPipe(SendBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.sendReceipt(s, b.channel, b.to, u); }
-  @Get('receipt/:saleNo/data') data(@Param('saleNo') s: string, @CurrentUser() u: JwtUser) { return this.svc.preview(s, 'data', u); }
+  @Get('receipt/:saleNo/data') data(@Param('saleNo') s: string, @Query('lang') lang: 'th' | 'en' | 'both' | undefined, @CurrentUser() u: JwtUser) { return this.svc.preview(s, 'data', u, lang); }
   @Get('receipt/:saleNo') @Header('Content-Type', 'text/html; charset=utf-8')
-  async receipt(@Param('saleNo') s: string, @CurrentUser() u: JwtUser) { return (await this.svc.preview(s, 'html', u)).html; }
+  async receipt(@Param('saleNo') s: string, @Query('lang') lang: 'th' | 'en' | 'both' | undefined, @CurrentUser() u: JwtUser) { return (await this.svc.preview(s, 'html', u, lang)).html; }
 
   // REST-10 control: receipt ↔ fiscal sale tie-out
   @Get('tie-out/:saleNo') tieOut(@Param('saleNo') s: string, @CurrentUser() u: JwtUser) { return this.svc.tieOut(s, u); }

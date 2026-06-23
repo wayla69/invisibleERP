@@ -29,6 +29,7 @@ const ProfileBody = z.object({
   postal_code: z.string().optional(),
   // PromptPay merchant id — mobile (0xxxxxxxxx) or 13-digit national/tax id; '' clears it.
   promptpay_id: z.string().refine((v) => v === '' || isValidPromptPayTarget(v), 'invalid PromptPay id').optional(),
+  default_language: z.enum(['th', 'en']).optional(), // customer-facing output language
 });
 type ProfileBody = z.infer<typeof ProfileBody>;
 
@@ -58,6 +59,7 @@ export class TenantController {
       vat_registered: 'vatRegistered', tax_country: 'taxCountry', phone: 'phone', email: 'email',
       address_line1: 'addressLine1', address_line2: 'addressLine2', sub_district: 'subDistrict',
       district: 'district', province: 'province', postal_code: 'postalCode', promptpay_id: 'promptpayId',
+      default_language: 'defaultLanguage',
     };
     for (const [k, col] of Object.entries(map)) if (b[k as keyof ProfileBody] !== undefined) patch[col] = b[k as keyof ProfileBody];
     if (b.vat_rate !== undefined) patch.vatRate = String(b.vat_rate);
@@ -79,6 +81,7 @@ export class TenantController {
       address_line1: t.addressLine1, address_line2: t.addressLine2, sub_district: t.subDistrict,
       district: t.district, province: t.province, postal_code: t.postalCode,
       promptpay_id: t.promptpayId ?? null,
+      default_language: t.defaultLanguage ?? 'th',
       setup_complete: setupComplete,
     };
   }
