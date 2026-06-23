@@ -102,6 +102,9 @@ export type UpdateTableDto = z.infer<typeof UpdateTableBody>;
 
 export const TableStatusBody = z.object({ status: z.enum(['available', 'reserved', 'occupied', 'bill_requested', 'paying', 'cleaning', 'out_of_service']) });
 
+// move a live tab to another (free) table
+export const MoveTableBody = z.object({ to_table_id: z.number().int().positive() });
+
 export const ZoneBody = z.object({ name: z.string().min(1), sort_order: z.number().int().optional() });
 
 export const StationBody = z.object({ code: z.string().min(1), name: z.string().min(1), sort: z.number().int().optional(), default_prep_minutes: z.number().int().positive().optional() });

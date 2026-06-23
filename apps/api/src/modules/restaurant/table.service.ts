@@ -94,6 +94,28 @@ export class TableService {
     return { session_id: Number(s.id), session_no: sessionNo, public_token: publicToken, table_no: t.tableNo, qr_token: t.qrToken, reused: false };
   }
 
+  // Move a live tab to another (free) table: reassign the session + its open orders, then update both
+  // tables' status. Moving onto an occupied table is a merge (separate flow) and is rejected here.
+  async moveSession(fromTableId: number, toTableId: number, _user: JwtUser) {
+    const db = this.db as any;
+    if (fromTableId === toTableId) throw new BadRequestException({ code: 'SAME_TABLE', message: 'Source and target are the same table', messageTh: 'โต๊ะต้นทางและปลายทางเป็นโต๊ะเดียวกัน' });
+    const [from] = await db.select().from(diningTables).where(eq(diningTables.id, fromTableId)).limit(1);
+    if (!from) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Source table not found', messageTh: 'ไม่พบโต๊ะต้นทาง' });
+    const [to] = await db.select().from(diningTables).where(eq(diningTables.id, toTableId)).limit(1);
+    if (!to || !to.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Target table not found', messageTh: 'ไม่พบโต๊ะปลายทาง' });
+    const [sess] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, fromTableId), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    if (!sess) throw new BadRequestException({ code: 'NO_SESSION', message: 'No live session on the source table', messageTh: 'โต๊ะต้นทางไม่มีลูกค้า' });
+    // target must be free — moving onto a table that already has a live session would be a merge
+    const [busy] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, toTableId), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    if (busy) throw new BadRequestException({ code: 'TABLE_BUSY', message: 'Target table is occupied (use merge instead)', messageTh: 'โต๊ะปลายทางมีลูกค้าอยู่ (ใช้การรวมโต๊ะ)' });
+    const now = new Date();
+    await db.update(tableSessions).set({ tableId: toTableId }).where(eq(tableSessions.id, sess.id));
+    await db.update(dineInOrders).set({ tableId: toTableId }).where(and(eq(dineInOrders.sessionId, Number(sess.id)), ne(dineInOrders.status, 'closed'), ne(dineInOrders.status, 'cancelled')));
+    await db.update(diningTables).set({ status: 'occupied', updatedAt: now }).where(eq(diningTables.id, toTableId));
+    await db.update(diningTables).set({ status: 'available', updatedAt: now }).where(eq(diningTables.id, fromTableId));
+    return { from_table_no: from.tableNo, to_table_no: to.tableNo, session_no: sess.sessionNo };
+  }
+
   // Printable diner QR for a table — encodes the STABLE landing URL (…/qr/start/:qrToken). Scanning it
   // opens/joins the table session and drops the guest on the order page. `base` = the web origin
   // (passed by the admin UI as window.location.origin), else WEB_PUBLIC_URL, else a relative path.

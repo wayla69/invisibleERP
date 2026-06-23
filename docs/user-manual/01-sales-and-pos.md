@@ -119,6 +119,11 @@ Staff can also start a buffet for guests from the floor: on the **โต๊ะ**
 pick **เริ่มบุฟเฟต์**, choose the tier and number of diners, and confirm — the
 per-head charge and time window start just as with QR self-start.
 
+**Moving a table.** If guests change seats, open the table and tap **ย้ายโต๊ะ**,
+pick a free table, and confirm — the whole tab (order + bill) moves across, the
+old table is freed and the new one becomes occupied. Moving onto a table that
+already has guests isn't allowed (that's a *merge* — coming separately).
+
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).

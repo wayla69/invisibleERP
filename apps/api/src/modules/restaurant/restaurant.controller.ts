@@ -9,7 +9,7 @@ import { ChannelOrderService } from './channel-order.service';
 import { BuffetService } from './buffet.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
-  TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody,
+  TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody,
   type CreateOrderDto, type AddItemsDto, type KdsActionDto, type CheckoutDto, type CreateTableDto, type UpdateTableDto,
   type BuffetPackageDto, type BuffetPackageUpdateDto, type StartBuffetDto,
 } from './dto';
@@ -43,6 +43,7 @@ export class RestaurantController {
   @Post('tables/:id/open') openTable(@Param('id') id: string, @Body(new ZodValidationPipe(OpenTableBody)) b: { party_size?: number }, @CurrentUser() u: JwtUser) { return this.tables.openTable(+id, b.party_size, u.username, u); }
   @Get('tables/:id/qr') tableQr(@Param('id') id: string, @Query('base') base: string | undefined, @CurrentUser() u: JwtUser) { return this.tables.qrSticker(+id, base, u); }
   @Post('tables/:id/buffet') startBuffet(@Param('id') id: string, @Body(new ZodValidationPipe(StartBuffetBody)) b: StartBuffetDto, @CurrentUser() u: JwtUser) { return this.buffet.startBuffetForTable(+id, b.package_id, b.pax ?? 1, u); }
+  @Post('tables/:id/move') moveTable(@Param('id') id: string, @Body(new ZodValidationPipe(MoveTableBody)) b: { to_table_id: number }, @CurrentUser() u: JwtUser) { return this.tables.moveSession(+id, b.to_table_id, u); }
 
   // ── dine-in orders ──
   @Post('orders') createOrder(@Body(new ZodValidationPipe(CreateOrderBody)) b: CreateOrderDto, @CurrentUser() u: JwtUser) { return this.dineIn.createOrder(b, u); }

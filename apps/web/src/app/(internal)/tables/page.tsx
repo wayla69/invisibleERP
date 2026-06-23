@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Armchair, Flame, Plus, QrCode, Receipt, Sparkles, Utensils, Wallet, X } from 'lucide-react';
+import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Utensils, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
 import { cn } from '@/lib/utils';
@@ -160,6 +160,10 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
   const printQr = useMutation({ mutationFn: () => api<{ url: string; qr_image: string }>(`/api/restaurant/tables/${t.id}/qr?base=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin : '')}`), onSuccess: setSticker, onError: onErr });
   const tiers = useQuery<{ packages: { id: number; name: string; price_per_pax: number }[] }>({ queryKey: ['buffet-packages'], queryFn: () => api('/api/restaurant/buffet/packages'), enabled: buffetOpen });
   const startBuffet = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/buffet`, { method: 'POST', body: JSON.stringify({ package_id: Number(bPkg), pax: Number(bPax) || 1 }) }), onSuccess: () => { setMsg('เริ่มบุฟเฟต์แล้ว'); setBuffetOpen(false); onChange(); }, onError: onErr });
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveTo, setMoveTo] = useState('');
+  const allTables = useQuery<{ tables: { id: number; table_no: string; status: string }[] }>({ queryKey: ['tables-list'], queryFn: () => api('/api/restaurant/tables'), enabled: moveOpen });
+  const move = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/move`, { method: 'POST', body: JSON.stringify({ to_table_id: Number(moveTo) }) }), onSuccess: () => { setMsg('ย้ายโต๊ะแล้ว'); setMoveOpen(false); onClose(); onChange(); }, onError: onErr });
   const open = useMutation({ mutationFn: () => api<{ session_id: number; public_token: string }>(`/api/restaurant/tables/${t.id}/open`, { method: 'POST', body: '{}' }), onSuccess: (r) => { setSessionId(r.session_id); setQr(`/qr/${r.public_token}`); setMsg('เปิดโต๊ะแล้ว'); onChange(); }, onError: onErr });
   const addItem = useMutation({
     mutationFn: async () => {
@@ -217,6 +221,23 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
               </Select>
               <Input className="w-[90px]" type="number" min={1} step={1} placeholder="จำนวนคน" value={bPax} onChange={(e) => setBPax(e.target.value)} />
               <Button disabled={!bPkg || startBuffet.isPending} onClick={() => startBuffet.mutate()}>เริ่ม</Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(t.session || sessionId) && t.status !== 'cleaning' && (
+        <div>
+          <Button variant="outline" size="sm" onClick={() => setMoveOpen((v) => !v)}><ArrowLeftRight className="size-4" /> ย้ายโต๊ะ</Button>
+          {moveOpen && (
+            <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border p-3">
+              <Select value={moveTo} onValueChange={setMoveTo}>
+                <SelectTrigger className="w-[200px]"><SelectValue placeholder="ย้ายไปโต๊ะว่าง…" /></SelectTrigger>
+                <SelectContent>
+                  {(allTables.data?.tables ?? []).filter((x) => x.id !== t.id && x.status === 'available').map((x) => <SelectItem key={x.id} value={String(x.id)}>โต๊ะ {x.table_no}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button disabled={!moveTo || move.isPending} onClick={() => move.mutate()}>ย้าย</Button>
             </div>
           )}
         </div>

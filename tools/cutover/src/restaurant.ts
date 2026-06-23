@@ -255,6 +255,22 @@ async function main() {
   for (let i = 0; i < 16; i++) { const r = await inj('POST', `/api/qr/t/${openRl.json.public_token}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] }); if (r.status === 429) limited = true; else if (r.status < 300) okCount++; }
   ok('Anti-abuse: diner order endpoint throttled per session (429 after burst)', limited && okCount <= 15, `ok=${okCount} limited=${limited}`);
 
+  // ── table operations: move a live tab to another table ──
+  const mvFrom = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A10', seats: 2 });
+  const mvOpen = await inj('POST', `/api/restaurant/tables/${mvFrom.json.id}/open`, sales1, {});
+  const mvOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: mvFrom.json.id, session_id: mvOpen.json.session_id, items: [{ name: 'น้ำส้ม', qty: 1, unit_price: 40, station_code: 'drinks' }] });
+  const mvTo = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A11', seats: 4 });
+  const moved = await inj('POST', `/api/restaurant/tables/${mvFrom.json.id}/move`, sales1, { to_table_id: mvTo.json.id });
+  ok('Table move: relocates the live tab to a free table', (moved.status === 200 || moved.status === 201) && moved.json.to_table_no === 'A11' && moved.json.session_no === mvOpen.json.session_no, `${moved.status} ${JSON.stringify(moved.json).slice(0, 80)}`);
+  const mvBoard = await inj('GET', '/api/restaurant/tables/status', sales1);
+  const a11 = (mvBoard.json.tables ?? []).find((t: any) => t.table_no === 'A11');
+  const a10 = (mvBoard.json.tables ?? []).find((t: any) => t.table_no === 'A10');
+  ok('Table move: target occupied + carries the order; source freed', a11?.status === 'occupied' && a11?.order?.order_no === mvOrd.json.order_no && a10?.status === 'available', `to=${a11?.status}/${a11?.order?.order_no} from=${a10?.status}`);
+  const occ = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A12', seats: 2 });
+  await inj('POST', `/api/restaurant/tables/${occ.json.id}/open`, sales1, {});
+  const moveBusy = await inj('POST', `/api/restaurant/tables/${mvTo.json.id}/move`, sales1, { to_table_id: occ.json.id });
+  ok('Table move: onto an occupied table rejected (400 TABLE_BUSY)', moveBusy.status === 400 && moveBusy.json.error?.code === 'TABLE_BUSY', `${moveBusy.status} ${moveBusy.json.error?.code}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);
