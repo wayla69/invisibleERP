@@ -30,6 +30,7 @@ export const arReceipts = pgTable('ar_receipts', {
   method: text('method').default('Transfer'),
   refNo: text('ref_no'),
   remarks: text('remarks'),
+  idempotencyKey: text('idempotency_key'), // client retry key — dedups a receipt per (tenant, key)
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }),
 });
@@ -52,6 +53,7 @@ export const apTransactions = pgTable('ap_transactions', {
   currency: text('currency').default('THB'),
   status: invoiceStatusEnum('status').default('Unpaid'),
   remarks: text('remarks'),
+  idempotencyKey: text('idempotency_key'), // client retry key — dedups a bill per (tenant, key)
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }),
 });

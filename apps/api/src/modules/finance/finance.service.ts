@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { sql, eq, ne, and, gte, lt, asc, inArray, notInArray } from 'drizzle-orm';
+import { sql, eq, ne, and, gte, lt, asc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, apTransactions, arInvoices, arReceipts, orders, orderLines, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -10,8 +10,8 @@ import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { ymd, monthStart, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
-export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string }
-export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero' }
+export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
+export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; idempotency_key?: string }
 
 @Injectable()
 export class FinanceService {
@@ -160,18 +160,24 @@ export class FinanceService {
     const db = this.db as any;
     const [inv] = await db.select().from(arInvoices).where(eq(arInvoices.invoiceNo, dto.invoice_no)).limit(1);
     if (!inv) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Invoice not found', messageTh: 'ไม่พบใบแจ้งหนี้' });
+    // Idempotency: a retried request carrying the same key returns the original receipt instead of
+    // minting a new one + re-posting cash + re-incrementing paidAmount (double-collection).
+    if (dto.idempotency_key) {
+      const [ex] = await db.select().from(arReceipts).where(and(eq(arReceipts.invoiceNo, dto.invoice_no), eq(arReceipts.idempotencyKey, dto.idempotency_key))).limit(1);
+      if (ex) { const [cur] = await db.select().from(arInvoices).where(eq(arInvoices.id, inv.id)).limit(1); return { receipt_no: ex.receiptNo, invoice_no: dto.invoice_no, paid_amount: n(cur?.paidAmount), status: cur?.status, idempotent: true }; }
+    }
     const receiptNo = await this.docNo.nextDaily('RCP');
     const newPaid = n(inv.paidAmount) + n(dto.amount);
     const status = newPaid >= n(inv.amount) ? 'Paid' : 'Partial';
     await db.transaction(async (tx: any) => {
       await tx.insert(arReceipts).values({
         receiptNo, receiptDate: ymd(), tenantId: inv.tenantId, invoiceNo: dto.invoice_no, amount: String(n(dto.amount)),
-        method: dto.method ?? 'Transfer', refNo: dto.ref_no ?? null, remarks: dto.remarks ?? null, createdBy: user.username,
+        method: dto.method ?? 'Transfer', refNo: dto.ref_no ?? null, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
       });
       await tx.update(arInvoices).set({ paidAmount: String(newPaid), status }).where(eq(arInvoices.id, inv.id));
     });
-    // GL: collect cash against the receivable (Dr 1000 Cash / Cr 1100 AR)
-    if (this.ledger && n(dto.amount) > 0) {
+    // GL: collect cash against the receivable (Dr 1000 Cash / Cr 1100 AR). Guarded so a same-receipt re-run posts once.
+    if (this.ledger && n(dto.amount) > 0 && !(await this.ledger.alreadyPosted('RCP', receiptNo, inv.tenantId ?? null))) {
       await this.ledger.postEntry({
         date: ymd(), source: 'RCP', sourceRef: receiptNo, tenantId: inv.tenantId ?? null,
         memo: `Receipt ${receiptNo} for ${dto.invoice_no}`, createdBy: user.username,
@@ -185,6 +191,13 @@ export class FinanceService {
   // POST /api/finance/ap/transactions — AP-
   async createApTxn(dto: ApTxnDto, user: JwtUser) {
     const db = this.db as any;
+    const tenantId = user.tenantId ?? null; // input VAT is per shop (ภ.พ.30) → tenant-scoped like output VAT
+    // Idempotency: a retried request with the same key returns the original bill (no duplicate payable/expense).
+    if (dto.idempotency_key) {
+      const tenantPred = tenantId != null ? eq(apTransactions.tenantId, tenantId) : isNull(apTransactions.tenantId);
+      const [ex] = await db.select().from(apTransactions).where(and(tenantPred, eq(apTransactions.idempotencyKey, dto.idempotency_key))).limit(1);
+      if (ex) return { txn_no: ex.txnNo, status: ex.status, idempotent: true };
+    }
     const txnNo = await this.docNo.nextDaily('AP');
     const paid = n(dto.paid_amount);
     const status = paid >= n(dto.amount) ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid';
@@ -192,11 +205,10 @@ export class FinanceService {
     // input VAT — exempt/zero-rated/non-VAT bills carry NO input VAT (else ภ.พ.30 overstates the credit).
     const treatment = dto.vat_treatment ?? 'standard';
     const { net, vat } = treatment === 'standard' ? this.vatSplit(apGross) : { net: apGross, vat: 0 };
-    const tenantId = user.tenantId ?? null; // input VAT is per shop (ภ.พ.30) → tenant-scoped like output VAT
     await db.insert(apTransactions).values({
       txnNo, tenantId, vendorId: dto.vendor_id ?? null, vendorName: dto.vendor_name ?? null, txnType: dto.txn_type ?? 'Invoice',
       invoiceNo: dto.invoice_no ?? null, invoiceDate: dto.invoice_date ?? null, dueDate: dto.due_date ?? null,
-      amount: String(apGross), vatAmount: fx(vat, 2), paidAmount: String(paid), status, remarks: dto.remarks ?? null, createdBy: user.username,
+      amount: String(apGross), vatAmount: fx(vat, 2), paidAmount: String(paid), status, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
     });
     // GL: record expense + input VAT + payable (Dr 5100/1200 net / Dr 2100 vat / Cr 2000 gross). Zero VAT leg auto-drops.
     if (this.ledger && apGross > 0) {
@@ -212,20 +224,25 @@ export class FinanceService {
   }
 
   // PATCH /api/finance/ap/transactions/{no}/pay
-  async payAp(txnNo: string, amount: number, user: JwtUser) {
+  async payAp(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string) {
     const db = this.db as any;
     const [t] = await db.select().from(apTransactions).where(eq(apTransactions.txnNo, txnNo)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
     // Phase 16 — 3-way match gate: a PO-based invoice must pass match (or be overridden) before payment.
     if (this.matchSvc) await this.matchSvc.assertPayable(txnNo);
+    const apTenant = t.tenantId ?? user.tenantId ?? null;
+    // Idempotency key for the installment. With a client key the ref is STABLE across retries; without one
+    // it falls back to the running-total ref (best-effort). Check the guard BEFORE mutating paidAmount so a
+    // retried request (which already sees the incremented paid total) neither re-posts nor re-applies.
+    const payRef = idempotencyKey ? `${txnNo}:k:${idempotencyKey}` : `${txnNo}:${n(t.paidAmount) + n(amount)}`;
+    if (this.ledger && n(amount) > 0 && (await this.ledger.alreadyPosted('PAY-AP', payRef, apTenant))) {
+      return { txn_no: txnNo, paid_amount: n(t.paidAmount), status: t.status, idempotent: true };
+    }
     const newPaid = n(t.paidAmount) + n(amount);
     const status = newPaid >= n(t.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
     await db.update(apTransactions).set({ paidAmount: String(newPaid), status }).where(eq(apTransactions.id, t.id));
-    // GL: pay the payable (Dr 2000 AP / Cr 1000 Cash). Tag the entry to the AP txn's tenant (not null),
-    // keyed per-payment (running paid total) and guarded so a retry of the same installment posts once.
-    const apTenant = t.tenantId ?? user.tenantId ?? null;
-    const payRef = `${txnNo}:${newPaid}`;
-    if (this.ledger && n(amount) > 0 && !(await this.ledger.alreadyPosted('PAY-AP', payRef, apTenant))) {
+    // GL: pay the payable (Dr 2000 AP / Cr 1000 Cash), tagged to the AP txn's tenant.
+    if (this.ledger && n(amount) > 0) {
       await this.ledger.postEntry({
         date: ymd(), source: 'PAY-AP', sourceRef: payRef, tenantId: apTenant,
         memo: `AP payment ${txnNo}`, createdBy: user.username,
