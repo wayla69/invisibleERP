@@ -54,6 +54,7 @@ import {
   UserCog,
   Users,
   Utensils,
+  Wallet,
   Warehouse,
   Workflow,
 } from 'lucide-react';
@@ -119,6 +120,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ช่องทางเดลิเวอรี (Aggregators)', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },
       { label: 'ลอยัลตี้ & แรงงาน (POS Ops)', href: '/pos-ops', icon: Star, perms: ['pos', 'loyalty', 'users', 'exec'] },
       { label: 'เครื่องรับบัตร & สรุปยอด', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
+      { label: 'มัดจำ & บัญชีเครดิต (House accounts)', href: '/payments/accounts', icon: Wallet, perms: ['pos', 'order_mgt', 'exec'] },
       { label: 'สาขา & ยอดขายรวม (Branches)', href: '/branches', icon: Store, perms: ['branch', 'exec'], workspace: BOTH },
     ],
   },

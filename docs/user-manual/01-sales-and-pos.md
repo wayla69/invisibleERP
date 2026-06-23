@@ -398,5 +398,36 @@ accurately from the scale.
 
 ---
 
+## 10. Deposits, house accounts & card surcharge
+
+**Screen:** `/payments/accounts` (**มัดจำ & บัญชีเครดิต**) · **Required
+permission:** `pos` / `order_mgt` (opening a credit account needs a
+manager — `order_mgt` / `exec`).
+
+- **Deposits (มัดจำ).** Take a prepayment for a booking or open tab — it's held
+  as a liability, not yet income. Later **ใช้ (apply)** it to the sale (income is
+  recognised then) or **คืน (refund)** the unused balance. You can never apply or
+  refund more than what remains.
+- **House / charge accounts (บัญชีเครดิต).** Open a running credit account for a
+  regular/B2B customer with a **credit limit**. **Charge** a sale to it (it
+  becomes a receivable) — a charge that would exceed the limit is **blocked**.
+  **Settle** the account when they pay; you can take payment in a **foreign
+  currency** (enter the currency, rate and amount tendered) and the system books
+  the **FX gain/loss** automatically. **รายการ (statement)** shows every charge
+  and payment with the running balance and remaining credit.
+- **Card surcharge (ค่าธรรมเนียมบัตร).** Set a percentage per payment method;
+  **quote** shows the surcharge for an amount, and charging it records VATable
+  surcharge income.
+
+**Expected result:** Prepayments and customer credit are tracked with correct
+accounting; the credit limit is enforced; foreign-currency settlement is
+converted and any FX difference is recorded.
+
+> **Troubleshooting:** “CREDIT_LIMIT_EXCEEDED” — the charge exceeds the account's
+> limit (raise the limit or take part-payment first); “OVER_APPLY” / “OVER_REFUND”
+> / “OVER_SETTLE” — the amount is more than what remains/owed.
+
+---
+
 **Next:** [Customer Portal](./02-customer-portal.md) ·
 [Finance — AR & AP](./05-finance-ar-ap.md)

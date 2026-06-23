@@ -10,10 +10,10 @@
 | Process owner | `<<Operations / Revenue Controller>>` |
 | Approver | `<<approver-name / title>>` |
 | Version | **0.1 DRAFT** |
-| Revision date | 2026-06-23 (v1.5) |
+| Revision date | 2026-06-23 (v1.6) |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | REST-01 … REST-11; GL-01 |
+| Related RCM controls | REST-01 … REST-12; GL-01 |
 | Related policy | `<<POS & Cash Handling Policy>>`, `<<VAT / e-Tax Policy>>`, `<<Discount Authority Policy>>`, `<<Fiscal Audit-Trail Policy>>` |
 
 ## 2. Purpose
@@ -129,6 +129,11 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
     - **Customer-facing display.** `POST /display/:terminal` sets the per-terminal display state (line items, subtotal, total, amount due, change, message); the pole/second screen polls `GET /display/:terminal`. No GL, no control — operator convenience.
     - **Weighing scale.** `POST /scale/read` (`{sku, gross_weight, tare_weight}`) computes **net × the catalog per-unit price** for a weighed item and logs a `scale_readings` row, returning a ready-to-add priced line. The per-unit price is resolved **server-side** from the catalog — staff can't tamper a weighed price (mirrors REST-08). An item is marked weighed via `PATCH /scale/items/:sku` (`menu_items.sold_by_weight`, `weight_unit`); reading a non-weighed item returns `NOT_WEIGHED`. Errors: `BAD_KIND`, `DEVICE_NOT_FOUND`, `ITEM_NOT_FOUND`, `NOT_WEIGHED`, `BAD_WEIGHT`.
 
+13. **Payments depth (`/api/payments`, perm `pos` / `order_mgt`).** Each money movement posts its **own balanced JE** via the ledger — the sale builders (step 3) are untouched.
+    - **Customer deposits (prepaid).** Cash in advance for a booking/tab. `POST /deposits` → Dr 1000 Cash / Cr **2210 Customer Deposits**. `POST /deposits/:no/apply` recognises the deposit as revenue (VAT-inclusive) → Dr 2210 / Cr 4000 net / Cr 2100 VAT; `POST /deposits/:no/refund` returns the unused balance → Dr 2210 / Cr 1000. A deposit can never be over-applied or over-refunded (`OVER_APPLY`, `OVER_REFUND`).
+    - **House / charge accounts (credit).** A POS customer's running AR with a **credit limit**. `POST /house-accounts` opens one (manager: `pos`/`order_mgt`/`exec`). `POST /house-accounts/:no/charge` posts a credit sale → Dr **1100 AR** / Cr 4000 net / Cr 2100 VAT and is **rejected over the credit limit** (`CREDIT_LIMIT_EXCEEDED`). `POST /house-accounts/:no/settle` pays it down → Dr 1000 Cash / Cr 1100 AR; settlement may be **tendered in a foreign currency** (`currency`, `fx_rate`, `foreign_tendered`) — the THB received vs the THB cleared books a **realised FX gain/loss to 5410** (gain → credit, loss → debit). Over-settlement is rejected (`OVER_SETTLE`). `GET /house-accounts/:no/statement` reconciles entries to the running balance + available credit. *Control: REST-12 (POS credit & prepayment integrity — credit-limit cap, no over-apply/over-refund/over-settle, balanced GL, statement reconciliation).*
+    - **Card surcharge.** A per-method percentage (`GET/POST /surcharges`, `GET /surcharges/quote`). `POST /surcharges/charge` records the surcharge as VATable income → Dr 1000 Cash / Cr **4500 Card Surcharge Income** / Cr 2100 VAT. Surcharge % is capped 0–20 (`BAD_PCT`); a method with no active surcharge returns `NO_SURCHARGE`.
+
 ## 8. Process Flow
 
 ```mermaid
@@ -178,6 +183,7 @@ flowchart TD
 | 6 | Buffet abuse: off-tier items, ordering after time-up, mode mixing, mis-priced charge | Tier eligibility (`NOT_IN_PACKAGE`); time-window enforcement (`BUFFET_EXPIRED`); single-mode lock (`MODE_LOCKED`); per-pax charge + overtime computed server-side from the tier; food forced to ฿0 | Preventive | REST-09 | Buffet session (mode, pax, window), charge/overtime lines |
 | 11 | Receipt total diverges from the fiscal sale; receipt mistaken for the fiscal record | Receipt rendered from `cust_pos_sales` only and posts no GL; tie-out reconciles Σ line − discount + VAT + tip = total; reprints flagged COPY (สำเนา) | Detective / Preventive | REST-10 | `print_jobs` queue, tie-out report, COPY flag |
 | 12 | Cash drawer opened without a sale (theft / unaccounted access); weighed-item price tampering | Every drawer open writes a `drawer_events` row (reason + operator + till); no-sale opens flagged and reconciled vs Z-report; weighed price computed server-side from the catalog | Detective / Preventive | REST-11 | `drawer_events`, drawer reconciliation, `scale_readings` |
+| 13 | Customer credit beyond limit; deposit over-applied/refunded; mis-stated FX on settlement | House-account credit-limit cap (`CREDIT_LIMIT_EXCEEDED`); deposit apply/refund clamped to remaining; FX gain/loss booked to 5410; balanced JE per movement; statement reconciliation | Preventive / Detective | REST-12 | `house_accounts`/`house_account_entries`, `customer_deposits`, GL entries |
 
 ## 10. Inputs & Outputs
 
@@ -253,3 +259,4 @@ flowchart TD
 | 1.3 | 2026-06-23 | Platform | **Food-cost / margin analytics (POS customization Phase 7):** §12 — `GET /api/menu/food-cost` (per-menu cost/margin %/food-cost % vs target) + `/api/menu/ingredient-cost` (ingredient cost-contribution), theoretical from recipes. Reporting only. |
 | 1.4 | 2026-06-23 | Platform | **Receipts & printing (POS customization Phase 4):** §7 step 11 — server-rendered receipts (HTML + ESC/POS) + a pull-based `print_jobs` queue (`/api/print/*`), auto-enqueue on checkout, reprint-as-COPY, out-of-band email/LINE/SMS delivery, and receipt↔fiscal tie-out. Added control **REST-10** + control-matrix row; migration `0074_print_jobs`. |
 | 1.5 | 2026-06-23 | Platform | **Hardware peripherals (POS customization Phase 5):** §7 step 12 — device registry + cash-drawer kick (via the print queue) with a `drawer_events` audit trail + auto-pop on cash checkout, customer-facing display state, and weighing-scale capture (server-side per-unit pricing) (`/api/peripherals/*`). Added control **REST-11** (cash-drawer open accountability) + control-matrix row; migration `0075_pos_peripherals`; `menu_items.sold_by_weight`/`weight_unit`. |
+| 1.6 | 2026-06-23 | Platform | **Payments depth (POS customization Phase 8):** §7 step 13 — customer deposits (prepaid 2210, recognised on apply), house/charge accounts (AR 1100 with a credit limit + foreign-currency settlement → realised FX 5410), and card surcharge (4500), each posting its own balanced JE (`/api/payments/*`). Added control **REST-12** (POS credit & prepayment integrity) + control-matrix row; migration `0076_payments_depth`; new accounts 2210/4500/5410. |
