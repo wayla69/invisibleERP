@@ -78,6 +78,7 @@ jobs:
           - { pkg: cutover, script: pos-p2 }
           - { pkg: cutover, script: pos-wiring }
           - { pkg: cutover, script: pos-discount }
+          - { pkg: cutover, script: pricing }
           - { pkg: cutover, script: splitbill }
           - { pkg: cutover, script: cashreport }
           - { pkg: cutover, script: returns }

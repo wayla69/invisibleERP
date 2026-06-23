@@ -3,7 +3,7 @@ import { eq, and, inArray, desc, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
   dineInOrders, dineInOrderItems, kitchenStations, diningTables, tableSessions,
-  custPosSales, custPosItems, tenants,
+  custPosSales, custPosItems, tenants, menuItems,
 } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { TaxService } from '../tax/tax.service';
@@ -15,6 +15,7 @@ import { RecipeService } from '../menu/recipe.service';
 import { MemberService } from '../loyalty/member.service';
 import { GiftCardService } from '../giftcards/gift-card.service';
 import { PromoEngineService } from '../marketing/promo-engine.service';
+import { PricingService } from '../pricing/pricing.service';
 import { promotions, promoRedemptions } from '../../database/schema';
 import { roundCurrency } from '../tax/money';
 import { n, fx, ymd } from '../../database/queries';
@@ -37,6 +38,7 @@ export class DineInService {
     private readonly recipe: RecipeService,
     private readonly member: MemberService,
     private readonly gift: GiftCardService,
+    private readonly pricing: PricingService,
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -184,7 +186,11 @@ export class DineInService {
       pointsRedeem = { memberId: dto.member_id, points: dto.redeem_points!, bahtPerPoint: q.bahtPerPoint, redeemValue: q.redeemValue };
     }
     const saleNo = await this.mintSaleNo(o.tenantId);
-    const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, { orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts, memberId: dto.member_id, pointsRedeem, tip: dto.tip, giftCardNo: dto.gift_card_no, giftCardAmount: dto.gift_card_amount });
+    const built = await this.buildSale(o, saleNo, dto.discount ?? 0, user, {
+      orderDiscountPct: dto.discount_pct, promoCode: dto.promo_code, lineDiscounts: dto.line_discounts, memberId: dto.member_id, pointsRedeem, tip: dto.tip, giftCardNo: dto.gift_card_no, giftCardAmount: dto.gift_card_amount,
+      applyPricingRules: dto.apply_pricing_rules,
+      pricing: dto.apply_pricing_rules ? { channel: dto.channel ?? 'dine_in', location: dto.location, partySize: dto.party_size ?? o.guestCount ?? 0, serviceChargePct: dto.service_charge_pct, serviceMinParty: dto.service_min_party, rounding: dto.rounding } : undefined,
+    });
     // tender the SALE-MONEY cash (= total − gift draw-down on the bill); gift is already settled as the 2200
     // draw, not a drawer payment. payments.amount excludes tip (tip rides separately) so the Z-report's
     // cash reconciliation counts sale money only. Skip the tender when no sale-money cash is due.
@@ -199,11 +205,33 @@ export class DineInService {
 
   // shared: insert cust_pos_sales + items + GL from a dine-in order, applying line/order/promo discounts.
   // VAT is on the discounted base (Thai rule). opts is optional → no-discount path matches the old behavior.
-  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number; memberId?: number; pointsRedeem?: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number }; tip?: number; giftCardNo?: string; giftCardAmount?: number }) {
+  async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number; memberId?: number; pointsRedeem?: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number }; tip?: number; giftCardNo?: string; giftCardAmount?: number; applyPricingRules?: boolean; pricing?: { channel?: string; location?: string; partySize?: number; serviceChargePct?: number; serviceMinParty?: number; surchargePct?: number; rounding?: number; at?: string } }) {
     const db = this.db as any;
     const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, Number(o.id)), ne(dineInOrderItems.kdsStatus, 'voided')));
-    const lineDiscounts = opts?.lineDiscounts ?? {};
+    // B4: opt-in pricing rules. Resolve each order line's sku/category, ask the pricing engine for the
+    // time/day/BOGO/qty-break/item/category discounts, and MERGE them through the existing discount path
+    // (explicit per-line overrides win). Default off ⇒ byte-identical to the prior behaviour.
+    const lineDiscounts: Record<string, { discount_pct?: number; discount_amt?: number }> = { ...(opts?.lineDiscounts ?? {}) };
+    let ruleOrderDiscount = 0; const appliedRules: string[] = [];
+    if (opts?.applyPricingRules && items.length) {
+      // dineInOrderItems.itemId holds the menu SKU (menu-driven lines) or a freeform ref. Resolve the
+      // category from the catalog by SKU so category-scope rules apply.
+      const skus = Array.from(new Set(items.map((i: any) => String(i.itemId ?? '')).filter((x: string) => x.length)));
+      const menus = skus.length ? await db.select().from(menuItems).where(inArray(menuItems.sku as any, skus)) : [];
+      const bySku = new Map<string, any>(menus.map((m: any) => [String(m.sku), m] as [string, any]));
+      const rlines = items.map((l: any) => {
+        const sku = String(l.itemId ?? l.name);
+        const m = bySku.get(sku);
+        return { sku, qty: n(l.qty), unit_price: n(l.unitPrice), category: m?.categoryId != null ? String(m.categoryId) : undefined };
+      });
+      const pr = await this.pricing.ruleDiscountsForLines(rlines, { channel: opts.pricing?.channel, location: opts.pricing?.location, at: opts.pricing?.at });
+      items.forEach((l: any, i: number) => {
+        const key = String(l.id);
+        if (lineDiscounts[key] == null && pr.lineDiscounts[i] > 0) { lineDiscounts[key] = { discount_amt: pr.lineDiscounts[i] }; appliedRules.push(...pr.lineRules[i]); }
+      });
+      ruleOrderDiscount = roundCurrency(pr.orderDiscount, 'THB'); appliedRules.push(...pr.orderRules);
+    }
     const maxPct = opts?.maxDiscountPct ?? 50;
     let subtotalNet = 0, grossSum = 0, lineDiscTotal = 0;
     const itemRows: any[] = [];
@@ -219,6 +247,7 @@ export class DineInService {
     // order-level discount: explicit fixed amount, else percent
     if (discount > subtotalNet + 0.01) throw new BadRequestException({ code: 'DISCOUNT_EXCEEDS_SUBTOTAL', message: `Discount ${discount} exceeds subtotal ${subtotalNet}`, messageTh: `ส่วนลด (${discount}) เกินยอดรวม (${subtotalNet})` });
     let orderDisc = discount > 0 ? roundCurrency(discount, 'THB') : (opts?.orderDiscountPct ? roundCurrency(subtotalNet * opts.orderDiscountPct / 100, 'THB') : 0);
+    if (ruleOrderDiscount > 0) orderDisc = roundCurrency(Math.max(orderDisc, ruleOrderDiscount), 'THB'); // rule order-discount (best, not stacked on explicit)
     let pe: any = null;
     if (opts?.promoCode) {
       pe = await this.promo.applyPromo({ code: opts.promoCode, subtotalNet, itemIds: items.map((i: any) => String(i.itemId ?? i.name)), tenantId: o.tenantId ?? null });
@@ -238,8 +267,19 @@ export class DineInService {
       actualRedeemPoints = opts.pointsRedeem.bahtPerPoint > 0 ? Math.round(pointsDisc / opts.pointsRedeem.bahtPerPoint) : 0;
     }
     const taxable = Math.max(0, roundCurrency(subtotalNet - orderDisc - pointsDisc, 'THB'));
-    const vat = this.tax.calcTax({ net: taxable, country: 'TH' }).tax;
-    const total = roundCurrency(taxable + vat, 'THB');
+    // B4b: auto service charge for large parties — VATable service income (4400), added to the tax base.
+    // Satang rounding adjusts the final bill to a cash-friendly multiple (rounding gain/loss → 4900).
+    // Both are zero unless opted-in ⇒ taxable/vat/total stay identical to the prior behaviour.
+    const scPct = opts?.pricing?.serviceChargePct ?? 0;
+    const minParty = opts?.pricing?.serviceMinParty ?? 6;
+    const partySize = opts?.pricing?.partySize ?? 0;
+    const serviceCharge = opts?.applyPricingRules && scPct > 0 && partySize >= minParty ? roundCurrency(taxable * scPct / 100, 'THB') : 0;
+    const taxableTotal = roundCurrency(taxable + serviceCharge, 'THB');
+    const vat = this.tax.calcTax({ net: taxableTotal, country: 'TH' }).tax;
+    const preRoundTotal = roundCurrency(taxableTotal + vat, 'THB');
+    const roundTo = opts?.applyPricingRules ? (opts?.pricing?.rounding ?? 0) : 0;
+    const total = roundTo > 0 ? roundCurrency(Math.round(preRoundTotal / roundTo) * roundTo, 'THB') : preRoundTotal;
+    const roundingAdj = roundCurrency(total - preRoundTotal, 'THB');
     // tip (staff pass-through, liability 2300 — NOT in subtotal/VAT) + gift-card redemption (draws down the
     // 2200 deposit liability, reducing the cash leg). cashDue = bill+tip; cashLeg = what's actually tendered.
     const tip = roundCurrency(Math.max(0, opts?.tip ?? 0), 'THB');
@@ -270,9 +310,12 @@ export class DineInService {
         lines: [
           ...(cashLeg > 0 ? [{ account_code: '1000', debit: cashLeg }] : []),
           ...(giftApplied > 0 ? [{ account_code: '2200', debit: giftApplied }] : []),
+          ...(roundingAdj < 0 ? [{ account_code: '4900', debit: roundCurrency(-roundingAdj, 'THB') }] : []), // rounded down → expense
           { account_code: '4000', credit: taxable },
+          ...(serviceCharge > 0 ? [{ account_code: '4400', credit: serviceCharge }] : []),
           { account_code: '2100', credit: vat },
           ...(tip > 0 ? [{ account_code: '2300', credit: tip }] : []),
+          ...(roundingAdj > 0 ? [{ account_code: '4900', credit: roundingAdj }] : []), // rounded up → income
         ],
       });
       journalNo = je?.entry_no ?? null;
@@ -297,7 +340,7 @@ export class DineInService {
       if (pointsEarned > 0) await db.update(custPosSales).set({ pointsEarned: String(pointsEarned) }).where(eq(custPosSales.id, h.id));
       if (actualRedeemPoints > 0) await this.member.redeemInTx(db, o.tenantId, opts.memberId, actualRedeemPoints, pointsDisc, saleNo, user.username);
     }
-    return { subtotal: subtotalNet, discount: roundCurrency(orderDisc + pointsDisc, 'THB'), vat, total, tip, total_with_tip: cashDue, gift_applied: giftApplied, cash_due: cashLeg, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal, points_used: actualRedeemPoints, points_earned: pointsEarned };
+    return { subtotal: subtotalNet, discount: roundCurrency(orderDisc + pointsDisc, 'THB'), vat, total, tip, total_with_tip: cashDue, gift_applied: giftApplied, cash_due: cashLeg, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal, points_used: actualRedeemPoints, points_earned: pointsEarned, service_charge: serviceCharge, rounding_adjustment: roundingAdj, applied_rules: Array.from(new Set(appliedRules)) };
   }
 
   // mark order paid + close table/session + idempotent abbreviated tax invoice

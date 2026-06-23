@@ -92,6 +92,8 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
 
 6. **Transient price quote.** `POST /api/pricing/quote` explodes combos, applies eligible rules by priority/stackability, adds a service charge if party size ≥ configured minimum, applies surcharge, and satang-rounds. **No GL is posted** — pricing is transient; the GL is posted when the order/sale finalises elsewhere (`01-order-to-cash.md`, `20-restaurant-operations.md`). *Operational (non-financial at this step).*
 
+6a. **Pricing rules applied at the till (B4).** Dine-in checkout (`POST /api/restaurant/orders/:orderNo/checkout`) can opt in with `apply_pricing_rules` so the same item/category/time-day/BOGO/qty-break + order-level rules **apply to the finalised sale** (not just the preview), flowing through the existing discount → VAT-on-discounted-base → markdown-cap path (explicit per-line/promo discounts take precedence). An **auto service charge** for large parties posts as VATable service income (GL **4400**), and **satang rounding** posts the rounding gain/loss (GL **4900**); the sale's GL stays balanced. Rule discounts are governed by the same R10 segregation (price/promo maintenance ≠ selling) — a cashier applies rules but cannot author them. *Control: MKT-01 / R10; GL posting per `20-restaurant-operations.md`.*
+
 7. **Loyalty configuration (perm `loyalty` / `marketing`).** `GET` / `PUT /api/loyalty/config` sets `points_per_baht`, `baht_per_point`, `min_redeem`, `expiry_days`. *Control: MKT-03 — config sets the monetary value of the points liability; segregated from POS operators.*
 
 8. **Enrol & look up members.** `POST /api/loyalty/members` enrols a member (code `M-{id}`); `GET /api/loyalty/members/lookup`, `GET /api/loyalty/members/:id` and `/history` read membership. `GET /api/loyalty/me` returns the caller's balance. Duplicate enrolment returns `MEMBER_EXISTS`; unknown member returns `MEMBER_NOT_FOUND`. *Operational.*
@@ -177,3 +179,4 @@ flowchart TD
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 | 2026-06-23 | Platform | B4: pricing rules now apply at dine-in checkout (step 6a) — service charge → GL 4400, satang rounding → GL 4900; verified by the `pricing` cutover harness. |

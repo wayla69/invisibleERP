@@ -60,6 +60,26 @@ sent.
   format).
 - To email or SMS it, use **Send receipt** and enter the customer's contact.
 
+### Cashier speed: quick-tender, change & hotkeys
+
+On `/pos/new` the cart panel speeds up cash sales:
+
+- **Quick-tender** (**รับเงินสด**): tap **พอดี** (exact), **฿100**, **฿500** or
+  **฿1000** to fill the *cash received* field; the **change** (**เงินทอน**) is
+  shown instantly (red if not enough).
+- **Hotkeys:** **F2** adds a line, **F9** confirms the order — so a cashier can
+  ring up without leaving the keyboard.
+
+### Pricing rules, service charge & rounding (dine-in)
+
+At dine-in checkout you can apply the shop's **pricing rules** automatically
+(happy-hour %, buy-one-get-one, quantity breaks, item/category discounts) instead
+of keying discounts by hand — turn on **apply pricing rules** at checkout. For
+large parties an **auto service charge** is added, and the bill can be **satang-
+rounded** to a cash-friendly total. Cashiers *apply* rules; only Pricing/Marketing
+roles may *create* them (segregation of duties). See **Dine-in / restaurant** for
+the full flow.
+
 ---
 
 ## 2. Credit checks (account customers)

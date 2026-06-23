@@ -180,23 +180,33 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   prod boot blocked without secrets (verified); change/deploy gates in repo; `main` ruleset ready to
   import. Verified: `pnpm -r typecheck` + API build clean; `e2e`/`compliance`/`worldclass` harnesses green.
 
-### Phase B — Close the POS standard gaps customers hit · ~6–8 weeks
+### Phase B — Close the POS standard gaps customers hit · **IN PROGRESS (2026-06-23)**
 *Goal: the floor experience matches Square/Toast on the things staff feel hourly.*
 
-- **B1 — Offline-first POS (`L`).** Client outbox (IndexedDB/Dexie or in-browser PGlite) with menu/
-  price/tax snapshot + client-generated `client_uuid`; service worker; online/offline + pending-sync
-  UI. Backend: accept `client_uuid`, dedup via `UNIQUE(tenant_id, client_uuid)`, batch
-  `POST /api/pos/sync` with per-item savepoints; conflicts resolved under lock at replay. Harness
-  `offline-pos`: N sales offline → exactly N on replay, GL balanced, idempotent. *Highest POS ROI.*
-- **B2 — Cashier speed & control (`M`).** Hotkeys, numeric keypad, quick-tender (exact/฿100/฿500),
-  favorites grid, barcode quick-add; POS-native returns/exchange wrapper.
-- **B3 — Peripheral bridge (`M/L`).** WebUSB/WebSerial (or small local agent) for ESC/POS printer,
-  cash-drawer kick, scanner, customer display, scale; certify one acquirer terminal end-to-end.
-- **B4 — Pricing engine (`M`).** `price_rules` (item/category/all × channel × location × time/day ×
-  percent/amount/BOGO/qty-break, priority/stacking); combos explode; auto service charge; satang
-  rounding. Integrate into `menu.resolveLine`/dine-in/portal so all channels price identically.
-- **Exit:** sell through a 30-min network outage with deterministic sync; sub-second tender on
+> Reality check (verified on the as-built code): the pricing **engine** and the offline-sync
+> **backend** already existed. The gaps were (a) rules not applied at the till, (b) cashier
+> ergonomics, (c) the offline client + hardware bridge. Backend/verifiable work landed and is
+> CI-gated; browser/hardware pieces ship as typecheck-only scaffolds (no runtime verification here).
+
+- **B1 — Offline-first POS.** ✅ *Backend already present* — `portal/offline-sync.service.ts` replays a
+  batch idempotently, dedup `UNIQUE(tenant_id, client_uuid)`, per-op savepoints (`offline-sync`
+  harness, CI-gated). ✅ *Client outbox added* — `apps/web/src/lib/offline-pos.ts` (IndexedDB
+  enqueue/pending/sync → `POST /api/portal/pos/offline-sync`, auto-sync on reconnect). 🟡 **scaffold**
+  (needs browser/IndexedDB to verify); service worker for app-shell/menu caching is the follow-up.
+- **B2 — Cashier speed & control.** ✅ `/pos/new` quick-tender (exact/฿100/฿500/฿1000) + live change +
+  hotkeys (F2 add line, F9 confirm). Build-verified. (Favorites grid + POS-native returns wrapper = next.)
+- **B3 — Peripheral bridge.** 🟡 **scaffold** `apps/web/src/lib/peripherals.ts` — WebUSB/WebSerial
+  ESC/POS print, cash-drawer kick, keyboard-wedge scanner. Typecheck-only (needs hardware + a browser
+  gesture; acquirer-terminal certification remains).
+- **B4 — Pricing engine → at the till.** ✅ *Engine existed*; now **applied at checkout**: dine-in
+  checkout opt-in (`apply_pricing_rules`) runs item/category/time-day/BOGO/qty-break + order rules
+  through the existing discount/VAT/markdown-cap path, plus auto service charge (VATable → acct 4400)
+  and satang rounding (→ acct 4900), balanced GL. New `pricing` harness (18 checks); restaurant/
+  pos-discount/splitbill stay green. (Wiring into retail `pos.service`/portal = next.)
+- **Exit (target):** sell through a 30-min outage with deterministic sync; sub-second tender on
   hotkeys; printer/drawer/scanner working; happy-hour + combo + service-charge priced correctly.
+  **Done so far:** rules + service charge + rounding priced & GL-correct at the till (verified);
+  cashier quick-tender/hotkeys (build-verified); offline + peripheral clients scaffolded.
 
 ### Phase C — Globalize & certify · ~8–12 weeks
 *Goal: legally and operationally sellable beyond Thailand; passes enterprise security review.*
@@ -259,3 +269,4 @@ and DB-enforced isolation; deepen MRP/HR/portals where the target market demands
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-23 | Platform / Controller | Initial next-upgrade roadmap; benchmarks as-built system vs global POS/ERP; supersedes the "missing GL/payments/RLS" premise of `09-worldclass-roadmap.md` and `pos-worldclass-roadmap.md`, which are now substantially delivered. |
 | 0.2 | 2026-06-23 | Platform | **Phase A delivered** (production hardening): Docker/compose, scripted restore + automated restore-drill, fail-closed secret validation, `/healthz`+`/readyz`, observability/incident + change-management + secrets + deployment runbooks, CODEOWNERS + PR template + approval-gated deploy + branch-protection ruleset, prod DB least-privilege SQL. Marked `[setup]` items (console actions) + deferred httpOnly-cookie workstream. |
+| 0.3 | 2026-06-23 | Platform | **Phase B in progress**: B4 pricing rules now apply at dine-in checkout (+ service charge acct 4400, satang rounding acct 4900, `pricing` harness); B2 cashier quick-tender + hotkeys; B1 offline client outbox + B3 peripheral bridge scaffolds (backend offline-sync already existed). Verified pieces CI-gated; browser/hardware pieces are typecheck-only scaffolds. |

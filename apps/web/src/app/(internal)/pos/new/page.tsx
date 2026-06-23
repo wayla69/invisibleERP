@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { ArrowLeft, CheckCircle2, Plus, ShoppingCart, Trash2 } from 'lucide-react';
+import { ArrowLeft, Banknote, CheckCircle2, Keyboard, Plus, ShoppingCart, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -21,7 +21,11 @@ export default function NewOrderPage() {
   const [customer, setCustomer] = useState('');
   const [lines, setLines] = useState<Line[]>([{ item_id: '', order_qty: 1, unit_price: 0 }]);
 
+  const [cashReceived, setCashReceived] = useState<number | ''>('');
+
   const total = lines.reduce((a, l) => a + Number(l.order_qty) * Number(l.unit_price), 0);
+  const change = cashReceived === '' ? null : Math.round((Number(cashReceived) - total) * 100) / 100;
+  const canConfirm = lines.some((l) => l.item_id && Number(l.order_qty) > 0);
 
   const mut = useMutation({
     mutationFn: () =>
@@ -36,6 +40,18 @@ export default function NewOrderPage() {
   });
 
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const addLine = useCallback(() => setLines((ls) => [...ls, { item_id: '', order_qty: 1, unit_price: 0 }]), []);
+  const confirm = useCallback(() => { if (canConfirm && !mut.isPending) mut.mutate(); }, [canConfirm, mut]);
+
+  // Cashier-speed hotkeys: F2 = add line, F9 = confirm. (Quick-tender buttons handle exact/round cash.)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F2') { e.preventDefault(); addLine(); }
+      else if (e.key === 'F9') { e.preventDefault(); confirm(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [addLine, confirm]);
 
   return (
     <div>
@@ -113,12 +129,8 @@ export default function NewOrderPage() {
               ))}
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setLines((ls) => [...ls, { item_id: '', order_qty: 1, unit_price: 0 }])}
-            >
-              <Plus className="size-4" /> เพิ่มรายการ
+            <Button variant="outline" size="sm" onClick={addLine}>
+              <Plus className="size-4" /> เพิ่มรายการ <kbd className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">F2</kbd>
             </Button>
           </CardContent>
         </Card>
@@ -141,13 +153,42 @@ export default function NewOrderPage() {
               <span className="tabular text-2xl font-semibold tracking-tight">{baht(total)}</span>
             </div>
 
+            {/* Quick-tender: exact + round-cash buttons fill the cash-received field for fast change calc */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <Banknote className="size-3.5" /> รับเงินสด
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setCashReceived(Math.round(total * 100) / 100)}>พอดี</Button>
+                {[100, 500, 1000].map((d) => (
+                  <Button key={d} type="button" variant="secondary" size="sm" onClick={() => setCashReceived(d)}>฿{d}</Button>
+                ))}
+              </div>
+              <Input
+                type="number" min={0} step="0.01" inputMode="decimal"
+                className="tabular text-right" placeholder="เงินที่รับ"
+                value={cashReceived}
+                onChange={(e) => setCashReceived(e.target.value === '' ? '' : +e.target.value)}
+              />
+              {change !== null && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">เงินทอน</span>
+                  <span className={`tabular font-semibold ${change < 0 ? 'text-destructive' : 'text-success'}`}>{baht(change)}</span>
+                </div>
+              )}
+            </div>
+
             <Button
               className="w-full"
-              disabled={mut.isPending || !lines.some((l) => l.item_id && Number(l.order_qty) > 0)}
-              onClick={() => mut.mutate()}
+              disabled={mut.isPending || !canConfirm}
+              onClick={confirm}
             >
               {mut.isPending ? 'กำลังบันทึก…' : 'ยืนยันออเดอร์'}
+              <kbd className="ml-1 rounded bg-primary-foreground/20 px-1 text-[10px]">F9</kbd>
             </Button>
+            <p className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
+              <Keyboard className="size-3" /> F2 เพิ่มรายการ · F9 ยืนยัน
+            </p>
 
             {mut.error && (
               <Alert variant="destructive">

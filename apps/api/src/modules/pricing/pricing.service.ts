@@ -145,6 +145,52 @@ export class PricingService {
     };
   }
 
+  // Rule-based discounts for an already-resolved set of sale lines (no combo explosion — the caller's
+  // lines are leaf items). Used by POS checkout (dine-in buildSale) to APPLY time/day/BOGO/qty-break/
+  // item/category rules at the till, returning a positionally-aligned per-line discount array + an
+  // order-level rule discount on the net subtotal. Service charge / surcharge / rounding are intentionally
+  // NOT computed here — the checkout owns those so they fold into its VAT base + GL correctly.
+  async ruleDiscountsForLines(
+    lines: { sku: string; qty: number; unit_price: number; category?: string }[],
+    ctx: { channel?: string; location?: string; at?: string },
+  ): Promise<{ lineDiscounts: number[]; lineRules: string[][]; orderDiscount: number; orderRules: string[] }> {
+    const db = this.db as any;
+    const at = ctx.at ? new Date(ctx.at) : new Date();
+    const bkk = new Date(at.getTime() + 7 * 3600 * 1000); // Bangkok wall-clock
+    const isoDow = ((bkk.getUTCDay() + 6) % 7) + 1;        // Mon=1 … Sun=7
+    const hhmm = `${pad(bkk.getUTCHours())}:${pad(bkk.getUTCMinutes())}`;
+    const today = ymd(at);
+    const allRules = await db.select().from(priceRules).where(eq(priceRules.active, true));
+    const rules = allRules
+      .filter((r: any) => ruleApplies(r, { channel: ctx.channel, location: ctx.location, isoDow, hhmm, today }))
+      .sort((a: any, b: any) => (a.priority ?? 100) - (b.priority ?? 100));
+
+    const lineDiscounts: number[] = [];
+    const lineRules: string[][] = [];
+    let netSubtotal = 0;
+    for (const l of lines) {
+      const ql: QuoteLine = { sku: l.sku, qty: l.qty, unit_price: l.unit_price, category: l.category };
+      const gross = round2(l.qty * l.unit_price);
+      const applicable = rules.filter((r: any) => scopeMatches(r, ql));
+      let discount = 0; const applied: string[] = [];
+      let best: { d: number; name: string } | null = null;
+      for (const r of applicable.filter((r: any) => !r.stackable)) { const d = lineDiscount(r, ql, gross); if (d > 0 && (!best || d > best.d)) best = { d, name: r.name }; }
+      if (best) { discount += best.d; applied.push(best.name); }
+      for (const r of applicable.filter((r: any) => r.stackable)) { const d = lineDiscount(r, ql, gross); if (d > 0) { discount += d; applied.push(r.name); } }
+      discount = round2(Math.min(discount, gross));
+      lineDiscounts.push(discount); lineRules.push(applied);
+      netSubtotal = round2(netSubtotal + (gross - discount));
+    }
+
+    let orderDiscount = 0; const orderRules: string[] = [];
+    for (const r of rules.filter((x: any) => x.scope === 'all' && (x.type === 'percent' || x.type === 'amount'))) {
+      const d = r.type === 'percent' ? round2(netSubtotal * n(r.value) / 100) : Math.min(n(r.value), netSubtotal - orderDiscount);
+      if (d > 0) { orderDiscount += d; orderRules.push(r.name); if (!r.stackable) break; }
+    }
+    orderDiscount = round2(Math.min(orderDiscount, netSubtotal));
+    return { lineDiscounts, lineRules, orderDiscount, orderRules };
+  }
+
   async getRule(id: number) {
     const db = this.db as any;
     const [r] = await db.select().from(priceRules).where(eq(priceRules.id, id)).limit(1);
