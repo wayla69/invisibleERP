@@ -42,6 +42,7 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // GL-05 maker-checker approver
     { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
     { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t2 },
   ]).onConflictDoNothing();
@@ -59,6 +60,13 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const [admin, sales1, sales2] = [await login('admin', 'admin123'), await login('sales1', 'pw1'), await login('sales2', 'pw2')];
+  const approver = await login('approver', 'admin123');
+  // GL-05 maker-checker: a manual JE posts as Draft; a DIFFERENT user must approve it to affect balances.
+  const postJE = async (preparer: string, payload: any) => {
+    const r = await inj('POST', '/api/ledger/journal', preparer, payload);
+    if (r.json?.entry_no && r.json?.pending) await inj('POST', `/api/ledger/journal/${r.json.entry_no}/approve`, preparer === approver ? admin : approver, {});
+    return r;
+  };
 
   // create 2 cost centers
   const ccA = await inj('POST', '/api/ledger/cost-centers', admin, { code: 'CC-A', name: 'สาขา A', type: 'branch' });
@@ -66,7 +74,7 @@ async function main() {
   ok('Cost centers created (CC-A, CC-B)', ccA.json.code === 'CC-A' && (await inj('GET', '/api/ledger/cost-centers', admin)).json.count >= 2, `${ccA.status}`);
 
   // post journals tagged per center + 1 untagged. Window 2029-01.
-  const J = (date: string, lines: any[]) => inj('POST', '/api/ledger/journal', admin, { date, source: 'Manual', lines });
+  const J = (date: string, lines: any[]) => postJE(admin, { date, source: 'Manual', lines });
   await J('2029-01-05', [{ account_code: '1000', debit: 1000, cost_center: 'CC-A' }, { account_code: '4000', credit: 1000, cost_center: 'CC-A' }]); // A revenue 1000
   await J('2029-01-06', [{ account_code: '5100', debit: 300, cost_center: 'CC-A' }, { account_code: '1000', credit: 300, cost_center: 'CC-A' }]); // A expense 300
   await J('2029-01-07', [{ account_code: '1000', debit: 500, cost_center: 'CC-B' }, { account_code: '4000', credit: 500, cost_center: 'CC-B' }]); // B revenue 500

@@ -140,7 +140,9 @@ async function main() {
   ok('create user', (uc.status === 200 || uc.status === 201) && uc.json.created === true);
   const ulist = await inj('GET', '/api/admin/users', token);
   ok('list users includes u1', ulist.json.users.some((x: any) => x.username === 'u1'));
-  const uup = await inj('PATCH', '/api/admin/users/u1', token, { role: 'Warehouse', permissions: ['warehouse', 'lots'] });
+  // SoD redesign: the coarse `warehouse` perm bundles wh_adjust+wh_count (R11 conflict). Assign the
+  // single-duty WarehouseOperator perms instead — SoD-clean and the realistic post-redesign grant.
+  const uup = await inj('PATCH', '/api/admin/users/u1', token, { role: 'Warehouse', permissions: ['wh_receive', 'wh_custody', 'lots', 'locations'] });
   ok('update user role+perms', uup.json.updated === true);
   const urp = await inj('POST', '/api/admin/users/u1/reset-password', token, { password: 'newpass1' });
   ok('reset password', urp.json.reset === true);

@@ -56,9 +56,14 @@ jobs:
         include:
           # ── read/write parity (services vs expected, on PGlite) ──
           - { pkg: parity, script: writeflow }
+          - { pkg: parity, script: analytics }
           # ── end-to-end / platform foundations ──
           - { pkg: cutover, script: e2e }
           - { pkg: cutover, script: ext }
+          - { pkg: cutover, script: worldclass }
+          - { pkg: cutover, script: tenant-isolation }
+          - { pkg: cutover, script: module-qr }
+          - { pkg: cutover, script: gaps }
           - { pkg: cutover, script: onboarding }
           - { pkg: cutover, script: opening-balances }
           # ── POS ──
@@ -85,6 +90,10 @@ jobs:
           - { pkg: cutover, script: intercompany }
           - { pkg: cutover, script: consolidation }
           - { pkg: cutover, script: recon-profitability }
+          - { pkg: cutover, script: multiledger }
+          - { pkg: cutover, script: bankrec }
+          - { pkg: cutover, script: costcenter }
+          - { pkg: cutover, script: budget }
           # ── supply chain / inventory / manufacturing ──
           - { pkg: cutover, script: stock-ops }
           - { pkg: cutover, script: match }
@@ -129,11 +138,16 @@ jobs:
       - name: ${{ matrix.pkg }} → ${{ matrix.script }}
         run: pnpm --filter @ierp/${{ matrix.pkg }} ${{ matrix.script }}
 
-  # Quarantine — harnesses that currently FAIL because of a wall-clock dependency,
-  # not because the feature is broken. They post entries "today" / close a hard-coded
-  # prior fiscal year, so they pass on the day they were written and drift red later:
-  #   cutover: worldclass, tenant-isolation, multiledger, bankrec, costcenter, budget,
-  #            module-qr, gaps
-  #   parity:  analytics  (forecast avg/stdev drift with the date window)
-  # These are intentionally NOT gated above. To re-enable, make the harness dates
-  # relative to a fixed/seeded "now" and move the entry into the matrix.
+  # All previously-quarantined harnesses are now gated above. They had been failing not on a
+  # wall-clock dependency but on staleness against shipped features, now reconciled in the harnesses:
+  #   - GL-05 maker-checker: a manual JE/GAAP-adjustment posts as Draft and only affects balances once
+  #     a DIFFERENT user approves it. worldclass/tenant-isolation/multiledger/bankrec/costcenter/budget
+  #     now post-then-approve via a 2nd Admin.
+  #   - SoD preventive guard: the coarse `warehouse` perm self-conflicts (R11); gaps now assigns the
+  #     single-duty WarehouseOperator perms.
+  #   - module-qr asserted modules == PERMISSIONS; those diverged once sub-permissions were added — now
+  #     compares against MODULE_KEYS.
+  #   - parity analytics seeded sales in UTC while the service bins by business-TZ (UTC+7); the seed now
+  #     uses the same offset so the forecast window is deterministic.
+  # Harnesses still NOT gated (need external services, not self-contained on PGlite): shadow, reconcile,
+  # smoke-http.

@@ -43,7 +43,10 @@ async function main() {
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง' }, { code: 'T2', name: 'ร้านสอง' }]).onConflictDoNothing();
   const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // GL-05 maker-checker: 2nd Admin approves JEs
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -58,10 +61,17 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token as string;
+  const approver = (await inj('POST', '/api/login', undefined, { username: 'approver', password: 'admin123' })).json.token as string;
+  // GL-05 maker-checker: a manual JE posts as Draft; a DIFFERENT user must approve it to affect balances.
+  const postJE = async (preparer: string, payload: any) => {
+    const r = await inj('POST', '/api/ledger/journal', preparer, payload);
+    if (r.json?.entry_no && r.json?.pending) await inj('POST', `/api/ledger/journal/${r.json.entry_no}/approve`, preparer === approver ? admin : approver, {});
+    return r;
+  };
 
   // ── 1. both tenants post June-2026 revenue (T1=1000, T2=500) ──
-  const p1 = await inj('POST', '/api/ledger/journal', admin, rev(t1, '2026-06-15', 1000));
-  const p2 = await inj('POST', '/api/ledger/journal', admin, rev(t2, '2026-06-15', 500));
+  const p1 = await postJE(admin, rev(t1, '2026-06-15', 1000));
+  const p2 = await postJE(admin, rev(t2, '2026-06-15', 500));
   ok('Both tenants post June-2026 revenue', /^JE-/.test(p1.json.entry_no ?? '') && /^JE-/.test(p2.json.entry_no ?? ''), `${p1.json.entry_no} ${p2.json.entry_no}`);
 
   // ── 2. close T1's FY2026 (aggregates ONLY T1 → net 1000) ──
@@ -69,11 +79,11 @@ async function main() {
   ok('Close T1 FY2026 → net 1000 (T1 only, not T1+T2)', near(closeT1.json.net_income, 1000) && /^JE-/.test(closeT1.json.entry_no ?? ''), JSON.stringify({ net: closeT1.json.net_income, e: closeT1.json.entry_no }));
 
   // ── 3. T1's June is now CLOSED → further T1 posting blocked ──
-  const t1Blocked = await inj('POST', '/api/ledger/journal', admin, rev(t1, '2026-06-20', 100));
+  const t1Blocked = await postJE(admin, rev(t1, '2026-06-20', 100));
   ok('After T1 close: T1 posting into 2026-06 → 400 PERIOD_CLOSED', t1Blocked.status === 400 && t1Blocked.json.error?.code === 'PERIOD_CLOSED', `${t1Blocked.status} ${t1Blocked.json.error?.code}`);
 
   // ── 4. THE R1 FIX: T2's June is UNAFFECTED → T2 posting still succeeds ──
-  const t2Open = await inj('POST', '/api/ledger/journal', admin, rev(t2, '2026-06-20', 200));
+  const t2Open = await postJE(admin, rev(t2, '2026-06-20', 200));
   ok('R1 FIX: T1 close did NOT lock T2 — T2 posts into 2026-06 fine', /^JE-/.test(t2Open.json.entry_no ?? ''), `${t2Open.status} ${t2Open.json.entry_no}`);
 
   // ── 5. per-tenant period state: T1 June Closed, T2 June Open ──

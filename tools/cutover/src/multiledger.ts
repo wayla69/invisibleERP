@@ -43,6 +43,7 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // GL-05 maker-checker approver
     { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t2 },
   ]).onConflictDoNothing();
 
@@ -60,6 +61,13 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const admin = await login('admin', 'admin123');
+  const approver = await login('approver', 'admin123');
+  // GL-05 maker-checker: a manual JE posts as Draft; a DIFFERENT user must approve it to affect balances.
+  const postJE = async (preparer: string, payload: any) => {
+    const r = await inj('POST', '/api/ledger/journal', preparer, payload);
+    if (r.json?.entry_no && r.json?.pending) await inj('POST', `/api/ledger/journal/${r.json.entry_no}/approve`, preparer === approver ? admin : approver, {});
+    return r;
+  };
   const sales2 = await login('sales2', 'pw2');
   const D = '2026-03-15', FROM = '2026-01-01', TO = '2026-12-31';
 
@@ -70,12 +78,14 @@ async function main() {
   ok('Ledgers seeded: TFRS (leading) + TAX + IFRS', codes.includes('TFRS') && codes.includes('TAX') && codes.includes('IFRS') && tfrs?.is_leading === true && lg.json.leading === 'TFRS', JSON.stringify(codes));
 
   // ── 2. shared business entries (ledger_code NULL → every book) ──
-  const rev = await inj('POST', '/api/ledger/journal', admin, { date: D, source: 'TEST', tenant_id: t1, memo: 'sale', lines: [{ account_code: '1000', debit: 10000 }, { account_code: '4000', credit: 10000 }] });
-  const bookDep = await inj('POST', '/api/ledger/journal', admin, { date: D, source: 'TEST', tenant_id: t1, memo: 'book depreciation', lines: [{ account_code: '5200', debit: 1000 }, { account_code: '1590', credit: 1000 }] });
+  const rev = await postJE(admin, { date: D, source: 'TEST', tenant_id: t1, memo: 'sale', lines: [{ account_code: '1000', debit: 10000 }, { account_code: '4000', credit: 10000 }] });
+  const bookDep = await postJE(admin, { date: D, source: 'TEST', tenant_id: t1, memo: 'book depreciation', lines: [{ account_code: '5200', debit: 1000 }, { account_code: '1590', credit: 1000 }] });
   ok('Shared entries post (ledger_code NULL)', /^JE-/.test(rev.json.entry_no ?? '') && /^JE-/.test(bookDep.json.entry_no ?? ''), `${rev.json.entry_no} ${bookDep.json.entry_no}`);
 
   // ── 3. TAX-only adjustment: accelerated tax depreciation +1000 ──
   const adj = await inj('POST', '/api/ledger/ledgers/TAX/adjustment', admin, { date: D, tenant_id: t1, memo: 'ค่าเสื่อมเร่งทางภาษี', lines: [{ account_code: '5200', debit: 1000 }, { account_code: '1590', credit: 1000 }] });
+  // GL-05 maker-checker: a GAAP adjustment also posts as Draft — approve it (approver ≠ preparer) so it affects the TAX book.
+  if (adj.json?.entry_no && adj.json?.pending) await inj('POST', `/api/ledger/journal/${adj.json.entry_no}/approve`, approver, {});
   const adjRow = (await pg.query(`SELECT ledger_code FROM journal_entries WHERE entry_no='${adj.json.entry_no}'`)).rows as any[];
   ok('TAX adjustment posts with ledger_code=TAX', /^JE-/.test(adj.json.entry_no ?? '') && adjRow[0]?.ledger_code === 'TAX', `${adj.json.entry_no} ${adjRow[0]?.ledger_code}`);
 

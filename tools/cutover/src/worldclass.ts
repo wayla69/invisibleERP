@@ -46,10 +46,16 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // maker-checker: 2nd Admin approves JEs (GL-05)
     { username: 'cust1', passwordHash: await pw.hash('pw1'), role: 'Customer', tenantId: t1 },
     { username: 'cust2', passwordHash: await pw.hash('pw2'), role: 'Customer', tenantId: t2 },
     { username: 'sales1', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 }, // non-Admin staff bound to shop T1
   ]).onConflictDoNothing();
+  // SoD redesign split `pos_till` out of the Customer role; grant the till operator its Customer
+  // perms PLUS pos_till as a user override (overrides REPLACE role defaults, so include both).
+  const cust2Id = Number((await db.select({ id: s.users.id }).from(s.users).where(eq(s.users.username, 'cust2')))[0].id);
+  await db.insert(s.userPermissions).values([...DEFAULT_ROLE_PERMISSIONS.Customer, 'pos_till'].map((perm) => ({ userId: cust2Id, perm })))
+    .onConflictDoNothing();
   await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1.0' }).onConflictDoNothing();
   await db.insert(s.items).values({ itemId: 'A', itemDescription: 'Apple', uom: 'EA', unitPrice: '50' }).onConflictDoNothing();
   await db.insert(s.customerInventory).values([
@@ -89,6 +95,14 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const admin = await login('admin', 'admin123');
+  const approver = await login('approver', 'admin123');
+  // GL-05 maker-checker: a manual JE posts as Draft and only affects balances once a DIFFERENT
+  // user approves it. Post then approve (approver ≠ preparer) so setup/asserted JEs actually post.
+  const postJE = async (preparer: string, payload: any) => {
+    const r = await inj('POST', '/api/ledger/journal', preparer, payload);
+    if (r.json?.entry_no && r.json?.pending) await inj('POST', `/api/ledger/journal/${r.json.entry_no}/approve`, preparer === approver ? admin : approver, {});
+    return r;
+  };
   const c1 = await login('cust1', 'pw1');
   const c2 = await login('cust2', 'pw2');
   const sales1 = await login('sales1', 'pw3');
@@ -101,9 +115,9 @@ async function main() {
 
   // ── General Ledger (move #2) ──
   ok('GL: chart of accounts seeded (>=9)', (await inj('GET', '/api/ledger/accounts', admin)).json.accounts?.length >= 9 || (await inj('GET', '/api/ledger/accounts', admin)).json.length >= 9, '');
-  const balanced = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', memo: 't', lines: [{ account_code: '1000', debit: 500 }, { account_code: '4000', credit: 500 }] });
+  const balanced = await postJE(admin, { source: 'Manual', memo: 't', lines: [{ account_code: '1000', debit: 500 }, { account_code: '4000', credit: 500 }] });
   ok('GL: balanced journal posts (JE-)', (balanced.status === 200 || balanced.status === 201) && /^JE-/.test(balanced.json.entry_no ?? ''), `status=${balanced.status} ${JSON.stringify(balanced.json).slice(0, 80)}`);
-  const unbal = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 100 }, { account_code: '4000', credit: 90 }] });
+  const unbal = await postJE(admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 100 }, { account_code: '4000', credit: 90 }] });
   ok('GL: unbalanced journal rejected (400)', unbal.status === 400, `status=${unbal.status}`);
   const tb = await inj('GET', '/api/ledger/trial-balance', admin);
   const tbTotals = tb.json.totals ?? tb.json;
@@ -113,13 +127,13 @@ async function main() {
   const curMonth = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 7); // business-TZ month
   ok('GL: COA includes 3100 Retained Earnings', JSON.stringify((await inj('GET', '/api/ledger/accounts', admin)).json).includes('3100'));
   await inj('POST', `/api/ledger/periods/${curMonth}/close`, admin, {});
-  const blockedJE = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
+  const blockedJE = await postJE(admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
   ok('Period close → posting into closed period rejected (PERIOD_CLOSED)', blockedJE.status === 400 && blockedJE.json.error?.code === 'PERIOD_CLOSED', `${blockedJE.status} ${blockedJE.json.error?.code}`);
   await inj('POST', `/api/ledger/periods/${curMonth}/open`, admin, {}); // re-open so later sale/JE postings work
-  const reopenJE = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
+  const reopenJE = await postJE(admin, { source: 'Manual', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
   ok('Period re-open → posting works again', reopenJE.status === 201 || reopenJE.status === 200, `${reopenJE.status}`);
   // year-end close on a prior year (2025), isolated from current activity
-  await inj('POST', '/api/ledger/journal', admin, { date: '2025-03-15', source: 'Manual', memo: 'FY2025', lines: [{ account_code: '1000', debit: 1000 }, { account_code: '4000', credit: 1000 }] });
+  await postJE(admin, { date: '2025-03-15', source: 'Manual', memo: 'FY2025', lines: [{ account_code: '1000', debit: 1000 }, { account_code: '4000', credit: 1000 }] });
   const cy = await inj('POST', '/api/ledger/close-year?fiscal_year=2025', admin, {});
   ok('Year-end close FY2025 → P&L moved to 3100 (net 1000)', near(cy.json.net_income, 1000) && /^JE-/.test(cy.json.entry_no ?? ''), `${cy.status} ${JSON.stringify(cy.json).slice(0, 70)}`);
   const is2025 = await inj('GET', '/api/ledger/income-statement?from=2025-01-01&to=2025-12-31', admin);
@@ -173,8 +187,8 @@ async function main() {
   ok('FA(multi-tenant): re-run idempotent per tenant+period (no new postings)', runMt2.json.already === true || near(runMt2.json.total_depreciation, 0), JSON.stringify(runMt2.json).slice(0, 80));
 
   // ── Tenancy model: "HQ sees all, staff bound to shop" (Phase 9.2 bypass allowlist) ──
-  await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T1', tenant_id: t1, lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
-  await inj('POST', '/api/ledger/journal', admin, { source: 'TEST', source_ref: 'SCOPE-T2', tenant_id: t2, lines: [{ account_code: '1000', debit: 20 }, { account_code: '4000', credit: 20 }] });
+  await postJE(admin, { source: 'TEST', source_ref: 'SCOPE-T1', tenant_id: t1, lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
+  await postJE(admin, { source: 'TEST', source_ref: 'SCOPE-T2', tenant_id: t2, lines: [{ account_code: '1000', debit: 20 }, { account_code: '4000', credit: 20 }] });
   const refsOf = (j: any) => ((j.json.entries ?? []) as any[]).map((e) => e.source_ref);
   const salesJ = refsOf(await inj('GET', '/api/ledger/journal?limit=100', sales1));
   const adminJ = refsOf(await inj('GET', '/api/ledger/journal?limit=100', admin));

@@ -14,7 +14,10 @@ import { AnalyticsService } from '../../../apps/api/dist/modules/analytics/analy
 
 delete process.env.ANTHROPIC_API_KEY; // force rule-based path
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
-const ymd = (d: Date) => d.toISOString().slice(0, 10);
+// Match the app's business-timezone date (Asia/Bangkok, UTC+7 — see apps/api/src/common/bizdate.ts).
+// ForecastingService bins sales by business-TZ day up to *its* "today"; seeding in UTC drifts the
+// dense series by a day near the UTC-evening boundary (avg 2 → 1.93), so derive dates the same way.
+const ymd = (d: Date) => new Date(d.getTime() + 420 * 60_000).toISOString().slice(0, 10);
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000);
 
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
