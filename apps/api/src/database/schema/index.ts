@@ -60,3 +60,4 @@ export * from './access-review';
 export * from './ai-actions';
 export * from './kb';
 export * from './demand';
+export * from './printing';

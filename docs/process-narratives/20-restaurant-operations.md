@@ -10,10 +10,10 @@
 | Process owner | `<<Operations / Revenue Controller>>` |
 | Approver | `<<approver-name / title>>` |
 | Version | **0.1 DRAFT** |
-| Revision date | 2026-06-23 (v1.3) |
+| Revision date | 2026-06-23 (v1.4) |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | REST-01 … REST-09; GL-01 |
+| Related RCM controls | REST-01 … REST-10; GL-01 |
 | Related policy | `<<POS & Cash Handling Policy>>`, `<<VAT / e-Tax Policy>>`, `<<Discount Authority Policy>>`, `<<Fiscal Audit-Trail Policy>>` |
 
 ## 2. Purpose
@@ -122,6 +122,8 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
 
 10. **e-Tax submission.** `POST /api/tax/etax/submit/:docNo` submits to a provider (INET / Frank / Leceipt, or mock). It is **idempotent once Accepted**, and **fail-closed** in production (`WEBHOOK_NOT_CONFIGURED`; `ETAX_PROVIDER_NOT_CONFIGURED`). *Control: REST-07 (e-Tax submission completeness).*
 
+11. **Receipts & printing (`/api/print`, perm `pos` / `order_mgt`).** A **receipt** is a non-fiscal courtesy document over a settled sale — the abbreviated tax invoice (step 10) remains the fiscal record, so receipts post **no GL**. The server renders a receipt from `cust_pos_sales` + items + the seller's tenant identity into both an **HTML** document (`GET /api/print/receipt/:saleNo`, auto-prints with `?print`) and an **ESC/POS** byte stream for thermal printers. Printing is **pull-based**: each rendered ticket is queued in `print_jobs` and a CloudPRNT printer or a small in-store agent claims the next job for its tenant — `GET /api/print/jobs/next` (`queued`→`sent`, race-guarded), prints it, then acks `POST /api/print/jobs/:id/ack` (`{ok}` → `printed`; `{ok:false}` → re-queued, retried up to 5 attempts then `failed`). ESC/POS payloads carry NUL/control bytes a text column can't store, so they are **base64-encoded** in the queue and decoded by the agent. On checkout the customer receipt is **auto-enqueued** (best-effort — a print failure never blocks a settled sale). Staff can **reprint** (`POST /api/print/reprint/:saleNo`) — the first issuance is the original; every later render is flagged a **COPY (สำเนา)** — and **deliver out-of-band** via email / LINE / SMS (`POST /api/print/receipt/:saleNo/send`) through the messaging gateway. A **tie-out** endpoint (`GET /api/print/tie-out/:saleNo`) reconciles the receipt to its fiscal sale (Σ line − discount + VAT + tip = total + tip). Print jobs are tenant-isolated (RLS). Errors: `SALE_NOT_FOUND`, `NO_SALE_NO`, `NO_PAYLOAD`, `JOB_NOT_FOUND`. *Control: REST-10 (receipt ↔ fiscal-sale tie-out + non-fiscal receipt segregation).*
+
 ## 8. Process Flow
 
 ```mermaid
@@ -169,6 +171,7 @@ flowchart TD
 | 10 | Missing / duplicate tax invoice | e-Tax idempotent on Accepted; fail-closed in prod | Preventive | REST-07 | e-Tax submission status |
 | 6 | Diner self-order with a tampered / arbitrary price | Public order accepts **menu-driven lines only**; price/station/86/modifier rules resolved server-side from the catalog; freeform `name`/`unit_price` rejected | Preventive | REST-08 | QR order request log, catalog price |
 | 6 | Buffet abuse: off-tier items, ordering after time-up, mode mixing, mis-priced charge | Tier eligibility (`NOT_IN_PACKAGE`); time-window enforcement (`BUFFET_EXPIRED`); single-mode lock (`MODE_LOCKED`); per-pax charge + overtime computed server-side from the tier; food forced to ฿0 | Preventive | REST-09 | Buffet session (mode, pax, window), charge/overtime lines |
+| 11 | Receipt total diverges from the fiscal sale; receipt mistaken for the fiscal record | Receipt rendered from `cust_pos_sales` only and posts no GL; tie-out reconciles Σ line − discount + VAT + tip = total; reprints flagged COPY (สำเนา) | Detective / Preventive | REST-10 | `print_jobs` queue, tie-out report, COPY flag |
 
 ## 10. Inputs & Outputs
 
@@ -242,3 +245,4 @@ flowchart TD
 | 1.1 | 2026-06-23 | Platform | **Course firing (POS customization Phase 2):** §5 — order lines carry a `course`; KDS feed is course-ordered and course-tagged; fire all or one course via `POST …/fire?course=N` (`NO_COURSE_ITEMS`). |
 | 1.2 | 2026-06-23 | Platform | **Day-parting / menu scheduling (POS customization Phase 3):** §6 — menu items carry a time-of-day + day-of-week availability window (Asia/Bangkok); menu flags `available_now`; ordering outside the window blocked (`OUTSIDE_HOURS`). |
 | 1.3 | 2026-06-23 | Platform | **Food-cost / margin analytics (POS customization Phase 7):** §12 — `GET /api/menu/food-cost` (per-menu cost/margin %/food-cost % vs target) + `/api/menu/ingredient-cost` (ingredient cost-contribution), theoretical from recipes. Reporting only. |
+| 1.4 | 2026-06-23 | Platform | **Receipts & printing (POS customization Phase 4):** §7 step 11 — server-rendered receipts (HTML + ESC/POS) + a pull-based `print_jobs` queue (`/api/print/*`), auto-enqueue on checkout, reprint-as-COPY, out-of-band email/LINE/SMS delivery, and receipt↔fiscal tie-out. Added control **REST-10** + control-matrix row; migration `0074_print_jobs`. |

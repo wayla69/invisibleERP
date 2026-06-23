@@ -96,6 +96,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-060 | CRM: marketing-consent enforced | MKT-04 | 19 §7, §9 |
 | UAT-O2C-061 | Food-cost: per-menu margin from recipe | Feature (food-cost) | 20 §12 |
 | UAT-O2C-062 | Food-cost: ingredient cost contribution | Feature (food-cost) | 20 §12 |
+| UAT-O2C-063 | Checkout auto-queues a receipt print job | REST-10 | 20 §7 |
+| UAT-O2C-064 | Receipt ties out to the fiscal sale | REST-10 | 20 §7, §9 |
+| UAT-O2C-065 | Receipt renders seller header + VAT + items | REST-10 | 20 §7 |
+| UAT-O2C-066 | HTML receipt document served | REST-10 | 20 §7 |
+| UAT-O2C-067 | Agent pulls + acks the next print job | REST-10 | 20 §7 |
+| UAT-O2C-068 | Reprint flagged a COPY (สำเนา) | REST-10 | 20 §7, §9 |
+| UAT-O2C-069 | Send receipt out-of-band (email) | REST-10 | 20 §7 |
+| UAT-O2C-070 | Print jobs tenant-isolated (RLS) | REST-10 | 20 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
