@@ -93,8 +93,9 @@ async function main() {
     'sales' in kpi && 'receivables' in kpi && 'payables' in kpi && 'pipeline' in kpi,
     JSON.stringify(kpi));
 
-  // ── 2. kpiBoard MTD orders ≥ 2 (we created 2 POS sales above) ──
-  ok('kpiBoard MTD orders ≥ 2 after seeding sales', kpi.sales.mtd_orders >= 0, `orders=${kpi.sales.mtd_orders}`); // Allow 0 if portal sale needs inventory
+  // ── 2. kpiBoard exposes mtd_orders as a non-negative number (seeding via portal sales is inventory-dependent,
+  // so the exact count isn't asserted here; the value/amount KPIs are covered by the pipeline checks below). ──
+  ok('kpiBoard.sales.mtd_orders present + non-negative', typeof kpi.sales.mtd_orders === 'number' && kpi.sales.mtd_orders >= 0, `orders=${kpi.sales.mtd_orders}`);
 
   // ── 3. kpiBoard pipeline open_count = 1 (seeded 1 opportunity) ──
   ok('kpiBoard pipeline open_count = 1', kpi.pipeline.open_count === 1, `count=${kpi.pipeline.open_count}`);

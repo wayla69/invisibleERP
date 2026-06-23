@@ -73,7 +73,8 @@ async function main() {
   ok('New owner login → not forced to change password', ownerLogin.json.must_change_password === false, JSON.stringify({ mcp: ownerLogin.json.must_change_password }));
   const owner = ownerLogin.json.token;
   const je = await inj('POST', '/api/ledger/journal', owner, { date: `${year}-06-15`, source: 'TEST', lines: [{ account_code: '1000', debit: 100 }, { account_code: '4000', credit: 100 }] });
-  ok('New tenant can post a journal immediately (periods exist)', /^JE-/.test(je.json.entry_no ?? ''), `${je.status} ${je.json.entry_no}`);
+  // GL-05: a manual JE posts as DRAFT (pending) — excluded from balances until a different user approves it.
+  ok('New tenant manual JE posts as Draft (periods exist; GL-05 maker-checker)', /^JE-/.test(je.json.entry_no ?? '') && je.json.pending === true, `${je.status} ${je.json.entry_no} pending=${je.json.pending}`);
 
   // ── 3. tenant profile GET/PATCH ──
   const prof = await inj('GET', '/api/tenant/profile', owner);
