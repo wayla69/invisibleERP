@@ -547,6 +547,13 @@
       "when": 1782400000000,
       "tag": "0077_tenant_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1782410000000,
+      "tag": "0078_custom_fields",
+      "breakpoints": true
     }
   ]
 }

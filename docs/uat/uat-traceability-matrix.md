@@ -278,6 +278,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-018 | AI action — self-approval blocked (SoD) | ITGC-AC-09 | 08 §7 |
 | UAT-ADM-019 | AI action — approver lacks kind permission | ITGC-AC-02/09 | 08 §7 |
 | UAT-ADM-020 | AI action — tenant isolation (RLS) | ITGC-AC-03 | 08 §7 |
+| UAT-ADM-021 | Custom field — define + slugged key | Feature (UDF) | 17 §7 |
+| UAT-ADM-022 | Custom field — typed/required/option validation | Feature (UDF) | 17 §7 |
+| UAT-ADM-023 | Custom field — typed read + bulk load | Feature (UDF) | 17 §7 |
+| UAT-ADM-024 | Custom field — tenant isolation (RLS) | Feature (UDF) | 17 §7 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
