@@ -243,8 +243,12 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   tool `search_knowledge_base` + cite-or-refuse system prompt; endpoints `/api/ai/kb/*`. New `rag`
   harness (8 checks). *Prod upgrade: swap `EMBED_PROVIDER` for a real model + move `embedding` to a
   pgvector ANN column behind the same API.*
-- **D3 — Close the ERP depth gaps where the market is.** MRP / supply planning / multi-level BOM +
-  capacity (if pursuing manufacturing); employee self-service + expense mgmt; supplier portal.
+- **D3 — Close the ERP depth gaps.** ✅ **MRP deepened.** `MrpService.run` now does **multi-level
+  (recursive) BOM explosion** with per-item on-hand netting (shared pool), planned Make orders at every
+  level + Buy orders for leaves, a circular-BOM guard, and **`POST /api/mrp/plan-to-pr`** that turns the
+  planned Buy into a real consolidated PR (reuses the PR→PO→GR workflow). New `mrp` harness (10 checks);
+  `mfg-depth`/`manufacturing` stay green. *Remaining D3: capacity scheduling/lot-sizing (EOQ),
+  employee self-service + expense mgmt, supplier (vendor-facing) portal.*
 - **D4 — Analytics plane + demand ML.** dbt + semantic layer + embedded BI; seasonality/Croston
   demand model with a backtesting harness (WAPE/MASE) as a CI gate.
 

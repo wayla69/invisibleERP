@@ -54,4 +54,6 @@ export class QualityController {
 export class MrpController {
   constructor(private readonly svc: MrpService) {}
   @Post('run') run(@Body(new ZodValidationPipe(MrpBody)) b: MrpRunDto, @CurrentUser() u: JwtUser) { return this.svc.run(b, u); }
+  // Multi-level MRP → consolidated PR for the planned Buy (needs procurement to raise the PR).
+  @Post('plan-to-pr') @Permissions('procurement', 'planner') planToPr(@Body(new ZodValidationPipe(MrpBody)) b: MrpRunDto, @CurrentUser() u: JwtUser) { return this.svc.planToPr(b, u); }
 }
