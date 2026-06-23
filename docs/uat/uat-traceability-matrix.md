@@ -86,6 +86,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-050 | Diner self-order UI smoke (Playwright) | Feature (diner UI) | 20 §6 |
 | UAT-O2C-051 | Move a live tab to a free table | Feature (table ops) | 20 §6 |
 | UAT-O2C-052 | Move onto an occupied table blocked | Feature (table ops) | 20 §6, §13 |
+| UAT-O2C-053 | Transfer line items between tables | Feature (table ops) | 20 §6 |
+| UAT-O2C-054 | Merge two tabs into a combined bill | Feature (table ops) | 20 §6 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

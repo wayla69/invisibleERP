@@ -105,6 +105,12 @@ export const TableStatusBody = z.object({ status: z.enum(['available', 'reserved
 // move a live tab to another (free) table
 export const MoveTableBody = z.object({ to_table_id: z.number().int().positive() });
 
+// move selected line items to another table's open order
+export const TransferItemsBody = z.object({ item_ids: z.array(z.number().int().positive()).min(1).max(100), to_table_id: z.number().int().positive() });
+
+// merge another table's tab into this one (combined bill)
+export const MergeTablesBody = z.object({ from_table_id: z.number().int().positive() });
+
 export const ZoneBody = z.object({ name: z.string().min(1), sort_order: z.number().int().optional() });
 
 export const StationBody = z.object({ code: z.string().min(1), name: z.string().min(1), sort: z.number().int().optional(), default_prep_minutes: z.number().int().positive().optional() });

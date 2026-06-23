@@ -162,8 +162,11 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
   const startBuffet = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/buffet`, { method: 'POST', body: JSON.stringify({ package_id: Number(bPkg), pax: Number(bPax) || 1 }) }), onSuccess: () => { setMsg('เริ่มบุฟเฟต์แล้ว'); setBuffetOpen(false); onChange(); }, onError: onErr });
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveTo, setMoveTo] = useState('');
-  const allTables = useQuery<{ tables: { id: number; table_no: string; status: string }[] }>({ queryKey: ['tables-list'], queryFn: () => api('/api/restaurant/tables'), enabled: moveOpen });
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeFrom, setMergeFrom] = useState('');
+  const allTables = useQuery<{ tables: { id: number; table_no: string; status: string }[] }>({ queryKey: ['tables-list'], queryFn: () => api('/api/restaurant/tables'), enabled: moveOpen || mergeOpen });
   const move = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/move`, { method: 'POST', body: JSON.stringify({ to_table_id: Number(moveTo) }) }), onSuccess: () => { setMsg('ย้ายโต๊ะแล้ว'); setMoveOpen(false); onClose(); onChange(); }, onError: onErr });
+  const merge = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/merge`, { method: 'POST', body: JSON.stringify({ from_table_id: Number(mergeFrom) }) }), onSuccess: () => { setMsg('รวมโต๊ะแล้ว'); setMergeOpen(false); onChange(); }, onError: onErr });
   const open = useMutation({ mutationFn: () => api<{ session_id: number; public_token: string }>(`/api/restaurant/tables/${t.id}/open`, { method: 'POST', body: '{}' }), onSuccess: (r) => { setSessionId(r.session_id); setQr(`/qr/${r.public_token}`); setMsg('เปิดโต๊ะแล้ว'); onChange(); }, onError: onErr });
   const addItem = useMutation({
     mutationFn: async () => {
@@ -227,10 +230,13 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
       )}
 
       {(t.session || sessionId) && t.status !== 'cleaning' && (
-        <div>
-          <Button variant="outline" size="sm" onClick={() => setMoveOpen((v) => !v)}><ArrowLeftRight className="size-4" /> ย้ายโต๊ะ</Button>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setMoveOpen((v) => !v); setMergeOpen(false); }}><ArrowLeftRight className="size-4" /> ย้ายโต๊ะ</Button>
+            <Button variant="outline" size="sm" onClick={() => { setMergeOpen((v) => !v); setMoveOpen(false); }}><Sparkles className="size-4" /> รวมโต๊ะ</Button>
+          </div>
           {moveOpen && (
-            <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border p-3">
+            <div className="flex flex-wrap items-end gap-2 rounded-lg border p-3">
               <Select value={moveTo} onValueChange={setMoveTo}>
                 <SelectTrigger className="w-[200px]"><SelectValue placeholder="ย้ายไปโต๊ะว่าง…" /></SelectTrigger>
                 <SelectContent>
@@ -238,6 +244,17 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
                 </SelectContent>
               </Select>
               <Button disabled={!moveTo || move.isPending} onClick={() => move.mutate()}>ย้าย</Button>
+            </div>
+          )}
+          {mergeOpen && (
+            <div className="flex flex-wrap items-end gap-2 rounded-lg border p-3">
+              <Select value={mergeFrom} onValueChange={setMergeFrom}>
+                <SelectTrigger className="w-[220px]"><SelectValue placeholder="รวมโต๊ะอื่นเข้าโต๊ะนี้…" /></SelectTrigger>
+                <SelectContent>
+                  {(allTables.data?.tables ?? []).filter((x) => x.id !== t.id && ['occupied', 'bill_requested', 'paying'].includes(x.status)).map((x) => <SelectItem key={x.id} value={String(x.id)}>โต๊ะ {x.table_no}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button disabled={!mergeFrom || merge.isPending} onClick={() => merge.mutate()}>รวม</Button>
             </div>
           )}
         </div>

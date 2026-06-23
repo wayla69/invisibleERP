@@ -9,7 +9,7 @@ import { ChannelOrderService } from './channel-order.service';
 import { BuffetService } from './buffet.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
-  TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody,
+  TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
   type CreateOrderDto, type AddItemsDto, type KdsActionDto, type CheckoutDto, type CreateTableDto, type UpdateTableDto,
   type BuffetPackageDto, type BuffetPackageUpdateDto, type StartBuffetDto,
 } from './dto';
@@ -44,12 +44,14 @@ export class RestaurantController {
   @Get('tables/:id/qr') tableQr(@Param('id') id: string, @Query('base') base: string | undefined, @CurrentUser() u: JwtUser) { return this.tables.qrSticker(+id, base, u); }
   @Post('tables/:id/buffet') startBuffet(@Param('id') id: string, @Body(new ZodValidationPipe(StartBuffetBody)) b: StartBuffetDto, @CurrentUser() u: JwtUser) { return this.buffet.startBuffetForTable(+id, b.package_id, b.pax ?? 1, u); }
   @Post('tables/:id/move') moveTable(@Param('id') id: string, @Body(new ZodValidationPipe(MoveTableBody)) b: { to_table_id: number }, @CurrentUser() u: JwtUser) { return this.tables.moveSession(+id, b.to_table_id, u); }
+  @Post('tables/:id/merge') mergeTable(@Param('id') id: string, @Body(new ZodValidationPipe(MergeTablesBody)) b: { from_table_id: number }, @CurrentUser() u: JwtUser) { return this.dineIn.mergeTables(+id, b.from_table_id, u); }
 
   // ── dine-in orders ──
   @Post('orders') createOrder(@Body(new ZodValidationPipe(CreateOrderBody)) b: CreateOrderDto, @CurrentUser() u: JwtUser) { return this.dineIn.createOrder(b, u); }
   @Get('orders') listOrders(@CurrentUser() u: JwtUser) { return this.dineIn.listOpenOrders(u); }
   @Get('orders/:orderNo') getOrder(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.getOrder(o, u); }
   @Post('orders/:orderNo/items') addItems(@Param('orderNo') o: string, @Body(new ZodValidationPipe(AddItemsBody)) b: AddItemsDto, @CurrentUser() u: JwtUser) { return this.dineIn.addItems(o, b, u); }
+  @Post('orders/:orderNo/transfer-items') transferItems(@Param('orderNo') o: string, @Body(new ZodValidationPipe(TransferItemsBody)) b: { item_ids: number[]; to_table_id: number }, @CurrentUser() u: JwtUser) { return this.dineIn.transferItems(o, b.item_ids, b.to_table_id, u); }
   @Post('orders/:orderNo/fire') fire(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.fire(o, u); }
   @Post('orders/:orderNo/bill') bill(@Param('orderNo') o: string, @CurrentUser() u: JwtUser) { return this.dineIn.requestBill(o, u); }
   @Post('orders/:orderNo/checkout') checkout(@Param('orderNo') o: string, @Body(new ZodValidationPipe(CheckoutBody)) b: CheckoutDto, @CurrentUser() u: JwtUser) { return this.dineIn.checkout(o, b, u); }

@@ -271,6 +271,33 @@ async function main() {
   const moveBusy = await inj('POST', `/api/restaurant/tables/${mvTo.json.id}/move`, sales1, { to_table_id: occ.json.id });
   ok('Table move: onto an occupied table rejected (400 TABLE_BUSY)', moveBusy.status === 400 && moveBusy.json.error?.code === 'TABLE_BUSY', `${moveBusy.status} ${moveBusy.json.error?.code}`);
 
+  // ── table operations: transfer items between tables ──
+  const tfFrom = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A13', seats: 4 });
+  const tfOpen = await inj('POST', `/api/restaurant/tables/${tfFrom.json.id}/open`, sales1, {});
+  const tfOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tfFrom.json.id, session_id: tfOpen.json.session_id, items: [{ name: 'สเต๊ก', qty: 1, unit_price: 200, station_code: 'hot' }, { name: 'สลัด', qty: 1, unit_price: 80, station_code: 'cold' }] });
+  const tfTo = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A14', seats: 2 });
+  await inj('POST', `/api/restaurant/tables/${tfTo.json.id}/open`, sales1, {});
+  const steakId = (tfOrd.json.items ?? []).find((i: any) => i.name === 'สเต๊ก')?.item_id;
+  const tf = await inj('POST', `/api/restaurant/orders/${tfOrd.json.order_no}/transfer-items`, sales1, { item_ids: [steakId], to_table_id: tfTo.json.id });
+  ok('Transfer items: moves a line to another table', (tf.status === 200 || tf.status === 201) && tf.json.moved === 1 && tf.json.to_table_id === tfTo.json.id, `${tf.status} ${JSON.stringify(tf.json).slice(0, 90)}`);
+  const tfSrc = await inj('GET', `/api/restaurant/orders/${tfOrd.json.order_no}`, sales1);
+  ok('Transfer items: source keeps the remaining line (80); target carries the moved one (200)', tfSrc.json.items?.length === 1 && near(tfSrc.json.subtotal, 80) && (await inj('GET', '/api/restaurant/orders', sales1)).json.orders.some((o: any) => o.table_id === tfTo.json.id && near(o.total, 214)), `src=${tfSrc.json.items?.length}/${tfSrc.json.subtotal}`);
+
+  // ── table operations: merge two tabs into one (combined bill) ──
+  const mgT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A15', seats: 4 });
+  const mgTo = await inj('POST', `/api/restaurant/tables/${mgT.json.id}/open`, sales1, {});
+  const mgTord = await inj('POST', '/api/restaurant/orders', sales1, { table_id: mgT.json.id, session_id: mgTo.json.session_id, items: [{ name: 'ข้าวผัด', qty: 1, unit_price: 100, station_code: 'hot' }] });
+  const mgF = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A16', seats: 2 });
+  const mgFo = await inj('POST', `/api/restaurant/tables/${mgF.json.id}/open`, sales1, {});
+  await inj('POST', '/api/restaurant/orders', sales1, { table_id: mgF.json.id, session_id: mgFo.json.session_id, items: [{ name: 'น้ำเปล่า', qty: 1, unit_price: 50, station_code: 'drinks' }] });
+  const merged = await inj('POST', `/api/restaurant/tables/${mgT.json.id}/merge`, sales1, { from_table_id: mgF.json.id });
+  ok('Merge tables: absorbs the other tab into one order', (merged.status === 200 || merged.status === 201) && merged.json.into_order_no === mgTord.json.order_no && merged.json.moved === 1, `${merged.status} ${JSON.stringify(merged.json).slice(0, 90)}`);
+  const mgCombined = await inj('GET', `/api/restaurant/orders/${mgTord.json.order_no}`, sales1);
+  ok('Merge tables: combined bill = sum of both tabs (subtotal 150)', mgCombined.json.items?.length === 2 && near(mgCombined.json.subtotal, 150), `lines=${mgCombined.json.items?.length} sub=${mgCombined.json.subtotal}`);
+  const mgBoard = await inj('GET', '/api/restaurant/tables/status', sales1);
+  const a16 = (mgBoard.json.tables ?? []).find((t: any) => t.table_no === 'A16');
+  ok('Merge tables: source table freed after merge', a16?.status === 'available' && !a16?.session, `${a16?.status} session=${!!a16?.session}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

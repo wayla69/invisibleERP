@@ -121,8 +121,16 @@ per-head charge and time window start just as with QR self-start.
 
 **Moving a table.** If guests change seats, open the table and tap **ย้ายโต๊ะ**,
 pick a free table, and confirm — the whole tab (order + bill) moves across, the
-old table is freed and the new one becomes occupied. Moving onto a table that
-already has guests isn't allowed (that's a *merge* — coming separately).
+old table is freed and the new one becomes occupied.
+
+**Merging tables.** To combine two tabs onto one bill (e.g. two tables join up),
+open the table you want to keep and tap **รวมโต๊ะ**, then pick the other table —
+its items move onto this table's order, the other table is freed, and you settle
+one combined bill. (Buffet tables can't be merged.)
+
+**Transferring items.** Individual dishes can be moved between tabs via
+`transfer-items` (e.g. an item rung on the wrong table) — the bill follows the
+moved items.
 
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
