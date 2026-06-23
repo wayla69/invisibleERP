@@ -1,7 +1,7 @@
 // POS Tier 2 #9 — Loyalty / membership at POS (สมาชิก/แต้มที่จุดขาย).
 // End-consumer members per shop (distinct from tenant-scoped loyalty_points) + append-only points ledger.
 // tenant_id REQUIRED → RLS: each shop owns its own roster. Lookup by phone / card / member_code.
-import { pgTable, bigserial, bigint, text, numeric, timestamp, boolean, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, timestamp, boolean, date, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 export const posMembers = pgTable('pos_members', {
@@ -12,6 +12,8 @@ export const posMembers = pgTable('pos_members', {
   phone: text('phone'),
   cardNo: text('card_no'),
   email: text('email'),
+  birthday: date('birthday'),                       // for birthday campaigns (month/day matter)
+  marketingOptIn: boolean('marketing_opt_in').notNull().default(true), // consent for marketing messages
   balance: numeric('balance').default('0'),
   lifetime: numeric('lifetime').default('0'),
   tier: text('tier').default('Standard'),
@@ -20,6 +22,22 @@ export const posMembers = pgTable('pos_members', {
   lastUpdated: timestamp('last_updated', { withTimezone: true }),
   createdBy: text('created_by'),
 }, (t) => ({ uqCode: uniqueIndex('pos_members_tenant_code').on(t.tenantId, t.memberCode) }));
+
+// Message-delivery log for CRM messaging (LINE / SMS / email). Provider-agnostic; mock by default.
+export const messageLog = pgTable('message_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  memberId: bigint('member_id', { mode: 'number' }).references(() => posMembers.id),
+  channel: text('channel').notNull(),               // line | sms | email
+  recipient: text('recipient'),
+  body: text('body').notNull(),
+  campaign: text('campaign'),
+  status: text('status').notNull(),                 // sent | failed | skipped
+  provider: text('provider'),                       // mock | line | sms | email
+  error: text('error'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ idxTenant: index('idx_message_log_tenant').on(t.tenantId, t.createdAt) }));
 // phone/card partial-unique (WHERE NOT NULL) defined in the migration SQL.
 
 export const posMemberLedger = pgTable('pos_member_ledger', {
@@ -38,3 +56,4 @@ export const posMemberLedger = pgTable('pos_member_ledger', {
 
 export type PosMember = typeof posMembers.$inferSelect;
 export type PosMemberLedger = typeof posMemberLedger.$inferSelect;
+export type MessageLog = typeof messageLog.$inferSelect;

@@ -21,11 +21,11 @@ export class MemberService {
     return user.tenantId;
   }
 
-  async enroll(dto: { name?: string; phone?: string; card_no?: string; email?: string }, user: JwtUser) {
+  async enroll(dto: { name?: string; phone?: string; card_no?: string; email?: string; birthday?: string; marketing_opt_in?: boolean }, user: JwtUser) {
     const db = this.db as any; const tenantId = this.tid(user);
     let row;
     try {
-      [row] = await db.insert(posMembers).values({ tenantId, memberCode: `M-TMP`, name: dto.name ?? null, phone: dto.phone ?? null, cardNo: dto.card_no ?? null, email: dto.email ?? null, balance: '0', lifetime: '0', createdBy: user.username }).returning();
+      [row] = await db.insert(posMembers).values({ tenantId, memberCode: `M-TMP`, name: dto.name ?? null, phone: dto.phone ?? null, cardNo: dto.card_no ?? null, email: dto.email ?? null, birthday: dto.birthday ?? null, marketingOptIn: dto.marketing_opt_in ?? true, balance: '0', lifetime: '0', createdBy: user.username }).returning();
     } catch (e: any) {
       if (String(e?.code) === '23505' || /duplicate|unique/i.test(String(e?.message))) throw new ConflictException({ code: 'MEMBER_EXISTS', message: 'Member with this phone/card already exists', messageTh: 'มีสมาชิกที่ใช้เบอร์/บัตรนี้แล้ว' });
       throw e;
@@ -51,6 +51,37 @@ export class MemberService {
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, id)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     return shape(m);
+  }
+
+  // update member profile (contact + birthday + marketing consent)
+  async update(id: number, dto: { name?: string; phone?: string; email?: string; birthday?: string | null; marketing_opt_in?: boolean; tier?: string; active?: boolean }, _user: JwtUser) {
+    const db = this.db as any;
+    const [m] = await db.select().from(posMembers).where(eq(posMembers.id, id)).limit(1);
+    if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
+    const set: any = { lastUpdated: new Date() };
+    if (dto.name !== undefined) set.name = dto.name;
+    if (dto.phone !== undefined) set.phone = dto.phone;
+    if (dto.email !== undefined) set.email = dto.email;
+    if (dto.birthday !== undefined) set.birthday = dto.birthday;
+    if (dto.marketing_opt_in !== undefined) set.marketingOptIn = dto.marketing_opt_in;
+    if (dto.tier !== undefined) set.tier = dto.tier;
+    if (dto.active !== undefined) set.active = dto.active;
+    await db.update(posMembers).set(set).where(eq(posMembers.id, id));
+    return this.balance(id, _user);
+  }
+
+  // members with a birthday today / this month (Asia/Bangkok), active & opted-in — for birthday campaigns
+  async birthdays(window: 'today' | 'month', _user: JwtUser) {
+    const db = this.db as any;
+    const bkk = new Date(Date.now() + 7 * 3600 * 1000);
+    const mo = bkk.getUTCMonth() + 1, day = bkk.getUTCDate();
+    const rows = await db.select().from(posMembers).where(eq(posMembers.active, true));
+    const out = rows.filter((m: any) => {
+      if (!m.birthday || m.marketingOptIn === false) return false;
+      const d = new Date(m.birthday + 'T00:00:00Z');
+      return window === 'month' ? d.getUTCMonth() + 1 === mo : (d.getUTCMonth() + 1 === mo && d.getUTCDate() === day);
+    });
+    return { window, count: out.length, members: out.map(shape) };
   }
   async history(id: number, _user: JwtUser, limit = 20) {
     const db = this.db as any;
@@ -100,5 +131,5 @@ export class MemberService {
 }
 
 function shape(m: any) {
-  return { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, card_no: m.cardNo, balance: n(m.balance), lifetime: n(m.lifetime), tier: m.tier, active: m.active };
+  return { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, card_no: m.cardNo, email: m.email, birthday: m.birthday ?? null, marketing_opt_in: m.marketingOptIn !== false, balance: n(m.balance), lifetime: n(m.lifetime), tier: m.tier, active: m.active };
 }

@@ -10,10 +10,10 @@
 | Process owner | `<<Marketing / Revenue Controller>>` |
 | Approver | `<<approver-name / title>>` |
 | Version | **0.1 DRAFT** |
-| Revision date | 2026-06-22 |
+| Revision date | 2026-06-23 (v0.3) |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | MKT-01, MKT-02, MKT-03; SoD rule R10 |
+| Related RCM controls | MKT-01, MKT-02, MKT-03, MKT-04; SoD rule R10 |
 | Related policy | `<<Pricing & Discount Authority Policy>>`, `<<Promotions Policy>>`, `<<Loyalty Programme Terms>>`, `<<Segregation-of-Duties Policy>>` |
 
 ## 2. Purpose
@@ -102,6 +102,8 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
 
 10. **Redeem points.** `POST /api/loyalty/redeem` locks the balance row **`FOR UPDATE`**, then reads, validates and decrements under the lock to prevent double-spend. It enforces the minimum-redeem floor and sufficiency. Errors: `INSUFFICIENT_POINTS`, `MIN_REDEEM`, `BAD_POINTS`, `LOYALTY_DISABLED`. *Control: MKT-03 — points liability integrity.*
 
+11. **CRM messaging (consented).** Members carry a `birthday` and a `marketing_opt_in` consent flag (`PATCH /api/loyalty/members/:id`); `GET /api/loyalty/members/birthdays?window=today|month` lists upcoming birthdays. `POST /api/messaging/send` (one member) and `POST /api/messaging/blast` (audience = all / `birthdays_today` / RFM `segment`) send via a provider-agnostic gateway (LINE / SMS / email — real provider when its credentials are configured, otherwise a logged **mock**), and **every send respects consent** — an opted-out member is recorded as `skipped`, never contacted. All deliveries are written to an append-only `message_log` (`GET /api/messaging/log`). *Control: MKT-04 — marketing-consent enforcement + auditable delivery log.*
+
 ## 8. Process Flow
 
 ```mermaid
@@ -137,6 +139,7 @@ flowchart TD
 | 7 | Mis-valued points liability | Config gated to loyalty/marketing; segregated from POS | Preventive | MKT-03 | `/loyalty/config` change log |
 | 9 | Lost earn increment under concurrency | `FOR UPDATE` lock on balance during earn | Preventive | MKT-03 | DB transaction log |
 | 10 | Double-spend / over-redemption of points | `FOR UPDATE` lock; validate+decrement under lock; min-redeem & sufficiency checks | Preventive | MKT-03 | Redemption ledger |
+| 11 | Contacting customers without consent / no audit | `marketing_opt_in` enforced on every send (opted-out → `skipped`); append-only `message_log` | Preventive / Detective | MKT-04 | Message-delivery log |
 
 ## 10. Inputs & Outputs
 
@@ -173,6 +176,7 @@ flowchart TD
 | BAD_POINTS | Invalid (non-positive) points value | Reject input. |
 | MEMBER_NOT_FOUND | Lookup/redeem for unknown member | Reject; verify membership. |
 | MEMBER_EXISTS | Enrol duplicate member | Reject; use existing member. |
+| (send → `skipped`) | Member opted out of marketing | Not contacted; logged as skipped. |
 
 ## 14. Revision History
 
@@ -180,3 +184,4 @@ flowchart TD
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | B4: pricing rules now apply at dine-in checkout (step 6a) — service charge → GL 4400, satang rounding → GL 4900; verified by the `pricing` cutover harness. |
+| 0.3 | 2026-06-23 | Platform | **CRM messaging (POS customization Phase 6):** step 11 — member `birthday` + `marketing_opt_in`, birthdays endpoint, provider-agnostic `/api/messaging` send/blast (LINE/SMS/email, mock default) with consent enforcement + `message_log`; new control **MKT-04**. Config: `LINE_CHANNEL_TOKEN`, `SMS_API_KEY`, `SMTP_HOST`. |

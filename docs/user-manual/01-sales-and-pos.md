@@ -320,5 +320,23 @@ Record any cash added or removed:
 
 ---
 
+## 8. Customer messaging & birthdays (CRM)
+
+On the **CRM 360** screen you can reach out to members:
+
+- **Birthdays:** see who has a birthday today / this month, for a "happy
+  birthday" offer.
+- **Send a message** to a group — **วันเกิดวันนี้** (today's birthdays), an
+  **RFM segment** (Champions, Loyal, At Risk, …), or **all members** — over
+  **SMS / LINE / email**, then read the delivery log.
+
+Two things to know: a member must have **opted in** to marketing (set when you
+enrol or edit them) — anyone opted out is automatically skipped and never
+contacted; and until a real SMS/LINE/email provider is configured, messages are
+recorded as **mock** sends (the log shows the provider) so you can rehearse
+campaigns safely.
+
+---
+
 **Next:** [Customer Portal](./02-customer-portal.md) ·
 [Finance — AR & AP](./05-finance-ar-ap.md)

@@ -92,6 +92,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-056 | Fire next course / empty course | Feature (course firing) | 20 §5, §13 |
 | UAT-O2C-057 | Day-parting: menu flags availability | Feature (day-parting) | 20 §6 |
 | UAT-O2C-058 | Day-parting: order outside window blocked | Feature (day-parting) | 20 §6, §13 |
+| UAT-O2C-059 | CRM: enrol member + messaging send | MKT-04 | 19 §7 |
+| UAT-O2C-060 | CRM: marketing-consent enforced | MKT-04 | 19 §7, §9 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

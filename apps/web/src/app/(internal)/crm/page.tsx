@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Banknote, ShoppingCart, Receipt, Users, Search } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Banknote, ShoppingCart, Receipt, Users, Search, Cake, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -40,6 +40,7 @@ export default function CrmPage() {
       <div className="space-y-6">
         <BranchKpi />
         <CustomerLookup />
+        <Messaging />
       </div>
     </div>
   );
@@ -114,6 +115,96 @@ function BranchKpi() {
         </div>
       )}
     </StateView>
+  );
+}
+
+const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
+
+interface Member { id: number; member_code: string; name: string | null; phone: string | null }
+interface Msg { id: number; channel: string; recipient: string | null; body: string; status: string; provider: string | null; campaign: string | null; created_at: string }
+
+function Messaging() {
+  const qc = useQueryClient();
+  const bdays = useQuery<{ window: string; count: number; members: Member[] }>({ queryKey: ['crm-birthdays'], queryFn: () => api('/api/loyalty/members/birthdays?window=month') });
+  const log = useQuery<{ messages: Msg[] }>({ queryKey: ['crm-msg-log'], queryFn: () => api('/api/messaging/log?limit=20') });
+
+  const [audience, setAudience] = useState('birthdays_today');
+  const [segment, setSegment] = useState('Champions');
+  const [channel, setChannel] = useState('sms');
+  const [body, setBody] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const blast = useMutation({
+    mutationFn: () => api<{ sent: number; skipped: number; targeted: number }>('/api/messaging/blast', { method: 'POST', body: JSON.stringify({ audience, segment: audience === 'segment' ? segment : undefined, channel, body }) }),
+    onSuccess: (r) => { setMsg(`✅ ส่งสำเร็จ ${r.sent} · ข้าม ${r.skipped} · เป้าหมาย ${r.targeted}`); setBody(''); qc.invalidateQueries({ queryKey: ['crm-msg-log'] }); },
+    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+  });
+
+  return (
+    <Card className="gap-4">
+      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Send className="size-4" /> การตลาด & ข้อความถึงลูกค้า</CardTitle></CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border p-3">
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold"><Cake className="size-4 text-primary" /> วันเกิดเดือนนี้ ({num(bdays.data?.count ?? 0)})</h3>
+            <StateView q={bdays}>
+              <DataTable
+                rows={bdays.data?.members ?? []}
+                rowKey={(r) => r.id}
+                columns={[
+                  { key: 'member_code', label: 'รหัส' },
+                  { key: 'name', label: 'ชื่อ', render: (r) => r.name ?? '—' },
+                  { key: 'phone', label: 'เบอร์', render: (r) => r.phone ?? '—' },
+                ]}
+                emptyText="ไม่มีวันเกิดเดือนนี้"
+              />
+            </StateView>
+          </div>
+
+          <div className="space-y-3 rounded-lg border p-3">
+            <h3 className="text-sm font-semibold">ส่งข้อความหากลุ่มลูกค้า</h3>
+            <div className="flex flex-wrap gap-2">
+              <select className={selectCls} value={audience} onChange={(e) => setAudience(e.target.value)}>
+                <option value="birthdays_today">วันเกิดวันนี้</option>
+                <option value="segment">กลุ่ม RFM</option>
+                <option value="all">สมาชิกทั้งหมด</option>
+              </select>
+              {audience === 'segment' && (
+                <select className={selectCls} value={segment} onChange={(e) => setSegment(e.target.value)}>
+                  {['Champions', 'Loyal', 'At Risk', 'Lost', 'New'].map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+              <select className={selectCls} value={channel} onChange={(e) => setChannel(e.target.value)}>
+                <option value="sms">SMS</option>
+                <option value="line">LINE</option>
+                <option value="email">Email</option>
+              </select>
+            </div>
+            <Input value={body} onChange={(e) => setBody(e.target.value)} placeholder="ข้อความ เช่น สุขสันต์วันเกิด รับส่วนลด 10%" />
+            <Button disabled={!body.trim() || blast.isPending} onClick={() => { setMsg(''); blast.mutate(); }}><Send className="size-4" /> {blast.isPending ? 'กำลังส่ง…' : 'ส่งข้อความ'}</Button>
+            {msg && <p className={msg.startsWith('✅') ? 'text-sm text-success' : 'text-sm text-destructive'}>{msg}</p>}
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ประวัติการส่งล่าสุด</h3>
+          <StateView q={log}>
+            <DataTable
+              rows={log.data?.messages ?? []}
+              rowKey={(r) => r.id}
+              columns={[
+                { key: 'channel', label: 'ช่องทาง', render: (r) => <Badge variant="info">{r.channel}</Badge> },
+                { key: 'recipient', label: 'ผู้รับ', render: (r) => r.recipient ?? '—' },
+                { key: 'body', label: 'ข้อความ', render: (r) => <span className="line-clamp-1">{r.body}</span> },
+                { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'sent' ? 'success' : r.status === 'skipped' ? 'muted' : 'destructive'}>{r.status}</Badge> },
+                { key: 'provider', label: 'ผู้ให้บริการ', render: (r) => r.provider ?? '—' },
+              ]}
+              emptyText="ยังไม่มีการส่งข้อความ"
+            />
+          </StateView>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

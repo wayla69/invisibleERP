@@ -334,6 +334,25 @@ async function main() {
   const dpOk = await inj('POST', `/api/qr/t/${dpOpen.json.public_token}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] });
   ok('Day-parting: an always-available item is still orderable', dpOk.status === 200 || dpOk.status === 201, `${dpOk.status}`);
 
+  // ── CRM messaging + birthdays (Phase 6) ──
+  const bkkNow = new Date(Date.now() + 7 * 3600 * 1000);
+  const todayBday = `1990-${String(bkkNow.getUTCMonth() + 1).padStart(2, '0')}-${String(bkkNow.getUTCDate()).padStart(2, '0')}`;
+  const mem1 = await inj('POST', '/api/loyalty/members', sales1, { name: 'คุณวันเกิด', phone: '0810000001', birthday: todayBday, marketing_opt_in: true });
+  ok('CRM: enroll member with birthday + marketing consent', (mem1.status === 200 || mem1.status === 201) && !!mem1.json.id, `${mem1.status}`);
+  const send1 = await inj('POST', '/api/messaging/send', sales1, { member_id: mem1.json.id, channel: 'sms', body: 'สวัสดีค่ะ' });
+  ok('CRM messaging: send to a member logged as sent (mock provider)', (send1.status === 200 || send1.status === 201) && send1.json.status === 'sent' && send1.json.provider === 'mock', `${send1.status} ${send1.json.status}/${send1.json.provider}`);
+  const mem2 = await inj('POST', '/api/loyalty/members', sales1, { name: 'คุณไม่รับโปร', phone: '0810000002', birthday: todayBday, marketing_opt_in: false });
+  const send2 = await inj('POST', '/api/messaging/send', sales1, { member_id: mem2.json.id, channel: 'sms', body: 'โปรโมชั่น' });
+  ok('CRM messaging: opted-out member is skipped (consent respected)', send2.json.status === 'skipped', `${send2.json.status}`);
+  const bdays = await inj('GET', '/api/loyalty/members/birthdays?window=today', sales1);
+  ok('CRM: birthdays-today lists the opted-in member, excludes opted-out', (bdays.json.members ?? []).some((m: any) => m.id === mem1.json.id) && !(bdays.json.members ?? []).some((m: any) => m.id === mem2.json.id), `count=${bdays.json.count}`);
+  const blast = await inj('POST', '/api/messaging/blast', sales1, { audience: 'birthdays_today', channel: 'sms', body: 'สุขสันต์วันเกิด 🎂' });
+  ok('CRM messaging: birthday blast sends to opted-in only (skips opted-out)', blast.status < 300 && blast.json.sent >= 1 && blast.json.skipped >= 1, `sent=${blast.json.sent} skipped=${blast.json.skipped} targeted=${blast.json.targeted}`);
+  const mlog = await inj('GET', '/api/messaging/log', sales1);
+  ok('CRM messaging: deliveries recorded in the message log', (mlog.json.messages ?? []).length >= 3, `${(mlog.json.messages ?? []).length}`);
+  const updMem = await inj('PATCH', `/api/loyalty/members/${mem1.json.id}`, sales1, { marketing_opt_in: false });
+  ok('CRM: member consent can be updated', updMem.json.marketing_opt_in === false, `${updMem.json.marketing_opt_in}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);
