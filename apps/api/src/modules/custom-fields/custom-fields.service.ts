@@ -6,7 +6,15 @@ import type { JwtUser } from '../../common/decorators';
 
 const DATA_TYPES = ['text', 'number', 'date', 'boolean', 'select'] as const;
 type DataType = typeof DATA_TYPES[number];
-const slug = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+// slugify: lowercase, non-alphanumerics → '_', then strip leading/trailing '_'. The trim is a char loop
+// (not an anchored `^_+|_+$` regex) to avoid polynomial backtracking on long runs of '_' (CodeQL ReDoS).
+const slug = (s: string) => {
+  const r = s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_');
+  let i = 0, j = r.length;
+  while (i < j && r.charCodeAt(i) === 95) i++;       // 95 = '_'
+  while (j > i && r.charCodeAt(j - 1) === 95) j--;
+  return r.slice(i, j);
+};
 
 // Custom fields (UDFs). A tenant defines fields per entity (customer, item, …); values are stored typed and
 // validated server-side against the definition. Values are metadata (no GL); mutations ride the audit log.
