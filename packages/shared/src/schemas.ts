@@ -6,6 +6,7 @@ import { ROLES } from './enums.js';
 export const LoginRequest = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
+  totp: z.string().optional(), // 6-digit TOTP code — required when the account has MFA enabled (ITGC-AC-06)
 });
 export type LoginRequest = z.infer<typeof LoginRequest>;
 
@@ -15,6 +16,7 @@ export const LoginResponse = z.object({
   role: z.enum(ROLES),
   customer_name: z.string().nullable(),
   must_change_password: z.boolean().optional(),
+  must_setup_mfa: z.boolean().optional(), // privileged/finance role without MFA enrolled — client must force setup
 });
 export type LoginResponse = z.infer<typeof LoginResponse>;
 

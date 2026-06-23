@@ -1,0 +1,155 @@
+# Process Narrative — HCM: Time & Labor
+
+> **Status: DRAFT v0.1** — contains `<<placeholders>>` pending owner confirmation.
+
+## 1. Document Control
+
+| Field | Value |
+|---|---|
+| Process ID | PN-25-HCM |
+| Process owner | `<<HR / Payroll Controller>>` |
+| Approver | `<<approver-name / title>>` |
+| Version | **0.1 DRAFT** |
+| Revision date | 2026-06-22 |
+| Effective date | `<<effective-date>>` |
+| Review cadence | Annual + on significant change |
+| Related RCM controls | HCM-01, HCM-02; cross-ref PAY-01, PAY-02; SoD rule R07 |
+| Related policy | `<<HR / Time & Attendance Policy>>`, `<<Leave Policy>>`, `<<Segregation-of-Duties Policy>>` |
+
+## 2. Purpose
+
+This narrative documents human-capital time and labor capture: employee timesheet logging (regular and overtime hours), leave requests and their approval, and leave-balance tracking. The control objectives are **time-capture accuracy and completeness** (hours are an IPE input to payroll gross/OT), **leave approval authorization and balance integrity**, and the **employee-master existence check** that prevents ghost-employee time. No GL is posted in HCM; the financial impact is realised downstream in payroll.
+
+## 3. Scope
+
+**In scope**
+- Timesheet logging and listing — regular and OT hours per employee per day (hcm, `/api/hcm`).
+- Leave requests, listing and approval (`/api/hcm/leave`).
+- Paid-leave balance tracking (`leaveBalances`: entitled vs used, per employee/type/year).
+
+**Out of scope**
+- Payroll calculation, statutory deductions and the payroll-to-GL posting — see `05-payroll.md`.
+- Employee master creation/maintenance and master-data governance — see `17-master-data-management.md`.
+
+## 4. References
+
+- ISO 9001:2015 cl. 4.4 (QMS and its processes); cl. 7.1.2 (People); cl. 8.5.1 (Control of provision).
+- Risk & Control Matrix: `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`.
+- Segregation-of-Duties matrix: `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`.
+- Policies: `<<HR / Time & Attendance Policy>>`, `<<Leave Policy>>`.
+- Code:
+  - `apps/api/src/modules/hcm/hcm.controller.ts`
+  - `apps/api/src/modules/hcm/hcm.service.ts`
+  - `apps/api/src/modules/hcm/hcm.module.ts`
+
+## 5. Definitions & Abbreviations
+
+| Term | Definition |
+|---|---|
+| Timesheet | A per-employee, per-day record of `regular_hours` and `ot_hours`. |
+| Shift | A logged work period; opened, then closed with its hours captured on the timesheet. |
+| OT | Overtime hours; flow to the payroll OT calculation. |
+| Leave request | A request (`leave_type` default `annual`, from/to, `days`, `paid`) with status Pending then Approved. |
+| Leave balance | Per employee, leave type and year: `entitled` vs `used`; the row is created on first paid-leave approval if absent. |
+| Employee master | The `employees` record keyed by `emp_code`; its existence is checked before any time/leave entry. |
+| Ghost employee | A fictitious employee used to divert pay; prevented by the master existence check. |
+| IPE | Information Produced by the Entity. |
+| SoD | Segregation of Duties. |
+
+## 6. Roles & Responsibilities (RACI)
+
+The defining SoD rule here is **R07** (initiate vs approve): the timekeeper who logs hours and the requester of leave must be distinct from the approver, and both must be distinct from the payroll processor who consumes these hours downstream. HCM endpoints are gated to the `exec`/`users`/`creditors` permission set; leave approval is the authorization control point. The employee-master existence check is enforced on every entry (`EMP_NOT_FOUND`).
+
+| Activity | Employee | Timekeeper / Supervisor | Leave Approver | Payroll Processor | HR Controller |
+|---|---|---|---|---|---|
+| Log timesheet (regular/OT) | C | R | I | I | A |
+| List timesheets | I | R | I | C | A |
+| Request leave | R | C | I | I | I |
+| Approve leave | I | I | A/R | I | C |
+| Maintain leave balance | I | I | C | I | A/R |
+| Consume hours into payroll | I | I | I | R | A |
+
+A = Accountable, R = Responsible, C = Consulted, I = Informed.
+
+## 7. Process Narrative
+
+1. **Log timesheet (perm `exec`/`users`/`creditors`).** `POST /api/hcm/timesheets` records `regular_hours` and `ot_hours` for an employee on `work_date` (defaulting to today). The `emp_code` is resolved against the employee master; an unknown code returns `EMP_NOT_FOUND` (404). A shift is logged then closed with its hours captured. *Control: HCM-01 / R07 — time capture is an IPE input to payroll; timekeeper segregated from payroll processor.*
+
+2. **List timesheets.** `GET /api/hcm/timesheets?emp_code=` returns recent timesheets for an employee (or the latest across employees when no code is supplied). *Operational.*
+
+3. **Request leave (perm `exec`/`users`/`creditors`).** `POST /api/hcm/leave` records a request (`leave_type` default `annual`, `from_date`/`to_date`, `days`, `paid` default true) against a resolved employee. `days` must be positive or `BAD_DAYS` (400) is returned; an unknown `emp_code` returns `EMP_NOT_FOUND` (404). The request is created with status **Pending**. *Operational (initiation only — no approval here).*
+
+4. **List leave.** `GET /api/hcm/leave` returns recent leave requests with status and paid flag. *Operational.*
+
+5. **Approve leave.** `POST /api/hcm/leave/:id/approve` transitions a request from **Pending** to **Approved** (an already-decided request is returned idempotently). For a **paid** leave type it increments `leaveBalances.used` for (employee, leave type, year), creating the balance row if missing. An unknown id returns `LEAVE_NOT_FOUND` (404). *Control: HCM-02 / R07 — approver distinct from requester; paid-leave balance prevents over-consumption.*
+
+6. **Labor feeds payroll (no GL in HCM).** Approved `ot_hours` flow to the payroll module's OT calculation, and approved leave with balance tracking enables unpaid-leave deduction. There is **no direct GL** in HCM. The financial impact is realised in `05-payroll.md`, where gross pay posts to **5600**, employer SSO to **5610 / 2350**, withholding tax to **2360**, and provident fund to **5620 / 2370**. *Control: HCM-01 — hours feed payroll gross/OT (cross-ref PAY-01, PAY-02).*
+
+## 8. Process Flow
+
+```mermaid
+flowchart TD
+    A[Resolve employee by emp_code] --> B{Employee exists?}
+    B -->|No| C[EMP_NOT_FOUND]
+    B -->|Yes| D[Log timesheet regular and OT hours]
+    D --> E[Employee requests leave status Pending]
+    E --> F{Approver distinct from requester R07}
+    F -->|No| G[Block: SoD violation]
+    F -->|Yes| H[Approve leave status Approved]
+    H --> I{Paid leave type?}
+    I -->|Yes| J[Increment leave balance used, create row if missing]
+    I -->|No| K[No balance change]
+    D --> L[OT hours feed payroll OT calc]
+    J --> M[Approved leave enables unpaid-leave deduction]
+    L --> N[Financial impact realised in payroll GL]
+    M --> N
+```
+
+**Swimlane narrative.** The *Employee* lane initiates leave requests. The *Timekeeper / Supervisor* lane logs shift hours (regular and OT). The *Leave Approver* lane authorises leave and is segregated from the requester under R07; paid approvals adjust the leave balance. The *Payroll Processor* lane consumes the captured hours and leave downstream in `05-payroll.md`, where the only GL postings occur. The *HR Controller* lane owns master integrity and the leave-balance ledger.
+
+## 9. Control Matrix
+
+| Step | Risk | Control | Type | RCM ID | Evidence / Record |
+|---|---|---|---|---|---|
+| 1 | Inaccurate / incomplete hours feed wrong payroll gross/OT | Time capture validated; IPE input to payroll; timekeeper segregated from processor | Preventive | HCM-01 / R07 | Timesheet records; payroll input reconciliation |
+| 5 | Unauthorised / self-approved leave | Approval transition Pending → Approved by an approver distinct from requester | Preventive | HCM-02 / R07 | Leave approval log |
+| 5 | Over-consumption of paid leave | `leaveBalances.used` incremented on paid approval; balance integrity | Detective | HCM-02 | Leave-balance ledger (entitled vs used) |
+| 1, 3 | Ghost-employee time / leave | Employee-master existence check (`EMP_NOT_FOUND`) on every entry | Preventive | HCM-01 | Rejected-entry log; master cross-ref |
+| 6 | Hours not flowed to payroll | OT/leave hand-off to payroll OT and unpaid-leave deduction | Detective | PAY-01 / PAY-02 | Payroll input vs timesheet reconciliation |
+
+## 10. Inputs & Outputs
+
+**Inputs:** `emp_code` (resolved against employee master); `work_date`, `regular_hours`, `ot_hours`; leave request fields (`leave_type`, from/to, `days`, `paid`); user JWT (tenant + permissions).
+
+**Outputs:** timesheet records; leave requests (Pending/Approved); leave-balance rows (entitled vs used). OT hours and approved leave are IPE inputs to payroll gross/OT and unpaid-leave deduction in `05-payroll.md`.
+
+## 11. Records & Retention
+
+| Record | Retention |
+|---|---|
+| Timesheets (regular/OT hours) | `<<7 years / per Thai law>>` |
+| Leave requests & approvals | `<<7 years / per Thai law>>` |
+| Leave-balance ledger (entitled/used) | `<<7 years / per Thai law>>` |
+
+## 12. KPIs / Metrics
+
+- Timesheet completeness — days logged vs scheduled (target: 100%).
+- OT hours captured vs OT paid in payroll (reconciliation difference target: 0).
+- Leave requests approved by requester (SoD R07 exceptions; target: 0).
+- Paid-leave balance over-consumption events (used > entitled; target: 0).
+- `EMP_NOT_FOUND` rejection rate (potential ghost-employee attempts).
+
+## 13. Exception & Error Handling
+
+| Error code | Trigger | Handling |
+|---|---|---|
+| EMP_NOT_FOUND (404) | Timesheet/leave for an unknown `emp_code` | Reject; prevents ghost-employee time (cross-ref `17-master-data-management.md`). |
+| BAD_DAYS (400) | Leave `days` not positive | Reject; supply a positive day count. |
+| LEAVE_NOT_FOUND (404) | Approve an unknown leave id | Reject; verify the request id. |
+| Already decided | Approve a non-Pending request | Idempotent — returns existing status, no double balance increment. |
+
+## 14. Revision History
+
+| Version | Date | Author | Notes |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |

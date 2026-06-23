@@ -170,6 +170,25 @@ export function detectSodConflicts(perms: readonly Permission[]): SodConflict[] 
   return hits;
 }
 
+// ── ITGC-AC-06: MFA policy ──────────────────────────────────────────────────
+// Privileged / financially-significant duties that REQUIRE a second factor. A user whose EFFECTIVE
+// permissions intersect this set (or who is an Admin) must enrol TOTP. Evaluated on the expanded set so
+// a coarse 'exec'/'pos' holder is correctly captured. Cashiers/customers and read-only roles are exempt.
+export const MFA_REQUIRED_PERMISSIONS: Permission[] = [
+  'users',            // access administration
+  'gl_post', 'gl_close', // journal posting / period close
+  'creditors', 'ar',  // AP disbursement / AR
+  'approvals',        // workflow approvals
+  'md_vendor', 'md_config', // sensitive master data
+];
+
+// Does this role + override require MFA? (Admin always does.)
+export function requiresMfa(role: Role, userOverride?: Permission[] | null): boolean {
+  if (role === 'Admin') return true;
+  const eff = new Set<Permission>(resolvePermissions(role, userOverride ?? null));
+  return MFA_REQUIRED_PERMISSIONS.some((p) => eff.has(p));
+}
+
 // Permission → nav route (V2 App Router). null = no direct page (handled inside another).
 export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   pos: '/pos', order_mgt: '/orders', claim_mgt: '/claims', crm: '/customers',

@@ -10,22 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # NOTE: no `version:` input — pnpm/action-setup@v4 reads the version from the
-      # root package.json `packageManager` field (pnpm@11.8.0). Pinning a *different*
-      # version here (it used to say `version: 9`) makes the action abort with
-      # "Multiple versions of pnpm specified", which was failing every CI run at setup.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager" (pnpm@11.8.0)
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Build only what the harnesses + unit tests consume. A blanket `pnpm -r build`
-      # also compiles tools/erp-mcp, which has an unrelated/pre-existing build break.
-      - name: Build shared + api
-        run: pnpm --filter @ierp/shared build && pnpm --filter @ierp/api build
+      - name: Build shared
+        run: pnpm --filter @ierp/shared build
       - name: Typecheck
         run: pnpm -r typecheck
+      - name: Build
+        run: pnpm -r build
       - name: Unit tests (vitest + coverage)
         run: pnpm --filter @ierp/api test
       # Hand the compiled output to the harness matrix so 50+ jobs don't each rebuild.
@@ -44,6 +40,14 @@ jobs:
   # "it compiles". Previously only a handful ran inline; the rest existed but were
   # never gated, so they could rot silently. This matrix runs each one as its own
   # required check, in parallel, with per-harness visibility.
+  #
+  # Harnesses reconciled with shipped features so they can be gated:
+  #   - GL-05 maker-checker: a manual JE/GAAP-adjustment posts as Draft and only affects balances once
+  #     a DIFFERENT user approves it (tenant-isolation/multiledger/bankrec/costcenter/budget post-then-approve).
+  #   - SoD preventive guard: the coarse `warehouse` perm self-conflicts (R11); gaps assigns single-duty perms.
+  #   - module-qr asserts modules == MODULE_KEYS (diverged from PERMISSIONS once sub-permissions were added).
+  #   - parity analytics derives sale dates in business-TZ (UTC+7), the same basis ForecastingService bins by.
+  # Still NOT gated (need external services, not self-contained on PGlite): shadow, reconcile, smoke-http.
   harnesses:
     needs: build
     runs-on: ubuntu-latest
@@ -66,6 +70,8 @@ jobs:
           - { pkg: cutover, script: gaps }
           - { pkg: cutover, script: onboarding }
           - { pkg: cutover, script: opening-balances }
+          # ── COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability) ──
+          - { pkg: cutover, script: compliance }
           # ── POS ──
           - { pkg: cutover, script: pos-p0 }
           - { pkg: cutover, script: pos-p1 }
@@ -125,7 +131,7 @@ jobs:
           - { pkg: cutover, script: portal-extra }
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager" (pnpm@11.8.0)
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -138,16 +144,68 @@ jobs:
       - name: ${{ matrix.pkg }} → ${{ matrix.script }}
         run: pnpm --filter @ierp/${{ matrix.pkg }} ${{ matrix.script }}
 
-  # All previously-quarantined harnesses are now gated above. They had been failing not on a
-  # wall-clock dependency but on staleness against shipped features, now reconciled in the harnesses:
-  #   - GL-05 maker-checker: a manual JE/GAAP-adjustment posts as Draft and only affects balances once
-  #     a DIFFERENT user approves it. worldclass/tenant-isolation/multiledger/bankrec/costcenter/budget
-  #     now post-then-approve via a 2nd Admin.
-  #   - SoD preventive guard: the coarse `warehouse` perm self-conflicts (R11); gaps now assigns the
-  #     single-duty WarehouseOperator perms.
-  #   - module-qr asserted modules == PERMISSIONS; those diverged once sub-permissions were added — now
-  #     compares against MODULE_KEYS.
-  #   - parity analytics seeded sales in UTC while the service bins by business-TZ (UTC+7); the seed now
-  #     uses the same offset so the forecast window is deterministic.
-  # Harnesses still NOT gated (need external services, not self-contained on PGlite): shadow, reconcile,
-  # smoke-http.
+  # ITGC vulnerability management: dependency advisories + secret scanning. Evidence for the IT auditor /
+  # IPO security review. The dependency audit is a HARD GATE at --audit-level high: any NEW high/critical
+  # advisory fails the build. Known, triaged advisories are accepted via auditConfig.ignoreGhsas in
+  # pnpm-workspace.yaml and documented in compliance/vulnerability-triage.md (re-reviewed quarterly).
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks scans full history
+      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager" (pnpm@11.8.0)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Dependency audit (fails on new high/critical; triaged items in vulnerability-triage.md)
+        run: pnpm audit --audit-level high
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # SAST — CodeQL static analysis for JavaScript/TypeScript.
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
+  # Web UI smoke (Playwright) — exercises interactions build/unit checks can't, e.g. the ERP/POS
+  # workspace switcher (toggle, role-based landing redirect, localStorage persistence, menu filtering).
+  # The backend is stubbed in the specs, so no API/DB is needed; the config builds + serves the web app.
+  web-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager" (pnpm@11.8.0)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build shared (web build dependency)
+        run: pnpm --filter @ierp/shared build
+      - name: Install Playwright browser
+        run: pnpm --filter @ierp/web exec playwright install --with-deps chromium
+      - name: Web E2E smoke (ERP/POS workspace switcher)
+        run: pnpm --filter @ierp/web test:e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7

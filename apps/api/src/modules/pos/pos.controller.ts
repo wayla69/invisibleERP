@@ -25,10 +25,11 @@ const UpdateStatusBody = z.object({
 export class PosController {
   constructor(private readonly svc: PosService) {}
 
-  @Get('summary') @Permissions('pos', 'dashboard')
+  // Read-only shift KPIs — also visible to single-duty POS operators (Cashier/PosSupervisor) for the POS home.
+  @Get('summary') @Permissions('pos', 'pos_sell', 'pos_till', 'dashboard')
   summary(@Query('start_date') start: string, @Query('end_date') end: string) { return this.svc.summary(start, end); }
 
-  @Get('orders') @Permissions('pos', 'order_mgt', 'dashboard')
+  @Get('orders') @Permissions('pos', 'pos_sell', 'pos_till', 'order_mgt', 'dashboard')
   orders(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('status') status?: string) {
     return this.svc.orders(qint('limit', limit, 20), qint('offset', offset, 0), status);
   }
@@ -36,7 +37,7 @@ export class PosController {
   @Get('orders/:saleNo') @Permissions('pos', 'order_mgt', 'dashboard')
   orderDetail(@Param('saleNo') saleNo: string) { return this.svc.orderDetail(saleNo); }
 
-  @Get('sessions') @Permissions('pos', 'dashboard')
+  @Get('sessions') @Permissions('pos', 'pos_sell', 'pos_till', 'dashboard')
   sessions() { return this.svc.sessions(); }
 
   // WRITE

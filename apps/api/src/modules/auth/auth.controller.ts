@@ -11,6 +11,9 @@ const ChangePasswordBody = z.object({
 });
 type ChangePasswordBody = z.infer<typeof ChangePasswordBody>;
 
+const MfaCodeBody = z.object({ code: z.string().min(6) });
+const MfaDisableBody = z.object({ password: z.string().min(1), code: z.string().min(6) });
+
 @Controller('api')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
@@ -21,11 +24,31 @@ export class AuthController {
     return this.auth.changePassword(user.username, b.current_password, b.new_password);
   }
 
+  // ── ITGC-AC-06: MFA enrolment (authenticated) ──
+  @Get('auth/mfa/status')
+  mfaStatus(@CurrentUser() user: JwtUser) { return this.auth.mfaStatus({ username: user.username, role: user.role }); }
+
+  @Post('auth/mfa/setup')
+  @HttpCode(200)
+  mfaSetup(@CurrentUser() user: JwtUser) { return this.auth.mfaSetup(user.username); }
+
+  @Post('auth/mfa/enable')
+  @HttpCode(200)
+  mfaEnable(@Body(new ZodValidationPipe(MfaCodeBody)) b: z.infer<typeof MfaCodeBody>, @CurrentUser() user: JwtUser) {
+    return this.auth.mfaEnable(user.username, b.code);
+  }
+
+  @Post('auth/mfa/disable')
+  @HttpCode(200)
+  mfaDisable(@Body(new ZodValidationPipe(MfaDisableBody)) b: z.infer<typeof MfaDisableBody>, @CurrentUser() user: JwtUser) {
+    return this.auth.mfaDisable(user.username, b.password, b.code);
+  }
+
   @Public()
   @Post('login')
   @HttpCode(200) // parity: V1 FastAPI คืน 200 (ไม่ใช่ 201 default ของ Nest POST)
   login(@Body(new ZodValidationPipe(LoginRequest)) body: LoginRequest): Promise<LoginResponse> {
-    return this.auth.login(body.username, body.password);
+    return this.auth.login(body.username, body.password, body.totp);
   }
 
   @Get('auth/me')

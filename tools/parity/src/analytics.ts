@@ -11,13 +11,11 @@ import { ForecastingService } from '../../../apps/api/dist/modules/analytics/for
 import { AnomaliesService } from '../../../apps/api/dist/modules/analytics/anomalies.service';
 import { InsightsService } from '../../../apps/api/dist/modules/analytics/insights.service';
 import { AnalyticsService } from '../../../apps/api/dist/modules/analytics/analytics.service';
+import { ymd as bizYmd } from '../../../apps/api/dist/database/queries'; // business-TZ (Asia/Bangkok) date — same basis the forecasting service uses
 
 delete process.env.ANTHROPIC_API_KEY; // force rule-based path
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
-// Match the app's business-timezone date (Asia/Bangkok, UTC+7 — see apps/api/src/common/bizdate.ts).
-// ForecastingService bins sales by business-TZ day up to *its* "today"; seeding in UTC drifts the
-// dense series by a day near the UTC-evening boundary (avg 2 → 1.93), so derive dates the same way.
-const ymd = (d: Date) => new Date(d.getTime() + 420 * 60_000).toISOString().slice(0, 10);
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000);
 
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
@@ -32,9 +30,12 @@ async function main() {
   const db: any = drizzle(pg, { schema: s });
 
   // ── seed forecasting: item X, current stock 20, 30 วันขายวันละ 2 ──
+  // Seed sale dates on the BUSINESS calendar (Asia/Bangkok) — the same basis the forecasting service uses
+  // for its dense-series "today" (bizYmdDash). Seeding in UTC (toISOString) drifts a day whenever the
+  // business date is ahead of UTC (e.g. UTC afternoon), leaving a trailing zero day that skews avg to ~1.93.
   await db.insert(s.stockSnapshots).values({ generateDate: new Date(), itemId: 'X', itemDescription: 'Item X', uom: 'EA', avQty: '20' });
   for (let i = 0; i < 30; i++) {
-    const [sale] = await db.insert(s.custPosSales).values({ saleNo: `S${i}`, saleDate: ymd(daysAgo(i)), status: 'Completed', total: '100' }).returning({ id: s.custPosSales.id });
+    const [sale] = await db.insert(s.custPosSales).values({ saleNo: `S${i}`, saleDate: bizYmd(daysAgo(i)), status: 'Completed', total: '100' }).returning({ id: s.custPosSales.id });
     await db.insert(s.custPosItems).values({ saleId: Number(sale.id), itemId: 'X', qty: '2', amount: '100' });
   }
 

@@ -1,0 +1,168 @@
+# 11 · Administration
+
+**Status: DRAFT v0.1**
+
+This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
+*MasterDataAdmin*. It covers managing users, assigning roles and permissions,
+turning modules on or off, the periodic **User Access Review**, the **Segregation
+of Duties (SoD) conflict report**, the MFA policy, and multi-branch setup.
+
+---
+
+## 1. Managing users
+
+**Screen:** `/admin/users` · **Required permission:** `users`
+
+### To add a user
+
+1. Go to **Users** (`/admin/users`).
+2. Click **Add user**.
+3. Enter the **username**, a starter **password**, the **role**, and (optionally)
+   any individual permission overrides.
+4. Save.
+
+**Expected result:** The user is created. On their first login they will be forced
+to change the password (see [Getting Started](./00-getting-started.md)), and — if
+their role requires it — to enrol in MFA.
+
+### Other user actions
+
+| Task | How |
+|------|-----|
+| Change role / permissions | Open the user and edit |
+| Reset password | **Reset password** — forces a change at next login |
+| Delete a user | **Delete** |
+
+[screenshot: user management list]
+
+---
+
+## 2. Assigning roles & permissions
+
+- Choose a **role** to give a sensible default set of permissions (see
+  [Getting Started](./00-getting-started.md) for the full role list).
+- Fine-tune with **per-user permission overrides** when someone needs a little
+  more or less than their role.
+
+> **Note — conflicting permissions are blocked.** If you try to grant a
+> combination that creates a conflict of interest (e.g. both *record sale* and
+> *issue refund*, or both *raise PO* and *pay supplier*), the system warns or
+> blocks with `SOD_CONFLICT`. Resolve it by removing one of the conflicting
+> duties or assigning it to a different person. See the SoD report below.
+
+---
+
+## 3. Turning modules on or off
+
+**Screen:** `/settings` → **Modules** tab · **Required permission:** `users`
+
+1. Go to **Settings** (`/settings`) → **Modules** (**เปิด / ปิด การใช้งานโมดูล**).
+2. Toggle a module **on** or **off** for the whole organisation.
+
+**Expected result:** A module turned **off** disappears from every user's menu and
+is blocked in the system. (Core access — user management — can never be turned
+off.)
+
+---
+
+## 4. User Access Review (UAR)
+
+A periodic review where you confirm that every user's access is still appropriate.
+
+**Screen:** `/admin/users` (Access Review area) · **Required permission:** `users`
+
+### To run and certify a review
+
+1. Go to **Users** (`/admin/users`) → **Access Review**.
+2. Review the list of users, their roles, permissions and any **SoD conflicts**.
+3. **Export** the review to CSV (access list + SoD conflicts) for your records or
+   auditors.
+4. After confirming each user's access is correct (adjusting any that aren't),
+   click **Certify** to sign off the review period.
+
+**Expected result:** The review is certified and recorded; past certifications are
+listed for audit history.
+
+[screenshot: User Access Review with certify button]
+
+---
+
+## 5. Segregation of Duties (SoD) conflict report
+
+**Screen:** `/sod` · **Required permission:** administrator
+
+The SoD report lists the **rules** (conflicting duty pairs), which **roles** would
+breach them, and any **live users** who currently hold conflicting duties.
+
+1. Go to **SoD** (`/sod`).
+2. Review the tabs: **Rules**, **Role Conflicts**, and **Live User Conflicts**.
+3. For each live conflict, remove one side of the duty or reassign it.
+
+**Expected result:** A clear picture of where one person holds incompatible
+duties, so you can remediate. Examples of rules enforced:
+
+| Rule | Conflict | Severity |
+|------|----------|----------|
+| R02 | Maintain vendor master **and** pay vendors | High |
+| R03 | Raise purchase **and** approve / pay AP | High |
+| R04 | Purchase ordering **and** goods receipt | High |
+| R05 | Post journal entries **and** close the period | High |
+| R07 | Initiate a transaction **and** approve it | High |
+| R08 | Record a sale **and** refund / reconcile the till | High |
+| R11 | Adjust inventory **and** count stock | Medium |
+
+> **Note:** The single-duty roles (e.g. *Cashier*, *ApClerk*, *StockCounter*)
+> were designed to produce **zero** SoD conflicts. Prefer them over the broad
+> roles where strict separation matters.
+
+[screenshot: SoD live user conflicts]
+
+---
+
+## 6. MFA policy
+
+**Screen:** `/settings` → **MFA Policy** tab.
+
+Two-factor authentication (MFA) is **required** for any user whose permissions
+include sensitive duties — user administration, journal posting / period close,
+AR / AP, approvals, or sensitive master data — and for all Admins.
+
+- Affected users are prompted to enrol on login (see
+  [Getting Started](./00-getting-started.md)).
+- If a user loses their device, an administrator can reset their MFA so they can
+  re-enrol.
+
+---
+
+## 7. Multi-branch
+
+**Screen:** `/branches` · **Required permission:** `branch`
+
+1. Go to **Branches** (`/branches`).
+2. **Add** each outlet with its details.
+3. Use **Consolidated Sales** to view sales across all branches for a date range.
+4. Use the **master bundle** to prepare offline data for branch POS terminals.
+
+**Expected result:** Multiple outlets are managed centrally, with consolidated
+reporting at HQ.
+
+[screenshot: branches list and consolidated sales]
+
+---
+
+## 8. Master data
+
+**Screen:** `/master-data` (and `/bom-master`) · **Required permission:**
+`masterdata` / `bom_master` (held by *MasterDataAdmin*).
+
+Maintain the shared reference data the whole system relies on — items, vendors,
+configuration and bills of materials.
+
+> **Note — separation of duties:** Maintaining master data is kept separate from
+> transacting on it (rules R02, R09, R10, R13). For example, the person who sets
+> prices should not also be the one selling at those prices.
+
+---
+
+**Next:** [Approvals](./10-approvals.md) ·
+[Troubleshooting & FAQ](./99-troubleshooting-faq.md)
