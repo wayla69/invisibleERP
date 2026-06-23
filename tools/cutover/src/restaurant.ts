@@ -353,6 +353,16 @@ async function main() {
   const updMem = await inj('PATCH', `/api/loyalty/members/${mem1.json.id}`, sales1, { marketing_opt_in: false });
   ok('CRM: member consent can be updated', updMem.json.marketing_opt_in === false, `${updMem.json.marketing_opt_in}`);
 
+  // ── food-cost / margin analytics (Phase 7) ──
+  await inj('POST', '/api/menu/items', sales1, { sku: 'FC01', name: 'ก๋วยเตี๋ยวต้มยำ', price: 100, station_code: 'hot' });
+  await inj('POST', '/api/menu/items/FC01/recipe', sales1, { yield_qty: 1, lines: [{ ingredient_item_id: 'NOODLE', ingredient_description: 'เส้น', qty_per: 2, unit_cost: 15 }] });
+  const fc = await inj('GET', '/api/menu/food-cost', sales1);
+  const fc01 = (fc.json.items ?? []).find((i: any) => i.sku === 'FC01');
+  ok('Food-cost: per-item margin from recipe (cost 30, margin 70, food-cost 30%)', !!fc01 && near(fc01.cost, 30) && near(fc01.margin, 70) && near(fc01.margin_pct, 70) && near(fc01.food_cost_pct, 30) && fc01.has_recipe === true, `${JSON.stringify(fc01 ?? {}).slice(0, 130)}`);
+  ok('Food-cost: menu summary reports avg food-cost % + costed count', fc.status === 200 && fc.json.summary?.costed >= 1 && fc.json.summary?.avg_food_cost_pct >= 0, `${JSON.stringify(fc.json.summary ?? {})}`);
+  const ic = await inj('GET', '/api/menu/ingredient-cost', sales1);
+  ok('Food-cost: ingredient cost-contribution lists the ingredient (30/serving)', (ic.json.ingredients ?? []).some((g: any) => g.ingredient_item_id === 'NOODLE' && near(g.cost, 30) && g.recipes_using >= 1), `${JSON.stringify((ic.json.ingredients ?? []).slice(0, 2))}`);
+
   // ── security / RLS ──
   const t2tables = await inj('GET', '/api/restaurant/tables', sales2);
   const t1tables = await inj('GET', '/api/restaurant/tables', sales1);

@@ -10,7 +10,7 @@
 | Process owner | `<<Operations / Revenue Controller>>` |
 | Approver | `<<approver-name / title>>` |
 | Version | **0.1 DRAFT** |
-| Revision date | 2026-06-23 (v1.2) |
+| Revision date | 2026-06-23 (v1.3) |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
 | Related RCM controls | REST-01 … REST-09; GL-01 |
@@ -195,6 +195,7 @@ flowchart TD
 - Rejected channel webhooks (`BAD_WEBHOOK_SIG`).
 - Average checkout/settlement time per channel.
 - **Buffet behaviour per tier** (`/buffet/analytics`): menu mix / top items, covers, items-per-head, average bill per session, overtime rate.
+- **Food cost & margin** (`GET /api/menu/food-cost`, `/api/menu/ingredient-cost`): per-menu theoretical cost (from recipe, else `menu_items.cost`), margin %, food-cost % vs target, and ingredient cost-contribution — the menu-engineering layer over recipe COGS (§7). Actual-vs-physical variance is a separate inventory feature.
 
 ## 13. Exception & Error Handling
 
@@ -240,3 +241,4 @@ flowchart TD
 | 1.0 | 2026-06-23 | Platform | **Table operations complete (Phase 1):** §6 — transfer line items between tables (`POST /api/restaurant/orders/:orderNo/transfer-items`) and merge two tabs into a combined bill (`POST /api/restaurant/tables/:id/merge`); errors `NO_ITEMS`/`BUFFET_MERGE`. |
 | 1.1 | 2026-06-23 | Platform | **Course firing (POS customization Phase 2):** §5 — order lines carry a `course`; KDS feed is course-ordered and course-tagged; fire all or one course via `POST …/fire?course=N` (`NO_COURSE_ITEMS`). |
 | 1.2 | 2026-06-23 | Platform | **Day-parting / menu scheduling (POS customization Phase 3):** §6 — menu items carry a time-of-day + day-of-week availability window (Asia/Bangkok); menu flags `available_now`; ordering outside the window blocked (`OUTSIDE_HOURS`). |
+| 1.3 | 2026-06-23 | Platform | **Food-cost / margin analytics (POS customization Phase 7):** §12 — `GET /api/menu/food-cost` (per-menu cost/margin %/food-cost % vs target) + `/api/menu/ingredient-cost` (ingredient cost-contribution), theoretical from recipes. Reporting only. |

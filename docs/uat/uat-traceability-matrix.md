@@ -94,6 +94,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-058 | Day-parting: order outside window blocked | Feature (day-parting) | 20 §6, §13 |
 | UAT-O2C-059 | CRM: enrol member + messaging send | MKT-04 | 19 §7 |
 | UAT-O2C-060 | CRM: marketing-consent enforced | MKT-04 | 19 §7, §9 |
+| UAT-O2C-061 | Food-cost: per-menu margin from recipe | Feature (food-cost) | 20 §12 |
+| UAT-O2C-062 | Food-cost: ingredient cost contribution | Feature (food-cost) | 20 §12 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
