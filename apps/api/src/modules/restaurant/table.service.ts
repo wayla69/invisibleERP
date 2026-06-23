@@ -102,7 +102,9 @@ export class TableService {
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, tableId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     if (!t.qrToken) throw new BadRequestException({ code: 'NO_QR', message: 'Table has no QR token', messageTh: 'โต๊ะนี้ยังไม่มี QR' });
-    const origin = (base && /^https?:\/\//.test(base) ? base.replace(/\/+$/, '') : (process.env.WEB_PUBLIC_URL || '').replace(/\/+$/, ''));
+    // strip trailing slashes without a regex (the input is uncontrolled — avoid polynomial backtracking)
+    const trimSlash = (s: string) => { let e = s.length; while (e > 0 && s.charCodeAt(e - 1) === 47) e--; return s.slice(0, e); };
+    const origin = base && /^https?:\/\//.test(base) ? trimSlash(base) : trimSlash(process.env.WEB_PUBLIC_URL || '');
     const path = `/qr/start/${t.qrToken}`;
     const url = origin ? `${origin}${path}` : path;
     const qrImage = await QRCode.toDataURL(url, { margin: 1, width: 320 });
