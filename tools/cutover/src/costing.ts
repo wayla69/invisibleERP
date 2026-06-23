@@ -134,6 +134,16 @@ async function main() {
   ok('GR valuation idempotent (one GRV JE per GR)', grvCnt[0].n === 1, `n=${grvCnt[0].n}`);
   const t2val = await inj('GET', '/api/costing/valuation', shop2);
   ok('RLS: T2 valuation does not see T1 cost layers (empty/0)', (t2val.json.items ?? []).length === 0 && near(t2val.json.total_value ?? 0, 0), JSON.stringify({ n: (t2val.json.items ?? []).length }));
+  // ── STD rounding (W4/H3): independent leg-rounding must not unbalance the GRV JE ──
+  // std value 8.99×3.3235 = 29.88, actual 8.99×0.0083 ≈ 0.07; the old code rounded each leg separately
+  // (debit 29.88 vs credit 29.87) and postEntry threw UNBALANCED. The PPV plug now balances by construction.
+  await inj('PUT', '/api/costing/config', plan1, { item_id: 'STDROUND', method: 'STD', standard_cost: 3.3235 });
+  const grRnd = await receive('STDROUND', 8.99, 0.0083);
+  const glRnd = await glOf('GRV', grRnd.json.gr_no);
+  const drR = glRnd.reduce((a: number, l: any) => a + Number(l.debit || 0), 0);
+  const crR = glRnd.reduce((a: number, l: any) => a + Number(l.credit || 0), 0);
+  ok('STD rounding: GRV JE posts and balances (no UNBALANCED from independent leg rounding)', grRnd.status < 300 && glRnd.length > 0 && near(drR, crR), JSON.stringify({ st: grRnd.status, lines: glRnd.length, dr: drR, cr: crR }));
+
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after all costing activity', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
 

@@ -1,6 +1,6 @@
 # UAT — Cycle 04: Inventory & Warehouse (WMS)
 
-**Status: DRAFT v0.2 · 2026-06-23** · Cross-ref: process narratives `03-inventory-cogs.md` (INV-01..04, REV-07, R11) and `15-manufacturing-costing.md` §5a (MRP), harnesses `tools/cutover/src/wms.ts`, `e2e.ts`, `mrp.ts`.
+**Status: DRAFT v0.3 · 2026-06-23** · Cross-ref: process narratives `03-inventory-cogs.md` (INV-01..04, REV-07, R11) and `15-manufacturing-costing.md` §5a (MRP), §9 (costing/PPV), harnesses `tools/cutover/src/wms.ts`, `e2e.ts`, `mrp.ts`, `costing.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -29,3 +29,4 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-INV-021 | Circular BOM rejected | Planner | BOM-X↔BOM-Y cycle | 1. `POST /api/mrp/run` demand BOM-X. | — | 400 `CIRCULAR_BOM`. | Med | Control | Feature (MRP guard) | Not Run | mrp.ts |
 | UAT-INV-022 | MRP lot-sizing — min-order-qty / order-multiple / EOQ (D3) | Planner | item masters: FLOUR min_order_qty 20; EGG order_multiple 12; FROSTING avg_daily_usage 1, order_cost 40, holding_cost 5 | 1. `POST /api/mrp/run` demand 10 CAKE with `lot_sizing:true`. | `{demand:[{item_id:BOM-CAKE,qty:10}],lot_sizing:true}` | Buy FLOUR `ordered_qty`=20 (`lot_policy` min), EGG=24 (multiple, rounded from 18), FROSTING=77 (`eoq` √(2·365·40/5), policy eoq). | High | Positive | Feature (MRP lot-sizing) | Not Run | mrp.ts |
 | UAT-INV-023 | Rough-cut capacity flags overloaded work-centre (D3) | Planner | routing RT-CAKE: MIX setup 30 + run 5/unit; BAKE run 10/unit; make qty 10 | 1. `POST /api/mrp/capacity` demand 10 CAKE, work_centers MIX=100, BAKE=60. | `{demand:[{item_id:BOM-CAKE,qty:10}],work_centers:[{code:MIX,available_minutes:100},{code:BAKE,available_minutes:60}]}` | MIX `load_minutes`=80 (30+5×10), `overloaded`=false; BAKE=100 (10×10) > 60 → `overloaded`=true; `summary.overloaded`=1. | High | Positive | Feature (RCCP) | Not Run | mrp.ts |
+| UAT-INV-024 | STD goods-receipt PPV stays balanced under rounding (W4) | CostAccountant | item STD, standard_cost 3.3235 | 1. Receive qty 8.99 @ actual 0.0083. | as left | GRV JE posts (not `UNBALANCED`): Dr 1200 (std, rounded) + PPV 5500 plug + Cr 2000 (actual); Σdebit = Σcredit. | High | Control | MFG-03 / GL-01 | Not Run | costing.ts |
