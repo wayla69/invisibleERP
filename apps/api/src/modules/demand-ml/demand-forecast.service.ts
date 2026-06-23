@@ -54,7 +54,10 @@ export class DemandForecastService {
   // Backtest every candidate model; return metrics sorted best-WAPE-first.
   private evaluate(series: number[], testSize: number): AlgoMetric[] {
     const out = Object.entries(ALGOS).map(([algorithm, f]: [string, Forecaster]) => {
-      const { actual, pred } = walkForward(series, f, testSize);
+      const { actual, pred: raw } = walkForward(series, f, testSize);
+      // Score the SAME non-negative forecast we deploy (forecast() clamps to ≥ 0), so model selection
+      // reflects production behaviour rather than a model's raw (possibly negative) extrapolation.
+      const pred = raw.map((x) => Math.max(0, x));
       const train = series.slice(0, series.length - actual.length);
       return {
         algorithm,
@@ -106,7 +109,8 @@ export class DemandForecastService {
 
   async list(_user: JwtUser, limit = 50) {
     const db = this.db as any;
-    const rows = await db.select().from(demandForecasts).orderBy(desc(demandForecasts.createdAt)).limit(limit);
+    const lim = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 200) : 50;
+    const rows = await db.select().from(demandForecasts).orderBy(desc(demandForecasts.createdAt)).limit(lim);
     return { count: rows.length, forecasts: rows };
   }
 
