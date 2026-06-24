@@ -367,7 +367,7 @@ export class DineInService {
     const cashLeg = roundCurrency(cashDue - giftApplied, 'THB');
     const [h] = await db.insert(custPosSales).values({
       saleNo, saleDate: ymd(), tenantId: o.tenantId, subtotal: fx(subtotalNet, 2), discount: fx(roundCurrency(orderDisc + pointsDisc, 'THB'), 2),
-      taxAmount: fx(vat, 2), total: fx(total, 2), tip: fx(tip, 2), paymentMethod: 'Dine-in', pointsUsed: String(actualRedeemPoints), pointsEarned: '0',
+      taxAmount: fx(vat, 2), total: fx(total, 2), tip: fx(tip, 2), serviceCharge: fx(serviceCharge, 2), paymentMethod: 'Dine-in', pointsUsed: String(actualRedeemPoints), pointsEarned: '0',
       status: 'Completed', notes: `Dine-in ${o.orderNo}`, createdBy: user.username,
     }).returning({ id: custPosSales.id });
     await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h.id), ...r })));

@@ -10,6 +10,7 @@ export interface ReceiptModel {
   lines: { name: string; qty: number; unit_price: number; amount: number; discount_pct: number }[];
   subtotal: number;
   discount: number;
+  service_charge: number; // VATable service income (ค่าบริการ) — 0 for retail; >0 for large-party dine-in
   vat: number;
   total: number;
   tip: number;
@@ -36,6 +37,7 @@ export function receiptHtml(m: ReceiptModel): string {
   const totals = [
     totalRow('รวมย่อย', money(m.subtotal)),
     m.discount > 0 ? totalRow('ส่วนลด', '-' + money(m.discount)) : '',
+    m.service_charge > 0 ? totalRow('ค่าบริการ', money(m.service_charge)) : '',
     totalRow('ภาษีมูลค่าเพิ่ม 7%', money(m.vat)),
     totalRow('รวมทั้งสิ้น', money(m.total), true),
     m.tip > 0 ? totalRow('ทิป', money(m.tip)) : '',
@@ -109,6 +111,7 @@ export function receiptEscPos(m: ReceiptModel): string {
   out.push(dash);
   out.push(lr('รวมย่อย', money(m.subtotal)));
   if (m.discount > 0) out.push(lr('ส่วนลด', '-' + money(m.discount)));
+  if (m.service_charge > 0) out.push(lr('ค่าบริการ', money(m.service_charge)));
   out.push(lr('ภาษีมูลค่าเพิ่ม 7%', money(m.vat)));
   out.push(lr('รวมทั้งสิ้น', money(m.total)));
   if (m.tip > 0) out.push(lr('ทิป', money(m.tip)));

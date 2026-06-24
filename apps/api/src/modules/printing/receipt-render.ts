@@ -13,8 +13,8 @@ const escAttr = (s: string) => esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#3
 
 // Receipt label dictionary. `both` renders "TH / EN" so a bilingual slip is one toggle away.
 const L = {
-  th: { subtotal: 'ยอดรวม', discount: 'ส่วนลด', vat: 'ภาษีมูลค่าเพิ่ม', total: 'รวมสุทธิ', tip: 'ทิป', paidBy: 'ชำระโดย', copy: 'สำเนา', taxInv: 'ใบกำกับภาษีอย่างย่อ', taxId: 'เลขประจำตัวผู้เสียภาษี', no: 'เลขที่', thanks: 'ขอบคุณที่ใช้บริการ', print: 'พิมพ์', receipt: 'ใบเสร็จรับเงิน' },
-  en: { subtotal: 'Subtotal', discount: 'Discount', vat: 'VAT', total: 'Total', tip: 'Tip', paidBy: 'Paid by', copy: 'COPY', taxInv: 'Abbreviated tax invoice', taxId: 'Tax ID', no: 'No.', thanks: 'Thank you', print: 'Print', receipt: 'Receipt' },
+  th: { subtotal: 'ยอดรวม', discount: 'ส่วนลด', service: 'ค่าบริการ', vat: 'ภาษีมูลค่าเพิ่ม', total: 'รวมสุทธิ', tip: 'ทิป', paidBy: 'ชำระโดย', copy: 'สำเนา', taxInv: 'ใบกำกับภาษีอย่างย่อ', taxId: 'เลขประจำตัวผู้เสียภาษี', no: 'เลขที่', thanks: 'ขอบคุณที่ใช้บริการ', print: 'พิมพ์', receipt: 'ใบเสร็จรับเงิน' },
+  en: { subtotal: 'Subtotal', discount: 'Discount', service: 'Service charge', vat: 'VAT', total: 'Total', tip: 'Tip', paidBy: 'Paid by', copy: 'COPY', taxInv: 'Abbreviated tax invoice', taxId: 'Tax ID', no: 'No.', thanks: 'Thank you', print: 'Print', receipt: 'Receipt' },
 } as const;
 
 // Resolve labels for a language; `both` joins TH / EN.
@@ -35,6 +35,7 @@ export type ReceiptData = {
   items: { description: string; qty: number; unit_price: number; amount: number }[];
   subtotal: number;
   discount: number;
+  service_charge: number; // VATable service income (ค่าบริการ) — 0 for retail; >0 for large-party dine-in
   vat: number;
   total: number;
   tip: number;
@@ -92,6 +93,7 @@ export function renderReceiptHtml(d: ReceiptData, cfg: ReceiptTemplateConfig = D
   const accentCss = cfg.body.accent_color ? `h1{color:${cfg.body.accent_color}}.tot td{color:${cfg.body.accent_color}}` : '';
   const rows = d.items.map((l) => `<tr><td>${esc(l.description)}</td><td class="q">${l.qty}</td><td class="m">${baht(l.amount)}</td></tr>`).join('');
   const copy = d.is_copy ? `<div class="copy">${esc(t.copy)}</div>` : '';
+  const svcLine = d.service_charge > 0 ? `<tr><td colspan="2">${esc(t.service)}</td><td class="m">${baht(d.service_charge)}</td></tr>` : '';
   const vatLine = d.seller.vat_registered ? `<tr><td colspan="2">${esc(t.vat)}</td><td class="m">${baht(d.vat)}</td></tr>` : '';
   const tipLine = d.tip > 0 ? `<tr><td colspan="2">${esc(t.tip)}</td><td class="m">${baht(d.tip)}</td></tr>` : '';
   const inv = d.tax_invoice_no ? `<div class="muted">${esc(t.taxInv)} ${esc(d.tax_invoice_no)}</div>` : '';
@@ -116,6 +118,7 @@ ${copy}
 <table class="sep"><tbody>
 <tr><td colspan="2">${esc(t.subtotal)}</td><td class="m">${baht(d.subtotal)}</td></tr>
 ${d.discount > 0 ? `<tr><td colspan="2">${esc(t.discount)}</td><td class="m">-${baht(d.discount)}</td></tr>` : ''}
+${svcLine}
 ${vatLine}
 <tr class="tot"><td colspan="2">${esc(t.total)}</td><td class="m">${baht(d.total)}</td></tr>
 ${tipLine}
@@ -150,6 +153,7 @@ export function renderReceiptEscPos(d: ReceiptData, cfg: ReceiptTemplateConfig =
   s += '-'.repeat(W) + '\n';
   s += row(t.subtotal, baht(d.subtotal));
   if (d.discount > 0) s += row(t.discount, '-' + baht(d.discount));
+  if (d.service_charge > 0) s += row(t.service, baht(d.service_charge));
   if (d.seller.vat_registered) s += row(t.vat, baht(d.vat));
   s += boldOn + row(t.total, baht(d.total)) + boldOff;
   if (d.tip > 0) s += row(t.tip, baht(d.tip));
@@ -174,6 +178,6 @@ export function buildSampleReceiptData(seller: ReceiptData['seller'], lang: Rece
   const total = Math.round((subtotal - discount + vat) * 100) / 100;
   return {
     sale_no: 'SALE-PREVIEW', date: '2026-06-24', is_copy: false, lang,
-    seller, items, subtotal, discount, vat, total, tip: 0, payment_method: 'PromptPay',
+    seller, items, subtotal, discount, service_charge: 0, vat, total, tip: 0, payment_method: 'PromptPay',
   };
 }

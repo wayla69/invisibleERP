@@ -75,12 +75,17 @@ How printing works:
   พิมพ์** to open the receipt in a window and print it from the browser.
 - **Reprint.** Click **พิมพ์ซ้ำ (สำเนา)** to re-queue the receipt. The first
   issuance is the original; **every later copy is marked สำเนา / COPY**.
-- **Send electronically.** Enter the customer's email (or LINE / SMS contact) and
-  click **ส่ง** to deliver the receipt out-of-band.
+- **Send electronically.** Pick a **channel** (**LINE / SMS / อีเมล**), enter the
+  customer's contact (LINE User ID, phone, or email) and click **ส่ง** to deliver
+  the receipt out-of-band. LINE delivery uses the shop's LINE Official Account when
+  it is configured; otherwise the message is logged for the demo. Every send is
+  recorded in the message log.
+- **Service charge line.** A receipt **itemises a ค่าบริการ (service charge) line**
+  whenever the sale carries one (large-party dine-in); retail sales show none.
 
 **Expected result:** The customer gets a printed or electronic receipt; the
-receipt always **ties out** to the fiscal sale (line total − discount + VAT +
-tip = total).
+receipt always **ties out** to the fiscal sale (line total − discount + service
+charge + VAT + tip = total).
 
 > **Troubleshooting:** “SALE_NOT_FOUND” — the sale number is mistyped or belongs
 > to another branch/tenant. If a job stays **queued**, the printer/agent isn't
@@ -101,10 +106,11 @@ On `/pos/new` the cart panel speeds up cash sales:
 At dine-in checkout you can apply the shop's **pricing rules** automatically
 (happy-hour %, buy-one-get-one, quantity breaks, item/category discounts) instead
 of keying discounts by hand — turn on **apply pricing rules** at checkout. For
-large parties an **auto service charge** is added, and the bill can be **satang-
-rounded** to a cash-friendly total. Cashiers *apply* rules; only Pricing/Marketing
-roles may *create* them (segregation of duties). See **Dine-in / restaurant** for
-the full flow.
+large parties an **auto service charge** is added (a VATable ค่าบริการ that the
+receipt lists as its own line), and the bill can be **satang-rounded** to a
+cash-friendly total. Cashiers *apply* rules; only Pricing/Marketing roles may
+*create* them (segregation of duties). See **Dine-in / restaurant** for the full
+flow.
 
 ### QR self-ordering & the kitchen display (KDS)
 
@@ -406,9 +412,11 @@ On the **CRM 360** screen you can reach out to members:
 
 Two things to know: a member must have **opted in** to marketing (set when you
 enrol or edit them) — anyone opted out is automatically skipped and never
-contacted; and until a real SMS/LINE/email provider is configured, messages are
-recorded as **mock** sends (the log shows the provider) so you can rehearse
-campaigns safely.
+contacted; and the channel sends for real only when its provider is configured —
+**LINE** delivers via the LINE Messaging API once a channel token is set, while
+SMS/email stay **mock** until their provider is added. The log shows the provider
+(`line` vs `mock`) on each row, so you can rehearse campaigns safely and confirm
+which sends were live.
 
 ---
 
