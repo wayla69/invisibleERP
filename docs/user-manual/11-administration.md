@@ -271,5 +271,33 @@ across the group.
 
 ---
 
+## 12. Webhooks (push events to other systems)
+
+**Screen:** `/webhooks` (**เว็บฮุค**) · **Required permission:** `users`.
+
+Connect the ERP to other software: when something happens here — a **purchase
+order is approved/rejected**, or an **alert fires** — we send a signed message to a
+URL you choose, so the other system can react instantly.
+
+1. **Register an endpoint** — paste the receiving **URL** and (optionally) pick which
+   **events** to receive (pick none to receive all).
+2. **Copy the signing secret** shown **once** at registration. The receiver uses it
+   to verify each message is genuinely from us:
+   `HMAC-SHA256(secret, "<timestamp>.<body>")` must equal the `X-IERP-Signature`
+   header (reject anything older than 5 minutes).
+3. **Watch deliveries** on the **ประวัติการส่ง** tab — each attempt shows its status,
+   attempt count and any error. **ส่งซ้ำ** re-sends one, and **Dispatch** retries all
+   the failed-but-not-exhausted ones.
+
+**Expected result:** Real-time, tamper-evident integration with your other tools.
+Endpoints and their delivery history are **private to your company**; a slow or
+down receiver is bounded (10s) and never blocks the ERP — failed deliveries are
+logged and retried.
+
+> **Security:** the signing secret is stored **encrypted** and shown only once —
+> if you lose it, delete the endpoint and register a new one.
+
+---
+
 **Next:** [Approvals](./10-approvals.md) ·
 [Troubleshooting & FAQ](./99-troubleshooting-faq.md)

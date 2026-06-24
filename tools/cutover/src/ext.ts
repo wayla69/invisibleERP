@@ -293,6 +293,36 @@ async function main() {
   const vrow = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-BULK')))[0];
   ok('Bulk import: tenant-scoped entity (vendors) is stamped with the importer’s tenant', vend.json.status === 'success' && vend.json.imported === 1 && Number(vrow?.tenantId) === Number(hq.id), `tenant=${vrow?.tenantId} hq=${hq.id}`);
 
+  // ── outbound webhooks (Phase 8) ──
+  // cf2aa / hqaa are AccessAdmin (hold `users`, non-Admin → tenant-scoped). Deliveries go to an unreachable
+  // URL, so they're logged 'failed' — that still exercises registration, signed delivery, retry and isolation.
+  const wEvents = await inj('GET', '/api/platform/webhooks/events', cf2aa);
+  ok('Webhooks: event catalog exposes subscribable events', (wEvents.json.events ?? []).some((e: any) => e.key === 'alert.fired') && (wEvents.json.events ?? []).some((e: any) => e.key === 'po.approved'), `${(wEvents.json.events ?? []).length}`);
+  const reg = await inj('POST', '/api/platform/webhooks', cf2aa, { url: 'http://127.0.0.1:9/ierp-hook', events: [] });
+  ok('Webhooks: register returns id + a one-time plaintext secret', (reg.status === 200 || reg.status === 201) && !!reg.json.id && /^[0-9a-f]{48}$/.test(reg.json.secret ?? ''), `${reg.status} secretLen=${(reg.json.secret ?? '').length}`);
+  const wlist = await inj('GET', '/api/platform/webhooks', cf2aa);
+  ok('Webhooks: list shows the endpoint without leaking the secret', (wlist.json ?? []).some((w: any) => w.id === reg.json.id) && (wlist.json ?? []).every((w: any) => w.secret === undefined), `n=${(wlist.json ?? []).length}`);
+  const wlistHq = await inj('GET', '/api/platform/webhooks', hqaa);
+  ok('Webhooks: endpoints are tenant-isolated (HQ admin sees none of cf2’s)', (wlistHq.json ?? []).every((w: any) => w.id !== reg.json.id), `n=${(wlistHq.json ?? []).length}`);
+
+  // trigger a real emission: a fresh (non-cooldown) low-stock rule for cf2, then run the alert sweep
+  await inj('POST', '/api/alerts/rules', cf2aa, { name: 'hook trip', metric: 'low_stock_count', operator: 'gte', threshold: 1, channel: 'notification', target_role: 'Warehouse' });
+  const hookSweep = await inj('POST', '/api/alerts/run', cf2aa);
+  ok('Webhooks: an alert fire emits to the subscribed endpoint', (hookSweep.json.fired_count ?? 0) >= 1, `fired=${hookSweep.json.fired_count}`);
+  const dels = await inj('GET', '/api/platform/webhooks/deliveries', cf2aa);
+  const hookDel = (dels.json.deliveries ?? []).find((d: any) => d.event === 'alert.fired' && d.webhook_id === reg.json.id);
+  ok('Webhooks: the delivery is logged (attempted → failed against the unreachable URL)', !!hookDel && hookDel.status === 'failed' && hookDel.attempts === 1, `${JSON.stringify(hookDel ?? {})}`);
+  const delsHq = await inj('GET', '/api/platform/webhooks/deliveries', hqaa);
+  ok('Webhooks: the delivery log is tenant-isolated', (delsHq.json.deliveries ?? []).every((d: any) => d.webhook_id !== reg.json.id), `n=${(delsHq.json.deliveries ?? []).length}`);
+  const redeliver = await inj('POST', `/api/platform/webhooks/deliveries/${hookDel.id}/redeliver`, cf2aa);
+  ok('Webhooks: redeliver re-attempts a single delivery (attempt count advances)', redeliver.status === 200 && redeliver.json.status === 'failed', `${redeliver.status} ${redeliver.json.status}`);
+  const dispatch = await inj('POST', '/api/platform/webhooks/dispatch', cf2aa);
+  ok('Webhooks: dispatch re-runs failed deliveries under the retry cap', (dispatch.json.scanned ?? 0) >= 1, `${JSON.stringify(dispatch.json)}`);
+  const wNoPerm = await inj('GET', '/api/platform/webhooks', token2); // cfwh2 = Warehouse, lacks `users`
+  ok('Webhooks: management is gated by the users permission (403 without it)', wNoPerm.status === 403, `${wNoPerm.status}`);
+  const wDel = await inj('DELETE', `/api/platform/webhooks/${reg.json.id}`, cf2aa);
+  ok('Webhooks: an endpoint can be revoked (deleted)', wDel.status === 200 && wDel.json.deleted === true, `${wDel.status}`);
+
   await app.close();
   await pg.close();
 

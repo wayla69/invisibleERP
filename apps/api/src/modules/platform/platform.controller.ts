@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, Query, ParseIntPipe, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -36,6 +36,11 @@ export class PlatformController {
   }
 
   // ── Webhooks ──────────────────────────────────────────────
+  @Get('webhooks/events')
+  webhookEvents() {
+    return this.webhooks.events();
+  }
+
   @Post('webhooks')
   registerWebhook(@Body(new ZodValidationPipe(RegisterWebhookBody)) b: RegisterWebhookDto, @CurrentUser() u: JwtUser) {
     return this.webhooks.register(b, u);
@@ -44,6 +49,28 @@ export class PlatformController {
   @Get('webhooks')
   listWebhooks(@CurrentUser() u: JwtUser) {
     return this.webhooks.listForUser(u);
+  }
+
+  @Delete('webhooks/:id')
+  removeWebhook(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
+    return this.webhooks.remove(id, u);
+  }
+
+  @Get('webhooks/deliveries')
+  webhookDeliveries(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.webhooks.deliveries(u, limit ? Math.min(parseInt(limit, 10) || 100, 500) : 100);
+  }
+
+  @Post('webhooks/deliveries/:id/redeliver')
+  @HttpCode(200)
+  redeliver(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
+    return this.webhooks.redeliver(id, u);
+  }
+
+  @Post('webhooks/dispatch')
+  @HttpCode(200)
+  dispatch(@CurrentUser() u: JwtUser) {
+    return this.webhooks.dispatchPending(u);
   }
 
   // ── MFA (TOTP) ────────────────────────────────────────────
