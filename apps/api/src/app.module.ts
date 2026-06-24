@@ -93,6 +93,7 @@ import { DocumentTemplatesModule } from './modules/document-templates/document-t
 import { CustomObjectsModule } from './modules/custom-objects/custom-objects.module';
 import { ObjectLayoutsModule } from './modules/object-layouts/object-layouts.module';
 import { PublicApiModule } from './modules/public-api/public-api.module';
+import { IdentityModule } from './modules/identity/identity.module';
 
 @Module({
   imports: [
@@ -184,6 +185,7 @@ import { PublicApiModule } from './modules/public-api/public-api.module';
     CustomObjectsModule,
     ObjectLayoutsModule,
     PublicApiModule,
+    IdentityModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

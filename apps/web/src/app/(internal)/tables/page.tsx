@@ -140,7 +140,7 @@ function Board({ tables, zones, q, onSelect, sel, onOrder }: { tables: TableRow[
   );
 }
 
-type RevRoom = { zone_id: number; name: string; color: string | null; revenue: number; sales: number; avg_sale: number };
+type RevRoom = { zone_id: number; name: string; color: string | null; active?: boolean; revenue: number; sales: number; avg_sale: number };
 
 function RoomRevenue() {
   const today = (() => { const d = new Date(); const p = (x: number) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; })();
@@ -155,7 +155,7 @@ function RoomRevenue() {
   const max = Math.max(1, ...rooms.map((r) => r.revenue), unzoned.revenue);
   const rows: RevRoom[] = [
     ...rooms,
-    { zone_id: 0, name: 'ไม่มีห้อง', color: null, revenue: unzoned.revenue, sales: unzoned.sales, avg_sale: unzoned.sales ? unzoned.revenue / unzoned.sales : 0 },
+    { zone_id: 0, name: 'ไม่มีห้อง', color: null, active: true, revenue: unzoned.revenue, sales: unzoned.sales, avg_sale: unzoned.sales ? unzoned.revenue / unzoned.sales : 0 },
   ].filter((r) => r.zone_id !== 0 || r.sales > 0);
 
   return (
@@ -176,7 +176,7 @@ function RoomRevenue() {
               {rows.map((r) => (
                 <div key={r.zone_id} className="rounded-lg border bg-card p-3">
                   <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-sm">
-                    <span className="flex items-center gap-2 font-medium">{r.color && <span className="size-2.5 rounded-full" style={{ background: r.color }} />}{r.name}</span>
+                    <span className="flex items-center gap-2 font-medium">{r.color && <span className="size-2.5 rounded-full" style={{ background: r.color }} />}{r.name}{r.active === false && <span className="text-xs font-normal text-muted-foreground">(ลบแล้ว)</span>}</span>
                     <span className="text-muted-foreground tabular">{baht(r.revenue)} · {r.sales} บิล · เฉลี่ย {baht(r.avg_sale)}</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(r.revenue / max) * 100}%` }} /></div>

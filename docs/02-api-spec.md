@@ -220,6 +220,46 @@ the `{ data: [...], pagination: { limit, offset, count } }` envelope; `?limit` (
 
 ---
 
+## Enterprise identity — SSO + SCIM (Platform #4)
+
+Per-tenant OIDC single sign-on and SCIM 2.0 provisioning. Tenant admins configure their IdP; users
+log in via SSO; the IdP provisions/deprovisions users automatically. Secrets are write-only (OIDC
+client secret **AES-256-GCM at rest**; SCIM bearer stored as a `sha256` hash, shown once).
+
+**Tenant config** (perm `users`):
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/platform/identity` | — | sanitized config (`has_client_secret`/`has_scim_token` flags; **never** the secrets) |
+| PUT | `/api/platform/identity` | `{sso_enabled, oidc_issuer, oidc_client_id, oidc_client_secret?, oidc_redirect_uri, default_role, scim_enabled}` | sanitized config |
+| POST | `/api/platform/identity/scim-token` | — | `{token: "scim_…", prefix}` — **shown once** |
+
+**SSO login** (`@Public`):
+
+| Method | Path | Query | Response |
+|---|---|---|---|
+| GET | `/api/auth/sso/authorize` | `tenant=CODE` | `{authorization_url, state}` → redirect the browser to the IdP (`503 SSO_NOT_CONFIGURED` if off) |
+| POST | `/api/auth/sso/callback` | body `{state, code? \| id_token?}` | `{token, username, role}` — verifies the `id_token` (sig/iss/aud/exp), **JIT-provisions** the user by `sso_subject`, mints the standard session JWT. **POST body** (not query) so the token never lands in a URL/log |
+
+`id_token` is verified HS256 against the client secret (RS256/JWKS is a documented follow-on). A
+JIT user gets the tenant's `default_role`; repeat logins reuse the same user. Errors:
+`BAD_ID_TOKEN`/`BAD_ISSUER`/`BAD_AUDIENCE`/`TOKEN_EXPIRED`/`USER_DEACTIVATED` (`401`).
+
+**SCIM 2.0** (`/scim/v2`, auth: `Authorization: Bearer scim_…` per-tenant token; `401 SCIM_UNAUTHORIZED`):
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/scim/v2/ServiceProviderConfig` | capabilities (patch + filter supported) |
+| GET | `/scim/v2/Users?filter=userName eq "x"` | SCIM `ListResponse` (1-based `startIndex`/`count`) |
+| GET/POST/PUT/PATCH/DELETE | `/scim/v2/Users[/:id]` | create/replace/patch/deprovision a user |
+
+Create & role-change run through `AdminUsersService` → **same SoD checks** as the admin UI
+(`USER_EXISTS` → `409`). **Deprovisioning** (`DELETE`, or `PATCH active=false`) **deactivates**
+(`users.is_active=false`) — it never deletes the row; a deactivated account cannot authenticate
+(password **or** SSO → `401 USER_DEACTIVATED`).
+
+---
+
 ## หมายเหตุการ map สำคัญ
 
 - **`/api/chat`** เดิมเป็น LLM passthrough (ดึง DB ไม่ได้) — V2 ต่อ AgentService ให้เรียก tools จริง ⇒ behavior ดีขึ้น (ระบุใน release note ว่าเป็น improvement ตั้งใจ)

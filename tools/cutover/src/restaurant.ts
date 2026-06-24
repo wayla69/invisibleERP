@@ -385,6 +385,17 @@ async function main() {
   ok('Zone revenue: grand total reconciles rooms + unzoned', near(rvRev.json.total?.revenue, (rvRev.json.rooms ?? []).reduce((s: number, r: any) => s + r.revenue, 0) + (rvRev.json.unzoned?.revenue ?? 0)), `total=${rvRev.json.total?.revenue}`);
   const rvT2 = await inj('GET', '/api/restaurant/zones/revenue', sales2);
   ok('Zone revenue: tenant-isolated (T2 cannot see T1’s room)', !(rvT2.json.rooms ?? []).some((r: any) => r.zone_id === rvZone.json.id), `T2 rooms=${(rvT2.json.rooms ?? []).length}`);
+  // snapshot proof: move R1 to a different room AFTER the sale → the sale stays in the room it was sold in
+  const rvZone2 = await inj('POST', '/api/restaurant/zones', sales1, { name: 'โซนใหม่' });
+  await inj('PATCH', `/api/restaurant/tables/${rvTbl.json.id}`, sales1, { zone_id: rvZone2.json.id });
+  const rvRev2 = await inj('GET', '/api/restaurant/zones/revenue', sales1);
+  const rvStill = (rvRev2.json.rooms ?? []).find((r: any) => r.zone_id === rvZone.json.id);
+  const rvMovedTo = (rvRev2.json.rooms ?? []).find((r: any) => r.zone_id === rvZone2.json.id);
+  ok('Zone revenue: room snapshot — moving the table later keeps the sale in the original room', near(rvStill?.revenue, rvCo.json.total) && (rvMovedTo?.revenue ?? 0) === 0, `orig=${rvStill?.revenue} movedTo=${rvMovedTo?.revenue}`);
+  await inj('DELETE', `/api/restaurant/zones/${rvZone.json.id}`, sales1);   // delete the room that earned the sale
+  const rvRev3 = await inj('GET', '/api/restaurant/zones/revenue', sales1);
+  const rvDeleted = (rvRev3.json.rooms ?? []).find((r: any) => r.zone_id === rvZone.json.id);
+  ok('Zone revenue: a deleted room keeps its past takings (flagged inactive) + total still reconciles', !!rvDeleted && rvDeleted.active === false && near(rvDeleted.revenue, rvCo.json.total) && near(rvRev3.json.total?.revenue, (rvRev3.json.rooms ?? []).reduce((s: number, r: any) => s + r.revenue, 0) + (rvRev3.json.unzoned?.revenue ?? 0)), `del=${JSON.stringify(rvDeleted ?? {}).slice(0, 80)}`);
 
   // ── KDS course firing (hold-and-fire course-by-course) ──
   const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });

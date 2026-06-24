@@ -15,6 +15,7 @@ export const users = pgTable('users', {
   mfaEnabled: boolean('mfa_enabled').default(false), // move #7 — TOTP
   totpSecret: text('totp_secret'),
   ssoSubject: text('sso_subject'), // OIDC/SAML subject for SSO users
+  isActive: boolean('is_active').notNull().default(true), // SCIM deprovisioning deactivates (no hard delete)
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
