@@ -21,9 +21,9 @@ a **mobile PWA** (E3), and **scale interfaces** (E5). Each is **presentation-onl
 
 ## 3. Scope
 
-**In scope (delivered):** **white-label theming (E4, Phase 29)** + **guided onboarding & industry packs (E1,
-Phase 26)**. **Planned (see roadmap `13` §5):** E2 migration toolkit (Phase 27), E3 PWA (Phase 28), E5 scale
-interfaces (Phase 30).
+**In scope (delivered):** **white-label theming (E4, Phase 29)**, **guided onboarding & industry packs (E1,
+Phase 26)** + **data-migration toolkit (E2, Phase 27)**. **Planned (see roadmap `13` §5):** E3 PWA (Phase 28),
+E5 scale interfaces (Phase 30).
 
 ## 4. Process narrative — capabilities
 
@@ -45,6 +45,14 @@ interfaces (Phase 30).
    `users`/`exec`/`dashboard` (reads + steps), `masterdata`/`users`/`exec` (apply). Tables `onboarding_progress`
    + `pack_installs` (migration `0095`); RLS-scoped. Web `/onboarding`. *Verified by the `ext` harness
    (checklist / complete-step / bad-step / pack-apply / idempotent-reapply / bad-pack / RLS).*
+3. **Data-migration toolkit — Phase 27 (E2).** Productizes the Phase-7 import into a guided **migrate-from**
+   flow: a **source adapter** (Loyverse / FlowAccount / generic CSV) maps a vendor export → **canonical** rows,
+   then a **dry-run** validation (mirroring the Phase-7 per-row checks) reports errors **without writing**, and
+   the job is recorded for preview before the tenant commits through the proven Phase-7 importer. `GET
+   /api/migration/sources`, `POST /api/migration/dry-run`, `GET /api/migration/jobs` (perm
+   `masterdata`/`users`/`exec`). Table `migration_jobs` (migration `0098`); RLS-scoped. Web `/migration`.
+   *Verified by the `ext` harness (sources / field-map + invalid-row flagging / bad-source / bad-entity /
+   job-recorded / RLS). Direct one-click commit (calling the Phase-7 importer) is a noted follow-up.*
 
 ## 5. Control matrix
 
@@ -52,12 +60,13 @@ interfaces (Phase 30).
 |---|---|---|---|---|---|
 | White-label theming | Cross-tenant theme bleed; unsafe asset/colour | RLS self-scoped tenant theme; brand hue bounded 0–360 → in-gamut oklch; radius from an allowlist; logo restricted to https/data-image; presentation-only, no GL | Preventive | (operational) | `ext` theme checks (set, bad-hue, bad-radius, RLS) |
 | Onboarding / industry packs | Cross-tenant seed bleed; duplicate seeding | Pack apply is idempotent + RLS-scoped (seeds only the caller's tenant); seeds configuration/sample objects only, no GL | Preventive | (operational) | `ext` onboarding checks (idempotent re-apply, RLS) |
+| Data migration | Bad master data loaded silently | Source adapter → canonical → dry-run validation (Phase-7 per-row checks) before any write; job recorded; RLS-scoped; no GL | Preventive | MDM-02 | `ext` migration checks (invalid-row flagging, RLS) |
 
 ## 6. Exception & error handling
 
 All `400` unless noted: theming — `BAD_HUE` (hue not 0–360), `BAD_RADIUS` (not in the allowlist), `BAD_LOGO`
-(not https/data-image), `NO_TENANT`; onboarding — `BAD_STEP` (unknown step), `BAD_PACK` (unknown pack).
-Unauthorized → `403`/`401`; cross-tenant access is RLS-filtered.
+(not https/data-image), `NO_TENANT`; onboarding — `BAD_STEP` (unknown step), `BAD_PACK` (unknown pack);
+migration — `BAD_SOURCE`, `BAD_ENTITY`, `BAD_ROWS`. Unauthorized → `403`/`401`; cross-tenant access is RLS-filtered.
 
 ## 7. Revision history
 
@@ -65,3 +74,4 @@ Unauthorized → `403`/`401`; cross-tenant access is RLS-filtered.
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-24 | Platform | Initial experience narrative. Delivered **Platform Phase 29 — white-label theming (E4)**: per-tenant brand tokens (brand hue → in-gamut oklch `--primary`, radius, name, logo, tagline) applied as CSS variables app-wide; `tenants.theme_prefs` (migration `0094`). Presentation-only, no GL, RLS/self-scoped; `ext` +5 checks. E1/E2/E3/E5 planned — see roadmap `13` §5. |
 | 0.2 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 26 — guided onboarding + industry packs (E1)**: a setup checklist (per-tenant step completion + %) and one-click industry packs (restaurant/retail/distribution/services) that idempotently seed custom objects (reusing A1). Tables `onboarding_progress` + `pack_installs` (migration `0095`). No GL, RLS-scoped; new §4.2, control-matrix row, `BAD_STEP`/`BAD_PACK`; `ext` +7 checks. |
+| 0.3 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 27 — data-migration toolkit (E2)**: source adapters (Loyverse/FlowAccount/CSV) map a vendor export → canonical → dry-run validation (mirroring Phase-7) with a recorded job, previewed before the Phase-7 commit. Table `migration_jobs` (migration `0098`). RLS-scoped, validation-only, no GL; new §4.3, control-matrix row (MDM-02), `BAD_SOURCE`/`BAD_ENTITY`/`BAD_ROWS`; `ext` +6 checks. |

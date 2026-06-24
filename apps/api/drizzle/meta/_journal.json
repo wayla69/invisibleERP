@@ -687,6 +687,20 @@
       "when": 1783430000000,
       "tag": "0096_api_key_tier",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1783440000000,
+      "tag": "0097_connectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1783450000000,
+      "tag": "0098_migration_jobs",
+      "breakpoints": true
     }
   ]
 }

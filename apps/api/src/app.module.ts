@@ -105,6 +105,8 @@ import { I18nModule } from './modules/i18n/i18n.module';
 import { ThemeModule } from './modules/theme/theme.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { DeveloperModule } from './modules/developer/developer.module';
+import { ConnectorsModule } from './modules/connectors/connectors.module';
+import { MigrationModule } from './modules/migration/migration.module';
 
 @Module({
   imports: [
@@ -208,6 +210,8 @@ import { DeveloperModule } from './modules/developer/developer.module';
     ThemeModule,
     OnboardingModule,
     DeveloperModule,
+    ConnectorsModule,
+    MigrationModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

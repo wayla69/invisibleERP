@@ -746,6 +746,37 @@ async function main() {
   const dpCf2 = await inj('GET', '/api/developer/portal', cf2aa);
   ok('Developer: RLS — another tenant does not see HQ’s keys', !(dpCf2.json.keys ?? []).some((k: any) => k.name === 'dev-test'), `cf2 keys=${(dpCf2.json.keys ?? []).length}`);
 
+  // ── D2 connector framework (Platform Phase 24) ──
+  const connCat = await inj('GET', '/api/connectors/catalog', hqaa);
+  ok('Connectors: catalog lists line / shopee / bank_csv', (connCat.json.connectors ?? []).length >= 3 && (connCat.json.connectors ?? []).some((c: any) => c.type === 'shopee'), `${(connCat.json.connectors ?? []).length}`);
+  const connBad = await inj('POST', '/api/connectors', hqaa, { type: 'nope' });
+  ok('Connectors: unknown type rejected (400 BAD_CONNECTOR)', connBad.status === 400 && connBad.json.error?.code === 'BAD_CONNECTOR', `${connBad.status} ${connBad.json.error?.code}`);
+  const connReg = await inj('POST', '/api/connectors', hqaa, { type: 'shopee' });
+  const sync1 = await inj('POST', `/api/connectors/${connReg.json.id}/sync`, hqaa, {});
+  ok('Connectors: first sync pulls + records a canonical batch', (sync1.status === 200 || sync1.status === 201) && sync1.json.pulled === 2 && sync1.json.created === 2, `pulled=${sync1.json.pulled} new=${sync1.json.created}`);
+  const sync2 = await inj('POST', `/api/connectors/${connReg.json.id}/sync`, hqaa, {});
+  ok('Connectors: re-sync is idempotent (0 new)', sync2.json.created === 0 && sync2.json.duplicates === 2, `new=${sync2.json.created} dup=${sync2.json.duplicates}`);
+  const bankReg = await inj('POST', '/api/connectors', hqaa, { type: 'bank_csv' });
+  const bankSync = await inj('POST', `/api/connectors/${bankReg.json.id}/sync`, hqaa, { csv: '2026-06-01,1500.00,deposit\n2026-06-02,-220.00,payment' });
+  ok('Connectors: bank-CSV import parses statement lines', bankSync.json.pulled === 2 && bankSync.json.created === 2, `pulled=${bankSync.json.pulled}`);
+  const cf2conn = await inj('POST', '/api/connectors', cf2aa, { type: 'shopee' });
+  const cf2sync = await inj('POST', `/api/connectors/${cf2conn.json.id}/sync`, cf2aa, {});
+  ok('Connectors: RLS — idempotency is per-tenant (cf2 syncs the same fixtures fresh)', cf2sync.json.created === 2, `cf2 new=${cf2sync.json.created}`);
+
+  // ── E2 data-migration toolkit (Platform Phase 27) ──
+  const migSrc = await inj('GET', '/api/migration/sources', hqaa);
+  ok('Migration: source + entity catalogs exposed', (migSrc.json.sources ?? []).length >= 3 && (migSrc.json.entities ?? []).length >= 2, `s=${(migSrc.json.sources ?? []).length} e=${(migSrc.json.entities ?? []).length}`);
+  const migRun = await inj('POST', '/api/migration/dry-run', hqaa, { source: 'loyverse', entity: 'products', rows: [{ sku: 'A1', item_name: 'Coffee' }, { sku: 'A2' }] });
+  ok('Migration: dry-run maps source fields + flags invalid rows', (migRun.status === 200 || migRun.status === 201) && migRun.json.total === 2 && migRun.json.valid === 1 && (migRun.json.errors ?? []).length === 1, `total=${migRun.json.total} valid=${migRun.json.valid} err=${(migRun.json.errors ?? []).length}`);
+  const migBadSrc = await inj('POST', '/api/migration/dry-run', hqaa, { source: 'nope', entity: 'products', rows: [] });
+  ok('Migration: unknown source rejected (400 BAD_SOURCE)', migBadSrc.status === 400 && migBadSrc.json.error?.code === 'BAD_SOURCE', `${migBadSrc.status} ${migBadSrc.json.error?.code}`);
+  const migBadEnt = await inj('POST', '/api/migration/dry-run', hqaa, { source: 'csv', entity: 'nope', rows: [] });
+  ok('Migration: unknown entity rejected (400 BAD_ENTITY)', migBadEnt.status === 400 && migBadEnt.json.error?.code === 'BAD_ENTITY', `${migBadEnt.status} ${migBadEnt.json.error?.code}`);
+  const migJobs = await inj('GET', '/api/migration/jobs', hqaa);
+  ok('Migration: a dry-run is recorded as a job', (migJobs.json.jobs ?? []).length >= 1, `jobs=${(migJobs.json.jobs ?? []).length}`);
+  const migJobsCf2 = await inj('GET', '/api/migration/jobs', cf2aa);
+  ok('Migration: RLS — another tenant does not see HQ’s jobs', !(migJobsCf2.json.jobs ?? []).some((j: any) => j.source === 'loyverse'), `cf2 jobs=${(migJobsCf2.json.jobs ?? []).length}`);
+
   await app.close();
   await pg.close();
 
