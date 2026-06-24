@@ -7,20 +7,20 @@
 | Process ID | PN-27-PLAT |
 | Process owner | `<<Platform Admin / Controller>>` |
 | Approver | `<<CFO / Head of IT>>` |
-| Version | **0.2 DRAFT · 2026-06-24** |
+| Version | **0.3 DRAFT · 2026-06-24** |
 | Review cadence | Annual + on significant change |
 | Related RCM controls | No new RCM control (operational/configuration features); reinforces ITGC-AC-03 (RLS), ITGC-AC-04 (secrets at rest), ITGC-AC-10 (audit trail), MDM-02 (master-data validation) |
 | Related policy | `compliance/policies/` (Access Control; IPE; Change Management) |
 
 ## 2. Purpose
 
-This is an **umbrella narrative** for the cross-cutting *platform-customization* capabilities that let a tenant adapt the ERP to its business **without code** — added incrementally as Platform Phases 1–9, plus a consolidation phase (the notification inbox, #10). It exists so an auditor or new administrator can see, in one place, **what is configurable, who may configure it, through which endpoint, and under which controls**, and then follow the link to the owning cycle narrative for detail. None of these features posts to the general ledger, and each is **tenant-isolated by Row-Level Security (RLS)** and gated by an explicit permission.
+This is an **umbrella narrative** for the cross-cutting *platform-customization* capabilities that let a tenant adapt the ERP to its business **without code** — added incrementally as Platform Phases 1–9, plus consolidation phases (the notification inbox #10 and the public REST API #11). It exists so an auditor or new administrator can see, in one place, **what is configurable, who may configure it, through which endpoint, and under which controls**, and then follow the link to the owning cycle narrative for detail. None of these features posts to the general ledger, and each is **tenant-isolated by Row-Level Security (RLS)** and gated by an explicit permission.
 
 > **Design invariants** (verified by the `ext` control/integration harness for every feature): (a) **no GL impact** — configuration and operational features never post journal entries; (b) **tenant isolation** — every tenant-scoped table is RLS-scoped so one tenant can never read or write another's configuration; (c) **least privilege** — each surface is gated by a specific permission (`users`, `exec`, `masterdata`, or `dashboard`); (d) **documentation-as-done** — each feature updated its owning cycle narrative, the user manual, and UAT in the same change.
 
 ## 3. Scope
 
-**In scope:** the ten platform-customization capabilities (§7). **Out of scope:** the financially-significant business cycles they extend (see the per-feature cross-references), and the global, code-governed **module on/off** feature flags (`module_configs`, a platform-wide switch — see `08-itgc.md` / user manual §11.3).
+**In scope:** the eleven platform-customization capabilities (§7). **Out of scope:** the financially-significant business cycles they extend (see the per-feature cross-references), and the global, code-governed **module on/off** feature flags (`module_configs`, a platform-wide switch — see `08-itgc.md` / user manual §11.3).
 
 ## 4. References
 
@@ -55,7 +55,7 @@ This is an **umbrella narrative** for the cross-cutting *platform-customization*
 | Register outbound webhooks | **A/R** | I | I | I | signs + delivers + retries |
 | Brand the org (logo/tagline) | **A/R** | I | I | I | renders on receipts |
 
-## 7. Process narrative — the ten capabilities
+## 7. Process narrative — the eleven capabilities
 
 Each entry: **what it does · endpoint(s) · permission · storage/migration · controls · owning narrative.**
 
@@ -69,6 +69,7 @@ Each entry: **what it does · endpoint(s) · permission · storage/migration · 
 8. **Outbound webhooks — Phase 8.** Tenants register endpoints and subscribe to business events (`po.approved`, `po.rejected`, `alert.fired`); a dispatcher delivers **HMAC-SHA256-signed** payloads (10s-bounded) with a capped retry, recording every attempt. `GET/POST/DELETE /api/platform/webhooks`, `GET /api/platform/webhooks/events|deliveries`, `POST /api/platform/webhooks/deliveries/:id/redeliver`, `POST /api/platform/webhooks/dispatch`. Perm `users`. Signing secret **AES-256-GCM encrypted at rest** (shown once). Additive migration `0084`; the `webhook_deliveries` egress log is tenant-scoped via its FK to the (RLS-scoped) `webhooks`. Web `/webhooks`. *Controls: **ITGC-AC-04** (secret at rest); reuses the inbound HMAC scheme. Detail: `08-itgc.md` §7.A.9.*
 9. **Tenant branding — Phase 9.** A tenant admin sets a **logo + tagline** (and a `branding_prefs` blob) on the org profile; these are **genuinely rendered** on the customer-facing receipt header. `GET/PATCH /api/tenant/profile` (extended). Perm `users`. Additive `tenants` columns, migration `0086`; RLS self-scoped to the caller's own tenant. Logo accepted as an `https` URL or a small image data-URI (other schemes rejected; **attribute-encoded** on output). Web `/setup` Branding card. *Detail: `23-customer-onboarding-provisioning.md` §7.6a.*
 10. **Notification inbox — Phase #2 (consolidation).** A **per-user** in-app inbox unifying the notifications already produced by the alert engine (#3), scheduled reports (#4), and workflow escalations — each row targets a `(tenant, role)` pair or is a tenant-wide broadcast (`target_role` NULL). **Any authenticated user** gets a personal inbox scoped server-side to their own tenant + role; read state is tracked **per user** (so one recipient marking-read never affects another). `GET /api/notifications/inbox` (paginated, unread-first; `unread_only` filter), `GET /api/notifications/unread-count`, `POST /api/notifications/:id/read`, `POST /api/notifications/mark-all-read`. No `@Permissions` gate (universal); the `notifications` table is **not** RLS-scoped, so every query filters by `target_tenant_id` explicitly. New table `notification_reads` (per-user read markers, unique `(notification_id, username)`), migration `0087`; mark-read is **guarded** so a user can only ever mark a notification actually visible to them. Web: a header **bell** (unread badge, 30s poll) + a full `/notifications` page. *Consumes the producers in #3/#4 and `20`/`02` workflow escalations; no new RCM control.*
+11. **Public REST API (v1) — Phase #3.** A stable, versioned, **scope-limited read API** for third-party integrators, built on the existing API-key auth (a `Bearer ierp_…` key, issued at `/api/platform/api-keys`, verified by the global guard into an `apikey:<prefix>` machine principal carrying its granted scopes). `GET /api/v1` (discovery) + `GET /api/v1/openapi.json` are **open**; `GET /api/v1/me` identifies the key; `GET /api/v1/items` (`catalog:read`), `/inventory` (`inventory:read`), `/orders` (`orders:read`), `/invoices` (`invoices:read`) return a paginated `{data, pagination}` envelope. **API-key only** (human JWTs → `403 API_KEY_REQUIRED`); a dedicated `PublicApiGuard` enforces **scope** (`403 INSUFFICIENT_SCOPE`, legacy `read`/`write`/`*` aliases honoured) and a **per-key fixed-window rate limit** (`429 RATE_LIMITED`, env-tunable). Tenant isolation is the **same RLS** the rest of the app uses — the key's `tenant_id` scopes every row (the shared `items` catalog has no tenant_id and is returned in full). **No schema change** (pure surface over existing tables); curated OpenAPI 3.1 document. *Controls: scope-gating + rate-limiting are **preventive** access controls reinforcing ITGC-AC-07 (key issuance/auth); no new RCM control.*
 
 ## 8. Process flow
 
@@ -97,6 +98,7 @@ flowchart TD
 | Webhooks | Forged/replayed egress; secret disclosure | HMAC-SHA256 signed payload + timestamp; secret AES-256-GCM at rest | Preventive | ITGC-AC-04 | `ext` webhook checks |
 | Bulk import | Bad master data loaded silently | Dry-run + per-row validation; block-or-skip commit | Preventive | MDM-02 | `ext` bulk-import checks |
 | Role dashboards | KPI leakage to under-privileged role | Resolved layout filtered to the viewer's permissions | Preventive | ITGC-AC-02 | `ext` dashboard checks |
+| Public API | Over-broad machine access; key abuse | API-key-only surface + per-endpoint **scope** gate (`INSUFFICIENT_SCOPE`); per-key **rate limit** (`RATE_LIMITED`); RLS scopes every row to the key's tenant | Preventive | ITGC-AC-07 | `ext` public-API checks (scope-deny, isolation, 429) |
 
 ## 10. Inputs & outputs
 
@@ -118,7 +120,7 @@ flowchart TD
 
 ## 13. Exception & error handling
 
-Per-feature validation codes are consolidated here (all `400` unless noted): UDFs — `UNKNOWN_FIELD`/`REQUIRED_FIELD`/`BAD_OPTION`/`BAD_NUMBER`/`BAD_DATE`; alerts — `BAD_METRIC`/`BAD_OPERATOR`/`BAD_CHANNEL`/`NO_TARGET`; scheduled reports/views — `BAD_REPORT_TYPE`/`BAD_FREQUENCY`/`VIEW_NOT_FOUND` (404); dashboards — `BAD_ROLE`/`BAD_WIDGET`; bulk import — `REQUIRED_EMPTY`/`BAD_NUMBER`/`BAD_DATE`/`DUP_IN_FILE`/`EXISTS`; webhooks — `WEBHOOK_NOT_FOUND` (404)/`DELIVERY_NOT_FOUND` (404); branding — invalid `logo_url` rejected. Unauthorized access → `403`; cross-tenant access is silently RLS-filtered (no leak).
+Per-feature validation codes are consolidated here (all `400` unless noted): UDFs — `UNKNOWN_FIELD`/`REQUIRED_FIELD`/`BAD_OPTION`/`BAD_NUMBER`/`BAD_DATE`; alerts — `BAD_METRIC`/`BAD_OPERATOR`/`BAD_CHANNEL`/`NO_TARGET`; scheduled reports/views — `BAD_REPORT_TYPE`/`BAD_FREQUENCY`/`VIEW_NOT_FOUND` (404); dashboards — `BAD_ROLE`/`BAD_WIDGET`; bulk import — `REQUIRED_EMPTY`/`BAD_NUMBER`/`BAD_DATE`/`DUP_IN_FILE`/`EXISTS`; webhooks — `WEBHOOK_NOT_FOUND` (404)/`DELIVERY_NOT_FOUND` (404); branding — invalid `logo_url` rejected; public API — `API_KEY_REQUIRED` (`403`, human JWT on `/api/v1`), `INSUFFICIENT_SCOPE` (`403`, missing scope), `RATE_LIMITED` (`429`, per-key window exceeded). Unauthorized access → `403` (missing key → `401`); cross-tenant access is silently RLS-filtered (no leak).
 
 ## 14. Revision history
 
@@ -126,3 +128,4 @@ Per-feature validation codes are consolidated here (all `400` unless noted): UDF
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-24 | Platform | Initial umbrella narrative consolidating Platform Phases 1–9 (custom fields, approval workflows, alert rules, scheduled reports + saved views, role dashboards, audit viewer, validated bulk import, outbound webhooks, tenant branding). Cross-references the owning cycle narratives; no new RCM control. |
 | 0.2 DRAFT | 2026-06-24 | Platform | Added capability #10 — the **notification inbox** (per-user read state over the existing `notifications` table; new `notification_reads`, migration `0087`; bell + `/notifications` page). Unifies the notifications produced by #3/#4 and workflow escalations; no new RCM control. |
+| 0.3 DRAFT | 2026-06-24 | Platform | Added capability #11 — the **public REST API (v1)** (`/api/v1` items/inventory/orders/invoices, API-key-only, scope-gated, per-key rate-limited, OpenAPI 3.1 doc). No schema change; scope + rate limiting are preventive access controls reinforcing ITGC-AC-07; no new RCM control. |

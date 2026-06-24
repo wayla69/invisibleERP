@@ -196,6 +196,30 @@ GET    /api/customers/{name}                     internal CRM detail (orders/sta
 
 ---
 
+## Public API (v1) — external integrators (Platform #3)
+
+A **stable, versioned, read-only** surface for third parties. **API-key auth only** —
+`Authorization: Bearer ierp_…` (issued at `POST /api/platform/api-keys`); a human JWT is
+rejected with `403 API_KEY_REQUIRED`. Each endpoint declares a required **scope**; the key's
+granted scopes (`catalog:read`, `inventory:read`, `orders:read`, `invoices:read`, or the
+aliases `read`/`write`/`*`) are checked by the `PublicApiGuard` (`403 INSUFFICIENT_SCOPE`).
+Calls are **per-key rate-limited** (`429 RATE_LIMITED`, fixed window, env-tunable
+`PUBLIC_API_RATE_MAX`/`PUBLIC_API_RATE_WINDOW_MS`). Every row is **RLS-scoped to the key's
+tenant** (the shared `items` catalog has no `tenant_id` and is returned in full). Responses use
+the `{ data: [...], pagination: { limit, offset, count } }` envelope; `?limit` (≤200) / `?offset`.
+
+| Method | Path | Scope | Response | หมายเหตุ |
+|---|---|---|---|---|
+| GET | `/api/v1` | — (open) | `{name, version, documentation, endpoints}` | discovery, no key |
+| GET | `/api/v1/openapi.json` | — (open) | OpenAPI 3.1 document | the published contract |
+| GET | `/api/v1/me` | valid key | `{principal, tenant_id, scopes, version}` | identify the key |
+| GET | `/api/v1/items` | `catalog:read` | `{data:[{item_id, description, uom, unit_price, category}], pagination}` | `?q`, `?category` |
+| GET | `/api/v1/inventory` | `inventory:read` | `{data:[{item_id, current_stock, reorder_point, reorder_qty, …}], pagination}` | tenant-scoped |
+| GET | `/api/v1/orders` | `orders:read` | `{data:[{order_no, order_date, status, currency, …}], pagination}` | `?status` |
+| GET | `/api/v1/invoices` | `invoices:read` | `{data:[{invoice_no, amount, paid_amount, outstanding, status, …}], pagination}` | `?status`; `outstanding = amount − paid` |
+
+---
+
 ## หมายเหตุการ map สำคัญ
 
 - **`/api/chat`** เดิมเป็น LLM passthrough (ดึง DB ไม่ได้) — V2 ต่อ AgentService ให้เรียก tools จริง ⇒ behavior ดีขึ้น (ระบุใน release note ว่าเป็น improvement ตั้งใจ)

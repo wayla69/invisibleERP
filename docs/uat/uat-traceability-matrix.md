@@ -318,6 +318,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-041 | Notification inbox — tenant isolation (no cross-tenant) | Feature (notification inbox), ITGC-AC-03 | 27 §7.10 |
 | UAT-ADM-042 | Notification inbox — broadcast vs role-targeted visibility | Feature (notification inbox) | 27 §7.10 |
 | UAT-ADM-043 | Notification inbox — per-user mark-read, guard & mark-all | Feature (notification inbox) | 27 §7.10 |
+| UAT-ADM-044 | Public API — OpenAPI doc + discovery open | Feature (public API) | 27 §7.11 |
+| UAT-ADM-045 | Public API — API-key-only, scope identity | Feature (public API), ITGC-AC-07 | 27 §7.11 |
+| UAT-ADM-046 | Public API — tenant isolation (RLS) over reads | Feature (public API), ITGC-AC-03 | 27 §7.11 |
+| UAT-ADM-047 | Public API — scope gate | Feature (public API), ITGC-AC-07 | 27 §7.11 |
+| UAT-ADM-048 | Public API — per-key rate limit | Feature (public API), anti-abuse | 27 §7.11 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -385,7 +390,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 43 | 27 |
+| 08 Admin / SoD / Audit | 48 | 31 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **225** | **98** |
+| **Total** | **230** | **102** |
