@@ -5,6 +5,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { webhooks, webhookDeliveries, users } from '../../database/schema';
 import { encrypt, decrypt } from '../../common/crypto';
 import type { JwtUser } from '../../common/decorators';
+import { AutomationService } from '../automation/automation.service';
 
 export interface RegisterWebhookDto { url: string; events?: string[] }
 
@@ -21,7 +22,10 @@ const MAX_ATTEMPTS = 3;
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger('WebhookService');
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly automation: AutomationService,
+  ) {}
 
   events() { return { events: WEBHOOK_EVENTS }; }
 
@@ -131,7 +135,10 @@ export class WebhookService {
   async emit(event: string, payload: unknown, user: JwtUser) {
     try {
       const tenantId = await this.tenantOf(user);
-      return await this.deliver(event, payload, tenantId);
+      const res = await this.deliver(event, payload, tenantId);
+      // Same event drives the no-code automation engine (Phase 13 — A4); it must never break webhook emit.
+      try { await this.automation.runEvent(event, payload as any, user); } catch { /* best-effort */ }
+      return res;
     } catch (err) {
       this.logger.warn(`webhook emit('${event}') failed: ${(err as Error).message}`);
       return { matched: 0, delivered: 0 };

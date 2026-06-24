@@ -601,6 +601,45 @@ async function main() {
   const deactLogin = await inj('POST', '/api/login', undefined, { username: 'deact1', password: 'pw' });
   ok('Identity: a deactivated account cannot log in (401 USER_DEACTIVATED)', deactLogin.status === 401 && deactLogin.json.error?.code === 'USER_DEACTIVATED', `${deactLogin.status} ${deactLogin.json.error?.code}`);
 
+  // ── automation rules engine (Platform Phase 13 — A4) ──
+  const jlBeforeAu = (await db.select().from(s.journalLines)).length;
+  const auCat = await inj('GET', '/api/automation/events', hqaa);
+  ok('Automation: event catalog exposes alert.fired + action types', (auCat.json.events ?? []).some((e: any) => e.key === 'alert.fired') && (auCat.json.action_types ?? []).includes('notification'), `${(auCat.json.events ?? []).length}`);
+  const auBadEvent = await inj('POST', '/api/automation/rules', hqaa, { name: 'x', event_type: 'nope', action: { type: 'log' } });
+  ok('Automation: unknown event rejected (400 BAD_EVENT)', auBadEvent.status === 400 && auBadEvent.json.error?.code === 'BAD_EVENT', `${auBadEvent.status} ${auBadEvent.json.error?.code}`);
+  const auBadAction = await inj('POST', '/api/automation/rules', hqaa, { name: 'x', event_type: 'alert.fired', action: { type: 'explode' } });
+  ok('Automation: unknown action rejected (400 BAD_ACTION)', auBadAction.status === 400 && auBadAction.json.error?.code === 'BAD_ACTION', `${auBadAction.status} ${auBadAction.json.error?.code}`);
+  const auCreate = await inj('POST', '/api/automation/rules', hqaa, { name: 'แจ้งเมื่อ critical', event_type: 'alert.fired', condition: { field: 'severity', op: 'eq', value: 'critical' }, action: { type: 'notification', message: 'critical alert!' } });
+  ok('Automation: create a rule (event + condition + action)', (auCreate.status === 200 || auCreate.status === 201) && !!auCreate.json.id, `${auCreate.status} ${JSON.stringify(auCreate.json)}`);
+  const auMatch = await inj('POST', '/api/automation/run-event', hqaa, { event: 'alert.fired', payload: { severity: 'critical', name: 'low stock', value: 9 } });
+  ok('Automation: run-event executes a matching rule', (auMatch.json.matched ?? 0) >= 1 && (auMatch.json.executed ?? 0) >= 1, `${JSON.stringify(auMatch.json)}`);
+  const auSkip = await inj('POST', '/api/automation/run-event', hqaa, { event: 'alert.fired', payload: { severity: 'warning' } });
+  ok('Automation: a non-matching condition is skipped (executed 0)', (auSkip.json.executed ?? 0) === 0, `${JSON.stringify(auSkip.json)}`);
+  const auExecs = await inj('GET', '/api/automation/executions', hqaa);
+  ok('Automation: executions are logged (executed + skipped)', (auExecs.json.executions ?? []).some((e: any) => e.status === 'executed') && (auExecs.json.executions ?? []).some((e: any) => e.status === 'skipped'), `${(auExecs.json.executions ?? []).length}`);
+  const auIso = await inj('GET', '/api/automation/rules', cf2aa);
+  ok('Automation: rules are tenant-isolated (cf2 sees none of HQ’s)', (auIso.json.rules ?? []).length === 0, `cf2 rules=${(auIso.json.rules ?? []).length}`);
+  const jlAfterAu = (await db.select().from(s.journalLines)).length;
+  ok('Automation: no GL impact (journal lines unchanged)', jlAfterAu === jlBeforeAu, `before=${jlBeforeAu} after=${jlAfterAu}`);
+
+  // ── semantic layer + report/pivot builder (Platform Phase 14 — A5) ──
+  // hqwh / cfwh2 are Warehouse (carry `masterdata`), non-Admin → RLS-scoped reads.
+  const hqwhT = (await inj('POST', '/api/login', undefined, { username: 'hqwh', password: 'pw' })).json.token;
+  await db.insert(s.custPosSales).values([
+    { saleNo: 'Q-HQ-1', saleDate: '2026-06-01', tenantId: hq.id, subtotal: '500', discount: '0', taxAmount: '35', total: '500', paymentMethod: 'Cash', status: 'Completed' },
+    { saleNo: 'Q-HQ-2', saleDate: '2026-06-02', tenantId: hq.id, subtotal: '300', discount: '0', taxAmount: '21', total: '300', paymentMethod: 'PromptPay', status: 'Completed' },
+  ]).onConflictDoNothing();
+  const qModel = await inj('GET', '/api/query/model', hqwhT);
+  ok('Query: semantic model exposes measures + dimensions', (qModel.json.measures ?? []).some((m: any) => m.key === 'sales_total') && (qModel.json.dimensions ?? []).some((d: any) => d.key === 'payment_method'), `${(qModel.json.measures ?? []).length}x${(qModel.json.dimensions ?? []).length}`);
+  const qRun = await inj('POST', '/api/query/run', hqwhT, { dimension: 'payment_method' });
+  const qTotal = (qRun.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.sales_total || 0), 0);
+  ok('Query: run aggregates the tenant’s POS sales by dimension', (qRun.status === 200 || qRun.status === 201) && (qRun.json.rows ?? []).length >= 2 && qTotal >= 800, `status=${qRun.status} rows=${(qRun.json.rows ?? []).length} total=${qTotal}`);
+  const qBad = await inj('POST', '/api/query/run', hqwhT, { dimension: 'nope' });
+  ok('Query: an unknown dimension is rejected (400 BAD_DIMENSION)', qBad.status === 400 && qBad.json.error?.code === 'BAD_DIMENSION', `${qBad.status} ${qBad.json.error?.code}`);
+  const qIso = await inj('POST', '/api/query/run', token2, { dimension: 'payment_method' });
+  const qIsoTotal = (qIso.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.sales_total || 0), 0);
+  ok('Query: RLS-scoped — another tenant does not see these sales', qIsoTotal === 0, `cf2 total=${qIsoTotal}`);
+
   await app.close();
   await pg.close();
 
