@@ -798,6 +798,13 @@ async function main() {
   const eiBad = await inj('POST', '/api/einvoice/submit', token, { doc: { doc_ref: 'EINV-T2', seller: 'My Co', buyer: 'Customer' } });
   ok('e-Invoice: an invalid document is rejected (400 BAD_DOC)', eiBad.status === 400 && eiBad.json.error?.code === 'BAD_DOC', `${eiBad.status} ${eiBad.json.error?.code}`);
 
+  // ── E5 scale interfaces / ops (Platform Phase 30) ──
+  const opsM = await inj('GET', '/api/ops/metrics', hqaa);
+  ok('Ops: metrics expose uptime + cache + scale posture', typeof opsM.json.uptime_s === 'number' && opsM.json.cache?.provider === 'memory' && !!opsM.json.scale?.cache_provider, `cache=${opsM.json.cache?.provider}`);
+  const st1 = await inj('GET', '/api/ops/cache-selftest', hqaa);
+  const st2 = await inj('GET', '/api/ops/cache-selftest', hqaa);
+  ok('Ops: CacheService round-trips (2nd read is a cache hit)', st1.json.ok === true && st1.json.cached === false && st2.json.cached === true, `first=${st1.json.cached} second=${st2.json.cached}`);
+
   await app.close();
   await pg.close();
 
