@@ -154,6 +154,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-113 | Service charge persisted + itemised on the receipt | REST-10 | 20 §7 |
 | UAT-O2C-114 | Large-party receipt ties out incl. service charge | REST-10 | 20 §7, §9 |
 | UAT-O2C-115 | Send receipt via LINE channel | REST-10 | 20 §7 |
+| UAT-O2C-116 | Enrol/link member via LINE (idempotent) | Feature (LINE CRM) | 19 §7.8 |
+| UAT-O2C-117 | One LINE account = one member | Feature (LINE CRM) | 19 §7.8 |
+| UAT-O2C-118 | LINE push to userId, consent enforced | Feature (LINE CRM), MKT-04 | 19 §7.11 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

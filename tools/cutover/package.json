@@ -28,6 +28,7 @@
     "promptpay": "tsx src/promptpay.ts",
     "payments-gateway": "tsx src/payments-gateway.ts",
     "menu-engineering": "tsx src/menu-engineering.ts",
+    "line-crm": "tsx src/line-crm.ts",
     "etax": "tsx src/etax.ts",
     "etax-sign": "tsx src/etax-sign.ts",
     "etax-email": "tsx src/etax-email.ts",

@@ -417,6 +417,11 @@ On the **CRM 360** screen you can reach out to members:
 - **Send a message** to a group — **วันเกิดวันนี้** (today's birthdays), an
   **RFM segment** (Champions, Loyal, At Risk, …), or **all members** — over
   **SMS / LINE / email**, then read the delivery log.
+- **LINE members:** a customer can become a member by signing in with **LINE**
+  (LIFF / LINE Login). The shop links their LINE account to their membership, and
+  from then on **LINE messages reach them directly in LINE** (not their phone), and
+  you can look a member up by their LINE account. One LINE account links to one
+  member.
 
 Two things to know: a member must have **opted in** to marketing (set when you
 enrol or edit them) — anyone opted out is automatically skipped and never
