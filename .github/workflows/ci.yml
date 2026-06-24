@@ -217,3 +217,24 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 7
+
+  migrations-journaled:
+    # Guard against the bug class: a hand-written .sql NOT registered in meta/_journal.json is silently
+    # SKIPPED by `drizzle-kit migrate` in production (the cutover harness runs every .sql directly, so it
+    # stays green and the gap is invisible until prod 500s). Fail the PR instead.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every drizzle .sql is registered in _journal.json
+        run: |
+          node -e '
+            const fs = require("fs"), dir = "apps/api/drizzle";
+            const sqls = fs.readdirSync(dir).filter(f => f.endsWith(".sql")).map(f => f.slice(0, -4));
+            const tags = new Set(JSON.parse(fs.readFileSync(dir + "/meta/_journal.json", "utf8")).entries.map(e => e.tag));
+            const unjournaled = sqls.filter(t => !tags.has(t));
+            const orphan = Array.from(tags).filter(t => sqls.indexOf(t) < 0);
+            if (unjournaled.length) console.error("Unjournaled .sql (prod drizzle-kit migrate SKIPS these): " + unjournaled.join(", "));
+            if (orphan.length) console.error("Journal tags with no .sql file: " + orphan.join(", "));
+            if (unjournaled.length || orphan.length) { console.error("::error::drizzle migration journal mismatch — run db:generate (pnpm --filter @ierp/api) instead of hand-writing .sql files"); process.exit(1); }
+            console.log("OK: " + sqls.length + " migrations all registered in the journal.");
+          '
