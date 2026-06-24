@@ -40,5 +40,32 @@ jobs:
             echo "RAILWAY_TOKEN not configured on the production environment — aborting." >&2
             exit 1
           fi
-          npx -y @railway/cli up --service invisibleERP --detach
-          npx -y @railway/cli up --service invisiblePOSERP --detach
+          npx -y @railway/cli up --service invisibleERP
+          npx -y @railway/cli up --service invisiblePOSERP
+      - name: Smoke test (production)
+        # Post-deploy guard: assert the app is up and key endpoints return 200 (not 500) — catches a
+        # "deployed but broken" state such as a migration that never ran. Set vars.PROD_API_URL and
+        # secrets.SMOKE_USER / SMOKE_PASS (a low-privilege `pos` account) on the production Environment
+        # to enable the authenticated checks; without them only a health check runs (warns, non-blocking).
+        env:
+          PROD_API_URL: ${{ vars.PROD_API_URL }}
+          SMOKE_USER: ${{ secrets.SMOKE_USER }}
+          SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
+        run: |
+          set -e
+          if [ -z "${PROD_API_URL:-}" ]; then echo "::warning::PROD_API_URL not set — skipping smoke test"; exit 0; fi
+          echo "Health check: $PROD_API_URL/healthz"
+          code=000
+          for i in $(seq 1 12); do code=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_API_URL/healthz" || true); [ "$code" = "200" ] && break; echo "  health=$code ($i)"; sleep 5; done
+          [ "$code" = "200" ] || { echo "::error::API health check failed (last=$code)"; exit 1; }
+          if [ -z "${SMOKE_USER:-}" ] || [ -z "${SMOKE_PASS:-}" ]; then echo "::warning::SMOKE_USER/SMOKE_PASS not set — authenticated smoke skipped (set them to catch schema/migration breakage)"; exit 0; fi
+          TOK=$(curl -s -X POST "$PROD_API_URL/api/login" -H 'Content-Type: application/json' -d "{\"username\":\"$SMOKE_USER\",\"password\":\"$SMOKE_PASS\"}" | jq -r '.token // empty')
+          [ -n "$TOK" ] || { echo "::error::smoke login failed"; exit 1; }
+          fail=""
+          for p in "/api/restaurant/tables/status" "/api/restaurant/zones" "/api/restaurant/zones/revenue"; do
+            c=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOK" "$PROD_API_URL$p")
+            echo "  GET $p -> $c"
+            [ "$c" = "200" ] || fail="$fail $p($c)"
+          done
+          [ -z "$fail" ] || { echo "::error::smoke failed (non-200):$fail — likely a missing migration/column"; exit 1; }
+          echo "Smoke test passed ✅"
