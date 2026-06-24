@@ -209,6 +209,9 @@ add("REV-10","Revenue & Cash","Application","Revenue; Tax","Sales not posted to 
 add("REV-11","Revenue & Cash","Application","Cash","Card settlements not reconciled to PSP payouts.","Existence/Accuracy",
     "Payment intents batched into settlement; settlement reconcile step.","Det","Auto+Manual","Daily","Controller","P16",
     "pos-terminal.service.ts (settle / reconcile)","Inspect settlement batching.","Sample batch reconciled to PSP statement.","Settlement recon","Implemented")
+add("REV-12","Revenue & Cash","Application","Accounts Receivable","Overdue receivables not pursued; collection lapses; further credit extended to a defaulting customer.","Valuation/Authorization",
+    "AR collections worklist + escalating dunning ladder (reminder→legal) recorded per invoice (DUN-); credit-status / credit-check hold (over-limit OR 90+ days overdue) consulted before extending further credit.","Det","Auto+Manual","Per overdue invoice","AR / Controller","P10/P16",
+    "collections.service.ts (worklist, recordDunning, creditStatus, creditCheck); collections.controller.ts; cutover/basics.ts (ToE)","Inspect aging→stage logic + hold decision.","Worklist ages open AR + recommends stage; dunning recorded; held customer's credit-check denied (re-performed by the harness).","Dunning log; credit-hold report","Implemented")
 
 # ---- Expenditure / Procurement / AP ----
 add("EXP-01","Expenditure","Application","Accounts Payable; Inventory","Pay supplier for goods not ordered/received or wrong price.","Occurrence/Accuracy",
@@ -257,6 +260,9 @@ add("GL-05","General Ledger","Application","All","Manual JE posted without indep
 add("GL-06","General Ledger","Application","All","Operator mis-posts to another tenant's books.","Validity",
     "HQ cross-tenant posting gated to Admin (explicit tenant override); others pinned to context (also RLS).","Prev","Automated","Per JE","Eng Lead","P10/P11",
     "ledger.controller.ts (hqTenant)","Inspect Admin gating of tenant_id.","Non-Admin tenant override ignored; Admin audited.","Override test","Implemented")
+add("GL-07","General Ledger","Application","Cash","Statement of cash flows mis-stated or doesn't tie to the change in cash.","Accuracy/Completeness",
+    "Statement of Cash Flows (indirect) reconstructed from the GL: net income + non-cash add-backs + working-capital + investing + financing; year-end CLOSE entries excluded; reconciles to Δcash (1000/1010/1020) by construction with a `reconciled` tie-out flag.","Det","Automated","Per period","Controller","P10",
+    "ledger.service.ts (cashFlowStatement); ledger.controller.ts (GET cash-flow); cutover/basics.ts (ToE)","Inspect SCF derivation + reconciliation flag.","Run cash-flow over a seeded period — activities tie to the movement in cash; CLOSE excluded (re-performed by the harness).","Cash-flow reconciliation","Implemented")
 
 # ---- Reconciliation ----
 add("REC-01","Reconciliation","Application","All","Subledgers diverge from GL undetected.","Completeness/Accuracy",

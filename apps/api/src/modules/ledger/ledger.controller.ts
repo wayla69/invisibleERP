@@ -116,6 +116,11 @@ export class LedgerController {
   @Get('balance-sheet')
   balanceSheet(@Query('as_of') asOf: string, @Query('ledger') ledger?: string) { return this.svc.balanceSheet(asOf, ledger || undefined); }
 
+  // Statement of Cash Flows (indirect method) over [from,to] — the third primary statement, reconstructed
+  // from the GL/trial-balance data (no separate cash-flow ledger). Reconciles to the change in cash.
+  @Get('cash-flow')
+  cashFlow(@Query('from') from: string, @Query('to') to: string, @Query('ledger') ledger?: string) { return this.svc.cashFlowStatement(from, to, ledger || undefined); }
+
   // ── fiscal periods + year-end close ──
   // Periods are per-tenant (0043). Operations default to the caller's own tenant; HQ/Admin may target a
   // specific shop with ?tenant_id= (used when one operator manages several tenants' books).

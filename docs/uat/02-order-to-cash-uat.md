@@ -1,6 +1,6 @@
 # UAT — Cycle 02: Order-to-Cash (Revenue / AR)
 
-**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `01-order-to-cash.md` (REV-01..11, GL-01, R07–R10/R12), harness `e2e.ts`, `worldclass.ts`, `returns.ts`, `compliance.ts`, `pos-p1.ts`.
+**Status: DRAFT v0.2 · 2026-06-24** · Cross-ref: process narrative `01-order-to-cash.md` (REV-01..12, GL-01, R07–R10/R12), harness `e2e.ts`, `worldclass.ts`, `returns.ts`, `compliance.ts`, `pos-p1.ts`, `basics.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. VAT = 7%. Error codes/amounts are exact.
 
@@ -121,3 +121,9 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. VAT = 7%. Error codes/amou
 | UAT-O2C-092 | Receipt renders in English | Sales | Settled sale | 1. `GET /api/print/receipt/{saleNo}?lang=en`. | bearer sales | HTML shows Subtotal/Total/Thank you; no Thai total label. | Med | Positive | Feature (i18n) | Not Run | restaurant.ts |
 | UAT-O2C-093 | Bilingual (TH/EN) receipt | Sales | Settled sale | 1. `GET /api/print/receipt/{saleNo}?lang=both`. | bearer sales | Labels render as "TH / EN" (e.g. `รวมสุทธิ / Total`). | Low | Positive | Feature (i18n) | Not Run | restaurant.ts |
 | UAT-O2C-094 | Per-tenant default language persists | Admin | — | 1. `PATCH /api/tenant/profile {default_language:en}`. 2. `GET /api/tenant/profile`. | bearer admin | Saved + returned `default_language` = `en`. | Med | Positive | Feature (i18n) | Not Run | restaurant.ts |
+| UAT-O2C-116 | Collections worklist lists open overdue AR, excludes paid | ArClerk | INV-A (40d overdue), INV-B (100d), INV-C (paid) | 1. `GET /api/finance/ar/collections`. | — | INV-A and INV-B listed (oldest first: INV-B top); INV-C (Paid) excluded. | High | Positive | REV-12 | Not Run | basics.ts |
+| UAT-O2C-117 | Dunning stage recommended by aging | ArClerk | As O2C-116 | 1. Read worklist rows. | — | INV-A (40d) → `recommended_stage: second_notice`; INV-B (100d) → `legal`. | High | Positive | REV-12 | Not Run | basics.ts |
+| UAT-O2C-118 | Record a dunning action advances the stage | ArClerk | INV-A overdue | 1. `POST /api/finance/ar/collections/INV-A/dunning {stage:second_notice, channel:email}`. 2. Re-read worklist + history. | as left | `DUN-…` issued; INV-A `current_stage:second_notice`, `escalate:false`; history count = 1. | High | Control | REV-12 | Not Run | basics.ts |
+| UAT-O2C-119 | Dunning on a paid invoice rejected | ArClerk | INV-C is Paid | 1. `POST /api/finance/ar/collections/INV-C/dunning {stage:reminder}`. | as left | 400 `ALREADY_PAID`. | Med | Control | REV-12 | Not Run | basics.ts |
+| UAT-O2C-120 | Credit status flags over-limit + serious overdue | ArClerk | Customer limit 2500, exposure 3000, INV 100d overdue | 1. `GET /api/finance/ar/credit-status?tenant_id=<cust>`. | — | `exposure`≈3000; `over_limit:true`; `serious_overdue:true` (`max_overdue_days`≥100); `on_hold:true`. | High | Detective | REV-12, R09 | Not Run | basics.ts |
+| UAT-O2C-121 | Credit check denies further credit to a held customer | Sales/ArClerk | Customer on_hold | 1. `POST /api/finance/ar/credit-check {tenant_id:<cust>, amount:100}`. | as left | `approved:false`; `reason` ∈ {`CREDIT_LIMIT_EXCEEDED`,`SERIOUS_OVERDUE`}. | High | Control | REV-12, R09 | Not Run | basics.ts |

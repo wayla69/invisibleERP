@@ -8,7 +8,7 @@ This chapter is for **accountants** — *GlAccountant*, *FinancialController* an
 year-end close, multi-ledger reporting, and fixed assets.
 
 **Main screen:** `/accounting` — tabs include Trial Balance, Journal, Pending
-journal entries, Income Statement, Balance Sheet and Opening Balances.
+journal entries, Income Statement, Balance Sheet, Cash Flow and Opening Balances.
 
 ---
 
@@ -92,12 +92,37 @@ is recorded.
 | **Trial Balance** (**งบทดลอง**) | Trial Balance | Every account's debit/credit balance |
 | **Income Statement / P&L** (**งบกำไรขาดทุน**) | Income Statement | Revenue − Expense = Net Income, for a date range |
 | **Balance Sheet** (**งบดุล**) | Balance Sheet | Assets = Liabilities + Equity, as of a date |
+| **Statement of Cash Flows** (**งบกระแสเงินสด**) | Cash Flow | How cash moved over a date range — operating, investing, financing |
 
 To run a report: open the relevant tab, set the **period / date range** (and cost
 centre or ledger if needed), and view or export it.
 
 **Expected result:** The statement is produced from all **posted** entries (drafts
 are excluded).
+
+### Statement of Cash Flows (indirect method)
+
+The cash flow statement is the **third primary financial statement** (alongside the
+income statement and balance sheet). It explains how the cash balance changed over a
+period, in three sections:
+
+- **Operating** — starts from **net income**, then adds back non-cash charges (e.g.
+  **depreciation**) and the movement in working capital (receivables, inventory,
+  payables, accruals).
+- **Investing** — cash spent on / received from **fixed assets**.
+- **Financing** — owner **capital** contributions and **dividends**.
+
+1. Go to **Accounting** (`/accounting`) → **Cash Flow** tab.
+2. Set the **From / To** date range (and ledger if needed) and run it.
+
+**Expected result:** The statement shows each section's subtotal, the **net change
+in cash**, and the **beginning** and **ending** cash balances. It is built from the
+same posted GL data as the other statements (no separate data entry), and **year-end
+closing entries are excluded** so they don't distort the period.
+
+> **Note — it always ties out:** the three sections together equal the change in the
+> cash accounts (1000 / 1010 / 1020). The response carries a `reconciled` flag; if it
+> ever shows `false`, an account is mis-classified — raise it with finance.
 
 ---
 

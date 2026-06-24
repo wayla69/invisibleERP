@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Each period close + annual |
-| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, REC-01, REC-02, REC-03, CON-01, CON-02; SoD R05, R06 |
+| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, GL-07, REC-01, REC-02, REC-03, CON-01, CON-02; SoD R05, R06 |
 | Related policy | `compliance/policies/11-financial-close-policy.md`, `compliance/policies/13-segregation-of-duties-policy.md` |
 
 ## 2. Purpose
@@ -19,7 +19,7 @@ To control journal entry, the trial balance / financial statements, period and y
 
 ## 3. Scope
 
-**In scope:** manual journal entry (`/api/ledger/journal`) posting as Draft → GL-05 maker-checker approve/reject; trial balance, income statement, balance sheet; period open/close (`gl_close`); year-end close; subledger-to-GL, bank, and intercompany reconciliations; consolidation and FX revaluation.
+**In scope:** manual journal entry (`/api/ledger/journal`) posting as Draft → GL-05 maker-checker approve/reject; trial balance, income statement, balance sheet, **statement of cash flows (indirect)**; period open/close (`gl_close`); year-end close; subledger-to-GL, bank, and intercompany reconciliations; consolidation and FX revaluation.
 
 **Out of scope:** source-cycle postings (revenue, AP, inventory, payroll, tax) which are documented in their own narratives but flow into the GL here.
 
@@ -39,6 +39,7 @@ To control journal entry, the trial balance / financial statements, period and y
 | Draft / Posted / Voided | JE lifecycle states; only Posted affects balances |
 | Period close | Locking a fiscal period against further posting |
 | TB / IS / BS | Trial Balance / Income Statement / Balance Sheet |
+| SCF | Statement of Cash Flows (indirect method; the third primary statement) |
 | RE | Retained Earnings |
 | Recon prepare → certify | Two-person reconciliation sign-off |
 
@@ -50,7 +51,7 @@ SoD: the **preparer** of a manual JE (GlAccountant) is never its **approver** (F
 |---|---|---|---|---|
 | Prepare manual JE (`gl_post`) | **A/R** | I | A | I |
 | Approve / reject manual JE (`gl_close`/checker, ≠ preparer) | I | **A/R** | A | C |
-| Run TB / IS / BS | R | R | **A/R** | I |
+| Run TB / IS / BS / SCF | R | R | **A/R** | I |
 | Close / open fiscal period (`gl_close`) | I | **A/R** | A | I |
 | Year-end close (`exec`) | I | C | **A/R** | A |
 | Prepare reconciliation (`recon_prep`) | **A/R** | C | A | I |
@@ -63,7 +64,7 @@ SoD: the **preparer** of a manual JE (GlAccountant) is never its **approver** (F
 3. **Idempotent posting.** A unique key `(tenant, source, source_ref, ledger)` with `ON CONFLICT DO NOTHING` prevents concurrent double-booking of the same source document (**GL-04**).
 4. **Manual JE maker-checker (the key control).** A manual JE submitted via `POST /api/ledger/journal` with `pendingApproval` posts as **Draft** and is **excluded from the trial balance** until approved. `approveEntry` (permission `gl_close`) sets it **Posted** only if the approver is **not** the preparer (`createdBy`); a self-approval → `SOD_VIOLATION` — enforced **even for Admin**. `rejectEntry` sets it **Voided** with the reason appended to the memo; Voided/Draft never affect balances (**GL-05**, **R05**). Posting (`gl_post`) and approval (`gl_close`) are different permissions.
 5. **Cross-tenant posting gate.** HQ cross-tenant posting (`hqTenant`) is gated to Admin (explicit tenant override, also audited); a non-Admin override is ignored and RLS pins the context (**GL-06**).
-6. **Financial statements.** Controller runs the trial balance, income statement, and balance sheet — built only from Posted entries in open/closed periods.
+6. **Financial statements.** Controller runs the trial balance, income statement, balance sheet, and **statement of cash flows** — built only from Posted entries in open/closed periods. The **statement of cash flows** (`GET /api/ledger/cash-flow?from&to`, indirect method) is reconstructed from the same GL data: operating cash = net income + non-cash add-backs (depreciation, acct 1590) + working-capital movements (AR/inventory/AP/accruals), then investing (fixed assets, acct 1500) and financing (equity/dividends, accts 3000/3100). **Year-end CLOSE journals are excluded** (they reclassify P&L to retained earnings and carry no cash). The statement **reconciles by construction** to the movement in the cash accounts (1000/1010/1020) — the response carries a `reconciled` flag and lists any `unclassified_accounts` for transparency (**GL-07**).
 7. **Reconciliations (decision point, two-person).** Subledger-to-GL reconciliation imports GL items, auto-matches, clears unmatched, and is **certified** by a different person — preparer (`recon_prep`) ≠ certifier (`approvals`) (**REC-01**, **R06**). Bank reconciliation against statements (**REC-02**, see `07-cash-treasury.md`); intercompany reconciliation/elimination on consolidation (**REC-03**).
 8. **Period close.** FinancialController closes the period via `gl_close` after reconciliations are certified, per the close calendar; the period then rejects further posting (**GL-02**, **GL-06**).
 9. **Year-end close.** Year-end close is restricted to `exec`; an attempt without it → `403`. Closing entries roll to retained earnings (**GL-03**).
@@ -82,7 +83,7 @@ flowchart TD
     E -- "same person / Admin" --> E1[Reject SOD_VIOLATION]
     E -- "reject" --> E2[Voided - never affects balances]
     E -- "independent approve" --> F[Posted - appears in TB GL-05]
-    F --> G[Run TB / IS / BS]
+    F --> G[Run TB / IS / BS / SCF - cash flow reconciles to Δcash GL-07]
     G --> H[Subledger / bank / IC reconciliations REC-01/02/03]
     H --> I{Preparer != certifier? R06}
     I -- "Yes" --> J[Certify recon - approvals]
@@ -105,13 +106,14 @@ flowchart TD
 | 7 | Subledgers diverge from GL undetected | Subledger-to-GL recon + independent certify | Det / Hybrid | REC-01, R06 | Certified recon |
 | 7 | Bank balance not reconciled | Bank reconciliation vs statements | Det / Hybrid | REC-02 | Bank rec |
 | 7 | Intercompany not eliminated/agreed | IC reconciliation + elimination | Det / Hybrid | REC-03 | IC recon |
+| 6 | Cash flow statement mis-stated / doesn't tie to cash | SCF (indirect) reconstructed from GL; `reconciled` tie-out to Δcash; CLOSE entries excluded | Det / Auto | GL-07 | `basics` harness reconciliation check |
 | 9 | Unauthorized year-end close / RE roll | Year-end close restricted to `exec` | Prev / Hybrid | GL-03 | Close package; 403 test |
 | 10 | Consolidation / FX mis-stated | Consolidation gated by `approvals`; FX reval | Hybrid | CON-01, CON-02 | Consol TB; FX reval JE |
 
 ## 10. Inputs & outputs
 
 **Inputs:** source-cycle postings, manual JE requests, subledger balances, bank statements, FX rates, ownership %, close calendar.
-**Outputs:** Posted JEs (JE-), trial balance, income statement, balance sheet, certified reconciliations, closed periods, year-end close package, consolidated TB.
+**Outputs:** Posted JEs (JE-), trial balance, income statement, balance sheet, **statement of cash flows (indirect)**, certified reconciliations, closed periods, year-end close package, consolidated TB.
 
 ## 11. Records & retention
 
@@ -145,3 +147,4 @@ flowchart TD
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 DRAFT | 2026-06-24 | `<<author>>` | Added **Statement of Cash Flows (indirect)** (`GET /api/ledger/cash-flow`) as the third primary statement, control **GL-07** (reconciles to Δcash; CLOSE excluded), and the `basics` reconciliation harness. |

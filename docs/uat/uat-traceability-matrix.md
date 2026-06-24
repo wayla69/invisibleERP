@@ -151,6 +151,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-113 | Service charge persisted + itemised on the receipt | REST-10 | 20 §7 |
 | UAT-O2C-114 | Large-party receipt ties out incl. service charge | REST-10 | 20 §7, §9 |
 | UAT-O2C-115 | Send receipt via LINE channel | REST-10 | 20 §7 |
+| UAT-O2C-116 | Collections worklist (open overdue AR) | REV-12 | 01 §7, §9 |
+| UAT-O2C-117 | Dunning stage recommended by aging | REV-12 | 01 §7 |
+| UAT-O2C-118 | Record dunning action advances stage | REV-12 | 01 §7, §9 |
+| UAT-O2C-119 | Dunning on paid invoice rejected (ALREADY_PAID) | REV-12 | 01 §9, §13 |
+| UAT-O2C-120 | Credit status flags over-limit + serious overdue | REV-12, R09 | 01 §7, §9 |
+| UAT-O2C-121 | Credit check denies further credit (held customer) | REV-12, R09 | 01 §9, §13 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -240,6 +246,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
 | UAT-GL-020 | Bank reconciliation tenant-scoped | ITGC-AC-03 / REC-02 | 07 §7 |
+| UAT-GL-021 | Statement of Cash Flows reconstructed from GL | GL-07 | 04 §7, §9 |
+| UAT-GL-022 | Cash flow reconciles to change in cash | GL-07 | 04 §9 |
+| UAT-GL-023 | Year-end close excluded from cash flow | GL-07 | 04 §7, §9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -427,13 +436,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 27 | 9 |
+| 02 Order-to-Cash | 33 | 12 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close | 20 | 11 |
+| 05 GL & Close | 23 | 12 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **262** | **118** |
+| **Total** | **271** | **122** |

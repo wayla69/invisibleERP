@@ -1,6 +1,6 @@
 # UAT — Cycle 05: General Ledger & Financial Close
 
-**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `04-general-ledger-close.md` (GL-01..06, REC-01..03, R05/R06), harness `tools/cutover/src/compliance.ts`, `worldclass.ts`.
+**Status: DRAFT v0.2 · 2026-06-24** · Cross-ref: process narrative `04-general-ledger-close.md` (GL-01..07, REC-01..03, R05/R06), harness `tools/cutover/src/compliance.ts`, `worldclass.ts`, `basics.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -26,3 +26,6 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-GL-018 | RLS — tenant cannot see another's GL | Procurement (T2) | T1 JEs exist | 1. `GET /api/ledger/journal?limit=100` as T2. | bearer finT2 | No T1 entries; no T1 4000 credit in trial balance. | High | Control | ITGC-AC (RLS) | Not Run | compliance.ts |
 | UAT-GL-019 | Revenue recognition is tenant-scoped (W2) | HQ/Admin (no tenant) | due rev-rec lines in two tenants, same period | 1. `POST /api/revenue/recognize?period=P` (no tenant_id). 2. Retry with `&tenant_id=<T1>`. | — | (1) 400 `TENANT_REQUIRED`; (2) recognizes ONLY T1's line — T2's stays unrecognized. | High | Control | ITGC-AC-03 / REVREC-03 | Not Run | revrec.ts |
 | UAT-GL-020 | Bank reconciliation is tenant-scoped (W2) | Admin | T1 bank account on 1010; a T2 movement on 1010 | 1. `GET /api/bank/accounts/<T1>/reconciliation` as Admin. | — | T2's 1010 movement excluded; `gl_balance` reflects T1 only (no cross-tenant leak). | High | Control | ITGC-AC-03 / REC-02 | Not Run | bankrec.ts |
+| UAT-GL-021 | Statement of Cash Flows reconstructed from GL | Controller | Posted period activity (sale, cash expense, depreciation, inventory-on-credit, receipt) | 1. `GET /api/ledger/cash-flow?from=2026-03-01&to=2026-03-31`. | net income 500; dep 300; AR +600; inv +500; AP +500 | `operating.net_income`≈500; depreciation add-back (1590)≈300; `operating.net`≈200; `investing.net`=0; `financing.net`=0. | High | Positive | GL-07 | Not Run | basics.ts |
+| UAT-GL-022 | Cash flow reconciles to change in cash | Controller | As GL-021 | 1. Read same response. | beginning cash 10000 | `net_change_in_cash`≈200; `cash_beginning`≈10000; `cash_ending`≈10200; `reconciled: true`; `unclassified_accounts` empty. | High | Detective | GL-07 | Not Run | basics.ts |
+| UAT-GL-023 | Year-end close excluded from cash flow | Controller | A `CLOSE` JE dated in the window | 1. Post a year-end CLOSE entry in the window. 2. Re-read cash-flow. | CLOSE zeroes P&L to 3100 | `operating.net_income` unchanged (≈500); `reconciled: true` (closing reclassification ignored). | High | Control | GL-07 | Not Run | basics.ts |

@@ -42,6 +42,44 @@ moves **Unpaid → Partial → Paid**, and the cash / AR entries post to the led
 
 **Expected result:** You can see which customers are overdue and by how much.
 
+### A4. Collections & dunning (chasing overdue invoices)
+
+The **collections worklist** shows every open invoice with its age, the dunning
+stage already reached, and the **next recommended step**. The dunning ladder
+escalates with age:
+
+| Days overdue | Recommended stage |
+|---|---|
+| 1–15 | reminder |
+| 16–30 | first notice |
+| 31–60 | second notice |
+| 61–90 | final notice |
+| 90+ | legal |
+
+1. Open the **Collections** view (worklist endpoint `GET /api/finance/ar/collections`).
+   The oldest / largest overdue invoices sort to the top.
+2. Contact the customer, then click **Record dunning action** on the invoice: pick
+   the **stage**, the **channel** (email / phone / letter / sms), and optionally a
+   **promise-to-pay date** and notes.
+3. **Expected result:** A dunning record (`DUN-…`) is saved and the invoice's
+   **current stage** advances; the full history is kept as the collections audit
+   trail. (Recording an action against an already-paid invoice returns
+   `ALREADY_PAID`.)
+
+#### Credit status & credit hold
+
+- **Check a customer's credit** (`GET /api/finance/ar/credit-status?tenant_id=…`):
+  shows their **credit limit**, current **exposure** (open AR), **overdue** amount,
+  **available credit**, and an **on-hold** flag. A customer goes **on hold** when
+  they are **over their limit** or have invoices **90+ days** past due.
+- **Order entry** consults the same decision (`POST /api/finance/ar/credit-check`)
+  before extending further credit — a held customer is declined with reason
+  `CREDIT_LIMIT_EXCEEDED`, `SERIOUS_OVERDUE`, or `WOULD_EXCEED_LIMIT`.
+
+> **Note — separation of duties:** the **credit limit** is master data maintained by
+> the *Credit Manager*, kept separate from order entry, so nobody can raise a limit
+> and then sell against it (rule R09).
+
 ---
 
 ## Part B — Accounts Payable (money you owe suppliers)
