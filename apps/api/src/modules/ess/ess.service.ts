@@ -3,7 +3,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, payslips } from '../../database/schema/payroll';
 import { timesheets, leaveRequests, leaveBalances, expenseClaims } from '../../database/schema/hcm';
-import { LedgerService } from '../ledger/ledger.service';
+import { FinanceService } from '../finance/finance.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -17,7 +17,7 @@ export interface ExpenseDto { claim_date?: string; category?: string; amount: nu
 export class EssService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
-    private readonly ledger: LedgerService,
+    private readonly finance: FinanceService,
   ) {}
 
   // Resolve the logged-in user → their employee row (by user_name link, emp_code fallback). RLS scopes
@@ -82,7 +82,10 @@ export class EssService {
   }
 
   // Manager approval (perm 'approvals'/'exec', gated at the controller). SoD: the approver must not be
-  // the claimant. On approval, post the reimbursement to GL (Dr 5100 Operating Expense / Cr 2000 AP).
+  // the claimant. On approval, raise an **AP reimbursement payable** to the employee — this posts the GL
+  // (Dr 5100 Operating Expense / Cr 2000 AP) AND creates the AP sub-ledger row, so the reimbursement shows
+  // in AP aging, is settled through the normal AP pay flow, and keeps the AP sub-ledger ↔ GL control
+  // account (2000) reconciled. Reimbursements carry no claimable input VAT (vat_treatment 'exempt').
   async approveExpense(id: number, approve: boolean, user: JwtUser) {
     const db = this.db as any;
     const [c] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, id)).limit(1);
@@ -96,8 +99,14 @@ export class EssService {
       await db.update(expenseClaims).set({ status: 'Rejected', decidedBy: user.username, decidedAt: new Date() }).where(eq(expenseClaims.id, id));
       return { id, status: 'Rejected' };
     }
-    const je: any = await this.ledger.postEntry({ source: 'EXPENSE', sourceRef: `EXP-${id}`, tenantId: c.tenantId, memo: `Expense reimbursement ${emp?.empCode ?? ''}`.trim(), createdBy: user.username, lines: [{ account_code: '5100', debit: n(c.amount) }, { account_code: '2000', credit: n(c.amount) }] });
-    await db.update(expenseClaims).set({ status: 'Approved', decidedBy: user.username, decidedAt: new Date(), entryNo: je?.entry_no ?? null }).where(eq(expenseClaims.id, id));
-    return { id, status: 'Approved', entry_no: je?.entry_no ?? null };
+    const ap = await this.finance.createApTxn({
+      vendor_name: `Employee ${emp?.empCode ?? c.employeeId}`, txn_type: 'Reimbursement',
+      invoice_no: `EXP-${id}`, invoice_date: c.claimDate ?? ymd(), due_date: c.claimDate ?? ymd(),
+      amount: n(c.amount), vat_treatment: 'exempt', expense_account: '5100',
+      tenant_id: c.tenantId, idempotency_key: `EXP-${id}`,
+      remarks: `Expense reimbursement ${emp?.empCode ?? ''} — ${c.category ?? 'general'}`.trim(),
+    }, user);
+    await db.update(expenseClaims).set({ status: 'Approved', decidedBy: user.username, decidedAt: new Date(), apTxnNo: ap?.txn_no ?? null }).where(eq(expenseClaims.id, id));
+    return { id, status: 'Approved', ap_txn_no: ap?.txn_no ?? null, payable: true };
   }
 }

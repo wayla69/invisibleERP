@@ -209,6 +209,9 @@ add("REV-10","Revenue & Cash","Application","Revenue; Tax","Sales not posted to 
 add("REV-11","Revenue & Cash","Application","Cash","Card settlements not reconciled to PSP payouts.","Existence/Accuracy",
     "Payment intents batched into settlement; settlement reconcile step.","Det","Auto+Manual","Daily","Controller","P16",
     "pos-terminal.service.ts (settle / reconcile)","Inspect settlement batching.","Sample batch reconciled to PSP statement.","Settlement recon","Implemented")
+add("REV-12","Revenue & Cash","Application","Accounts Receivable","Overdue receivables not pursued; collection lapses; further credit extended to a defaulting customer.","Valuation/Authorization",
+    "AR collections worklist + escalating dunning ladder (reminder→legal) recorded per invoice (DUN-); credit-status / credit-check hold (over-limit OR 90+ days overdue). The serious-overdue hold is ENFORCED at POS/portal order entry (CREDIT_OVERDUE) under the FOR-UPDATE tenant lock, single-sourced with the collections on_hold threshold so the two never drift.","Det/Prev","Auto+Manual","Per overdue invoice / per order","AR / Controller","P10/P16",
+    "collections.service.ts (worklist, recordDunning, runDunningSweep, creditStatus, creditCheck, SERIOUS_OVERDUE_DAYS); pos.service.ts (createOrder CREDIT_OVERDUE); collections.controller.ts (incl. cron-callable /collections/sweep); bi.service.ts (ar_collections_dunning scheduled job, daily via runDue); /finance Collections UI; cutover/basics.ts (ToE)","Inspect aging→stage logic, hold decision, automated+scheduled sweep + order-entry gate.","Worklist ages open AR; manual, automated (idempotent) and daily-scheduled dunning recorded; held customer's credit-check denied; a 90+ defaulter is blocked at order entry while a good-standing customer orders (re-performed by the harness).","Dunning log; sweep/scheduler run log; credit-hold report; CREDIT_OVERDUE rejections","Implemented")
 
 # ---- Expenditure / Procurement / AP ----
 add("EXP-01","Expenditure","Application","Accounts Payable; Inventory","Pay supplier for goods not ordered/received or wrong price.","Occurrence/Accuracy",
@@ -223,6 +226,12 @@ add("EXP-03","Expenditure","Application","Accounts Payable","PR/PO raised withou
 add("EXP-04","Expenditure","Application","Accounts Payable","Match tolerance loosened to force payment.","Validity",
     "Match-tolerance configuration change restricted to 'creditors' permission.","Prev","Automated","Per change","Controller","P10/P11",
     "match.controller.ts (PUT tolerance @Permissions creditors)","Inspect permission on tolerance change.","Attempt change w/o perm → 403; log changes.","Config-change log","Implemented")
+add("EXP-05","Expenditure","Application","Operating Expense; Accounts Payable","Employee/maintenance spend recorded in GL but not as a payable (escapes AP aging; AP sub-ledger ≠ GL control).","Completeness/Accuracy",
+    "ESS expense approval and EAM work-order completion raise an AP payable via createApTxn (Dr 5100/5710 / Cr 2000) — not a bare GL post — so the liability appears in AP aging, settles through the AP pay flow, and keeps the AP sub-ledger ↔ GL 2000 reconciled (REC-01). Reimbursements vat-exempt; SoD approver ≠ claimant retained.","Prev","Automated","Per claim/WO","AP / Controller","P10",
+    "ess.service.ts (approveExpense → createApTxn); eam.service.ts (updateWorkOrderStatus → createApTxn, acct 5710); finance.service.ts (createApTxn expense_account/tenant_id); cutover/ess.ts + basics.ts (ToE)","Inspect approval→AP routing + reconciliation.","Approve a claim / complete a WO → AP payable raised, paid via AP, sub-ledger ties to GL 2000 (re-performed by the harness).","AP sub-ledger; reimbursement/maintenance payables","Implemented")
+add("FA-06","Fixed Assets","Application","Property, Plant & Equipment","Equipment not maintained; maintenance uncontrolled; preventive maintenance missed.","Existence/Valuation",
+    "EAM maintenance work orders against the asset register with a guarded lifecycle (open→in_progress→completed/cancelled; BAD_TRANSITION); preventive-maintenance schedules (time/meter) with an idempotent due-generation sweep (cron / daily scheduled job eam_pm_generate).","Det","Automated","Per WO / per sweep","Maintenance / FaAccountant","P13/P16",
+    "eam.service.ts (work orders, PM schedules, runPmDue, meters); eam.controller.ts; bi.service.ts (eam_pm_generate); cutover/basics.ts (ToE)","Inspect WO lifecycle guard + PM due logic.","Raise/complete a WO; PM sweep raises due preventive WOs (time + meter) and is idempotent (re-performed by the harness).","Work-order log; PM schedule + sweep run log","Implemented")
 
 # ---- Inventory / COGS ----
 add("INV-01","Inventory & COGS","Application","Inventory; COGS","Two terminals sell last unit → negative/oversold stock.","Existence/Valuation",
@@ -257,6 +266,9 @@ add("GL-05","General Ledger","Application","All","Manual JE posted without indep
 add("GL-06","General Ledger","Application","All","Operator mis-posts to another tenant's books.","Validity",
     "HQ cross-tenant posting gated to Admin (explicit tenant override); others pinned to context (also RLS).","Prev","Automated","Per JE","Eng Lead","P10/P11",
     "ledger.controller.ts (hqTenant)","Inspect Admin gating of tenant_id.","Non-Admin tenant override ignored; Admin audited.","Override test","Implemented")
+add("GL-07","General Ledger","Application","Cash","Statement of cash flows mis-stated or doesn't tie to the change in cash.","Accuracy/Completeness",
+    "Statement of Cash Flows (indirect) reconstructed from the GL: net income + non-cash add-backs + working-capital + investing + financing; year-end CLOSE entries excluded; reconciles to Δcash (1000/1010/1020) by construction with a `reconciled` tie-out flag.","Det","Automated","Per period","Controller","P10",
+    "ledger.service.ts (cashFlowStatement); ledger.controller.ts (GET cash-flow); cutover/basics.ts (ToE)","Inspect SCF derivation + reconciliation flag.","Run cash-flow over a seeded period — activities tie to the movement in cash; CLOSE excluded (re-performed by the harness).","Cash-flow reconciliation","Implemented")
 
 # ---- Reconciliation ----
 add("REC-01","Reconciliation","Application","All","Subledgers diverge from GL undetected.","Completeness/Accuracy",

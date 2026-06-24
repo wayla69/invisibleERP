@@ -98,13 +98,16 @@ async function main() {
   const ps = await inj('GET', '/api/ess/payslips', emp1);
   ok('ESS payslips self-scoped (1 own, no leak)', ps.json.count === 1 && ps.json.payslips?.[0]?.emp_code === 'E001', JSON.stringify(ps.json).slice(0, 80));
 
-  // 5. expense submit + manager approve → GL posted (Dr 5100 / Cr 2000)
+  // 5. expense submit + manager approve → AP reimbursement payable raised (GL Dr 5100 / Cr 2000 + AP sub-ledger)
   const ex = await inj('POST', '/api/ess/expenses', emp1, { category: 'travel', amount: 500, description: 'taxi' });
   ok('Expense submit → pending', ex.json.status === 'Pending' && near(ex.json.amount, 500), JSON.stringify(ex.json));
   const ap = await inj('POST', `/api/ess/expenses/${ex.json.id}/decide`, mgr1, { approve: true });
-  ok('Manager approve → Approved + GL JE', ap.json.status === 'Approved' && /^JE-/.test(ap.json.entry_no ?? ''), `${ap.status} ${JSON.stringify(ap.json)}`);
-  const gl = (await pg.query(`SELECT account_code, debit, credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source_ref='EXP-${ex.json.id}'`)).rows as any[];
-  ok('Expense GL balanced: Dr 5100=500, Cr 2000=500', near(gl.filter((l) => l.account_code === '5100').reduce((a, l) => a + Number(l.debit || 0), 0), 500) && near(gl.filter((l) => l.account_code === '2000').reduce((a, l) => a + Number(l.credit || 0), 0), 500), JSON.stringify(gl));
+  ok('Manager approve → AP reimbursement payable (AP-) raised', ap.json.status === 'Approved' && /^AP-/.test(ap.json.ap_txn_no ?? '') && ap.json.payable === true, `${ap.status} ${JSON.stringify(ap.json)}`);
+  const gl = (await pg.query(`SELECT account_code, debit, credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source_ref='${ap.json.ap_txn_no}'`)).rows as any[];
+  ok('Reimbursement GL balanced: Dr 5100=500, Cr 2000=500', near(gl.filter((l) => l.account_code === '5100').reduce((a, l) => a + Number(l.debit || 0), 0), 500) && near(gl.filter((l) => l.account_code === '2000').reduce((a, l) => a + Number(l.credit || 0), 0), 500), JSON.stringify(gl));
+  // the reimbursement is now a payable in the AP sub-ledger (settle-able via the AP pay flow)
+  const apRow = (await pg.query(`SELECT txn_no, amount, status FROM ap_transactions WHERE txn_no='${ap.json.ap_txn_no}'`)).rows as any[];
+  ok('Reimbursement is an AP payable (sub-ledger)', apRow.length === 1 && near(apRow[0].amount, 500) && apRow[0].status === 'Unpaid', JSON.stringify(apRow));
 
   // 6. SoD: claimant cannot approve their own expense
   const ex2 = await inj('POST', '/api/ess/expenses', mgr1, { category: 'meal', amount: 200 });

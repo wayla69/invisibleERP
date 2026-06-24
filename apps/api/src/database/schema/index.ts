@@ -86,3 +86,4 @@ export * from './connectors';
 export * from './migration-jobs';
 export * from './localization';
 export * from './einvoice';
+export * from './eam';

@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | FA-01, FA-02, FA-03, FA-04, FA-05, GL-01, REC-01; SoD R07, R05, R01 |
+| Related RCM controls | FA-01, FA-02, FA-03, FA-04, FA-05, FA-06, EXP-05, GL-01, REC-01; SoD R07, R05, R01 |
 | Related policy | `compliance/policies/03-delegation-of-authority.md`, `compliance/policies/11-financial-close-policy.md` |
 
 ## 2. Purpose
@@ -21,14 +21,16 @@ To define and control the fixed-asset lifecycle — acquisition/capitalization, 
 
 **In scope:** asset categories and capitalization defaults (`/api/assets/categories`), asset acquisition (`POST /api/assets`, FA-), the asset/NBV register (`GET /api/assets`), QR labelling and custody scan-update (`/api/assets/scan-update`, non-GL), the per-asset depreciation schedule (`GET /api/assets/:assetNo/schedule`), the monthly straight-line depreciation run (`POST /api/assets/depreciation/run`, DEP-), and disposal (`PATCH /api/assets/:assetNo/dispose`, DISP-).
 
-**Out of scope:** the manual journal lifecycle and period close that the FA postings flow through (see `04-general-ledger-close.md`), procurement and AP settlement of the asset purchase (see `02-procure-to-pay.md`), and VAT on acquisition/disposal (see `06-tax-compliance.md`).
+**Also in scope — Enterprise Asset Management (EAM):** maintenance **work orders** (`/api/eam/work-orders`, corrective/preventive/inspection), **preventive-maintenance (PM) schedules** (`/api/eam/pm-schedules`, time- or meter-based) with an idempotent **due-generation sweep** (`/api/eam/pm/run`, also a daily scheduled job `eam_pm_generate`), and **meter readings** (`/api/eam/assets/:assetNo/meter`). Completing a work order with a vendor cost raises an **AP payable** for the maintenance spend.
+
+**Out of scope:** the manual journal lifecycle and period close that the FA postings flow through (see `04-general-ledger-close.md`), procurement and AP settlement of the asset purchase / maintenance (see `02-procure-to-pay.md`), and VAT on acquisition/disposal (see `06-tax-compliance.md`).
 
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 7.1.3 (infrastructure), cl. 7.5 (documented information), cl. 9.1 (monitoring/measurement).
 - `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — FA-01..05, GL-01, REC-01.
 - `compliance/policies/03-delegation-of-authority.md` (capital expenditure and disposal authority), `11-financial-close-policy.md` (depreciation cutoff).
-- Code: `apps/api/src/modules/assets/assets.service.ts` + `assets.controller.ts`, `apps/api/src/modules/ledger/ledger.service.ts`, `apps/api/src/common/doc-number.service.ts`.
+- Code: `apps/api/src/modules/assets/assets.service.ts` + `assets.controller.ts`, `apps/api/src/modules/eam/eam.service.ts` + `eam.controller.ts` (EAM), `apps/api/src/modules/ledger/ledger.service.ts`, `apps/api/src/common/doc-number.service.ts`.
 
 ## 5. Definitions & abbreviations
 
@@ -37,12 +39,15 @@ To define and control the fixed-asset lifecycle — acquisition/capitalization, 
 | NBV | Net Book Value = cost − accumulated depreciation |
 | Salvage | Estimated residual value; depreciation floors NBV at salvage |
 | Useful life | `useful_life_months` over which cost less salvage is depreciated |
-| FA- / DEP- / DISP- | Document-number prefixes (acquisition / depreciation / disposal) |
+| FA- / DEP- / DISP- / MWO- | Document-number prefixes (acquisition / depreciation / disposal / maintenance work order) |
+| Work order (WO) | A maintenance job against an asset: corrective, preventive or inspection; lifecycle open → in_progress → completed/cancelled |
+| PM schedule | Preventive-maintenance plan per asset, time-based (`interval_days`) and/or meter-based (`meter_interval`) |
+| Meter reading | A usage reading (`asset_meters`) that can trigger meter-based PM |
 | Asset register | `GET /api/assets` — cost, accumulated depreciation, NBV totals |
 | Scan-update | Location/holder change logged to `assetMovements` (custody audit, non-GL) |
 | Idempotency key | `${tenant}:${period}` for a depreciation run |
 
-GL accounts used: **1500** asset cost, **1590** accumulated depreciation (contra), **5200** depreciation expense, **1000** cash, **2000** AP, **1510** gain/loss on disposal.
+GL accounts used: **1500** asset cost, **1590** accumulated depreciation (contra), **5200** depreciation expense, **1000** cash, **2000** AP, **1510** gain/loss on disposal, **5710** repairs & maintenance (EAM work-order cost), **2100** input VAT.
 
 ## 6. Roles & responsibilities (RACI)
 
@@ -69,6 +74,7 @@ Single-duty roles enforce SoD: the role that **initiates** an asset acquisition 
 6. **Monthly depreciation run (decision point).** FaAccountant runs `POST /api/assets/depreciation/run` for a period (`YYYY-MM`). The run is **idempotent per `${tenant}:${period}`** — a re-run for the same tenant/period does not double-post. Per-tenant it produces **ONE balanced entry per tenant per period** (doc prefix **DEP-**) so each shop trial balance ties: **Dr 5200 Cr 1590**. Fully-depreciated assets flip status when NBV ≤ salvage and stop accruing (**FA-02**, **GL-01**). The DEP- entry flows through the normal ledger period guard, so a **closed period is rejected** (`PERIOD_CLOSED`) — see `04-general-ledger-close.md`.
 7. **Depreciation run review.** `GET /api/assets/depreciation/runs` lists prior runs. FinancialController reviews each run for idempotency (no duplicate period) and balanced posting before close (**FA-02**, **R05**).
 8. **Disposal (decision point).** FinancialController-approved disposal is executed via `PATCH /api/assets/:assetNo/dispose`. A disposal of an already-disposed asset → `ALREADY_DISPOSED` (`400`); an unknown asset → `NOT_FOUND` (`404`). The balanced disposal JE (doc prefix **DISP-**) clears the asset: **Dr 1590** (remove accumulated) + **Dr 1000** (cash proceeds) + **Cr 1500** (remove cost). Gain/loss = proceeds − NBV: a **gain** posts **Cr 1510**, a **loss** posts **Dr 1510** (**FA-03**, **GL-01**). Disposal authorization is segregated from custody and from the FA register owner (**R07**).
+9. **Maintenance (EAM).** A maintenance **work order** is raised against a registered asset (`POST /api/eam/work-orders`, **MWO-**; an unknown asset → `ASSET_NOT_FOUND`) and progresses through a guarded lifecycle **open → in_progress → completed/cancelled** (an out-of-order move → `BAD_TRANSITION`). On **completion with a vendor and an actual cost**, the maintenance spend is routed through **AP** (`createApTxn`, expense account **5710**): **Dr 5710** net **+ Dr 2100** input VAT **/ Cr 2000** gross — so the cost is a payable that settles through the normal AP flow and reconciles (in-house work with no vendor records the cost only). **PM schedules** (`POST /api/eam/pm-schedules`) define a preventive cadence (time `interval_days` and/or `meter_interval`, against `asset_meters` readings); the **due-generation sweep** (`POST /api/eam/pm/run`, cron-callable, and the daily scheduled job **`eam_pm_generate`** via the report scheduler) raises a preventive WO for every due schedule and rolls it forward. The sweep is **idempotent** — a schedule with an outstanding generated WO is skipped and its due date is advanced on generation (**FA-06**).
 
 ## 8. Process flow
 
@@ -113,6 +119,8 @@ flowchart TD
 | 2,8 | Self-initiated capex / disposal | SoD: initiate vs approve segregated | Prev / Manual | R07 | SoD conflict report |
 | 6 | Poster also closes period | SoD: `gl_post` vs `gl_close` segregated | Prev / Manual | R05 | SoD conflict report |
 | 1 | Unauthorized category/master change | Asset-master access administered separately | Prev / Manual | R01, FA-04 | Access review |
+| 9 | Maintenance spend not captured / not payable / not reconciled | WO completion routes cost to AP (Dr 5710 / Cr 2000); guarded WO lifecycle | Prev / Auto | EXP-05, GL-01 | WO→AP tie-out; `BAD_TRANSITION` test; basics harness |
+| 9 | Preventive maintenance missed | PM schedule + idempotent due-generation sweep (cron / daily `eam_pm_generate`) | Det / Auto | FA-06 | Generated WO log; sweep run log |
 
 ## 10. Inputs & outputs
 
@@ -152,3 +160,4 @@ flowchart TD
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 DRAFT | 2026-06-24 | `<<author>>` | Added **Enterprise Asset Management (EAM)** §7.9: maintenance work orders (cost → AP, acct 5710), preventive-maintenance schedules + idempotent due-generation sweep (cron / daily `eam_pm_generate`), meter readings; control **FA-06**. Verified by the `basics` harness. |

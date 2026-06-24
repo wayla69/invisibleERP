@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { sql, eq, and, desc, gt, lte } from 'drizzle-orm';
+import { sql, eq, and, desc, notInArray, gt, lte } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns } from '../../database/schema';
@@ -74,7 +74,46 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '5410', name: 'FX Gain/Loss (Realized)', type: 'Expense' },        // กำไร/ขาดทุนอัตราแลกเปลี่ยนที่เกิดขึ้นจริง — loss=debit, gain=credit (settlement)
   { code: '2250', name: 'Loyalty Points Liability', type: 'Liability' },      // หนี้สินแต้มสะสม — TFRS 15 contract liability for outstanding loyalty points (control acct)
   { code: '5700', name: 'Loyalty Points Expense', type: 'Expense' },          // ค่าใช้จ่ายแต้มสะสม — provision for loyalty points granted (offsets 2250)
+  { code: '5710', name: 'Repairs & Maintenance', type: 'Expense' },           // ค่าซ่อมแซมและบำรุงรักษา — EAM maintenance work-order cost
 ];
+
+// ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
+// Cash & cash-equivalents — the accounts the statement EXPLAINS (movement is the bottom line, not a flow).
+const CASH_ACCOUNTS = ['1000', '1010', '1020'];
+type CfBucket = 'addback' | 'operating' | 'investing' | 'financing';
+// Maps every NON-cash balance-sheet account to a cash-flow section. The indirect method starts operating
+// cash from net income, then layers (a) non-cash add-backs and (b) working-capital movements. Every
+// balance-sheet account is bucketed exactly once so the statement reconciles to the change in cash by
+// double-entry construction (Σ all accounts' debit−credit = 0). Accounts absent here fall back by type.
+const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = {
+  // Non-cash add-backs (P&L charge that consumed no cash) — accumulated depreciation (contra-asset, credit-normal).
+  '1590': { bucket: 'addback', label: 'ค่าเสื่อมราคาและค่าตัดจำหน่าย (Depreciation & amortization)' },
+  // Operating — current assets (an increase ties up cash)
+  '1100': { bucket: 'operating', label: 'ลูกหนี้การค้า (Accounts receivable)' },
+  '1150': { bucket: 'operating', label: 'ลูกหนี้ระหว่างบริษัท (Intercompany receivable)' },
+  '1200': { bucket: 'operating', label: 'สินค้าคงเหลือ (Inventory)' },
+  '1210': { bucket: 'operating', label: 'สินค้าสำเร็จรูป (Finished goods)' },
+  '1250': { bucket: 'operating', label: 'งานระหว่างทำ (Work-in-process)' },
+  '1260': { bucket: 'operating', label: 'ต้นทุนโครงการที่ยังไม่เรียกเก็บ (Unbilled project cost)' },
+  // Operating — current liabilities (an increase releases cash)
+  '2000': { bucket: 'operating', label: 'เจ้าหนี้การค้า (Accounts payable)' },
+  '2100': { bucket: 'operating', label: 'ภาษีค้างจ่าย (Tax payable)' },
+  '2150': { bucket: 'operating', label: 'เจ้าหนี้ระหว่างบริษัท (Intercompany payable)' },
+  '2200': { bucket: 'operating', label: 'เงินมัดจำลูกค้า/บัตรของขวัญ (Customer deposits)' },
+  '2210': { bucket: 'operating', label: 'เงินรับล่วงหน้า (Customer deposits — prepaid)' },
+  '2300': { bucket: 'operating', label: 'ทิปค้างจ่าย (Tips payable)' },
+  '2350': { bucket: 'operating', label: 'ประกันสังคมค้างจ่าย (Social security payable)' },
+  '2360': { bucket: 'operating', label: 'ภาษีหัก ณ ที่จ่ายเงินเดือนค้างจ่าย (Payroll WHT payable)' },
+  '2370': { bucket: 'operating', label: 'กองทุนสำรองเลี้ยงชีพค้างจ่าย (Provident fund payable)' },
+  '2380': { bucket: 'operating', label: 'ค่าใช้จ่ายการผลิตรอปันส่วน (Manufacturing costs applied)' },
+  '2390': { bucket: 'operating', label: 'ต้นทุนโครงการรอปันส่วน (Project costs applied)' },
+  '2400': { bucket: 'operating', label: 'รายได้รับล่วงหน้า (Unearned revenue)' },
+  // Investing — property, plant & equipment (gross)
+  '1500': { bucket: 'investing', label: 'ซื้อ/จำหน่ายสินทรัพย์ถาวร (Purchase/disposal of fixed assets)' },
+  // Financing — owners' equity & dividends
+  '3000': { bucket: 'financing', label: 'ส่วนทุน/เงินลงทุนจากเจ้าของ (Owner capital contributions)' },
+  '3100': { bucket: 'financing', label: 'เงินปันผลจ่าย / กำไรสะสม (Dividends paid)' },
+};
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null }
 export interface PostEntryDto {
@@ -347,6 +386,70 @@ export class LedgerService {
     };
   }
 
+  // ───────────────────── Statement of Cash Flows (indirect method) ─────────────────────
+  // Reconstructs operating cash from net income + non-cash add-backs + working-capital movements, then
+  // investing & financing — all off the posted GL over [from,to]. Year-end CLOSE entries are excluded
+  // (they reclassify P&L into retained earnings and carry no cash). Reconciles to the change in the cash
+  // accounts (1000/1010/1020) by double-entry construction: Σ(every account's debit−credit)=0, so
+  // Σ(non-cash credit−debit) ≡ Σ(cash debit−credit) = net change in cash.
+  async cashFlowStatement(from: string, to: string, ledgerCode?: string | null) {
+    const db = this.db as any;
+    const rows = await this.aggregateByType(db, from, to, undefined, ledgerCode, undefined, ['CLOSE']);
+    const move = (r: any) => round4(n(r.credit) - n(r.debit)); // cash effect of a balance-sheet account's movement
+
+    // Net income over the window = Σ P&L (credit−debit). Equals the income statement on an unclosed window.
+    const netIncome = round4(rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense').reduce((a: number, r: any) => a + move(r), 0));
+
+    const addbacks: any[] = [], operating: any[] = [], investing: any[] = [], financing: any[] = [], unclassified: any[] = [];
+    for (const r of rows) {
+      const t = r.account_type;
+      if (t === 'Revenue' || t === 'Expense') continue;        // already captured in net income
+      if (CASH_ACCOUNTS.includes(r.account_code)) continue;    // the cash being explained
+      const amount = move(r);
+      if (Math.abs(amount) < 1e-9) continue;
+      const line = { account_code: r.account_code, account_name: r.account_name, amount };
+      const cls = CF_CLASSIFY[r.account_code];
+      const bucket = cls?.bucket ?? (t === 'Asset' ? 'operating' : t === 'Liability' ? 'operating' : t === 'Equity' ? 'financing' : 'operating');
+      const label = cls?.label ?? r.account_name ?? r.account_code;
+      const entry = { ...line, label };
+      if (bucket === 'addback') addbacks.push(entry);
+      else if (bucket === 'investing') investing.push(entry);
+      else if (bucket === 'financing') financing.push(entry);
+      else operating.push(entry);
+      if (!cls) unclassified.push(r.account_code); // surfaced for transparency (still bucketed by type)
+    }
+
+    const sum = (xs: any[]) => round4(xs.reduce((a, x) => a + x.amount, 0));
+    const netOperating = round4(netIncome + sum(addbacks) + sum(operating));
+    const netInvesting = sum(investing);
+    const netFinancing = sum(financing);
+    const netChange = round4(netOperating + netInvesting + netFinancing);
+
+    // Actual cash balances bracketing the window (full books incl. opening/close — CLOSE never hits cash).
+    const cashBeginning = await this.cashBalanceAsOf(prevDay(from), ledgerCode);
+    const cashEnding = await this.cashBalanceAsOf(to, ledgerCode);
+
+    return {
+      from, to, ledger: ledgerCode ?? LEADING, method: 'indirect',
+      operating: { net_income: netIncome, adjustments: addbacks, working_capital: operating, net: netOperating },
+      investing: { lines: investing, net: netInvesting },
+      financing: { lines: financing, net: netFinancing },
+      net_change_in_cash: netChange,
+      cash_beginning: cashBeginning,
+      cash_ending: cashEnding,
+      // Independent tie-out: the activity sections must equal the movement in the cash accounts.
+      reconciled: Math.abs(round4(cashEnding - cashBeginning) - netChange) < 0.01,
+      unclassified_accounts: [...new Set(unclassified)],
+    };
+  }
+
+  // Net debit balance of the cash accounts (1000/1010/1020) as of a date, in one ledger.
+  private async cashBalanceAsOf(asOf: string, ledgerCode?: string | null): Promise<number> {
+    const db = this.db as any;
+    const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
+    return round4(rows.filter((r: any) => CASH_ACCOUNTS.includes(r.account_code)).reduce((a: number, r: any) => a + (n(r.debit) - n(r.credit)), 0));
+  }
+
   // ───────────────────── GAAP adjustment posting ─────────────────────
   // Post a balanced entry to ONE ledger only (e.g. a tax-depreciation delta, an IFRS lease adjustment).
   // The shared books are untouched; only this ledger's reports pick it up.
@@ -590,12 +693,15 @@ export class LedgerService {
     return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, net_income: netIncome, entry_no: je.entry_no };
   }
 
-  // group Posted journal_lines by account type within optional date window
-  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null, tenantId?: number | null) {
+  // group Posted journal_lines by account type within optional date window.
+  // excludeSources drops whole entries by source (e.g. CLOSE) — used by the cash-flow statement so a
+  // year-end closing reclassification doesn't masquerade as P&L/working-capital movement.
+  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null, tenantId?: number | null, excludeSources?: string[]) {
     const conds = [eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${to}`, this.ledgerCond(ledgerCode)];
     if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
     // Explicit tenant scope for writes like closeYear (which may run under HQ/bypass where RLS won't narrow).
     if (tenantId !== undefined && tenantId !== null) conds.push(eq(journalEntries.tenantId, tenantId));
+    if (excludeSources && excludeSources.length) conds.push(notInArray(journalEntries.source, excludeSources));
     if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
     else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
     const rows = await db
@@ -620,6 +726,12 @@ export class LedgerService {
 }
 
 function round4(x: number): number { return Math.round(x * 10000) / 10000; }
+// Calendar day before an ISO date (YYYY-MM-DD) — the day the opening cash balance is struck.
+function prevDay(ymdStr: string): string {
+  const d = new Date(`${ymdStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 function typeTotal(rows: any[], type: string, side: 'debit' | 'credit'): number {
   return rows.filter((r) => r.account_type === type).reduce((a, r) => a + n(r[side]), 0);
 }

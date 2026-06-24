@@ -161,6 +161,19 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-120 | Accept/reject routes to KDS + notifies platform | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-121 | Status callback + mock fallback | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-122 | Multi-terminal realtime KDS event | Feature (multi-terminal SSE) | 20 §rev3.0 |
+| UAT-O2C-130 | Collections worklist (open overdue AR) | REV-12 | 01 §7, §9 |
+| UAT-O2C-131 | Dunning stage recommended by aging | REV-12 | 01 §7 |
+| UAT-O2C-132 | Record dunning action advances stage | REV-12 | 01 §7, §9 |
+| UAT-O2C-133 | Dunning on paid invoice rejected (ALREADY_PAID) | REV-12 | 01 §9, §13 |
+| UAT-O2C-134 | Credit status flags over-limit + serious overdue | REV-12, R09 | 01 §7, §9 |
+| UAT-O2C-135 | Credit check denies further credit (held customer) | REV-12, R09 | 01 §9, §13 |
+| UAT-O2C-136 | Order entry blocks 90+ defaulter (CREDIT_OVERDUE) | REV-12 | 01 §7, §9 |
+| UAT-O2C-137 | Order entry — over-limit still blocked (parity) | REV-08 | 01 §9, §13 |
+| UAT-O2C-138 | Order entry — good-standing customer can order | REV-12 | 01 §7 |
+| UAT-O2C-139 | Automated dunning sweep advances overdue invoices | REV-12 | 01 §7 |
+| UAT-O2C-140 | Dunning sweep is idempotent | REV-12 | 01 §7 |
+| UAT-O2C-141 | Schedule daily automated dunning | REV-12 | 01 §7 |
+| UAT-O2C-142 | Scheduler tick fires the dunning job | REV-12 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -250,6 +263,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
 | UAT-GL-020 | Bank reconciliation tenant-scoped | ITGC-AC-03 / REC-02 | 07 §7 |
+| UAT-GL-021 | Statement of Cash Flows reconstructed from GL | GL-07 | 04 §7, §9 |
+| UAT-GL-022 | Cash flow reconciles to change in cash | GL-07 | 04 §9 |
+| UAT-GL-023 | Year-end close excluded from cash flow | GL-07 | 04 §7, §9 |
+| UAT-EAM-001 | Raise a corrective maintenance work order | FA-06 | 09 §7 |
+| UAT-EAM-002 | Complete WO → maintenance cost to AP (5700) | EXP-05, GL-01 | 09 §7, §9 |
+| UAT-EAM-003 | Illegal WO transition rejected | FA-06 | 09 §7, §13 |
+| UAT-EAM-004 | PM sweep raises due preventive WOs (time + meter) | FA-06 | 09 §7 |
+| UAT-EAM-005 | PM generation is idempotent | FA-06 | 09 §7, §9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -287,7 +308,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-012 | RLS payroll isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-PAY-013 | RBAC non-HCM block | ITGC-AC-07 | 08 §9 |
 | UAT-PAY-014 | ESS self-service own data | Feature (ESS), ITGC-AC | 25 §7 |
-| UAT-PAY-015 | ESS expense → GL on approve | Feature (ESS), GL-01 | 25 §7 |
+| UAT-PAY-015 | ESS expense → AP reimbursement on approve | Feature (ESS), EXP-05, GL-01 | 25 §7 |
+| UAT-PAY-019 | Reimbursement is an AP payable, settled via AP | EXP-05, REC-01 | 25 §7, 02 §7 |
 | UAT-PAY-016 | ESS expense self-approval blocked | ITGC-AC-09 | 25 §7 |
 | UAT-PAY-017 | ESS unlinked user refused | Feature (ESS) | 25 §7 |
 | UAT-PAY-018 | Payroll run tenant-scoped | ITGC-AC-03 | 05 §7 |
@@ -475,14 +497,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 27 | 9 |
+| 02 Order-to-Cash | 47 | 18 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close | 20 | 11 |
+| 05 GL & Close (incl. fixed assets / EAM) | 28 | 15 |
 | 06 Tax | 13 | 4 |
-| 07 Payroll | 18 | 7 |
+| 07 Payroll | 19 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **287** | **139** |
+| **Total** | **316** | **153** |
