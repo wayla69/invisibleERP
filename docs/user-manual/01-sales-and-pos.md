@@ -53,9 +53,11 @@ total is shown, and any loyalty points earned are recorded.
 
 > **Card payments:** when a payment provider is configured (Opn/Omise or Stripe —
 > see `OPN_SECRET_KEY` / `STRIPE_SECRET_KEY`), a Card tender is charged for real
-> through the card terminal. If the card is declined the sale is **not** marked
-> paid. Without a provider configured the system uses a safe test gateway (no real
-> money moves), so card tenders in a demo environment always succeed.
+> through the card terminal. If the card is **declined** the tender comes back as
+> **Failed** (the sale is not marked paid) and the declined attempt is recorded —
+> ask for another card or payment method. Without a provider configured the system
+> uses a safe test gateway (no real money moves), so card tenders in a demo
+> environment always succeed.
 
 **Expected result:** The payment is captured and a receipt can be printed or
 sent.

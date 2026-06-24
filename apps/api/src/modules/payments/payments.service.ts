@@ -81,11 +81,15 @@ export class PaymentService {
     let result;
     try {
       result = await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId, token: dto.token });
-    } catch (e) {
-      // The capture call failed (or its outcome is unknown): mark the row Failed so it is never a silent
-      // Pending limbo, and surface the error. A later PSP webhook can still settle a truly-captured tender.
-      await db.update(payments).set({ status: 'Failed' }).where(eq(payments.paymentNo, paymentNo));
-      throw e;
+    } catch (e: any) {
+      // A PSP decline (or unknown outcome) is a normal business result, not an exception to throw: if we
+      // rethrew, the per-request transaction would roll back and the Failed row would vanish, leaving no
+      // audit trail of the attempt. Instead we COMMIT the row as Failed (with the decline reason) and
+      // RETURN it — durable evidence that a card was attempted and declined, and never reported Captured.
+      const code = e?.response?.code ?? e?.code ?? 'PSP_ERROR';
+      const message = e?.response?.message ?? e?.message ?? String(e);
+      await db.update(payments).set({ status: 'Failed', gatewayRef: `declined:${code}: ${message}`.slice(0, 480) }).where(eq(payments.paymentNo, paymentNo));
+      return { payment_no: paymentNo, status: 'Failed', amount: n(dto.amount), gateway_ref: null, error: code, error_message: message };
     }
     await db.update(payments).set({
       status: result.status, gatewayRef: result.ref, capturedAt: result.status === 'Captured' ? new Date() : null,

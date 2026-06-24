@@ -102,15 +102,16 @@ async function main() {
     r3.json.status === 'Pending' && fetchCalls.length === before3,
     JSON.stringify({ s: r3.json.status, calls: fetchCalls.length - before3 }));
 
-  // ── 4. PSP decline → 4xx and NO money booked (no Captured tender). The request tx rolls back on the
-  //       rethrown PSP error, so the safety property is "nothing captured", not a surviving Failed row. ──
+  // ── 4. PSP decline → a DURABLE Failed tender (committed, with the decline reason), never Captured.
+  //       The decline is returned as a Failed result, not a rethrow, so the request tx commits the row. ──
   omiseMode = 'decline';
   const r4 = await tender({ sale_no: 'S-PG-3', method: 'Card', amount: 50, currency: 'THB', gateway: 'opn', token: 'tokn_bad' });
   const list3 = await inj('GET', '/api/payments?sale_no=S-PG-3', token);
-  const captured3 = (list3.json.payments ?? []).some((p: any) => p.status === 'Captured');
-  ok('Opn decline → 4xx + no Captured tender (money not booked)',
-    r4.status >= 400 && !captured3,
-    JSON.stringify({ http: r4.status, captured: captured3 }));
+  const rows3 = list3.json.payments ?? [];
+  const failed3 = rows3.find((p: any) => p.status === 'Failed');
+  ok('Opn decline → status Failed + durable Failed row persisted (with reason), never Captured',
+    r4.json.status === 'Failed' && !!r4.json.error && !!failed3 && /declined:/.test(failed3.gateway_ref ?? '') && !rows3.some((p: any) => p.status === 'Captured'),
+    JSON.stringify({ s: r4.json.status, err: r4.json.error, row: failed3?.status }));
   omiseMode = 'ok';
 
   // ── 5. Stripe card WITH token → real PaymentIntent, Captured, Bearer auth ──
