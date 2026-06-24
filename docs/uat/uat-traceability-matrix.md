@@ -130,6 +130,16 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-092 | Receipt renders in English | Feature (i18n) | 20 §7 |
 | UAT-O2C-093 | Bilingual (TH/EN) receipt | Feature (i18n) | 20 §7 |
 | UAT-O2C-094 | Per-tenant default language persists | Feature (i18n) | 20 §7 |
+| UAT-O2C-095 | Reposition a table on the floor plan | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-096 | Delete a free table (soft-delete) | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-097 | Delete a seated table blocked | Feature (floor-plan layout) | 20 §6, §13 |
+| UAT-O2C-098 | Create a VIP room (zone) | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-099 | Move/resize/rename a room persists | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-100 | Assign / un-assign a table to a room | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-101 | Delete a room keeps its tables | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-102 | Rooms are tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
+| UAT-O2C-103 | Set table shape / size / rotation / seats | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-104 | Invalid shape / rotation rejected | Feature (floor-plan layout) | 20 §6, §13 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

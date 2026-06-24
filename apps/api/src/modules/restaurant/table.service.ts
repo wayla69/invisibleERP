@@ -8,7 +8,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { mintTableToken } from './qr-token.util';
-import type { CreateTableDto, UpdateTableDto } from './dto';
+import type { CreateTableDto, UpdateTableDto, ZoneDto, ZoneUpdateDto } from './dto';
 
 const LIVE_SESSION = ['open', 'bill_requested', 'paying'];
 
@@ -19,16 +19,43 @@ export class TableService {
     private readonly docNo: DocNumberService,
   ) {}
 
-  // ── zones ──
+  // ── zones / rooms (floor-plan groupings; a VIP room is just a zone with an accent colour) ──
   async listZones(_user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select().from(floorZones).where(eq(floorZones.active, true)).orderBy(asc(floorZones.sortOrder));
-    return { zones: rows.map((z: any) => ({ id: Number(z.id), name: z.name, sort_order: z.sortOrder })) };
+    return { zones: rows.map(shapeZone) };
   }
-  async createZone(name: string, sortOrder: number | undefined, user: JwtUser) {
+  async createZone(dto: ZoneDto, user: JwtUser) {
     const db = this.db as any;
-    const [z] = await db.insert(floorZones).values({ tenantId: user.tenantId, name, sortOrder: sortOrder ?? 0 }).returning({ id: floorZones.id });
-    return { id: Number(z.id), name };
+    const [z] = await db.insert(floorZones).values({
+      tenantId: user.tenantId, name: dto.name, sortOrder: dto.sort_order ?? 0,
+      posX: String(dto.pos_x ?? 16), posY: String(dto.pos_y ?? 16),
+      width: String(dto.width ?? 320), height: String(dto.height ?? 200), color: dto.color ?? null,
+    }).returning();
+    return shapeZone(z);
+  }
+  async updateZone(id: number, dto: ZoneUpdateDto, _user: JwtUser) {
+    const db = this.db as any;
+    const set: any = {};
+    if (dto.name != null) set.name = dto.name;
+    if (dto.sort_order != null) set.sortOrder = dto.sort_order;
+    if (dto.pos_x != null) set.posX = String(dto.pos_x);
+    if (dto.pos_y != null) set.posY = String(dto.pos_y);
+    if (dto.width != null) set.width = String(dto.width);
+    if (dto.height != null) set.height = String(dto.height);
+    if (dto.color !== undefined) set.color = dto.color ?? null;
+    const [z] = await db.update(floorZones).set(set).where(eq(floorZones.id, id)).returning();
+    if (!z) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Zone not found', messageTh: 'ไม่พบโซน' });
+    return shapeZone(z);
+  }
+  // Soft-delete a zone (active=false). Its tables stay on the plan but become un-grouped (zone_id=null).
+  async deleteZone(id: number, _user: JwtUser) {
+    const db = this.db as any;
+    const [z] = await db.select().from(floorZones).where(eq(floorZones.id, id)).limit(1);
+    if (!z || !z.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Zone not found', messageTh: 'ไม่พบโซน' });
+    await db.update(diningTables).set({ zoneId: null, updatedAt: new Date() }).where(eq(diningTables.zoneId, id));
+    await db.update(floorZones).set({ active: false }).where(eq(floorZones.id, id));
+    return { id, deleted: true, name: z.name };
   }
 
   // ── tables ──
@@ -53,9 +80,10 @@ export class TableService {
     const db = this.db as any;
     const set: any = { updatedAt: new Date() };
     if (dto.table_no != null) set.tableNo = dto.table_no;
-    if (dto.zone_id != null) set.zoneId = dto.zone_id;
+    if (dto.zone_id !== undefined) set.zoneId = dto.zone_id;   // explicit null un-assigns the table from its zone
     if (dto.seats != null) set.seats = dto.seats;
     if (dto.shape != null) set.shape = dto.shape;
+    if (dto.rotation != null) set.rotation = dto.rotation;
     if (dto.pos_x != null) set.posX = String(dto.pos_x);
     if (dto.pos_y != null) set.posY = String(dto.pos_y);
     if (dto.width != null) set.width = String(dto.width);
@@ -63,6 +91,18 @@ export class TableService {
     const [t] = await db.update(diningTables).set(set).where(eq(diningTables.id, id)).returning();
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     return shapeTable(t);
+  }
+
+  // Soft-delete a table (active=false) — preserves history + FKs (orders/sessions keep referencing it).
+  // A table with a live session cannot be removed; clear/checkout the table first.
+  async deleteTable(id: number, _user: JwtUser) {
+    const db = this.db as any;
+    const [t] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
+    if (!t || !t.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
+    const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    if (live) throw new BadRequestException({ code: 'TABLE_BUSY', message: 'Table has a live session — clear it first', messageTh: 'โต๊ะมีลูกค้าอยู่ — เคลียร์โต๊ะก่อนจึงจะลบได้' });
+    await db.update(diningTables).set({ active: false, updatedAt: new Date() }).where(eq(diningTables.id, id));
+    return { id, deleted: true, table_no: t.tableNo };
   }
 
   async setStatus(id: number, status: string, _user: JwtUser) {
@@ -162,5 +202,12 @@ function shapeTable(t: any) {
   return {
     id: Number(t.id), table_no: t.tableNo, zone_id: t.zoneId, seats: t.seats, shape: t.shape, status: t.status,
     pos_x: n(t.posX), pos_y: n(t.posY), width: n(t.width), height: n(t.height), rotation: t.rotation, qr_token: t.qrToken,
+  };
+}
+
+function shapeZone(z: any) {
+  return {
+    id: Number(z.id), name: z.name, sort_order: z.sortOrder, color: z.color ?? null,
+    pos_x: n(z.posX), pos_y: n(z.posY), width: n(z.width), height: n(z.height),
   };
 }

@@ -92,9 +92,9 @@ export type CheckoutDto = z.infer<typeof CheckoutBody>;
 
 // ── tables / floor-plan ──
 export const CreateTableBody = z.object({
-  table_no: z.string().min(1), zone_id: z.number().int().optional(), seats: z.number().int().positive().optional(),
-  shape: z.string().optional(), pos_x: z.number().optional(), pos_y: z.number().optional(),
-  width: z.number().optional(), height: z.number().optional(),
+  table_no: z.string().min(1), zone_id: z.number().int().nullable().optional(), seats: z.number().int().positive().optional(),
+  shape: z.enum(['rect', 'circle', 'square']).optional(), pos_x: z.number().optional(), pos_y: z.number().optional(),
+  width: z.number().positive().optional(), height: z.number().positive().optional(), rotation: z.number().int().min(0).max(359).optional(),
 });
 export type CreateTableDto = z.infer<typeof CreateTableBody>;
 
@@ -112,6 +112,14 @@ export const TransferItemsBody = z.object({ item_ids: z.array(z.number().int().p
 // merge another table's tab into this one (combined bill)
 export const MergeTablesBody = z.object({ from_table_id: z.number().int().positive() });
 
-export const ZoneBody = z.object({ name: z.string().min(1), sort_order: z.number().int().optional() });
+export const ZoneBody = z.object({
+  name: z.string().min(1), sort_order: z.number().int().optional(),
+  pos_x: z.number().optional(), pos_y: z.number().optional(),
+  width: z.number().positive().optional(), height: z.number().positive().optional(),
+  color: z.string().max(32).nullable().optional(),
+});
+export type ZoneDto = z.infer<typeof ZoneBody>;
+export const ZoneUpdateBody = ZoneBody.partial();
+export type ZoneUpdateDto = z.infer<typeof ZoneUpdateBody>;
 
 export const StationBody = z.object({ code: z.string().min(1), name: z.string().min(1), sort: z.number().int().optional(), default_prep_minutes: z.number().int().positive().optional() });
