@@ -186,6 +186,11 @@ set the **ที่นั่ง** count, **หมุน** it left/right (handy f
 and drag its **corner** to resize — so a small 2-seater and a long 8-seater look
 different at a glance on the plan.
 
+**Watching tables by room.** Once tables are in rooms, the **สถานะโต๊ะ** tab groups
+them by room — each room shows how many tables are busy (e.g. *VIP · 2/4*), and you
+can tap a room chip at the top to watch just that area. (Tip: the floor plan now
+**snaps to a grid** as you drag, so rows of tables line up neatly.)
+
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).

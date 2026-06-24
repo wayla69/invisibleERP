@@ -4,9 +4,9 @@
 //  • view  — แตะโต๊ะเพื่อจัดการ (เปิดแผงจัดการในหน้า tables); zones render as labelled rooms.
 //  • edit  — drag/resize tables AND zones, delete them, assign a table to a room. Persists via the
 //            REST API (PATCH /tables/:id pos/size/zone_id; PATCH/DELETE /zones/:id). A VIP room is
-//            just a zone with an accent colour. Shapes/rotation come from the API and are honoured.
+//            just a zone with an accent colour. Drops snap to an 8px grid. Shapes/rotation honoured.
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Check, Home, Move, Palette, Pencil, Plus, RotateCcw, RotateCw, Trash2, X } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export type TableRow = {
   id: number; table_no: string; status: string; seats: number;
@@ -54,7 +55,9 @@ const hexA = (hex: string, a: number) => {
 };
 
 const CANVAS_H = 520; // px — the floor canvas height
+const GRID = 8;       // drops snap to this grid so the plan lines up
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+const snap = (v: number) => Math.round(v / GRID) * GRID;
 
 type Drag = {
   kind: 'table' | 'zone'; id: number; action: 'move' | 'resize';
@@ -62,18 +65,17 @@ type Drag = {
   x: number; y: number; w: number; h: number; moved: boolean;
 };
 
-export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRow[]; onSelect: (id: number) => void; sel: number | null; onChange: () => void }) {
-  const qc = useQueryClient();
-  const zonesQ = useQuery<{ zones: ZoneRow[] }>({ queryKey: ['floor-zones'], queryFn: () => api('/api/restaurant/zones') });
-  const zones = zonesQ.data?.zones ?? [];
-  const refreshZones = () => qc.invalidateQueries({ queryKey: ['floor-zones'] });
-
+export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChange }: {
+  tables: TableRow[]; zones: ZoneRow[]; onSelect: (id: number) => void; sel: number | null; onChange: () => void; onZonesChange: () => void;
+}) {
   const [no, setNo] = useState('');
   const [zoneName, setZoneName] = useState('');
   const [zoneColor, setZoneColor] = useState('');     // '' = no accent
   const [edit, setEdit] = useState(false);
   const [editSel, setEditSel] = useState<number | null>(null);   // selected table id for the edit inspector
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [confirm, setConfirm] = useState<{ title: string; body: string; onYes: () => void } | null>(null);
+  const [rename, setRename] = useState<{ z: ZoneRow; value: string } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const onErr = (e: any) => toast.error(e.message);
@@ -84,7 +86,7 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
   // generic PATCH for table/zone move+resize+zone-assign — invalidates the right cache by kind
   const patch = useMutation({
     mutationFn: (v: { path: string; body: any; kind: 'table' | 'zone' }) => api(v.path, { method: 'PATCH', body: JSON.stringify(v.body) }),
-    onSuccess: (_r, v) => { if (v.kind === 'zone') refreshZones(); else onChange(); }, onError: onErr,
+    onSuccess: (_r, v) => { if (v.kind === 'zone') onZonesChange(); else onChange(); }, onError: onErr,
   });
   const delTable = useMutation({
     mutationFn: (id: number) => api(`/api/restaurant/tables/${id}`, { method: 'DELETE' }),
@@ -92,11 +94,11 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
   });
   const addZone = useMutation({
     mutationFn: () => api('/api/restaurant/zones', { method: 'POST', body: JSON.stringify({ name: zoneName.trim(), color: zoneColor || null, pos_x: 16 + ((zones.length % 2) * 340), pos_y: 16 + Math.floor(zones.length / 2) * 230, width: 320, height: 200 }) }),
-    onSuccess: () => { setZoneName(''); refreshZones(); }, onError: onErr,
+    onSuccess: () => { setZoneName(''); onZonesChange(); }, onError: onErr,
   });
   const delZone = useMutation({
     mutationFn: (id: number) => api(`/api/restaurant/zones/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { toast.success('ลบห้องแล้ว'); refreshZones(); onChange(); }, onError: onErr,   // tables un-assigned → refresh both
+    onSuccess: () => { toast.success('ลบห้องแล้ว'); onZonesChange(); onChange(); }, onError: onErr,   // tables un-assigned → refresh both
   });
 
   // ── unified pointer drag (move | resize) for tables and zones ──
@@ -132,26 +134,17 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
     setDrag(null);
     if (!d.moved) { if (d.kind === 'table') setEditSel(d.id); return; }   // a tap (no travel) selects a table
     const path = d.kind === 'table' ? `/api/restaurant/tables/${d.id}` : `/api/restaurant/zones/${d.id}`;
-    const body = d.action === 'move' ? { pos_x: Math.round(d.x), pos_y: Math.round(d.y) } : { width: Math.round(d.w), height: Math.round(d.h) };
+    const body = d.action === 'move' ? { pos_x: snap(d.x), pos_y: snap(d.y) } : { width: snap(d.w), height: snap(d.h) };
     patch.mutate({ path, body, kind: d.kind });
   };
 
-  const confirmDeleteTable = (t: TableRow) => {
-    if (typeof window !== 'undefined' && !window.confirm(`ลบโต๊ะ ${t.table_no}?\nโต๊ะจะถูกซ่อนจากผัง — ประวัติการขายยังอยู่ครบ`)) return;
-    delTable.mutate(t.id);
-  };
-  const renameZone = (z: ZoneRow) => {
-    const v = typeof window !== 'undefined' ? window.prompt('ชื่อห้อง', z.name)?.trim() : '';
-    if (v) patch.mutate({ path: `/api/restaurant/zones/${z.id}`, body: { name: v }, kind: 'zone' });
-  };
+  const confirmDeleteTable = (t: TableRow) => setConfirm({ title: `ลบโต๊ะ ${t.table_no}?`, body: 'โต๊ะจะถูกซ่อนจากผัง — ประวัติการขายยังอยู่ครบ', onYes: () => delTable.mutate(t.id) });
+  const confirmDeleteZone = (z: ZoneRow) => setConfirm({ title: `ลบห้อง “${z.name}”?`, body: 'โต๊ะในห้องจะไม่ถูกลบ แต่จะไม่อยู่ในห้องใด', onYes: () => delZone.mutate(z.id) });
+  const submitRename = () => { if (rename && rename.value.trim()) patch.mutate({ path: `/api/restaurant/zones/${rename.z.id}`, body: { name: rename.value.trim() }, kind: 'zone' }); setRename(null); };
   const cycleColor = (z: ZoneRow) => {
     const order = [null, ...ACCENTS.map((a) => a.hex)];
     const next = order[(order.indexOf(z.color) + 1) % order.length];
     patch.mutate({ path: `/api/restaurant/zones/${z.id}`, body: { color: next }, kind: 'zone' });
-  };
-  const confirmDeleteZone = (z: ZoneRow) => {
-    if (typeof window !== 'undefined' && !window.confirm(`ลบห้อง “${z.name}”?\nโต๊ะในห้องจะไม่ถูกลบ แต่จะไม่อยู่ในห้องใด`)) return;
-    delZone.mutate(z.id);
   };
 
   // shape change normalises dimensions so the new shape reads immediately (circle/square → equal sides;
@@ -233,13 +226,14 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
                 className={cn('flex items-center gap-1 rounded-t-md px-2 py-1 text-xs font-semibold', !z.color && 'bg-muted')}
                 style={{ pointerEvents: edit ? 'auto' : 'none', cursor: edit ? 'grab' : 'default', background: z.color ? hexA(z.color, 0.18) : undefined, color: z.color ?? undefined, touchAction: 'none' }}
               >
-                <Home className="size-3.5 shrink-0" />
+                {/* a star marks an accented room so VIP is not signalled by colour alone (a11y) */}
+                {z.color ? <span title="ห้องเด่น" className="shrink-0">★</span> : <Home className="size-3.5 shrink-0" />}
                 <span className="truncate">{z.name}</span>
                 {edit && (
                   <span className="ml-auto flex items-center gap-0.5">
-                    <button type="button" title="เปลี่ยนสี" onPointerDown={(e) => e.stopPropagation()} onClick={() => cycleColor(z)} className="grid size-5 place-items-center rounded hover:bg-foreground/10"><Palette className="size-3.5" /></button>
-                    <button type="button" title="เปลี่ยนชื่อ" onPointerDown={(e) => e.stopPropagation()} onClick={() => renameZone(z)} className="grid size-5 place-items-center rounded hover:bg-foreground/10"><Pencil className="size-3.5" /></button>
-                    <button type="button" title="ลบห้อง" onPointerDown={(e) => e.stopPropagation()} onClick={() => confirmDeleteZone(z)} className="grid size-5 place-items-center rounded text-destructive hover:bg-destructive/10"><Trash2 className="size-3.5" /></button>
+                    <button type="button" title="เปลี่ยนสี" onPointerDown={(e) => e.stopPropagation()} onClick={() => cycleColor(z)} className="grid size-6 place-items-center rounded hover:bg-foreground/10"><Palette className="size-4" /></button>
+                    <button type="button" title="เปลี่ยนชื่อ" onPointerDown={(e) => e.stopPropagation()} onClick={() => setRename({ z, value: z.name })} className="grid size-6 place-items-center rounded hover:bg-foreground/10"><Pencil className="size-4" /></button>
+                    <button type="button" title="ลบห้อง" onPointerDown={(e) => e.stopPropagation()} onClick={() => confirmDeleteZone(z)} className="grid size-6 place-items-center rounded text-destructive hover:bg-destructive/10"><Trash2 className="size-4" /></button>
                   </span>
                 )}
               </div>
@@ -249,9 +243,11 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
                   onPointerMove={onDragMove}
                   onPointerUp={onDragUp}
                   title="ปรับขนาดห้อง"
-                  className="absolute -bottom-1.5 -right-1.5 size-3.5 rounded-sm border border-background bg-foreground/50"
+                  className="absolute -bottom-3 -right-3 grid place-items-center p-2"
                   style={{ pointerEvents: 'auto', cursor: 'nwse-resize', touchAction: 'none' }}
-                />
+                >
+                  <span className="size-3.5 rounded-sm border border-background bg-foreground/50" />
+                </div>
               )}
             </div>
           );
@@ -296,18 +292,20 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => { e.stopPropagation(); confirmDeleteTable(t); }}
                     title="ลบโต๊ะ"
-                    className="absolute -right-2 -top-2 grid size-5 place-items-center rounded-full bg-destructive text-destructive-foreground shadow ring-1 ring-background hover:bg-destructive/90"
+                    className="absolute -right-2.5 -top-2.5 grid size-6 place-items-center rounded-full bg-destructive text-destructive-foreground shadow ring-1 ring-background hover:bg-destructive/90"
                   >
-                    <Trash2 className="size-3" />
+                    <Trash2 className="size-3.5" />
                   </button>
                   <div
                     onPointerDown={(e) => startDrag(e, 'table', t.id, 'resize', { x: t.pos_x, y: t.pos_y, w: t.width, h: t.height })}
                     onPointerMove={onDragMove}
                     onPointerUp={onDragUp}
                     title="ปรับขนาดโต๊ะ"
-                    className="absolute -bottom-1 -right-1 size-3 rounded-sm border border-background bg-foreground/60"
+                    className="absolute -bottom-2.5 -right-2.5 grid place-items-center p-2"
                     style={{ pointerEvents: 'auto', cursor: 'nwse-resize', touchAction: 'none' }}
-                  />
+                  >
+                    <span className="size-3 rounded-sm border border-background bg-foreground/60" />
+                  </div>
                 </>
               )}
             </div>
@@ -340,12 +338,14 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
             />
           </label>
 
-          <span className="flex items-center gap-1">
-            <span className="text-muted-foreground">หมุน</span>
-            <Button variant="outline" size="icon" className="size-8" title="หมุนซ้าย 15°" onClick={() => rotateBy(inspTable, -15)}><RotateCcw className="size-4" /></Button>
-            <span className="w-10 text-center tabular">{inspTable.rotation || 0}°</span>
-            <Button variant="outline" size="icon" className="size-8" title="หมุนขวา 15°" onClick={() => rotateBy(inspTable, 15)}><RotateCw className="size-4" /></Button>
-          </span>
+          {inspTable.shape !== 'circle' && (
+            <span className="flex items-center gap-1">
+              <span className="text-muted-foreground">หมุน</span>
+              <Button variant="outline" size="icon" className="size-8" title="หมุนซ้าย 15°" onClick={() => rotateBy(inspTable, -15)}><RotateCcw className="size-4" /></Button>
+              <span className="w-10 text-center tabular">{inspTable.rotation || 0}°</span>
+              <Button variant="outline" size="icon" className="size-8" title="หมุนขวา 15°" onClick={() => rotateBy(inspTable, 15)}><RotateCw className="size-4" /></Button>
+            </span>
+          )}
 
           <label className="flex items-center gap-2">
             <span className="text-muted-foreground">ห้อง</span>
@@ -373,6 +373,36 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
           ? <span className="inline-flex items-center gap-1"><Move className="size-3" /> ลากเพื่อย้าย · จับมุมเพื่อปรับขนาด · แตะโต๊ะเพื่อตั้งรูปทรง/หมุน/ที่นั่ง/ห้อง · กด “เสร็จสิ้น” เมื่อจัดเสร็จ</span>
           : 'แตะโต๊ะเพื่อจัดการ · กด “แก้ไขผัง” เพื่อจัดผัง/สร้างห้อง VIP · สีบอกสถานะ'}
       </p>
+
+      {/* confirm (delete) + rename dialogs — design-system, replaces window.confirm/prompt */}
+      <Dialog open={!!confirm} onOpenChange={(o) => { if (!o) setConfirm(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirm?.title}</DialogTitle>
+            <DialogDescription>{confirm?.body}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirm(null)}>ยกเลิก</Button>
+            <Button variant="destructive" onClick={() => { confirm?.onYes(); setConfirm(null); }}>ลบ</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!rename} onOpenChange={(o) => { if (!o) setRename(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>เปลี่ยนชื่อห้อง</DialogTitle></DialogHeader>
+          <Input
+            autoFocus
+            value={rename?.value ?? ''}
+            onChange={(e) => setRename((r) => (r ? { ...r, value: e.target.value } : r))}
+            onKeyDown={(e) => { if (e.key === 'Enter') submitRename(); }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRename(null)}>ยกเลิก</Button>
+            <Button disabled={!rename?.value.trim()} onClick={submitRename}>บันทึก</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
