@@ -154,4 +154,4 @@ flowchart TD
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
-| 0.2 | 2026-06-24 | Platform | Platform Phase 9: §7 step 6a — self-service org profile & **branding** (`PATCH /api/tenant/profile` adds `logo_url`/`tagline`/`branding_prefs`, validated; logo + tagline genuinely rendered on the receipt header, RLS-isolated). Migration 0085 (additive tenant columns). No GL, no new control; verified by the `ext` harness. |
+| 0.2 | 2026-06-24 | Platform | Platform Phase 9: §7 step 6a — self-service org profile & **branding** (`PATCH /api/tenant/profile` adds `logo_url`/`tagline`/`branding_prefs`, validated; logo + tagline genuinely rendered on the receipt header, RLS-isolated). Migration 0086 (additive tenant columns). No GL, no new control; verified by the `ext` harness. |
