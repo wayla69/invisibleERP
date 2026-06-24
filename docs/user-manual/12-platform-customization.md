@@ -35,6 +35,8 @@ tools.
 | Ask for data in plain language | **NL Analytics** | `/nl-analytics` | exec / dashboard / masterdata | [Reports §9](./09-reports-and-analytics.md) |
 | Draft a config from a description | **AI Config** | `/ai-config` | masterdata / users / exec | [Administration §17](./11-administration.md) |
 | Scan the books for red flags | **Controls monitoring** | `/controls` | exec / users / creditors | [Administration §11](./11-administration.md) |
+| Use the system in your language | **Language picker** | header (top-right) | anyone (your own) | [Getting started](./00-getting-started.md) |
+| Brand the whole app (colours, logo) | **White-label theme** | `/theme` | users / exec | [Administration §13](./11-administration.md) |
 | Read alerts, report deliveries & approval reminders | **Notification inbox** | `/notifications` | anyone (your own) | §A below |
 | Let another system read your data securely | **Public REST API** | `/api/v1` (+ API keys) | users (to issue keys) | §B below |
 | Let staff sign in with your company login / auto-manage users | **SSO & SCIM** | Settings → SSO / SCIM | users | §C below |

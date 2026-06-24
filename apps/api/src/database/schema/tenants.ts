@@ -34,6 +34,7 @@ export const tenants = pgTable('tenants', {
   logoUrl: text('logo_url'),                                       // https URL or small image data-URI
   tagline: text('tagline'),                                        // short company tagline under the name
   brandingPrefs: jsonb('branding_prefs').default({}),              // {show_logo_on_receipt?: bool, ...}
+  themePrefs: jsonb('theme_prefs').default({}),                    // E4 (Phase 29) white-label theme tokens {primary_hue, radius, brand_name, logo_url, tagline}
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
