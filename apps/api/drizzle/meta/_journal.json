@@ -701,6 +701,20 @@
       "when": 1783450000000,
       "tag": "0098_migration_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1783450000001,
+      "tag": "0085_floor_zone_geometry",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1783450000002,
+      "tag": "0088_dine_in_order_zone",
+      "breakpoints": true
     }
   ]
 }
