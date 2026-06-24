@@ -75,3 +75,5 @@ export * from './controls';
 export * from './onboarding';
 export * from './connectors';
 export * from './migration-jobs';
+export * from './localization';
+export * from './einvoice';

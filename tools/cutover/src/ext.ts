@@ -777,6 +777,27 @@ async function main() {
   const migJobsCf2 = await inj('GET', '/api/migration/jobs', cf2aa);
   ok('Migration: RLS — another tenant does not see HQ’s jobs', !(migJobsCf2.json.jobs ?? []).some((j: any) => j.source === 'loyverse'), `cf2 jobs=${(migJobsCf2.json.jobs ?? []).length}`);
 
+  // ── C2 country localization packs (Platform Phase 21) ──
+  const locPacks = await inj('GET', '/api/localization/packs', hqaa);
+  ok('Localization: packs list TH (certified) + a draft country', (locPacks.json.packs ?? []).some((p: any) => p.country === 'TH' && p.status === 'certified') && (locPacks.json.packs ?? []).some((p: any) => p.status === 'draft'), `${(locPacks.json.packs ?? []).length}`);
+  const locApply = await inj('POST', '/api/localization/apply', hqaa, { country: 'TH' });
+  const locActive = await inj('GET', '/api/localization', hqaa);
+  ok('Localization: applying a pack sets the active country + locale', (locApply.status === 200 || locApply.status === 201) && locApply.json.locale === 'th' && locActive.json.active?.country === 'TH', `${locActive.json.active?.country}`);
+  const locBad = await inj('POST', '/api/localization/apply', hqaa, { country: 'ZZ' });
+  ok('Localization: unsupported country rejected (400 BAD_COUNTRY)', locBad.status === 400 && locBad.json.error?.code === 'BAD_COUNTRY', `${locBad.status} ${locBad.json.error?.code}`);
+  const locCf2 = await inj('GET', '/api/localization', cf2aa);
+  ok('Localization: RLS — another tenant has its own (no HQ leak)', locCf2.json.active === null, `cf2 active=${locCf2.json.active?.country ?? 'none'}`);
+
+  // ── C3 pluggable e-invoicing engine (Platform Phase 22) ──
+  const eiProv = await inj('GET', '/api/einvoice/providers', token);
+  ok('e-Invoice: provider catalog exposes stub + country adapters', (eiProv.json.providers ?? []).length >= 3 && (eiProv.json.providers ?? []).some((p: any) => p.key === 'stub'), `${(eiProv.json.providers ?? []).length}`);
+  const eiSubmit = await inj('POST', '/api/einvoice/submit', token, { doc: { doc_ref: 'EINV-T1', seller: 'My Co', buyer: 'Customer', total: 1500 } });
+  ok('e-Invoice: submit validates + returns an accepted ref (stub)', (eiSubmit.status === 200 || eiSubmit.status === 201) && eiSubmit.json.status === 'accepted' && String(eiSubmit.json.ref ?? '').startsWith('EINV-'), `${eiSubmit.json.status} ${eiSubmit.json.ref}`);
+  const eiDup = await inj('POST', '/api/einvoice/submit', token, { doc: { doc_ref: 'EINV-T1', seller: 'My Co', buyer: 'Customer', total: 1500 } });
+  ok('e-Invoice: re-submitting the same doc is idempotent', eiDup.json.idempotent === true && eiDup.json.ref === eiSubmit.json.ref, `idem=${eiDup.json.idempotent}`);
+  const eiBad = await inj('POST', '/api/einvoice/submit', token, { doc: { doc_ref: 'EINV-T2', seller: 'My Co', buyer: 'Customer' } });
+  ok('e-Invoice: an invalid document is rejected (400 BAD_DOC)', eiBad.status === 400 && eiBad.json.error?.code === 'BAD_DOC', `${eiBad.status} ${eiBad.json.error?.code}`);
+
   await app.close();
   await pg.close();
 

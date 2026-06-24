@@ -359,6 +359,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-074 | Developer portal — keys, tiers, RLS | Feature (developer portal) | 29 §4 |
 | UAT-ADM-075 | Connectors — register, sync, idempotent, per-tenant RLS | Feature (connectors) | 29 §4 |
 | UAT-ADM-076 | Migration — dry-run field-map + validation + RLS | Feature (migration) | 30 §4 |
+| UAT-ADM-077 | Localization — packs, apply, bad-country, RLS | Feature (localization) | 28 §4 |
+| UAT-ADM-078 | e-Invoicing — submit, idempotent, validation | Feature (e-invoicing) | 28 §4 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -426,7 +428,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 76 | 46 |
+| 08 Admin / SoD / Audit | 78 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **258** | **117** |
+| **Total** | **260** | **118** |
