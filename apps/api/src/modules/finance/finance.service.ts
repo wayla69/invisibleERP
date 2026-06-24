@@ -167,9 +167,15 @@ export class FinanceService {
       if (ex) { const [cur] = await db.select().from(arInvoices).where(eq(arInvoices.id, inv.id)).limit(1); return { receipt_no: ex.receiptNo, invoice_no: dto.invoice_no, paid_amount: n(cur?.paidAmount), status: cur?.status, idempotent: true }; }
     }
     const receiptNo = await this.docNo.nextDaily('RCP');
-    const newPaid = n(inv.paidAmount) + n(dto.amount);
-    const status = newPaid >= n(inv.amount) ? 'Paid' : 'Partial';
+    let newPaid = 0; let status = '';
     await db.transaction(async (tx: any) => {
+      // Concurrency: lock the invoice row and recompute paidAmount from the LOCKED current value.
+      // Without the lock, two concurrent receipts on the same invoice both read the old paidAmount and
+      // write absolute totals → the last writer wins and one collection silently vanishes (AR sub-ledger
+      // overstated, control account 1100 ≠ cash collected). FOR UPDATE serializes them.
+      const [locked] = await tx.select().from(arInvoices).where(eq(arInvoices.id, inv.id)).for('update').limit(1);
+      newPaid = n(locked.paidAmount) + n(dto.amount);
+      status = newPaid >= n(locked.amount) ? 'Paid' : 'Partial';
       await tx.insert(arReceipts).values({
         receiptNo, receiptDate: ymd(), tenantId: inv.tenantId, invoiceNo: dto.invoice_no, amount: String(n(dto.amount)),
         method: dto.method ?? 'Transfer', refNo: dto.ref_no ?? null, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
@@ -232,15 +238,23 @@ export class FinanceService {
     if (this.matchSvc) await this.matchSvc.assertPayable(txnNo);
     const apTenant = t.tenantId ?? user.tenantId ?? null;
     // Idempotency key for the installment. With a client key the ref is STABLE across retries; without one
-    // it falls back to the running-total ref (best-effort). Check the guard BEFORE mutating paidAmount so a
-    // retried request (which already sees the incremented paid total) neither re-posts nor re-applies.
+    // it falls back to the running-total ref (best-effort). The guard runs OUTSIDE the row-lock tx below
+    // because it queries the GL via this.db — issuing that on the same connection while the lock tx is open
+    // would deadlock; checking it first keeps a retried request from re-posting / re-applying.
     const payRef = idempotencyKey ? `${txnNo}:k:${idempotencyKey}` : `${txnNo}:${n(t.paidAmount) + n(amount)}`;
     if (this.ledger && n(amount) > 0 && (await this.ledger.alreadyPosted('PAY-AP', payRef, apTenant))) {
       return { txn_no: txnNo, paid_amount: n(t.paidAmount), status: t.status, idempotent: true };
     }
-    const newPaid = n(t.paidAmount) + n(amount);
-    const status = newPaid >= n(t.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
-    await db.update(apTransactions).set({ paidAmount: String(newPaid), status }).where(eq(apTransactions.id, t.id));
+    let newPaid = 0; let status = '';
+    await db.transaction(async (tx: any) => {
+      // Concurrency: lock the AP row and recompute paidAmount from the LOCKED current value, so two
+      // concurrent installment payments on the same bill can't both read the old total and lose one
+      // increment (AP sub-ledger understated, control account 2000 ≠ cash disbursed). FOR UPDATE serializes.
+      const [locked] = await tx.select().from(apTransactions).where(eq(apTransactions.id, t.id)).for('update').limit(1);
+      newPaid = n(locked.paidAmount) + n(amount);
+      status = newPaid >= n(locked.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
+      await tx.update(apTransactions).set({ paidAmount: String(newPaid), status }).where(eq(apTransactions.id, t.id));
+    });
     // GL: pay the payable (Dr 2000 AP / Cr 1000 Cash), tagged to the AP txn's tenant.
     if (this.ledger && n(amount) > 0) {
       await this.ledger.postEntry({

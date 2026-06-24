@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, timestamp, boolean, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 import { orderStatusEnum, claimStatusEnum, posStatusEnum } from './enums';
 
@@ -27,7 +27,9 @@ export const orderLines = pgTable('order_lines', {
   totalPrice: numeric('total_price', { precision: 14, scale: 2 }),
   status: orderStatusEnum('status').default('Pending'),
   receivedQty: numeric('received_qty').default('0'),
-});
+}, (t) => ({
+  byOrder: index('idx_order_lines_order').on(t.orderId), // header ⋈ lines join key
+}));
 
 export const orderClaims = pgTable('order_claims', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -60,7 +62,11 @@ export const custPosSales = pgTable('cust_pos_sales', {
   status: posStatusEnum('status').default('Completed'),
   notes: text('notes'),
   createdBy: text('created_by'),
-});
+}, (t) => ({
+  // Highest-volume retail table. Daily/period sales reports filter tenant + sale_date (+ branch).
+  byTenantDate: index('idx_cps_tenant_date').on(t.tenantId, t.saleDate),
+  byBranch: index('idx_cps_branch').on(t.branchId, t.saleDate),
+}));
 
 export const custPosItems = pgTable('cust_pos_items', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -73,7 +79,9 @@ export const custPosItems = pgTable('cust_pos_items', {
   discountPct: numeric('discount_pct').default('0'),
   amount: numeric('amount', { precision: 14, scale: 2 }),
   isCustom: boolean('is_custom').default(false),
-});
+}, (t) => ({
+  bySale: index('idx_cpi_sale').on(t.saleId), // sale ⋈ items join key
+}));
 
 export const salesReturns = pgTable('sales_returns', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -100,7 +108,9 @@ export const returnItems = pgTable('return_items', {
   amount: numeric('amount', { precision: 14, scale: 2 }),
   reason: text('reason'),
   returnToStock: boolean('return_to_stock').default(true),
-});
+}, (t) => ({
+  byReturn: index('idx_return_items_return').on(t.returnId), // return ⋈ items join key
+}));
 
 export const pendingOrders = pgTable('pending_orders', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -123,4 +133,6 @@ export const pendingOrderItems = pgTable('pending_order_items', {
   uom: text('uom'),
   unitPrice: numeric('unit_price', { precision: 14, scale: 2 }),
   triggerReason: text('trigger_reason'),
-});
+}, (t) => ({
+  byPending: index('idx_pending_order_items_pending').on(t.pendingId), // header ⋈ items join key
+}));
