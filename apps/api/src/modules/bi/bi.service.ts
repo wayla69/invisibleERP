@@ -1,21 +1,33 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, sql, gte, lt, desc, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { biDailySnapshots, reportSubscriptions } from '../../database/schema/bi';
+import { biDailySnapshots, reportSubscriptions, reportRuns } from '../../database/schema/bi';
+import { notifications } from '../../database/schema/system';
 import { custPosSales } from '../../database/schema/sales';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { arInvoices } from '../../database/schema/finance';
 import { apTransactions } from '../../database/schema/finance';
 import { opportunities, pipelineStages } from '../../database/schema/pipeline';
 import { n, fx } from '../../database/queries';
+import { MessagingService } from '../messaging/messaging.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
+// Catalog of report types a subscription may schedule. Each key maps to a generator below; the catalog
+// drives both create-time validation and the report-type picker in the builder UI.
+const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
+  kpi_board:      { label: 'สรุป KPI', labelEn: 'KPI board' },
+  sales_cube:     { label: 'ยอดขายตามช่วงเวลา', labelEn: 'Sales cube' },
+  finance_trend:  { label: 'แนวโน้มกำไร-ขาดทุน', labelEn: 'Finance (P&L) trend' },
+  pipeline_trend: { label: 'แนวโน้มไปป์ไลน์', labelEn: 'Pipeline trend' },
+};
+const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
+
 @Injectable()
 export class BiService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly messaging: MessagingService) {}
 
   // ── KPI Board ─────────────────────────────────────────────────────────────
   // Real-time cross-domain aggregation for the AI copilot dashboard
@@ -267,8 +279,14 @@ export class BiService {
 
   // ── Report Subscriptions ───────────────────────────────────────────────────
 
+  reportTypes() {
+    return { report_types: Object.entries(REPORT_TYPES).map(([key, v]) => ({ key, label: v.label, label_en: v.labelEn })), frequencies: FREQUENCIES };
+  }
+
   async createSubscription(dto: { name: string; report_type: string; frequency: string; filters?: object; recipients?: object[] }, user: JwtUser) {
     const db = this.db as any;
+    if (!REPORT_TYPES[dto.report_type]) throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${dto.report_type}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
+    if (!(FREQUENCIES as readonly string[]).includes(dto.frequency)) throw new BadRequestException({ code: 'BAD_FREQUENCY', message: 'frequency must be daily|weekly|monthly', messageTh: 'ความถี่ต้องเป็น รายวัน/รายสัปดาห์/รายเดือน' });
     const nextRun = this.nextRunDate(dto.frequency);
     const [sub] = await db.insert(reportSubscriptions).values({
       tenantId: user.tenantId!, name: dto.name, reportType: dto.report_type,
@@ -291,6 +309,91 @@ export class BiService {
     await db.update(reportSubscriptions).set({ isActive: false })
       .where(and(eq(reportSubscriptions.id, id), eq(reportSubscriptions.tenantId, user.tenantId!)));
     return { deleted: id };
+  }
+
+  // ── Scheduled-report execution engine ──────────────────────────────────────
+  // Generate the payload + a one-line summary (TH/EN) for a report type. Reuses the live aggregations above.
+  private async generateReport(reportType: string, filters: any, user: JwtUser): Promise<{ data: any; summary: string; summaryTh: string }> {
+    const f = filters ?? {};
+    if (reportType === 'kpi_board') {
+      const k = await this.kpiBoard(user);
+      return { data: k, summary: `MTD sales ${k.sales.mtd}, open AR ${k.receivables.open_ar}, open AP ${k.payables.open_ap}, pipeline ${k.pipeline.open_value}`, summaryTh: `ยอดขายเดือนนี้ ${k.sales.mtd} · ลูกหนี้คงค้าง ${k.receivables.open_ar} · เจ้าหนี้คงค้าง ${k.payables.open_ap}` };
+    }
+    if (reportType === 'sales_cube') {
+      const c = await this.salesCube({ period: f.period, months: f.months, start_date: f.start_date, end_date: f.end_date }, user);
+      return { data: c, summary: `Sales ${c.totals.total_sales} across ${c.rows.length} ${c.period_type}(s), ${c.totals.total_orders} orders`, summaryTh: `ยอดขายรวม ${c.totals.total_sales} · ${c.totals.total_orders} ออเดอร์` };
+    }
+    if (reportType === 'finance_trend') {
+      const t = await this.financeTrend({ months: f.months, ledger_code: f.ledger_code }, user);
+      const last = t.trend[t.trend.length - 1];
+      return { data: t, summary: last ? `Latest ${last.period}: revenue ${last.revenue}, gross profit ${last.gross_profit} (${last.margin_pct}%)` : 'No posted GL in range', summaryTh: last ? `งวดล่าสุด ${last.period}: รายได้ ${last.revenue} · กำไรขั้นต้น ${last.gross_profit}` : 'ไม่มีรายการบัญชีในช่วงนี้' };
+    }
+    if (reportType === 'pipeline_trend') {
+      const p = await this.pipelineTrend({ months: f.months }, user);
+      const last = p.trend[p.trend.length - 1];
+      return { data: p, summary: last ? `Latest ${last.month}: ${last.open} open (${last.open_value}), win rate ${last.win_rate_pct}%` : 'No pipeline in range', summaryTh: last ? `เดือนล่าสุด ${last.month}: เปิดอยู่ ${last.open} รายการ` : 'ไม่มีไปป์ไลน์ในช่วงนี้' };
+    }
+    throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
+  }
+
+  // Execute one subscription: generate → deliver (email recipients + in-app notification) → log a run →
+  // advance the schedule. Delivery is best-effort; the run is always recorded.
+  private async executeSubscription(sub: any, user: JwtUser) {
+    const db = this.db as any;
+    try {
+      const report = await this.generateReport(sub.reportType, sub.filters, user);
+      const recipients = Array.isArray(sub.recipients) ? sub.recipients : [];
+      let delivered = 0;
+      for (const r of recipients) {
+        const to = r?.email;
+        if (!to) continue;
+        try { const res: any = await this.messaging.send({ to, channel: 'email', body: `${sub.name}: ${report.summary}`, campaign: 'report' }, user); if (res?.status === 'sent') delivered++; } catch { /* best-effort */ }
+      }
+      // in-app notification to the tenant
+      await db.insert(notifications).values({ targetTenantId: sub.tenantId, targetRole: null, message: `รายงาน ${sub.name}: ${report.summaryTh}`, messageEn: `Report ${sub.name}: ${report.summary}` });
+      const [run] = await db.insert(reportRuns).values({
+        tenantId: sub.tenantId, subscriptionId: Number(sub.id), name: sub.name, reportType: sub.reportType,
+        frequency: sub.frequency, status: 'success', recipientsCount: delivered, summary: report.data,
+      }).returning({ id: reportRuns.id });
+      await db.update(reportSubscriptions).set({ lastRunAt: new Date(), nextRunAt: this.nextRunDate(sub.frequency) }).where(eq(reportSubscriptions.id, sub.id));
+      return { run_id: Number(run.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'success', delivered, summary: report.summary };
+    } catch (e: any) {
+      const [run] = await db.insert(reportRuns).values({
+        tenantId: sub.tenantId, subscriptionId: Number(sub.id), name: sub.name, reportType: sub.reportType,
+        frequency: sub.frequency, status: 'failed', recipientsCount: 0, summary: {}, error: String(e?.message ?? e),
+      }).returning({ id: reportRuns.id });
+      await db.update(reportSubscriptions).set({ lastRunAt: new Date(), nextRunAt: this.nextRunDate(sub.frequency) }).where(eq(reportSubscriptions.id, sub.id));
+      return { run_id: Number(run.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'failed', delivered: 0, error: String(e?.message ?? e) };
+    }
+  }
+
+  // Cron-callable sweep: run every active subscription that is due (never run yet, or next_run_at has passed).
+  async runDue(user: JwtUser) {
+    const db = this.db as any;
+    const now = Date.now();
+    const subs = await db.select().from(reportSubscriptions)
+      .where(and(eq(reportSubscriptions.tenantId, user.tenantId!), eq(reportSubscriptions.isActive, true)));
+    const due = subs.filter((s: any) => !s.lastRunAt || (s.nextRunAt && new Date(s.nextRunAt).getTime() <= now));
+    const runs: any[] = [];
+    for (const sub of due) runs.push(await this.executeSubscription(sub, user));
+    return { due: due.length, ran_count: runs.length, delivered: runs.reduce((a, r) => a + (r.delivered ?? 0), 0), runs };
+  }
+
+  // Run one subscription on demand (ignores the schedule) — the "Run now" button.
+  async runSubscriptionNow(id: number, user: JwtUser) {
+    const db = this.db as any;
+    const [sub] = await db.select().from(reportSubscriptions)
+      .where(and(eq(reportSubscriptions.id, id), eq(reportSubscriptions.tenantId, user.tenantId!)));
+    if (!sub) throw new NotFoundException({ code: 'SUB_NOT_FOUND', message: 'Subscription not found', messageTh: 'ไม่พบการสมัครรับรายงาน' });
+    return this.executeSubscription(sub, user);
+  }
+
+  async listRuns(user: JwtUser, limit = 100) {
+    const db = this.db as any;
+    const rows = await db.select().from(reportRuns)
+      .where(eq(reportRuns.tenantId, user.tenantId!))
+      .orderBy(desc(reportRuns.ranAt)).limit(limit);
+    return { runs: rows.map((r: any) => ({ id: Number(r.id), subscription_id: r.subscriptionId != null ? Number(r.subscriptionId) : null, name: r.name, report_type: r.reportType, frequency: r.frequency, status: r.status, recipients_count: Number(r.recipientsCount ?? 0), error: r.error, ran_at: r.ranAt })) };
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

@@ -142,6 +142,52 @@ sales, finance and other modules.
 
 ---
 
+## 7. Scheduled reports (get reports delivered automatically)
+
+**Screen:** `/scheduled-reports` (**รายงานตามกำหนดเวลา**) · **Required permission:**
+`exec`.
+
+Set a report to be built and delivered on a schedule, so the right people get it
+without anyone running it by hand.
+
+1. **Name the report** and pick a **type** — *KPI board*, *Sales cube*, *Finance
+   (P&L) trend*, or *Pipeline trend*.
+2. **Choose a frequency** — daily, weekly or monthly — and optionally an **email
+   recipient**.
+3. Save. The report then runs on its schedule: each run posts an **in-app
+   notification** to your company and emails any recipients, and is recorded in
+   **ประวัติการส่ง (History)** with its status and the figures sent.
+4. Use **ส่งที่ถึงกำหนดเดี๋ยวนี้** to run everything that's due right now, or the
+   **▶ (Run now)** button on a single report to send it on demand.
+
+**Expected result:** Your KPI, sales, finance and pipeline summaries arrive on
+their own cadence — same figures as the on-screen views, delivered to inbox and
+notification feed.
+
+> **Troubleshooting:** “BAD_REPORT_TYPE” — the report type isn't one of the four
+> built-ins; “BAD_FREQUENCY” — the frequency must be daily, weekly or monthly.
+
+---
+
+## 8. Saved views (reuse your filters)
+
+**Screen:** `/saved-views` (**มุมมองที่บันทึก**) · **Required permission:** any
+list-screen permission (e.g. `dashboard`, `warehouse`, `masterdata`).
+
+Save the way you've set up a list screen — its filters and sorting — so you can
+return to it in one click.
+
+1. Pick the **screen (module)** and give the view a **name**.
+2. Tick **แชร์ให้ทั้งองค์กร (Share)** to make it available to everyone in your
+   company, or leave it unticked to keep it **personal**.
+3. Saved views are listed per screen; delete any you own with the 🗑 button.
+
+**Expected result:** Personal and shared presets for your common list screens.
+Views are private to your company; a shared view can only be deleted by whoever
+created it.
+
+---
+
 ## Food cost & menu margins
 
 The **ต้นทุนอาหาร (Food cost)** screen shows, for each menu item, its **cost**

@@ -322,6 +322,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-024 | Demand forecasts tenant-isolated (RLS) | ITGC-AC (RLS) | 26 §8a |
 | UAT-RPT-025 | Customer-360 detail + RLS + perm gate | Feature (CRM 360), ITGC-AC | 26 §7 |
 | UAT-RPT-026 | Analytics HTTP layer (guard stack) | ITGC-AC-02 | 26 §7 |
+| UAT-RPT-027 | Scheduled report subscription validation | Feature (scheduled reports) | 26 §5, §5a |
+| UAT-RPT-028 | Scheduled report sweep runs due + records run | Feature (scheduled reports) | 26 §5a |
+| UAT-RPT-029 | Scheduled report run-now + tenant isolation | Feature (scheduled reports), ITGC-AC-03 | 26 §5a |
+| UAT-RPT-030 | Saved views visibility + owner-only delete | Feature (saved views), ITGC-AC-03 | 26 §5b |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 

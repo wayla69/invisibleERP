@@ -96,7 +96,11 @@ A = Accountable, R = Responsible, C = Consulted, I = Informed.
 
 4. **Sales cube & finance trend (perm `exec`).** `GET /api/bi/sales-cube?period=day|week|month` aggregates `custPosSales`. `GET /api/bi/finance-trend?months=&ledger=` aggregates `journal_lines` by period and account type (revenue / expense / gross profit), multi-ledger with the default leading ledger (TFRS). Both are **derived from the posted ledger / POS sales**, so their accuracy depends on source completeness. *Control: BI-01 — finance-trend/P&L tie to trial balance; daily-sales/cube tie to the POS journal.*
 
-5. **Pipeline trend, snapshots & subscriptions (perm `exec`).** `GET /api/bi/pipeline-trend`; `POST /api/bi/snapshots/refresh` and `GET /api/bi/snapshots`; report subscriptions CRUD (`GET`/`POST /api/bi/subscriptions`, `DELETE /api/bi/subscriptions/:id`). *Operational.*
+5. **Pipeline trend, snapshots & subscriptions (perm `exec`).** `GET /api/bi/pipeline-trend`; `POST /api/bi/snapshots/refresh` and `GET /api/bi/snapshots`; report subscriptions CRUD (`GET`/`POST /api/bi/subscriptions`, `DELETE /api/bi/subscriptions/:id`). A subscription names a report type (`kpi_board`/`sales_cube`/`finance_trend`/`pipeline_trend`, validated `BAD_REPORT_TYPE`), a frequency (`daily`/`weekly`/`monthly`, validated `BAD_FREQUENCY`) and optional email recipients. *Operational.*
+
+5a. **Scheduled-report execution (perm `exec`).** The subscription schedule is acted on by a **cron-callable sweep** `POST /api/bi/subscriptions/run`, which runs every active subscription that is **due** (never run, or `next_run_at` has passed): it generates the named report from the same live aggregations as steps 3–5, delivers it (an in-app notification to the tenant plus best-effort email to each recipient via the messaging provider), records a row in `report_runs` (`status` success/failed, recipient count, the generated payload), and advances `last_run_at`/`next_run_at`. `POST /api/bi/subscriptions/:id/run` runs one subscription on demand (the "Run now" button); `GET /api/bi/runs` is the tenant-scoped delivery history. Generation reuses the read-only BI aggregations and **posts nothing to the GL**; every run is tenant-scoped (RLS) and a report used in financial reporting remains an IPE (step 10). *Control: BI-01 — delivered report ties to the same source as its on-screen view; R01 — tenant-scoped delivery. Operational/advisory; no new RCM control.*
+
+5b. **Saved views (perm any list-screen permission).** `GET`/`POST /api/saved-views`, `DELETE /api/saved-views/:id` persist a user's per-module list presets (filter/sort/columns) as **personal** views or, when `shared`, views visible to the whole tenant. Views are tenant-isolated by RLS; a shared view can only be deleted by its creator (`VIEW_NOT_FOUND` otherwise). *Operational; a convenience layer over existing gated list screens — no change to data access or RCM controls.*
 
 6. **Analytics — replenishment (perm `planner`/`dashboard`/`warehouse`).** `GET /api/analytics/replenishment` returns items with urgency critical/warning; reorder point = `avg_daily_sales × lead_time_days + stdev_daily × 1.5`, with `days_of_stock` and predicted stockout. *Operational / advisory.*
 
@@ -178,6 +182,9 @@ flowchart TD
 | No API key | AI agent invoked without LLM credentials | Rule-based Thai fallback message returned; no failure of the stream. |
 | INSUFFICIENT_HISTORY (400) | Demand forecast/backtest with < 14 days of demand history | Reject; accumulate more sales history before forecasting (step 8a). |
 | UNKNOWN_ALGORITHM (400) | Demand forecast pins an unrecognised `algorithm` | Reject; use one of sma / ses / holt / seasonal_naive / croston, or omit to auto-select. |
+| BAD_REPORT_TYPE (400) | Report subscription names an unknown report type | Reject; use kpi_board / sales_cube / finance_trend / pipeline_trend (step 5). |
+| BAD_FREQUENCY (400) | Report subscription frequency not daily/weekly/monthly | Reject; supply a supported cadence (step 5). |
+| VIEW_NOT_FOUND (404) | Deleting a saved view the caller does not own | Block; only the creator can delete their view (step 5b). |
 | Access denied | Permission/RLS check fails | Block; report access is gated and tenant-scoped (R01, cross-ref `08-itgc.md`). |
 
 ## 14. Revision History
@@ -187,3 +194,4 @@ flowchart TD
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | D4: added step 8a — demand ML (multi-model forecasting + walk-forward backtesting, `/api/demand/*`), WAPE/MASE definitions, control rows (BI-01 backtest accuracy gate, BI-04 advisory boundary), accuracy KPI and `INSUFFICIENT_HISTORY`/`UNKNOWN_ALGORITHM` error codes. Verified by the `demand-ml` harness. |
 | 0.3 | 2026-06-23 | Platform | Doc-drift fix: §5 — BI report-subscription delete corrected to `DELETE /api/bi/subscriptions/:id` (route is keyed by id). |
+| 0.4 | 2026-06-24 | Platform | Platform Phase 4: §7 — added step 5a (scheduled-report execution engine: `POST /api/bi/subscriptions/run` sweep, `:id/run`, `report_runs` history, in-app + email delivery) and step 5b (saved views, `/api/saved-views`); §5 — subscription type/frequency validation; §13 — `BAD_REPORT_TYPE`/`BAD_FREQUENCY`/`VIEW_NOT_FOUND` error codes. Both operational (no GL, no new RCM control); verified by the `ext` harness. |
