@@ -25,6 +25,11 @@ of Duties (SoD) conflict report**, the MFA policy, and multi-branch setup.
 to change the password (see [Getting Started](./00-getting-started.md)), and — if
 their role requires it — to enrol in MFA.
 
+> **Note — usernames are not case-sensitive.** The username is stored in lowercase
+> with surrounding spaces removed, so `JohnD`, `johnd` and `  johnd ` are the same
+> account. Tell the user they can sign in regardless of capitalisation. (The
+> **password**, by contrast, *is* case-sensitive and is never trimmed.)
+
 ### Other user actions
 
 | Task | How |

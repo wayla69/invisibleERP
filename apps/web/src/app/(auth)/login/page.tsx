@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, ShieldCheck } from 'lucide-react';
-import { api, setToken } from '@/lib/api';
+import { api, publicApi, setToken } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,9 +30,14 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await api<{ token: string; role: string }>('/api/login', {
+      // Use publicApi (not api): login is a pre-auth request, so a 401 means "wrong username/password"
+      // and must surface the server's real message — NOT be swallowed by api()'s handleUnauthorized,
+      // which turns every 401 into a misleading "session expired".
+      // Usernames are stored canonicalized (trimmed + lowercased) server-side; mirror that here so the
+      // submitted value matches regardless of casing or stray surrounding whitespace.
+      const res = await publicApi<{ token: string; role: string }>('/api/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim().toLowerCase(), password }),
       });
       setToken(res.token);
       router.push(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');

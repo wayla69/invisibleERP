@@ -5,6 +5,7 @@ import { plans, subscriptions, tenants, users } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd } from '../../database/queries';
+import { normalizeUsername } from '../../common/username';
 
 export interface SignupDto {
   company_name: string;
@@ -77,7 +78,7 @@ export class BillingService {
   async signup(dto: SignupDto) {
     const db = this.db as any;
     const code = dto.tenant_code.trim();
-    const username = dto.admin_username.trim();
+    const username = normalizeUsername(dto.admin_username);
     const planCode = dto.plan_code?.trim() || 'free';
 
     // tenant code must be unique

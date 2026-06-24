@@ -1,12 +1,13 @@
 import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { authenticator } from 'otplib';
 import { resolvePermissions, requiresMfa, type Role, type Permission, type LoginResponse, type AuthUser } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users, userPermissions, tenants } from '../../database/schema';
 import { PasswordService } from './password.service';
 import { encrypt, decrypt } from '../../common/crypto';
+import { normalizeUsername } from '../../common/username';
 
 @Injectable()
 export class AuthService {
@@ -17,7 +18,11 @@ export class AuthService {
   ) {}
 
   async login(username: string, password: string, totp?: string): Promise<LoginResponse> {
-    const row = (await this.db.select().from(users).where(eq(users.username, username)).limit(1))[0];
+    // Match case-insensitively against the STORED username. New accounts are written canonicalized
+    // (trimmed-lowercase), but legacy/seeded rows may still be mixed-case (pre-migration) — comparing on
+    // lower() lets either authenticate without depending on the back-fill migration having run.
+    const norm = normalizeUsername(username);
+    const row = (await this.db.select().from(users).where(sql`lower(${users.username}) = ${norm}`).limit(1))[0];
     const fail = () =>
       new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or password', messageTh: 'Username หรือ Password ไม่ถูกต้อง' });
     if (!row) throw fail();
@@ -51,8 +56,10 @@ export class AuthService {
     // setup (mirrors must_change_password). Enrolment must remain reachable, so this is a flag, not a block.
     const mustSetupMfa = !row.mfaEnabled && requiresMfa(role, overrides.length ? (overrides as Permission[]) : null);
 
-    const token = await this.jwt.signAsync({ sub: username, role, customerName, tenantId: row.tenantId ?? null, permissions: perms });
-    return { token, username, role, customer_name: customerName, must_change_password: !!row.mustChangePassword, must_setup_mfa: mustSetupMfa };
+    // Carry the STORED username (not the typed input) so later exact-match lookups by JWT sub resolve the
+    // same row — important for legacy mixed-case accounts authenticated via the case-insensitive match above.
+    const token = await this.jwt.signAsync({ sub: row.username, role, customerName, tenantId: row.tenantId ?? null, permissions: perms });
+    return { token, username: row.username, role, customer_name: customerName, must_change_password: !!row.mustChangePassword, must_setup_mfa: mustSetupMfa };
   }
 
   // ── ITGC-AC-06: TOTP enrolment lifecycle ────────────────────────────────────

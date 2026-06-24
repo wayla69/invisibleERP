@@ -29,6 +29,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-017 | Aggregator webhook requires secret | ITGC-AC-03 | 08 §7 |
 | UAT-SEC-018 | PSP webhook tenant-scoped | ITGC-AC-03 | 08 §7 |
 | UAT-SEC-019 | Input-validation hardening (qint/Zod) | ITGC-AC-02 | 08 §7 |
+| UAT-SEC-020 | Username login case/whitespace-insensitive | ITGC-AC-01 | 08 §7 |
+| UAT-SEC-021 | Password remains case-sensitive (not trimmed) | ITGC-AC-01 | 08 §7, §13 |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 
