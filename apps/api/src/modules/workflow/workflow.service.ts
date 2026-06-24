@@ -1,13 +1,13 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, asc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { workflowDefinitions, workflowSteps, workflowInstances, approvalActions, approvalDelegations, users } from '../../database/schema';
+import { workflowDefinitions, workflowSteps, workflowInstances, approvalActions, approvalDelegations, users, notifications } from '../../database/schema';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { SodService } from './sod.service';
 
-export interface StartWorkflowArgs { docType: string; docNo: string; amount: number; createdBy: string; tenantId: number | null; }
-export interface StepDto { step_no: number; approver_role?: string; approver_user?: string; min_amount?: number; all_of_n?: number; name?: string; }
+export interface StartWorkflowArgs { docType: string; docNo: string; amount: number; createdBy: string; tenantId: number | null; context?: Record<string, string>; }
+export interface StepDto { step_no: number; approver_role?: string; approver_user?: string; min_amount?: number; all_of_n?: number; name?: string; sla_hours?: number; escalate_to_role?: string; escalate_to_user?: string; match_key?: string; match_value?: string; }
 
 // Generic, polymorphic approval engine. A module calls start() on submit, and canTransition()/act() to gate
 // its own status flips. The engine posts NOTHING to the GL — it only routes approvals. Maker-checker is
@@ -17,15 +17,36 @@ export class WorkflowService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly sod: SodService) {}
 
   // ── Definitions ──
-  async createDefinition(dto: { doc_type: string; name: string; steps: StepDto[] }, user: JwtUser) {
+  async createDefinition(dto: { doc_type: string; name: string; sla_hours?: number; steps: StepDto[] }, user: JwtUser) {
     const db = this.db as any;
     if (!dto.steps?.length) throw new BadRequestException({ code: 'NO_STEPS', message: 'A workflow needs at least one step', messageTh: 'ต้องมีอย่างน้อยหนึ่งขั้น' });
-    const [d] = await db.insert(workflowDefinitions).values({ tenantId: user.tenantId ?? null, docType: dto.doc_type, name: dto.name, active: true, createdBy: user.username }).returning({ id: workflowDefinitions.id });
-    for (const s of dto.steps) {
-      if (!(s.approver_role) === !(s.approver_user)) throw new BadRequestException({ code: 'STEP_ROLE_XOR_USER', message: 'A step needs exactly one of approver_role / approver_user', messageTh: 'ขั้นต้องระบุ role หรือ user อย่างใดอย่างหนึ่ง' });
-      await db.insert(workflowSteps).values({ tenantId: user.tenantId ?? null, definitionId: Number(d.id), stepNo: s.step_no, approverRole: s.approver_role ?? null, approverUser: s.approver_user ?? null, minAmount: String(s.min_amount ?? 0), allOfN: s.all_of_n ?? 1, name: s.name ?? null });
-    }
+    const [d] = await db.insert(workflowDefinitions).values({ tenantId: user.tenantId ?? null, docType: dto.doc_type, name: dto.name, slaHours: dto.sla_hours ?? null, active: true, createdBy: user.username }).returning({ id: workflowDefinitions.id });
+    await this.insertSteps(Number(d.id), dto.steps, user);
     return { id: Number(d.id) };
+  }
+  // Replace a definition's steps (no-code builder save). Validates the same XOR rule per step.
+  async updateDefinition(id: number, dto: { name?: string; sla_hours?: number; steps?: StepDto[] }, user: JwtUser) {
+    const db = this.db as any;
+    const [def] = await db.select().from(workflowDefinitions).where(and(eq(workflowDefinitions.tenantId, user.tenantId as any), eq(workflowDefinitions.id, id))).limit(1);
+    if (!def) throw new NotFoundException({ code: 'DEF_NOT_FOUND', message: 'Workflow definition not found', messageTh: 'ไม่พบเวิร์กโฟลว์' });
+    const patch: any = {};
+    if (dto.name !== undefined) patch.name = dto.name;
+    if (dto.sla_hours !== undefined) patch.slaHours = dto.sla_hours;
+    if (Object.keys(patch).length) await db.update(workflowDefinitions).set(patch).where(eq(workflowDefinitions.id, id));
+    if (dto.steps) {
+      if (!dto.steps.length) throw new BadRequestException({ code: 'NO_STEPS', message: 'A workflow needs at least one step', messageTh: 'ต้องมีอย่างน้อยหนึ่งขั้น' });
+      await db.delete(workflowSteps).where(eq(workflowSteps.definitionId, id));
+      await this.insertSteps(id, dto.steps, user);
+    }
+    return { id };
+  }
+  private async insertSteps(definitionId: number, steps: StepDto[], user: JwtUser) {
+    const db = this.db as any;
+    for (const s of steps) {
+      if (!(s.approver_role) === !(s.approver_user)) throw new BadRequestException({ code: 'STEP_ROLE_XOR_USER', message: 'A step needs exactly one of approver_role / approver_user', messageTh: 'ขั้นต้องระบุ role หรือ user อย่างใดอย่างหนึ่ง' });
+      if (!(s.match_key) !== !(s.match_value)) throw new BadRequestException({ code: 'MATCH_KEY_VALUE', message: 'A dimension condition needs both match_key and match_value', messageTh: 'เงื่อนไขมิติต้องมีทั้ง key และ value' });
+      await db.insert(workflowSteps).values({ tenantId: user.tenantId ?? null, definitionId, stepNo: s.step_no, approverRole: s.approver_role ?? null, approverUser: s.approver_user ?? null, minAmount: String(s.min_amount ?? 0), allOfN: s.all_of_n ?? 1, name: s.name ?? null, slaHours: s.sla_hours ?? null, escalateToRole: s.escalate_to_role ?? null, escalateToUser: s.escalate_to_user ?? null, matchKey: s.match_key ?? null, matchValue: s.match_value ?? null });
+    }
   }
   async listDefinitions(_user: JwtUser) {
     const db = this.db as any;
@@ -33,7 +54,7 @@ export class WorkflowService {
     const out = [] as any[];
     for (const d of defs) {
       const steps = await db.select().from(workflowSteps).where(eq(workflowSteps.definitionId, Number(d.id))).orderBy(asc(workflowSteps.stepNo));
-      out.push({ id: Number(d.id), doc_type: d.docType, name: d.name, active: d.active, steps: steps.map((s: any) => ({ step_no: s.stepNo, approver_role: s.approverRole, approver_user: s.approverUser, min_amount: n(s.minAmount), all_of_n: s.allOfN })) });
+      out.push({ id: Number(d.id), doc_type: d.docType, name: d.name, sla_hours: d.slaHours, active: d.active, steps: steps.map((s: any) => ({ step_no: s.stepNo, approver_role: s.approverRole, approver_user: s.approverUser, min_amount: n(s.minAmount), all_of_n: s.allOfN, name: s.name, sla_hours: s.slaHours, escalate_to_role: s.escalateToRole, escalate_to_user: s.escalateToUser, match_key: s.matchKey, match_value: s.matchValue })) });
     }
     return { definitions: out };
   }
@@ -48,13 +69,28 @@ export class WorkflowService {
     const [d] = await db.select().from(workflowDefinitions).where(and(eq(workflowDefinitions.docType, docType), eq(workflowDefinitions.active, true))).limit(1);
     return d ?? null;
   }
+  private async defById(id: number) {
+    const [d] = await (this.db as any).select().from(workflowDefinitions).where(eq(workflowDefinitions.id, id)).limit(1);
+    return d ?? null;
+  }
   private async steps(definitionId: number) {
     const db = this.db as any;
     return db.select().from(workflowSteps).where(eq(workflowSteps.definitionId, definitionId)).orderBy(asc(workflowSteps.stepNo));
   }
-  // first engaged step (min_amount <= amount), in order; null = none engaged → auto-approve
-  private firstEngaged(steps: any[], amount: number, after = 0) {
-    return steps.filter((s) => Number(s.stepNo) > after && n(s.minAmount) <= amount).sort((a, b) => a.stepNo - b.stepNo)[0] ?? null;
+  // a step engages when its amount threshold is met AND its dimension condition (if any) matches the context
+  private engages(step: any, amount: number, context: Record<string, string>) {
+    if (n(step.minAmount) > amount) return false;
+    if (step.matchKey) return String(context?.[step.matchKey] ?? '') === String(step.matchValue);
+    return true;
+  }
+  // first engaged step after `after`, in order; null = none engaged → auto-approve
+  private firstEngaged(steps: any[], amount: number, context: Record<string, string>, after = 0) {
+    return steps.filter((s) => Number(s.stepNo) > after && this.engages(s, amount, context)).sort((a, b) => a.stepNo - b.stepNo)[0] ?? null;
+  }
+  // SLA deadline for a step (step override → definition default → none)
+  private dueFor(step: any, def: any): Date | null {
+    const hrs = step?.slaHours ?? def?.slaHours ?? null;
+    return hrs ? new Date(Date.now() + Number(hrs) * 3600 * 1000) : null;
   }
 
   // ── Engine entrypoints a module calls ──
@@ -67,11 +103,12 @@ export class WorkflowService {
     const [existing] = await db.select().from(workflowInstances).where(and(eq(workflowInstances.docType, args.docType), eq(workflowInstances.docNo, args.docNo), eq(workflowInstances.status, 'pending'))).limit(1);
     if (existing) return { instanceId: Number(existing.id), status: existing.status, currentStep: existing.currentStep ?? 0, autoApproved: false };
     const steps = await this.steps(Number(def.id));
+    const context = args.context ?? {};
     // an ACTIVE definition must always require at least one approval — if a (maker-supplied, optional)
     // amount engages no step by threshold, fall back to the lowest step so the chain can't be skipped.
-    const engaged = this.firstEngaged(steps, args.amount, 0) ?? [...steps].sort((a, b) => a.stepNo - b.stepNo)[0] ?? null;
+    const engaged = this.firstEngaged(steps, args.amount, context, 0) ?? [...steps].sort((a, b) => a.stepNo - b.stepNo)[0] ?? null;
     const status = engaged ? 'pending' : 'approved';
-    const [inst] = await db.insert(workflowInstances).values({ tenantId: args.tenantId ?? null, definitionId: Number(def.id), docType: args.docType, docNo: args.docNo, amount: String(args.amount), createdBy: args.createdBy, status, currentStep: engaged ? engaged.stepNo : 0, closedAt: engaged ? null : new Date() }).returning({ id: workflowInstances.id });
+    const [inst] = await db.insert(workflowInstances).values({ tenantId: args.tenantId ?? null, definitionId: Number(def.id), docType: args.docType, docNo: args.docNo, amount: String(args.amount), createdBy: args.createdBy, status, currentStep: engaged ? engaged.stepNo : 0, context, dueAt: engaged ? this.dueFor(engaged, def) : null, closedAt: engaged ? null : new Date() }).returning({ id: workflowInstances.id });
     return { instanceId: Number(inst.id), status, currentStep: engaged ? engaged.stepNo : 0, autoApproved: !engaged };
   }
 
@@ -97,10 +134,14 @@ export class WorkflowService {
     if (i && i.status === 'rejected') throw new ForbiddenException({ code: 'WORKFLOW_REJECTED', message: `${docType} ${docNo} was rejected`, messageTh: 'เอกสารถูกปฏิเสธ' });
   }
 
-  // eligibility for a step: direct (user/role) match
-  private eligible(step: any, username: string, role: string) {
-    if (step.approverUser) return username === step.approverUser;
-    if (step.approverRole) return role === step.approverRole;
+  // eligibility for a step: direct (user/role) match — plus the escalation fallback once the SLA has lapsed
+  private eligible(step: any, username: string, role: string, escalated = false) {
+    if (step.approverUser && username === step.approverUser) return true;
+    if (step.approverRole && role === step.approverRole) return true;
+    if (escalated) {
+      if (step.escalateToUser && username === step.escalateToUser) return true;
+      if (step.escalateToRole && role === step.escalateToRole) return true;
+    }
     return false;
   }
   private async roleOf(username: string): Promise<string | null> {
@@ -109,14 +150,14 @@ export class WorkflowService {
     return u?.role ?? null;
   }
   // resolve the effective approver: direct, or via an active delegation whose from_user is eligible
-  private async resolveActor(step: any, user: JwtUser): Promise<{ ok: boolean; onBehalfOf: string | null }> {
-    if (this.eligible(step, user.username, user.role)) return { ok: true, onBehalfOf: null };
+  private async resolveActor(step: any, user: JwtUser, escalated = false): Promise<{ ok: boolean; onBehalfOf: string | null }> {
+    if (this.eligible(step, user.username, user.role, escalated)) return { ok: true, onBehalfOf: null };
     const db = this.db as any;
     const today = ymd();
     const dels = await db.select().from(approvalDelegations).where(and(eq(approvalDelegations.toUser, user.username), eq(approvalDelegations.active, true), sql`${approvalDelegations.fromDate} <= ${today}`, sql`${approvalDelegations.toDate} >= ${today}`));
     for (const d of dels) {
       const fromRole = await this.roleOf(d.fromUser);
-      if (this.eligible(step, d.fromUser, fromRole ?? '')) return { ok: true, onBehalfOf: d.fromUser };
+      if (this.eligible(step, d.fromUser, fromRole ?? '', escalated)) return { ok: true, onBehalfOf: d.fromUser };
     }
     return { ok: false, onBehalfOf: null };
   }
@@ -130,8 +171,9 @@ export class WorkflowService {
     const steps = await this.steps(Number(inst.definitionId));
     const step = steps.find((s: any) => s.stepNo === inst.currentStep);
     if (!step) throw new BadRequestException({ code: 'NO_STEP', message: 'No active step', messageTh: 'ไม่พบขั้นอนุมัติ' });
-    // eligibility (direct OR via delegation) + maker-checker on the EFFECTIVE approver + configurable SoD.
-    const who = await this.resolveActor(step, user);
+    // eligibility (direct OR via delegation, plus the escalation fallback once SLA-lapsed) + maker-checker
+    // on the EFFECTIVE approver + configurable SoD.
+    const who = await this.resolveActor(step, user, !!inst.escalated);
     if (!who.ok) throw new ForbiddenException({ code: 'NOT_AN_APPROVER', message: 'You are not an approver for this step', messageTh: 'คุณไม่มีสิทธิ์อนุมัติขั้นนี้' });
     // maker-checker (always on): NEITHER the caller NOR the person they act on behalf of may be the creator
     // (closes the "delegate the approval back to yourself" bypass).
@@ -148,8 +190,9 @@ export class WorkflowService {
     const approversAtStep = await db.select({ actor: approvalActions.actor }).from(approvalActions).where(and(eq(approvalActions.instanceId, instanceId), eq(approvalActions.stepNo, inst.currentStep), eq(approvalActions.decision, 'approve')));
     const distinct = new Set(approversAtStep.map((a: any) => a.actor)).size;
     if (distinct < (step.allOfN ?? 1)) return { status: 'pending', currentStep: inst.currentStep };
-    const next = this.firstEngaged(steps, n(inst.amount), Number(inst.currentStep));
-    if (next) { await db.update(workflowInstances).set({ currentStep: next.stepNo }).where(eq(workflowInstances.id, instanceId)); return { status: 'pending', currentStep: next.stepNo }; }
+    const def = await this.defById(Number(inst.definitionId));
+    const next = this.firstEngaged(steps, n(inst.amount), (inst.context as any) ?? {}, Number(inst.currentStep));
+    if (next) { await db.update(workflowInstances).set({ currentStep: next.stepNo, dueAt: this.dueFor(next, def), escalated: false, lastRemindedAt: null }).where(eq(workflowInstances.id, instanceId)); return { status: 'pending', currentStep: next.stepNo }; }
     await db.update(workflowInstances).set({ status: 'approved', closedAt: new Date() }).where(eq(workflowInstances.id, instanceId));
     return { status: 'approved', currentStep: inst.currentStep };
   }
@@ -159,7 +202,36 @@ export class WorkflowService {
     const [i] = await db.select().from(workflowInstances).where(eq(workflowInstances.id, id)).limit(1);
     if (!i) throw new NotFoundException({ code: 'INSTANCE_NOT_FOUND', message: 'Not found', messageTh: 'ไม่พบรายการ' });
     const actions = await db.select().from(approvalActions).where(eq(approvalActions.instanceId, id)).orderBy(asc(approvalActions.actedAt));
-    return { id: Number(i.id), doc_type: i.docType, doc_no: i.docNo, amount: n(i.amount), created_by: i.createdBy, status: i.status, current_step: i.currentStep, actions: actions.map((a: any) => ({ step_no: a.stepNo, actor: a.actor, on_behalf_of: a.onBehalfOf, decision: a.decision, comment: a.comment, acted_at: a.actedAt })) };
+    const overdue = i.status === 'pending' && i.dueAt != null && new Date(i.dueAt).getTime() < Date.now();
+    return { id: Number(i.id), doc_type: i.docType, doc_no: i.docNo, amount: n(i.amount), created_by: i.createdBy, status: i.status, current_step: i.currentStep, context: i.context ?? {}, due_at: i.dueAt, overdue, escalated: !!i.escalated, actions: actions.map((a: any) => ({ step_no: a.stepNo, actor: a.actor, on_behalf_of: a.onBehalfOf, decision: a.decision, comment: a.comment, acted_at: a.actedAt })) };
+  }
+
+  // ── Escalation / SLA sweep ──
+  // Cron-callable: find pending instances past their SLA deadline, flag them escalated (enabling the step's
+  // escalation fallback approver to act), and drop a reminder notification to that fallback (or the step's
+  // approver role). Idempotent within `remindEveryHours` so re-runs don't spam.
+  async runEscalations(user: JwtUser, remindEveryHours = 12) {
+    const db = this.db as any;
+    const now = Date.now();
+    const pend = await db.select().from(workflowInstances).where(eq(workflowInstances.status, 'pending'));
+    let escalated = 0, reminded = 0;
+    for (const i of pend) {
+      if (!i.dueAt || new Date(i.dueAt).getTime() >= now) continue;     // not past SLA
+      const steps = await this.steps(Number(i.definitionId));
+      const step = steps.find((s: any) => s.stepNo === i.currentStep);
+      if (!step) continue;
+      const recently = i.lastRemindedAt && (now - new Date(i.lastRemindedAt).getTime()) < remindEveryHours * 3600 * 1000;
+      if (recently) continue;
+      if (!i.escalated) escalated++;
+      // notify the escalation target role (fallback role → step approver role)
+      const targetRole = step.escalateToRole ?? step.approverRole ?? null;
+      if (targetRole) {
+        await db.insert(notifications).values({ targetTenantId: i.tenantId, targetRole, message: `รออนุมัติเกินกำหนด: ${i.docType} ${i.docNo} (ขั้น ${i.currentStep})`, messageEn: `Approval overdue: ${i.docType} ${i.docNo} (step ${i.currentStep})` });
+        reminded++;
+      }
+      await db.update(workflowInstances).set({ escalated: true, lastRemindedAt: new Date() }).where(eq(workflowInstances.id, i.id));
+    }
+    return { scanned: pend.length, escalated, reminded };
   }
 
   // instances pending at a step this user can act on (direct or delegated), excluding their own docs
@@ -172,9 +244,12 @@ export class WorkflowService {
       const steps = await this.steps(Number(i.definitionId));
       const step = steps.find((s: any) => s.stepNo === i.currentStep);
       if (!step) continue;
-      const who = await this.resolveActor(step, user);
+      const who = await this.resolveActor(step, user, !!i.escalated);
       // hide docs the user would only be able to approve as the maker (direct or via delegation-from-creator)
-      if (who.ok && (who.onBehalfOf ?? user.username) !== i.createdBy) items.push({ instance_id: Number(i.id), doc_type: i.docType, doc_no: i.docNo, amount: n(i.amount), current_step: i.currentStep, created_by: i.createdBy, on_behalf_of: who.onBehalfOf });
+      if (who.ok && (who.onBehalfOf ?? user.username) !== i.createdBy) {
+        const overdue = i.dueAt != null && new Date(i.dueAt).getTime() < Date.now();
+        items.push({ instance_id: Number(i.id), doc_type: i.docType, doc_no: i.docNo, amount: n(i.amount), current_step: i.currentStep, created_by: i.createdBy, on_behalf_of: who.onBehalfOf, due_at: i.dueAt, overdue, escalated: !!i.escalated });
+      }
     }
     return { items };
   }

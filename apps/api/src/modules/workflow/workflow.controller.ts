@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Delete, Param, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { WorkflowService } from './workflow.service';
 
-const StepBody = z.object({ step_no: z.number().int().positive(), approver_role: z.string().optional(), approver_user: z.string().optional(), min_amount: z.number().nonnegative().optional(), all_of_n: z.number().int().positive().optional(), name: z.string().optional() });
-const DefinitionBody = z.object({ doc_type: z.string().min(1), name: z.string().min(1), steps: z.array(StepBody).min(1) });
+const StepBody = z.object({ step_no: z.number().int().positive(), approver_role: z.string().optional(), approver_user: z.string().optional(), min_amount: z.number().nonnegative().optional(), all_of_n: z.number().int().positive().optional(), name: z.string().optional(), sla_hours: z.number().int().positive().optional(), escalate_to_role: z.string().optional(), escalate_to_user: z.string().optional(), match_key: z.string().optional(), match_value: z.string().optional() });
+const DefinitionBody = z.object({ doc_type: z.string().min(1), name: z.string().min(1), sla_hours: z.number().int().positive().optional(), steps: z.array(StepBody).min(1) });
+const UpdateDefinitionBody = z.object({ name: z.string().optional(), sla_hours: z.number().int().positive().optional(), steps: z.array(StepBody).min(1).optional() });
 const ActiveBody = z.object({ active: z.boolean() });
 const ActBody = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().optional() });
 const DelegationBody = z.object({ to_user: z.string().min(1), from_date: z.string().min(1), to_date: z.string().min(1) });
@@ -20,6 +21,12 @@ export class WorkflowController {
   listDefinitions(@CurrentUser() u: JwtUser) { return this.svc.listDefinitions(u); }
   @Patch('definitions/:id') @Permissions('masterdata')
   setDefinitionActive(@Param('id') id: string, @Body(new ZodValidationPipe(ActiveBody)) b: { active: boolean }, @CurrentUser() u: JwtUser) { return this.svc.setDefinitionActive(+id, b.active, u); }
+  @Put('definitions/:id') @Permissions('masterdata')
+  updateDefinition(@Param('id') id: string, @Body(new ZodValidationPipe(UpdateDefinitionBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.updateDefinition(+id, b, u); }
+
+  // SLA / escalation sweep — cron-callable (flags overdue instances + reminds the escalation approver)
+  @Post('run-escalations') @Permissions('masterdata', 'exec', 'approvals')
+  runEscalations(@CurrentUser() u: JwtUser) { return this.svc.runEscalations(u); }
 
   @Get('my-approvals') @Permissions('approvals')
   myApprovals(@CurrentUser() u: JwtUser) { return this.svc.myApprovals(u); }

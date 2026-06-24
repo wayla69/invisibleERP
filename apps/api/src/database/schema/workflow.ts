@@ -1,7 +1,7 @@
 // Phase 15 — Generic Approval Workflow engine + Segregation of Duties (SoD). One polymorphic engine:
 // documents bind by (doc_type, doc_no) only; modules never fork. The engine GATES other modules' postings
 // (it posts NOTHING to the GL itself). Every table carries tenant_id → RLS-isolated by the 0002 loop.
-import { pgTable, bigserial, bigint, text, numeric, integer, boolean, timestamp, date, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, boolean, timestamp, date, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // per-tenant, per-doc_type workflow config
@@ -10,6 +10,7 @@ export const workflowDefinitions = pgTable('workflow_definitions', {
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   docType: text('doc_type').notNull(),          // 'PR' | 'PO' | 'AP_PAY' | 'JE' | ...
   name: text('name').notNull(),
+  slaHours: integer('sla_hours'),               // default SLA for steps unless overridden (Phase 2)
   active: boolean('active').default(true),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -26,6 +27,11 @@ export const workflowSteps = pgTable('workflow_steps', {
   minAmount: numeric('min_amount', { precision: 14, scale: 2 }).default('0'),
   allOfN: integer('all_of_n').default(1),
   name: text('name'),
+  slaHours: integer('sla_hours'),               // step SLA override (else definition's) (Phase 2)
+  escalateToRole: text('escalate_to_role'),     // fallback approver once past SLA — role…
+  escalateToUser: text('escalate_to_user'),     // …or user
+  matchKey: text('match_key'),                  // dimension condition: engage only when context[matchKey] === matchValue
+  matchValue: text('match_value'),
 }, (t) => ({ byDef: uniqueIndex('uq_wfstep_def_no').on(t.definitionId, t.stepNo) }));
 
 // one runtime instance per submitted document
@@ -39,6 +45,10 @@ export const workflowInstances = pgTable('workflow_instances', {
   createdBy: text('created_by').notNull(),       // the maker — SoD anchor
   status: text('status').notNull().default('pending'),  // pending | approved | rejected | cancelled
   currentStep: integer('current_step').default(0),
+  context: jsonb('context'),                     // dimension values (cost_center/category/branch/…) (Phase 2)
+  dueAt: timestamp('due_at', { withTimezone: true }),       // current step's SLA deadline
+  escalated: boolean('escalated').default(false),
+  lastRemindedAt: timestamp('last_reminded_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
 }, (t) => ({ byDoc: index('idx_wfinst_doc').on(t.tenantId, t.docType, t.docNo), byStatus: index('idx_wfinst_status').on(t.tenantId, t.status) }));

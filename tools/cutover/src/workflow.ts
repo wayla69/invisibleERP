@@ -155,6 +155,40 @@ async function main() {
   const apX = await inj('PATCH', `/api/procurement/prs/${prX.json.pr_no}/approve`, admin, { approve: true }); // legacy Admin path
   ok('Unknown instance → 404; no active def → autoApproved passthrough (legacy approve)', unknown.status === 404 && !instX && apX.json.status === 'Approved', `unknown=${unknown.status} inst=${!!instX} legacy=${apX.json.status}`);
 
+  // ── Phase 2: dimension routing + wire PO + SLA escalation + no-code builder ──
+  // (placed BEFORE the SoD PERM_PAIR rule below so mgr1/plan1 approvals aren't blocked by that test's rule)
+  const poDef = await inj('POST', '/api/workflow/definitions', mgr1, { doc_type: 'PO', name: 'PO approval', steps: [
+    { step_no: 1, approver_role: 'Planner', min_amount: 0, match_key: 'vendor', match_value: 'ACME' },
+    { step_no: 2, approver_role: 'Procurement', min_amount: 0, match_key: 'vendor', match_value: 'OTHER' },
+  ] });
+  ok('Phase2 builder: PO workflow with a dimension step created', (poDef.status === 200 || poDef.status === 201) && !!poDef.json.id, `${poDef.status}`);
+  const poAcme = await inj('POST', '/api/procurement/pos', proc1, { vendor_name: 'ACME', items: [{ item_id: 'A', order_qty: 1, unit_price: 100 }] });
+  const poiA = await instOf(poAcme.json.po_no);
+  ok('Phase2 dimension routing: PO to vendor ACME engages the matched step (Planner, step 1)', poiA?.status === 'pending' && poiA?.current_step === 1, JSON.stringify(poiA));
+  const poOther = await inj('POST', '/api/procurement/pos', proc1, { vendor_name: 'OTHER', items: [{ item_id: 'A', order_qty: 1, unit_price: 100 }] });
+  const poiO = await instOf(poOther.json.po_no);
+  ok('Phase2 dimension routing: a non-matching vendor falls through to the default step (step 2)', poiO?.status === 'pending' && poiO?.current_step === 2, JSON.stringify(poiO));
+  const poApprove = await inj('PATCH', `/api/procurement/pos/${poAcme.json.po_no}/approve`, plan1, { approve: true });
+  ok('Phase2 wire PO: approval routes through the engine (Planner clears step 1 → Approved)', poApprove.json.status === 'Approved', JSON.stringify(poApprove.json));
+
+  const slaDef = await inj('POST', '/api/workflow/definitions', mgr1, { doc_type: 'PR', name: 'PR SLA', sla_hours: 24, steps: [{ step_no: 1, approver_role: 'Procurement', min_amount: 0, escalate_to_role: 'Planner' }] });
+  ok('Phase2 SLA: workflow with sla_hours created', slaDef.status === 200 || slaDef.status === 201, `${slaDef.status}`);
+  const slaPr = await mkPr(proc1, 5000);
+  const slaInst = await instOf(slaPr.json.pr_no);
+  const hasDue = (await pg.query(`SELECT due_at IS NOT NULL AS has FROM workflow_instances WHERE id=${slaInst.id}`)).rows as any[];
+  ok('Phase2 SLA: a new instance is stamped with an SLA deadline (due_at)', hasDue[0]?.has === true, JSON.stringify(hasDue[0]));
+  await pg.query(`UPDATE workflow_instances SET due_at = now() - interval '1 hour' WHERE id=${slaInst.id}`); // force overdue
+  const esc = await inj('POST', '/api/workflow/run-escalations', admin, {});
+  const escRow = (await pg.query(`SELECT escalated FROM workflow_instances WHERE id=${slaInst.id}`)).rows as any[];
+  const notif = (await pg.query(`SELECT count(*)::int n FROM notifications WHERE message_en LIKE 'Approval overdue%'`)).rows as any[];
+  ok('Phase2 escalation: sweep flags overdue instance escalated + writes a reminder notification', (esc.json.escalated ?? 0) >= 1 && escRow[0]?.escalated === true && Number(notif[0].n) >= 1, JSON.stringify({ esc: esc.json, escalated: escRow[0]?.escalated, notif: notif[0].n }));
+  const escAct = await inj('POST', `/api/workflow/instances/${slaInst.id}/act`, plan1, { decision: 'approve' }); // Planner = escalation fallback
+  ok('Phase2 escalation: the fallback approver (Planner) can act once escalated', escAct.json.status === 'approved', JSON.stringify(escAct.json));
+
+  const putRes = await inj('PUT', `/api/workflow/definitions/${poDef.json.id}`, mgr1, { steps: [{ step_no: 1, approver_role: 'Procurement', min_amount: 0 }] });
+  const poDefAfter = (await inj('GET', '/api/workflow/definitions', mgr1)).json.definitions.find((d: any) => d.id === poDef.json.id);
+  ok('Phase2 builder: PUT replaces a definition steps (2 → 1)', (putRes.status === 200 || putRes.status === 201) && poDefAfter?.steps?.length === 1, `${putRes.status} steps=${poDefAfter?.steps?.length}`);
+
   // ── 13. SoD PERM_PAIR rule + violation report ──
   await inj('POST', '/api/sod/rules', mgr1, { name: 'PO maker vs approver', kind: 'PERM_PAIR', perm_a: 'procurement', perm_b: 'approvals' });
   const viol = await inj('GET', '/api/sod/violations', admin);
