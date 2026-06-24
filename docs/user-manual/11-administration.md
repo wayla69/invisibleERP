@@ -217,5 +217,30 @@ choose.
 
 ---
 
+## 11. Audit trail (who changed what, and when)
+
+**Screen:** `/audit` (**ร่องรอยการตรวจสอบ**) · **Required permission:** `users`.
+
+Every change in the system is recorded in a **tamper-proof** log — it can be read
+and exported, but never edited or deleted (a database guard enforces this). Use it
+to investigate an issue or to give an auditor evidence of activity.
+
+1. Go to **Audit trail** (`/audit`).
+2. **Filter** by user (actor), action (e.g. a route like `/api/orders`), status
+   (success / fail), and a **date range**, then **ค้นหา (Search)**.
+3. Page through the results; each row shows the time, user, action, status, IP and
+   request id.
+4. Click the **download** button to **export the filtered set to CSV** for your
+   records or an auditor.
+
+**Expected result:** A searchable, exportable history of changes. You only ever see
+your **own company's** events (entries are private to your tenant); HQ/Admin sees
+across the group.
+
+> **Note:** The log is **append-only** — entries can't be altered or removed, which
+> is what makes it acceptable as audit evidence.
+
+---
+
 **Next:** [Approvals](./10-approvals.md) ·
 [Troubleshooting & FAQ](./99-troubleshooting-faq.md)
