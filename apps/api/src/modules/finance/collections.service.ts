@@ -1,8 +1,9 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { arInvoices, arDunningLog, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
+import { MessagingService } from '../messaging/messaging.service';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -12,6 +13,38 @@ export type DunningStage = (typeof DUNNING_STAGES)[number];
 const STAGE_INDEX = new Map<string, number>(DUNNING_STAGES.map((s, i) => [s, i]));
 
 export interface DunningDto { stage: DunningStage; channel?: string; promise_to_pay_date?: string; notes?: string }
+
+// Channels the dunning notice can actually be DISPATCHED on (others — phone/letter — are recorded as a
+// manual contact). Matches the messaging gateway's MessageChannel set.
+const DISPATCH_CHANNELS = new Set(['email', 'sms', 'line']);
+
+// Per-stage dunning notice (TH primary, EN secondary). Escalating tone; legal = final demand.
+function dunningMessage(stage: DunningStage, ctx: { party: string; invoiceNo: string; outstanding: number; daysOverdue: number; dueDate: string | null }): string {
+  const amt = ctx.outstanding.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const head = `เรียน ${ctx.party} | ใบแจ้งหนี้ ${ctx.invoiceNo} ยอดค้างชำระ ${amt} บาท (เกินกำหนด ${ctx.daysOverdue} วัน)`;
+  const tail: Record<DunningStage, string> = {
+    reminder: 'ขอเรียนเตือนการชำระเงิน หากชำระแล้วขออภัยมา ณ ที่นี้ / Friendly reminder — please disregard if already paid.',
+    first_notice: 'กรุณาดำเนินการชำระโดยเร็ว / Please arrange payment at your earliest convenience.',
+    second_notice: 'บัญชีของท่านเกินกำหนดชำระ กรุณาชำระทันที / Your account is overdue — immediate payment is requested.',
+    final_notice: 'หนังสือทวงถามครั้งสุดท้าย กรุณาชำระภายใน 7 วัน เพื่อหลีกเลี่ยงการระงับเครดิต / FINAL NOTICE — pay within 7 days to avoid a credit hold.',
+    legal: 'ยอดค้างชำระเกินกำหนดอย่างมีนัยสำคัญ บัญชีอาจถูกส่งดำเนินคดี / Seriously overdue — this account may be referred for legal collection.',
+  };
+  return `${head}. ${tail[stage]}`;
+}
+
+// Pick the channel + recipient for a dunning notice from the customer's contact details. 'auto' (used by
+// the sweep) prefers email, then SMS. Explicit channels resolve their own contact; phone/letter carry the
+// phone for the agent but are not auto-dispatched.
+function resolveChannel(req: string, cust: { email?: string | null; phone?: string | null } | undefined): { channel: string; recipient: string | null } {
+  if (req === 'email') return { channel: 'email', recipient: cust?.email ?? null };
+  if (req === 'sms') return { channel: 'sms', recipient: cust?.phone ?? null };
+  if (req === 'line') return { channel: 'line', recipient: null }; // no LINE id on the customer master
+  if (req === 'phone' || req === 'letter') return { channel: req, recipient: cust?.phone ?? null };
+  // 'auto' / unknown → best deliverable channel
+  if (cust?.email) return { channel: 'email', recipient: cust.email };
+  if (cust?.phone) return { channel: 'sms', recipient: cust.phone };
+  return { channel: 'email', recipient: null };
+}
 
 // Days-past-due beyond which a customer is in default and put on credit hold. Single-sourced here so the
 // collections `on_hold` decision and the order-entry credit gate (pos.service) never drift apart.
@@ -37,6 +70,9 @@ export class CollectionsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
+    // Optional so the writeflow/partial harnesses can construct without the messaging graph; the full app
+    // always provides it (MessagingModule) so dunning notices are actually dispatched.
+    @Optional() private readonly messaging?: MessagingService,
   ) {}
 
   // ───────────────────── Collections worklist ─────────────────────
@@ -91,15 +127,36 @@ export class CollectionsService {
     if (String(inv.status) === 'Paid') {
       throw new BadRequestException({ code: 'ALREADY_PAID', message: `Invoice ${invoiceNo} is already paid`, messageTh: 'ใบแจ้งหนี้นี้ชำระครบแล้ว' });
     }
-    const outstanding = n(inv.amount) - n(inv.paidAmount);
+    const outstanding = round2(n(inv.amount) - n(inv.paidAmount));
     const daysOverdue = inv.dueDate ? Math.max(0, daysBetween(String(inv.dueDate), ymd())) : 0;
+
+    // Resolve the customer contact + channel, then dispatch the dunning notice (best-effort). Dispatchable
+    // channels (email/sms/line) go through the messaging gateway and capture a delivery status; phone/letter
+    // are recorded as a manual contact for the agent to action offline.
+    const [cust] = inv.tenantId != null
+      ? await db.select({ code: tenants.code, email: tenants.email, phone: tenants.phone }).from(tenants).where(eq(tenants.id, inv.tenantId)).limit(1)
+      : [undefined];
+    const { channel, recipient } = resolveChannel(dto.channel ?? 'auto', cust);
+    let messageStatus = 'not_sent';
+    let messageRecipient: string | null = null;
+    if (DISPATCH_CHANNELS.has(channel) && this.messaging) {
+      const body = dunningMessage(dto.stage, { party: cust?.code ?? `tenant ${inv.tenantId}`, invoiceNo, outstanding, daysOverdue, dueDate: inv.dueDate ?? null });
+      const res: any = await this.messaging.send({ to: recipient ?? undefined, channel: channel as any, body, campaign: `dunning:${dto.stage}` }, user);
+      messageStatus = res?.status ?? 'failed';
+      messageRecipient = res?.recipient ?? recipient ?? null;
+    } else if (channel === 'phone' || channel === 'letter') {
+      messageStatus = 'manual';
+      messageRecipient = recipient;
+    }
+
     const dunningNo = await this.docNo.nextDaily('DUN');
     await db.insert(arDunningLog).values({
       dunningNo, tenantId: inv.tenantId ?? null, invoiceNo, stage: dto.stage,
-      channel: dto.channel ?? 'email', daysOverdue, outstanding: String(round2(outstanding)),
-      promiseToPayDate: dto.promise_to_pay_date ?? null, notes: dto.notes ?? null, actionedBy: user.username,
+      channel, daysOverdue, outstanding: String(outstanding),
+      promiseToPayDate: dto.promise_to_pay_date ?? null, notes: dto.notes ?? null,
+      messageStatus, messageRecipient, actionedBy: user.username,
     });
-    return { dunning_no: dunningNo, invoice_no: invoiceNo, stage: dto.stage, days_overdue: daysOverdue, outstanding: round2(outstanding) };
+    return { dunning_no: dunningNo, invoice_no: invoiceNo, stage: dto.stage, days_overdue: daysOverdue, outstanding, channel, message_status: messageStatus, recipient: messageRecipient };
   }
 
   // ───────────────────── Automated dunning sweep (cron-callable) ─────────────────────
@@ -109,13 +166,14 @@ export class CollectionsService {
   async runDunningSweep(user: JwtUser) {
     const wl = await this.worklist({ onlyOverdue: true });
     const actor = { ...user, username: user?.username ? `${user.username} (sweep)` : 'system' } as JwtUser;
-    const advanced: { invoice_no: string; stage: DunningStage; dunning_no: string }[] = [];
+    const advanced: { invoice_no: string; stage: DunningStage; dunning_no: string; channel: string; message_status: string }[] = [];
     for (const r of wl.rows) {
       if (!r.escalate || !r.recommended_stage) continue;
       const res = await this.recordDunning(r.invoice_no, { stage: r.recommended_stage, channel: 'auto', notes: 'Auto-advanced by dunning sweep' }, actor);
-      advanced.push({ invoice_no: r.invoice_no, stage: r.recommended_stage, dunning_no: res.dunning_no });
+      advanced.push({ invoice_no: r.invoice_no, stage: r.recommended_stage, dunning_no: res.dunning_no, channel: res.channel, message_status: res.message_status });
     }
-    return { as_of: wl.as_of, scanned: wl.rows.length, advanced: advanced.length, actions: advanced };
+    const sent = advanced.filter((a) => a.message_status === 'sent').length;
+    return { as_of: wl.as_of, scanned: wl.rows.length, advanced: advanced.length, notices_sent: sent, actions: advanced };
   }
 
   // Full dunning history for one invoice (newest first).
@@ -124,7 +182,7 @@ export class CollectionsService {
     const rows = await db.select().from(arDunningLog).where(eq(arDunningLog.invoiceNo, invoiceNo)).orderBy(desc(arDunningLog.createdAt), desc(arDunningLog.id));
     return {
       invoice_no: invoiceNo, count: rows.length,
-      actions: rows.map((r: any) => ({ dunning_no: r.dunningNo, stage: r.stage, channel: r.channel, days_overdue: r.daysOverdue, outstanding: n(r.outstanding), promise_to_pay_date: r.promiseToPayDate, notes: r.notes, actioned_by: r.actionedBy, created_at: r.createdAt })),
+      actions: rows.map((r: any) => ({ dunning_no: r.dunningNo, stage: r.stage, channel: r.channel, days_overdue: r.daysOverdue, outstanding: n(r.outstanding), promise_to_pay_date: r.promiseToPayDate, notes: r.notes, message_status: r.messageStatus, recipient: r.messageRecipient, actioned_by: r.actionedBy, created_at: r.createdAt })),
     };
   }
 

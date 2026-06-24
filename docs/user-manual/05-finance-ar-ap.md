@@ -64,16 +64,22 @@ escalates with age:
    (email / phone / letter / sms), and optionally add a **promise-to-pay date** and
    notes.
 3. **Expected result:** A dunning record (`DUN-…`) is saved and the invoice's
-   **current stage** advances; the full history is kept as the collections audit
-   trail. (Recording an action against an already-paid invoice returns
-   `ALREADY_PAID`.)
+   **current stage** advances. **The reminder is also sent to the customer** — an
+   email/SMS with the invoice number, amount overdue, days late and an escalating
+   message (the `legal` stage is a final demand) — using the email/phone on the
+   **customer's master record**. The toast confirms delivery (e.g. "ส่งแจ้งเตือนแล้ว").
+   *Phone* / *letter* channels are just logged as a manual contact (nothing is sent).
+   If the customer has no email/phone on file, the action is still recorded but the
+   send is marked failed. The full history (incl. delivery status) is the audit trail.
+   (Recording an action against an already-paid invoice returns `ALREADY_PAID`.)
 
 #### Run dunning automatically
 
 Click **ทวงถามอัตโนมัติ (Run sweep)** at the top of the Collections section (or call
 `POST /api/finance/ar/collections/sweep` from a scheduler). The sweep records the
 **recommended** dunning action on every overdue invoice that has fallen behind its
-stage — marked as system-actioned (channel `auto`).
+stage **and sends each reminder** (auto-picking email, else SMS, from the customer's
+contact) — marked as system-actioned.
 
 **Expected result:** The button reports how many invoices it advanced. Running it
 again right away advances **nothing** (it's idempotent — no customer gets dunned
