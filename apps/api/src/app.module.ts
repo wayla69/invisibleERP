@@ -51,6 +51,7 @@ import { MessagingModule } from './modules/messaging/messaging.module';
 import { PrintingModule } from './modules/printing/printing.module';
 import { PeripheralsModule } from './modules/peripherals/peripherals.module';
 import { PaymentsDepthModule } from './modules/payments-depth/payments-depth.module';
+import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
 import { PlanningModule } from './modules/planning/planning.module';
 import { ConsolidationModule } from './modules/consolidation/consolidation.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
@@ -134,6 +135,7 @@ import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
     PrintingModule,
     PeripheralsModule,
     PaymentsDepthModule,
+    CustomFieldsModule,
     PlanningModule,
     ConsolidationModule,
     ReconciliationModule,

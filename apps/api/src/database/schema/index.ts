@@ -63,3 +63,4 @@ export * from './demand';
 export * from './printing';
 export * from './peripherals';
 export * from './payments-depth';
+export * from './custom-fields';

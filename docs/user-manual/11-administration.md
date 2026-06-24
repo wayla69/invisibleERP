@@ -164,5 +164,32 @@ configuration and bills of materials.
 
 ---
 
+## 9. Custom fields (extend records without code)
+
+**Screen:** `/custom-fields` (**ฟิลด์กำหนดเอง**) · **Required permission:**
+`masterdata` / `users` / `exec` (to define fields).
+
+Add your own fields to any record type — customers, items, orders, vendors,
+journals and more — without a developer.
+
+1. **Pick the record type** (entity) at the top.
+2. **Add a field:** give it a name, a **type** (text, number, date, yes/no, or a
+   dropdown **list** of choices), and tick **required** if it must be filled.
+3. The field then appears on that record type's screens (a *Custom fields* panel),
+   where staff fill in values.
+
+The system **validates** entries against the field's type — a number field only
+accepts numbers, a date only accepts dates, and a list field only accepts one of
+its choices; a required field can't be left blank. Fields and their values are
+**private to your company** and every change is recorded in the audit log.
+
+**Expected result:** Your team captures the extra information your business needs,
+consistently and validated — no custom development required.
+
+> **Troubleshooting:** “REQUIRED_FIELD” — a required custom field was left blank;
+> “BAD_OPTION” — the value isn't one of the dropdown's choices.
+
+---
+
 **Next:** [Approvals](./10-approvals.md) ·
 [Troubleshooting & FAQ](./99-troubleshooting-faq.md)

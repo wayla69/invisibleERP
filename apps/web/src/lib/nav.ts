@@ -43,6 +43,7 @@ import {
   ScanLine,
   Settings,
   ShieldAlert,
+  SlidersHorizontal,
   ShoppingBag,
   ShoppingCart,
   Star,
@@ -225,6 +226,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     workspace: BOTH, // settings/users/master-data are reachable from either workspace
     items: [
       { label: 'ข้อมูลหลัก (Master Data)', href: '/master-data', icon: Database, perms: ['masterdata'] },
+      { label: 'ฟิลด์กำหนดเอง (Custom fields)', href: '/custom-fields', icon: SlidersHorizontal, perms: ['masterdata', 'users', 'exec'] },
       { label: 'จัดการผู้ใช้', href: '/admin/users', icon: UserCog, perms: ['users'] },
       { label: 'ตั้งค่ากิจการ', href: '/setup', icon: BadgeCheck, perms: ['users'] },
       { label: 'แพ็กเกจ', href: '/billing', icon: CreditCard, perms: ['users'] },

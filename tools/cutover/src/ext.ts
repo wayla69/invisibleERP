@@ -40,6 +40,9 @@ async function main() {
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
   await db.insert(s.users).values({ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
+  // seed permissions + role→perm map so non-Admin (RLS-scoped) users can be permission-checked
+  await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
+  for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1.0', bahtPerPoint: '0.1' }).onConflictDoNothing();
   for (const [id, desc, qty] of [['A', 'Apple', 5], ['B', 'Banana', -2]] as [string, string, number][]) {
     await db.insert(s.items).values({ itemId: id, itemDescription: desc, uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
@@ -106,6 +109,38 @@ async function main() {
   // ── SSE chat route exists (no AI key → stream yields a note, not 404) ──
   const sse = await inj('GET', '/api/chat/stream?message=hi', token);
   ok('GET /api/chat/stream exists (not 404)', sse.status !== 404, `status=${sse.status}`);
+
+  // ── custom fields (UDFs) ──
+  // a second tenant + admin to prove isolation
+  await db.insert(s.tenants).values([{ code: 'CF2', name: 'CF Tenant 2' }]).onConflictDoNothing();
+  const cf2 = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'CF2')))[0];
+  // non-Admin role so the request is RLS-scoped (Admin bypasses isolation by design); Warehouse carries 'masterdata'
+  await db.insert(s.users).values({ username: 'cfwh2', passwordHash: await pw.hash('pw2'), role: 'Warehouse', tenantId: cf2.id }).onConflictDoNothing();
+  const token2 = (await inj('POST', '/api/login', undefined, { username: 'cfwh2', password: 'pw2' })).json.token;
+
+  const defText = await inj('POST', '/api/custom-fields/defs', token, { entity: 'customer', label: 'Sales rep', data_type: 'text' });
+  ok('Custom fields: define a text field (label → field_key slug)', (defText.status === 200 || defText.status === 201) && defText.json.field_key === 'sales_rep' && defText.json.entity === 'customer', `${defText.status} ${JSON.stringify(defText.json)}`);
+  await inj('POST', '/api/custom-fields/defs', token, { entity: 'customer', label: 'Credit tier', data_type: 'select', options: ['A', 'B', 'C'], required: true });
+  await inj('POST', '/api/custom-fields/defs', token, { entity: 'customer', label: 'Onboarded', data_type: 'date' });
+  const defs = await inj('GET', '/api/custom-fields/defs?entity=customer', token);
+  ok('Custom fields: list definitions for an entity', (defs.json.fields ?? []).length === 3 && (defs.json.fields ?? []).some((f: any) => f.field_key === 'credit_tier' && f.data_type === 'select' && f.required), `${(defs.json.fields ?? []).length}`);
+
+  const setBad = await inj('PUT', '/api/custom-fields/values', token, { entity: 'customer', record_id: 'CUST-1', values: { sales_rep: 'Anan' } });
+  ok('Custom fields: missing a required field is rejected (400 REQUIRED_FIELD)', setBad.status === 400 && setBad.json.error?.code === 'REQUIRED_FIELD', `${setBad.status} ${setBad.json.error?.code}`);
+  const setOpt = await inj('PUT', '/api/custom-fields/values', token, { entity: 'customer', record_id: 'CUST-1', values: { sales_rep: 'Anan', credit_tier: 'Z' } });
+  ok('Custom fields: an out-of-list select value is rejected (400 BAD_OPTION)', setOpt.status === 400 && setOpt.json.error?.code === 'BAD_OPTION', `${setOpt.status} ${setOpt.json.error?.code}`);
+  const setUnknown = await inj('PUT', '/api/custom-fields/values', token, { entity: 'customer', record_id: 'CUST-1', values: { sales_rep: 'Anan', credit_tier: 'A', nope: 'x' } });
+  ok('Custom fields: an undefined field key is rejected (400 UNKNOWN_FIELD)', setUnknown.status === 400 && setUnknown.json.error?.code === 'UNKNOWN_FIELD', `${setUnknown.status} ${setUnknown.json.error?.code}`);
+  const setOk = await inj('PUT', '/api/custom-fields/values', token, { entity: 'customer', record_id: 'CUST-1', values: { sales_rep: 'Anan', credit_tier: 'A', onboarded: '2026-06-01' } });
+  ok('Custom fields: valid values saved (typed + validated)', (setOk.status === 200 || setOk.status === 201) && setOk.json.values?.credit_tier === 'A', `${setOk.status} ${JSON.stringify(setOk.json.values ?? {})}`);
+  const get = await inj('GET', '/api/custom-fields/values?entity=customer&record_id=CUST-1', token);
+  const repField = (get.json.fields ?? []).find((f: any) => f.field_key === 'sales_rep');
+  const dateField = (get.json.fields ?? []).find((f: any) => f.field_key === 'onboarded');
+  ok('Custom fields: values returned typed alongside their definitions', repField?.value === 'Anan' && dateField?.value === '2026-06-01' && dateField?.data_type === 'date', `${JSON.stringify(get.json.fields ?? []).slice(0, 140)}`);
+  const bulk = await inj('POST', '/api/custom-fields/values/bulk', token, { entity: 'customer', record_ids: ['CUST-1', 'CUST-2'] });
+  ok('Custom fields: bulk value load keys by record (for list views)', bulk.json.records?.['CUST-1']?.sales_rep === 'Anan' && bulk.json.records?.['CUST-2'] === undefined, `${JSON.stringify(bulk.json.records ?? {})}`);
+  const t2defs = await inj('GET', '/api/custom-fields/defs?entity=customer', token2);
+  ok('Custom fields: definitions are tenant-isolated (T2 sees none of T1’s)', (t2defs.json.fields ?? []).length === 0, `T2 defs=${(t2defs.json.fields ?? []).length}`);
 
   await app.close();
   await pg.close();
