@@ -420,7 +420,11 @@ export class DineInService {
   async markPaidAndInvoice(o: any, saleNo: string, user: JwtUser) {
     const db = this.db as any;
     const now = new Date();
-    await db.update(dineInOrders).set({ status: 'paid', saleNo, paidAt: now, closedAt: now }).where(eq(dineInOrders.id, o.id));
+    // snapshot the table's CURRENT room onto the order — keeps per-room revenue accurate even if the table
+    // is later moved to another room (zone lives on the table, not on the historical sale).
+    let zoneId: number | null = null;
+    if (o.tableId) { const [tbl] = await db.select({ zoneId: diningTables.zoneId }).from(diningTables).where(eq(diningTables.id, o.tableId)).limit(1); zoneId = tbl?.zoneId ?? null; }
+    await db.update(dineInOrders).set({ status: 'paid', saleNo, zoneId, paidAt: now, closedAt: now }).where(eq(dineInOrders.id, o.id));
     if (o.tableId) await db.update(diningTables).set({ status: 'cleaning', updatedAt: now }).where(eq(diningTables.id, o.tableId));
     if (o.sessionId) await db.update(tableSessions).set({ status: 'closed', closedAt: now, saleNo }).where(eq(tableSessions.id, o.sessionId));
     return this.issueAbbreviated(saleNo, user);

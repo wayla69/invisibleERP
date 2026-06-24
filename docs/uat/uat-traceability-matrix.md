@@ -146,6 +146,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-108 | Floor-plan editor UI smoke (Playwright) | Feature (floor-plan UI) | 20 §6 |
 | UAT-O2C-109 | Revenue attributed by room | Feature (floor-plan layout) | 20 §6 |
 | UAT-O2C-110 | Room revenue is tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
+| UAT-O2C-111 | Revenue snapshot survives a table move | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-112 | Deleted room keeps its past takings | Feature (floor-plan layout) | 20 §6 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
