@@ -687,6 +687,20 @@
       "when": 1783430000000,
       "tag": "0096_api_key_tier",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1783430000001,
+      "tag": "0085_floor_zone_geometry",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1783430000002,
+      "tag": "0088_dine_in_order_zone",
+      "breakpoints": true
     }
   ]
 }
