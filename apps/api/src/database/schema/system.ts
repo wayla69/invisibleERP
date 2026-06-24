@@ -103,6 +103,26 @@ export const auditLog = pgTable(
   }),
 );
 
+// ITGC-AC-14 — field-level before/after change log (see migration 0112). Populated by DB triggers on the
+// core financial tables; append-only. `tenant_ref` (not `tenant_id`) intentionally opts out of the RLS loop —
+// reads are admin-gated and tenant-scoped in the audit-viewer service. App code never writes this directly.
+export const dataChangeLog = pgTable('data_change_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  ts: timestamp('ts', { withTimezone: true }).defaultNow(),
+  tableName: text('table_name'),
+  op: text('op'), // INSERT | UPDATE | DELETE
+  rowPk: text('row_pk'),
+  tenantRef: bigint('tenant_ref', { mode: 'number' }),
+  actor: text('actor'),
+  oldValue: jsonb('old_value'),
+  newValue: jsonb('new_value'),
+  changedColumns: text('changed_columns').array(),
+}, (t) => ({
+  byRow: index('idx_dcl_row').on(t.tableName, t.rowPk),
+  byTenantTs: index('idx_dcl_tenant_ts').on(t.tenantRef, t.ts),
+  byActor: index('idx_dcl_actor').on(t.actor),
+}));
+
 // Public API keys (move #7) — scoped, hashed
 export const apiKeys = pgTable('api_keys', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

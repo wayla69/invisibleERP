@@ -339,6 +339,22 @@ async function main() {
   ok('ITGC-AC-10: audit_log UPDATE blocked by DB trigger (append-only)', updateBlocked, `blocked=${updateBlocked}`);
   ok('ITGC-AC-10: audit_log DELETE blocked by DB trigger (append-only)', deleteBlocked && after === before, `blocked=${deleteBlocked} rows=${after}`);
 
+  // ════════════════════ ITGC-AC-14 — field-level before/after change log (financial tables) ════════════════════
+  // The DB triggers (0112) capture OLD→NEW row images on the financial tables. The AP-PAY flow above mutated
+  // ap_transactions through the app (apclerk created the bill Unpaid; fincon's approval set it Paid), so the
+  // change log must hold both images with the correct actor + changed columns — captured at the DB layer.
+  const apUpd = ((await pg.query(`SELECT actor, old_value->>'status' os, new_value->>'status' ns, changed_columns FROM data_change_log WHERE table_name='ap_transactions' AND op='UPDATE' AND new_value->>'txn_no'='${apNo}' ORDER BY id DESC LIMIT 1`)).rows as any[])[0];
+  ok('ITGC-AC-14: change log captured AP bill OLD→NEW (Unpaid→Paid) with approver + changed columns',
+    !!apUpd && apUpd.actor === 'fincon' && apUpd.os === 'Unpaid' && apUpd.ns === 'Paid' && (apUpd.changed_columns ?? []).includes('paid_amount'),
+    apUpd ? `actor=${apUpd.actor} ${apUpd.os}->${apUpd.ns} cols=${JSON.stringify(apUpd.changed_columns)}` : 'no row');
+  // Surfaced through the admin audit-viewer endpoint (tenant-scoped; Admin sees all).
+  const chgApi = await inj('GET', '/api/admin/audit/changes?table=ap_transactions', admin);
+  ok('ITGC-AC-14: change log exposed via /api/admin/audit/changes with old/new + actor', chgApi.status === 200 && (chgApi.json.rows ?? []).some((r: any) => r.op === 'UPDATE' && r.new_value && r.old_value && r.actor), `n=${(chgApi.json.rows ?? []).length}`);
+  // Append-only: the change log itself cannot be rewritten.
+  let dclBlocked = false;
+  try { await pg.query(`UPDATE data_change_log SET actor='tamper' WHERE id=(SELECT id FROM data_change_log LIMIT 1)`); } catch { dclBlocked = true; }
+  ok('ITGC-AC-14: data_change_log UPDATE blocked by DB trigger (append-only)', dclBlocked, `blocked=${dclBlocked}`);
+
   // ════════════════════ LYL-03 — Loyalty points liability posts to GL (TFRS 15, control acct 2250) ════════════════════
   // Seed a deterministic program: fair value 0.1 baht/point, two ACTIVE members holding 1000 + 500 points
   // (with matching sub-ledger rows so the watermark advances) ⇒ outstanding 1500 × 0.1 = ฿150 liability.

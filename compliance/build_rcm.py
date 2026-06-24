@@ -121,7 +121,7 @@ add("ITGC-AC-09","ITGC · Access","ITGC","All","Conflicting duties in one user e
     "Segregation-of-Duties conflict ruleset with preventive blocks + detective conflict report.","Prev/Det","Auto+Manual","Quarterly","Controller / IT","P10/P11",
     "permissions.ts (SOD_RULES, 13 rules); admin-users.service.ts (assertNoSodConflict preventive block); sod.service.ts (detective report); cutover/compliance.ts (ToE)","Inspect SoD rule set vs role design.","Run conflict report; assigning a conflicting set is blocked (422) unless justified-override+reason — re-performed by the harness.","SoD report","Implemented")
 add("ITGC-AC-10","ITGC · Access","ITGC","All","No record of who changed financial data.","Completeness",
-    "Audit trail — financially-relevant create/update/delete logged with user, timestamp, before/after.","Det","Automated","Continuous","Eng Lead","P13/P16",
+    "Audit trail — every mutating request logged with user, timestamp, IP, action, status (field-level before/after is ITGC-AC-14).","Det","Automated","Continuous","Eng Lead","P13/P16",
     "common/audit.interceptor.ts; status-log.service.ts; drizzle/0062_audit_log_immutable.sql (append-only trigger); cutover/compliance.ts (ToE)","Inspect logged actions/fields; confirm coverage of GL/AR/AP/cash; verify append-only trigger.","Sample transactions traced to audit log; UPDATE/DELETE on audit_log rejected (re-performed by the harness).","Audit log","Implemented")
 add("ITGC-AC-11","ITGC · Access","ITGC","Revenue / Cash","Past financial records altered/deleted undetectably.","Integrity",
     "Append-only, per-tenant HASH-CHAINED electronic journal — altering any row breaks later hashes (tamper-evident).","Prev/Det","Automated","Continuous","Eng Lead","P13",
@@ -132,6 +132,9 @@ add("ITGC-AC-12","ITGC · Access","ITGC","All","Secrets hardcoded/shared/un-rota
 add("ITGC-AC-13","ITGC · Access","ITGC","All","Direct DB access bypasses app controls; shared DB superuser.","Restricted access",
     "Named DB users, least privilege, app uses non-superuser role; DBA access logged & restricted.","Prev","Manual","Continuous","DBA / DevOps","P11",
     "tools/ops/sql/prod-db-roles.sql (non-owner ierp_app login); app_user role","Inspect DB role grants + access list.","Sample DB access reviewed; app connects as non-owner least-priv role; no shared superuser in app path.","DB grants","Implemented")
+add("ITGC-AC-14","ITGC · Access","ITGC","Revenue / Cash; Expenditure","Financial data changed without a field-level record of WHAT changed (old→new).","Completeness/Integrity",
+    "Field-level change log — DB triggers capture OLD/NEW row images + changed columns + actor on every INSERT/UPDATE/DELETE of the core financial tables (GL header, AP/AR sub-ledgers, AP payments, tenders); append-only.","Det","Automated","Continuous","Eng Lead","P13/P16",
+    "drizzle/0112_field_change_log.sql (log_data_change triggers; data_change_log append-only); tenant-tx.interceptor.ts (app.actor GUC); audit-viewer.service.ts (changes / GET /api/admin/audit/changes); cutover/compliance.ts (ToE)","Inspect trigger coverage + actor capture; verify append-only trigger.","Sample a financial update → change log holds old/new + changed columns + actor; UPDATE/DELETE on data_change_log rejected (re-performed by the harness).","Field change log","Implemented")
 
 # ---- ITGC: Change Management ----
 add("ITGC-CM-01","ITGC · Change","ITGC","All","Unauthorized/untested code reaches production.","—",

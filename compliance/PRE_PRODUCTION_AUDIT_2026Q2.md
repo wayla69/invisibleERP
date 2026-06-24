@@ -48,7 +48,7 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
 | 3.8 | Returns restock — inventory add not row-locked | ✅ **FIXED** — `FOR UPDATE` |
 | 3.9 | AP disbursement (`payAp`) has no maker-checker / second-person approval | ✅ **FIXED** — request (`creditors`) → approve (`approvals`/`gl_close`), requester ≠ approver (EXP-05) |
 | 3.10 | AP bill can be booked pre-paid in one call (`createApTxn`, `paid_amount>0`) | ✅ **FIXED** — blocked (`AP_PREPAID_BLOCKED`) |
-| 3.11 | Central `audit_log` records no old-value / new-value (before/after image) | ⚠️ FLAGGED (medium) |
+| 3.11 | Central `audit_log` records no old-value / new-value (before/after image) | ✅ **FIXED** — field-level change log via DB triggers (ITGC-AC-14) |
 
 ### Pillar 4 — Exhaustive Functional & Component Testing
 | # | Item | Status |
@@ -93,13 +93,18 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
   (`build_rcm.py`, xlsx regenerated); ToE re-performed by `cutover/compliance.ts` (8 checks); functional
   flow in `parity/writeflow.ts` and `cutover/match.ts`; narrative/user-manual/UAT updated.
 
-## Flagged for a dedicated workstream (NOT remediated this pass — require design + doc/RCM updates)
-1. **Audit before/after capture (3.11, medium).** Add structured `old_value`/`new_value` (jsonb) for mutations
-   on financially-significant entities (interceptor enrichment or row-level triggers).
-2. **N+1 batch refactors (2.8).** AR sync (`finance.service.ts`), journal-line list (`ledger.service.ts:231`),
-   consolidation (`consolidation.service.ts:97`), costing-on-issue (`costing.service.ts:95`), anomaly report
-   (`anomalies.service.ts:38`) — collapse per-row queries to `inArray`/join batches.
-3. **~18 remaining table-row buttons (4.6)** — apply the same `disabled={mut.isPending}` pattern fleet-wide.
+## Implemented in a follow-up pass
+- **Audit before/after capture (3.11 — control ITGC-AC-14).** DB triggers (`log_data_change`, migration 0112)
+  capture `old_value`/`new_value` (jsonb) + `changed_columns` + actor (`app.actor` GUC) on every
+  INSERT/UPDATE/DELETE of the core financial tables (`journal_entries`, `ap_transactions`, `ap_payments`,
+  `ar_invoices`, `ar_receipts`, `payments`, `payment_refunds`) — at the DB layer, append-only
+  (`data_change_log`). Surfaced read-only at `GET /api/admin/audit/changes`. RCM AC-14 added; ToE in
+  `cutover/compliance.ts`; ITGC narrative updated.
+
+## Flagged for a dedicated workstream (NOT remediated — lower-severity / broad mechanical)
+1. **N+1 batch refactors (2.8).** AR sync (`finance.service.ts`), journal-line list (`ledger.service.ts`),
+   consolidation, costing-on-issue, anomaly report — collapse per-row queries to `inArray`/join batches.
+2. **~18 remaining table-row buttons (4.6)** — apply the same `disabled={mut.isPending}` pattern fleet-wide.
 
 ## Sign-off
 Conditionally **production-ready**: the data-integrity (lost-update) and double-submit money-movement defects —
