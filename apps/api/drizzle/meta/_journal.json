@@ -715,6 +715,20 @@
       "when": 1783470000000,
       "tag": "0100_einvoice",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1783470000001,
+      "tag": "0085_floor_zone_geometry",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1783470000002,
+      "tag": "0088_dine_in_order_zone",
+      "breakpoints": true
     }
   ]
 }
