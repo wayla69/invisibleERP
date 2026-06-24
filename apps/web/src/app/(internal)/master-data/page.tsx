@@ -16,6 +16,8 @@ const selectCls =
   'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 interface Entity { key: string; label_en: string; label_th: string; required: string[]; columns: string[]; allow_replace: boolean }
+interface ImpErr { row: number; column?: string; code: string; message: string; messageTh: string }
+interface ValidateReport { entity: string; mode: string; total: number; valid: number; invalid: number; errors: ImpErr[] }
 
 export default function MasterDataPage() {
   const list = useQuery<{ entities: Entity[] }>({ queryKey: ['md-entities'], queryFn: () => api('/api/admin/master-data/entities') });
@@ -23,6 +25,9 @@ export default function MasterDataPage() {
   const [mode, setMode] = useState<'append' | 'replace'>('append');
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  const [csvText, setCsvText] = useState('');
+  const [report, setReport] = useState<ValidateReport | null>(null);
+  const [skipErrors, setSkipErrors] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const entities = list.data?.entities ?? [];
@@ -40,20 +45,45 @@ export default function MasterDataPage() {
     catch (e: any) { setMsg(`❌ ${e.message}`); } finally { setBusy(''); }
   }
 
+  // Step 1 — read the file and dry-run validate it (no DB change), then show a preview.
   async function onFile(file: File) {
     if (!ent) return;
-    setMsg(''); setBusy('import');
+    setMsg(''); setReport(null); setSkipErrors(false); setBusy('validate');
     try {
       const csv = await file.text();
-      const r = await api<{ imported: number }>(`/api/admin/master-data/${ent.key}/import`, {
+      setCsvText(csv);
+      const r = await api<ValidateReport>(`/api/admin/master-data/${ent.key}/import/validate`, {
         method: 'POST', body: JSON.stringify({ format: 'csv', mode, csv }),
       });
-      setMsg(`✅ นำเข้า ${r.imported} แถวเข้า ${ent.label_th} สำเร็จ`);
+      setReport(r);
+      setMsg(r.invalid ? `⚠️ ตรวจสอบแล้ว: ถูกต้อง ${r.valid}/${r.total} · ผิดพลาด ${r.invalid}` : `✅ ตรวจสอบแล้ว: ถูกต้องครบ ${r.valid}/${r.total}`);
     } catch (e: any) {
       setMsg(`❌ ${e.message}`);
     } finally {
       setBusy('');
       if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  // Step 2 — commit the validated file. Bad rows block the import unless "skip errors" is on.
+  async function commit() {
+    if (!ent || !csvText) return;
+    setMsg(''); setBusy('commit');
+    try {
+      const r = await api<{ status: string; imported: number; skipped: number; errors: ImpErr[] }>(
+        `/api/admin/master-data/${ent.key}/import/checked`,
+        { method: 'POST', body: JSON.stringify({ format: 'csv', mode, csv: csvText, skip_errors: skipErrors }) },
+      );
+      if (r.status === 'invalid') {
+        setMsg(`❌ มีข้อผิดพลาด ${r.errors.length} รายการ — แก้ไขไฟล์ หรือเลือก "ข้ามแถวที่ผิด"`);
+      } else {
+        setMsg(`✅ นำเข้า ${r.imported} แถวเข้า ${ent.label_th}${r.skipped ? ` · ข้าม ${r.skipped}` : ''}`);
+        setReport(null); setCsvText('');
+      }
+    } catch (e: any) {
+      setMsg(`❌ ${e.message}`);
+    } finally {
+      setBusy('');
     }
   }
 
@@ -108,7 +138,7 @@ export default function MasterDataPage() {
 
               <Card className="gap-3 p-5">
                 <h3 className="text-base font-semibold">นำเข้า (Import)</h3>
-                <p className="text-sm text-muted-foreground">อัปโหลดไฟล์ CSV (หัวคอลัมน์ตรงกับแบบฟอร์ม)</p>
+                <p className="text-sm text-muted-foreground">อัปโหลดไฟล์ CSV — ระบบจะตรวจสอบทุกแถวก่อน แล้วให้ยืนยันนำเข้า</p>
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="grid gap-1.5">
                     <Label htmlFor="md-mode">โหมด</Label>
@@ -118,13 +148,56 @@ export default function MasterDataPage() {
                     </select>
                   </div>
                   <Button disabled={!!busy} onClick={() => fileRef.current?.click()}>
-                    <Upload className="size-4" /> {busy === 'import' ? 'กำลังนำเข้า…' : 'เลือกไฟล์ CSV'}
+                    <Upload className="size-4" /> {busy === 'validate' ? 'กำลังตรวจสอบ…' : 'เลือกไฟล์ CSV เพื่อตรวจสอบ'}
                   </Button>
                   <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
                 </div>
                 {mode === 'replace' && <Badge variant="destructive">โหมดแทนที่จะลบข้อมูลเดิมทั้งหมดก่อนนำเข้า</Badge>}
               </Card>
+
+              {report && (
+                <Card className="gap-3 p-5 md:col-span-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-base font-semibold">ตรวจทานก่อนนำเข้า (Preview)</h3>
+                    <div className="flex gap-2 text-sm">
+                      <Badge variant="success">ถูกต้อง {report.valid}</Badge>
+                      {report.invalid > 0 && <Badge variant="destructive">ผิดพลาด {report.invalid}</Badge>}
+                      <Badge variant="muted">รวม {report.total}</Badge>
+                    </div>
+                  </div>
+                  {report.errors.length > 0 && (
+                    <div className="max-h-64 overflow-auto rounded border">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-muted">
+                          <tr><th className="px-2 py-1 text-left">แถว</th><th className="px-2 py-1 text-left">คอลัมน์</th><th className="px-2 py-1 text-left">ปัญหา</th></tr>
+                        </thead>
+                        <tbody>
+                          {report.errors.slice(0, 200).map((er, i) => (
+                            <tr key={i} className="border-t">
+                              <td className="px-2 py-1 tabular-nums">{er.row || '—'}</td>
+                              <td className="px-2 py-1">{er.column ? <code className="text-xs">{er.column}</code> : '—'}</td>
+                              <td className="px-2 py-1">{er.messageTh} <span className="text-muted-foreground">({er.code})</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    {report.invalid > 0 && (
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={skipErrors} onChange={(e) => setSkipErrors(e.target.checked)} />
+                        ข้ามแถวที่ผิด แล้วนำเข้าเฉพาะที่ถูกต้อง
+                      </label>
+                    )}
+                    <Button disabled={busy === 'commit' || (report.invalid > 0 && !skipErrors)} onClick={commit}>
+                      {busy === 'commit' ? 'กำลังนำเข้า…' : `ยืนยันนำเข้า ${report.invalid > 0 && skipErrors ? report.valid : report.total} แถว`}
+                    </Button>
+                    <Button variant="outline" disabled={!!busy} onClick={() => { setReport(null); setCsvText(''); setMsg(''); }}>ยกเลิก</Button>
+                  </div>
+                </Card>
+              )}
             </div>
           )}
         </div>

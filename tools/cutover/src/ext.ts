@@ -266,6 +266,33 @@ async function main() {
   const hqAudit = await inj('GET', '/api/admin/audit?action=saved-views&limit=200', hqaa);
   ok('Audit viewer: no cross-tenant leakage (HQ admin never sees cf2 rows)', (hqAudit.json.rows ?? []).every((r: any) => r.tenant_id !== cf2.id), `n=${(hqAudit.json.rows ?? []).length}`);
 
+  // ── validated bulk import/export (Phase 7) ──
+  // admin holds `masterdata`. Items master is global (not tenant-scoped); vendors are tenant-scoped.
+  const cnt = async (where?: any) => (await db.select().from(s.items).where(where)).length;
+  const itemsBefore = await cnt();
+  const badCsv = 'Item_ID,Item_Description,Unit_Price\nGOOD1,Good,5\n,NoId,5\nBAD2,,5\nBAD3,BadPrice,abc\nGOOD1,DupKey,7';
+  const dry = await inj('POST', '/api/admin/master-data/items/import/validate', token, { format: 'csv', mode: 'append', csv: badCsv });
+  const codes = (dry.json.errors ?? []).map((e: any) => e.code);
+  ok('Bulk import: dry-run validate accumulates per-row errors (no first-fail)', dry.json.total === 5 && dry.json.valid === 1 && dry.json.invalid === 4 && codes.includes('REQUIRED_EMPTY') && codes.includes('BAD_NUMBER') && codes.includes('DUP_IN_FILE'), `${JSON.stringify({ total: dry.json.total, valid: dry.json.valid, invalid: dry.json.invalid, codes })}`);
+  ok('Bulk import: dry-run touches nothing', (await cnt()) === itemsBefore, `items=${await cnt()} before=${itemsBefore}`);
+  const blocked = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: badCsv });
+  ok('Bulk import: a file with errors imports nothing unless skip_errors', blocked.json.status === 'invalid' && blocked.json.imported === 0 && (await cnt()) === itemsBefore, `${JSON.stringify({ status: blocked.json.status, imported: blocked.json.imported })}`);
+  const skipped = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: badCsv, skip_errors: true });
+  ok('Bulk import: skip_errors imports only the valid rows + reports the rest', skipped.json.status === 'partial' && skipped.json.imported === 1 && (await cnt(eq(s.items.itemId, 'GOOD1'))) === 1, `${JSON.stringify({ status: skipped.json.status, imported: skipped.json.imported })}`);
+
+  const missCols = await inj('POST', '/api/admin/master-data/items/import/validate', token, { format: 'csv', mode: 'append', csv: 'Item_ID,Unit_Price\nX1,5' });
+  ok('Bulk import: a missing required column is reported (MISSING_COLUMNS)', (missCols.json.errors ?? []).some((e: any) => e.code === 'MISSING_COLUMNS'), `${JSON.stringify(missCols.json.errors ?? [])}`);
+  const cleanCsv = 'Item_ID,Item_Description,Unit_Price\nBULK1,Widget,10\nBULK2,Gadget,20';
+  const good = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: cleanCsv });
+  ok('Bulk import: a clean file commits with status success', good.json.status === 'success' && good.json.imported === 2 && (await cnt(eq(s.items.itemId, 'BULK1'))) === 1, `${JSON.stringify({ status: good.json.status, imported: good.json.imported })}`);
+  const reimport = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: cleanCsv });
+  ok('Bulk import: re-importing existing rows reports them as EXISTS (append, 0 new)', reimport.json.imported === 0 && (reimport.json.errors ?? []).every((e: any) => e.code === 'EXISTS') && (reimport.json.errors ?? []).length === 2, `${JSON.stringify({ imported: reimport.json.imported, errs: (reimport.json.errors ?? []).map((e: any) => e.code) })}`);
+
+  // vendors are tenant-scoped: a Warehouse admin's import is stamped with their tenant
+  const vend = await inj('POST', '/api/admin/master-data/vendors/import/checked', hqwh, { format: 'csv', mode: 'append', csv: 'Vendor_Code,Name\nV-BULK,Acme Co' });
+  const vrow = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-BULK')))[0];
+  ok('Bulk import: tenant-scoped entity (vendors) is stamped with the importer’s tenant', vend.json.status === 'success' && vend.json.imported === 1 && Number(vrow?.tenantId) === Number(hq.id), `tenant=${vrow?.tenantId} hq=${hq.id}`);
+
   await app.close();
   await pg.close();
 

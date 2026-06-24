@@ -294,6 +294,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-029 | Audit viewer — query, filter, paginate | ITGC-AC-10 | 08 §7.A.8 |
 | UAT-ADM-030 | Audit viewer — CSV export + permission gate | ITGC-AC-10/02 | 08 §7.A.8 |
 | UAT-ADM-031 | Audit viewer — tenant isolation (RLS) | ITGC-AC-10/03 | 08 §7.A.8 |
+| UAT-ADM-032 | Bulk import — dry-run validates every row | Feature (bulk import), MDM-02 | 17 §7.3a |
+| UAT-ADM-033 | Bulk import — checked commit (block vs skip) | Feature (bulk import) | 17 §7.3a |
+| UAT-ADM-034 | Bulk import — tenant-scoped entity stamped | Feature (bulk import), MDM-01 | 17 §7.3a |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 

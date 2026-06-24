@@ -162,6 +162,30 @@ configuration and bills of materials.
 > transacting on it (rules R02, R09, R10, R13). For example, the person who sets
 > prices should not also be the one selling at those prices.
 
+### Bulk import / export (validate before you commit)
+
+**Screen:** `/master-data` · **Required permission:** `masterdata`.
+
+You can load many records at once from a spreadsheet — items, customers, vendors,
+locations, prices, promotions, BoMs and assets.
+
+1. **Download the template** (or **export** the current data) for the record type,
+   fill it in, and save as **CSV**.
+2. **Choose a file** — the system **checks every row first** (a dry run that
+   changes nothing) and shows a **preview**: how many rows are valid, and a table
+   of any problems (missing required value, a number/date that won't parse, or a
+   key repeated in the file), each with its **row and column**.
+3. **Confirm the import.** If every row is valid it imports them all. If some rows
+   have errors, you can either fix the file and try again, or tick **“ข้ามแถวที่ผิด
+   (skip bad rows)”** to import only the valid ones. Rows whose key already exists
+   are skipped and reported (in *append* mode).
+
+**Expected result:** No more guessing — you see exactly what will (and won't) import
+before committing, and bad rows never silently corrupt your data.
+
+> **Append vs Replace:** *Append* adds new records and skips existing keys.
+> *Replace* (only where allowed) wipes the current data first — use with care.
+
 ---
 
 ## 9. Custom fields (extend records without code)

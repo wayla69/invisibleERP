@@ -129,7 +129,98 @@ export class MasterDataService {
     });
     return { entity: key, mode, imported: count };
   }
+
+  // ── Validated import (Phase 7): dry-run preview + per-row error reporting ───
+  // Validates every row (required, type-coercion, in-file duplicate) and accumulates errors instead of
+  // throwing on the first one. `validateReport` is a pure dry-run; `importChecked` commits (optionally
+  // skipping bad rows) and reports already-existing rows it skipped.
+  private validateCore(e: MdEntity, mode: 'append' | 'replace', rows: Record<string, any>[], user: JwtUser) {
+    const errors: ImportError[] = [];
+    const prepared: { rowNo: number; value: any }[] = [];
+    if (mode === 'replace' && !e.allowReplace) errors.push({ row: 0, code: 'REPLACE_FORBIDDEN', message: `Replace not allowed for ${e.key}`, messageTh: 'ไม่อนุญาตให้แทนที่ทั้งหมดสำหรับข้อมูลนี้' });
+    if (!Array.isArray(rows) || rows.length === 0) {
+      errors.push({ row: 0, code: 'NO_ROWS', message: 'No rows to import', messageTh: 'ไม่มีข้อมูลให้นำเข้า' });
+      return { total: 0, valid: 0, invalid: 0, errors, prepared };
+    }
+    const provided = new Set(Object.keys(rows[0] ?? {}));
+    const missing = e.required.filter((h) => !provided.has(h));
+    if (missing.length) errors.push({ row: 0, code: 'MISSING_COLUMNS', message: `Missing required columns: ${missing.join(', ')}`, messageTh: `ขาดคอลัมน์ที่จำเป็น: ${missing.join(', ')}` });
+
+    const keyHeader = e.required[0];
+    const seen = new Map<string, number>();
+    const badRows = new Set<number>();
+    rows.forEach((raw, i) => {
+      const rowNo = i + 1;
+      if (missing.length) { badRows.add(rowNo); return; } // can't validate rows without their key columns
+      let rowBad = false;
+      for (const h of e.required) {
+        const v = raw[h];
+        if (v == null || String(v).trim() === '') { errors.push({ row: rowNo, column: h, code: 'REQUIRED_EMPTY', message: `'${h}' is required`, messageTh: `ต้องระบุ '${h}'` }); rowBad = true; }
+      }
+      const o: Record<string, any> = {};
+      for (const c of e.cols) {
+        const cell = raw[c.header];
+        if (cell === undefined) continue;
+        if (cell == null || String(cell).trim() === '') { o[c.prop] = null; continue; }
+        const s = String(cell).trim();
+        if (c.type === 'num' || c.type === 'int') {
+          if (!Number.isFinite(Number(s))) { errors.push({ row: rowNo, column: c.header, code: 'BAD_NUMBER', message: `'${c.header}' must be a number (got "${s}")`, messageTh: `'${c.header}' ต้องเป็นตัวเลข` }); rowBad = true; continue; }
+          o[c.prop] = c.type === 'int' ? Math.trunc(Number(s)) : fx(Number(s), 4);
+        } else if (c.type === 'date') {
+          const d = new Date(s);
+          if (isNaN(d.getTime())) { errors.push({ row: rowNo, column: c.header, code: 'BAD_DATE', message: `'${c.header}' is not a valid date (got "${s}")`, messageTh: `'${c.header}' รูปแบบวันที่ไม่ถูกต้อง` }); rowBad = true; continue; }
+          o[c.prop] = d.toISOString().slice(0, 10);
+        } else if (c.type === 'bool') {
+          o[c.prop] = ['1', 'true', 'yes', 'y', 't'].includes(s.toLowerCase());
+        } else o[c.prop] = s;
+      }
+      const k = String(raw[keyHeader] ?? '').trim();
+      if (k) {
+        if (seen.has(k)) { errors.push({ row: rowNo, column: keyHeader, code: 'DUP_IN_FILE', message: `Duplicate ${keyHeader} "${k}" (first seen at row ${seen.get(k)})`, messageTh: `${keyHeader} ซ้ำในไฟล์` }); rowBad = true; }
+        else seen.set(k, rowNo);
+      }
+      if (e.tenantScoped && 'tenantId' in e.table) o.tenantId = user.tenantId ?? null;
+      if (e.key === 'assets') { o.netBookValue = fx(o.acquireCost ?? 0, 4); if (o.status == null) o.status = 'active'; }
+      if (rowBad) badRows.add(rowNo); else prepared.push({ rowNo, value: o });
+    });
+    const invalid = badRows.size;
+    return { total: rows.length, valid: rows.length - invalid, invalid, errors, prepared };
+  }
+
+  validateReport(key: string, mode: 'append' | 'replace', rows: Record<string, any>[], user: JwtUser) {
+    const e = this.entOrThrow(key);
+    const v = this.validateCore(e, mode, rows, user);
+    return { entity: key, mode, total: v.total, valid: v.valid, invalid: v.invalid, errors: v.errors };
+  }
+
+  async importChecked(key: string, mode: 'append' | 'replace', rows: Record<string, any>[], user: JwtUser, skipErrors: boolean) {
+    const e = this.entOrThrow(key);
+    const v = this.validateCore(e, mode, rows, user);
+    const blocking = v.errors.some((x) => x.row === 0); // entity/columns/replace problems can't be skipped
+    if (blocking || (v.invalid > 0 && !skipErrors)) {
+      return { entity: key, mode, status: 'invalid' as const, total: v.total, imported: 0, skipped: v.total, errors: v.errors };
+    }
+    const db = this.db as any;
+    let imported = 0;
+    const extra: ImportError[] = [];
+    await db.transaction(async (tx: any) => {
+      if (mode === 'replace') await tx.delete(e.table); // RLS scopes tenant tables to caller
+      for (const p of v.prepared) {
+        if (mode === 'replace') { await tx.insert(e.table).values(p.value); imported++; }
+        else {
+          const ins = await tx.insert(e.table).values(p.value).onConflictDoNothing().returning();
+          if (ins.length) imported++;
+          else extra.push({ row: p.rowNo, column: e.required[0], code: 'EXISTS', message: 'already exists — skipped', messageTh: 'มีอยู่แล้ว — ข้ามไป' });
+        }
+      }
+    });
+    const allErrors = [...v.errors, ...extra];
+    const status: 'partial' | 'success' = allErrors.length ? 'partial' : 'success';
+    return { entity: key, mode, status, total: v.total, imported, skipped: v.total - imported, errors: allErrors };
+  }
 }
+
+export interface ImportError { row: number; column?: string; code: string; message: string; messageTh: string }
 
 function castOut(v: unknown, t: MdType): any {
   if (v == null) return '';
