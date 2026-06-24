@@ -72,3 +72,4 @@ export * from './custom-objects';
 export * from './object-layouts';
 export * from './automation';
 export * from './controls';
+export * from './onboarding';

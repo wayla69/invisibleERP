@@ -355,6 +355,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-070 | Controls monitoring — scan, review, isolation, no GL | Feature (controls monitoring) | 27 §7.22, §9 |
 | UAT-ADM-071 | i18n — set own locale, resolution, bad code, per-user | Feature (i18n) | 28 §4 |
 | UAT-ADM-072 | White-label theme — set tokens, validation, RLS | Feature (white-label) | 30 §4 |
+| UAT-ADM-073 | Onboarding — checklist + idempotent pack apply | Feature (onboarding) | 30 §4 |
+| UAT-ADM-074 | Developer portal — keys, tiers, RLS | Feature (developer portal) | 29 §4 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -422,7 +424,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 72 | 44 |
+| 08 Admin / SoD / Audit | 74 | 45 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **254** | **115** |
+| **Total** | **256** | **116** |

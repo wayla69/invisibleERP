@@ -673,6 +673,20 @@
       "when": 1783410000000,
       "tag": "0094_tenant_theme",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1783420000000,
+      "tag": "0095_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1783430000000,
+      "tag": "0096_api_key_tier",
+      "breakpoints": true
     }
   ]
 }

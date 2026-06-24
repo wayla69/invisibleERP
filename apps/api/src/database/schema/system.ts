@@ -111,6 +111,7 @@ export const apiKeys = pgTable('api_keys', {
   prefix: text('prefix').notNull(), // shown to user (first 8 chars)
   hashedKey: text('hashed_key').notNull(),
   scopes: text('scopes').default(''), // csv of scopes
+  tier: text('tier').default('free'), // D1 (Phase 23) — rate tier: free | standard | partner
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   revoked: boolean('revoked').default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
