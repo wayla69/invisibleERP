@@ -199,6 +199,11 @@ drop into place. With a table selected you can also nudge it with the **arrow ke
 (hold **Shift** for fine 1-pixel steps) or remove it with **Delete**. For a big
 restaurant the plan **scrolls** as you add more tables, so there's always room.
 
+**Revenue by room.** The **รายได้ต่อห้อง** tab shows how much each room earned over a
+date range (defaults to today). Pick **ตั้งแต่ / ถึง** and you'll see total takings,
+the number of bills and the average per bill for every room (and for tables in no
+room), ranked by revenue — handy for checking whether the VIP room pulls its weight.
+
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).

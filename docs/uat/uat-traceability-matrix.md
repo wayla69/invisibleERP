@@ -144,6 +144,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-106 | Unconditional update / undo (no rev) | Feature (floor-plan layout) | 20 §6 |
 | UAT-O2C-107 | Create with full initial appearance | Feature (floor-plan layout) | 20 §6 |
 | UAT-O2C-108 | Floor-plan editor UI smoke (Playwright) | Feature (floor-plan UI) | 20 §6 |
+| UAT-O2C-109 | Revenue attributed by room | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-110 | Room revenue is tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

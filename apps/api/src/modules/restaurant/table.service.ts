@@ -1,16 +1,17 @@
 import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
-import { eq, and, asc, desc, inArray, ne, sql } from 'drizzle-orm';
+import { eq, and, asc, desc, gte, lte, inArray, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { diningTables, floorZones, tableSessions, dineInOrders } from '../../database/schema';
+import { diningTables, floorZones, tableSessions, dineInOrders, custPosSales } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
-import { n } from '../../database/queries';
+import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { mintTableToken } from './qr-token.util';
 import type { CreateTableDto, UpdateTableDto, ZoneDto, ZoneUpdateDto } from './dto';
 
 const LIVE_SESSION = ['open', 'bill_requested', 'paying'];
+const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
 @Injectable()
 export class TableService {
@@ -56,6 +57,36 @@ export class TableService {
     await db.update(diningTables).set({ zoneId: null, updatedAt: new Date() }).where(eq(diningTables.zoneId, id));
     await db.update(floorZones).set({ active: false }).where(eq(floorZones.id, id));
     return { id, deleted: true, name: z.name };
+  }
+
+  // Revenue by room over a business-day range [from..to] (defaults to today, Asia/Bangkok — cust_pos_sales.sale_date
+  // is already the business day). Joins fiscal dine-in sales → order → table → zone; RLS scopes every table to the
+  // tenant. Lists all active rooms (revenue 0 if none) + an "unzoned" bucket + the grand total.
+  async zoneRevenue(from: string | undefined, to: string | undefined, _user: JwtUser) {
+    const db = this.db as any;
+    const f = from || ymd();
+    const t = to || ymd();
+    const rows = await db
+      .select({ zoneId: diningTables.zoneId, total: custPosSales.total })
+      .from(custPosSales)
+      .innerJoin(dineInOrders, eq(dineInOrders.saleNo, custPosSales.saleNo))
+      .innerJoin(diningTables, eq(diningTables.id, dineInOrders.tableId))
+      .where(and(gte(custPosSales.saleDate, f), lte(custPosSales.saleDate, t)));
+    const agg = new Map<number | 'none', { revenue: number; sales: number }>();
+    for (const r of rows) {
+      const key = r.zoneId == null ? 'none' : Number(r.zoneId);
+      const e = agg.get(key) ?? { revenue: 0, sales: 0 };
+      e.revenue += n(r.total); e.sales += 1; agg.set(key, e);
+    }
+    const zones = await db.select().from(floorZones).where(eq(floorZones.active, true)).orderBy(asc(floorZones.sortOrder));
+    const rooms = zones
+      .map((z: any) => { const a = agg.get(Number(z.id)) ?? { revenue: 0, sales: 0 }; return { zone_id: Number(z.id), name: z.name, color: z.color ?? null, revenue: round2(a.revenue), sales: a.sales, avg_sale: a.sales ? round2(a.revenue / a.sales) : 0 }; })
+      .sort((a: any, b: any) => b.revenue - a.revenue);
+    const un = agg.get('none') ?? { revenue: 0, sales: 0 };
+    const unzoned = { revenue: round2(un.revenue), sales: un.sales };
+    const totalRevenue = round2(rooms.reduce((s: number, r: any) => s + r.revenue, 0) + unzoned.revenue);
+    const totalSales = rooms.reduce((s: number, r: any) => s + r.sales, 0) + unzoned.sales;
+    return { from: f, to: t, rooms, unzoned, total: { revenue: totalRevenue, sales: totalSales }, generated_at: new Date().toISOString() };
   }
 
   // ── tables ──
