@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
 import { CostingService } from '../costing/costing.service';
+import { WebhookService } from '../platform/webhook.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -24,6 +25,7 @@ export class ProcurementService {
     // @Optional + last so harnesses that construct this service directly (writeflow) without the engine still work
     @Optional() private readonly workflow?: WorkflowService,
     @Optional() private readonly costing?: CostingService, // Phase 17A — inventory costing (opt-in per item)
+    @Optional() private readonly webhooks?: WebhookService, // Phase 8 — outbound webhook fan-out (best-effort)
   ) {}
 
   // ── PR ──────────────────────────────────────────────────────────────
@@ -154,6 +156,7 @@ export class ProcurementService {
       const newStatus = approve ? (cleared ? 'Approved' : 'Pending') : 'Cancelled';
       await db.update(purchaseOrders).set({ status: newStatus, approvedBy: user.username, approvedAt: new Date(), remarks: approve ? po.remarks : `Rejected: ${reason ?? ''}` }).where(eq(purchaseOrders.id, po.id));
       if (newStatus !== po.status) await this.statusLog.log('PO', poNo, po.status ?? '', newStatus, user.username);
+      await this.emitPo(newStatus, poNo, po, reason, user);
       return { po_no: poNo, status: newStatus };
     }
     if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
@@ -163,7 +166,15 @@ export class ProcurementService {
       remarks: approve ? po.remarks : `Rejected: ${reason ?? ''}`,
     }).where(eq(purchaseOrders.id, po.id));
     await this.statusLog.log('PO', poNo, po.status ?? '', newStatus, user.username);
+    await this.emitPo(newStatus, poNo, po, reason, user);
     return { po_no: poNo, status: newStatus };
+  }
+
+  // Fan out the PO approval/rejection to outbound webhooks (best-effort; only on a terminal decision).
+  private async emitPo(newStatus: string, poNo: string, po: any, reason: string | undefined, user: JwtUser) {
+    const event = newStatus === 'Approved' ? 'po.approved' : (newStatus === 'Cancelled' ? 'po.rejected' : null);
+    if (!event) return;
+    await this.webhooks?.emit(event, { po_no: poNo, vendor: po.vendorName ?? po.vendorCode ?? null, total_amount: Number(po.total ?? 0), status: newStatus, reason: reason ?? null, decided_by: user.username }, user);
   }
 
   async cancelPo(poNo: string, reason: string, user: JwtUser) {
