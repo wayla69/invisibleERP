@@ -235,9 +235,12 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'ข้อมูลหลัก (Master Data)', href: '/master-data', icon: Database, perms: ['masterdata'] },
       { label: 'ฟิลด์กำหนดเอง (Custom fields)', href: '/custom-fields', icon: SlidersHorizontal, perms: ['masterdata', 'users', 'exec'] },
+      { label: 'ออบเจ็กต์กำหนดเอง (Custom objects)', href: '/custom-objects', icon: Boxes, perms: ['masterdata', 'users', 'exec'] },
+      { label: 'เลย์เอาต์ฟอร์ม (Form layouts)', href: '/object-layouts', icon: LayoutTemplate, perms: ['masterdata', 'users', 'exec'] },
       { label: 'การแจ้งเตือน (Alert rules)', href: '/alerts', icon: BellRing, perms: ['masterdata', 'users', 'exec', 'dashboard'] },
       { label: 'มุมมองที่บันทึก (Saved views)', href: '/saved-views', icon: Bookmark, perms: ['dashboard', 'exec', 'masterdata', 'warehouse', 'pos'] },
       { label: 'แดชบอร์ดตามบทบาท (Role dashboards)', href: '/dashboard-designer', icon: LayoutTemplate, perms: ['users', 'exec'] },
+      { label: 'เทมเพลตเอกสาร (Document templates)', href: '/document-templates', icon: LayoutTemplate, perms: ['users', 'exec'] },
       { label: 'เว็บฮุค (Webhooks)', href: '/webhooks', icon: Webhook, perms: ['users'] },
       { label: 'จัดการผู้ใช้', href: '/admin/users', icon: UserCog, perms: ['users'] },
       { label: 'ตั้งค่ากิจการ', href: '/setup', icon: BadgeCheck, perms: ['users'] },

@@ -67,3 +67,6 @@ export * from './custom-fields';
 export * from './alerts';
 export * from './saved-views';
 export * from './dashboards';
+export * from './document-templates';
+export * from './custom-objects';
+export * from './object-layouts';

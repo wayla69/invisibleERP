@@ -89,6 +89,9 @@ import { BranchModule } from './modules/branch/branch.module';
 import { EssModule } from './modules/ess/ess.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
 import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
+import { DocumentTemplatesModule } from './modules/document-templates/document-templates.module';
+import { CustomObjectsModule } from './modules/custom-objects/custom-objects.module';
+import { ObjectLayoutsModule } from './modules/object-layouts/object-layouts.module';
 import { PublicApiModule } from './modules/public-api/public-api.module';
 import { IdentityModule } from './modules/identity/identity.module';
 
@@ -178,6 +181,9 @@ import { IdentityModule } from './modules/identity/identity.module';
     EssModule,
     SupplierModule,
     DemandMlModule,
+    DocumentTemplatesModule,
+    CustomObjectsModule,
+    ObjectLayoutsModule,
     PublicApiModule,
     IdentityModule,
   ],

@@ -338,6 +338,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-053 | SCIM — token + auth + provision (SoD) | Feature (SCIM), ITGC-AC-09 | 27 §7.12 |
 | UAT-ADM-054 | SCIM — deprovision = deactivate (soft) | Feature (SCIM), ITGC-AC-10 | 27 §7.12 |
 | UAT-ADM-055 | SCIM/identity — tenant isolation + deactivated login block | Feature (SSO/SCIM), ITGC-AC-02/03 | 27 §7.12 |
+| UAT-ADM-056 | Document templates — create, default & live preview | Feature (document templates) | 27 §7.13 |
+| UAT-ADM-057 | Document templates — core integrity, gate, isolation, no GL | Feature (document templates) | 27 §7.13, §9 |
+| UAT-ADM-058 | Custom objects — define, fields & record CRUD | Feature (custom objects) | 27 §7.14 |
+| UAT-ADM-059 | Custom objects — validation reuse, isolation, no GL | Feature (custom objects) | 27 §7.14, §9 |
+| UAT-ADM-060 | Object layouts — design, resolve & live preview | Feature (object layouts) | 27 §7.15 |
+| UAT-ADM-061 | Object layouts — dup name, isolation, no GL | Feature (object layouts) | 27 §7.15, §9 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -405,7 +411,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 55 | 36 |
+| 08 Admin / SoD / Audit | 61 | 39 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **237** | **107** |
+| **Total** | **243** | **110** |

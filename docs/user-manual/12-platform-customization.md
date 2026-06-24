@@ -25,6 +25,9 @@ tools.
 | Load many records from a spreadsheet (with a preview) | **Bulk import** | `/master-data` | masterdata | [Administration §8](./11-administration.md) |
 | Push events to other systems | **Webhooks** | `/webhooks` | users | [Administration §12](./11-administration.md) |
 | Put your logo & tagline on receipts | **Branding** | `/setup` | users | [Administration §13](./11-administration.md) |
+| Customize how documents look (receipt, …) | **Document templates** | `/document-templates` | users / exec | [Administration §14](./11-administration.md) |
+| Create your own record types (no code) | **Custom objects** | `/custom-objects` | masterdata / users / exec | [Administration §15](./11-administration.md) |
+| Lay out a custom object's form | **Form layouts** | `/object-layouts` | masterdata / users / exec | [Administration §16](./11-administration.md) |
 | Read alerts, report deliveries & approval reminders | **Notification inbox** | `/notifications` | anyone (your own) | §A below |
 | Let another system read your data securely | **Public REST API** | `/api/v1` (+ API keys) | users (to issue keys) | §B below |
 | Let staff sign in with your company login / auto-manage users | **SSO & SCIM** | Settings → SSO / SCIM | users | §C below |
