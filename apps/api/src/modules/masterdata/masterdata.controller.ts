@@ -12,6 +12,7 @@ const ImportBody = z.object({
   format: z.enum(['rows', 'csv']).default('rows'),
   csv: z.string().optional(),
   rows: z.array(z.record(z.any())).optional(),
+  skip_errors: z.boolean().optional(),
 });
 type ImportBodyT = z.infer<typeof ImportBody>;
 
@@ -46,5 +47,20 @@ export class MasterDataController {
   import(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
     const rows = b.format === 'csv' ? parseCsv(b.csv ?? '') : (b.rows ?? []);
     return this.svc.importRows(entity, b.mode, rows, u);
+  }
+
+  // Dry-run: validate every row and report all errors, without touching the DB.
+  @Post(':entity/import/validate')
+  validate(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
+    const rows = b.format === 'csv' ? parseCsv(b.csv ?? '') : (b.rows ?? []);
+    return this.svc.validateReport(entity, b.mode, rows, u);
+  }
+
+  // Validated commit: by default refuses an import with any bad row (imports nothing); with skip_errors it
+  // imports the valid rows and reports the rest. Also reports already-existing rows it skipped (append).
+  @Post(':entity/import/checked')
+  importChecked(@Param('entity') entity: string, @Body(new ZodValidationPipe(ImportBody)) b: ImportBodyT, @CurrentUser() u: JwtUser) {
+    const rows = b.format === 'csv' ? parseCsv(b.csv ?? '') : (b.rows ?? []);
+    return this.svc.importChecked(entity, b.mode, rows, u, b.skip_errors ?? false);
   }
 }
