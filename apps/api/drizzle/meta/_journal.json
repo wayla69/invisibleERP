@@ -701,6 +701,20 @@
       "when": 1783450000000,
       "tag": "0098_migration_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1783460000000,
+      "tag": "0099_tenant_localization",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1783470000000,
+      "tag": "0100_einvoice",
+      "breakpoints": true
     }
   ]
 }
