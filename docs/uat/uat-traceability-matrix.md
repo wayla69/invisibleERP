@@ -157,6 +157,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-116 | Enrol/link member via LINE (idempotent) | Feature (LINE CRM) | 19 §7.8 |
 | UAT-O2C-117 | One LINE account = one member | Feature (LINE CRM) | 19 §7.8 |
 | UAT-O2C-118 | LINE push to userId, consent enforced | Feature (LINE CRM), MKT-04 | 19 §7.11 |
+| UAT-O2C-119 | Aggregator menu push (real adapter) | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-120 | Accept/reject routes to KDS + notifies platform | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-121 | Status callback + mock fallback | Feature (aggregator adapter) | 20 §7.7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
