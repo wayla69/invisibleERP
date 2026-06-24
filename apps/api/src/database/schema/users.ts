@@ -16,6 +16,7 @@ export const users = pgTable('users', {
   totpSecret: text('totp_secret'),
   ssoSubject: text('sso_subject'), // OIDC/SAML subject for SSO users
   isActive: boolean('is_active').notNull().default(true), // SCIM deprovisioning deactivates (no hard delete)
+  locale: text('locale'), // C1 (Phase 20) — per-user UI locale override; resolves user → tenant.default_language → 'th'
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

@@ -659,6 +659,20 @@
       "when": 1783300000000,
       "tag": "0092_control_findings",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1783400000000,
+      "tag": "0093_user_locale",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1783410000000,
+      "tag": "0094_tenant_theme",
+      "breakpoints": true
     }
   ]
 }

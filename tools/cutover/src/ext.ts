@@ -692,6 +692,29 @@ async function main() {
   const jlAfterCtl = (await db.select().from(s.journalLines)).length;
   ok('Controls: no GL impact (journal lines unchanged)', jlAfterCtl === jlBeforeCtl, `before=${jlBeforeCtl} after=${jlAfterCtl}`);
 
+  // ── C1 i18n / locale framework (Platform Phase 20) ──
+  const locs = await inj('GET', '/api/i18n/locales', hqaa);
+  ok('i18n: locale catalog lists the supported locales', (locs.json.locales ?? []).length >= 5 && (locs.json.locales ?? []).some((l: any) => l.code === 'th'), `${(locs.json.locales ?? []).length}`);
+  await inj('PUT', '/api/i18n/me', hqaa, { locale: 'en' });
+  const meEn = await inj('GET', '/api/i18n/me', hqaa);
+  ok('i18n: a user can set their own locale (resolves to user)', meEn.json.locale === 'en' && meEn.json.source === 'user', `${meEn.json.locale}/${meEn.json.source}`);
+  const badLoc = await inj('PUT', '/api/i18n/me', hqaa, { locale: 'xx' });
+  ok('i18n: an unsupported locale is rejected (400 BAD_LOCALE)', badLoc.status === 400 && badLoc.json.error?.code === 'BAD_LOCALE', `${badLoc.status} ${badLoc.json.error?.code}`);
+  const meCf2 = await inj('GET', '/api/i18n/me', cf2aa);
+  ok('i18n: per-user — another user is unaffected by HQ’s choice', meCf2.json.locale !== 'en' || meCf2.json.source !== 'user', `${meCf2.json.locale}/${meCf2.json.source}`);
+
+  // ── E4 white-label theming (Platform Phase 29) ──
+  const th0 = await inj('GET', '/api/tenant/theme', hqaa);
+  ok('Theme: default theme exposes an in-gamut oklch primary', /^oklch\(/.test(th0.json.theme?.primary_css ?? ''), `${th0.json.theme?.primary_css}`);
+  const thPut = await inj('PUT', '/api/tenant/theme', hqaa, { primary_hue: 200, radius: 'lg', brand_name: 'HQ Brand', tagline: 'x' });
+  ok('Theme: a tenant sets its brand tokens', (thPut.status === 200 || thPut.status === 201) && thPut.json.theme?.primary_hue === 200 && String(thPut.json.theme?.primary_css ?? '').includes('200'), `hue=${thPut.json.theme?.primary_hue}`);
+  const badHue = await inj('PUT', '/api/tenant/theme', hqaa, { primary_hue: 400, radius: 'md' });
+  ok('Theme: out-of-range hue rejected (400 BAD_HUE)', badHue.status === 400 && badHue.json.error?.code === 'BAD_HUE', `${badHue.status} ${badHue.json.error?.code}`);
+  const badRad = await inj('PUT', '/api/tenant/theme', hqaa, { primary_hue: 10, radius: 'huge' });
+  ok('Theme: bad radius rejected (400 BAD_RADIUS)', badRad.status === 400 && badRad.json.error?.code === 'BAD_RADIUS', `${badRad.status} ${badRad.json.error?.code}`);
+  const thCf2 = await inj('GET', '/api/tenant/theme', cf2aa);
+  ok('Theme: RLS-scoped — another tenant keeps its own theme (not HQ’s)', thCf2.json.theme?.primary_hue !== 200, `cf2 hue=${thCf2.json.theme?.primary_hue}`);
+
   await app.close();
   await pg.close();
 
