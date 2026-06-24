@@ -39,6 +39,7 @@ import {
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { CommandPalette } from '@/components/command-palette';
+import { NotificationBell } from '@/components/notification-bell';
 
 function initials(name?: string | null) {
   if (!name) return '?';
@@ -251,6 +252,7 @@ export function AppShell({
             <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => setPaletteOpen(true)} aria-label="ค้นหา">
               <Search className="size-4" />
             </Button>
+            <NotificationBell />
             <LanguageToggle />
             <ThemeToggle />
             <DropdownMenu>

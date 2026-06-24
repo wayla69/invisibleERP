@@ -1,6 +1,6 @@
 # 12 · Platform Customization
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2** · Updated 2026-06-24 — added the notification inbox (§A).
 
 This chapter is the **map** to the no-code ways you can adapt the system to your
 business — for **Admins**, *AccessAdmin*, *MasterDataAdmin* and *Executives*. Each
@@ -25,6 +25,29 @@ tools.
 | Load many records from a spreadsheet (with a preview) | **Bulk import** | `/master-data` | masterdata | [Administration §8](./11-administration.md) |
 | Push events to other systems | **Webhooks** | `/webhooks` | users | [Administration §12](./11-administration.md) |
 | Put your logo & tagline on receipts | **Branding** | `/setup` | users | [Administration §13](./11-administration.md) |
+| Read alerts, report deliveries & approval reminders | **Notification inbox** | `/notifications` | anyone (your own) | §A below |
+
+---
+
+## A · Your notification inbox
+
+Everything the system needs to tell you — a low-stock **alert**, a **scheduled report**
+that just arrived, an **approval that's overdue** — lands in your personal inbox.
+
+- **Where:** the **bell icon** (🔔) at the top-right of every screen. A red number on
+  the bell is your count of **unread** messages. Click it for the latest few, or click
+  **"ดูทั้งหมด" (See all)** to open the full inbox at `/notifications`.
+- **Who:** **everyone** has an inbox. There's nothing to switch on. You only ever see
+  messages addressed to **your company and your role** (plus company-wide announcements);
+  one teammate reading a message never marks it read for you — read state is **per person**.
+- **What you can do:**
+  - **Mark one read** — click a message (in the bell list) or its **"อ่านแล้ว" (Mark read)**
+    button (in the full page). The unread count drops immediately.
+  - **อ่านทั้งหมด (Mark all read)** — clears your badge in one click.
+  - **เฉพาะที่ยังไม่อ่าน (Unread only)** — on the full page, filter to just what you
+    haven't read yet.
+- **Note:** the inbox **never** shows another company's or another role's messages, and it
+  contains **notifications only** — it never changes any accounting record.
 
 ---
 

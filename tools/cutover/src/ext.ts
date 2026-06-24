@@ -166,6 +166,40 @@ async function main() {
   const hqRules = await inj('GET', '/api/alerts/rules', hqwh);
   ok('Alerts: rules are tenant-isolated (HQ sees none of cf2’s)', (hqRules.json.rules ?? []).every((r: any) => r.id !== rule.json.id), `HQ rules=${(hqRules.json.rules ?? []).length}`);
 
+  // ── notification inbox (Phase #2) — per-user read state over the notifications table ──
+  // The alert sweep above wrote a notification for cf2 + target_role 'Warehouse'. cfwh2
+  // (Warehouse@cf2) must see it; hqwh (Warehouse@HQ) must NOT (the table isn't RLS-scoped,
+  // so the inbox query filters by target_tenant_id explicitly).
+  const inbox1 = await inj('GET', '/api/notifications/inbox', token2);
+  ok('Inbox: the alert notification appears for the targeted (tenant,role) user', (inbox1.json.items ?? []).length >= 1 && (inbox1.json.unread_count ?? 0) >= 1, `items=${(inbox1.json.items ?? []).length} unread=${inbox1.json.unread_count}`);
+  const hqInbox = await inj('GET', '/api/notifications/inbox', hqwh);
+  ok('Inbox: tenant-isolated (HQ Warehouse sees none of cf2’s notifications)', (hqInbox.json.items ?? []).length === 0 && (hqInbox.json.unread_count ?? 0) === 0, `items=${(hqInbox.json.items ?? []).length}`);
+
+  // broadcast (target_role NULL) is visible to ANY role in the tenant; a role-targeted note is not
+  await db.insert(s.notifications).values({ targetTenantId: cf2.id, targetRole: null, message: 'ประกาศทั้งระบบ', messageEn: 'System broadcast' });
+  await db.insert(s.notifications).values({ targetTenantId: cf2.id, targetRole: 'Planner', message: 'เฉพาะ Planner', messageEn: 'Planner only' });
+  const wInbox = await inj('GET', '/api/notifications/inbox', token2);
+  ok('Inbox: a tenant broadcast is visible to all roles; another role’s targeted note is hidden', (wInbox.json.items ?? []).some((i: any) => i.message_en === 'System broadcast') && !(wInbox.json.items ?? []).some((i: any) => i.message_en === 'Planner only'), `seen=${JSON.stringify((wInbox.json.items ?? []).map((i: any) => i.message_en))}`);
+
+  // mark one read → unread count drops, and the unread_only filter then hides it
+  const broadcast = (wInbox.json.items ?? []).find((i: any) => i.message_en === 'System broadcast');
+  const beforeUnread = (await inj('GET', '/api/notifications/unread-count', token2)).json.unread_count;
+  const markR = await inj('POST', `/api/notifications/${broadcast.id}/read`, token2);
+  ok('Inbox: mark-read flips state and decrements the unread count', markR.json.ok === true && markR.json.unread_count === beforeUnread - 1, `${JSON.stringify(markR.json)} before=${beforeUnread}`);
+  const unreadOnly = await inj('GET', '/api/notifications/inbox?unread_only=1', token2);
+  ok('Inbox: the unread_only filter excludes a just-read item', !(unreadOnly.json.items ?? []).some((i: any) => i.id === broadcast.id), `ids=${JSON.stringify((unreadOnly.json.items ?? []).map((i: any) => i.id))}`);
+
+  // a user cannot mark-read a notification not visible to them (the Planner-only one)
+  const planOnly = (await db.select().from(s.notifications).where(eq(s.notifications.messageEn, 'Planner only')))[0];
+  const sneaky = await inj('POST', `/api/notifications/${planOnly.id}/read`, token2);
+  ok('Inbox: cannot mark-read a notification targeted at another role', sneaky.json.ok === false, `${JSON.stringify(sneaky.json)}`);
+
+  // mark-all-read clears the badge for the caller only
+  const markAll = await inj('POST', '/api/notifications/mark-all-read', token2);
+  ok('Inbox: mark-all-read clears the caller’s unread count to 0', markAll.json.ok === true && markAll.json.unread_count === 0, `${JSON.stringify(markAll.json)}`);
+  const finalCount = await inj('GET', '/api/notifications/unread-count', token2);
+  ok('Inbox: unread-count is 0 after mark-all-read', finalCount.json.unread_count === 0, `${finalCount.json.unread_count}`);
+
   // ── scheduled-report execution engine (Phase 4) ──
   // Planner role carries 'exec' (the /api/bi gate) and is non-Admin → requests are RLS-scoped.
   await db.insert(s.users).values([
