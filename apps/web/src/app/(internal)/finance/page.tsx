@@ -25,7 +25,10 @@ export default function FinancePage() {
   const ar = useQuery<any>({ queryKey: ['fin-ar'], queryFn: () => api('/api/finance/ar?limit=50') });
   const ap = useQuery<any>({ queryKey: ['fin-ap'], queryFn: () => api('/api/finance/ap?status=Unpaid&limit=50') });
 
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['fin-kpi'] }); qc.invalidateQueries({ queryKey: ['fin-ar'] }); qc.invalidateQueries({ queryKey: ['fin-ap'] }); };
+  // Awaiting-approval AP payments (checker queue). retry:false so a maker without approval rights simply
+  // doesn't see the section (the 403 leaves data undefined) instead of getting an error banner.
+  const pendingPay = useQuery<any>({ queryKey: ['fin-ap-pending'], queryFn: () => api('/api/finance/ap/payments/pending'), retry: false });
+  const refresh = () => { for (const k of ['fin-kpi', 'fin-ar', 'fin-ap', 'fin-ap-pending']) qc.invalidateQueries({ queryKey: [k] }); };
 
   // ── AP vendor invoice entry ──
   const [apOpen, setApOpen] = useState(false);
@@ -48,14 +51,27 @@ export default function FinancePage() {
   });
   const syncAr = useMutation({ mutationFn: () => api('/api/finance/ar/sync', { method: 'POST' }), onSuccess: () => refresh() });
 
-  // ── AP pay (per row) ──
+  // ── AP pay REQUEST (per row) — maker-checker: this submits a request; a different user approves it ──
   const [payTxn, setPayTxn] = useState<string | null>(null);
   const [payAmt, setPayAmt] = useState('');
   const [payMsg, setPayMsg] = useState('');
   const payAp = useMutation({
     mutationFn: () => api(`/api/finance/ap/transactions/${payTxn}/pay`, { method: 'PATCH', body: JSON.stringify({ amount: Number(payAmt) }) }),
-    onSuccess: (r: any) => { setPayMsg(`✅ จ่าย ${r.txn_no} — สถานะ ${r.status}`); refresh(); setPayTxn(null); setPayAmt(''); },
+    onSuccess: (r: any) => { setPayMsg(`✅ ส่งคำขอจ่าย ${r.payment_no ?? r.txn_no} — รออนุมัติ`); refresh(); setPayTxn(null); setPayAmt(''); },
     onError: (e: any) => setPayMsg(`❌ ${e.message}`),
+  });
+
+  // ── AP payment approval (checker) — approve / reject a pending payment (approver ≠ requester) ──
+  const [apprMsg, setApprMsg] = useState('');
+  const approvePay = useMutation({
+    mutationFn: (no: string) => api(`/api/finance/ap/payments/${no}/approve`, { method: 'POST' }),
+    onSuccess: (r: any) => { setApprMsg(`✅ อนุมัติจ่าย ${r.payment_no} — บิล ${r.bill_status}`); refresh(); },
+    onError: (e: any) => setApprMsg(`❌ ${e.message}`),
+  });
+  const rejectPay = useMutation({
+    mutationFn: (no: string) => api(`/api/finance/ap/payments/${no}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'rejected by approver' }) }),
+    onSuccess: (r: any) => { setApprMsg(`✅ ปฏิเสธคำขอ ${r.payment_no}`); refresh(); },
+    onError: (e: any) => setApprMsg(`❌ ${e.message}`),
   });
 
   const field = (label: string, key: string, props: any = {}, form = apForm, set = setApForm) => (
@@ -177,21 +193,50 @@ export default function FinancePage() {
           </StateView>
         </div>
 
+        {/* AP payments awaiting approval (maker-checker) — only shown to users with approval authority */}
+        {pendingPay.data && (
+          <div>
+            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">คำขอจ่ายรออนุมัติ (Maker-Checker)</h3>
+            {apprMsg && <div className="mb-2"><Msg ok={apprMsg.startsWith('✅')}>{apprMsg}</Msg></div>}
+            <DataTable
+              rows={pendingPay.data.payments}
+              columns={[
+                { key: 'payment_no', label: 'เลขที่คำขอ' },
+                { key: 'txn_no', label: 'บิล AP' },
+                { key: 'vendor_name', label: 'เจ้าหนี้' },
+                { key: 'requested_by', label: 'ผู้ขอจ่าย' },
+                { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'act', label: '', sortable: false, render: (r: any) => {
+                  const busy = (approvePay.isPending && approvePay.variables === r.payment_no) || (rejectPay.isPending && rejectPay.variables === r.payment_no);
+                  return (
+                    <div className="flex gap-1">
+                      <Button size="sm" disabled={busy} onClick={() => { setApprMsg(''); approvePay.mutate(r.payment_no); }}>อนุมัติ</Button>
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => { setApprMsg(''); rejectPay.mutate(r.payment_no); }}>ปฏิเสธ</Button>
+                    </div>
+                  );
+                } },
+              ]}
+              emptyText="ไม่มีคำขอจ่ายรออนุมัติ"
+            />
+          </div>
+        )}
+
         <AgingSection />
       </div>
 
-      {/* AP pay dialog */}
+      {/* AP pay-request dialog — submits a request that a different user must approve (maker-checker) */}
       <Dialog open={!!payTxn} onOpenChange={(o) => { if (!o) { setPayTxn(null); setPayMsg(''); } }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>จ่ายเจ้าหนี้ {payTxn}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>ขอจ่ายเจ้าหนี้ {payTxn}</DialogTitle></DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="payAmt">จำนวนเงิน</Label>
             <Input id="payAmt" type="number" step="0.01" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} />
+            <p className="text-xs text-muted-foreground">คำขอจ่ายต้องได้รับการอนุมัติจากผู้มีสิทธิ์อีกคน (แบ่งแยกหน้าที่) ก่อนตัดจ่ายจริง</p>
             {payMsg && <Msg ok={payMsg.startsWith('✅')}>{payMsg}</Msg>}
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">ยกเลิก</Button></DialogClose>
-            <Button onClick={() => { setPayMsg(''); payAp.mutate(); }} disabled={payAp.isPending || !payAmt}>ยืนยันจ่าย</Button>
+            <Button onClick={() => { setPayMsg(''); payAp.mutate(); }} disabled={payAp.isPending || !payAmt}>ส่งคำขอจ่าย</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

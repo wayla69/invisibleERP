@@ -46,6 +46,7 @@ async function main() {
     // non-Admin (RLS-scoped) procurement users — Procurement role carries both procurement + masterdata
     { username: 'procT1', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },
     { username: 'procT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },
+    { username: 'apprv', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: hq }, // AP-PAY checker (≠ admin requester)
   ]).onConflictDoNothing();
   await db.insert(s.items).values({ itemId: 'X', itemDescription: 'วัตถุดิบ X', uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
   // V1 = legacy shared master (tenant_id NULL). Seeded via the raw superuser db so RLS WITH CHECK is bypassed.
@@ -71,8 +72,17 @@ async function main() {
   const admin = await login('admin', 'admin123');
   const procT1 = await login('procT1', 'pw'); // RLS-scoped to t1
   const procT2 = await login('procT2', 'pw'); // RLS-scoped to t2
+  const apprv = await login('apprv', 'pw');   // AP-PAY approver (≠ admin)
   const apTxn = async (amount: number) => (await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: V1, txn_type: 'Goods', amount })).json.txn_no as string;
+  // AP-PAY maker-checker: requesting a payment (admin) is gated on the 3-way match; a successful request
+  // is PendingApproval until a DIFFERENT authorized user approves it. payAttempt = the request (used for the
+  // match-gate block assertions); payFull = request + approve (used where a real disbursement is expected).
   const payAttempt = (txnNo: string, amount: number) => inj('PATCH', `/api/finance/ap/transactions/${txnNo}/pay`, admin, { amount });
+  const payFull = async (txnNo: string, amount: number) => {
+    const req = await payAttempt(txnNo, amount);
+    if (!req.json?.payment_no) return req; // blocked at request (match gate) → return the request result as-is
+    return inj('POST', `/api/finance/ap/payments/${req.json.payment_no}/approve`, apprv);
+  };
   const runMatch = (txnNo: string, poNo: string, lines: any[]) => inj('POST', '/api/procurement/match/run', admin, { txn_no: txnNo, po_no: poNo, lines });
   const payGl = async (txnNo: string) => (await pg.query(`SELECT account_code, debit, credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source='PAY-AP' AND je.source_ref LIKE '${txnNo}:%'`)).rows as any[];
   const leg = (gl: any[], c: string, side: string) => Number(gl.filter((l) => l.account_code === c).reduce((a, l) => a + Number(l[side] || 0), 0));
@@ -89,9 +99,9 @@ async function main() {
   const ap1 = await apTxn(1000);
   const m1 = await runMatch(ap1, poNo, [{ item_id: 'X', qty: 100, unit_price: 10 }]);
   ok('Match 100@10 → matched, payable', m1.json.match_status === 'matched' && m1.json.payable === true, JSON.stringify({ st: m1.json.match_status, pay: m1.json.payable }));
-  const pay1 = await payAttempt(ap1, 1000);
+  const pay1 = await payFull(ap1, 1000);
   const gl1 = await payGl(ap1);
-  ok('Matched invoice pays → 200 Paid, GL Dr2000=1000 / Cr1000=1000', pay1.json.status === 'Paid' && near(leg(gl1, '2000', 'debit'), 1000) && near(leg(gl1, '1000', 'credit'), 1000), JSON.stringify({ st: pay1.json.status }));
+  ok('Matched invoice request+approve → bill Paid, GL Dr2000=1000 / Cr1000=1000', pay1.json.bill_status === 'Paid' && near(leg(gl1, '2000', 'debit'), 1000) && near(leg(gl1, '1000', 'credit'), 1000), JSON.stringify({ st: pay1.json.status, bill: pay1.json.bill_status }));
 
   // ── C. price variance → blocked ──
   const ap2 = await apTxn(1200);
@@ -116,9 +126,9 @@ async function main() {
 
   // ── F. override gate ──
   const ovr = await inj('POST', `/api/procurement/match/${ap2}/override`, admin, { reason: 'manager approved variance' });
-  const pay2b = await payAttempt(ap2, 1200);
+  const pay2b = await payFull(ap2, 1200);
   const gl2 = await payGl(ap2);
-  ok('Override unblocks: override→pay 200 Paid + PAY-AP GL posted', ovr.json.override === true && pay2b.json.status === 'Paid' && near(leg(gl2, '2000', 'debit'), 1200), JSON.stringify({ ovr: ovr.json.override, pay: pay2b.json.status }));
+  ok('Override unblocks: override→request+approve → bill Paid + PAY-AP GL posted', ovr.json.override === true && pay2b.json.bill_status === 'Paid' && near(leg(gl2, '2000', 'debit'), 1200), JSON.stringify({ ovr: ovr.json.override, pay: pay2b.json.bill_status }));
 
   // ── G. RFQ → award → PO ──
   const rfq = await inj('POST', '/api/procurement/rfqs', admin, { items: [{ item_id: 'X', qty: 50 }] });
@@ -153,8 +163,8 @@ async function main() {
 
   // ── K. non-PO bill (no match) is payable — gate fails OPEN, only PO-based matched invoices are gated ──
   const nonPo = await apTxn(500);
-  const payNonPo = await payAttempt(nonPo, 500);
-  ok('Non-PO bill (no match row) pays → 200 Paid (gate fails open)', payNonPo.json.status === 'Paid', `${payNonPo.status} ${payNonPo.json.status}`);
+  const payNonPo = await payFull(nonPo, 500);
+  ok('Non-PO bill (no match row) request+approve → bill Paid (gate fails open)', payNonPo.json.bill_status === 'Paid', `${payNonPo.status} ${payNonPo.json.bill_status}`);
 
   // ── L. override does NOT survive a re-match (stale override must not keep a failing invoice payable) ──
   const ap5 = await apTxn(1200);
@@ -196,11 +206,14 @@ async function main() {
   const bill2 = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: V1, txn_type: 'Goods', amount: 500, idempotency_key: 'bill-k1' });
   const billRows = Number((await pg.query(`SELECT count(*)::int n FROM ap_transactions WHERE idempotency_key='bill-k1'`)).rows[0].n);
   ok('AP bill idempotent: same key → same txn_no, 1 row, 1 AP GL entry', bill1.json.txn_no === bill2.json.txn_no && bill2.json.idempotent === true && billRows === 1 && (await countEntries('AP', bill1.json.txn_no)) === 1, JSON.stringify({ t1: bill1.json.txn_no, t2: bill2.json.txn_no, rows: billRows }));
-  // (b) AP payment idempotency (H2): same key → paid once, one PAY-AP GL entry, even across "retries"
+  // (b) AP payment-REQUEST idempotency (H2): a retried request with the same key → ONE pending request;
+  //     approving it once disburses 800 with exactly one PAY-AP GL entry (no double cash-out).
   const payIdem = await apTxn(800);
   const p1 = await inj('PATCH', `/api/finance/ap/transactions/${payIdem}/pay`, admin, { amount: 800, idempotency_key: 'pay-k1' });
   const p2 = await inj('PATCH', `/api/finance/ap/transactions/${payIdem}/pay`, admin, { amount: 800, idempotency_key: 'pay-k1' });
-  ok('AP payment idempotent: retried key → paid once (800), 2nd idempotent, 1 PAY-AP entry', near(p1.json.paid_amount, 800) && p2.json.idempotent === true && near(p2.json.paid_amount, 800) && (await countEntries('PAY-AP', `${payIdem}:k:pay-k1`)) === 1, JSON.stringify({ p1: p1.json.paid_amount, p2: p2.json.paid_amount, idem: p2.json.idempotent }));
+  const reqRows = Number((await pg.query(`SELECT count(*)::int n FROM ap_payments WHERE idempotency_key='pay-k1'`)).rows[0].n);
+  const apprIdem = await inj('POST', `/api/finance/ap/payments/${p1.json.payment_no}/approve`, apprv);
+  ok('AP payment-request idempotent + approved once: same key → 1 pending request, paid 800, 1 PAY-AP entry', p1.json.payment_no === p2.json.payment_no && p2.json.idempotent === true && reqRows === 1 && near(apprIdem.json.paid_amount, 800) && (await countEntries('PAY-AP', `${payIdem}:p:%`)) === 1, JSON.stringify({ pn1: p1.json.payment_no, pn2: p2.json.payment_no, rows: reqRows, paid: apprIdem.json.paid_amount }));
   // (c) AR receipt idempotency (H1): same key → cash collected once, one RCP GL entry
   await db.insert(s.arInvoices).values({ invoiceNo: 'INV-IDEM-1', tenantId: hq, amount: '500', paidAmount: '0', status: 'Unpaid' }).onConflictDoNothing();
   const rc1 = await inj('POST', '/api/finance/ar/receipts', admin, { invoice_no: 'INV-IDEM-1', amount: 500, idempotency_key: 'rcp-k1' });

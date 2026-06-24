@@ -223,6 +223,9 @@ add("EXP-03","Expenditure","Application","Accounts Payable","PR/PO raised withou
 add("EXP-04","Expenditure","Application","Accounts Payable","Match tolerance loosened to force payment.","Validity",
     "Match-tolerance configuration change restricted to 'creditors' permission.","Prev","Automated","Per change","Controller","P10/P11",
     "match.controller.ts (PUT tolerance @Permissions creditors)","Inspect permission on tolerance change.","Attempt change w/o perm → 403; log changes.","Config-change log","Implemented")
+add("EXP-05","Expenditure","Application","Accounts Payable; Cash","Vendor payment disbursed without independent approval — one person both books and pays a bill.","Authorization",
+    "AP disbursement maker-checker — a payment is REQUESTED by a 'creditors' holder and APPROVED by a DIFFERENT user (approvals/gl_close); the bill's paid_amount and the cash-disbursement GL move only on approval. Booking a bill pre-paid in one call is blocked.","Prev","Auto+Manual","Per payment","AP / Controller","P10",
+    "finance.service.ts (requestApPayment / approveApPayment requester≠approver / rejectApPayment); finance.controller.ts (creditors requests, approvals|gl_close approves); schema/finance.ts (ap_payments) + migration 0111; cutover/compliance.ts (ToE)","Inspect AP payment approval routing + SoD guard.","Sample payments: approver ≠ requester; no cash/GL effect until approved; self-approval → 403 SOD_VIOLATION; pre-paid creation → 400 (re-performed by the harness).","AP payment approvals","Implemented")
 
 # ---- Inventory / COGS ----
 add("INV-01","Inventory & COGS","Application","Inventory; COGS","Two terminals sell last unit → negative/oversold stock.","Existence/Valuation",

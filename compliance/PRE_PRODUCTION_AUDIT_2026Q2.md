@@ -46,8 +46,8 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
 | 3.6 | AR receipt `paidAmount` — unlocked read-modify-write (lost-update race) | ✅ **FIXED** — `FOR UPDATE` + recompute |
 | 3.7 | AP payment `paidAmount` — unlocked read-modify-write (lost-update race) | ✅ **FIXED** — `FOR UPDATE` + recompute |
 | 3.8 | Returns restock — inventory add not row-locked | ✅ **FIXED** — `FOR UPDATE` |
-| 3.9 | AP disbursement (`payAp`) has no maker-checker / second-person approval | ⚠️ FLAGGED (medium — see below) |
-| 3.10 | AP bill can be booked pre-paid in one call (`createApTxn`, `paid_amount>0`) | ⚠️ FLAGGED (low-med) |
+| 3.9 | AP disbursement (`payAp`) has no maker-checker / second-person approval | ✅ **FIXED** — request (`creditors`) → approve (`approvals`/`gl_close`), requester ≠ approver (EXP-05) |
+| 3.10 | AP bill can be booked pre-paid in one call (`createApTxn`, `paid_amount>0`) | ✅ **FIXED** — blocked (`AP_PREPAID_BLOCKED`) |
 | 3.11 | Central `audit_log` records no old-value / new-value (before/after image) | ⚠️ FLAGGED (medium) |
 
 ### Pillar 4 — Exhaustive Functional & Component Testing
@@ -83,21 +83,29 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
 - `m/page.tsx` — `busy` re-entrancy guard on redeem/spin/claim/mission (no double-spent points/coupons).
 - `qr/[token]/page.tsx` — `doBill()` now surfaces API errors instead of swallowing them.
 
+## Implemented after the initial pass
+- **AP disbursement maker-checker (3.9 / 3.10 — control EXP-05).** AP payment is now a two-step segregated
+  flow: `PATCH /api/finance/ap/transactions/{no}/pay` (maker, `creditors`) records a `PendingApproval` request
+  with **no cash/GL effect**; `POST /api/finance/ap/payments/{no}/approve` (checker, `approvals`/`gl_close`)
+  by a **different** user moves `paid_amount` (under `FOR UPDATE`) and posts the cash GL — requester ≠ approver
+  enforced even for Admin (`SOD_VIOLATION`). Pre-paid bill creation blocked (`AP_PREPAID_BLOCKED`).
+  New `ap_payments` table (migration 0111, RLS) + pending queue + web approval UI. RCM **EXP-05** added
+  (`build_rcm.py`, xlsx regenerated); ToE re-performed by `cutover/compliance.ts` (8 checks); functional
+  flow in `parity/writeflow.ts` and `cutover/match.ts`; narrative/user-manual/UAT updated.
+
 ## Flagged for a dedicated workstream (NOT remediated this pass — require design + doc/RCM updates)
-1. **AP disbursement maker-checker (3.9, medium).** Route `payAp` through `WorkflowService` (as PO/PR) or add
-   an explicit `payer ≠ bill-creator` + threshold dual-approval, with a `pay_ap` permission distinct from
-   `creditors`. Also gate `createApTxn` pre-paid creation (3.10). Touches `permissions.ts`, RCM, narratives, UAT.
-2. **Audit before/after capture (3.11, medium).** Add structured `old_value`/`new_value` (jsonb) for mutations
+1. **Audit before/after capture (3.11, medium).** Add structured `old_value`/`new_value` (jsonb) for mutations
    on financially-significant entities (interceptor enrichment or row-level triggers).
-3. **N+1 batch refactors (2.8).** AR sync (`finance.service.ts:130`), journal-line list (`ledger.service.ts:231`),
+2. **N+1 batch refactors (2.8).** AR sync (`finance.service.ts`), journal-line list (`ledger.service.ts:231`),
    consolidation (`consolidation.service.ts:97`), costing-on-issue (`costing.service.ts:95`), anomaly report
    (`anomalies.service.ts:38`) — collapse per-row queries to `inArray`/join batches.
-4. **~18 remaining table-row buttons (4.6)** — apply the same `disabled={mut.isPending}` pattern fleet-wide.
+3. **~18 remaining table-row buttons (4.6)** — apply the same `disabled={mut.isPending}` pattern fleet-wide.
 
 ## Sign-off
 Conditionally **production-ready**: the data-integrity (lost-update) and double-submit money-movement defects —
 the items that most directly threaten an audit — are fixed and verified, and the performance/maintenance gaps
-that risked peak-load degradation are closed. The four FLAGGED items are lower-severity or design-level and
+that risked peak-load degradation are closed. The AP disbursement maker-checker (EXP-05) is now implemented and
+ToE-tested. The three remaining FLAGGED items are lower-severity or design-level and
 should be scheduled as follow-up workstreams with their accompanying control-documentation updates before they
 are signed off individually; none is a release blocker for the audited transaction paths.
 
