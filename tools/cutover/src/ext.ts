@@ -715,6 +715,37 @@ async function main() {
   const thCf2 = await inj('GET', '/api/tenant/theme', cf2aa);
   ok('Theme: RLS-scoped — another tenant keeps its own theme (not HQ’s)', thCf2.json.theme?.primary_hue !== 200, `cf2 hue=${thCf2.json.theme?.primary_hue}`);
 
+  // ── E1 onboarding + industry packs (Platform Phase 26) ──
+  const ob0 = await inj('GET', '/api/onboarding', hqaa);
+  ok('Onboarding: checklist exposes steps + percent', (ob0.json.steps ?? []).length >= 5 && typeof ob0.json.percent === 'number', `steps=${(ob0.json.steps ?? []).length} pct=${ob0.json.percent}`);
+  await inj('POST', '/api/onboarding/steps/branding/complete', hqaa, {});
+  const ob1 = await inj('GET', '/api/onboarding', hqaa);
+  ok('Onboarding: completing a step advances progress', (ob1.json.steps ?? []).find((s: any) => s.key === 'branding')?.done === true && ob1.json.percent > 0, `pct=${ob1.json.percent}`);
+  const obBadStep = await inj('POST', '/api/onboarding/steps/nope/complete', hqaa, {});
+  ok('Onboarding: unknown step rejected (400 BAD_STEP)', obBadStep.status === 400 && obBadStep.json.error?.code === 'BAD_STEP', `${obBadStep.status} ${obBadStep.json.error?.code}`);
+  const obApply = await inj('POST', '/api/onboarding/apply-pack', hqaa, { pack: 'restaurant' });
+  ok('Onboarding: applying an industry pack seeds custom objects', (obApply.status === 200 || obApply.status === 201) && (obApply.json.objects_created ?? 0) >= 1, `created=${obApply.json.objects_created}`);
+  const obApply2 = await inj('POST', '/api/onboarding/apply-pack', hqaa, { pack: 'restaurant' });
+  ok('Onboarding: re-applying a pack is idempotent (0 new)', obApply2.json.objects_created === 0, `created=${obApply2.json.objects_created}`);
+  const obBadPack = await inj('POST', '/api/onboarding/apply-pack', hqaa, { pack: 'nope' });
+  ok('Onboarding: unknown pack rejected (400 BAD_PACK)', obBadPack.status === 400 && obBadPack.json.error?.code === 'BAD_PACK', `${obBadPack.status} ${obBadPack.json.error?.code}`);
+  const coCf2 = await inj('GET', '/api/custom-objects', cf2aa);
+  const cf2objs = Array.isArray(coCf2.json) ? coCf2.json : (coCf2.json?.objects ?? []);
+  ok('Onboarding: RLS — the seeded objects do not leak to another tenant', !cf2objs.some((o: any) => (o.object_key ?? o.objectKey) === 'menu_recipe'), `cf2 objects=${cf2objs.length}`);
+
+  // ── D1 API maturity / developer portal (Platform Phase 23) ──
+  const dp0 = await inj('GET', '/api/developer/portal', hqaa);
+  ok('Developer: portal exposes scopes / endpoints / tiers', (dp0.json.scopes ?? []).length >= 4 && (dp0.json.endpoints ?? []).length >= 4 && (dp0.json.tiers ?? []).length >= 3, `s=${(dp0.json.scopes ?? []).length} e=${(dp0.json.endpoints ?? []).length} t=${(dp0.json.tiers ?? []).length}`);
+  await inj('POST', '/api/platform/api-keys', hqaa, { name: 'dev-test', scopes: ['catalog:read'] });
+  const dp1 = await inj('GET', '/api/developer/portal', hqaa);
+  const devKey = (dp1.json.keys ?? []).find((k: any) => k.name === 'dev-test') ?? (dp1.json.keys ?? [])[0];
+  const setTier = await inj('PUT', `/api/developer/keys/${devKey?.id}/tier`, hqaa, { tier: 'partner' });
+  ok('Developer: set a key rate tier', (setTier.status === 200 || setTier.status === 201) && setTier.json.tier === 'partner', `${setTier.status} ${setTier.json.tier}`);
+  const badTier = await inj('PUT', `/api/developer/keys/${devKey?.id}/tier`, hqaa, { tier: 'gold' });
+  ok('Developer: bad tier rejected (400 BAD_TIER)', badTier.status === 400 && badTier.json.error?.code === 'BAD_TIER', `${badTier.status} ${badTier.json.error?.code}`);
+  const dpCf2 = await inj('GET', '/api/developer/portal', cf2aa);
+  ok('Developer: RLS — another tenant does not see HQ’s keys', !(dpCf2.json.keys ?? []).some((k: any) => k.name === 'dev-test'), `cf2 keys=${(dpCf2.json.keys ?? []).length}`);
+
   await app.close();
   await pg.close();
 
