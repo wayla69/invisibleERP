@@ -76,6 +76,7 @@ export default function ProductionPlanPage() {
                   { key: 'velocity_per_day', label: 'ขาย/วัน (เฉลี่ย)', align: 'right', render: (r: any) => num(r.velocity_per_day) },
                   { key: 'forecast_qty', label: 'พยากรณ์', align: 'right', render: (r: any) => num(r.forecast_qty) },
                   { key: 'prep_suggestion', label: 'แนะนำให้เตรียม', align: 'right', render: (r: any) => <strong>{num(r.prep_suggestion)}</strong> },
+                  { key: 'model', label: 'โมเดล', render: (r: any) => <Badge variant="muted" className="font-mono text-[10px]">{r.model}{typeof r.forecast_wape === 'number' ? ` · ${Math.round((1 - r.forecast_wape) * 100)}%` : ''}</Badge> },
                   { key: 'ingredient_short', label: 'วัตถุดิบ', render: (r: any) => r.ingredient_short ? <Badge variant="warning">วัตถุดิบไม่พอ</Badge> : <Badge variant="muted">พอ</Badge> },
                 ]}
               />

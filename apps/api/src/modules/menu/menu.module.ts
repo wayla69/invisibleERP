@@ -4,10 +4,12 @@ import { RecipeService } from './recipe.service';
 import { FoodCostService } from './food-cost.service';
 import { ProductionPlanService } from './production-plan.service';
 import { MenuController } from './menu.controller';
+import { DemandMlModule } from '../demand-ml/demand-ml.module';
 
 // POS Menu / Catalog master — source of truth for POS / dine-in / portal order entry.
 // DRIZZLE is global (DatabaseModule). Exports MenuService + RecipeService for order-entry + returns.
 @Module({
+  imports: [DemandMlModule], // demand forecaster powers the production plan
   controllers: [MenuController],
   providers: [MenuService, RecipeService, FoodCostService, ProductionPlanService],
   exports: [MenuService, RecipeService, FoodCostService, ProductionPlanService],

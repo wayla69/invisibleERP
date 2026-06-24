@@ -316,9 +316,12 @@ and it gives you two lists:
   suggests **how much of each ingredient to order** (rounded up to your reorder pack
   size). Ingredients you have enough of don't appear.
 
-The forecast is **day-of-week aware** — it predicts each day from the *same weekday's*
-history (so a Saturday is forecast from past Saturdays, not a flat average), which
-matters when weekends and weekdays sell differently.
+The forecast uses a **self-tuning demand model** — for each dish it backtests several
+classic methods (moving average, smoothing, trend, weekly-seasonal, intermittent) on
+that dish's own sales history and **automatically picks the most accurate one**, so
+trend and weekly seasonality (weekends ≠ weekdays) are both captured. Each row shows
+the chosen model and its accuracy; a brand-new dish with little history falls back to
+a simple day-of-week average until it has enough data to model.
 
 It's advice, not an automatic order — but when the buy list has items you can press
 **สร้างใบสั่งซื้อ (ร่าง)** to raise a **draft purchase order** in procurement in one

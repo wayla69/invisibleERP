@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosItems, custPosSales, menuRecipes, menuRecipeLines, menuItems, customerInventory } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
+import { DemandForecastService } from '../demand-ml/demand-forecast.service';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -21,13 +22,14 @@ const weekdayOf = (d: string): number => new Date(`${d}T00:00:00Z`).getUTCDay();
 //   sales velocity (demand)  →  BOM explosion (recipe)  →  current stock (customer_inventory)
 // to answer, for a horizon: how many of each dish to PREP, and which ingredients to BUY (and how much).
 //
-// Demand model is **day-of-week aware**: each target day is forecast from that *same weekday's* history
-// over the lookback (a Saturday is forecast from past Saturdays, not a flat average), which matters for
-// F&B where weekends ≠ weekdays. Transparent and explainable, and a drop-in point for the ML demand
-// model later. Read-only suggestions; turning a line into a real PO is a one-click handoff to procurement.
+// Demand model: each dish is forecast by the **demand-ML** engine — it backtests classic models
+// (SMA / SES / Holt-trend / weekly seasonal-naive / Croston) walk-forward and auto-selects the most
+// accurate by WAPE, so weekly seasonality (weekends ≠ weekdays) and trend are captured and *measured*.
+// Dishes with too little history fall back to a transparent **day-of-week average**. Read-only
+// suggestions; turning a line into a real PO is a one-click handoff to procurement.
 @Injectable()
 export class ProductionPlanService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, @Optional() private readonly demand?: DemandForecastService) {}
 
   async plan(user: JwtUser, opts?: { days?: number; lookback?: number; date?: string }) {
     const db = this.db as any;
@@ -90,11 +92,22 @@ export class ProductionPlanService {
     // ── 2. forecast per recipe'd dish + ingredient requirement accumulation ──
     const required = new Map<string, number>(); // ingredient item_id → qty needed for the forecast
     const prep: any[] = [];
+    let mlUsed = false;
     for (const rec of recipes) {
       const mi = miById.get(Number(rec.menuItemId));
       const recLines = linesByRecipe.get(Number(rec.id)) ?? [];
       const yld = Math.max(n(rec.yieldQty), 1);
-      const { forecast, velocity } = forecastFor(String(rec.sku));
+      // Demand-ML first (auto-selected model over the dish's full history); DOW average when too thin.
+      let forecast: number; let velocity: number; let model: string; let wape: number | null = null;
+      const ml = this.demand ? await this.demand.planForecast(String(rec.sku), days).catch(() => null) : null;
+      if (ml) {
+        forecast = Math.ceil(ml.forecast.slice(0, days).reduce((a, b) => a + b, 0));
+        velocity = r3(ml.forecast.length ? ml.forecast.reduce((a, b) => a + b, 0) / ml.forecast.length : 0);
+        model = ml.algorithm; wape = ml.wape; mlUsed = true;
+      } else {
+        const f = forecastFor(String(rec.sku));
+        forecast = f.forecast; velocity = r3(f.velocity); model = 'day-of-week';
+      }
       let canMake = Infinity;
       for (const l of recLines) {
         const perServing = n(l.qtyPer) / yld;
@@ -107,7 +120,7 @@ export class ProductionPlanService {
       const capacity = canMake === Infinity ? null : canMake;
       prep.push({
         sku: rec.sku, name: mi?.name ?? rec.sku,
-        velocity_per_day: r3(velocity), forecast_qty: forecast,
+        velocity_per_day: velocity, forecast_qty: forecast, model, forecast_wape: wape,
         prep_suggestion: forecast,                                  // pre-make to meet forecast demand
         ingredient_capacity: capacity,
         ingredient_short: capacity != null && capacity < forecast,  // can't even cover the forecast alone
@@ -130,7 +143,8 @@ export class ProductionPlanService {
 
     const purchaseOrders = ingredients.filter((i) => i.needs_order);
     return {
-      date: anchor, horizon_days: days, lookback_days: lookback, forecast_method: 'day-of-week',
+      date: anchor, horizon_days: days, lookback_days: lookback,
+      forecast_method: mlUsed ? 'demand-ML (auto-selected per dish, day-of-week fallback)' : 'day-of-week',
       summary: {
         dishes: prep.length,
         dishes_to_prep: prep.filter((p) => p.prep_suggestion > 0).length,

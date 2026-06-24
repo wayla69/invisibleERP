@@ -420,7 +420,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-037 | Staff / cashier performance | Feature (staff analytics) | 20 §rev2.9 |
 | UAT-RPT-038 | Sales trend vs prior window | Feature (sales trend) | 20 §rev2.9 |
 | UAT-RPT-039 | BOM availability forecast (servings-remaining) | Feature (BOM availability) | 20 §rev2.9 |
-| UAT-RPT-040 | Production plan — day-of-week forecast | Feature (production plan, DOW) | 20 §rev3.2 |
+| UAT-RPT-040 | Production plan — demand-ML forecast | Feature (production plan, demand-ML) | 20 §rev3.3 |
 | UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
