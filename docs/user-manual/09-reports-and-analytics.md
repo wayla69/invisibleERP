@@ -301,4 +301,25 @@ out, instead of discovering it at the kitchen pass.
 
 ---
 
+## Production plan (predictive prep + auto-replenishment)
+
+**แผนการผลิต (Production plan)** in the POS menu (`/production-plan`) plans your day
+from your own sales. Pick how many days ahead to plan and how far back to learn from,
+and it gives you two lists:
+
+- **Prep list** — for each dish it works out the **average sold per day** (over your
+  lookback window) and forecasts demand for the period, so the kitchen knows **how
+  many to pre-make**. A dish whose ingredients can't even cover the forecast is
+  flagged.
+- **Buy list** — it explodes those forecasts through your recipes into a total
+  ingredient requirement, compares it to current stock and your reorder points, and
+  suggests **how much of each ingredient to order** (rounded up to your reorder pack
+  size). Ingredients you have enough of don't appear.
+
+It's advice, not an automatic order — review it, then raise the purchase orders in
+procurement. The forecast uses a simple, transparent daily-average; it can be swapped
+for the AI demand model later without changing the screen.
+
+---
+
 **Next:** [Approvals](./10-approvals.md) · [Administration](./11-administration.md)

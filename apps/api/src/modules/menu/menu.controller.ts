@@ -4,6 +4,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { MenuService } from './menu.service';
 import { RecipeService } from './recipe.service';
 import { FoodCostService } from './food-cost.service';
+import { ProductionPlanService } from './production-plan.service';
 import { UpsertRecipeBody, type UpsertRecipeDto } from './recipe.dto';
 import {
   CreateCategoryBody, CreateItemBody, UpdateItemBody, SetAvailabilityBody, CreateModifierGroupBody, OptionBody, AttachGroupBody, ResolveLineBody,
@@ -16,7 +17,13 @@ const RECIPE_MANAGE = ['bom_master', 'masterdata', 'exec'] as const;
 
 @Controller('api/menu')
 export class MenuController {
-  constructor(private readonly svc: MenuService, private readonly recipe: RecipeService, private readonly foodCost: FoodCostService) {}
+  constructor(private readonly svc: MenuService, private readonly recipe: RecipeService, private readonly foodCost: FoodCostService, private readonly production: ProductionPlanService) {}
+
+  // Predictive prep + auto-replenishment: forecast demand → BOM → prep list + ingredient buy list.
+  @Get('production-plan') @Permissions('pos', 'order_mgt', 'masterdata', 'planner', 'exec')
+  productionPlan(@Query('days') days: string | undefined, @Query('lookback') lookback: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.production.plan(u, { days: days != null ? Number(days) : undefined, lookback: lookback != null ? Number(lookback) : undefined });
+  }
 
   // ── food-cost / margin analytics (menu engineering) ──
   @Get('food-cost') @Permissions('pos', 'order_mgt', 'masterdata', 'exec')
