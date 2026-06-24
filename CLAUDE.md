@@ -47,6 +47,12 @@ For every such change, review and update as needed:
    regressions (harnesses + typecheck + build). State results honestly, with the output.
 6. **Leave it greener.** If you find a pre-existing failure, fix it or clearly flag it to the user; never
    silently step over a red gate. Reconcile docs per the policy above.
+7. **For a CI gate, get the real finding before you touch code — and don't trust a stale check.** Read the
+   gate's actual output (e.g. `get_check_run` for the `CodeQL` results gate gives the alert count/severity)
+   and **enumerate the diff for the exact sink** rather than guessing at the cause; a wrong guess costs a
+   full ~5-min CI cycle. Also check **timing**: the `CodeQL` results gate concludes a few seconds *before*
+   the `codeql` analysis job finishes, so a red gate often reflects the **previous** commit's SARIF — a
+   freshly-pushed fix can show red purely because the gate is one analysis behind (see gotcha below).
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -65,6 +71,21 @@ For every such change, review and update as needed:
   GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
   Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
   blocked (403), and the commit-signing server is occasionally flaky (retry the commit).
+- **CodeQL `CodeQL` results gate races / is one commit behind.** The capital-`CodeQL` PR check (distinct
+  from the lowercase `codeql` analysis *job*) concludes ~5–8s **before** that run's analysis finishes
+  uploading, so on a fresh push it reports the **prior** commit's alerts — a pushed fix can read red even
+  when its own analysis is clean. Confirm via `get_check_run` (the `output.summary` carries the count, e.g.
+  "2 high"; `output.text`/annotations are **not** exposed via MCP, nor is a code-scanning-alerts list tool,
+  and no SARIF artifact is uploaded). Diagnose by **enumerating the diff** for the flagged sink, not by
+  re-reading the gate. The merge is **not** hard-blocked by this gate, so a verified-clean fix can be
+  merged even while the gate still displays its stale red (the post-merge `main` analysis is the
+  authoritative confirmation).
+- **`js/sensitive-get-query` (CWE-598) fires on CLIENT code too.** It flags reading a sensitive-named
+  param (`token`, `id_token`, `code`, `secret`, …) from the URL — including `new URLSearchParams(
+  window.location.search).get('id_token')` in a web page, not just server `req.query`/Nest `@Query`. Fix
+  by **not naming** the sensitive param at the read site: forward the raw query string opaquely and parse
+  it server-side from the POST **body** (the body is not a GET-query source). This bit the SSO `/sso/callback`
+  page (the IdP redirect carries `code`/`id_token` in the URL).
 
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
