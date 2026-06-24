@@ -180,6 +180,12 @@ they simply stop belonging to a room. To put a table in a room, tap the table (i
 edit mode) and choose the room under **ห้อง:** in the small panel that appears
 (pick **ไม่มีห้อง** to take it out again).
 
+**Table shapes & sizes.** Tap a table in **แก้ไขผัง** to open its panel and make it
+match the real one: pick a **รูปทรง** (**วงกลม** round / **สี่เหลี่ยมผืนผ้า** / **จัตุรัส**),
+set the **ที่นั่ง** count, **หมุน** it left/right (handy for corner or wall tables),
+and drag its **corner** to resize — so a small 2-seater and a long 8-seater look
+different at a glance on the plan.
+
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).

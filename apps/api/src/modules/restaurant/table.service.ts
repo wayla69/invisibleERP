@@ -83,6 +83,7 @@ export class TableService {
     if (dto.zone_id !== undefined) set.zoneId = dto.zone_id;   // explicit null un-assigns the table from its zone
     if (dto.seats != null) set.seats = dto.seats;
     if (dto.shape != null) set.shape = dto.shape;
+    if (dto.rotation != null) set.rotation = dto.rotation;
     if (dto.pos_x != null) set.posX = String(dto.pos_x);
     if (dto.pos_y != null) set.posY = String(dto.pos_y);
     if (dto.width != null) set.width = String(dto.width);

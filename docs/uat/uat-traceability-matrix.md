@@ -136,6 +136,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-100 | Assign / un-assign a table to a room | Feature (floor-plan layout) | 20 §6 |
 | UAT-O2C-101 | Delete a room keeps its tables | Feature (floor-plan layout) | 20 §6 |
 | UAT-O2C-102 | Rooms are tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
+| UAT-O2C-103 | Set table shape / size / rotation / seats | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-104 | Invalid shape / rotation rejected | Feature (floor-plan layout) | 20 §6, §13 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

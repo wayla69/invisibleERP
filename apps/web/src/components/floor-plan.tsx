@@ -8,7 +8,7 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Check, Home, Move, Palette, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Check, Home, Move, Palette, Pencil, Plus, RotateCcw, RotateCw, Trash2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -154,6 +154,19 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
     delZone.mutate(z.id);
   };
 
+  // shape change normalises dimensions so the new shape reads immediately (circle/square → equal sides;
+  // rect → a visibly rectangular ratio when it was square). Seats/rotation are simple field patches.
+  const setShape = (t: TableRow, shape: string) => {
+    const body: any = { shape };
+    if (shape === 'circle' || shape === 'square') { const s = Math.round(Math.max(t.width, t.height)); body.width = s; body.height = s; }
+    else if (t.width === t.height) { body.height = Math.max(40, Math.round(t.width * 0.62)); }
+    patch.mutate({ path: `/api/restaurant/tables/${t.id}`, body, kind: 'table' });
+  };
+  const rotateBy = (t: TableRow, delta: number) => {
+    const r = ((((t.rotation || 0) + delta) % 360) + 360) % 360;
+    patch.mutate({ path: `/api/restaurant/tables/${t.id}`, body: { rotation: r }, kind: 'table' });
+  };
+
   const inspTable = editSel != null ? tables.find((t) => t.id === editSel) ?? null : null;
 
   return (
@@ -250,12 +263,15 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
 
         {tables.map((t) => {
           const d = drag?.kind === 'table' && drag.id === t.id ? drag : null;
-          const left = d ? d.x : t.pos_x, top = d ? d.y : t.pos_y;
+          const left = d && d.action === 'move' ? d.x : t.pos_x;
+          const top = d && d.action === 'move' ? d.y : t.pos_y;
+          const w = d && d.action === 'resize' ? d.w : t.width;
+          const h = d && d.action === 'resize' ? d.h : t.height;
           const dragging = d?.moved;
-          const round = t.shape === 'circle' || t.width === t.height;
+          const round = t.shape === 'circle' || (t.shape !== 'square' && w === h);
           const selected = sel === t.id || (edit && editSel === t.id);
           return (
-            <div key={t.id} className="absolute" style={{ left, top, width: t.width, height: t.height }}>
+            <div key={t.id} className="absolute" style={{ left, top, width: w, height: h }}>
               <button
                 onPointerDown={(e) => startDrag(e, 'table', t.id, 'move', { x: t.pos_x, y: t.pos_y, w: t.width, h: t.height })}
                 onPointerMove={onDragMove}
@@ -274,38 +290,77 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
                 <span className="text-[10px] font-normal">{STATUS_TH[t.status]}</span>
               </button>
               {edit && (
-                <button
-                  type="button"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => { e.stopPropagation(); confirmDeleteTable(t); }}
-                  title="ลบโต๊ะ"
-                  className="absolute -right-2 -top-2 grid size-5 place-items-center rounded-full bg-destructive text-destructive-foreground shadow ring-1 ring-background hover:bg-destructive/90"
-                >
-                  <Trash2 className="size-3" />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); confirmDeleteTable(t); }}
+                    title="ลบโต๊ะ"
+                    className="absolute -right-2 -top-2 grid size-5 place-items-center rounded-full bg-destructive text-destructive-foreground shadow ring-1 ring-background hover:bg-destructive/90"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                  <div
+                    onPointerDown={(e) => startDrag(e, 'table', t.id, 'resize', { x: t.pos_x, y: t.pos_y, w: t.width, h: t.height })}
+                    onPointerMove={onDragMove}
+                    onPointerUp={onDragUp}
+                    title="ปรับขนาดโต๊ะ"
+                    className="absolute -bottom-1 -right-1 size-3 rounded-sm border border-background bg-foreground/60"
+                    style={{ pointerEvents: 'auto', cursor: 'nwse-resize', touchAction: 'none' }}
+                  />
+                </>
               )}
             </div>
           );
         })}
       </div>
 
-      {/* edit inspector — assign the selected table to a room, or delete it */}
+      {/* edit inspector — shape / seats / rotation / room for the selected table, or delete it */}
       {edit && inspTable && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
+        <div key={inspTable.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-card p-3 text-sm">
           <span className="font-semibold">โต๊ะ {inspTable.table_no}</span>
-          <span className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">ห้อง:</span>
+
+          <label className="flex items-center gap-2">
+            <span className="text-muted-foreground">รูปทรง</span>
+            <Select value={inspTable.shape || 'rect'} onValueChange={(v) => setShape(inspTable, v)}>
+              <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="circle">วงกลม</SelectItem>
+                <SelectItem value="rect">สี่เหลี่ยมผืนผ้า</SelectItem>
+                <SelectItem value="square">จัตุรัส</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+
+          <label className="flex items-center gap-2">
+            <span className="text-muted-foreground">ที่นั่ง</span>
+            <Input
+              type="number" min={1} className="w-[72px]" defaultValue={inspTable.seats}
+              onBlur={(e) => { const s = Number(e.target.value); if (s > 0 && s !== inspTable.seats) patch.mutate({ path: `/api/restaurant/tables/${inspTable.id}`, body: { seats: s }, kind: 'table' }); }}
+            />
+          </label>
+
+          <span className="flex items-center gap-1">
+            <span className="text-muted-foreground">หมุน</span>
+            <Button variant="outline" size="icon" className="size-8" title="หมุนซ้าย 15°" onClick={() => rotateBy(inspTable, -15)}><RotateCcw className="size-4" /></Button>
+            <span className="w-10 text-center tabular">{inspTable.rotation || 0}°</span>
+            <Button variant="outline" size="icon" className="size-8" title="หมุนขวา 15°" onClick={() => rotateBy(inspTable, 15)}><RotateCw className="size-4" /></Button>
+          </span>
+
+          <label className="flex items-center gap-2">
+            <span className="text-muted-foreground">ห้อง</span>
             <Select
               value={inspTable.zone_id != null ? String(inspTable.zone_id) : 'none'}
               onValueChange={(v) => patch.mutate({ path: `/api/restaurant/tables/${inspTable.id}`, body: { zone_id: v === 'none' ? null : Number(v) }, kind: 'table' })}
             >
-              <SelectTrigger className="w-[180px]"><SelectValue placeholder="เลือกห้อง" /></SelectTrigger>
+              <SelectTrigger className="w-[160px]"><SelectValue placeholder="เลือกห้อง" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">ไม่มีห้อง</SelectItem>
                 {zones.map((z) => <SelectItem key={z.id} value={String(z.id)}>{z.name}</SelectItem>)}
               </SelectContent>
             </Select>
-          </span>
+          </label>
+
           <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => confirmDeleteTable(inspTable)} disabled={delTable.isPending}>
             <Trash2 className="size-4" /> ลบโต๊ะ
           </Button>
@@ -315,7 +370,7 @@ export function FloorPlan({ tables, onSelect, sel, onChange }: { tables: TableRo
 
       <p className="text-xs text-muted-foreground">
         {edit
-          ? <span className="inline-flex items-center gap-1"><Move className="size-3" /> ลากโต๊ะ/ห้องเพื่อย้าย · จับมุมห้องเพื่อปรับขนาด · แตะโต๊ะเพื่อกำหนดห้อง/ลบ · กด “เสร็จสิ้น” เมื่อจัดเสร็จ</span>
+          ? <span className="inline-flex items-center gap-1"><Move className="size-3" /> ลากเพื่อย้าย · จับมุมเพื่อปรับขนาด · แตะโต๊ะเพื่อตั้งรูปทรง/หมุน/ที่นั่ง/ห้อง · กด “เสร็จสิ้น” เมื่อจัดเสร็จ</span>
           : 'แตะโต๊ะเพื่อจัดการ · กด “แก้ไขผัง” เพื่อจัดผัง/สร้างห้อง VIP · สีบอกสถานะ'}
       </p>
     </div>

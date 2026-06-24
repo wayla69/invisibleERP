@@ -345,6 +345,18 @@ async function main() {
   const zoneGone = await inj('DELETE', `/api/restaurant/zones/${zoneId}`, sales1);
   ok('Zones: deleting an already-removed room → 404', zoneGone.status === 404, `${zoneGone.status}`);
 
+  // ── floor-plan table appearance: shape + rotation + resize + seats ──
+  const apT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'S1', seats: 2 });
+  const apShape = await inj('PATCH', `/api/restaurant/tables/${apT.json.id}`, sales1, { shape: 'circle', width: 90, height: 90, rotation: 45, seats: 8 });
+  ok('Table appearance: shape/size/rotation/seats persist (PATCH)', apShape.status === 200 && apShape.json.shape === 'circle' && near(apShape.json.width, 90) && apShape.json.rotation === 45 && apShape.json.seats === 8, `${apShape.status} ${JSON.stringify(apShape.json).slice(0, 100)}`);
+  const apBoard = await inj('GET', '/api/restaurant/tables/status', sales1);
+  const apRow = (apBoard.json.tables ?? []).find((t: any) => t.id === apT.json.id);
+  ok('Table appearance: status board carries shape + rotation', apRow?.shape === 'circle' && apRow?.rotation === 45 && near(apRow?.height, 90), `shape=${apRow?.shape} rot=${apRow?.rotation}`);
+  const apBadShape = await inj('PATCH', `/api/restaurant/tables/${apT.json.id}`, sales1, { shape: 'triangle' });
+  ok('Table appearance: unknown shape rejected (400)', apBadShape.status === 400, `${apBadShape.status}`);
+  const apBadRot = await inj('PATCH', `/api/restaurant/tables/${apT.json.id}`, sales1, { rotation: 400 });
+  ok('Table appearance: out-of-range rotation rejected (400)', apBadRot.status === 400, `${apBadRot.status}`);
+
   // ── KDS course firing (hold-and-fire course-by-course) ──
   const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
   const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});

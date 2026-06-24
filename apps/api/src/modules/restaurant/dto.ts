@@ -93,8 +93,8 @@ export type CheckoutDto = z.infer<typeof CheckoutBody>;
 // ── tables / floor-plan ──
 export const CreateTableBody = z.object({
   table_no: z.string().min(1), zone_id: z.number().int().nullable().optional(), seats: z.number().int().positive().optional(),
-  shape: z.string().optional(), pos_x: z.number().optional(), pos_y: z.number().optional(),
-  width: z.number().optional(), height: z.number().optional(),
+  shape: z.enum(['rect', 'circle', 'square']).optional(), pos_x: z.number().optional(), pos_y: z.number().optional(),
+  width: z.number().positive().optional(), height: z.number().positive().optional(), rotation: z.number().int().min(0).max(359).optional(),
 });
 export type CreateTableDto = z.infer<typeof CreateTableBody>;
 
