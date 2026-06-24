@@ -31,7 +31,7 @@ const ProfileBody = z.object({
   promptpay_id: z.string().refine((v) => v === '' || isValidPromptPayTarget(v), 'invalid PromptPay id').optional(),
   default_language: z.enum(['th', 'en']).optional(), // customer-facing output language
   // ── Branding (Phase 9) ── logo is a pasted https URL or a small image data-URI; '' clears it.
-  logo_url: z.string().max(500_000).refine((v) => v === '' || /^https:\/\//i.test(v) || /^data:image\/(png|jpe?g|svg\+xml|webp);base64,/i.test(v), 'logo_url must be an https URL or an image data-URI').optional(),
+  logo_url: z.string().max(500_000).refine((v) => v === '' || ((/^https:\/\//i.test(v) || /^data:image\/(png|jpe?g|svg\+xml|webp);base64,/i.test(v)) && !/["'<>]/.test(v)), 'logo_url must be an https URL or an image data-URI').optional(),
   tagline: z.string().max(200).optional(),
   branding_prefs: z.record(z.unknown()).optional(),
 });

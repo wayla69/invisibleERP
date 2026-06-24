@@ -6,6 +6,8 @@ import { custPosSales, custPosItems, tenants } from '../../database/schema';
 const n = (x: any) => Number(x) || 0;
 const baht = (x: any) => n(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Attribute-context encode: also neutralise the quotes that could close an attribute (XSS via e.g. logo src).
+const escAttr = (s: string) => esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 export type ReceiptLang = 'th' | 'en' | 'both';
 
@@ -110,7 +112,7 @@ h1{font-size:16px;text-align:center;margin:0}.muted{color:#444;font-size:11px;te
 table{width:100%;border-collapse:collapse;margin-top:6px}td{padding:1px 0;vertical-align:top}.q{text-align:center;width:24px}.m{text-align:right;width:64px}
 .sep{border-top:1px dashed #000}.tot td{font-weight:bold}.foot{text-align:center;margin-top:8px;font-size:11px}@media print{button{display:none}}</style></head>
 <body onload="if(location.search.indexOf('print')>=0)window.print()">
-${d.seller.logo_url && d.seller.show_logo ? `<img class="logo" src="${esc(d.seller.logo_url)}" alt="">` : ''}
+${d.seller.logo_url && d.seller.show_logo ? `<img class="logo" src="${escAttr(d.seller.logo_url)}" alt="">` : ''}
 <h1>${esc(d.seller.legal_name || d.seller.name)}</h1>
 ${d.seller.tagline ? `<div class="tagline">${esc(d.seller.tagline)}</div>` : ''}
 ${d.seller.branch_label ? `<div class="muted">${esc(d.seller.branch_label)}</div>` : ''}
