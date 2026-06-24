@@ -71,3 +71,4 @@ export * from './document-templates';
 export * from './custom-objects';
 export * from './object-layouts';
 export * from './automation';
+export * from './controls';

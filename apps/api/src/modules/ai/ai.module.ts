@@ -117,5 +117,6 @@ export class KnowledgeController {
   imports: [PosModule, InventoryModule, FinanceModule, AnalyticsModule, BiModule, PipelineModule, CpqModule, ServiceModule, ProfitabilityModule, LedgerModule, ProcurementModule],
   controllers: [AiController, AiActionController, KnowledgeController],
   providers: [AgentService, AiActionService, EmbedderService, KnowledgeService],
+  exports: [AgentService, KnowledgeService, EmbedderService],
 })
 export class AiModule {}

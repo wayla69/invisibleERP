@@ -1,6 +1,6 @@
 # 12 · Platform Customization
 
-**Status: DRAFT v0.4** · Updated 2026-06-24 — added the notification inbox (§A), the public REST API (§B), and SSO/SCIM (§C).
+**Status: DRAFT v0.5** · Updated 2026-06-24 — added the AI-native features (copilot, document AI, NL analytics, AI config assistant, controls monitoring).
 
 This chapter is the **map** to the no-code ways you can adapt the system to your
 business — for **Admins**, *AccessAdmin*, *MasterDataAdmin* and *Executives*. Each
@@ -30,6 +30,11 @@ tools.
 | Lay out a custom object's form | **Form layouts** | `/object-layouts` | masterdata / users / exec | [Administration §16](./11-administration.md) |
 | Automate actions when events happen | **Automation** | `/automation` | masterdata / users / exec | [Administration §17](./11-administration.md) |
 | Build your own reports (no code) | **Analytics studio** | `/query` | exec / dashboard / masterdata | [Reports §9](./09-reports-and-analytics.md) |
+| Ask the AI copilot (cited answers) | **Copilot** | `/copilot` | ai_chat / dashboard | [Reports §9](./09-reports-and-analytics.md) |
+| Read an invoice into an AP draft | **Document AI** | `/doc-ai` | procurement / creditors / exec | [Procurement §3](./03-procurement.md) |
+| Ask for data in plain language | **NL Analytics** | `/nl-analytics` | exec / dashboard / masterdata | [Reports §9](./09-reports-and-analytics.md) |
+| Draft a config from a description | **AI Config** | `/ai-config` | masterdata / users / exec | [Administration §17](./11-administration.md) |
+| Scan the books for red flags | **Controls monitoring** | `/controls` | exec / users / creditors | [Administration §11](./11-administration.md) |
 | Read alerts, report deliveries & approval reminders | **Notification inbox** | `/notifications` | anyone (your own) | §A below |
 | Let another system read your data securely | **Public REST API** | `/api/v1` (+ API keys) | users (to issue keys) | §B below |
 | Let staff sign in with your company login / auto-manage users | **SSO & SCIM** | Settings → SSO / SCIM | users | §C below |

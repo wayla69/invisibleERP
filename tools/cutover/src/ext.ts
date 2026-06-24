@@ -640,6 +640,58 @@ async function main() {
   const qIsoTotal = (qIso.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.sales_total || 0), 0);
   ok('Query: RLS-scoped — another tenant does not see these sales', qIsoTotal === 0, `cf2 total=${qIsoTotal}`);
 
+  // ── B1 embedded copilot (Platform Phase 15) ──
+  // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
+  await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });
+  const cpAsk = await inj('POST', '/api/copilot/ask', token, { question: 'refund policy return products' });
+  ok('Copilot: grounds an answer in the knowledge base (cite)', (cpAsk.status === 200 || cpAsk.status === 201) && cpAsk.json.grounded === true && (cpAsk.json.citations ?? []).length >= 1, `grounded=${cpAsk.json.grounded} cites=${(cpAsk.json.citations ?? []).length} src=${cpAsk.json.source}`);
+  ok('Copilot: no-key fallback returns a KB-cited answer (source=kb)', (cpAsk.json.answer ?? '').length > 0 && cpAsk.json.source === 'kb', `src=${cpAsk.json.source} len=${(cpAsk.json.answer ?? '').length}`);
+
+  // ── B2 document-AI intake (Platform Phase 16) ──
+  const docEx = await inj('POST', '/api/doc-ai/extract', token, { text: 'ACME Supplies Co.\nInvoice INV-9001\nDate 2026-06-15\nSubtotal 1,401.87\nVAT 98.13\nGrand Total 1,500.00' });
+  ok('Doc-AI: extracts invoice no / amount / date (regex fallback)', (docEx.status === 200 || docEx.status === 201) && docEx.json.fields?.invoice_no === 'INV-9001' && Number(docEx.json.fields?.amount) === 1500 && docEx.json.fields?.invoice_date === '2026-06-15', `${JSON.stringify(docEx.json.fields ?? {})}`);
+
+  // ── B3 NL analytics (Platform Phase 17) — over the A5 semantic layer (HQ has seeded sales) ──
+  const nlPay = await inj('POST', '/api/nl-analytics/ask', hqwhT, { question: 'sales by payment method' });
+  ok('NL analytics: maps NL → governed query + runs it', (nlPay.status === 200 || nlPay.status === 201) && nlPay.json.resolved?.dimension === 'payment_method' && (nlPay.json.result?.rows ?? []).length >= 1, `dim=${nlPay.json.resolved?.dimension} rows=${(nlPay.json.result?.rows ?? []).length}`);
+  const nlBranch = await inj('POST', '/api/nl-analytics/ask', hqwhT, { question: 'ยอดขายแยกตามสาขา' });
+  ok('NL analytics: Thai keywords map to the branch dimension', nlBranch.json.resolved?.dimension === 'branch', `dim=${nlBranch.json.resolved?.dimension}`);
+
+  // ── B4 AI configuration assistant (Platform Phase 18) ──
+  const cfgTargets = await inj('GET', '/api/ai-config/targets', hqwhT);
+  ok('AI config: target catalog exposes custom_object', (cfgTargets.json.targets ?? []).includes('custom_object'), `${JSON.stringify(cfgTargets.json.targets ?? [])}`);
+  const cfgObj = await inj('POST', '/api/ai-config/suggest', hqwhT, { target: 'custom_object', description: 'equipment maintenance log' });
+  ok('AI config: proposes a custom-object config (template fallback)', (cfgObj.status === 200 || cfgObj.status === 201) && !!cfgObj.json.proposal?.label && (cfgObj.json.proposal?.fields ?? []).length >= 1, `${JSON.stringify(cfgObj.json.proposal ?? {}).slice(0, 120)}`);
+  const cfgAlert = await inj('POST', '/api/ai-config/suggest', hqwhT, { target: 'alert', description: 'แจ้งเตือนเมื่อสต๊อกต่ำ low stock' });
+  ok('AI config: alert suggestion picks the low_stock metric', cfgAlert.json.proposal?.metric === 'low_stock_count', `${cfgAlert.json.proposal?.metric}`);
+  const cfgBad = await inj('POST', '/api/ai-config/suggest', hqwhT, { target: 'nope', description: 'x' });
+  ok('AI config: unknown target rejected (400 BAD_TARGET)', cfgBad.status === 400 && cfgBad.json.error?.code === 'BAD_TARGET', `${cfgBad.status} ${cfgBad.json.error?.code}`);
+
+  // ── B5 continuous controls monitoring (Platform Phase 19) ──
+  const jlBeforeCtl = (await db.select().from(s.journalLines)).length;
+  await db.insert(s.apTransactions).values([
+    { txnNo: 'AP-CTL-1', tenantId: cf2.id, vendorName: 'ACME', invoiceNo: 'DUP-1', amount: '1000', status: 'Unpaid' },
+    { txnNo: 'AP-CTL-2', tenantId: cf2.id, vendorName: 'ACME', invoiceNo: 'DUP-1', amount: '1000', status: 'Unpaid' },
+  ]).onConflictDoNothing();
+  await db.insert(s.vendors).values([
+    { tenantId: cf2.id, vendorCode: 'GV-A', name: 'Foo A', taxId: '9999999999999' },
+    { tenantId: cf2.id, vendorCode: 'GV-B', name: 'Foo B', taxId: '9999999999999' },
+  ]).onConflictDoNothing();
+  const ctlCat = await inj('GET', '/api/controls/catalog', cf2aa);
+  ok('Controls: catalog exposes the detectors', (ctlCat.json.controls ?? []).some((c: any) => c.key === 'duplicate_invoice'), `${(ctlCat.json.controls ?? []).length}`);
+  const ctlScan = await inj('POST', '/api/controls/scan', cf2aa);
+  ok('Controls: scan detects red flags', (ctlScan.status === 200 || ctlScan.status === 201) && (ctlScan.json.candidates ?? 0) >= 2, `candidates=${ctlScan.json.candidates}`);
+  const ctlFind = await inj('GET', '/api/controls/findings', cf2aa);
+  const ctlKeys = (ctlFind.json.findings ?? []).map((f: any) => f.control_key);
+  ok('Controls: duplicate-invoice + ghost-vendor findings raised', ctlKeys.includes('duplicate_invoice') && ctlKeys.includes('ghost_vendor'), `${JSON.stringify(ctlKeys)}`);
+  const ctlRev = await inj('POST', `/api/controls/findings/${(ctlFind.json.findings ?? [])[0]?.id}/review`, cf2aa, { status: 'reviewed' });
+  ok('Controls: a finding can be reviewed', (ctlRev.status === 200 || ctlRev.status === 201) && ctlRev.json.status === 'reviewed', `${ctlRev.status} ${ctlRev.json.status}`);
+  await inj('POST', '/api/controls/scan', hqaa);
+  const hqFind = await inj('GET', '/api/controls/findings', hqaa);
+  ok('Controls: RLS-scoped — HQ never sees cf2’s findings', (hqFind.json.findings ?? []).every((f: any) => !String(f.entity_ref ?? '').includes('ACME') && !String(f.entity_ref ?? '').includes('9999999999999')), `hq findings=${(hqFind.json.findings ?? []).length}`);
+  const jlAfterCtl = (await db.select().from(s.journalLines)).length;
+  ok('Controls: no GL impact (journal lines unchanged)', jlAfterCtl === jlBeforeCtl, `before=${jlBeforeCtl} after=${jlAfterCtl}`);
+
   await app.close();
   await pg.close();
 

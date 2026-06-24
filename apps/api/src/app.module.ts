@@ -91,6 +91,11 @@ import { SupplierModule } from './modules/supplier/supplier.module';
 import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
 import { AutomationModule } from './modules/automation/automation.module';
 import { QueryModule } from './modules/query/query.module';
+import { CopilotModule } from './modules/copilot/copilot.module';
+import { DocAiModule } from './modules/doc-ai/doc-ai.module';
+import { NlAnalyticsModule } from './modules/nl-analytics/nl-analytics.module';
+import { AiConfigModule } from './modules/ai-config/ai-config.module';
+import { ControlsModule } from './modules/controls/controls.module';
 import { DocumentTemplatesModule } from './modules/document-templates/document-templates.module';
 import { CustomObjectsModule } from './modules/custom-objects/custom-objects.module';
 import { ObjectLayoutsModule } from './modules/object-layouts/object-layouts.module';
@@ -190,6 +195,11 @@ import { IdentityModule } from './modules/identity/identity.module';
     IdentityModule,
     AutomationModule,
     QueryModule,
+    CopilotModule,
+    DocAiModule,
+    NlAnalyticsModule,
+    AiConfigModule,
+    ControlsModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

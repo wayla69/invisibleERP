@@ -168,8 +168,25 @@ nothing to the GL. That discipline is itself part of "outclass."
   hides a field, **a newly-added field auto-surfaces**, preview-without-save, RLS isolation, no-GL) — **137/137 green**.
 - **Docs:** narrative 27 §7.12 (+RACI/control-matrix/codes, revision 0.4); user manual ch.12; UAT ADM-044/045 + traceability.
 
-**Wave 1 (A3 → A1 → A2) is complete.** Next up is Wave 1's remaining items (onboarding/industry packs, LINE + a
-connector, document-AI for AP) or Wave 2 — see §2.
+## 5c. Phases 13–19 — Pillar A finish (A4/A5) + Pillar B (AI-native) · **DELIVERED 2026-06-24**
+
+*Goal: complete the no-code Studio and make the ERP AI-native — without weakening the audited books.*
+
+**Pillar A — completed:**
+- **Phase 13 · A4 — Automation rules engine.** No-code "when EVENT [and CONDITION] then ACTION" over the events the app emits (`po.approved/rejected`, `alert.fired`); actions = notification / message / log (non-GL), via a guarded webhook-dispatcher hook + `/api/automation/run-event`. Tables `automation_rules` + `automation_executions` (migration `0091`).
+- **Phase 14 · A5 — Semantic layer + report builder.** Governed measures × dimensions over POS sales; safe RLS-scoped aggregate (keys map to fixed SQL — only filter values parameterized); saved reports reuse saved-views. `/api/query/model` + `/api/query/run`.
+
+**Pillar B — AI-native** *(all read-only / suggestion-only / human-in-the-loop; each degrades deterministically with no `ANTHROPIC_API_KEY`, so CI is offline-safe):*
+- **Phase 15 · B1 — Embedded copilot** (`/api/copilot/ask`) — KB-grounded, cite-or-refuse; reuses the RAG `KnowledgeService` + agent.
+- **Phase 16 · B2 — Document-AI intake** (`/api/doc-ai/extract`) — pasted invoice → structured AP draft (Claude or regex); **extract-only**, never posts.
+- **Phase 17 · B3 — NL analytics** (`/api/nl-analytics/ask`) — plain language → the A5 governed query (no raw SQL).
+- **Phase 18 · B4 — AI configuration assistant** (`/api/ai-config/suggest`) — describe → proposed Studio config JSON; **suggestion-only**.
+- **Phase 19 · B5 — Continuous controls monitoring** (`/api/controls/*`) — detective scans (duplicate invoice/amount, ghost vendor) → findings for review; RLS-scoped, no GL. Table `control_findings` (migration `0092`).
+
+- **Verification:** `ext` harness **208/208 green** (+15 for B1–B5); `pnpm -r typecheck` + `@ierp/api` / `@ierp/web` builds clean; the full suite (e2e / worldclass / compliance / restaurant / taxdocs) stays green. All RLS-scoped, audited, **no GL**.
+- **Docs:** narrative 27 §7.16–7.22 (twenty-two capabilities; +RACI / control-matrix / error-codes, revisions 0.8–1.0); user manual ch.12; UAT ADM-062…070 + traceability. B5 is noted as a detective-control aid (formal RCM control-ID assignment is a planned follow-up).
+
+**Pillars A & B are complete.** Remaining roadmap: **Pillar C** (localization / i18n), **Pillar D** (ecosystem / connectors / marketplace), **Pillar E** (onboarding / migration / mobile / white-label / scale) — see §1–§2.
 
 ---
 
@@ -180,3 +197,5 @@ connector, document-AI for AP) or Wave 2 — see §2.
 | 0.1 DRAFT | 2026-06-24 | Platform / Product | Initial outclass roadmap: 5 pillars (Studio / AI-native / localization / ecosystem / experience), 3 waves. Records **Phase 10 (A3 document templates) as delivered** and sketches **Phase 11–12 (A1/A2 custom objects + form designer)** as next. Builds on Platform Phases 1–9 and the T0–T3 world-class roadmap. |
 | 0.2 DRAFT | 2026-06-24 | Platform / Product | **Phase 11 (A1 custom objects) delivered** — tenant-defined record types reusing the Phase 1 custom-fields typed store; 128/128 `ext` checks. **Phase 12 (A2 form/layout designer) is next.** |
 | 0.3 DRAFT | 2026-06-24 | Platform / Product | **Phase 12 (A2 form/layout designer) delivered** — per-object/per-role layouts (sections, columns, order, hide) resolved against live field defs; the custom-object form renders by the layout; 137/137 `ext` checks. **Wave 1 (A3 → A1 → A2) complete.** |
+| 0.4 DRAFT | 2026-06-24 | Platform / Product | **Phases 13–14 (A4 automation + A5 semantic-layer reports) delivered** — Pillar A complete (merged via PR #50); 193/193 `ext`. |
+| 0.5 DRAFT | 2026-06-24 | Platform / Product | **Pillar B (AI-native) delivered** — Phases 15–19: embedded copilot, document-AI intake, NL analytics, AI configuration assistant, continuous controls monitoring; all read-only / suggestion-only / human-in-the-loop with deterministic no-key fallbacks. 208/208 `ext`; typecheck + builds clean. **Pillars A & B complete.** §5c added. |

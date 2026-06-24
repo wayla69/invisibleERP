@@ -348,6 +348,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-063 | Automation — validation, isolation, no GL | Feature (automation) | 27 §7.16, §9 |
 | UAT-ADM-064 | Analytics studio — model + governed aggregate + RLS | Feature (semantic layer) | 27 §7.17 |
 | UAT-ADM-065 | Analytics studio — unknown dimension rejected | Feature (semantic layer) | 27 §7.17, §9 |
+| UAT-ADM-066 | Copilot — KB-grounded, cite-or-refuse | Feature (copilot) | 27 §7.18 |
+| UAT-ADM-067 | Document AI — extract an AP draft | Feature (document AI) | 27 §7.19 |
+| UAT-ADM-068 | NL analytics — plain language → governed query | Feature (NL analytics) | 27 §7.20 |
+| UAT-ADM-069 | AI config — suggest + reject unknown target | Feature (AI config) | 27 §7.21, §9 |
+| UAT-ADM-070 | Controls monitoring — scan, review, isolation, no GL | Feature (controls monitoring) | 27 §7.22, §9 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -415,7 +420,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 65 | 41 |
+| 08 Admin / SoD / Audit | 70 | 43 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **247** | **112** |
+| **Total** | **252** | **114** |
