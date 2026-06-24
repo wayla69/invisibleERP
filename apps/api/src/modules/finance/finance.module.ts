@@ -6,9 +6,10 @@ import { CollectionsService } from './collections.service';
 import { LedgerModule } from '../ledger/ledger.module';
 import { TaxModule } from '../tax/tax.module';
 import { MatchModule } from '../match/match.module';
+import { MessagingModule } from '../messaging/messaging.module';
 
 @Module({
-  imports: [LedgerModule, TaxModule, MatchModule],
+  imports: [LedgerModule, TaxModule, MatchModule, MessagingModule],
   controllers: [FinanceController, CollectionsController],
   providers: [FinanceService, CollectionsService],
   exports: [FinanceService, CollectionsService],

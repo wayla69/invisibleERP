@@ -48,6 +48,8 @@ export const arDunningLog = pgTable('ar_dunning_log', {
   outstanding: numeric('outstanding', { precision: 14, scale: 2 }), // snapshot at action time
   promiseToPayDate: date('promise_to_pay_date'), // customer commitment, if any
   notes: text('notes'),
+  messageStatus: text('message_status'),   // delivery outcome of the dunning notice: sent | failed | manual | not_sent
+  messageRecipient: text('message_recipient'), // the email/phone/LINE id the notice was sent to
   actionedBy: text('actioned_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

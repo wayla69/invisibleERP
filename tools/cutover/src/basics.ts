@@ -40,9 +40,9 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([
     { code: 'HQ', name: 'HQ' },
-    { code: 'CUST', name: 'Credit Customer', creditLimit: '2500' },
-    { code: 'CUST2', name: 'Defaulting Customer', creditLimit: '100000' }, // under limit but 90+ overdue
-    { code: 'CUST3', name: 'Good Customer', creditLimit: '100000' },        // under limit, only mildly overdue
+    { code: 'CUST', name: 'Credit Customer', creditLimit: '2500', email: 'ar@cust.example', phone: '0810000000' },
+    { code: 'CUST2', name: 'Defaulting Customer', creditLimit: '100000', email: 'ar@cust2.example' }, // under limit but 90+ overdue
+    { code: 'CUST3', name: 'Good Customer', creditLimit: '100000', phone: '0820000000' },             // under limit, only mildly overdue
   ]).onConflictDoNothing();
   const tid = async (code: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, code)))[0].id);
   const hq = await tid('HQ');
@@ -133,6 +133,10 @@ async function main() {
 
   const dun = await inj('POST', '/api/finance/ar/collections/INV-A/dunning', admin, { stage: 'second_notice', channel: 'email', notes: 'Sent 2nd notice' });
   ok('Record dunning action → DUN- issued', /^DUN-/.test(dun.json.dunning_no ?? '') && dun.json.stage === 'second_notice', JSON.stringify(dun.json).slice(0, 80));
+  ok('Dunning notice dispatched to customer email (sent)', dun.json.message_status === 'sent' && dun.json.recipient === 'ar@cust.example', `st=${dun.json.message_status} to=${dun.json.recipient}`);
+  const mlog = (await inj('GET', '/api/messaging/log?limit=50', admin)).json;
+  const dunMsg = (mlog.messages ?? []).find((m: any) => m.campaign === 'dunning:second_notice' && m.recipient === 'ar@cust.example');
+  ok('Dunning notice logged with per-stage body', !!dunMsg && /INV-A/.test(dunMsg.body) && dunMsg.channel === 'email', `found=${!!dunMsg}`);
 
   const wl2 = (await inj('GET', '/api/finance/ar/collections', admin)).json;
   const a2 = (wl2.rows ?? []).find((r: any) => r.invoice_no === 'INV-A');
@@ -176,6 +180,12 @@ async function main() {
   const ran = (await inj('POST', '/api/bi/subscriptions/run', admin)).json;
   const dunRun = (ran.runs ?? []).find((r: any) => r.report_type === 'ar_collections_dunning');
   ok('Scheduler tick runs the dunning sweep + records a run (advanced 3)', ran.ran_count >= 1 && dunRun?.status === 'success' && /advanced 3 of/i.test(dunRun?.summary ?? ''), `ran=${ran.ran_count} sum="${dunRun?.summary}"`);
+
+  // The sweep dispatched the dunning notices too: INV-B/INV-D via email, INV-E via SMS (CUST3 has only a phone).
+  const mlog2 = (await inj('GET', '/api/messaging/log?limit=100', admin)).json.messages ?? [];
+  const legalEmails = mlog2.filter((m: any) => m.campaign === 'dunning:legal' && m.channel === 'email' && m.status === 'sent').length;
+  const smsNotice = mlog2.find((m: any) => m.campaign === 'dunning:first_notice' && m.channel === 'sms' && m.recipient === '0820000000');
+  ok('Swept dunning notices delivered: ≥2 legal emails + 1 SMS (channel auto-picked from contact)', legalEmails >= 2 && !!smsNotice, `legalEmails=${legalEmails} sms=${!!smsNotice}`);
 
   // The direct cron-callable sweep now advances nothing — scheduled + direct paths share the same DUN state.
   const sw2 = (await inj('POST', '/api/finance/ar/collections/sweep', admin)).json;

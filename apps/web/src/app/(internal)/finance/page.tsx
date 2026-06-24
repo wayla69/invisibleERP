@@ -254,7 +254,12 @@ function CollectionsSection() {
       method: 'POST',
       body: JSON.stringify({ stage: form.stage, channel: form.channel, promise_to_pay_date: form.promise_to_pay_date || undefined, notes: form.notes || undefined }),
     }),
-    onSuccess: (r: any) => { setMsg(`✅ บันทึกการทวงถาม ${r.dunning_no}`); refresh(); setDun(null); },
+    onSuccess: (r: any) => {
+      const note = r.message_status === 'sent' ? ` — ส่งแจ้งเตือนแล้ว (${r.recipient ?? r.channel})`
+        : r.message_status === 'manual' ? ` — บันทึกการติดต่อ (${r.channel})`
+        : r.message_status === 'failed' ? ' — แต่ส่งแจ้งเตือนไม่สำเร็จ (ไม่มีช่องทางติดต่อ)' : '';
+      setMsg(`✅ บันทึกการทวงถาม ${r.dunning_no}${note}`); refresh(); setDun(null);
+    },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 

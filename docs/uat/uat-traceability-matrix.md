@@ -174,6 +174,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-140 | Dunning sweep is idempotent | REV-12 | 01 §7 |
 | UAT-O2C-141 | Schedule daily automated dunning | REV-12 | 01 §7 |
 | UAT-O2C-142 | Scheduler tick fires the dunning job | REV-12 | 01 §7 |
+| UAT-O2C-143 | Dunning action dispatches a notice to the customer | REV-12 | 01 §7 |
+| UAT-O2C-144 | Sweep dispatches notices, channel auto-picked | REV-12 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -497,7 +499,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 47 | 18 |
+| 02 Order-to-Cash | 49 | 19 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
 | 05 GL & Close (incl. fixed assets / EAM) | 28 | 15 |
@@ -507,4 +509,4 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **316** | **153** |
+| **Total** | **318** | **154** |
