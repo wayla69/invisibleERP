@@ -610,6 +610,13 @@
       "when": 1782880000000,
       "tag": "0086_tenant_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1782960000000,
+      "tag": "0087_notification_reads",
+      "breakpoints": true
     }
   ]
 }
