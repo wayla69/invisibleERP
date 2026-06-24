@@ -729,6 +729,13 @@
       "when": 1783470000002,
       "tag": "0088_dine_in_order_zone",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1783470000003,
+      "tag": "0104_service_charge",
+      "breakpoints": true
     }
   ]
 }

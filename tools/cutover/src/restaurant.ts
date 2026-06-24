@@ -587,6 +587,25 @@ async function main() {
   const forgedRes = await inj('GET', `/api/qr/t/${forged}`, undefined);
   ok('Security: forged/tampered token → 401', forgedRes.status === 401, `${forgedRes.status}`);
 
+  // ── service charge on the receipt (large-party dine-in) — REST-10 extension ──
+  // Placed last so the fresh checkout's auto-enqueued receipt + drawer events never shift the hardcoded
+  // job-id / event-count assertions above. Subtotal 1000, party 6 ≥ min 6, 10% → sc 100, VAT on 1100 = 77,
+  // total 1177. The receipt must itemise the ค่าบริการ line and the tie-out must reconcile it.
+  const scTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'SC9', seats: 8, pos_x: 60, pos_y: 60 });
+  const scOpen = await inj('POST', `/api/restaurant/tables/${scTbl.json.id}/open`, sales1, { party_size: 6 });
+  const scOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: scTbl.json.id, session_id: scOpen.json.session_id, guest_count: 6, items: [{ name: 'เซ็ตอาหารกลุ่ม', qty: 1, unit_price: 1000, station_code: 'hot' }] });
+  await inj('POST', `/api/restaurant/orders/${scOrd.json.order_no}/bill`, sales1);
+  const scCo = await inj('POST', `/api/restaurant/orders/${scOrd.json.order_no}/checkout`, sales1, { method: 'Cash', apply_pricing_rules: true, party_size: 6, service_charge_pct: 10, service_min_party: 6 });
+  ok('Service charge: large-party checkout charges 10% (sc=100, total 1177)', near(scCo.json.service_charge, 100) && near(scCo.json.total, 1177), `sc=${scCo.json.service_charge} total=${scCo.json.total}`);
+  const scData = await inj('GET', `/api/print/receipt/${scCo.json.sale_no}/data`, sales1);
+  ok('Service charge: persisted on the sale + present in receipt data', near(scData.json.data?.service_charge, 100), `sc=${scData.json.data?.service_charge}`);
+  const scHtml = await inj('GET', `/api/print/receipt/${scCo.json.sale_no}`, sales1);
+  ok('Service charge: receipt slip itemises a ค่าบริการ line', scHtml.status === 200 && typeof scHtml.body === 'string' && scHtml.body.includes('ค่าบริการ'), `${scHtml.status}`);
+  const scTie = await inj('GET', `/api/print/tie-out/${scCo.json.sale_no}`, sales1);
+  ok('Service charge: receipt still ties out with the charge included (REST-10)', scTie.status === 200 && scTie.json.matched === true && near(scTie.json.service_charge, 100) && near(scTie.json.total, 1177), `matched=${scTie.json.matched} sc=${scTie.json.service_charge}`);
+  const scLine = await inj('POST', `/api/print/receipt/${scCo.json.sale_no}/send`, sales1, { channel: 'line', to: 'Uffffffffffffffffffffffffffffffff' });
+  ok('E-receipt: send via the LINE channel (mock provider when no token)', (scLine.status === 200 || scLine.status === 201) && scLine.json.channel === 'line' && scLine.json.status === 'sent', `${scLine.status} ${scLine.json.channel}/${scLine.json.status}`);
+
   await app.close();
   await pg.close();
 

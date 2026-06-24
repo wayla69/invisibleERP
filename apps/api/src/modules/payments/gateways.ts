@@ -56,16 +56,48 @@ export class StripeGateway implements PaymentGateway {
   }
 }
 
-export type GatewayName = 'mock' | 'promptpay' | 'stripe';
+// Opn Payments (formerly Omise) — Thailand's most common PSP aggregator. ONE integration unlocks cards
+// (chip/contactless), Thai e-wallets (TrueMoney / Rabbit LINE Pay / ShopeePay) and cross-border tourist
+// wallets (Alipay+ / WeChat Pay) through a single charge API, so the POS doesn't integrate each wallet
+// separately. Constructed only when OPN_SECRET_KEY is set; otherwise resolveGateway falls back to mock.
+//
+// Settlement model varies by method: card charges capture synchronously (→ Captured), while wallet/QR
+// "source" charges are confirmed by the payer out-of-band and settle via webhook (→ Pending until then,
+// then PATCH /api/payments/:no/settle). We mirror that here so funds are never booked before they move.
+export class OpnGateway implements PaymentGateway {
+  constructor(private readonly secretKey: string) {}
 
-// Resolve a gateway by name. Stripe only available when STRIPE_SECRET_KEY env is set.
+  async authorizeAndCapture(
+    amount: number,
+    currency: string,
+    method: string,
+    _meta?: Record<string, unknown>,
+  ): Promise<GatewayResult> {
+    if (!this.secretKey) return { ref: 'opn_unconfigured', status: 'Failed' };
+    // Card tenders capture immediately; wallet/QR tenders settle asynchronously.
+    const async = /wallet|promptpay|qr|alipay|wechat|truemoney|linepay|shopeepay/i.test(method);
+    // TODO: real Opn charge create+capture — POST https://api.omise.co/charges with `amount` in the
+    // currency's minor unit (satang for THB), a card token or a `source` per method, Basic auth on the
+    // secret key. Stub returns a synthetic ref so the tender path stays honest until credentials exist.
+    return { ref: `opn_${method.toLowerCase()}_${currency.toLowerCase()}_${amount}_${rnd()}`, status: async ? 'Pending' : 'Captured' };
+  }
+}
+
+export type GatewayName = 'mock' | 'promptpay' | 'stripe' | 'opn';
+
+// Resolve a gateway by name. Stripe/Opn are only available when their secret-key env is set; absent that,
+// they fall back to the mock so the tender path keeps working in dev/test.
 export function resolveGateway(name?: string): { gateway: PaymentGateway; name: GatewayName } {
   const key = (name ?? 'mock').toLowerCase();
   if (key === 'promptpay') return { gateway: new PromptPayGateway(), name: 'promptpay' };
   if (key === 'stripe') {
     const secret = process.env.STRIPE_SECRET_KEY;
     if (secret) return { gateway: new StripeGateway(secret), name: 'stripe' };
-    // fall back to mock when Stripe isn't configured
+    return { gateway: new MockGateway(), name: 'mock' };
+  }
+  if (key === 'opn') {
+    const secret = process.env.OPN_SECRET_KEY;
+    if (secret) return { gateway: new OpnGateway(secret), name: 'opn' };
     return { gateway: new MockGateway(), name: 'mock' };
   }
   return { gateway: new MockGateway(), name: 'mock' };

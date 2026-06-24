@@ -56,6 +56,7 @@ export class ReceiptService {
       items: lines.map((l: any) => ({ description: l.itemDescription ?? l.itemId ?? '', qty: n(l.qty), unit_price: n(l.unitPrice), amount: n(l.amount) })),
       subtotal: n(sale.subtotal),
       discount: n(sale.discount),
+      service_charge: n(sale.serviceCharge),
       vat: n(sale.taxAmount),
       total: n(sale.total),
       tip: n(sale.tip),
@@ -70,9 +71,10 @@ export class ReceiptService {
   // VAT − discount + tip). Drives the REST-10 control (receipt ↔ fiscal-journal tie-out).
   tieOut(d: ReceiptData) {
     const lineSum = Math.round(d.items.reduce((a, l) => a + l.amount, 0) * 100) / 100;
-    const expected = Math.round((lineSum - d.discount + d.vat + d.tip) * 100) / 100;
+    // Service charge is a VATable add-on to the bill (in the tax base), so it joins the reconciliation.
+    const expected = Math.round((lineSum - d.discount + d.service_charge + d.vat + d.tip) * 100) / 100;
     const matched = Math.abs(expected - Math.round((d.total + d.tip) * 100) / 100) < 0.01;
-    return { sale_no: d.sale_no, line_sum: lineSum, discount: d.discount, vat: d.vat, tip: d.tip, total: d.total, matched };
+    return { sale_no: d.sale_no, line_sum: lineSum, discount: d.discount, service_charge: d.service_charge, vat: d.vat, tip: d.tip, total: d.total, matched };
   }
 
   // Render the HTML / ESC/POS slip through the resolved template (default applied when none is set).

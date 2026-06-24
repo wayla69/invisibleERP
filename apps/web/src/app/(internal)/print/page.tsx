@@ -35,10 +35,18 @@ async function openReceipt(saleNo: string, lang?: string) {
   if (w) { w.document.open(); w.document.write(html); w.document.close(); }
 }
 
+type SendChannel = 'email' | 'line' | 'sms';
+const CHANNEL_META: Record<SendChannel, { label: string; toLabel: string; placeholder: string }> = {
+  email: { label: 'อีเมล (Email)', toLabel: 'อีเมลผู้รับ', placeholder: 'guest@example.com' },
+  line: { label: 'LINE', toLabel: 'LINE User ID', placeholder: 'Uxxxxxxxxxxxxxxxx' },
+  sms: { label: 'SMS', toLabel: 'เบอร์โทร', placeholder: '08x-xxx-xxxx' },
+};
+
 export default function PrintPage() {
   const qc = useQueryClient();
   const [saleNo, setSaleNo] = useState('');
-  const [email, setEmail] = useState('');
+  const [channel, setChannel] = useState<SendChannel>('email');
+  const [to, setTo] = useState('');
   const [lang, setLang] = useState('');   // '' = tenant default; th | en | both
   const [msg, setMsg] = useState('');
   const q = useQuery<{ jobs: Job[] }>({ queryKey: ['print-jobs'], queryFn: () => api('/api/print/jobs?limit=100'), refetchInterval: 10_000 });
@@ -49,14 +57,14 @@ export default function PrintPage() {
     onError: (e: Error) => setMsg(`❌ ${e.message}`),
   });
   const send = useMutation({
-    mutationFn: (b: { sale_no: string; to: string }) => api(`/api/print/receipt/${encodeURIComponent(b.sale_no)}/send`, { method: 'POST', body: JSON.stringify({ channel: 'email', to: b.to }) }),
-    onSuccess: () => setMsg(`✅ ส่งใบเสร็จไปยัง ${email} แล้ว`),
+    mutationFn: (b: { sale_no: string; channel: SendChannel; to: string }) => api(`/api/print/receipt/${encodeURIComponent(b.sale_no)}/send`, { method: 'POST', body: JSON.stringify({ channel: b.channel, to: b.to }) }),
+    onSuccess: () => setMsg(`✅ ส่งใบเสร็จทาง ${CHANNEL_META[channel].label} ไปยัง ${to} แล้ว`),
     onError: (e: Error) => setMsg(`❌ ${e.message}`),
   });
 
   return (
     <div>
-      <PageHeader title="ใบเสร็จ & งานพิมพ์ (Receipts & printing)" description="คิวงานพิมพ์ที่เครื่องพิมพ์/เอเจนต์ดึงไปพิมพ์ — เปิดดูใบเสร็จ พิมพ์ซ้ำ (สำเนา) หรือส่งทางอีเมล" />
+      <PageHeader title="ใบเสร็จ & งานพิมพ์ (Receipts & printing)" description="คิวงานพิมพ์ที่เครื่องพิมพ์/เอเจนต์ดึงไปพิมพ์ — เปิดดูใบเสร็จ พิมพ์ซ้ำ (สำเนา) หรือส่งใบเสร็จทาง LINE / SMS / อีเมล" />
 
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <Card>
@@ -80,11 +88,17 @@ export default function PrintPage() {
               <Button disabled={!saleNo || reprint.isPending} onClick={() => reprint.mutate(saleNo)}><Printer className="mr-1 h-4 w-4" />พิมพ์ซ้ำ (สำเนา)</Button>
             </div>
             <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <Label>ส่งทางอีเมล</Label>
-                <Input value={email} onChange={(e) => setEmail(e.target.value.trim())} placeholder="guest@example.com" />
+              <div>
+                <Label>ช่องทาง</Label>
+                <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={channel} onChange={(e) => { setChannel(e.target.value as SendChannel); setTo(''); }}>
+                  {(Object.keys(CHANNEL_META) as SendChannel[]).map((c) => <option key={c} value={c}>{CHANNEL_META[c].label}</option>)}
+                </select>
               </div>
-              <Button variant="outline" disabled={!saleNo || !email || send.isPending} onClick={() => send.mutate({ sale_no: saleNo, to: email })}><Send className="mr-1 h-4 w-4" />ส่ง</Button>
+              <div className="flex-1">
+                <Label>{CHANNEL_META[channel].toLabel}</Label>
+                <Input value={to} onChange={(e) => setTo(e.target.value.trim())} placeholder={CHANNEL_META[channel].placeholder} />
+              </div>
+              <Button variant="outline" disabled={!saleNo || !to || send.isPending} onClick={() => send.mutate({ sale_no: saleNo, channel, to })}><Send className="mr-1 h-4 w-4" />ส่ง</Button>
             </div>
             <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </CardContent>

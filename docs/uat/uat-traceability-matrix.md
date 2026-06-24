@@ -148,6 +148,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-110 | Room revenue is tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
 | UAT-O2C-111 | Revenue snapshot survives a table move | Feature (floor-plan layout) | 20 §6 |
 | UAT-O2C-112 | Deleted room keeps its past takings | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-113 | Service charge persisted + itemised on the receipt | REST-10 | 20 §7 |
+| UAT-O2C-114 | Large-party receipt ties out incl. service charge | REST-10 | 20 §7, §9 |
+| UAT-O2C-115 | Send receipt via LINE channel | REST-10 | 20 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
