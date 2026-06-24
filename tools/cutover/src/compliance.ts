@@ -230,6 +230,16 @@ async function main() {
   const held = await order(1);
   ok('REV-08: customer on credit hold cannot order → CREDIT_HOLD', held.status === 409 && held.json.error?.code === 'CREDIT_HOLD', `${held.status} ${held.json.error?.code}`);
 
+  // ════════════════════ ITGC-AC-01 — username identity is canonicalized ════════════════════
+  // Usernames are stored trimmed-lowercase; login matches the same way, so a mixed-case account can be
+  // reached regardless of casing/whitespace — but the password stays case-sensitive and is never trimmed.
+  const mkCase = await inj('POST', '/api/admin/users', admin, { username: 'CaseUser', password: 'pw123456', role: 'Sales' });
+  ok('ITGC-AC-01: create stores username canonicalized (trimmed-lowercase)', mkCase.status === 201 && mkCase.json.username === 'caseuser', `${mkCase.status} ${mkCase.json.username}`);
+  const caseLogin = await inj('POST', '/api/login', undefined, { username: '  CASEUSER ', password: 'pw123456' });
+  ok('ITGC-AC-01: login is case/whitespace-insensitive on username', caseLogin.status === 200 && !!caseLogin.json.token, `${caseLogin.status} token=${!!caseLogin.json.token}`);
+  const caseBadPw = await inj('POST', '/api/login', undefined, { username: 'caseuser', password: 'PW123456' });
+  ok('ITGC-AC-01: password remains case-sensitive (not normalized)', caseBadPw.status === 401, `${caseBadPw.status} ${caseBadPw.json.error?.code}`);
+
   // ════════════════════ ITGC-AC-06 — multi-factor authentication (TOTP) ════════════════════
   // 1. A privileged role (Admin) that has not enrolled MFA is flagged for mandatory setup at login.
   const adminLogin = await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' });

@@ -7,6 +7,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users, userPermissions, tenants } from '../../database/schema';
 import { PasswordService } from './password.service';
 import { encrypt, decrypt } from '../../common/crypto';
+import { normalizeUsername } from '../../common/username';
 
 @Injectable()
 export class AuthService {
@@ -17,6 +18,7 @@ export class AuthService {
   ) {}
 
   async login(username: string, password: string, totp?: string): Promise<LoginResponse> {
+    username = normalizeUsername(username);
     const row = (await this.db.select().from(users).where(eq(users.username, username)).limit(1))[0];
     const fail = () =>
       new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or password', messageTh: 'Username หรือ Password ไม่ถูกต้อง' });

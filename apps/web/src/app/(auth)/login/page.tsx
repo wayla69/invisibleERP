@@ -30,9 +30,11 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
+      // Usernames are stored canonicalized (trimmed + lowercased) server-side; mirror that here so the
+      // submitted value matches regardless of casing or stray surrounding whitespace.
       const res = await api<{ token: string; role: string }>('/api/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim().toLowerCase(), password }),
       });
       setToken(res.token);
       router.push(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');

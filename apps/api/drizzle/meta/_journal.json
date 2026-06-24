@@ -575,6 +575,13 @@
       "when": 1782520000000,
       "tag": "0081_scheduled_reports_saved_views",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1782530000000,
+      "tag": "0082_username_normalize",
+      "breakpoints": true
     }
   ]
 }
