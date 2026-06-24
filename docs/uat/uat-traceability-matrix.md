@@ -291,6 +291,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-026 | Alert sweep fires a breached rule | Feature (alerts) | 17 §7 |
 | UAT-ADM-027 | Alert cooldown suppresses re-fire | Feature (alerts) | 17 §7 |
 | UAT-ADM-028 | Alert rules tenant-isolated (RLS) | Feature (alerts) | 17 §7 |
+| UAT-ADM-029 | Audit viewer — query, filter, paginate | ITGC-AC-10 | 08 §7.A.8 |
+| UAT-ADM-030 | Audit viewer — CSV export + permission gate | ITGC-AC-10/02 | 08 §7.A.8 |
+| UAT-ADM-031 | Audit viewer — tenant isolation (RLS) | ITGC-AC-10/03 | 08 §7.A.8 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 

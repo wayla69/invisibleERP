@@ -238,6 +238,34 @@ async function main() {
   const t2Layout = await inj('GET', '/api/dashboard/layouts/ExecutiveViewer', cf2ex);
   ok('Dashboards: layouts are tenant-isolated (cf2 sees none of HQ’s)', t2Layout.json.configured === false && (t2Layout.json.widgets ?? []).length === 0, `configured=${t2Layout.json.configured}`);
 
+  // ── audit-trail viewer (Phase 6) ──
+  // AccessAdmin carries only `users` and is non-Admin → its reads are RLS-scoped (proves isolation).
+  await db.insert(s.users).values([
+    { username: 'hqaa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: hq.id },
+    { username: 'cf2aa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: cf2.id },
+  ]).onConflictDoNothing();
+  const hqaa = (await inj('POST', '/api/login', undefined, { username: 'hqaa', password: 'pw' })).json.token;
+  const cf2aa = (await inj('POST', '/api/login', undefined, { username: 'cf2aa', password: 'pw' })).json.token;
+  // a guaranteed cf2-tenant mutation → one known audit row (actor cfwh2, tenant cf2)
+  await inj('POST', '/api/saved-views', token2, { module: 'audit-probe', name: 'AUDITPROBE', config: {}, shared: false });
+
+  const audit = await inj('GET', '/api/admin/audit?limit=10', token);
+  ok('Audit viewer: paginated query returns rows + total', audit.status === 200 && Array.isArray(audit.json.rows) && audit.json.rows.length <= 10 && typeof audit.json.total === 'number' && audit.json.total > 0, `status=${audit.status} total=${audit.json.total}`);
+  const byAction = await inj('GET', '/api/admin/audit?action=saved-views&limit=50', token);
+  ok('Audit viewer: action filter matches (substring)', (byAction.json.rows ?? []).length >= 1 && (byAction.json.rows ?? []).every((r: any) => (r.action ?? '').includes('saved-views')), `n=${(byAction.json.rows ?? []).length}`);
+  const byStatus = await inj('GET', '/api/admin/audit?status=success&limit=50', token);
+  ok('Audit viewer: status filter matches', (byStatus.json.rows ?? []).length >= 1 && (byStatus.json.rows ?? []).every((r: any) => r.status === 'success'), `n=${(byStatus.json.rows ?? []).length}`);
+  const badQ = await inj('GET', '/api/admin/audit?limit=abc', token);
+  ok('Audit viewer: a non-numeric limit is rejected (400 BAD_QUERY)', badQ.status === 400 && badQ.json.error?.code === 'BAD_QUERY', `${badQ.status} ${badQ.json.error?.code}`);
+  const csv = await inj('GET', '/api/admin/audit/export', token);
+  ok('Audit viewer: CSV export with header row', csv.status === 200 && (csv.raw?.toString('utf8') ?? '').startsWith('id,ts,actor,tenant_id,action'), `status=${csv.status} head=${(csv.raw?.toString('utf8') ?? '').slice(0, 24)}`);
+  const noPerm = await inj('GET', '/api/admin/audit', token2); // cfwh2 = Warehouse, lacks `users`
+  ok('Audit viewer: gated by the users permission (403 without it)', noPerm.status === 403, `${noPerm.status}`);
+  const cf2Audit = await inj('GET', '/api/admin/audit?limit=200', cf2aa);
+  ok('Audit viewer: RLS-scoped — a tenant admin sees only its own tenant rows', (cf2Audit.json.rows ?? []).length >= 1 && (cf2Audit.json.rows ?? []).every((r: any) => r.tenant_id === cf2.id), `n=${(cf2Audit.json.rows ?? []).length}`);
+  const hqAudit = await inj('GET', '/api/admin/audit?action=saved-views&limit=200', hqaa);
+  ok('Audit viewer: no cross-tenant leakage (HQ admin never sees cf2 rows)', (hqAudit.json.rows ?? []).every((r: any) => r.tenant_id !== cf2.id), `n=${(hqAudit.json.rows ?? []).length}`);
+
   await app.close();
   await pg.close();
 

@@ -45,6 +45,7 @@ import {
   ReceiptText,
   Scale,
   ScanLine,
+  ScrollText,
   Settings,
   ShieldAlert,
   SlidersHorizontal,
@@ -216,6 +217,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'อนุมัติงาน', href: '/workflow', icon: Workflow, perms: ['exec', 'creditors', 'procurement', 'users'] },
       { label: 'แยกหน้าที่ (SoD)', href: '/sod', icon: ShieldAlert, perms: ['exec', 'users'] },
+      { label: 'ร่องรอยตรวจสอบ (Audit trail)', href: '/audit', icon: ScrollText, perms: ['users'] },
     ],
   },
   {
