@@ -192,7 +192,7 @@ Auditors weight the "tone at the top." **DRAFT templates now exist in `complianc
 | Incident Response | `policies/10-incident-response-policy.md` | ITGC-OP-03 |
 | Financial Close & Reporting (close calendar) | `policies/11-financial-close-policy.md` | GL-06 |
 | Third-Party / Vendor & Sub-Service Orgs (SOC reports) | `policies/12-third-party-vendor-management-policy.md` | EXP-02, sub-service reliance |
-| Segregation of Duties (rules R01–R13) | `policies/13-segregation-of-duties-policy.md` | ITGC-AC-09 |
+| Segregation of Duties (rules R01–R16) | `policies/13-segregation-of-duties-policy.md` | ITGC-AC-09 |
 
 ---
 

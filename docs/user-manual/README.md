@@ -67,6 +67,7 @@ if this is your first time logging in.
 | 10 | [Approvals](./10-approvals.md) | Anyone who approves documents |
 | 11 | [Administration](./11-administration.md) | Admin, AccessAdmin, MasterDataAdmin |
 | 12 | [Platform Customization](./12-platform-customization.md) | Admin, AccessAdmin, MasterDataAdmin, Executives |
+| 13 | [Members & Points CRM](./13-loyalty-crm.md) | Sales, Marketing, Loyalty Admin, Managers |
 | 99 | [Troubleshooting & FAQ](./99-troubleshooting-faq.md) | Everyone |
 
 ---

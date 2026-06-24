@@ -65,6 +65,7 @@ export class JwtAuthGuard implements CanActivate {
         customerName: payload.customerName ?? null,
         tenantId: payload.tenantId ?? null,
         permissions: payload.permissions ?? [],
+        memberId: payload.memberId ?? null, // loyalty member principal (role==='Member'); null for staff
       } satisfies JwtUser;
       return true;
     } catch {

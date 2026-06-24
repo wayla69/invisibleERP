@@ -280,7 +280,253 @@ async function main() {
   ok('ITGC-AC-10: audit_log UPDATE blocked by DB trigger (append-only)', updateBlocked, `blocked=${updateBlocked}`);
   ok('ITGC-AC-10: audit_log DELETE blocked by DB trigger (append-only)', deleteBlocked && after === before, `blocked=${deleteBlocked} rows=${after}`);
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10) ──');
+  // ════════════════════ LYL-03 — Loyalty points liability posts to GL (TFRS 15, control acct 2250) ════════════════════
+  // Seed a deterministic program: fair value 0.1 baht/point, two ACTIVE members holding 1000 + 500 points
+  // (with matching sub-ledger rows so the watermark advances) ⇒ outstanding 1500 × 0.1 = ฿150 liability.
+  const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+  await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1', bahtPerPoint: '0.1', minRedeem: '0', expiryDays: 365 })
+    .onConflictDoUpdate({ target: s.loyaltyConfig.id, set: { enabled: true, bahtPerPoint: '0.1', pointsPerBaht: '1', expiryDays: 365 } });
+  const [lm1] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LYL1', name: 'แต้ม A', balance: '1000', lifetime: '1000', active: true }).returning({ id: s.posMembers.id });
+  const [lm2] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LYL2', name: 'แต้ม B', balance: '500', lifetime: '500', active: true }).returning({ id: s.posMembers.id });
+  await db.insert(s.posMemberLedger).values([
+    { tenantId: t1, memberId: Number(lm1.id), txnType: 'Earn', points: '1000', balanceAfter: '1000', refDoc: 'SEED-A' },
+    { tenantId: t1, memberId: Number(lm2.id), txnType: 'Earn', points: '500', balanceAfter: '500', refDoc: 'SEED-B' },
+  ]);
+
+  // 1. The read-only tie-out reports the liability against control account 2250 at fair value.
+  const liab = await inj('GET', '/api/loyalty/liability', glacct);
+  ok('LYL-03: liability tie-out reports outstanding × fair value on control acct 2250',
+    liab.json.control_account === '2250' && near(liab.json.fair_value_per_point, 0.1) && near(liab.json.outstanding_points, 1500) && near(liab.json.liability_value, 150),
+    `acct=${liab.json.control_account} out=${liab.json.outstanding_points} liab=${liab.json.liability_value}`);
+
+  // 2. Posting the accrual books a balanced JE (Dr 5700 / Cr 2250) for the full liability — posted immediately.
+  const lpost = await inj('POST', '/api/loyalty/liability/post', glacct, {});
+  const ljno = String(lpost.json.journal_no ?? '');
+  const lperiod = `${ljno.slice(3, 7)}-${ljno.slice(7, 9)}`;
+  ok('LYL-03: accrual run posts the liability delta to the GL (Dr 5700 / Cr 2250)',
+    lpost.json.posted === true && near(lpost.json.liability_delta, 150) && near(lpost.json.posted_liability, 150) && /^JE-/.test(ljno),
+    `posted=${lpost.json.posted} delta=${lpost.json.liability_delta} je=${ljno}`);
+  const cr2250 = await tbCredit(lperiod, '2250');
+  ok('LYL-03: control account 2250 credited by outstanding × fair value (ties to sub-ledger)', near(cr2250, 150), `2250 credit=${cr2250}`);
+
+  // 3. Trial balance stays balanced after the accrual.
+  const ltb = await inj('GET', `/api/ledger/trial-balance?period=${lperiod}`, admin);
+  ok('LYL-03: trial balance remains balanced after the loyalty accrual',
+    ltb.json.totals?.balanced === true || near(ltb.json.totals?.debit, Number(ltb.json.totals?.credit)),
+    `debit=${ltb.json.totals?.debit} credit=${ltb.json.totals?.credit}`);
+
+  // 4. Idempotent — re-running with no new points movements posts nothing (no double accrual).
+  const lpost2 = await inj('POST', '/api/loyalty/liability/post', glacct, {});
+  const cr2250b = await tbCredit(lperiod, '2250');
+  ok('LYL-03: re-run is idempotent (no new movements → no double posting)',
+    lpost2.json.posted === false && near(cr2250b, 150), `reason=${lpost2.json.reason} 2250 credit=${cr2250b}`);
+
+  // 5. Tenant-scoped — an HQ-tenant run sees none of T1's points (explicit tenant scope on the accrual).
+  const lpostHq = await inj('POST', '/api/loyalty/liability/post', admin, {});
+  ok('LYL-03: accrual is tenant-scoped (HQ-tenant run finds no T1 points)',
+    lpostHq.json.posted === false && near(lpostHq.json.outstanding_points ?? 0, 0), `posted=${lpostHq.json.posted} out=${lpostHq.json.outstanding_points}`);
+
+  // 6. The READ tie-out is tenant-scoped even for Admin (whose JWT bypasses RLS): an HQ admin must see
+  // HQ's own (empty) liability, NOT T1's ฿150 commingled across tenants.
+  const liabHq = await inj('GET', '/api/loyalty/liability', admin);
+  ok('LYL-03: liability tie-out is tenant-scoped under Admin RLS-bypass (no cross-tenant commingling)',
+    near(liabHq.json.outstanding_points ?? 0, 0) && near(liabHq.json.liability_value ?? 0, 0), `out=${liabHq.json.outstanding_points} liab=${liabHq.json.liability_value}`);
+
+  // 7. Basis is ALL members: deactivating a balance-bearing member does NOT silently drop the liability
+  // (you still owe the points) and does NOT desync the GL — the accrual stays tied at ฿150.
+  await db.update(s.posMembers).set({ active: false }).where(eq(s.posMembers.id, Number(lm1.id)));
+  const liabAfter = await inj('GET', '/api/loyalty/liability', glacct);
+  const lpost3 = await inj('POST', '/api/loyalty/liability/post', glacct, {});
+  const cr2250c = await tbCredit(lperiod, '2250');
+  ok('LYL-03: liability basis covers all members (deactivation does not desync GL 2250)',
+    near(liabAfter.json.outstanding_points, 1500) && near(liabAfter.json.liability_value, 150) && lpost3.json.posted === false && near(cr2250c, 150),
+    `out=${liabAfter.json.outstanding_points} 2250=${cr2250c} rerun=${lpost3.json.reason}`);
+
+  // ════════ LYL-04/05 — Points expiry (breakage) releases the liability; period-close auto-accrues ════════
+  // Fresh tenant T2 isolates from the T1 checks above. Sales@T2 holds 'exec' ⇒ gl_post/gl_close + loyalty/exec.
+  await db.insert(s.users).values({ username: 'salesT2', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t2 }).onConflictDoNothing();
+  const salesT2 = await login('salesT2', 'pw');
+  const oldDate = new Date('2023-01-01T00:00:00Z'); // > expiry_days (365) ago ⇒ outside the earn window
+  const [t2a] = await db.insert(s.posMembers).values({ tenantId: t2, memberCode: 'M-T2A', name: 'เก่า', balance: '1000', lifetime: '1000', active: true }).returning({ id: s.posMembers.id });
+  const [t2b] = await db.insert(s.posMembers).values({ tenantId: t2, memberCode: 'M-T2B', name: 'ใหม่', balance: '1000', lifetime: '1000', active: true }).returning({ id: s.posMembers.id });
+  await db.insert(s.posMemberLedger).values([
+    { tenantId: t2, memberId: Number(t2a.id), txnType: 'Earn', points: '1000', balanceAfter: '1000', refDoc: 'SEED-OLD', txnDate: oldDate },
+    { tenantId: t2, memberId: Number(t2b.id), txnType: 'Earn', points: '1000', balanceAfter: '1000', refDoc: 'SEED-NEW' },
+  ]);
+
+  const t2acc1 = await inj('POST', '/api/loyalty/liability/post', salesT2, {});            // baseline 2000 × 0.1 = ฿200
+  const exp = await inj('POST', '/api/loyalty/expire', salesT2, {});                       // M-T2A's old 1000 expire
+  const t2acc2 = await inj('POST', '/api/loyalty/liability/post', salesT2, {});            // release → target ฿100
+  ok('LYL-04: aged points expire (breakage) and release the GL liability (Dr 2250 / Cr 5700)',
+    near(t2acc1.json.posted_liability, 200) && exp.json.expired_points === 1000 && exp.json.expired_members === 1 && near(t2acc2.json.liability_delta, -100) && near(t2acc2.json.posted_liability, 100),
+    `base=${t2acc1.json.posted_liability} expired=${exp.json.expired_points} delta=${t2acc2.json.liability_delta} posted=${t2acc2.json.posted_liability}`);
+
+  // New movement, then close T2's current period → close auto-accrues the delta (no manual run needed).
+  const [t2c] = await db.insert(s.posMembers).values({ tenantId: t2, memberCode: 'M-T2C', name: 'ปิดงวด', balance: '500', lifetime: '500', active: true }).returning({ id: s.posMembers.id });
+  await db.insert(s.posMemberLedger).values({ tenantId: t2, memberId: Number(t2c.id), txnType: 'Earn', points: '500', balanceAfter: '500', refDoc: 'SEED-CLOSE' });
+  const t2close = await inj('POST', `/api/ledger/periods/${period}/close`, salesT2);
+  ok('LYL-05: closing a period auto-accrues the loyalty liability before locking the books',
+    (t2close.status === 200 || t2close.status === 201) && t2close.json.status === 'Closed' && t2close.json.loyalty_accrual?.posted === true && near(t2close.json.loyalty_accrual?.liability_delta, 50) && near(t2close.json.loyalty_accrual?.posted_liability, 150),
+    `status=${t2close.json.status} accrual=${JSON.stringify(t2close.json.loyalty_accrual)}`);
+
+  // ════════ LYL-06 — Scheduled maintenance sweep (cron): expire aged points + re-accrue, per tenant ════════
+  const [hqA] = await db.insert(s.posMembers).values({ tenantId: hq, memberCode: 'M-HQ-OLD', name: 'hq เก่า', balance: '1000', lifetime: '1000', active: true }).returning({ id: s.posMembers.id });
+  const [hqB] = await db.insert(s.posMembers).values({ tenantId: hq, memberCode: 'M-HQ-NEW', name: 'hq ใหม่', balance: '500', lifetime: '500', active: true }).returning({ id: s.posMembers.id });
+  await db.insert(s.posMemberLedger).values([
+    { tenantId: hq, memberId: Number(hqA.id), txnType: 'Earn', points: '1000', balanceAfter: '1000', refDoc: 'HQ-OLD', txnDate: oldDate },
+    { tenantId: hq, memberId: Number(hqB.id), txnType: 'Earn', points: '500', balanceAfter: '500', refDoc: 'HQ-NEW' },
+  ]);
+  const hqBase = await inj('POST', '/api/loyalty/liability/post', admin, {});            // admin.tenantId=hq ⇒ baseline 1500 × 0.1 = ฿150
+  const sweep = await inj('POST', '/api/loyalty/maintenance/run', admin, { tenant_id: hq });
+  const hqRes = (sweep.json.results ?? []).find((r: any) => Number(r.tenant_id) === hq);
+  ok('LYL-06: maintenance sweep expires aged points then re-accrues the liability per tenant',
+    near(hqBase.json.posted_liability, 150) && !!hqRes && hqRes.expired_points === 1000 && near(hqRes.accrual?.liability_delta, -100) && near(hqRes.accrual?.posted_liability, 50),
+    `base=${hqBase.json.posted_liability} sweep=${JSON.stringify(hqRes)}`);
+
+  // ════════ LYL-07 — Rewards: burn points for a single-use code, release the liability, block double-use ════════
+  // execu (Sales@T1) holds marketing/exec (catalog config) + pos (redeem/use). M-LYL2 (lm2) holds 500 points.
+  const rwd = await inj('POST', '/api/loyalty/rewards', execu, { name: 'ส่วนลด ฿50', type: 'evoucher', point_cost: 300, cash_value: 50, coupon_kind: 'amount', coupon_value: 50, per_member_limit: 1 });
+  const rwdId = Number(rwd.json.id);
+  const redeem = await inj('POST', `/api/loyalty/rewards/${rwdId}/redeem`, execu, { member_id: Number(lm2.id) });
+  const accAfter = await inj('POST', '/api/loyalty/liability/post', execu, {});       // execu.tenantId=T1 ⇒ accrue T1; burn of 300 pts ⇒ −฿30
+  const useResp = await inj('POST', `/api/loyalty/redemptions/${redeem.json.redemption_code}/use`, execu, { sale_no: 'SALE-T1-RWD' });
+  const useAgain = await inj('POST', `/api/loyalty/redemptions/${redeem.json.redemption_code}/use`, execu, {});
+  ok('LYL-07: reward burn issues a single-use code, releases the GL liability, and blocks double-use',
+    (rwd.status === 200 || rwd.status === 201) && /^RDM-/.test(redeem.json.redemption_code ?? '') && redeem.json.balance === 200 && near(accAfter.json.liability_delta, -30) && useResp.json.status === 'used' && useAgain.status === 409 && useAgain.json.error?.code === 'ALREADY_USED',
+    `code=${redeem.json.redemption_code} bal=${redeem.json.balance} delta=${accAfter.json.liability_delta} use=${useResp.json.status} again=${useAgain.json.error?.code}`);
+
+  // Tenant scoping under Admin RLS-bypass: an HQ admin must NOT see T1's reward catalog nor use T1's code.
+  const useCross = await inj('POST', `/api/loyalty/redemptions/${redeem.json.redemption_code}/use`, admin, {});
+  const adminRewards = await inj('GET', '/api/loyalty/rewards', admin);
+  ok('LYL-07: rewards are tenant-scoped under Admin RLS-bypass (no cross-tenant code use or catalog leak)',
+    useCross.status === 404 && useCross.json.error?.code === 'REDEMPTION_NOT_FOUND' && !(adminRewards.json.rewards ?? []).some((r: any) => Number(r.id) === rwdId),
+    `crossUse=${useCross.status}/${useCross.json.error?.code} adminSeesT1=${(adminRewards.json.rewards ?? []).some((r: any) => Number(r.id) === rwdId)}`);
+
+  // ════════ LYL-08 — Tier auto-recompute + gamification mission claim (single-claim) ════════
+  // HQ members from LYL-06: hqA (lifetime 1000), hqB (lifetime 500, balance 500). Seed a tier ladder.
+  await db.insert(s.loyaltyTiers).values([
+    { tenantId: hq, tier: 'Silver', minLifetime: '500', earnMult: '1', redeemMult: '1', sort: 1 },
+    { tenantId: hq, tier: 'Gold', minLifetime: '1000', earnMult: '2', redeemMult: '1', sort: 2 },
+  ]);
+  const tierRecomp = await inj('POST', '/api/loyalty/tiers/recompute', admin, {});             // admin.tenantId=hq
+  const journeyB = await inj('GET', `/api/loyalty/members/${Number(hqB.id)}/tier`, admin);      // hqB lifetime 500 → Silver, next Gold
+  const mission = await inj('POST', '/api/loyalty/missions', admin, { name: 'แสตมป์ 3 ครั้ง', type: 'stamp', goal: 3, reward_kind: 'points', reward_points: 50 });
+  const mid = Number(mission.json.id);
+  const prog = await inj('POST', `/api/loyalty/missions/${mid}/progress`, admin, { member_id: Number(hqB.id), amount: 3 });
+  const claim1 = await inj('POST', `/api/loyalty/missions/${mid}/claim`, admin, { member_id: Number(hqB.id) });
+  const claim2 = await inj('POST', `/api/loyalty/missions/${mid}/claim`, admin, { member_id: Number(hqB.id) });
+  ok('LYL-08: tier auto-recompute (lifetime → tier ladder) + mission claim grants bonus points, single-claim',
+    tierRecomp.json.changed >= 2 && journeyB.json.current_tier === 'Silver' && journeyB.json.next_tier === 'Gold' && prog.json.completed === true && claim1.json.reward?.points === 50 && claim1.json.reward?.balance === 550 && claim2.status === 409 && claim2.json.error?.code === 'ALREADY_CLAIMED',
+    `changed=${tierRecomp.json.changed} tierB=${journeyB.json.current_tier}/${journeyB.json.next_tier} done=${prog.json.completed} claim=${JSON.stringify(claim1.json.reward)} again=${claim2.json.error?.code}`);
+
+  // ════════ LYL-09 — Member-get-member referral rewards both, once, tenant-scoped ════════
+  const [refA] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-REFA', name: 'ผู้แนะนำ', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  const [refB] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-REFB', name: 'ผู้ถูกแนะนำ', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  const refCreate = await inj('POST', '/api/loyalty/referrals', execu, { referrer_member_id: Number(refA.id), referred_member_id: Number(refB.id), referrer_points: 50, referred_points: 50 });
+  const refReward = await inj('POST', `/api/loyalty/referrals/${refCreate.json.id}/reward`, execu, {});
+  const refReward2 = await inj('POST', `/api/loyalty/referrals/${refCreate.json.id}/reward`, execu, {});
+  const refRewardCross = await inj('POST', `/api/loyalty/referrals/${refCreate.json.id}/reward`, admin, {});  // admin.tenantId=hq ⇒ not in scope
+  ok('LYL-09: referral rewards both members once (single-reward) and is tenant-scoped',
+    /^RFL-/.test(refCreate.json.code ?? '') && refReward.json.status === 'rewarded' && refReward.json.referrer?.balance === 50 && refReward.json.referred?.balance === 50 && refReward2.status === 409 && refReward2.json.error?.code === 'ALREADY_REWARDED' && refRewardCross.status === 404,
+    `code=${refCreate.json.code} reward=${refReward.json.status} refr=${refReward.json.referrer?.balance} refd=${refReward.json.referred?.balance} again=${refReward2.json.error?.code} cross=${refRewardCross.status}`);
+
+  // ════════ LYL-10 — Member self-service app: phone-OTP login, self-scoped access, staff routes blocked ════════
+  const [appMem] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-APP', name: 'แอป', phone: '0890000001', balance: '100', lifetime: '100', active: true }).returning({ id: s.posMembers.id });
+  const otpReq = await inj('POST', '/api/member/auth/request-otp', undefined, { phone: '0890000001', tenant_code: 'T1' });
+  const badVerify = await inj('POST', '/api/member/auth/verify-otp', undefined, { phone: '0890000001', tenant_code: 'T1', code: '000000' });   // wrong → 401
+  const otpVerify = await inj('POST', '/api/member/auth/verify-otp', undefined, { phone: '0890000001', tenant_code: 'T1', code: String(otpReq.json.dev_otp) });
+  const memberTok = otpVerify.json.token as string;
+  const meResp = await inj('GET', '/api/member/me', memberTok);
+  const rewardsResp = await inj('GET', '/api/member/rewards', memberTok);
+  const staffAttempt = await inj('GET', '/api/loyalty/members', memberTok);   // member token (no perms) → 403
+  ok('LYL-10: phone-OTP login mints a member token; self-service works; staff routes blocked; wrong code rejected',
+    otpReq.json.sent === true && /^[0-9]{6}$/.test(String(otpReq.json.dev_otp ?? '')) && badVerify.status === 401 && !!memberTok && meResp.json.member_code === 'M-APP' && Number(appMem.id) === meResp.json.id && Array.isArray(rewardsResp.json.rewards) && staffAttempt.status === 403,
+    `otp=${otpReq.json.dev_otp} bad=${badVerify.status} me=${meResp.json.member_code} rewards=${rewardsResp.json.rewards?.length} staff=${staffAttempt.status}`);
+  // LYL-10b — OTP brute-force cap: 5 wrong guesses lock the code; even the CORRECT code is then rejected
+  // (the >=5-attempt bound + invalidation; the row is locked FOR UPDATE so concurrent guesses can't bypass it).
+  const otpReq2 = await inj('POST', '/api/member/auth/request-otp', undefined, { phone: '0890000001', tenant_code: 'T1' });
+  let wrong5 = 0;
+  for (let i = 0; i < 5; i++) { const w = await inj('POST', '/api/member/auth/verify-otp', undefined, { phone: '0890000001', tenant_code: 'T1', code: '111111' }); wrong5 = w.status; }
+  const afterExhaust = await inj('POST', '/api/member/auth/verify-otp', undefined, { phone: '0890000001', tenant_code: 'T1', code: String(otpReq2.json.dev_otp) });
+  ok('LYL-10b: OTP attempt-bound — 5 wrong guesses lock the code; the correct code is then rejected (brute-force cap)',
+    /^[0-9]{6}$/.test(String(otpReq2.json.dev_otp ?? '')) && wrong5 === 401 && afterExhaust.status === 401,
+    `wrong5=${wrong5} thenCorrect=${afterExhaust.status}`);
+
+  // ════════ LYL-11 — Spin-the-wheel: weighted draw, free→cost, balance accounting, per-prize stock cap ════════
+  const [spinMem] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-SPIN', name: 'หมุน', balance: '100', lifetime: '100', active: true }).returning({ id: s.posMembers.id });
+  const wheelA = await inj('POST', '/api/loyalty/wheels', execu, { name: 'วงล้อนำโชค', cost_points: 5, daily_free_spins: 1, segments: [{ label: 'P10', prize_kind: 'points', prize_points: 10, weight: 1 }] });
+  const spin1 = await inj('POST', `/api/loyalty/wheels/${wheelA.json.id}/spin`, execu, { member_id: Number(spinMem.id) });   // free spin → +10
+  const spin2 = await inj('POST', `/api/loyalty/wheels/${wheelA.json.id}/spin`, execu, { member_id: Number(spinMem.id) });   // paid (5) → -5 +10
+  const histW = await inj('GET', `/api/loyalty/members/${Number(spinMem.id)}/spins`, execu);
+  const wheelB = await inj('POST', '/api/loyalty/wheels', execu, { name: 'รางวัลจำกัด', cost_points: 0, daily_free_spins: 99, segments: [{ label: 'L50', prize_kind: 'points', prize_points: 50, weight: 1, stock: 1 }] });
+  const spinB1 = await inj('POST', `/api/loyalty/wheels/${wheelB.json.id}/spin`, execu, { member_id: Number(spinMem.id) });  // wins the only stocked prize
+  const spinB2 = await inj('POST', `/api/loyalty/wheels/${wheelB.json.id}/spin`, execu, { member_id: Number(spinMem.id) });  // stock exhausted → 409
+  ok('LYL-11: spin-the-wheel — weighted draw, free→cost, balance accounting, per-prize stock cap',
+    spin1.json.free === true && spin1.json.prize?.points === 10 && spin1.json.balance === 110
+    && spin2.json.free === false && spin2.json.cost_points === 5 && spin2.json.balance === 115
+    && Array.isArray(histW.json.spins) && histW.json.spins.length === 2
+    && spinB1.json.prize?.points === 50 && spinB1.json.balance === 165 && spinB2.status === 409,
+    `s1=${spin1.json.balance}/${spin1.json.free} s2=${spin2.json.balance}/c${spin2.json.cost_points} hist=${histW.json.spins?.length} B1=${spinB1.json.balance} B2=${spinB2.status}`);
+
+  // ════════ LYL-12 — Campaign orchestration: segmented send respects PDPA opt-out, audits, idempotent ════════
+  const [cm1] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP1', name: 'แคมเปญ1', phone: '0891111111', marketingOptIn: true, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
+  const [cm2] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP2', name: 'แคมเปญ2', phone: '0892222222', marketingOptIn: false, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
+  const [cm3] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-CMP3', name: 'แคมเปญ3', phone: '0893333333', marketingOptIn: true, tier: 'VIPTEST', active: true }).returning({ id: s.posMembers.id });
+  void cm1; void cm2; void cm3;
+  const camp = await inj('POST', '/api/loyalty/campaigns', execu, { name: 'โปรสมาชิก VIP', channel: 'sms', audience: 'tier', tier: 'VIPTEST', body: 'รับส่วนลดพิเศษวันนี้!' });
+  const sendC = await inj('POST', `/api/loyalty/campaigns/${camp.json.id}/send`, execu);
+  const resend = await inj('POST', `/api/loyalty/campaigns/${camp.json.id}/send`, execu);   // already sent → 409
+  ok('LYL-12: campaign — segmented send respects PDPA opt-out, audits each recipient, idempotent (no re-send)',
+    String(camp.json.campaign_code ?? '').startsWith('CMP-') && sendC.json.targeted === 3 && sendC.json.sent === 2 && sendC.json.skipped === 1 && sendC.json.status === 'sent' && resend.status === 409,
+    `code=${camp.json.campaign_code} targeted=${sendC.json.targeted} sent=${sendC.json.sent} skipped=${sendC.json.skipped} resend=${resend.status}`);
+  // LYL-12b — a scheduled campaign is fired ONCE by run-due (claim-first: status committed before delivery, so
+  // a re-run never re-sends — the at-most-once fix from the adversarial review).
+  const sched = await inj('POST', '/api/loyalty/campaigns', execu, { name: 'ตั้งเวลา', channel: 'sms', audience: 'tier', tier: 'VIPTEST', body: 'โปรตั้งเวลา', schedule_at: new Date(Date.now() - 60_000).toISOString() });
+  const due1 = await inj('POST', '/api/loyalty/campaigns/run-due', execu, {});
+  const due2 = await inj('POST', '/api/loyalty/campaigns/run-due', execu, {});   // already sent → fires 0
+  ok('LYL-12b: scheduled campaign fired once by run-due (claim-first; never re-sent on a second run)',
+    sched.json.status === 'scheduled' && Number(due1.json.campaigns_sent) >= 1 && Number(due2.json.campaigns_sent) === 0,
+    `sched=${sched.json.status} due1=${due1.json.campaigns_sent} due2=${due2.json.campaigns_sent}`);
+
+  // ════════ LYL-13 — CRM SoD split (R14–R16): the granular crm_* permissions are enforced ════════
+  const r14Blocked = await inj('POST', '/api/admin/users', admin, { username: 'crm_conflict', password: 'pw1234', role: 'Sales', permissions: ['crm_reward', 'pos_sell'] });   // R14: config reward + redeem at till
+  const r14Msg = String(r14Blocked.json.error?.message ?? '');
+  const crmClean = await inj('POST', '/api/admin/users', admin, { username: 'crm_rewardmgr', password: 'pw1234', role: 'Sales', permissions: ['crm_reward'] });   // single-duty → clean
+  ok('LYL-13: CRM SoD split — crm_reward + pos_sell blocked as R14; a single-duty crm_reward role is clean',
+    r14Blocked.status === 422 && r14Blocked.json.error?.code === 'SOD_CONFLICT' && r14Msg.includes('R14') && (crmClean.status === 200 || crmClean.status === 201),
+    `r14=${r14Blocked.status}/${r14Blocked.json.error?.code} msg~R14=${r14Msg.includes('R14')} clean=${crmClean.status}`);
+
+  // ════════ LYL-14 — Partner privileges: tier-gated single-use claim, per-member limit, partner redeem ════════
+  const [pmA] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-PRVA', name: 'สิทธิ์A', balance: '0', lifetime: '200', active: true }).returning({ id: s.posMembers.id });
+  const [pmB] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-PRVB', name: 'สิทธิ์B', balance: '0', lifetime: '50', active: true }).returning({ id: s.posMembers.id });
+  const partner = await inj('POST', '/api/loyalty/partners', execu, { name: 'ร้านกาแฟพันธมิตร', category: 'dining' });
+  const priv = await inj('POST', '/api/loyalty/privileges', execu, { partner_id: partner.json.id, name: 'ส่วนลด 10%', kind: 'discount_percent', value: 10, tier_min: 100, stock: 2, per_member_limit: 1 });
+  const claimA = await inj('POST', `/api/loyalty/privileges/${priv.json.id}/claim`, execu, { member_id: Number(pmA.id) });
+  const usePrv = await inj('POST', `/api/loyalty/privilege-claims/${claimA.json.claim_code}/use`, execu, { partner: 'ร้านกาแฟพันธมิตร' });
+  const reusePrv = await inj('POST', `/api/loyalty/privilege-claims/${claimA.json.claim_code}/use`, execu, {});                  // single-use → 409
+  const claimAgain = await inj('POST', `/api/loyalty/privileges/${priv.json.id}/claim`, execu, { member_id: Number(pmA.id) }); // per-member limit → 409
+  const claimLow = await inj('POST', `/api/loyalty/privileges/${priv.json.id}/claim`, execu, { member_id: Number(pmB.id) });   // tier too low → 409
+  ok('LYL-14: partner privilege — tier-gated single-use claim, per-member limit, partner redeem',
+    String(claimA.json.claim_code ?? '').startsWith('PRV-') && usePrv.json.status === 'used' && reusePrv.status === 409 && claimAgain.status === 409 && claimLow.status === 409 && claimLow.json.error?.code === 'TIER_TOO_LOW',
+    `claim=${claimA.json.claim_code} use=${usePrv.json.status} reuse=${reusePrv.status} again=${claimAgain.status} low=${claimLow.status}/${claimLow.json.error?.code}`);
+
+  // ════════ LYL-15 — Loyalty analytics: liability + redemption funnel + churn, tenant-scoped ════════
+  const analytics = await inj('GET', '/api/loyalty/analytics', execu);
+  ok('LYL-15: loyalty analytics — liability + redemption funnel + churn risk (tenant-scoped)',
+    analytics.status === 200 && Number(analytics.json.members?.total) > 0 && typeof analytics.json.liability?.fair_value === 'number' && typeof analytics.json.redemption?.redemption_rate_pct === 'number' && typeof analytics.json.churn_rate_pct === 'number' && typeof analytics.json.breakage_rate_pct === 'number',
+    `total=${analytics.json.members?.total} fv=${analytics.json.liability?.fair_value} rr=${analytics.json.redemption?.redemption_rate_pct} churn=${analytics.json.churn_rate_pct}`);
+
+  // ════════ LYL-16 — LINE LIFF: linked account logs in (mints member token); unlinked rejected; link works ═══════
+  const [lm] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LINE', name: 'ไลน์', balance: '0', lifetime: '0', active: true, lineUserId: 'U-line-123' }).returning({ id: s.posMembers.id });
+  const lineLogin = await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', id_token: 'mock:U-line-123' });
+  const lineUnlinked = await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', id_token: 'mock:U-nope' });
+  const lineMe = await inj('GET', '/api/member/me', lineLogin.json.token);
+  const relink = await inj('POST', '/api/member/link-line', lineLogin.json.token, { id_token: 'mock:U-relink-456' });
+  ok('LYL-16: LINE login — linked account mints a member token; unlinked rejected; member can link',
+    !!lineLogin.json.token && lineMe.json.member_code === 'M-LINE' && Number(lm.id) === lineMe.json.id && lineUnlinked.status === 401 && lineUnlinked.json.error?.code === 'LINE_NOT_LINKED' && relink.json.linked === true,
+    `tok=${!!lineLogin.json.token} me=${lineMe.json.member_code} unlinked=${lineUnlinked.status}/${lineUnlinked.json.error?.code} link=${relink.json.linked}`);
+
+  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} compliance checks failed` : `\n✅ All ${checks.length} compliance control checks passed`);

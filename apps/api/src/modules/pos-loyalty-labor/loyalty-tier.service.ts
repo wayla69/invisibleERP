@@ -52,15 +52,18 @@ export class LoyaltyTierService {
     const cutoff = new Date(Date.now() - expiryDays * 86400000);
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
     if (!m) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
+    const balance = n(m.balance);
+    // Expiry disabled (expiry_days <= 0) → nothing ages; everything is redeemable (matches expirePoints()).
+    if (expiryDays <= 0) return { member_id: memberId, balance: round0(balance), redeemable: round0(balance), expired: 0, expiry_days: expiryDays };
     const ledger = await db.select().from(posMemberLedger).where(eq(posMemberLedger.memberId, memberId));
-    let earnedRecent = 0, redeemed = 0;
+    let earnedRecent = 0, redeemed = 0, adjusted = 0;
     for (const e of ledger) {
       const pts = n(e.points);
       if (e.txnType === 'Earn') { if (new Date(e.txnDate) >= cutoff) earnedRecent += pts; }
       else if (e.txnType === 'Redeem') redeemed += Math.abs(pts);
+      else if (e.txnType === 'Adjust') adjusted += pts; // manual adjustments don't age — never shown as expired
     }
-    const redeemableBal = Math.max(0, round0(earnedRecent - redeemed));
-    const balance = n(m.balance);
+    const redeemableBal = Math.max(0, round0(earnedRecent + adjusted - redeemed));
     return { member_id: memberId, balance: round0(balance), redeemable: redeemableBal, expired: Math.max(0, round0(balance - redeemableBal)), expiry_days: expiryDays };
   }
 }
