@@ -1,7 +1,9 @@
 // Payment gateway abstraction — select by `gateway` field (default 'mock').
 // Each gateway proves money moved: authorizeAndCapture returns a ref + final status.
 
+import { BadRequestException } from '@nestjs/common';
 import { buildPromptPayPayload } from './promptpay-qr';
+import { OmiseProvider } from '../pos-terminal/providers';
 
 export interface GatewayResult {
   ref: string;
@@ -39,48 +41,62 @@ export class PromptPayGateway implements PaymentGateway {
   }
 }
 
-// Stripe stub — constructed only when STRIPE_SECRET_KEY is set; otherwise unused.
-// Real capture would call the Stripe SDK here; stub keeps the interface honest.
+// Stripe — real PaymentIntents create+confirm. A card needs a payment-method token from the client
+// (threaded via meta.token); without one we cannot charge, so we report Pending (NOT a fake capture).
 export class StripeGateway implements PaymentGateway {
   constructor(private readonly secretKey: string) {}
 
-  async authorizeAndCapture(
-    amount: number,
-    currency: string,
-    _method: string,
-    _meta?: Record<string, unknown>,
-  ): Promise<GatewayResult> {
+  async authorizeAndCapture(amount: number, currency: string, _method: string, meta?: Record<string, unknown>): Promise<GatewayResult> {
     if (!this.secretKey) return { ref: 'stripe_unconfigured', status: 'Failed' };
-    // TODO: real Stripe PaymentIntent create+capture. Stub returns a synthetic ref.
-    return { ref: `stripe_${currency.toLowerCase()}_${amount}_${rnd()}`, status: 'Captured' };
+    const token = (meta?.token ?? meta?.payment_method) as string | undefined;
+    if (!token) return { ref: `stripe_pending_${meta?.sale_no ?? amount}`, status: 'Pending' };
+    const res = await fetch('https://api.stripe.com/v1/payment_intents', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.secretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ amount: String(minorUnits(amount, currency)), currency: (currency || 'THB').toLowerCase(), payment_method: token, confirm: 'true', 'automatic_payment_methods[enabled]': 'true', 'automatic_payment_methods[allow_redirects]': 'never' }),
+    });
+    const pi: any = await res.json().catch(() => ({}));
+    if (!res.ok || pi.error) throw new BadRequestException({ code: 'PSP_ERROR', message: pi.error?.message ?? `Stripe error ${res.status}`, messageTh: 'การชำระเงินผิดพลาด' });
+    return { ref: pi.id, status: mapStripe(pi.status) };
   }
 }
 
 // Opn Payments (formerly Omise) — Thailand's most common PSP aggregator. ONE integration unlocks cards
 // (chip/contactless), Thai e-wallets (TrueMoney / Rabbit LINE Pay / ShopeePay) and cross-border tourist
-// wallets (Alipay+ / WeChat Pay) through a single charge API, so the POS doesn't integrate each wallet
-// separately. Constructed only when OPN_SECRET_KEY is set; otherwise resolveGateway falls back to mock.
+// wallets (Alipay+ / WeChat Pay) through a single charge API. Constructed only when OPN_SECRET_KEY is set;
+// otherwise resolveGateway falls back to mock.
 //
-// Settlement model varies by method: card charges capture synchronously (→ Captured), while wallet/QR
-// "source" charges are confirmed by the payer out-of-band and settle via webhook (→ Pending until then,
-// then PATCH /api/payments/:no/settle). We mirror that here so funds are never booked before they move.
+// A card tender carries a token/source from the terminal SDK (meta.token) and is charged for real via the
+// shared OmiseProvider — capturing synchronously (→ Captured) per the PSP's authoritative response. A
+// tender with no token cannot be charged here, so it stays Pending (settled out-of-band) — we NEVER
+// report Captured for money that has not actually moved.
 export class OpnGateway implements PaymentGateway {
-  constructor(private readonly secretKey: string) {}
+  private readonly omise: OmiseProvider;
+  constructor(secretKey: string) { this.omise = new OmiseProvider(secretKey); }
 
-  async authorizeAndCapture(
-    amount: number,
-    currency: string,
-    method: string,
-    _meta?: Record<string, unknown>,
-  ): Promise<GatewayResult> {
-    if (!this.secretKey) return { ref: 'opn_unconfigured', status: 'Failed' };
-    // Card tenders capture immediately; wallet/QR tenders settle asynchronously.
-    const async = /wallet|promptpay|qr|alipay|wechat|truemoney|linepay|shopeepay/i.test(method);
-    // TODO: real Opn charge create+capture — POST https://api.omise.co/charges with `amount` in the
-    // currency's minor unit (satang for THB), a card token or a `source` per method, Basic auth on the
-    // secret key. Stub returns a synthetic ref so the tender path stays honest until credentials exist.
-    return { ref: `opn_${method.toLowerCase()}_${currency.toLowerCase()}_${amount}_${rnd()}`, status: async ? 'Pending' : 'Captured' };
+  async authorizeAndCapture(amount: number, currency: string, method: string, meta?: Record<string, unknown>): Promise<GatewayResult> {
+    const token = (meta?.token ?? meta?.source) as string | undefined;
+    if (!token) {
+      // No token to charge against → await an out-of-band settlement; do not fabricate a capture.
+      return { ref: `opn_pending_${meta?.sale_no ?? amount}`, status: 'Pending' };
+    }
+    // Real charge through the proven Omise client (handles satang, basic-auth, status mapping). Card
+    // tenders capture immediately; the PSP itself returns Pending for an async wallet/QR source.
+    const { ref, status } = await this.omise.charge({ amount, currency: currency || 'THB', type: 'sale', token, intentNo: String(meta?.sale_no ?? '') });
+    return { ref, status };
   }
+}
+
+// Minor-currency units. Most currencies are 2-decimal (satang/cents ×100); JPY/KRW are zero-decimal.
+function minorUnits(amount: number, currency: string): number {
+  const zeroDecimal = /^(JPY|KRW|VND|CLP|ISK)$/i.test(currency || '');
+  return Math.round(amount * (zeroDecimal ? 1 : 100));
+}
+function mapStripe(status: string): GatewayResult['status'] {
+  if (status === 'succeeded') return 'Captured';
+  if (status === 'requires_capture') return 'Authorized';
+  if (status === 'processing' || status === 'requires_action' || status === 'requires_confirmation') return 'Pending';
+  return 'Failed';
 }
 
 export type GatewayName = 'mock' | 'promptpay' | 'stripe' | 'opn';

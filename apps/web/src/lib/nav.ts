@@ -127,6 +127,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'เมนูอาหาร', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
       { label: 'บุฟเฟต์ (แพ็กเกจ)', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
       { label: 'ต้นทุนอาหาร (Food cost)', href: '/food-cost', icon: PieChart, perms: ['pos', 'order_mgt', 'masterdata', 'exec'] },
+      { label: 'วิเคราะห์ร้านอาหาร (Analytics)', href: '/restaurant-analytics', icon: BarChart3, perms: ['dashboard', 'exec', 'planner', 'order_mgt'] },
+      { label: 'แผนการผลิต (Production plan)', href: '/production-plan', icon: Boxes, perms: ['pos', 'order_mgt', 'masterdata', 'planner', 'exec'] },
       { label: 'จัดการเคลม', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
       { label: 'ใบส่งสินค้า', href: '/delivery', icon: Truck, perms: ['delivery'] },
       { label: 'ควบคุม POS (พักบิล/อนุมัติ)', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },

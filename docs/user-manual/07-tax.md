@@ -60,11 +60,31 @@ From the tax-invoice detail you can submit electronically:
 
 - **Send by e-Tax email** — for the *e-Tax by Email* scheme (smaller businesses):
   enter the recipient email; a copy is time-stamped by ETDA.
-- **Download e-Tax XML** — the standard XML file (unsigned). Apply your digital
-  signature with your Revenue Department certificate separately before filing.
+- **Download e-Tax XML** — the standard ETDA UBL 2.1 file. Add `?signed=1` to the
+  download to get the **digitally signed** document (XAdES) — provided your signing
+  certificate is configured (see below). Without a certificate the unsigned instance
+  document is returned, which you can still sign separately before filing.
+- **Submit to provider** — `POST /api/tax/etax/submit/{docNo}` builds, signs (if a
+  certificate is configured), and transmits the document to your e-Tax service
+  provider. Full tax invoices are also submitted automatically when issued.
 
 > **Note:** Submission is idempotent — submitting the same document twice will not
 > create duplicates. Check the status (Pending → Accepted / Rejected) afterwards.
+
+### Configuring the digital certificate & provider (administrator)
+
+Set these environment variables (see `.env.example`) so signing and real submission
+are active — when unset, the system runs unsigned against the `mock` sandbox:
+
+| Variable | Purpose |
+|---|---|
+| `ETAX_SIGNING_CERT_PEM` / `_B64` | Your CA-issued certificate (PEM, or base64 for one-line env) |
+| `ETAX_SIGNING_KEY_PEM` / `_B64` | The matching private key |
+| `ETAX_PROVIDER` | `mock` (default sandbox) or `http` (real service provider) |
+| `ETAX_PROVIDER_URL` / `ETAX_PROVIDER_TOKEN` | The SP endpoint + bearer token (for `http`) |
+
+The signature is XAdES (RSA-SHA256) with the signing time and certificate digest
+embedded, so any later edit to the document invalidates it (tamper-evident).
 
 ---
 

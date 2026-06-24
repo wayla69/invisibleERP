@@ -8,14 +8,14 @@ const rnd = () => Math.random().toString(36).slice(2, 12);
 export type MessageChannel = 'line' | 'sms' | 'email';
 export interface SendResult { status: 'sent' | 'failed'; provider: string; ref?: string; error?: string }
 
-const ENV: Record<MessageChannel, string | undefined> = {
-  line: process.env.LINE_CHANNEL_TOKEN,
-  sms: process.env.SMS_API_KEY,
-  email: process.env.SMTP_HOST,
-};
+// Read credentials at call time (not module-load) so a late-injected secret takes effect without a
+// restart — mirrors the payment-gateway resolver.
+function channelToken(channel: MessageChannel): string | undefined {
+  return channel === 'line' ? process.env.LINE_CHANNEL_TOKEN : channel === 'sms' ? process.env.SMS_API_KEY : process.env.SMTP_HOST;
+}
 
 export function resolveMessageGateway(channel: MessageChannel) {
-  const token = ENV[channel];
+  const token = channelToken(channel);
   const configured = !!token;
   const provider = configured ? channel : 'mock';
   return {

@@ -1,8 +1,9 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChefHat, Smartphone, Utensils } from 'lucide-react';
+import { ChefHat, Smartphone, Utensils, Wifi, WifiOff } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useRealtime } from '@/hooks/use-realtime';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -29,7 +30,10 @@ const URGENCY = {
 
 export default function KdsPage() {
   const qc = useQueryClient();
-  const feed = useQuery<{ stations: Station[] }>({ queryKey: ['kds'], queryFn: () => api('/api/restaurant/kds/feed'), refetchInterval: 3000 });
+  // Live via SSE: another terminal advancing an item refreshes this screen instantly. Polling stays as a
+  // 15s fallback for when the stream is down (vs 3s before — the realtime push carries the load now).
+  const { connected } = useRealtime((e) => { if (e.type === 'kds_item') qc.invalidateQueries({ queryKey: ['kds'] }); });
+  const feed = useQuery<{ stations: Station[] }>({ queryKey: ['kds'], queryFn: () => api('/api/restaurant/kds/feed'), refetchInterval: connected ? 15000 : 3000 });
   const act = useMutation({
     mutationFn: ({ id, action }: { id: number; action: string }) => api(`/api/restaurant/kds/items/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['kds'] }),
@@ -39,7 +43,15 @@ export default function KdsPage() {
 
   return (
     <div>
-      <PageHeader title="จอครัว (KDS)" description="อัปเดตอัตโนมัติทุก 3 วินาที · แตะการ์ดเพื่อเปลี่ยนสถานะ" />
+      <PageHeader
+        title="จอครัว (KDS)"
+        description="อัปเดตสดทุกเครื่องพร้อมกัน · แตะการ์ดเพื่อเปลี่ยนสถานะ"
+        actions={
+          <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
+            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? 'เรียลไทม์' : 'กำลังเชื่อมต่อ…'}
+          </Badge>
+        }
+      />
       <StateView q={feed}>
         {feed.data && (
           <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">

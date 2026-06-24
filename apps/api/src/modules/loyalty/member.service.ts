@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, posMemberLedger, loyaltyConfig } from '../../database/schema';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { verifyLineIdToken } from './line-auth';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -35,16 +36,56 @@ export class MemberService {
     return { id: Number(row.id), member_code: memberCode, name: row.name, phone: row.phone, balance: 0 };
   }
 
-  async lookup(q: { phone?: string; card?: string; code?: string }, user: JwtUser) {
+  async lookup(q: { phone?: string; card?: string; code?: string; line_user_id?: string }, user: JwtUser) {
     const db = this.db as any; this.tid(user);
     const conds: any[] = [];
     if (q.phone) conds.push(eq(posMembers.phone, q.phone));
     if (q.card) conds.push(eq(posMembers.cardNo, q.card));
     if (q.code) conds.push(eq(posMembers.memberCode, q.code));
-    if (!conds.length) throw new BadRequestException({ code: 'BAD_QUERY', message: 'phone, card or code required', messageTh: 'ต้องระบุเบอร์/บัตร/รหัส' });
+    if (q.line_user_id) conds.push(eq(posMembers.lineUserId, q.line_user_id));
+    if (!conds.length) throw new BadRequestException({ code: 'BAD_QUERY', message: 'phone, card, code or line_user_id required', messageTh: 'ต้องระบุเบอร์/บัตร/รหัส/LINE' });
     const [m] = await db.select().from(posMembers).where(or(...conds)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     return shape(m);
+  }
+
+  // Enrol-or-return a member from a verified LINE identity (LIFF/LINE-Login id token). Idempotent: a
+  // second sign-in with the same LINE account returns the existing member, never a duplicate.
+  async enrollViaLine(dto: { id_token: string; name?: string; phone?: string; marketing_opt_in?: boolean }, user: JwtUser) {
+    const db = this.db as any; const tenantId = this.tid(user);
+    const prof = await verifyLineIdToken(dto.id_token);
+    const [existing] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.lineUserId, prof.lineUserId))).limit(1);
+    if (existing) return { ...shape(existing), created: false };
+    let row;
+    try {
+      [row] = await db.insert(posMembers).values({
+        tenantId, memberCode: 'M-TMP', name: dto.name ?? prof.displayName ?? null, phone: dto.phone ?? null,
+        lineUserId: prof.lineUserId, lineDisplayName: prof.displayName ?? null,
+        marketingOptIn: dto.marketing_opt_in ?? true, balance: '0', lifetime: '0', createdBy: user.username,
+      }).returning();
+    } catch (e: any) {
+      // lost a race to another concurrent sign-in → return the now-existing member
+      if (String(e?.code) === '23505' || /duplicate|unique/i.test(String(e?.message))) {
+        const [m] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.lineUserId, prof.lineUserId))).limit(1);
+        if (m) return { ...shape(m), created: false };
+      }
+      throw e;
+    }
+    const memberCode = `M-${String(row.id).padStart(6, '0')}`;
+    await db.update(posMembers).set({ memberCode }).where(eq(posMembers.id, row.id));
+    return { ...shape({ ...row, memberCode }), created: true };
+  }
+
+  // Link a verified LINE identity to an EXISTING member (e.g. a phone member who later signs in with LINE).
+  async linkLine(memberId: number, idToken: string, user: JwtUser) {
+    const db = this.db as any; const tenantId = this.tid(user);
+    const prof = await verifyLineIdToken(idToken);
+    const [m] = await db.select().from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
+    if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
+    const [other] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.lineUserId, prof.lineUserId))).limit(1);
+    if (other && Number(other.id) !== memberId) throw new ConflictException({ code: 'LINE_ALREADY_LINKED', message: 'That LINE account is already linked to another member', messageTh: 'บัญชี LINE นี้ถูกผูกกับสมาชิกอื่นแล้ว' });
+    await db.update(posMembers).set({ lineUserId: prof.lineUserId, lineDisplayName: prof.displayName ?? m.lineDisplayName ?? null, lastUpdated: new Date() }).where(eq(posMembers.id, memberId));
+    return this.balance(memberId, user);
   }
   async balance(id: number, _user: JwtUser) {
     const db = this.db as any;
@@ -131,5 +172,5 @@ export class MemberService {
 }
 
 function shape(m: any) {
-  return { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, card_no: m.cardNo, email: m.email, birthday: m.birthday ?? null, marketing_opt_in: m.marketingOptIn !== false, balance: n(m.balance), lifetime: n(m.lifetime), tier: m.tier, active: m.active };
+  return { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, card_no: m.cardNo, email: m.email, line_user_id: m.lineUserId ?? null, line_display_name: m.lineDisplayName ?? null, birthday: m.birthday ?? null, marketing_opt_in: m.marketingOptIn !== false, balance: n(m.balance), lifetime: n(m.lifetime), tier: m.tier, active: m.active };
 }

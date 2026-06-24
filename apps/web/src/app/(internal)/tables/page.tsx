@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Split, Trash2, Utensils, Wallet, X } from 'lucide-react';
+import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Split, Trash2, Utensils, Wallet, Wifi, WifiOff, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useRealtime } from '@/hooks/use-realtime';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
 import { FloorPlan, STATUS_TH, tone, type TableRow, type ZoneRow } from '@/components/floor-plan';
 import { cn } from '@/lib/utils';
@@ -29,7 +30,10 @@ import {
 
 export default function TablesPage() {
   const qc = useQueryClient();
-  const board = useQuery<{ tables: TableRow[] }>({ queryKey: ['tables-status'], queryFn: () => api('/api/restaurant/tables/status'), refetchInterval: 4000 });
+  // Live via SSE: a table freed/occupied/fired on another terminal updates this board at once; polling
+  // drops to a 20s fallback while the stream is connected.
+  const { connected } = useRealtime((e) => { if (e.type === 'table' || e.type === 'kds_item') qc.invalidateQueries({ queryKey: ['tables-status'] }); });
+  const board = useQuery<{ tables: TableRow[] }>({ queryKey: ['tables-status'], queryFn: () => api('/api/restaurant/tables/status'), refetchInterval: connected ? 20000 : 4000 });
   const zonesQ = useQuery<{ zones: ZoneRow[] }>({ queryKey: ['floor-zones'], queryFn: () => api('/api/restaurant/zones') });
   const [sel, setSel] = useState<number | null>(null);
   const [orderTable, setOrderTable] = useState<number | null>(null);
@@ -43,7 +47,15 @@ export default function TablesPage() {
 
   return (
     <div>
-      <PageHeader title="โต๊ะ (Floor plan)" description="สถานะโต๊ะแบบเรียลไทม์และผังร้าน" />
+      <PageHeader
+        title="โต๊ะ (Floor plan)"
+        description="สถานะโต๊ะแบบเรียลไทม์และผังร้าน"
+        actions={
+          <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
+            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? 'เรียลไทม์' : 'กำลังเชื่อมต่อ…'}
+          </Badge>
+        }
+      />
       <Tabs
         tabs={[
           { key: 'board', label: 'สถานะโต๊ะ', content: <Board tables={tables} zones={zones} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
