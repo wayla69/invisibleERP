@@ -1,4 +1,4 @@
--- 0105 — AR collections / dunning. Records each dunning action taken on an open receivable so the
+-- 0110 — AR collections / dunning. Records each dunning action taken on an open receivable so the
 -- collections worklist can derive the current stage and escalate. New tenant_id table → RLS loop re-run.
 CREATE TABLE IF NOT EXISTS ar_dunning_log (
   id bigserial PRIMARY KEY,

@@ -1,4 +1,4 @@
--- 0107 — Enterprise Asset Management (EAM): maintenance work orders, preventive-maintenance schedules,
+-- 0112 — Enterprise Asset Management (EAM): maintenance work orders, preventive-maintenance schedules,
 -- and asset meter readings on top of the fixed-asset register. New tenant_id tables → RLS loop re-run.
 CREATE TABLE IF NOT EXISTS maintenance_work_orders (
   id bigserial PRIMARY KEY,
