@@ -26,3 +26,6 @@ BEGIN
     RAISE NOTICE 'username normalization: % row(s) left as-is to avoid a case-insensitive collision; resolve manually', skipped;
   END IF;
 END $$;
+
+-- Login now matches case-insensitively (lower(username) = <input>); keep that lookup index-backed.
+CREATE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username));
