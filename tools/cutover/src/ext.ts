@@ -211,6 +211,88 @@ async function main() {
   const svDel = await inj('DELETE', `/api/saved-views/${svPersonal.json.id}`, token2);
   ok('Saved views: the owner can delete their view', svDel.status === 200 && svDel.json.deleted === true, `${svDel.status}`);
 
+  // ── role-based dashboard layouts (Phase 5) ──
+  // ExecutiveViewer carries `dashboard` (can view the dashboard) but NOT `exec`/`ar`/`creditors` — perfect to
+  // prove per-widget permission filtering. hqex (Planner) carries `exec` → can configure layouts.
+  await db.insert(s.users).values({ username: 'hqev', passwordHash: await pw.hash('pw'), role: 'ExecutiveViewer', tenantId: hq.id }).onConflictDoNothing();
+  const hqev = (await inj('POST', '/api/login', undefined, { username: 'hqev', password: 'pw' })).json.token;
+
+  const catalog = await inj('GET', '/api/dashboard/widgets/catalog', hqex);
+  ok('Dashboards: widget catalog + role list exposed', (catalog.json.widgets ?? []).some((w: any) => w.key === 'today_sales') && (catalog.json.roles ?? []).includes('ExecutiveViewer'), `${(catalog.json.widgets ?? []).length} widgets`);
+  const badRole = await inj('PUT', '/api/dashboard/layouts/NotARole', hqex, { widgets: [] });
+  ok('Dashboards: an unknown role is rejected (400 BAD_ROLE)', badRole.status === 400 && badRole.json.error?.code === 'BAD_ROLE', `${badRole.status} ${badRole.json.error?.code}`);
+  const badWidget = await inj('PUT', '/api/dashboard/layouts/ExecutiveViewer', hqex, { widgets: ['nope'] });
+  ok('Dashboards: an unknown widget key is rejected (400 BAD_WIDGET)', badWidget.status === 400 && badWidget.json.error?.code === 'BAD_WIDGET', `${badWidget.status} ${badWidget.json.error?.code}`);
+  const setLayout = await inj('PUT', '/api/dashboard/layouts/ExecutiveViewer', hqex, { widgets: ['today_sales', 'open_ar', 'outstanding_ap', 'low_stock', 'open_pipeline'] });
+  ok('Dashboards: admin sets a per-role layout', setLayout.status === 200 && (setLayout.json.widgets ?? []).length === 5, `${setLayout.status} ${(setLayout.json.widgets ?? []).length}`);
+  const getLayout = await inj('GET', '/api/dashboard/layouts/ExecutiveViewer', hqex);
+  ok('Dashboards: the configured layout reads back', getLayout.json.configured === true && (getLayout.json.widgets ?? []).length === 5, `${JSON.stringify(getLayout.json.widgets ?? [])}`);
+  const mine = await inj('GET', '/api/dashboard/layout/me', hqev);
+  const mineKeys = (mine.json.widgets ?? []).map((w: any) => w.key);
+  ok('Dashboards: resolved layout is filtered to the viewer’s permissions (no AR/AP for ExecutiveViewer)',
+    mineKeys.includes('today_sales') && mineKeys.includes('low_stock') && mineKeys.includes('open_pipeline') && !mineKeys.includes('open_ar') && !mineKeys.includes('outstanding_ap'),
+    `keys=${JSON.stringify(mineKeys)}`);
+  ok('Dashboards: each resolved widget carries a live numeric value', (mine.json.widgets ?? []).length > 0 && (mine.json.widgets ?? []).every((w: any) => typeof w.value === 'number'), `${JSON.stringify(mine.json.widgets ?? [])}`);
+  const mineDefault = await inj('GET', '/api/dashboard/layout/me', hqex);
+  ok('Dashboards: an unconfigured role falls back to the default layout', mineDefault.json.configured === false && (mineDefault.json.widgets ?? []).length >= 4, `configured=${mineDefault.json.configured} n=${(mineDefault.json.widgets ?? []).length}`);
+  const t2Layout = await inj('GET', '/api/dashboard/layouts/ExecutiveViewer', cf2ex);
+  ok('Dashboards: layouts are tenant-isolated (cf2 sees none of HQ’s)', t2Layout.json.configured === false && (t2Layout.json.widgets ?? []).length === 0, `configured=${t2Layout.json.configured}`);
+
+  // ── audit-trail viewer (Phase 6) ──
+  // AccessAdmin carries only `users` and is non-Admin → its reads are RLS-scoped (proves isolation).
+  await db.insert(s.users).values([
+    { username: 'hqaa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: hq.id },
+    { username: 'cf2aa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: cf2.id },
+  ]).onConflictDoNothing();
+  const hqaa = (await inj('POST', '/api/login', undefined, { username: 'hqaa', password: 'pw' })).json.token;
+  const cf2aa = (await inj('POST', '/api/login', undefined, { username: 'cf2aa', password: 'pw' })).json.token;
+  // a guaranteed cf2-tenant mutation → one known audit row (actor cfwh2, tenant cf2)
+  await inj('POST', '/api/saved-views', token2, { module: 'audit-probe', name: 'AUDITPROBE', config: {}, shared: false });
+
+  const audit = await inj('GET', '/api/admin/audit?limit=10', token);
+  ok('Audit viewer: paginated query returns rows + total', audit.status === 200 && Array.isArray(audit.json.rows) && audit.json.rows.length <= 10 && typeof audit.json.total === 'number' && audit.json.total > 0, `status=${audit.status} total=${audit.json.total}`);
+  const byAction = await inj('GET', '/api/admin/audit?action=saved-views&limit=50', token);
+  ok('Audit viewer: action filter matches (substring)', (byAction.json.rows ?? []).length >= 1 && (byAction.json.rows ?? []).every((r: any) => (r.action ?? '').includes('saved-views')), `n=${(byAction.json.rows ?? []).length}`);
+  const byStatus = await inj('GET', '/api/admin/audit?status=success&limit=50', token);
+  ok('Audit viewer: status filter matches', (byStatus.json.rows ?? []).length >= 1 && (byStatus.json.rows ?? []).every((r: any) => r.status === 'success'), `n=${(byStatus.json.rows ?? []).length}`);
+  const badQ = await inj('GET', '/api/admin/audit?limit=abc', token);
+  ok('Audit viewer: a non-numeric limit is rejected (400 BAD_QUERY)', badQ.status === 400 && badQ.json.error?.code === 'BAD_QUERY', `${badQ.status} ${badQ.json.error?.code}`);
+  const csv = await inj('GET', '/api/admin/audit/export', token);
+  ok('Audit viewer: CSV export with header row', csv.status === 200 && (csv.raw?.toString('utf8') ?? '').startsWith('id,ts,actor,tenant_id,action'), `status=${csv.status} head=${(csv.raw?.toString('utf8') ?? '').slice(0, 24)}`);
+  const noPerm = await inj('GET', '/api/admin/audit', token2); // cfwh2 = Warehouse, lacks `users`
+  ok('Audit viewer: gated by the users permission (403 without it)', noPerm.status === 403, `${noPerm.status}`);
+  const cf2Audit = await inj('GET', '/api/admin/audit?limit=200', cf2aa);
+  ok('Audit viewer: RLS-scoped — a tenant admin sees only its own tenant rows', (cf2Audit.json.rows ?? []).length >= 1 && (cf2Audit.json.rows ?? []).every((r: any) => r.tenant_id === cf2.id), `n=${(cf2Audit.json.rows ?? []).length}`);
+  const hqAudit = await inj('GET', '/api/admin/audit?action=saved-views&limit=200', hqaa);
+  ok('Audit viewer: no cross-tenant leakage (HQ admin never sees cf2 rows)', (hqAudit.json.rows ?? []).every((r: any) => r.tenant_id !== cf2.id), `n=${(hqAudit.json.rows ?? []).length}`);
+
+  // ── validated bulk import/export (Phase 7) ──
+  // admin holds `masterdata`. Items master is global (not tenant-scoped); vendors are tenant-scoped.
+  const cnt = async (where?: any) => (await db.select().from(s.items).where(where)).length;
+  const itemsBefore = await cnt();
+  const badCsv = 'Item_ID,Item_Description,Unit_Price\nGOOD1,Good,5\n,NoId,5\nBAD2,,5\nBAD3,BadPrice,abc\nGOOD1,DupKey,7';
+  const dry = await inj('POST', '/api/admin/master-data/items/import/validate', token, { format: 'csv', mode: 'append', csv: badCsv });
+  const codes = (dry.json.errors ?? []).map((e: any) => e.code);
+  ok('Bulk import: dry-run validate accumulates per-row errors (no first-fail)', dry.json.total === 5 && dry.json.valid === 1 && dry.json.invalid === 4 && codes.includes('REQUIRED_EMPTY') && codes.includes('BAD_NUMBER') && codes.includes('DUP_IN_FILE'), `${JSON.stringify({ total: dry.json.total, valid: dry.json.valid, invalid: dry.json.invalid, codes })}`);
+  ok('Bulk import: dry-run touches nothing', (await cnt()) === itemsBefore, `items=${await cnt()} before=${itemsBefore}`);
+  const blocked = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: badCsv });
+  ok('Bulk import: a file with errors imports nothing unless skip_errors', blocked.json.status === 'invalid' && blocked.json.imported === 0 && (await cnt()) === itemsBefore, `${JSON.stringify({ status: blocked.json.status, imported: blocked.json.imported })}`);
+  const skipped = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: badCsv, skip_errors: true });
+  ok('Bulk import: skip_errors imports only the valid rows + reports the rest', skipped.json.status === 'partial' && skipped.json.imported === 1 && (await cnt(eq(s.items.itemId, 'GOOD1'))) === 1, `${JSON.stringify({ status: skipped.json.status, imported: skipped.json.imported })}`);
+
+  const missCols = await inj('POST', '/api/admin/master-data/items/import/validate', token, { format: 'csv', mode: 'append', csv: 'Item_ID,Unit_Price\nX1,5' });
+  ok('Bulk import: a missing required column is reported (MISSING_COLUMNS)', (missCols.json.errors ?? []).some((e: any) => e.code === 'MISSING_COLUMNS'), `${JSON.stringify(missCols.json.errors ?? [])}`);
+  const cleanCsv = 'Item_ID,Item_Description,Unit_Price\nBULK1,Widget,10\nBULK2,Gadget,20';
+  const good = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: cleanCsv });
+  ok('Bulk import: a clean file commits with status success', good.json.status === 'success' && good.json.imported === 2 && (await cnt(eq(s.items.itemId, 'BULK1'))) === 1, `${JSON.stringify({ status: good.json.status, imported: good.json.imported })}`);
+  const reimport = await inj('POST', '/api/admin/master-data/items/import/checked', token, { format: 'csv', mode: 'append', csv: cleanCsv });
+  ok('Bulk import: re-importing existing rows reports them as EXISTS (append, 0 new)', reimport.json.imported === 0 && (reimport.json.errors ?? []).every((e: any) => e.code === 'EXISTS') && (reimport.json.errors ?? []).length === 2, `${JSON.stringify({ imported: reimport.json.imported, errs: (reimport.json.errors ?? []).map((e: any) => e.code) })}`);
+
+  // vendors are tenant-scoped: a Warehouse admin's import is stamped with their tenant
+  const vend = await inj('POST', '/api/admin/master-data/vendors/import/checked', hqwh, { format: 'csv', mode: 'append', csv: 'Vendor_Code,Name\nV-BULK,Acme Co' });
+  const vrow = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-BULK')))[0];
+  ok('Bulk import: tenant-scoped entity (vendors) is stamped with the importer’s tenant', vend.json.status === 'success' && vend.json.imported === 1 && Number(vrow?.tenantId) === Number(hq.id), `tenant=${vrow?.tenantId} hq=${hq.id}`);
+
   await app.close();
   await pg.close();
 

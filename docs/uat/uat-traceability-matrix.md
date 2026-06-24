@@ -293,6 +293,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-026 | Alert sweep fires a breached rule | Feature (alerts) | 17 §7 |
 | UAT-ADM-027 | Alert cooldown suppresses re-fire | Feature (alerts) | 17 §7 |
 | UAT-ADM-028 | Alert rules tenant-isolated (RLS) | Feature (alerts) | 17 §7 |
+| UAT-ADM-029 | Audit viewer — query, filter, paginate | ITGC-AC-10 | 08 §7.A.8 |
+| UAT-ADM-030 | Audit viewer — CSV export + permission gate | ITGC-AC-10/02 | 08 §7.A.8 |
+| UAT-ADM-031 | Audit viewer — tenant isolation (RLS) | ITGC-AC-10/03 | 08 §7.A.8 |
+| UAT-ADM-032 | Bulk import — dry-run validates every row | Feature (bulk import), MDM-02 | 17 §7.3a |
+| UAT-ADM-033 | Bulk import — checked commit (block vs skip) | Feature (bulk import) | 17 §7.3a |
+| UAT-ADM-034 | Bulk import — tenant-scoped entity stamped | Feature (bulk import), MDM-01 | 17 §7.3a |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -328,6 +334,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-028 | Scheduled report sweep runs due + records run | Feature (scheduled reports) | 26 §5a |
 | UAT-RPT-029 | Scheduled report run-now + tenant isolation | Feature (scheduled reports), ITGC-AC-03 | 26 §5a |
 | UAT-RPT-030 | Saved views visibility + owner-only delete | Feature (saved views), ITGC-AC-03 | 26 §5b |
+| UAT-RPT-031 | Role dashboard catalog + layout validation | Feature (role dashboards) | 26 §3a |
+| UAT-RPT-032 | Role dashboard resolution filtered to viewer perms | Feature (role dashboards), ITGC-AC-02 | 26 §3a |
+| UAT-RPT-033 | Role dashboard default fallback + tenant isolation | Feature (role dashboards), ITGC-AC-03 | 26 §3a |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 

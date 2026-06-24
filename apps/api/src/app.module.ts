@@ -54,6 +54,7 @@ import { PaymentsDepthModule } from './modules/payments-depth/payments-depth.mod
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { SavedViewsModule } from './modules/saved-views/saved-views.module';
+import { AuditViewerModule } from './modules/audit-viewer/audit-viewer.module';
 import { PlanningModule } from './modules/planning/planning.module';
 import { ConsolidationModule } from './modules/consolidation/consolidation.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
@@ -140,6 +141,7 @@ import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
     CustomFieldsModule,
     AlertsModule,
     SavedViewsModule,
+    AuditViewerModule,
     PlanningModule,
     ConsolidationModule,
     ReconciliationModule,

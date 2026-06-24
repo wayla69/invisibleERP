@@ -36,6 +36,7 @@ import {
   Landmark,
   Layers,
   LayoutDashboard,
+  LayoutTemplate,
   LifeBuoy,
   Megaphone,
   Package,
@@ -44,6 +45,7 @@ import {
   ReceiptText,
   Scale,
   ScanLine,
+  ScrollText,
   Settings,
   ShieldAlert,
   SlidersHorizontal,
@@ -215,6 +217,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'อนุมัติงาน', href: '/workflow', icon: Workflow, perms: ['exec', 'creditors', 'procurement', 'users'] },
       { label: 'แยกหน้าที่ (SoD)', href: '/sod', icon: ShieldAlert, perms: ['exec', 'users'] },
+      { label: 'ร่องรอยตรวจสอบ (Audit trail)', href: '/audit', icon: ScrollText, perms: ['users'] },
     ],
   },
   {
@@ -233,6 +236,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ฟิลด์กำหนดเอง (Custom fields)', href: '/custom-fields', icon: SlidersHorizontal, perms: ['masterdata', 'users', 'exec'] },
       { label: 'การแจ้งเตือน (Alert rules)', href: '/alerts', icon: BellRing, perms: ['masterdata', 'users', 'exec', 'dashboard'] },
       { label: 'มุมมองที่บันทึก (Saved views)', href: '/saved-views', icon: Bookmark, perms: ['dashboard', 'exec', 'masterdata', 'warehouse', 'pos'] },
+      { label: 'แดชบอร์ดตามบทบาท (Role dashboards)', href: '/dashboard-designer', icon: LayoutTemplate, perms: ['users', 'exec'] },
       { label: 'จัดการผู้ใช้', href: '/admin/users', icon: UserCog, perms: ['users'] },
       { label: 'ตั้งค่ากิจการ', href: '/setup', icon: BadgeCheck, perms: ['users'] },
       { label: 'แพ็กเกจ', href: '/billing', icon: CreditCard, perms: ['users'] },

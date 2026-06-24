@@ -167,6 +167,30 @@ configuration and bills of materials.
 > transacting on it (rules R02, R09, R10, R13). For example, the person who sets
 > prices should not also be the one selling at those prices.
 
+### Bulk import / export (validate before you commit)
+
+**Screen:** `/master-data` · **Required permission:** `masterdata`.
+
+You can load many records at once from a spreadsheet — items, customers, vendors,
+locations, prices, promotions, BoMs and assets.
+
+1. **Download the template** (or **export** the current data) for the record type,
+   fill it in, and save as **CSV**.
+2. **Choose a file** — the system **checks every row first** (a dry run that
+   changes nothing) and shows a **preview**: how many rows are valid, and a table
+   of any problems (missing required value, a number/date that won't parse, or a
+   key repeated in the file), each with its **row and column**.
+3. **Confirm the import.** If every row is valid it imports them all. If some rows
+   have errors, you can either fix the file and try again, or tick **“ข้ามแถวที่ผิด
+   (skip bad rows)”** to import only the valid ones. Rows whose key already exists
+   are skipped and reported (in *append* mode).
+
+**Expected result:** No more guessing — you see exactly what will (and won't) import
+before committing, and bad rows never silently corrupt your data.
+
+> **Append vs Replace:** *Append* adds new records and skips existing keys.
+> *Replace* (only where allowed) wipes the current data first — use with care.
+
 ---
 
 ## 9. Custom fields (extend records without code)
@@ -219,6 +243,31 @@ choose.
 
 > **Troubleshooting:** “BAD_METRIC” — the metric isn't in the catalog;
 > “NO_TARGET” — a LINE/SMS/email rule needs a recipient.
+
+---
+
+## 11. Audit trail (who changed what, and when)
+
+**Screen:** `/audit` (**ร่องรอยการตรวจสอบ**) · **Required permission:** `users`.
+
+Every change in the system is recorded in a **tamper-proof** log — it can be read
+and exported, but never edited or deleted (a database guard enforces this). Use it
+to investigate an issue or to give an auditor evidence of activity.
+
+1. Go to **Audit trail** (`/audit`).
+2. **Filter** by user (actor), action (e.g. a route like `/api/orders`), status
+   (success / fail), and a **date range**, then **ค้นหา (Search)**.
+3. Page through the results; each row shows the time, user, action, status, IP and
+   request id.
+4. Click the **download** button to **export the filtered set to CSV** for your
+   records or an auditor.
+
+**Expected result:** A searchable, exportable history of changes. You only ever see
+your **own company's** events (entries are private to your tenant); HQ/Admin sees
+across the group.
+
+> **Note:** The log is **append-only** — entries can't be altered or removed, which
+> is what makes it acceptable as audit evidence.
 
 ---
 

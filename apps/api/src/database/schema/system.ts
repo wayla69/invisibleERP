@@ -71,7 +71,15 @@ export const auditLog = pgTable(
     status: text('status'), // success | fail
     meta: jsonb('meta'),
   },
-  (t) => ({ byActor: index('idx_audit_actor').on(t.actor), byTs: index('idx_audit_ts').on(t.ts) }),
+  (t) => ({
+    byActor: index('idx_audit_actor').on(t.actor),
+    byTs: index('idx_audit_ts').on(t.ts),
+    // composite indexes for the tenant-scoped audit-trail viewer (Phase 6) — keep in sync with 0083
+    byTenantTs: index('idx_audit_tenant_ts').on(t.tenantId, t.ts),
+    byTenantActor: index('idx_audit_tenant_actor').on(t.tenantId, t.actor),
+    byTenantAction: index('idx_audit_tenant_action').on(t.tenantId, t.action),
+    byTenantStatus: index('idx_audit_tenant_status').on(t.tenantId, t.status),
+  }),
 );
 
 // Public API keys (move #7) — scoped, hashed
