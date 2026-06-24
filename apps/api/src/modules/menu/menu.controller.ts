@@ -68,4 +68,8 @@ export class MenuController {
   upsertRecipe(@Param('sku') sku: string, @Body(new ZodValidationPipe(UpsertRecipeBody)) b: UpsertRecipeDto, @CurrentUser() u: JwtUser) { return this.recipe.upsertRecipe(sku, b, u); }
   @Delete('items/:sku/recipe') @Permissions(...RECIPE_MANAGE)
   deleteRecipe(@Param('sku') sku: string, @CurrentUser() u: JwtUser) { return this.recipe.deleteRecipe(sku, u); }
+
+  // Availability forecast: servings-remaining per dish from the limiting ingredient + low-stock warnings.
+  @Get('availability/forecast') @Permissions('pos', 'order_mgt', 'masterdata', 'dashboard', 'exec')
+  forecast(@Query('low') low: string | undefined, @CurrentUser() u: JwtUser) { return this.recipe.availabilityForecast(u, { low: low != null ? Number(low) : undefined }); }
 }

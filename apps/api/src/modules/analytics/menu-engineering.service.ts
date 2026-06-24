@@ -206,6 +206,69 @@ export class MenuEngineeringService {
       by_actor: mapOut(byActor, 'requested_by'),
     };
   }
+
+  // ── Staff / cashier performance: who rang what, average ticket, and their void/discount activity. ──
+  async staffPerformance(_user: JwtUser, opts?: { from?: string; to?: string }) {
+    const db = this.db as any;
+    const to = opts?.to ?? ymd();
+    const from = opts?.from ?? to;
+    const sales = await db
+      .select({ staff: custPosSales.createdBy, count: sql<string>`count(*)`, gross: sql<string>`coalesce(sum(${custPosSales.total}),0)` })
+      .from(custPosSales)
+      .where(and(gte(custPosSales.saleDate, from), lte(custPosSales.saleDate, to), sql`${custPosSales.status}::text = 'Completed'`))
+      .groupBy(custPosSales.createdBy);
+
+    // void/discount activity per actor over the same window (business-day exact)
+    const ov = await db.select({ action: posOverrides.action, amount: posOverrides.amount, requestedBy: posOverrides.requestedBy, createdAt: posOverrides.createdAt })
+      .from(posOverrides).where(and(sql`${posOverrides.createdAt} >= ${shiftDays(from, -1)}`, sql`${posOverrides.createdAt} < ${shiftDays(to, 2)}`));
+    const ovByActor = new Map<string, { voids: number; void_amount: number; discounts: number; discount_amount: number }>();
+    for (const o of ov) {
+      if (bizYmdDash(new Date(o.createdAt)) < from || bizYmdDash(new Date(o.createdAt)) > to) continue;
+      const k = o.requestedBy || '(unknown)';
+      const e = ovByActor.get(k) ?? { voids: 0, void_amount: 0, discounts: 0, discount_amount: 0 };
+      if (o.action === 'void') { e.voids++; e.void_amount = r2(e.void_amount + n(o.amount)); }
+      else if (o.action === 'discount') { e.discounts++; e.discount_amount = r2(e.discount_amount + n(o.amount)); }
+      ovByActor.set(k, e);
+    }
+
+    const staff = sales.map((s: any) => {
+      const key = s.staff || '(unknown)';
+      const cnt = Number(s.count); const gross = r2(n(s.gross));
+      const o = ovByActor.get(key) ?? { voids: 0, void_amount: 0, discounts: 0, discount_amount: 0 };
+      return { staff: key, sales: cnt, revenue: gross, avg_ticket: cnt > 0 ? r2(gross / cnt) : 0, voids: o.voids, void_amount: o.void_amount, discounts: o.discounts, discount_amount: o.discount_amount };
+    }).sort((a: any, b: any) => b.revenue - a.revenue);
+
+    return { from, to, summary: { staff: staff.length, revenue: r2(staff.reduce((a: number, s: any) => a + s.revenue, 0)), sales: staff.reduce((a: number, s: any) => a + s.sales, 0) }, staff };
+  }
+
+  // ── Sales trend: this window vs the immediately-preceding equal-length window (revenue + txn deltas). ──
+  async salesTrend(_user: JwtUser, opts?: { from?: string; to?: string }) {
+    const to = opts?.to ?? ymd();
+    const from = opts?.from ?? to;
+    const lenDays = daysBetween(from, to) + 1;
+    const prevTo = shiftDays(from, -1);
+    const prevFrom = shiftDays(from, -lenDays);
+    const cur = await this.windowTotals(from, to);
+    const prev = await this.windowTotals(prevFrom, prevTo);
+    const pct = (now: number, was: number) => (was > 0 ? r1(((now - was) / was) * 100) : now > 0 ? 100 : 0);
+    return {
+      window_days: lenDays,
+      current: { from, to, ...cur },
+      previous: { from: prevFrom, to: prevTo, ...prev },
+      revenue_delta: r2(cur.revenue - prev.revenue),
+      revenue_delta_pct: pct(cur.revenue, prev.revenue),
+      txn_delta: cur.txns - prev.txns,
+      avg_ticket_delta: r2(cur.avg_ticket - prev.avg_ticket),
+    };
+  }
+
+  private async windowTotals(from: string, to: string) {
+    const db = this.db as any;
+    const [row] = await db.select({ txns: sql<string>`count(*)`, revenue: sql<string>`coalesce(sum(${custPosSales.total}),0)` })
+      .from(custPosSales).where(and(gte(custPosSales.saleDate, from), lte(custPosSales.saleDate, to), sql`${custPosSales.status}::text = 'Completed'`));
+    const txns = Number(row?.txns ?? 0); const revenue = r2(n(row?.revenue));
+    return { revenue, txns, avg_ticket: txns > 0 ? r2(revenue / txns) : 0 };
+  }
 }
 
 // add/subtract whole days from a YYYY-MM-DD string (UTC-noon anchor avoids DST/edge drift)
@@ -213,4 +276,7 @@ function shiftDays(ymdStr: string, days: number): string {
   const d = new Date(`${ymdStr}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
 }

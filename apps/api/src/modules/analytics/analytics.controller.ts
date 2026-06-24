@@ -49,4 +49,16 @@ export class AnalyticsController {
   voidsDiscounts(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) {
     return this.menuEng.voidsDiscounts(u, { from, to });
   }
+
+  // Staff / cashier performance: sales, average ticket, and void/discount activity per cashier.
+  @Get('staff-performance') @Permissions('dashboard', 'exec')
+  staffPerformance(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.menuEng.staffPerformance(u, { from, to });
+  }
+
+  // Sales trend: this window vs the immediately-preceding equal-length window.
+  @Get('sales-trend') @Permissions('dashboard', 'exec', 'planner')
+  salesTrend(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.menuEng.salesTrend(u, { from, to });
+  }
 }

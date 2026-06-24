@@ -416,6 +416,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-034 | Menu-engineering matrix (Kasavana–Smith) | Feature (menu engineering) | 20 §rev2.7 |
 | UAT-RPT-035 | Daypart / hour demand on the business clock | Feature (daypart), TZ (Asia/Bangkok) | 20 §rev2.7 |
 | UAT-RPT-036 | Void / discount shrinkage analytics | Feature (loss prevention) | 20 §rev2.7 |
+| UAT-RPT-037 | Staff / cashier performance | Feature (staff analytics) | 20 §rev2.9 |
+| UAT-RPT-038 | Sales trend vs prior window | Feature (sales trend) | 20 §rev2.9 |
+| UAT-RPT-039 | BOM availability forecast (servings-remaining) | Feature (BOM availability) | 20 §rev2.9 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 

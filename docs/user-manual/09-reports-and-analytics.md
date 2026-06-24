@@ -269,6 +269,31 @@ A shrinkage view over the manager-override audit: total voids/discounts, the **v
 rate** vs sales, and a breakdown **by reason code, by action, and by staff member** —
 so unusual void/discount patterns surface quickly.
 
+### Staff performance (`GET /api/analytics/staff-performance`)
+
+Per **cashier**: number of sales, revenue, average ticket, and their **void /
+discount activity** over the window — ranked by revenue. A quick read on who is
+selling, and a loss-prevention cross-check (high voids on one cashier).
+
+### Sales trend (`GET /api/analytics/sales-trend`)
+
+This window vs the **immediately-preceding equal-length window** — revenue and
+transaction **deltas** (฿ and %) plus the change in average ticket. Pick any range
+(a day, a week) and instantly see "up or down vs last period".
+
+---
+
+## Menu availability forecast (kitchen)
+
+The **availability forecast** (`GET /api/menu/availability/forecast?low=5`) answers
+"how many more can we make?" For every dish with a recipe it computes the
+**servings remaining** from current ingredient stock and names the **limiting
+ingredient** (the one that runs out first), classing each dish **out** (0 — should
+be 86'd), **low** (≤ your threshold) or **ok**. It also lists **low-stock
+ingredients** (at or below their reorder point). This is the *proactive* layer over
+auto-86: you see "only 4 Pad Thai left — prawns are short" **before** the dish sells
+out, instead of discovering it at the kitchen pass.
+
 ---
 
 **Next:** [Approvals](./10-approvals.md) · [Administration](./11-administration.md)

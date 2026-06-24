@@ -30,6 +30,8 @@
     "menu-engineering": "tsx src/menu-engineering.ts",
     "line-crm": "tsx src/line-crm.ts",
     "channel-adapter": "tsx src/channel-adapter.ts",
+    "bom-availability": "tsx src/bom-availability.ts",
+    "analytics-staff": "tsx src/analytics-staff.ts",
     "etax": "tsx src/etax.ts",
     "etax-sign": "tsx src/etax-sign.ts",
     "etax-email": "tsx src/etax-email.ts",
