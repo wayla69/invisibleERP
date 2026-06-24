@@ -29,6 +29,9 @@ export class AuthService {
 
     const { ok, needsRehash } = await this.passwords.verify(password, row.passwordHash);
     if (!ok) throw fail();
+    // A deactivated account (e.g. SCIM-deprovisioned) cannot authenticate, even with valid credentials.
+    if (row.isActive === false)
+      throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
     if (needsRehash) {
       const fresh = await this.passwords.hash(password);
       await this.db.update(users).set({ passwordHash: fresh }).where(eq(users.id, row.id));

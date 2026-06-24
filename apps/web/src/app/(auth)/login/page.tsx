@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2, ShieldCheck, KeyRound } from 'lucide-react';
 import { api, publicApi, setToken } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,9 @@ export default function LoginPage() {
   const [company, setCompany] = useState('Invisible ERP V2');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [ssoOpen, setSsoOpen] = useState(false);
+  const [ssoTenant, setSsoTenant] = useState('');
+  const [ssoLoading, setSsoLoading] = useState(false);
 
   useEffect(() => {
     api<{ company_name: string }>('/api/config')
@@ -45,6 +48,22 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function onSso(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    setSsoLoading(true);
+    try {
+      // Ask the backend for this tenant's IdP authorization URL, then hand the browser to the IdP.
+      const res = await publicApi<{ authorization_url: string }>(
+        `/api/auth/sso/authorize?tenant=${encodeURIComponent(ssoTenant.trim())}`,
+      );
+      window.location.href = res.authorization_url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'เริ่ม SSO ไม่สำเร็จ');
+      setSsoLoading(false);
     }
   }
 
@@ -92,6 +111,28 @@ export default function LoginPage() {
             {loading ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
           </Button>
         </form>
+
+        <div className="mt-5">
+          <div className="relative mb-4 text-center">
+            <span className="relative z-10 bg-card px-2 text-xs text-muted-foreground">หรือ</span>
+            <span className="absolute inset-x-0 top-1/2 -z-0 border-t" />
+          </div>
+          {!ssoOpen ? (
+            <Button type="button" variant="outline" className="w-full gap-2" onClick={() => setSsoOpen(true)}>
+              <KeyRound className="size-4" />
+              เข้าสู่ระบบด้วย SSO (องค์กร)
+            </Button>
+          ) : (
+            <form onSubmit={onSso} className="grid gap-2">
+              <Label htmlFor="ssoTenant" className="text-sm">รหัสบริษัท (Company code)</Label>
+              <Input id="ssoTenant" value={ssoTenant} onChange={(e) => setSsoTenant(e.target.value)} placeholder="เช่น ACME" autoFocus />
+              <Button type="submit" variant="outline" className="w-full gap-2" disabled={!ssoTenant.trim() || ssoLoading}>
+                {ssoLoading && <Loader2 className="size-4 animate-spin" />}
+                {ssoLoading ? 'กำลังพาไป IdP…' : 'ดำเนินการต่อด้วย SSO'}
+              </Button>
+            </form>
+          )}
+        </div>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           ยังไม่มีบัญชี?{' '}

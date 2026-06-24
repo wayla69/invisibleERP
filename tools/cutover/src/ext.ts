@@ -18,6 +18,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
+import { signHs256 } from '../../../apps/api/dist/modules/identity/jwt-hs256';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
@@ -449,6 +450,64 @@ async function main() {
   // A different key is unaffected by another key's exhausted window.
   const otherKeyOk = await inj('GET', '/api/v1/me', cf2Key);
   ok('Public API: the rate limit is per-key (a fresh key still passes)', otherKeyOk.status === 200, `${otherKeyOk.status}`);
+
+  // ── Enterprise identity: OIDC SSO + SCIM 2.0 (Phase #4) ──
+  // cf2aa (AccessAdmin@cf2, holds `users`) configures its tenant's IdP + SCIM.
+  const SECRET = 'cf2-oidc-secret'; const ISSUER = 'https://idp.cf2.example'; const CLIENT = 'cf2-client-id';
+  const cfgPut = await inj('PUT', '/api/platform/identity', cf2aa, { sso_enabled: true, oidc_issuer: ISSUER, oidc_client_id: CLIENT, oidc_client_secret: SECRET, oidc_redirect_uri: 'https://app.example/sso/cb', default_role: 'Customer' });
+  ok('Identity: tenant admin configures OIDC SSO', cfgPut.status === 200 && cfgPut.json.sso_enabled === true && cfgPut.json.has_client_secret === true, `${cfgPut.status} ${JSON.stringify(cfgPut.json).slice(0,120)}`);
+  ok('Identity: the client secret is write-only (never returned)', !('oidc_client_secret' in (cfgPut.json ?? {})) && cfgPut.json.oidc_client_secret === undefined, `keys=${Object.keys(cfgPut.json ?? {}).join(',')}`);
+  const cfgGated = await inj('PUT', '/api/platform/identity', token2, { sso_enabled: true }); // cfwh2 = Warehouse, lacks `users`
+  ok('Identity: config is gated by the users permission (403)', cfgGated.status === 403, `${cfgGated.status}`);
+
+  // SSO authorize → IdP redirect URL.
+  const authz = await inj('GET', '/api/auth/sso/authorize?tenant=CF2', undefined);
+  ok('SSO: authorize returns the IdP URL with client_id + state', authz.status === 200 && String(authz.json.authorization_url).includes(CLIENT) && String(authz.json.authorization_url).startsWith(ISSUER) && !!authz.json.state, `${authz.status} ${String(authz.json.authorization_url).slice(0,80)}`);
+  const authzHq = await inj('GET', '/api/auth/sso/authorize?tenant=HQ', undefined);
+  ok('SSO: authorize is 503 for a tenant without SSO configured', authzHq.status === 503 && authzHq.json.error?.code === 'SSO_NOT_CONFIGURED', `${authzHq.status} ${authzHq.json.error?.code}`);
+
+  // Mint an HS256 id_token (signed with the client secret) and complete the callback → JIT provision + JWT.
+  const mkIdToken = (over: any = {}) => signHs256({ iss: ISSUER, aud: CLIENT, sub: 'idp-user-1', email: 'alice@cf2.example', exp: Math.floor(Date.now() / 1000) + 3600, ...over }, SECRET);
+  const cb1 = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.nonce1', id_token: mkIdToken() });
+  ok('SSO: callback verifies the id_token and mints a session (JIT-provisioned user)', cb1.status === 200 && !!cb1.json.token && cb1.json.role === 'Customer', `${cb1.status} ${JSON.stringify(cb1.json).slice(0,100)}`);
+  const ssoMe = await inj('GET', '/api/auth/me', cb1.json.token);
+  ok('SSO: the minted session works (auth/me) and is scoped to the SSO user', ssoMe.status === 200 && ssoMe.json.username === cb1.json.username, `${ssoMe.status} ${ssoMe.json.username}`);
+  const cb2 = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.nonce2', id_token: mkIdToken() });
+  ok('SSO: a repeat login reuses the same user (idempotent JIT by sso_subject)', cb2.status === 200 && cb2.json.username === cb1.json.username, `${cb1.json.username} vs ${cb2.json.username}`);
+  const cbBadSig = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.n', id_token: mkIdToken() + 'x' });
+  ok('SSO: a tampered id_token is rejected (401 BAD_ID_TOKEN)', cbBadSig.status === 401 && cbBadSig.json.error?.code === 'BAD_ID_TOKEN', `${cbBadSig.status} ${cbBadSig.json.error?.code}`);
+  const cbBadAud = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.n', id_token: mkIdToken({ aud: 'someone-else' }) });
+  ok('SSO: a wrong-audience id_token is rejected (401 BAD_AUDIENCE)', cbBadAud.status === 401 && cbBadAud.json.error?.code === 'BAD_AUDIENCE', `${cbBadAud.status} ${cbBadAud.json.error?.code}`);
+
+  // SCIM: rotate a token, then provision/list/deactivate.
+  const scimTok = (await inj('POST', '/api/platform/identity/scim-token', cf2aa)).json.token;
+  ok('SCIM: a per-tenant bearer token is issued (scim_)', /^scim_/.test(scimTok ?? ''), `${String(scimTok).slice(0,12)}`);
+  const scimNoAuth = await inj('GET', '/scim/v2/Users', undefined);
+  ok('SCIM: a request without a token is 401', scimNoAuth.status === 401 && scimNoAuth.json.error?.code === 'SCIM_UNAUTHORIZED', `${scimNoAuth.status}`);
+  const spc = await inj('GET', '/scim/v2/ServiceProviderConfig', scimTok);
+  ok('SCIM: ServiceProviderConfig advertises patch + filter', spc.status === 200 && spc.json.patch?.supported === true && spc.json.filter?.supported === true, `${spc.status}`);
+  const scimCreate = await inj('POST', '/scim/v2/Users', scimTok, { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], userName: 'scim.user@cf2', externalId: 'idp-sub-42', active: true });
+  ok('SCIM: provision a user (201, active, externalId linked)', scimCreate.status === 201 && scimCreate.json.active === true && scimCreate.json.externalId === 'idp-sub-42' && !!scimCreate.json.id, `${scimCreate.status} ${JSON.stringify(scimCreate.json).slice(0,120)}`);
+  const scimId = scimCreate.json.id;
+  const scimDup = await inj('POST', '/scim/v2/Users', scimTok, { userName: 'scim.user@cf2' });
+  ok('SCIM: a duplicate userName is rejected (reuses the admin create path → 409)', scimDup.status === 409, `${scimDup.status}`);
+  const scimFilter = await inj('GET', '/scim/v2/Users?filter=userName eq "scim.user@cf2"', scimTok);
+  ok('SCIM: filter by userName returns the ListResponse', scimFilter.status === 200 && scimFilter.json.totalResults === 1 && scimFilter.json.Resources?.[0]?.id === scimId, `${scimFilter.status} total=${scimFilter.json.totalResults}`);
+  const scimDeact = await inj('PATCH', `/scim/v2/Users/${scimId}`, scimTok, { schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'], Operations: [{ op: 'replace', path: 'active', value: false }] });
+  ok('SCIM: PATCH active=false deprovisions (deactivate, not delete)', scimDeact.status === 200 && scimDeact.json.active === false, `${scimDeact.status} active=${scimDeact.json.active}`);
+  const scimDelete = await inj('DELETE', `/scim/v2/Users/${scimId}`, scimTok);
+  ok('SCIM: DELETE soft-deactivates (204) and the row survives', scimDelete.status === 204 && (await inj('GET', `/scim/v2/Users/${scimId}`, scimTok)).json.active === false, `${scimDelete.status}`);
+
+  // SCIM tenant isolation: HQ's SCIM token must not see cf2's users.
+  await inj('PUT', '/api/platform/identity', hqaa, { default_role: 'Customer' });
+  const hqScimTok = (await inj('POST', '/api/platform/identity/scim-token', hqaa)).json.token;
+  const hqSees = await inj('GET', '/scim/v2/Users?filter=userName eq "scim.user@cf2"', hqScimTok);
+  ok('SCIM: tenant isolation — HQ’s token cannot see cf2’s users (RLS)', hqSees.status === 200 && hqSees.json.totalResults === 0, `total=${hqSees.json.totalResults}`);
+
+  // is_active gates password login: deactivate a seeded user directly, then login must fail.
+  await db.insert(s.users).values({ username: 'deact1', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: hq.id, isActive: false });
+  const deactLogin = await inj('POST', '/api/login', undefined, { username: 'deact1', password: 'pw' });
+  ok('Identity: a deactivated account cannot log in (401 USER_DEACTIVATED)', deactLogin.status === 401 && deactLogin.json.error?.code === 'USER_DEACTIVATED', `${deactLogin.status} ${deactLogin.json.error?.code}`);
 
   await app.close();
   await pg.close();
