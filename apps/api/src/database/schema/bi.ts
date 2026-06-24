@@ -38,3 +38,18 @@ export const reportSubscriptions = pgTable('report_subscriptions', {
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+// History of scheduled-report executions — written by BiService.runDue() / runSubscriptionNow()
+export const reportRuns = pgTable('report_runs', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  subscriptionId: bigint('subscription_id', { mode: 'number' }),
+  name: text('name'),
+  reportType: text('report_type'),
+  frequency: text('frequency'),
+  status: text('status').notNull().default('success'), // success | failed
+  recipientsCount: bigint('recipients_count', { mode: 'number' }).notNull().default(0),
+  summary: jsonb('summary').default({}),
+  error: text('error'),
+  ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow(),
+});

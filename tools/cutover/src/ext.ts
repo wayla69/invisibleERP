@@ -166,6 +166,51 @@ async function main() {
   const hqRules = await inj('GET', '/api/alerts/rules', hqwh);
   ok('Alerts: rules are tenant-isolated (HQ sees none of cf2’s)', (hqRules.json.rules ?? []).every((r: any) => r.id !== rule.json.id), `HQ rules=${(hqRules.json.rules ?? []).length}`);
 
+  // ── scheduled-report execution engine (Phase 4) ──
+  // Planner role carries 'exec' (the /api/bi gate) and is non-Admin → requests are RLS-scoped.
+  await db.insert(s.users).values([
+    { username: 'hqex', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: hq.id },
+    { username: 'cf2ex', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: cf2.id },
+  ]).onConflictDoNothing();
+  const hqex = (await inj('POST', '/api/login', undefined, { username: 'hqex', password: 'pw' })).json.token;
+  const cf2ex = (await inj('POST', '/api/login', undefined, { username: 'cf2ex', password: 'pw' })).json.token;
+
+  const rtypes = await inj('GET', '/api/bi/report-types', cf2ex);
+  ok('Scheduled reports: report-type catalog exposes built-ins + frequencies', (rtypes.json.report_types ?? []).some((r: any) => r.key === 'kpi_board') && (rtypes.json.frequencies ?? []).includes('daily'), `${(rtypes.json.report_types ?? []).length}`);
+  const subBadType = await inj('POST', '/api/bi/subscriptions', cf2ex, { name: 'x', report_type: 'nope', frequency: 'daily' });
+  ok('Scheduled reports: unknown report_type rejected (400 BAD_REPORT_TYPE)', subBadType.status === 400 && subBadType.json.error?.code === 'BAD_REPORT_TYPE', `${subBadType.status} ${subBadType.json.error?.code}`);
+  const subBadFreq = await inj('POST', '/api/bi/subscriptions', cf2ex, { name: 'x', report_type: 'kpi_board', frequency: 'hourly' });
+  ok('Scheduled reports: bad frequency rejected (400 BAD_FREQUENCY)', subBadFreq.status === 400 && subBadFreq.json.error?.code === 'BAD_FREQUENCY', `${subBadFreq.status} ${subBadFreq.json.error?.code}`);
+  const sub = await inj('POST', '/api/bi/subscriptions', cf2ex, { name: 'รายงาน KPI รายวัน', report_type: 'kpi_board', frequency: 'daily', recipients: [{ email: 'cfo@cf2.test' }] });
+  ok('Scheduled reports: create a subscription (validated type + frequency)', (sub.status === 200 || sub.status === 201) && !!sub.json.id, `${sub.status}`);
+  const sweep = await inj('POST', '/api/bi/subscriptions/run', cf2ex);
+  ok('Scheduled reports: sweep runs due subscriptions (generates + records a run)', (sweep.json.ran_count ?? 0) >= 1 && (sweep.json.runs ?? []).some((r: any) => r.report_type === 'kpi_board' && r.status === 'success'), `${JSON.stringify(sweep.json).slice(0, 140)}`);
+  const sweep2 = await inj('POST', '/api/bi/subscriptions/run', cf2ex);
+  ok('Scheduled reports: a freshly-run subscription is no longer due (schedule advanced)', (sweep2.json.ran_count ?? 0) === 0, `${JSON.stringify(sweep2.json)}`);
+  const runNow = await inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, cf2ex);
+  ok('Scheduled reports: run-now executes a single subscription on demand', (runNow.status === 200 || runNow.status === 201) && runNow.json.status === 'success', `${runNow.status} ${runNow.json.status}`);
+  const cfRuns = await inj('GET', '/api/bi/runs', cf2ex);
+  ok('Scheduled reports: run history records the executions', (cfRuns.json.runs ?? []).filter((r: any) => r.report_type === 'kpi_board' && r.status === 'success').length >= 2, `runs=${(cfRuns.json.runs ?? []).length}`);
+  const hqRuns = await inj('GET', '/api/bi/runs', hqex);
+  ok('Scheduled reports: run history is tenant-isolated (HQ sees none of cf2’s)', (hqRuns.json.runs ?? []).every((r: any) => r.name !== 'รายงาน KPI รายวัน'), `HQ runs=${(hqRuns.json.runs ?? []).length}`);
+
+  // ── saved views (Phase 4) ──
+  // token2 = cfwh2 (Warehouse@CF2, non-admin), cf2ex = Planner@CF2 (same tenant), hqwh = Warehouse@HQ.
+  const svPersonal = await inj('POST', '/api/saved-views', token2, { module: 'inventory', name: 'สต๊อกต่ำของฉัน', config: { filter: { low: true }, sort: 'qty' }, shared: false });
+  ok('Saved views: create a personal view', (svPersonal.status === 200 || svPersonal.status === 201) && !!svPersonal.json.id && svPersonal.json.mine === true, `${svPersonal.status}`);
+  const svShared = await inj('POST', '/api/saved-views', token2, { module: 'inventory', name: 'มุมมองรวม', config: {}, shared: true });
+  ok('Saved views: create a shared view', (svShared.status === 200 || svShared.status === 201) && svShared.json.shared === true, `${svShared.status}`);
+  const svMine = await inj('GET', '/api/saved-views?module=inventory', token2);
+  ok('Saved views: owner sees both their personal and shared views', (svMine.json.views ?? []).some((v: any) => v.name === 'สต๊อกต่ำของฉัน') && (svMine.json.views ?? []).some((v: any) => v.name === 'มุมมองรวม'), `mine=${(svMine.json.views ?? []).length}`);
+  const svOther = await inj('GET', '/api/saved-views?module=inventory', cf2ex);
+  ok('Saved views: another tenant user sees shared views but not personal ones', (svOther.json.views ?? []).some((v: any) => v.name === 'มุมมองรวม') && (svOther.json.views ?? []).every((v: any) => v.name !== 'สต๊อกต่ำของฉัน'), `other=${(svOther.json.views ?? []).length}`);
+  const svHq = await inj('GET', '/api/saved-views?module=inventory', hqwh);
+  ok('Saved views: tenant-isolated (HQ sees none of cf2’s)', (svHq.json.views ?? []).length === 0, `HQ views=${(svHq.json.views ?? []).length}`);
+  const svDelOther = await inj('DELETE', `/api/saved-views/${svPersonal.json.id}`, cf2ex);
+  ok('Saved views: a non-owner cannot delete someone’s view (404)', svDelOther.status === 404, `${svDelOther.status}`);
+  const svDel = await inj('DELETE', `/api/saved-views/${svPersonal.json.id}`, token2);
+  ok('Saved views: the owner can delete their view', svDel.status === 200 && svDel.json.deleted === true, `${svDel.status}`);
+
   await app.close();
   await pg.close();
 

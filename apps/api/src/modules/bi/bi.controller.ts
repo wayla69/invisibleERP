@@ -46,6 +46,10 @@ export class BiController {
     return this.svc.getSnapshots({ days: qintOpt('days', days), start_date: start, end_date: end }, user!);
   }
 
+  @Get('report-types')
+  @Permissions('exec')
+  reportTypes() { return this.svc.reportTypes(); }
+
   @Get('subscriptions')
   @Permissions('exec')
   listSubs(@CurrentUser() user: JwtUser) { return this.svc.listSubscriptions(user); }
@@ -54,7 +58,21 @@ export class BiController {
   @Permissions('exec')
   createSub(@Body(new ZodValidationPipe(SubscriptionBody)) dto: z.infer<typeof SubscriptionBody>, @CurrentUser() user: JwtUser) { return this.svc.createSubscription(dto, user); }
 
+  @Post('subscriptions/run')
+  @Permissions('exec')
+  @HttpCode(200)
+  runDue(@CurrentUser() user: JwtUser) { return this.svc.runDue(user); }
+
+  @Post('subscriptions/:id/run')
+  @Permissions('exec')
+  @HttpCode(200)
+  runNow(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.runSubscriptionNow(id, user); }
+
   @Delete('subscriptions/:id')
   @Permissions('exec')
   deleteSub(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.deleteSubscription(id, user); }
+
+  @Get('runs')
+  @Permissions('exec')
+  runs(@Query('limit') limit?: string, @CurrentUser() user?: JwtUser) { return this.svc.listRuns(user!, qintOpt('limit', limit)); }
 }

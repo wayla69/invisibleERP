@@ -65,3 +65,4 @@ export * from './peripherals';
 export * from './payments-depth';
 export * from './custom-fields';
 export * from './alerts';
+export * from './saved-views';
