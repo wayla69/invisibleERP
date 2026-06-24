@@ -135,14 +135,28 @@ export class ProcurementService {
       })));
     });
     await this.statusLog.log('PO', poNo, '', 'Pending', user.username);
+    // route into the approval engine (no active PO definition → autoApproved, legacy passthrough). The vendor
+    // is supplied as dimension context so a workflow can route e.g. a specific vendor to a special approver.
+    await this.workflow?.start({ docType: 'PO', docNo: poNo, amount: total, createdBy: user.username, tenantId: user.tenantId ?? null, context: { vendor: vendorName ?? '' } });
     return { po_no: poNo, status: 'Pending', total_amount: total };
   }
 
   async approvePo(poNo: string, approve: boolean, reason: string | undefined, user: JwtUser) {
-    if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
     const db = this.db as any;
     const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
     if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบ PO' });
+    // route through the approval engine when a workflow is configured (maker-checker + multi-level + SoD +
+    // dimension routing all enforced there); otherwise fall back to the legacy Admin-only flip.
+    const inst = this.workflow ? await this.workflow.pendingInstanceFor('PO', poNo) : null;
+    if (inst) {
+      await this.workflow!.act(Number(inst.id), { decision: approve ? 'approve' : 'reject' }, user);
+      const cleared = await this.workflow!.canTransition('PO', poNo);
+      const newStatus = approve ? (cleared ? 'Approved' : 'Pending') : 'Cancelled';
+      await db.update(purchaseOrders).set({ status: newStatus, approvedBy: user.username, approvedAt: new Date(), remarks: approve ? po.remarks : `Rejected: ${reason ?? ''}` }).where(eq(purchaseOrders.id, po.id));
+      if (newStatus !== po.status) await this.statusLog.log('PO', poNo, po.status ?? '', newStatus, user.username);
+      return { po_no: poNo, status: newStatus };
+    }
+    if (user.role !== 'Admin') throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Admin only', messageTh: 'เฉพาะผู้ดูแล' });
     const newStatus = approve ? 'Approved' : 'Cancelled';
     await db.update(purchaseOrders).set({
       status: newStatus, approvedBy: user.username, approvedAt: new Date(),

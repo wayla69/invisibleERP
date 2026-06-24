@@ -156,6 +156,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-021 | Supplier portal unlinked user refused | Feature (supplier portal) | 02 §7 |
 | UAT-P2P-022 | AP bill idempotency | EXP-03 / GL-01 | 02 §7 |
 | UAT-P2P-023 | AP payment idempotency | EXP-03 / GL-01 | 02 §7 |
+| UAT-P2P-024 | Dimension routing — PO by vendor | EXP-03 (workflow) | 02 §7 |
+| UAT-P2P-025 | PO approval routes through the engine | EXP-03 (workflow) | 02 §7 |
+| UAT-P2P-026 | SLA escalation sweep flags + reminds | EXP-03 (workflow) | 02 §7 |
+| UAT-P2P-027 | Escalation fallback approver can act | EXP-03 (workflow) | 02 §7 |
+| UAT-P2P-028 | No-code builder replaces steps | Feature (workflow builder) | 02 §7 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
 

@@ -75,6 +75,31 @@ Definitions** in `/workflow`. See [Administration](./11-administration.md).
 
 ---
 
+## 4a. Routing by dimension (cost centre, department, vendor…)
+
+Beyond amount, a step can carry a **dimension condition** — it engages only when
+the document matches, e.g. *cost centre = IT* or *vendor = ACME*. This routes,
+say, IT-department purchases to the IT approver and everything else to the
+default approver, automatically.
+
+## 4b. SLA, escalation & reminders
+
+A workflow (or an individual step) can have an **SLA** in hours. When an approval
+sits past its SLA it's flagged **เกินกำหนด / overdue** on the inbox, and the
+**escalation approver** for that step is allowed to step in and act. Running
+**ตรวจสอบงานเกินกำหนด** (the escalation sweep — also scheduled) sends the
+escalation approver a **reminder notification**. This keeps work from stalling
+when someone is away.
+
+## 4c. Building a workflow (no-code)
+
+On **Workflow → ผังการอนุมัติ**, an administrator builds a chain without code:
+pick the **document type**, add **steps** (each: approver role *or* user, amount
+threshold, how many must approve, optional SLA, escalation target, and a
+dimension condition), and save. Toggle a definition active/inactive anytime.
+
+---
+
 ## 5. Approvals you'll commonly see by module
 
 | Document | Where it starts | Approved by |
