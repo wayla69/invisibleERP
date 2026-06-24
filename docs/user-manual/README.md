@@ -66,6 +66,7 @@ if this is your first time logging in.
 | 09 | [Reports & Analytics](./09-reports-and-analytics.md) | Managers, Planner, ExecutiveViewer |
 | 10 | [Approvals](./10-approvals.md) | Anyone who approves documents |
 | 11 | [Administration](./11-administration.md) | Admin, AccessAdmin, MasterDataAdmin |
+| 12 | [Platform Customization](./12-platform-customization.md) | Admin, AccessAdmin, MasterDataAdmin, Executives |
 | 99 | [Troubleshooting & FAQ](./99-troubleshooting-faq.md) | Everyone |
 
 ---

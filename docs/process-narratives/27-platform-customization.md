@@ -1,0 +1,126 @@
+# Platform Customization & Extensibility — Process Narrative
+
+## 1. Document control
+
+| Field | Value |
+|---|---|
+| Process ID | PN-27-PLAT |
+| Process owner | `<<Platform Admin / Controller>>` |
+| Approver | `<<CFO / Head of IT>>` |
+| Version | **0.1 DRAFT · 2026-06-24** |
+| Review cadence | Annual + on significant change |
+| Related RCM controls | No new RCM control (operational/configuration features); reinforces ITGC-AC-03 (RLS), ITGC-AC-04 (secrets at rest), ITGC-AC-10 (audit trail), MDM-02 (master-data validation) |
+| Related policy | `compliance/policies/` (Access Control; IPE; Change Management) |
+
+## 2. Purpose
+
+This is an **umbrella narrative** for the cross-cutting *platform-customization* capabilities that let a tenant adapt the ERP to its business **without code** — added incrementally as Platform Phases 1–9. It exists so an auditor or new administrator can see, in one place, **what is configurable, who may configure it, through which endpoint, and under which controls**, and then follow the link to the owning cycle narrative for detail. None of these features posts to the general ledger, and each is **tenant-isolated by Row-Level Security (RLS)** and gated by an explicit permission.
+
+> **Design invariants** (verified by the `ext` control/integration harness for every feature): (a) **no GL impact** — configuration and operational features never post journal entries; (b) **tenant isolation** — every tenant-scoped table is RLS-scoped so one tenant can never read or write another's configuration; (c) **least privilege** — each surface is gated by a specific permission (`users`, `exec`, `masterdata`, or `dashboard`); (d) **documentation-as-done** — each feature updated its owning cycle narrative, the user manual, and UAT in the same change.
+
+## 3. Scope
+
+**In scope:** the nine platform-customization capabilities (§7). **Out of scope:** the financially-significant business cycles they extend (see the per-feature cross-references), and the global, code-governed **module on/off** feature flags (`module_configs`, a platform-wide switch — see `08-itgc.md` / user manual §11.3).
+
+## 4. References
+
+- ISO 9001:2015 cl. 4.4 (process approach), cl. 7.5 (documented information).
+- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; `compliance/policies/`.
+- Permissions / SoD model: `packages/shared/src/permissions.ts`. Web navigation: `apps/web/src/lib/nav.ts`.
+- Control/integration harness: `tools/cutover/src/ext.ts` (the cross-feature suite — 104 checks at time of writing).
+- Per-feature owning narratives: `02` (workflows), `08` (audit viewer, webhooks), `17` (custom fields, alerts, bulk import), `23` (branding), `26` (scheduled reports, saved views, role dashboards).
+
+## 5. Definitions & abbreviations
+
+| Term | Meaning |
+|---|---|
+| UDF | User-defined (custom) field |
+| RLS | Row-Level Security (PostgreSQL `tenant_isolation` policy) |
+| Dry-run | Validation that reports all errors **without** writing to the database |
+| HMAC | Hash-based message authentication code (SHA-256), for webhook payload signing |
+| IPE | Information Produced by the Entity (a report relied upon in a control/decision) |
+| Egress | Outbound delivery to an external system (webhooks) |
+
+## 6. Roles & responsibilities (RACI)
+
+| Activity | Tenant Admin (`users`) | Exec (`exec`) | MasterData Admin (`masterdata`) | Dashboard user (`dashboard`) | System |
+|---|---|---|---|---|---|
+| Define custom fields | C | C | **A/R** | I | I |
+| Configure approval workflows | **A/R** | C | I | I | enforces SoD/SLA |
+| Define alert rules | C | C | **A/R** | C | runs sweep |
+| Schedule reports / saved views | I | **A/R** | I | C | runs sweep / delivers |
+| Configure role dashboards | **A/R** | C | I | R (views own) | resolves + permission-filters |
+| Review audit trail | **A/R** | I | I | I | append-only, RLS-scoped |
+| Bulk-import master data | I | I | **A/R** | I | validates per-row |
+| Register outbound webhooks | **A/R** | I | I | I | signs + delivers + retries |
+| Brand the org (logo/tagline) | **A/R** | I | I | I | renders on receipts |
+
+## 7. Process narrative — the nine capabilities
+
+Each entry: **what it does · endpoint(s) · permission · storage/migration · controls · owning narrative.**
+
+1. **Custom fields (UDFs) — Phase 1.** Tenant-defined typed fields on any entity (customer, item, order, …). `POST/GET /api/custom-fields/defs`, `PUT /api/custom-fields/values`, `POST /values/bulk`. Perm `masterdata`/`users`/`exec`. Tables `custom_field_defs` + `custom_field_values` (typed columns), migration `0078`; RLS-scoped. Server-side validation: `UNKNOWN_FIELD`, `REQUIRED_FIELD`, `BAD_OPTION`, `BAD_NUMBER`, `BAD_DATE`. Web `/custom-fields` + a reusable `<CustomFields>` panel. *Detail: `17-master-data-management.md` §7.9.*
+2. **Configurable approval workflows — Phase 2.** No-code, multi-level approval definitions with **SLA + escalation + dimension routing** and maker-checker/SoD enforcement. `GET/POST/PUT /api/workflow/definitions`, `POST /api/workflow/run-escalations`; wired into PO approval. Perm `exec`/`users`/approvals. Additive columns migration `0079`. *Detail: `02-procure-to-pay.md` §7.3; user manual `10-approvals.md`.*
+3. **Alert / notification rules engine — Phase 3.** No-code rules over a **built-in metric catalog** (`low_stock_count`, `approvals_overdue`, `open_pr_count`); a cron-callable sweep fires in-app notifications and optional LINE/SMS/email with a cooldown, logging each fire. `GET /api/alerts/metrics|preview|events`, `GET/POST/PATCH/DELETE /api/alerts/rules`, `POST /api/alerts/run`. Perm `masterdata`/`users`/`exec`/`dashboard`. Tables `alert_rules` + `alert_events`, migration `0080`. Errors `BAD_METRIC`/`BAD_OPERATOR`/`BAD_CHANNEL`/`NO_TARGET`. Web `/alerts`. *Detail: `17-master-data-management.md` §7.10.*
+4. **Scheduled reports + saved views — Phase 4.** A cron-callable sweep generates due report subscriptions (kpi_board / sales_cube / finance_trend / pipeline_trend) and delivers them (in-app + email), recording each run; plus per-user/per-module saved list views (personal or shared). `POST /api/bi/subscriptions/run`, `/:id/run`, `GET /api/bi/runs|report-types`; `GET/POST/DELETE /api/saved-views`. Perm `exec` (reports), any list perm (views). Tables `report_runs` + `saved_views`, migration `0081`. Errors `BAD_REPORT_TYPE`/`BAD_FREQUENCY`/`VIEW_NOT_FOUND`. Web `/scheduled-reports`, `/saved-views`. *Detail: `26-reporting-bi-ai.md` §5a/§5b.*
+5. **Role-based dashboards — Phase 5.** An admin configures, **per role**, which KPI widgets appear on the home dashboard, drawn from an 11-metric catalog; at view time each user gets their role's layout **filtered to the widgets their own permissions allow**, with live values. `GET /api/dashboard/widgets/catalog`, `GET/PUT /api/dashboard/layouts/:role`, `GET /api/dashboard/layout/me`. Perm `users`/`exec` (configure), `dashboard`/`exec` (view). Table `dashboard_layouts`, migration `0082`. Errors `BAD_ROLE`/`BAD_WIDGET`. Web `/dashboard-designer` + a permission-filtered "role KPIs" strip on `/dashboard`. *Detail: `26-reporting-bi-ai.md` §3a.*
+6. **Audit-trail viewer — Phase 6.** A read-only, paginated, filterable view + CSV export over the append-only `audit_log` (the immutability trigger is untouched). `GET /api/admin/audit`, `GET /api/admin/audit/export`. Perm `users`. SELECT-only; **RLS-scoped** (a tenant admin sees only its tenant's events; HQ/Admin sees all). Query indexes migration `0083`. Web `/audit`. *Control: **ITGC-AC-10** (detective review of the tamper-evident trail). Detail: `08-itgc.md` §7.A.8.*
+7. **Validated bulk import — Phase 7.** A **dry-run validate → preview → commit** flow over the existing master-data import (8 entities), accumulating per-row errors instead of failing fast, with an optional skip-errors partial commit. `POST /api/admin/master-data/:entity/import/validate` and `/import/checked`. Perm `masterdata`. No schema change. Errors `REQUIRED_EMPTY`/`BAD_NUMBER`/`BAD_DATE`/`DUP_IN_FILE`/`EXISTS`. Web `/master-data` preview. *Control: **MDM-02** (master-data validation). Detail: `17-master-data-management.md` §7.3a.*
+8. **Outbound webhooks — Phase 8.** Tenants register endpoints and subscribe to business events (`po.approved`, `po.rejected`, `alert.fired`); a dispatcher delivers **HMAC-SHA256-signed** payloads (10s-bounded) with a capped retry, recording every attempt. `GET/POST/DELETE /api/platform/webhooks`, `GET /api/platform/webhooks/events|deliveries`, `POST /api/platform/webhooks/deliveries/:id/redeliver`, `POST /api/platform/webhooks/dispatch`. Perm `users`. Signing secret **AES-256-GCM encrypted at rest** (shown once). Additive migration `0084`; the `webhook_deliveries` egress log is tenant-scoped via its FK to the (RLS-scoped) `webhooks`. Web `/webhooks`. *Controls: **ITGC-AC-04** (secret at rest); reuses the inbound HMAC scheme. Detail: `08-itgc.md` §7.A.9.*
+9. **Tenant branding — Phase 9.** A tenant admin sets a **logo + tagline** (and a `branding_prefs` blob) on the org profile; these are **genuinely rendered** on the customer-facing receipt header. `GET/PATCH /api/tenant/profile` (extended). Perm `users`. Additive `tenants` columns, migration `0086`; RLS self-scoped to the caller's own tenant. Logo accepted as an `https` URL or a small image data-URI (other schemes rejected; **attribute-encoded** on output). Web `/setup` Branding card. *Detail: `23-customer-onboarding-provisioning.md` §7.6a.*
+
+## 8. Process flow
+
+```mermaid
+flowchart TD
+    A[Tenant admin configures a platform feature] --> B{Permission gate users / exec / masterdata / dashboard}
+    B -- No --> B1[403 Forbidden]
+    B -- Yes --> C{Input valid? per-feature validation codes}
+    C -- No --> C1[400 with code + message TH/EN]
+    C -- Yes --> D[Write config — RLS-scoped to caller's tenant]
+    D --> E{Operational sweep? alerts.run / subscriptions.run / webhooks.dispatch}
+    E -- Yes --> F[Evaluate live data RLS-scoped, deliver, log; no GL]
+    E -- No --> G[Config consumed at read/render time: dashboards, custom-field panels, branded receipts]
+    D --> H[Every mutation captured in append-only audit_log ITGC-AC-10]
+```
+
+**Swimlane note.** The *Tenant Admin / MasterData Admin / Exec* lanes configure their respective surfaces under least-privilege permissions; the *system* enforces RLS isolation, per-feature input validation, and the append-only audit trail, and runs the cron-callable sweeps (alerts, scheduled reports, webhook dispatch) that operate on **live, tenant-scoped** data without posting to the GL.
+
+## 9. Control matrix
+
+| Capability | Risk | Control | Type | RCM ID | Evidence |
+|---|---|---|---|---|---|
+| All | Cross-tenant config read/write | RLS tenant isolation on every config table; self-scoped tenant edits | Preventive | ITGC-AC-03 | `ext` isolation checks; RLS policies |
+| All | Unauthorized configuration | Permission gate (`users`/`exec`/`masterdata`/`dashboard`) | Preventive | ITGC-AC-02 | 403 checks in `ext` |
+| Audit viewer | Undetected/tampered change record | Append-only `audit_log` (trigger) + detective read/export | Detective | ITGC-AC-10 | `compliance.ts`, `ext` |
+| Webhooks | Forged/replayed egress; secret disclosure | HMAC-SHA256 signed payload + timestamp; secret AES-256-GCM at rest | Preventive | ITGC-AC-04 | `ext` webhook checks |
+| Bulk import | Bad master data loaded silently | Dry-run + per-row validation; block-or-skip commit | Preventive | MDM-02 | `ext` bulk-import checks |
+| Role dashboards | KPI leakage to under-privileged role | Resolved layout filtered to the viewer's permissions | Preventive | ITGC-AC-02 | `ext` dashboard checks |
+
+## 10. Inputs & outputs
+
+**Inputs:** admin configuration (field definitions, workflow/alert rules, report subscriptions, dashboard layouts, webhook endpoints, branding); the caller's JWT (tenant + permissions). **Outputs:** stored, RLS-scoped configuration; operational side-effects with **no GL impact** — in-app notifications, emailed reports + a `report_runs` log, signed webhook deliveries + a `webhook_deliveries` log, branded receipts; and an append-only `audit_log` entry per mutation.
+
+## 11. Records & retention
+
+| Record | Retention |
+|---|---|
+| Configuration tables (fields, rules, layouts, subscriptions, webhooks, branding) | `<<retention per policy>>` |
+| Operational logs (`alert_events`, `report_runs`, `webhook_deliveries`) | `<<retention per policy>>` |
+| `audit_log` (append-only) | `<<7 years / per ITGC-AC-10>>` |
+
+## 12. KPIs / metrics
+
+- Configuration-validation rejection rate (data-quality signal across features).
+- Alert/report/webhook delivery success vs failure (operational health).
+- Webhook retry exhaustion count; audit-viewer usage in UARs.
+
+## 13. Exception & error handling
+
+Per-feature validation codes are consolidated here (all `400` unless noted): UDFs — `UNKNOWN_FIELD`/`REQUIRED_FIELD`/`BAD_OPTION`/`BAD_NUMBER`/`BAD_DATE`; alerts — `BAD_METRIC`/`BAD_OPERATOR`/`BAD_CHANNEL`/`NO_TARGET`; scheduled reports/views — `BAD_REPORT_TYPE`/`BAD_FREQUENCY`/`VIEW_NOT_FOUND` (404); dashboards — `BAD_ROLE`/`BAD_WIDGET`; bulk import — `REQUIRED_EMPTY`/`BAD_NUMBER`/`BAD_DATE`/`DUP_IN_FILE`/`EXISTS`; webhooks — `WEBHOOK_NOT_FOUND` (404)/`DELIVERY_NOT_FOUND` (404); branding — invalid `logo_url` rejected. Unauthorized access → `403`; cross-tenant access is silently RLS-filtered (no leak).
+
+## 14. Revision history
+
+| Version | Date | Author | Notes |
+|---|---|---|---|
+| 0.1 DRAFT | 2026-06-24 | Platform | Initial umbrella narrative consolidating Platform Phases 1–9 (custom fields, approval workflows, alert rules, scheduled reports + saved views, role dashboards, audit viewer, validated bulk import, outbound webhooks, tenant branding). Cross-references the owning cycle narratives; no new RCM control. |
