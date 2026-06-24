@@ -40,5 +40,5 @@ jobs:
             echo "RAILWAY_TOKEN not configured on the production environment — aborting." >&2
             exit 1
           fi
-          npx -y @railway/cli up --service api --detach
-          npx -y @railway/cli up --service web --detach
+          npx -y @railway/cli up --service invisibleERP --detach
+          npx -y @railway/cli up --service invisiblePOSERP --detach
