@@ -191,5 +191,31 @@ consistently and validated — no custom development required.
 
 ---
 
+## 10. Alert rules (get notified when something needs attention)
+
+**Screen:** `/alerts` (**การแจ้งเตือน**) · **Required permission:** `masterdata` /
+`users` / `exec` / `dashboard`.
+
+Set up rules that watch your live data and notify the right people when a
+threshold is crossed — no code.
+
+1. **Pick a metric** — e.g. *items below reorder point*, *overdue approvals*,
+   *open purchase requisitions*. The current value is shown beside each.
+2. **Set the condition** — an operator (≥, >, ≤, <, =) and a number.
+3. **Choose how to notify** — an **in-app notification** to a role, or **LINE /
+   SMS / email** to a recipient — with a severity and a **cooldown** (so you're
+   not spammed).
+4. Save. The **ตรวจสอบเดี๋ยวนี้** button (and a scheduled sweep) evaluates the
+   rules; each time one fires, it shows in **ประวัติการแจ้งเตือน**.
+
+**Expected result:** The right people are alerted automatically — low stock,
+stalled approvals, and other conditions you care about — through the channel you
+choose.
+
+> **Troubleshooting:** “BAD_METRIC” — the metric isn't in the catalog;
+> “NO_TARGET” — a LINE/SMS/email rule needs a recipient.
+
+---
+
 **Next:** [Approvals](./10-approvals.md) ·
 [Troubleshooting & FAQ](./99-troubleshooting-faq.md)

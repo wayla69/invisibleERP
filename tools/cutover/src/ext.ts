@@ -39,7 +39,10 @@ async function main() {
     await db.insert(s.rolePermissions).values((perms as string[]).map((perm) => ({ role: role as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
-  await db.insert(s.users).values({ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id },
+    { username: 'hqwh', passwordHash: await pw.hash('pw'), role: 'Warehouse', tenantId: hq.id }, // HQ-scoped, non-admin (alerts isolation)
+  ]).onConflictDoNothing();
   // seed permissions + role→perm map so non-Admin (RLS-scoped) users can be permission-checked
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
@@ -141,6 +144,27 @@ async function main() {
   ok('Custom fields: bulk value load keys by record (for list views)', bulk.json.records?.['CUST-1']?.sales_rep === 'Anan' && bulk.json.records?.['CUST-2'] === undefined, `${JSON.stringify(bulk.json.records ?? {})}`);
   const t2defs = await inj('GET', '/api/custom-fields/defs?entity=customer', token2);
   ok('Custom fields: definitions are tenant-isolated (T2 sees none of T1’s)', (t2defs.json.fields ?? []).length === 0, `T2 defs=${(t2defs.json.fields ?? []).length}`);
+
+  // ── alert/notification rules engine (Phase 3) ──
+  const hqwh = (await inj('POST', '/api/login', undefined, { username: 'hqwh', password: 'pw' })).json.token;
+  // seed a below-reorder inventory row in cf2 so the low_stock metric trips for that tenant (RLS-scoped)
+  await db.insert(s.customerInventory).values({ tenantId: cf2.id, itemId: 'LOW1', itemDescription: 'ของใกล้หมด', uom: 'EA', currentStock: '2', reorderPoint: '5', reorderQty: '20' });
+  const metrics = await inj('GET', '/api/alerts/metrics', token2);
+  ok('Alerts: metric catalog exposes built-in metrics + operators', (metrics.json.metrics ?? []).some((m: any) => m.key === 'low_stock_count') && (metrics.json.operators ?? []).includes('gte'), `${(metrics.json.metrics ?? []).length}`);
+  const preview = await inj('GET', '/api/alerts/preview', token2);
+  ok('Alerts: preview computes current metric values (low_stock_count ≥ 1 for the tenant)', (preview.json.values?.low_stock_count ?? 0) >= 1, `${JSON.stringify(preview.json.values ?? {})}`);
+  const rule = await inj('POST', '/api/alerts/rules', token2, { name: 'สินค้าใกล้หมด', metric: 'low_stock_count', operator: 'gte', threshold: 1, channel: 'notification', target_role: 'Warehouse', severity: 'warning', cooldown_hours: 12 });
+  ok('Alerts: create a rule (validated metric/operator/channel)', (rule.status === 200 || rule.status === 201) && !!rule.json.id, `${rule.status}`);
+  const badMetric = await inj('POST', '/api/alerts/rules', token2, { name: 'x', metric: 'nope', operator: 'gte', threshold: 1, channel: 'notification' });
+  ok('Alerts: an unknown metric is rejected (400 BAD_METRIC)', badMetric.status === 400 && badMetric.json.error?.code === 'BAD_METRIC', `${badMetric.status} ${badMetric.json.error?.code}`);
+  const run1 = await inj('POST', '/api/alerts/run', token2);
+  ok('Alerts: sweep fires the breached rule (writes a notification + event)', (run1.json.fired_count ?? 0) >= 1 && (run1.json.fired ?? []).some((f: any) => f.metric === 'low_stock_count'), `${JSON.stringify(run1.json)}`);
+  const run2 = await inj('POST', '/api/alerts/run', token2);
+  ok('Alerts: cooldown suppresses an immediate re-fire', (run2.json.fired_count ?? 0) === 0 && (run2.json.suppressed ?? 0) >= 1, `${JSON.stringify(run2.json)}`);
+  const events = await inj('GET', '/api/alerts/events', token2);
+  ok('Alerts: the fire is logged to the event feed', (events.json.events ?? []).some((e: any) => e.metric === 'low_stock_count' && e.value >= 1), `${(events.json.events ?? []).length}`);
+  const hqRules = await inj('GET', '/api/alerts/rules', hqwh);
+  ok('Alerts: rules are tenant-isolated (HQ sees none of cf2’s)', (hqRules.json.rules ?? []).every((r: any) => r.id !== rule.json.id), `HQ rules=${(hqRules.json.rules ?? []).length}`);
 
   await app.close();
   await pg.close();
