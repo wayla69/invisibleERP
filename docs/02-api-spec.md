@@ -239,7 +239,7 @@ client secret **AES-256-GCM at rest**; SCIM bearer stored as a `sha256` hash, sh
 | Method | Path | Query | Response |
 |---|---|---|---|
 | GET | `/api/auth/sso/authorize` | `tenant=CODE` | `{authorization_url, state}` → redirect the browser to the IdP (`503 SSO_NOT_CONFIGURED` if off) |
-| GET | `/api/auth/sso/callback` | `state`, `code` \| `id_token` | `{token, username, role}` — verifies the `id_token` (sig/iss/aud/exp), **JIT-provisions** the user by `sso_subject`, mints the standard session JWT |
+| POST | `/api/auth/sso/callback` | body `{state, code? \| id_token?}` | `{token, username, role}` — verifies the `id_token` (sig/iss/aud/exp), **JIT-provisions** the user by `sso_subject`, mints the standard session JWT. **POST body** (not query) so the token never lands in a URL/log |
 
 `id_token` is verified HS256 against the client secret (RS256/JWKS is a documented follow-on). A
 JIT user gets the tenant's `default_role`; repeat logins reuse the same user. Errors:

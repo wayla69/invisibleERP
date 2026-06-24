@@ -468,15 +468,15 @@ async function main() {
 
   // Mint an HS256 id_token (signed with the client secret) and complete the callback → JIT provision + JWT.
   const mkIdToken = (over: any = {}) => signHs256({ iss: ISSUER, aud: CLIENT, sub: 'idp-user-1', email: 'alice@cf2.example', exp: Math.floor(Date.now() / 1000) + 3600, ...over }, SECRET);
-  const cb1 = await inj('GET', `/api/auth/sso/callback?state=CF2.nonce1&id_token=${mkIdToken()}`, undefined);
+  const cb1 = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.nonce1', id_token: mkIdToken() });
   ok('SSO: callback verifies the id_token and mints a session (JIT-provisioned user)', cb1.status === 200 && !!cb1.json.token && cb1.json.role === 'Customer', `${cb1.status} ${JSON.stringify(cb1.json).slice(0,100)}`);
   const ssoMe = await inj('GET', '/api/auth/me', cb1.json.token);
   ok('SSO: the minted session works (auth/me) and is scoped to the SSO user', ssoMe.status === 200 && ssoMe.json.username === cb1.json.username, `${ssoMe.status} ${ssoMe.json.username}`);
-  const cb2 = await inj('GET', `/api/auth/sso/callback?state=CF2.nonce2&id_token=${mkIdToken()}`, undefined);
+  const cb2 = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.nonce2', id_token: mkIdToken() });
   ok('SSO: a repeat login reuses the same user (idempotent JIT by sso_subject)', cb2.status === 200 && cb2.json.username === cb1.json.username, `${cb1.json.username} vs ${cb2.json.username}`);
-  const cbBadSig = await inj('GET', `/api/auth/sso/callback?state=CF2.n&id_token=${mkIdToken()}x`, undefined);
+  const cbBadSig = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.n', id_token: mkIdToken() + 'x' });
   ok('SSO: a tampered id_token is rejected (401 BAD_ID_TOKEN)', cbBadSig.status === 401 && cbBadSig.json.error?.code === 'BAD_ID_TOKEN', `${cbBadSig.status} ${cbBadSig.json.error?.code}`);
-  const cbBadAud = await inj('GET', `/api/auth/sso/callback?state=CF2.n&id_token=${mkIdToken({ aud: 'someone-else' })}`, undefined);
+  const cbBadAud = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.n', id_token: mkIdToken({ aud: 'someone-else' }) });
   ok('SSO: a wrong-audience id_token is rejected (401 BAD_AUDIENCE)', cbBadAud.status === 401 && cbBadAud.json.error?.code === 'BAD_AUDIENCE', `${cbBadAud.status} ${cbBadAud.json.error?.code}`);
 
   // SCIM: rotate a token, then provision/list/deactivate.

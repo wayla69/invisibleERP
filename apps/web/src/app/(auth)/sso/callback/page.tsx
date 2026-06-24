@@ -16,14 +16,14 @@ export default function SsoCallbackPage() {
 
   useEffect(() => {
     const qs = new URLSearchParams(window.location.search);
-    const state = qs.get('state') ?? '';
-    const code = qs.get('code') ?? '';
-    const idToken = qs.get('id_token') ?? '';
-    const params = new URLSearchParams();
-    if (state) params.set('state', state);
-    if (code) params.set('code', code);
-    if (idToken) params.set('id_token', idToken);
-    publicApi<{ token: string; role: string }>(`/api/auth/sso/callback?${params.toString()}`)
+    // Forward the IdP's assertion to the backend in the POST body (not the URL) so the id_token /
+    // authorization code never lands in a server log or browser history.
+    const body = {
+      state: qs.get('state') ?? undefined,
+      code: qs.get('code') ?? undefined,
+      id_token: qs.get('id_token') ?? undefined,
+    };
+    publicApi<{ token: string; role: string }>('/api/auth/sso/callback', { method: 'POST', body: JSON.stringify(body) })
       .then((res) => {
         setToken(res.token);
         router.replace(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');

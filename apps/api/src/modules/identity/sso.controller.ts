@@ -1,4 +1,4 @@
-import { Controller, Get, Query, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, HttpCode } from '@nestjs/common';
 import { Public, NoTx } from '../../common/decorators';
 import { SsoService } from './sso.service';
 
@@ -14,11 +14,14 @@ export class SsoController {
     return this.svc.authorize(String(tenant ?? ''));
   }
 
-  @Get('callback')
+  // The assertion (state + code/id_token) is taken from the request BODY, not the query string, so the
+  // sensitive id_token/authorization code never lands in a URL (and thus not in logs/history/referer).
+  // The browser-facing redirect_uri is the web /sso/callback page, which forwards these via this POST.
+  @Post('callback')
   @Public()
   @NoTx()
   @HttpCode(200)
-  callback(@Query('state') state?: string, @Query('code') code?: string, @Query('id_token') idToken?: string) {
-    return this.svc.callback({ state, code, id_token: idToken });
+  callback(@Body() body: { state?: string; code?: string; id_token?: string }) {
+    return this.svc.callback({ state: body?.state, code: body?.code, id_token: body?.id_token });
   }
 }
