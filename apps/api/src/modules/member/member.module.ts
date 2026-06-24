@@ -8,12 +8,13 @@ import { RewardsModule } from '../rewards/rewards.module';
 import { GamificationModule } from '../gamification/gamification.module';
 import { ReferralsModule } from '../referrals/referrals.module';
 import { WheelsModule } from '../wheels/wheels.module';
+import { PartnersModule } from '../partners/partners.module';
 
-// The member self-service app. Reuses the existing loyalty/rewards/gamification/referrals/wheels services
-// (tenant-scoped + adversarially reviewed); adds only the phone-OTP auth. AuthModule re-exports JwtModule
-// (token signing) + PasswordService (scrypt OTP hashing).
+// The member self-service app. Reuses the existing loyalty/rewards/gamification/referrals/wheels/partners
+// services (tenant-scoped + adversarially reviewed); adds only the phone-OTP auth. AuthModule re-exports
+// JwtModule (token signing) + PasswordService (scrypt OTP hashing).
 @Module({
-  imports: [AuthModule, LoyaltyModule, RewardsModule, GamificationModule, ReferralsModule, WheelsModule],
+  imports: [AuthModule, LoyaltyModule, RewardsModule, GamificationModule, ReferralsModule, WheelsModule, PartnersModule],
   controllers: [MemberController],
   providers: [MemberAuthService, MemberGuard],
 })

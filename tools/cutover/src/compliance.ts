@@ -496,7 +496,37 @@ async function main() {
     r14Blocked.status === 422 && r14Blocked.json.error?.code === 'SOD_CONFLICT' && r14Msg.includes('R14') && (crmClean.status === 200 || crmClean.status === 201),
     `r14=${r14Blocked.status}/${r14Blocked.json.error?.code} msg~R14=${r14Msg.includes('R14')} clean=${crmClean.status}`);
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · LYL-03..13) ──');
+  // ════════ LYL-14 — Partner privileges: tier-gated single-use claim, per-member limit, partner redeem ════════
+  const [pmA] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-PRVA', name: 'สิทธิ์A', balance: '0', lifetime: '200', active: true }).returning({ id: s.posMembers.id });
+  const [pmB] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-PRVB', name: 'สิทธิ์B', balance: '0', lifetime: '50', active: true }).returning({ id: s.posMembers.id });
+  const partner = await inj('POST', '/api/loyalty/partners', execu, { name: 'ร้านกาแฟพันธมิตร', category: 'dining' });
+  const priv = await inj('POST', '/api/loyalty/privileges', execu, { partner_id: partner.json.id, name: 'ส่วนลด 10%', kind: 'discount_percent', value: 10, tier_min: 100, stock: 2, per_member_limit: 1 });
+  const claimA = await inj('POST', `/api/loyalty/privileges/${priv.json.id}/claim`, execu, { member_id: Number(pmA.id) });
+  const usePrv = await inj('POST', `/api/loyalty/privilege-claims/${claimA.json.claim_code}/use`, execu, { partner: 'ร้านกาแฟพันธมิตร' });
+  const reusePrv = await inj('POST', `/api/loyalty/privilege-claims/${claimA.json.claim_code}/use`, execu, {});                  // single-use → 409
+  const claimAgain = await inj('POST', `/api/loyalty/privileges/${priv.json.id}/claim`, execu, { member_id: Number(pmA.id) }); // per-member limit → 409
+  const claimLow = await inj('POST', `/api/loyalty/privileges/${priv.json.id}/claim`, execu, { member_id: Number(pmB.id) });   // tier too low → 409
+  ok('LYL-14: partner privilege — tier-gated single-use claim, per-member limit, partner redeem',
+    String(claimA.json.claim_code ?? '').startsWith('PRV-') && usePrv.json.status === 'used' && reusePrv.status === 409 && claimAgain.status === 409 && claimLow.status === 409 && claimLow.json.error?.code === 'TIER_TOO_LOW',
+    `claim=${claimA.json.claim_code} use=${usePrv.json.status} reuse=${reusePrv.status} again=${claimAgain.status} low=${claimLow.status}/${claimLow.json.error?.code}`);
+
+  // ════════ LYL-15 — Loyalty analytics: liability + redemption funnel + churn, tenant-scoped ════════
+  const analytics = await inj('GET', '/api/loyalty/analytics', execu);
+  ok('LYL-15: loyalty analytics — liability + redemption funnel + churn risk (tenant-scoped)',
+    analytics.status === 200 && Number(analytics.json.members?.total) > 0 && typeof analytics.json.liability?.fair_value === 'number' && typeof analytics.json.redemption?.redemption_rate_pct === 'number' && typeof analytics.json.churn_rate_pct === 'number' && typeof analytics.json.breakage_rate_pct === 'number',
+    `total=${analytics.json.members?.total} fv=${analytics.json.liability?.fair_value} rr=${analytics.json.redemption?.redemption_rate_pct} churn=${analytics.json.churn_rate_pct}`);
+
+  // ════════ LYL-16 — LINE LIFF: linked account logs in (mints member token); unlinked rejected; link works ═══════
+  const [lm] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LINE', name: 'ไลน์', balance: '0', lifetime: '0', active: true, lineUserId: 'U-line-123' }).returning({ id: s.posMembers.id });
+  const lineLogin = await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', dev_line_user_id: 'U-line-123' });
+  const lineUnlinked = await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', dev_line_user_id: 'U-nope' });
+  const lineMe = await inj('GET', '/api/member/me', lineLogin.json.token);
+  const relink = await inj('POST', '/api/member/link-line', lineLogin.json.token, { line_user_id: 'U-relink-456' });
+  ok('LYL-16: LINE login — linked account mints a member token; unlinked rejected; member can link',
+    !!lineLogin.json.token && lineMe.json.member_code === 'M-LINE' && Number(lm.id) === lineMe.json.id && lineUnlinked.status === 401 && lineUnlinked.json.error?.code === 'LINE_NOT_LINKED' && relink.json.linked === true,
+    `tok=${!!lineLogin.json.token} me=${lineMe.json.member_code} unlinked=${lineUnlinked.status}/${lineUnlinked.json.error?.code} link=${relink.json.linked}`);
+
+  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} compliance checks failed` : `\n✅ All ${checks.length} compliance control checks passed`);

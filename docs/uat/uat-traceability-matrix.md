@@ -443,6 +443,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-LOY-019b | Member OTP brute-force cap holds (adversarial-review fix) | LYL-10b | 19 control 21 |
 | UAT-LOY-020 | Spin-the-wheel — weighted draw, free→cost, per-prize stock cap | MKT-09 | 19 §7 (22), control 22 |
 | UAT-LOY-021 | Campaign — segmented send respects opt-out, audited, idempotent | MKT-10 | 19 §7 (23), control 23 |
+| UAT-LOY-022 | Partner privilege — tier-gated single-use claim, limit, partner redeem | MKT-11 | 19 §7 (24), control 24 |
+| UAT-LOY-023 | Loyalty analytics — tenant-scoped liability + funnel + churn | LYL-15 | 19 §7 (25) |
+| UAT-LOY-024 | LINE login — linked account mints a member token; unlinked rejected | ITGC-AC, LYL-16 | 19 §7 (26), control 26 |
 
 ## Coverage summary
 
@@ -458,5 +461,5 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 08 Admin / SoD / Audit | 78 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| 11 Loyalty & CRM | 22 | 19 |
-| **Total** | **282** | **137** |
+| 11 Loyalty & CRM | 25 | 21 |
+| **Total** | **285** | **139** |

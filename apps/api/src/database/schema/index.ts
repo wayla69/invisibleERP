@@ -27,6 +27,7 @@ export * from './loyalty-gamification';
 export * from './loyalty-referrals';
 export * from './loyalty-wheels';
 export * from './loyalty-campaigns';
+export * from './loyalty-partners';
 export * from './member-otp';
 export * from './payments';
 export * from './billing';

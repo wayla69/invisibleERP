@@ -11,6 +11,7 @@ import {
   CalendarClock,
   Bot,
   Disc3,
+  Handshake,
   Boxes,
   Briefcase,
   Cable,
@@ -157,6 +158,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ภารกิจ & แสตมป์', href: '/loyalty/missions', icon: Target, perms: ['loyalty', 'marketing'], workspace: BOTH },
       { label: 'วงล้อนำโชค', href: '/loyalty/wheels', icon: Disc3, perms: ['loyalty', 'marketing'], workspace: BOTH },
       { label: 'แคมเปญ', href: '/loyalty/campaigns', icon: Megaphone, perms: ['marketing', 'exec'], workspace: BOTH },
+      { label: 'พันธมิตร & สิทธิพิเศษ', href: '/loyalty/partners', icon: Handshake, perms: ['loyalty', 'marketing'], workspace: BOTH },
+      { label: 'วิเคราะห์ลอยัลตี้', href: '/loyalty/analytics', icon: BarChart3, perms: ['marketing', 'exec'], workspace: BOTH },
     ],
   },
   {

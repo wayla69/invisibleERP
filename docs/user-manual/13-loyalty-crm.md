@@ -181,6 +181,27 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > send is **idempotent** (a campaign can't be sent twice — a second send is rejected); and every recipient is
 > recorded in the message log. *(MKT-10.)*
 
+## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
+
+Give members perks at partner shops. On **พันธมิตร & สิทธิพิเศษ** (`/loyalty/partners`):
+
+1. Add a **partner** (a shop/brand) and one or more **privileges** — a discount %, a baht discount, a freebie,
+   or access. Each privilege can require a **minimum lifetime-points** level (tier gate), a **stock** cap, and a
+   **per-member limit**.
+2. A member **claims** a privilege (from the member app, or staff claim at the counter) → they get a **single-use
+   code** to show at the partner. The partner marks it used once.
+
+> Controls: tier eligibility + stock + per-member limit are all enforced atomically; the claim code works **once**
+> only; one tenant can't redeem another's code. *(MKT-11.)*
+
+## 13. Loyalty analytics (วิเคราะห์ลอยัลตี้)
+
+For managers — **วิเคราะห์ลอยัลตี้** (`/loyalty/analytics`) shows the loyalty programme at a glance:
+**points-liability fair value** (and the posted GL 2250), the **redemption funnel** (issued vs used), the
+**breakage rate** (points that expired), the **tier mix**, the **active rate**, and **churn risk** — members who
+have been dormant for 90+ days but still hold points, ready for a **win-back** campaign. Read-only; HQ users pick
+a shop.
+
 ## Errors you might see
 
 | Code | Meaning | What to do |
@@ -195,6 +216,8 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 | `OTP_INVALID` (member app) | Wrong, expired, or already-used login code | Press *ขอรหัส OTP* again for a fresh code. |
 | `MEMBER_ONLY` (member app) | A staff/non-member token hit a member route | Log in via the member app (`/m`). |
 | `PRIZE_OUT_OF_STOCK` / `NO_PRIZES` (wheel) | A wheel prize just ran out, or no prizes remain | Top up the prize stock, or the member spins again. |
+| `TIER_TOO_LOW` / `OUT_OF_STOCK` / `LIMIT_REACHED` (privilege) | Member's tier too low, privilege sold out, or per-person limit reached | Choose another privilege or raise the limits. |
+| `LINE_NOT_LINKED` / `LINE_ALREADY_LINKED` (member app) | No member linked to that LINE account, or the LINE account is already linked to someone else | Link LINE while signed in via OTP first; one LINE per member. |
 
 ## Revision history
 
@@ -210,3 +233,4 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 | 0.8 | 2026-06-24 | Platform | Added §9 **Member self-service app** (`/m`) — phone-OTP login (5-min single-use code), digital card, rewards/redeem, missions/claim, refer-by-phone, coupon wallet; self-scoped, staff routes blocked. New error codes `OTP_INVALID`, `MEMBER_ONLY`, `SELF_REFERRAL`/`ALREADY_REFERRED`. |
 | 0.9 | 2026-06-24 | Platform | Added §10 **Spin-the-wheel / lucky draw** (`/loyalty/wheels` + `/m`) — weighted prize segments, points-cost or daily free spins, provably-fair server-side draw, per-prize stock. New error codes `PRIZE_OUT_OF_STOCK`, `NO_PRIZES`. |
 | 1.0 | 2026-06-24 | Platform | Added §11 **Campaigns** (`/loyalty/campaigns`) — segmented (all/RFM/tier/birthday) + scheduled broadcasts; PDPA opt-out auto-skipped, idempotent send, per-recipient audit. |
+| 1.1 | 2026-06-24 | Platform | Added §12 **Partner privileges** (`/loyalty/partners`) — tier-gated single-use member perks at partner merchants; §13 **Loyalty analytics** (`/loyalty/analytics`) — liability, redemption funnel, breakage, churn/win-back; **LINE login** in the member app. New error codes `TIER_TOO_LOW`/`OUT_OF_STOCK`/`LIMIT_REACHED`, `LINE_NOT_LINKED`/`LINE_ALREADY_LINKED`. |

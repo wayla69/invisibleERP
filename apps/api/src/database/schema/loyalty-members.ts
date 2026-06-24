@@ -20,6 +20,7 @@ export const posMembers = pgTable('pos_members', {
   active: boolean('active').default(true),
   enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow(),
   lastUpdated: timestamp('last_updated', { withTimezone: true }),
+  lineUserId: text('line_user_id'),                 // linked LINE account (for LIFF login); unique per tenant
   createdBy: text('created_by'),
 }, (t) => ({ uqCode: uniqueIndex('pos_members_tenant_code').on(t.tenantId, t.memberCode) }));
 

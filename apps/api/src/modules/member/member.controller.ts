@@ -9,12 +9,15 @@ import { RewardsService } from '../rewards/rewards.service';
 import { GamificationService } from '../gamification/gamification.service';
 import { ReferralsService } from '../referrals/referrals.service';
 import { WheelsService } from '../wheels/wheels.service';
+import { PartnersService } from '../partners/partners.service';
 
 const RequestOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string().min(1) });
 const VerifyOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string().min(1), code: z.string().min(4) });
 const EmptyBody = z.preprocess((v) => v ?? {}, z.object({}).passthrough());
 const ReferBody = z.object({ referred_member_id: z.number().int().positive().optional(), referred_phone: z.string().optional() })
   .refine((d) => d.referred_member_id != null || d.referred_phone, { message: 'referred_member_id or referred_phone required' });
+const LineLoginBody = z.object({ tenant_code: z.string().min(1), line_id_token: z.string().optional(), dev_line_user_id: z.string().optional() });
+const LinkLineBody = z.object({ line_user_id: z.string().min(1) });
 
 // Member self-service app (phone-OTP). Auth routes are @Public; everything else needs a member token. The
 // member can only ever act on THEMSELVES — every call passes req.user.memberId (the authenticated member),
@@ -28,6 +31,7 @@ export class MemberController {
     private readonly missions: GamificationService,
     private readonly referrals: ReferralsService,
     private readonly wheels: WheelsService,
+    private readonly partners: PartnersService,
   ) {}
 
   // ── Auth (public) ──
@@ -38,10 +42,16 @@ export class MemberController {
   // guarded UPDATEs in the service, not a row lock. Tenant isolation is by explicit filter (resolved from code).
   @Public() @NoTx() @Post('auth/verify-otp')
   verifyOtp(@Body(new ZodValidationPipe(VerifyOtpBody)) b: any) { return this.auth.verifyOtp(b); }
+  // LINE LIFF login — verify the LIFF idToken (prod) → mint a member token for the linked member.
+  @Public() @NoTx() @Post('auth/line')
+  loginLine(@Body(new ZodValidationPipe(LineLoginBody)) b: any) { return this.auth.loginWithLine(b); }
 
   // ── Self-service (member token only; self-scoped) ──
   @Get('me') @UseGuards(MemberGuard)
   me(@CurrentUser() u: JwtUser) { return this.member.balance(u.memberId!, u); }
+  // Link the member's LINE account (one LINE ↔ one member per tenant) so they can later log in via LINE.
+  @Post('link-line') @UseGuards(MemberGuard)
+  linkLine(@Body(new ZodValidationPipe(LinkLineBody)) b: any, @CurrentUser() u: JwtUser) { return this.auth.linkLine(u, b.line_user_id); }
   @Get('tier') @UseGuards(MemberGuard)
   tier(@CurrentUser() u: JwtUser) { return this.member.tierJourney(u, u.memberId!); }
   @Get('history') @UseGuards(MemberGuard)
@@ -65,6 +75,13 @@ export class MemberController {
   spin(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.wheels.spin(u, +id, { member_id: u.memberId! }); }
   @Get('spins') @UseGuards(MemberGuard)
   spinHistory(@CurrentUser() u: JwtUser) { return this.wheels.memberSpins(u, u.memberId!); }
+
+  @Get('privileges') @UseGuards(MemberGuard)
+  privileges(@CurrentUser() u: JwtUser) { return this.partners.available(u, u.memberId!); }
+  @Post('privileges/:id/claim') @UseGuards(MemberGuard)
+  claimPrivilege(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.partners.claim(u, +id, { member_id: u.memberId! }); }
+  @Get('privilege-claims') @UseGuards(MemberGuard)
+  privilegeClaims(@CurrentUser() u: JwtUser) { return this.partners.memberClaims(u, u.memberId!); }
 
   @Get('referrals') @UseGuards(MemberGuard)
   referralsList(@CurrentUser() u: JwtUser) { return this.referrals.memberReferrals(u, u.memberId!); }

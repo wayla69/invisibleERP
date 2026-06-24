@@ -5,7 +5,7 @@
 // SEPARATE key from the staff token; every other call carries that token. The member only ever sees/acts on
 // themselves (the API derives the member from the token — there is no member_id input).
 import { useState, useEffect, useCallback } from 'react';
-import { Gift, Trophy, Users, Star, LogOut, Sparkles, Ticket, Loader2, Disc3 } from 'lucide-react';
+import { Gift, Trophy, Users, Star, LogOut, Sparkles, Ticket, Loader2, Disc3, Handshake } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -103,20 +103,22 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
   const [refs, setRefs] = useState<any[]>([]);
   const [wallet, setWallet] = useState<any[]>([]);
   const [wheels, setWheels] = useState<any[]>([]);
+  const [privileges, setPrivileges] = useState<any[]>([]);
   const [err, setErr] = useState('');
   const [flash, setFlash] = useState('');
 
   const reload = useCallback(async () => {
     try {
-      const [m, r, ms, rf, w, wh] = await Promise.all([
+      const [m, r, ms, rf, w, wh, pv] = await Promise.all([
         mapi('/api/member/me', {}, token),
         mapi<{ rewards: any[] }>('/api/member/rewards', {}, token),
         mapi<{ missions: any[] }>('/api/member/missions', {}, token),
         mapi<{ referrals: any[] }>('/api/member/referrals', {}, token),
         mapi<{ coupons: any[] }>('/api/member/wallet', {}, token),
         mapi<{ wheels: any[] }>('/api/member/wheels', {}, token),
+        mapi<{ privileges: any[] }>('/api/member/privileges', {}, token),
       ]);
-      setMe(m); setRewards(r.rewards ?? []); setMissions(ms.missions ?? []); setRefs(rf.referrals ?? []); setWallet(w.coupons ?? []); setWheels(wh.wheels ?? []);
+      setMe(m); setRewards(r.rewards ?? []); setMissions(ms.missions ?? []); setRefs(rf.referrals ?? []); setWallet(w.coupons ?? []); setWheels(wh.wheels ?? []); setPrivileges(pv.privileges ?? []);
     } catch (e: any) { if (/เซสชัน|401|token/i.test(e.message)) on401(); else setErr(e.message); }
   }, [token, on401]);
   useEffect(() => { reload(); }, [reload]);
@@ -133,6 +135,11 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
       setFlash(p?.kind === 'points' ? `🎉 ได้รับ ${p.points} แต้ม!` : p?.kind === 'coupon' ? `🎟️ ได้คูปอง “${p.label}” — ดูในคูปองของฉัน` : `🎡 ${p?.label ?? 'รอบนี้ยังไม่ได้รางวัล ลองใหม่!'}`);
       await reload();
     } catch (e: any) { setErr(e.message); }
+  };
+  const claimPriv = async (v: any) => {
+    setFlash(''); setErr('');
+    try { const res: any = await mapi(`/api/member/privileges/${v.id}/claim`, { method: 'POST' }, token); setFlash(`🎫 รับสิทธิ์แล้ว! รหัส ${res.claim_code} — แสดงที่ร้านพันธมิตร`); await reload(); }
+    catch (e: any) { setErr(e.message); }
   };
 
   if (err && !me) return <div className="py-10 text-center text-sm text-destructive">{err}</div>;
@@ -179,6 +186,17 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
           {wheels.map((w) => (
             <Row key={w.id} title={w.name} sub={w.cost_points > 0 ? `${Number(w.cost_points).toLocaleString()} แต้ม/ครั้ง${w.daily_free_spins > 0 ? ` · ฟรี ${w.daily_free_spins}/วัน` : ''}` : (w.daily_free_spins > 0 ? `ฟรี ${w.daily_free_spins} ครั้ง/วัน` : 'ฟรี')}>
               <Button size="sm" disabled={w.cost_points > 0 && Number(me.balance) < w.cost_points} onClick={() => spin(w)}>หมุน</Button>
+            </Row>
+          ))}
+        </Section>
+      )}
+
+      {/* Partner privileges */}
+      {privileges.length > 0 && (
+        <Section icon={<Handshake className="size-4" />} title="สิทธิพิเศษพันธมิตร">
+          {privileges.map((v) => (
+            <Row key={v.id} title={v.name} sub={`${v.partner ?? ''}${v.kind === 'discount_percent' ? ` · ลด ${v.value}%` : v.kind === 'discount_amount' ? ` · ลด ฿${v.value}` : v.kind === 'freebie' ? ' · ของแถม' : ''}`}>
+              <Button size="sm" variant="outline" onClick={() => claimPriv(v)}>รับสิทธิ์</Button>
             </Row>
           ))}
         </Section>

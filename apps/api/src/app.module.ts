@@ -28,6 +28,8 @@ import { GamificationModule } from './modules/gamification/gamification.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { WheelsModule } from './modules/wheels/wheels.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { PartnersModule } from './modules/partners/partners.module';
+import { LoyaltyAnalyticsModule } from './modules/loyalty-analytics/loyalty-analytics.module';
 import { MemberModule } from './modules/member/member.module';
 import { BomModule } from './modules/bom/bom.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
@@ -141,6 +143,8 @@ import { EInvoiceModule } from './modules/einvoice/einvoice.module';
     ReferralsModule,
     WheelsModule,
     CampaignsModule,
+    PartnersModule,
+    LoyaltyAnalyticsModule,
     MemberModule,
     BomModule,
     LedgerModule,
