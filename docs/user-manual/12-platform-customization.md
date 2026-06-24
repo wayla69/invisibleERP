@@ -43,6 +43,8 @@ tools.
 | Bring data in from another system | **Migration** | `/migration` | masterdata / users / exec | [Administration §8](./11-administration.md) |
 | Set up for your country (CoA / tax / locale) | **Localization** | `/localization` | exec / users / masterdata | [Administration](./11-administration.md) |
 | Send e-tax invoices to the authority | **e-Invoicing** | `/einvoice` | exec / creditors / ar | [Tax §7](./07-tax.md) |
+| Install the app on your device (works offline) | **PWA** | browser "Install" | anyone | [Getting started](./00-getting-started.md) |
+| Check system health & scale posture | **Ops** | `/ops` | exec / users | [Administration §11](./11-administration.md) |
 | Read alerts, report deliveries & approval reminders | **Notification inbox** | `/notifications` | anyone (your own) | §A below |
 | Let another system read your data securely | **Public REST API** | `/api/v1` (+ API keys) | users (to issue keys) | §B below |
 | Let staff sign in with your company login / auto-manage users | **SSO & SCIM** | Settings → SSO / SCIM | users | §C below |

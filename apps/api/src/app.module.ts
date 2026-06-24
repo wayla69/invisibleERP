@@ -109,6 +109,7 @@ import { ConnectorsModule } from './modules/connectors/connectors.module';
 import { MigrationModule } from './modules/migration/migration.module';
 import { LocalizationModule } from './modules/localization/localization.module';
 import { EInvoiceModule } from './modules/einvoice/einvoice.module';
+import { OpsModule } from './modules/ops/ops.module';
 
 @Module({
   imports: [
@@ -216,6 +217,7 @@ import { EInvoiceModule } from './modules/einvoice/einvoice.module';
     MigrationModule,
     LocalizationModule,
     EInvoiceModule,
+    OpsModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

@@ -21,9 +21,10 @@ a **mobile PWA** (E3), and **scale interfaces** (E5). Each is **presentation-onl
 
 ## 3. Scope
 
-**In scope (delivered):** **white-label theming (E4, Phase 29)**, **guided onboarding & industry packs (E1,
-Phase 26)** + **data-migration toolkit (E2, Phase 27)**. **Planned (see roadmap `13` §5):** E3 PWA (Phase 28),
-E5 scale interfaces (Phase 30).
+**In scope (delivered):** all of Pillar E's software — **white-label theming (E4)**, **onboarding & industry
+packs (E1)**, **data-migration toolkit (E2)**, **mobile PWA (E3)** + **scale interfaces (E5)** (Phases 26–30).
+**External (not a code deliverable):** E6 SOC 2 / ISO 27001 certification — an audit, deferred per the
+deployment plan (roadmap `13` §5/§8).
 
 ## 4. Process narrative — capabilities
 
@@ -53,6 +54,19 @@ E5 scale interfaces (Phase 30).
    `masterdata`/`users`/`exec`). Table `migration_jobs` (migration `0098`); RLS-scoped. Web `/migration`.
    *Verified by the `ext` harness (sources / field-map + invalid-row flagging / bad-source / bad-entity /
    job-recorded / RLS). Direct one-click commit (calling the Phase-7 importer) is a noted follow-up.*
+4. **Mobile PWA — Phase 28 (E3).** Makes the app an **installable, offline-capable PWA**: a
+   `manifest.webmanifest` (name / icons / `standalone` display / theme colour) + registration of the existing
+   safe app-shell service worker (`sw.js` — same-origin, GET-only, API-skipping stale-while-revalidate), wired
+   into the root layout. Pairs with the existing offline-POS outbox (idempotent replay). No backend model — a
+   client capability over existing APIs. Installable from any screen. *Verified by the web build (manifest +
+   icon + SW registration). Push over the existing notification inbox is a noted follow-up.*
+5. **Scale interfaces — Phase 30 (E5).** The app-side of the upmarket scale story: a **`CacheService`**
+   (in-memory TTL default; `CACHE_PROVIDER=redis` swaps a Redis adapter behind the same interface — the
+   EmbedderService precedent) and an **ops endpoint** surfacing process metrics + cache/queue **provider
+   posture** (the liveness `/healthz` + readiness `/readyz` probes already exist). `GET /api/ops/metrics`,
+   `GET /api/ops/cache-selftest` (perm `exec`/`users`). No schema. Web `/ops`. *Verified by the `ext` harness
+   (metrics posture + CacheService round-trip). Provisioning managed Redis + read replicas + table
+   partitioning is an infra/ops task (lean-then-scale) — out of scope for the app layer.*
 
 ## 5. Control matrix
 
@@ -61,6 +75,8 @@ E5 scale interfaces (Phase 30).
 | White-label theming | Cross-tenant theme bleed; unsafe asset/colour | RLS self-scoped tenant theme; brand hue bounded 0–360 → in-gamut oklch; radius from an allowlist; logo restricted to https/data-image; presentation-only, no GL | Preventive | (operational) | `ext` theme checks (set, bad-hue, bad-radius, RLS) |
 | Onboarding / industry packs | Cross-tenant seed bleed; duplicate seeding | Pack apply is idempotent + RLS-scoped (seeds only the caller's tenant); seeds configuration/sample objects only, no GL | Preventive | (operational) | `ext` onboarding checks (idempotent re-apply, RLS) |
 | Data migration | Bad master data loaded silently | Source adapter → canonical → dry-run validation (Phase-7 per-row checks) before any write; job recorded; RLS-scoped; no GL | Preventive | MDM-02 | `ext` migration checks (invalid-row flagging, RLS) |
+| Mobile PWA | Offline data integrity | Offline writes replay through the existing idempotent outbox; the SW is GET-only + API-skipping + same-origin; no GL | Preventive | (operational) | web build (manifest + SW) |
+| Scale interfaces | Stale / inconsistent cached reads | Cache is a TTL store behind one interface (in-memory default); ops endpoint read-only; no GL | Preventive | (operational) | `ext` ops checks (metrics, cache round-trip) |
 
 ## 6. Exception & error handling
 
@@ -75,3 +91,5 @@ migration — `BAD_SOURCE`, `BAD_ENTITY`, `BAD_ROWS`. Unauthorized → `403`/`40
 | 0.1 DRAFT | 2026-06-24 | Platform | Initial experience narrative. Delivered **Platform Phase 29 — white-label theming (E4)**: per-tenant brand tokens (brand hue → in-gamut oklch `--primary`, radius, name, logo, tagline) applied as CSS variables app-wide; `tenants.theme_prefs` (migration `0094`). Presentation-only, no GL, RLS/self-scoped; `ext` +5 checks. E1/E2/E3/E5 planned — see roadmap `13` §5. |
 | 0.2 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 26 — guided onboarding + industry packs (E1)**: a setup checklist (per-tenant step completion + %) and one-click industry packs (restaurant/retail/distribution/services) that idempotently seed custom objects (reusing A1). Tables `onboarding_progress` + `pack_installs` (migration `0095`). No GL, RLS-scoped; new §4.2, control-matrix row, `BAD_STEP`/`BAD_PACK`; `ext` +7 checks. |
 | 0.3 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 27 — data-migration toolkit (E2)**: source adapters (Loyverse/FlowAccount/CSV) map a vendor export → canonical → dry-run validation (mirroring Phase-7) with a recorded job, previewed before the Phase-7 commit. Table `migration_jobs` (migration `0098`). RLS-scoped, validation-only, no GL; new §4.3, control-matrix row (MDM-02), `BAD_SOURCE`/`BAD_ENTITY`/`BAD_ROWS`; `ext` +6 checks. |
+| 0.4 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 28 — mobile PWA (E3)**: installable, offline-capable PWA (`manifest.webmanifest` + icon + registration of the existing app-shell `sw.js`) wired into the root layout; pairs with the offline-POS outbox. No backend model, no GL; new §4.4, control-matrix row. Verified by the web build. |
+| 0.5 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 30 — scale interfaces (E5)**: a `CacheService` (in-memory TTL default; Redis swap behind the interface) + an ops metrics endpoint (cache/queue posture; the health probes already exist). No schema, no GL; new §4.5, control-matrix row; `ext` +2 checks. Infra (Redis / read replicas / partitioning) is an ops follow-up. **Pillar E software complete (E1–E5); E6 SOC2 is external.** |

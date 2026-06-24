@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  Activity,
   ArrowLeftRight,
   BadgeCheck,
   BarChart3,
@@ -232,6 +233,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'แยกหน้าที่ (SoD)', href: '/sod', icon: ShieldAlert, perms: ['exec', 'users'] },
       { label: 'ร่องรอยตรวจสอบ (Audit trail)', href: '/audit', icon: ScrollText, perms: ['users'] },
       { label: 'เฝ้าระวังการควบคุม (Controls)', href: '/controls', icon: ShieldAlert, perms: ['exec', 'users', 'creditors'] },
+      { label: 'ระบบ & การขยายขนาด (Ops)', href: '/ops', icon: Activity, perms: ['exec', 'users'] },
     ],
   },
   {

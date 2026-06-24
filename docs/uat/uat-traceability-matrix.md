@@ -361,6 +361,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-076 | Migration — dry-run field-map + validation + RLS | Feature (migration) | 30 §4 |
 | UAT-ADM-077 | Localization — packs, apply, bad-country, RLS | Feature (localization) | 28 §4 |
 | UAT-ADM-078 | e-Invoicing — submit, idempotent, validation | Feature (e-invoicing) | 28 §4 |
+| UAT-ADM-079 | Ops — metrics + cache round-trip | Feature (scale/ops) | 30 §4 |
+| UAT-ADM-080 | PWA — installable + offline shell | Feature (PWA) | 30 §4 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -428,7 +430,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 78 | 47 |
+| 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **260** | **118** |
+| **Total** | **262** | **118** |
