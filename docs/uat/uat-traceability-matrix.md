@@ -346,6 +346,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-061 | Object layouts — dup name, isolation, no GL | Feature (object layouts) | 27 §7.15, §9 |
 | UAT-ADM-062 | Automation — create rule + run-event match/skip | Feature (automation) | 27 §7.16 |
 | UAT-ADM-063 | Automation — validation, isolation, no GL | Feature (automation) | 27 §7.16, §9 |
+| UAT-ADM-064 | Analytics studio — model + governed aggregate + RLS | Feature (semantic layer) | 27 §7.17 |
+| UAT-ADM-065 | Analytics studio — unknown dimension rejected | Feature (semantic layer) | 27 §7.17, §9 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -413,7 +415,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 63 | 40 |
+| 08 Admin / SoD / Audit | 65 | 41 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **245** | **111** |
+| **Total** | **247** | **112** |

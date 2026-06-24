@@ -90,6 +90,7 @@ import { EssModule } from './modules/ess/ess.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
 import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
 import { AutomationModule } from './modules/automation/automation.module';
+import { QueryModule } from './modules/query/query.module';
 import { DocumentTemplatesModule } from './modules/document-templates/document-templates.module';
 import { CustomObjectsModule } from './modules/custom-objects/custom-objects.module';
 import { ObjectLayoutsModule } from './modules/object-layouts/object-layouts.module';
@@ -188,6 +189,7 @@ import { IdentityModule } from './modules/identity/identity.module';
     PublicApiModule,
     IdentityModule,
     AutomationModule,
+    QueryModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

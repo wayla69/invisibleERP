@@ -622,6 +622,24 @@ async function main() {
   const jlAfterAu = (await db.select().from(s.journalLines)).length;
   ok('Automation: no GL impact (journal lines unchanged)', jlAfterAu === jlBeforeAu, `before=${jlBeforeAu} after=${jlAfterAu}`);
 
+  // ── semantic layer + report/pivot builder (Platform Phase 14 — A5) ──
+  // hqwh / cfwh2 are Warehouse (carry `masterdata`), non-Admin → RLS-scoped reads.
+  const hqwhT = (await inj('POST', '/api/login', undefined, { username: 'hqwh', password: 'pw' })).json.token;
+  await db.insert(s.custPosSales).values([
+    { saleNo: 'Q-HQ-1', saleDate: '2026-06-01', tenantId: hq.id, subtotal: '500', discount: '0', taxAmount: '35', total: '500', paymentMethod: 'Cash', status: 'Completed' },
+    { saleNo: 'Q-HQ-2', saleDate: '2026-06-02', tenantId: hq.id, subtotal: '300', discount: '0', taxAmount: '21', total: '300', paymentMethod: 'PromptPay', status: 'Completed' },
+  ]).onConflictDoNothing();
+  const qModel = await inj('GET', '/api/query/model', hqwhT);
+  ok('Query: semantic model exposes measures + dimensions', (qModel.json.measures ?? []).some((m: any) => m.key === 'sales_total') && (qModel.json.dimensions ?? []).some((d: any) => d.key === 'payment_method'), `${(qModel.json.measures ?? []).length}x${(qModel.json.dimensions ?? []).length}`);
+  const qRun = await inj('POST', '/api/query/run', hqwhT, { dimension: 'payment_method' });
+  const qTotal = (qRun.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.sales_total || 0), 0);
+  ok('Query: run aggregates the tenant’s POS sales by dimension', (qRun.status === 200 || qRun.status === 201) && (qRun.json.rows ?? []).length >= 2 && qTotal >= 800, `status=${qRun.status} rows=${(qRun.json.rows ?? []).length} total=${qTotal}`);
+  const qBad = await inj('POST', '/api/query/run', hqwhT, { dimension: 'nope' });
+  ok('Query: an unknown dimension is rejected (400 BAD_DIMENSION)', qBad.status === 400 && qBad.json.error?.code === 'BAD_DIMENSION', `${qBad.status} ${qBad.json.error?.code}`);
+  const qIso = await inj('POST', '/api/query/run', token2, { dimension: 'payment_method' });
+  const qIsoTotal = (qIso.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.sales_total || 0), 0);
+  ok('Query: RLS-scoped — another tenant does not see these sales', qIsoTotal === 0, `cf2 total=${qIsoTotal}`);
+
   await app.close();
   await pg.close();
 

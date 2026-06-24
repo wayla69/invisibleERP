@@ -209,6 +209,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'โครงการ (Projects)', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
       { label: 'กำไรตามมิติ', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'BI Analytics', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
+      { label: 'เครื่องมือวิเคราะห์ (Studio)', href: '/query', icon: BarChart3, perms: ['exec', 'dashboard', 'masterdata'] },
       { label: 'รายงานตามเวลา (Scheduled)', href: '/scheduled-reports', icon: CalendarClock, perms: ['exec'] },
     ],
   },
