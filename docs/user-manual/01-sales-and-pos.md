@@ -193,6 +193,12 @@ them by room — each room shows how many tables are busy (e.g. *VIP · 2/4*), a
 can tap a room chip at the top to watch just that area. (Tip: the floor plan now
 **snaps to a grid** as you drag, so rows of tables line up neatly.)
 
+**Faster setup & shortcuts.** To copy a table you've already styled, select it and
+tap **ทำซ้ำ** — you get an identical table (same shape, size, seats and room) to
+drop into place. With a table selected you can also nudge it with the **arrow keys**
+(hold **Shift** for fine 1-pixel steps) or remove it with **Delete**. For a big
+restaurant the plan **scrolls** as you add more tables, so there's always room.
+
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).

@@ -142,6 +142,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-104 | Invalid shape / rotation rejected | Feature (floor-plan layout) | 20 §6, §13 |
 | UAT-O2C-105 | Optimistic-locked table update (rev) | Feature (floor-plan layout) | 20 §6, §13 |
 | UAT-O2C-106 | Unconditional update / undo (no rev) | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-107 | Create with full initial appearance | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-108 | Floor-plan editor UI smoke (Playwright) | Feature (floor-plan UI) | 20 §6 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

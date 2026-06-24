@@ -5,10 +5,10 @@
 //  • edit  — drag/resize tables AND zones, delete them, assign a table to a room. Persists via the
 //            REST API (PATCH /tables/:id pos/size/zone_id; PATCH/DELETE /zones/:id). A VIP room is
 //            just a zone with an accent colour. Drops snap to an 8px grid. Shapes/rotation honoured.
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Check, Home, Move, Palette, Pencil, Plus, RotateCcw, RotateCw, Trash2, Undo2, X } from 'lucide-react';
+import { Check, Copy, Home, Move, Palette, Pencil, Plus, RotateCcw, RotateCw, Trash2, Undo2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -85,6 +85,12 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
   const addTable = useMutation({
     mutationFn: () => api('/api/restaurant/tables', { method: 'POST', body: JSON.stringify({ table_no: no.trim(), pos_x: 20 + ((tables.length % 5) * 120), pos_y: 20 + Math.floor(tables.length / 5) * 110 }) }),
     onSuccess: () => { setNo(''); onChange(); }, onError: onErr,
+  });
+  // duplicate a table — same shape/size/seats/rotation/room, offset a little, with a unique number
+  const dupNo = (base: string) => { const taken = new Set(tables.map((t) => t.table_no)); let i = 2; while (taken.has(`${base}-${i}`)) i++; return `${base}-${i}`; };
+  const dup = useMutation({
+    mutationFn: (t: TableRow) => api('/api/restaurant/tables', { method: 'POST', body: JSON.stringify({ table_no: dupNo(t.table_no), pos_x: snap(t.pos_x + 24), pos_y: snap(t.pos_y + 24), width: t.width, height: t.height, shape: t.shape, seats: t.seats, rotation: t.rotation, zone_id: t.zone_id }) }),
+    onSuccess: () => { toast.success('ทำซ้ำโต๊ะแล้ว'); onChange(); }, onError: onErr,
   });
   // generic PATCH for table/zone move+resize+appearance. On success we patch the cache in place (incl. the
   // bumped `rev`) so rapid follow-up edits use a fresh rev and don't self-conflict; a stale-write 409 from
@@ -211,6 +217,36 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
 
   const inspTable = editSel != null ? tables.find((t) => t.id === editSel) ?? null : null;
 
+  // keyboard a11y: with a table selected in edit mode, arrows nudge it (Shift = 1px), Delete removes it.
+  // Uses an unconditional patch (no rev) so holding an arrow can't self-conflict on key-repeat.
+  useEffect(() => {
+    if (!edit || editSel == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && /^(INPUT|TEXTAREA|SELECT)$/.test(tgt.tagName)) return;   // don't hijack typing
+      const t = tables.find((x) => x.id === editSel);
+      if (!t) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); confirmDeleteTable(t); return; }
+      const step = e.shiftKey ? 1 : GRID;
+      let dx = 0, dy = 0;
+      if (e.key === 'ArrowLeft') dx = -step; else if (e.key === 'ArrowRight') dx = step;
+      else if (e.key === 'ArrowUp') dy = -step; else if (e.key === 'ArrowDown') dy = step;
+      else return;
+      e.preventDefault();
+      pushUndo({ path: `/api/restaurant/tables/${t.id}`, body: { pos_x: t.pos_x, pos_y: t.pos_y }, kind: 'table' });
+      patch.mutate({ path: `/api/restaurant/tables/${t.id}`, body: { pos_x: Math.max(0, t.pos_x + dx), pos_y: Math.max(0, t.pos_y + dy) }, kind: 'table' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edit, editSel, tables]);
+
+  // the canvas grows to hold the furthest table/room (+ headroom) and scrolls — fits big venues.
+  const rightEdge = Math.max(0, ...tables.map((t) => t.pos_x + t.width), ...zones.map((z) => z.pos_x + z.width));
+  const bottomEdge = Math.max(0, ...tables.map((t) => t.pos_y + t.height), ...zones.map((z) => z.pos_y + z.height));
+  const contentW = Math.max(960, rightEdge + 160);
+  const contentH = Math.max(CANVAS_H, bottomEdge + 160);
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -257,12 +293,13 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
         </div>
       )}
 
-      <div
-        ref={canvasRef}
-        onPointerDown={(e) => { if (edit && e.target === canvasRef.current) setEditSel(null); }}
-        className={cn('relative overflow-hidden rounded-lg border border-dashed bg-muted/40', edit && 'border-primary/60 bg-primary/5')}
-        style={{ height: CANVAS_H }}
-      >
+      <div className={cn('overflow-auto rounded-lg border border-dashed bg-muted/40', edit && 'border-primary/60 bg-primary/5')} style={{ maxHeight: CANVAS_H }}>
+        <div
+          ref={canvasRef}
+          onPointerDown={(e) => { if (edit && e.target === canvasRef.current) setEditSel(null); }}
+          className="relative"
+          style={{ width: '100%', minWidth: contentW, height: contentH }}
+        >
         {/* zones / rooms — drawn behind tables; only headers + handles are interactive */}
         {zones.map((z) => {
           const d = drag?.kind === 'zone' && drag.id === z.id ? drag : null;
@@ -327,6 +364,8 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
                 onPointerMove={onDragMove}
                 onPointerUp={onDragUp}
                 onClick={() => { if (!edit) onSelect(t.id); }}
+                onKeyDown={(e) => { if (edit && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setEditSel(t.id); } }}
+                aria-label={`โต๊ะ ${t.table_no} · ${STATUS_TH[t.status]}`}
                 title={STATUS_TH[t.status]}
                 className={cn(
                   'flex size-full select-none flex-col items-center justify-center text-[13px] font-bold',
@@ -365,6 +404,7 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
             </div>
           );
         })}
+        </div>
       </div>
 
       {/* edit inspector — shape / seats / rotation / room for the selected table, or delete it */}
@@ -415,6 +455,9 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
             </Select>
           </label>
 
+          <Button variant="outline" size="sm" onClick={() => dup.mutate(inspTable)} disabled={dup.isPending}>
+            <Copy className="size-4" /> ทำซ้ำ
+          </Button>
           <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => confirmDeleteTable(inspTable)} disabled={delTable.isPending}>
             <Trash2 className="size-4" /> ลบโต๊ะ
           </Button>

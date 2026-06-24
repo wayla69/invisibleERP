@@ -368,6 +368,10 @@ async function main() {
   const cForce = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 80 });   // no rev → last-write-wins (e.g. an undo)
   ok('Optimistic lock: PATCH without rev still applies (last-write-wins)', cForce.status === 200 && near(cForce.json.pos_x, 80) && cForce.json.rev === cRev0 + 2, `${cForce.status} rev=${cForce.json.rev}`);
 
+  // create accepts the full initial appearance (shape/rotation/size/seats) — the "duplicate table" path
+  const dupSrc = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'C10', shape: 'square', rotation: 90, width: 70, height: 70, seats: 6 });
+  ok('Create: table accepts initial shape/rotation/size/seats (duplicate path)', (dupSrc.status === 200 || dupSrc.status === 201) && dupSrc.json.shape === 'square' && dupSrc.json.rotation === 90 && dupSrc.json.seats === 6 && near(dupSrc.json.width, 70), `${dupSrc.status} ${JSON.stringify(dupSrc.json).slice(0, 90)}`);
+
   // ── KDS course firing (hold-and-fire course-by-course) ──
   const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
   const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});

@@ -70,7 +70,7 @@ export class TableService {
     const qrToken = 'rt_' + randomBytes(18).toString('base64url');
     const [t] = await db.insert(diningTables).values({
       tenantId: user.tenantId, zoneId: dto.zone_id ?? null, tableNo: dto.table_no, seats: dto.seats ?? 4,
-      shape: dto.shape ?? 'rect', posX: String(dto.pos_x ?? 0), posY: String(dto.pos_y ?? 0),
+      shape: dto.shape ?? 'rect', rotation: dto.rotation ?? 0, posX: String(dto.pos_x ?? 0), posY: String(dto.pos_y ?? 0),
       width: String(dto.width ?? 80), height: String(dto.height ?? 80), status: 'available', qrToken,
     }).returning();
     return shapeTable(t);
