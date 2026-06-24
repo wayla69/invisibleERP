@@ -4,6 +4,7 @@ import {
   BadgeCheck,
   BarChart3,
   Banknote,
+  BellRing,
   BookOpen,
   BookText,
   Bot,
@@ -227,6 +228,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'ข้อมูลหลัก (Master Data)', href: '/master-data', icon: Database, perms: ['masterdata'] },
       { label: 'ฟิลด์กำหนดเอง (Custom fields)', href: '/custom-fields', icon: SlidersHorizontal, perms: ['masterdata', 'users', 'exec'] },
+      { label: 'การแจ้งเตือน (Alert rules)', href: '/alerts', icon: BellRing, perms: ['masterdata', 'users', 'exec', 'dashboard'] },
       { label: 'จัดการผู้ใช้', href: '/admin/users', icon: UserCog, perms: ['users'] },
       { label: 'ตั้งค่ากิจการ', href: '/setup', icon: BadgeCheck, perms: ['users'] },
       { label: 'แพ็กเกจ', href: '/billing', icon: CreditCard, perms: ['users'] },

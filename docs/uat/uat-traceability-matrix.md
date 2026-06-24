@@ -287,6 +287,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-022 | Custom field — typed/required/option validation | Feature (UDF) | 17 §7 |
 | UAT-ADM-023 | Custom field — typed read + bulk load | Feature (UDF) | 17 §7 |
 | UAT-ADM-024 | Custom field — tenant isolation (RLS) | Feature (UDF) | 17 §7 |
+| UAT-ADM-025 | Alert rule — create + reject unknown metric | Feature (alerts) | 17 §7 |
+| UAT-ADM-026 | Alert sweep fires a breached rule | Feature (alerts) | 17 §7 |
+| UAT-ADM-027 | Alert cooldown suppresses re-fire | Feature (alerts) | 17 §7 |
+| UAT-ADM-028 | Alert rules tenant-isolated (RLS) | Feature (alerts) | 17 §7 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
