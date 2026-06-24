@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Split, Utensils, Wallet, X } from 'lucide-react';
+import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Split, Trash2, Utensils, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
+import { FloorPlan, STATUS_TH, tone, type TableRow } from '@/components/floor-plan';
 import { cn } from '@/lib/utils';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -24,25 +24,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-type TableRow = {
-  id: number; table_no: string; status: string; seats: number; pos_x: number; pos_y: number; width: number; height: number;
-  session: { session_no: string; party_size: number; elapsed_min: number } | null;
-  order: { order_no: string; status: string; total: number; waited_min: number } | null;
-};
-
-const STATUS_TH: Record<string, string> = { available: 'ว่าง', reserved: 'จอง', occupied: 'มีลูกค้า', bill_requested: 'เรียกเก็บเงิน', paying: 'กำลังชำระ', cleaning: 'ทำความสะอาด', out_of_service: 'งดใช้' };
-
-// Status → token classes. text = label color, border = left/top accent, dot = floor-plan fill, bar = panel top accent.
-const STATUS_TONE: Record<string, { text: string; border: string; fill: string; bar: string }> = {
-  available: { text: 'text-success', border: 'border-l-success', fill: 'bg-success text-success-foreground', bar: 'border-t-success' },
-  reserved: { text: 'text-info', border: 'border-l-info', fill: 'bg-info text-info-foreground', bar: 'border-t-info' },
-  occupied: { text: 'text-info', border: 'border-l-info', fill: 'bg-info text-info-foreground', bar: 'border-t-info' },
-  bill_requested: { text: 'text-warning-foreground dark:text-warning', border: 'border-l-warning', fill: 'bg-warning text-warning-foreground', bar: 'border-t-warning' },
-  paying: { text: 'text-warning-foreground dark:text-warning', border: 'border-l-warning', fill: 'bg-warning text-warning-foreground', bar: 'border-t-warning' },
-  cleaning: { text: 'text-muted-foreground', border: 'border-l-muted-foreground', fill: 'bg-muted text-muted-foreground', bar: 'border-t-muted-foreground' },
-  out_of_service: { text: 'text-muted-foreground', border: 'border-l-muted', fill: 'bg-muted text-muted-foreground', bar: 'border-t-muted' },
-};
-const tone = (s: string) => STATUS_TONE[s] ?? STATUS_TONE.out_of_service;
+// TableRow / STATUS_TH / STATUS_TONE / tone live in components/floor-plan and are imported above —
+// the floor-plan editor and this page share the same status palette and row shape.
 
 export default function TablesPage() {
   const qc = useQueryClient();
@@ -61,7 +44,7 @@ export default function TablesPage() {
       <Tabs
         tabs={[
           { key: 'board', label: 'สถานะโต๊ะ', content: <Board tables={tables} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
-          { key: 'plan', label: 'ผังร้าน', content: <FloorPlan tables={tables} onSelect={setSel} sel={sel} onAdd={refresh} /> },
+          { key: 'plan', label: 'ผังร้าน', content: <FloorPlan tables={tables} onSelect={setSel} sel={sel} onChange={refresh} /> },
         ]}
       />
       {selected && <TablePanel t={selected} onChange={refresh} onClose={() => setSel(null)} onOrder={() => setOrderTable(selected.id)} />}
@@ -112,40 +95,6 @@ function Board({ tables, q, onSelect, sel, onOrder }: { tables: TableRow[]; q: a
   );
 }
 
-function FloorPlan({ tables, onSelect, sel, onAdd }: { tables: TableRow[]; onSelect: (id: number) => void; sel: number | null; onAdd: () => void }) {
-  const [no, setNo] = useState('');
-  const add = useMutation({ mutationFn: () => api('/api/restaurant/tables', { method: 'POST', body: JSON.stringify({ table_no: no, pos_x: 20 + ((tables.length % 5) * 120), pos_y: 20 + Math.floor(tables.length / 5) * 110 }) }), onSuccess: () => { setNo(''); onAdd(); }, onError: (e: any) => toast.error(e.message) });
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input className="max-w-[180px]" placeholder="เลขโต๊ะ เช่น A1" value={no} onChange={(e) => setNo(e.target.value)} />
-        <Button disabled={!no || add.isPending} onClick={() => add.mutate()}>
-          <Plus className="size-4" /> เพิ่มโต๊ะ
-        </Button>
-      </div>
-      <div className="relative h-[420px] overflow-hidden rounded-lg border border-dashed bg-muted/40">
-        {tables.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => onSelect(t.id)}
-            title={STATUS_TH[t.status]}
-            className={cn(
-              'absolute flex flex-col items-center justify-center text-[13px] font-bold',
-              tone(t.status).fill,
-              sel === t.id && 'ring-[3px] ring-primary',
-            )}
-            style={{ left: t.pos_x, top: t.pos_y, width: t.width, height: t.height, borderRadius: t.width === t.height ? '50%' : 8 }}
-          >
-            {t.table_no}
-            <div className="text-[10px] font-normal">{STATUS_TH[t.status]}</div>
-          </button>
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground">แตะโต๊ะเพื่อจัดการ · สีบอกสถานะ</p>
-    </div>
-  );
-}
-
 function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: () => void; onClose: () => void; onOrder: () => void }) {
   const [msg, setMsg] = useState('');
   const [qr, setQr] = useState('');
@@ -189,6 +138,8 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
   const bill = useMutation({ mutationFn: () => api(`/api/restaurant/orders/${t.order!.order_no}/bill`, { method: 'POST', body: '{}' }), onSuccess: () => { setMsg('เรียกเก็บเงินแล้ว'); onChange(); }, onError: onErr });
   const checkout = useMutation({ mutationFn: () => api<{ tax_invoice_no: string }>(`/api/restaurant/orders/${t.order!.order_no}/checkout`, { method: 'POST', body: JSON.stringify({ method: 'Cash' }) }), onSuccess: (r) => { setMsg(`ชำระเงินสำเร็จ · ใบกำกับภาษี ${r.tax_invoice_no ?? '-'}`); onChange(); }, onError: onErr });
   const clear = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'available' }) }), onSuccess: () => { setMsg('เคลียร์โต๊ะแล้ว'); onClose(); onChange(); }, onError: onErr });
+  const del = useMutation({ mutationFn: () => api(`/api/restaurant/tables/${t.id}`, { method: 'DELETE' }), onSuccess: () => { onClose(); onChange(); }, onError: onErr });
+  const removeTable = () => { if (typeof window !== 'undefined' && !window.confirm(`ลบโต๊ะ ${t.table_no}? ประวัติการขายยังอยู่ครบ`)) return; del.mutate(); };
 
   return (
     <Card className={cn('mt-4 gap-4 border-t-4 p-5', tone(t.status).bar)}>
@@ -325,6 +276,12 @@ function TablePanel({ t, onChange, onClose, onOrder }: { t: TableRow; onChange: 
         </div>
       )}
       {t.status === 'cleaning' && <Button onClick={() => clear.mutate()} disabled={clear.isPending}><Sparkles className="size-4" /> เคลียร์โต๊ะแล้ว (พร้อมรับลูกค้า)</Button>}
+
+      {!t.session && (
+        <Button variant="ghost" size="sm" className="self-start text-destructive hover:bg-destructive/10" onClick={removeTable} disabled={del.isPending}>
+          <Trash2 className="size-4" /> ลบโต๊ะนี้
+        </Button>
+      )}
     </Card>
   );
 }

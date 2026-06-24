@@ -128,6 +128,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-092 | Receipt renders in English | Feature (i18n) | 20 §7 |
 | UAT-O2C-093 | Bilingual (TH/EN) receipt | Feature (i18n) | 20 §7 |
 | UAT-O2C-094 | Per-tenant default language persists | Feature (i18n) | 20 §7 |
+| UAT-O2C-095 | Reposition a table on the floor plan | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-096 | Delete a free table (soft-delete) | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-097 | Delete a seated table blocked | Feature (floor-plan layout) | 20 §6, §13 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

@@ -298,6 +298,26 @@ async function main() {
   const a16 = (mgBoard.json.tables ?? []).find((t: any) => t.table_no === 'A16');
   ok('Merge tables: source table freed after merge', a16?.status === 'available' && !a16?.session, `${a16?.status} session=${!!a16?.session}`);
 
+  // ── floor-plan edit: reposition (drag) + delete (soft) + busy-guard ──
+  const fpT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'F1', seats: 2, pos_x: 0, pos_y: 0 });
+  const fpMoved = await inj('PATCH', `/api/restaurant/tables/${fpT.json.id}`, sales1, { pos_x: 240, pos_y: 130 });
+  ok('Floor-plan: drag persists new x/y (PATCH pos_x/pos_y)', (fpMoved.status === 200 || fpMoved.status === 201) && near(fpMoved.json.pos_x, 240) && near(fpMoved.json.pos_y, 130), `${fpMoved.status} ${fpMoved.json.pos_x},${fpMoved.json.pos_y}`);
+  const fpBoard = await inj('GET', '/api/restaurant/tables/status', sales1);
+  ok('Floor-plan: status board reflects the moved position', near((fpBoard.json.tables ?? []).find((t: any) => t.id === fpT.json.id)?.pos_x, 240), `x=${(fpBoard.json.tables ?? []).find((t: any) => t.id === fpT.json.id)?.pos_x}`);
+
+  const delT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'F2', seats: 2 });
+  const delRes = await inj('DELETE', `/api/restaurant/tables/${delT.json.id}`, sales1);
+  ok('Floor-plan: delete a free table (soft-delete → active=false)', (delRes.status === 200 || delRes.status === 201) && delRes.json.deleted === true, `${delRes.status} ${JSON.stringify(delRes.json).slice(0, 60)}`);
+  const afterDel = await inj('GET', '/api/restaurant/tables', sales1);
+  ok('Floor-plan: deleted table drops off the list', !(afterDel.json.tables ?? []).some((t: any) => t.id === delT.json.id), `n=${(afterDel.json.tables ?? []).length}`);
+  const delGone = await inj('DELETE', `/api/restaurant/tables/${delT.json.id}`, sales1);
+  ok('Floor-plan: deleting an already-removed table → 404', delGone.status === 404, `${delGone.status}`);
+
+  const busyT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'F3', seats: 2 });
+  await inj('POST', `/api/restaurant/tables/${busyT.json.id}/open`, sales1, {});
+  const delBusy = await inj('DELETE', `/api/restaurant/tables/${busyT.json.id}`, sales1);
+  ok('Floor-plan: deleting a table with a live session rejected (400 TABLE_BUSY)', delBusy.status === 400 && delBusy.json.error?.code === 'TABLE_BUSY', `${delBusy.status} ${delBusy.json.error?.code}`);
+
   // ── KDS course firing (hold-and-fire course-by-course) ──
   const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
   const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});

@@ -65,6 +65,18 @@ export class TableService {
     return shapeTable(t);
   }
 
+  // Soft-delete a table (active=false) — preserves history + FKs (orders/sessions keep referencing it).
+  // A table with a live session cannot be removed; clear/checkout the table first.
+  async deleteTable(id: number, _user: JwtUser) {
+    const db = this.db as any;
+    const [t] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
+    if (!t || !t.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
+    const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    if (live) throw new BadRequestException({ code: 'TABLE_BUSY', message: 'Table has a live session — clear it first', messageTh: 'โต๊ะมีลูกค้าอยู่ — เคลียร์โต๊ะก่อนจึงจะลบได้' });
+    await db.update(diningTables).set({ active: false, updatedAt: new Date() }).where(eq(diningTables.id, id));
+    return { id, deleted: true, table_no: t.tableNo };
+  }
+
   async setStatus(id: number, status: string, _user: JwtUser) {
     const db = this.db as any;
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
