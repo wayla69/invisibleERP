@@ -30,7 +30,7 @@ Our SoD analysis (computed from `packages/shared/src/permissions.ts` → `DEFAUL
 - 18 single-duty roles per the **"Proposed Roles"** tab (Cashier, POS Supervisor, AR/AP Clerk, Buyer, Warehouse Operator, Inventory Controller, Stock Counter, GL Accountant, Financial Controller, Master Data Admin, Pricing Manager, CRM/Credit Manager, Returns Clerk, Access Administrator, Executive-read, Customer, Superuser). The "Remediated Matrix" tab shows this design → **0 residual conflicts** (Admin inherent).
 
 ### 4. SoD conflict rule registry + detective report
-- Encode the 13 rules (Duty A perms × Duty B perms) as a config in `@ierp/shared`.
+- Encode the 16 rules (Duty A perms × Duty B perms) as a config in `@ierp/shared`.
 - `GET /api/admin/sod/conflicts` (Admin-only): returns each **user** holding both sides of any rule, including effective permissions (must resolve per-user `userOverride`, not just role) — feeds the quarterly User Access Review (ITGC-AC-08).
 
 ### 5. Preventive guard (admin-users)
