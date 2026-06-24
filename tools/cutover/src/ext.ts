@@ -211,6 +211,33 @@ async function main() {
   const svDel = await inj('DELETE', `/api/saved-views/${svPersonal.json.id}`, token2);
   ok('Saved views: the owner can delete their view', svDel.status === 200 && svDel.json.deleted === true, `${svDel.status}`);
 
+  // ── role-based dashboard layouts (Phase 5) ──
+  // ExecutiveViewer carries `dashboard` (can view the dashboard) but NOT `exec`/`ar`/`creditors` — perfect to
+  // prove per-widget permission filtering. hqex (Planner) carries `exec` → can configure layouts.
+  await db.insert(s.users).values({ username: 'hqev', passwordHash: await pw.hash('pw'), role: 'ExecutiveViewer', tenantId: hq.id }).onConflictDoNothing();
+  const hqev = (await inj('POST', '/api/login', undefined, { username: 'hqev', password: 'pw' })).json.token;
+
+  const catalog = await inj('GET', '/api/dashboard/widgets/catalog', hqex);
+  ok('Dashboards: widget catalog + role list exposed', (catalog.json.widgets ?? []).some((w: any) => w.key === 'today_sales') && (catalog.json.roles ?? []).includes('ExecutiveViewer'), `${(catalog.json.widgets ?? []).length} widgets`);
+  const badRole = await inj('PUT', '/api/dashboard/layouts/NotARole', hqex, { widgets: [] });
+  ok('Dashboards: an unknown role is rejected (400 BAD_ROLE)', badRole.status === 400 && badRole.json.error?.code === 'BAD_ROLE', `${badRole.status} ${badRole.json.error?.code}`);
+  const badWidget = await inj('PUT', '/api/dashboard/layouts/ExecutiveViewer', hqex, { widgets: ['nope'] });
+  ok('Dashboards: an unknown widget key is rejected (400 BAD_WIDGET)', badWidget.status === 400 && badWidget.json.error?.code === 'BAD_WIDGET', `${badWidget.status} ${badWidget.json.error?.code}`);
+  const setLayout = await inj('PUT', '/api/dashboard/layouts/ExecutiveViewer', hqex, { widgets: ['today_sales', 'open_ar', 'outstanding_ap', 'low_stock', 'open_pipeline'] });
+  ok('Dashboards: admin sets a per-role layout', setLayout.status === 200 && (setLayout.json.widgets ?? []).length === 5, `${setLayout.status} ${(setLayout.json.widgets ?? []).length}`);
+  const getLayout = await inj('GET', '/api/dashboard/layouts/ExecutiveViewer', hqex);
+  ok('Dashboards: the configured layout reads back', getLayout.json.configured === true && (getLayout.json.widgets ?? []).length === 5, `${JSON.stringify(getLayout.json.widgets ?? [])}`);
+  const mine = await inj('GET', '/api/dashboard/layout/me', hqev);
+  const mineKeys = (mine.json.widgets ?? []).map((w: any) => w.key);
+  ok('Dashboards: resolved layout is filtered to the viewer’s permissions (no AR/AP for ExecutiveViewer)',
+    mineKeys.includes('today_sales') && mineKeys.includes('low_stock') && mineKeys.includes('open_pipeline') && !mineKeys.includes('open_ar') && !mineKeys.includes('outstanding_ap'),
+    `keys=${JSON.stringify(mineKeys)}`);
+  ok('Dashboards: each resolved widget carries a live numeric value', (mine.json.widgets ?? []).length > 0 && (mine.json.widgets ?? []).every((w: any) => typeof w.value === 'number'), `${JSON.stringify(mine.json.widgets ?? [])}`);
+  const mineDefault = await inj('GET', '/api/dashboard/layout/me', hqex);
+  ok('Dashboards: an unconfigured role falls back to the default layout', mineDefault.json.configured === false && (mineDefault.json.widgets ?? []).length >= 4, `configured=${mineDefault.json.configured} n=${(mineDefault.json.widgets ?? []).length}`);
+  const t2Layout = await inj('GET', '/api/dashboard/layouts/ExecutiveViewer', cf2ex);
+  ok('Dashboards: layouts are tenant-isolated (cf2 sees none of HQ’s)', t2Layout.json.configured === false && (t2Layout.json.widgets ?? []).length === 0, `configured=${t2Layout.json.configured}`);
+
   await app.close();
   await pg.close();
 

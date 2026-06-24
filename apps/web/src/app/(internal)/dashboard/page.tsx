@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Banknote, Package, Receipt, ShoppingCart, TrendingUp } from 'lucide-react';
+import { Banknote, Gauge, Package, Receipt, ShoppingCart, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -25,18 +25,31 @@ interface Trend {
   days: number;
   trend: { date: string; sales: number; orders: number }[];
 }
+interface Widget { key: string; label: string; label_en: string; unit: string; value: number }
 
 export default function DashboardPage() {
   const q = useQuery<Dash>({ queryKey: ['dashboard'], queryFn: () => api('/api/dashboard') });
   const t = useQuery<Trend>({ queryKey: ['dashboard-trend'], queryFn: () => api('/api/dashboard/sales-trend?days=14') });
+  const mine = useQuery<{ role: string; configured: boolean; widgets: Widget[] }>({ queryKey: ['dashboard-mine'], queryFn: () => api('/api/dashboard/layout/me') });
   const d = q.data;
 
   const trendData = (t.data?.trend ?? []).map((r) => ({ ...r, label: thaiDate(r.date) }));
   const topItems = (d?.top_items_today ?? []).slice(0, 6).map((r) => ({ name: r.Item_Description, revenue: r.revenue }));
+  const myWidgets = mine.data?.widgets ?? [];
 
   return (
     <div>
       <PageHeader title="แดชบอร์ด" description="ภาพรวมธุรกิจแบบเรียลไทม์" />
+      {myWidgets.length > 0 && (
+        <div className="mb-6">
+          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ตัวชี้วัดตามบทบาท (Your role KPIs)</h3>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {myWidgets.map((w) => (
+              <StatCard key={w.key} label={w.label} value={w.unit === 'baht' ? baht(w.value) : num(w.value)} icon={Gauge} tone="default" hint={w.label_en} />
+            ))}
+          </div>
+        </div>
+      )}
       <StateView q={q}>
         {d && (
           <div className="space-y-6">

@@ -24,6 +24,32 @@ replenishment, anomaly detection, and the AI assistant.
 
 ---
 
+## 1a. Role-based dashboards
+
+The home dashboard shows a **“ตัวชี้วัดตามบทบาท (Your role KPIs)”** strip at the top:
+a set of KPI tiles chosen for *your* role — today's sales, low stock, open AR/AP,
+open pipeline, and more. You only ever see tiles your permissions allow.
+
+### Designing a role's dashboard (admins)
+
+**Screen:** `/dashboard-designer` (**แดชบอร์ดตามบทบาท**) · **Required permission:**
+`users` / `exec`.
+
+1. Pick a **role** at the top.
+2. From **วิดเจ็ตที่มีให้เลือก (available widgets)**, click **เพิ่ม (Add)** to put a
+   KPI on that role's dashboard; reorder with ▲▼ and remove with ✕.
+3. Click **บันทึก (Save)**.
+
+**Expected result:** Everyone with that role sees the chosen KPIs on their home
+dashboard — **filtered to what each person is allowed to see** (e.g. a stock-only
+role never sees finance figures, even if the widget is in the role's layout). A
+role with no saved layout falls back to a sensible default set.
+
+> **Troubleshooting:** “BAD_ROLE” — the role isn't recognised; “BAD_WIDGET” — a
+> widget key isn't in the catalog (pick from the available list).
+
+---
+
 ## 2. Standard reports (Excel & PDF)
 
 **Required permission:** varies by report (`dashboard` / `pos` / `exec` for sales;
