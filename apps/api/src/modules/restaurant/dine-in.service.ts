@@ -1,4 +1,5 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
+import { RealtimeService } from '../pos-scale/realtime.service';
 import { eq, and, inArray, desc, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
@@ -39,6 +40,7 @@ export class DineInService {
     private readonly member: MemberService,
     private readonly gift: GiftCardService,
     private readonly pricing: PricingService,
+    @Optional() private readonly realtime?: RealtimeService,   // multi-terminal SSE fan-out (best-effort)
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -214,6 +216,9 @@ export class DineInService {
     await db.update(dineInOrderItems).set(set).where(eq(dineInOrderItems.id, itemId));
     await this.refreshTotals(Number(item.orderId));
     const status = await this.recomputeOrderStatus(Number(item.orderId));
+    // realtime: fan this KDS state change out to every other terminal (SSE), so a second screen reflects
+    // it without waiting for its poll. Best-effort — a missing realtime service never blocks the action.
+    this.realtime?.publish({ type: 'kds_item', tenant_id: user.tenantId ?? null, item_id: itemId, order_id: Number(item.orderId), kds_status: set.kdsStatus, order_status: status, at: now.toISOString() });
     return { item_id: itemId, kds_status: set.kdsStatus, order_status: status };
   }
 

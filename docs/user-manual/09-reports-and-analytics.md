@@ -236,7 +236,12 @@ can act on. *(The underlying counts come from the inventory EOD count.)*
 
 ## Restaurant management analytics
 
-Three manager reports turn the sales you've already rung into decisions. All take an
+Open **วิเคราะห์ร้านอาหาร (Restaurant analytics)** in the POS menu (`/restaurant-analytics`)
+for all of these on one screen — pick a date range at the top and switch tabs (Menu
+engineering · ช่วงเวลาขายดี · ยกเลิก/ส่วนลด · พนักงาน · แนวโน้ม · ความพร้อมเมนู). The same
+data is available on the API for your own tools.
+
+The manager reports turn the sales you've already rung into decisions. All take an
 optional date window (`?from=YYYY-MM-DD&to=YYYY-MM-DD`, default = today).
 
 ### Menu engineering (`GET /api/analytics/menu-engineering`)

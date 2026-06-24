@@ -160,6 +160,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-119 | Aggregator menu push (real adapter) | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-120 | Accept/reject routes to KDS + notifies platform | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-121 | Status callback + mock fallback | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-122 | Multi-terminal realtime KDS event | Feature (multi-terminal SSE) | 20 §rev3.0 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

@@ -243,6 +243,12 @@ course number and tap **ส่งคอร์ส** to fire just that course — 
 until you fire them. The KDS shows each ticket's course and lists them in course
 order, so the kitchen cooks in the right sequence.
 
+**Live across every screen.** The KDS and the **โต๊ะ (tables)** board update in
+**real time** — when one terminal advances a dish (เริ่มทำ → เสร็จ → เสิร์ฟ) or a
+table is seated/cleared, every other screen reflects it at once, without waiting for
+a refresh. A small **เรียลไทม์ / กำลังเชื่อมต่อ…** badge shows the live status; if the
+connection drops it falls back to a periodic refresh automatically.
+
 **Kitchen (KDS).** Open **จอครัว (KDS)** (back-of-house). Tickets are grouped by
 station and refresh automatically; tap a card to advance it
 **เริ่มทำ → เสร็จแล้ว → เสิร์ฟแล้ว**. The colour border flags how long a ticket has
