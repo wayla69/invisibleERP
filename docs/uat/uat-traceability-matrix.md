@@ -157,6 +157,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-119 | Dunning on paid invoice rejected (ALREADY_PAID) | REV-12 | 01 §9, §13 |
 | UAT-O2C-120 | Credit status flags over-limit + serious overdue | REV-12, R09 | 01 §7, §9 |
 | UAT-O2C-121 | Credit check denies further credit (held customer) | REV-12, R09 | 01 §9, §13 |
+| UAT-O2C-122 | Order entry blocks 90+ defaulter (CREDIT_OVERDUE) | REV-12 | 01 §7, §9 |
+| UAT-O2C-123 | Order entry — over-limit still blocked (parity) | REV-08 | 01 §9, §13 |
+| UAT-O2C-124 | Order entry — good-standing customer can order | REV-12 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -436,7 +439,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 33 | 12 |
+| 02 Order-to-Cash | 36 | 14 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
 | 05 GL & Close | 23 | 12 |
@@ -445,4 +448,4 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **271** | **122** |
+| **Total** | **274** | **124** |

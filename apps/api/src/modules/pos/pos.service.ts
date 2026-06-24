@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, custPosItems, tenants, orders, orderLines, loyaltyConfig, loyaltyPoints, loyaltyTxn, arInvoices } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
+import { isSeriousOverdue } from '../finance/collections.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -115,6 +116,19 @@ export class PosService {
           if (n(ar?.out) + total > limit)
             throw new ConflictException({ code: 'CREDIT_LIMIT', message: 'Order exceeds credit limit', messageTh: 'เกินวงเงินเครดิต' });
         }
+        // Serious-overdue hold (REV-12) — unified with the collections `on_hold` decision: a customer with
+        // any invoice 90+ days past due is in default and blocked from new credit orders even within limit.
+        // Same FOR-UPDATE'd tenant context, so it serializes with concurrent orders like the limit check.
+        const overdue = await tx.select({ due_date: arInvoices.dueDate, out: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)` })
+          .from(arInvoices).where(and(eq(arInvoices.tenantId, tenant.id), sql`${arInvoices.status}::text <> 'Paid'`));
+        let maxOverdueDays = 0;
+        for (const r of overdue) {
+          if (n(r.out) <= 0.0001 || !r.due_date) continue;
+          const d = Math.round((Date.parse(today) - Date.parse(String(r.due_date))) / 86400000);
+          if (d > maxOverdueDays) maxOverdueDays = d;
+        }
+        if (isSeriousOverdue(maxOverdueDays))
+          throw new ConflictException({ code: 'CREDIT_OVERDUE', message: `Customer has invoices ${maxOverdueDays} days overdue`, messageTh: 'ลูกค้ามีหนี้ค้างชำระเกินกำหนด (90+ วัน)' });
       }
 
       const [oh] = await tx.insert(orders).values({

@@ -13,6 +13,11 @@ const STAGE_INDEX = new Map<string, number>(DUNNING_STAGES.map((s, i) => [s, i])
 
 export interface DunningDto { stage: DunningStage; channel?: string; promise_to_pay_date?: string; notes?: string }
 
+// Days-past-due beyond which a customer is in default and put on credit hold. Single-sourced here so the
+// collections `on_hold` decision and the order-entry credit gate (pos.service) never drift apart.
+export const SERIOUS_OVERDUE_DAYS = 90;
+export function isSeriousOverdue(maxOverdueDays: number): boolean { return maxOverdueDays > SERIOUS_OVERDUE_DAYS; }
+
 // Recommended dunning rung for an overdue age (Asia/Bangkok business day). null ⇒ not yet due.
 function recommendedStage(daysOverdue: number): DunningStage | null {
   if (daysOverdue <= 0) return null;
@@ -129,7 +134,7 @@ export class CollectionsService {
     }
     const limit = n(t.creditLimit);
     const overLimit = limit > 0 && round2(exposure) > limit;
-    const seriousOverdue = maxOverdueDays > 90; // 90+ past due ⇒ default territory
+    const seriousOverdue = isSeriousOverdue(maxOverdueDays); // 90+ past due ⇒ default territory
     const onHold = overLimit || seriousOverdue;
     return {
       tenant_id: tenantId, customer: t.code, credit_term: t.creditTerm ?? null,

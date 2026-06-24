@@ -75,6 +75,10 @@ escalates with age:
 - **Order entry** consults the same decision (`POST /api/finance/ar/credit-check`)
   before extending further credit — a held customer is declined with reason
   `CREDIT_LIMIT_EXCEEDED`, `SERIOUS_OVERDUE`, or `WOULD_EXCEED_LIMIT`.
+- **This hold is enforced directly at the till and portal:** creating a credit
+  order (POS or customer self-service) for a customer **90+ days overdue** is
+  blocked with `CREDIT_OVERDUE` — even if they're under their limit — using the
+  same 90-day threshold as the collections hold above.
 
 > **Note — separation of duties:** the **credit limit** is master data maintained by
 > the *Credit Manager*, kept separate from order entry, so nobody can raise a limit

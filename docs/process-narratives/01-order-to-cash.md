@@ -65,7 +65,7 @@ Single-duty roles enforce SoD: the role that **records** a sale (Cashier / Sales
 
 1. **Master-data prerequisites.** CreditManager maintains the customer credit limit / credit-hold flag; PricingManager maintains price lists and promotions. SoD separates these from order entry (**R09**, **R10**). Changes are captured in `audit_log` (**ITGC-AC-10**).
 2. **Order / sale capture.** Sales or Cashier submits `POST /api/pos/orders`. Inputs are validated by Zod schema (qty > 0, price ≥ 0, amount > 0) with a standardized error envelope — invalid payloads are rejected with `400` (**REV-01**).
-3. **Credit control (decision point).** For credit customers the service takes a tenant-row lock (`SELECT ... FOR UPDATE`) before reading outstanding AR, so concurrent orders for the same customer serialize. If `creditHold` is set → reject `CREDIT_HOLD`; if `outstanding AR + order > creditLimit` → reject `CREDIT_LIMIT` (**REV-08**). Cash sales bypass credit control.
+3. **Credit control (decision point).** For credit customers the service takes a tenant-row lock (`SELECT ... FOR UPDATE`) before reading outstanding AR, so concurrent orders for the same customer serialize. If `creditHold` is set → reject `CREDIT_HOLD`; if `outstanding AR + order > creditLimit` → reject `CREDIT_LIMIT` (**REV-08**); and — unified with the collections hold (step 9) — if the customer has any invoice **90+ days past due** they are in default and rejected `CREDIT_OVERDUE` even within their limit (**REV-12**; the 90-day threshold is single-sourced in `collections.service.ts` so the order gate and the collections `on_hold` decision never drift). This gate runs identically for **internal POS** and **portal/self-service** order entry (both `POST /api/pos/orders`, Customer role pinned to its own tenant). Cash sales bypass credit control.
 4. **Document numbering.** A gapless, per-type document number (SALE-/SO-/INV-) is allocated atomically via upsert-returning on `doc_counters` — no `COUNT(*)+1` race, no duplicate or skipped numbers (**REV-04**).
 5. **Payment capture.** Tender is recorded via `/api/payments`. The payment row is persisted **Pending before** the gateway capture and flipped to **Failed** on error, so captured funds can never be unrecorded (**REV-03**). A repeated `idempotency_key` returns the original tender, backed by a unique index, preventing double charges (**REV-02**). For card/e-wallet, PSP webhooks are HMAC-SHA256 verified over the raw body, fail-closed in production, with out-of-band status re-verification (**REV-09**) — see `07-cash-treasury.md`. The gateway is selectable per tender (`gateway`): `mock` (default), `promptpay` (a real scannable EMVCo QR), `stripe`, and **`opn`** (Opn / Omise — Thailand's PSP aggregator, so a single integration covers cards plus Thai e-wallets (TrueMoney / Rabbit LINE Pay / ShopeePay) and cross-border tourist wallets (Alipay+ / WeChat Pay)); `stripe`/`opn` activate when their secret-key env (`STRIPE_SECRET_KEY` / `OPN_SECRET_KEY`) is set and otherwise fall back to `mock`. Card tenders capture synchronously; wallet/QR tenders return **Pending** and settle via webhook (`PATCH /api/payments/:no/settle`), so funds are never booked before they move.
 6. **Order lifecycle.** Order status transitions Pending → Processing → Shipped → Completed; each transition is recorded in `doc_status_log`. Fulfilment decrements stock under lock (see `03-inventory-cogs.md`, **INV-01**).
@@ -85,9 +85,10 @@ flowchart TD
     B -- No --> B1[Reject 400 VALIDATION REV-01]
     B -- Yes --> C{Credit customer?}
     C -- No, cash --> E[Allocate doc number SALE-/INV- REV-04]
-    C -- Yes --> D{Credit hold or over limit? FOR UPDATE REV-08}
+    C -- Yes --> D{Hold / over limit / 90+ overdue? FOR UPDATE REV-08/REV-12}
     D -- Hold --> D1[Reject CREDIT_HOLD]
     D -- Over limit --> D2[Reject CREDIT_LIMIT]
+    D -- 90+ overdue --> D3[Reject CREDIT_OVERDUE]
     D -- OK --> E
     E --> F[Capture payment: persist Pending then capture REV-02/03]
     F --> G[Order lifecycle Pending->Processing->Shipped->Completed]
@@ -110,6 +111,7 @@ flowchart TD
 |---|---|---|---|---|---|
 | 2 | Garbage/invalid sales data posted | Zod schema validation, standard error envelope | Prev / Auto | REV-01 | Validation test logs, 400 responses |
 | 3 | Sale beyond customer credit limit / on hold | Credit-limit + credit-hold check under tenant-row lock | Prev / Auto | REV-08 | `CREDIT_LIMIT`/`CREDIT_HOLD` rejections, harness ToE |
+| 3,9 | Sale to a customer in default (90+ days overdue) | Serious-overdue hold at order entry, unified with collections `on_hold` (single-sourced threshold) | Prev / Auto | REV-12 | `CREDIT_OVERDUE` rejection; `basics` harness ToE |
 | 4,7 | Missing/duplicate sales numbers | Atomic gapless document numbering | Prev / Auto | REV-04 | Doc-number sequence export |
 | 5 | Double-charged customer on retry | Payment idempotency key + unique index | Prev / Auto | REV-02 | Idempotency test; payments table |
 | 5 | Captured funds unrecorded (orphan charge) | Persist Pending before capture; flip Failed on error | Prev / Auto | REV-03 | Negative-path test |
@@ -172,3 +174,4 @@ flowchart TD
 | 0.2 | 2026-06-23 | Platform | Security review W3 (REC-01 / GL-01): AR receipts accept an `idempotency_key` (migration 0068) so a retried request collects cash once — no double receipt / double-counted paid amount. Verified by the `match` harness idempotency case. |
 | 0.3 | 2026-06-24 | Platform | §7 step 5 — documented the selectable payment `gateway` set and added **`opn`** (Opn / Omise — Thai PSP aggregator covering cards + Thai e-wallets + Alipay+/WeChat), env-gated (`OPN_SECRET_KEY`) with mock fallback; noted synchronous card vs async wallet/QR settlement. Scaffold only — no control change. |
 | 0.4 | 2026-06-24 | Platform | Added **AR collections & dunning** (§7 step 9): collections worklist, dunning ladder (`DUN-`, migration 0105), credit-status / credit-check hold decision, control **REV-12**, `ALREADY_PAID` handling. Verified by the `basics` harness. |
+| 0.5 | 2026-06-24 | Platform | §7 step 3 — wired the **serious-overdue hold** (90+ days past due ⇒ `CREDIT_OVERDUE`) into POS/portal order entry, unified with the collections `on_hold` decision (threshold single-sourced in `collections.service.ts`). Parity-locked `CREDIT_HOLD`/`CREDIT_LIMIT` checks unchanged. Verified by the `basics` harness. |

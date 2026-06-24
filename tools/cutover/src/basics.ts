@@ -38,9 +38,17 @@ async function main() {
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'CUST', name: 'Credit Customer', creditLimit: '2500' }]).onConflictDoNothing();
-  const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  const cust = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'CUST')))[0].id);
+  await db.insert(s.tenants).values([
+    { code: 'HQ', name: 'HQ' },
+    { code: 'CUST', name: 'Credit Customer', creditLimit: '2500' },
+    { code: 'CUST2', name: 'Defaulting Customer', creditLimit: '100000' }, // under limit but 90+ overdue
+    { code: 'CUST3', name: 'Good Customer', creditLimit: '100000' },        // under limit, only mildly overdue
+  ]).onConflictDoNothing();
+  const tid = async (code: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, code)))[0].id);
+  const hq = await tid('HQ');
+  const cust = await tid('CUST');
+  const cust2 = await tid('CUST2');
+  const cust3 = await tid('CUST3');
   await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
@@ -101,6 +109,8 @@ async function main() {
     { invoiceNo: 'INV-A', invoiceDate: daysAgo(70), dueDate: daysAgo(40), tenantId: cust, amount: '1000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
     { invoiceNo: 'INV-B', invoiceDate: daysAgo(130), dueDate: daysAgo(100), tenantId: cust, amount: '2000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },
     { invoiceNo: 'INV-C', invoiceDate: daysAgo(20), dueDate: daysAgo(5), tenantId: cust, amount: '500', paidAmount: '500', status: 'Paid', createdBy: 'seed' },
+    { invoiceNo: 'INV-D', invoiceDate: daysAgo(150), dueDate: daysAgo(120), tenantId: cust2, amount: '500', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }, // 120d overdue, well under limit
+    { invoiceNo: 'INV-E', invoiceDate: daysAgo(45), dueDate: daysAgo(20), tenantId: cust3, amount: '500', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },  // only 20d overdue
   ]).onConflictDoNothing();
 
   const wl = (await inj('GET', '/api/finance/ar/collections', admin)).json;
@@ -109,7 +119,7 @@ async function main() {
   const c = (wl.rows ?? []).find((r: any) => r.invoice_no === 'INV-C');
   ok('Collections worklist lists open overdue invoices, excludes Paid', !!a && !!b && !c, `A=${!!a} B=${!!b} C=${!!c}`);
   ok('Collections: INV-A (40d) recommends second_notice; INV-B (100d) recommends legal', a?.recommended_stage === 'second_notice' && b?.recommended_stage === 'legal', `A=${a?.recommended_stage} B=${b?.recommended_stage}`);
-  ok('Collections worklist sorted by days overdue (oldest first)', (wl.rows?.[0]?.invoice_no) === 'INV-B', `first=${wl.rows?.[0]?.invoice_no}`);
+  ok('Collections worklist sorted by days overdue (oldest first)', (wl.rows?.[0]?.invoice_no) === 'INV-D', `first=${wl.rows?.[0]?.invoice_no}`);
 
   const dun = await inj('POST', '/api/finance/ar/collections/INV-A/dunning', admin, { stage: 'second_notice', channel: 'email', notes: 'Sent 2nd notice' });
   ok('Record dunning action → DUN- issued', /^DUN-/.test(dun.json.dunning_no ?? '') && dun.json.stage === 'second_notice', JSON.stringify(dun.json).slice(0, 80));
@@ -131,6 +141,18 @@ async function main() {
 
   const cc = (await inj('POST', '/api/finance/ar/credit-check', admin, { tenant_id: cust, amount: 100 })).json;
   ok('Credit check: further credit DENIED for held customer', cc.approved === false && (cc.reason === 'CREDIT_LIMIT_EXCEEDED' || cc.reason === 'SERIOUS_OVERDUE'), `appr=${cc.approved} reason=${cc.reason}`);
+
+  // ───────────────────── Credit hold wired into POS/portal order entry ─────────────────────
+  const order = (c: string) => ({ customer_name: c, items: [{ item_id: 'WIDGET', order_qty: 1, unit_price: 10 }] });
+  // CUST2: under limit (100k) but 120d overdue → blocked by the serious-overdue hold (REV-12, unified rule).
+  const o2 = await inj('POST', '/api/pos/orders', admin, order('CUST2'));
+  ok('Order entry: 90+ days overdue blocked at POS (CREDIT_OVERDUE) even within limit', o2.status === 409 && o2.json?.error?.code === 'CREDIT_OVERDUE', `st=${o2.status} code=${o2.json?.error?.code}`);
+  // CUST (over the 2500 limit) → the parity-locked credit-limit block still fires first.
+  const o1 = await inj('POST', '/api/pos/orders', admin, order('CUST'));
+  ok('Order entry: over-limit still blocked at POS (CREDIT_LIMIT) — parity preserved', o1.status === 409 && o1.json?.error?.code === 'CREDIT_LIMIT', `st=${o1.status} code=${o1.json?.error?.code}`);
+  // CUST3: under limit and only 20d overdue → order allowed (no over-block).
+  const o3 = await inj('POST', '/api/pos/orders', admin, order('CUST3'));
+  ok('Order entry: customer in good standing can still order', o3.status === 201 && /^SO-/.test(o3.json?.order_no ?? ''), `st=${o3.status} no=${o3.json?.order_no}`);
 
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
