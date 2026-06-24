@@ -357,6 +357,17 @@ async function main() {
   const apBadRot = await inj('PATCH', `/api/restaurant/tables/${apT.json.id}`, sales1, { rotation: 400 });
   ok('Table appearance: out-of-range rotation rejected (400)', apBadRot.status === 400, `${apBadRot.status}`);
 
+  // ── optimistic concurrency: rev-gated table updates ──
+  const cT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'C9', seats: 2 });
+  const cRev0 = cT.json.rev;
+  ok('Optimistic lock: a new table carries rev=0', cRev0 === 0, `rev=${cRev0}`);
+  const cOk = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 50, rev: cRev0 });
+  ok('Optimistic lock: PATCH with the current rev applies + bumps rev', cOk.status === 200 && cOk.json.rev === cRev0 + 1 && near(cOk.json.pos_x, 50), `${cOk.status} rev ${cRev0}->${cOk.json.rev}`);
+  const cStale = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 80, rev: cRev0 });   // reuse the now-stale rev
+  ok('Optimistic lock: PATCH with a stale rev rejected (409 STALE_WRITE)', cStale.status === 409 && cStale.json.error?.code === 'STALE_WRITE', `${cStale.status} ${cStale.json.error?.code}`);
+  const cForce = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 80 });   // no rev → last-write-wins (e.g. an undo)
+  ok('Optimistic lock: PATCH without rev still applies (last-write-wins)', cForce.status === 200 && near(cForce.json.pos_x, 80) && cForce.json.rev === cRev0 + 2, `${cForce.status} rev=${cForce.json.rev}`);
+
   // ── KDS course firing (hold-and-fire course-by-course) ──
   const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
   const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});

@@ -1,7 +1,7 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
-import { eq, and, asc, desc, inArray, ne } from 'drizzle-orm';
+import { eq, and, asc, desc, inArray, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { diningTables, floorZones, tableSessions, dineInOrders } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -76,9 +76,12 @@ export class TableService {
     return shapeTable(t);
   }
 
+  // Every update bumps `rev`. When the caller passes the `rev` it last saw (optimistic concurrency),
+  // the write is gated on it: a stale `rev` (someone else edited the table meanwhile) → 409 STALE_WRITE.
+  // Omitting `rev` keeps the legacy last-write-wins behaviour (e.g. an undo that must always apply).
   async updateTable(id: number, dto: UpdateTableDto, _user: JwtUser) {
     const db = this.db as any;
-    const set: any = { updatedAt: new Date() };
+    const set: any = { updatedAt: new Date(), rev: sql`${diningTables.rev} + 1` };
     if (dto.table_no != null) set.tableNo = dto.table_no;
     if (dto.zone_id !== undefined) set.zoneId = dto.zone_id;   // explicit null un-assigns the table from its zone
     if (dto.seats != null) set.seats = dto.seats;
@@ -88,8 +91,15 @@ export class TableService {
     if (dto.pos_y != null) set.posY = String(dto.pos_y);
     if (dto.width != null) set.width = String(dto.width);
     if (dto.height != null) set.height = String(dto.height);
-    const [t] = await db.update(diningTables).set(set).where(eq(diningTables.id, id)).returning();
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
+    const whereClause = dto.rev != null ? and(eq(diningTables.id, id), eq(diningTables.rev, dto.rev)) : eq(diningTables.id, id);
+    const [t] = await db.update(diningTables).set(set).where(whereClause).returning();
+    if (!t) {
+      if (dto.rev != null) {
+        const [exists] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
+        if (exists) throw new ConflictException({ code: 'STALE_WRITE', message: 'Table changed since it was loaded', messageTh: 'ผังถูกแก้ไขโดยผู้อื่น กรุณารีเฟรช' });
+      }
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
+    }
     return shapeTable(t);
   }
 
@@ -201,7 +211,7 @@ export class TableService {
 function shapeTable(t: any) {
   return {
     id: Number(t.id), table_no: t.tableNo, zone_id: t.zoneId, seats: t.seats, shape: t.shape, status: t.status,
-    pos_x: n(t.posX), pos_y: n(t.posY), width: n(t.width), height: n(t.height), rotation: t.rotation, qr_token: t.qrToken,
+    pos_x: n(t.posX), pos_y: n(t.posY), width: n(t.width), height: n(t.height), rotation: t.rotation, rev: t.rev, qr_token: t.qrToken,
   };
 }
 

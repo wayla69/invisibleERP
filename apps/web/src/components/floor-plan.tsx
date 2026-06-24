@@ -6,9 +6,9 @@
 //            REST API (PATCH /tables/:id pos/size/zone_id; PATCH/DELETE /zones/:id). A VIP room is
 //            just a zone with an accent colour. Drops snap to an 8px grid. Shapes/rotation honoured.
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Check, Home, Move, Palette, Pencil, Plus, RotateCcw, RotateCw, Trash2, X } from 'lucide-react';
+import { Check, Home, Move, Palette, Pencil, Plus, RotateCcw, RotateCw, Trash2, Undo2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 export type TableRow = {
   id: number; table_no: string; status: string; seats: number;
-  zone_id: number | null; shape: string; rotation: number;
+  zone_id: number | null; shape: string; rotation: number; rev: number;
   pos_x: number; pos_y: number; width: number; height: number;
   session: { session_no: string; party_size: number; elapsed_min: number } | null;
   order: { order_no: string; status: string; total: number; waited_min: number } | null;
@@ -76,17 +76,33 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
   const [drag, setDrag] = useState<Drag | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; body: string; onYes: () => void } | null>(null);
   const [rename, setRename] = useState<{ z: ZoneRow; value: string } | null>(null);
+  const [undoStack, setUndoStack] = useState<{ path: string; body: any; kind: 'table' | 'zone' }[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const qc = useQueryClient();
+  const pushUndo = (u: { path: string; body: any; kind: 'table' | 'zone' }) => setUndoStack((s) => [...s.slice(-19), u]);
 
   const onErr = (e: any) => toast.error(e.message);
   const addTable = useMutation({
     mutationFn: () => api('/api/restaurant/tables', { method: 'POST', body: JSON.stringify({ table_no: no.trim(), pos_x: 20 + ((tables.length % 5) * 120), pos_y: 20 + Math.floor(tables.length / 5) * 110 }) }),
     onSuccess: () => { setNo(''); onChange(); }, onError: onErr,
   });
-  // generic PATCH for table/zone move+resize+zone-assign — invalidates the right cache by kind
+  // generic PATCH for table/zone move+resize+appearance. On success we patch the cache in place (incl. the
+  // bumped `rev`) so rapid follow-up edits use a fresh rev and don't self-conflict; a stale-write 409 from
+  // another editor surfaces as a refresh.
   const patch = useMutation({
-    mutationFn: (v: { path: string; body: any; kind: 'table' | 'zone' }) => api(v.path, { method: 'PATCH', body: JSON.stringify(v.body) }),
-    onSuccess: (_r, v) => { if (v.kind === 'zone') onZonesChange(); else onChange(); }, onError: onErr,
+    mutationFn: (v: { path: string; body: any; kind: 'table' | 'zone' }) => api<any>(v.path, { method: 'PATCH', body: JSON.stringify(v.body) }),
+    onSuccess: (row, v) => {
+      if (v.kind === 'zone') {
+        qc.setQueryData<{ zones: ZoneRow[] }>(['floor-zones'], (old) => (old ? { ...old, zones: old.zones.map((z) => (z.id === row.id ? { ...z, ...row } : z)) } : old));
+        onZonesChange();
+      } else {
+        qc.setQueryData<{ tables: TableRow[] }>(['tables-status'], (old) => (old ? { ...old, tables: old.tables.map((t) => (t.id === row.id ? { ...t, ...row } : t)) } : old));
+      }
+    },
+    onError: (e: any, v) => {
+      if (typeof e?.message === 'string' && /แก้ไขโดยผู้อื่น|STALE_WRITE/i.test(e.message)) { toast.error('ผังถูกแก้ไขโดยผู้อื่น — กำลังรีเฟรช'); if (v.kind === 'zone') onZonesChange(); else onChange(); }
+      else onErr(e);
+    },
   });
   const delTable = useMutation({
     mutationFn: (id: number) => api(`/api/restaurant/tables/${id}`, { method: 'DELETE' }),
@@ -100,6 +116,23 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
     mutationFn: (id: number) => api(`/api/restaurant/zones/${id}`, { method: 'DELETE' }),
     onSuccess: () => { toast.success('ลบห้องแล้ว'); onZonesChange(); onChange(); }, onError: onErr,   // tables un-assigned → refresh both
   });
+
+  // forward edit: optimistic-locked (sends the table's current rev) + records an undo of the old values.
+  const editTable = (t: TableRow, body: any, inverse: any) => {
+    pushUndo({ path: `/api/restaurant/tables/${t.id}`, body: inverse, kind: 'table' });
+    patch.mutate({ path: `/api/restaurant/tables/${t.id}`, body: { ...body, rev: t.rev }, kind: 'table' });
+  };
+  const editZone = (z: ZoneRow, body: any, inverse: any) => {
+    pushUndo({ path: `/api/restaurant/zones/${z.id}`, body: inverse, kind: 'zone' });
+    patch.mutate({ path: `/api/restaurant/zones/${z.id}`, body, kind: 'zone' });
+  };
+  // undo applies the recorded inverse without a rev → always wins (it's a deliberate take-back).
+  const doUndo = () => {
+    const last = undoStack[undoStack.length - 1];
+    if (!last) return;
+    setUndoStack((s) => s.slice(0, -1));
+    patch.mutate(last);
+  };
 
   // ── unified pointer drag (move | resize) for tables and zones ──
   const startDrag = (e: ReactPointerEvent, kind: Drag['kind'], id: number, action: Drag['action'], box: { x: number; y: number; w: number; h: number }) => {
@@ -133,18 +166,34 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
     const d = drag;
     setDrag(null);
     if (!d.moved) { if (d.kind === 'table') setEditSel(d.id); return; }   // a tap (no travel) selects a table
-    const path = d.kind === 'table' ? `/api/restaurant/tables/${d.id}` : `/api/restaurant/zones/${d.id}`;
-    const body = d.action === 'move' ? { pos_x: snap(d.x), pos_y: snap(d.y) } : { width: snap(d.w), height: snap(d.h) };
-    patch.mutate({ path, body, kind: d.kind });
+    if (d.kind === 'zone') {
+      const z = zones.find((zz) => zz.id === d.id);
+      if (!z) return;
+      if (d.action === 'move') editZone(z, { pos_x: snap(d.x), pos_y: snap(d.y) }, { pos_x: z.pos_x, pos_y: z.pos_y });
+      else editZone(z, { width: snap(d.w), height: snap(d.h) }, { width: z.width, height: z.height });
+      return;
+    }
+    const t = tables.find((tt) => tt.id === d.id);
+    if (!t) return;
+    if (d.action === 'resize') { editTable(t, { width: snap(d.w), height: snap(d.h) }, { width: t.width, height: t.height }); return; }
+    // move → also auto-assign the table to whichever room now contains its centre (geometry ↔ zone sync)
+    const px = snap(d.x), py = snap(d.y);
+    const cx = px + t.width / 2, cy = py + t.height / 2;
+    const room = zones.find((z) => cx >= z.pos_x && cx <= z.pos_x + z.width && cy >= z.pos_y && cy <= z.pos_y + z.height);
+    const newZid = room ? room.id : null;
+    const body: any = { pos_x: px, pos_y: py };
+    const inverse: any = { pos_x: t.pos_x, pos_y: t.pos_y };
+    if (newZid !== (t.zone_id ?? null)) { body.zone_id = newZid; inverse.zone_id = t.zone_id ?? null; }
+    editTable(t, body, inverse);
   };
 
   const confirmDeleteTable = (t: TableRow) => setConfirm({ title: `ลบโต๊ะ ${t.table_no}?`, body: 'โต๊ะจะถูกซ่อนจากผัง — ประวัติการขายยังอยู่ครบ', onYes: () => delTable.mutate(t.id) });
   const confirmDeleteZone = (z: ZoneRow) => setConfirm({ title: `ลบห้อง “${z.name}”?`, body: 'โต๊ะในห้องจะไม่ถูกลบ แต่จะไม่อยู่ในห้องใด', onYes: () => delZone.mutate(z.id) });
-  const submitRename = () => { if (rename && rename.value.trim()) patch.mutate({ path: `/api/restaurant/zones/${rename.z.id}`, body: { name: rename.value.trim() }, kind: 'zone' }); setRename(null); };
+  const submitRename = () => { if (rename && rename.value.trim()) editZone(rename.z, { name: rename.value.trim() }, { name: rename.z.name }); setRename(null); };
   const cycleColor = (z: ZoneRow) => {
     const order = [null, ...ACCENTS.map((a) => a.hex)];
     const next = order[(order.indexOf(z.color) + 1) % order.length];
-    patch.mutate({ path: `/api/restaurant/zones/${z.id}`, body: { color: next }, kind: 'zone' });
+    editZone(z, { color: next }, { color: z.color });
   };
 
   // shape change normalises dimensions so the new shape reads immediately (circle/square → equal sides;
@@ -153,11 +202,11 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
     const body: any = { shape };
     if (shape === 'circle' || shape === 'square') { const s = Math.round(Math.max(t.width, t.height)); body.width = s; body.height = s; }
     else if (t.width === t.height) { body.height = Math.max(40, Math.round(t.width * 0.62)); }
-    patch.mutate({ path: `/api/restaurant/tables/${t.id}`, body, kind: 'table' });
+    editTable(t, body, { shape: t.shape, width: t.width, height: t.height });
   };
   const rotateBy = (t: TableRow, delta: number) => {
     const r = ((((t.rotation || 0) + delta) % 360) + 360) % 360;
-    patch.mutate({ path: `/api/restaurant/tables/${t.id}`, body: { rotation: r }, kind: 'table' });
+    editTable(t, { rotation: r }, { rotation: t.rotation || 0 });
   };
 
   const inspTable = editSel != null ? tables.find((t) => t.id === editSel) ?? null : null;
@@ -175,7 +224,12 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
         <Button disabled={!no.trim() || addTable.isPending} onClick={() => addTable.mutate()}>
           <Plus className="size-4" /> เพิ่มโต๊ะ
         </Button>
-        <Button variant={edit ? 'default' : 'outline'} className="ml-auto" onClick={() => { setEdit((v) => !v); setDrag(null); setEditSel(null); }}>
+        {edit && (
+          <Button variant="outline" className="ml-auto" disabled={!undoStack.length || patch.isPending} onClick={doUndo} title="เลิกทำการแก้ผังล่าสุด">
+            <Undo2 className="size-4" /> เลิกทำ{undoStack.length ? ` (${undoStack.length})` : ''}
+          </Button>
+        )}
+        <Button variant={edit ? 'default' : 'outline'} className={edit ? undefined : 'ml-auto'} onClick={() => { setEdit((v) => !v); setDrag(null); setEditSel(null); setUndoStack([]); }}>
           {edit ? <><Check className="size-4" /> เสร็จสิ้น</> : <><Pencil className="size-4" /> แก้ไขผัง</>}
         </Button>
       </div>
@@ -334,7 +388,7 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
             <span className="text-muted-foreground">ที่นั่ง</span>
             <Input
               type="number" min={1} className="w-[72px]" defaultValue={inspTable.seats}
-              onBlur={(e) => { const s = Number(e.target.value); if (s > 0 && s !== inspTable.seats) patch.mutate({ path: `/api/restaurant/tables/${inspTable.id}`, body: { seats: s }, kind: 'table' }); }}
+              onBlur={(e) => { const s = Number(e.target.value); if (s > 0 && s !== inspTable.seats) editTable(inspTable, { seats: s }, { seats: inspTable.seats }); }}
             />
           </label>
 
@@ -351,7 +405,7 @@ export function FloorPlan({ tables, zones, onSelect, sel, onChange, onZonesChang
             <span className="text-muted-foreground">ห้อง</span>
             <Select
               value={inspTable.zone_id != null ? String(inspTable.zone_id) : 'none'}
-              onValueChange={(v) => patch.mutate({ path: `/api/restaurant/tables/${inspTable.id}`, body: { zone_id: v === 'none' ? null : Number(v) }, kind: 'table' })}
+              onValueChange={(v) => editTable(inspTable, { zone_id: v === 'none' ? null : Number(v) }, { zone_id: inspTable.zone_id })}
             >
               <SelectTrigger className="w-[160px]"><SelectValue placeholder="เลือกห้อง" /></SelectTrigger>
               <SelectContent>

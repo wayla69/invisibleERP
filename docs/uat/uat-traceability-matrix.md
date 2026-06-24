@@ -140,6 +140,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-102 | Rooms are tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
 | UAT-O2C-103 | Set table shape / size / rotation / seats | Feature (floor-plan layout) | 20 §6 |
 | UAT-O2C-104 | Invalid shape / rotation rejected | Feature (floor-plan layout) | 20 §6, §13 |
+| UAT-O2C-105 | Optimistic-locked table update (rev) | Feature (floor-plan layout) | 20 §6, §13 |
+| UAT-O2C-106 | Unconditional update / undo (no rev) | Feature (floor-plan layout) | 20 §6 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
