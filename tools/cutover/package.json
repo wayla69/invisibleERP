@@ -34,6 +34,7 @@
     "analytics-staff": "tsx src/analytics-staff.ts",
     "realtime-kds": "tsx src/realtime-kds.ts",
     "production-plan": "tsx src/production-plan.ts",
+    "cashflow": "tsx src/cashflow.ts",
     "etax": "tsx src/etax.ts",
     "etax-sign": "tsx src/etax-sign.ts",
     "etax-email": "tsx src/etax-email.ts",

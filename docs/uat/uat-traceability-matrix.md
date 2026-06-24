@@ -250,6 +250,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
 | UAT-GL-020 | Bank reconciliation tenant-scoped | ITGC-AC-03 / REC-02 | 07 §7 |
+| UAT-GL-021 | Cash-flow forecast + working-capital health | Feature (cash-flow forecast) | 07 §7.9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 

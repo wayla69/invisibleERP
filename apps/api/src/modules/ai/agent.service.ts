@@ -2,6 +2,7 @@ import { Injectable, Optional, ServiceUnavailableException } from '@nestjs/commo
 import { PosService } from '../pos/pos.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
+import { CashflowService } from '../finance/cashflow.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { BiService } from '../bi/bi.service';
 import { PipelineService } from '../pipeline/pipeline.service';
@@ -65,6 +66,7 @@ const TOOLS = [
   { name: 'get_staff_performance', description: 'ผลงานพนักงาน: ยอดขาย/บิลเฉลี่ย/การยกเลิก-ส่วนลด ต่อคน', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
   { name: 'get_sales_trend', description: 'แนวโน้มยอดขายเทียบช่วงก่อนหน้าที่เท่ากัน (เพิ่ม/ลด %)', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
   { name: 'get_menu_availability', description: 'เมนูแต่ละอย่างทำได้อีกกี่จาน (จากวัตถุดิบที่จำกัด) + วัตถุดิบใกล้หมด', input_schema: { type: 'object', properties: { low: { type: 'number' } } } },
+  { name: 'get_cashflow_forecast', description: 'พยากรณ์กระแสเงินสดรายสัปดาห์ (เงินสดตั้งต้น+ลูกหนี้+เจ้าหนี้+ยอดขาย) เตือนเงินสดขาดมือ + คะแนนสุขภาพการเงิน', input_schema: { type: 'object', properties: { weeks: { type: 'number' } } } },
 ];
 
 @Injectable()
@@ -84,6 +86,7 @@ export class AgentService {
     @Optional() private readonly menuEng?: MenuEngineeringService,
     @Optional() private readonly production?: ProductionPlanService,
     @Optional() private readonly recipe?: RecipeService,
+    @Optional() private readonly cashflow?: CashflowService,
   ) {}
 
   private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
@@ -249,6 +252,7 @@ export class AgentService {
         case 'get_staff_performance': return this.menuEng ? await this.menuEng.staffPerformance(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
         case 'get_sales_trend': return this.menuEng ? await this.menuEng.salesTrend(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
         case 'get_menu_availability': return this.recipe ? await this.recipe.availabilityForecast(user, { low: input.low }) : { error: 'Menu availability unavailable' };
+        case 'get_cashflow_forecast': return this.cashflow ? await this.cashflow.forecast(user, { weeks: input.weeks }) : { error: 'Cash-flow forecast unavailable' };
         default: return { error: `unknown tool ${name}` };
       }
     } catch (e: any) {

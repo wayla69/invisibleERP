@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto } from './finance.service';
+import { CashflowService } from './cashflow.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
@@ -11,7 +12,11 @@ const PayBody = z.object({ amount: z.number().positive(), idempotency_key: z.str
 
 @Controller('api/finance')
 export class FinanceController {
-  constructor(private readonly svc: FinanceService) {}
+  constructor(private readonly svc: FinanceService, private readonly cashflow: CashflowService) {}
+
+  // Cash-flow forecast (week-by-week) + working-capital health score.
+  @Get('cashflow') @Permissions('exec', 'dashboard', 'ar', 'creditors')
+  cashflowForecast(@Query('weeks') weeks: string | undefined, @CurrentUser() u: JwtUser) { return this.cashflow.forecast(u, { weeks: weeks != null ? Number(weeks) : undefined }); }
 
   // READ
   @Get('pl') @Permissions('exec', 'dashboard', 'ar', 'creditors')

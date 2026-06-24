@@ -113,6 +113,18 @@ needs investigating.
 **Expected result:** The period is marked *Certified*. (You cannot certify a
 reconciliation you prepared yourself.)
 
+## Cash-flow forecast (will I have enough cash?)
+
+Open **กระแสเงินสด (Cash-flow)** in the Finance menu (`/cashflow`). Pick how many
+weeks ahead, and it projects your **cash balance week by week** from four real
+sources: your current cash (from the ledger), money **coming in** from customers
+(receivables, by due date) and from daily POS sales, and money **going out** to
+suppliers (payables, by due date). If the balance is heading below zero it shows the
+**week the shortfall hits** — so you can chase a receivable or delay a payment *before*
+it happens. A **financial-health score** (0–100, A–E) summarises how comfortable your
+working capital is. You can also just ask the **AI assistant** — *"จะมีเงินสดพอไหม
+เดือนนี้?"*
+
 ---
 
 **Next:** [General Ledger](./06-general-ledger.md) · [Tax](./07-tax.md) ·
