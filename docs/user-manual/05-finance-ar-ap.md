@@ -56,15 +56,28 @@ escalates with age:
 | 61–90 | final notice |
 | 90+ | legal |
 
-1. Open the **Collections** view (worklist endpoint `GET /api/finance/ar/collections`).
-   The oldest / largest overdue invoices sort to the top.
-2. Contact the customer, then click **Record dunning action** on the invoice: pick
-   the **stage**, the **channel** (email / phone / letter / sms), and optionally a
-   **promise-to-pay date** and notes.
+1. On `/finance`, scroll to **ติดตามหนี้ค้างชำระ (Collections)**. The worklist lists
+   open overdue invoices (oldest first) with the **current stage** and the
+   **recommended** next stage (highlighted when an escalation is due).
+2. Contact the customer, then click **ทวงถาม (Record dunning)** on the row: it
+   pre-selects the recommended **stage** — confirm or change it, pick the **channel**
+   (email / phone / letter / sms), and optionally add a **promise-to-pay date** and
+   notes.
 3. **Expected result:** A dunning record (`DUN-…`) is saved and the invoice's
    **current stage** advances; the full history is kept as the collections audit
    trail. (Recording an action against an already-paid invoice returns
    `ALREADY_PAID`.)
+
+#### Run dunning automatically
+
+Click **ทวงถามอัตโนมัติ (Run sweep)** at the top of the Collections section (or call
+`POST /api/finance/ar/collections/sweep` from a scheduler). The sweep records the
+**recommended** dunning action on every overdue invoice that has fallen behind its
+stage — marked as system-actioned (channel `auto`).
+
+**Expected result:** The button reports how many invoices it advanced. Running it
+again right away advances **nothing** (it's idempotent — no customer gets dunned
+twice for the same stage until aging moves them to the next rung).
 
 #### Credit status & credit hold
 

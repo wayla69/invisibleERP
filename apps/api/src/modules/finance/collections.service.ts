@@ -102,6 +102,22 @@ export class CollectionsService {
     return { dunning_no: dunningNo, invoice_no: invoiceNo, stage: dto.stage, days_overdue: daysOverdue, outstanding: round2(outstanding) };
   }
 
+  // ───────────────────── Automated dunning sweep (cron-callable) ─────────────────────
+  // Walks the collections worklist and auto-records the next dunning rung on every overdue invoice whose
+  // recommended stage has overtaken its current stage. System-actioned, idempotent across runs: once an
+  // invoice is dunned at its recommended stage it stops escalating (escalate=false) until aging advances it.
+  async runDunningSweep(user: JwtUser) {
+    const wl = await this.worklist({ onlyOverdue: true });
+    const actor = { ...user, username: user?.username ? `${user.username} (sweep)` : 'system' } as JwtUser;
+    const advanced: { invoice_no: string; stage: DunningStage; dunning_no: string }[] = [];
+    for (const r of wl.rows) {
+      if (!r.escalate || !r.recommended_stage) continue;
+      const res = await this.recordDunning(r.invoice_no, { stage: r.recommended_stage, channel: 'auto', notes: 'Auto-advanced by dunning sweep' }, actor);
+      advanced.push({ invoice_no: r.invoice_no, stage: r.recommended_stage, dunning_no: res.dunning_no });
+    }
+    return { as_of: wl.as_of, scanned: wl.rows.length, advanced: advanced.length, actions: advanced };
+  }
+
   // Full dunning history for one invoice (newest first).
   async history(invoiceNo: string) {
     const db = this.db as any;

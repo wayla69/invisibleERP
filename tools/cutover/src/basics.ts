@@ -154,6 +154,13 @@ async function main() {
   const o3 = await inj('POST', '/api/pos/orders', admin, order('CUST3'));
   ok('Order entry: customer in good standing can still order', o3.status === 201 && /^SO-/.test(o3.json?.order_no ?? ''), `st=${o3.status} no=${o3.json?.order_no}`);
 
+  // ───────────────────── Automated dunning sweep (cron-callable) ─────────────────────
+  // INV-A already at second_notice (rec second_notice) → skipped; INV-B→legal, INV-D→legal, INV-E→first_notice advance.
+  const sw = (await inj('POST', '/api/finance/ar/collections/sweep', admin)).json;
+  ok('Dunning sweep auto-advances overdue invoices past their stage', sw.advanced === 3 && (sw.actions ?? []).some((a: any) => a.invoice_no === 'INV-B' && a.stage === 'legal'), `adv=${sw.advanced}/${sw.scanned} ${JSON.stringify((sw.actions ?? []).map((a: any) => `${a.invoice_no}:${a.stage}`))}`);
+  const sw2 = (await inj('POST', '/api/finance/ar/collections/sweep', admin)).json;
+  ok('Dunning sweep idempotent (no re-advance on a second run)', sw2.advanced === 0, `adv2=${sw2.advanced}`);
+
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

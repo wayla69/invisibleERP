@@ -20,6 +20,10 @@ export class CollectionsController {
   @Get('collections') @Permissions('ar', 'exec')
   worklist(@Query('overdue_only') overdueOnly?: string) { return this.svc.worklist({ onlyOverdue: overdueOnly === '1' || overdueOnly === 'true' }); }
 
+  // Cron-callable: auto-advance dunning on every overdue invoice past its recommended stage.
+  @Post('collections/sweep') @Permissions('ar', 'exec')
+  sweep(@CurrentUser() u: JwtUser) { return this.svc.runDunningSweep(u); }
+
   // Dunning history for one invoice.
   @Get('collections/:invoiceNo/history') @Permissions('ar', 'exec')
   history(@Param('invoiceNo') invoiceNo: string) { return this.svc.history(invoiceNo); }
