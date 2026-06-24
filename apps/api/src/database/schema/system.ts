@@ -103,6 +103,7 @@ export const webhooks = pgTable('webhooks', {
   events: text('events').default(''), // csv of event names
   secret: text('secret').notNull(),
   active: boolean('active').default(true),
+  createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
@@ -125,5 +126,8 @@ export const webhookDeliveries = pgTable('webhook_deliveries', {
   status: text('status').default('pending'), // pending | delivered | failed
   statusCode: integer('status_code'),
   attempts: integer('attempts').default(0),
+  error: text('error'),
+  nextRetryAt: timestamp('next_retry_at', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

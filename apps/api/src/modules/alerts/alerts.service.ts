@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { alertRules, alertEvents, notifications, customerInventory, workflowInstances, purchaseRequests } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { MessagingService } from '../messaging/messaging.service';
+import { WebhookService } from '../platform/webhook.service';
 
 const n = (x: any) => Number(x) || 0;
 const OPERATORS = ['gt', 'gte', 'lt', 'lte', 'eq'] as const;
@@ -22,7 +23,7 @@ const METRICS: Record<string, { label: string; labelEn: string; unit: string }> 
 // active rule and fires a notification (and optionally a LINE/SMS/email) when breached. No GL.
 @Injectable()
 export class AlertsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly messaging: MessagingService) {}
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly messaging: MessagingService, @Optional() private readonly webhooks?: WebhookService) {}
 
   metrics() {
     return { metrics: Object.entries(METRICS).map(([key, m]) => ({ key, label: m.label, label_en: m.labelEn, unit: m.unit })), operators: OPERATORS, channels: CHANNELS };
@@ -119,6 +120,8 @@ export class AlertsService {
       }
       await db.insert(alertEvents).values({ tenantId: rule.tenantId, ruleId: Number(rule.id), name: rule.name, metric: rule.metric, value: String(value), threshold: String(n(rule.threshold)), severity: rule.severity, channel: rule.channel, message });
       await db.update(alertRules).set({ lastFiredAt: new Date() }).where(eq(alertRules.id, rule.id));
+      // also fan out to any subscribed outbound webhooks (best-effort, never blocks the sweep)
+      await this.webhooks?.emit('alert.fired', { rule_id: Number(rule.id), name: rule.name, metric: rule.metric, value, threshold: n(rule.threshold), severity: rule.severity }, user);
       fired.push({ rule_id: Number(rule.id), name: rule.name, metric: rule.metric, value, threshold: n(rule.threshold), severity: rule.severity, channel: rule.channel });
     }
     return { evaluated: rules.length, fired_count: fired.length, suppressed, fired };
