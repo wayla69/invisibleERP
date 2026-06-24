@@ -188,6 +188,8 @@ nothing to the GL. That discipline is itself part of "outclass."
 
 **Pillars A & B are complete.** Remaining roadmap: **Pillar C** (localization / i18n), **Pillar D** (ecosystem / connectors / marketplace), **Pillar E** (onboarding / migration / mobile / white-label / scale) — see §1–§2.
 
+> **Detailed C–E architecture & specs:** [`13-pillars-cde-architecture-spec.md`](./13-pillars-cde-architecture-spec.md) — per-initiative interfaces, data models, API surfaces, controls, verification approach, and an honest 🟢/🟡/🔴 tag for what's fully buildable vs framework-+-stub vs external-only (SOC2/ISO audit, live 3rd-party creds, statutory sign-off). §8 there lists the open decisions needed before the build starts.
+
 ---
 
 ## 6. Revision history
@@ -199,3 +201,4 @@ nothing to the GL. That discipline is itself part of "outclass."
 | 0.3 DRAFT | 2026-06-24 | Platform / Product | **Phase 12 (A2 form/layout designer) delivered** — per-object/per-role layouts (sections, columns, order, hide) resolved against live field defs; the custom-object form renders by the layout; 137/137 `ext` checks. **Wave 1 (A3 → A1 → A2) complete.** |
 | 0.4 DRAFT | 2026-06-24 | Platform / Product | **Phases 13–14 (A4 automation + A5 semantic-layer reports) delivered** — Pillar A complete (merged via PR #50); 193/193 `ext`. |
 | 0.5 DRAFT | 2026-06-24 | Platform / Product | **Pillar B (AI-native) delivered** — Phases 15–19: embedded copilot, document-AI intake, NL analytics, AI configuration assistant, continuous controls monitoring; all read-only / suggestion-only / human-in-the-loop with deterministic no-key fallbacks. 208/208 `ext`; typecheck + builds clean. **Pillars A & B complete.** §5c added. |
+| 0.6 DRAFT | 2026-06-24 | Platform / Product | Added the **Pillars C–E architecture & specification** (`13-pillars-cde-architecture-spec.md`, Phases 20–30) as a direction checkpoint before build: provider/adapter interfaces, data models, migrations `0093`–`0101`, controls, verification, 🟢/🟡/🔴 dependency tagging, recommended sequence, and the §8 decisions. No code yet — awaiting direction. |
