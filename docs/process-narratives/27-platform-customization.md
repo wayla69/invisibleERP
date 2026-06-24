@@ -7,27 +7,27 @@
 | Process ID | PN-27-PLAT |
 | Process owner | `<<Platform Admin / Controller>>` |
 | Approver | `<<CFO / Head of IT>>` |
-| Version | **0.1 DRAFT · 2026-06-24** |
+| Version | **0.2 DRAFT · 2026-06-24** |
 | Review cadence | Annual + on significant change |
 | Related RCM controls | No new RCM control (operational/configuration features); reinforces ITGC-AC-03 (RLS), ITGC-AC-04 (secrets at rest), ITGC-AC-10 (audit trail), MDM-02 (master-data validation) |
 | Related policy | `compliance/policies/` (Access Control; IPE; Change Management) |
 
 ## 2. Purpose
 
-This is an **umbrella narrative** for the cross-cutting *platform-customization* capabilities that let a tenant adapt the ERP to its business **without code** — added incrementally as Platform Phases 1–9. It exists so an auditor or new administrator can see, in one place, **what is configurable, who may configure it, through which endpoint, and under which controls**, and then follow the link to the owning cycle narrative for detail. None of these features posts to the general ledger, and each is **tenant-isolated by Row-Level Security (RLS)** and gated by an explicit permission.
+This is an **umbrella narrative** for the cross-cutting *platform-customization* capabilities that let a tenant adapt the ERP to its business **without code** — added incrementally as Platform Phases 1–12. It exists so an auditor or new administrator can see, in one place, **what is configurable, who may configure it, through which endpoint, and under which controls**, and then follow the link to the owning cycle narrative for detail. None of these features posts to the general ledger, and each is **tenant-isolated by Row-Level Security (RLS)** and gated by an explicit permission.
 
 > **Design invariants** (verified by the `ext` control/integration harness for every feature): (a) **no GL impact** — configuration and operational features never post journal entries; (b) **tenant isolation** — every tenant-scoped table is RLS-scoped so one tenant can never read or write another's configuration; (c) **least privilege** — each surface is gated by a specific permission (`users`, `exec`, `masterdata`, or `dashboard`); (d) **documentation-as-done** — each feature updated its owning cycle narrative, the user manual, and UAT in the same change.
 
 ## 3. Scope
 
-**In scope:** the nine platform-customization capabilities (§7). **Out of scope:** the financially-significant business cycles they extend (see the per-feature cross-references), and the global, code-governed **module on/off** feature flags (`module_configs`, a platform-wide switch — see `08-itgc.md` / user manual §11.3).
+**In scope:** the twelve platform-customization capabilities (§7). **Out of scope:** the financially-significant business cycles they extend (see the per-feature cross-references), and the global, code-governed **module on/off** feature flags (`module_configs`, a platform-wide switch — see `08-itgc.md` / user manual §11.3).
 
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 7.5 (documented information).
 - `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; `compliance/policies/`.
 - Permissions / SoD model: `packages/shared/src/permissions.ts`. Web navigation: `apps/web/src/lib/nav.ts`.
-- Control/integration harness: `tools/cutover/src/ext.ts` (the cross-feature suite — 104 checks at time of writing).
+- Control/integration harness: `tools/cutover/src/ext.ts` (the cross-feature suite — 137 checks at time of writing).
 - Per-feature owning narratives: `02` (workflows), `08` (audit viewer, webhooks), `17` (custom fields, alerts, bulk import), `23` (branding), `26` (scheduled reports, saved views, role dashboards).
 
 ## 5. Definitions & abbreviations
@@ -54,6 +54,9 @@ This is an **umbrella narrative** for the cross-cutting *platform-customization*
 | Bulk-import master data | I | I | **A/R** | I | validates per-row |
 | Register outbound webhooks | **A/R** | I | I | I | signs + delivers + retries |
 | Brand the org (logo/tagline) | **A/R** | I | I | I | renders on receipts |
+| Customize document templates | **A/R** | C | I | I | renders on documents (presentation only) |
+| Define custom objects & records | C | C | **A/R** | I | reuses the custom-fields typed store |
+| Design object form layouts | C | C | **A/R** | I | resolved against live field defs, per role |
 
 ## 7. Process narrative — the nine capabilities
 
@@ -68,6 +71,9 @@ Each entry: **what it does · endpoint(s) · permission · storage/migration · 
 7. **Validated bulk import — Phase 7.** A **dry-run validate → preview → commit** flow over the existing master-data import (8 entities), accumulating per-row errors instead of failing fast, with an optional skip-errors partial commit. `POST /api/admin/master-data/:entity/import/validate` and `/import/checked`. Perm `masterdata`. No schema change. Errors `REQUIRED_EMPTY`/`BAD_NUMBER`/`BAD_DATE`/`DUP_IN_FILE`/`EXISTS`. Web `/master-data` preview. *Control: **MDM-02** (master-data validation). Detail: `17-master-data-management.md` §7.3a.*
 8. **Outbound webhooks — Phase 8.** Tenants register endpoints and subscribe to business events (`po.approved`, `po.rejected`, `alert.fired`); a dispatcher delivers **HMAC-SHA256-signed** payloads (10s-bounded) with a capped retry, recording every attempt. `GET/POST/DELETE /api/platform/webhooks`, `GET /api/platform/webhooks/events|deliveries`, `POST /api/platform/webhooks/deliveries/:id/redeliver`, `POST /api/platform/webhooks/dispatch`. Perm `users`. Signing secret **AES-256-GCM encrypted at rest** (shown once). Additive migration `0084`; the `webhook_deliveries` egress log is tenant-scoped via its FK to the (RLS-scoped) `webhooks`. Web `/webhooks`. *Controls: **ITGC-AC-04** (secret at rest); reuses the inbound HMAC scheme. Detail: `08-itgc.md` §7.A.9.*
 9. **Tenant branding — Phase 9.** A tenant admin sets a **logo + tagline** (and a `branding_prefs` blob) on the org profile; these are **genuinely rendered** on the customer-facing receipt header. `GET/PATCH /api/tenant/profile` (extended). Perm `users`. Additive `tenants` columns, migration `0086`; RLS self-scoped to the caller's own tenant. Logo accepted as an `https` URL or a small image data-URI (other schemes rejected; **attribute-encoded** on output). Web `/setup` Branding card. *Detail: `23-customer-onboarding-provisioning.md` §7.6a.*
+10. **Document templates — Phase 10.** A no-code, **presentation-only** designer for customer-facing documents — the **receipt** is live; abbreviated/full tax invoices, quotations, POs and payslips are authorable now and rendered as their wiring lands. A tenant defines templates with header/body/footer/paper knobs (show logo, extra header note, show/hide branch·address·tax-id, accent colour, body font scale, thank-you text + extra footer lines, paper width); one per (tenant, doc_type) is the **default** consumed at render time. A template can **never change amounts** and can **never blank the document's core** (the seller name + the total always render, and mandatory tax-document fields are never omitted); it posts **nothing** to the GL. `GET /api/document-templates` (+ `/doc-types`, `/active?doc_type=`), `POST /api/document-templates`, `PUT /:id`, `POST /:id/default`, `DELETE /:id`, `POST /preview` (live sample render). Perm `users`/`exec`. Table `document_templates`, migration `0087`; RLS-scoped. The active receipt template is resolved inside the `printing` module via a shared pure renderer (`printing/receipt-render.ts`, used by both the live render and the preview). Web `/document-templates`. *Verified by the `ext` harness (catalog/create/default/active/preview/core-integrity/RLS/no-GL); extends Phase 9 branding.*
+11. **Custom objects — Phase 11.** Tenant-defined record types ("custom apps") with no code: define an object, give it fields, capture records — without us shipping a module. An object's fields and typed values **reuse the Phase 1 custom-fields store** (entity = `object_key`), so the same validation (type/required/select-option) applies; records get their own registry (`custom_object_records`) so they can be enumerated and carry a display name. Pure metadata — **no GL**, RLS-scoped, audited. `GET/POST /api/custom-objects`, `GET/DELETE /api/custom-objects/:key`, `GET/POST /api/custom-objects/:key/records`, `GET/PUT/DELETE /api/custom-objects/:key/records/:id`; field defs are managed through the existing `/api/custom-fields` API. Perm `masterdata`/`users`/`exec`. Tables `custom_objects` + `custom_object_records`, migration `0088`; RLS-scoped. Web `/custom-objects`. *Verified by the `ext` harness (define/dup/fields/record CRUD/reused validation/RLS/no-GL).*
+12. **Object layouts — Phase 12.** A no-code form/layout designer for a custom object (Phase 11): arrange fields into **sections**, set a 1- or 2-**column** layout, **reorder**, **hide** fields, and optionally target a **role** — stored as presentation-only config and **resolved against the object's live field defs** at render time, so a newly-added field always surfaces (appended) and stale references drop. The custom-object data-entry form renders by the resolved layout. `GET /api/object-layouts` (+ `/resolve?object_key=&role=`), `POST /api/object-layouts`, `PUT /:id`, `POST /:id/default`, `DELETE /:id`, `POST /preview`. Perm `masterdata`/`users`/`exec`. Table `object_layouts`, migration `0089`; RLS-scoped; **no GL**. Web `/object-layouts`. *Verified by the `ext` harness (built-in fallback/create/resolve/hide/auto-surface-new-field/preview/RLS/no-GL).*
 
 ## 8. Process flow
 
@@ -96,6 +102,9 @@ flowchart TD
 | Webhooks | Forged/replayed egress; secret disclosure | HMAC-SHA256 signed payload + timestamp; secret AES-256-GCM at rest | Preventive | ITGC-AC-04 | `ext` webhook checks |
 | Bulk import | Bad master data loaded silently | Dry-run + per-row validation; block-or-skip commit | Preventive | MDM-02 | `ext` bulk-import checks |
 | Role dashboards | KPI leakage to under-privileged role | Resolved layout filtered to the viewer's permissions | Preventive | ITGC-AC-02 | `ext` dashboard checks |
+| Document templates | Tampered/blanked customer document; amount or mandatory-field manipulation | Presentation-only config (carries no amounts); core fields (seller, total) always render; mandatory tax-document fields never omitted; no GL post | Preventive | (operational) | `ext` doc-template checks (core integrity + no-GL) |
+| Custom objects | Cross-tenant record read/write; untyped/invalid data | RLS on objects + records; field values validated via the reused custom-fields machinery (type/required/option); no GL post | Preventive | (operational) | `ext` custom-object checks |
+| Object layouts | A field silently dropped from a form; cross-tenant config | Presentation-only config resolved against live field defs (new fields auto-surface, none silently lost); RLS on layouts; no GL post | Preventive | (operational) | `ext` object-layout checks |
 
 ## 10. Inputs & outputs
 
@@ -117,10 +126,13 @@ flowchart TD
 
 ## 13. Exception & error handling
 
-Per-feature validation codes are consolidated here (all `400` unless noted): UDFs — `UNKNOWN_FIELD`/`REQUIRED_FIELD`/`BAD_OPTION`/`BAD_NUMBER`/`BAD_DATE`; alerts — `BAD_METRIC`/`BAD_OPERATOR`/`BAD_CHANNEL`/`NO_TARGET`; scheduled reports/views — `BAD_REPORT_TYPE`/`BAD_FREQUENCY`/`VIEW_NOT_FOUND` (404); dashboards — `BAD_ROLE`/`BAD_WIDGET`; bulk import — `REQUIRED_EMPTY`/`BAD_NUMBER`/`BAD_DATE`/`DUP_IN_FILE`/`EXISTS`; webhooks — `WEBHOOK_NOT_FOUND` (404)/`DELIVERY_NOT_FOUND` (404); branding — invalid `logo_url` rejected. Unauthorized access → `403`; cross-tenant access is silently RLS-filtered (no leak).
+Per-feature validation codes are consolidated here (all `400` unless noted): UDFs — `UNKNOWN_FIELD`/`REQUIRED_FIELD`/`BAD_OPTION`/`BAD_NUMBER`/`BAD_DATE`; alerts — `BAD_METRIC`/`BAD_OPERATOR`/`BAD_CHANNEL`/`NO_TARGET`; scheduled reports/views — `BAD_REPORT_TYPE`/`BAD_FREQUENCY`/`VIEW_NOT_FOUND` (404); dashboards — `BAD_ROLE`/`BAD_WIDGET`; bulk import — `REQUIRED_EMPTY`/`BAD_NUMBER`/`BAD_DATE`/`DUP_IN_FILE`/`EXISTS`; webhooks — `WEBHOOK_NOT_FOUND` (404)/`DELIVERY_NOT_FOUND` (404); branding — invalid `logo_url` rejected; document templates — `BAD_DOC_TYPE`/`NAME_REQUIRED`/`NAME_EXISTS`/`TEMPLATE_NOT_FOUND` (404); custom objects — `BAD_OBJECT`/`BAD_LABEL`/`OBJECT_EXISTS`/`OBJECT_NOT_FOUND` (404)/`RECORD_NOT_FOUND` (404) (record field values reuse the custom-fields codes); object layouts — `BAD_OBJECT`/`NAME_REQUIRED`/`NAME_EXISTS`/`LAYOUT_NOT_FOUND` (404). Unauthorized access → `403`; cross-tenant access is silently RLS-filtered (no leak).
 
 ## 14. Revision history
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-24 | Platform | Initial umbrella narrative consolidating Platform Phases 1–9 (custom fields, approval workflows, alert rules, scheduled reports + saved views, role dashboards, audit viewer, validated bulk import, outbound webhooks, tenant branding). Cross-references the owning cycle narratives; no new RCM control. |
+| 0.2 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 10 — document templates**: no-code, presentation-only customization of customer-facing documents (receipt live; other doc types authorable, rendered as wiring lands). Template carries no amounts, never blanks the core / omits mandatory fields, posts nothing to the GL; RLS-scoped (migration `0087`). New §7.10, RACI + control-matrix rows, error codes; `ext` harness +11 checks (now 115). No new RCM control (operational). |
+| 0.3 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 11 — custom objects**: tenant-defined record types reusing the Phase 1 custom-fields typed store (entity = object_key); records get a registry with a display name. No GL, RLS-scoped (migration `0088`). New §7.11, RACI + control-matrix rows, error codes; `ext` harness +13 checks (now 128). No new RCM control (operational). |
+| 0.4 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 12 — object layouts**: no-code form/layout designer for custom objects (sections/columns/order/hide, per role) resolved against live field defs so new fields auto-surface. No GL, RLS-scoped (migration `0089`). New §7.12, RACI + control-matrix rows, error codes; `ext` harness +9 checks (now 137). No new RCM control (operational). |

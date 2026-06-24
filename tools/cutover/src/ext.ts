@@ -346,6 +346,98 @@ async function main() {
   const rcpt2 = (await inj('GET', `/api/print/receipt/${sale.json.sale_no}`, token)).raw?.toString('utf8') ?? '';
   ok('Branding: show_logo_on_receipt=false suppresses the logo (tagline stays)', !rcpt2.includes('class="logo"') && rcpt2.includes(TAG), `hasLogo=${rcpt2.includes('class="logo"')}`);
 
+  // ── document templates (Platform Phase 10 — A3) ──
+  // hqaa/cf2aa = AccessAdmin (carry `users`, non-Admin → RLS-scoped). token2 = Warehouse (lacks users/exec).
+  const jlBefore = (await db.select().from(s.journalLines)).length;
+  const dtTypes = await inj('GET', '/api/document-templates/doc-types', hqaa);
+  ok('Doc templates: catalog exposes the receipt type as live', (dtTypes.json.doc_types ?? []).some((d: any) => d.key === 'receipt' && d.status === 'live'), `${(dtTypes.json.doc_types ?? []).length}`);
+  const dtCreate = await inj('POST', '/api/document-templates', hqaa, { doc_type: 'receipt', name: 'หน้าร้านสาขาหลัก', config: { header: { header_note: 'สมาชิกรับแต้มทุกบิล' }, body: { show_tax_id: false, accent_color: '#0F766E' }, footer: { thanks_text: 'ขอบคุณที่อุดหนุน', extra_lines: ['คืนสินค้าภายใน 7 วัน'] } } });
+  ok('Doc templates: create a receipt template (first → becomes default)', (dtCreate.status === 200 || dtCreate.status === 201) && !!dtCreate.json.id && dtCreate.json.is_default === true, `${dtCreate.status} ${JSON.stringify(dtCreate.json)}`);
+  const dtBadType = await inj('POST', '/api/document-templates', hqaa, { doc_type: 'nope', name: 'x' });
+  ok('Doc templates: an unknown doc_type is rejected (400 BAD_DOC_TYPE)', dtBadType.status === 400 && dtBadType.json.error?.code === 'BAD_DOC_TYPE', `${dtBadType.status} ${dtBadType.json.error?.code}`);
+  const dtDup = await inj('POST', '/api/document-templates', hqaa, { doc_type: 'receipt', name: 'หน้าร้านสาขาหลัก' });
+  ok('Doc templates: duplicate name per (tenant, doc_type) rejected (400 NAME_EXISTS)', dtDup.status === 400 && dtDup.json.error?.code === 'NAME_EXISTS', `${dtDup.status} ${dtDup.json.error?.code}`);
+  const dtActive = await inj('GET', '/api/document-templates/active?doc_type=receipt', hqaa);
+  ok('Doc templates: active config resolves the default template', dtActive.json.config?.footer?.thanks_text === 'ขอบคุณที่อุดหนุน' && dtActive.json.config?.body?.show_tax_id === false, `${JSON.stringify(dtActive.json.config ?? {}).slice(0, 120)}`);
+  // live preview: posted config is honored
+  const dtPrev = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'receipt', config: { footer: { thanks_text: 'PREVIEW-XYZ' }, body: { show_tax_id: false } } });
+  const prevHtml = typeof dtPrev.json.html === 'string' ? dtPrev.json.html : '';
+  ok('Doc templates: preview renders the posted config', (dtPrev.status === 200 || dtPrev.status === 201) && prevHtml.includes('PREVIEW-XYZ'), `status=${dtPrev.status} len=${prevHtml.length}`);
+  ok('Doc templates: preview honors the hide-tax-id toggle', prevHtml.length > 0 && !prevHtml.includes('เลขประจำตัวผู้เสียภาษี'), `hasTaxId=${prevHtml.includes('เลขประจำตัวผู้เสียภาษี')}`);
+  // control: even an EMPTY template cannot blank the core — the total label + amount always render
+  const dtMinimal = await inj('POST', '/api/document-templates/preview', hqaa, { doc_type: 'receipt', config: {} });
+  const minHtml = typeof dtMinimal.json.html === 'string' ? dtMinimal.json.html : '';
+  ok('Doc templates: core integrity — a minimal template still renders the total', minHtml.includes('รวมสุทธิ') && /\d/.test(minHtml), `len=${minHtml.length}`);
+  // permission gate: Warehouse (no users/exec) is forbidden
+  const dtNoPerm = await inj('GET', '/api/document-templates?doc_type=receipt', token2);
+  ok('Doc templates: gated by users/exec (403 for Warehouse)', dtNoPerm.status === 403, `${dtNoPerm.status}`);
+  // RLS isolation: cf2 admin sees none of HQ’s templates
+  const dtIso = await inj('GET', '/api/document-templates?doc_type=receipt', cf2aa);
+  ok('Doc templates: tenant-isolated (cf2 sees none of HQ’s)', (dtIso.json.templates ?? []).length === 0, `cf2 templates=${(dtIso.json.templates ?? []).length}`);
+  // no GL impact: authoring templates posts no journal lines
+  const jlAfter = (await db.select().from(s.journalLines)).length;
+  ok('Doc templates: no GL impact (journal lines unchanged by template authoring)', jlAfter === jlBefore, `before=${jlBefore} after=${jlAfter}`);
+
+  // ── custom objects (Platform Phase 11 — A1) ──
+  // reuses Phase 1 custom-fields for typed values (entity = object_key). hqaa = HQ admin (RLS-scoped).
+  const jlBefore2 = (await db.select().from(s.journalLines)).length;
+  const coCreate = await inj('POST', '/api/custom-objects', hqaa, { label: 'Equipment', label_en: 'Equipment', icon: 'wrench' });
+  ok('Custom objects: define an object (slugged key)', (coCreate.status === 200 || coCreate.status === 201) && coCreate.json.object_key === 'equipment', `${coCreate.status} ${JSON.stringify(coCreate.json)}`);
+  const coDup = await inj('POST', '/api/custom-objects', hqaa, { label: 'Equipment' });
+  ok('Custom objects: duplicate object rejected (400 OBJECT_EXISTS)', coDup.status === 400 && coDup.json.error?.code === 'OBJECT_EXISTS', `${coDup.status} ${coDup.json.error?.code}`);
+  // define fields on the object via the Phase 1 custom-fields API (entity = object_key)
+  await inj('POST', '/api/custom-fields/defs', hqaa, { entity: 'equipment', label: 'Asset name', data_type: 'text', required: true });
+  await inj('POST', '/api/custom-fields/defs', hqaa, { entity: 'equipment', label: 'Serial', data_type: 'text' });
+  await inj('POST', '/api/custom-fields/defs', hqaa, { entity: 'equipment', label: 'Status', data_type: 'select', options: ['active', 'repair', 'retired'] });
+  const coGet = await inj('GET', '/api/custom-objects/equipment', hqaa);
+  ok('Custom objects: object carries its field defs', (coGet.json.fields ?? []).length === 3 && (coGet.json.fields ?? []).some((f: any) => f.field_key === 'asset_name' && f.required), `${(coGet.json.fields ?? []).length}`);
+  const coRec = await inj('POST', '/api/custom-objects/equipment/records', hqaa, { values: { asset_name: 'เครื่องชงกาแฟ', serial: 'CM-001', status: 'active' } });
+  ok('Custom objects: create a record → id + display name', (coRec.status === 200 || coRec.status === 201) && !!coRec.json.record_id && coRec.json.display_name === 'เครื่องชงกาแฟ', `${coRec.status} ${JSON.stringify(coRec.json)}`);
+  const coBadOpt = await inj('POST', '/api/custom-objects/equipment/records', hqaa, { values: { asset_name: 'X', status: 'broken' } });
+  ok('Custom objects: record validation reuses custom-fields (400 BAD_OPTION)', coBadOpt.status === 400 && coBadOpt.json.error?.code === 'BAD_OPTION', `${coBadOpt.status} ${coBadOpt.json.error?.code}`);
+  const coReq = await inj('POST', '/api/custom-objects/equipment/records', hqaa, { values: { serial: 'no-name' } });
+  ok('Custom objects: required field enforced on records (400 REQUIRED_FIELD)', coReq.status === 400 && coReq.json.error?.code === 'REQUIRED_FIELD', `${coReq.status} ${coReq.json.error?.code}`);
+  const coList = await inj('GET', '/api/custom-objects/equipment/records', hqaa);
+  ok('Custom objects: list records with typed values + display', (coList.json.records ?? []).length === 1 && coList.json.records[0].values?.status === 'active' && coList.json.records[0].display_name === 'เครื่องชงกาแฟ', `${JSON.stringify(coList.json.records ?? []).slice(0, 140)}`);
+  const recId = coRec.json.record_id;
+  const coUpd = await inj('PUT', `/api/custom-objects/equipment/records/${recId}`, hqaa, { values: { asset_name: 'เครื่องชงกาแฟ (ใหม่)', status: 'repair' } });
+  ok('Custom objects: update a record (display recomputed)', (coUpd.status === 200 || coUpd.status === 201) && coUpd.json.display_name === 'เครื่องชงกาแฟ (ใหม่)', `${coUpd.status} ${JSON.stringify(coUpd.json)}`);
+  const coGetRec = await inj('GET', `/api/custom-objects/equipment/records/${recId}`, hqaa);
+  ok('Custom objects: get a record returns typed fields', (coGetRec.json.fields ?? []).find((f: any) => f.field_key === 'status')?.value === 'repair', `${JSON.stringify(coGetRec.json.fields ?? []).slice(0, 140)}`);
+  const coIso = await inj('GET', '/api/custom-objects', cf2aa);
+  ok('Custom objects: tenant-isolated (cf2 sees none of HQ’s)', (coIso.json.objects ?? []).every((o: any) => o.object_key !== 'equipment'), `cf2 objects=${(coIso.json.objects ?? []).length}`);
+  const coDel = await inj('DELETE', `/api/custom-objects/equipment/records/${recId}`, hqaa);
+  ok('Custom objects: soft-delete a record', (coDel.status === 200 || coDel.status === 201) && coDel.json.active === false, `${coDel.status}`);
+  const coListAfter = await inj('GET', '/api/custom-objects/equipment/records', hqaa);
+  ok('Custom objects: deleted record drops out of the list', (coListAfter.json.records ?? []).length === 0, `${(coListAfter.json.records ?? []).length}`);
+  const jlAfter2 = (await db.select().from(s.journalLines)).length;
+  ok('Custom objects: no GL impact (journal lines unchanged)', jlAfter2 === jlBefore2, `before=${jlBefore2} after=${jlAfter2}`);
+
+  // ── object layouts (Platform Phase 12 — A2) ──
+  const jlBefore3 = (await db.select().from(s.journalLines)).length;
+  const olBuiltin = await inj('GET', '/api/object-layouts/resolve?object_key=equipment', hqaa);
+  ok('Object layouts: resolve falls back to a built-in layout', olBuiltin.json.source === 'builtin' && (olBuiltin.json.sections ?? []).length === 1 && (olBuiltin.json.sections[0].fields ?? []).length >= 3, `${olBuiltin.json.source} secs=${(olBuiltin.json.sections ?? []).length}`);
+  const olCreate = await inj('POST', '/api/object-layouts', hqaa, { object_key: 'equipment', name: 'ฟอร์มหลัก', config: { sections: [{ title: 'หลัก', columns: 2, fields: ['asset_name', 'status'] }], hidden: ['serial'] } });
+  ok('Object layouts: create a layout (first → default)', (olCreate.status === 200 || olCreate.status === 201) && olCreate.json.is_default === true, `${olCreate.status} ${JSON.stringify(olCreate.json)}`);
+  const olDup = await inj('POST', '/api/object-layouts', hqaa, { object_key: 'equipment', name: 'ฟอร์มหลัก' });
+  ok('Object layouts: duplicate name rejected (400 NAME_EXISTS)', olDup.status === 400 && olDup.json.error?.code === 'NAME_EXISTS', `${olDup.status} ${olDup.json.error?.code}`);
+  const olRes = await inj('GET', '/api/object-layouts/resolve?object_key=equipment', hqaa);
+  const sec0 = (olRes.json.sections ?? [])[0] ?? {};
+  ok('Object layouts: resolve applies sections + hides a field', olRes.json.source === 'object' && sec0.title === 'หลัก' && sec0.columns === 2 && (sec0.fields ?? []).some((f: any) => f.field_key === 'asset_name') && !(sec0.fields ?? []).some((f: any) => f.field_key === 'serial') && (olRes.json.hidden ?? []).some((f: any) => f.field_key === 'serial'), `${JSON.stringify(olRes.json).slice(0, 160)}`);
+  // a field added AFTER the layout was saved still surfaces (appended) — never lost
+  await inj('POST', '/api/custom-fields/defs', hqaa, { entity: 'equipment', label: 'Location', data_type: 'text' });
+  const olRes2 = await inj('GET', '/api/object-layouts/resolve?object_key=equipment', hqaa);
+  const allKeys = (olRes2.json.sections ?? []).flatMap((x: any) => (x.fields ?? []).map((f: any) => f.field_key));
+  ok('Object layouts: a newly-added field auto-surfaces in the layout', allKeys.includes('location'), `${JSON.stringify(allKeys)}`);
+  const olPrev = await inj('POST', '/api/object-layouts/preview', hqaa, { object_key: 'equipment', config: { sections: [{ title: 'ทุกฟิลด์', columns: 1, fields: ['asset_name', 'serial', 'status'] }], hidden: [] } });
+  ok('Object layouts: preview resolves a posted config (no save)', olPrev.json.source === 'preview' && (olPrev.json.sections ?? [])[0]?.title === 'ทุกฟิลด์', `${(olPrev.json.sections ?? [])[0]?.title}`);
+  const olList = await inj('GET', '/api/object-layouts?object_key=equipment', hqaa);
+  ok('Object layouts: list shows the tenant’s layouts', (olList.json.layouts ?? []).length >= 1, `${(olList.json.layouts ?? []).length}`);
+  const olIso = await inj('GET', '/api/object-layouts?object_key=equipment', cf2aa);
+  ok('Object layouts: tenant-isolated (cf2 sees none of HQ’s)', (olIso.json.layouts ?? []).length === 0, `cf2=${(olIso.json.layouts ?? []).length}`);
+  const jlAfter3 = (await db.select().from(s.journalLines)).length;
+  ok('Object layouts: no GL impact (journal lines unchanged)', jlAfter3 === jlBefore3, `before=${jlBefore3} after=${jlAfter3}`);
+
   await app.close();
   await pg.close();
 
