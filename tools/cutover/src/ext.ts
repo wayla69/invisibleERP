@@ -6,6 +6,8 @@
 import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'ext-secret';
 process.env.NODE_ENV = 'test';
+// Cap the public-API per-key rate limit low so the harness can trip it deterministically.
+process.env.PUBLIC_API_RATE_MAX = process.env.PUBLIC_API_RATE_MAX || '50';
 
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -379,6 +381,74 @@ async function main() {
   await inj('PATCH', '/api/tenant/profile', hqaa, { branding_prefs: { show_logo_on_receipt: false } });
   const rcpt2 = (await inj('GET', `/api/print/receipt/${sale.json.sale_no}`, token)).raw?.toString('utf8') ?? '';
   ok('Branding: show_logo_on_receipt=false suppresses the logo (tagline stays)', !rcpt2.includes('class="logo"') && rcpt2.includes(TAG), `hasLogo=${rcpt2.includes('class="logo"')}`);
+
+  // ── Public REST API v1 (Phase #3) — versioned, API-key-only, scope-gated, rate-limited ──
+  // Seed one cf2-scoped order + invoice so the tenant-isolation assertions over /orders, /invoices are real.
+  await db.insert(s.orders).values({ orderNo: 'SO-PUB-CF2', orderDate: '2026-06-01', tenantId: cf2.id, status: 'Pending' });
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-PUB-CF2', invoiceDate: '2026-06-01', tenantId: cf2.id, orderNo: 'SO-PUB-CF2', amount: '100', paidAmount: '30', status: 'Unpaid' });
+
+  // OpenAPI doc + discovery root are open (no key).
+  const oapi = await inj('GET', '/api/v1/openapi.json');
+  ok('Public API: OpenAPI 3.1 doc is served openly (no key)', oapi.status === 200 && oapi.json.openapi === '3.1.0' && !!oapi.json.paths?.['/items'] && !!oapi.json.paths?.['/invoices'], `status=${oapi.status} v=${oapi.json.openapi}`);
+  const v1root = await inj('GET', '/api/v1');
+  ok('Public API: discovery root advertises v1 + endpoints', v1root.status === 200 && v1root.json.version === 'v1' && Array.isArray(v1root.json.endpoints), `status=${v1root.status}`);
+
+  // Issue keys: full HQ + full cf2 + a catalog-only cf2 key + a throwaway key for the rate test.
+  const hqKeyR = await inj('POST', '/api/platform/api-keys', token, { name: 'pub-hq', scopes: ['*'] });
+  const hqKey = hqKeyR.json.key;
+  ok('Public API: an API key is issued (ierp_) for the public surface', /^ierp_/.test(hqKey ?? ''), `${hqKeyR.status}`);
+  const cf2Key = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cf2', scopes: ['*'] })).json.key;
+  const catKey = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cat', scopes: ['catalog:read'] })).json.key;
+  const rateKey = (await inj('POST', '/api/platform/api-keys', token, { name: 'pub-rate', scopes: ['*'] })).json.key;
+
+  // /me identifies the key (tenant + granted scopes).
+  const me1 = await inj('GET', '/api/v1/me', hqKey);
+  ok('Public API: /me returns the key principal, tenant + scopes', me1.status === 200 && me1.json.tenant_id === hq.id && (me1.json.scopes ?? []).includes('*') && String(me1.json.principal).startsWith('apikey:'), `${JSON.stringify(me1.json)}`);
+
+  // Key-only: a human JWT (admin) is rejected from the public surface.
+  const humanReject = await inj('GET', '/api/v1/items', token);
+  ok('Public API: human JWTs are rejected (API_KEY_REQUIRED)', humanReject.status === 403 && humanReject.json.error?.code === 'API_KEY_REQUIRED', `${humanReject.status} ${humanReject.json.error?.code}`);
+  // No token at all → 401 from the global auth guard.
+  const noTok = await inj('GET', '/api/v1/me');
+  ok('Public API: a missing key is 401 (global auth)', noTok.status === 401, `${noTok.status}`);
+
+  // Catalog read works; the shared item catalog is returned.
+  const itemsR = await inj('GET', '/api/v1/items', hqKey);
+  ok('Public API: GET /items returns the catalog envelope (data + pagination)', itemsR.status === 200 && Array.isArray(itemsR.json.data) && itemsR.json.data.length >= 2 && itemsR.json.pagination?.limit === 50, `n=${(itemsR.json.data ?? []).length}`);
+  const itemsPaged = await inj('GET', '/api/v1/items?limit=1', hqKey);
+  ok('Public API: limit is honoured (pagination)', itemsPaged.json.data?.length === 1 && itemsPaged.json.pagination?.limit === 1, `n=${(itemsPaged.json.data ?? []).length}`);
+
+  // Tenant isolation via inventory: HQ sees item A (seeded for HQ); cf2 sees LOW1, never A.
+  const hqInv = await inj('GET', '/api/v1/inventory', hqKey);
+  const cf2Inv = await inj('GET', '/api/v1/inventory', cf2Key);
+  const hqItems = (hqInv.json.data ?? []).map((r: any) => r.item_id);
+  const cf2Items = (cf2Inv.json.data ?? []).map((r: any) => r.item_id);
+  ok('Public API: /inventory is RLS tenant-scoped (HQ↔cf2 do not bleed)', hqItems.includes('A') && !hqItems.includes('LOW1') && cf2Items.includes('LOW1') && !cf2Items.includes('A'), `hq=${JSON.stringify(hqItems)} cf2=${JSON.stringify(cf2Items)}`);
+
+  // Tenant isolation via orders + invoices: the cf2 row is visible to cf2's key, not HQ's.
+  const cf2Orders = (await inj('GET', '/api/v1/orders', cf2Key)).json.data ?? [];
+  const hqOrders = (await inj('GET', '/api/v1/orders', hqKey)).json.data ?? [];
+  ok('Public API: /orders is tenant-scoped', cf2Orders.some((o: any) => o.order_no === 'SO-PUB-CF2') && !hqOrders.some((o: any) => o.order_no === 'SO-PUB-CF2'), `cf2=${cf2Orders.length} hq=${hqOrders.length}`);
+  const cf2Inv2 = (await inj('GET', '/api/v1/invoices', cf2Key)).json.data ?? [];
+  const theInv = cf2Inv2.find((i: any) => i.invoice_no === 'INV-PUB-CF2');
+  ok('Public API: /invoices returns typed amounts + computed outstanding', !!theInv && theInv.amount === 100 && theInv.outstanding === 70, `${JSON.stringify(theInv ?? {})}`);
+
+  // Scope enforcement: a catalog-only key reads /items but is denied /orders.
+  const catItems = await inj('GET', '/api/v1/items', catKey);
+  ok('Public API: a catalog:read key may read /items', catItems.status === 200, `${catItems.status}`);
+  const catOrders = await inj('GET', '/api/v1/orders', catKey);
+  ok('Public API: a catalog:read key is denied /orders (INSUFFICIENT_SCOPE)', catOrders.status === 403 && catOrders.json.error?.code === 'INSUFFICIENT_SCOPE', `${catOrders.status} ${catOrders.json.error?.code}`);
+
+  // Per-key rate limit: hammer the throwaway key past the cap (50) → at least one 429 RATE_LIMITED.
+  let got429 = false; let rlCode = '';
+  for (let i = 0; i < 55; i++) {
+    const r = await inj('GET', '/api/v1/me', rateKey);
+    if (r.status === 429) { got429 = true; rlCode = r.json.error?.code; break; }
+  }
+  ok('Public API: per-key rate limit trips (429 RATE_LIMITED)', got429 && rlCode === 'RATE_LIMITED', `got429=${got429} code=${rlCode}`);
+  // A different key is unaffected by another key's exhausted window.
+  const otherKeyOk = await inj('GET', '/api/v1/me', cf2Key);
+  ok('Public API: the rate limit is per-key (a fresh key still passes)', otherKeyOk.status === 200, `${otherKeyOk.status}`);
 
   await app.close();
   await pg.close();

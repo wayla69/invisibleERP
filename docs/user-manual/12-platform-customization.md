@@ -1,6 +1,6 @@
 # 12 · Platform Customization
 
-**Status: DRAFT v0.2** · Updated 2026-06-24 — added the notification inbox (§A).
+**Status: DRAFT v0.3** · Updated 2026-06-24 — added the notification inbox (§A) and the public REST API (§B).
 
 This chapter is the **map** to the no-code ways you can adapt the system to your
 business — for **Admins**, *AccessAdmin*, *MasterDataAdmin* and *Executives*. Each
@@ -26,6 +26,7 @@ tools.
 | Push events to other systems | **Webhooks** | `/webhooks` | users | [Administration §12](./11-administration.md) |
 | Put your logo & tagline on receipts | **Branding** | `/setup` | users | [Administration §13](./11-administration.md) |
 | Read alerts, report deliveries & approval reminders | **Notification inbox** | `/notifications` | anyone (your own) | §A below |
+| Let another system read your data securely | **Public REST API** | `/api/v1` (+ API keys) | users (to issue keys) | §B below |
 
 ---
 
@@ -48,6 +49,29 @@ that just arrived, an **approval that's overdue** — lands in your personal inb
     haven't read yet.
 - **Note:** the inbox **never** shows another company's or another role's messages, and it
   contains **notifications only** — it never changes any accounting record.
+
+---
+
+## B · The public API (for connecting other systems)
+
+If you use another system (an online shop, a BI tool, your own software) that needs to
+**read** your data, it can connect to the **Public API** instead of a person logging in.
+
+- **Issue an API key.** An admin with the *users* permission creates a key in
+  **Administration → API keys** (`/api/platform/api-keys`). Choose what the key may do by
+  giving it **scopes** — e.g. `catalog:read`, `inventory:read`, `orders:read`,
+  `invoices:read` (or `read` for all reads, or `*` for everything). The **full key is shown
+  only once** (it starts `ierp_…`) — copy it then; you can't see it again.
+- **Hand it to the other system.** It calls the API at `https://<your-server>/api/v1/…`
+  sending the key as `Authorization: Bearer ierp_…`. Available endpoints: `/api/v1/items`,
+  `/api/v1/inventory`, `/api/v1/orders`, `/api/v1/invoices` (and `/api/v1/me` to check the
+  key). The machine-readable manual is at **`/api/v1/openapi.json`**.
+- **It only ever sees your company's data**, and only what the key's scopes allow — a key
+  without `orders:read` is refused the orders endpoint. Calls are **rate-limited** per key;
+  too many too fast get a polite "try again later" (`429`).
+- **Revoke any time.** Delete the key in the same screen and it stops working immediately.
+- **Note:** the public API is **read-only** and **never** posts to the ledger. Keep keys
+  secret — anyone holding one can read what its scopes allow.
 
 ---
 

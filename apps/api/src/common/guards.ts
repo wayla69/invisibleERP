@@ -50,7 +50,9 @@ export class JwtAuthGuard implements CanActivate {
         const expanded = scopes.flatMap((s) => SCOPE_ALIASES[s] ?? [s]);
         permissions = expanded.length ? expanded : resolvePermissions(role as any);
       }
-      req.user = { username: `apikey:${row.prefix}`, role, customerName: null, tenantId, permissions } satisfies JwtUser;
+      // Carry the raw granted scopes alongside the expanded permissions — the public API
+      // (/api/v1) gates on these scopes directly (a stable contract independent of internal perms).
+      req.user = { username: `apikey:${row.prefix}`, role, customerName: null, tenantId, permissions, scopes } satisfies JwtUser;
       return true;
     }
 

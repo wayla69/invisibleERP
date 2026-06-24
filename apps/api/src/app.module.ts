@@ -89,6 +89,7 @@ import { BranchModule } from './modules/branch/branch.module';
 import { EssModule } from './modules/ess/ess.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
 import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
+import { PublicApiModule } from './modules/public-api/public-api.module';
 
 @Module({
   imports: [
@@ -176,6 +177,7 @@ import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
     EssModule,
     SupplierModule,
     DemandMlModule,
+    PublicApiModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
