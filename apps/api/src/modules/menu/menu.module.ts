@@ -9,6 +9,6 @@ import { MenuController } from './menu.controller';
 @Module({
   controllers: [MenuController],
   providers: [MenuService, RecipeService, FoodCostService],
-  exports: [MenuService, RecipeService],
+  exports: [MenuService, RecipeService, FoodCostService],
 })
 export class MenuModule {}

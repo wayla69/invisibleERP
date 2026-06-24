@@ -407,6 +407,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-031 | Role dashboard catalog + layout validation | Feature (role dashboards) | 26 §3a |
 | UAT-RPT-032 | Role dashboard resolution filtered to viewer perms | Feature (role dashboards), ITGC-AC-02 | 26 §3a |
 | UAT-RPT-033 | Role dashboard default fallback + tenant isolation | Feature (role dashboards), ITGC-AC-03 | 26 §3a |
+| UAT-RPT-034 | Menu-engineering matrix (Kasavana–Smith) | Feature (menu engineering) | 20 §rev2.7 |
+| UAT-RPT-035 | Daypart / hour demand on the business clock | Feature (daypart), TZ (Asia/Bangkok) | 20 §rev2.7 |
+| UAT-RPT-036 | Void / discount shrinkage analytics | Feature (loss prevention) | 20 §rev2.7 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 

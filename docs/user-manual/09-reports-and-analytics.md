@@ -234,4 +234,41 @@ can act on. *(The underlying counts come from the inventory EOD count.)*
 
 ---
 
+## Restaurant management analytics
+
+Three manager reports turn the sales you've already rung into decisions. All take an
+optional date window (`?from=YYYY-MM-DD&to=YYYY-MM-DD`, default = today).
+
+### Menu engineering (`GET /api/analytics/menu-engineering`)
+
+The classic **menu-engineering matrix** — better than a plain "best sellers" list
+because it weighs **how often** a dish sells against **how much margin** it earns.
+Each costed item is placed in one of four quadrants and given an action:
+
+| Quadrant | Meaning | What to do |
+|---|---|---|
+| ⭐ **Star** (ดาวเด่น) | Popular **and** high-margin | Keep & feature; protect quality/price |
+| 🐴 **Plowhorse** (ม้างาน) | Popular but low-margin | Raise price modestly or cut recipe cost |
+| ❓ **Puzzle** (ปริศนา) | High-margin but slow | Reposition / rename / promote |
+| 🐶 **Dog** (สุนัข) | Slow **and** low-margin | Consider removing or reworking |
+
+Popularity uses the **70% rule** (a dish is "popular" when its share of units sold is
+≥ 70% of an equal share); profitability compares each dish's unit contribution margin
+to the menu average. Items with no recipe/cost are listed separately as *uncosted*.
+
+### Daypart & busiest hours (`GET /api/analytics/daypart`)
+
+Revenue, transaction count and average ticket **by hour of day** and by **daypart**
+(breakfast / lunch / afternoon / dinner / late), with the **peak hour and daypart**
+highlighted — for staff scheduling and promo timing. All times are on the **business
+clock (Asia/Bangkok)**, so a 1 a.m. sale counts as *late* on the correct day.
+
+### Voids & discounts — loss prevention (`GET /api/analytics/voids-discounts`)
+
+A shrinkage view over the manager-override audit: total voids/discounts, the **void
+rate** vs sales, and a breakdown **by reason code, by action, and by staff member** —
+so unusual void/discount patterns surface quickly.
+
+---
+
 **Next:** [Approvals](./10-approvals.md) · [Administration](./11-administration.md)
