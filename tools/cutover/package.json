@@ -27,6 +27,7 @@
     "cpq-gl": "tsx src/cpq-gl.ts",
     "promptpay": "tsx src/promptpay.ts",
     "etax": "tsx src/etax.ts",
+    "etax-sign": "tsx src/etax-sign.ts",
     "etax-email": "tsx src/etax-email.ts",
     "worldclass": "tsx src/worldclass.ts",
     "taxdocs": "tsx src/taxdocs.ts",

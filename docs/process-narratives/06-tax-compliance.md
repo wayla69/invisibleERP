@@ -28,7 +28,7 @@ To control the computation, documentation, transmission, and reconciliation of T
 - ISO 9001:2015 cl. 4.4, cl. 8.6, cl. 9.1.
 - `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — TAX-01..03.
 - Thai law: Revenue Code VAT 7%, ม.86/4(4) (tax-invoice particulars), ETDA e-Tax UBL 2.1; ภ.ง.ด. WHT returns.
-- Code: `apps/api/src/modules/tax/tax-providers.ts` + `tax.service.ts`, `apps/api/src/modules/tax-docs/etax-xml.ts` + `etax-email.service.ts`, `apps/api/src/modules/tax-reports/`, `apps/api/src/common/doc-number.service.ts`.
+- Code: `apps/api/src/modules/tax/tax-providers.ts` + `tax.service.ts`, `apps/api/src/modules/tax-docs/etax-xml.ts` + `etax-sign.ts` (XAdES signature) + `etax-email.service.ts`, `apps/api/src/modules/pos-fiscal/etax.service.ts` (provider submission), `apps/api/src/modules/tax-reports/`, `apps/api/src/common/doc-number.service.ts`.
 
 ## 5. Definitions & abbreviations
 
@@ -59,7 +59,7 @@ To control the computation, documentation, transmission, and reconciliation of T
 1. **Rate configuration.** VAT is computed via a pluggable provider (TH 7%) with no hard-coded rate; the provider is unit-tested (**TAX-01**). Rate config changes are master-data-controlled and audited.
 2. **VAT computation.** On each sale/purchase, output/input VAT is computed by the provider and carried into the revenue/expense journal (sales VAT posts with the automatic revenue JE, **REV-10**). Re-computation on a sample ties to the filed return (**TAX-01**).
 3. **Tax-invoice numbering (decision point).** A legally compliant, monthly per-seller sequential tax-invoice number is allocated atomically (doc numbering), satisfying ม.86/4(4) — gapless and unique.
-4. **e-Tax invoice generation.** The e-Tax invoice is generated as ETDA UBL 2.1 XML and emailed to the customer with CC to the ETDA timestamp mailbox; XML schema correctness and escaping are validated/tested (**TAX-02**).
+4. **e-Tax invoice generation, signing & transmission.** The e-Tax invoice is generated as ETDA UBL 2.1 XML; when a CA-issued certificate is configured (`ETAX_SIGNING_*`) it is sealed with an enveloped **XAdES** digital signature (RSA-SHA256 over the document + XAdES SignedProperties carrying SigningTime and the SigningCertificate digest), making it tamper-evident. The signed document is transmitted either to the customer by *e-Tax by Email* (CC the ETDA timestamp mailbox) or to a service provider (`ETAX_PROVIDER`: `mock` sandbox, or `http` for INET/Frank/Leceipt). Submission is idempotent (an `Accepted` document is never re-sent). XML schema correctness/escaping and signature integrity are tested (**TAX-02**).
 5. **WHT computation.** On qualifying supplier payments/transactions, WHT is computed and a withholding certificate / ภ.ง.ด. line is prepared (**TAX-03**).
 6. **Return preparation & filing.** Monthly ภ.พ.30 (VAT) and ภ.ง.ด. (WHT) returns are prepared and filed by the period deadline.
 7. **Reconciliation (decision point).** Output/input VAT and WHT per the returns are reconciled to the GL VAT/WHT liability and input-VAT accounts; differences are investigated and cleared before filing, with evidence retained (**TAX-03**; ties to REC-01).
@@ -88,7 +88,7 @@ flowchart TD
 |---|---|---|---|---|---|
 | 1,2 | VAT computed incorrectly (penalty risk) | Pluggable, unit-tested rate provider (no hard-coded rate) | Auto | TAX-01 | VAT unit tests; return tie-out |
 | 3 | Non-sequential / non-compliant tax-invoice number | Atomic monthly per-seller numbering (ม.86/4(4)) | Prev / Auto | TAX-01 | Doc-number sequence |
-| 4 | Non-compliant / untransmitted e-Tax invoice | ETDA UBL 2.1 XML generation + email CC ETDA | Auto | TAX-02 | e-Tax XML samples, email log |
+| 4 | Non-compliant / unsigned / untransmitted e-Tax invoice | ETDA UBL 2.1 XML generation + XAdES digital signature (tamper-evident) + idempotent transmission (email CC ETDA or SP) | Auto | TAX-02 | e-Tax XML/signature samples, submission log, email log |
 | 5 | WHT mis-computed / not reported | WHT computation + ภ.ง.ด. reporting | Auto | TAX-03 | WHT report; certificates |
 | 7 | Filings diverge from GL tax accounts | Tax-account-to-GL reconciliation before filing | Det / Hybrid | TAX-03 | Reconciliation evidence |
 
@@ -127,3 +127,4 @@ flowchart TD
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 DRAFT | 2026-06-24 | `<<author>>` | e-Tax invoices: added XAdES digital signing (`etax-sign.ts`, configurable cert) and idempotent provider submission (mock + generic `http` SP). Updated step 4, control TAX-02 matrix, and code refs. New harness `tools/cutover/src/etax-sign.ts`; `etax.ts` extended (submit + signed-fallback). |

@@ -105,7 +105,14 @@ async function main() {
   const tampered = await inj('GET', '/api/pos/journal/verify', token);
   ok('journal verify detects tamper (broken_at 2)', tampered.json.ok === false && tampered.json.broken_at === 2, `broken_at=${tampered.json.broken_at}`);
 
-  // ── P1b: e-Tax submission (mock provider) ──
+  // ── P1b: e-Tax submission (mock provider) — submission builds + signs the stored tax invoice's XML,
+  //         so seed a real tax-invoice row to target (no cert configured → submitted unsigned).
+  await db.insert(s.taxInvoices).values({
+    tenantId: hq.id, docNo: 'TIV-202606-0001', type: 'full', issueDate: '2026-06-24', sourceType: 'AR', sourceRef: 'INV-X',
+    sellerName: 'HQ', sellerTaxId: '0105551234567', sellerBranchCode: '00000', sellerAddress: 'กรุงเทพฯ',
+    buyerName: 'ลูกค้า', buyerTaxId: '0992001234567', buyerAddress: 'กรุงเทพฯ', currency: 'THB',
+    subtotal: '100.00', discount: '0', vatRate: '0.0700', vatAmount: '7.00', grandTotal: '107.00', isVatInclusive: false, status: 'Issued',
+  }).onConflictDoNothing();
   const sub = await inj('POST', '/api/tax/etax/submit/TIV-202606-0001', token, {});
   ok('e-Tax submit (mock) → Accepted', sub.json.status === 'Accepted' && /^mock-/.test(sub.json.provider_ref));
   ok('e-Tax status → Accepted', (await inj('GET', '/api/tax/etax/status/TIV-202606-0001', token)).json.status === 'Accepted');
