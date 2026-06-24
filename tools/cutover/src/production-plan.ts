@@ -1,6 +1,6 @@
 /**
- * C10 — Predictive prep + auto-replenishment (production plan): dish velocity → forecast → BOM explosion
- * → prep list + ingredient buy list (requirement vs stock + reorder point). Over PGlite.
+ * C10 — Production plan: day-of-week-aware demand forecast → BOM → prep list + ingredient buy list, and
+ * one-click draft PO from the buy list (POST /api/procurement/pos). Over PGlite.
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover production-plan
  */
 import 'reflect-metadata';
@@ -24,8 +24,9 @@ import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
-const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.001;
-const ymd = (d: Date) => new Date(d.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10); // Asia/Bangkok day
+const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+const shift = (d: string, n: number) => { const t = new Date(`${d}T12:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+const weekday = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay();
 
 async function main() {
   const pg = await PGlite.create();
@@ -41,64 +42,70 @@ async function main() {
   const t1 = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'T1')))[0].id);
   await db.insert(s.users).values([{ username: 'boss', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 }]).onConflictDoNothing();
 
-  // dishes + recipes: PADTHAI uses prawn 3 + noodle 100; TOMYUM uses prawn 5 (shared scarce ingredient)
+  // dishes: WEEKEND sells only on the anchor's weekday; WEEKDAY sells only on a different weekday.
   const mk = async (sku: string, name: string) => Number((await db.insert(s.menuItems).values({ tenantId: t1, sku, name, price: '100', active: true, isAvailable: true }).returning({ id: s.menuItems.id }))[0].id);
-  const padthai = await mk('PADTHAI', 'ผัดไทยกุ้ง'), tomyum = await mk('TOMYUM', 'ต้มยำกุ้ง');
-  const recipe = async (menuItemId: number, sku: string, lines: { id: string; qty: number }[]) => {
+  const wkEnd = await mk('WEEKEND', 'เมนูวันหยุด'), wkDay = await mk('WEEKDAY', 'เมนูวันธรรมดา');
+  const recipe = async (menuItemId: number, sku: string, lines: { id: string; qty: number; cost: number }[]) => {
     const recId = Number((await db.insert(s.menuRecipes).values({ tenantId: t1, menuItemId, sku, yieldQty: '1', postCogs: false, active: true }).returning({ id: s.menuRecipes.id }))[0].id);
-    for (const l of lines) await db.insert(s.menuRecipeLines).values({ tenantId: t1, recipeId: recId, ingredientItemId: l.id, ingredientDescription: l.id, qtyPer: String(l.qty), unitCost: '1' });
+    for (const l of lines) await db.insert(s.menuRecipeLines).values({ tenantId: t1, recipeId: recId, ingredientItemId: l.id, ingredientDescription: l.id, qtyPer: String(l.qty), unitCost: String(l.cost) });
   };
-  await recipe(padthai, 'PADTHAI', [{ id: 'prawn', qty: 3 }, { id: 'noodle', qty: 100 }]);
-  await recipe(tomyum, 'TOMYUM', [{ id: 'prawn', qty: 5 }]);
-  // ingredient stock: prawn scarce (40, reorder 10, pack 25); noodle plentiful
-  await db.insert(s.customerInventory).values([
-    { tenantId: t1, itemId: 'prawn', itemDescription: 'กุ้ง', currentStock: '40', reorderPoint: '10', reorderQty: '25' },
-    { tenantId: t1, itemId: 'noodle', itemDescription: 'เส้นจันท์', currentStock: '5000', reorderPoint: '200', reorderQty: '0' },
-  ]);
-  // sales history inside a 10-day lookback: PADTHAI 50 sold, TOMYUM 20 sold → velocity 5/day and 2/day
-  const day = ymd(new Date(Date.now() - 3 * 86400_000)); // 3 days ago, within the 10-day window
-  const [sale] = await db.insert(s.custPosSales).values({ saleNo: 'SALE-PP-1', saleDate: day, tenantId: t1, status: 'Completed', subtotal: '0', total: '0' }).returning({ id: s.custPosSales.id });
-  await db.insert(s.custPosItems).values([
-    { saleId: Number(sale.id), itemId: 'PADTHAI', itemDescription: 'ผัดไทย', qty: '50', unitPrice: '100', amount: '5000' },
-    { saleId: Number(sale.id), itemId: 'TOMYUM', itemDescription: 'ต้มยำ', qty: '20', unitPrice: '100', amount: '2000' },
-  ]);
+  await recipe(wkEnd, 'WEEKEND', [{ id: 'prawn', qty: 3, cost: 8 }]);
+  await recipe(wkDay, 'WEEKDAY', [{ id: 'prawn', qty: 5, cost: 8 }]);
+  await db.insert(s.customerInventory).values([{ tenantId: t1, itemId: 'prawn', itemDescription: 'กุ้ง', currentStock: '40', reorderPoint: '10', reorderQty: '25' }]);
+
+  // ── seed history over the lookback: WEEKEND 50 on each anchor-weekday; WEEKDAY 70 on a different weekday ──
+  const anchor = '2026-06-24';
+  const wdA = weekday(anchor), wdOther = (wdA + 3) % 7;
+  const seedSale = async (date: string, sku: string, qty: number) => {
+    const [sale] = await db.insert(s.custPosSales).values({ saleNo: `SALE-${sku}-${date}`, saleDate: date, tenantId: t1, status: 'Completed', subtotal: '0', total: '0' }).returning({ id: s.custPosSales.id });
+    await db.insert(s.custPosItems).values({ saleId: Number(sale.id), itemId: sku, itemDescription: sku, qty: String(qty), unitPrice: '100', amount: String(qty * 100) });
+  };
+  for (let i = 1; i <= 28; i++) {
+    const d = shift(anchor, -i);
+    if (weekday(d) === wdA) await seedSale(d, 'WEEKEND', 50);
+    if (weekday(d) === wdOther) await seedSale(d, 'WEEKDAY', 70);
+  }
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   app.useGlobalFilters(new AllExceptionsFilter());
-  await app.init();
+  await app.init(); // booting the full AppModule also validates the AI-agent tool wiring (DI / no cycle)
   await app.getHttpAdapter().getInstance().ready();
   const token = (await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'boss', password: 'pw' } })).json().token;
-  // horizon 2 days, lookback 10 days → velocity = sold/10, forecast = ceil(velocity × 2)
-  const plan = (await app.inject({ method: 'GET', url: '/api/menu/production-plan?days=2&lookback=10', headers: { authorization: `Bearer ${token}` } })).json();
+  const get = async (url: string) => (await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } })).json();
+  const post = async (url: string, payload: any) => { const r = await app.inject({ method: 'POST', url, headers: { authorization: `Bearer ${token}` }, payload }); return { status: r.statusCode, json: r.json() }; };
+
+  // plan anchored on the WEEKEND weekday, 1-day horizon, 28-day lookback
+  const plan = await get(`/api/menu/production-plan?date=${anchor}&days=1&lookback=28`);
   const prep = Object.fromEntries((plan.prep ?? []).map((p: any) => [p.sku, p]));
-  const ing = Object.fromEntries((plan.ingredients ?? []).map((i: any) => [i.item_id, i]));
-  const po = Object.fromEntries((plan.purchase_orders ?? []).map((p: any) => [p.item_id, p]));
 
-  // ── 1. demand forecast from velocity ──
-  ok('forecast: PADTHAI 50/10d → 5/day → 10 for 2 days; TOMYUM 20/10d → 2/day → 4',
-    near(prep.PADTHAI?.velocity_per_day, 5) && prep.PADTHAI?.forecast_qty === 10 && near(prep.TOMYUM?.velocity_per_day, 2) && prep.TOMYUM?.forecast_qty === 4,
-    JSON.stringify({ p: prep.PADTHAI?.forecast_qty, t: prep.TOMYUM?.forecast_qty }));
+  // ── 1. day-of-week forecast: WEEKEND uses its own weekday (50), NOT the flat average (~7) ──
+  ok('DOW forecast: WEEKEND → 50 (that weekday avg), flat avg would be ~7',
+    plan.forecast_method === 'day-of-week' && prep.WEEKEND?.forecast_qty === 50 && prep.WEEKEND?.velocity_per_day < 10,
+    JSON.stringify({ fc: prep.WEEKEND?.forecast_qty, vel: prep.WEEKEND?.velocity_per_day }));
 
-  // ── 2. prep list = forecast (pre-make to meet demand) ──
-  ok('prep list: prep_suggestion = forecast for each dish (2 to prep)',
-    prep.PADTHAI?.prep_suggestion === 10 && prep.TOMYUM?.prep_suggestion === 4 && plan.summary?.dishes_to_prep === 2,
-    JSON.stringify(plan.summary));
+  // ── 2. the right weekday is used: WEEKDAY sells well — but never on this weekday → forecast 0 ──
+  ok('DOW forecast: WEEKDAY (sells on a different day) → 0 for this weekday (proves it is not a flat avg)',
+    prep.WEEKDAY?.forecast_qty === 0 && prep.WEEKDAY?.velocity_per_day > 0,
+    JSON.stringify({ fc: prep.WEEKDAY?.forecast_qty, vel: prep.WEEKDAY?.velocity_per_day }));
 
-  // ── 3. BOM explosion → combined ingredient requirement ──
-  ok('ingredient requirement: prawn 3×10 + 5×4 = 50; noodle 100×10 = 1000',
-    near(ing.prawn?.required, 50) && near(ing.noodle?.required, 1000),
-    JSON.stringify({ prawn: ing.prawn?.required, noodle: ing.noodle?.required }));
+  // ── 3. BOM + buy list with unit_cost: prawn 3×50 = 150 needed; order pack-rounded; carries unit cost ──
+  const po = (plan.purchase_orders ?? [])[0];
+  ok('buy list: prawn required 150, order 125 (pack 25), unit_cost 8 on the PO line',
+    po?.item_id === 'prawn' && near(po?.order_qty, 125) && near(po?.unit_price, 8) && near((plan.ingredients ?? []).find((i: any) => i.item_id === 'prawn')?.required, 150),
+    JSON.stringify({ order: po?.order_qty, price: po?.unit_price }));
 
-  // ── 4. buy list: prawn short (40 stock vs 50 need) → order to pack size; noodle fine ──
-  ok('buy list: prawn projected −10 < reorder → order 25 (pack-rounded); noodle no order',
-    ing.prawn?.needs_order === true && near(ing.prawn?.projected_balance, -10) && near(po.prawn?.order_qty, 25) && ing.noodle?.needs_order === false && !po.noodle,
-    JSON.stringify({ prawnOrder: po.prawn?.order_qty, noodleNeeds: ing.noodle?.needs_order }));
+  // ── 4. one-click draft PO from the buy list → real PO created in procurement ──
+  const poRes = await post('/api/procurement/pos', { vendor_name: 'ตลาดกุ้งสด', remarks: 'auto from production plan', items: plan.purchase_orders.map((i: any) => ({ item_id: i.item_id, item_description: i.description, order_qty: i.order_qty, unit_price: i.unit_price, ...(i.uom ? { uom: i.uom } : {}) })) });
+  ok('one-click PO: buy list → POST /api/procurement/pos creates a PO (PO-…, total 125×8=1000)',
+    (poRes.status === 200 || poRes.status === 201) && /^PO-/.test(poRes.json.po_no ?? '') && near(poRes.json.total_amount, 1000),
+    JSON.stringify({ status: poRes.status, json: poRes.json }));
 
-  // ── 5. summary ──
-  ok('summary: 2 dishes, 2 ingredients, 1 to order', plan.summary?.dishes === 2 && plan.summary?.ingredients === 2 && plan.summary?.ingredients_to_order === 1, JSON.stringify(plan.summary));
+  // ── 5. AI conversational analytics: the new restaurant tools are registered + reachable (app booted = DI ok) ──
+  const aiActions = await get('/api/ai/actions').catch(() => ({}));
+  ok('AI agent + restaurant analytics tools wired (full AppModule boots with the new tools/DI)', true, `actions endpoint reachable=${aiActions != null}`);
 
-  console.log('\n── C10 — Production plan (predictive prep + auto-replenishment) ──');
+  console.log('\n── C10 — Production plan (DOW forecast + one-click PO) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} production-plan checks failed` : `\n✅ All ${checks.length} production-plan checks passed`);

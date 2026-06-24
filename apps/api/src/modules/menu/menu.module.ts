@@ -10,6 +10,6 @@ import { MenuController } from './menu.controller';
 @Module({
   controllers: [MenuController],
   providers: [MenuService, RecipeService, FoodCostService, ProductionPlanService],
-  exports: [MenuService, RecipeService, FoodCostService],
+  exports: [MenuService, RecipeService, FoodCostService, ProductionPlanService],
 })
 export class MenuModule {}

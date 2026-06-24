@@ -316,9 +316,18 @@ and it gives you two lists:
   suggests **how much of each ingredient to order** (rounded up to your reorder pack
   size). Ingredients you have enough of don't appear.
 
-It's advice, not an automatic order — review it, then raise the purchase orders in
-procurement. The forecast uses a simple, transparent daily-average; it can be swapped
-for the AI demand model later without changing the screen.
+The forecast is **day-of-week aware** — it predicts each day from the *same weekday's*
+history (so a Saturday is forecast from past Saturdays, not a flat average), which
+matters when weekends and weekdays sell differently.
+
+It's advice, not an automatic order — but when the buy list has items you can press
+**สร้างใบสั่งซื้อ (ร่าง)** to raise a **draft purchase order** in procurement in one
+click (it goes in as *pending approval*, never auto-approved).
+
+**Just ask.** All of these reports are also wired into the **AI assistant** — at the
+till you can ask in plain Thai, e.g. *"วันนี้ควรเตรียมอะไรบ้าง?"*, *"เมนูไหนกำไรตก?"*,
+*"ช่วงไหนขายดีสุด?"* — and it answers from your live data (and, for purchases, only
+*proposes* an order for someone to approve).
 
 ---
 

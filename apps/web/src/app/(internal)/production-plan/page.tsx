@@ -1,16 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ChefHat, ShoppingCart, Soup } from 'lucide-react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { ChefHat, ShoppingCart, Soup, FilePlus } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
+import { Msg } from '@/components/tabs';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 
@@ -29,6 +31,19 @@ export default function ProductionPlanPage() {
   const q = useQuery<any>({
     queryKey: ['production-plan', days, lookback],
     queryFn: () => api(`/api/menu/production-plan?days=${days}&lookback=${lookback}`),
+  });
+  const [poMsg, setPoMsg] = useState('');
+  const createPo = useMutation({
+    // one-click draft PO from the buy list (omit a null uom — the procurement API wants string-or-absent).
+    mutationFn: () => api<{ po_no: string }>('/api/procurement/pos', {
+      method: 'POST',
+      body: JSON.stringify({
+        remarks: 'จากแผนการผลิต (production plan)',
+        items: (q.data?.purchase_orders ?? []).map((i: any) => ({ item_id: i.item_id, item_description: i.description, order_qty: i.order_qty, unit_price: i.unit_price, ...(i.uom ? { uom: i.uom } : {}) })),
+      }),
+    }),
+    onSuccess: (r) => setPoMsg(`สร้างใบสั่งซื้อแล้ว: ${r.po_no} — รออนุมัติ`),
+    onError: (e: any) => setPoMsg(`❌ ${e.message}`),
   });
 
   return (
@@ -70,6 +85,13 @@ export default function ProductionPlanPage() {
               {q.data.purchase_orders.length === 0
                 ? <p className="text-sm text-muted-foreground">ไม่มีวัตถุดิบที่ต้องสั่งซื้อสำหรับช่วงนี้ ✓</p>
                 : (
+                  <>
+                  <div className="mb-1 flex items-center justify-end">
+                    <Button size="sm" disabled={createPo.isPending} onClick={() => createPo.mutate()}>
+                      <FilePlus className="size-4" /> {createPo.isPending ? 'กำลังสร้าง…' : 'สร้างใบสั่งซื้อ (ร่าง)'}
+                    </Button>
+                  </div>
+                  {poMsg && <Msg ok={!poMsg.startsWith('❌')}>{poMsg}</Msg>}
                   <DataTable
                     rows={q.data.purchase_orders}
                     rowKey={(r: any) => r.item_id}
@@ -80,6 +102,7 @@ export default function ProductionPlanPage() {
                       { key: 'order_qty', label: 'แนะนำสั่งซื้อ', align: 'right', render: (r: any) => <strong>{num(r.order_qty)} {r.uom ?? ''}</strong> },
                     ]}
                   />
+                  </>
                 )}
             </Section>
           </>

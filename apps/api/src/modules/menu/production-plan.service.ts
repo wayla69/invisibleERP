@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, and, gte, inArray, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosItems, custPosSales, menuRecipes, menuRecipeLines, menuItems, customerInventory } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
@@ -8,42 +8,78 @@ import type { JwtUser } from '../../common/decorators';
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const r3 = (x: number) => Math.round((Number(x) || 0) * 1000) / 1000;
 
+// Whole-day shift of a YYYY-MM-DD string (UTC-noon anchor avoids DST/edge drift).
+function shiftYmd(d: string, days: number): string {
+  const t = new Date(`${d}T12:00:00Z`);
+  t.setUTCDate(t.getUTCDate() + days);
+  return t.toISOString().slice(0, 10);
+}
+// Day-of-week of a business date (0=Sunday). The date string is already the Asia/Bangkok day.
+const weekdayOf = (d: string): number => new Date(`${d}T00:00:00Z`).getUTCDay();
+
 // Predictive prep + auto-replenishment ("production plan"). Chains the pieces that a pure POS can't:
 //   sales velocity (demand)  →  BOM explosion (recipe)  →  current stock (customer_inventory)
-// to answer two operational questions for a horizon (default: today):
-//   1. How many of each dish should the kitchen PREP?  (forecast demand vs what stock can already make)
-//   2. Which ingredients must we BUY, and how much?    (requirement vs stock + reorder point)
+// to answer, for a horizon: how many of each dish to PREP, and which ingredients to BUY (and how much).
 //
-// The demand model here is a transparent average-daily-velocity over a lookback window — honest and
-// explainable, and a drop-in point for the ML demand model (`demand-ml`) later. Read-only suggestions;
-// turning a suggested order into a real PO is a one-click handoff to the procurement module.
+// Demand model is **day-of-week aware**: each target day is forecast from that *same weekday's* history
+// over the lookback (a Saturday is forecast from past Saturdays, not a flat average), which matters for
+// F&B where weekends ≠ weekdays. Transparent and explainable, and a drop-in point for the ML demand
+// model later. Read-only suggestions; turning a line into a real PO is a one-click handoff to procurement.
 @Injectable()
 export class ProductionPlanService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
-  async plan(user: JwtUser, opts?: { days?: number; lookback?: number }) {
+  async plan(user: JwtUser, opts?: { days?: number; lookback?: number; date?: string }) {
     const db = this.db as any;
     const tenantId = user.tenantId ?? null;
-    const days = Math.max(1, Math.floor(opts?.days ?? 1));         // horizon to prep/buy for
-    const lookback = Math.max(1, Math.floor(opts?.lookback ?? 28)); // velocity window
-    const today = ymd();
-    const cutoff = ymd(new Date(Date.now() - lookback * 86400_000));
+    const days = Math.max(1, Math.floor(opts?.days ?? 1));          // horizon to prep/buy for
+    const lookback = Math.max(1, Math.floor(opts?.lookback ?? 28)); // learning window (days)
+    const anchor = opts?.date && /^\d{4}-\d{2}-\d{2}$/.test(opts.date) ? opts.date : ymd(); // plan-from day
+    const histStart = shiftYmd(anchor, -lookback); // inclusive
+    const histEnd = shiftYmd(anchor, -1);          // day before the anchor, inclusive
 
-    // ── 1. dish velocity over the lookback window (completed sales only) ──
+    // ── 1. per-dish DAILY sales over the history window (completed sales only) ──
     const soldRows = await db
-      .select({ itemId: custPosItems.itemId, qty: sql<string>`coalesce(sum(${custPosItems.qty}),0)` })
+      .select({ itemId: custPosItems.itemId, d: custPosSales.saleDate, qty: sql<string>`coalesce(sum(${custPosItems.qty}),0)` })
       .from(custPosItems)
       .innerJoin(custPosSales, eq(custPosItems.saleId, custPosSales.id))
-      .where(and(eq(custPosSales.tenantId, tenantId as any), gte(custPosSales.saleDate, cutoff), sql`${custPosSales.status}::text = 'Completed'`))
-      .groupBy(custPosItems.itemId);
-    const soldQty = new Map<string, number>(soldRows.map((r: any) => [String(r.itemId), n(r.qty)]));
+      .where(and(eq(custPosSales.tenantId, tenantId as any), gte(custPosSales.saleDate, histStart), lte(custPosSales.saleDate, histEnd), sql`${custPosSales.status}::text = 'Completed'`))
+      .groupBy(custPosItems.itemId, custPosSales.saleDate);
+
+    // weekday → qty per dish, and total per dish, plus how many of each weekday the window covered
+    const wdSumByDish = new Map<string, number[]>();
+    const totalByDish = new Map<string, number>();
+    for (const r of soldRows) {
+      const sku = String(r.itemId); const q = n(r.qty); const wd = weekdayOf(String(r.d));
+      const arr = wdSumByDish.get(sku) ?? [0, 0, 0, 0, 0, 0, 0];
+      arr[wd] += q; wdSumByDish.set(sku, arr);
+      totalByDish.set(sku, (totalByDish.get(sku) ?? 0) + q);
+    }
+    const wdOccurrences = [0, 0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < lookback; i++) wdOccurrences[weekdayOf(shiftYmd(histStart, i))]++;
+    const targetWeekdays: number[] = [];
+    for (let i = 0; i < days; i++) targetWeekdays.push(weekdayOf(shiftYmd(anchor, i)));
+
+    // Forecast = Σ over each target day of that weekday's average (fallback to the overall average when a
+    // weekday never occurred in the window). velocity_per_day is the plain overall average (for display).
+    const forecastFor = (sku: string): { forecast: number; velocity: number } => {
+      const wdSum = wdSumByDish.get(sku) ?? [0, 0, 0, 0, 0, 0, 0];
+      const overall = (totalByDish.get(sku) ?? 0) / lookback;
+      let f = 0;
+      for (const wd of targetWeekdays) f += wdOccurrences[wd] > 0 ? wdSum[wd] / wdOccurrences[wd] : overall;
+      return { forecast: Math.ceil(f), velocity: overall };
+    };
 
     // ── recipes (tenant-scoped) + lines + dish names + ingredient stock ──
     const recipes = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId as any), eq(menuRecipes.active, true)));
     const recipeIds = recipes.map((r: any) => Number(r.id));
     const lines = recipeIds.length ? await db.select().from(menuRecipeLines).where(inArray(menuRecipeLines.recipeId, recipeIds)) : [];
     const linesByRecipe = new Map<number, any[]>();
-    for (const l of lines) { const k = Number(l.recipeId); (linesByRecipe.get(k) ?? linesByRecipe.set(k, []).get(k))!.push(l); }
+    const costByIngredient = new Map<string, number>(); // ingredient → unit cost (from the recipe line) for PO pricing
+    for (const l of lines) {
+      const k = Number(l.recipeId); (linesByRecipe.get(k) ?? linesByRecipe.set(k, []).get(k))!.push(l);
+      const c = n(l.unitCost); if (c > 0 && !costByIngredient.has(String(l.ingredientItemId))) costByIngredient.set(String(l.ingredientItemId), c);
+    }
     const mis = await db.select().from(menuItems).where(eq(menuItems.tenantId, tenantId as any));
     const miById = new Map<number, any>(mis.map((m: any) => [Number(m.id), m]));
     const inv = await db.select().from(customerInventory).where(eq(customerInventory.tenantId, tenantId as any));
@@ -58,9 +94,7 @@ export class ProductionPlanService {
       const mi = miById.get(Number(rec.menuItemId));
       const recLines = linesByRecipe.get(Number(rec.id)) ?? [];
       const yld = Math.max(n(rec.yieldQty), 1);
-      const velocity = (soldQty.get(String(rec.sku)) ?? 0) / lookback;
-      const forecast = Math.ceil(velocity * days);
-      // how many servings current stock can already make (the limiting ingredient)
+      const { forecast, velocity } = forecastFor(String(rec.sku));
       let canMake = Infinity;
       for (const l of recLines) {
         const perServing = n(l.qtyPer) / yld;
@@ -86,18 +120,17 @@ export class ProductionPlanService {
       const s = stockBy.get(itemId) ?? { stock: 0, reorder: 0, reorderQty: 0, desc: null, uom: null };
       const projected = r3(s.stock - req);
       const needsOrder = projected < s.reorder || projected < 0;
-      // bring the balance back up to (requirement + reorder safety); respect the reorder pack size if set
       let orderQty = 0;
       if (needsOrder) {
         const raw = Math.max(0, req + s.reorder - s.stock);
         orderQty = s.reorderQty > 0 ? Math.ceil(raw / s.reorderQty) * s.reorderQty : Math.ceil(raw);
       }
-      return { item_id: itemId, description: s.desc, uom: s.uom, required: r3(req), stock: r3(s.stock), projected_balance: projected, reorder_point: r3(s.reorder), needs_order: needsOrder, suggested_order_qty: r2(orderQty) };
+      return { item_id: itemId, description: s.desc, uom: s.uom, unit_cost: r2(costByIngredient.get(itemId) ?? 0), required: r3(req), stock: r3(s.stock), projected_balance: projected, reorder_point: r3(s.reorder), needs_order: needsOrder, suggested_order_qty: r2(orderQty) };
     }).sort((a, b) => a.projected_balance - b.projected_balance);
 
     const purchaseOrders = ingredients.filter((i) => i.needs_order);
     return {
-      date: today, horizon_days: days, lookback_days: lookback,
+      date: anchor, horizon_days: days, lookback_days: lookback, forecast_method: 'day-of-week',
       summary: {
         dishes: prep.length,
         dishes_to_prep: prep.filter((p) => p.prep_suggestion > 0).length,
@@ -106,7 +139,8 @@ export class ProductionPlanService {
       },
       prep,
       ingredients,
-      purchase_orders: purchaseOrders.map((i) => ({ item_id: i.item_id, description: i.description, uom: i.uom, order_qty: i.suggested_order_qty, current_stock: i.stock, required: i.required })),
+      // shape ready for a one-click draft PO (POST /api/procurement/pos): item_id + order_qty + unit_price.
+      purchase_orders: purchaseOrders.map((i) => ({ item_id: i.item_id, description: i.description, uom: i.uom, order_qty: i.suggested_order_qty, unit_price: i.unit_cost, current_stock: i.stock, required: i.required })),
     };
   }
 }
