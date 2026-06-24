@@ -83,6 +83,7 @@ export const dineInOrders = pgTable('dine_in_orders', {
   orderNo: text('order_no').notNull().unique(),         // DIN-YYYYMMDD-NNN
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   tableId: bigint('table_id', { mode: 'number' }).references(() => diningTables.id),
+  zoneId: bigint('zone_id', { mode: 'number' }),   // room snapshot taken at checkout — keeps per-room revenue accurate if the table later moves rooms (0088)
   sessionId: bigint('session_id', { mode: 'number' }).references(() => tableSessions.id),
   status: dineInOrderStatusEnum('status').notNull().default('open'),
   // online/delivery/kiosk dimension (POS Tier 2 #10) — legacy dine-in defaults keep existing rows unchanged

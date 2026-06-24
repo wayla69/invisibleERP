@@ -203,6 +203,9 @@ restaurant the plan **scrolls** as you add more tables, so there's always room.
 date range (defaults to today). Pick **ตั้งแต่ / ถึง** and you'll see total takings,
 the number of bills and the average per bill for every room (and for tables in no
 room), ranked by revenue — handy for checking whether the VIP room pulls its weight.
+These figures **stick to the room where each sale actually happened**: if you move a
+table to a different room later, past takings stay put (and a room you delete still
+shows its earlier sales, marked *(ลบแล้ว)*).
 
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing

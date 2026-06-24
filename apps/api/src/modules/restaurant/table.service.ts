@@ -60,17 +60,17 @@ export class TableService {
   }
 
   // Revenue by room over a business-day range [from..to] (defaults to today, Asia/Bangkok — cust_pos_sales.sale_date
-  // is already the business day). Joins fiscal dine-in sales → order → table → zone; RLS scopes every table to the
-  // tenant. Lists all active rooms (revenue 0 if none) + an "unzoned" bucket + the grand total.
+  // is already the business day). Joins fiscal dine-in sales → order, grouping by the order's **room snapshot**
+  // (`dine_in_orders.zone_id`, captured at checkout) so a later table move never re-buckets past sales; RLS scopes
+  // every row to the tenant. Lists all active rooms (revenue 0 if none) + an "unzoned" bucket + the grand total.
   async zoneRevenue(from: string | undefined, to: string | undefined, _user: JwtUser) {
     const db = this.db as any;
     const f = from || ymd();
     const t = to || ymd();
     const rows = await db
-      .select({ zoneId: diningTables.zoneId, total: custPosSales.total })
+      .select({ zoneId: dineInOrders.zoneId, total: custPosSales.total })
       .from(custPosSales)
       .innerJoin(dineInOrders, eq(dineInOrders.saleNo, custPosSales.saleNo))
-      .innerJoin(diningTables, eq(diningTables.id, dineInOrders.tableId))
       .where(and(gte(custPosSales.saleDate, f), lte(custPosSales.saleDate, t)));
     const agg = new Map<number | 'none', { revenue: number; sales: number }>();
     for (const r of rows) {
@@ -78,9 +78,14 @@ export class TableService {
       const e = agg.get(key) ?? { revenue: 0, sales: 0 };
       e.revenue += n(r.total); e.sales += 1; agg.set(key, e);
     }
-    const zones = await db.select().from(floorZones).where(eq(floorZones.active, true)).orderBy(asc(floorZones.sortOrder));
-    const rooms = zones
-      .map((z: any) => { const a = agg.get(Number(z.id)) ?? { revenue: 0, sales: 0 }; return { zone_id: Number(z.id), name: z.name, color: z.color ?? null, revenue: round2(a.revenue), sales: a.sales, avg_sale: a.sales ? round2(a.revenue / a.sales) : 0 }; })
+    const active = await db.select().from(floorZones).where(eq(floorZones.active, true)).orderBy(asc(floorZones.sortOrder));
+    // a sale's snapshot may point to a since-deleted room — still surface it (by name, flagged inactive) so the
+    // grand total reconciles and the manager can see where past takings came from.
+    const dataIds = [...agg.keys()].filter((k): k is number => k !== 'none');
+    const extraIds = dataIds.filter((id) => !active.some((z: any) => Number(z.id) === id));
+    const extra = extraIds.length ? await db.select().from(floorZones).where(inArray(floorZones.id, extraIds)) : [];
+    const rooms = [...active, ...extra]
+      .map((z: any) => { const a = agg.get(Number(z.id)) ?? { revenue: 0, sales: 0 }; return { zone_id: Number(z.id), name: z.name, color: z.color ?? null, active: !!z.active, revenue: round2(a.revenue), sales: a.sales, avg_sale: a.sales ? round2(a.revenue / a.sales) : 0 }; })
       .sort((a: any, b: any) => b.revenue - a.revenue);
     const un = agg.get('none') ?? { revenue: 0, sales: 0 };
     const unzoned = { revenue: round2(un.revenue), sales: un.sales };
