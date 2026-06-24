@@ -326,6 +326,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-028 | Scheduled report sweep runs due + records run | Feature (scheduled reports) | 26 §5a |
 | UAT-RPT-029 | Scheduled report run-now + tenant isolation | Feature (scheduled reports), ITGC-AC-03 | 26 §5a |
 | UAT-RPT-030 | Saved views visibility + owner-only delete | Feature (saved views), ITGC-AC-03 | 26 §5b |
+| UAT-RPT-031 | Role dashboard catalog + layout validation | Feature (role dashboards) | 26 §3a |
+| UAT-RPT-032 | Role dashboard resolution filtered to viewer perms | Feature (role dashboards), ITGC-AC-02 | 26 §3a |
+| UAT-RPT-033 | Role dashboard default fallback + tenant isolation | Feature (role dashboards), ITGC-AC-03 | 26 §3a |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 

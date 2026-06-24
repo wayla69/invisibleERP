@@ -575,6 +575,13 @@
       "when": 1782520000000,
       "tag": "0081_scheduled_reports_saved_views",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1782610000000,
+      "tag": "0082_dashboard_layouts",
+      "breakpoints": true
     }
   ]
 }
