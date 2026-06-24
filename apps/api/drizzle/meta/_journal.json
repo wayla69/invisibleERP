@@ -719,71 +719,92 @@
     {
       "idx": 102,
       "version": "7",
-      "when": 1783480000000,
-      "tag": "0101_loyalty_crm_phase1",
+      "when": 1783470000001,
+      "tag": "0085_floor_zone_geometry",
       "breakpoints": true
     },
     {
       "idx": 103,
       "version": "7",
-      "when": 1793480000000,
-      "tag": "0102_loyalty_liability_runs",
+      "when": 1783470000002,
+      "tag": "0088_dine_in_order_zone",
       "breakpoints": true
     },
     {
       "idx": 104,
       "version": "7",
-      "when": 1803480000000,
-      "tag": "0103_loyalty_rewards",
+      "when": 1783470000003,
+      "tag": "0104_service_charge",
       "breakpoints": true
     },
     {
       "idx": 105,
       "version": "7",
-      "when": 1813480000000,
-      "tag": "0104_loyalty_gamification",
+      "when": 1783470000004,
+      "tag": "0105_member_line",
       "breakpoints": true
     },
     {
       "idx": 106,
       "version": "7",
-      "when": 1823480000000,
-      "tag": "0105_loyalty_referrals",
+      "when": 1793470000004,
+      "tag": "0101_loyalty_crm_phase1",
       "breakpoints": true
     },
     {
       "idx": 107,
       "version": "7",
-      "when": 1833480000000,
-      "tag": "0106_member_otp",
+      "when": 1803470000004,
+      "tag": "0102_loyalty_liability_runs",
       "breakpoints": true
     },
     {
       "idx": 108,
       "version": "7",
-      "when": 1843480000000,
-      "tag": "0107_loyalty_wheels",
+      "when": 1813470000004,
+      "tag": "0103_loyalty_rewards",
       "breakpoints": true
     },
     {
       "idx": 109,
       "version": "7",
-      "when": 1853480000000,
-      "tag": "0108_loyalty_campaigns",
+      "when": 1823470000004,
+      "tag": "0104_loyalty_gamification",
       "breakpoints": true
     },
     {
       "idx": 110,
       "version": "7",
-      "when": 1863480000000,
-      "tag": "0109_loyalty_partners",
+      "when": 1833470000004,
+      "tag": "0105_loyalty_referrals",
       "breakpoints": true
     },
     {
       "idx": 111,
       "version": "7",
-      "when": 1873480000000,
-      "tag": "0110_member_line_link",
+      "when": 1843470000004,
+      "tag": "0106_member_otp",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1853470000004,
+      "tag": "0107_loyalty_wheels",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1863470000004,
+      "tag": "0108_loyalty_campaigns",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1873470000004,
+      "tag": "0109_loyalty_partners",
       "breakpoints": true
     }
   ]

@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { menuRecipes, menuRecipeLines, menuItems, customerInventory, custStockLog, items } from '../../database/schema';
 import { n, fx } from '../../database/queries';
@@ -72,6 +72,67 @@ export class RecipeService {
     const db = this.db as any;
     const recs = await db.select().from(menuRecipes).orderBy(menuRecipes.sku);
     return { recipes: recs.map((r: any) => ({ sku: r.sku, yield_qty: n(r.yieldQty), post_cogs: r.postCogs })), count: recs.length };
+  }
+
+  // ── Availability forecast (proactive layer over the reactive auto-86) ──
+  // For every recipe'd dish, how many more servings can the kitchen make from current stock — and which
+  // ingredient is the bottleneck. servings_left = floor(min over ingredients of stock / qty-per-serving).
+  // Classifies out (0 → should be 86'd) / low (≤ threshold) / ok, and lists low ingredients (≤ reorder pt).
+  async availabilityForecast(user: JwtUser, opts?: { low?: number }) {
+    const db = this.db as any;
+    const tenantId = user.tenantId ?? null;
+    const low = Math.max(0, opts?.low ?? 5);
+    // Scope to the caller's tenant explicitly (sku/itemId are unique only per tenant; an HQ/bypass caller
+    // must not blend another shop's recipes or stock — mirrors explode()).
+    const recipes = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId as any), eq(menuRecipes.active, true)));
+    if (!recipes.length) return { low_threshold: low, summary: { dishes: 0, out: 0, low: 0, ok: 0, low_ingredients: 0 }, items: [], low_ingredients: [] };
+
+    const recipeIds = recipes.map((r: any) => Number(r.id));
+    const allLines = await db.select().from(menuRecipeLines).where(inArray(menuRecipeLines.recipeId, recipeIds));
+    const linesByRecipe = new Map<number, any[]>();
+    for (const l of allLines) { const k = Number(l.recipeId); (linesByRecipe.get(k) ?? linesByRecipe.set(k, []).get(k))!.push(l); }
+    const mis = await db.select().from(menuItems).where(eq(menuItems.tenantId, tenantId as any));
+    const miById = new Map<number, any>(mis.map((m: any) => [Number(m.id), m]));
+    const inv = await db.select().from(customerInventory).where(eq(customerInventory.tenantId, tenantId as any));
+    const stockByItem = new Map<string, { stock: number; reorder: number; desc: string | null }>(inv.map((i: any) => [String(i.itemId), { stock: n(i.currentStock), reorder: n(i.reorderPoint), desc: i.itemDescription }]));
+
+    const items: any[] = [];
+    for (const r of recipes) {
+      const mi = miById.get(Number(r.menuItemId));
+      const lines = linesByRecipe.get(Number(r.id)) ?? [];
+      const yld = Math.max(n(r.yieldQty), 1);
+      let servingsLeft = Infinity;
+      let limiting: any = null;
+      for (const l of lines) {
+        const perServing = n(l.qtyPer) / yld;
+        if (perServing <= 0) continue;
+        const stock = stockByItem.get(String(l.ingredientItemId))?.stock ?? 0;
+        const canMake = Math.floor(stock / perServing);
+        if (canMake < servingsLeft) {
+          servingsLeft = canMake;
+          limiting = { item_id: l.ingredientItemId, description: l.ingredientDescription ?? stockByItem.get(String(l.ingredientItemId))?.desc ?? null, stock: round4(stock), qty_per_serving: round4(perServing) };
+        }
+      }
+      const left = servingsLeft === Infinity ? null : servingsLeft; // no costed ingredient lines → unknown
+      const status = left == null ? 'unknown' : left <= 0 ? 'out' : left <= low ? 'low' : 'ok';
+      items.push({ sku: r.sku, name: mi?.name ?? r.sku, is_available: mi?.isAvailable ?? true, servings_left: left, status, limiting_ingredient: limiting });
+    }
+    items.sort((a, b) => (a.servings_left ?? 1e9) - (b.servings_left ?? 1e9));
+
+    // ingredients at/under their reorder point that feed at least one recipe
+    const usedItemIds = new Set(allLines.map((l: any) => String(l.ingredientItemId)));
+    const lowIngredients = [...stockByItem.entries()]
+      .filter(([id, v]) => usedItemIds.has(id) && v.reorder > 0 && v.stock <= v.reorder)
+      .map(([id, v]) => ({ item_id: id, description: v.desc, stock: round4(v.stock), reorder_point: round4(v.reorder) }))
+      .sort((a, b) => a.stock - b.stock);
+
+    const count = (st: string) => items.filter((i) => i.status === st).length;
+    return {
+      low_threshold: low,
+      summary: { dishes: items.length, out: count('out'), low: count('low'), ok: count('ok'), low_ingredients: lowIngredients.length },
+      items,
+      low_ingredients: lowIngredients,
+    };
   }
 
   // ── engine (called by sale / return paths; shares the caller's tx) ──

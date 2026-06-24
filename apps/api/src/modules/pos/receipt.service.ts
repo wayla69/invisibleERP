@@ -36,7 +36,7 @@ export class ReceiptService {
       date: String(sale.saleDate ?? ''),
       shop: { name: snap.sellerName, tax_id: snap.sellerTaxId, branch_label: snap.sellerBranchLabel, address: snap.sellerAddress, phone: t?.phone ?? undefined },
       lines: lines.map((l: any) => ({ name: l.itemDescription ?? l.itemId, qty: n(l.qty), unit_price: n(l.unitPrice), amount: n(l.amount), discount_pct: n(l.discountPct) })),
-      subtotal: n(sale.subtotal), discount: n(sale.discount), vat: n(sale.taxAmount), total: n(sale.total), tip: n(sale.tip),
+      subtotal: n(sale.subtotal), discount: n(sale.discount), service_charge: n(sale.serviceCharge), vat: n(sale.taxAmount), total: n(sale.total), tip: n(sale.tip),
       tenders,
       points_earned: n(sale.pointsEarned), points_used: n(sale.pointsUsed),
       reprint_count: 0, copy: false,

@@ -1,6 +1,6 @@
 # UAT — Cycle 06: Tax Compliance (VAT / WHT / e-Tax)
 
-**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `06-tax-compliance.md` (TAX-01..03, REV-10, PAY-02), harness `tools/cutover/src/etax.ts`, `worldclass.ts`, `pos-p1.ts`, `payroll.ts`.
+**Status: DRAFT v0.2 · 2026-06-24** · Cross-ref: process narrative `06-tax-compliance.md` (TAX-01..03, REV-10, PAY-02), harness `tools/cutover/src/etax.ts`, `etax-sign.ts`, `worldclass.ts`, `pos-p1.ts`, `payroll.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. VAT = 7%. Error codes/amounts are exact.
 
@@ -15,7 +15,10 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. VAT = 7%. Error codes/amou
 | UAT-TAX-007 | e-Tax XML parties & tax IDs | Admin | XML | 1. Inspect PartyTaxScheme. | — | Seller CompanyID 0105551234567 and buyer 0992001234567 present. | Med | Positive | TAX-02 | Not Run | etax.ts |
 | UAT-TAX-008 | e-Tax XML tax & totals | Admin | XML | 1. Inspect tax/totals. | — | Percent 7.00; TaxableAmount 300.00; TaxAmount 21.00; PayableAmount 321.00. | High | Positive | TAX-02 | Not Run | etax.ts |
 | UAT-TAX-009 | e-Tax XML lines + special-char escaping | Admin | XML | 1. Inspect invoice lines. | — | 2 `<cac:InvoiceLine>`; `<` → `&lt;`, `&` → `&amp;`; no raw angle brackets/ampersand leak. | Med | Control | TAX-02 | Not Run | etax.ts |
-| UAT-TAX-010 | e-Tax submission accepted | MasterDataAdmin | Tax invoice exists | 1. `POST /api/tax/etax/submit/{docNo}`. 2. `GET /api/tax/etax/status/{docNo}`. | docNo=TIV-202606-0001 | submit → status `Accepted`, `provider_ref` `mock-*`; status read back `Accepted`. | Med | Positive | TAX-02 | Not Run | pos-p1.ts |
-| UAT-TAX-011 | e-Tax resubmit idempotent | MasterDataAdmin | Already submitted | 1. `POST /api/tax/etax/submit/{docNo}` again. | same docNo | `idempotent: true`. | Low | Control | TAX-02 | Not Run | pos-p1.ts |
+| UAT-TAX-010 | e-Tax submission accepted | MasterDataAdmin | Tax invoice exists | 1. `POST /api/tax/etax/submit/{docNo}`. 2. `GET /api/tax/etax/status/{docNo}`. | docNo=TIV-202606-0007 | submit → status `Accepted`, `provider_ref` `mock-*`, `signed:false` (no cert); status read back `Accepted`. | Med | Positive | TAX-02 | Not Run | etax.ts |
+| UAT-TAX-011 | e-Tax resubmit idempotent | MasterDataAdmin | Already submitted | 1. `POST /api/tax/etax/submit/{docNo}` again. | same docNo | `idempotent: true`, same `provider_ref`. | Low | Control | TAX-02 | Not Run | etax.ts |
+| UAT-TAX-011a | e-Tax XML XAdES-signed | Admin | Signing cert configured (`ETAX_SIGNING_*`) | 1. `GET /api/tax-invoices/{docNo}/etax-xml?signed=1`. 2. Inspect XML. | docNo + test cert | Doc contains `<ds:Signature>` with `<xades:QualifyingProperties>` (SigningTime + SigningCertificate digest) and an embedded `<ds:X509Certificate>`; verifies (digest + RSA + props OK). | High | Positive | TAX-02 | Not Run | etax-sign.ts |
+| UAT-TAX-011b | e-Tax signature tamper-evident | Admin | Signed XML from 011a | 1. Alter an amount in the signed XML. 2. Re-verify. | — | Verification fails (`docDigestOk=false`); altering the SignatureValue fails (`signatureOk=false`); a different certificate fails to verify. | High | Control | TAX-02 | Not Run | etax-sign.ts |
+| UAT-TAX-011c | e-Tax unsigned fallback (no cert) | Admin | No signing cert | 1. `GET /api/tax-invoices/{docNo}/etax-xml?signed=1`. | docNo=TIV-202606-0007 | 200; valid UBL with **no** `<ds:Signature>`; filename `{docNo}.xml` (no `-signed`). | Med | Control | TAX-02 | Not Run | etax.ts |
 | UAT-TAX-012 | Tax-invoice numbering sequential | Admin | Issue 2+ tax invoices | 1. Issue tax invoices. 2. Inspect doc numbers. | — | Monotonic, gapless, tenant-scoped numbering (no duplicates). | Med | Control | TAX-03 | Not Run | tax-docs |
 | UAT-TAX-013 | WHT withheld on payroll | GlAccountant | Payroll run 2026-06 | 1. `POST /api/payroll/runs?period=2026-06`. 2. `GET /api/payroll/pnd1?period=2026-06`. | gross 42000 | `wht_total`=170.83; ภ.ง.ด.1 total_wht 170.83; GL 2360 WHT payable cr 170.83. | High | Positive | PAY-02, TAX | Not Run | payroll.ts |

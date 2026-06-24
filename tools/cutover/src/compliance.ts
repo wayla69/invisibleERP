@@ -518,10 +518,10 @@ async function main() {
 
   // ════════ LYL-16 — LINE LIFF: linked account logs in (mints member token); unlinked rejected; link works ═══════
   const [lm] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LINE', name: 'ไลน์', balance: '0', lifetime: '0', active: true, lineUserId: 'U-line-123' }).returning({ id: s.posMembers.id });
-  const lineLogin = await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', dev_line_user_id: 'U-line-123' });
-  const lineUnlinked = await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', dev_line_user_id: 'U-nope' });
+  const lineLogin = await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', id_token: 'mock:U-line-123' });
+  const lineUnlinked = await inj('POST', '/api/member/auth/line', undefined, { tenant_code: 'T1', id_token: 'mock:U-nope' });
   const lineMe = await inj('GET', '/api/member/me', lineLogin.json.token);
-  const relink = await inj('POST', '/api/member/link-line', lineLogin.json.token, { line_user_id: 'U-relink-456' });
+  const relink = await inj('POST', '/api/member/link-line', lineLogin.json.token, { id_token: 'mock:U-relink-456' });
   ok('LYL-16: LINE login — linked account mints a member token; unlinked rejected; member can link',
     !!lineLogin.json.token && lineMe.json.member_code === 'M-LINE' && Number(lm.id) === lineMe.json.id && lineUnlinked.status === 401 && lineUnlinked.json.error?.code === 'LINE_NOT_LINKED' && relink.json.linked === true,
     `tok=${!!lineLogin.json.token} me=${lineMe.json.member_code} unlinked=${lineUnlinked.status}/${lineUnlinked.json.error?.code} link=${relink.json.linked}`);

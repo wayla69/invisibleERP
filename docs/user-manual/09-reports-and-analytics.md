@@ -234,4 +234,101 @@ can act on. *(The underlying counts come from the inventory EOD count.)*
 
 ---
 
+## Restaurant management analytics
+
+Open **วิเคราะห์ร้านอาหาร (Restaurant analytics)** in the POS menu (`/restaurant-analytics`)
+for all of these on one screen — pick a date range at the top and switch tabs (Menu
+engineering · ช่วงเวลาขายดี · ยกเลิก/ส่วนลด · พนักงาน · แนวโน้ม · ความพร้อมเมนู). The same
+data is available on the API for your own tools.
+
+The manager reports turn the sales you've already rung into decisions. All take an
+optional date window (`?from=YYYY-MM-DD&to=YYYY-MM-DD`, default = today).
+
+### Menu engineering (`GET /api/analytics/menu-engineering`)
+
+The classic **menu-engineering matrix** — better than a plain "best sellers" list
+because it weighs **how often** a dish sells against **how much margin** it earns.
+Each costed item is placed in one of four quadrants and given an action:
+
+| Quadrant | Meaning | What to do |
+|---|---|---|
+| ⭐ **Star** (ดาวเด่น) | Popular **and** high-margin | Keep & feature; protect quality/price |
+| 🐴 **Plowhorse** (ม้างาน) | Popular but low-margin | Raise price modestly or cut recipe cost |
+| ❓ **Puzzle** (ปริศนา) | High-margin but slow | Reposition / rename / promote |
+| 🐶 **Dog** (สุนัข) | Slow **and** low-margin | Consider removing or reworking |
+
+Popularity uses the **70% rule** (a dish is "popular" when its share of units sold is
+≥ 70% of an equal share); profitability compares each dish's unit contribution margin
+to the menu average. Items with no recipe/cost are listed separately as *uncosted*.
+
+### Daypart & busiest hours (`GET /api/analytics/daypart`)
+
+Revenue, transaction count and average ticket **by hour of day** and by **daypart**
+(breakfast / lunch / afternoon / dinner / late), with the **peak hour and daypart**
+highlighted — for staff scheduling and promo timing. All times are on the **business
+clock (Asia/Bangkok)**, so a 1 a.m. sale counts as *late* on the correct day.
+
+### Voids & discounts — loss prevention (`GET /api/analytics/voids-discounts`)
+
+A shrinkage view over the manager-override audit: total voids/discounts, the **void
+rate** vs sales, and a breakdown **by reason code, by action, and by staff member** —
+so unusual void/discount patterns surface quickly.
+
+### Staff performance (`GET /api/analytics/staff-performance`)
+
+Per **cashier**: number of sales, revenue, average ticket, and their **void /
+discount activity** over the window — ranked by revenue. A quick read on who is
+selling, and a loss-prevention cross-check (high voids on one cashier).
+
+### Sales trend (`GET /api/analytics/sales-trend`)
+
+This window vs the **immediately-preceding equal-length window** — revenue and
+transaction **deltas** (฿ and %) plus the change in average ticket. Pick any range
+(a day, a week) and instantly see "up or down vs last period".
+
+---
+
+## Menu availability forecast (kitchen)
+
+The **availability forecast** (`GET /api/menu/availability/forecast?low=5`) answers
+"how many more can we make?" For every dish with a recipe it computes the
+**servings remaining** from current ingredient stock and names the **limiting
+ingredient** (the one that runs out first), classing each dish **out** (0 — should
+be 86'd), **low** (≤ your threshold) or **ok**. It also lists **low-stock
+ingredients** (at or below their reorder point). This is the *proactive* layer over
+auto-86: you see "only 4 Pad Thai left — prawns are short" **before** the dish sells
+out, instead of discovering it at the kitchen pass.
+
+---
+
+## Production plan (predictive prep + auto-replenishment)
+
+**แผนการผลิต (Production plan)** in the POS menu (`/production-plan`) plans your day
+from your own sales. Pick how many days ahead to plan and how far back to learn from,
+and it gives you two lists:
+
+- **Prep list** — for each dish it works out the **average sold per day** (over your
+  lookback window) and forecasts demand for the period, so the kitchen knows **how
+  many to pre-make**. A dish whose ingredients can't even cover the forecast is
+  flagged.
+- **Buy list** — it explodes those forecasts through your recipes into a total
+  ingredient requirement, compares it to current stock and your reorder points, and
+  suggests **how much of each ingredient to order** (rounded up to your reorder pack
+  size). Ingredients you have enough of don't appear.
+
+The forecast is **day-of-week aware** — it predicts each day from the *same weekday's*
+history (so a Saturday is forecast from past Saturdays, not a flat average), which
+matters when weekends and weekdays sell differently.
+
+It's advice, not an automatic order — but when the buy list has items you can press
+**สร้างใบสั่งซื้อ (ร่าง)** to raise a **draft purchase order** in procurement in one
+click (it goes in as *pending approval*, never auto-approved).
+
+**Just ask.** All of these reports are also wired into the **AI assistant** — at the
+till you can ask in plain Thai, e.g. *"วันนี้ควรเตรียมอะไรบ้าง?"*, *"เมนูไหนกำไรตก?"*,
+*"ช่วงไหนขายดีสุด?"* — and it answers from your live data (and, for purchases, only
+*proposes* an order for someone to approve).
+
+---
+
 **Next:** [Approvals](./10-approvals.md) · [Administration](./11-administration.md)

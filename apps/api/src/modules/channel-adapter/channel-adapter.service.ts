@@ -7,6 +7,7 @@ import { RealtimeScope } from '../restaurant/realtime.scope';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { normalizeAggregatorPayload } from './mappers';
+import { getPlatformProvider } from './providers';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const PLATFORMS = ['grab', 'lineman', 'foodpanda', 'robinhood'];
@@ -34,12 +35,17 @@ export class ChannelAdapterService {
     return { id: r.id, created: true };
   }
 
-  // Menu that would be pushed to the platform (only available items).
+  // Push the available menu to the platform via its outbound provider (real HTTP when configured, else mock).
   async menuSyncOut(platform: string, user: JwtUser) {
+    if (!PLATFORMS.includes(platform)) throw new BadRequestException({ code: 'BAD_PLATFORM', message: `Unknown platform ${platform}`, messageTh: 'แพลตฟอร์มไม่ถูกต้อง' });
     const db = this.db as any;
     const rows = await db.select().from(menuItems).where(and(eq(menuItems.isAvailable, true), eq(menuItems.active, true)));
+    const items = rows.map((r: any) => ({ sku: r.sku, name: r.name, price: n(r.price), available: r.isAvailable }));
+    const [adapter] = await db.select().from(channelAdapters).where(eq(channelAdapters.platform, platform)).limit(1);
     void user;
-    return { platform, items: rows.map((r: any) => ({ sku: r.sku, name: r.name, price: n(r.price), available: r.isAvailable })), count: rows.length, pushed: true };
+    const provider = getPlatformProvider(platform);
+    const res = await provider.pushMenu(adapter?.storeRef ?? null, items);
+    return { platform, items, count: items.length, pushed: res.ok, provider: provider.name, ref: res.ref ?? null, error: res.error ?? null };
   }
 
   // Inbound order webhook — PUBLIC, authenticated by a per-platform shared secret (store_ref is a public,
@@ -105,13 +111,37 @@ export class ChannelAdapterService {
     await db.insert(channelWebhookEvents).values({ tenantId, source: platform, extEventId, extOrderId: norm.extOrderId ?? null, orderNo, payload: norm.raw ?? {}, status }).catch(() => { /* best-effort log */ });
   }
 
-  // Status callback — update fulfilment + (mock) post back to the platform.
+  // Status callback — update local fulfilment, then post the new status back to the platform.
   async updateStatus(orderNo: string, status: string) {
     const db = this.db as any;
     const [ord] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).limit(1);
     if (!ord) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
     await db.update(dineInOrders).set({ fulfillmentStatus: status }).where(eq(dineInOrders.id, ord.id));
-    return { order_no: orderNo, fulfillment_status: status, posted_to_platform: ord.extSource ?? null };
+    const res = ord.extSource ? await getPlatformProvider(ord.extSource).updateStatus(ord.extOrderId, status) : { ok: false };
+    return { order_no: orderNo, fulfillment_status: status, posted_to_platform: ord.extSource ?? null, post_ok: res.ok, post_ref: (res as any).ref ?? null };
+  }
+
+  // Accept a received (not auto-accepted) aggregator order: confirm to the platform, then route its lines
+  // to the KDS (sent_to_kitchen / queued). Reject does the inverse and cancels the order.
+  async acceptOrder(orderNo: string) { return this.decide(orderNo, true, ''); }
+  async rejectOrder(orderNo: string, reason: string) { return this.decide(orderNo, false, reason); }
+
+  private async decide(orderNo: string, accept: boolean, reason: string) {
+    const db = this.db as any;
+    const [ord] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).limit(1);
+    if (!ord) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
+    if (!ord.extSource) throw new BadRequestException({ code: 'NOT_CHANNEL_ORDER', message: 'Not an aggregator order', messageTh: 'ไม่ใช่ออเดอร์จากแพลตฟอร์ม' });
+    const provider = getPlatformProvider(ord.extSource);
+    const res = accept ? await provider.acceptOrder(ord.extOrderId) : await provider.rejectOrder(ord.extOrderId, reason);
+    await db.transaction(async (tx: any) => {
+      if (accept) {
+        await tx.update(dineInOrders).set({ status: 'sent_to_kitchen', fulfillmentStatus: 'accepted' }).where(eq(dineInOrders.id, ord.id));
+        await tx.update(dineInOrderItems).set({ kdsStatus: 'queued' }).where(and(eq(dineInOrderItems.orderId, ord.id), eq(dineInOrderItems.kdsStatus, 'new')));
+      } else {
+        await tx.update(dineInOrders).set({ status: 'cancelled', fulfillmentStatus: 'rejected', notes: reason ? `rejected: ${reason}` : 'rejected' }).where(eq(dineInOrders.id, ord.id));
+      }
+    });
+    return { order_no: orderNo, fulfillment_status: accept ? 'accepted' : 'rejected', routed_to_kds: accept, posted_to_platform: ord.extSource, post_ok: res.ok };
   }
 
   async listChannelOrders(limit = 50) {

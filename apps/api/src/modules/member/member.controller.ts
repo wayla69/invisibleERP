@@ -16,8 +16,8 @@ const VerifyOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string
 const EmptyBody = z.preprocess((v) => v ?? {}, z.object({}).passthrough());
 const ReferBody = z.object({ referred_member_id: z.number().int().positive().optional(), referred_phone: z.string().optional() })
   .refine((d) => d.referred_member_id != null || d.referred_phone, { message: 'referred_member_id or referred_phone required' });
-const LineLoginBody = z.object({ tenant_code: z.string().min(1), line_id_token: z.string().optional(), dev_line_user_id: z.string().optional() });
-const LinkLineBody = z.object({ line_user_id: z.string().min(1) });
+const LineLoginBody = z.object({ tenant_code: z.string().min(1), id_token: z.string().min(1) });
+const LinkLineBody = z.object({ id_token: z.string().min(1) });
 
 // Member self-service app (phone-OTP). Auth routes are @Public; everything else needs a member token. The
 // member can only ever act on THEMSELVES — every call passes req.user.memberId (the authenticated member),
@@ -51,7 +51,7 @@ export class MemberController {
   me(@CurrentUser() u: JwtUser) { return this.member.balance(u.memberId!, u); }
   // Link the member's LINE account (one LINE ↔ one member per tenant) so they can later log in via LINE.
   @Post('link-line') @UseGuards(MemberGuard)
-  linkLine(@Body(new ZodValidationPipe(LinkLineBody)) b: any, @CurrentUser() u: JwtUser) { return this.auth.linkLine(u, b.line_user_id); }
+  linkLine(@Body(new ZodValidationPipe(LinkLineBody)) b: any, @CurrentUser() u: JwtUser) { return this.auth.linkLine(u, b.id_token); }
   @Get('tier') @UseGuards(MemberGuard)
   tier(@CurrentUser() u: JwtUser) { return this.member.tierJourney(u, u.memberId!); }
   @Get('history') @UseGuards(MemberGuard)

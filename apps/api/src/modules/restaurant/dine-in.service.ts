@@ -1,4 +1,5 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
+import { RealtimeService } from '../pos-scale/realtime.service';
 import { eq, and, inArray, desc, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
@@ -39,6 +40,7 @@ export class DineInService {
     private readonly member: MemberService,
     private readonly gift: GiftCardService,
     private readonly pricing: PricingService,
+    @Optional() private readonly realtime?: RealtimeService,   // multi-terminal SSE fan-out (best-effort)
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
@@ -214,6 +216,9 @@ export class DineInService {
     await db.update(dineInOrderItems).set(set).where(eq(dineInOrderItems.id, itemId));
     await this.refreshTotals(Number(item.orderId));
     const status = await this.recomputeOrderStatus(Number(item.orderId));
+    // realtime: fan this KDS state change out to every other terminal (SSE), so a second screen reflects
+    // it without waiting for its poll. Best-effort — a missing realtime service never blocks the action.
+    this.realtime?.publish({ type: 'kds_item', tenant_id: user.tenantId ?? null, item_id: itemId, order_id: Number(item.orderId), kds_status: set.kdsStatus, order_status: status, at: now.toISOString() });
     return { item_id: itemId, kds_status: set.kdsStatus, order_status: status };
   }
 
@@ -367,7 +372,7 @@ export class DineInService {
     const cashLeg = roundCurrency(cashDue - giftApplied, 'THB');
     const [h] = await db.insert(custPosSales).values({
       saleNo, saleDate: ymd(), tenantId: o.tenantId, subtotal: fx(subtotalNet, 2), discount: fx(roundCurrency(orderDisc + pointsDisc, 'THB'), 2),
-      taxAmount: fx(vat, 2), total: fx(total, 2), tip: fx(tip, 2), paymentMethod: 'Dine-in', pointsUsed: String(actualRedeemPoints), pointsEarned: '0',
+      taxAmount: fx(vat, 2), total: fx(total, 2), tip: fx(tip, 2), serviceCharge: fx(serviceCharge, 2), paymentMethod: 'Dine-in', pointsUsed: String(actualRedeemPoints), pointsEarned: '0',
       status: 'Completed', notes: `Dine-in ${o.orderNo}`, createdBy: user.username,
     }).returning({ id: custPosSales.id });
     await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h.id), ...r })));

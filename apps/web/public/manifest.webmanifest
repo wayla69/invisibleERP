@@ -1,0 +1,14 @@
+{
+  "name": "Invisible ERP V2",
+  "short_name": "Invisible ERP",
+  "description": "Oshinei Enterprise ERP — V2 (POS · inventory · finance)",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#1E3C72",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

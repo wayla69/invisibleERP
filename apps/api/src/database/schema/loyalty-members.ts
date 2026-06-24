@@ -12,6 +12,10 @@ export const posMembers = pgTable('pos_members', {
   phone: text('phone'),
   cardNo: text('card_no'),
   email: text('email'),
+  // LINE OA identity (the dominant Thai channel). lineUserId is the stable `sub` from LINE Login/LIFF —
+  // the address LINE push messages are sent to. Unique per tenant so one LINE account = one member.
+  lineUserId: text('line_user_id'),
+  lineDisplayName: text('line_display_name'),
   birthday: date('birthday'),                       // for birthday campaigns (month/day matter)
   marketingOptIn: boolean('marketing_opt_in').notNull().default(true), // consent for marketing messages
   balance: numeric('balance').default('0'),
@@ -20,9 +24,12 @@ export const posMembers = pgTable('pos_members', {
   active: boolean('active').default(true),
   enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow(),
   lastUpdated: timestamp('last_updated', { withTimezone: true }),
-  lineUserId: text('line_user_id'),                 // linked LINE account (for LIFF login); unique per tenant
   createdBy: text('created_by'),
-}, (t) => ({ uqCode: uniqueIndex('pos_members_tenant_code').on(t.tenantId, t.memberCode) }));
+}, (t) => ({
+  uqCode: uniqueIndex('pos_members_tenant_code').on(t.tenantId, t.memberCode),
+  // NULL line_user_id rows are distinct under a Postgres unique index, so unlinked members never collide.
+  uqLine: uniqueIndex('pos_members_tenant_line').on(t.tenantId, t.lineUserId),
+}));
 
 // Message-delivery log for CRM messaging (LINE / SMS / email). Provider-agnostic; mock by default.
 export const messageLog = pgTable('message_log', {

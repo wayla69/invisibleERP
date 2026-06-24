@@ -45,6 +45,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-007 | AR receipt (RCP-) | REV-05 | 01 §7 |
 | UAT-O2C-008 | Portal sale VAT + loyalty | REV-03, GL-01 | 01 §7 |
 | UAT-O2C-009 | Tender capture | REV-06 | 01 §7 |
+| UAT-O2C-009a | Card tender real PSP charge | REV-03 | 07 §7 |
+| UAT-O2C-009b | No-token/declined never books funds | REV-03 | 07 §7 |
+| UAT-O2C-009c | Card tender idempotency = one charge | REV-02 | 07 §7 |
 | UAT-O2C-010 | Full refund | REV-09 | 01 §7 |
 | UAT-O2C-011 | Over-refund block | REV-09 | 01 §9, §13 |
 | UAT-O2C-012 | Return + restock + GL reversal | REV-09, GL-01 | 01 §7, §9 |
@@ -148,6 +151,16 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-110 | Room revenue is tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
 | UAT-O2C-111 | Revenue snapshot survives a table move | Feature (floor-plan layout) | 20 §6 |
 | UAT-O2C-112 | Deleted room keeps its past takings | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-113 | Service charge persisted + itemised on the receipt | REST-10 | 20 §7 |
+| UAT-O2C-114 | Large-party receipt ties out incl. service charge | REST-10 | 20 §7, §9 |
+| UAT-O2C-115 | Send receipt via LINE channel | REST-10 | 20 §7 |
+| UAT-O2C-116 | Enrol/link member via LINE (idempotent) | Feature (LINE CRM) | 19 §7.8 |
+| UAT-O2C-117 | One LINE account = one member | Feature (LINE CRM) | 19 §7.8 |
+| UAT-O2C-118 | LINE push to userId, consent enforced | Feature (LINE CRM), MKT-04 | 19 §7.11 |
+| UAT-O2C-119 | Aggregator menu push (real adapter) | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-120 | Accept/reject routes to KDS + notifies platform | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-121 | Status callback + mock fallback | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-122 | Multi-terminal realtime KDS event | Feature (multi-terminal SSE) | 20 §rev3.0 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -361,6 +374,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-076 | Migration — dry-run field-map + validation + RLS | Feature (migration) | 30 §4 |
 | UAT-ADM-077 | Localization — packs, apply, bad-country, RLS | Feature (localization) | 28 §4 |
 | UAT-ADM-078 | e-Invoicing — submit, idempotent, validation | Feature (e-invoicing) | 28 §4 |
+| UAT-ADM-079 | Ops — metrics + cache round-trip | Feature (scale/ops) | 30 §4 |
+| UAT-ADM-080 | PWA — installable + offline shell | Feature (PWA) | 30 §4 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -399,6 +414,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-031 | Role dashboard catalog + layout validation | Feature (role dashboards) | 26 §3a |
 | UAT-RPT-032 | Role dashboard resolution filtered to viewer perms | Feature (role dashboards), ITGC-AC-02 | 26 §3a |
 | UAT-RPT-033 | Role dashboard default fallback + tenant isolation | Feature (role dashboards), ITGC-AC-03 | 26 §3a |
+| UAT-RPT-034 | Menu-engineering matrix (Kasavana–Smith) | Feature (menu engineering) | 20 §rev2.7 |
+| UAT-RPT-035 | Daypart / hour demand on the business clock | Feature (daypart), TZ (Asia/Bangkok) | 20 §rev2.7 |
+| UAT-RPT-036 | Void / discount shrinkage analytics | Feature (loss prevention) | 20 §rev2.7 |
+| UAT-RPT-037 | Staff / cashier performance | Feature (staff analytics) | 20 §rev2.9 |
+| UAT-RPT-038 | Sales trend vs prior window | Feature (sales trend) | 20 §rev2.9 |
+| UAT-RPT-039 | BOM availability forecast (servings-remaining) | Feature (BOM availability) | 20 §rev2.9 |
+| UAT-RPT-040 | Production plan — day-of-week forecast | Feature (production plan, DOW) | 20 §rev3.2 |
+| UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 
@@ -458,8 +481,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 78 | 47 |
+| 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **285** | **139** |
+| **Total** | **287** | **139** |

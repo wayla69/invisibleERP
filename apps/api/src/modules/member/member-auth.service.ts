@@ -7,6 +7,7 @@ import { tenants, posMembers, memberOtps, messageLog } from '../../database/sche
 import { n } from '../../database/queries';
 import { PasswordService } from '../auth/password.service';
 import { resolveMessageGateway } from '../messaging/gateways';
+import { verifyLineIdToken } from '../loyalty/line-auth';
 import type { JwtUser } from '../../common/decorators';
 
 // CRM Phase 4 — phone-OTP login for the loyalty member self-service app.
@@ -87,12 +88,15 @@ export class MemberAuthService {
     return { token, member: { id: Number(member.id), member_code: member.memberCode, name: member.name, tier: member.tier, balance: n(member.balance) } };
   }
 
-  // ── LINE LIFF ───────────────────────────────────────────────────────────────
-  // An authenticated member links their LINE account (one LINE ↔ one member per tenant via the partial unique).
-  async linkLine(user: JwtUser, lineUserId: string) {
+  // ── LINE LIFF (member self-service) ──────────────────────────────────────────
+  // A signed-in member links their LINE account from a verified LIFF/LINE-Login idToken (reusing the shared
+  // verifier — same LINE_LOGIN_CHANNEL_ID / mock-token path as the staff enrol/link flow). One LINE ↔ one
+  // member per tenant via the partial unique.
+  async linkLine(user: JwtUser, idToken: string) {
     const db = this.db as any;
+    const { lineUserId, displayName } = await verifyLineIdToken(idToken);
     try {
-      await db.update(posMembers).set({ lineUserId }).where(and(eq(posMembers.id, user.memberId!), eq(posMembers.tenantId, user.tenantId!)));
+      await db.update(posMembers).set({ lineUserId, lineDisplayName: displayName ?? null }).where(and(eq(posMembers.id, user.memberId!), eq(posMembers.tenantId, user.tenantId!)));
     } catch (e: any) {
       if (String(e?.code) === '23505' || /unique|duplicate/i.test(String(e?.message))) throw new ConflictException({ code: 'LINE_ALREADY_LINKED', message: 'This LINE account is already linked to another member', messageTh: 'บัญชี LINE นี้ผูกกับสมาชิกอื่นแล้ว' });
       throw e;
@@ -100,33 +104,19 @@ export class MemberAuthService {
     return { linked: true, line_user_id: lineUserId };
   }
 
-  // LINE login: verify the LIFF idToken against LINE (prod), or accept a dev id outside production, then mint a
-  // member token for the linked member. @Public + @NoTx → RLS bypassed, so we filter by tenant + lineUserId.
-  async loginWithLine(dto: { tenant_code: string; line_id_token?: string; dev_line_user_id?: string }) {
+  // LINE login for the member app: verify the idToken (prod → LINE; dev → mock token), then mint a member
+  // token for the member whose line_user_id matches WITHIN the tenant. @Public + @NoTx → RLS bypassed, so we
+  // filter by tenant + lineUserId explicitly.
+  async loginWithLine(dto: { tenant_code: string; id_token: string }) {
     const db = this.db as any;
-    const fail = () => new UnauthorizedException({ code: 'LINE_LOGIN_FAILED', message: 'LINE login failed', messageTh: 'เข้าสู่ระบบ LINE ไม่สำเร็จ' });
-    let lineUserId: string | null = null;
-    const channelId = process.env.LINE_CHANNEL_ID;
-    if (dto.line_id_token && channelId) lineUserId = await this.verifyLineIdToken(dto.line_id_token, channelId).catch(() => null);
-    else if (process.env.NODE_ENV !== 'production' && dto.dev_line_user_id) lineUserId = dto.dev_line_user_id; // dev/test only
-    if (!lineUserId) throw fail();
+    const notLinked = () => new UnauthorizedException({ code: 'LINE_NOT_LINKED', message: 'No member linked to this LINE account', messageTh: 'ยังไม่ได้ผูกบัญชี LINE กับสมาชิก' });
+    const { lineUserId } = await verifyLineIdToken(dto.id_token); // throws LINE_VERIFY_FAILED / LINE_NOT_CONFIGURED
     const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, dto.tenant_code)).limit(1);
-    if (!t) throw fail();
+    if (!t) throw notLinked();
     const tenantId = Number(t.id);
     const [m] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.lineUserId, lineUserId), eq(posMembers.active, true))).limit(1);
-    if (!m) throw new UnauthorizedException({ code: 'LINE_NOT_LINKED', message: 'No member linked to this LINE account', messageTh: 'ยังไม่ได้ผูกบัญชี LINE กับสมาชิก' });
+    if (!m) throw notLinked();
     const token = await this.jwt.signAsync({ sub: `member:${m.id}`, kind: 'member', role: 'Member', tenantId, memberId: Number(m.id), permissions: [], customerName: null }, { expiresIn: '30d' });
     return { token, member: { id: Number(m.id), member_code: m.memberCode, name: m.name, tier: m.tier, balance: n(m.balance) } };
-  }
-
-  // LINE verifies the idToken's signature/audience/expiry and returns the profile (sub = the LINE user id).
-  private async verifyLineIdToken(idToken: string, channelId: string): Promise<string | null> {
-    const res = await fetch('https://api.line.me/oauth2/v2.1/verify', {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ id_token: idToken, client_id: channelId }).toString(),
-    });
-    if (!res.ok) return null;
-    const j: any = await res.json().catch(() => null);
-    return j?.sub ?? null;
   }
 }

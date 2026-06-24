@@ -10,6 +10,9 @@ import { ServiceService } from '../service/service.service';
 import { ProfitabilityService } from '../profitability/profitability.service';
 import { AiActionService } from './ai-action.service';
 import { KnowledgeService } from './knowledge.service';
+import { MenuEngineeringService } from '../analytics/menu-engineering.service';
+import { ProductionPlanService } from '../menu/production-plan.service';
+import { RecipeService } from '../menu/recipe.service';
 import type { JwtUser } from '../../common/decorators';
 
 // port จาก agents/base_agent.py + erp_agent.py
@@ -54,6 +57,14 @@ const TOOLS = [
   // Phase D2 — RAG. Retrieve relevant passages from the company's policies/SOPs/contracts. Answer
   // policy questions ONLY from these results; cite the title; if nothing relevant returns, say so.
   { name: 'search_knowledge_base', description: 'ค้นหานโยบาย/ขั้นตอนปฏิบัติ/สัญญา ในฐานความรู้ของบริษัท เพื่อตอบคำถามเชิงนโยบายโดยอ้างอิงแหล่งที่มา', input_schema: { type: 'object', properties: { query: { type: 'string' }, k: { type: 'number' } }, required: ['query'] } },
+  // Restaurant F&B — conversational analytics at the till (date windows default to today; YYYY-MM-DD).
+  { name: 'get_production_plan', description: 'แผนเตรียมครัววันนี้/ล่วงหน้า: พยากรณ์ยอดขายแต่ละเมนู (ตามวันในสัปดาห์) → จำนวนที่ควรเตรียม + วัตถุดิบที่ควรสั่งซื้อ', input_schema: { type: 'object', properties: { days: { type: 'number' }, lookback: { type: 'number' } } } },
+  { name: 'get_menu_engineering', description: 'จัดกลุ่มเมนูตามความนิยม×กำไร (Star/Plowhorse/Puzzle/Dog) พร้อมคำแนะนำ', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
+  { name: 'get_daypart_sales', description: 'ยอดขายตามช่วงเวลา/ชั่วโมงของวัน (เวลาไทย) — หาช่วงพีก', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
+  { name: 'get_void_discount_report', description: 'รายงานการยกเลิก/ส่วนลด: อัตรายกเลิก แยกตามเหตุผล/พนักงาน', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
+  { name: 'get_staff_performance', description: 'ผลงานพนักงาน: ยอดขาย/บิลเฉลี่ย/การยกเลิก-ส่วนลด ต่อคน', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
+  { name: 'get_sales_trend', description: 'แนวโน้มยอดขายเทียบช่วงก่อนหน้าที่เท่ากัน (เพิ่ม/ลด %)', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
+  { name: 'get_menu_availability', description: 'เมนูแต่ละอย่างทำได้อีกกี่จาน (จากวัตถุดิบที่จำกัด) + วัตถุดิบใกล้หมด', input_schema: { type: 'object', properties: { low: { type: 'number' } } } },
 ];
 
 @Injectable()
@@ -70,6 +81,9 @@ export class AgentService {
     @Optional() private readonly profitability: ProfitabilityService,
     @Optional() private readonly actions: AiActionService,
     @Optional() private readonly knowledge: KnowledgeService,
+    @Optional() private readonly menuEng?: MenuEngineeringService,
+    @Optional() private readonly production?: ProductionPlanService,
+    @Optional() private readonly recipe?: RecipeService,
   ) {}
 
   private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
@@ -227,6 +241,14 @@ export class AgentService {
         case 'propose_journal_entry': return this.actions ? await this.actions.propose({ kind: 'journal_entry', payload: { memo: input.memo, lines: input.lines }, rationale: input.rationale, source: 'ai' }, user) : { error: 'AI actions unavailable' };
         case 'propose_purchase_order': return this.actions ? await this.actions.propose({ kind: 'purchase_order', payload: { vendor_name: input.vendor_name, items: input.items }, rationale: input.rationale, source: 'ai' }, user) : { error: 'AI actions unavailable' };
         case 'search_knowledge_base': return this.knowledge ? await this.knowledge.search(input.query, input.k ?? 4, user) : { error: 'Knowledge base unavailable' };
+        // Restaurant F&B — conversational analytics
+        case 'get_production_plan': return this.production ? await this.production.plan(user, { days: input.days, lookback: input.lookback }) : { error: 'Production plan unavailable' };
+        case 'get_menu_engineering': return this.menuEng ? await this.menuEng.menuEngineering(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
+        case 'get_daypart_sales': return this.menuEng ? await this.menuEng.daypart(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
+        case 'get_void_discount_report': return this.menuEng ? await this.menuEng.voidsDiscounts(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
+        case 'get_staff_performance': return this.menuEng ? await this.menuEng.staffPerformance(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
+        case 'get_sales_trend': return this.menuEng ? await this.menuEng.salesTrend(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
+        case 'get_menu_availability': return this.recipe ? await this.recipe.availabilityForecast(user, { low: input.low }) : { error: 'Menu availability unavailable' };
         default: return { error: `unknown tool ${name}` };
       }
     } catch (e: any) {

@@ -32,6 +32,8 @@ const ConsentBody = z.object({
 });
 // tenant_id is required only for HQ/Admin callers with no tenant context (else inferred from the JWT).
 const LiabilityPostBody = z.preprocess((v) => v ?? {}, z.object({ tenant_id: z.coerce.number().int().positive().optional() }));
+const EnrollLineBody = z.object({ id_token: z.string().min(1), name: z.string().optional(), phone: z.string().optional(), marketing_opt_in: z.boolean().optional() });
+const LinkLineBody = z.object({ id_token: z.string().min(1) });
 
 @Controller('api/loyalty')
 export class LoyaltyController {
@@ -78,8 +80,14 @@ export class LoyaltyController {
   // ── POS members (สมาชิก/แต้มที่จุดขาย) ──
   @Post('members') @Permissions('crm_member', 'loyalty', 'pos')
   enroll(@Body(new ZodValidationPipe(EnrollBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.enroll(b, u); }
+  // Enrol or return a member from a verified LINE identity (LIFF / LINE Login id token). Idempotent.
+  @Post('members/enroll-line') @Permissions('loyalty', 'pos')
+  enrollLine(@Body(new ZodValidationPipe(EnrollLineBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.enrollViaLine(b, u); }
+  // Link a verified LINE identity to an existing member.
+  @Post('members/:id/link-line') @Permissions('loyalty', 'pos')
+  linkLine(@Param('id') id: string, @Body(new ZodValidationPipe(LinkLineBody)) b: { id_token: string }, @CurrentUser() u: JwtUser) { return this.member.linkLine(+id, b.id_token, u); }
   @Get('members/lookup') @Permissions('loyalty', 'pos')
-  lookup(@Query('phone') phone: string | undefined, @Query('card') card: string | undefined, @Query('code') code: string | undefined, @CurrentUser() u: JwtUser) { return this.member.lookup({ phone, card, code }, u); }
+  lookup(@Query('phone') phone: string | undefined, @Query('card') card: string | undefined, @Query('code') code: string | undefined, @Query('line_user_id') lineUserId: string | undefined, @CurrentUser() u: JwtUser) { return this.member.lookup({ phone, card, code, line_user_id: lineUserId }, u); }
   @Get('members/birthdays') @Permissions('loyalty', 'marketing', 'crm')
   birthdays(@Query('window') window: string | undefined, @CurrentUser() u: JwtUser) { return this.member.birthdays(window === 'today' ? 'today' : 'month', u); }
   @Patch('members/:id') @Permissions('crm_member', 'loyalty', 'pos')
