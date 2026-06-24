@@ -26,6 +26,7 @@
     "sub-billing": "tsx src/sub-billing.ts",
     "cpq-gl": "tsx src/cpq-gl.ts",
     "promptpay": "tsx src/promptpay.ts",
+    "payments-gateway": "tsx src/payments-gateway.ts",
     "etax": "tsx src/etax.ts",
     "etax-sign": "tsx src/etax-sign.ts",
     "etax-email": "tsx src/etax-email.ts",

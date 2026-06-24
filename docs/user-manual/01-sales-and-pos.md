@@ -51,6 +51,12 @@ total is shown, and any loyalty points earned are recorded.
    PromptPay, or Store Credit (gift card).
 2. Enter the amount tendered and record the payment.
 
+> **Card payments:** when a payment provider is configured (Opn/Omise or Stripe —
+> see `OPN_SECRET_KEY` / `STRIPE_SECRET_KEY`), a Card tender is charged for real
+> through the card terminal. If the card is declined the sale is **not** marked
+> paid. Without a provider configured the system uses a safe test gateway (no real
+> money moves), so card tenders in a demo environment always succeed.
+
 **Expected result:** The payment is captured and a receipt can be printed or
 sent.
 

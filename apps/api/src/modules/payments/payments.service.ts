@@ -19,6 +19,7 @@ export interface RecordTenderDto {
   tip?: number;          // tip portion — persisted separately, NOT folded into amount (cash recon)
   currency?: string;
   gateway?: string;
+  token?: string;             // card token / wallet source from the terminal SDK — for a real PSP charge
   till_session_id?: number;
   idempotency_key?: string;   // C1: retries with the same key return the original tender, never re-charge
 }
@@ -79,7 +80,7 @@ export class PaymentService {
 
     let result;
     try {
-      result = await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId });
+      result = await gateway.authorizeAndCapture(n(dto.amount), currency, dto.method, { sale_no: dto.sale_no, promptpay_id: promptpayId, token: dto.token });
     } catch (e) {
       // The capture call failed (or its outcome is unknown): mark the row Failed so it is never a silent
       // Pending limbo, and surface the error. A later PSP webhook can still settle a truly-captured tender.

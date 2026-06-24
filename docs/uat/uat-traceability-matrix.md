@@ -45,6 +45,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-007 | AR receipt (RCP-) | REV-05 | 01 §7 |
 | UAT-O2C-008 | Portal sale VAT + loyalty | REV-03, GL-01 | 01 §7 |
 | UAT-O2C-009 | Tender capture | REV-06 | 01 §7 |
+| UAT-O2C-009a | Card tender real PSP charge | REV-03 | 07 §7 |
+| UAT-O2C-009b | No-token/declined never books funds | REV-03 | 07 §7 |
+| UAT-O2C-009c | Card tender idempotency = one charge | REV-02 | 07 §7 |
 | UAT-O2C-010 | Full refund | REV-09 | 01 §7 |
 | UAT-O2C-011 | Over-refund block | REV-09 | 01 §9, §13 |
 | UAT-O2C-012 | Return + restock + GL reversal | REV-09, GL-01 | 01 §7, §9 |
