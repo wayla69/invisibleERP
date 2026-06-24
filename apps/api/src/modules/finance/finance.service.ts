@@ -126,22 +126,28 @@ export class FinanceService {
     const candidates = await db.select({ id: orders.id, orderNo: orders.orderNo, orderDate: orders.orderDate, tenantId: orders.tenantId })
       .from(orders).where(sql`${orders.status}::text in ('Shipped','Completed')`);
     const existing = new Set((await db.select({ no: arInvoices.orderNo }).from(arInvoices)).map((r: any) => r.no));
+    const todo = candidates.filter((o: any) => !existing.has(o.orderNo));
+    if (!todo.length) return { created: 0 };
+    // Batch the per-order line-sum + tenant credit-term lookups (was 2 queries per order → N+1).
+    const orderIds = todo.map((o: any) => Number(o.id));
+    const sumRows = await db.select({ orderId: orderLines.orderId, a: sql<string>`coalesce(sum(${orderLines.totalPrice}),0)` })
+      .from(orderLines).where(inArray(orderLines.orderId, orderIds)).groupBy(orderLines.orderId);
+    const sumMap = new Map<number, string>(sumRows.map((r: any) => [Number(r.orderId), r.a]));
+    const tenantIds = [...new Set(todo.map((o: any) => o.tenantId).filter((v: any) => v != null))] as number[];
+    const termRows = tenantIds.length ? await db.select({ id: tenants.id, ct: tenants.creditTerm }).from(tenants).where(inArray(tenants.id, tenantIds)) : [];
+    const termMap = new Map<number, string>(termRows.map((t: any) => [Number(t.id), t.ct]));
     let created = 0;
-    for (const o of candidates) {
-      if (existing.has(o.orderNo)) continue;
-      const [amt] = await db.select({ a: sql<string>`coalesce(sum(${orderLines.totalPrice}),0)` }).from(orderLines).where(eq(orderLines.orderId, o.id));
+    for (const o of todo) {
+      const amtA = sumMap.get(Number(o.id)) ?? '0';
       let termDays = 30;
-      if (o.tenantId != null) {
-        const [t] = await db.select({ ct: tenants.creditTerm }).from(tenants).where(eq(tenants.id, o.tenantId)).limit(1);
-        termDays = parseInt(String(t?.ct ?? '').replace(/\D/g, ''), 10) || 30;
-      }
+      if (o.tenantId != null) termDays = parseInt(String(termMap.get(Number(o.tenantId)) ?? '').replace(/\D/g, ''), 10) || 30;
       const invoiceNo = this.docNo.invoiceFromOrder(o.orderNo);
       await db.insert(arInvoices).values({
         invoiceNo, invoiceDate: o.orderDate, dueDate: addDays(o.orderDate, termDays),
-        tenantId: o.tenantId, orderNo: o.orderNo, amount: amt.a, paidAmount: '0', status: 'Unpaid', createdBy: 'system',
+        tenantId: o.tenantId, orderNo: o.orderNo, amount: amtA, paidAmount: '0', status: 'Unpaid', createdBy: 'system',
       }).onConflictDoNothing();
       // GL: recognize receivable + revenue + output VAT (Dr 1100 / Cr 4000 net / Cr 2100 vat)
-      const grossAmt = n(amt.a);
+      const grossAmt = n(amtA);
       if (this.ledger && grossAmt > 0 && !(await this.ledger.alreadyPosted('AR', invoiceNo))) {
         const { net, vat } = this.vatSplit(grossAmt);
         await this.ledger.postEntry({

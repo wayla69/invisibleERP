@@ -101,10 +101,15 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
   (`data_change_log`). Surfaced read-only at `GET /api/admin/audit/changes`. RCM AC-14 added; ToE in
   `cutover/compliance.ts`; ITGC narrative updated.
 
-## Flagged for a dedicated workstream (NOT remediated — lower-severity / broad mechanical)
-1. **N+1 batch refactors (2.8).** AR sync (`finance.service.ts`), journal-line list (`ledger.service.ts`),
-   consolidation, costing-on-issue, anomaly report — collapse per-row queries to `inArray`/join batches.
-2. **~18 remaining table-row buttons (4.6)** — apply the same `disabled={mut.isPending}` pattern fleet-wide.
+- **N+1 batch refactors (2.8).** Collapsed per-row queries to single batched `inArray`/grouped queries
+  (behaviour identical — verified by the costing/consolidation/recon/writeflow/analytics harnesses):
+  AR sync (`finance.service.ts` — line-sum + credit-term), journal-line list (`ledger.service.ts`
+  `entriesList`), consolidation (`consolidation.service.ts` — GL net per entity + FX prefetch),
+  costing-on-issue (`costing.service.ts` `onIssue` — config resolution; FIFO/AVG/STD locked writes stay
+  per-line), anomaly report (`anomalies.service.ts` — item-name lookup).
+
+## Flagged for a dedicated workstream (NOT remediated — broad mechanical)
+1. **~18 remaining table-row buttons (4.6)** — apply the same `disabled={mut.isPending}` pattern fleet-wide.
 
 ## Sign-off
 Conditionally **production-ready**: the data-integrity (lost-update) and double-submit money-movement defects —
