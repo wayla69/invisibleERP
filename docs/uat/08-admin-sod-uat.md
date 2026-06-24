@@ -1,6 +1,6 @@
 # UAT — Cycle 08: Admin / Segregation of Duties / Access Governance / Audit
 
-**Status: DRAFT v0.3 · 2026-06-24** · Cross-ref: process narrative `08-itgc.md` (ITGC-AC-01/08/09/10, SoD R01–R13) + `27-platform-customization.md` §7 (platform features, incl. public API + SSO/SCIM), harness `tools/cutover/src/compliance.ts` + `ext.ts`.
+**Status: DRAFT v0.4 · 2026-06-24** · Cross-ref: process narrative `08-itgc.md` (ITGC-AC-01/08/09/10, SoD R01–R16) + `27-platform-customization.md` §7 (platform features, incl. public API + SSO/SCIM), harness `tools/cutover/src/compliance.ts` + `ext.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -84,3 +84,4 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-ADM-076 | Migration — dry-run field-map + validation + RLS | MasterDataAdmin (2 tenants) | — | 1. `GET …/sources`. 2. `POST …/dry-run {loyverse, products, [valid, invalid]}`. 3. bad source / bad entity. 4. jobs as another tenant. | as left | sources + entities listed; dry-run maps fields, total 2 / valid 1 / 1 error; 400 `BAD_SOURCE` / `BAD_ENTITY`; another tenant doesn't see the job (RLS); no writes/GL. | Med | Control | Feature (migration) | Not Run | ext.ts |
 | UAT-ADM-077 | Localization — packs, apply, bad-country, RLS | Exec/AccessAdmin (2 tenants) | — | 1. `GET …/packs`. 2. `POST …/apply {TH}` + `GET …`. 3. `…{ZZ}`. 4. localization as the other tenant. | as left | TH certified + a draft listed; apply sets active TH + locale th; 400 `BAD_COUNTRY`; the other tenant has its own (no leak); no GL. | Med | Positive | Feature (localization) | Not Run | ext.ts |
 | UAT-ADM-078 | e-Invoicing — submit, idempotent, validation | Exec/Creditors | — | 1. `GET …/providers`. 2. `POST …/submit {valid doc}` ×2. 3. submit a doc with no total. | as left | providers incl. stub + country adapters; submit returns accepted + ref; re-submit idempotent (same ref); 400 `BAD_DOC`; no GL. | Med | Control | Feature (e-invoicing) | Not Run | ext.ts |
+| UAT-ADM-079 | SoD R14 — reward config ✗ POS redemption blocked | AccessAdmin/Admin | — | 1. `POST /api/admin/users` with both `crm_reward`+`pos_sell`. 2. `POST /api/admin/users` with `['crm_reward']` only. | `{username: sod_r14, permissions:[crm_reward, pos_sell]}` | (1) 422 `SOD_CONFLICT` naming `R14`; user NOT created. (2) 200/201; single-duty `crm_reward` user accepted. | High | Control | ITGC-AC-09, R14 | Not Run | compliance.ts |

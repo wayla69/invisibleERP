@@ -10,6 +10,7 @@ import {
   BookText,
   CalendarClock,
   Bot,
+  Disc3,
   Boxes,
   Briefcase,
   Cable,
@@ -33,6 +34,7 @@ import {
   FileSpreadsheet,
   FileText,
   Globe,
+  Gift,
   FlaskConical,
   Factory,
   FolderKanban,
@@ -150,7 +152,11 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'CRM 360', href: '/crm', icon: Users, perms: ['marketing', 'exec'] },
       { label: 'การตลาด', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
       // dual-use: loyalty program is run from POS but configured/analysed in ERP → cross-listed
-      { label: 'สมาชิก & แต้ม', href: '/loyalty', icon: Star, perms: ['loyalty', 'marketing'], workspace: BOTH },
+      { label: 'สมาชิก & แต้ม', href: '/loyalty/members', icon: Star, perms: ['loyalty', 'marketing'], workspace: BOTH },
+      { label: 'ของรางวัล & คูปอง', href: '/loyalty/rewards', icon: Gift, perms: ['loyalty', 'marketing'], workspace: BOTH },
+      { label: 'ภารกิจ & แสตมป์', href: '/loyalty/missions', icon: Target, perms: ['loyalty', 'marketing'], workspace: BOTH },
+      { label: 'วงล้อนำโชค', href: '/loyalty/wheels', icon: Disc3, perms: ['loyalty', 'marketing'], workspace: BOTH },
+      { label: 'แคมเปญ', href: '/loyalty/campaigns', icon: Megaphone, perms: ['marketing', 'exec'], workspace: BOTH },
     ],
   },
   {

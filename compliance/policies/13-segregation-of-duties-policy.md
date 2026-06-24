@@ -2,7 +2,7 @@
 
 **Policy ID:** ELC-POL-13 · **Owner:** `<<Controller / IT Security>>` · **Approved by:** `<<CFO>>`
 **Version:** 0.1 (DRAFT) · **Effective:** `<<date>>` · **Last reviewed:** `<<date>>` · **Cadence:** Annual + quarterly conflict review
-**Related RCM controls:** ITGC-AC-09 (SoD ruleset), and the underlying rules R01–R13
+**Related RCM controls:** ITGC-AC-09 (SoD ruleset), and the underlying rules R01–R16
 
 > DRAFT template — the rule registry, preventive block, and detective report are already implemented; this policy documents how they operate. Linked artifact: `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`.
 
@@ -15,7 +15,7 @@ Prevent any single individual from controlling all phases of a transaction in a 
 - **Access administration** is separated from transacting.
 - Conflicts that cannot be eliminated (small-team reality) require **documented compensating controls** and management acceptance.
 
-## 3. Conflict rule registry (R01–R13)
+## 3. Conflict rule registry (R01–R16)
 The conflict rules are codified in `packages/shared/src/permissions.ts` (`SOD_RULES`) and evaluated on each user's *effective* (resolved + expanded) permissions. Summary:
 
 | Rule | Duty A ✗ Duty B | Severity |
@@ -33,6 +33,9 @@ The conflict rules are codified in `packages/shared/src/permissions.ts` (`SOD_RU
 | R11 | Adjust inventory ✗ stock custody & counting | Medium |
 | R12 | Process returns ✗ issue refund | Medium |
 | R13 | Maintain master data/config ✗ transact on it | Medium |
+| R14 | Configure rewards/vouchers (`crm_reward`) ✗ POS redemption at till (`pos_sell`) | High |
+| R15 | Manual points adjustment (`crm_points_adjust`) ✗ member master maintenance (`crm_member`) | High |
+| R16 | Campaign issuance of point-bearing value (`crm_campaign`) ✗ points adjustment (`crm_points_adjust`) | High |
 
 The remediated single-duty role design (`Oshinei_ERP_SoD_Matrix_v1.xlsx`, "Remediated Matrix") yields **0 residual conflicts** (Admin inherent superuser, by compensating control).
 
@@ -51,3 +54,4 @@ The SoD matrix, the rule registry, override records (reason + approver), quarter
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-06-22 | `<<author>>` | Initial draft |
+| 0.2 | 2026-06-24 | Platform | Added CRM SoD rules R14–R16 (loyalty value issuance segregation) — now 16 rules. |

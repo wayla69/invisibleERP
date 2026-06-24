@@ -17,7 +17,7 @@ Each UAT case is traceable to:
 
 ## 2. Scope
 
-### In scope (10 cycles)
+### In scope (11 cycles)
 
 | # | Cycle | UAT file | UAT ID prefix |
 |---|---|---|---|
@@ -31,6 +31,7 @@ Each UAT case is traceable to:
 | 08 | Admin / SoD / Access Governance / Audit | [`08-admin-sod-uat.md`](./08-admin-sod-uat.md) | UAT-ADM |
 | 09 | Reports & Analytics | [`09-reports-analytics-uat.md`](./09-reports-analytics-uat.md) | UAT-RPT |
 | 10 | Customer Portal (self-serve POS, loyalty, inventory) | [`10-customer-portal-uat.md`](./10-customer-portal-uat.md) | UAT-POR |
+| 11 | Loyalty & CRM (member directory, 360, PDPA consent, points liability) | [`11-loyalty-crm-uat.md`](./11-loyalty-crm-uat.md) | UAT-LOY |
 
 ### Out of scope
 - Non-functional load/performance and penetration testing (covered by separate plans).
@@ -45,7 +46,7 @@ Each UAT case is traceable to:
 | UAT traceability matrix | [`./uat-traceability-matrix.md`](./uat-traceability-matrix.md) |
 | User manual | `<<docs/user-manual/ — link once authored>>` |
 | Risk & Control Matrix (RCM) | `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` |
-| Segregation-of-Duties matrix + ruleset (R01–R13) | `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`, `packages/shared/src/permissions.ts` |
+| Segregation-of-Duties matrix + ruleset (R01–R16) | `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`, `packages/shared/src/permissions.ts` |
 | API specification | `docs/02-api-spec.md` |
 | Cutover / control-evidence harnesses (expected-result oracles) | `tools/cutover/src/compliance.ts`, `e2e.ts`, `match.ts`, `worldclass.ts`, `payroll.ts`, `returns.ts`, `wms.ts`, `etax.ts`, `pos-p1.ts` |
 | Cutover runbook | `docs/08-cutover-runbook.md` |
@@ -68,7 +69,7 @@ Provision one UAT account per role used by the cases. Roles are least-privilege 
 - **Coarse:** Admin, Sales, Customer, Warehouse, Procurement, Planner.
 - **Single-duty:** Cashier, PosSupervisor, ArClerk, ApClerk, Buyer, WarehouseOperator, InventoryController, StockCounter, GlAccountant, FinancialController, MasterDataAdmin, PricingManager, CreditManager, ReturnsClerk, AccessAdmin, ExecutiveViewer.
 
-**SoD guardrail for provisioning:** maker and checker for any approval must be different roles/users (e.g. GlAccountant prepares JEs, FinancialController approves). Do not grant a single UAT account both sides of any SoD rule R01–R13 unless the test explicitly exercises the override path.
+**SoD guardrail for provisioning:** maker and checker for any approval must be different roles/users (e.g. GlAccountant prepares JEs, FinancialController approves). Do not grant a single UAT account both sides of any SoD rule R01–R16 unless the test explicitly exercises the override path.
 
 ## 6. Entry criteria
 
@@ -125,3 +126,4 @@ Outstanding-defect summary at sign-off: Critical `<<0>>` · High `<<0>>` · Medi
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial UAT plan + 10 cycle test lists + traceability matrix. |
+| 0.2 | 2026-06-24 | Platform | Added cycle 11 — Loyalty & CRM (`11-loyalty-crm-uat.md`, UAT-LOY): member directory, 360, PDPA consent, points-liability tie-out. Total cases 260 → 267. |

@@ -2,7 +2,7 @@
 
 **Status: DRAFT v0.2 · 2026-06-23**
 
-Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R13) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
+Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
 Coverage check: every in-scope requirement/control should appear in ≥1 executed case (UAT exit criterion §7.4). Section numbers in the narrative column follow the common 14-section structure (§7 = Process narrative, §9 = Control matrix).
 
@@ -417,6 +417,33 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-POR-011 | Billing plans public | — | 08 §7 |
 | UAT-POR-012 | Credit hold/limit on portal | REV-08 | 01 §9 |
 
+## 11 — Loyalty & CRM (Members & Points) → `19-marketing-pricing-loyalty.md`
+
+| UAT ID | Requirement / Feature | RCM control / SoD | Narrative § |
+|---|---|---|---|
+| UAT-LOY-001 | Member directory list + search | Feature (member directory) | 19 §7 (8a) |
+| UAT-LOY-002 | Directory RBAC gate | ITGC-AC-02/07 | 19 §6 |
+| UAT-LOY-003 | Member 360 + points history | Feature (CRM 360) | 19 §7 |
+| UAT-LOY-004 | Withdraw marketing consent stops sends | MKT-04, MKT-05 | 19 §7, §9 |
+| UAT-LOY-005 | Consent register persists per purpose | MKT-05 | 19 §7 |
+| UAT-LOY-006 | Points-liability tie-out (acct 2250) | MKT-06 | 19 §7, §9 |
+| UAT-LOY-007 | Members tenant-isolated (RLS) | ITGC-AC (RLS) | 08 §9 |
+| UAT-LOY-008 | Liability accrual posts & ties out to GL 2250 | MKT-06 | 19 §7, §9 |
+| UAT-LOY-009 | Accrual run idempotent (no double-post) | MKT-06 | 19 §7 |
+| UAT-LOY-010 | Tie-out tenant-scoped (Admin bypass) + all-member basis | MKT-06, ITGC-AC (RLS) | 19 §7 |
+| UAT-LOY-011 | Aged points expire (breakage) & release liability | MKT-06 | 19 §7, §9 |
+| UAT-LOY-012 | Period close auto-accrues the liability | MKT-06 | 19 §7, §9 |
+| UAT-LOY-013 | Scheduled maintenance sweep (expire + accrue, per tenant) | MKT-06 | 19 §7, §9 |
+| UAT-LOY-014 | Reward burn → single-use code → liability release → double-use blocked | MKT-07 | 19 §7, §9 |
+| UAT-LOY-015 | Reward eligibility guards (points/stock/limit/tier) | MKT-07 | 19 §7 |
+| UAT-LOY-016 | Tier auto-recompute + journey | MKT-08 | 19 §7, §9 |
+| UAT-LOY-017 | Mission claim grants reward once (single-claim) | MKT-08 | 19 §7, §9 |
+| UAT-LOY-018 | Referral rewards both once + anti-gaming + tenant-scoped | MKT-08, ITGC-AC (RLS) | 19 §7, §9 |
+| UAT-LOY-019 | Member self-service app — phone-OTP login, self-scoped, staff routes blocked | LYL-10, ITGC-AC | 19 §7 (21), control 21 |
+| UAT-LOY-019b | Member OTP brute-force cap holds (adversarial-review fix) | LYL-10b | 19 control 21 |
+| UAT-LOY-020 | Spin-the-wheel — weighted draw, free→cost, per-prize stock cap | MKT-09 | 19 §7 (22), control 22 |
+| UAT-LOY-021 | Campaign — segmented send respects opt-out, audited, idempotent | MKT-10 | 19 §7 (23), control 23 |
+
 ## Coverage summary
 
 | Cycle | Cases | Control-type cases |
@@ -431,4 +458,5 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 08 Admin / SoD / Audit | 78 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **260** | **118** |
+| 11 Loyalty & CRM | 22 | 19 |
+| **Total** | **282** | **137** |

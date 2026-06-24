@@ -23,7 +23,7 @@ CI-gated:
 | No payment capture | ✅ `payments` module: multi-tender, auth→capture→settle, refunds/voids, idempotency keys, gateway abstraction (mock/Stripe/PromptPay/Adyen), **terminal layer** (Opn/2C2P/GBPrime), settlement batches |
 | Tracker, not POS | ✅ Till sessions, X/Z reports, cash movements, split bills, KDS (SSE), table/floor management, public QR diner flow, gift cards, loyalty, ESC/POS receipts, **hash-chained fiscal journal + Thai e-Tax submission** |
 | Tests = "it compiles" | ✅ 59 cutover harnesses (8.5k LOC) boot the real app over PGlite; 8+ are **required CI gates** alongside CodeQL, gitleaks, `pnpm audit`, Playwright |
-| No compliance posture | ✅ COSO 2013 RCM (66 controls, **49 implemented** after Phase A · 11 partial · 6 gap), 26 ISO/SOX process narratives, 13 SoD rules enforced in code, 159 UAT cases, ICFR audit-readiness plan |
+| No compliance posture | ✅ COSO 2013 RCM (66 controls, **49 implemented** after Phase A · 11 partial · 6 gap), 26 ISO/SOX process narratives, 16 SoD rules enforced in code, 159 UAT cases, ICFR audit-readiness plan |
 
 **Conclusion:** the differentiation problem is solved. The remaining problem is **operational
 maturity and breadth** — the unglamorous layer that separates "passes a demo and a code review"
