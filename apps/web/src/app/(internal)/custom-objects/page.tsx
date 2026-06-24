@@ -117,7 +117,7 @@ export default function CustomObjectsPage() {
             <Card>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-base"><Database className="size-4 text-primary" /> ฟิลด์ของ “{detail.data?.object.label ?? selKey}”</CardTitle>
-                <Button size="sm" variant="ghost" onClick={() => delObj.mutate(selKey)}><Trash2 className="size-4 text-destructive" /> ลบออบเจ็กต์</Button>
+                <Button size="sm" variant="ghost" disabled={delObj.isPending} onClick={() => delObj.mutate(selKey)}><Trash2 className="size-4 text-destructive" /> ลบออบเจ็กต์</Button>
               </CardHeader>
               <CardContent className="grid gap-3">
                 <div className="flex flex-wrap gap-2">
@@ -150,7 +150,7 @@ export default function CustomObjectsPage() {
                               {fields.map((f) => <td key={f.field_key} className="px-2 py-1">{String(r.values?.[f.field_key] ?? '')}</td>)}
                               <td className="px-2 py-1 text-right">
                                 <Button size="sm" variant="ghost" onClick={() => { setEditId(r.record_id); setRec({ ...r.values }); }}>แก้ไข</Button>
-                                <Button size="sm" variant="ghost" onClick={() => delRec.mutate(r.record_id)}><Trash2 className="size-4 text-destructive" /></Button>
+                                <Button size="sm" variant="ghost" disabled={delRec.isPending} onClick={() => delRec.mutate(r.record_id)}><Trash2 className="size-4 text-destructive" /></Button>
                               </td>
                             </tr>
                           ))}

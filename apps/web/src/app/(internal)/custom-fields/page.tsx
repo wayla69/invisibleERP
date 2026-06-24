@@ -94,7 +94,7 @@ export default function CustomFieldsPage() {
             { key: 'data_type', label: 'ชนิด', render: (r) => <Badge variant="muted">{r.data_type}</Badge> },
             { key: 'options', label: 'ตัวเลือก', render: (r) => r.options?.join(', ') ?? '—' },
             { key: 'required', label: 'จำเป็น', render: (r) => r.required ? <Badge variant="warning">required</Badge> : '—' },
-            { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
+            { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
           emptyText="ยังไม่มีฟิลด์กำหนดเองสำหรับประเภทนี้"
         />

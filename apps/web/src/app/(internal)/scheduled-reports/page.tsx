@@ -96,8 +96,8 @@ function Subscriptions() {
             { key: 'frequency', label: 'รอบ', render: (r) => <Badge variant="muted">{FREQ_LABEL[r.frequency] ?? r.frequency}</Badge> },
             { key: 'recipients', label: 'ผู้รับ', render: (r) => (r.recipients ?? []).map((x) => x.email).filter(Boolean).join(', ') || '—' },
             { key: 'next_run_at', label: 'รอบถัดไป', render: (r) => r.next_run_at ? new Date(r.next_run_at).toLocaleString('th-TH') : '—' },
-            { key: 'run', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" onClick={() => runNow.mutate(r.id)} title="ส่งเดี๋ยวนี้"><Play className="h-4 w-4" /></Button> },
-            { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
+            { key: 'run', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={runNow.isPending} onClick={() => runNow.mutate(r.id)} title="ส่งเดี๋ยวนี้"><Play className="h-4 w-4" /></Button> },
+            { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
           emptyText="ยังไม่มีรายงานที่ตั้งไว้"
         />

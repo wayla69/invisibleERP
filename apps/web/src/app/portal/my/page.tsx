@@ -36,7 +36,7 @@ function Customers() {
       <StateView q={q}>
         {q.data && <DataTable rows={q.data.customers} columns={[
           { key: 'customer_name', label: 'ชื่อ' }, { key: 'phone', label: 'โทร' }, { key: 'address', label: 'ที่อยู่' },
-          { key: 'x', label: '', align: 'right', render: (r) => <Button variant="destructive" size="icon" onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
+          { key: 'x', label: '', align: 'right', render: (r) => <Button variant="destructive" size="icon" disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
         ]} />}
       </StateView>
     </div>
@@ -63,7 +63,7 @@ function Suppliers() {
       <StateView q={q}>
         {q.data && <DataTable rows={q.data.suppliers} columns={[
           { key: 'supplier_name', label: 'ชื่อ' }, { key: 'contact_name', label: 'ผู้ติดต่อ' }, { key: 'phone', label: 'โทร' },
-          { key: 'x', label: '', align: 'right', render: (r) => <Button variant="destructive" size="icon" onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
+          { key: 'x', label: '', align: 'right', render: (r) => <Button variant="destructive" size="icon" disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
         ]} />}
       </StateView>
     </div>

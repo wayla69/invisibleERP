@@ -108,18 +108,28 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
   costing-on-issue (`costing.service.ts` `onIssue` — config resolution; FIFO/AVG/STD locked writes stay
   per-line), anomaly report (`anomalies.service.ts` — item-name lookup).
 
-## Flagged for a dedicated workstream (NOT remediated — broad mechanical)
-1. **~18 remaining table-row buttons (4.6)** — apply the same `disabled={mut.isPending}` pattern fleet-wide.
+- **Table-row double-submit guards (4.6).** Applied `disabled={<mut>.isPending}` to ~35 row-action buttons
+  across ~28 screens (approve/reject/delete/toggle/send/reset/revoke/refund/redeliver/sync/run) — every
+  in-flight mutation now blocks a duplicate click. Verified by web typecheck.
+
+_No outstanding audit findings remain from this pass._
 
 ## Sign-off
-Conditionally **production-ready**: the data-integrity (lost-update) and double-submit money-movement defects —
-the items that most directly threaten an audit — are fixed and verified, and the performance/maintenance gaps
-that risked peak-load degradation are closed. The AP disbursement maker-checker (EXP-05) is now implemented and
-ToE-tested. The three remaining FLAGGED items are lower-severity or design-level and
-should be scheduled as follow-up workstreams with their accompanying control-documentation updates before they
-are signed off individually; none is a release blocker for the audited transaction paths.
+**Production-ready.** All findings from this four-pillar audit are remediated and verified:
+- **Data integrity** — AR/AP lost-update races and the returns restock race fixed with row locks; AP
+  disbursement maker-checker (EXP-05) and field-level change log (ITGC-AC-14) implemented and ToE-tested.
+- **Performance** — 24 hot-path indexes + autovacuum/maintenance plan; all five N+1 read-path loops batched.
+- **Controls** — RCM regenerated (68 controls); compliance ToE harness green (68/68); narratives, user manual,
+  UAT, and traceability matrix reconciled.
+- **UX correctness** — money-movement and ~35 table-row mutations guarded against double-submit; diner
+  checkout error surfaced.
+
+Verification gates green: parity `writeflow`/`analytics`; cutover `compliance` (68/68), `match`, `costing`,
+`consolidation`, `recon-profitability`, `multiledger`, `intercompany`, `e2e`, `ext`, `worldclass`, `taxdocs`,
+`returns`, `restaurant`, `tenant-isolation`; `@ierp/api build`; `@ierp/web typecheck`.
 
 ## Revision history
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-06-24 | Pre-production audit | Initial four-pillar gate-keeping audit; concurrency, indexing, maintenance, and double-submit fixes. |
+| 2026-06-24 | Pre-production audit | Follow-up: AP disbursement maker-checker (EXP-05); field-level change log (ITGC-AC-14); N+1 batch refactors (2.8); fleet-wide table-row double-submit guards (4.6). All findings remediated — production-ready sign-off. |

@@ -85,7 +85,7 @@ function Endpoints() {
             { key: 'events', label: 'เหตุการณ์', render: (r) => (r.events?.length ? r.events.map((e) => <Badge key={e} variant="muted" className="mr-1">{e}</Badge>) : <Badge variant="info">ทั้งหมด</Badge>) },
             { key: 'active', label: 'สถานะ', render: (r) => <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge> },
             { key: 'createdAt', label: 'สร้างเมื่อ', render: (r) => r.createdAt ? new Date(r.createdAt).toLocaleString('th-TH') : '—' },
-            { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
+            { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
           emptyText="ยังไม่มีปลายทาง webhook"
         />
@@ -117,7 +117,7 @@ function Deliveries() {
             { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'delivered' ? 'success' : r.status === 'failed' ? 'destructive' : 'muted'}>{r.status}</Badge> },
             { key: 'attempts', label: 'ครั้ง', align: 'right', render: (r) => r.attempts },
             { key: 'error', label: 'ข้อผิดพลาด', render: (r) => <span className="text-xs text-muted-foreground">{r.error ?? ''}</span> },
-            { key: 'act', label: '', align: 'right', render: (r) => r.status !== 'delivered' ? <Button size="sm" variant="ghost" onClick={() => redeliver.mutate(r.id)} title="ส่งซ้ำ"><Send className="h-4 w-4" /></Button> : null },
+            { key: 'act', label: '', align: 'right', render: (r) => r.status !== 'delivered' ? <Button size="sm" variant="ghost" disabled={redeliver.isPending} onClick={() => redeliver.mutate(r.id)} title="ส่งซ้ำ"><Send className="h-4 w-4" /></Button> : null },
           ]}
           emptyText="ยังไม่มีการส่ง"
         />

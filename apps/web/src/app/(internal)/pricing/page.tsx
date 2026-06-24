@@ -72,7 +72,7 @@ function Rules() {
             { key: 'value', label: 'ค่า', align: 'right' },
             { key: 'window', label: 'เวลา', render: (r: any) => r.time_start ? `${r.time_start}-${r.time_end}` : '—' },
             { key: 'stackable', label: 'ซ้อน', render: (r: any) => r.stackable ? <Badge>ได้</Badge> : '—' },
-            { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="destructive" onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
+            { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
           ]} emptyText="ยังไม่มีกฎราคา" />
         )}
       </StateView>
