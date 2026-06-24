@@ -1,4 +1,4 @@
-import { pgTable, bigserial, text, numeric, boolean, date, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, text, numeric, boolean, date, timestamp, jsonb } from 'drizzle-orm/pg-core';
 
 // จาก tbl_customers — เดิม PK = Customer_Name (string). V2: surrogate id + code = ชื่อเดิม
 export const tenants = pgTable('tenants', {
@@ -30,6 +30,10 @@ export const tenants = pgTable('tenants', {
   postalCode: text('postal_code'),
   promptpayId: text('promptpay_id'),                              // PromptPay merchant target (mobile/13-digit ID) for QR (0049)
   defaultLanguage: text('default_language').default('th'),         // 'th' | 'en' — customer-facing output language (receipts, display, QR) (0077)
+  // ── Branding (0085, Phase 9) — rendered on customer-facing documents ──
+  logoUrl: text('logo_url'),                                       // https URL or small image data-URI
+  tagline: text('tagline'),                                        // short company tagline under the name
+  brandingPrefs: jsonb('branding_prefs').default({}),              // {show_logo_on_receipt?: bool, ...}
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

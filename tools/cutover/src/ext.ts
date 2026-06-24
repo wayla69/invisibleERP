@@ -323,6 +323,29 @@ async function main() {
   const wDel = await inj('DELETE', `/api/platform/webhooks/${reg.json.id}`, cf2aa);
   ok('Webhooks: an endpoint can be revoked (deleted)', wDel.status === 200 && wDel.json.deleted === true, `${wDel.status}`);
 
+  // ── tenant branding (Phase 9) ──
+  // hqaa (AccessAdmin@HQ, holds `users`) brands the HQ org; the earlier portal sale belongs to HQ, so its
+  // receipt must render the logo + tagline. AccessAdmin/RLS scopes each admin to their own tenant row.
+  const LOGO = 'https://cdn.example.com/hq-logo.png'; const TAG = 'พันธมิตรที่ไว้ใจได้';
+  const brand = await inj('PATCH', '/api/tenant/profile', hqaa, { logo_url: LOGO, tagline: TAG, branding_prefs: { show_logo_on_receipt: true } });
+  ok('Branding: a tenant admin sets logo + tagline on its own org', brand.status === 200 && brand.json.logo_url === LOGO && brand.json.tagline === TAG, `${brand.status}`);
+  const brandGet = await inj('GET', '/api/tenant/profile', hqaa);
+  ok('Branding: profile round-trips logo + tagline + prefs', brandGet.json.logo_url === LOGO && brandGet.json.tagline === TAG && brandGet.json.branding_prefs?.show_logo_on_receipt === true, `${JSON.stringify(brandGet.json.branding_prefs ?? {})}`);
+  const rcpt = await inj('GET', `/api/print/receipt/${sale.json.sale_no}`, token);
+  const rcptHtml = rcpt.raw?.toString('utf8') ?? '';
+  ok('Branding: the logo + tagline are rendered on the receipt (genuinely consumed)', rcpt.status === 200 && rcptHtml.includes(LOGO) && rcptHtml.includes(TAG) && rcptHtml.includes('class="logo"'), `status=${rcpt.status} hasLogo=${rcptHtml.includes(LOGO)} hasTag=${rcptHtml.includes(TAG)}`);
+  const badLogo = await inj('PATCH', '/api/tenant/profile', hqaa, { logo_url: 'ftp://nope/x.png' });
+  ok('Branding: a non-https/non-data logo URL is rejected (400)', badLogo.status === 400, `${badLogo.status}`);
+  // other tenant's branding is independent (RLS)
+  await inj('PATCH', '/api/tenant/profile', cf2aa, { tagline: 'CF2 Brand' });
+  const hqAfter = await inj('GET', '/api/tenant/profile', hqaa);
+  const cf2After = await inj('GET', '/api/tenant/profile', cf2aa);
+  ok('Branding: org branding is tenant-isolated', hqAfter.json.tagline === TAG && cf2After.json.tagline === 'CF2 Brand', `hq=${hqAfter.json.tagline} cf2=${cf2After.json.tagline}`);
+  // turning the prefs flag off hides the logo on the receipt
+  await inj('PATCH', '/api/tenant/profile', hqaa, { branding_prefs: { show_logo_on_receipt: false } });
+  const rcpt2 = (await inj('GET', `/api/print/receipt/${sale.json.sale_no}`, token)).raw?.toString('utf8') ?? '';
+  ok('Branding: show_logo_on_receipt=false suppresses the logo (tagline stays)', !rcpt2.includes('class="logo"') && rcpt2.includes(TAG), `hasLogo=${rcpt2.includes('class="logo"')}`);
+
   await app.close();
   await pg.close();
 

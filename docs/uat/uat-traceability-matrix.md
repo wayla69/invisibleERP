@@ -302,6 +302,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-035 | Webhook — register + secret-once + isolation | ITGC-AC-04/03 | 08 §7.A.9 |
 | UAT-ADM-036 | Webhook — event emits a signed delivery (logged) | Feature (webhooks), ITGC-AC-04 | 08 §7.A.9 |
 | UAT-ADM-037 | Webhook — redeliver / dispatch / revoke | Feature (webhooks) | 08 §7.A.9 |
+| UAT-ADM-038 | Branding — set + render on receipt + validation | Feature (branding) | 23 §7.6a |
+| UAT-ADM-039 | Branding — tenant-isolated | Feature (branding), ITGC-AC-03 | 23 §7.6a |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 

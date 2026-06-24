@@ -603,6 +603,13 @@
       "when": 1782800000000,
       "tag": "0085_username_normalize",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1782880000000,
+      "tag": "0086_tenant_branding",
+      "breakpoints": true
     }
   ]
 }

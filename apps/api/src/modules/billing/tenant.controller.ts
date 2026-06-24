@@ -30,6 +30,10 @@ const ProfileBody = z.object({
   // PromptPay merchant id — mobile (0xxxxxxxxx) or 13-digit national/tax id; '' clears it.
   promptpay_id: z.string().refine((v) => v === '' || isValidPromptPayTarget(v), 'invalid PromptPay id').optional(),
   default_language: z.enum(['th', 'en']).optional(), // customer-facing output language
+  // ── Branding (Phase 9) ── logo is a pasted https URL or a small image data-URI; '' clears it.
+  logo_url: z.string().max(500_000).refine((v) => v === '' || ((/^https:\/\//i.test(v) || /^data:image\/(png|jpe?g|svg\+xml|webp);base64,/i.test(v)) && !/["'<>]/.test(v)), 'logo_url must be an https URL or an image data-URI').optional(),
+  tagline: z.string().max(200).optional(),
+  branding_prefs: z.record(z.unknown()).optional(),
 });
 type ProfileBody = z.infer<typeof ProfileBody>;
 
@@ -59,10 +63,11 @@ export class TenantController {
       vat_registered: 'vatRegistered', tax_country: 'taxCountry', phone: 'phone', email: 'email',
       address_line1: 'addressLine1', address_line2: 'addressLine2', sub_district: 'subDistrict',
       district: 'district', province: 'province', postal_code: 'postalCode', promptpay_id: 'promptpayId',
-      default_language: 'defaultLanguage',
+      default_language: 'defaultLanguage', logo_url: 'logoUrl', tagline: 'tagline',
     };
     for (const [k, col] of Object.entries(map)) if (b[k as keyof ProfileBody] !== undefined) patch[col] = b[k as keyof ProfileBody];
     if (b.vat_rate !== undefined) patch.vatRate = String(b.vat_rate);
+    if (b.branding_prefs !== undefined) patch.brandingPrefs = b.branding_prefs;
     if (Object.keys(patch).length) await (this.db as any).update(tenants).set(patch).where(eq(tenants.id, id));
     if (b.vat_rate !== undefined || b.tax_country !== undefined) this.tax.invalidateTenantTax(id); // drop stale cache
     const [t] = await (this.db as any).select().from(tenants).where(eq(tenants.id, id)).limit(1);
@@ -82,6 +87,9 @@ export class TenantController {
       district: t.district, province: t.province, postal_code: t.postalCode,
       promptpay_id: t.promptpayId ?? null,
       default_language: t.defaultLanguage ?? 'th',
+      logo_url: t.logoUrl ?? null,
+      tagline: t.tagline ?? null,
+      branding_prefs: t.brandingPrefs ?? {},
       setup_complete: setupComplete,
     };
   }

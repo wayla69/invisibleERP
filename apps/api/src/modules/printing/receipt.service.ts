@@ -6,6 +6,8 @@ import { custPosSales, custPosItems, tenants } from '../../database/schema';
 const n = (x: any) => Number(x) || 0;
 const baht = (x: any) => n(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Attribute-context encode: also neutralise the quotes that could close an attribute (XSS via e.g. logo src).
+const escAttr = (s: string) => esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 export type ReceiptLang = 'th' | 'en' | 'both';
 
@@ -29,7 +31,7 @@ export type ReceiptData = {
   date: string | null;
   is_copy: boolean;
   lang: ReceiptLang;
-  seller: { name: string; legal_name?: string | null; branch_label?: string | null; tax_id?: string | null; address?: string | null; vat_registered: boolean };
+  seller: { name: string; legal_name?: string | null; branch_label?: string | null; tax_id?: string | null; address?: string | null; vat_registered: boolean; logo_url?: string | null; tagline?: string | null; show_logo?: boolean };
   items: { description: string; qty: number; unit_price: number; amount: number }[];
   subtotal: number;
   discount: number;
@@ -70,6 +72,9 @@ export class ReceiptService {
         tax_id: seller?.taxId ?? null,
         address: addr || null,
         vat_registered: !!seller?.vatRegistered,
+        logo_url: seller?.logoUrl ?? null,
+        tagline: seller?.tagline ?? null,
+        show_logo: (seller?.brandingPrefs?.show_logo_on_receipt) !== false, // default on when a logo is set
       },
       items: lines.map((l: any) => ({ description: l.itemDescription ?? l.itemId ?? '', qty: n(l.qty), unit_price: n(l.unitPrice), amount: n(l.amount) })),
       subtotal: n(sale.subtotal),
@@ -103,10 +108,13 @@ export class ReceiptService {
     return `<!doctype html><html lang="${htmlLang}"><head><meta charset="utf-8"><title>${esc(t.receipt)} ${esc(d.sale_no)}</title>
 <style>@page{size:80mm auto;margin:4mm}body{font-family:'TH Sarabun New',Tahoma,monospace;width:72mm;margin:0 auto;font-size:13px;color:#000}
 h1{font-size:16px;text-align:center;margin:0}.muted{color:#444;font-size:11px;text-align:center}.copy{text-align:center;font-weight:bold;border:1px dashed #000;margin:4px 0;padding:2px}
+.logo{display:block;max-height:48px;max-width:60mm;margin:0 auto 4px}.tagline{text-align:center;font-size:11px;font-style:italic;color:#333}
 table{width:100%;border-collapse:collapse;margin-top:6px}td{padding:1px 0;vertical-align:top}.q{text-align:center;width:24px}.m{text-align:right;width:64px}
 .sep{border-top:1px dashed #000}.tot td{font-weight:bold}.foot{text-align:center;margin-top:8px;font-size:11px}@media print{button{display:none}}</style></head>
 <body onload="if(location.search.indexOf('print')>=0)window.print()">
+${d.seller.logo_url && d.seller.show_logo ? `<img class="logo" src="${escAttr(d.seller.logo_url)}" alt="">` : ''}
 <h1>${esc(d.seller.legal_name || d.seller.name)}</h1>
+${d.seller.tagline ? `<div class="tagline">${esc(d.seller.tagline)}</div>` : ''}
 ${d.seller.branch_label ? `<div class="muted">${esc(d.seller.branch_label)}</div>` : ''}
 ${d.seller.address ? `<div class="muted">${esc(d.seller.address)}</div>` : ''}
 ${d.seller.tax_id ? `<div class="muted">${esc(t.taxId)} ${esc(d.seller.tax_id)}</div>` : ''}

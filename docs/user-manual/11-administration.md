@@ -299,5 +299,30 @@ logged and retried.
 
 ---
 
+## 13. Company profile & branding
+
+**Screen:** `/setup` (**ตั้งค่ากิจการ**) · **Required permission:** `users`.
+
+This is where you keep your company's official details — used on tax invoices and
+receipts — and where you **brand** your customer-facing documents.
+
+- **Company info & address:** legal name, tax ID, branch, VAT registration/rate,
+  address, PromptPay ID, and the default language for receipts.
+- **Branding (ตราสินค้า):**
+  - **Logo** — paste an **`https://` image URL** (or a small image *data URI*). A
+    preview shows what you entered.
+  - **Tagline** — a short line shown beneath your company name.
+  - **Show logo on receipt** — turn the logo on or off for printed/emailed
+    receipts (the tagline always shows when set).
+
+**Expected result:** Your receipts (and other customer-facing documents) carry your
+**logo and tagline**. These settings are **private to your company** — each tenant
+brands its own documents independently.
+
+> **Note:** there's no file upload — paste a public image URL or a small data URI.
+> An invalid logo address (not `https://` or an image data URI) is rejected.
+
+---
+
 **Next:** [Approvals](./10-approvals.md) ·
 [Troubleshooting & FAQ](./99-troubleshooting-faq.md)
