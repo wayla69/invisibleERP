@@ -139,6 +139,25 @@ export const moduleConfigs = pgTable('module_configs', {
   updatedBy: text('updated_by'),
 });
 
+// Per-tenant enterprise identity config (Platform #4): OIDC SSO + SCIM 2.0 provisioning.
+// tenant_id → RLS-scoped (0088 re-runs the loop). Secrets are never returned in plaintext after write.
+export const tenantIdentity = pgTable('tenant_identity', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  ssoEnabled: boolean('sso_enabled').notNull().default(false),
+  oidcIssuer: text('oidc_issuer'),
+  oidcClientId: text('oidc_client_id'),
+  oidcClientSecretEnc: text('oidc_client_secret_enc'), // AES-256-GCM at rest
+  oidcRedirectUri: text('oidc_redirect_uri'),
+  defaultRole: text('default_role').notNull().default('Customer'),
+  scimEnabled: boolean('scim_enabled').notNull().default(false),
+  scimTokenHash: text('scim_token_hash'),     // sha256(scim_…); plaintext shown once
+  scimTokenPrefix: text('scim_token_prefix'), // first 12 chars for display
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const webhookDeliveries = pgTable('webhook_deliveries', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   webhookId: bigint('webhook_id', { mode: 'number' }).references(() => webhooks.id),

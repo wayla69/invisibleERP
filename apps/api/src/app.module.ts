@@ -90,6 +90,7 @@ import { EssModule } from './modules/ess/ess.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
 import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
 import { PublicApiModule } from './modules/public-api/public-api.module';
+import { IdentityModule } from './modules/identity/identity.module';
 
 @Module({
   imports: [
@@ -178,6 +179,7 @@ import { PublicApiModule } from './modules/public-api/public-api.module';
     SupplierModule,
     DemandMlModule,
     PublicApiModule,
+    IdentityModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

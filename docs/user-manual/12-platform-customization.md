@@ -1,6 +1,6 @@
 # 12 · Platform Customization
 
-**Status: DRAFT v0.3** · Updated 2026-06-24 — added the notification inbox (§A) and the public REST API (§B).
+**Status: DRAFT v0.4** · Updated 2026-06-24 — added the notification inbox (§A), the public REST API (§B), and SSO/SCIM (§C).
 
 This chapter is the **map** to the no-code ways you can adapt the system to your
 business — for **Admins**, *AccessAdmin*, *MasterDataAdmin* and *Executives*. Each
@@ -27,6 +27,7 @@ tools.
 | Put your logo & tagline on receipts | **Branding** | `/setup` | users | [Administration §13](./11-administration.md) |
 | Read alerts, report deliveries & approval reminders | **Notification inbox** | `/notifications` | anyone (your own) | §A below |
 | Let another system read your data securely | **Public REST API** | `/api/v1` (+ API keys) | users (to issue keys) | §B below |
+| Let staff sign in with your company login / auto-manage users | **SSO & SCIM** | Settings → SSO / SCIM | users | §C below |
 
 ---
 
@@ -72,6 +73,36 @@ If you use another system (an online shop, a BI tool, your own software) that ne
 - **Revoke any time.** Delete the key in the same screen and it stops working immediately.
 - **Note:** the public API is **read-only** and **never** posts to the ledger. Keep keys
   secret — anyone holding one can read what its scopes allow.
+
+---
+
+## C · Single sign-on (SSO) & automatic user management (SCIM)
+
+Large organisations can let staff sign in with their **company login** (Microsoft/Azure AD,
+Okta, Google) and have user accounts **created and switched off automatically** when people join
+or leave — no manual account admin.
+
+**Set it up** (an admin with the *users* permission, in **Settings → SSO / SCIM**):
+
+1. **SSO (single sign-on).** Tick *Enable SSO* and fill in the details your IdP gives you:
+   *Issuer URL*, *Client ID*, *Client Secret*, *Redirect URI* (`https://<your-app>/sso/callback`),
+   and the *default role* new staff should get. Save. The **client secret is stored encrypted**
+   and never shown again.
+2. **SCIM (auto user management).** Press **Generate SCIM token** and paste the token
+   (shown **once**) into your IdP's provisioning settings, pointing it at `/scim/v2`. Your IdP can
+   then add users, change their role, and **deactivate** leavers automatically.
+
+**How staff log in:** on the login page they click **“เข้าสู่ระบบด้วย SSO”**, enter your
+**company code**, and are sent to your IdP. First-time users are created automatically with the
+default role.
+
+- **Note (security & control):**
+  - A new SSO user still respects **segregation of duties** — the system creates them through the
+    same checks as manual user creation.
+  - **Deactivating** a user (via your IdP/SCIM) does **not** delete them — it switches the account
+    off, so the audit history is kept. A deactivated person **cannot log in** by any method.
+  - **Everything is scoped to your company** — your IdP/SCIM can only see and manage your own
+    organisation's users.
 
 ---
 

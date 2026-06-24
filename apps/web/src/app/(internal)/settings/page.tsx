@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Lock, Plus, Power, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -25,6 +25,7 @@ export default function SettingsPage() {
         tabs={[
           { key: 'modules', label: 'โมดูล (เปิด/ปิด)', content: <Modules /> },
           { key: 'keys', label: 'API Keys', content: <ApiKeys /> },
+          { key: 'identity', label: 'SSO / SCIM', content: <Identity /> },
           { key: 'mfa', label: 'ความปลอดภัย (MFA)', content: <Mfa /> },
         ]}
       />
@@ -182,6 +183,87 @@ function ApiKeys() {
           ]}
         />
       </StateView>
+    </div>
+  );
+}
+
+// ───────────────────────── Identity (SSO / SCIM) ─────────────────────────
+function Identity() {
+  const qc = useQueryClient();
+  const cfg = useQuery<any>({ queryKey: ['identity-config'], queryFn: () => api('/api/platform/identity') });
+  const [issuer, setIssuer] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [secret, setSecret] = useState('');
+  const [redirect, setRedirect] = useState('');
+  const [defaultRole, setDefaultRole] = useState('Customer');
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+  const [scimToken, setScimToken] = useState('');
+  const [msg, setMsg] = useState('');
+  const [seeded, setSeeded] = useState(false);
+
+  // Seed the form once from the server config (secrets are never returned, so they stay blank).
+  useEffect(() => {
+    if (!cfg.data || seeded) return;
+    setIssuer(cfg.data.oidc_issuer ?? '');
+    setClientId(cfg.data.oidc_client_id ?? '');
+    setRedirect(cfg.data.oidc_redirect_uri ?? '');
+    setDefaultRole(cfg.data.default_role ?? 'Customer');
+    setSsoEnabled(!!cfg.data.sso_enabled);
+    setSeeded(true);
+  }, [cfg.data, seeded]);
+
+  const save = useMutation({
+    mutationFn: () => api('/api/platform/identity', { method: 'PUT', body: JSON.stringify({
+      sso_enabled: ssoEnabled, oidc_issuer: issuer, oidc_client_id: clientId,
+      ...(secret ? { oidc_client_secret: secret } : {}), oidc_redirect_uri: redirect, default_role: defaultRole,
+    }) }),
+    onSuccess: () => { setMsg('✅ บันทึกการตั้งค่า IdP แล้ว'); setSecret(''); qc.invalidateQueries({ queryKey: ['identity-config'] }); },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+  const rotate = useMutation({
+    mutationFn: () => api<{ token: string }>('/api/platform/identity/scim-token', { method: 'POST' }),
+    onSuccess: (r) => { setScimToken(r.token); qc.invalidateQueries({ queryKey: ['identity-config'] }); },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card className="gap-3 p-5">
+        <div>
+          <h3 className="text-base font-semibold">เข้าสู่ระบบด้วย SSO (OIDC)</h3>
+          <p className="text-sm text-muted-foreground">เชื่อมต่อ Identity Provider ขององค์กร (Azure AD, Okta, Google) ให้พนักงานล็อกอินด้วยบัญชีองค์กร</p>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={ssoEnabled} onChange={(e) => setSsoEnabled(e.target.checked)} />
+          เปิดใช้งาน SSO
+        </label>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-1.5"><Label>Issuer URL</Label><Input value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://login.example.com" /></div>
+          <div className="grid gap-1.5"><Label>Client ID</Label><Input value={clientId} onChange={(e) => setClientId(e.target.value)} /></div>
+          <div className="grid gap-1.5"><Label>Client Secret {cfg.data?.has_client_secret && <span className="text-xs text-muted-foreground">(ตั้งไว้แล้ว — เว้นว่างเพื่อคงเดิม)</span>}</Label><Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="••••••" /></div>
+          <div className="grid gap-1.5"><Label>Redirect URI</Label><Input value={redirect} onChange={(e) => setRedirect(e.target.value)} placeholder="https://app.example/sso/callback" /></div>
+          <div className="grid gap-1.5"><Label>บทบาทเริ่มต้นของผู้ใช้ใหม่</Label><Input value={defaultRole} onChange={(e) => setDefaultRole(e.target.value)} /></div>
+        </div>
+        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+        <div><Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}</Button></div>
+      </Card>
+
+      <Card className="gap-3 p-5">
+        <div>
+          <h3 className="text-base font-semibold">SCIM 2.0 — จัดการผู้ใช้อัตโนมัติ</h3>
+          <p className="text-sm text-muted-foreground">ให้ IdP เพิ่ม/ปิดผู้ใช้อัตโนมัติผ่าน SCIM endpoint <code>/scim/v2</code> ด้วย bearer token นี้</p>
+        </div>
+        {cfg.data?.has_scim_token && !scimToken && <p className="text-sm text-muted-foreground">โทเค็นปัจจุบัน: <code>{cfg.data.scim_token_prefix}…</code></p>}
+        {scimToken && (
+          <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-warning-foreground dark:text-warning">
+              <TriangleAlert className="size-4" /> คัดลอกเก็บไว้ตอนนี้ — จะแสดงเพียงครั้งเดียว
+            </div>
+            <code className="mt-1.5 block break-all text-sm">{scimToken}</code>
+          </div>
+        )}
+        <div><Button variant="outline" disabled={rotate.isPending} onClick={() => rotate.mutate()}>{rotate.isPending ? 'กำลังสร้าง…' : (cfg.data?.has_scim_token ? 'สร้างโทเค็นใหม่ (เพิกถอนของเดิม)' : 'สร้าง SCIM token')}</Button></div>
+      </Card>
     </div>
   );
 }

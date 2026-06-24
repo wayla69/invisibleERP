@@ -323,6 +323,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-046 | Public API — tenant isolation (RLS) over reads | Feature (public API), ITGC-AC-03 | 27 §7.11 |
 | UAT-ADM-047 | Public API — scope gate | Feature (public API), ITGC-AC-07 | 27 §7.11 |
 | UAT-ADM-048 | Public API — per-key rate limit | Feature (public API), anti-abuse | 27 §7.11 |
+| UAT-ADM-049 | SSO — configure OIDC + secret write-only | Feature (SSO), ITGC-AC-04 | 27 §7.12 |
+| UAT-ADM-050 | SSO — authorize URL / not-configured | Feature (SSO) | 27 §7.12 |
+| UAT-ADM-051 | SSO — callback JIT-provisions + mints session | Feature (SSO), ITGC-AC-01 | 27 §7.12 |
+| UAT-ADM-052 | SSO — id_token rejected (sig/aud) | Feature (SSO), ITGC-AC-01 | 27 §7.12 |
+| UAT-ADM-053 | SCIM — token + auth + provision (SoD) | Feature (SCIM), ITGC-AC-09 | 27 §7.12 |
+| UAT-ADM-054 | SCIM — deprovision = deactivate (soft) | Feature (SCIM), ITGC-AC-10 | 27 §7.12 |
+| UAT-ADM-055 | SCIM/identity — tenant isolation + deactivated login block | Feature (SSO/SCIM), ITGC-AC-02/03 | 27 §7.12 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -390,7 +397,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 48 | 31 |
+| 08 Admin / SoD / Audit | 55 | 36 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **230** | **102** |
+| **Total** | **237** | **107** |
