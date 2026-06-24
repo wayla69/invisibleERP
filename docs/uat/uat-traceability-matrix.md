@@ -161,6 +161,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-120 | Accept/reject routes to KDS + notifies platform | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-121 | Status callback + mock fallback | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-122 | Multi-terminal realtime KDS event | Feature (multi-terminal SSE) | 20 §rev3.0 |
+| UAT-O2C-123 | LINE marketing automation — closed loop | Feature (LINE automation), MKT-04 | 19 §7.12 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

@@ -14,6 +14,7 @@ import { KnowledgeService } from './knowledge.service';
 import { MenuEngineeringService } from '../analytics/menu-engineering.service';
 import { ProductionPlanService } from '../menu/production-plan.service';
 import { RecipeService } from '../menu/recipe.service';
+import { MarketingAutomationService } from '../marketing/marketing-automation.service';
 import type { JwtUser } from '../../common/decorators';
 
 // port จาก agents/base_agent.py + erp_agent.py
@@ -67,6 +68,7 @@ const TOOLS = [
   { name: 'get_sales_trend', description: 'แนวโน้มยอดขายเทียบช่วงก่อนหน้าที่เท่ากัน (เพิ่ม/ลด %)', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
   { name: 'get_menu_availability', description: 'เมนูแต่ละอย่างทำได้อีกกี่จาน (จากวัตถุดิบที่จำกัด) + วัตถุดิบใกล้หมด', input_schema: { type: 'object', properties: { low: { type: 'number' } } } },
   { name: 'get_cashflow_forecast', description: 'พยากรณ์กระแสเงินสดรายสัปดาห์ (เงินสดตั้งต้น+ลูกหนี้+เจ้าหนี้+ยอดขาย) เตือนเงินสดขาดมือ + คะแนนสุขภาพการเงิน', input_schema: { type: 'object', properties: { weeks: { type: 'number' } } } },
+  { name: 'get_marketing_audience', description: 'จำนวนลูกค้าเป้าหมายของแคมเปญ (lapsed=ห่างหาย, birthday=วันเกิด, winback=กลุ่มเสี่ยง/หาย) ที่ส่งถึงได้ — ดูอย่างเดียว ไม่ส่ง', input_schema: { type: 'object', properties: { trigger: { type: 'string', enum: ['lapsed', 'birthday', 'winback', 'all'] }, channel: { type: 'string' }, lapsed_days: { type: 'number' } }, required: ['trigger'] } },
 ];
 
 @Injectable()
@@ -87,6 +89,7 @@ export class AgentService {
     @Optional() private readonly production?: ProductionPlanService,
     @Optional() private readonly recipe?: RecipeService,
     @Optional() private readonly cashflow?: CashflowService,
+    @Optional() private readonly marketing?: MarketingAutomationService,
   ) {}
 
   private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
@@ -253,6 +256,7 @@ export class AgentService {
         case 'get_sales_trend': return this.menuEng ? await this.menuEng.salesTrend(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
         case 'get_menu_availability': return this.recipe ? await this.recipe.availabilityForecast(user, { low: input.low }) : { error: 'Menu availability unavailable' };
         case 'get_cashflow_forecast': return this.cashflow ? await this.cashflow.forecast(user, { weeks: input.weeks }) : { error: 'Cash-flow forecast unavailable' };
+        case 'get_marketing_audience': return this.marketing ? await this.marketing.preview({ trigger: input.trigger, channel: input.channel, lapsed_days: input.lapsed_days }, user) : { error: 'Marketing automation unavailable' };
         default: return { error: `unknown tool ${name}` };
       }
     } catch (e: any) {

@@ -20,6 +20,7 @@ export * from './revenue';
 export * from './fx';
 export * from './intercompany';
 export * from './loyalty-members';
+export * from './marketing-campaigns';
 export * from './payments';
 export * from './billing';
 export * from './tax-docs';

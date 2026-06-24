@@ -19,6 +19,7 @@ import { ProfitabilityModule } from '../profitability/profitability.module';
 import { LedgerModule } from '../ledger/ledger.module';
 import { ProcurementModule } from '../procurement/procurement.module';
 import { MenuModule } from '../menu/menu.module';
+import { MarketingModule } from '../marketing/marketing.module';
 
 const ChatBody = z.object({ message: z.string().min(1), history: z.array(z.any()).optional(), agent_type: z.string().optional() });
 const ProposeBody = z.object({ kind: z.enum(['journal_entry', 'purchase_order']), payload: z.any(), rationale: z.string().optional(), source: z.enum(['ai', 'human']).optional() });
@@ -115,7 +116,7 @@ export class KnowledgeController {
 }
 
 @Module({
-  imports: [PosModule, InventoryModule, FinanceModule, AnalyticsModule, BiModule, PipelineModule, CpqModule, ServiceModule, ProfitabilityModule, LedgerModule, ProcurementModule, MenuModule],
+  imports: [PosModule, InventoryModule, FinanceModule, AnalyticsModule, BiModule, PipelineModule, CpqModule, ServiceModule, ProfitabilityModule, LedgerModule, ProcurementModule, MenuModule, MarketingModule],
   controllers: [AiController, AiActionController, KnowledgeController],
   providers: [AgentService, AiActionService, EmbedderService, KnowledgeService],
   exports: [AgentService, KnowledgeService, EmbedderService],

@@ -437,6 +437,18 @@ SMS/email stay **mock** until their provider is added. The log shows the provide
 (`line` vs `mock`) on each row, so you can rehearse campaigns safely and confirm
 which sends were live.
 
+### Automated LINE campaigns (with redemption tracking)
+
+The **แคมเปญ LINE (Automation)** screen (`/campaigns`) goes one step further: pick a
+**target group** — ลูกค้าห่างหาย (haven't visited in a while), วันเกิดวันนี้, or
+**ดึงกลับ (win-back)** the at-risk/lost segment — set a discount, and press send. Each
+chosen member gets their **own coupon code** pushed to LINE (opted-out members are
+skipped automatically). When a customer later **uses that code at the till**, the
+system records the redemption against the campaign — so the list shows each campaign's
+**redemption rate and the revenue it brought back**, closing the loop from message to
+sale. You can also ask the AI assistant *"ลูกค้าห่างหายมีกี่คน?"* to size a group
+before sending.
+
 ---
 
 ## 9. Hardware peripherals (cash drawer, customer display, scale)

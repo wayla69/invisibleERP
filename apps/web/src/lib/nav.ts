@@ -152,6 +152,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'บริการ & SLA', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
       { label: 'CRM 360', href: '/crm', icon: Users, perms: ['marketing', 'exec'] },
       { label: 'การตลาด', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
+      { label: 'แคมเปญ LINE (Automation)', href: '/campaigns', icon: Megaphone, perms: ['marketing', 'crm'] },
       // dual-use: loyalty program is run from POS but configured/analysed in ERP → cross-listed
       { label: 'สมาชิก & แต้ม', href: '/loyalty', icon: Star, perms: ['loyalty', 'marketing'], workspace: BOTH },
     ],
