@@ -15,15 +15,11 @@ export default function SsoCallbackPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const qs = new URLSearchParams(window.location.search);
-    // Forward the IdP's assertion to the backend in the POST body (not the URL) so the id_token /
-    // authorization code never lands in a server log or browser history.
-    const body = {
-      state: qs.get('state') ?? undefined,
-      code: qs.get('code') ?? undefined,
-      id_token: qs.get('id_token') ?? undefined,
-    };
-    publicApi<{ token: string; role: string }>('/api/auth/sso/callback', { method: 'POST', body: JSON.stringify(body) })
+    // Forward the IdP's redirect query string VERBATIM to the backend in the POST body — we never
+    // pick out the sensitive id_token/code params here; the server parses them from the body. This
+    // keeps those credentials out of any URL/log and out of client-side handling by name.
+    const query = window.location.search;
+    publicApi<{ token: string; role: string }>('/api/auth/sso/callback', { method: 'POST', body: JSON.stringify({ query }) })
       .then((res) => {
         setToken(res.token);
         router.replace(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');
