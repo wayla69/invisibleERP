@@ -318,6 +318,33 @@ async function main() {
   const delBusy = await inj('DELETE', `/api/restaurant/tables/${busyT.json.id}`, sales1);
   ok('Floor-plan: deleting a table with a live session rejected (400 TABLE_BUSY)', delBusy.status === 400 && delBusy.json.error?.code === 'TABLE_BUSY', `${delBusy.status} ${delBusy.json.error?.code}`);
 
+  // ── floor-plan zones / rooms (a VIP room is just a zone) ──
+  const zoneRes = await inj('POST', '/api/restaurant/zones', sales1, { name: 'ห้อง VIP', color: '#caa53d', pos_x: 40, pos_y: 24, width: 300, height: 180 });
+  ok('Zones: create a room (VIP) with geometry + accent colour', (zoneRes.status === 200 || zoneRes.status === 201) && !!zoneRes.json.id && zoneRes.json.name === 'ห้อง VIP' && zoneRes.json.color === '#caa53d' && near(zoneRes.json.width, 300), `${zoneRes.status} ${JSON.stringify(zoneRes.json).slice(0, 90)}`);
+  const zoneId = zoneRes.json.id;
+  const zoneMoved = await inj('PATCH', `/api/restaurant/zones/${zoneId}`, sales1, { pos_x: 120, pos_y: 60, width: 360, height: 220, name: 'ห้อง VIP 1' });
+  ok('Zones: drag/resize/rename persists (PATCH)', zoneMoved.status === 200 && near(zoneMoved.json.pos_x, 120) && near(zoneMoved.json.width, 360) && zoneMoved.json.name === 'ห้อง VIP 1', `${zoneMoved.status} ${JSON.stringify(zoneMoved.json).slice(0, 90)}`);
+  const zoneList = await inj('GET', '/api/restaurant/zones', sales1);
+  ok('Zones: list returns the room with geometry', (zoneList.json.zones ?? []).some((z: any) => z.id === zoneId && near(z.pos_x, 120) && z.color === '#caa53d'), `n=${(zoneList.json.zones ?? []).length}`);
+  const t2zones = await inj('GET', '/api/restaurant/zones', sales2);
+  ok('Zones: rooms are tenant-isolated (T2 cannot see T1’s room)', !(t2zones.json.zones ?? []).some((z: any) => z.id === zoneId), `T2 zones=${(t2zones.json.zones ?? []).length}`);
+
+  const zTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'V1', seats: 6 });
+  const assign = await inj('PATCH', `/api/restaurant/tables/${zTbl.json.id}`, sales1, { zone_id: zoneId });
+  ok('Zones: assign a table to the room (zone_id)', assign.status === 200 && assign.json.zone_id === zoneId, `${assign.status} zone=${assign.json.zone_id}`);
+  const unassign = await inj('PATCH', `/api/restaurant/tables/${zTbl.json.id}`, sales1, { zone_id: null });
+  ok('Zones: un-assign a table from a room (zone_id=null)', unassign.status === 200 && unassign.json.zone_id == null, `${unassign.status} zone=${unassign.json.zone_id}`);
+
+  await inj('PATCH', `/api/restaurant/tables/${zTbl.json.id}`, sales1, { zone_id: zoneId });   // re-assign before deleting the room
+  const zoneDel = await inj('DELETE', `/api/restaurant/zones/${zoneId}`, sales1);
+  ok('Zones: delete a room (soft-delete)', (zoneDel.status === 200 || zoneDel.status === 201) && zoneDel.json.deleted === true, `${zoneDel.status} ${JSON.stringify(zoneDel.json).slice(0, 60)}`);
+  const zoneListAfter = await inj('GET', '/api/restaurant/zones', sales1);
+  ok('Zones: deleted room drops off the list', !(zoneListAfter.json.zones ?? []).some((z: any) => z.id === zoneId), `n=${(zoneListAfter.json.zones ?? []).length}`);
+  const tblAfterZoneDel = await inj('GET', '/api/restaurant/tables', sales1);
+  ok('Zones: deleting a room keeps its tables (un-grouped, zone_id=null)', (tblAfterZoneDel.json.tables ?? []).some((t: any) => t.id === zTbl.json.id && t.zone_id == null), `${(tblAfterZoneDel.json.tables ?? []).find((t: any) => t.id === zTbl.json.id)?.zone_id}`);
+  const zoneGone = await inj('DELETE', `/api/restaurant/zones/${zoneId}`, sales1);
+  ok('Zones: deleting an already-removed room → 404', zoneGone.status === 404, `${zoneGone.status}`);
+
   // ── KDS course firing (hold-and-fire course-by-course) ──
   const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
   const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});

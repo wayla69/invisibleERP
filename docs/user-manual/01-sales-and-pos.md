@@ -170,6 +170,16 @@ past orders, bills and tax records stay intact. You **can't delete a table while
 guests are seated** (*โต๊ะมีลูกค้าอยู่* — clear or check it out first); you can also
 delete from the table panel with **ลบโต๊ะนี้** when the table is free.
 
+**Rooms & VIP areas.** Still in **แก้ไขผัง**, you can group tables into **rooms**.
+Type a room name (e.g. *VIP*, *ระเบียง*, *ชั้น 2*), pick an accent colour and tap
+**เพิ่มห้อง**. Drag a room by its **title bar** to move it and drag its **corner**
+to resize it, so the plan matches your real dining room. Each room has small
+buttons: **🎨** changes its colour (a **gold** room reads as a VIP area), **✎**
+renames it, and **🗑** removes it. **Deleting a room never deletes its tables** —
+they simply stop belonging to a room. To put a table in a room, tap the table (in
+edit mode) and choose the room under **ห้อง:** in the small panel that appears
+(pick **ไม่มีห้อง** to take it out again).
+
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing
 tiers is a master-data task (separate from front-of-house roles).

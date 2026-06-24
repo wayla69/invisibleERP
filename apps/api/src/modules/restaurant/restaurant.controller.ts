@@ -11,9 +11,9 @@ import { PrintService } from '../printing/print.service';
 import { PeripheralsService } from '../peripherals/peripherals.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
-  TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
+  TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
   type CreateOrderDto, type AddItemsDto, type KdsActionDto, type CheckoutDto, type CreateTableDto, type UpdateTableDto,
-  type BuffetPackageDto, type BuffetPackageUpdateDto, type StartBuffetDto,
+  type ZoneDto, type ZoneUpdateDto, type BuffetPackageDto, type BuffetPackageUpdateDto, type StartBuffetDto,
 } from './dto';
 
 const OpenTableBody = z.object({ party_size: z.number().int().positive().optional() });
@@ -37,7 +37,9 @@ export class RestaurantController {
 
   // ── floor-plan / tables ──
   @Get('zones') zones(@CurrentUser() u: JwtUser) { return this.tables.listZones(u); }
-  @Post('zones') createZone(@Body(new ZodValidationPipe(ZoneBody)) b: { name: string; sort_order?: number }, @CurrentUser() u: JwtUser) { return this.tables.createZone(b.name, b.sort_order, u); }
+  @Post('zones') createZone(@Body(new ZodValidationPipe(ZoneBody)) b: ZoneDto, @CurrentUser() u: JwtUser) { return this.tables.createZone(b, u); }
+  @Patch('zones/:id') updateZone(@Param('id') id: string, @Body(new ZodValidationPipe(ZoneUpdateBody)) b: ZoneUpdateDto, @CurrentUser() u: JwtUser) { return this.tables.updateZone(+id, b, u); }
+  @Delete('zones/:id') removeZone(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.tables.deleteZone(+id, u); }
 
   @Get('tables') listTables(@CurrentUser() u: JwtUser) { return this.tables.listTables(u); }
   @Get('tables/status') tablesStatus(@CurrentUser() u: JwtUser) { return this.tables.statusBoard(u); }

@@ -24,6 +24,12 @@ export const floorZones = pgTable('floor_zones', {
   tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
   name: text('name').notNull(),
   sortOrder: integer('sort_order').default(0),
+  // geometry: each zone is drawn as a positioned "room" rectangle on the floor plan (0085)
+  posX: numeric('pos_x', { precision: 8, scale: 2 }).default('16'),
+  posY: numeric('pos_y', { precision: 8, scale: 2 }).default('16'),
+  width: numeric('width', { precision: 8, scale: 2 }).default('320'),
+  height: numeric('height', { precision: 8, scale: 2 }).default('200'),
+  color: text('color'),                      // optional accent (e.g. gold for a VIP room)
   active: boolean('active').default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
