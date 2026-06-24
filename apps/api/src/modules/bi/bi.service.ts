@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, sql, gte, lt, desc, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { biDailySnapshots, reportSubscriptions, reportRuns } from '../../database/schema/bi';
@@ -10,6 +10,7 @@ import { apTransactions } from '../../database/schema/finance';
 import { opportunities, pipelineStages } from '../../database/schema/pipeline';
 import { n, fx } from '../../database/queries';
 import { MessagingService } from '../messaging/messaging.service';
+import { CollectionsService } from '../finance/collections.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -22,12 +23,21 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   sales_cube:     { label: 'ยอดขายตามช่วงเวลา', labelEn: 'Sales cube' },
   finance_trend:  { label: 'แนวโน้มกำไร-ขาดทุน', labelEn: 'Finance (P&L) trend' },
   pipeline_trend: { label: 'แนวโน้มไปป์ไลน์', labelEn: 'Pipeline trend' },
+  // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.
+  // Create a `daily` subscription of this type to dun overdue customers automatically (idempotent per run).
+  ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
 @Injectable()
 export class BiService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly messaging: MessagingService) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly messaging: MessagingService,
+    // Optional so a partially-wired test harness can construct BiService without the finance graph;
+    // the full app always provides it (FinanceModule), enabling the scheduled ar_collections_dunning job.
+    @Optional() private readonly collections?: CollectionsService,
+  ) {}
 
   // ── KPI Board ─────────────────────────────────────────────────────────────
   // Real-time cross-domain aggregation for the AI copilot dashboard
@@ -332,6 +342,11 @@ export class BiService {
       const p = await this.pipelineTrend({ months: f.months }, user);
       const last = p.trend[p.trend.length - 1];
       return { data: p, summary: last ? `Latest ${last.month}: ${last.open} open (${last.open_value}), win rate ${last.win_rate_pct}%` : 'No pipeline in range', summaryTh: last ? `เดือนล่าสุด ${last.month}: เปิดอยู่ ${last.open} รายการ` : 'ไม่มีไปป์ไลน์ในช่วงนี้' };
+    }
+    if (reportType === 'ar_collections_dunning') {
+      if (!this.collections) throw new BadRequestException({ code: 'COLLECTIONS_UNAVAILABLE', message: 'Collections service not available', messageTh: 'ระบบติดตามหนี้ไม่พร้อมใช้งาน' });
+      const r = await this.collections.runDunningSweep(user); // idempotent: re-runs the same day advance nothing
+      return { data: r, summary: `Dunning sweep: advanced ${r.advanced} of ${r.scanned} overdue invoices`, summaryTh: `ทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการค้างชำระ` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }

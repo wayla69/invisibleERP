@@ -79,6 +79,12 @@ stage — marked as system-actioned (channel `auto`).
 again right away advances **nothing** (it's idempotent — no customer gets dunned
 twice for the same stage until aging moves them to the next rung).
 
+**To run it every night automatically:** create a **daily scheduled job** of type
+**Automated AR dunning** (`ar_collections_dunning`) under Reports → Scheduled reports
+(`POST /api/bi/subscriptions {report_type:'ar_collections_dunning', frequency:'daily'}`).
+The scheduler then fires the sweep on its daily tick, logs each run, and notifies you
+of how many invoices it advanced — no manual button press needed.
+
 #### Credit status & credit hold
 
 - **Check a customer's credit** (`GET /api/finance/ar/credit-status?tenant_id=…`):

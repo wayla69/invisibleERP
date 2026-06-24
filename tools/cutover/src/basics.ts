@@ -154,12 +154,22 @@ async function main() {
   const o3 = await inj('POST', '/api/pos/orders', admin, order('CUST3'));
   ok('Order entry: customer in good standing can still order', o3.status === 201 && /^SO-/.test(o3.json?.order_no ?? ''), `st=${o3.status} no=${o3.json?.order_no}`);
 
-  // ───────────────────── Automated dunning sweep (cron-callable) ─────────────────────
-  // INV-A already at second_notice (rec second_notice) → skipped; INV-B→legal, INV-D→legal, INV-E→first_notice advance.
-  const sw = (await inj('POST', '/api/finance/ar/collections/sweep', admin)).json;
-  ok('Dunning sweep auto-advances overdue invoices past their stage', sw.advanced === 3 && (sw.actions ?? []).some((a: any) => a.invoice_no === 'INV-B' && a.stage === 'legal'), `adv=${sw.advanced}/${sw.scanned} ${JSON.stringify((sw.actions ?? []).map((a: any) => `${a.invoice_no}:${a.stage}`))}`);
+  // ───────────────────── Automated dunning — scheduled job + direct sweep ─────────────────────
+  // Register a DAILY scheduled job that runs the dunning sweep, and confirm it's in the schedulable catalog.
+  const rt = (await inj('GET', '/api/bi/report-types', admin)).json;
+  ok('AR dunning is a schedulable job type (rides the report scheduler)', (rt.report_types ?? []).some((t: any) => t.key === 'ar_collections_dunning'), '');
+  const sub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Nightly dunning', report_type: 'ar_collections_dunning', frequency: 'daily' });
+  ok('Schedule a daily AR-dunning job', sub.json?.report_type === 'ar_collections_dunning' && sub.json?.frequency === 'daily' && !!sub.json?.next_run_at, JSON.stringify(sub.json).slice(0, 90));
+
+  // Scheduler tick (cron → POST /subscriptions/run) fires the due job, which executes the sweep.
+  // INV-A already at second_notice (skipped); INV-B→legal, INV-D→legal, INV-E→first_notice advance ⇒ 3.
+  const ran = (await inj('POST', '/api/bi/subscriptions/run', admin)).json;
+  const dunRun = (ran.runs ?? []).find((r: any) => r.report_type === 'ar_collections_dunning');
+  ok('Scheduler tick runs the dunning sweep + records a run (advanced 3)', ran.ran_count >= 1 && dunRun?.status === 'success' && /advanced 3 of/i.test(dunRun?.summary ?? ''), `ran=${ran.ran_count} sum="${dunRun?.summary}"`);
+
+  // The direct cron-callable sweep now advances nothing — scheduled + direct paths share the same DUN state.
   const sw2 = (await inj('POST', '/api/finance/ar/collections/sweep', admin)).json;
-  ok('Dunning sweep idempotent (no re-advance on a second run)', sw2.advanced === 0, `adv2=${sw2.advanced}`);
+  ok('Dunning is idempotent across scheduled + direct sweeps', sw2.advanced === 0, `adv2=${sw2.advanced}`);
 
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
