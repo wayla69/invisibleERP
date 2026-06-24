@@ -256,6 +256,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-021 | Statement of Cash Flows reconstructed from GL | GL-07 | 04 §7, §9 |
 | UAT-GL-022 | Cash flow reconciles to change in cash | GL-07 | 04 §9 |
 | UAT-GL-023 | Year-end close excluded from cash flow | GL-07 | 04 §7, §9 |
+| UAT-EAM-001 | Raise a corrective maintenance work order | FA-06 | 09 §7 |
+| UAT-EAM-002 | Complete WO → maintenance cost to AP (5700) | EXP-05, GL-01 | 09 §7, §9 |
+| UAT-EAM-003 | Illegal WO transition rejected | FA-06 | 09 §7, §13 |
+| UAT-EAM-004 | PM sweep raises due preventive WOs (time + meter) | FA-06 | 09 §7 |
+| UAT-EAM-005 | PM generation is idempotent | FA-06 | 09 §7, §9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -293,7 +298,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-012 | RLS payroll isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-PAY-013 | RBAC non-HCM block | ITGC-AC-07 | 08 §9 |
 | UAT-PAY-014 | ESS self-service own data | Feature (ESS), ITGC-AC | 25 §7 |
-| UAT-PAY-015 | ESS expense → GL on approve | Feature (ESS), GL-01 | 25 §7 |
+| UAT-PAY-015 | ESS expense → AP reimbursement on approve | Feature (ESS), EXP-05, GL-01 | 25 §7 |
+| UAT-PAY-019 | Reimbursement is an AP payable, settled via AP | EXP-05, REC-01 | 25 §7, 02 §7 |
 | UAT-PAY-016 | ESS expense self-approval blocked | ITGC-AC-09 | 25 §7 |
 | UAT-PAY-017 | ESS unlinked user refused | Feature (ESS) | 25 §7 |
 | UAT-PAY-018 | Payroll run tenant-scoped | ITGC-AC-03 | 05 §7 |
@@ -446,10 +452,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 02 Order-to-Cash | 40 | 16 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close | 23 | 12 |
+| 05 GL & Close (incl. fixed assets / EAM) | 28 | 15 |
 | 06 Tax | 13 | 4 |
-| 07 Payroll | 18 | 7 |
+| 07 Payroll | 19 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **278** | **126** |
+| **Total** | **284** | **130** |

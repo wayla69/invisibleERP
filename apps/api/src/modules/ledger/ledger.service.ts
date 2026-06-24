@@ -70,6 +70,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '2210', name: 'Customer Deposits — Prepaid', type: 'Liability' },  // มัดจำ/เงินรับล่วงหน้า (booking/tab) — recognised to revenue on apply
   { code: '4500', name: 'Card Surcharge Income', type: 'Revenue' },          // รายได้ค่าธรรมเนียมบัตร — VATable card surcharge
   { code: '5410', name: 'FX Gain/Loss (Realized)', type: 'Expense' },        // กำไร/ขาดทุนอัตราแลกเปลี่ยนที่เกิดขึ้นจริง — loss=debit, gain=credit (settlement)
+  { code: '5700', name: 'Repairs & Maintenance', type: 'Expense' },          // ค่าซ่อมแซมและบำรุงรักษา — EAM maintenance work-order cost
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────

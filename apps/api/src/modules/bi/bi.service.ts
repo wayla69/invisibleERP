@@ -11,6 +11,7 @@ import { opportunities, pipelineStages } from '../../database/schema/pipeline';
 import { n, fx } from '../../database/queries';
 import { MessagingService } from '../messaging/messaging.service';
 import { CollectionsService } from '../finance/collections.service';
+import { EamService } from '../eam/eam.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -26,6 +27,8 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.
   // Create a `daily` subscription of this type to dun overdue customers automatically (idempotent per run).
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
+  // Likewise: each run raises preventive-maintenance work orders for every due PM schedule (idempotent).
+  eam_pm_generate: { label: 'สร้างใบสั่งงานซ่อมตามแผน (PM)', labelEn: 'Generate due preventive maintenance' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -37,6 +40,7 @@ export class BiService {
     // Optional so a partially-wired test harness can construct BiService without the finance graph;
     // the full app always provides it (FinanceModule), enabling the scheduled ar_collections_dunning job.
     @Optional() private readonly collections?: CollectionsService,
+    @Optional() private readonly eam?: EamService,
   ) {}
 
   // ── KPI Board ─────────────────────────────────────────────────────────────
@@ -347,6 +351,11 @@ export class BiService {
       if (!this.collections) throw new BadRequestException({ code: 'COLLECTIONS_UNAVAILABLE', message: 'Collections service not available', messageTh: 'ระบบติดตามหนี้ไม่พร้อมใช้งาน' });
       const r = await this.collections.runDunningSweep(user); // idempotent: re-runs the same day advance nothing
       return { data: r, summary: `Dunning sweep: advanced ${r.advanced} of ${r.scanned} overdue invoices`, summaryTh: `ทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการค้างชำระ` };
+    }
+    if (reportType === 'eam_pm_generate') {
+      if (!this.eam) throw new BadRequestException({ code: 'EAM_UNAVAILABLE', message: 'EAM service not available', messageTh: 'ระบบบำรุงรักษาไม่พร้อมใช้งาน' });
+      const r = await this.eam.runPmDue(user); // idempotent: a schedule with an open WO is skipped
+      return { data: r, summary: `PM generation: raised ${r.generated} of ${r.scanned} schedules`, summaryTh: `สร้างใบสั่งงานซ่อมตามแผน: ${r.generated} จาก ${r.scanned} แผน` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }

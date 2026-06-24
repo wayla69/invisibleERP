@@ -49,7 +49,17 @@ async function main() {
   const cust = await tid('CUST');
   const cust2 = await tid('CUST2');
   const cust3 = await tid('CUST3');
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'emp1', passwordHash: await pw.hash('emp123'), role: 'Admin', tenantId: hq }, // claimant (ESS)
+    { username: 'mgr', passwordHash: await pw.hash('mgr123'), role: 'Admin', tenantId: hq },   // approver (≠ claimant)
+  ]).onConflictDoNothing();
+  // Employee linked to the emp1 user (ESS self-service) + two assets for EAM maintenance.
+  await db.insert(s.employees).values([{ tenantId: hq, empCode: 'EMP1', name: 'Test Employee', userName: 'emp1', monthlySalary: '30000' }]).onConflictDoNothing();
+  await db.insert(s.fixedAssets).values([
+    { tenantId: hq, assetNo: 'FA-EAM1', name: 'Compressor', acquireDate: '2026-01-01', acquireCost: '120000', usefulLifeMonths: 60, netBookValue: '120000', status: 'active' },
+    { tenantId: hq, assetNo: 'FA-EAM2', name: 'Forklift', acquireDate: '2026-01-01', acquireCost: '80000', usefulLifeMonths: 60, netBookValue: '80000', status: 'active' },
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -171,7 +181,51 @@ async function main() {
   const sw2 = (await inj('POST', '/api/finance/ar/collections/sweep', admin)).json;
   ok('Dunning is idempotent across scheduled + direct sweeps', sw2.advanced === 0, `adv2=${sw2.advanced}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning ──');
+  // ───────────────────── ESS expense → AP reimbursement ─────────────────────
+  const emp1 = (await inj('POST', '/api/login', undefined, { username: 'emp1', password: 'emp123' })).json.token;
+  const mgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
+  const exp = await inj('POST', '/api/ess/expenses', emp1, { category: 'travel', amount: 500, description: 'Taxi' });
+  const expId = exp.json?.id;
+  ok('Employee submits an expense claim', exp.status === 201 && exp.json?.status === 'Pending', `st=${exp.status} id=${expId}`);
+  const selfApprove = await inj('POST', `/api/ess/expenses/${expId}/decide`, emp1, { approve: true });
+  ok('Self-approval of own expense blocked (SoD)', (selfApprove.status === 400 || selfApprove.status === 403) && selfApprove.json?.error?.code === 'SOD_SELF_APPROVAL', `st=${selfApprove.status} code=${selfApprove.json?.error?.code}`);
+  const appr = await inj('POST', `/api/ess/expenses/${expId}/decide`, mgr, { approve: true });
+  ok('Manager approval raises an AP reimbursement payable (AP-…)', /^AP-/.test(appr.json?.ap_txn_no ?? '') && appr.json?.payable === true, JSON.stringify(appr.json).slice(0, 90));
+  const apList = (await inj('GET', '/api/finance/ap?status=Unpaid&limit=50', admin)).json;
+  const reimb = (apList.transactions ?? []).find((t: any) => t.Invoice_No === `EXP-${expId}`);
+  ok('Reimbursement appears in AP as a payable (500) — settle-able via AP', !!reimb && near(reimb.Outstanding_Amount, 500), `found=${!!reimb} out=${reimb?.Outstanding_Amount}`);
+  const payReimb = await inj('PATCH', `/api/finance/ap/transactions/${appr.json.ap_txn_no}/pay`, admin, { amount: 500 });
+  ok('Reimbursement paid through the normal AP pay flow', payReimb.json?.status === 'Paid', `st=${payReimb.json?.status}`);
+
+  // ───────────────────── EAM: asset maintenance ─────────────────────
+  const wo = await inj('POST', '/api/eam/work-orders', admin, { asset_no: 'FA-EAM1', type: 'corrective', priority: 'high', description: 'Seal leak', vendor_name: 'ACME Repairs', cost_estimate: 1000 });
+  const woNo = wo.json?.wo_no;
+  ok('Raise a corrective maintenance work order', wo.status === 201 && /^MWO-/.test(woNo ?? '') && wo.json?.status === 'open', `st=${wo.status} wo=${woNo}`);
+  const comp = await inj('PATCH', `/api/eam/work-orders/${woNo}/status`, admin, { status: 'completed', actual_cost: 1000, vendor_name: 'ACME Repairs', vat_treatment: 'exempt', downtime_hours: 4 });
+  ok('Complete WO → raises an AP payable for the maintenance cost', comp.json?.status === 'completed' && /^AP-/.test(comp.json?.ap_txn_no ?? ''), JSON.stringify(comp.json));
+  const badT = await inj('PATCH', `/api/eam/work-orders/${woNo}/status`, admin, { status: 'in_progress' });
+  ok('Illegal WO transition rejected (completed→in_progress)', badT.status === 400 && badT.json?.error?.code === 'BAD_TRANSITION', `st=${badT.status} code=${badT.json?.error?.code}`);
+  const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+  const acct5700 = (tb.rows ?? []).find((r: any) => r.account_code === '5700');
+  ok('Maintenance cost posts to 5700 Repairs & Maintenance', near(acct5700?.debit, 1000), `dr=${acct5700?.debit}`);
+  const apM = (await inj('GET', '/api/finance/ap?status=Unpaid&limit=50', admin)).json;
+  ok('Maintenance cost is an AP payable', (apM.transactions ?? []).some((t: any) => t.Invoice_No === woNo && near(t.Outstanding_Amount, 1000)), '');
+
+  // PM schedules: time-based (due now) + meter-based (over the interval) → due-generation sweep.
+  await inj('POST', '/api/eam/pm-schedules', admin, { asset_no: 'FA-EAM1', name: 'Quarterly service', interval_days: 90, next_due_date: daysAgo(1) });
+  await inj('POST', '/api/eam/pm-schedules', admin, { asset_no: 'FA-EAM2', name: 'Engine hours', meter_interval: 100 });
+  await inj('POST', '/api/eam/assets/FA-EAM2/meter', admin, { meter_value: 150 }); // 150 ≥ 0+100 → meter-due
+  ok('PM generation is a schedulable job type', (rt.report_types ?? []).some((t: any) => t.key === 'eam_pm_generate') || (await inj('GET', '/api/bi/report-types', admin)).json.report_types.some((t: any) => t.key === 'eam_pm_generate'), '');
+  await inj('POST', '/api/bi/subscriptions', admin, { name: 'Daily PM', report_type: 'eam_pm_generate', frequency: 'daily' });
+  const ranPm = (await inj('POST', '/api/bi/subscriptions/run', admin)).json;
+  const pmRun = (ranPm.runs ?? []).find((r: any) => r.report_type === 'eam_pm_generate');
+  ok('Scheduler raises preventive WOs for due schedules (2: time + meter)', pmRun?.status === 'success' && /raised 2 of/i.test(pmRun?.summary ?? ''), `sum="${pmRun?.summary}"`);
+  const pmAgain = (await inj('POST', '/api/eam/pm/run', admin)).json;
+  ok('PM generation idempotent (open WO + advanced due date)', pmAgain.generated === 0, `gen2=${pmAgain.generated}`);
+  const woPrev = (await inj('GET', '/api/eam/work-orders?type=preventive', admin)).json;
+  ok('Generated preventive work orders are listed', (woPrev.work_orders ?? []).length >= 2, `n=${woPrev.count}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

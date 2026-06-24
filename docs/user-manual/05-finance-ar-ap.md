@@ -109,6 +109,13 @@ of how many invoices it advanced — no manual button press needed.
 
 **Required permission:** `creditors` (held by *ApClerk*, *Admin*)
 
+> **Note — employee reimbursements & maintenance show up here too.** When a manager
+> approves an **employee expense claim** (Employee Self-Service) or a **maintenance
+> work order** is completed with a vendor cost, the system raises an **AP payable**
+> automatically (`AP-…`, payee shown as the employee or the vendor). It appears in
+> the AP list and aging like any supplier bill and is settled with the same **Pay**
+> action below — no separate reimbursement run needed.
+
 ### B1. Record a supplier bill
 
 1. On `/creditors` (or `/finance` → AP), click **Add bill** (creates `AP-…`).

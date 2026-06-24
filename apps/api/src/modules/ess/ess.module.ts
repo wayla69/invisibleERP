@@ -2,7 +2,7 @@ import { Controller, Get, Post, Param, Body, Module } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { LedgerModule } from '../ledger/ledger.module';
+import { FinanceModule } from '../finance/finance.module';
 import { EssService } from './ess.service';
 
 const LeaveBody = z.object({ leave_type: z.string().optional(), from_date: z.string(), to_date: z.string(), days: z.number().positive(), paid: z.boolean().optional(), reason: z.string().optional() });
@@ -25,5 +25,5 @@ export class EssController {
   @Post('expenses/:id/decide') @Permissions('approvals') decide(@Param('id') id: string, @Body(new ZodValidationPipe(DecideBody)) b: z.infer<typeof DecideBody>, @CurrentUser() u: JwtUser) { return this.ess.approveExpense(+id, b.approve, u); }
 }
 
-@Module({ imports: [LedgerModule], controllers: [EssController], providers: [EssService] })
+@Module({ imports: [FinanceModule], controllers: [EssController], providers: [EssService] })
 export class EssModule {}

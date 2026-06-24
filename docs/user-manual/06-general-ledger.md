@@ -214,5 +214,42 @@ posted.
 
 ---
 
+## 7. Asset maintenance (EAM)
+
+**API base:** `/api/eam` · **Required permission:** `exec` / `warehouse` / `creditors`.
+
+Keep equipment running with maintenance **work orders**, **preventive-maintenance
+(PM) schedules**, and **meter readings** — all tied to the fixed-asset register.
+
+### Raise & complete a work order
+
+1. Create a work order against an asset (`POST /api/eam/work-orders`): choose the
+   **type** (corrective / preventive / inspection), priority, description, and an
+   optional **vendor** and cost estimate.
+2. Progress it: **open → in_progress → completed** (or **cancelled**). An
+   out-of-order move is rejected (`BAD_TRANSITION`).
+3. On **completion**, enter the **actual cost**, downtime and vendor.
+
+**Expected result:** If a vendor and cost are given, the maintenance spend posts as
+an **AP payable** (`Dr 5700 Repairs & Maintenance / Cr 2000`), so it shows in AP
+aging and is paid through the normal AP flow. In-house work (no vendor) just records
+the cost.
+
+### Preventive maintenance & meters
+
+1. Create a **PM schedule** (`POST /api/eam/pm-schedules`): a cadence by **time**
+   (`interval_days`) and/or by **meter** (`meter_interval`).
+2. Record **meter readings** as equipment is used
+   (`POST /api/eam/assets/{assetNo}/meter`).
+3. Run the **PM sweep** (`POST /api/eam/pm/run`) — or schedule it daily by creating a
+   **Generate due preventive maintenance** (`eam_pm_generate`) job under Scheduled
+   reports.
+
+**Expected result:** The sweep raises a preventive work order for every due
+schedule (time elapsed or meter overrun) and rolls the schedule forward. It is
+**idempotent** — a schedule with an open generated work order isn't raised again.
+
+---
+
 **Next:** [Tax](./07-tax.md) · [Finance — AR & AP](./05-finance-ar-ap.md) ·
 [Approvals](./10-approvals.md)
