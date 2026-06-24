@@ -168,7 +168,9 @@ icon on the plan — is different from **ย้ายโต๊ะ** above, which
 tab to another table.) Deleting is safe: the table is hidden from the plan but its
 past orders, bills and tax records stay intact. You **can't delete a table while
 guests are seated** (*โต๊ะมีลูกค้าอยู่* — clear or check it out first); you can also
-delete from the table panel with **ลบโต๊ะนี้** when the table is free.
+delete from the table panel with **ลบโต๊ะนี้** when the table is free. Made a wrong
+move? Tap **เลิกทำ** to undo your last layout changes. And when you drag a table
+**into a room**, it joins that room automatically (no need to set it by hand).
 
 **Rooms & VIP areas.** Still in **แก้ไขผัง**, you can group tables into **rooms**.
 Type a room name (e.g. *VIP*, *ระเบียง*, *ชั้น 2*), pick an accent colour and tap
@@ -185,6 +187,22 @@ match the real one: pick a **รูปทรง** (**วงกลม** round / *
 set the **ที่นั่ง** count, **หมุน** it left/right (handy for corner or wall tables),
 and drag its **corner** to resize — so a small 2-seater and a long 8-seater look
 different at a glance on the plan.
+
+**Watching tables by room.** Once tables are in rooms, the **สถานะโต๊ะ** tab groups
+them by room — each room shows how many tables are busy (e.g. *VIP · 2/4*), and you
+can tap a room chip at the top to watch just that area. (Tip: the floor plan now
+**snaps to a grid** as you drag, so rows of tables line up neatly.)
+
+**Faster setup & shortcuts.** To copy a table you've already styled, select it and
+tap **ทำซ้ำ** — you get an identical table (same shape, size, seats and room) to
+drop into place. With a table selected you can also nudge it with the **arrow keys**
+(hold **Shift** for fine 1-pixel steps) or remove it with **Delete**. For a big
+restaurant the plan **scrolls** as you add more tables, so there's always room.
+
+**Revenue by room.** The **รายได้ต่อห้อง** tab shows how much each room earned over a
+date range (defaults to today). Pick **ตั้งแต่ / ถึง** and you'll see total takings,
+the number of bills and the average per bill for every room (and for tables in no
+room), ranked by revenue — handy for checking whether the VIP room pulls its weight.
 
 Manage tiers in **บุฟเฟต์ (แพ็กเกจ)** (back office): set the code, per-head price,
 time limit, optional overtime fee, and the menu SKUs included. Creating/editing

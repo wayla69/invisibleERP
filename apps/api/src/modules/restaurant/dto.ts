@@ -98,7 +98,9 @@ export const CreateTableBody = z.object({
 });
 export type CreateTableDto = z.infer<typeof CreateTableBody>;
 
-export const UpdateTableBody = CreateTableBody.partial();
+// `rev` = optimistic-concurrency token: PATCH only applies if it matches the table's current rev
+// (else 409 STALE_WRITE). Optional — omit it for an unconditional (last-write-wins) update.
+export const UpdateTableBody = CreateTableBody.partial().extend({ rev: z.number().int().nonnegative().optional() });
 export type UpdateTableDto = z.infer<typeof UpdateTableBody>;
 
 export const TableStatusBody = z.object({ status: z.enum(['available', 'reserved', 'occupied', 'bill_requested', 'paying', 'cleaning', 'out_of_service']) });

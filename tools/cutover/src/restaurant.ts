@@ -357,6 +357,35 @@ async function main() {
   const apBadRot = await inj('PATCH', `/api/restaurant/tables/${apT.json.id}`, sales1, { rotation: 400 });
   ok('Table appearance: out-of-range rotation rejected (400)', apBadRot.status === 400, `${apBadRot.status}`);
 
+  // ── optimistic concurrency: rev-gated table updates ──
+  const cT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'C9', seats: 2 });
+  const cRev0 = cT.json.rev;
+  ok('Optimistic lock: a new table carries rev=0', cRev0 === 0, `rev=${cRev0}`);
+  const cOk = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 50, rev: cRev0 });
+  ok('Optimistic lock: PATCH with the current rev applies + bumps rev', cOk.status === 200 && cOk.json.rev === cRev0 + 1 && near(cOk.json.pos_x, 50), `${cOk.status} rev ${cRev0}->${cOk.json.rev}`);
+  const cStale = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 80, rev: cRev0 });   // reuse the now-stale rev
+  ok('Optimistic lock: PATCH with a stale rev rejected (409 STALE_WRITE)', cStale.status === 409 && cStale.json.error?.code === 'STALE_WRITE', `${cStale.status} ${cStale.json.error?.code}`);
+  const cForce = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 80 });   // no rev → last-write-wins (e.g. an undo)
+  ok('Optimistic lock: PATCH without rev still applies (last-write-wins)', cForce.status === 200 && near(cForce.json.pos_x, 80) && cForce.json.rev === cRev0 + 2, `${cForce.status} rev=${cForce.json.rev}`);
+
+  // create accepts the full initial appearance (shape/rotation/size/seats) — the "duplicate table" path
+  const dupSrc = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'C10', shape: 'square', rotation: 90, width: 70, height: 70, seats: 6 });
+  ok('Create: table accepts initial shape/rotation/size/seats (duplicate path)', (dupSrc.status === 200 || dupSrc.status === 201) && dupSrc.json.shape === 'square' && dupSrc.json.rotation === 90 && dupSrc.json.seats === 6 && near(dupSrc.json.width, 70), `${dupSrc.status} ${JSON.stringify(dupSrc.json).slice(0, 90)}`);
+
+  // ── per-room revenue analytics (sale → order → table → zone) ──
+  const rvZone = await inj('POST', '/api/restaurant/zones', sales1, { name: 'โซนรายได้' });
+  const rvTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'R1', seats: 2, zone_id: rvZone.json.id });
+  const rvOpen = await inj('POST', `/api/restaurant/tables/${rvTbl.json.id}/open`, sales1, {});
+  const rvOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: rvTbl.json.id, session_id: rvOpen.json.session_id, items: [{ name: 'สเต๊กห้อง', qty: 1, unit_price: 300, station_code: 'hot' }] });
+  await inj('POST', `/api/restaurant/orders/${rvOrd.json.order_no}/bill`, sales1);
+  const rvCo = await inj('POST', `/api/restaurant/orders/${rvOrd.json.order_no}/checkout`, sales1, { method: 'Cash' });
+  const rvRev = await inj('GET', '/api/restaurant/zones/revenue', sales1);
+  const rvRoom = (rvRev.json.rooms ?? []).find((r: any) => r.zone_id === rvZone.json.id);
+  ok('Zone revenue: attributes a dine-in sale to its room (gross incl. VAT)', rvRev.status === 200 && !!rvRoom && rvRoom.sales === 1 && near(rvRoom.revenue, rvCo.json.total) && near(rvRoom.avg_sale, rvRoom.revenue), `${rvRev.status} ${JSON.stringify(rvRoom ?? {}).slice(0, 100)}`);
+  ok('Zone revenue: grand total reconciles rooms + unzoned', near(rvRev.json.total?.revenue, (rvRev.json.rooms ?? []).reduce((s: number, r: any) => s + r.revenue, 0) + (rvRev.json.unzoned?.revenue ?? 0)), `total=${rvRev.json.total?.revenue}`);
+  const rvT2 = await inj('GET', '/api/restaurant/zones/revenue', sales2);
+  ok('Zone revenue: tenant-isolated (T2 cannot see T1’s room)', !(rvT2.json.rooms ?? []).some((r: any) => r.zone_id === rvZone.json.id), `T2 rooms=${(rvT2.json.rooms ?? []).length}`);
+
   // ── KDS course firing (hold-and-fire course-by-course) ──
   const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
   const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});

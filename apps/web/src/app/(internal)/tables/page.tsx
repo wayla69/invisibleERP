@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Split, Trash2, Utensils, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
-import { FloorPlan, STATUS_TH, tone, type TableRow } from '@/components/floor-plan';
+import { FloorPlan, STATUS_TH, tone, type TableRow, type ZoneRow } from '@/components/floor-plan';
 import { cn } from '@/lib/utils';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -30,11 +30,14 @@ import {
 export default function TablesPage() {
   const qc = useQueryClient();
   const board = useQuery<{ tables: TableRow[] }>({ queryKey: ['tables-status'], queryFn: () => api('/api/restaurant/tables/status'), refetchInterval: 4000 });
+  const zonesQ = useQuery<{ zones: ZoneRow[] }>({ queryKey: ['floor-zones'], queryFn: () => api('/api/restaurant/zones') });
   const [sel, setSel] = useState<number | null>(null);
   const [orderTable, setOrderTable] = useState<number | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ['tables-status'] });
+  const refreshZones = () => qc.invalidateQueries({ queryKey: ['floor-zones'] });
 
   const tables = board.data?.tables ?? [];
+  const zones = zonesQ.data?.zones ?? [];
   const selected = tables.find((t) => t.id === sel) ?? null;
   const ordering = tables.find((t) => t.id === orderTable) ?? null;
 
@@ -43,8 +46,9 @@ export default function TablesPage() {
       <PageHeader title="โต๊ะ (Floor plan)" description="สถานะโต๊ะแบบเรียลไทม์และผังร้าน" />
       <Tabs
         tabs={[
-          { key: 'board', label: 'สถานะโต๊ะ', content: <Board tables={tables} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
-          { key: 'plan', label: 'ผังร้าน', content: <FloorPlan tables={tables} onSelect={setSel} sel={sel} onChange={refresh} /> },
+          { key: 'board', label: 'สถานะโต๊ะ', content: <Board tables={tables} zones={zones} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
+          { key: 'plan', label: 'ผังร้าน', content: <FloorPlan tables={tables} zones={zones} onSelect={setSel} sel={sel} onChange={refresh} onZonesChange={refreshZones} /> },
+          { key: 'revenue', label: 'รายได้ต่อห้อง', content: <RoomRevenue /> },
         ]}
       />
       {selected && <TablePanel t={selected} onChange={refresh} onClose={() => setSel(null)} onOrder={() => setOrderTable(selected.id)} />}
@@ -61,37 +65,128 @@ export default function TablesPage() {
   );
 }
 
-function Board({ tables, q, onSelect, sel, onOrder }: { tables: TableRow[]; q: any; onSelect: (id: number) => void; sel: number | null; onOrder: (id: number) => void }) {
+function Board({ tables, zones, q, onSelect, sel, onOrder }: { tables: TableRow[]; zones: ZoneRow[]; q: any; onSelect: (id: number) => void; sel: number | null; onOrder: (id: number) => void }) {
+  const [room, setRoom] = useState<number | 'all' | 'none'>('all');
+  const busy = (ts: TableRow[]) => ts.filter((t) => ['occupied', 'bill_requested', 'paying'].includes(t.status)).length;
+  const chip = (active: boolean) => cn('inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors', active ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-accent');
+
+  const card = (t: TableRow) => (
+    <div
+      key={t.id}
+      className={cn('rounded-lg border border-l-[6px] bg-card transition-colors', tone(t.status).border, sel === t.id && 'ring-2 ring-primary')}
+    >
+      <button onClick={() => onSelect(t.id)} className="w-full rounded-t-lg p-2.5 text-left hover:bg-accent">
+        <div className="flex items-center justify-between">
+          <strong>โต๊ะ {t.table_no}</strong>
+          <span className="text-sm text-muted-foreground">{t.seats} ที่</span>
+        </div>
+        <div className={cn('text-sm font-semibold', tone(t.status).text)}>{STATUS_TH[t.status]}</div>
+        {t.order && <div className="text-xs text-muted-foreground tabular">{baht(t.order.total)} · รอ {t.order.waited_min}′</div>}
+      </button>
+      <div className="px-2.5 pb-2.5">
+        <Button variant="outline" size="sm" className="w-full" onClick={() => onOrder(t.id)}>
+          <Utensils className="size-4" /> สั่งอาหาร
+        </Button>
+      </div>
+    </div>
+  );
+
+  // No rooms defined → keep the simple flat grid (unchanged for shops without rooms).
+  if (zones.length === 0) {
+    return (
+      <StateView q={q}>
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+          {tables.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีโต๊ะ — เพิ่มในแท็บ “ผังร้าน”</p>}
+          {tables.map(card)}
+        </div>
+      </StateView>
+    );
+  }
+
+  // Rooms exist → group tables by room, with a filter + per-room occupancy.
+  const sections: { key: number | 'none'; name: string; color: string | null; tables: TableRow[] }[] = [
+    ...zones.map((z) => ({ key: z.id as number | 'none', name: z.name, color: z.color, tables: tables.filter((t) => t.zone_id === z.id) })),
+    { key: 'none' as const, name: 'ไม่มีห้อง', color: null as string | null, tables: tables.filter((t) => t.zone_id == null) },
+  ].filter((s) => s.tables.length > 0);
+  const shown = room === 'all' ? sections : sections.filter((s) => s.key === room);
+
   return (
     <StateView q={q}>
-      <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
-        {tables.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีโต๊ะ — เพิ่มในแท็บ “ผังร้าน”</p>}
-        {tables.map((t) => (
-          <div
-            key={t.id}
-            className={cn(
-              'rounded-lg border border-l-[6px] bg-card transition-colors',
-              tone(t.status).border,
-              sel === t.id && 'ring-2 ring-primary',
-            )}
-          >
-            <button onClick={() => onSelect(t.id)} className="w-full rounded-t-lg p-2.5 text-left hover:bg-accent">
-              <div className="flex items-center justify-between">
-                <strong>โต๊ะ {t.table_no}</strong>
-                <span className="text-sm text-muted-foreground">{t.seats} ที่</span>
-              </div>
-              <div className={cn('text-sm font-semibold', tone(t.status).text)}>{STATUS_TH[t.status]}</div>
-              {t.order && <div className="text-xs text-muted-foreground tabular">{baht(t.order.total)} · รอ {t.order.waited_min}′</div>}
-            </button>
-            <div className="px-2.5 pb-2.5">
-              <Button variant="outline" size="sm" className="w-full" onClick={() => onOrder(t.id)}>
-                <Utensils className="size-4" /> สั่งอาหาร
-              </Button>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button onClick={() => setRoom('all')} className={chip(room === 'all')}>ทั้งหมด ({tables.length})</button>
+        {sections.map((s) => (
+          <button key={String(s.key)} onClick={() => setRoom(s.key)} className={chip(room === s.key)}>
+            {s.color && <span className="size-2 rounded-full" style={{ background: s.color }} />}
+            {s.name} · {busy(s.tables)}/{s.tables.length}
+          </button>
+        ))}
+      </div>
+      {tables.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีโต๊ะ — เพิ่มในแท็บ “ผังร้าน”</p>}
+      <div className="space-y-4">
+        {shown.map((s) => (
+          <section key={String(s.key)}>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              {s.color && <span className="size-2.5 rounded-full" style={{ background: s.color }} />}
+              {s.name}
+              <span className="font-normal text-muted-foreground">· {busy(s.tables)}/{s.tables.length} โต๊ะมีลูกค้า</span>
+            </h3>
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))]">
+              {s.tables.map(card)}
             </div>
-          </div>
+          </section>
         ))}
       </div>
     </StateView>
+  );
+}
+
+type RevRoom = { zone_id: number; name: string; color: string | null; revenue: number; sales: number; avg_sale: number };
+
+function RoomRevenue() {
+  const today = (() => { const d = new Date(); const p = (x: number) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; })();
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const q = useQuery<{ from: string; to: string; rooms: RevRoom[]; unzoned: { revenue: number; sales: number }; total: { revenue: number; sales: number } }>({
+    queryKey: ['zone-revenue', from, to],
+    queryFn: () => api(`/api/restaurant/zones/revenue?from=${from}&to=${to}`),
+  });
+  const rooms = q.data?.rooms ?? [];
+  const unzoned = q.data?.unzoned ?? { revenue: 0, sales: 0 };
+  const max = Math.max(1, ...rooms.map((r) => r.revenue), unzoned.revenue);
+  const rows: RevRoom[] = [
+    ...rooms,
+    { zone_id: 0, name: 'ไม่มีห้อง', color: null, revenue: unzoned.revenue, sales: unzoned.sales, avg_sale: unzoned.sales ? unzoned.revenue / unzoned.sales : 0 },
+  ].filter((r) => r.zone_id !== 0 || r.sales > 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-sm">ตั้งแต่ <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="mt-1 w-[170px]" /></label>
+        <label className="text-sm">ถึง <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="mt-1 w-[170px]" /></label>
+      </div>
+      <StateView q={q}>
+        {q.data && (
+          <>
+            <div className="flex flex-wrap gap-3">
+              <div className="rounded-lg border bg-card p-3"><div className="text-xs text-muted-foreground">รายได้รวม</div><div className="text-2xl font-semibold tabular">{baht(q.data.total.revenue)}</div></div>
+              <div className="rounded-lg border bg-card p-3"><div className="text-xs text-muted-foreground">จำนวนบิล</div><div className="text-2xl font-semibold tabular">{q.data.total.sales}</div></div>
+            </div>
+            <div className="space-y-2">
+              {q.data.total.sales === 0 && <p className="text-sm text-muted-foreground">ยังไม่มีรายได้ในช่วงนี้</p>}
+              {rows.map((r) => (
+                <div key={r.zone_id} className="rounded-lg border bg-card p-3">
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="flex items-center gap-2 font-medium">{r.color && <span className="size-2.5 rounded-full" style={{ background: r.color }} />}{r.name}</span>
+                    <span className="text-muted-foreground tabular">{baht(r.revenue)} · {r.sales} บิล · เฉลี่ย {baht(r.avg_sale)}</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(r.revenue / max) * 100}%` }} /></div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </StateView>
+    </div>
   );
 }
 

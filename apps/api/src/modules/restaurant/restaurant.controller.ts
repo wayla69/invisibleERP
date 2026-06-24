@@ -37,6 +37,7 @@ export class RestaurantController {
 
   // ── floor-plan / tables ──
   @Get('zones') zones(@CurrentUser() u: JwtUser) { return this.tables.listZones(u); }
+  @Get('zones/revenue') @Permissions('pos', 'order_mgt', 'exec') zoneRevenue(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) { return this.tables.zoneRevenue(from, to, u); }
   @Post('zones') createZone(@Body(new ZodValidationPipe(ZoneBody)) b: ZoneDto, @CurrentUser() u: JwtUser) { return this.tables.createZone(b, u); }
   @Patch('zones/:id') updateZone(@Param('id') id: string, @Body(new ZodValidationPipe(ZoneUpdateBody)) b: ZoneUpdateDto, @CurrentUser() u: JwtUser) { return this.tables.updateZone(+id, b, u); }
   @Delete('zones/:id') removeZone(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.tables.deleteZone(+id, u); }
