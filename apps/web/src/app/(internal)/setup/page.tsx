@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, Building2, Loader2, MapPin, ReceiptText, Save } from 'lucide-react';
+import { BadgeCheck, Building2, Loader2, MapPin, Palette, ReceiptText, Save } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -20,6 +20,7 @@ interface Profile {
   address_line1: string | null; address_line2: string | null; sub_district: string | null;
   district: string | null; province: string | null; postal_code: string | null;
   promptpay_id: string | null;
+  logo_url: string | null; tagline: string | null; branding_prefs: Record<string, unknown>;
   setup_complete: boolean;
 }
 
@@ -52,6 +53,8 @@ export default function SetupPage() {
         address_line1: form.address_line1, address_line2: form.address_line2, sub_district: form.sub_district,
         district: form.district, province: form.province, postal_code: form.postal_code,
         promptpay_id: form.promptpay_id || undefined,
+        logo_url: form.logo_url ?? '', tagline: form.tagline ?? '',
+        branding_prefs: form.branding_prefs ?? {},
       }),
     }),
     onSuccess: (p) => { setMsg('✅ บันทึกข้อมูลกิจการเรียบร้อย'); qc.setQueryData(['tenant-profile'], p); setForm(p as any); },
@@ -114,6 +117,39 @@ export default function SetupPage() {
                   <Input id={k} value={form[k] ?? ''} onChange={set(k)} />
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Palette className="size-4 text-primary" /> ตราสินค้า (Branding) — แสดงบนใบเสร็จ/เอกสาร</CardTitle></CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2 sm:col-span-2">
+                <Label htmlFor="logo_url">โลโก้ (วาง URL รูปภาพ https:// หรือ data URI)</Label>
+                <Input id="logo_url" value={form.logo_url ?? ''} onChange={set('logo_url')} placeholder="https://…/logo.png" />
+              </div>
+              <div className="grid gap-2 sm:col-span-2">
+                <Label htmlFor="tagline">สโลแกน / คำโปรย (แสดงใต้ชื่อกิจการ)</Label>
+                <Input id="tagline" value={form.tagline ?? ''} onChange={set('tagline')} placeholder="เช่น พันธมิตรที่ไว้ใจได้" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="show_logo">แสดงโลโก้บนใบเสร็จ</Label>
+                <select
+                  id="show_logo"
+                  className="h-9 rounded-md border bg-transparent px-3 text-sm"
+                  value={(form.branding_prefs?.show_logo_on_receipt === false) ? '0' : '1'}
+                  onChange={(e) => setForm((f) => ({ ...f, branding_prefs: { ...(f.branding_prefs ?? {}), show_logo_on_receipt: e.target.value === '1' } }))}
+                >
+                  <option value="1">แสดง</option>
+                  <option value="0">ไม่แสดง</option>
+                </select>
+              </div>
+              {form.logo_url ? (
+                <div className="grid gap-2">
+                  <Label>ตัวอย่าง</Label>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={form.logo_url} alt="logo preview" className="max-h-12 w-fit rounded border bg-white p-1" />
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
