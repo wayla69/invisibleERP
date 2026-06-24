@@ -130,6 +130,22 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-092 | Receipt renders in English | Feature (i18n) | 20 §7 |
 | UAT-O2C-093 | Bilingual (TH/EN) receipt | Feature (i18n) | 20 §7 |
 | UAT-O2C-094 | Per-tenant default language persists | Feature (i18n) | 20 §7 |
+| UAT-O2C-095 | Reposition a table on the floor plan | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-096 | Delete a free table (soft-delete) | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-097 | Delete a seated table blocked | Feature (floor-plan layout) | 20 §6, §13 |
+| UAT-O2C-098 | Create a VIP room (zone) | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-099 | Move/resize/rename a room persists | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-100 | Assign / un-assign a table to a room | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-101 | Delete a room keeps its tables | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-102 | Rooms are tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
+| UAT-O2C-103 | Set table shape / size / rotation / seats | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-104 | Invalid shape / rotation rejected | Feature (floor-plan layout) | 20 §6, §13 |
+| UAT-O2C-105 | Optimistic-locked table update (rev) | Feature (floor-plan layout) | 20 §6, §13 |
+| UAT-O2C-106 | Unconditional update / undo (no rev) | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-107 | Create with full initial appearance | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-108 | Floor-plan editor UI smoke (Playwright) | Feature (floor-plan UI) | 20 §6 |
+| UAT-O2C-109 | Revenue attributed by room | Feature (floor-plan layout) | 20 §6 |
+| UAT-O2C-110 | Room revenue is tenant-isolated (RLS) | Feature (floor-plan layout) | 20 §6, 08 §RLS |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -304,12 +320,21 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-037 | Webhook — redeliver / dispatch / revoke | Feature (webhooks) | 08 §7.A.9 |
 | UAT-ADM-038 | Branding — set + render on receipt + validation | Feature (branding) | 23 §7.6a |
 | UAT-ADM-039 | Branding — tenant-isolated | Feature (branding), ITGC-AC-03 | 23 §7.6a |
-| UAT-ADM-040 | Document templates — create, default & live preview | Feature (document templates) | 27 §7.10 |
-| UAT-ADM-041 | Document templates — core integrity, gate, isolation, no GL | Feature (document templates) | 27 §7.10, §9 |
-| UAT-ADM-042 | Custom objects — define, fields & record CRUD | Feature (custom objects) | 27 §7.11 |
-| UAT-ADM-043 | Custom objects — validation reuse, isolation, no GL | Feature (custom objects) | 27 §7.11, §9 |
-| UAT-ADM-044 | Object layouts — design, resolve & live preview | Feature (object layouts) | 27 §7.12 |
-| UAT-ADM-045 | Object layouts — dup name, isolation, no GL | Feature (object layouts) | 27 §7.12, §9 |
+| UAT-ADM-040 | Notification inbox — targeted note reaches the right (tenant, role) user | Feature (notification inbox) | 27 §7.10 |
+| UAT-ADM-041 | Notification inbox — tenant isolation (no cross-tenant) | Feature (notification inbox), ITGC-AC-03 | 27 §7.10 |
+| UAT-ADM-042 | Notification inbox — broadcast vs role-targeted visibility | Feature (notification inbox) | 27 §7.10 |
+| UAT-ADM-043 | Notification inbox — per-user mark-read, guard & mark-all | Feature (notification inbox) | 27 §7.10 |
+| UAT-ADM-044 | Public API — OpenAPI doc + discovery open | Feature (public API) | 27 §7.11 |
+| UAT-ADM-045 | Public API — API-key-only, scope identity | Feature (public API), ITGC-AC-07 | 27 §7.11 |
+| UAT-ADM-046 | Public API — tenant isolation (RLS) over reads | Feature (public API), ITGC-AC-03 | 27 §7.11 |
+| UAT-ADM-047 | Public API — scope gate | Feature (public API), ITGC-AC-07 | 27 §7.11 |
+| UAT-ADM-048 | Public API — per-key rate limit | Feature (public API), anti-abuse | 27 §7.11 |
+| UAT-ADM-049 | Document templates — create, default & live preview | Feature (document templates) | 27 §7.12 |
+| UAT-ADM-050 | Document templates — core integrity, gate, isolation, no GL | Feature (document templates) | 27 §7.12, §9 |
+| UAT-ADM-051 | Custom objects — define, fields & record CRUD | Feature (custom objects) | 27 §7.13 |
+| UAT-ADM-052 | Custom objects — validation reuse, isolation, no GL | Feature (custom objects) | 27 §7.13, §9 |
+| UAT-ADM-053 | Object layouts — design, resolve & live preview | Feature (object layouts) | 27 §7.14 |
+| UAT-ADM-054 | Object layouts — dup name, isolation, no GL | Feature (object layouts) | 27 §7.14, §9 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -377,7 +402,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 05 GL & Close | 20 | 11 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 18 | 7 |
-| 08 Admin / SoD / Audit | 26 | 13 |
+| 08 Admin / SoD / Audit | 54 | 34 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **208** | **73** |
+| **Total** | **236** | **105** |

@@ -1,4 +1,4 @@
--- 0087 — Document templates (Platform Phase 10 — A3). A per-tenant, no-code registry that customizes the
+-- 0088 — Document templates (Platform Phase 10 — A3). A per-tenant, no-code registry that customizes the
 -- PRESENTATION of customer-facing documents (receipt first; tax invoices / quotations / POs / payslips
 -- follow). `config` is a presentation-only JSON blob (header/body/footer/paper knobs); it never controls
 -- amounts, never omits a legally-mandatory field, and posts nothing to the GL. One row per (tenant, doc_type)

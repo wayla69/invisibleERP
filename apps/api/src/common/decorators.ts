@@ -18,6 +18,9 @@ export interface JwtUser {
   customerName: string | null;
   tenantId: number | null;
   permissions: string[];
+  // Raw API-key scopes (only set for `ierp_` machine principals; undefined for human JWTs).
+  // Used by the public API (/api/v1) scope guard; the permission system is unaffected.
+  scopes?: string[];
 }
 
 // แนบ user จาก JWT (ตั้งโดย JwtAuthGuard) เข้า request

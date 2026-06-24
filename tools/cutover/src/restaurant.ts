@@ -298,6 +298,94 @@ async function main() {
   const a16 = (mgBoard.json.tables ?? []).find((t: any) => t.table_no === 'A16');
   ok('Merge tables: source table freed after merge', a16?.status === 'available' && !a16?.session, `${a16?.status} session=${!!a16?.session}`);
 
+  // ── floor-plan edit: reposition (drag) + delete (soft) + busy-guard ──
+  const fpT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'F1', seats: 2, pos_x: 0, pos_y: 0 });
+  const fpMoved = await inj('PATCH', `/api/restaurant/tables/${fpT.json.id}`, sales1, { pos_x: 240, pos_y: 130 });
+  ok('Floor-plan: drag persists new x/y (PATCH pos_x/pos_y)', (fpMoved.status === 200 || fpMoved.status === 201) && near(fpMoved.json.pos_x, 240) && near(fpMoved.json.pos_y, 130), `${fpMoved.status} ${fpMoved.json.pos_x},${fpMoved.json.pos_y}`);
+  const fpBoard = await inj('GET', '/api/restaurant/tables/status', sales1);
+  ok('Floor-plan: status board reflects the moved position', near((fpBoard.json.tables ?? []).find((t: any) => t.id === fpT.json.id)?.pos_x, 240), `x=${(fpBoard.json.tables ?? []).find((t: any) => t.id === fpT.json.id)?.pos_x}`);
+
+  const delT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'F2', seats: 2 });
+  const delRes = await inj('DELETE', `/api/restaurant/tables/${delT.json.id}`, sales1);
+  ok('Floor-plan: delete a free table (soft-delete → active=false)', (delRes.status === 200 || delRes.status === 201) && delRes.json.deleted === true, `${delRes.status} ${JSON.stringify(delRes.json).slice(0, 60)}`);
+  const afterDel = await inj('GET', '/api/restaurant/tables', sales1);
+  ok('Floor-plan: deleted table drops off the list', !(afterDel.json.tables ?? []).some((t: any) => t.id === delT.json.id), `n=${(afterDel.json.tables ?? []).length}`);
+  const delGone = await inj('DELETE', `/api/restaurant/tables/${delT.json.id}`, sales1);
+  ok('Floor-plan: deleting an already-removed table → 404', delGone.status === 404, `${delGone.status}`);
+
+  const busyT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'F3', seats: 2 });
+  await inj('POST', `/api/restaurant/tables/${busyT.json.id}/open`, sales1, {});
+  const delBusy = await inj('DELETE', `/api/restaurant/tables/${busyT.json.id}`, sales1);
+  ok('Floor-plan: deleting a table with a live session rejected (400 TABLE_BUSY)', delBusy.status === 400 && delBusy.json.error?.code === 'TABLE_BUSY', `${delBusy.status} ${delBusy.json.error?.code}`);
+
+  // ── floor-plan zones / rooms (a VIP room is just a zone) ──
+  const zoneRes = await inj('POST', '/api/restaurant/zones', sales1, { name: 'ห้อง VIP', color: '#caa53d', pos_x: 40, pos_y: 24, width: 300, height: 180 });
+  ok('Zones: create a room (VIP) with geometry + accent colour', (zoneRes.status === 200 || zoneRes.status === 201) && !!zoneRes.json.id && zoneRes.json.name === 'ห้อง VIP' && zoneRes.json.color === '#caa53d' && near(zoneRes.json.width, 300), `${zoneRes.status} ${JSON.stringify(zoneRes.json).slice(0, 90)}`);
+  const zoneId = zoneRes.json.id;
+  const zoneMoved = await inj('PATCH', `/api/restaurant/zones/${zoneId}`, sales1, { pos_x: 120, pos_y: 60, width: 360, height: 220, name: 'ห้อง VIP 1' });
+  ok('Zones: drag/resize/rename persists (PATCH)', zoneMoved.status === 200 && near(zoneMoved.json.pos_x, 120) && near(zoneMoved.json.width, 360) && zoneMoved.json.name === 'ห้อง VIP 1', `${zoneMoved.status} ${JSON.stringify(zoneMoved.json).slice(0, 90)}`);
+  const zoneList = await inj('GET', '/api/restaurant/zones', sales1);
+  ok('Zones: list returns the room with geometry', (zoneList.json.zones ?? []).some((z: any) => z.id === zoneId && near(z.pos_x, 120) && z.color === '#caa53d'), `n=${(zoneList.json.zones ?? []).length}`);
+  const t2zones = await inj('GET', '/api/restaurant/zones', sales2);
+  ok('Zones: rooms are tenant-isolated (T2 cannot see T1’s room)', !(t2zones.json.zones ?? []).some((z: any) => z.id === zoneId), `T2 zones=${(t2zones.json.zones ?? []).length}`);
+
+  const zTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'V1', seats: 6 });
+  const assign = await inj('PATCH', `/api/restaurant/tables/${zTbl.json.id}`, sales1, { zone_id: zoneId });
+  ok('Zones: assign a table to the room (zone_id)', assign.status === 200 && assign.json.zone_id === zoneId, `${assign.status} zone=${assign.json.zone_id}`);
+  const unassign = await inj('PATCH', `/api/restaurant/tables/${zTbl.json.id}`, sales1, { zone_id: null });
+  ok('Zones: un-assign a table from a room (zone_id=null)', unassign.status === 200 && unassign.json.zone_id == null, `${unassign.status} zone=${unassign.json.zone_id}`);
+
+  await inj('PATCH', `/api/restaurant/tables/${zTbl.json.id}`, sales1, { zone_id: zoneId });   // re-assign before deleting the room
+  const zoneDel = await inj('DELETE', `/api/restaurant/zones/${zoneId}`, sales1);
+  ok('Zones: delete a room (soft-delete)', (zoneDel.status === 200 || zoneDel.status === 201) && zoneDel.json.deleted === true, `${zoneDel.status} ${JSON.stringify(zoneDel.json).slice(0, 60)}`);
+  const zoneListAfter = await inj('GET', '/api/restaurant/zones', sales1);
+  ok('Zones: deleted room drops off the list', !(zoneListAfter.json.zones ?? []).some((z: any) => z.id === zoneId), `n=${(zoneListAfter.json.zones ?? []).length}`);
+  const tblAfterZoneDel = await inj('GET', '/api/restaurant/tables', sales1);
+  ok('Zones: deleting a room keeps its tables (un-grouped, zone_id=null)', (tblAfterZoneDel.json.tables ?? []).some((t: any) => t.id === zTbl.json.id && t.zone_id == null), `${(tblAfterZoneDel.json.tables ?? []).find((t: any) => t.id === zTbl.json.id)?.zone_id}`);
+  const zoneGone = await inj('DELETE', `/api/restaurant/zones/${zoneId}`, sales1);
+  ok('Zones: deleting an already-removed room → 404', zoneGone.status === 404, `${zoneGone.status}`);
+
+  // ── floor-plan table appearance: shape + rotation + resize + seats ──
+  const apT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'S1', seats: 2 });
+  const apShape = await inj('PATCH', `/api/restaurant/tables/${apT.json.id}`, sales1, { shape: 'circle', width: 90, height: 90, rotation: 45, seats: 8 });
+  ok('Table appearance: shape/size/rotation/seats persist (PATCH)', apShape.status === 200 && apShape.json.shape === 'circle' && near(apShape.json.width, 90) && apShape.json.rotation === 45 && apShape.json.seats === 8, `${apShape.status} ${JSON.stringify(apShape.json).slice(0, 100)}`);
+  const apBoard = await inj('GET', '/api/restaurant/tables/status', sales1);
+  const apRow = (apBoard.json.tables ?? []).find((t: any) => t.id === apT.json.id);
+  ok('Table appearance: status board carries shape + rotation', apRow?.shape === 'circle' && apRow?.rotation === 45 && near(apRow?.height, 90), `shape=${apRow?.shape} rot=${apRow?.rotation}`);
+  const apBadShape = await inj('PATCH', `/api/restaurant/tables/${apT.json.id}`, sales1, { shape: 'triangle' });
+  ok('Table appearance: unknown shape rejected (400)', apBadShape.status === 400, `${apBadShape.status}`);
+  const apBadRot = await inj('PATCH', `/api/restaurant/tables/${apT.json.id}`, sales1, { rotation: 400 });
+  ok('Table appearance: out-of-range rotation rejected (400)', apBadRot.status === 400, `${apBadRot.status}`);
+
+  // ── optimistic concurrency: rev-gated table updates ──
+  const cT = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'C9', seats: 2 });
+  const cRev0 = cT.json.rev;
+  ok('Optimistic lock: a new table carries rev=0', cRev0 === 0, `rev=${cRev0}`);
+  const cOk = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 50, rev: cRev0 });
+  ok('Optimistic lock: PATCH with the current rev applies + bumps rev', cOk.status === 200 && cOk.json.rev === cRev0 + 1 && near(cOk.json.pos_x, 50), `${cOk.status} rev ${cRev0}->${cOk.json.rev}`);
+  const cStale = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 80, rev: cRev0 });   // reuse the now-stale rev
+  ok('Optimistic lock: PATCH with a stale rev rejected (409 STALE_WRITE)', cStale.status === 409 && cStale.json.error?.code === 'STALE_WRITE', `${cStale.status} ${cStale.json.error?.code}`);
+  const cForce = await inj('PATCH', `/api/restaurant/tables/${cT.json.id}`, sales1, { pos_x: 80 });   // no rev → last-write-wins (e.g. an undo)
+  ok('Optimistic lock: PATCH without rev still applies (last-write-wins)', cForce.status === 200 && near(cForce.json.pos_x, 80) && cForce.json.rev === cRev0 + 2, `${cForce.status} rev=${cForce.json.rev}`);
+
+  // create accepts the full initial appearance (shape/rotation/size/seats) — the "duplicate table" path
+  const dupSrc = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'C10', shape: 'square', rotation: 90, width: 70, height: 70, seats: 6 });
+  ok('Create: table accepts initial shape/rotation/size/seats (duplicate path)', (dupSrc.status === 200 || dupSrc.status === 201) && dupSrc.json.shape === 'square' && dupSrc.json.rotation === 90 && dupSrc.json.seats === 6 && near(dupSrc.json.width, 70), `${dupSrc.status} ${JSON.stringify(dupSrc.json).slice(0, 90)}`);
+
+  // ── per-room revenue analytics (sale → order → table → zone) ──
+  const rvZone = await inj('POST', '/api/restaurant/zones', sales1, { name: 'โซนรายได้' });
+  const rvTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'R1', seats: 2, zone_id: rvZone.json.id });
+  const rvOpen = await inj('POST', `/api/restaurant/tables/${rvTbl.json.id}/open`, sales1, {});
+  const rvOrd = await inj('POST', '/api/restaurant/orders', sales1, { table_id: rvTbl.json.id, session_id: rvOpen.json.session_id, items: [{ name: 'สเต๊กห้อง', qty: 1, unit_price: 300, station_code: 'hot' }] });
+  await inj('POST', `/api/restaurant/orders/${rvOrd.json.order_no}/bill`, sales1);
+  const rvCo = await inj('POST', `/api/restaurant/orders/${rvOrd.json.order_no}/checkout`, sales1, { method: 'Cash' });
+  const rvRev = await inj('GET', '/api/restaurant/zones/revenue', sales1);
+  const rvRoom = (rvRev.json.rooms ?? []).find((r: any) => r.zone_id === rvZone.json.id);
+  ok('Zone revenue: attributes a dine-in sale to its room (gross incl. VAT)', rvRev.status === 200 && !!rvRoom && rvRoom.sales === 1 && near(rvRoom.revenue, rvCo.json.total) && near(rvRoom.avg_sale, rvRoom.revenue), `${rvRev.status} ${JSON.stringify(rvRoom ?? {}).slice(0, 100)}`);
+  ok('Zone revenue: grand total reconciles rooms + unzoned', near(rvRev.json.total?.revenue, (rvRev.json.rooms ?? []).reduce((s: number, r: any) => s + r.revenue, 0) + (rvRev.json.unzoned?.revenue ?? 0)), `total=${rvRev.json.total?.revenue}`);
+  const rvT2 = await inj('GET', '/api/restaurant/zones/revenue', sales2);
+  ok('Zone revenue: tenant-isolated (T2 cannot see T1’s room)', !(rvT2.json.rooms ?? []).some((r: any) => r.zone_id === rvZone.json.id), `T2 rooms=${(rvT2.json.rooms ?? []).length}`);
+
   // ── KDS course firing (hold-and-fire course-by-course) ──
   const csTbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A17', seats: 4 });
   const csOpen = await inj('POST', `/api/restaurant/tables/${csTbl.json.id}/open`, sales1, {});

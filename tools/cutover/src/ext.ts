@@ -6,6 +6,8 @@
 import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'ext-secret';
 process.env.NODE_ENV = 'test';
+// Cap the public-API per-key rate limit low so the harness can trip it deterministically.
+process.env.PUBLIC_API_RATE_MAX = process.env.PUBLIC_API_RATE_MAX || '50';
 
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -165,6 +167,40 @@ async function main() {
   ok('Alerts: the fire is logged to the event feed', (events.json.events ?? []).some((e: any) => e.metric === 'low_stock_count' && e.value >= 1), `${(events.json.events ?? []).length}`);
   const hqRules = await inj('GET', '/api/alerts/rules', hqwh);
   ok('Alerts: rules are tenant-isolated (HQ sees none of cf2’s)', (hqRules.json.rules ?? []).every((r: any) => r.id !== rule.json.id), `HQ rules=${(hqRules.json.rules ?? []).length}`);
+
+  // ── notification inbox (Phase #2) — per-user read state over the notifications table ──
+  // The alert sweep above wrote a notification for cf2 + target_role 'Warehouse'. cfwh2
+  // (Warehouse@cf2) must see it; hqwh (Warehouse@HQ) must NOT (the table isn't RLS-scoped,
+  // so the inbox query filters by target_tenant_id explicitly).
+  const inbox1 = await inj('GET', '/api/notifications/inbox', token2);
+  ok('Inbox: the alert notification appears for the targeted (tenant,role) user', (inbox1.json.items ?? []).length >= 1 && (inbox1.json.unread_count ?? 0) >= 1, `items=${(inbox1.json.items ?? []).length} unread=${inbox1.json.unread_count}`);
+  const hqInbox = await inj('GET', '/api/notifications/inbox', hqwh);
+  ok('Inbox: tenant-isolated (HQ Warehouse sees none of cf2’s notifications)', (hqInbox.json.items ?? []).length === 0 && (hqInbox.json.unread_count ?? 0) === 0, `items=${(hqInbox.json.items ?? []).length}`);
+
+  // broadcast (target_role NULL) is visible to ANY role in the tenant; a role-targeted note is not
+  await db.insert(s.notifications).values({ targetTenantId: cf2.id, targetRole: null, message: 'ประกาศทั้งระบบ', messageEn: 'System broadcast' });
+  await db.insert(s.notifications).values({ targetTenantId: cf2.id, targetRole: 'Planner', message: 'เฉพาะ Planner', messageEn: 'Planner only' });
+  const wInbox = await inj('GET', '/api/notifications/inbox', token2);
+  ok('Inbox: a tenant broadcast is visible to all roles; another role’s targeted note is hidden', (wInbox.json.items ?? []).some((i: any) => i.message_en === 'System broadcast') && !(wInbox.json.items ?? []).some((i: any) => i.message_en === 'Planner only'), `seen=${JSON.stringify((wInbox.json.items ?? []).map((i: any) => i.message_en))}`);
+
+  // mark one read → unread count drops, and the unread_only filter then hides it
+  const broadcast = (wInbox.json.items ?? []).find((i: any) => i.message_en === 'System broadcast');
+  const beforeUnread = (await inj('GET', '/api/notifications/unread-count', token2)).json.unread_count;
+  const markR = await inj('POST', `/api/notifications/${broadcast.id}/read`, token2);
+  ok('Inbox: mark-read flips state and decrements the unread count', markR.json.ok === true && markR.json.unread_count === beforeUnread - 1, `${JSON.stringify(markR.json)} before=${beforeUnread}`);
+  const unreadOnly = await inj('GET', '/api/notifications/inbox?unread_only=1', token2);
+  ok('Inbox: the unread_only filter excludes a just-read item', !(unreadOnly.json.items ?? []).some((i: any) => i.id === broadcast.id), `ids=${JSON.stringify((unreadOnly.json.items ?? []).map((i: any) => i.id))}`);
+
+  // a user cannot mark-read a notification not visible to them (the Planner-only one)
+  const planOnly = (await db.select().from(s.notifications).where(eq(s.notifications.messageEn, 'Planner only')))[0];
+  const sneaky = await inj('POST', `/api/notifications/${planOnly.id}/read`, token2);
+  ok('Inbox: cannot mark-read a notification targeted at another role', sneaky.json.ok === false, `${JSON.stringify(sneaky.json)}`);
+
+  // mark-all-read clears the badge for the caller only
+  const markAll = await inj('POST', '/api/notifications/mark-all-read', token2);
+  ok('Inbox: mark-all-read clears the caller’s unread count to 0', markAll.json.ok === true && markAll.json.unread_count === 0, `${JSON.stringify(markAll.json)}`);
+  const finalCount = await inj('GET', '/api/notifications/unread-count', token2);
+  ok('Inbox: unread-count is 0 after mark-all-read', finalCount.json.unread_count === 0, `${finalCount.json.unread_count}`);
 
   // ── scheduled-report execution engine (Phase 4) ──
   // Planner role carries 'exec' (the /api/bi gate) and is non-Admin → requests are RLS-scoped.
@@ -437,6 +473,74 @@ async function main() {
   ok('Object layouts: tenant-isolated (cf2 sees none of HQ’s)', (olIso.json.layouts ?? []).length === 0, `cf2=${(olIso.json.layouts ?? []).length}`);
   const jlAfter3 = (await db.select().from(s.journalLines)).length;
   ok('Object layouts: no GL impact (journal lines unchanged)', jlAfter3 === jlBefore3, `before=${jlBefore3} after=${jlAfter3}`);
+
+  // ── Public REST API v1 (Phase #3) — versioned, API-key-only, scope-gated, rate-limited ──
+  // Seed one cf2-scoped order + invoice so the tenant-isolation assertions over /orders, /invoices are real.
+  await db.insert(s.orders).values({ orderNo: 'SO-PUB-CF2', orderDate: '2026-06-01', tenantId: cf2.id, status: 'Pending' });
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-PUB-CF2', invoiceDate: '2026-06-01', tenantId: cf2.id, orderNo: 'SO-PUB-CF2', amount: '100', paidAmount: '30', status: 'Unpaid' });
+
+  // OpenAPI doc + discovery root are open (no key).
+  const oapi = await inj('GET', '/api/v1/openapi.json');
+  ok('Public API: OpenAPI 3.1 doc is served openly (no key)', oapi.status === 200 && oapi.json.openapi === '3.1.0' && !!oapi.json.paths?.['/items'] && !!oapi.json.paths?.['/invoices'], `status=${oapi.status} v=${oapi.json.openapi}`);
+  const v1root = await inj('GET', '/api/v1');
+  ok('Public API: discovery root advertises v1 + endpoints', v1root.status === 200 && v1root.json.version === 'v1' && Array.isArray(v1root.json.endpoints), `status=${v1root.status}`);
+
+  // Issue keys: full HQ + full cf2 + a catalog-only cf2 key + a throwaway key for the rate test.
+  const hqKeyR = await inj('POST', '/api/platform/api-keys', token, { name: 'pub-hq', scopes: ['*'] });
+  const hqKey = hqKeyR.json.key;
+  ok('Public API: an API key is issued (ierp_) for the public surface', /^ierp_/.test(hqKey ?? ''), `${hqKeyR.status}`);
+  const cf2Key = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cf2', scopes: ['*'] })).json.key;
+  const catKey = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cat', scopes: ['catalog:read'] })).json.key;
+  const rateKey = (await inj('POST', '/api/platform/api-keys', token, { name: 'pub-rate', scopes: ['*'] })).json.key;
+
+  // /me identifies the key (tenant + granted scopes).
+  const me1 = await inj('GET', '/api/v1/me', hqKey);
+  ok('Public API: /me returns the key principal, tenant + scopes', me1.status === 200 && me1.json.tenant_id === hq.id && (me1.json.scopes ?? []).includes('*') && String(me1.json.principal).startsWith('apikey:'), `${JSON.stringify(me1.json)}`);
+
+  // Key-only: a human JWT (admin) is rejected from the public surface.
+  const humanReject = await inj('GET', '/api/v1/items', token);
+  ok('Public API: human JWTs are rejected (API_KEY_REQUIRED)', humanReject.status === 403 && humanReject.json.error?.code === 'API_KEY_REQUIRED', `${humanReject.status} ${humanReject.json.error?.code}`);
+  // No token at all → 401 from the global auth guard.
+  const noTok = await inj('GET', '/api/v1/me');
+  ok('Public API: a missing key is 401 (global auth)', noTok.status === 401, `${noTok.status}`);
+
+  // Catalog read works; the shared item catalog is returned.
+  const itemsR = await inj('GET', '/api/v1/items', hqKey);
+  ok('Public API: GET /items returns the catalog envelope (data + pagination)', itemsR.status === 200 && Array.isArray(itemsR.json.data) && itemsR.json.data.length >= 2 && itemsR.json.pagination?.limit === 50, `n=${(itemsR.json.data ?? []).length}`);
+  const itemsPaged = await inj('GET', '/api/v1/items?limit=1', hqKey);
+  ok('Public API: limit is honoured (pagination)', itemsPaged.json.data?.length === 1 && itemsPaged.json.pagination?.limit === 1, `n=${(itemsPaged.json.data ?? []).length}`);
+
+  // Tenant isolation via inventory: HQ sees item A (seeded for HQ); cf2 sees LOW1, never A.
+  const hqInv = await inj('GET', '/api/v1/inventory', hqKey);
+  const cf2Inv = await inj('GET', '/api/v1/inventory', cf2Key);
+  const hqItems = (hqInv.json.data ?? []).map((r: any) => r.item_id);
+  const cf2Items = (cf2Inv.json.data ?? []).map((r: any) => r.item_id);
+  ok('Public API: /inventory is RLS tenant-scoped (HQ↔cf2 do not bleed)', hqItems.includes('A') && !hqItems.includes('LOW1') && cf2Items.includes('LOW1') && !cf2Items.includes('A'), `hq=${JSON.stringify(hqItems)} cf2=${JSON.stringify(cf2Items)}`);
+
+  // Tenant isolation via orders + invoices: the cf2 row is visible to cf2's key, not HQ's.
+  const cf2Orders = (await inj('GET', '/api/v1/orders', cf2Key)).json.data ?? [];
+  const hqOrders = (await inj('GET', '/api/v1/orders', hqKey)).json.data ?? [];
+  ok('Public API: /orders is tenant-scoped', cf2Orders.some((o: any) => o.order_no === 'SO-PUB-CF2') && !hqOrders.some((o: any) => o.order_no === 'SO-PUB-CF2'), `cf2=${cf2Orders.length} hq=${hqOrders.length}`);
+  const cf2Inv2 = (await inj('GET', '/api/v1/invoices', cf2Key)).json.data ?? [];
+  const theInv = cf2Inv2.find((i: any) => i.invoice_no === 'INV-PUB-CF2');
+  ok('Public API: /invoices returns typed amounts + computed outstanding', !!theInv && theInv.amount === 100 && theInv.outstanding === 70, `${JSON.stringify(theInv ?? {})}`);
+
+  // Scope enforcement: a catalog-only key reads /items but is denied /orders.
+  const catItems = await inj('GET', '/api/v1/items', catKey);
+  ok('Public API: a catalog:read key may read /items', catItems.status === 200, `${catItems.status}`);
+  const catOrders = await inj('GET', '/api/v1/orders', catKey);
+  ok('Public API: a catalog:read key is denied /orders (INSUFFICIENT_SCOPE)', catOrders.status === 403 && catOrders.json.error?.code === 'INSUFFICIENT_SCOPE', `${catOrders.status} ${catOrders.json.error?.code}`);
+
+  // Per-key rate limit: hammer the throwaway key past the cap (50) → at least one 429 RATE_LIMITED.
+  let got429 = false; let rlCode = '';
+  for (let i = 0; i < 55; i++) {
+    const r = await inj('GET', '/api/v1/me', rateKey);
+    if (r.status === 429) { got429 = true; rlCode = r.json.error?.code; break; }
+  }
+  ok('Public API: per-key rate limit trips (429 RATE_LIMITED)', got429 && rlCode === 'RATE_LIMITED', `got429=${got429} code=${rlCode}`);
+  // A different key is unaffected by another key's exhausted window.
+  const otherKeyOk = await inj('GET', '/api/v1/me', cf2Key);
+  ok('Public API: the rate limit is per-key (a fresh key still passes)', otherKeyOk.status === 200, `${otherKeyOk.status}`);
 
   await app.close();
   await pg.close();

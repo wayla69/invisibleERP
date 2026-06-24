@@ -92,6 +92,7 @@ import { DemandMlModule } from './modules/demand-ml/demand-ml.module';
 import { DocumentTemplatesModule } from './modules/document-templates/document-templates.module';
 import { CustomObjectsModule } from './modules/custom-objects/custom-objects.module';
 import { ObjectLayoutsModule } from './modules/object-layouts/object-layouts.module';
+import { PublicApiModule } from './modules/public-api/public-api.module';
 
 @Module({
   imports: [
@@ -182,6 +183,7 @@ import { ObjectLayoutsModule } from './modules/object-layouts/object-layouts.mod
     DocumentTemplatesModule,
     CustomObjectsModule,
     ObjectLayoutsModule,
+    PublicApiModule,
   ],
   providers: [
     // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off

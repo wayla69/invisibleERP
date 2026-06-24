@@ -1,9 +1,9 @@
-import { Inject, Injectable, Module, Controller, Get } from '@nestjs/common';
-import { sql, eq, and, ne, asc, lt } from 'drizzle-orm';
+import { Inject, Injectable, Module, Controller, Get, Post, Param, Query } from '@nestjs/common';
+import { sql, eq, and, or, ne, asc, desc, lt, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { stockSnapshots, apTransactions, arInvoices, tenants } from '../../database/schema';
+import { stockSnapshots, apTransactions, arInvoices, tenants, notifications, notificationReads } from '../../database/schema';
 import { latestSnapshotDate, ymd, n } from '../../database/queries';
-import { Permissions } from '../../common/decorators';
+import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 
 const thb = (v: unknown) => `฿${n(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -74,6 +74,102 @@ export class NotificationsService {
     };
     return { alerts, counts };
   }
+
+  // ── In-app notification inbox (per-user read state) ────────────────────────
+  // The notifications table is NOT RLS-scoped (no tenant_id column), so EVERY query
+  // here must filter by target_tenant_id = caller's tenant. A row is visible to a
+  // user when it targets their tenant AND either is a broadcast (target_role IS NULL)
+  // or matches their role. Read state is per-user via notification_reads.
+  private visibleTo(user: JwtUser) {
+    return and(
+      eq(notifications.targetTenantId, user.tenantId as number),
+      or(isNull(notifications.targetRole), eq(notifications.targetRole, user.role as any)),
+    );
+  }
+
+  // GET /api/notifications/inbox — paginated, unread-first then newest-first.
+  async inbox(user: JwtUser, opts: { limit?: number; offset?: number; unread_only?: boolean } = {}) {
+    const db = this.db as any;
+    if (user.tenantId == null) return { items: [], total: 0, unread_count: 0 };
+    const limit = Math.min(Math.max(n(opts.limit) || 20, 1), 100);
+    const offset = Math.max(n(opts.offset) || 0, 0);
+
+    const readJoin = and(
+      eq(notificationReads.notificationId, notifications.id),
+      eq(notificationReads.username, user.username),
+    );
+    const where = opts.unread_only
+      ? and(this.visibleTo(user), isNull(notificationReads.readAt))
+      : this.visibleTo(user);
+
+    const rows = await db
+      .select({
+        id: notifications.id,
+        message: notifications.message,
+        message_en: notifications.messageEn,
+        target_role: notifications.targetRole,
+        created_at: notifications.createdAt,
+        read_at: notificationReads.readAt,
+      })
+      .from(notifications)
+      .leftJoin(notificationReads, readJoin)
+      .where(where)
+      .orderBy(asc(sql`(${notificationReads.readAt} is not null)`), desc(notifications.createdAt), desc(notifications.id))
+      .limit(limit)
+      .offset(offset);
+
+    const items = rows.map((r: any) => ({ ...r, is_read: r.read_at != null }));
+    const total = n((await db.select({ c: sql<number>`count(*)` }).from(notifications).where(this.visibleTo(user)))[0]?.c);
+    const unread_count = await this.unreadCount(user);
+    return { items, total, unread_count };
+  }
+
+  // GET /api/notifications/unread-count — for the header bell badge.
+  async unreadCount(user: JwtUser) {
+    const db = this.db as any;
+    if (user.tenantId == null) return 0;
+    const readJoin = and(
+      eq(notificationReads.notificationId, notifications.id),
+      eq(notificationReads.username, user.username),
+    );
+    const row = (await db
+      .select({ c: sql<number>`count(*)` })
+      .from(notifications)
+      .leftJoin(notificationReads, readJoin)
+      .where(and(this.visibleTo(user), isNull(notificationReads.readAt))))[0];
+    return n(row?.c);
+  }
+
+  // POST /api/notifications/:id/read — mark one as read for the caller.
+  // Guarded: only notifications actually visible to this user can be marked, so a
+  // user can never write a read marker for another tenant/role's notification.
+  async markRead(user: JwtUser, id: number) {
+    const db = this.db as any;
+    if (user.tenantId == null) return { ok: false };
+    const visible = (await db.select({ id: notifications.id }).from(notifications)
+      .where(and(eq(notifications.id, id), this.visibleTo(user))))[0];
+    if (!visible) return { ok: false };
+    await db.insert(notificationReads).values({ notificationId: id, username: user.username }).onConflictDoNothing();
+    return { ok: true, unread_count: await this.unreadCount(user) };
+  }
+
+  // POST /api/notifications/mark-all-read — mark every currently-visible unread one.
+  async markAllRead(user: JwtUser) {
+    const db = this.db as any;
+    if (user.tenantId == null) return { ok: false, marked: 0 };
+    const readJoin = and(
+      eq(notificationReads.notificationId, notifications.id),
+      eq(notificationReads.username, user.username),
+    );
+    const unread = await db.select({ id: notifications.id }).from(notifications)
+      .leftJoin(notificationReads, readJoin)
+      .where(and(this.visibleTo(user), isNull(notificationReads.readAt)));
+    if (unread.length)
+      await db.insert(notificationReads)
+        .values(unread.map((r: any) => ({ notificationId: r.id, username: user.username })))
+        .onConflictDoNothing();
+    return { ok: true, marked: unread.length, unread_count: 0 };
+  }
 }
 
 @Controller('api/notifications')
@@ -84,6 +180,37 @@ export class NotificationsController {
   @Permissions('dashboard', 'track', 'exec', 'cust_dash')
   list() {
     return this.svc.list();
+  }
+
+  // Inbox endpoints — no @Permissions: any authenticated user has a personal inbox,
+  // scoped to their own tenant + role (and broadcasts) inside the service.
+  @Get('inbox')
+  inbox(
+    @CurrentUser() u: JwtUser,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('unread_only') unreadOnly?: string,
+  ) {
+    return this.svc.inbox(u, {
+      limit: limit ? +limit : undefined,
+      offset: offset ? +offset : undefined,
+      unread_only: unreadOnly === '1' || unreadOnly === 'true',
+    });
+  }
+
+  @Get('unread-count')
+  async unreadCount(@CurrentUser() u: JwtUser) {
+    return { unread_count: await this.svc.unreadCount(u) };
+  }
+
+  @Post('mark-all-read')
+  markAllRead(@CurrentUser() u: JwtUser) {
+    return this.svc.markAllRead(u);
+  }
+
+  @Post(':id/read')
+  markRead(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.svc.markRead(u, +id);
   }
 }
 

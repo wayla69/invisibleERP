@@ -1,6 +1,6 @@
 # 12 · Platform Customization
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.3** · Updated 2026-06-24 — added the notification inbox (§A) and the public REST API (§B).
 
 This chapter is the **map** to the no-code ways you can adapt the system to your
 business — for **Admins**, *AccessAdmin*, *MasterDataAdmin* and *Executives*. Each
@@ -28,6 +28,53 @@ tools.
 | Customize how documents look (receipt, …) | **Document templates** | `/document-templates` | users / exec | [Administration §14](./11-administration.md) |
 | Create your own record types (no code) | **Custom objects** | `/custom-objects` | masterdata / users / exec | [Administration §15](./11-administration.md) |
 | Lay out a custom object's form | **Form layouts** | `/object-layouts` | masterdata / users / exec | [Administration §16](./11-administration.md) |
+| Read alerts, report deliveries & approval reminders | **Notification inbox** | `/notifications` | anyone (your own) | §A below |
+| Let another system read your data securely | **Public REST API** | `/api/v1` (+ API keys) | users (to issue keys) | §B below |
+
+---
+
+## A · Your notification inbox
+
+Everything the system needs to tell you — a low-stock **alert**, a **scheduled report**
+that just arrived, an **approval that's overdue** — lands in your personal inbox.
+
+- **Where:** the **bell icon** (🔔) at the top-right of every screen. A red number on
+  the bell is your count of **unread** messages. Click it for the latest few, or click
+  **"ดูทั้งหมด" (See all)** to open the full inbox at `/notifications`.
+- **Who:** **everyone** has an inbox. There's nothing to switch on. You only ever see
+  messages addressed to **your company and your role** (plus company-wide announcements);
+  one teammate reading a message never marks it read for you — read state is **per person**.
+- **What you can do:**
+  - **Mark one read** — click a message (in the bell list) or its **"อ่านแล้ว" (Mark read)**
+    button (in the full page). The unread count drops immediately.
+  - **อ่านทั้งหมด (Mark all read)** — clears your badge in one click.
+  - **เฉพาะที่ยังไม่อ่าน (Unread only)** — on the full page, filter to just what you
+    haven't read yet.
+- **Note:** the inbox **never** shows another company's or another role's messages, and it
+  contains **notifications only** — it never changes any accounting record.
+
+---
+
+## B · The public API (for connecting other systems)
+
+If you use another system (an online shop, a BI tool, your own software) that needs to
+**read** your data, it can connect to the **Public API** instead of a person logging in.
+
+- **Issue an API key.** An admin with the *users* permission creates a key in
+  **Administration → API keys** (`/api/platform/api-keys`). Choose what the key may do by
+  giving it **scopes** — e.g. `catalog:read`, `inventory:read`, `orders:read`,
+  `invoices:read` (or `read` for all reads, or `*` for everything). The **full key is shown
+  only once** (it starts `ierp_…`) — copy it then; you can't see it again.
+- **Hand it to the other system.** It calls the API at `https://<your-server>/api/v1/…`
+  sending the key as `Authorization: Bearer ierp_…`. Available endpoints: `/api/v1/items`,
+  `/api/v1/inventory`, `/api/v1/orders`, `/api/v1/invoices` (and `/api/v1/me` to check the
+  key). The machine-readable manual is at **`/api/v1/openapi.json`**.
+- **It only ever sees your company's data**, and only what the key's scopes allow — a key
+  without `orders:read` is refused the orders endpoint. Calls are **rate-limited** per key;
+  too many too fast get a polite "try again later" (`429`).
+- **Revoke any time.** Delete the key in the same screen and it stops working immediately.
+- **Note:** the public API is **read-only** and **never** posts to the ledger. Keep keys
+  secret — anyone holding one can read what its scopes allow.
 
 ---
 

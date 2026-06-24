@@ -1,4 +1,4 @@
--- 0088 — Custom objects (Platform Phase 11 — A1). Tenant-defined record types ("custom apps") with no code:
+-- 0089 — Custom objects (Platform Phase 11 — A1). Tenant-defined record types ("custom apps") with no code:
 -- a registry of objects (`custom_objects`) and a registry of their records (`custom_object_records`). The
 -- records' typed field VALUES reuse the Phase 1 custom-fields store (`custom_field_values`, keyed by
 -- entity = object_key), so a custom object's fields are literally custom fields on its own entity. Pure

@@ -115,7 +115,7 @@ nothing to the GL. That discipline is itself part of "outclass."
 - **Architecture:** the receipt renderer was extracted to a pure module `printing/receipt-render.ts`
   shared by the **live render** (`ReceiptService`) and the **designer preview** (`DocumentTemplatesService`)
   — one source of truth, no DI cycle. Default config reproduces the prior output exactly.
-- **Files:** schema `database/schema/document-templates.ts`; migration `drizzle/0087_document_templates.sql`
+- **Files:** schema `database/schema/document-templates.ts`; migration `drizzle/0088_document_templates.sql`
   (new tenant table + RLS loop); module `modules/document-templates/*`; render `modules/printing/receipt-render.ts`;
   web `app/(internal)/document-templates/page.tsx` + nav.
 - **Verification:** `ext` harness +11 checks (catalog, create→default, active, preview, **core-integrity with
@@ -143,7 +143,7 @@ nothing to the GL. That discipline is itself part of "outclass."
   `GET/POST /api/custom-objects/:key/records`, `GET/PUT/DELETE /api/custom-objects/:key/records/:id`;
   field defs via the existing `/api/custom-fields`. Perm `masterdata`/`users`/`exec`.
 - **Files:** [custom-objects.ts](apps/api/src/database/schema/custom-objects.ts) · migration
-  [0088_custom_objects.sql](apps/api/drizzle/0088_custom_objects.sql) · [custom-objects module](apps/api/src/modules/custom-objects/custom-objects.service.ts)
+  [0089_custom_objects.sql](apps/api/drizzle/0089_custom_objects.sql) · [custom-objects module](apps/api/src/modules/custom-objects/custom-objects.service.ts)
   (reuses `CustomFieldsService`) · web [custom-objects/page.tsx](apps/web/src/app/(internal)/custom-objects/page.tsx) + nav.
 - **Verification:** `ext` harness +13 checks (define, dup, fields-via-reuse, record create/list/get/update/
   delete, reused `BAD_OPTION` + `REQUIRED_FIELD`, RLS isolation, no-GL) — **128/128 green**.
@@ -161,7 +161,7 @@ nothing to the GL. That discipline is itself part of "outclass."
 - **API:** `GET /api/object-layouts` (+ `/resolve?object_key=&role=`), `POST`, `PUT /:id`,
   `POST /:id/default`, `DELETE /:id`, `POST /preview`. Perm `masterdata`/`users`/`exec`.
 - **Files:** [object-layouts.ts](apps/api/src/database/schema/object-layouts.ts) · migration
-  [0089_object_layouts.sql](apps/api/drizzle/0089_object_layouts.sql) · [object-layouts module](apps/api/src/modules/object-layouts/object-layouts.service.ts) ·
+  [0090_object_layouts.sql](apps/api/drizzle/0090_object_layouts.sql) · [object-layouts module](apps/api/src/modules/object-layouts/object-layouts.service.ts) ·
   web [object-layouts/page.tsx](apps/web/src/app/(internal)/object-layouts/page.tsx) (designer + live preview) +
   the [custom-objects form](apps/web/src/app/(internal)/custom-objects/page.tsx) now renders by layout + nav.
 - **Verification:** `ext` harness +9 checks (built-in fallback, create→default, resolve applies sections +

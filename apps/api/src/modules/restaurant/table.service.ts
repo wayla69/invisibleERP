@@ -1,16 +1,17 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
-import { eq, and, asc, desc, inArray, ne } from 'drizzle-orm';
+import { eq, and, asc, desc, gte, lte, inArray, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { diningTables, floorZones, tableSessions, dineInOrders } from '../../database/schema';
+import { diningTables, floorZones, tableSessions, dineInOrders, custPosSales } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
-import { n } from '../../database/queries';
+import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { mintTableToken } from './qr-token.util';
-import type { CreateTableDto, UpdateTableDto } from './dto';
+import type { CreateTableDto, UpdateTableDto, ZoneDto, ZoneUpdateDto } from './dto';
 
 const LIVE_SESSION = ['open', 'bill_requested', 'paying'];
+const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
 @Injectable()
 export class TableService {
@@ -19,16 +20,73 @@ export class TableService {
     private readonly docNo: DocNumberService,
   ) {}
 
-  // ── zones ──
+  // ── zones / rooms (floor-plan groupings; a VIP room is just a zone with an accent colour) ──
   async listZones(_user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select().from(floorZones).where(eq(floorZones.active, true)).orderBy(asc(floorZones.sortOrder));
-    return { zones: rows.map((z: any) => ({ id: Number(z.id), name: z.name, sort_order: z.sortOrder })) };
+    return { zones: rows.map(shapeZone) };
   }
-  async createZone(name: string, sortOrder: number | undefined, user: JwtUser) {
+  async createZone(dto: ZoneDto, user: JwtUser) {
     const db = this.db as any;
-    const [z] = await db.insert(floorZones).values({ tenantId: user.tenantId, name, sortOrder: sortOrder ?? 0 }).returning({ id: floorZones.id });
-    return { id: Number(z.id), name };
+    const [z] = await db.insert(floorZones).values({
+      tenantId: user.tenantId, name: dto.name, sortOrder: dto.sort_order ?? 0,
+      posX: String(dto.pos_x ?? 16), posY: String(dto.pos_y ?? 16),
+      width: String(dto.width ?? 320), height: String(dto.height ?? 200), color: dto.color ?? null,
+    }).returning();
+    return shapeZone(z);
+  }
+  async updateZone(id: number, dto: ZoneUpdateDto, _user: JwtUser) {
+    const db = this.db as any;
+    const set: any = {};
+    if (dto.name != null) set.name = dto.name;
+    if (dto.sort_order != null) set.sortOrder = dto.sort_order;
+    if (dto.pos_x != null) set.posX = String(dto.pos_x);
+    if (dto.pos_y != null) set.posY = String(dto.pos_y);
+    if (dto.width != null) set.width = String(dto.width);
+    if (dto.height != null) set.height = String(dto.height);
+    if (dto.color !== undefined) set.color = dto.color ?? null;
+    const [z] = await db.update(floorZones).set(set).where(eq(floorZones.id, id)).returning();
+    if (!z) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Zone not found', messageTh: 'ไม่พบโซน' });
+    return shapeZone(z);
+  }
+  // Soft-delete a zone (active=false). Its tables stay on the plan but become un-grouped (zone_id=null).
+  async deleteZone(id: number, _user: JwtUser) {
+    const db = this.db as any;
+    const [z] = await db.select().from(floorZones).where(eq(floorZones.id, id)).limit(1);
+    if (!z || !z.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Zone not found', messageTh: 'ไม่พบโซน' });
+    await db.update(diningTables).set({ zoneId: null, updatedAt: new Date() }).where(eq(diningTables.zoneId, id));
+    await db.update(floorZones).set({ active: false }).where(eq(floorZones.id, id));
+    return { id, deleted: true, name: z.name };
+  }
+
+  // Revenue by room over a business-day range [from..to] (defaults to today, Asia/Bangkok — cust_pos_sales.sale_date
+  // is already the business day). Joins fiscal dine-in sales → order → table → zone; RLS scopes every table to the
+  // tenant. Lists all active rooms (revenue 0 if none) + an "unzoned" bucket + the grand total.
+  async zoneRevenue(from: string | undefined, to: string | undefined, _user: JwtUser) {
+    const db = this.db as any;
+    const f = from || ymd();
+    const t = to || ymd();
+    const rows = await db
+      .select({ zoneId: diningTables.zoneId, total: custPosSales.total })
+      .from(custPosSales)
+      .innerJoin(dineInOrders, eq(dineInOrders.saleNo, custPosSales.saleNo))
+      .innerJoin(diningTables, eq(diningTables.id, dineInOrders.tableId))
+      .where(and(gte(custPosSales.saleDate, f), lte(custPosSales.saleDate, t)));
+    const agg = new Map<number | 'none', { revenue: number; sales: number }>();
+    for (const r of rows) {
+      const key = r.zoneId == null ? 'none' : Number(r.zoneId);
+      const e = agg.get(key) ?? { revenue: 0, sales: 0 };
+      e.revenue += n(r.total); e.sales += 1; agg.set(key, e);
+    }
+    const zones = await db.select().from(floorZones).where(eq(floorZones.active, true)).orderBy(asc(floorZones.sortOrder));
+    const rooms = zones
+      .map((z: any) => { const a = agg.get(Number(z.id)) ?? { revenue: 0, sales: 0 }; return { zone_id: Number(z.id), name: z.name, color: z.color ?? null, revenue: round2(a.revenue), sales: a.sales, avg_sale: a.sales ? round2(a.revenue / a.sales) : 0 }; })
+      .sort((a: any, b: any) => b.revenue - a.revenue);
+    const un = agg.get('none') ?? { revenue: 0, sales: 0 };
+    const unzoned = { revenue: round2(un.revenue), sales: un.sales };
+    const totalRevenue = round2(rooms.reduce((s: number, r: any) => s + r.revenue, 0) + unzoned.revenue);
+    const totalSales = rooms.reduce((s: number, r: any) => s + r.sales, 0) + unzoned.sales;
+    return { from: f, to: t, rooms, unzoned, total: { revenue: totalRevenue, sales: totalSales }, generated_at: new Date().toISOString() };
   }
 
   // ── tables ──
@@ -43,26 +101,49 @@ export class TableService {
     const qrToken = 'rt_' + randomBytes(18).toString('base64url');
     const [t] = await db.insert(diningTables).values({
       tenantId: user.tenantId, zoneId: dto.zone_id ?? null, tableNo: dto.table_no, seats: dto.seats ?? 4,
-      shape: dto.shape ?? 'rect', posX: String(dto.pos_x ?? 0), posY: String(dto.pos_y ?? 0),
+      shape: dto.shape ?? 'rect', rotation: dto.rotation ?? 0, posX: String(dto.pos_x ?? 0), posY: String(dto.pos_y ?? 0),
       width: String(dto.width ?? 80), height: String(dto.height ?? 80), status: 'available', qrToken,
     }).returning();
     return shapeTable(t);
   }
 
+  // Every update bumps `rev`. When the caller passes the `rev` it last saw (optimistic concurrency),
+  // the write is gated on it: a stale `rev` (someone else edited the table meanwhile) → 409 STALE_WRITE.
+  // Omitting `rev` keeps the legacy last-write-wins behaviour (e.g. an undo that must always apply).
   async updateTable(id: number, dto: UpdateTableDto, _user: JwtUser) {
     const db = this.db as any;
-    const set: any = { updatedAt: new Date() };
+    const set: any = { updatedAt: new Date(), rev: sql`${diningTables.rev} + 1` };
     if (dto.table_no != null) set.tableNo = dto.table_no;
-    if (dto.zone_id != null) set.zoneId = dto.zone_id;
+    if (dto.zone_id !== undefined) set.zoneId = dto.zone_id;   // explicit null un-assigns the table from its zone
     if (dto.seats != null) set.seats = dto.seats;
     if (dto.shape != null) set.shape = dto.shape;
+    if (dto.rotation != null) set.rotation = dto.rotation;
     if (dto.pos_x != null) set.posX = String(dto.pos_x);
     if (dto.pos_y != null) set.posY = String(dto.pos_y);
     if (dto.width != null) set.width = String(dto.width);
     if (dto.height != null) set.height = String(dto.height);
-    const [t] = await db.update(diningTables).set(set).where(eq(diningTables.id, id)).returning();
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
+    const whereClause = dto.rev != null ? and(eq(diningTables.id, id), eq(diningTables.rev, dto.rev)) : eq(diningTables.id, id);
+    const [t] = await db.update(diningTables).set(set).where(whereClause).returning();
+    if (!t) {
+      if (dto.rev != null) {
+        const [exists] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
+        if (exists) throw new ConflictException({ code: 'STALE_WRITE', message: 'Table changed since it was loaded', messageTh: 'ผังถูกแก้ไขโดยผู้อื่น กรุณารีเฟรช' });
+      }
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
+    }
     return shapeTable(t);
+  }
+
+  // Soft-delete a table (active=false) — preserves history + FKs (orders/sessions keep referencing it).
+  // A table with a live session cannot be removed; clear/checkout the table first.
+  async deleteTable(id: number, _user: JwtUser) {
+    const db = this.db as any;
+    const [t] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
+    if (!t || !t.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
+    const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    if (live) throw new BadRequestException({ code: 'TABLE_BUSY', message: 'Table has a live session — clear it first', messageTh: 'โต๊ะมีลูกค้าอยู่ — เคลียร์โต๊ะก่อนจึงจะลบได้' });
+    await db.update(diningTables).set({ active: false, updatedAt: new Date() }).where(eq(diningTables.id, id));
+    return { id, deleted: true, table_no: t.tableNo };
   }
 
   async setStatus(id: number, status: string, _user: JwtUser) {
@@ -161,6 +242,13 @@ export class TableService {
 function shapeTable(t: any) {
   return {
     id: Number(t.id), table_no: t.tableNo, zone_id: t.zoneId, seats: t.seats, shape: t.shape, status: t.status,
-    pos_x: n(t.posX), pos_y: n(t.posY), width: n(t.width), height: n(t.height), rotation: t.rotation, qr_token: t.qrToken,
+    pos_x: n(t.posX), pos_y: n(t.posY), width: n(t.width), height: n(t.height), rotation: t.rotation, rev: t.rev, qr_token: t.qrToken,
+  };
+}
+
+function shapeZone(z: any) {
+  return {
+    id: Number(z.id), name: z.name, sort_order: z.sortOrder, color: z.color ?? null,
+    pos_x: n(z.posX), pos_y: n(z.posY), width: n(z.width), height: n(z.height),
   };
 }

@@ -11,9 +11,9 @@ import { PrintService } from '../printing/print.service';
 import { PeripheralsService } from '../peripherals/peripherals.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
-  TableStatusBody, ZoneBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
+  TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
   type CreateOrderDto, type AddItemsDto, type KdsActionDto, type CheckoutDto, type CreateTableDto, type UpdateTableDto,
-  type BuffetPackageDto, type BuffetPackageUpdateDto, type StartBuffetDto,
+  type ZoneDto, type ZoneUpdateDto, type BuffetPackageDto, type BuffetPackageUpdateDto, type StartBuffetDto,
 } from './dto';
 
 const OpenTableBody = z.object({ party_size: z.number().int().positive().optional() });
@@ -37,12 +37,16 @@ export class RestaurantController {
 
   // ── floor-plan / tables ──
   @Get('zones') zones(@CurrentUser() u: JwtUser) { return this.tables.listZones(u); }
-  @Post('zones') createZone(@Body(new ZodValidationPipe(ZoneBody)) b: { name: string; sort_order?: number }, @CurrentUser() u: JwtUser) { return this.tables.createZone(b.name, b.sort_order, u); }
+  @Get('zones/revenue') @Permissions('pos', 'order_mgt', 'exec') zoneRevenue(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) { return this.tables.zoneRevenue(from, to, u); }
+  @Post('zones') createZone(@Body(new ZodValidationPipe(ZoneBody)) b: ZoneDto, @CurrentUser() u: JwtUser) { return this.tables.createZone(b, u); }
+  @Patch('zones/:id') updateZone(@Param('id') id: string, @Body(new ZodValidationPipe(ZoneUpdateBody)) b: ZoneUpdateDto, @CurrentUser() u: JwtUser) { return this.tables.updateZone(+id, b, u); }
+  @Delete('zones/:id') removeZone(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.tables.deleteZone(+id, u); }
 
   @Get('tables') listTables(@CurrentUser() u: JwtUser) { return this.tables.listTables(u); }
   @Get('tables/status') tablesStatus(@CurrentUser() u: JwtUser) { return this.tables.statusBoard(u); }
   @Post('tables') createTable(@Body(new ZodValidationPipe(CreateTableBody)) b: CreateTableDto, @CurrentUser() u: JwtUser) { return this.tables.createTable(b, u); }
   @Patch('tables/:id') updateTable(@Param('id') id: string, @Body(new ZodValidationPipe(UpdateTableBody)) b: UpdateTableDto, @CurrentUser() u: JwtUser) { return this.tables.updateTable(+id, b, u); }
+  @Delete('tables/:id') removeTable(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.tables.deleteTable(+id, u); }
   @Patch('tables/:id/status') setStatus(@Param('id') id: string, @Body(new ZodValidationPipe(TableStatusBody)) b: { status: string }, @CurrentUser() u: JwtUser) { return this.tables.setStatus(+id, b.status, u); }
   @Post('tables/:id/open') openTable(@Param('id') id: string, @Body(new ZodValidationPipe(OpenTableBody)) b: { party_size?: number }, @CurrentUser() u: JwtUser) { return this.tables.openTable(+id, b.party_size, u.username, u); }
   @Get('tables/:id/qr') tableQr(@Param('id') id: string, @Query('base') base: string | undefined, @CurrentUser() u: JwtUser) { return this.tables.qrSticker(+id, base, u); }

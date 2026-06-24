@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Lock, Plus, Power, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { humanizeModule } from '@/lib/modules';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -93,18 +94,30 @@ function Modules() {
 }
 
 // ───────────────────────── API Keys ─────────────────────────
+// Public API (v1) scopes an integrator key can be granted. The aliases read/write/* are also
+// accepted by the server; here we expose the granular per-resource read scopes plus 'read'.
+const API_KEY_SCOPES: { key: string; label: string }[] = [
+  { key: 'read', label: 'อ่านทั้งหมด (read)' },
+  { key: 'catalog:read', label: 'แค็ตตาล็อกสินค้า (catalog:read)' },
+  { key: 'inventory:read', label: 'สต๊อก (inventory:read)' },
+  { key: 'orders:read', label: 'ออเดอร์ (orders:read)' },
+  { key: 'invoices:read', label: 'ใบแจ้งหนี้ (invoices:read)' },
+];
+
 function ApiKeys() {
   const qc = useQueryClient();
   const list = useQuery<any>({ queryKey: ['api-keys'], queryFn: () => api('/api/platform/api-keys') });
   const [name, setName] = useState('');
+  const [scopes, setScopes] = useState<string[]>(['read']);
   const [newKey, setNewKey] = useState('');
   const [msg, setMsg] = useState('');
 
   const rows = Array.isArray(list.data) ? list.data : (list.data?.keys ?? list.data?.api_keys ?? []);
+  const toggleScope = (k: string) => setScopes((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
 
   const create = useMutation({
-    mutationFn: () => api<{ key: string }>('/api/platform/api-keys', { method: 'POST', body: JSON.stringify({ name, scopes: ['read'] }) }),
-    onSuccess: (r) => { setNewKey(r.key); setName(''); setMsg(''); qc.invalidateQueries({ queryKey: ['api-keys'] }); },
+    mutationFn: () => api<{ key: string }>('/api/platform/api-keys', { method: 'POST', body: JSON.stringify({ name, scopes: scopes.length ? scopes : ['read'] }) }),
+    onSuccess: (r) => { setNewKey(r.key); setName(''); setScopes(['read']); setMsg(''); qc.invalidateQueries({ queryKey: ['api-keys'] }); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
   const revoke = useMutation({
@@ -117,13 +130,34 @@ function ApiKeys() {
       <Card className="gap-3 p-5">
         <div>
           <h3 className="text-base font-semibold">สร้าง API Key ใหม่</h3>
-          <p className="text-sm text-muted-foreground">สำหรับเชื่อมต่อระบบภายนอกกับ ERP ของคุณ</p>
+          <p className="text-sm text-muted-foreground">
+            สำหรับเชื่อมต่อระบบภายนอกกับ Public API (<code>/api/v1</code>) ของคุณ · เอกสาร:{' '}
+            <a href="/api/v1/openapi.json" className="underline" target="_blank" rel="noreferrer">openapi.json</a>
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Input className="min-w-[180px] flex-1" placeholder="ชื่อ key (เช่น Zapier)" value={name} onChange={(e) => setName(e.target.value)} />
           <Button disabled={!name || create.isPending} onClick={() => create.mutate()}>
             <Plus className="size-4" /> {create.isPending ? 'กำลังสร้าง…' : 'สร้าง Key'}
           </Button>
+        </div>
+        <div>
+          <p className="mb-1.5 text-sm font-medium">สิทธิ์ (scopes) ที่อนุญาต</p>
+          <div className="flex flex-wrap gap-1.5">
+            {API_KEY_SCOPES.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => toggleScope(s.key)}
+                className={cn(
+                  'rounded-full border px-2.5 py-1 text-xs transition-colors',
+                  scopes.includes(s.key) ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent',
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
         </div>
         <Msg>{msg}</Msg>
         {newKey && (

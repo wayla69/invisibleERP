@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, integer, timestamp, boolean, jsonb, index, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, integer, timestamp, boolean, jsonb, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 import { roleEnum } from './enums';
 
@@ -11,6 +11,27 @@ export const notifications = pgTable('notifications', {
   isRead: boolean('is_read').default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+// Per-user read state for the notification inbox. notifications.is_read is a single
+// shared boolean (wrong when a (tenant, role) notification has many recipients); this
+// table records who has read which notification. No tenant_id → not RLS-scoped; the
+// inbox query scopes rows by joining to notifications and filters by the caller's own
+// username, so a user only ever sees/writes their own markers.
+export const notificationReads = pgTable(
+  'notification_reads',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    notificationId: bigint('notification_id', { mode: 'number' })
+      .notNull()
+      .references(() => notifications.id, { onDelete: 'cascade' }),
+    username: text('username').notNull(),
+    readAt: timestamp('read_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('uq_notification_reads').on(t.notificationId, t.username),
+    byUser: index('idx_notification_reads_username').on(t.username),
+  }),
+);
 
 // polymorphic audit (แทน _log_status)
 export const docStatusLog = pgTable('doc_status_log', {

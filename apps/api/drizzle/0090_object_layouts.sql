@@ -1,4 +1,4 @@
--- 0089 — Object layouts (Platform Phase 12 — A2). A no-code form/layout for a custom object (Phase 11):
+-- 0090 — Object layouts (Platform Phase 12 — A2). A no-code form/layout for a custom object (Phase 11):
 -- sections, field order, columns and hidden fields, optionally per role. `config` is pure presentation,
 -- resolved against the object's current field defs at render time (newly-added fields always surface).
 -- One row per (tenant, object_key, role) is is_default = the active layout. Never posts to the GL.
