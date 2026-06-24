@@ -1,6 +1,6 @@
 import type { Role } from './enums.js';
 
-// The 37 fine-grained permission keys (ALL_PERMISSIONS in the legacy app) — the LIVE RBAC system.
+// The fine-grained permission keys (ALL_PERMISSIONS in the legacy app) — the LIVE RBAC system.
 // Tokens gate nav routes; ported verbatim. Admin bypasses to all.
 export const PERMISSIONS = [
   'pos', 'dashboard', 'order_mgt', 'claim_mgt', 'crm', 'users', 'warehouse', 'procurement',
@@ -17,6 +17,10 @@ export const PERMISSIONS = [
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
   'gl_post', 'gl_close', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
+  // ── CRM single-duty splits (loyalty back-office; see SoD R14–R16). Standalone granular perms: NOT implied
+  //    by a coarse perm (so a transacting/portal role can't inherit them and trip R14–R16); assigned directly
+  //    to SoD-clean CRM roles. Endpoints gate `crm_* OR coarse` so existing coarse roles keep working. ──
+  'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -27,6 +31,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
   'gl_post', 'gl_close', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
+  'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -155,6 +160,14 @@ export const SOD_RULES: SodRule[] = [
     a: ['returns'], b: ['pos_refund'], severity: 'Medium', risk: 'Process a return and issue the matching refund unchecked.', mitigation: 'Independent refund approval on returns; over-return guard + detective review.' },
   { id: 'R13', dutyA: 'Maintain master data / config', dutyB: 'Transact on it',
     a: ['md_item', 'md_config', 'bom_master'], b: ['pos_sell', 'order_mgt', 'procurement', 'creditors', 'ar'], severity: 'Medium', risk: 'Change config/master data and transact against it without review.', mitigation: 'Segregate config from operations; review master-data change log.' },
+  // ── CRM / loyalty single-duty conflicts (Phase 4) — points are a TFRS-15 liability, so loyalty value
+  //    issuance must be segregated from its use/creation just like cash duties. ──
+  { id: 'R14', dutyA: 'Configure rewards / vouchers', dutyB: 'POS redemption at till',
+    a: ['crm_reward'], b: ['pos_sell'], severity: 'High', risk: 'Create a reward/voucher and redeem it for oneself at the till.', mitigation: 'Separate reward-catalog configuration from POS redemption; review reward-change + redemption reports.' },
+  { id: 'R15', dutyA: 'Manual points adjustment', dutyB: 'Member master maintenance',
+    a: ['crm_points_adjust'], b: ['crm_member'], severity: 'High', risk: 'Enrol a ghost member and credit points to it.', mitigation: 'Separate member enrolment from points adjustment; over-threshold adjust routes via maker-checker approval.' },
+  { id: 'R16', dutyA: 'Campaign issuance of point-bearing value', dutyB: 'Points adjustment',
+    a: ['crm_campaign'], b: ['crm_points_adjust'], severity: 'High', risk: 'Self-issue loyalty value through two channels (campaign coupons + manual adjustment).', mitigation: 'Separate campaign issuance from points adjustment; review issuance + adjustment logs.' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }

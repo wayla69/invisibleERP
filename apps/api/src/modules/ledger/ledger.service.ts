@@ -1,11 +1,13 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { sql, eq, and, desc, notInArray } from 'drizzle-orm';
+import { sql, eq, and, desc, notInArray, gt, lte } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
+
+const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
 // Resolve the tenant a period/close operation belongs to: explicit arg wins, else the request's
 // own tenant (the interceptor's ALS). null only when called outside any request (bootstrap/seed).
@@ -70,7 +72,9 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '2210', name: 'Customer Deposits — Prepaid', type: 'Liability' },  // มัดจำ/เงินรับล่วงหน้า (booking/tab) — recognised to revenue on apply
   { code: '4500', name: 'Card Surcharge Income', type: 'Revenue' },          // รายได้ค่าธรรมเนียมบัตร — VATable card surcharge
   { code: '5410', name: 'FX Gain/Loss (Realized)', type: 'Expense' },        // กำไร/ขาดทุนอัตราแลกเปลี่ยนที่เกิดขึ้นจริง — loss=debit, gain=credit (settlement)
-  { code: '5700', name: 'Repairs & Maintenance', type: 'Expense' },          // ค่าซ่อมแซมและบำรุงรักษา — EAM maintenance work-order cost
+  { code: '2250', name: 'Loyalty Points Liability', type: 'Liability' },      // หนี้สินแต้มสะสม — TFRS 15 contract liability for outstanding loyalty points (control acct)
+  { code: '5700', name: 'Loyalty Points Expense', type: 'Expense' },          // ค่าใช้จ่ายแต้มสะสม — provision for loyalty points granted (offsets 2250)
+  { code: '5710', name: 'Repairs & Maintenance', type: 'Expense' },           // ค่าซ่อมแซมและบำรุงรักษา — EAM maintenance work-order cost
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -527,7 +531,86 @@ export class LedgerService {
       .where(tid == null ? eq(fiscalPeriods.code, period) : and(eq(fiscalPeriods.code, period), eq(fiscalPeriods.tenantId, tid)));
     return { period, status };
   }
-  async closePeriod(period: string, tenantId?: number | null) { return this.setPeriodStatus(period, 'Closed', tenantId); }
+  // Last calendar day of a 'YYYY-MM' period (period close dates the loyalty accrual inside the period).
+  private periodEndDate(period: string): string {
+    const [y, m] = period.split('-').map(Number);
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate(); // day 0 of next month = last day of this month
+    return `${period}-${String(last).padStart(2, '0')}`;
+  }
+
+  // ── Loyalty points-liability accrual (TFRS 15) ─────────────────────────────
+  // Reconciles GL control account 2250 to outstanding points × fair value by posting the delta since the
+  // last run (provision model: net grant ⇒ Dr 5700 / Cr 2250; net redeem/forfeit/expiry ⇒ Dr 2250 / Cr 5700).
+  // Watermarked on pos_member_ledger.id + idempotent (deterministic sourceRef + ux_je_idem + unique run).
+  // Lives here (not in the loyalty module) so the GL period-close can call it without a module cycle; it
+  // reads the loyalty sub-ledger tables directly and posts via this.postEntry.
+  async accrueLiability(ctx: { tenantId: number; createdBy: string; asOfDate?: string }) {
+    const db = this.db as any;
+    const tenantId = ctx.tenantId;
+    const [cfg] = await db.select().from(loyaltyConfig).limit(1);
+    const fairValue = cfg ? n(cfg.bahtPerPoint) : 0;
+    return await db.transaction(async (tx: any) => {
+      const [last] = await tx.select({
+        wm: sql`coalesce(max(${loyaltyPostingRuns.watermarkId}), 0)`,
+        posted: sql`coalesce(sum(${loyaltyPostingRuns.liabilityDelta}), 0)`,
+      }).from(loyaltyPostingRuns).where(eq(loyaltyPostingRuns.tenantId, tenantId));
+      const lastWm = Number(last?.wm ?? 0);
+      const priorLiability = round2(n(last?.posted));
+      const [hi] = await tx.select({ hi: sql`coalesce(max(${posMemberLedger.id}), 0)` }).from(posMemberLedger).where(eq(posMemberLedger.tenantId, tenantId));
+      const newHigh = Number(hi?.hi ?? 0);
+      const [agg] = await tx.select({ pts: sql`coalesce(sum(${posMembers.balance}), 0)` }).from(posMembers).where(eq(posMembers.tenantId, tenantId));
+      const outstanding = n(agg?.pts);
+      const target = round2(outstanding * fairValue);
+      if (newHigh <= lastWm) {
+        return { posted: false, reason: 'up_to_date', watermark: lastWm, outstanding_points: outstanding, fair_value_per_point: fairValue, target_liability: target, posted_liability: priorLiability, liability_delta: 0 };
+      }
+      const [stat] = await tx.select({
+        earn: sql`coalesce(sum(case when ${posMemberLedger.points} > 0 then ${posMemberLedger.points} else 0 end), 0)`,
+        redeem: sql`coalesce(sum(case when ${posMemberLedger.points} < 0 then -${posMemberLedger.points} else 0 end), 0)`,
+      }).from(posMemberLedger).where(and(eq(posMemberLedger.tenantId, tenantId), gt(posMemberLedger.id, lastWm), lte(posMemberLedger.id, newHigh)));
+      const delta = round2(target - priorLiability);
+      let journalNo: string | null = null;
+      if (Math.abs(delta) >= 0.005) {
+        const lines = delta > 0
+          ? [{ account_code: '5700', debit: delta }, { account_code: '2250', credit: delta }]
+          : [{ account_code: '2250', debit: -delta }, { account_code: '5700', credit: -delta }];
+        const je: any = await this.postEntry({
+          ...(ctx.asOfDate ? { date: ctx.asOfDate } : {}),
+          source: 'LOYALTY', sourceRef: `${tenantId}:upto-${newHigh}`, tenantId,
+          memo: `Loyalty points liability accrual (tenant ${tenantId})`, createdBy: ctx.createdBy, lines,
+        }, tx);
+        journalNo = je?.entry_no ?? null;
+        if (journalNo == null) {
+          return { posted: false, reason: 'deduped', watermark: newHigh, outstanding_points: outstanding, fair_value_per_point: fairValue, target_liability: target, posted_liability: priorLiability, liability_delta: 0 };
+        }
+      }
+      await tx.insert(loyaltyPostingRuns).values({
+        tenantId, runNo: `LOY-${tenantId}-${newHigh}`, watermarkId: newHigh,
+        outstandingPoints: String(outstanding), fairValuePerPoint: String(fairValue), targetLiability: String(target),
+        priorLiability: String(priorLiability), liabilityDelta: String(delta),
+        earnedPoints: String(n(stat?.earn)), redeemedPoints: String(n(stat?.redeem)), journalNo, createdBy: ctx.createdBy,
+      }).onConflictDoNothing();
+      return {
+        posted: journalNo != null, reason: journalNo != null ? 'posted' : 'no_change', journal_no: journalNo,
+        watermark: newHigh, outstanding_points: outstanding, fair_value_per_point: fairValue,
+        target_liability: target, posted_liability: round2(priorLiability + delta), liability_delta: delta,
+      };
+    });
+  }
+
+  // Close a period. Before locking it, accrue the loyalty points liability to date (dated inside the period)
+  // so the period's books carry the up-to-date liability — best-effort: a loyalty hiccup must not block the
+  // financial close. `accrue:false` is passed by closeYear, which runs the accrual once before its P&L sweep.
+  async closePeriod(period: string, tenantId?: number | null, opts?: { accrue?: boolean }) {
+    const tid = resolveTenantId(tenantId);
+    let loyaltyAccrual: any = null;
+    if (opts?.accrue !== false && tid != null) {
+      try { loyaltyAccrual = await this.accrueLiability({ tenantId: tid, createdBy: 'system:period-close', asOfDate: this.periodEndDate(period) }); }
+      catch (e: any) { loyaltyAccrual = { posted: false, reason: 'error', error: String(e?.message ?? e) }; }
+    }
+    const res = await this.setPeriodStatus(period, 'Closed', tid);
+    return { ...res, loyalty_accrual: loyaltyAccrual };
+  }
   async openPeriod(period: string, tenantId?: number | null) { return this.setPeriodStatus(period, 'Open', tenantId); }
 
   // Provision all 12 (Open) periods of a fiscal year for a tenant — called at signup so a new tenant
@@ -578,6 +661,12 @@ export class LedgerService {
       return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, already: true };
     }
     const from = `${fiscalYear}-01-01`, to = `${fiscalYear}-12-31`;
+    // Accrue the loyalty points liability up to year-end BEFORE the P&L sweep, so the 5700 expense it books
+    // is zeroed into Retained Earnings by this close (the 2250 liability stays on the balance sheet). Once,
+    // on the leading book only; best-effort so a loyalty hiccup never blocks the year-end close.
+    if (ledgerCode === LEADING && tid != null) {
+      try { await this.accrueLiability({ tenantId: tid, createdBy, asOfDate: to }); } catch { /* best-effort */ }
+    }
     const rows = await this.aggregateByType(db, from, to, undefined, ledgerCode, tid);
     const lines: JournalLineDto[] = [];
     let revTotal = 0, expTotal = 0;
@@ -600,7 +689,7 @@ export class LedgerService {
     const je = await this.postEntry({ date: to, source: 'CLOSE', sourceRef: closeRef, ledgerCode, tenantId: tid, allowClosedPeriod: true, memo: `Year-end close FY${fiscalYear} (${ledgerCode})`, createdBy, lines });
     // the tenant's fiscal calendar has no ledger dimension — only the LEADING close locks the months,
     // so non-leading ledgers can still post their own closing entry into December.
-    if (ledgerCode === LEADING) for (let m = 1; m <= 12; m++) await this.closePeriod(`${fiscalYear}-${String(m).padStart(2, '0')}`, tid);
+    if (ledgerCode === LEADING) for (let m = 1; m <= 12; m++) await this.closePeriod(`${fiscalYear}-${String(m).padStart(2, '0')}`, tid, { accrue: false });
     return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, net_income: netIncome, entry_no: je.entry_no };
   }
 

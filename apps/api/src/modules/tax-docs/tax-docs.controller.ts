@@ -6,6 +6,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { TaxInvoiceService } from './tax-invoice.service';
 import { TaxDocsPdfService } from './tax-docs-pdf.service';
 import { buildEtaxInvoiceXml } from './etax-xml';
+import { getSigningMaterial, signEtaxXml } from './etax-sign';
 import { EtaxEmailService } from './etax-email.service';
 import { IssueFullBody, type IssueFullDto } from './dto';
 
@@ -54,14 +55,20 @@ export class TaxDocsController {
     return this.etaxEmail.sendByEmail(u, docNo, b.to_email);
   }
 
-  // ETDA e-Tax Invoice XML (UBL 2.1) — unsigned instance document; XAdES signing added with the RD cert.
+  // ETDA e-Tax Invoice XML (UBL 2.1). Unsigned instance document by default; ?signed=1 appends the
+  // XAdES enveloped signature when a certificate is configured (ETAX_SIGNING_*), else returns unsigned.
   @Get(':docNo/etax-xml') @Permissions('ar', 'pos', 'cust_pos')
-  async etaxXml(@Param('docNo') docNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+  async etaxXml(@Param('docNo') docNo: string, @Query('signed') signed: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const inv = await this.svc.getByDocNo(u, docNo);
-    const xml = buildEtaxInvoiceXml(inv as never);
+    let xml = buildEtaxInvoiceXml(inv as never);
+    let suffix = '';
+    if (signed === '1' || signed === 'true') {
+      const material = getSigningMaterial();
+      if (material) { xml = signEtaxXml(xml, material); suffix = '-signed'; }
+    }
     reply
       .header('Content-Type', 'application/xml; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="${docNo}.xml"`)
+      .header('Content-Disposition', `attachment; filename="${docNo}${suffix}.xml"`)
       .send(xml);
   }
 

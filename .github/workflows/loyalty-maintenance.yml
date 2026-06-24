@@ -1,0 +1,62 @@
+# Scheduled loyalty maintenance — expire aged points + re-accrue the points-liability (GL acct 2250) for
+# every tenant by calling the cron sweep endpoint. The API has NO in-process scheduler (multi-instance
+# safe); this workflow is the external trigger. See docs/process-narratives/19-marketing-pricing-loyalty.md §7.
+#
+# Configure at the REPOSITORY level (Settings → Secrets and variables → Actions) — NOT the gated
+# `production` Environment, or the schedule would wait on required reviewers and never run unattended:
+#   vars.PROD_API_URL    — base URL of the deployed API (e.g. https://api.example.com)
+#   secrets.SWEEP_USER   — a dedicated, non-interactive service account holding `exec` (or `gl_post`) so it
+#                          may post the accrual JE. Keep it non-interactive; the must_setup_mfa flag is
+#                          advisory and does not block its token (same as any privileged service login).
+#   secrets.SWEEP_PASS   — its password
+# Without these the job no-ops (warns, non-blocking). Adjust the cron to your programme's expiry policy.
+name: Loyalty maintenance (scheduled)
+
+on:
+  schedule:
+    - cron: '0 19 * * *'   # 02:00 Asia/Bangkok daily (off-peak)
+  workflow_dispatch:        # manual run (Actions → Run workflow)
+
+concurrency:
+  group: loyalty-maintenance
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Expire + accrue loyalty points liability (all tenants)
+        env:
+          PROD_API_URL: ${{ vars.PROD_API_URL }}
+          SWEEP_USER: ${{ secrets.SWEEP_USER }}
+          SWEEP_PASS: ${{ secrets.SWEEP_PASS }}
+        run: |
+          set -e
+          if [ -z "${PROD_API_URL:-}" ] || [ -z "${SWEEP_USER:-}" ] || [ -z "${SWEEP_PASS:-}" ]; then
+            echo "::warning::PROD_API_URL / SWEEP_USER / SWEEP_PASS not set — skipping loyalty maintenance"
+            exit 0
+          fi
+          echo "Health check: $PROD_API_URL/healthz"
+          code=000
+          for i in $(seq 1 12); do code=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_API_URL/healthz" || true); [ "$code" = "200" ] && break; echo "  health=$code ($i)"; sleep 5; done
+          [ "$code" = "200" ] || { echo "::error::API health check failed (last=$code)"; exit 1; }
+          TOK=$(curl -s -X POST "$PROD_API_URL/api/login" -H 'Content-Type: application/json' -d "{\"username\":\"$SWEEP_USER\",\"password\":\"$SWEEP_PASS\"}" | jq -r '.token // empty')
+          [ -n "$TOK" ] || { echo "::error::sweep login failed (check SWEEP_USER/SWEEP_PASS)"; exit 1; }
+          echo "POST /api/loyalty/maintenance/run"
+          resp=$(curl -s -w "\n%{http_code}" -X POST "$PROD_API_URL/api/loyalty/maintenance/run" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{}')
+          body=$(echo "$resp" | sed '$d'); httpcode=$(echo "$resp" | tail -n1)
+          echo "  -> $httpcode"
+          echo "$body" | jq '{tenants_processed, total_expired_points, accruals_posted}' 2>/dev/null || echo "$body"
+          { [ "$httpcode" = "200" ] || [ "$httpcode" = "201" ]; } || { echo "::error::sweep failed ($httpcode)"; exit 1; }
+          echo "Loyalty maintenance sweep complete ✅"
+          # Fire any due SCHEDULED campaigns. Separate, @NoTx endpoint (not folded into the sweep's transaction)
+          # so each campaign is claimed 'sent' and committed BEFORE its irreversible gateway sends → at-most-once.
+          echo "POST /api/loyalty/campaigns/run-due"
+          cresp=$(curl -s -w "\n%{http_code}" -X POST "$PROD_API_URL/api/loyalty/campaigns/run-due" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{}')
+          cbody=$(echo "$cresp" | sed '$d'); ccode=$(echo "$cresp" | tail -n1)
+          echo "  -> $ccode"
+          echo "$cbody" | jq '{tenants_processed, campaigns_sent}' 2>/dev/null || echo "$cbody"
+          { [ "$ccode" = "200" ] || [ "$ccode" = "201" ]; } || { echo "::error::campaign run-due failed ($ccode)"; exit 1; }
+          echo "Due campaigns fired ✅"

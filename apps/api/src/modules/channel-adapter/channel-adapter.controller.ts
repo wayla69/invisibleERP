@@ -7,6 +7,7 @@ import { qint, qintOpt } from '../../common/query';
 
 const AdapterBody = z.object({ id: z.number().optional(), platform: z.string().min(1), store_ref: z.string().optional(), enabled: z.boolean().optional(), auto_accept: z.boolean().optional(), config: z.record(z.any()).optional() });
 const StatusBody = z.object({ status: z.string().min(1) });
+const RejectBody = z.object({ reason: z.string().optional() });
 // Aggregator payloads vary per platform, so this is a minimal shape guard: reject anything that is not a
 // JSON object (array/string/null) before the per-platform normalizer runs. Authenticity is established by a
 // per-platform shared secret header (x-webhook-secret) verified in the service (fail-closed in production).
@@ -22,6 +23,8 @@ export class ChannelAdapterController {
   @Post(':platform/menu-sync') menuSync(@Param('platform') p: string, @CurrentUser() u: JwtUser) { return this.svc.menuSyncOut(p, u); }
   @Get('orders') orders(@Query('limit') limit?: string) { return this.svc.listChannelOrders(qint('limit', limit, 50)); }
   @Post('orders/:orderNo/status') status(@Param('orderNo') no: string, @Body(new ZodValidationPipe(StatusBody)) b: z.infer<typeof StatusBody>) { return this.svc.updateStatus(no, b.status); }
+  @Post('orders/:orderNo/accept') accept(@Param('orderNo') no: string) { return this.svc.acceptOrder(no); }
+  @Post('orders/:orderNo/reject') reject(@Param('orderNo') no: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>) { return this.svc.rejectOrder(no, b.reason ?? ''); }
 }
 
 // Inbound aggregator webhook — PUBLIC (platform calls it), authenticated by a per-platform shared secret

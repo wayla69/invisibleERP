@@ -94,6 +94,25 @@ async function main() {
     lineCount === 2 && x.includes('&lt;ที่ปรึกษา&gt;') && x.includes('A&amp;B') && !x.includes('<ที่ปรึกษา>') && !x.includes('A&B'),
     `lines=${lineCount}`);
 
+  // ── 7. submit to the (mock) RD provider → Accepted, recorded unsigned (no cert configured) ──
+  const sub = await app.inject({ method: 'POST', url: `/api/tax/etax/submit/${docNo}`, headers: { authorization: `Bearer ${admin}` }, payload: {} });
+  const subJson = sub.json();
+  const st = await app.inject({ method: 'GET', url: `/api/tax/etax/status/${docNo}`, headers: { authorization: `Bearer ${admin}` } });
+  const stJson = st.json();
+  ok('submit (mock) → Accepted, signed=false (no cert), status persisted',
+    sub.statusCode === 201 && subJson.status === 'Accepted' && subJson.signed === false && stJson.status === 'Accepted' && stJson.rd_response?.signed === false,
+    JSON.stringify({ s: subJson.status, signed: subJson.signed }));
+
+  // ── 8. re-submit → idempotent (no second Accepted row, returns the first provider ref) ──
+  const sub2 = (await app.inject({ method: 'POST', url: `/api/tax/etax/submit/${docNo}`, headers: { authorization: `Bearer ${admin}` }, payload: {} })).json();
+  ok('re-submit → idempotent (same provider ref)', sub2.idempotent === true && sub2.provider_ref === subJson.provider_ref, JSON.stringify(sub2));
+
+  // ── 9. ?signed=1 with no cert configured → graceful unsigned fallback (valid UBL, no signature) ──
+  const unsignedFallback = await inj('GET', `/api/tax-invoices/${docNo}/etax-xml?signed=1`, admin);
+  ok('etax-xml?signed=1 without a cert → unsigned UBL fallback (no <ds:Signature>, plain filename)',
+    unsignedFallback.status === 200 && !unsignedFallback.body.includes('<ds:Signature') && (unsignedFallback.cdisp ?? '').includes(`${docNo}.xml`) && !(unsignedFallback.cdisp ?? '').includes('-signed'),
+    '');
+
   console.log('\n── C2 — e-Tax Invoice XML (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

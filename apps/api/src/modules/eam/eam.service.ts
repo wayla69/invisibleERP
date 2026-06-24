@@ -23,7 +23,7 @@ function addDays(dateStr: string, days: number): string {
 }
 
 // Enterprise Asset Management — maintenance work orders, preventive-maintenance schedules, meter readings.
-// Maintenance cost on completion is routed through AP (Dr 5700 Repairs & Maintenance / Cr 2000) so it's
+// Maintenance cost on completion is routed through AP (Dr 5710 Repairs & Maintenance / Cr 2000) so it's
 // payable + reconciles. Tenant isolation by RLS; the asset register is the system of record for assets.
 @Injectable()
 export class EamService {
@@ -74,7 +74,7 @@ export class EamService {
     return { work_orders: rows.map((w: any) => this.fmtWo(w)), count: rows.length };
   }
 
-  // Advance a work order. Completing it with a vendor + actual cost raises an AP payable (Dr 5700 / Cr 2000).
+  // Advance a work order. Completing it with a vendor + actual cost raises an AP payable (Dr 5710 / Cr 2000).
   async updateWorkOrderStatus(woNo: string, dto: WoStatusDto, user: JwtUser) {
     const db = this.db as any;
     const [wo] = await db.select().from(maintenanceWorkOrders).where(eq(maintenanceWorkOrders.woNo, woNo)).limit(1);
@@ -96,7 +96,7 @@ export class EamService {
       if (vendorName && actualCost > 0 && !apTxnNo) {
         const ap = await this.finance.createApTxn({
           vendor_name: vendorName, txn_type: 'Maintenance', invoice_no: woNo, invoice_date: ymd(), due_date: ymd(),
-          amount: actualCost, vat_treatment: dto.vat_treatment ?? 'standard', expense_account: '5700',
+          amount: actualCost, vat_treatment: dto.vat_treatment ?? 'standard', expense_account: '5710',
           tenant_id: wo.tenantId, idempotency_key: woNo, remarks: `Maintenance ${woNo} ${wo.assetNo ?? ''}`.trim(),
         }, user);
         apTxnNo = ap?.txn_no ?? null;

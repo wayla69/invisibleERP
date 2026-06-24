@@ -115,6 +115,18 @@ RULES=[
  ("R13","Maintain master data / config","Transact on it",{"masterdata","bom_master"},{"pos","order_mgt","procurement","creditors","ar"},
    "Change configuration/master data and transact against it without review.","Medium",
    "Segregate config from operations; master-data change log reviewed independently."),
+ # ---- CRM / loyalty single-duty conflicts (Phase 4) — loyalty points are a TFRS-15 liability, so issuing
+ #      loyalty value must be segregated from using/creating it. Granular crm_* perms (not held by the coarse
+ #      named roles), so these are clean in the to-be design; only the Admin superuser holds all sides. ----
+ ("R14","Configure rewards / vouchers","POS redemption at till",{"crm_reward"},{"pos_sell"},
+   "Create a reward/voucher and redeem it for oneself at the till.","High",
+   "Separate reward-catalog configuration from POS redemption; review reward-change + redemption reports."),
+ ("R15","Manual points adjustment","Member master maintenance",{"crm_points_adjust"},{"crm_member"},
+   "Enrol a ghost member and credit points to it.","High",
+   "Separate member enrolment from points adjustment; over-threshold adjust via maker-checker approval."),
+ ("R16","Campaign issuance of point-bearing value","Points adjustment",{"crm_campaign"},{"crm_points_adjust"},
+   "Self-issue loyalty value through two channels (campaign coupons + manual adjustment).","High",
+   "Separate campaign issuance from points adjustment; review issuance + adjustment logs."),
 ]
 
 def conflicts_for(role_perms):
@@ -140,7 +152,7 @@ def crow(r,l,v):
 crow(6,"Entity","Invisible Consulting — Oshinei Enterprise ERP (EGC)")
 crow(7,"Source of truth","packages/shared/src/permissions.ts — PERMISSIONS + DEFAULT_ROLE_PERMISSIONS")
 crow(8,"Enforcement today","RBAC via @Permissions (OR-semantics) + PermissionsGuard; tenant isolation via RLS")
-crow(9,"Method","13 SoD conflict rules; a role conflicts when it holds duties on BOTH sides of a rule")
+crow(9,"Method","16 SoD conflict rules; a role conflicts when it holds duties on BOTH sides of a rule")
 crow(10,"Prepared (draft)",DATE+"  ·  Version 1.0 — review with auditor + SOX advisor")
 cov["B13"]="How to read"; cov["B13"].font=f(11,True,NAVY)
 cov["B14"]=("Tabs: Permission Inventory (what each permission grants + sensitivity) · SoD Rules (the conflict library) · "
@@ -277,7 +289,7 @@ for (role,rid,da,db,held,risk,sev,mit) in det_nonadmin:
     ri+=1
 # Admin summary row
 for j,v in enumerate(["Admin","ALL","(superuser)","(superuser)","ALL 38 permissions",
-   "Holds every duty — inherently violates all 13 rules by design.","High",
+   "Holds every duty — inherently violates all 16 rules by design.","High",
    "Minimize named Admins; MFA (ITGC-AC-06); break-glass procedure; full reliance on audit log + hash-chained journal (ITGC-AC-10/11) + periodic privileged-access review."],1):
     c=dc.cell(ri,j,v); c.font=f(9); c.alignment=WRAP; c.border=BORDER; c.fill=fill(INH_F if j<=5 else "FFFFFF")
     if j in (1,2,7): c.alignment=CTR
@@ -315,7 +327,7 @@ TB_ROLES=[
  ("Customer",{"order_cust","cust_pos","cust_dash","loyalty","track"},"Portal self-service (unchanged)."),
  ("Superuser / Admin",{"__ALL__"},"Break-glass only — minimal named users, MFA, monitored (inherent superuser)."),
 ]
-# 3) the 13 rules remapped to to-be sub-permissions
+# 3) the 16 rules remapped to to-be sub-permissions
 TB_RULES=[
  ("R01",{"users"},{"pos_sell","pos_refund","order_mgt","procurement","creditors","ar","returns","pricelist","promos","md_vendor","md_item","md_config","wh_receive","wh_adjust","gl_post"}),
  ("R02",{"md_vendor"},{"creditors"}),
@@ -330,6 +342,9 @@ TB_RULES=[
  ("R11",{"wh_adjust"},{"wh_count"}),
  ("R12",{"returns"},{"pos_refund"}),
  ("R13",{"md_item","md_config","bom_master"},{"pos_sell","order_mgt","procurement","creditors","ar"}),
+ ("R14",{"crm_reward"},{"pos_sell"}),
+ ("R15",{"crm_points_adjust"},{"crm_member"}),
+ ("R16",{"crm_campaign"},{"crm_points_adjust"}),
 ]
 def tb_conflicts(perms):
     if "__ALL__" in perms: return [rid for rid,_,_ in TB_RULES]

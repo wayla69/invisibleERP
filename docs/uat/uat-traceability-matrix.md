@@ -2,7 +2,7 @@
 
 **Status: DRAFT v0.2 · 2026-06-23**
 
-Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R13) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
+Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
 Coverage check: every in-scope requirement/control should appear in ≥1 executed case (UAT exit criterion §7.4). Section numbers in the narrative column follow the common 14-section structure (§7 = Process narrative, §9 = Control matrix).
 
@@ -45,6 +45,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-007 | AR receipt (RCP-) | REV-05 | 01 §7 |
 | UAT-O2C-008 | Portal sale VAT + loyalty | REV-03, GL-01 | 01 §7 |
 | UAT-O2C-009 | Tender capture | REV-06 | 01 §7 |
+| UAT-O2C-009a | Card tender real PSP charge | REV-03 | 07 §7 |
+| UAT-O2C-009b | No-token/declined never books funds | REV-03 | 07 §7 |
+| UAT-O2C-009c | Card tender idempotency = one charge | REV-02 | 07 §7 |
 | UAT-O2C-010 | Full refund | REV-09 | 01 §7 |
 | UAT-O2C-011 | Over-refund block | REV-09 | 01 §9, §13 |
 | UAT-O2C-012 | Return + restock + GL reversal | REV-09, GL-01 | 01 §7, §9 |
@@ -151,19 +154,26 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-113 | Service charge persisted + itemised on the receipt | REST-10 | 20 §7 |
 | UAT-O2C-114 | Large-party receipt ties out incl. service charge | REST-10 | 20 §7, §9 |
 | UAT-O2C-115 | Send receipt via LINE channel | REST-10 | 20 §7 |
-| UAT-O2C-116 | Collections worklist (open overdue AR) | REV-12 | 01 §7, §9 |
-| UAT-O2C-117 | Dunning stage recommended by aging | REV-12 | 01 §7 |
-| UAT-O2C-118 | Record dunning action advances stage | REV-12 | 01 §7, §9 |
-| UAT-O2C-119 | Dunning on paid invoice rejected (ALREADY_PAID) | REV-12 | 01 §9, §13 |
-| UAT-O2C-120 | Credit status flags over-limit + serious overdue | REV-12, R09 | 01 §7, §9 |
-| UAT-O2C-121 | Credit check denies further credit (held customer) | REV-12, R09 | 01 §9, §13 |
-| UAT-O2C-122 | Order entry blocks 90+ defaulter (CREDIT_OVERDUE) | REV-12 | 01 §7, §9 |
-| UAT-O2C-123 | Order entry — over-limit still blocked (parity) | REV-08 | 01 §9, §13 |
-| UAT-O2C-124 | Order entry — good-standing customer can order | REV-12 | 01 §7 |
-| UAT-O2C-125 | Automated dunning sweep advances overdue invoices | REV-12 | 01 §7 |
-| UAT-O2C-126 | Dunning sweep is idempotent | REV-12 | 01 §7 |
-| UAT-O2C-127 | Schedule daily automated dunning | REV-12 | 01 §7 |
-| UAT-O2C-128 | Scheduler tick fires the dunning job | REV-12 | 01 §7 |
+| UAT-O2C-116 | Enrol/link member via LINE (idempotent) | Feature (LINE CRM) | 19 §7.8 |
+| UAT-O2C-117 | One LINE account = one member | Feature (LINE CRM) | 19 §7.8 |
+| UAT-O2C-118 | LINE push to userId, consent enforced | Feature (LINE CRM), MKT-04 | 19 §7.11 |
+| UAT-O2C-119 | Aggregator menu push (real adapter) | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-120 | Accept/reject routes to KDS + notifies platform | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-121 | Status callback + mock fallback | Feature (aggregator adapter) | 20 §7.7 |
+| UAT-O2C-122 | Multi-terminal realtime KDS event | Feature (multi-terminal SSE) | 20 §rev3.0 |
+| UAT-O2C-130 | Collections worklist (open overdue AR) | REV-12 | 01 §7, §9 |
+| UAT-O2C-131 | Dunning stage recommended by aging | REV-12 | 01 §7 |
+| UAT-O2C-132 | Record dunning action advances stage | REV-12 | 01 §7, §9 |
+| UAT-O2C-133 | Dunning on paid invoice rejected (ALREADY_PAID) | REV-12 | 01 §9, §13 |
+| UAT-O2C-134 | Credit status flags over-limit + serious overdue | REV-12, R09 | 01 §7, §9 |
+| UAT-O2C-135 | Credit check denies further credit (held customer) | REV-12, R09 | 01 §9, §13 |
+| UAT-O2C-136 | Order entry blocks 90+ defaulter (CREDIT_OVERDUE) | REV-12 | 01 §7, §9 |
+| UAT-O2C-137 | Order entry — over-limit still blocked (parity) | REV-08 | 01 §9, §13 |
+| UAT-O2C-138 | Order entry — good-standing customer can order | REV-12 | 01 §7 |
+| UAT-O2C-139 | Automated dunning sweep advances overdue invoices | REV-12 | 01 §7 |
+| UAT-O2C-140 | Dunning sweep is idempotent | REV-12 | 01 §7 |
+| UAT-O2C-141 | Schedule daily automated dunning | REV-12 | 01 §7 |
+| UAT-O2C-142 | Scheduler tick fires the dunning job | REV-12 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -426,6 +436,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-031 | Role dashboard catalog + layout validation | Feature (role dashboards) | 26 §3a |
 | UAT-RPT-032 | Role dashboard resolution filtered to viewer perms | Feature (role dashboards), ITGC-AC-02 | 26 §3a |
 | UAT-RPT-033 | Role dashboard default fallback + tenant isolation | Feature (role dashboards), ITGC-AC-03 | 26 §3a |
+| UAT-RPT-034 | Menu-engineering matrix (Kasavana–Smith) | Feature (menu engineering) | 20 §rev2.7 |
+| UAT-RPT-035 | Daypart / hour demand on the business clock | Feature (daypart), TZ (Asia/Bangkok) | 20 §rev2.7 |
+| UAT-RPT-036 | Void / discount shrinkage analytics | Feature (loss prevention) | 20 §rev2.7 |
+| UAT-RPT-037 | Staff / cashier performance | Feature (staff analytics) | 20 §rev2.9 |
+| UAT-RPT-038 | Sales trend vs prior window | Feature (sales trend) | 20 §rev2.9 |
+| UAT-RPT-039 | BOM availability forecast (servings-remaining) | Feature (BOM availability) | 20 §rev2.9 |
+| UAT-RPT-040 | Production plan — day-of-week forecast | Feature (production plan, DOW) | 20 §rev3.2 |
+| UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 
@@ -444,12 +462,42 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-POR-011 | Billing plans public | — | 08 §7 |
 | UAT-POR-012 | Credit hold/limit on portal | REV-08 | 01 §9 |
 
+## 11 — Loyalty & CRM (Members & Points) → `19-marketing-pricing-loyalty.md`
+
+| UAT ID | Requirement / Feature | RCM control / SoD | Narrative § |
+|---|---|---|---|
+| UAT-LOY-001 | Member directory list + search | Feature (member directory) | 19 §7 (8a) |
+| UAT-LOY-002 | Directory RBAC gate | ITGC-AC-02/07 | 19 §6 |
+| UAT-LOY-003 | Member 360 + points history | Feature (CRM 360) | 19 §7 |
+| UAT-LOY-004 | Withdraw marketing consent stops sends | MKT-04, MKT-05 | 19 §7, §9 |
+| UAT-LOY-005 | Consent register persists per purpose | MKT-05 | 19 §7 |
+| UAT-LOY-006 | Points-liability tie-out (acct 2250) | MKT-06 | 19 §7, §9 |
+| UAT-LOY-007 | Members tenant-isolated (RLS) | ITGC-AC (RLS) | 08 §9 |
+| UAT-LOY-008 | Liability accrual posts & ties out to GL 2250 | MKT-06 | 19 §7, §9 |
+| UAT-LOY-009 | Accrual run idempotent (no double-post) | MKT-06 | 19 §7 |
+| UAT-LOY-010 | Tie-out tenant-scoped (Admin bypass) + all-member basis | MKT-06, ITGC-AC (RLS) | 19 §7 |
+| UAT-LOY-011 | Aged points expire (breakage) & release liability | MKT-06 | 19 §7, §9 |
+| UAT-LOY-012 | Period close auto-accrues the liability | MKT-06 | 19 §7, §9 |
+| UAT-LOY-013 | Scheduled maintenance sweep (expire + accrue, per tenant) | MKT-06 | 19 §7, §9 |
+| UAT-LOY-014 | Reward burn → single-use code → liability release → double-use blocked | MKT-07 | 19 §7, §9 |
+| UAT-LOY-015 | Reward eligibility guards (points/stock/limit/tier) | MKT-07 | 19 §7 |
+| UAT-LOY-016 | Tier auto-recompute + journey | MKT-08 | 19 §7, §9 |
+| UAT-LOY-017 | Mission claim grants reward once (single-claim) | MKT-08 | 19 §7, §9 |
+| UAT-LOY-018 | Referral rewards both once + anti-gaming + tenant-scoped | MKT-08, ITGC-AC (RLS) | 19 §7, §9 |
+| UAT-LOY-019 | Member self-service app — phone-OTP login, self-scoped, staff routes blocked | LYL-10, ITGC-AC | 19 §7 (21), control 21 |
+| UAT-LOY-019b | Member OTP brute-force cap holds (adversarial-review fix) | LYL-10b | 19 control 21 |
+| UAT-LOY-020 | Spin-the-wheel — weighted draw, free→cost, per-prize stock cap | MKT-09 | 19 §7 (22), control 22 |
+| UAT-LOY-021 | Campaign — segmented send respects opt-out, audited, idempotent | MKT-10 | 19 §7 (23), control 23 |
+| UAT-LOY-022 | Partner privilege — tier-gated single-use claim, limit, partner redeem | MKT-11 | 19 §7 (24), control 24 |
+| UAT-LOY-023 | Loyalty analytics — tenant-scoped liability + funnel + churn | LYL-15 | 19 §7 (25) |
+| UAT-LOY-024 | LINE login — linked account mints a member token; unlinked rejected | ITGC-AC, LYL-16 | 19 §7 (26), control 26 |
+
 ## Coverage summary
 
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 40 | 16 |
+| 02 Order-to-Cash | 47 | 18 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
 | 05 GL & Close (incl. fixed assets / EAM) | 28 | 15 |
@@ -458,4 +506,5 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| **Total** | **284** | **130** |
+| 11 Loyalty & CRM | 25 | 21 |
+| **Total** | **316** | **153** |

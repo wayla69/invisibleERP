@@ -21,7 +21,8 @@ export class MessagingService {
       [member] = await db.select().from(posMembers).where(eq(posMembers.id, dto.member_id)).limit(1);
       if (!member) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
       if (member.marketingOptIn === false) return this.record(user, { memberId: dto.member_id, channel: dto.channel, recipient: null, body: dto.body, campaign: dto.campaign, status: 'skipped', provider: null, error: 'opted out' });
-      recipient = recipient ?? (dto.channel === 'email' ? member.email : member.phone);
+      // LINE pushes address the member's LINE userId (not their phone); email→email; else phone.
+      recipient = recipient ?? (dto.channel === 'email' ? member.email : dto.channel === 'line' ? member.lineUserId : member.phone);
     }
     if (!recipient) return this.record(user, { memberId: dto.member_id ?? null, channel: dto.channel, recipient: null, body: dto.body, campaign: dto.campaign, status: 'failed', provider: null, error: 'no recipient contact' });
     const gw = resolveMessageGateway(dto.channel);

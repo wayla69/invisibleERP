@@ -21,6 +21,7 @@ const TenderBody = z.object({
   tip: z.number().nonnegative().optional(),
   currency: z.string().optional(),
   gateway: z.string().optional(),
+  token: z.string().min(1).max(500).optional(),   // card token / wallet source from the terminal SDK
   till_session_id: z.number().optional(),
   // C1: a stable client token (e.g. a per-tender UUID). Retries with the same key return the original
   // tender instead of charging again. Optional so legacy/keyless callers keep working.

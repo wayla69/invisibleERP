@@ -51,6 +51,14 @@ total is shown, and any loyalty points earned are recorded.
    PromptPay, or Store Credit (gift card).
 2. Enter the amount tendered and record the payment.
 
+> **Card payments:** when a payment provider is configured (Opn/Omise or Stripe —
+> see `OPN_SECRET_KEY` / `STRIPE_SECRET_KEY`), a Card tender is charged for real
+> through the card terminal. If the card is **declined** the tender comes back as
+> **Failed** (the sale is not marked paid) and the declined attempt is recorded —
+> ask for another card or payment method. Without a provider configured the system
+> uses a safe test gateway (no real money moves), so card tenders in a demo
+> environment always succeed.
+
 **Expected result:** The payment is captured and a receipt can be printed or
 sent.
 
@@ -235,6 +243,12 @@ course number and tap **ส่งคอร์ส** to fire just that course — 
 until you fire them. The KDS shows each ticket's course and lists them in course
 order, so the kitchen cooks in the right sequence.
 
+**Live across every screen.** The KDS and the **โต๊ะ (tables)** board update in
+**real time** — when one terminal advances a dish (เริ่มทำ → เสร็จ → เสิร์ฟ) or a
+table is seated/cleared, every other screen reflects it at once, without waiting for
+a refresh. A small **เรียลไทม์ / กำลังเชื่อมต่อ…** badge shows the live status; if the
+connection drops it falls back to a periodic refresh automatically.
+
 **Kitchen (KDS).** Open **จอครัว (KDS)** (back-of-house). Tickets are grouped by
 station and refresh automatically; tap a card to advance it
 **เริ่มทำ → เสร็จแล้ว → เสิร์ฟแล้ว**. The colour border flags how long a ticket has
@@ -409,6 +423,11 @@ On the **CRM 360** screen you can reach out to members:
 - **Send a message** to a group — **วันเกิดวันนี้** (today's birthdays), an
   **RFM segment** (Champions, Loyal, At Risk, …), or **all members** — over
   **SMS / LINE / email**, then read the delivery log.
+- **LINE members:** a customer can become a member by signing in with **LINE**
+  (LIFF / LINE Login). The shop links their LINE account to their membership, and
+  from then on **LINE messages reach them directly in LINE** (not their phone), and
+  you can look a member up by their LINE account. One LINE account links to one
+  member.
 
 Two things to know: a member must have **opted in** to marketing (set when you
 enrol or edit them) — anyone opted out is automatically skipped and never

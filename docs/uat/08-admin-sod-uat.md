@@ -1,6 +1,6 @@
 # UAT — Cycle 08: Admin / Segregation of Duties / Access Governance / Audit
 
-**Status: DRAFT v0.3 · 2026-06-24** · Cross-ref: process narrative `08-itgc.md` (ITGC-AC-01/08/09/10, SoD R01–R13) + `27-platform-customization.md` §7 (platform features, incl. public API + SSO/SCIM), harness `tools/cutover/src/compliance.ts` + `ext.ts`.
+**Status: DRAFT v0.4 · 2026-06-24** · Cross-ref: process narrative `08-itgc.md` (ITGC-AC-01/08/09/10, SoD R01–R16) + `27-platform-customization.md` §7 (platform features, incl. public API + SSO/SCIM), harness `tools/cutover/src/compliance.ts` + `ext.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -86,3 +86,4 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-ADM-078 | e-Invoicing — submit, idempotent, validation | Exec/Creditors | — | 1. `GET …/providers`. 2. `POST …/submit {valid doc}` ×2. 3. submit a doc with no total. | as left | providers incl. stub + country adapters; submit returns accepted + ref; re-submit idempotent (same ref); 400 `BAD_DOC`; no GL. | Med | Control | Feature (e-invoicing) | Not Run | ext.ts |
 | UAT-ADM-079 | Ops — metrics + cache round-trip | Exec/AccessAdmin | — | 1. `GET /api/ops/metrics`. 2. `GET …/cache-selftest` ×2. | as left | metrics expose uptime + cache (provider memory) + scale posture; first self-test cached:false, second cached:true (CacheService works); no GL. | Low | Positive | Feature (scale/ops) | Not Run | ext.ts |
 | UAT-ADM-080 | PWA — installable + offline shell | Any device | — | 1. load the app, use the browser "Install". 2. inspect `/manifest.webmanifest` + SW registration. | as left | manifest served (name / icons / standalone); the app-shell SW registers (GET-only, API-skipping); installable; offline POS replays via the idempotent outbox. | Low | Positive | Feature (PWA) | Not Run | web build |
+| UAT-ADM-081 | SoD R14 — reward config ✗ POS redemption blocked | AccessAdmin/Admin | — | 1. `POST /api/admin/users` with both `crm_reward`+`pos_sell`. 2. `POST /api/admin/users` with `['crm_reward']` only. | `{username: sod_r14, permissions:[crm_reward, pos_sell]}` | (1) 422 `SOD_CONFLICT` naming `R14`; user NOT created. (2) 200/201; single-duty `crm_reward` user accepted. | High | Control | ITGC-AC-09, R14 | Not Run | compliance.ts |

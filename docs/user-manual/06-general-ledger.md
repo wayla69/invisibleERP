@@ -231,7 +231,7 @@ Keep equipment running with maintenance **work orders**, **preventive-maintenanc
 3. On **completion**, enter the **actual cost**, downtime and vendor.
 
 **Expected result:** If a vendor and cost are given, the maintenance spend posts as
-an **AP payable** (`Dr 5700 Repairs & Maintenance / Cr 2000`), so it shows in AP
+an **AP payable** (`Dr 5710 Repairs & Maintenance / Cr 2000`), so it shows in AP
 aging and is paid through the normal AP flow. In-house work (no vendor) just records
 the cost.
 

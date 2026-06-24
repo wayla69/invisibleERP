@@ -206,8 +206,8 @@ async function main() {
   const badT = await inj('PATCH', `/api/eam/work-orders/${woNo}/status`, admin, { status: 'in_progress' });
   ok('Illegal WO transition rejected (completed→in_progress)', badT.status === 400 && badT.json?.error?.code === 'BAD_TRANSITION', `st=${badT.status} code=${badT.json?.error?.code}`);
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
-  const acct5700 = (tb.rows ?? []).find((r: any) => r.account_code === '5700');
-  ok('Maintenance cost posts to 5700 Repairs & Maintenance', near(acct5700?.debit, 1000), `dr=${acct5700?.debit}`);
+  const acct5700 = (tb.rows ?? []).find((r: any) => r.account_code === '5710');
+  ok('Maintenance cost posts to 5710 Repairs & Maintenance', near(acct5700?.debit, 1000), `dr=${acct5700?.debit}`);
   const apM = (await inj('GET', '/api/finance/ap?status=Unpaid&limit=50', admin)).json;
   ok('Maintenance cost is an AP payable', (apM.transactions ?? []).some((t: any) => t.Invoice_No === woNo && near(t.Outstanding_Amount, 1000)), '');
 
