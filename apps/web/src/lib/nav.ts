@@ -98,6 +98,9 @@ export interface NavItem {
 export interface NavSubGroup {
   title: string;
   items: NavItem[];
+  /** Whether the sub-section starts expanded. Defaults to `true`; set `false` for advanced/infrequent
+   *  sections so the group opens compact. A saved user toggle (localStorage) overrides this. */
+  defaultOpen?: boolean;
   /** Workspaces this sub-section belongs to. Items may override per-item. Defaults to the parent group's. */
   workspace?: Workspace[];
 }
@@ -346,6 +349,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       },
       {
         title: 'ปรับแต่ง',
+        defaultOpen: false, // advanced configuration — collapsed by default
         items: [
           { label: 'การแจ้งเตือน (Alert rules)', href: '/alerts', icon: BellRing, perms: ['masterdata', 'users', 'exec', 'dashboard'] },
           { label: 'ระบบอัตโนมัติ (Automation)', href: '/automation', icon: Workflow, perms: ['masterdata', 'users', 'exec'] },
@@ -357,6 +361,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       },
       {
         title: 'เชื่อมต่อ & ขยาย',
+        defaultOpen: false, // integration/developer tooling — collapsed by default
         items: [
           { label: 'ตัวเชื่อมต่อ (Connectors)', href: '/connectors', icon: Cable, perms: ['users', 'exec'] },
           { label: 'เว็บฮุค (Webhooks)', href: '/webhooks', icon: Webhook, perms: ['users'] },
