@@ -31,6 +31,7 @@ interface Item {
   track_stock: boolean;
   is_available: boolean;
   has_modifiers?: boolean;
+  image_url?: string | null;
 }
 interface Category {
   id: number;
@@ -201,6 +202,10 @@ function Items() {
             rows={items}
             rowKey={(r) => r.sku}
             columns={[
+              { key: 'image_url', label: '', render: (r) => r.image_url
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={r.image_url} alt="" className="size-10 shrink-0 rounded-md object-cover" />
+                : <div className="size-10 rounded-md bg-muted" /> },
               { key: 'sku', label: 'SKU' },
               { key: 'name', label: 'ชื่อเมนู' },
               { key: 'category_id', label: 'หมวดหมู่', render: (r) => catName(r.category_id) },
