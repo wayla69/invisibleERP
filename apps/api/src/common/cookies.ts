@@ -10,6 +10,24 @@ export const CSRF_COOKIE = 'ierp_csrf';  // readable — double-submit CSRF toke
 const MAX_AGE = Number(process.env.AUTH_COOKIE_MAX_AGE ?? 43200); // seconds (default 12h)
 const isProd = () => process.env.NODE_ENV === 'production';
 
+// Cross-origin deploys (web and API on different hosts) need the session cookie scoped so the browser can
+// read the CSRF flag on the web origin and send the auth cookie to the API. Both are env-driven and
+// default to the original single-origin behaviour (no Domain, SameSite=Lax) so existing deploys are
+// unchanged.
+//   AUTH_COOKIE_DOMAIN   — e.g. ".oshinei.co" makes the cookie shared by every *.oshinei.co subdomain
+//                          (app.* + api.* are same-site under one registrable domain, so Lax still works).
+//   AUTH_COOKIE_SAMESITE — "None" for web/API on *different registrable domains* (true cross-site);
+//                          forces Secure (browsers drop SameSite=None without it). "Lax" (default) | "Strict".
+// Read per-call (not memoised) so a deploy can change them without a code change — and so tests can flip
+// them for a single request. Only ever evaluated on login/logout, so the cost is irrelevant.
+const cookieDomain = (): string => (process.env.AUTH_COOKIE_DOMAIN ?? '').trim();
+const cookieSameSite = (): 'Lax' | 'None' | 'Strict' => {
+  const v = (process.env.AUTH_COOKIE_SAMESITE ?? 'Lax').trim().toLowerCase();
+  if (v === 'none') return 'None';
+  if (v === 'strict') return 'Strict';
+  return 'Lax';
+};
+
 // Parse a single cookie value out of the raw Cookie header.
 export function readCookie(req: { headers?: Record<string, any> }, name: string): string | undefined {
   const raw = req.headers?.cookie;
@@ -23,9 +41,13 @@ export function readCookie(req: { headers?: Record<string, any> }, name: string)
 }
 
 function serialize(name: string, value: string, opts: { httpOnly?: boolean; maxAge?: number }): string {
-  const p = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'SameSite=Lax'];
+  const sameSite = cookieSameSite();
+  const domain = cookieDomain();
+  const p = [`${name}=${encodeURIComponent(value)}`, 'Path=/', `SameSite=${sameSite}`];
+  if (domain) p.push(`Domain=${domain}`);
   if (opts.httpOnly) p.push('HttpOnly');
-  if (isProd()) p.push('Secure'); // browsers still send Secure cookies over http://localhost in dev
+  // Secure in prod, and ALWAYS with SameSite=None (browsers reject a None cookie without Secure).
+  if (isProd() || sameSite === 'None') p.push('Secure'); // browsers still send Secure cookies over http://localhost in dev
   if (opts.maxAge != null) p.push(`Max-Age=${opts.maxAge}`);
   return p.join('; ');
 }

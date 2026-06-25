@@ -25,6 +25,9 @@ webhook in the webhook handler).
 | `APP_ENC_KEY` | ✅ (boot-blocking) | AES-256-GCM key for TOTP seeds + webhook secrets at rest | planned workstream — re-encrypt on rotate |
 | `PSP_WEBHOOK_SECRET` (or `PSP_WEBHOOK_SECRET_<PROVIDER>`) | ✅ (boot-blocking) | HMAC-verify PSP callbacks | per PSP policy |
 | `CORS_ORIGINS` | recommended (warns) | Explicit allowed web origins | on domain change |
+| `AUTH_COOKIE_DOMAIN` | **required when web & api are on different hosts** (else login bounces) | Scopes the session cookies (`ierp_token`/`ierp_csrf`) to a shared parent domain (e.g. `.example.com`) so both origins share them. Unset ⇒ host-only (single-origin / same-origin proxy). Not a secret. | on domain change |
+| `AUTH_COOKIE_SAMESITE` | only for **cross-registrable-domain** web/api | `Lax` (default) \| `None` \| `Strict`. `None` (true cross-site) auto-adds `Secure` (HTTPS required). Not a secret. | on topology change |
+| `AUTH_COOKIE_MAX_AGE` | optional | Session cookie lifetime in seconds (default `43200` = 12h). Not a secret. | n/a |
 | `SENTRY_DSN` | recommended (warns) | Error reporting | n/a |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended (warns) | Trace export | n/a |
 | `TABLE_TOKEN_SECRET` | optional (falls back to `APP_ENC_KEY`) | HMAC for QR table-session tokens | with APP_ENC_KEY |
@@ -47,3 +50,4 @@ workstream (do **not** rotate it casually; it invalidates stored TOTP/webhook se
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-06-23 | Platform / Security | Initial secrets policy + matrix + rotation; documents boot-time fail-closed validation. |
+| 1.1 | 2026-06-25 | Platform / Security | Added session-cookie scoping env to the matrix — `AUTH_COOKIE_DOMAIN` (required for separate web/api origins), `AUTH_COOKIE_SAMESITE`, `AUTH_COOKIE_MAX_AGE` (non-secret config, documented for completeness). Cross-references `railway-setup.md` §4. |
