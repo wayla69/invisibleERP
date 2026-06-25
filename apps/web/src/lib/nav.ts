@@ -156,6 +156,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ขายหน้าร้าน (Register)', href: '/pos/register', icon: ShoppingCart, perms: ['pos', 'order_mgt'] },
       { label: 'รายการออเดอร์', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
       { label: 'คืนสินค้า & คืนเงิน', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt'] },
+      { label: 'บัตรของขวัญ / เครดิตร้าน', href: '/giftcards', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
       { label: 'โต๊ะ', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
       { label: 'ครัว (KDS)', href: '/kds', icon: ChefHat, perms: ['pos'] },
       { label: 'เมนูอาหาร', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },

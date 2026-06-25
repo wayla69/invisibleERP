@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, and, like, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { giftCards, giftCardTxns } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -34,6 +34,37 @@ export class GiftCardService {
     }
     await db.insert(giftCardTxns).values({ txnNo: await this.docNo.nextDaily('GCT'), tenantId: user.tenantId ?? null, cardNo, type: 'Issue', amount: fx(face, 2), balanceAfter: fx(face, 2), refDoc: cardNo, journalNo, createdBy: user.username });
     return { card_no: cardNo, balance: face, journal_no: journalNo };
+  }
+
+  // Gift-card register (ops/finance): every card for the caller's tenant + the OUTSTANDING liability
+  // (sum of Active balances = the unredeemed 2200 Customer-Deposits exposure). Tenant-scoped explicitly
+  // (an HQ/Admin request bypasses RLS); typed builders / column refs only at user-input sites.
+  async listCards(q: { status?: string; search?: string; limit?: number }, user: JwtUser) {
+    const db = this.db as any;
+    const conds: any[] = [];
+    if (user.tenantId != null) conds.push(eq(giftCards.tenantId, user.tenantId));
+    if (q.status) conds.push(eq(giftCards.status, q.status as any));
+    if (q.search) conds.push(like(giftCards.cardNo, `%${q.search}%`));
+    const where = conds.length ? and(...conds) : undefined;
+    const rows = await db.select().from(giftCards).where(where).orderBy(desc(giftCards.id)).limit(q.limit ?? 200);
+    const [agg] = await db.select({
+      total: sql<string>`count(*)`,
+      active: sql<string>`coalesce(sum(case when ${giftCards.status}='Active' then 1 else 0 end),0)`,
+      liability: sql<string>`coalesce(sum(case when ${giftCards.status}='Active' then ${giftCards.balance} else 0 end),0)`,
+    }).from(giftCards).where(user.tenantId != null ? eq(giftCards.tenantId, user.tenantId) : undefined);
+    return {
+      cards: rows.map((c: any) => ({ card_no: c.cardNo, initial_amount: n(c.initialAmount), balance: n(c.balance), status: String(c.status), currency: c.currency ?? 'THB', note: c.note ?? null, issued_by: c.createdBy ?? null, created_at: c.createdAt ?? null })),
+      count: rows.length, total: n(agg?.total), active: n(agg?.active), outstanding: roundCurrency(n(agg?.liability), 'THB'),
+    };
+  }
+
+  // Per-card transaction ledger (issue / redeem / refund) for the register drill-down.
+  async cardTxns(cardNo: string) {
+    const db = this.db as any;
+    const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).limit(1);
+    if (!c) throw new NotFoundException({ code: 'GIFT_CARD_NOT_FOUND', message: 'Gift card not found', messageTh: 'ไม่พบบัตรของขวัญ' });
+    const txns = await db.select().from(giftCardTxns).where(eq(giftCardTxns.cardNo, cardNo)).orderBy(desc(giftCardTxns.id));
+    return { card_no: c.cardNo, initial_amount: n(c.initialAmount), balance: n(c.balance), status: String(c.status), txns: txns.map((t: any) => ({ txn_no: t.txnNo, type: String(t.type), amount: n(t.amount), balance_after: n(t.balanceAfter), ref_doc: t.refDoc, created_at: t.createdAt ?? null })) };
   }
 
   // Live balance + status (RLS-scoped → cross-tenant lookup 404s).

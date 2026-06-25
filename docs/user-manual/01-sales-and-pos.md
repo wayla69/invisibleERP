@@ -427,6 +427,23 @@ full breakdown (subtotal / VAT / total). The register is **store-scoped** — ea
 sees only its own returns. Use it for daily reconciliation and to watch refund volume for
 leakage.
 
+### Gift-card / store-credit register
+
+**Screen:** `/giftcards` (**บัตรของขวัญ / เครดิตร้าน**) · **Required permission:**
+`pos` / `creditors` / `exec`.
+
+Cards are **issued at the register** (sold for cash, or minted as store-credit on a
+return) — this screen is where you **see them all**. The **Gift-card Register** lists
+every card with its initial value, **current balance**, status (**ใช้งานได้** Active /
+**ใช้หมดแล้ว** Redeemed / **ยกเลิก** Void), who issued it and when. The KPI cards show
+the card count, how many are still Active, and — most important for finance — the
+**ยอดคงค้างรวม (outstanding liability)**: the sum of all Active balances, which is the
+store's unredeemed obligation carried in GL account **2200 (เงินรับล่วงหน้า)**. Filter by
+status or search a card number, and click **ประวัติ** on any card to see its full
+transaction history (issue / redeem / store-credit top-up) with the running balance and
+the linked sale. The register is **store-scoped**. Use it to look a customer's card up,
+and to tie the outstanding balance out to the GL at period close.
+
 ---
 
 ## 6. Opening & closing the till (cash drawer) + Z-report
