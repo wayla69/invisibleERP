@@ -2,14 +2,15 @@
 
 import { useState, type ComponentProps, type Dispatch, type SetStateAction } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Banknote, BellRing, CalendarClock, Download, HandCoins, PlayCircle, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
+import { Banknote, BellRing, CalendarClock, CheckCheck, Download, HandCoins, PlayCircle, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -163,13 +164,16 @@ function ReceivablesTab() {
   // ── AR receipt (record a customer payment against an invoice) ──
   const [arOpen, setArOpen] = useState(false);
   const [arForm, setArForm] = useState<any>({ invoice_no: '', amount: '', method: 'Transfer', ref_no: '' });
-  const [arMsg, setArMsg] = useState('');
   const arReceipt = useMutation({
     mutationFn: () => api('/api/finance/ar/receipts', { method: 'POST', body: JSON.stringify({ ...arForm, amount: Number(arForm.amount) }) }),
-    onSuccess: (r: any) => { setArMsg(`✅ รับชำระ ${r.receipt_no} — สถานะ ${r.status}`); refresh(); setArForm({ invoice_no: '', amount: '', method: 'Transfer', ref_no: '' }); },
-    onError: (e: any) => setArMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`รับชำระ ${r.receipt_no} — สถานะ ${r.status}`); refresh(); setArForm({ invoice_no: '', amount: '', method: 'Transfer', ref_no: '' }); },
+    onError: (e: any) => notifyError(e.message),
   });
-  const syncAr = useMutation({ mutationFn: () => api('/api/finance/ar/sync', { method: 'POST' }), onSuccess: () => refresh() });
+  const syncAr = useMutation({
+    mutationFn: () => api('/api/finance/ar/sync', { method: 'POST' }),
+    onSuccess: () => { notifySuccess('ซิงก์ลูกหนี้ (AR) เรียบร้อย'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
 
   return (
     <div className="space-y-6">
@@ -179,7 +183,7 @@ function ReceivablesTab() {
           <Button variant="outline" size="sm" onClick={() => syncAr.mutate()} disabled={syncAr.isPending}>
             <RefreshCw className={`size-4 ${syncAr.isPending ? 'animate-spin' : ''}`} /> Sync AR
           </Button>
-          <Dialog open={arOpen} onOpenChange={(o) => { setArOpen(o); setArMsg(''); }}>
+          <Dialog open={arOpen} onOpenChange={setArOpen}>
             <DialogTrigger asChild><Button variant="outline" size="sm"><HandCoins className="size-4" /> รับชำระ (AR)</Button></DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>รับชำระจากลูกหนี้</DialogTitle></DialogHeader>
@@ -188,10 +192,9 @@ function ReceivablesTab() {
                 <Field label="จำนวนเงิน" name="amount" type="number" step="0.01" form={arForm} set={setArForm} />
                 <Field label="วิธีรับชำระ" name="method" form={arForm} set={setArForm} />
                 <Field label="อ้างอิง" name="ref_no" form={arForm} set={setArForm} />
-                {arMsg && <Msg ok={arMsg.startsWith('✅')}>{arMsg}</Msg>}
               </div>
               <DialogFooter>
-                <Button onClick={() => { setArMsg(''); arReceipt.mutate(); }} disabled={arReceipt.isPending || !arForm.invoice_no || !arForm.amount}>บันทึก</Button>
+                <Button onClick={() => arReceipt.mutate()} disabled={arReceipt.isPending || !arForm.invoice_no || !arForm.amount}>บันทึก</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -202,6 +205,7 @@ function ReceivablesTab() {
         {ar.data && (
           <DataTable
             rows={ar.data.invoices}
+            emptyState={{ icon: ReceiptText, title: 'ยังไม่มีใบแจ้งหนี้', description: 'กด Sync AR เพื่อดึงใบแจ้งหนี้ลูกหนี้เข้ามา' }}
             columns={[
               { key: 'Invoice_No', label: 'เลขที่' },
               { key: 'Customer_Name', label: 'ลูกค้า' },
@@ -210,7 +214,7 @@ function ReceivablesTab() {
               { key: 'Outstanding_Amount', label: 'คงค้าง', align: 'right', render: (r: any) => <span className="tabular">{baht(r.Outstanding_Amount)}</span> },
               { key: 'Status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
               { key: 'act', label: '', sortable: false, render: (r: any) => (
-                <Button variant="ghost" size="sm" onClick={() => { setArForm({ invoice_no: r.Invoice_No, amount: String(r.Outstanding_Amount), method: 'Transfer', ref_no: '' }); setArMsg(''); setArOpen(true); }}>รับชำระ</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setArForm({ invoice_no: r.Invoice_No, amount: String(r.Outstanding_Amount), method: 'Transfer', ref_no: '' }); setArOpen(true); }}>รับชำระ</Button>
               ) },
             ]}
           />
@@ -235,41 +239,38 @@ function PayablesTab() {
   // ── AP vendor invoice entry ──
   const [apOpen, setApOpen] = useState(false);
   const [apForm, setApForm] = useState<any>({ vendor_name: '', invoice_no: '', invoice_date: '', due_date: '', amount: '', txn_type: 'Invoice', vat_treatment: 'standard' });
-  const [apMsg, setApMsg] = useState('');
   const apCreate = useMutation({
     mutationFn: () => api('/api/finance/ap/transactions', { method: 'POST', body: JSON.stringify({ ...apForm, amount: Number(apForm.amount) }) }),
-    onSuccess: (r: any) => { setApMsg(`✅ บันทึกบิล ${r.txn_no}`); refresh(); setApForm({ vendor_name: '', invoice_no: '', invoice_date: '', due_date: '', amount: '', txn_type: 'Invoice', vat_treatment: 'standard' }); },
-    onError: (e: any) => setApMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`บันทึกบิล ${r.txn_no}`); refresh(); setApForm({ vendor_name: '', invoice_no: '', invoice_date: '', due_date: '', amount: '', txn_type: 'Invoice', vat_treatment: 'standard' }); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   // ── AP pay REQUEST (per row) — maker-checker: this submits a request; a different user approves it ──
   const [payTxn, setPayTxn] = useState<string | null>(null);
   const [payAmt, setPayAmt] = useState('');
-  const [payMsg, setPayMsg] = useState('');
   const payAp = useMutation({
     mutationFn: () => api(`/api/finance/ap/transactions/${payTxn}/pay`, { method: 'PATCH', body: JSON.stringify({ amount: Number(payAmt) }) }),
-    onSuccess: (r: any) => { setPayMsg(`✅ ส่งคำขอจ่าย ${r.payment_no ?? r.txn_no} — รออนุมัติ`); refresh(); setPayTxn(null); setPayAmt(''); },
-    onError: (e: any) => setPayMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอจ่าย ${r.payment_no ?? r.txn_no} — รออนุมัติ`); refresh(); setPayTxn(null); setPayAmt(''); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   // ── AP payment approval (checker) — approve / reject a pending payment (approver ≠ requester) ──
-  const [apprMsg, setApprMsg] = useState('');
   const approvePay = useMutation({
     mutationFn: (no: string) => api(`/api/finance/ap/payments/${no}/approve`, { method: 'POST' }),
-    onSuccess: (r: any) => { setApprMsg(`✅ อนุมัติจ่าย ${r.payment_no} — บิล ${r.bill_status}`); refresh(); },
-    onError: (e: any) => setApprMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`อนุมัติจ่าย ${r.payment_no} — บิล ${r.bill_status}`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
   const rejectPay = useMutation({
     mutationFn: (no: string) => api(`/api/finance/ap/payments/${no}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'rejected by approver' }) }),
-    onSuccess: (r: any) => { setApprMsg(`✅ ปฏิเสธคำขอ ${r.payment_no}`); refresh(); },
-    onError: (e: any) => setApprMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`ปฏิเสธคำขอ ${r.payment_no}`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold">เจ้าหนี้ (AP)</h2>
-        <Dialog open={apOpen} onOpenChange={(o) => { setApOpen(o); setApMsg(''); }}>
+        <Dialog open={apOpen} onOpenChange={setApOpen}>
           <DialogTrigger asChild><Button size="sm"><Plus className="size-4" /> บันทึกบิลเจ้าหนี้ (AP)</Button></DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>บันทึกบิลเจ้าหนี้</DialogTitle></DialogHeader>
@@ -288,9 +289,8 @@ function PayablesTab() {
                 </select>
               </div>
             </div>
-            {apMsg && <Msg ok={apMsg.startsWith('✅')}>{apMsg}</Msg>}
             <DialogFooter>
-              <Button onClick={() => { setApMsg(''); apCreate.mutate(); }} disabled={apCreate.isPending || !apForm.amount}>บันทึก</Button>
+              <Button onClick={() => apCreate.mutate()} disabled={apCreate.isPending || !apForm.amount}>บันทึก</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -300,6 +300,7 @@ function PayablesTab() {
         {ap.data && (
           <DataTable
             rows={ap.data.transactions}
+            emptyState={{ icon: Wallet, title: 'ยังไม่มีบิลเจ้าหนี้', description: 'กด บันทึกบิล เพื่อเพิ่มบิลเจ้าหนี้รายการแรก' }}
             columns={[
               { key: 'Transaction_ID', label: 'เลขที่' },
               { key: 'Creditor_Name', label: 'เจ้าหนี้' },
@@ -308,7 +309,7 @@ function PayablesTab() {
               { key: 'Outstanding_Amount', label: 'คงค้าง', align: 'right', render: (r: any) => <span className="tabular">{baht(r.Outstanding_Amount)}</span> },
               { key: 'Status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
               { key: 'act', label: '', sortable: false, render: (r: any) => (
-                <Button variant="ghost" size="sm" onClick={() => { setPayTxn(r.Transaction_ID); setPayAmt(String(r.Outstanding_Amount)); setPayMsg(''); }}>จ่าย</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setPayTxn(r.Transaction_ID); setPayAmt(String(r.Outstanding_Amount)); }}>จ่าย</Button>
               ) },
             ]}
           />
@@ -319,9 +320,9 @@ function PayablesTab() {
       {pendingPay.data && (
         <div>
           <h3 className="mb-3 text-sm font-semibold text-muted-foreground">คำขอจ่ายรออนุมัติ (Maker-Checker)</h3>
-          {apprMsg && <div className="mb-2"><Msg ok={apprMsg.startsWith('✅')}>{apprMsg}</Msg></div>}
           <DataTable
             rows={pendingPay.data.payments}
+            emptyState={{ icon: CheckCheck, title: 'ไม่มีคำขอจ่ายรออนุมัติ', description: 'คำขอจ่ายที่รอการอนุมัติจะแสดงที่นี่' }}
             columns={[
               { key: 'payment_no', label: 'เลขที่คำขอ' },
               { key: 'txn_no', label: 'บิล AP' },
@@ -332,13 +333,12 @@ function PayablesTab() {
                 const busy = (approvePay.isPending && approvePay.variables === r.payment_no) || (rejectPay.isPending && rejectPay.variables === r.payment_no);
                 return (
                   <div className="flex gap-1">
-                    <Button size="sm" disabled={busy} onClick={() => { setApprMsg(''); approvePay.mutate(r.payment_no); }}>อนุมัติ</Button>
-                    <Button size="sm" variant="outline" disabled={busy} onClick={() => { setApprMsg(''); rejectPay.mutate(r.payment_no); }}>ปฏิเสธ</Button>
+                    <Button size="sm" disabled={busy} onClick={() => approvePay.mutate(r.payment_no)}>อนุมัติ</Button>
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => rejectPay.mutate(r.payment_no)}>ปฏิเสธ</Button>
                   </div>
                 );
               } },
             ]}
-            emptyText="ไม่มีคำขอจ่ายรออนุมัติ"
           />
         </div>
       )}
@@ -346,18 +346,17 @@ function PayablesTab() {
       <ApAgingSection />
 
       {/* AP pay-request dialog — submits a request that a different user must approve (maker-checker) */}
-      <Dialog open={!!payTxn} onOpenChange={(o) => { if (!o) { setPayTxn(null); setPayMsg(''); } }}>
+      <Dialog open={!!payTxn} onOpenChange={(o) => { if (!o) setPayTxn(null); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>ขอจ่ายเจ้าหนี้ {payTxn}</DialogTitle></DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="payAmt">จำนวนเงิน</Label>
             <Input id="payAmt" type="number" step="0.01" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} />
             <p className="text-xs text-muted-foreground">คำขอจ่ายต้องได้รับการอนุมัติจากผู้มีสิทธิ์อีกคน (แบ่งแยกหน้าที่) ก่อนตัดจ่ายจริง</p>
-            {payMsg && <Msg ok={payMsg.startsWith('✅')}>{payMsg}</Msg>}
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">ยกเลิก</Button></DialogClose>
-            <Button onClick={() => { setPayMsg(''); payAp.mutate(); }} disabled={payAp.isPending || !payAmt}>ส่งคำขอจ่าย</Button>
+            <Button onClick={() => payAp.mutate()} disabled={payAp.isPending || !payAmt}>ส่งคำขอจ่าย</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -427,7 +426,6 @@ function CollectionsSection() {
 
   const [dun, setDun] = useState<any | null>(null); // the worklist row being dunned
   const [form, setForm] = useState<any>({ stage: 'reminder', channel: 'email', promise_to_pay_date: '', notes: '' });
-  const [msg, setMsg] = useState('');
   const record = useMutation({
     mutationFn: () => api(`/api/finance/ar/collections/${dun.invoice_no}/dunning`, {
       method: 'POST',
@@ -437,31 +435,30 @@ function CollectionsSection() {
       const note = r.message_status === 'sent' ? ` — ส่งแจ้งเตือนแล้ว (${r.recipient ?? r.channel})`
         : r.message_status === 'manual' ? ` — บันทึกการติดต่อ (${r.channel})`
         : r.message_status === 'failed' ? ' — แต่ส่งแจ้งเตือนไม่สำเร็จ (ไม่มีช่องทางติดต่อ)' : '';
-      setMsg(`✅ บันทึกการทวงถาม ${r.dunning_no}${note}`); refresh(); setDun(null);
+      notifySuccess(`บันทึกการทวงถาม ${r.dunning_no}${note}`); refresh(); setDun(null);
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
-  const [sweepMsg, setSweepMsg] = useState('');
   const sweep = useMutation({
     mutationFn: () => api('/api/finance/ar/collections/sweep', { method: 'POST' }),
-    onSuccess: (r: any) => { setSweepMsg(`✅ รันการทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการ`); refresh(); },
-    onError: (e: any) => setSweepMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`รันการทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการ`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold">ติดตามหนี้ค้างชำระ (Collections)</h2>
-        <Button variant="outline" size="sm" disabled={sweep.isPending} onClick={() => { setSweepMsg(''); sweep.mutate(); }}>
+        <Button variant="outline" size="sm" disabled={sweep.isPending} onClick={() => sweep.mutate()}>
           <PlayCircle className={`size-4 ${sweep.isPending ? 'animate-spin' : ''}`} /> ทวงถามอัตโนมัติ
         </Button>
       </div>
-      {sweepMsg && <Msg ok={sweepMsg.startsWith('✅')}>{sweepMsg}</Msg>}
       <StateView q={wl}>
         {wl.data && (
           <DataTable
             rows={wl.data.rows}
+            emptyState={{ icon: CheckCheck, title: 'ไม่มีหนี้ค้างชำระ', description: 'ไม่มีลูกหนี้เกินกำหนดที่ต้องติดตามในขณะนี้' }}
             columns={[
               { key: 'invoice_no', label: 'ใบแจ้งหนี้' },
               { key: 'party', label: 'ลูกค้า' },
@@ -470,7 +467,7 @@ function CollectionsSection() {
               { key: 'current_stage', label: 'ขั้นปัจจุบัน', render: (r: any) => r.current_stage ? <Badge variant={stageBadge(r.current_stage)}>{STAGE_LABEL[r.current_stage]}</Badge> : <span className="text-muted-foreground">—</span> },
               { key: 'recommended_stage', label: 'แนะนำ', render: (r: any) => r.recommended_stage ? <Badge variant={r.escalate ? 'destructive' : 'outline'}>{STAGE_LABEL[r.recommended_stage]}</Badge> : <span className="text-muted-foreground">—</span> },
               { key: 'act', label: '', sortable: false, render: (r: any) => (
-                <Button variant="ghost" size="sm" onClick={() => { setForm({ stage: r.recommended_stage ?? 'reminder', channel: 'email', promise_to_pay_date: '', notes: '' }); setMsg(''); setDun(r); }}>
+                <Button variant="ghost" size="sm" onClick={() => { setForm({ stage: r.recommended_stage ?? 'reminder', channel: 'email', promise_to_pay_date: '', notes: '' }); setDun(r); }}>
                   <BellRing className="size-4" /> ทวงถาม
                 </Button>
               ) },
@@ -480,7 +477,7 @@ function CollectionsSection() {
       </StateView>
 
       {/* Record-dunning dialog */}
-      <Dialog open={!!dun} onOpenChange={(o) => { if (!o) { setDun(null); setMsg(''); } }}>
+      <Dialog open={!!dun} onOpenChange={(o) => { if (!o) setDun(null); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>บันทึกการทวงถาม {dun?.invoice_no}</DialogTitle></DialogHeader>
           <div className="grid gap-4">
@@ -504,11 +501,10 @@ function CollectionsSection() {
               <Label htmlFor="dun-notes">บันทึก</Label>
               <Input id="dun-notes" value={form.notes} onChange={(e) => setForm((f: any) => ({ ...f, notes: e.target.value }))} />
             </div>
-            {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">ยกเลิก</Button></DialogClose>
-            <Button onClick={() => { setMsg(''); record.mutate(); }} disabled={record.isPending}>บันทึก</Button>
+            <Button onClick={() => record.mutate()} disabled={record.isPending}>บันทึก</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

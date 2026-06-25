@@ -3,14 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import Link from 'next/link';
-import { CalendarClock, Hourglass, Package, Search, TriangleAlert } from 'lucide-react';
+import { CalendarClock, Hourglass, Package, SearchX, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { ModulePage } from '@/components/module-page';
+import { SearchInput } from '@/components/search-input';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
 interface StockResp {
@@ -65,18 +65,13 @@ export default function InventoryPage() {
       query={q}
       toolbar={
         <>
-          <div className="relative w-full sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="ค้นหา Item ID / ชื่อสินค้า…"
-              aria-label="ค้นหาสินค้า"
-              inputMode="search"
-              enterKeyHint="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="ค้นหา Item ID / ชื่อสินค้า…"
+            ariaLabel="ค้นหาสินค้า"
+            count={d ? `${num(d.items.length)} รายการ` : undefined}
+          />
           <Button variant={lowOnly ? 'default' : 'outline'} aria-pressed={lowOnly} onClick={() => setLowOnly((v) => !v)}>
             <TriangleAlert className="size-4" /> เฉพาะสต๊อกต่ำ
           </Button>
@@ -104,7 +99,20 @@ export default function InventoryPage() {
         <DataTable
           rows={d.items}
           rowKey={(r) => r.Item_ID}
-          emptyText={filtering ? 'ไม่พบสินค้าที่ตรงกับตัวกรอง' : 'ไม่มีข้อมูลสินค้า'}
+          emptyState={
+            filtering
+              ? {
+                  icon: SearchX,
+                  title: 'ไม่พบสินค้าที่ตรงกับตัวกรอง',
+                  description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                  action: (
+                    <Button variant="outline" size="sm" onClick={() => { setSearch(''); setLowOnly(false); }}>
+                      ล้างตัวกรอง
+                    </Button>
+                  ),
+                }
+              : { icon: Package, title: 'ยังไม่มีข้อมูลสินค้า', description: 'เพิ่มสินค้าในข้อมูลหลัก หรือซิงก์สต๊อกเพื่อเริ่มต้น' }
+          }
           columns={[
             { key: 'Item_ID', label: 'Item ID', render: (r) => <Link className="font-medium text-primary hover:underline" href={`/inventory/${encodeURIComponent(r.Item_ID)}`}>{r.Item_ID}</Link> },
             { key: 'Item_Description', label: 'ชื่อสินค้า' },

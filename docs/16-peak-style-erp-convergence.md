@@ -73,6 +73,21 @@ layout swap** — same queries, columns, dialogs, gating and order — verified 
 review (0 behavior-parity defects). The standard side effect of adoption is that the **toolbar (search/
 filters) renders during loading** instead of only after data arrives, matching the `inventory` reference.
 
+### 1.5 UX friendliness pass (toasts · guided empty states · clearable search · a11y)
+A consistency layer that makes everyday use friendlier, built on three new shared primitives —
+`lib/notify.ts` (success/error **toasts** over the already-mounted sonner `<Toaster>`),
+`components/search-input.tsx` (**clearable** search with a live result `count`), and
+`components/form-field.tsx` (label + required marker + hint/error) — plus two upgrades to
+`components/data-table.tsx` that lift **all ~67 tables at once**: a rich `emptyState` (icon + title +
+description + action) and **keyboard-operable, focus-ringed clickable rows** (Enter/Space, `role="button"`).
+
+Adopted on the high-traffic screens, each a reviewed behavior-preserving change (verified by an independent
+per-page review — 0 flagged): **inventory · suppliers · purchase-orders** (SearchInput + a no-match-vs-no-data
+empty state with a *ล้างตัวกรอง* action), **finance** (8 mutations → toasts; guided empty states on the AR /
+AP / maker-checker / collections tables), and **reconciliation · bank · workflow** (mutation toasts + empty
+states). Inline `<Msg>` is kept for **in-dialog field validation**; only action *result* feedback moved to
+toasts.
+
 ---
 
 ## 2. Control / compliance impact — **none**
@@ -107,3 +122,4 @@ and `00-getting-started.md` (Finance cycle sub-sections + action center).
 |---|---|---|---|
 | 2026-06-25 | v1.0 (IMPLEMENTED) | Web / Product | Finance menu → 5 PEAK-style cycle sub-sections; `/finance` split into ภาพรวม/รายรับ/รายจ่าย tabs with `?tab=` deep-link (URL-synced `Tabs`); dashboard "สิ่งที่ต้องทำวันนี้" action center (reuses existing endpoints, self-hides by permission); `ModulePage` scaffold adopted on inventory + bank. No href/API/permission/GL/control change. Docs synced (this file, doc 15, user-manual 05 + 00). Verified: web typecheck ✅ + build ✅; 2 new e2e cases (CI). |
 | 2026-06-25 | v1.1 (IMPLEMENTED) | Web / Product | `ModulePage.title` made optional (headerless tab/section body). Scaffold rolled out to `inventory/suppliers`, `inventory/purchase-orders`, the `revenue` SchedulesTab, and `reconciliation` (minimal) — each a pure layout swap, independently review-verified (0 behavior-parity defects). Still no API/route/permission/control change. Verified: web typecheck ✅ + build ✅. |
+| 2026-06-25 | v1.2 (IMPLEMENTED) | Web / Product | **UX friendliness pass** (§1.5): new shared primitives — `notify` toasts, `SearchInput` (clearable + live count), `FormField` — and `DataTable` rich `emptyState` + keyboard-accessible focus-ringed rows (lifts all ~67 tables). Adopted on inventory/suppliers/purchase-orders/finance/reconciliation/bank/workflow: 8 finance mutations + several others → toasts, guided no-match/no-data empty states, clearable search. All review-verified behavior-preserving (6/6, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |

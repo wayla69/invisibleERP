@@ -2,15 +2,15 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ClipboardList, Coins, Hourglass, Search } from 'lucide-react';
+import { ClipboardList, Coins, Hourglass, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { ModulePage } from '@/components/module-page';
+import { SearchInput } from '@/components/search-input';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { statusVariant } from '@/components/ui';
 
 interface PO { PO_No: string; PO_Date: string; Supplier_Name?: string; Total_Amount: number; Status: string }
@@ -47,18 +47,13 @@ export default function PurchaseOrdersPage() {
       toolbarClassName="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
       toolbar={
         <>
-          <div className="relative w-full sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ค้นหาเลขที่ PO หรือผู้ขาย…"
-              className="pl-9"
-              aria-label="ค้นหาใบสั่งซื้อ"
-              inputMode="search"
-              enterKeyHint="search"
-            />
-          </div>
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="ค้นหาเลขที่ PO หรือผู้ขาย…"
+            ariaLabel="ค้นหาใบสั่งซื้อ"
+            count={q.data ? `${num(filtered.length)} รายการ` : undefined}
+          />
           {statuses.length > 1 && (
             <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
               <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(null)}>
@@ -100,7 +95,20 @@ export default function PurchaseOrdersPage() {
         <DataTable
           rows={filtered}
           rowKey={(r) => r.PO_No}
-          emptyText={search || statusFilter ? 'ไม่พบใบสั่งซื้อที่ตรงกับตัวกรอง' : 'ยังไม่มีใบสั่งซื้อ'}
+          emptyState={
+            search || statusFilter
+              ? {
+                  icon: SearchX,
+                  title: 'ไม่พบใบสั่งซื้อที่ตรงกับตัวกรอง',
+                  description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                  action: (
+                    <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter(null); }}>
+                      ล้างตัวกรอง
+                    </Button>
+                  ),
+                }
+              : { icon: ClipboardList, title: 'ยังไม่มีใบสั่งซื้อ', description: 'สร้างใบสั่งซื้อจากเมนูจัดซื้อเพื่อเริ่มต้น' }
+          }
           columns={[
             { key: 'PO_No', label: 'PO' },
             { key: 'PO_Date', label: 'วันที่', render: (r) => thaiDate(r.PO_Date) },
