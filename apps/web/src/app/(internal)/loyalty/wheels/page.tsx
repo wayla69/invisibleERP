@@ -59,15 +59,18 @@ export default function WheelsPage() {
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between"><Label>ช่องรางวัล (น้ำหนักรวม {totalWeight})</Label><Button type="button" size="sm" variant="outline" onClick={() => setSegs((a) => [...a, emptySeg()])}><Plus className="size-3.5" /> เพิ่มช่อง</Button></div>
+              <div className="hidden grid-cols-6 gap-2 px-2 text-xs font-medium text-muted-foreground sm:grid">
+                <span className="col-span-2">ป้ายรางวัล</span><span>ชนิด</span><span>มูลค่า</span><span>น้ำหนัก</span><span>สต๊อก</span>
+              </div>
               {segs.map((s, i) => (
                 <div key={i} className="grid grid-cols-2 gap-2 rounded-lg border border-border/60 p-2 sm:grid-cols-6">
-                  <Input className="sm:col-span-2" value={s.label} onChange={(e) => setSeg(i, { label: e.target.value })} placeholder="ป้ายรางวัล" />
-                  <select className={selectCls} value={s.prize_kind} onChange={(e) => setSeg(i, { prize_kind: e.target.value })}><option value="points">แต้ม</option><option value="coupon">คูปอง</option><option value="none">ไม่ได้</option></select>
-                  <Input type="number" min="0" value={s.prize_kind === 'points' ? s.prize_points : (s.coupon_value ?? 0)} onChange={(e) => setSeg(i, s.prize_kind === 'points' ? { prize_points: +e.target.value } : { coupon_value: +e.target.value })} placeholder="มูลค่า" title="มูลค่า (แต้ม/คูปอง)" />
-                  <Input type="number" min="0" value={s.weight} onChange={(e) => setSeg(i, { weight: +e.target.value })} placeholder="น้ำหนัก" title="น้ำหนัก (โอกาส)" />
+                  <Input className="sm:col-span-2" value={s.label} onChange={(e) => setSeg(i, { label: e.target.value })} placeholder="ป้ายรางวัล" aria-label={`ป้ายรางวัล ช่องที่ ${i + 1}`} />
+                  <select className={selectCls} value={s.prize_kind} onChange={(e) => setSeg(i, { prize_kind: e.target.value })} aria-label={`ชนิดรางวัล ช่องที่ ${i + 1}`}><option value="points">แต้ม</option><option value="coupon">คูปอง</option><option value="none">ไม่ได้</option></select>
+                  <Input type="number" inputMode="numeric" min="0" value={s.prize_kind === 'points' ? s.prize_points : (s.coupon_value ?? 0)} onChange={(e) => setSeg(i, s.prize_kind === 'points' ? { prize_points: +e.target.value } : { coupon_value: +e.target.value })} placeholder="มูลค่า" title="มูลค่า (แต้ม/คูปอง)" aria-label={`มูลค่า ช่องที่ ${i + 1}`} />
+                  <Input type="number" inputMode="numeric" min="0" value={s.weight} onChange={(e) => setSeg(i, { weight: +e.target.value })} placeholder="น้ำหนัก" title="น้ำหนัก (โอกาส)" aria-label={`น้ำหนัก ช่องที่ ${i + 1}`} />
                   <div className="flex items-center gap-1">
-                    <Input type="number" min="0" value={s.stock ?? ''} onChange={(e) => setSeg(i, { stock: e.target.value === '' ? null : +e.target.value })} placeholder="สต๊อก ∞" title="สต๊อก (ว่าง=ไม่จำกัด)" />
-                    {segs.length > 1 && <button type="button" onClick={() => setSegs((a) => a.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive"><Trash2 className="size-4" /></button>}
+                    <Input type="number" inputMode="numeric" min="0" value={s.stock ?? ''} onChange={(e) => setSeg(i, { stock: e.target.value === '' ? null : +e.target.value })} placeholder="สต๊อก ∞" title="สต๊อก (ว่าง=ไม่จำกัด)" aria-label={`สต๊อก ช่องที่ ${i + 1}`} />
+                    {segs.length > 1 && <button type="button" onClick={() => setSegs((a) => a.filter((_, j) => j !== i))} aria-label={`ลบช่องที่ ${i + 1}`} className="text-muted-foreground hover:text-destructive"><Trash2 className="size-4" /></button>}
                   </div>
                 </div>
               ))}
