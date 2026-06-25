@@ -63,7 +63,7 @@ function Deposits() {
             { key: 'amount', label: 'มัดจำ', align: 'right', render: (r) => baht(r.amount) },
             { key: 'remaining', label: 'คงเหลือ', align: 'right', render: (r) => <span className="tabular">{baht(r.remaining)}</span> },
             { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'open' ? 'info' : r.status === 'closed' || r.status === 'refunded' ? 'muted' : 'success'}>{r.status}</Badge> },
-            { key: 'act', label: '', align: 'right', render: (r) => r.status === 'open' ? <div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => apply.mutate(r.deposit_no)}>ใช้</Button><Button size="sm" variant="ghost" onClick={() => refund.mutate(r.deposit_no)}>คืน</Button></div> : null },
+            { key: 'act', label: '', align: 'right', render: (r) => r.status === 'open' ? <div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => apply.mutate(r.deposit_no)}>ใช้</Button><Button size="sm" variant="ghost" disabled={refund.isPending} onClick={() => refund.mutate(r.deposit_no)}>คืน</Button></div> : null },
           ]}
           emptyText="ยังไม่มีมัดจำ"
         />

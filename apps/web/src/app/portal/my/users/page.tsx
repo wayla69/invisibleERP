@@ -49,7 +49,7 @@ export default function MyUsersPage() {
             columns={[
               { key: 'username', label: 'Username' },
               { key: 'role', label: 'Role' },
-              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" onClick={() => del.mutate(r.username)}>ลบ</Button> },
+              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.username)}>ลบ</Button> },
             ]}
             emptyText="ยังไม่มีพนักงาน"
           />

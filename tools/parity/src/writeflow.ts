@@ -29,6 +29,7 @@ async function throws(name: string, fn: () => Promise<any>, code?: string) {
 
 const admin = { username: 'admin', role: 'Admin', customerName: 'HQ', permissions: [] as string[] };
 const sales = { username: 'sales', role: 'Sales', customerName: 'HQ', permissions: [] as string[] };
+const approver = { username: 'fincon', role: 'FinancialController', customerName: 'HQ', permissions: [] as string[] }; // AP-PAY checker
 
 async function main() {
   const { PGlite } = require('@electric-sql/pglite');
@@ -122,11 +123,22 @@ async function main() {
   const [inv2] = await db.select().from(s.arInvoices).where(eq(s.arInvoices.invoiceNo, invNo));
   ok('AR invoice paid_amount=100 status Paid', Number(inv2?.paidAmount) === 100 && inv2?.status === 'Paid');
 
-  // ── E. AP txn + pay ──
+  // ── E. AP txn + pay (maker-checker AP-PAY) ──
   const ap = await fin.createApTxn({ vendor_name: 'Vendor One', amount: 200, paid_amount: 0 }, admin as any);
   ok('AP txn Unpaid + doc format', ap.status === 'Unpaid' && /^AP-\d{8}-\d{3}$/.test(ap.txn_no));
-  const pay = await fin.payAp(ap.txn_no, 200, admin as any);
-  ok('AP pay full → Paid', pay.status === 'Paid');
+  // pre-paid creation blocked (cannot disburse without second-person approval)
+  await throws('AP createApTxn pre-paid blocked', () => fin.createApTxn({ vendor_name: 'Vendor One', amount: 50, paid_amount: 50 }, admin as any), 'AP_PREPAID_BLOCKED');
+  // step 1 — request payment: PendingApproval, NO cash/GL effect yet
+  const req = await fin.requestApPayment(ap.txn_no, 200, admin as any);
+  ok('AP pay request → PendingApproval + doc format', req.status === 'PendingApproval' && /^APP-\d{8}-\d{3}$/.test(req.payment_no), `${req.payment_no} ${req.status}`);
+  const [apMid] = await db.select().from(s.apTransactions).where(eq(s.apTransactions.txnNo, ap.txn_no));
+  ok('AP bill still Unpaid + paid 0 before approval (no disbursement)', apMid.status === 'Unpaid' && Number(apMid.paidAmount) === 0, `st=${apMid.status} paid=${apMid.paidAmount}`);
+  ok('AP no PAY-AP GL before approval', (await db.select().from(s.journalEntries).where(eq(s.journalEntries.source, 'PAY-AP'))).length === 0);
+  // maker cannot approve own request → SOD_VIOLATION (binds even Admin)
+  await throws('AP self-approval blocked → SOD_VIOLATION', () => fin.approveApPayment(req.payment_no, admin as any), 'SOD_VIOLATION');
+  // step 2 — a DIFFERENT user approves → bill Paid + GL disburses
+  const appr = await fin.approveApPayment(req.payment_no, approver as any);
+  ok('AP pay approved by different user → Approved + bill Paid', appr.status === 'Approved' && appr.bill_status === 'Paid', `${appr.status} ${appr.bill_status}`);
 
   // ── F. Sub-ledger → GL auto-posting (Accounting Tier 1) ──
   const arGl = await jlines('AR', invNo);

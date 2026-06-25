@@ -1,6 +1,6 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { Permissions } from '../../common/decorators';
+import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { qint } from '../../common/query';
 import { AuditViewerService, type AuditFilters } from './audit-viewer.service';
 
@@ -24,6 +24,23 @@ export class AuditViewerController {
   ) {
     const filters: AuditFilters = { actor, action, status, entity, from, to };
     return this.svc.query(filters, Math.min(qint('limit', limit, 50), 200), Math.max(qint('offset', offset, 0), 0));
+  }
+
+  // Field-level OLD→NEW change log (ITGC-AC-14) for the core financial tables. Non-Admin is scoped to own tenant.
+  @Get('changes')
+  @Permissions('users')
+  changes(
+    @CurrentUser() u: JwtUser,
+    @Query('table') table?: string,
+    @Query('row_pk') row_pk?: string,
+    @Query('actor') actor?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const tenantId = u.role === 'Admin' ? null : (u.tenantId ?? null);
+    return this.svc.changes({ table, row_pk, actor, from, to, tenantId }, Math.min(qint('limit', limit, 50), 200), Math.max(qint('offset', offset, 0), 0));
   }
 
   @Get('export')

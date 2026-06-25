@@ -58,6 +58,8 @@ export class TenantTxInterceptor implements NestInterceptor {
         }
         await tx.execute(sql`select set_config('app.bypass_rls', ${bypass ? 'on' : 'off'}, true)`);
         await tx.execute(sql`select set_config('app.tenant_id', ${tenantId != null ? String(tenantId) : ''}, true)`);
+        // Identify the actor for the DB-level field change-log triggers (0116). Local to this tx.
+        await tx.execute(sql`select set_config('app.actor', ${user?.username ?? ''}, true)`);
         // NB: we intentionally do NOT force the tx READ ONLY for GETs — several GET handlers perform
         // legitimate writes (dashboard auto-reorder, lazy loyalty-config seed), and Postgres rejects
         // changing access mode after the first query anyway (25001). @NoTx is the opt-out for non-tenant

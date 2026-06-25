@@ -130,8 +130,8 @@ export default function DocumentTemplatesPage() {
                           {t.name} {t.is_default && <Badge variant="success" className="ml-2"><Star className="size-3" /> ค่าเริ่มต้น</Badge>}
                         </button>
                         <div className="flex items-center gap-2">
-                          {!t.is_default && <Button size="sm" variant="ghost" onClick={() => setDefault.mutate(t.id)}><Star className="size-4" /> ตั้งเริ่มต้น</Button>}
-                          <Button size="sm" variant="ghost" onClick={() => remove.mutate(t.id)}><Trash2 className="size-4 text-destructive" /></Button>
+                          {!t.is_default && <Button size="sm" variant="ghost" disabled={setDefault.isPending} onClick={() => setDefault.mutate(t.id)}><Star className="size-4" /> ตั้งเริ่มต้น</Button>}
+                          <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(t.id)}><Trash2 className="size-4 text-destructive" /></Button>
                         </div>
                       </div>
                     ))}

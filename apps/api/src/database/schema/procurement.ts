@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, integer, date, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, date, timestamp, boolean, index } from 'drizzle-orm/pg-core';
 import { poStatusEnum } from './enums';
 import { tenants } from './tenants';
 
@@ -137,7 +137,7 @@ export const prItems = pgTable('pr_items', {
   reason: text('reason'),
   poNo: text('po_no'),
   status: text('status').default('Open'),
-});
+}, (t) => ({ byPr: index('idx_pr_items_pr').on(t.prId) }));
 
 export const purchaseOrders = pgTable('purchase_orders', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -166,7 +166,7 @@ export const poItems = pgTable('po_items', {
   amount: numeric('amount', { precision: 14, scale: 2 }),
   receivedQty: numeric('received_qty').default('0'),
   status: text('status').default('Open'),
-});
+}, (t) => ({ byPo: index('idx_po_items_po').on(t.poId) }));
 
 export const poDeliveries = pgTable('po_deliveries', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -177,7 +177,7 @@ export const poDeliveries = pgTable('po_deliveries', {
   scheduledDate: date('scheduled_date'),
   receivedQty: numeric('received_qty').default('0'),
   status: text('status').default('Pending'),
-});
+}, (t) => ({ byPo: index('idx_po_deliveries_po').on(t.poId) }));
 
 export const goodsReceipts = pgTable('goods_receipts', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -188,7 +188,7 @@ export const goodsReceipts = pgTable('goods_receipts', {
   vendorName: text('vendor_name'),
   receivedBy: text('received_by'),
   remarks: text('remarks'),
-});
+}, (t) => ({ byPo: index('idx_gr_pono').on(t.poNo) }));
 
 export const grItems = pgTable('gr_items', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -203,7 +203,7 @@ export const grItems = pgTable('gr_items', {
   expiryDate: date('expiry_date'),
   unitCost: numeric('unit_cost', { precision: 14, scale: 2 }),
   remarks: text('remarks'),
-});
+}, (t) => ({ byGr: index('idx_gr_items_gr').on(t.grId), byPo: index('idx_gr_items_pono').on(t.poNo) }));
 
 export const grClaims = pgTable('gr_claims', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

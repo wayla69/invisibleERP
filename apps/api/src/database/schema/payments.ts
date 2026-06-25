@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Payments + tender layer (move #3) — 1 sale → N tenders; proof money moved
@@ -27,6 +27,9 @@ export const payments = pgTable('payments', {
   capturedAt: timestamp('captured_at', { withTimezone: true }),
 }, (t) => ({
   uxIdem: uniqueIndex('ux_payments_idem').on(t.idempotencyKey), // race backstop for double-submit
+  // Tender reconciliation / receipt rebuilds look up WHERE sale_no=?; tenant reports range over created_at.
+  bySale: index('idx_payments_sale').on(t.saleNo),
+  byTenantCreated: index('idx_payments_tenant_created').on(t.tenantId, t.createdAt),
 }));
 
 export const paymentRefunds = pgTable('payment_refunds', {
@@ -43,7 +46,10 @@ export const paymentRefunds = pgTable('payment_refunds', {
   status: text('status').default('Refunded'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-});
+}, (t) => ({
+  // Refund history is fetched WHERE payment_no=? (e.g. over-refund guard sums prior refunds).
+  byPayment: index('idx_refunds_payment').on(t.paymentNo),
+}));
 
 export const tillSessions = pgTable('till_sessions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

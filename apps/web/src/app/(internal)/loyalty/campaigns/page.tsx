@@ -76,8 +76,8 @@ export default function CampaignsPage() {
                 { key: 'sent_count', label: 'ส่ง/ข้าม/พลาด', align: 'right', render: (c) => c.status === 'sent' ? <span className="tabular text-xs">{num(c.sent_count)}/{num(c.skipped_count)}/{num(c.failed_count)}</span> : '—' },
                 { key: 'act', label: '', align: 'right', render: (c) => (c.status === 'draft' || c.status === 'scheduled') ? (
                   <div className="flex justify-end gap-1">
-                    <Button size="sm" variant="outline" onClick={() => { setMsg(''); sendNow.mutate(c); }}><Send className="size-3.5" /> ส่งเลย</Button>
-                    <Button size="sm" variant="ghost" onClick={() => cancel.mutate(c)}><Ban className="size-3.5" /></Button>
+                    <Button size="sm" variant="outline" disabled={sendNow.isPending} onClick={() => { setMsg(''); sendNow.mutate(c); }}><Send className="size-3.5" /> ส่งเลย</Button>
+                    <Button size="sm" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate(c)}><Ban className="size-3.5" /></Button>
                   </div>
                 ) : null },
               ]}

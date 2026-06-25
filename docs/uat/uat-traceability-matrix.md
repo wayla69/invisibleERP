@@ -189,13 +189,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-002 | PO approval (maker≠checker) | EXP-01, R02 | 02 §9 |
 | UAT-P2P-003 | Goods receipt | EXP-02 | 02 §7 |
 | UAT-P2P-004 | 3-way match success | EXP-03 | 02 §7, §9 |
-| UAT-P2P-005 | Matched pay + GL | EXP-03, GL-01 | 02 §7 |
+| UAT-P2P-005 | Matched pay (request+approve) + GL | EXP-06, GL-01 | 02 §7 |
 | UAT-P2P-006 | Price variance block (MATCH_BLOCKED) | EXP-03 | 02 §9, §13 |
 | UAT-P2P-007 | Over-invoice block | EXP-03 | 02 §9, §13 |
 | UAT-P2P-008 | Match tolerance | EXP-03 | 02 §9 |
-| UAT-P2P-009 | Override-with-reason | EXP-03, R04 | 02 §9 |
+| UAT-P2P-009 | Override-with-reason (request+approve) | EXP-06, R04 | 02 §9 |
 | UAT-P2P-010 | Override reset on re-match | EXP-03 | 02 §9, §13 |
-| UAT-P2P-011 | Non-PO bill (gate fails open) | EXP-03 | 02 §7 |
+| UAT-P2P-011 | Non-PO bill (gate fails open, request+approve) | EXP-06 | 02 §7 |
 | UAT-P2P-012 | Blocklisted vendor (SUPPLIER_BLOCKED) | EXP-04, R13 | 02 §9, §13 |
 | UAT-P2P-013 | Un-blocklist vendor | EXP-04 | 02 §7 |
 | UAT-P2P-014 | RFQ→quote→award→PO | EXP-01 | 02 §7 |
@@ -207,12 +207,17 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-020 | Supplier cannot invoice another vendor's PO | Feature (supplier portal) | 02 §7 |
 | UAT-P2P-021 | Supplier portal unlinked user refused | Feature (supplier portal) | 02 §7 |
 | UAT-P2P-022 | AP bill idempotency | EXP-03 / GL-01 | 02 §7 |
-| UAT-P2P-023 | AP payment idempotency | EXP-03 / GL-01 | 02 §7 |
+| UAT-P2P-023 | AP payment-request idempotency | EXP-06 / GL-01 | 02 §7 |
 | UAT-P2P-024 | Dimension routing — PO by vendor | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-025 | PO approval routes through the engine | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-026 | SLA escalation sweep flags + reminds | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-027 | Escalation fallback approver can act | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-028 | No-code builder replaces steps | Feature (workflow builder) | 02 §7 |
+| UAT-P2P-029 | Pre-paid bill creation blocked | EXP-06 | 02 §7, §9 |
+| UAT-P2P-030 | Payment request creates no GL/paid effect | EXP-06 | 02 §7, §9 |
+| UAT-P2P-031 | Requester self-approval blocked (SoD, incl. Admin) | EXP-06, R03/R07 | 02 §7, §9 |
+| UAT-P2P-032 | Maker without approval authority blocked | EXP-06 | 02 §7, §9 |
+| UAT-P2P-033 | Reject leaves bill unpaid | EXP-06 | 02 §7, §9 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
 

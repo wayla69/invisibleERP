@@ -1,7 +1,7 @@
-import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, asc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, arInvoices, arReceipts, orders, orderLines, tenants } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -126,22 +126,28 @@ export class FinanceService {
     const candidates = await db.select({ id: orders.id, orderNo: orders.orderNo, orderDate: orders.orderDate, tenantId: orders.tenantId })
       .from(orders).where(sql`${orders.status}::text in ('Shipped','Completed')`);
     const existing = new Set((await db.select({ no: arInvoices.orderNo }).from(arInvoices)).map((r: any) => r.no));
+    const todo = candidates.filter((o: any) => !existing.has(o.orderNo));
+    if (!todo.length) return { created: 0 };
+    // Batch the per-order line-sum + tenant credit-term lookups (was 2 queries per order → N+1).
+    const orderIds = todo.map((o: any) => Number(o.id));
+    const sumRows = await db.select({ orderId: orderLines.orderId, a: sql<string>`coalesce(sum(${orderLines.totalPrice}),0)` })
+      .from(orderLines).where(inArray(orderLines.orderId, orderIds)).groupBy(orderLines.orderId);
+    const sumMap = new Map<number, string>(sumRows.map((r: any) => [Number(r.orderId), r.a]));
+    const tenantIds = [...new Set(todo.map((o: any) => o.tenantId).filter((v: any) => v != null))] as number[];
+    const termRows = tenantIds.length ? await db.select({ id: tenants.id, ct: tenants.creditTerm }).from(tenants).where(inArray(tenants.id, tenantIds)) : [];
+    const termMap = new Map<number, string>(termRows.map((t: any) => [Number(t.id), t.ct]));
     let created = 0;
-    for (const o of candidates) {
-      if (existing.has(o.orderNo)) continue;
-      const [amt] = await db.select({ a: sql<string>`coalesce(sum(${orderLines.totalPrice}),0)` }).from(orderLines).where(eq(orderLines.orderId, o.id));
+    for (const o of todo) {
+      const amtA = sumMap.get(Number(o.id)) ?? '0';
       let termDays = 30;
-      if (o.tenantId != null) {
-        const [t] = await db.select({ ct: tenants.creditTerm }).from(tenants).where(eq(tenants.id, o.tenantId)).limit(1);
-        termDays = parseInt(String(t?.ct ?? '').replace(/\D/g, ''), 10) || 30;
-      }
+      if (o.tenantId != null) termDays = parseInt(String(termMap.get(Number(o.tenantId)) ?? '').replace(/\D/g, ''), 10) || 30;
       const invoiceNo = this.docNo.invoiceFromOrder(o.orderNo);
       await db.insert(arInvoices).values({
         invoiceNo, invoiceDate: o.orderDate, dueDate: addDays(o.orderDate, termDays),
-        tenantId: o.tenantId, orderNo: o.orderNo, amount: amt.a, paidAmount: '0', status: 'Unpaid', createdBy: 'system',
+        tenantId: o.tenantId, orderNo: o.orderNo, amount: amtA, paidAmount: '0', status: 'Unpaid', createdBy: 'system',
       }).onConflictDoNothing();
       // GL: recognize receivable + revenue + output VAT (Dr 1100 / Cr 4000 net / Cr 2100 vat)
-      const grossAmt = n(amt.a);
+      const grossAmt = n(amtA);
       if (this.ledger && grossAmt > 0 && !(await this.ledger.alreadyPosted('AR', invoiceNo))) {
         const { net, vat } = this.vatSplit(grossAmt);
         await this.ledger.postEntry({
@@ -167,9 +173,15 @@ export class FinanceService {
       if (ex) { const [cur] = await db.select().from(arInvoices).where(eq(arInvoices.id, inv.id)).limit(1); return { receipt_no: ex.receiptNo, invoice_no: dto.invoice_no, paid_amount: n(cur?.paidAmount), status: cur?.status, idempotent: true }; }
     }
     const receiptNo = await this.docNo.nextDaily('RCP');
-    const newPaid = n(inv.paidAmount) + n(dto.amount);
-    const status = newPaid >= n(inv.amount) ? 'Paid' : 'Partial';
+    let newPaid = 0; let status = '';
     await db.transaction(async (tx: any) => {
+      // Concurrency: lock the invoice row and recompute paidAmount from the LOCKED current value.
+      // Without the lock, two concurrent receipts on the same invoice both read the old paidAmount and
+      // write absolute totals → the last writer wins and one collection silently vanishes (AR sub-ledger
+      // overstated, control account 1100 ≠ cash collected). FOR UPDATE serializes them.
+      const [locked] = await tx.select().from(arInvoices).where(eq(arInvoices.id, inv.id)).for('update').limit(1);
+      newPaid = n(locked.paidAmount) + n(dto.amount);
+      status = newPaid >= n(locked.amount) ? 'Paid' : 'Partial';
       await tx.insert(arReceipts).values({
         receiptNo, receiptDate: ymd(), tenantId: inv.tenantId, invoiceNo: dto.invoice_no, amount: String(n(dto.amount)),
         method: dto.method ?? 'Transfer', refNo: dto.ref_no ?? null, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
@@ -194,6 +206,11 @@ export class FinanceService {
     // input VAT is per shop (ภ.พ.30) → tenant-scoped. An internal caller (e.g. ESS reimbursement, EAM
     // maintenance) may pin the AP to the source document's tenant via dto.tenant_id.
     const tenantId = dto.tenant_id ?? user.tenantId ?? null;
+    // Maker-checker (EXP-06): a bill cannot be booked pre-paid in one call — that would disburse cash with no
+    // second-person approval. Disbursement must go through requestApPayment → approveApPayment (always Unpaid here).
+    if (n(dto.paid_amount) > 0) {
+      throw new BadRequestException({ code: 'AP_PREPAID_BLOCKED', message: 'A bill cannot be created pre-paid; record the payment via the approval flow', messageTh: 'ห้ามสร้างบิลพร้อมจ่าย ต้องบันทึกการจ่ายผ่านการอนุมัติ' });
+    }
     // Idempotency: a retried request with the same key returns the original bill (no duplicate payable/expense).
     if (dto.idempotency_key) {
       const tenantPred = tenantId != null ? eq(apTransactions.tenantId, tenantId) : isNull(apTransactions.tenantId);
@@ -225,34 +242,95 @@ export class FinanceService {
     return { txn_no: txnNo, status };
   }
 
-  // PATCH /api/finance/ap/transactions/{no}/pay
-  async payAp(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string) {
+  // ───────────────────── AP disbursement maker-checker (AP-PAY) ─────────────────────
+  // Step 1 (MAKER, `creditors`) — REQUEST a vendor payment. No cash moves and NO GL posts here: the bill's
+  // paid_amount is untouched and a PendingApproval row is recorded. PATCH /api/finance/ap/transactions/{no}/pay
+  async requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string) {
     const db = this.db as any;
     const [t] = await db.select().from(apTransactions).where(eq(apTransactions.txnNo, txnNo)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
     // Phase 16 — 3-way match gate: a PO-based invoice must pass match (or be overridden) before payment.
     if (this.matchSvc) await this.matchSvc.assertPayable(txnNo);
     const apTenant = t.tenantId ?? user.tenantId ?? null;
-    // Idempotency key for the installment. With a client key the ref is STABLE across retries; without one
-    // it falls back to the running-total ref (best-effort). Check the guard BEFORE mutating paidAmount so a
-    // retried request (which already sees the incremented paid total) neither re-posts nor re-applies.
-    const payRef = idempotencyKey ? `${txnNo}:k:${idempotencyKey}` : `${txnNo}:${n(t.paidAmount) + n(amount)}`;
-    if (this.ledger && n(amount) > 0 && (await this.ledger.alreadyPosted('PAY-AP', payRef, apTenant))) {
-      return { txn_no: txnNo, paid_amount: n(t.paidAmount), status: t.status, idempotent: true };
+    // Idempotency: a retried request with the same key returns the original pending payment (no duplicate).
+    if (idempotencyKey) {
+      const tenantPred = apTenant != null ? eq(apPayments.tenantId, apTenant) : isNull(apPayments.tenantId);
+      const [ex] = await db.select().from(apPayments).where(and(tenantPred, eq(apPayments.idempotencyKey, idempotencyKey))).limit(1);
+      if (ex) return { payment_no: ex.paymentNo, txn_no: txnNo, amount: n(ex.amount), status: ex.status, idempotent: true };
     }
-    const newPaid = n(t.paidAmount) + n(amount);
-    const status = newPaid >= n(t.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
-    await db.update(apTransactions).set({ paidAmount: String(newPaid), status }).where(eq(apTransactions.id, t.id));
-    // GL: pay the payable (Dr 2000 AP / Cr 1000 Cash), tagged to the AP txn's tenant.
-    if (this.ledger && n(amount) > 0) {
+    // Over-request guard: a new request cannot exceed outstanding minus payments already awaiting approval
+    // (so two pending requests can't be approved into an overpayment).
+    const [agg] = await db.select({ pend: sql<string>`coalesce(sum(${apPayments.amount}),0)` }).from(apPayments)
+      .where(and(eq(apPayments.txnNo, txnNo), eq(apPayments.status, 'PendingApproval')));
+    const outstanding = round2(n(t.amount) - n(t.paidAmount) - n(agg?.pend));
+    if (n(amount) > outstanding + 0.001) {
+      throw new BadRequestException({ code: 'AP_OVERPAY', message: `Amount ${amount} exceeds payable balance ${outstanding}`, messageTh: 'ยอดจ่ายเกินยอดคงค้าง (รวมรายการที่รออนุมัติ)' });
+    }
+    const paymentNo = await this.docNo.nextDaily('APP');
+    await db.insert(apPayments).values({
+      paymentNo, txnNo, tenantId: apTenant, amount: String(n(amount)), status: 'PendingApproval',
+      requestedBy: user.username, glRef: `${txnNo}:p:${paymentNo}`, idempotencyKey: idempotencyKey ?? null,
+    });
+    await this.statusLog.log('APP', paymentNo, '', 'PendingApproval', user.username, `Payment request ${n(amount)} for ${txnNo}`);
+    return { payment_no: paymentNo, txn_no: txnNo, amount: n(amount), status: 'PendingApproval' };
+  }
+
+  // Step 2 (CHECKER, approval authority) — APPROVE a pending payment. The approver MUST differ from the
+  // requester (segregation of duties) regardless of permissions held — even an Admin cannot approve their
+  // own request. Only here does paid_amount move (under a row lock) and the cash-disbursement GL post.
+  async approveApPayment(paymentNo: string, approver: JwtUser) {
+    const db = this.db as any;
+    const [p] = await db.select().from(apPayments).where(eq(apPayments.paymentNo, paymentNo)).limit(1);
+    if (!p) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP payment not found', messageTh: 'ไม่พบรายการจ่าย' });
+    if (p.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Payment ${paymentNo} is ${p.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
+    if (p.requestedBy && p.requestedBy === approver.username) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a payment you requested', messageTh: 'ผู้ขอจ่ายอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
+    const apTenant = p.tenantId ?? approver.tenantId ?? null;
+    let newPaid = 0; let billStatus = '';
+    await db.transaction(async (tx: any) => {
+      // Lock the bill row and recompute from the LOCKED paid total → no lost update vs a concurrent approval.
+      const [t] = await tx.select().from(apTransactions).where(eq(apTransactions.txnNo, p.txnNo)).for('update').limit(1);
+      if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
+      newPaid = round2(n(t.paidAmount) + n(p.amount));
+      billStatus = newPaid >= n(t.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
+      await tx.update(apTransactions).set({ paidAmount: String(newPaid), status: billStatus }).where(eq(apTransactions.id, t.id));
+      await tx.update(apPayments).set({ status: 'Approved', approvedBy: approver.username, approvedAt: new Date() }).where(eq(apPayments.id, p.id));
+    });
+    // GL: disburse (Dr 2000 AP / Cr 1000 Cash). The per-request glRef is stable + unique → idempotent post.
+    if (this.ledger && n(p.amount) > 0 && !(await this.ledger.alreadyPosted('PAY-AP', p.glRef, apTenant))) {
       await this.ledger.postEntry({
-        date: ymd(), source: 'PAY-AP', sourceRef: payRef, tenantId: apTenant,
-        memo: `AP payment ${txnNo}`, createdBy: user.username,
-        lines: [{ account_code: '2000', debit: n(amount) }, { account_code: '1000', credit: n(amount) }],
+        date: ymd(), source: 'PAY-AP', sourceRef: p.glRef, tenantId: apTenant,
+        memo: `AP payment ${p.txnNo} (${paymentNo})`, createdBy: approver.username,
+        lines: [{ account_code: '2000', debit: n(p.amount) }, { account_code: '1000', credit: n(p.amount) }],
       });
     }
-    await this.statusLog.log('AP', txnNo, t.status ?? '', status, user.username);
-    return { txn_no: txnNo, paid_amount: newPaid, status };
+    await this.statusLog.log('APP', paymentNo, 'PendingApproval', 'Approved', approver.username);
+    return { payment_no: paymentNo, txn_no: p.txnNo, status: 'Approved', approved_by: approver.username, requested_by: p.requestedBy, paid_amount: newPaid, bill_status: billStatus };
+  }
+
+  // Step 2 (alt) — REJECT a pending payment (no cash/GL effect; recorded for the audit trail).
+  async rejectApPayment(paymentNo: string, approver: JwtUser, reason?: string) {
+    const db = this.db as any;
+    const [p] = await db.select().from(apPayments).where(eq(apPayments.paymentNo, paymentNo)).limit(1);
+    if (!p) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP payment not found', messageTh: 'ไม่พบรายการจ่าย' });
+    if (p.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Payment ${paymentNo} is ${p.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
+    await db.update(apPayments).set({ status: 'Rejected', approvedBy: approver.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(apPayments.id, p.id));
+    await this.statusLog.log('APP', paymentNo, 'PendingApproval', 'Rejected', approver.username, reason);
+    return { payment_no: paymentNo, txn_no: p.txnNo, status: 'Rejected', rejected_by: approver.username };
+  }
+
+  // Checker queue — AP payments awaiting approval (joined to the bill for context).
+  async listPendingApPayments(limit: number, offset: number) {
+    const db = this.db as any;
+    const rows = await db.select({
+      payment_no: apPayments.paymentNo, txn_no: apPayments.txnNo, amount: apPayments.amount,
+      requested_by: apPayments.requestedBy, requested_at: apPayments.requestedAt,
+      vendor_name: apTransactions.vendorName, bill_amount: apTransactions.amount, paid_amount: apTransactions.paidAmount,
+    }).from(apPayments).leftJoin(apTransactions, eq(apPayments.txnNo, apTransactions.txnNo))
+      .where(eq(apPayments.status, 'PendingApproval')).orderBy(asc(apPayments.requestedAt)).limit(limit).offset(offset);
+    const out = rows.map((r: any) => ({ ...r, amount: n(r.amount), bill_amount: n(r.bill_amount), paid_amount: n(r.paid_amount) }));
+    return { payments: out, count: out.length };
   }
 
   // Sub-ledger ↔ GL reconciliation: GL control account 1100 must equal open AR outstanding, 2000 = AP.

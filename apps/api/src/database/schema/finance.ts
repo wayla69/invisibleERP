@@ -1,4 +1,5 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 import { vendors } from './procurement';
 import { invoiceStatusEnum } from './enums';
@@ -89,3 +90,26 @@ export const apTransactions = pgTable('ap_transactions', {
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }),
 });
+
+// AP disbursement maker-checker (AP-PAY): a vendor payment is REQUESTED by a `creditors` holder (PendingApproval,
+// no cash/GL effect) and APPROVED by a DIFFERENT user (approval authority) — only then does the bill's
+// paid_amount move and the cash-disbursement GL post. Mirrors GL-05 (manual JE maker-checker). See 0115.
+export const apPayments = pgTable('ap_payments', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  paymentNo: text('payment_no').notNull().unique(), // APP-YYYYMMDD-NNN
+  txnNo: text('txn_no').notNull(),                   // → ap_transactions.txn_no
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected
+  requestedBy: text('requested_by'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+  glRef: text('gl_ref'), // PAY-AP source_ref used at approval (idempotent GL post)
+  idempotencyKey: text('idempotency_key'),
+}, (t) => ({
+  byTxn: index('idx_ap_payments_txn').on(t.txnNo),
+  byStatus: index('idx_ap_payments_status').on(t.tenantId, t.status),
+  uxIdem: uniqueIndex('ux_ap_payments_idem').on(sql`coalesce(${t.tenantId}, 0)`, t.idempotencyKey).where(sql`${t.idempotencyKey} IS NOT NULL`),
+}));

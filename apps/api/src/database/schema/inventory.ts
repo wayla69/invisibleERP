@@ -67,7 +67,9 @@ export const locationStock = pgTable('location_stock', {
   uom: text('uom'),
   expiryDate: date('expiry_date'),
   lastUpdated: timestamp('last_updated', { withTimezone: true }),
-});
+}, (t) => ({
+  byItemLoc: index('idx_locstock_item').on(t.itemId, t.locationId),
+}));
 
 export const lotLedger = pgTable('lot_ledger', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -86,7 +88,10 @@ export const lotLedger = pgTable('lot_ledger', {
   moveDate: timestamp('move_date', { withTimezone: true }),
   refDoc: text('ref_doc'),
   createdBy: text('created_by'),
-});
+}, (t) => ({
+  byItemLoc: index('idx_ll_item_loc').on(t.itemId, t.locationId),
+  byLot: index('idx_ll_lot').on(t.lotNo),
+}));
 
 export const stockMovements = pgTable('stock_movements', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -102,7 +107,10 @@ export const stockMovements = pgTable('stock_movements', {
   refDoc: text('ref_doc'),
   remarks: text('remarks'),
   createdBy: text('created_by'),
-});
+}, (t) => ({
+  byItemDate: index('idx_sm_item_date').on(t.itemId, t.moveDate),
+  byDoc: index('idx_sm_doc').on(t.docNo),
+}));
 
 export const stocktakes = pgTable('stocktakes', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

@@ -67,7 +67,7 @@ export default function SavedViewsPage() {
               { key: 'module', label: 'หน้าจอ', render: (r) => <code className="text-xs">{r.module}</code> },
               { key: 'shared', label: 'การมองเห็น', render: (r) => <Badge variant={r.shared ? 'info' : 'muted'}>{r.shared ? 'แชร์' : 'ส่วนตัว'}</Badge> },
               { key: 'owner', label: 'เจ้าของ', render: (r) => r.mine ? 'ฉัน' : r.owner },
-              { key: 'act', label: '', align: 'right', render: (r) => r.mine ? <Button size="sm" variant="ghost" onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> : null },
+              { key: 'act', label: '', align: 'right', render: (r) => r.mine ? <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> : null },
             ]}
             emptyText="ยังไม่มีมุมมองที่บันทึกไว้"
           />

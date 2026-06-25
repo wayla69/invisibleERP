@@ -94,7 +94,7 @@ export default function PortalBomPage() {
               { key: 'product_name', label: 'สินค้า', render: (r: any) => g(r, 'product_name', 'productName') ?? '—' },
               { key: 'yield_qty', label: 'ผลผลิต', align: 'right', render: (r: any) => num(g(r, 'yield_qty', 'yieldQty')) },
               { key: 'selling_price', label: 'ราคาขาย', align: 'right', render: (r: any) => baht(g(r, 'selling_price', 'sellingPrice')) },
-              { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="outline" onClick={() => run.mutate(g(r, 'bom_code', 'bomCode'))}><Play className="size-4" /> ผลิต</Button> },
+              { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={run.isPending} onClick={() => run.mutate(g(r, 'bom_code', 'bomCode'))}><Play className="size-4" /> ผลิต</Button> },
             ]}
             emptyText="ยังไม่มีสูตรการผลิต"
           />

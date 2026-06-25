@@ -56,7 +56,7 @@ function Campaigns() {
           { key: 'type', label: 'ประเภท', render: (r) => g(r, 'campaignType', 'campaign_type') },
           { key: 'dates', label: 'ช่วงเวลา', render: (r) => `${thaiDate(g(r, 'startDate', 'start_date'))} – ${thaiDate(g(r, 'endDate', 'end_date'))}` },
           { key: 'active', label: 'สถานะ', render: (r) => { const s = r.active ? 'Active' : 'Paused'; return <Badge variant={statusVariant(s)}>{s}</Badge>; } },
-          { key: 'x', label: '', sortable: false, render: (r) => <Button variant="secondary" size="sm" onClick={() => toggle.mutate(r.id)}>เปิด/ปิด</Button> },
+          { key: 'x', label: '', sortable: false, render: (r) => <Button variant="secondary" size="sm" disabled={toggle.isPending} onClick={() => toggle.mutate(r.id)}>เปิด/ปิด</Button> },
         ]} />}
       </StateView>
     </div>
@@ -109,7 +109,7 @@ function Promotions() {
           { key: 'name', label: 'ชื่อ', render: (r) => g(r, 'promoName', 'promo_name') },
           { key: 'type', label: 'ประเภท', render: (r) => g(r, 'promoType', 'promo_type') },
           { key: 'active', label: 'สถานะ', render: (r) => { const s = g(r, 'active', 'isActive') ? 'Active' : 'Paused'; return <Badge variant={statusVariant(s)}>{s}</Badge>; } },
-          { key: 'x', label: '', sortable: false, render: (r) => <Button variant="secondary" size="sm" onClick={() => toggle.mutate(g(r, 'id'))}>เปิด/ปิด</Button> },
+          { key: 'x', label: '', sortable: false, render: (r) => <Button variant="secondary" size="sm" disabled={toggle.isPending} onClick={() => toggle.mutate(g(r, 'id'))}>เปิด/ปิด</Button> },
         ]} />}
       </StateView>
     </div>

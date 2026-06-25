@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { sql, eq, and, desc, notInArray, gt, lte } from 'drizzle-orm';
+import { sql, eq, and, desc, notInArray, gt, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions } from '../../database/schema';
@@ -266,17 +266,23 @@ export class LedgerService {
     const db = this.db as any;
     const where = status ? eq(journalEntries.status, status) : undefined;
     const heads = await db.select().from(journalEntries).where(where).orderBy(desc(journalEntries.id)).limit(limit);
-    const out: any[] = [];
-    for (const h of heads) {
-      const lines = await db.select({
-        account_code: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit, memo: journalLines.memo,
-      }).from(journalLines).where(eq(journalLines.entryId, h.id));
-      out.push({
-        entry_no: h.entryNo, entry_date: h.entryDate, period: h.period, source: h.source, source_ref: h.sourceRef,
-        memo: h.memo, currency: h.currency, status: h.status, created_by: h.createdBy, created_at: h.createdAt,
-        lines: lines.map((l: any) => ({ ...l, debit: n(l.debit), credit: n(l.credit) })),
-      });
+    if (!heads.length) return { entries: [], count: 0 };
+    // Batch every line for the page in ONE query (was a query per header → N+1), then group by entry.
+    const ids = heads.map((h: any) => Number(h.id));
+    const allLines = await db.select({
+      entryId: journalLines.entryId, account_code: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit, memo: journalLines.memo,
+    }).from(journalLines).where(inArray(journalLines.entryId, ids));
+    const byEntry = new Map<number, any[]>();
+    for (const l of allLines) {
+      const arr = byEntry.get(Number(l.entryId)) ?? [];
+      arr.push({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo });
+      byEntry.set(Number(l.entryId), arr);
     }
+    const out = heads.map((h: any) => ({
+      entry_no: h.entryNo, entry_date: h.entryDate, period: h.period, source: h.source, source_ref: h.sourceRef,
+      memo: h.memo, currency: h.currency, status: h.status, created_by: h.createdBy, created_at: h.createdAt,
+      lines: byEntry.get(Number(h.id)) ?? [],
+    }));
     return { entries: out, count: out.length };
   }
   async listJournal(limit: number) { return this.entriesList(limit); }
