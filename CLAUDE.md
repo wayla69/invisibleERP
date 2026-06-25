@@ -80,6 +80,16 @@ For every such change, review and update as needed:
   re-reading the gate. The merge is **not** hard-blocked by this gate, so a verified-clean fix can be
   merged even while the gate still displays its stale red (the post-merge `main` analysis is the
   authoritative confirmation).
+- **Hand-written Drizzle migrations must be journaled, and numeric prefixes collide under parallel branches.**
+  Every `apps/api/drizzle/NNNN_*.sql` needs a matching entry in `meta/_journal.json` or the
+  `migrations-journaled` CI gate fails. Append `{idx, version:"7", when, tag:"NNNN_name", breakpoints:true}`
+  and write the file with **CRLF** line endings (`JSON.stringify(j,null,2).replace(/\n/g,"\r\n")`). On a
+  long-lived feature branch, `main` merges keep claiming your number (`0120`→`0121`→`0122`…): on each
+  `git merge origin/main`, take **theirs** for `_journal.json`, then `git mv` your `.sql` to the next free
+  number and re-append at the next `idx`. Verify with a quick node check that the journal tag-set and the
+  `.sql` filename-set match exactly (no missing, no orphan) before committing. **Gotcha:** if you `git add`
+  `_journal.json` during conflict resolution *before* re-appending your entry, the merge ships it unjournaled
+  and CI fails — always re-add after the node append.
 - **`js/sensitive-get-query` (CWE-598) fires on CLIENT code too.** It flags reading a sensitive-named
   param (`token`, `id_token`, `code`, `secret`, …) from the URL — including `new URLSearchParams(
   window.location.search).get('id_token')` in a web page, not just server `req.query`/Nest `@Query`. Fix
@@ -94,9 +104,19 @@ For every such change, review and update as needed:
   (one-time `pnpm --filter @ierp/web exec playwright install chromium`; needs browser-download network access)
 - Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`):
   `pnpm --filter @ierp/cutover compliance` (ICFR controls), `e2e`, `ext`, `worldclass`, `taxdocs`,
-  `restaurant`; `pnpm --filter @ierp/parity writeflow|analytics`. Keep these green.
+  `restaurant`, `production-plan`, `financial-health`, `line-automation`; `pnpm --filter @ierp/parity
+  writeflow|analytics`. Keep these green.
 
 ## Key references
 - RCM / readiness / policies: `compliance/` (`Oshinei_ERP_SOX_RCM_v1.xlsx`, `build_rcm.py`,
   `COSO_ICFR_Audit_Readiness_Plan.md`, `policies/`, `vulnerability-triage.md`).
 - Permissions / roles / SoD rules: `packages/shared/src/permissions.ts`. Web nav/workspaces: `apps/web/src/lib/nav.ts`.
+- POS growth features (PR #70): **demand-ML production forecast** — `ProductionPlanService` forecasts each
+  dish via `demand-ml/DemandForecastService.planForecast(itemId, horizon)` (non-persisting; walk-forward
+  backtest, auto-selects lowest-WAPE model; transparent **day-of-week fallback** when history < 14 days);
+  the parity-locked `ForecastingService` (reorder points) is untouched. **Working-capital health score** —
+  `GET /api/finance/health` (`FinancialHealthService`, 0–100 / A–E; read-only, no GL postings; complements
+  the GL module's `/api/ledger/cash-flow-forecast`). **LINE marketing automation** — `/api/marketing/
+  automation/{preview,campaigns,campaigns/:id,redeem}` (closed loop: trigger → coupon push → till redemption
+  attributed to sale; tables `automation_campaigns` + `campaign_sends`, migration `0123_marketing_campaigns`).
+  Web pages: `/production-plan`, `/financial-health`, `/campaigns`.
