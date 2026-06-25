@@ -54,6 +54,7 @@ import {
   Palette,
   PieChart,
   ReceiptText,
+  RotateCcw,
   Scale,
   ScanLine,
   ScrollText,
@@ -152,6 +153,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'ขายหน้าร้าน (Register)', href: '/pos/register', icon: ShoppingCart, perms: ['pos', 'order_mgt'] },
       { label: 'รายการออเดอร์', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
+      { label: 'คืนสินค้า & คืนเงิน', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt'] },
       { label: 'โต๊ะ', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
       { label: 'ครัว (KDS)', href: '/kds', icon: ChefHat, perms: ['pos'] },
       { label: 'เมนูอาหาร', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
