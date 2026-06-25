@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, Sarabun } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
@@ -24,10 +24,21 @@ export const metadata: Metadata = {
   description: 'Oshinei Enterprise ERP — V2',
   manifest: '/manifest.webmanifest',
   appleWebApp: { capable: true, title: 'Invisible ERP', statusBarStyle: 'default' },
+  icons: { icon: '/icon.svg', apple: '/icon.svg' },
+  // Long ID/figure strings (Sale_No, tax IDs) must not become tappable "phone numbers" on iOS Safari.
+  formatDetection: { telephone: false },
 };
 
-// E3 (Phase 28) — PWA theme color for the installed app's chrome.
-export const viewport = { themeColor: '#1E3C72' };
+// E3 (Phase 28) — PWA chrome + mobile viewport. `viewportFit: 'cover'` lets the installed app draw
+// edge-to-edge on notched iPhone / gesture-bar Android; the app shell then pads itself back in with
+// env(safe-area-inset-*) (a no-op in a normal browser, where the insets are 0). `initialScale` is set
+// but pinch-zoom is intentionally left enabled (no maximumScale) — disabling it is an a11y anti-pattern.
+export const viewport: Viewport = {
+  themeColor: '#1E3C72',
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

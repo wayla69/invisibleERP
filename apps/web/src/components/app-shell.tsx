@@ -490,7 +490,7 @@ export function AppShell({
       </Sidebar>
 
       <SidebarInset>
-        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <header className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center gap-2 border-b bg-background/95 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] safe-pt backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-1 h-5" />
           <h2 className="text-sm font-medium">{activeLabel}</h2>
@@ -544,7 +544,7 @@ export function AppShell({
           </div>
         </header>
 
-        <div className={cn('flex-1 p-4 sm:p-6')}>{children}</div>
+        <div className={cn('flex-1 pt-4 sm:pt-6 app-content-pad')}>{children}</div>
       </SidebarInset>
 
       <CommandPalette groups={paletteGroups} open={paletteOpen} onOpenChange={setPaletteOpen} />

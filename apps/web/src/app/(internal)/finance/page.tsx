@@ -13,11 +13,48 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose,
 } from '@/components/ui/dialog';
 import { statusVariant } from '@/components/ui';
+import { TrendAreaChart } from '@/components/charts';
 import { Msg } from '@/components/tabs';
+
+// AR/AP aging buckets in escalating-severity order — shared by the overview composition bars and the
+// detail Aging section. Colours ramp current → 90+ so an overdue-heavy book reads "red" at a glance.
+const AGING_BUCKETS = [
+  { k: 'current', l: 'ยังไม่ครบกำหนด', cls: 'bg-success' },
+  { k: 'd1_30', l: '1–30 วัน', cls: 'bg-info' },
+  { k: 'd31_60', l: '31–60 วัน', cls: 'bg-warning' },
+  { k: 'd61_90', l: '61–90 วัน', cls: 'bg-orange-500' },
+  { k: 'd90_plus', l: '90+ วัน', cls: 'bg-destructive' },
+] as const;
+
+/** A single horizontal stacked bar showing how an outstanding balance splits across aging buckets. */
+function AgingStack({ label, total, buckets }: { label: string; total: number; buckets?: Record<string, number> }) {
+  const t = total || AGING_BUCKETS.reduce((a, b) => a + Number(buckets?.[b.k] ?? 0), 0);
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between text-sm">
+        <span className="font-medium">{label}</span>
+        <span className="tabular text-muted-foreground">{baht(t)}</span>
+      </div>
+      <div
+        className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={`${label} แยกตามอายุหนี้ รวม ${baht(t)}`}
+      >
+        {t > 0 &&
+          AGING_BUCKETS.map((b) => {
+            const v = Number(buckets?.[b.k] ?? 0);
+            if (v <= 0) return null;
+            return <div key={b.k} className={b.cls} style={{ width: `${(v / t) * 100}%` }} title={`${b.l}: ${baht(v)}`} />;
+          })}
+      </div>
+    </div>
+  );
+}
 
 export default function FinancePage() {
   const qc = useQueryClient();
@@ -28,7 +65,12 @@ export default function FinancePage() {
   // Awaiting-approval AP payments (checker queue). retry:false so a maker without approval rights simply
   // doesn't see the section (the 403 leaves data undefined) instead of getting an error banner.
   const pendingPay = useQuery<any>({ queryKey: ['fin-ap-pending'], queryFn: () => api('/api/finance/ap/payments/pending'), retry: false });
-  const refresh = () => { for (const k of ['fin-kpi', 'fin-ar', 'fin-ap', 'fin-ap-pending']) qc.invalidateQueries({ queryKey: [k] }); };
+  // Overview visuals. The aging queries reuse the exact keys the detail Aging section uses, so React Query
+  // dedupes them to a single fetch each — no extra network round-trips for the dashboard band.
+  const trend = useQuery<any>({ queryKey: ['fin-revenue-trend'], queryFn: () => api('/api/dashboard/sales-trend?days=30') });
+  const arAging = useQuery<any>({ queryKey: ['fin-ar-aging'], queryFn: () => api('/api/finance/ar/aging') });
+  const apAging = useQuery<any>({ queryKey: ['fin-ap-aging'], queryFn: () => api('/api/finance/ap/aging') });
+  const refresh = () => { for (const k of ['fin-kpi', 'fin-ar', 'fin-ap', 'fin-ap-pending', 'fin-revenue-trend', 'fin-ar-aging', 'fin-ap-aging']) qc.invalidateQueries({ queryKey: [k] }); };
 
   // ── AP vendor invoice entry ──
   const [apOpen, setApOpen] = useState(false);
@@ -80,6 +122,8 @@ export default function FinancePage() {
       <Input id={key} value={form[key] ?? ''} onChange={(e) => set((f: any) => ({ ...f, [key]: e.target.value }))} {...props} />
     </div>
   );
+
+  const trendData = (trend.data?.trend ?? []).map((r: any) => ({ ...r, label: thaiDate(r.date) }));
 
   return (
     <div>
@@ -138,16 +182,56 @@ export default function FinancePage() {
         }
       />
       <div className="space-y-6">
+        {/* ── Executive overview band: KPIs + revenue trend + AR/AP aging composition ── */}
         <StateView q={kpi}>
           {kpi.data && (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="รายได้ MTD" value={baht(kpi.data.mtd_revenue)} icon={Banknote} tone="primary" />
-              <StatCard label="รายได้ YTD" value={baht(kpi.data.ytd_revenue)} icon={TrendingUp} tone="default" />
-              <StatCard label="ลูกหนี้คงค้าง (AR)" value={baht(kpi.data.ar_outstanding)} icon={ReceiptText} tone={kpi.data.ar_outstanding > 0 ? 'warning' : 'success'} />
-              <StatCard label="เจ้าหนี้คงค้าง (AP)" value={baht(kpi.data.ap_outstanding)} icon={Wallet} tone={kpi.data.ap_outstanding > 0 ? 'danger' : 'success'} />
+              <StatCard label="รายได้ MTD" value={baht(kpi.data.mtd_revenue)} icon={Banknote} tone="primary" hint="รายได้เดือนนี้ (สะสม)" />
+              <StatCard label="รายได้ YTD" value={baht(kpi.data.ytd_revenue)} icon={TrendingUp} tone="default" hint="รายได้ปีนี้ (สะสม)" />
+              <StatCard label="ลูกหนี้คงค้าง (AR)" value={baht(kpi.data.ar_outstanding)} icon={ReceiptText} tone={kpi.data.ar_outstanding > 0 ? 'warning' : 'success'} hint="ยอดที่ต้องเรียกเก็บ" />
+              <StatCard label="เจ้าหนี้คงค้าง (AP)" value={baht(kpi.data.ap_outstanding)} icon={Wallet} tone={kpi.data.ap_outstanding > 0 ? 'danger' : 'success'} hint="ยอดที่ต้องชำระ" />
             </div>
           )}
         </StateView>
+
+        <div className="grid gap-4 lg:grid-cols-5">
+          <Card className="lg:col-span-3">
+            <CardHeader>
+              <CardTitle className="text-base">แนวโน้มรายได้ (30 วัน)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {trend.isLoading ? (
+                <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">กำลังโหลด…</div>
+              ) : trendData.length ? (
+                <TrendAreaChart data={trendData} xKey="label" yKey="sales" fmt={(v) => baht(v)} />
+              ) : (
+                <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">ยังไม่มีข้อมูลรายได้</div>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">อายุหนี้คงค้าง (AR เทียบ AP)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {arAging.isLoading || apAging.isLoading ? (
+                <div className="grid h-[200px] place-items-center text-sm text-muted-foreground">กำลังโหลด…</div>
+              ) : (
+                <>
+                  <AgingStack label="ลูกหนี้ (AR)" total={arAging.data?.total ?? 0} buckets={arAging.data?.buckets} />
+                  <AgingStack label="เจ้าหนี้ (AP)" total={apAging.data?.total ?? 0} buckets={apAging.data?.buckets} />
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1">
+                    {AGING_BUCKETS.map((b) => (
+                      <span key={b.k} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className={`size-2.5 rounded-sm ${b.cls}`} /> {b.l}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
         <div>
           <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ลูกหนี้ (AR)</h3>

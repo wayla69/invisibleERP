@@ -6,9 +6,18 @@ This chapter is for **AR Clerks**, **AP Clerks** and **Procurement / finance**
 staff. It covers customer invoices and receipts (AR), supplier bills and payments
 (AP), aging analysis, and bank reconciliation.
 
-**Main screen:** `/finance` — the Finance dashboard shows MTD/YTD revenue,
-AR outstanding (**ลูกหนี้คงค้าง**) and AP outstanding (**เจ้าหนี้คงค้าง**), with
-tables and aging.
+**Main screen:** `/finance` — the Finance dashboard opens with an **executive
+overview band**:
+
+- **KPI cards** — MTD / YTD revenue, AR outstanding (**ลูกหนี้คงค้าง**) and AP
+  outstanding (**เจ้าหนี้คงค้าง**), each with a one-line hint.
+- **30-day revenue trend** — an area chart of daily takings (**แนวโน้มรายได้**).
+- **AR-vs-AP aging composition** (**อายุหนี้คงค้าง**) — a stacked bar for each
+  book showing how much is *current* vs *1–30 / 31–60 / 61–90 / 90+ days* overdue,
+  with a colour legend, so an overdue-heavy book reads "red" at a glance.
+
+The operational **AR / AP worklists, collections and detailed aging** follow
+below. The whole page reflows to a single column on phones/tablets.
 
 ---
 
