@@ -130,6 +130,15 @@ cash-friendly total. Cashiers *apply* rules; only Pricing/Marketing roles may
 *create* them (segregation of duties). See **Dine-in / restaurant** for the full
 flow.
 
+**Building rules (`/pricing` — กฎราคา & โปรโมชั่น).** Pricing/Marketing roles define
+rules on the **กฎราคา** tab: a labelled form for the **rule name**, **type** (ส่วนลด
+% / บาท, ราคาตายตัว, ซื้อ 1 แถม 1, ลดตามจำนวน), **scope** (รายสินค้า / หมวด / ทั้งบิล)
+and target, **channel**, **value**, **minimum quantity**, an optional **day-of-week**
+and **time window** (e.g. happy hour), a **priority**, and whether it **stacks** with
+other rules. The **ทดลองคำนวณ** tab prices a sample basket so you can see which rules
+apply before going live, and **ชุดเซ็ต (Combo)** defines set-menu components. The
+forms reflow to a single column on phones.
+
 ### QR self-ordering & the kitchen display (KDS)
 
 Guests can order from their own phone — no app, no login:

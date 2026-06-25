@@ -57,8 +57,15 @@ self-contained (single port). The same overlay works for any single-port preview
 # what the devcontainer runs (also usable for any cloud single-port preview):
 docker compose -f docker-compose.yml -f docker-compose.codespaces.yml up --build
 ```
-The opt-in proxy is gated behind `API_PROXY_TARGET` in `apps/web/next.config.mjs`, so it is a **no-op in
-prod** (Railway keeps web and API on separate origins via `NEXT_PUBLIC_API_URL`).
+The opt-in proxy is gated behind `API_PROXY_TARGET` in `apps/web/next.config.mjs` — unset ⇒ no-op. It is
+**also the recommended prod fix when the two origins can't share a cookie** (e.g. the auto-generated
+`*.up.railway.app` URLs are each their own registrable domain on the Public Suffix List, so cookie auth
+can't span them). In that case set the **web** service's `NEXT_PUBLIC_API_URL` to the **web's own** public
+URL and `API_PROXY_TARGET` to the **api** URL, and redeploy web: the browser then makes same-origin
+`/api/*` calls that Next forwards to the api, so the session cookie is first-party and login sticks — no
+custom domain needed. (Only when web and API sit under a **shared custom domain** is the separate-origin
+topology — `NEXT_PUBLIC_API_URL`=api URL + `AUTH_COOKIE_DOMAIN`=shared parent — preferable; see
+`railway-setup.md` §4.)
 
 ## 3. Migrations on deploy
 Hand-written SQL in `apps/api/drizzle/` applied by `drizzle-kit migrate` (`pnpm --filter @ierp/api db:migrate`).
@@ -70,6 +77,11 @@ DBA: `tools/ops/sql/prod-db-roles.sql` (NOT part of the migration chain — see 
 The API **refuses to boot in production** without `DATABASE_URL`, `JWT_SECRET`, `APP_ENC_KEY`, and a PSP
 webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matrix + sourcing:
 `docs/ops/secrets.md`. Observability env is recommended (warned if missing): `observability-incident.md`.
+
+> **Separate-origin deploys (web ≠ api host) must also set `AUTH_COOKIE_DOMAIN`** (a shared parent domain
+> like `.example.com`) so the session cookie is readable on the web origin — otherwise login succeeds but
+> bounces straight back to `/login`. For web/api on *different registrable domains*, also set
+> `AUTH_COOKIE_SAMESITE=None`. Same-origin deploys (§2C proxy) need neither. See `railway-setup.md` §4.
 
 ## 5. CI/CD
 - `ci.yml` — build/typecheck/unit, integration harnesses, security (audit + gitleaks), CodeQL, web-e2e.

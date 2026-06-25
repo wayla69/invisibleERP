@@ -1,21 +1,37 @@
 'use client';
 
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs, Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 
-const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm';
+const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
+
+const ACTION_OPTS: [string, string][] = [['void', 'ยกเลิกบิล (void)'], ['discount', 'ส่วนลด'], ['price_override', 'แก้ราคา'], ['no_sale', 'เปิดลิ้นชัก (no sale)'], ['return', 'คืนสินค้า']];
+const APPLIES_OPTS: [string, string][] = [['all', 'ทั้งหมด'], ['void', 'ยกเลิก'], ['discount', 'ส่วนลด'], ['price_override', 'แก้ราคา'], ['no_sale', 'เปิดลิ้นชัก'], ['return', 'คืนสินค้า'], ['refund', 'คืนเงิน'], ['paid_out', 'จ่ายออก']];
+
+function Field({ label, htmlFor, hint, className, children }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; className?: string; children: ReactNode }) {
+  return (
+    <div className={cn('grid gap-1.5', className)}>
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
 
 export default function PosControlPage() {
   return (
@@ -44,20 +60,25 @@ function ReasonCodes() {
   const del = useMutation({ mutationFn: (id: number) => api(`/api/pos/audit/reason-codes/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['reason-codes'] }) });
   return (
     <div className="space-y-4">
-      <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">เพิ่มรหัสเหตุผล</h3>
-        <div className="flex flex-wrap gap-2">
-          <Input className="max-w-[140px]" placeholder="รหัส" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />
-          <Input className="max-w-[200px]" placeholder="คำอธิบาย" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
-          <select className={selectCls} value={f.applies_to} onChange={(e) => setF({ ...f, applies_to: e.target.value })}>{['all', 'void', 'discount', 'price_override', 'no_sale', 'return', 'refund', 'paid_out'].map((a) => <option key={a} value={a}>{a}</option>)}</select>
-          <Button disabled={!f.code || !f.label || save.isPending} onClick={() => save.mutate()}>บันทึก</Button>
-        </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+      <Card>
+        <CardHeader><CardTitle className="text-base">เพิ่มรหัสเหตุผล</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="รหัส" htmlFor="rc-code"><Input id="rc-code" placeholder="เช่น VOID01" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} /></Field>
+            <Field label="คำอธิบาย" htmlFor="rc-label"><Input id="rc-label" placeholder="เช่น ลูกค้ายกเลิก" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></Field>
+            <Field label="ใช้กับ" htmlFor="rc-applies">
+              <select id="rc-applies" className={selectCls} value={f.applies_to} onChange={(e) => setF({ ...f, applies_to: e.target.value })}>{APPLIES_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            </Field>
+          </div>
+          <Button disabled={!f.code || !f.label || save.isPending} onClick={() => { setMsg(''); save.mutate(); }}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}</Button>
+          {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+        </CardContent>
       </Card>
       <StateView q={q}>
-        {q.data && <DataTable rows={q.data.reason_codes} columns={[
-          { key: 'code', label: 'รหัส' }, { key: 'label', label: 'คำอธิบาย' }, { key: 'applies_to', label: 'ใช้กับ' },
-          { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.id)}>ปิดใช้</Button> },
+        {q.data && <DataTable rows={q.data.reason_codes} rowKey={(r: any) => r.id} columns={[
+          { key: 'code', label: 'รหัส' }, { key: 'label', label: 'คำอธิบาย' },
+          { key: 'applies_to', label: 'ใช้กับ', render: (r: any) => APPLIES_OPTS.find(([v]) => v === r.applies_to)?.[1] ?? r.applies_to },
+          { key: 'act', label: '', sortable: false, render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.id)}>ปิดใช้</Button> },
         ]} emptyText="ยังไม่มีรหัสเหตุผล" />}
       </StateView>
     </div>
@@ -88,13 +109,14 @@ function Held() {
       {q.data && (
         <DataTable
           rows={q.data.held}
+          rowKey={(r: any) => r.hold_no}
           columns={[
             { key: 'hold_no', label: 'เลขที่' },
             { key: 'label', label: 'ป้าย/โต๊ะ' },
-            { key: 'customer_name', label: 'ลูกค้า' },
+            { key: 'customer_name', label: 'ลูกค้า', render: (r: any) => r.customer_name || '—' },
             { key: 'created_by', label: 'พักโดย' },
             { key: 'created_at', label: 'เวลา', render: (r: any) => thaiDate(r.created_at) },
-            { key: 'act', label: '', render: (r: any) => <div className="flex gap-1"><Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>เรียกคืน</Button><Button size="sm" variant="destructive" onClick={() => { if (window.confirm(`ทิ้งบิลที่พักไว้ ${r.hold_no}? การกระทำนี้ย้อนกลับไม่ได้`)) act.mutate({ no: r.hold_no, op: 'discard' }); }}>ทิ้ง</Button></div> },
+            { key: 'act', label: '', sortable: false, render: (r: any) => <div className="flex gap-1"><Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>เรียกคืน</Button><Button size="sm" variant="destructive" onClick={() => { if (window.confirm(`ทิ้งบิลที่พักไว้ ${r.hold_no}? การกระทำนี้ย้อนกลับไม่ได้`)) act.mutate({ no: r.hold_no, op: 'discard' }); }}>ทิ้ง</Button></div> },
           ]}
           emptyText="ไม่มีบิลที่พักไว้"
         />
@@ -108,6 +130,7 @@ function Overrides() {
   const q = useQuery<any>({ queryKey: ['overrides'], queryFn: () => api('/api/pos/overrides') });
   const [f, setF] = useState({ action: 'discount', sale_no: '', amount: '', reason: '', approved_by: '' });
   const [msg, setMsg] = useState('');
+  const isVoid = f.action === 'void';
   const create = useMutation({
     mutationFn: () => api('/api/pos/override', { method: 'POST', body: JSON.stringify({ action: f.action, sale_no: f.sale_no || undefined, amount: f.amount ? Number(f.amount) : undefined, reason: f.reason || undefined, approved_by: f.approved_by || undefined }) }),
     onSuccess: (r: any) => { setMsg(`✅ บันทึก ${r.override_no}`); setF({ action: 'discount', sale_no: '', amount: '', reason: '', approved_by: '' }); qc.invalidateQueries({ queryKey: ['overrides'] }); },
@@ -115,37 +138,44 @@ function Overrides() {
   });
   return (
     <div className="space-y-4">
-      <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">บันทึกการอนุมัติ</h3>
-        <div className="flex flex-wrap gap-2">
-          <select className={selectCls} value={f.action} onChange={(e) => setF({ ...f, action: e.target.value })}>{['void', 'discount', 'price_override', 'no_sale', 'return'].map((a) => <option key={a} value={a}>{a}</option>)}</select>
-          <Input className="max-w-[140px]" placeholder="เลขที่บิล" value={f.sale_no} onChange={(e) => setF({ ...f, sale_no: e.target.value })} />
-          <Input className="max-w-[110px]" type="number" placeholder="จำนวน" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
-          <Input className="max-w-[160px]" placeholder="เหตุผล" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
-          <Input className="max-w-[140px]" placeholder="ผู้อนุมัติ" value={f.approved_by} onChange={(e) => setF({ ...f, approved_by: e.target.value })} />
+      <Card>
+        <CardHeader><CardTitle className="text-base">บันทึกการอนุมัติ</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="ประเภท" htmlFor="ov-action">
+              <select id="ov-action" className={selectCls} value={f.action} onChange={(e) => setF({ ...f, action: e.target.value })}>{ACTION_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            </Field>
+            <Field label="เลขที่บิล" htmlFor="ov-sale"><Input id="ov-sale" placeholder="SALE-…" value={f.sale_no} onChange={(e) => setF({ ...f, sale_no: e.target.value })} /></Field>
+            <Field label="จำนวน (บาท)" htmlFor="ov-amt"><Input id="ov-amt" type="number" inputMode="decimal" placeholder="0" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
+            <Field label={<>เหตุผล {isVoid && <span className="text-destructive">*</span>}</>} htmlFor="ov-reason"><Input id="ov-reason" placeholder="เหตุผลการอนุมัติ" value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></Field>
+            <Field label={<>ผู้อนุมัติ {isVoid && <span className="text-destructive">*</span>}</>} htmlFor="ov-appr"><Input id="ov-appr" placeholder="ชื่อผู้จัดการที่อนุมัติ" value={f.approved_by} onChange={(e) => setF({ ...f, approved_by: e.target.value })} /></Field>
+          </div>
+          {isVoid && <p className="text-xs text-muted-foreground">การยกเลิก (void) ย้อนกลับการขาย — ต้องระบุ <strong>เหตุผล</strong> และ <strong>ผู้อนุมัติ</strong> และยืนยันก่อนบันทึก</p>}
           <Button disabled={create.isPending} onClick={() => {
+            setMsg('');
             // A void reverses a sale — require a reason + approver and confirm before recording.
             if (f.action === 'void') {
               if (!f.reason.trim() || !f.approved_by.trim()) { setMsg('❌ การยกเลิก (void) ต้องระบุเหตุผลและผู้อนุมัติ'); return; }
               if (!window.confirm(`ยืนยันการยกเลิกบิล ${f.sale_no || '(ไม่ระบุ)'}? การกระทำนี้ย้อนกลับไม่ได้`)) return;
             }
             create.mutate();
-          }}>บันทึก</Button>
-        </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+          }}>{create.isPending ? 'กำลังบันทึก…' : 'บันทึก'}</Button>
+          {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+        </CardContent>
       </Card>
       <StateView q={q}>
         {q.data && (
           <DataTable
             rows={q.data.overrides}
+            rowKey={(r: any) => r.override_no}
             columns={[
               { key: 'override_no', label: 'เลขที่' },
-              { key: 'action', label: 'การทำงาน' },
-              { key: 'sale_no', label: 'บิล' },
-              { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => r.amount != null ? baht(r.amount) : '—' },
-              { key: 'reason', label: 'เหตุผล' },
+              { key: 'action', label: 'การทำงาน', render: (r: any) => ACTION_OPTS.find(([v]) => v === r.action)?.[1] ?? r.action },
+              { key: 'sale_no', label: 'บิล', render: (r: any) => r.sale_no || '—' },
+              { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => r.amount != null ? <span className="tabular">{baht(r.amount)}</span> : '—' },
+              { key: 'reason', label: 'เหตุผล', render: (r: any) => r.reason || '—' },
               { key: 'requested_by', label: 'ขอโดย' },
-              { key: 'approved_by', label: 'อนุมัติโดย' },
+              { key: 'approved_by', label: 'อนุมัติโดย', render: (r: any) => r.approved_by || '—' },
             ]}
             emptyText="ยังไม่มีรายการอนุมัติ"
           />

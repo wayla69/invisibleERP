@@ -96,6 +96,28 @@ For every such change, review and update as needed:
   by **not naming** the sensitive param at the read site: forward the raw query string opaquely and parse
   it server-side from the POST **body** (the body is not a GET-query source). This bit the SSO `/sso/callback`
   page (the IdP redirect carries `code`/`id_token` in the URL).
+- **`js/sql-injection` false-positives on Drizzle `sql` templates.** CodeQL flags a `@Query()`-derived
+  value interpolated into a `sql\`${col} >= ${param}\`` template even though Drizzle **binds** `${param}`.
+  Use the typed builders (`gte`/`lte`/`eq`/`and`) instead of a raw `sql` template at user-input sites —
+  same parameterized SQL, no sink. (Bit `cashFlowDirect`'s date filter.)
+- **Drizzle migrations MUST be journaled.** Every new `apps/api/drizzle/NNNN_*.sql` needs a matching entry
+  appended to `apps/api/drizzle/meta/_journal.json` (sequential `idx`, ascending `when`), or the CI
+  `migrations-journaled` gate fails and prod `drizzle-kit migrate` skips it. Verify no duplicate `idx`.
+  Sequence is at `0121` / idx 126 as of the gap-pack work.
+- **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`
+  conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
+  doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage
+  the result. Currently **77 controls**.
+- **Stacked PRs + squash-merge conflicts.** When a feature PR is stacked on another and the base
+  squash-merges to `main`, the dependent PR goes `dirty` because main now holds the same content under a
+  *different* commit SHA. Resolve by merging `origin/main` and taking **ours** (the stacked branch already
+  contains the base's content as a superset) for every conflict, then regenerate the RCM xlsx. Retarget the
+  PR base to `main` only after the base PR merges.
+- **Authoring `basics` harness GL assertions:** trial-balance rows expose `debit`, `credit`, *and* `balance`
+  (= debit − credit). Use `balance` for net-position checks (e.g. a control account that gets both a debit
+  and a later credit) — reading the gross `debit` column alone misses the offsetting credit. Service errors
+  surface as `json.error.code` (the `AllExceptionsFilter` wraps the body in `{ error: {...} }`), not
+  `json.code`.
 
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
@@ -108,8 +130,9 @@ For every such change, review and update as needed:
   `*.capture.spec.ts` (screenshot tools, e.g. `e2e/sidebar.capture.spec.ts`) are excluded from CI via
   `testIgnore`; run them by clearing `testIgnore` in that local config.
 - Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`):
-  `pnpm --filter @ierp/cutover compliance` (ICFR controls), `e2e`, `ext`, `worldclass`, `taxdocs`,
-  `restaurant`; `pnpm --filter @ierp/parity writeflow|analytics`. Keep these green.
+  `pnpm --filter @ierp/cutover compliance` (ICFR controls), `basics` (the finance/GL/EAM smoke — **the
+  primary gate for AR/AP, GL, fixed-assets/EAM, leases, cash-flow, collections work; extend it for any such
+  change**), `e2e`, `ext`, `worldclass`, `taxdocs`, `restaurant`; `pnpm --filter @ierp/parity writeflow|analytics`. Keep these green.
 
 ## Key references
 - RCM / readiness / policies: `compliance/` (`Oshinei_ERP_SOX_RCM_v1.xlsx`, `build_rcm.py`,
@@ -119,3 +142,20 @@ For every such change, review and update as needed:
 - Per-user UI prefs (sidebar favourites + nav fold-state) sync across devices via `GET/PUT /api/user-prefs`
   (`UserPrefsModule`, table `user_prefs`, RLS + owner-scoped, no `@Permissions`); recents stay per-device
   (localStorage). See `docs/15-ui-ux-menu-restructure-plan.md`.
+- **Finance/GL feature map (controls + where the logic lives):**
+  - GL maker-checker / recurring / prepaid: `modules/ledger/ledger.service.ts` — `postEntry` (Draft+approve, **GL-05**),
+    `createRecurring`/`runDueRecurring` (**GL-08**), `createPrepaid`/`runDuePrepaid` (**GL-09**); cash flow
+    `cashFlowStatement`/`cashFlowDirect`/`cashFlowForecast` (**GL-07**).
+  - Cash flow account buckets live in the `CF_CLASSIFY` map + COA array at the top of `ledger.service.ts` —
+    **add new balance-sheet accounts there** or the indirect SCF mis-buckets them.
+  - Leases (IFRS 16, **LSE-01**): `modules/leases/` — `createLease` (ROU+liability at PV), `runDueLeases`
+    (interest/payment/ROU-dep, off the running `rou_nbv`), `modifyLease` (remeasurement).
+  - AR/AP statements (multi-currency), petty-cash advances (**EXP-07**): `modules/finance/finance.service.ts`
+    (`customerStatement`/`vendorStatement`, `issueAdvance`/`settleAdvance`).
+  - Asset revaluation/impairment + disposal recycling (**FA-07**): `modules/assets/assets.service.ts`
+    (`revalue`, `dispose` recycles surplus 3200→3100). EAM work orders/PM/reliability (**FA-06**): `modules/eam/`.
+  - Collections/dunning + credit-hold workflow (**REV-08/REV-12**): `modules/finance/collections.service.ts`.
+  - Scheduled "action" jobs ride the BI report scheduler (`modules/bi/bi.service.ts` `REPORT_TYPES` +
+    `generateReport`): `ar_collections_dunning`, `eam_pm_generate`, `gl_recurring_journals`,
+    `gl_prepaid_amortize`, `lease_periodic_run` — each is idempotent and injected `@Optional()` to keep
+    partial harnesses constructible.

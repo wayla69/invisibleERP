@@ -80,6 +80,20 @@ async function main() {
   const anon = await app.inject({ method: 'GET', url: '/api/auth/me' });
   ok('AC-07: no cookie / no bearer → 401', anon.statusCode === 401, `status=${anon.statusCode}`);
 
+  // 8. default cookie attributes are single-origin safe: SameSite=Lax, no Domain (regression guard).
+  const defCookie = String((Array.isArray(login.headers['set-cookie']) ? login.headers['set-cookie'] : [login.headers['set-cookie']]).find((c) => typeof c === 'string' && c.startsWith('ierp_token=')));
+  ok('AC-07: default cookie is SameSite=Lax with no Domain (single-origin)', /SameSite=Lax/i.test(defCookie) && !/Domain=/i.test(defCookie), defCookie);
+
+  // 9. cross-origin deploy config (AUTH_COOKIE_DOMAIN + SameSite=None) is honoured so web/API on different
+  //    hosts can share the session — None must force Secure. Config is read per-request, so set → login → restore.
+  process.env.AUTH_COOKIE_DOMAIN = '.example.test';
+  process.env.AUTH_COOKIE_SAMESITE = 'None';
+  const xo = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'admin', password: 'admin123' } });
+  const xoCookie = String((Array.isArray(xo.headers['set-cookie']) ? xo.headers['set-cookie'] : [xo.headers['set-cookie']]).find((c) => typeof c === 'string' && c.startsWith('ierp_token=')));
+  ok('AC-07: cross-origin env sets Domain + SameSite=None; Secure', /Domain=\.example\.test/i.test(xoCookie) && /SameSite=None/i.test(xoCookie) && /Secure/i.test(xoCookie), xoCookie);
+  delete process.env.AUTH_COOKIE_DOMAIN;
+  delete process.env.AUTH_COOKIE_SAMESITE;
+
   await app.close();
   console.log('\n── ITGC-AC-07 — cookie-based web session auth + CSRF ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

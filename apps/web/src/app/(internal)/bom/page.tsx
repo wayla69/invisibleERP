@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Tabs, Msg } from '@/components/tabs';
 import { statusVariant } from '@/components/ui';
 
@@ -41,20 +42,23 @@ function Library() {
           <CardTitle className="text-base">สร้าง/แก้สูตร (BoM)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
-            <Input placeholder="รหัสสูตร" value={code} onChange={(e) => setCode(e.target.value)} />
-            <Input placeholder="ชื่อสินค้า" value={name} onChange={(e) => setName(e.target.value)} />
-            <Input className="sm:max-w-[110px]" type="number" placeholder="ราคาขาย" value={sell} onChange={(e) => setSell(+e.target.value)} />
-            <Input className="sm:max-w-[110px]" type="number" placeholder="ค่าแรง" value={labor} onChange={(e) => setLabor(+e.target.value)} />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-1.5"><Label htmlFor="bom-code">รหัสสูตร</Label><Input id="bom-code" placeholder="เช่น BOM001" value={code} onChange={(e) => setCode(e.target.value)} /></div>
+            <div className="grid gap-1.5"><Label htmlFor="bom-name">ชื่อสินค้า</Label><Input id="bom-name" placeholder="เช่น ก๋วยเตี๋ยวต้มยำ" value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div className="grid gap-1.5"><Label htmlFor="bom-sell">ราคาขาย (บาท)</Label><Input id="bom-sell" type="number" inputMode="decimal" value={sell} onChange={(e) => setSell(+e.target.value)} /></div>
+            <div className="grid gap-1.5"><Label htmlFor="bom-labor">ค่าแรง (บาท)</Label><Input id="bom-labor" type="number" inputMode="decimal" value={labor} onChange={(e) => setLabor(+e.target.value)} /></div>
           </div>
-          <p className="text-sm text-muted-foreground">วัตถุดิบ (Item ID · จำนวนใช้ · อัตราแปลง)</p>
+          <p className="text-sm font-medium">วัตถุดิบ</p>
           <div className="space-y-2">
+            <div className="hidden grid-cols-[2fr_1fr_1fr_auto] gap-2 px-1 text-xs font-medium text-muted-foreground sm:grid">
+              <span>Item ID</span><span>จำนวนใช้</span><span>อัตราแปลง</span><span className="w-9" />
+            </div>
             {lines.map((l, i) => (
               <div key={i} className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2">
-                <Input placeholder="Item ID" value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} />
-                <Input type="number" value={l.qty_use_uom} onChange={(e) => setLine(i, { qty_use_uom: +e.target.value })} />
-                <Input type="number" value={l.conv_factor} onChange={(e) => setLine(i, { conv_factor: +e.target.value })} />
-                <Button variant="destructive" size="icon" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
+                <Input placeholder="Item ID" aria-label={`รหัสวัตถุดิบ แถวที่ ${i + 1}`} value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} />
+                <Input type="number" inputMode="decimal" aria-label={`จำนวนใช้ แถวที่ ${i + 1}`} value={l.qty_use_uom} onChange={(e) => setLine(i, { qty_use_uom: +e.target.value })} />
+                <Input type="number" inputMode="decimal" aria-label={`อัตราแปลง แถวที่ ${i + 1}`} value={l.conv_factor} onChange={(e) => setLine(i, { conv_factor: +e.target.value })} />
+                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" aria-label={`ลบวัตถุดิบ แถวที่ ${i + 1}`} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
                   <X className="size-4" />
                 </Button>
               </div>
