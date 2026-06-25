@@ -39,7 +39,10 @@ pnpm --filter @ierp/api db:seed:demo:loyalty     # สมาชิก ~150 + ร
 pnpm --filter @ierp/api db:seed:demo:procurement # ผู้ขาย + ใบสั่งซื้อ/รับของ + ตรวจนับสต๊อก + variance
 pnpm --filter @ierp/api db:seed:demo:finance     # ลงบัญชี GL รายเดือน (รายได้/ต้นทุน/ค่าใช้จ่าย) → P&L/กระแสเงินสด  (ต้องรัน :sales ก่อน)
 pnpm --filter @ierp/api db:seed:demo:pos         # ตัวเลือกเมนู (modifiers) + โปรโมชัน/กฎราคา
-pnpm --filter @ierp/api db:seed:demo:all    # รันทั้งหมดตามลำดับ (catalog → sales → loyalty → procurement → finance → pos)
+pnpm --filter @ierp/api db:seed:demo:hr          # พนักงาน + ลงเวลา/ลา + รอบจ่ายเงินเดือน/สลิป (HR/Payroll)
+pnpm --filter @ierp/api db:seed:demo:branch      # สาขา 3 แห่ง + ติดป้ายสาขาให้ยอดขาย (consolidation)  (ต้องรัน :sales ก่อน)
+pnpm --filter @ierp/api db:seed:demo:feedback    # แบบสอบถาม NPS/CSAT + คำตอบลูกค้า
+pnpm --filter @ierp/api db:seed:demo:all    # รันทั้งหมดตามลำดับ (catalog → sales → branch → loyalty → procurement → finance → pos → hr → feedback)
 # (db:seed:demo:images = ตั้งรูปเมนูใหม่ให้ tenant ที่ seed แล้ว — รวมอยู่ใน db:seed:demo แล้ว)
 
 # 4. รัน (api + web พร้อมกัน)

@@ -19,7 +19,10 @@
     "db:seed:demo:procurement": "tsx src/database/seed-demo-procurement.ts",
     "db:seed:demo:finance": "tsx src/database/seed-demo-finance.ts",
     "db:seed:demo:pos": "tsx src/database/seed-demo-pos.ts",
-    "db:seed:demo:all": "tsx src/database/seed-demo.ts && tsx src/database/seed-demo-sales.ts && tsx src/database/seed-demo-loyalty.ts && tsx src/database/seed-demo-procurement.ts && tsx src/database/seed-demo-finance.ts && tsx src/database/seed-demo-pos.ts",
+    "db:seed:demo:hr": "tsx src/database/seed-demo-hr.ts",
+    "db:seed:demo:branch": "tsx src/database/seed-demo-branch.ts",
+    "db:seed:demo:feedback": "tsx src/database/seed-demo-feedback.ts",
+    "db:seed:demo:all": "tsx src/database/seed-demo.ts && tsx src/database/seed-demo-sales.ts && tsx src/database/seed-demo-branch.ts && tsx src/database/seed-demo-loyalty.ts && tsx src/database/seed-demo-procurement.ts && tsx src/database/seed-demo-finance.ts && tsx src/database/seed-demo-pos.ts && tsx src/database/seed-demo-hr.ts && tsx src/database/seed-demo-feedback.ts",
     "lint": "echo \"(lint placeholder — add eslint)\"",
     "test": "vitest run"
   },
