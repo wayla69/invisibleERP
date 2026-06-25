@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Play } from 'lucide-react';
+import { FileText, Play, Plus, Users, Wallet } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -41,7 +42,6 @@ function Employees() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['pay-emps'], queryFn: () => api('/api/payroll/employees') });
   const [f, setF] = useState({ name: '', national_id: '', position: '', monthly_salary: '', hourly_rate: '', pf_rate: '' });
-  const [msg, setMsg] = useState('');
 
   const add = useMutation({
     mutationFn: () =>
@@ -57,11 +57,11 @@ function Employees() {
         }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ เพิ่มพนักงาน ${r.emp_code}`);
+      notifySuccess(`เพิ่มพนักงาน ${r.emp_code}`);
       setF({ name: '', national_id: '', position: '', monthly_salary: '', hourly_rate: '', pf_rate: '' });
       qc.invalidateQueries({ queryKey: ['pay-emps'] });
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -78,13 +78,13 @@ function Employees() {
         </div>
         <div className="flex items-center gap-3">
           <Button onClick={() => add.mutate()} disabled={!f.name || !f.monthly_salary || add.isPending}><Plus className="size-4" /> เพิ่ม</Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </div>
       </Card>
       <StateView q={q}>
         {q.data && (
           <DataTable
             rows={q.data.employees}
+            emptyState={{ icon: Users, title: 'ยังไม่มีพนักงาน', description: 'กรอกแบบฟอร์มด้านบนเพื่อเพิ่มพนักงานคนแรก' }}
             columns={[
               { key: 'emp_code', label: 'รหัส' },
               { key: 'name', label: 'ชื่อ' },
@@ -102,16 +102,15 @@ function Employees() {
 function RunPayroll() {
   const qc = useQueryClient();
   const [period, setPeriod] = useState(thisMonth());
-  const [msg, setMsg] = useState('');
   const runs = useQuery<any>({ queryKey: ['pay-runs'], queryFn: () => api('/api/payroll/runs') });
 
   const run = useMutation({
     mutationFn: () => api<any>(`/api/payroll/runs?period=${period}`, { method: 'POST' }),
     onSuccess: (r) => {
-      setMsg(r.already ? `ℹ️ งวด ${period} จ่ายแล้ว (${r.entry_no})` : `✅ จ่ายเงินเดือน ${period}: สุทธิ ${baht(r.net_total)} · ${r.entry_no}`);
+      notifySuccess(r.already ? `งวด ${period} จ่ายแล้ว (${r.entry_no})` : `จ่ายเงินเดือน ${period}: สุทธิ ${baht(r.net_total)} · ${r.entry_no}`);
       qc.invalidateQueries({ queryKey: ['pay-runs'] });
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -122,13 +121,13 @@ function RunPayroll() {
           <div className="grid gap-1.5"><Label>งวด (YYYY-MM)</Label><Input value={period} onChange={(e) => setPeriod(e.target.value)} className="w-40" /></div>
           <Button onClick={() => run.mutate()} disabled={run.isPending}><Play className="size-4" /> จ่ายเงินเดือน</Button>
         </div>
-        <Msg ok={msg.startsWith('✅') || msg.startsWith('ℹ️')}>{msg}</Msg>
         <p className="text-xs text-muted-foreground">ลงบัญชี: เดบิต เงินเดือน + ประกันสังคมนายจ้าง / เครดิต เงินสด + ประกันสังคมค้างจ่าย + ภาษีหัก ณ ที่จ่ายค้างจ่าย</p>
       </Card>
       <StateView q={runs}>
         {runs.data && (
           <DataTable
             rows={runs.data.runs}
+            emptyState={{ icon: Wallet, title: 'ยังไม่มีการจ่ายเงินเดือน', description: 'เลือกงวดแล้วกด จ่ายเงินเดือน เพื่อสร้างรายการจ่ายงวดแรก' }}
             columns={[
               { key: 'period', label: 'งวด' },
               { key: 'headcount', label: 'จำนวนคน', align: 'right' },
@@ -166,6 +165,7 @@ function Pnd1() {
             </div>
             <DataTable
               rows={q.data.lines}
+              emptyState={{ icon: FileText, title: 'ไม่มีข้อมูลในงวดนี้', description: 'ยังไม่มีการจ่ายเงินเดือนในงวดที่เลือก ลองเปลี่ยนงวดแล้วกด แสดง' }}
               columns={[
                 { key: 'emp_name', label: 'ชื่อ' },
                 { key: 'national_id', label: 'เลขบัตรประชาชน' },
@@ -203,6 +203,7 @@ function Pnd1a() {
             </div>
             <DataTable
               rows={q.data.lines}
+              emptyState={{ icon: FileText, title: 'ไม่มีข้อมูลในปีนี้', description: 'ยังไม่มีการจ่ายเงินเดือนในปีที่เลือก ลองเปลี่ยนปีแล้วกด แสดง' }}
               columns={[
                 { key: 'emp_name', label: 'ชื่อ' },
                 { key: 'national_id', label: 'เลขบัตรประชาชน' },

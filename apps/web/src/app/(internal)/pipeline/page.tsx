@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Target, TrendingUp, Layers } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -15,7 +16,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Msg } from '@/components/tabs';
 import { statusVariant } from '@/components/ui';
 
 // GET /api/pipeline/stages → BARE ARRAY of DB rows (camelCase)
@@ -49,11 +49,13 @@ export default function PipelinePage() {
           stage_name: stageName || undefined,
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      notifySuccess(`สร้างดีลสำเร็จ: ${(r as Opp).opp_no}`);
       setName(''); setExpectedValue(''); setStageName('');
       qc.invalidateQueries({ queryKey: ['pipeline-opps'] });
       qc.invalidateQueries({ queryKey: ['pipeline-forecast'] });
     },
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const move = useMutation({
@@ -63,6 +65,7 @@ export default function PipelinePage() {
       qc.invalidateQueries({ queryKey: ['pipeline-opps'] });
       qc.invalidateQueries({ queryKey: ['pipeline-forecast'] });
     },
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const selectCls =
@@ -128,9 +131,6 @@ export default function PipelinePage() {
                 <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างดีล'}
               </Button>
             </div>
-            {create.error && <Msg>{(create.error as Error).message}</Msg>}
-            {!!create.data && <Msg ok>✅ สร้างดีลสำเร็จ: {(create.data as Opp).opp_no}</Msg>}
-            {move.error && <Msg>{(move.error as Error).message}</Msg>}
           </CardContent>
         </Card>
 
@@ -141,6 +141,7 @@ export default function PipelinePage() {
             {opps.data && (
               <DataTable
                 rows={opps.data.opportunities}
+                emptyState={{ icon: Target, title: 'ยังไม่มีโอกาสการขาย', description: 'กรอกแบบฟอร์ม "สร้างโอกาสการขาย" ด้านบนเพื่อเพิ่มดีลแรกของคุณ' }}
                 columns={[
                   { key: 'opp_no', label: 'เลขที่' },
                   { key: 'name', label: 'ชื่อดีล' },

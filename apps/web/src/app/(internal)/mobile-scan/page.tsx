@@ -2,15 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ScanLine, PackageCheck } from 'lucide-react';
+import { ScanLine, PackageCheck, ClipboardList, PackageSearch } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { statusVariant } from '@/components/ui';
-import { Msg } from '@/components/tabs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,25 +26,24 @@ export default function MobileScanPage() {
   const [loc, setLoc] = useState('WH-MAIN');
   const [scan, setScan] = useState('');
   const [qty, setQty] = useState('1');
-  const [msg, setMsg] = useState('');
 
   const session = useQuery<any>({ queryKey: ['scan-session', sessionNo], queryFn: () => api(`/api/scan/sessions/${sessionNo}`), enabled: !!sessionNo });
   const recent = useQuery<any>({ queryKey: ['scan-sessions'], queryFn: () => api('/api/scan/sessions?limit=20'), enabled: !sessionNo });
 
   const open = useMutation({
     mutationFn: () => api<any>('/api/scan/sessions', { method: 'POST', body: JSON.stringify({ session_type: type, location_id: loc }) }),
-    onSuccess: (r) => { setSessionNo(r.session_no); setMsg(`✅ เปิดเซสชัน ${r.session_no}`); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { setSessionNo(r.session_no); notifySuccess(`เปิดเซสชัน ${r.session_no}`); },
+    onError: (e: any) => notifyError(e.message),
   });
   const addLine = useMutation({
     mutationFn: () => api(`/api/scan/sessions/${sessionNo}/lines`, { method: 'POST', body: JSON.stringify({ qr_data: scan, qty: Number(qty) }) }),
     onSuccess: () => { setScan(''); setQty('1'); qc.invalidateQueries({ queryKey: ['scan-session', sessionNo] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
   const close = useMutation({
     mutationFn: () => api<any>(`/api/scan/sessions/${sessionNo}/close`, { method: 'POST' }),
-    onSuccess: (r) => { setMsg(`✅ ปิดเซสชัน — บันทึก ${r.committed} รายการ`); setSessionNo(''); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`ปิดเซสชัน — บันทึก ${r.committed} รายการ`); setSessionNo(''); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -57,7 +56,6 @@ export default function MobileScanPage() {
             <div className="grid gap-1.5"><Label>ประเภท</Label><select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
             <div className="grid gap-1.5"><Label>คลัง</Label><Input value={loc} onChange={(e) => setLoc(e.target.value)} /></div>
             <Button disabled={open.isPending} onClick={() => open.mutate()}><ScanLine className="size-4" /> เปิดเซสชัน</Button>
-            <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </Card>
           <div>
             <h3 className="mb-3 text-sm font-semibold text-muted-foreground">เซสชันล่าสุด</h3>
@@ -72,7 +70,11 @@ export default function MobileScanPage() {
                     { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                     { key: 'act', label: '', render: (r: any) => r.status === 'Open' ? <Button size="sm" variant="outline" onClick={() => setSessionNo(r.session_no)}>เปิดต่อ</Button> : null },
                   ]}
-                  emptyText="ยังไม่มีเซสชัน"
+                  emptyState={{
+                    icon: ClipboardList,
+                    title: 'ยังไม่มีเซสชัน',
+                    description: 'เปิดเซสชันใหม่ด้านบนเพื่อเริ่มสแกนสินค้า',
+                  }}
                 />
               )}
             </StateView>
@@ -89,7 +91,6 @@ export default function MobileScanPage() {
             <div className="grid gap-1.5"><Label>จำนวน</Label><Input type="number" className="max-w-[120px]" value={qty} onChange={(e) => setQty(e.target.value)} /></div>
             <Button disabled={!scan || addLine.isPending} onClick={() => addLine.mutate()}>เพิ่ม</Button>
           </div>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           <DataTable
             rows={session.data?.lines ?? []}
             columns={[
@@ -97,7 +98,11 @@ export default function MobileScanPage() {
               { key: 'qty', label: 'จำนวน', align: 'right', render: (r: any) => num(r.qty) },
               { key: 'action', label: 'การทำงาน' },
             ]}
-            emptyText="ยังไม่มีรายการสแกน"
+            emptyState={{
+              icon: PackageSearch,
+              title: 'ยังไม่มีรายการสแกน',
+              description: 'สแกนหรือวางรหัส QR ด้านบนเพื่อเพิ่มรายการ',
+            }}
           />
         </Card>
       )}
