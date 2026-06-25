@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto, type AdvanceDto, type SettleAdvanceDto } from './finance.service';
+import { FinancialHealthService } from './financial-health.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
@@ -14,7 +15,12 @@ const SettleBody = z.object({ settled_expense: z.number().nonnegative(), returne
 
 @Controller('api/finance')
 export class FinanceController {
-  constructor(private readonly svc: FinanceService) {}
+  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService) {}
+
+  // Working-capital health score (0–100, A–E) from cash on hand + AR/AP + overdue + POS run-rate.
+  // Complements the GL module's cash-flow projection (/api/ledger/cash-flow-forecast).
+  @Get('health') @Permissions('exec', 'dashboard', 'ar', 'creditors')
+  financialHealth(@CurrentUser() u: JwtUser) { return this.health.score(u); }
 
   // READ
   @Get('pl') @Permissions('exec', 'dashboard', 'ar', 'creditors')

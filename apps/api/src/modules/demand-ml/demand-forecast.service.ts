@@ -78,6 +78,18 @@ export class DemandForecastService {
     return { item_id: dto.item_id, data_days: series.length, test_size: testSize, candidates, best: candidates[0] };
   }
 
+  // Non-persisting forecast for planning (e.g. the production plan): build the series, auto-select the best
+  // model by backtest WAPE, and return the horizon point forecasts + the chosen model + its accuracy.
+  // Returns null when there isn't enough history to model (caller falls back to a simpler heuristic).
+  async planForecast(itemId: string, horizon: number): Promise<{ algorithm: string; forecast: number[]; wape: number | null; data_days: number } | null> {
+    const series = await this.dailyDemand(itemId);
+    if (series.length < MIN_HISTORY) return null;
+    const hz = Math.min(Math.max(1, Math.floor(horizon)), 90);
+    const chosen = this.evaluate(series, this.testSize(series.length))[0];
+    const forecast = ALGOS[chosen.algorithm](series, hz).map((x) => Math.max(0, r2(x)));
+    return { algorithm: chosen.algorithm, forecast, wape: chosen.wape, data_days: series.length };
+  }
+
   // Forecast: auto-select the best model (or use a pinned one), forecast the horizon, and persist the run.
   async forecast(dto: DemandForecastDto, user: JwtUser) {
     const db = this.db as any;

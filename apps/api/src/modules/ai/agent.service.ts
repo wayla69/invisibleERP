@@ -2,6 +2,7 @@ import { Injectable, Optional, ServiceUnavailableException } from '@nestjs/commo
 import { PosService } from '../pos/pos.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
+import { FinancialHealthService } from '../finance/financial-health.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { BiService } from '../bi/bi.service';
 import { PipelineService } from '../pipeline/pipeline.service';
@@ -13,6 +14,7 @@ import { KnowledgeService } from './knowledge.service';
 import { MenuEngineeringService } from '../analytics/menu-engineering.service';
 import { ProductionPlanService } from '../menu/production-plan.service';
 import { RecipeService } from '../menu/recipe.service';
+import { MarketingAutomationService } from '../marketing/marketing-automation.service';
 import type { JwtUser } from '../../common/decorators';
 
 // port จาก agents/base_agent.py + erp_agent.py
@@ -65,6 +67,8 @@ const TOOLS = [
   { name: 'get_staff_performance', description: 'ผลงานพนักงาน: ยอดขาย/บิลเฉลี่ย/การยกเลิก-ส่วนลด ต่อคน', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
   { name: 'get_sales_trend', description: 'แนวโน้มยอดขายเทียบช่วงก่อนหน้าที่เท่ากัน (เพิ่ม/ลด %)', input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } } },
   { name: 'get_menu_availability', description: 'เมนูแต่ละอย่างทำได้อีกกี่จาน (จากวัตถุดิบที่จำกัด) + วัตถุดิบใกล้หมด', input_schema: { type: 'object', properties: { low: { type: 'number' } } } },
+  { name: 'get_financial_health', description: 'คะแนนสุขภาพการเงิน/เงินทุนหมุนเวียน (0–100, เกรด A–E): เงินสดคงเหลือ เทียบลูกหนี้/เจ้าหนี้ หนี้ค้างชำระ และยอดขาย', input_schema: { type: 'object', properties: {} } },
+  { name: 'get_marketing_audience', description: 'จำนวนลูกค้าเป้าหมายของแคมเปญ (lapsed=ห่างหาย, birthday=วันเกิด, winback=กลุ่มเสี่ยง/หาย) ที่ส่งถึงได้ — ดูอย่างเดียว ไม่ส่ง', input_schema: { type: 'object', properties: { trigger: { type: 'string', enum: ['lapsed', 'birthday', 'winback', 'all'] }, channel: { type: 'string' }, lapsed_days: { type: 'number' } }, required: ['trigger'] } },
 ];
 
 @Injectable()
@@ -84,6 +88,8 @@ export class AgentService {
     @Optional() private readonly menuEng?: MenuEngineeringService,
     @Optional() private readonly production?: ProductionPlanService,
     @Optional() private readonly recipe?: RecipeService,
+    @Optional() private readonly health?: FinancialHealthService,
+    @Optional() private readonly marketing?: MarketingAutomationService,
   ) {}
 
   private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
@@ -249,6 +255,8 @@ export class AgentService {
         case 'get_staff_performance': return this.menuEng ? await this.menuEng.staffPerformance(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
         case 'get_sales_trend': return this.menuEng ? await this.menuEng.salesTrend(user, { from: input.from, to: input.to }) : { error: 'Analytics unavailable' };
         case 'get_menu_availability': return this.recipe ? await this.recipe.availabilityForecast(user, { low: input.low }) : { error: 'Menu availability unavailable' };
+        case 'get_financial_health': return this.health ? await this.health.score(user) : { error: 'Financial-health score unavailable' };
+        case 'get_marketing_audience': return this.marketing ? await this.marketing.preview({ trigger: input.trigger, channel: input.channel, lapsed_days: input.lapsed_days }, user) : { error: 'Marketing automation unavailable' };
         default: return { error: `unknown tool ${name}` };
       }
     } catch (e: any) {

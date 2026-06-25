@@ -161,6 +161,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-120 | Accept/reject routes to KDS + notifies platform | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-121 | Status callback + mock fallback | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-122 | Multi-terminal realtime KDS event | Feature (multi-terminal SSE) | 20 §rev3.0 |
+| UAT-O2C-123 | LINE marketing automation — closed loop | Feature (LINE automation), MKT-04 | 19 §7.12 |
 | UAT-O2C-130 | Collections worklist (open overdue AR) | REV-12 | 01 §7, §9 |
 | UAT-O2C-131 | Dunning stage recommended by aging | REV-12 | 01 §7 |
 | UAT-O2C-132 | Record dunning action advances stage | REV-12 | 01 §7, §9 |
@@ -304,6 +305,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-035 | Asset impairment + no-change guard + audit | FA-07 | 09 §7 |
 | UAT-GL-036 | Lease modification remeasures liability + ROU | LSE-01 | 04 §7 |
 | UAT-GL-037 | Disposal recycles revaluation surplus to RE | FA-07 | 09 §7 |
+| UAT-GL-038 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -475,7 +477,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-037 | Staff / cashier performance | Feature (staff analytics) | 20 §rev2.9 |
 | UAT-RPT-038 | Sales trend vs prior window | Feature (sales trend) | 20 §rev2.9 |
 | UAT-RPT-039 | BOM availability forecast (servings-remaining) | Feature (BOM availability) | 20 §rev2.9 |
-| UAT-RPT-040 | Production plan — day-of-week forecast | Feature (production plan, DOW) | 20 §rev3.2 |
+| UAT-RPT-040 | Production plan — demand-ML forecast | Feature (production plan, demand-ML) | 20 §rev3.3 |
 | UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`

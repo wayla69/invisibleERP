@@ -191,6 +191,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'บริการ & SLA', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
       { label: 'CRM 360', href: '/crm', icon: Users, perms: ['marketing', 'exec'] },
       { label: 'การตลาด', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
+      { label: 'แคมเปญ LINE (Automation)', href: '/campaigns', icon: Megaphone, perms: ['marketing', 'crm'] },
     ],
   },
   {
@@ -265,6 +266,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     workspace: ['erp'],
     items: [
       { label: 'การเงิน', href: '/finance', icon: Banknote, perms: ['ar', 'creditors', 'exec'] },
+      { label: 'สุขภาพการเงิน (Financial health)', href: '/financial-health', icon: CircleDollarSign, perms: ['exec', 'dashboard', 'ar', 'creditors'] },
       { label: 'บัญชีแยกประเภท', href: '/accounting', icon: BookText, perms: ['exec', 'creditors', 'ar'] },
       { label: 'สินทรัพย์ถาวร', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
       { label: 'ธนาคาร', href: '/bank', icon: Landmark, perms: ['exec', 'creditors', 'ar'] },

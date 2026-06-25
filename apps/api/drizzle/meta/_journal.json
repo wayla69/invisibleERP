@@ -897,6 +897,13 @@
       "when": 2003470000004,
       "tag": "0122_user_prefs",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 2003480000004,
+      "tag": "0123_marketing_campaigns",
+      "breakpoints": true
     }
   ]
 }
