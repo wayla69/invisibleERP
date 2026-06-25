@@ -420,6 +420,10 @@ Record any cash added or removed:
 
 **Expected result:** The claim status changes to *Approved* or *Rejected*.
 
+> **Finding a claim.** Each claim list (sales and supplier/GR) has a **search** box
+> (order / GR number, item or reason) and **status filter chips** to narrow a long
+> list before you act. They reflow for mobile.
+
 (Supplier / goods-receipt claims are covered in [Procurement](./03-procurement.md).)
 
 ---
