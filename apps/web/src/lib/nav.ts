@@ -242,6 +242,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'รูปภาพสินค้า', href: '/images', icon: Camera, perms: ['images', 'masterdata'] },
       { label: 'คลังสินค้า (WMS)', href: '/wms', icon: Warehouse, perms: ['warehouse'] },
       { label: 'ต้นทุนสินค้า', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
+      { label: 'บัญชีสต๊อก & มูลค่า', href: '/inventory-ledger', icon: Wallet, perms: ['warehouse', 'dashboard'] },
       { label: 'เติมสต๊อกอัตโนมัติ', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
     ],
   },
