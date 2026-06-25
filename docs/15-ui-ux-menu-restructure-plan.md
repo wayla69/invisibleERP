@@ -1,10 +1,10 @@
 # 15 — UI/UX & Menu Restructure Plan (Navigation IA)
 
-> **Date:** 2026-06-25 · **Status:** DRAFT v0.2 (Phase 0 audit complete) · **Owner:** Web / Product
-> **Scope:** Plan a conservative, **URL-stable** restructure of the internal navigation
+> **Date:** 2026-06-25 · **Status:** v1.0 — IMPLEMENTED (conservative, URL-stable) · **Owner:** Web / Product
+> **Scope:** A conservative, **URL-stable** restructure of the internal navigation
 > (`apps/web/src/lib/nav.ts`, rendered by `apps/web/src/components/app-shell.tsx`) so the menu matches the
-> real, grown app structure after the recent ERP + POS feature additions. **This document is a plan only —
-> no application code changes are made by it.**
+> real, grown app structure after the recent ERP + POS feature additions. **Now implemented** — §2 is the
+> delivered taxonomy; §3 the shipped data model; §4 the phase log.
 > **Decision recorded:** *Conservative* aggressiveness — regroup, sub-section, and rename labels **without
 > changing any `href`/route**, so bookmarks, the ⌘K command palette, and route references in `docs/` keep
 > working.
@@ -31,7 +31,7 @@ filters by workspace; `app-shell.tsx` then filters by permission (`hasPerm`) and
 | Group (current `title`) | Workspace | Item count | Pain |
 |---|---|---:|---|
 | ภาพรวม (Overview) | both (split) | 2 | ok |
-| การขาย (Sales) | pos | ~22 | **flat mega-list**: POS, tables, KDS, menu, buffet, food cost, analytics, production, claims, delivery, POS control, print, peripherals, pricing, channels, POS ops, card terminals, house accounts, branches |
+| การขาย (Sales) | pos | 19 | **flat mega-list**: POS, tables, KDS, menu, buffet, food cost, analytics, production, claims, delivery, POS control, print, peripherals, pricing, channels, POS ops, card terminals, house accounts, branches |
 | ลูกค้า & การขาย (Customers & Sales) | erp | 13 | name collides with POS "การขาย"; mixes CRM/CPQ/service with all 8 loyalty sub-pages |
 | สต๊อก & จัดซื้อ (Stock & Procurement) | erp | 19 | **flat**: inventory+warehouse+procurement+manufacturing all in one group |
 | การเงิน (Finance) | erp | 9 | ok-ish |
@@ -40,12 +40,12 @@ filters by workspace; `app-shell.tsx` then filters by permission (`hasPerm`) and
 | วางแผน & วิเคราะห์ (Planning & Analytics) | erp | 7 | ok |
 | การควบคุม (Controls) | both | 5 | ok |
 | ผู้ช่วย AI (AI) | both | 3 | ok |
-| ระบบ (System) | both | **24** | **catch-all dumping ground**: master data, custom fields/objects/layouts, alerts, automation, AI-config, saved views, dashboards, doc templates, theme, onboarding, developer, connectors, migration, localization, e-invoicing, webhooks, users, setup, billing, settings |
+| ระบบ (System) | both | **22** | **catch-all dumping ground**: master data, custom fields/objects/layouts, alerts, automation, AI-config, saved views, dashboards, doc templates, theme, onboarding, developer, connectors, migration, localization, e-invoicing, webhooks, users, setup, billing, settings |
 
 **Diagnosis**
 
-1. **Only two levels.** `NavGroup → NavItem` has no sub-sectioning or per-section collapse, so a 24-item
-   group is a 24-row scroll.
+1. **Only two levels.** `NavGroup → NavItem` has no sub-sectioning or per-section collapse, so a 22-item
+   group is a 22-row scroll.
 2. **Name collision.** ERP "ลูกค้า & การขาย" vs POS "การขาย" — overlapping mental models across the switcher.
 3. **"ระบบ" is overloaded** — four unrelated concerns (master data / customization / integration /
    administration) in one bucket.
@@ -85,7 +85,7 @@ renamed for clarity; **no `href` changes**.
 ```
 
 Net effect on the worst groups:
-- **"ระบบ" (24) → "ตั้งค่าระบบ" with 4 collapsible sub-sections** (~5–6 items each, collapsed by default).
+- **"ระบบ" (22) → "ตั้งค่าระบบ" with 4 collapsible sub-sections** (~5–6 items each).
 - **"สต๊อก & จัดซื้อ" (19) → three focused groups** (Inventory / Procurement / Manufacturing).
 - **Loyalty (8 items) split out** of "ลูกค้า & การขาย", resolving the CRM/loyalty overload.
 
@@ -104,7 +104,7 @@ Net effect on the worst groups:
 การควบคุม / ผู้ช่วย AI / ตั้งค่า → (shared BOTH groups, same as ERP)
 ```
 
-This turns the 22-item POS "การขาย" into ~6 task-focused groups that mirror a store shift (sell → kitchen →
+This turns the 19-item POS "การขาย" into ~6 task-focused groups that mirror a store shift (sell → kitchen →
 store/delivery → hardware → pricing → loyalty → money → analytics).
 
 > The exact Thai labels and the precise sub-section boundaries are the **sign-off artifact of Phase 1** —
@@ -112,43 +112,46 @@ store/delivery → hardware → pricing → loyalty → money → analytics).
 
 ---
 
-## 3. Data-model change required (Phase 2, for reference only)
+## 3. Data-model change (as shipped)
 
-To support collapsible sub-sections without breaking the existing flat groups, extend the nav types
-additively (an absent `children` keeps today's behavior):
+The nav types were extended additively — an absent `subgroups` keeps a group's existing flat behavior, so
+no existing group or the customer `PORTAL_NAV` changed:
 
 ```ts
 export interface NavSubGroup {
-  title: string;                 // sub-section header (collapsible)
+  title: string;                 // collapsible sub-section header
   items: NavItem[];
-  defaultOpen?: boolean;         // collapsed by default for long Settings sub-sections
-  workspace?: Workspace[];
+  workspace?: Workspace[];       // defaults to the parent group's
 }
 export interface NavGroup {
   title: string;
-  items?: NavItem[];             // existing flat items (unchanged)
+  items?: NavItem[];             // existing flat items (now optional)
   subgroups?: NavSubGroup[];     // NEW optional third level
   workspace?: Workspace[];
 }
 ```
 
-`navForWorkspace()` recurses into `subgroups`; the ⌘K palette continues to **flatten all levels** so search
-still reaches everything. `app-shell.tsx` renders `subgroups` with the existing `Sidebar` collapsible
-primitive. **Favorites/Recents** is a separate localStorage-backed pseudo-group pinned at the top
-(out of scope for this plan doc; listed in Phase 2).
+`navForWorkspace()` and the new `allGroupItems()` helper recurse into `subgroups`; the ⌘K palette uses
+`allGroupItems()` to **flatten all levels** so search still reaches everything. `app-shell.tsx` renders
+each sub-section with a small **dependency-free** `NavSubSection` collapsible (no new package): a chevron
+header that folds its items, with open/closed state persisted per sub-section in `localStorage`
+(`ie-nav-sub:<title>`). In the icon-collapsed sidebar the headers hide and all item icons stay visible.
+Sub-sections default to **open**. *(No collapsible Radix/shadcn primitive existed in the repo and adding a
+dependency was avoided per the conservative scope; `defaultOpen`/collapsed-by-default and a
+**Favorites/Recents** pinned group are noted as follow-ups in §6.)*
 
 ---
 
-## 4. Phased delivery (this doc covers Phase 1 sign-off)
+## 4. Phased delivery — all phases complete (2026-06-25)
 
 | Phase | Outcome | Code? | Docs? |
 |---|---|---|---|
-| **0 — Audit** ✅ | **DONE (2026-06-25).** Diffed `nav.ts` hrefs vs routes: 0 dead links, 3 unlinked pages (2 intentional, 1 genuine orphan `/loyalty`). See §4a. | none (script only) | this file |
-| **1 — IA sign-off** | Confirm §2 taxonomy, final Thai labels, sub-section boundaries. **(this document)** | none | this file |
-| **2 — Model + shell** | Add `subgroups` to nav types; recurse in `navForWorkspace`; render collapsible sub-sections; add Favorites/Recents. | `nav.ts`, `app-shell.tsx`, `sidebar` usage | — |
-| **3 — Migrate nav** | Re-bucket items into §2 groups/sub-sections; rename labels. **No `href` changes.** | `nav.ts` | — |
-| **4 — Docs sync** | Per CLAUDE.md: update screen/route/nav references in process narratives, user-manual route+role tables, and UAT nav cases + traceability. | — | `docs/process-narratives/`, `docs/user-manual/`, `docs/uat/` |
-| **5 — QA** | Extend Playwright e2e (switcher + nested nav + permission filtering); `pnpm -r typecheck`; `pnpm --filter @ierp/web build`. | tests | — |
+| **0 — Audit** ✅ | **DONE.** Diffed `nav.ts` hrefs vs routes: 0 dead links, 3 unlinked pages (2 intentional, 1 genuine orphan `/loyalty`). See §4a. | none (script only) | this file |
+| **1 — IA sign-off** ✅ | §2 taxonomy approved; final Thai labels + sub-section boundaries fixed. | none | this file |
+| **2 — Model + shell** ✅ | Added `NavSubGroup` + `subgroups?` to nav types; `navForWorkspace` + `allGroupItems` recurse; `app-shell.tsx` renders a dependency-free collapsible `NavSubSection` (localStorage-persisted open state); permission filter + active-label + ⌘K palette recurse subgroups. *Favorites/Recents deferred — see §6.* | `nav.ts`, `app-shell.tsx`, `command-palette.tsx` | — |
+| **3 — Migrate nav** ✅ | Re-bucketed all 103 items into the §2 groups + 4 Settings sub-sections; relabelled groups; wired orphan `/loyalty`. **No `href` changed.** | `nav.ts` | — |
+| **4 — Docs sync** ✅ | Updated this plan + the user-manual *Workspaces* section (menu organization + collapsible Settings). `05-frontend.md` left as-is (historical migration-design doc referencing a different legacy file, not the live taxonomy). | — | `docs/15-…`, `docs/user-manual/00-getting-started.md` |
+| **5 — QA** ✅ | `pnpm --filter @ierp/web typecheck` ✅ · `build` ✅ · Playwright `workspace-split.spec.ts` 5/5 ✅ (added a collapsible-sub-section case). | tests | — |
 
 ---
 
@@ -203,13 +206,21 @@ Loyalty group. Audit script archived at `scratchpad/audit2.mjs` (re-runnable; no
 
 ---
 
-## 6. Recommendation
+## 6. Outcome & follow-ups
 
-Proceed with the **conservative IA migration** in §2. It removes the three real pain points (24-item System
-catch-all, 19/22-item flat operational groups, CRM/Loyalty overload and the name collision) with **zero
-route changes** and a small, additive data-model extension. Next actionable step on approval of §2:
-**Phase 0 audit**, then **Phase 2** (nav types + shell), then **Phase 3** migration with the **Phase 4**
-doc sync committed in the same series.
+**Shipped.** The **conservative IA migration** in §2 is implemented and verified (typecheck + build + e2e).
+It removes the three real pain points — the 22-item System catch-all (now 4 collapsible sub-sections), the
+19-item flat operational groups (now per-domain groups), and the CRM/Loyalty overload + name collision —
+with **zero route changes** and a small additive data-model extension. The orphaned `/loyalty` config page
+(Phase 0 finding) is now reachable from the new Loyalty group.
+
+**Deferred follow-ups (not blocking):**
+- **Favorites / Recents** — a localStorage-backed pinned group at the top of the sidebar for the ~85
+  destinations. Straightforward on the current model.
+- **`defaultOpen` / collapsed-by-default sub-sections** — add the flag and default the longer Settings
+  sub-sections to collapsed; persistence already exists.
+- **Screenshots** — refresh the `[screenshot: …]` placeholders in the user manual once design captures new
+  sidebar imagery.
 
 ---
 
@@ -219,3 +230,4 @@ doc sync committed in the same series.
 |---|---|---|---|
 | 2026-06-25 | v0.1 (DRAFT) | Web / Product | Initial plan: conservative, URL-stable navigation IA restructure for ERP + POS; proposed target taxonomy, additive `subgroups` model, 6-phase delivery, risk register. No application code changed. |
 | 2026-06-25 | v0.2 (DRAFT) | Web / Product | Phase 0 audit executed and recorded (§4a): 103 nav hrefs, 0 dead links, 3 unlinked pages classified (`/notifications` + `/pos/new` intentional; `/loyalty` config page is a genuine orphan to wire into the new Loyalty group in Phase 3). Cross-listing confirmed tag-based, not duplicated. No application code changed. |
+| 2026-06-25 | v1.0 (IMPLEMENTED) | Web / Product | Phases 2–5 delivered. `nav.ts`: `NavSubGroup` + optional `subgroups`/`items`, `allGroupItems()`, recursive `navForWorkspace()`, INTERNAL_NAV re-bucketed into per-domain ERP/POS groups + a 4-sub-section *ตั้งค่าระบบ* group, orphan `/loyalty` wired in — **no href changed**. `app-shell.tsx`: recursive permission filter + active-label, dependency-free collapsible `NavSubSection` (localStorage-persisted). `command-palette.tsx`: flattens subgroups. Corrected baseline counts (System 22, POS sales 19). Verified: web typecheck ✅, web build ✅, Playwright `workspace-split` 5/5 ✅ (added collapsible-sub-section case). Docs: user-manual *Workspaces* section updated. |

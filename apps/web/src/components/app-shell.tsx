@@ -3,12 +3,21 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, Search } from 'lucide-react';
+import { ChevronRight, LogOut, Search } from 'lucide-react';
 
 import { getToken, clearToken } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { useModuleFlags } from '@/lib/modules';
-import { navForWorkspace, defaultWorkspace, workspaceHome, WORKSPACES, type NavGroup, type Workspace } from '@/lib/nav';
+import {
+  allGroupItems,
+  navForWorkspace,
+  defaultWorkspace,
+  workspaceHome,
+  WORKSPACES,
+  type NavGroup,
+  type NavItem,
+  type Workspace,
+} from '@/lib/nav';
 import { cn } from '@/lib/utils';
 import {
   Sidebar,
@@ -47,6 +56,38 @@ function initials(name?: string | null) {
 }
 
 const WORKSPACE_KEY = 'ie-workspace';
+
+/** A labelled, collapsible sub-section inside a sidebar group (dependency-free). Open state persists per
+ *  title in localStorage. In icon-collapsed mode the header is hidden and items stay visible (icons only). */
+function NavSubSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const storeKey = `ie-nav-sub:${title}`;
+  const [open, setOpen] = React.useState(true);
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem(storeKey);
+    if (saved != null) setOpen(saved === '1');
+  }, [storeKey]);
+  const toggle = () =>
+    setOpen((o) => {
+      const next = !o;
+      if (typeof window !== 'undefined') localStorage.setItem(storeKey, next ? '1' : '0');
+      return next;
+    });
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+      >
+        <ChevronRight className={cn('size-3 shrink-0 transition-transform', open && 'rotate-90')} />
+        <span className="truncate">{title}</span>
+      </button>
+      <div className={cn(open ? 'block' : 'hidden', 'group-data-[collapsible=icon]:block')}>{children}</div>
+    </div>
+  );
+}
 
 export function AppShell({
   nav,
@@ -118,13 +159,21 @@ export function AppShell({
   const filterByPerm = React.useCallback(
     (groupsIn: NavGroup[]) => {
       if (!filterPerms) return groupsIn;
-      const visible = (it: NavGroup['items'][number]) => {
+      const visible = (it: NavItem) => {
         if (!hasPerm(me.data, ...(it.perms ?? []))) return false;
         const perms = it.perms ?? [];
         if (perms.length && perms.every((p) => disabledModules.has(p))) return false; // all its modules off
         return true;
       };
-      return groupsIn.map((g) => ({ ...g, items: g.items.filter(visible) })).filter((g) => g.items.length > 0);
+      return groupsIn
+        .map((g) => ({
+          ...g,
+          items: (g.items ?? []).filter(visible),
+          subgroups: (g.subgroups ?? [])
+            .map((s) => ({ ...s, items: s.items.filter(visible) }))
+            .filter((s) => s.items.length > 0),
+        }))
+        .filter((g) => (g.items?.length ?? 0) + (g.subgroups?.reduce((n, s) => n + s.items.length, 0) ?? 0) > 0);
     },
     [filterPerms, me.data, disabledModules],
   );
@@ -144,7 +193,18 @@ export function AppShell({
     pathname === href || (href !== '/dashboard' && href !== '/portal/dashboard' && pathname.startsWith(href + '/'));
 
   const activeLabel =
-    groups.flatMap((g) => g.items).find((it) => isActive(it.href))?.label ?? brand;
+    groups.flatMap((g) => allGroupItems(g)).find((it) => isActive(it.href))?.label ?? brand;
+
+  const renderItem = (item: NavItem) => (
+    <SidebarMenuItem key={item.href}>
+      <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.label}>
+        <Link href={item.href}>
+          <item.icon />
+          <span>{item.label}</span>
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
 
   function logout() {
     clearToken();
@@ -195,18 +255,14 @@ export function AppShell({
             <SidebarGroup key={group.title}>
               <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
               <SidebarGroupContent>
-                <SidebarMenu>
-                  {group.items.map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.label}>
-                        <Link href={item.href}>
-                          <item.icon />
-                          <span>{item.label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
+                {group.items && group.items.length > 0 && (
+                  <SidebarMenu>{group.items.map(renderItem)}</SidebarMenu>
+                )}
+                {group.subgroups?.map((sub) => (
+                  <NavSubSection key={sub.title} title={sub.title}>
+                    <SidebarMenu>{sub.items.map(renderItem)}</SidebarMenu>
+                  </NavSubSection>
+                ))}
               </SidebarGroupContent>
             </SidebarGroup>
           ))}
