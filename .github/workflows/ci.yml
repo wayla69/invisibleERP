@@ -233,11 +233,25 @@ jobs:
             // pre-existing orphans, prod patched via SQL ALTER ... IF NOT EXISTS; to be journaled when main is quiet.
             const GRANDFATHERED = ["0085_floor_zone_geometry", "0088_dine_in_order_zone"];
             const sqls = fs.readdirSync(dir).filter(f => f.endsWith(".sql")).map(f => f.slice(0, -4));
-            const tags = new Set(JSON.parse(fs.readFileSync(dir + "/meta/_journal.json", "utf8")).entries.map(e => e.tag));
+            const journal = JSON.parse(fs.readFileSync(dir + "/meta/_journal.json", "utf8")).entries;
+            const tags = new Set(journal.map(e => e.tag));
             const unjournaled = sqls.filter(t => !tags.has(t) && GRANDFATHERED.indexOf(t) < 0);
             const orphan = Array.from(tags).filter(t => sqls.indexOf(t) < 0);
+            // Two migrations with the SAME 4-digit number (concurrent PRs both adding e.g. 0119_*) collide:
+            // prod drizzle-kit migrate ordering is ambiguous and one silently wins. Renumber the newer one.
+            // Pre-existing historical collisions (already applied in prod) are grandfathered; only NEW ones fail.
+            const GRANDFATHERED_DUP = ["0085", "0088", "0104", "0105"];
+            const byNum = {};
+            for (const t of sqls) { const n = t.slice(0, 4); (byNum[n] = byNum[n] || []).push(t); }
+            const dupNum = Object.keys(byNum).filter(n => byNum[n].length > 1 && GRANDFATHERED_DUP.indexOf(n) < 0).map(n => byNum[n].join(" vs "));
+            // Duplicate journal tag/idx → a botched merge resolution of meta/_journal.json.
+            const seenTag = {}, dupTag = [], seenIdx = {}, dupIdx = [];
+            for (const e of journal) { if (seenTag[e.tag]) dupTag.push(e.tag); seenTag[e.tag] = 1; if (seenIdx[e.idx]) dupIdx.push(e.idx); seenIdx[e.idx] = 1; }
             if (unjournaled.length) console.error("Unjournaled .sql (prod drizzle-kit migrate SKIPS these): " + unjournaled.join(", "));
             if (orphan.length) console.error("Journal tags with no .sql file: " + orphan.join(", "));
-            if (unjournaled.length || orphan.length) { console.error("::error::drizzle migration journal mismatch — run db:generate (pnpm --filter @ierp/api) instead of hand-writing .sql files"); process.exit(1); }
-            console.log("OK: " + sqls.length + " migrations registered (" + GRANDFATHERED.length + " grandfathered, pending journaling).");
+            if (dupNum.length) console.error("Duplicate migration numbers (renumber the newer one to the next free id): " + dupNum.join("; "));
+            if (dupTag.length) console.error("Duplicate journal tags: " + dupTag.join(", "));
+            if (dupIdx.length) console.error("Duplicate journal idx: " + dupIdx.join(", "));
+            if (unjournaled.length || orphan.length || dupNum.length || dupTag.length || dupIdx.length) { console.error("::error::drizzle migration journal/numbering problem — hand-write the NEXT FREE 4-digit number and journal it (or run db:generate)"); process.exit(1); }
+            console.log("OK: " + sqls.length + " migrations registered (" + GRANDFATHERED.length + " grandfathered), no duplicate numbers/tags/idx.");
           '

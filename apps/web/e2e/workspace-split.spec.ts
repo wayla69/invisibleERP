@@ -138,8 +138,12 @@ test('starring a menu item pins it to the Favourites group and persists across r
   await page.reload();
   await expect(favGroup.locator('a[href="/procurement"]')).toBeVisible();
 
-  // Un-star from the favourites entry → the group disappears.
-  await favGroup.locator('li[data-sidebar="menu-item"] button[data-sidebar="menu-action"]').first().click();
+  // Un-star from the favourites entry (its unpin control) → the group disappears.
+  await favGroup
+    .locator('li[data-sidebar="menu-item"]')
+    .first()
+    .getByRole('button', { name: /ออกจากรายการโปรด/ })
+    .click();
   await expect(page.getByText('รายการโปรด', { exact: true })).toHaveCount(0);
 });
 
@@ -169,4 +173,39 @@ test('server-saved favourites hydrate the sidebar and toggles are persisted to /
   const invItem = page.locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/inventory"]') });
   await invItem.locator('button[data-sidebar="menu-action"]').click();
   await expect.poll(() => puts.some((p) => p.favorites?.includes('/inventory'))).toBeTruthy();
+});
+
+test('favourites and recents surface at the top of the command palette', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+
+  // Pin an item, then open the ⌘K palette.
+  await page
+    .locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/inventory"]') })
+    .locator('button[data-sidebar="menu-action"]')
+    .click();
+  await page.keyboard.press('Control+k');
+
+  // The Favourites group is rendered at the top of the palette.
+  await expect(page.getByText('★ รายการโปรด', { exact: true })).toBeVisible();
+});
+
+test('favourites can be reordered with the move up/down controls', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+  const star = (href: string) =>
+    page
+      .locator('li[data-sidebar="menu-item"]', { has: page.locator(`a[href="${href}"]`) })
+      .locator('button[data-sidebar="menu-action"]')
+      .first();
+  await star('/inventory').click();
+  await star('/finance').click(); // newest-first → favourites = [/finance, /inventory]
+
+  const favGroup = page.locator('div[data-sidebar="group"]', { has: page.getByText('รายการโปรด', { exact: true }) });
+  const firstFav = () => favGroup.locator('a[data-sidebar="menu-button"]').first();
+  await expect(firstFav()).toHaveAttribute('href', '/finance');
+
+  // Move the first favourite down → order flips.
+  await favGroup.locator('li[data-sidebar="menu-item"]').first().getByRole('button', { name: /ย้าย .* ลง/ }).click();
+  await expect(firstFav()).toHaveAttribute('href', '/inventory');
 });

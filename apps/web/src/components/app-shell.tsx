@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ChevronRight, LogOut, Search, Star } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, LogOut, Search, Star } from 'lucide-react';
 
 import { useQuery } from '@tanstack/react-query';
 
@@ -187,6 +187,23 @@ export function AppShell({
     },
     [schedulePush],
   );
+  // Swap two favourites' positions (used by the move up/down controls). Reorders relative to each other so
+  // it stays intuitive even when some pinned hrefs are hidden in the current workspace.
+  const swapFavorites = React.useCallback(
+    (hrefA: string, hrefB: string) => {
+      setFavorites((prev) => {
+        const ia = prev.indexOf(hrefA);
+        const ib = prev.indexOf(hrefB);
+        if (ia < 0 || ib < 0) return prev;
+        const next = prev.slice();
+        [next[ia], next[ib]] = [next[ib], next[ia]];
+        if (typeof window !== 'undefined') localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+        schedulePush({ favorites: next });
+        return next;
+      });
+    },
+    [schedulePush],
+  );
   const toggleFold = React.useCallback(
     (title: string, defaultOpen: boolean) => {
       setNavFold((prev) => {
@@ -352,6 +369,28 @@ export function AppShell({
     [recents, visibleByHref, favSet],
   );
 
+  // The ⌘K palette spans all workspaces (paletteGroups), so resolve favourites/recents against that wider
+  // set rather than the active-workspace one, and surface them pinned at the top of the palette.
+  const paletteByHref = React.useMemo(() => {
+    const m = new Map<string, NavItem>();
+    for (const g of paletteGroups) for (const it of allGroupItems(g)) m.set(it.href, it);
+    return m;
+  }, [paletteGroups]);
+  const paletteFavorites = React.useMemo(
+    () => (pinsEnabled ? favorites.map((h) => paletteByHref.get(h)).filter((it): it is NavItem => !!it) : []),
+    [pinsEnabled, favorites, paletteByHref],
+  );
+  const paletteRecents = React.useMemo(
+    () =>
+      pinsEnabled
+        ? recents
+            .map((h) => paletteByHref.get(h))
+            .filter((it): it is NavItem => !!it && !favSet.has(it.href))
+            .slice(0, RECENTS_SHOWN)
+        : [],
+    [pinsEnabled, recents, paletteByHref, favSet],
+  );
+
   const renderItem = (item: NavItem) => {
     const fav = favSet.has(item.href);
     return (
@@ -382,6 +421,72 @@ export function AppShell({
             <Star className={cn('size-3.5', fav && 'fill-current')} />
           </button>
         )}
+      </SidebarMenuItem>
+    );
+  };
+
+  // Favourites get reorder controls (move up/down) + unpin, shown only in the รายการโปรด group.
+  const FAV_BTN =
+    'flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground/50 outline-none ring-sidebar-ring hover:text-sidebar-foreground focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-30';
+  const renderFavoriteItem = (item: NavItem, index: number, list: NavItem[]) => {
+    const stop = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onHover = 'opacity-0 group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100';
+    return (
+      <SidebarMenuItem key={item.href}>
+        <SidebarMenuButton
+          asChild
+          isActive={isActive(item.href)}
+          tooltip={item.label}
+          className="pr-[4.25rem] group-data-[collapsible=icon]:pr-2"
+        >
+          <Link href={item.href}>
+            <item.icon />
+            <span>{item.label}</span>
+          </Link>
+        </SidebarMenuButton>
+        <div className="absolute right-1 top-1.5 flex items-center gap-0.5 group-data-[collapsible=icon]:hidden">
+          <button
+            type="button"
+            className={cn(FAV_BTN, onHover)}
+            disabled={index === 0}
+            aria-label={`ย้าย ${item.label} ขึ้น`}
+            title="ย้ายขึ้น"
+            onClick={(e) => {
+              stop(e);
+              if (index > 0) swapFavorites(item.href, list[index - 1].href);
+            }}
+          >
+            <ChevronUp className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className={cn(FAV_BTN, onHover)}
+            disabled={index === list.length - 1}
+            aria-label={`ย้าย ${item.label} ลง`}
+            title="ย้ายลง"
+            onClick={(e) => {
+              stop(e);
+              if (index < list.length - 1) swapFavorites(item.href, list[index + 1].href);
+            }}
+          >
+            <ChevronDown className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className={cn(FAV_BTN, 'text-amber-500')}
+            aria-label={`เอา ${item.label} ออกจากรายการโปรด`}
+            title="เอาออกจากรายการโปรด"
+            onClick={(e) => {
+              stop(e);
+              toggleFavorite(item.href);
+            }}
+          >
+            <Star className="size-3.5 fill-current" />
+          </button>
+        </div>
       </SidebarMenuItem>
     );
   };
@@ -434,7 +539,7 @@ export function AppShell({
             <SidebarGroup>
               <SidebarGroupLabel>รายการโปรด</SidebarGroupLabel>
               <SidebarGroupContent>
-                <SidebarMenu>{favItems.map(renderItem)}</SidebarMenu>
+                <SidebarMenu>{favItems.map((it, i) => renderFavoriteItem(it, i, favItems))}</SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
           )}
@@ -547,7 +652,13 @@ export function AppShell({
         <div className={cn('flex-1 p-4 sm:p-6')}>{children}</div>
       </SidebarInset>
 
-      <CommandPalette groups={paletteGroups} open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette
+        groups={paletteGroups}
+        favorites={paletteFavorites}
+        recents={paletteRecents}
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+      />
     </SidebarProvider>
   );
 }
