@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Download, ShieldCheck, UserPlus } from 'lucide-react';
+import { Download, Search, ShieldCheck, UserPlus } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -58,6 +58,14 @@ export default function AdminUsersPage() {
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 
+  const [search, setSearch] = useState('');
+  const users: any[] = list.data?.users ?? [];
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return users;
+    return users.filter((u) => [u.username, u.role, u.customer_name].some((v) => String(v ?? '').toLowerCase().includes(term)));
+  }, [users, search]);
+
   return (
     <div className="space-y-4">
       <PageHeader title="จัดการผู้ใช้ (User Management)" description="สร้าง / แก้ไขสิทธิ์ / รีเซ็ตรหัสผ่าน / ลบบัญชีผู้ใช้" />
@@ -83,8 +91,21 @@ export default function AdminUsersPage() {
       </Card>
       <StateView q={list}>
         {list.data && (
+          <div className="space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา username / role / บริษัท…" className="pl-9" aria-label="ค้นหาผู้ใช้" inputMode="search" enterKeyHint="search" />
+              </div>
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                ผู้ใช้ <span className="tabular font-medium text-foreground">{filtered.length}</span>
+                {search && filtered.length !== users.length ? ` จาก ${users.length}` : ''} คน
+              </p>
+            </div>
           <DataTable
-            rows={list.data.users}
+            rows={filtered}
+            rowKey={(r: any) => r.username}
+            emptyText={search ? 'ไม่พบผู้ใช้ที่ตรงกับการค้นหา' : 'ไม่มีผู้ใช้'}
             columns={[
               { key: 'username', label: 'Username' },
               { key: 'role', label: 'Role', render: (r: any) => <select className={selectCls} value={r.role} onChange={(e) => setRole.mutate({ u: r.username, role: e.target.value })}>{ROLES.map((x) => <option key={x} value={x}>{x}</option>)}</select> },
@@ -93,8 +114,8 @@ export default function AdminUsersPage() {
               { key: 'reset', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={reset.isPending} onClick={() => reset.mutate(r.username)}>รีเซ็ตรหัส</Button> },
               { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.username)}>ลบ</Button> },
             ]}
-            emptyText="ไม่มีผู้ใช้"
           />
+          </div>
         )}
       </StateView>
     </div>
