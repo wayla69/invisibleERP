@@ -13,13 +13,18 @@ ENV_FILE="${ENV_FILE:-$HERE/.env}"
 [ -f "$ENV_FILE" ] || { echo "[backup-cron] missing env file: $ENV_FILE" >&2; exit 1; }
 
 set -a; . "$ENV_FILE"; set +a
-: "${POSTGRES_USER:?}"; : "${POSTGRES_PASSWORD:?}"; : "${POSTGRES_DB:?}"
 
-# The host reaches the container DB over the localhost-bound port (see docker-compose.tier0.yml).
-HOST_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_HOST_PORT:-5432}/${POSTGRES_DB}"
+# Tier 1 (external RDS): set BACKUP_DB_URL to the RDS connection string.
+# Tier 0 (local db container): leave it unset → connect over the localhost-bound port.
+if [ -n "${BACKUP_DB_URL:-}" ]; then
+  SRC_DB_URL="$BACKUP_DB_URL"
+else
+  : "${POSTGRES_USER:?}"; : "${POSTGRES_PASSWORD:?}"; : "${POSTGRES_DB:?}"
+  SRC_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_HOST_PORT:-5432}/${POSTGRES_DB}"
+fi
 
 echo "[backup-cron] $(date -u +%FT%TZ) starting hourly backup"
-DATABASE_URL="$HOST_DB_URL" \
+DATABASE_URL="$SRC_DB_URL" \
 BACKUP_OSS="${BACKUP_OSS:-}" \
 RETAIN_DAYS="${RETAIN_DAYS:-14}" \
   bash "$OPS_DIR/pg-backup.sh" "${BACKUP_DIR:-/var/backups/ierp}"

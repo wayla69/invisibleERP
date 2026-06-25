@@ -1,0 +1,64 @@
+# Invisible ERP V2 — Alibaba Cloud "Tier 1" stack. Same single-host app tier as Tier 0, but Postgres
+# is now EXTERNAL (ApsaraDB RDS for PostgreSQL, HA): the `db` container is gone and the api talks to
+# RDS via DATABASE_URL. Migrate Tier 0 → Tier 1 with tools/ops/alibaba/migrate-tier0-to-tier1.sh.
+#
+#   docker compose --env-file tools/ops/alibaba/.env -f tools/ops/alibaba/docker-compose.tier1.yml up -d --build
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${CADDY_SITE_ADDRESS:?set CADDY_SITE_ADDRESS (domain for TLS, or :80 to test)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+  web:
+    build:
+      context: ../../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_SITE_URL:?set PUBLIC_SITE_URL (e.g. https://erp.example.co.th)}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-Asia/Bangkok}
+    expose:
+      - "3000"
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ../../..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # Tier 1: point straight at the managed RDS cluster (full connection string with password).
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL to the ApsaraDB RDS connection string}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      APP_ENC_KEY: ${APP_ENC_KEY:?set APP_ENC_KEY}
+      PSP_WEBHOOK_SECRET: ${PSP_WEBHOOK_SECRET:?set PSP_WEBHOOK_SECRET}
+      CORS_ORIGINS: ${PUBLIC_SITE_URL}
+      BUSINESS_TZ_OFFSET_MIN: ${BUSINESS_TZ_OFFSET_MIN:-420}
+      PORT: "8000"
+      TZ: ${TZ:-Asia/Bangkok}
+      # Migrations are applied as a one-shot release step (migrate-tier0-to-tier1.sh, or a deploy job),
+      # NOT on every replica boot. Set RUN_MIGRATIONS=1 only if you run a single api replica.
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-0}
+    expose:
+      - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  caddy_data:
+  caddy_config:

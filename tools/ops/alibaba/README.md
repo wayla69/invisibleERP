@@ -16,6 +16,8 @@
 | `ecs-tier0-setup.sh` | สคริปต์ติดตั้งครั้งเดียวบน ECS (Docker, สแตก, cron) — รันซ้ำได้ |
 | `backup-cron.sh` | สำรองข้อมูลรายชั่วโมง (เรียก `../pg-backup.sh` → ดิสก์ + OSS) |
 | `restore-drill-cron.sh` | ซ้อมกู้คืนรายเดือน (เรียก `../verify-restore.sh`) — หลักฐาน ITGC-OP-01 |
+| `docker-compose.tier1.yml` | สแตก Tier 1 (web + api + caddy, ใช้ Postgres ภายนอก = RDS, ไม่มี db container) |
+| `migrate-tier0-to-tier1.sh` | ย้ายข้อมูล Tier 0 → ApsaraDB RDS (Tier 1) + พิมพ์ขั้นตอนตัดสลับ |
 
 > งานจริงของการสำรอง/กู้คืนใช้สคริปต์กลางที่มีอยู่แล้ว: [`../pg-backup.sh`](../pg-backup.sh),
 > [`../restore.sh`](../restore.sh), [`../verify-restore.sh`](../verify-restore.sh) — ดู [`../BACKUP-RUNBOOK.md`](../BACKUP-RUNBOOK.md)
@@ -64,6 +66,16 @@ curl -fsS http://127.0.0.1:8000/healthz && echo ok      # api ภายในเ
 curl -fsSI https://<โดเมนของคุณ> | head -1               # หลัง DNS + TLS พร้อม
 ```
 
+## ทดสอบแบบ HTTP (ยังไม่มีโดเมน / ไม่เอา TLS)
+อยากลองเร็ว ๆ ก่อนซื้อโดเมน? ตั้งสองค่านี้ใน `.env` ให้ตรงกับที่อยู่ที่ใช้เปิดเบราว์เซอร์:
+```bash
+PUBLIC_SITE_URL=http://<public-ip-ของ-ECS>   # หรือ http://localhost ถ้าเปิดบนเครื่องนั้นเอง
+CADDY_SITE_ADDRESS=:80                         # Caddy เสิร์ฟ HTTP ล้วน ไม่ทำ TLS
+```
+แล้ว `docker compose --env-file .env -f docker-compose.tier0.yml up -d --build`
+(เพราะ `NEXT_PUBLIC_API_URL` ฝังตอน build ต้อง `--build` ใหม่ทุกครั้งที่เปลี่ยน `PUBLIC_SITE_URL`)
+พอจะขึ้นโปรดักชันจริงค่อยเปลี่ยนกลับเป็นโดเมน แล้ว Caddy จะออก HTTPS ให้อัตโนมัติ
+
 ## การสำรองข้อมูล
 - **อัตโนมัติ:** cron รันทุกชั่วโมง → ดัมป์ลง `BACKUP_DIR` (ดีฟอลต์ `/var/backups/ierp`) + อัปขึ้น `BACKUP_OSS`
   เก็บย้อนหลัง `RETAIN_DAYS` วัน (ดีฟอลต์ 14) · ล็อก: `/var/log/ierp-backup.log`
@@ -93,7 +105,27 @@ cd /opt/ierp && git pull
 docker compose --env-file tools/ops/alibaba/.env -f tools/ops/alibaba/docker-compose.tier0.yml up -d --build
 ```
 
-## เมื่อโตขึ้น → Tier 1
-เมื่อทราฟฟิก/ความเสี่ยงสูงขึ้น ให้แยก Postgres ออกไปใช้ **ApsaraDB RDS (HA)**: ย้ายข้อมูลด้วย dump/restore,
-เปลี่ยน `DATABASE_URL` ไปที่ RDS, เอา service `db` ออกจาก compose, และ **ปิด `RUN_MIGRATIONS`** แล้วรัน
-ไมเกรชันเป็นสเต็ปปล่อยเวอร์ชันเดี่ยวแทน (ดู [`docs/ops/deployment.md`](../../../docs/ops/deployment.md) §3)
+## เมื่อโตขึ้น → Tier 1 (แยก Postgres ไป ApsaraDB RDS)
+เมื่อทราฟฟิก/ความเสี่ยงสูงขึ้น ให้ย้ายฐานข้อมูลออกไปใช้ **ApsaraDB RDS for PostgreSQL (HA)** มีสคริปต์ช่วย:
+
+```bash
+# 1) สร้าง RDS (HA) ภูมิภาคเดียวกัน เปิดให้ ECS เชื่อมต่อได้ (VPC/security group)
+# 2) ย้ายข้อมูล Tier 0 → RDS (dump → migrate roles/RLS บน RDS → restore → ตรวจสอบ)
+TARGET_DATABASE_URL='postgresql://<user>:<pw>@<rds-host>:5432/invisible_erp_v2' \
+  bash tools/ops/alibaba/migrate-tier0-to-tier1.sh
+```
+
+สคริปต์จะ **ไม่แก้ `.env` ให้เอง** แต่จะพิมพ์ขั้นตอนตัดสลับท้ายงาน — สรุปคือ:
+1. แก้ `.env`: ตั้ง `DATABASE_URL`, `BACKUP_DB_URL`, `DRILL_ADMIN_URL` ให้ชี้ RDS (ดูบล็อก Tier 1 ใน `.env.example`)
+2. สลับมาใช้ `docker-compose.tier1.yml` (ไม่มี service `db` แล้ว):
+   ```bash
+   docker compose --env-file tools/ops/alibaba/.env -f tools/ops/alibaba/docker-compose.tier1.yml up -d --build
+   ```
+3. เช็ก `/healthz` → รัน **restore drill กับ RDS หนึ่งรอบ** → แล้วค่อย `stop` คอนเทนเนอร์ `db` เดิม
+   (เก็บ volume `pgdata` ไว้เป็น rollback จนกว่า drill บน RDS จะผ่าน)
+
+ไมเกรชันบน Tier 1 รันเป็น **สเต็ปปล่อยเวอร์ชันเดี่ยว** (สคริปต์/ดีพลอยจ็อบ) ไม่ใช่ทุก replica boot —
+ค่าเริ่มต้น `RUN_MIGRATIONS=0` (ดู [`docs/ops/deployment.md`](../../../docs/ops/deployment.md) §3)
+
+> CI: `.github/workflows/ops-scripts-check.yml` ตรวจสคริปต์เหล่านี้อัตโนมัติทุก PR ที่แตะ `tools/ops/`
+> (`bash -n` + shellcheck + `docker compose config` ของทั้ง Tier 0/1)

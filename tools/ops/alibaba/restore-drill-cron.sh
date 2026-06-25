@@ -17,10 +17,16 @@ ENV_FILE="${ENV_FILE:-$HERE/.env}"
 [ -f "$ENV_FILE" ] || { echo "[drill] missing env file: $ENV_FILE" >&2; exit 1; }
 
 set -a; . "$ENV_FILE"; set +a
-: "${POSTGRES_USER:?}"; : "${POSTGRES_PASSWORD:?}"
 
-# Maintenance "postgres" DB on the same server, where verify-restore.sh may CREATE/DROP a scratch DB.
-ADMIN_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_HOST_PORT:-5432}/postgres"
+# Maintenance DB where verify-restore.sh may CREATE/DROP a throwaway scratch database.
+# Tier 1 (RDS): set DRILL_ADMIN_URL to the RDS master pointed at the "postgres" db.
+# Tier 0 (local db container): leave it unset → use the localhost-bound port.
+if [ -n "${DRILL_ADMIN_URL:-}" ]; then
+  ADMIN_URL="$DRILL_ADMIN_URL"
+else
+  : "${POSTGRES_USER:?}"; : "${POSTGRES_PASSWORD:?}"
+  ADMIN_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_HOST_PORT:-5432}/postgres"
+fi
 
 echo "[drill] $(date -u +%FT%TZ) starting monthly restore drill"
 SCRATCH_ADMIN_URL="$ADMIN_URL" \
