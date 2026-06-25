@@ -160,6 +160,8 @@ async function main() {
   // ── J. supplier scorecard ──
   const sc = await inj('POST', `/api/procurement/suppliers/${V1}/scorecard`, admin, { period: '2026-06' });
   ok('Supplier scorecard computed (score + gr_count)', sc.json.score != null && sc.json.gr_count >= 1, JSON.stringify(sc.json));
+  const scReg = await inj('GET', '/api/procurement/scorecards', admin);
+  ok('Supplier scorecard register: ranks vendors by score (V1 present, avg + underperformers)', (scReg.json.scorecards ?? []).some((s: any) => s.vendor_id === V1 && s.score === sc.json.score) && scReg.json.count >= 1 && scReg.json.avg_score >= 0 && typeof scReg.json.underperformers === 'number', `n=${scReg.json.count} avg=${scReg.json.avg_score} under=${scReg.json.underperformers}`);
 
   // ── K. non-PO bill (no match) is payable — gate fails OPEN, only PO-based matched invoices are gated ──
   const nonPo = await apTxn(500);

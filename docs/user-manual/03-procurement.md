@@ -147,6 +147,19 @@ AP can pay. The list is **store-scoped** (you see only your own).
 - **Screen** the vendor (approve / block) before transacting.
 - **Scorecard** — recompute a vendor's performance score (delivery, quality).
 
+### Supplier scorecards register
+
+**Screen:** `/supplier-scorecards` (**คะแนนซัพพลายเออร์**, ERP nav → จัดซื้อ) ·
+**Required permission:** `procurement` / `exec`.
+
+To compare suppliers at a glance, open the **Supplier Scorecards** register. It
+**ranks every vendor by score** (🏆 on the top performer), with KPI cards (how many
+have a scorecard · the **average score** · how many are **underperforming**, below
+70) and per-vendor metrics (on-time %, quality %, price-variance %, goods-receipts,
+claims). Leave the **งวด (period)** box empty to see each vendor's **latest**
+standing, or enter a `YYYY-MM` period to rank that month. Use it to decide which
+suppliers to keep, coach, or drop. The list is store-scoped.
+
 > **Note — separation of duties:** Maintaining the **vendor master** is kept
 > separate from **paying** vendors (rule R02), to prevent creating a fictitious
 > vendor and paying it.

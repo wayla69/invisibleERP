@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
-import { sql, eq, and } from 'drizzle-orm';
+import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -107,6 +107,31 @@ export class ProcurementService {
       .onConflictDoUpdate({ target: [supplierScorecards.vendorId, supplierScorecards.period], set: { score: String(score), grCount } });
     await db.update(vendors).set({ scorecardScore: String(score) }).where(eq(vendors.id, vendorId));
     return { vendor_id: vendorId, period, score, gr_count: grCount };
+  }
+
+  // Supplier-performance register: scorecards for the caller's tenant ranked by score. With ?period → that
+  // period; without → the LATEST scorecard per vendor (current standing). Tenant-scoped explicitly. Returns
+  // the ranking + avg score + count of underperformers (< 70) for at-a-glance vendor management.
+  async listScorecards(q: { period?: string; limit?: number }, user: JwtUser) {
+    const db = this.db as any;
+    const conds: any[] = [];
+    if (user.tenantId != null) conds.push(eq(supplierScorecards.tenantId, user.tenantId));
+    if (q.period) conds.push(eq(supplierScorecards.period, q.period));
+    const rows = await db.select({
+      vendorId: supplierScorecards.vendorId, vendorName: vendors.name, period: supplierScorecards.period,
+      onTimePct: supplierScorecards.onTimePct, qualityPct: supplierScorecards.qualityPct, priceVarPct: supplierScorecards.priceVarPct,
+      score: supplierScorecards.score, grCount: supplierScorecards.grCount, claimCount: supplierScorecards.claimCount,
+    }).from(supplierScorecards).leftJoin(vendors, eq(supplierScorecards.vendorId, vendors.id))
+      .where(conds.length ? and(...conds) : undefined)
+      .orderBy(desc(supplierScorecards.period), desc(supplierScorecards.score)).limit(q.limit ?? 200);
+    // No period filter → keep only each vendor's latest scorecard (rows are period-desc, so first wins).
+    let list = rows as any[];
+    if (!q.period) { const seen = new Set<number>(); list = rows.filter((r: any) => { const v = Number(r.vendorId); if (seen.has(v)) return false; seen.add(v); return true; }); }
+    const scorecards = list
+      .map((r: any) => ({ vendor_id: Number(r.vendorId), vendor_name: r.vendorName, period: r.period, on_time_pct: Number(r.onTimePct ?? 0), quality_pct: Number(r.qualityPct ?? 0), price_var_pct: Number(r.priceVarPct ?? 0), score: Number(r.score ?? 0), gr_count: Number(r.grCount ?? 0), claim_count: Number(r.claimCount ?? 0) }))
+      .sort((a: any, b: any) => b.score - a.score);
+    const avg = scorecards.length ? Math.round((scorecards.reduce((s: number, r: any) => s + r.score, 0) / scorecards.length) * 100) / 100 : 0;
+    return { scorecards, count: scorecards.length, avg_score: avg, underperformers: scorecards.filter((r: any) => r.score < 70).length };
   }
 
   // ── PO ──────────────────────────────────────────────────────────────
