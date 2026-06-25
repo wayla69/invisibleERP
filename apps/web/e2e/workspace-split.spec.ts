@@ -156,13 +156,15 @@ test('Finance ?tab= deep-link opens the matching PEAK-style cycle tab', async ({
   });
 
   // Deep-link straight to the payables cycle (as the dashboard action center does).
+  // `exact: true` — the AP/AR section <h2> shares a substring with the aging sub-header
+  // (e.g. "เจ้าหนี้ (AP)" vs "อายุเจ้าหนี้ (AP) · …"), and getByRole name is a substring match by default.
   await page.goto('/finance?tab=payables');
   await expect(page.getByRole('tab', { name: 'รายจ่าย (AP)' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('heading', { name: 'เจ้าหนี้ (AP)' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'เจ้าหนี้ (AP)', exact: true })).toBeVisible();
 
   // Switching tabs writes the param back so the view stays shareable.
   await page.getByRole('tab', { name: 'รายรับ (AR)' }).click();
-  await expect(page.getByRole('heading', { name: 'ลูกหนี้ (AR)' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'ลูกหนี้ (AR)', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/[?&]tab=receivables/);
 });
 
