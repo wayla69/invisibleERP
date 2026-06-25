@@ -181,6 +181,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-146 | Credit check denies a manually-held customer (CREDIT_HOLD) | REV-08 | 01 §9, §13 |
 | UAT-O2C-147 | Self-release blocked, second person releases (SOD_SELF_RELEASE) | REV-08, R09 | 01 §7, §9, §13 |
 | UAT-O2C-148 | Credit-limit change is audited | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-149 | Customer statement of account (running balance) | REV-12 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -214,6 +215,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-026 | SLA escalation sweep flags + reminds | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-027 | Escalation fallback approver can act | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-028 | No-code builder replaces steps | Feature (workflow builder) | 02 §7 |
+| UAT-P2P-029 | Vendor statement of account | EXP-06 | 02 §7 |
+| UAT-P2P-030 | Petty cash — issue an advance | EXP-07 | 07 §7 |
+| UAT-P2P-031 | Petty cash — settle reconciles or rejects | EXP-07 | 07 §7 |
 | UAT-P2P-029 | Pre-paid bill creation blocked | EXP-06 | 02 §7, §9 |
 | UAT-P2P-030 | Payment request creates no GL/paid effect | EXP-06 | 02 §7, §9 |
 | UAT-P2P-031 | Requester self-approval blocked (SoD, incl. Admin) | EXP-06, R03/R07 | 02 §7, §9 |
@@ -292,7 +296,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-027 | Unbalanced recurring template rejected (UNBALANCED) | GL-08 | 04 §7, §9 |
 | UAT-GL-028 | Recurring run posts a Draft JE via maker-checker | GL-08, R05 | 04 §7, §9 |
 | UAT-GL-029 | Recurring run idempotent; second person approves → hits GL | GL-08, GL-05, R05 | 04 §7, §9 |
-| UAT-GL-030 | Working-capital health score | Feature (financial-health score) | 07 §7.9 |
+| UAT-GL-030 | Register a prepaid schedule + capitalize | GL-09 | 04 §7 |
+| UAT-GL-031 | Prepaid amortization run (straight-line) + idempotent | GL-09 | 04 §7 |
+| UAT-GL-032 | Lease commencement recognises ROU + liability at PV | LSE-01 | 04 §7 |
+| UAT-GL-033 | Lease periodic run (interest + payment + ROU depreciation) | LSE-01 | 04 §7 |
+| UAT-GL-034 | Asset upward revaluation → surplus to equity | FA-07 | 09 §7 |
+| UAT-GL-035 | Asset impairment + no-change guard + audit | FA-07 | 09 §7 |
+| UAT-GL-036 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -519,14 +529,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 53 | 23 |
-| 03 Procure-to-Pay | 23 | 9 |
+| 02 Order-to-Cash | 54 | 24 |
+| 03 Procure-to-Pay | 26 | 12 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close (incl. fixed assets / EAM) | 37 | 22 |
+| 05 GL & Close (incl. fixed assets / EAM) | 43 | 27 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 19 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **331** | **165** |
+| **Total** | **341** | **174** |
