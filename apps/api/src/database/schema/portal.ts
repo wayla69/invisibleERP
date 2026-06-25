@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, timestamp, boolean, unique, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 export const customerItems = pgTable('customer_items', {
@@ -41,6 +41,26 @@ export const custStockLog = pgTable('cust_stock_log', {
   notes: text('notes'),
   createdBy: text('created_by'),
 });
+
+// Per-branch on-hand ledger (Phase — branch-aware replenishment). Runs ALONGSIDE customer_inventory:
+// customer_inventory stays the tenant rollup (13 readers untouched); branch_stock is the per-branch detail
+// the transfer-before-buy router consumes. Invariant: customer_inventory.current_stock == Σ branch_stock.on_hand
+// per (tenant,item) + untagged_remainder (legacy/HQ stock not yet branch-attributed). RLS via the 0002 loop.
+export const branchStock = pgTable('branch_stock', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  branchId: bigint('branch_id', { mode: 'number' }), // outlet that holds this stock (branches.id)
+  itemId: text('item_id'),
+  itemDescription: text('item_description'),
+  uom: text('uom'),
+  onHand: numeric('on_hand').default('0'),
+  reorderPoint: numeric('reorder_point').default('0'),
+  reorderQty: numeric('reorder_qty').default('0'),
+  lastUpdated: timestamp('last_updated', { withTimezone: true }),
+}, (t) => ({
+  uq: unique('branch_stock_uq').on(t.tenantId, t.branchId, t.itemId),
+  byItem: index('idx_branchstock_item').on(t.tenantId, t.itemId),
+}));
 
 // Mini-ERP (เดิม Owner_Customer → tenant_id)
 export const myCustomers = pgTable('my_customers', {

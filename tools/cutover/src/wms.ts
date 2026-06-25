@@ -36,22 +36,35 @@ async function main() {
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง', vatRegistered: true }, { code: 'T2', name: 'ร้านสอง' }]).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง', vatRegistered: true }, { code: 'T2', name: 'ร้านสอง' }, { code: 'T3', name: 'ร้านสามสาขา' }]).onConflictDoNothing();
   const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
-  const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
+  const [hq, t1, t2, t3] = [await tid('HQ'), await tid('T1'), await tid('T2'), await tid('T3')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'wh1', passwordHash: await pw.hash('pw'), role: 'Warehouse', tenantId: t1 },
     { username: 'plan1', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: t1 },
     { username: 'plan2', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: t2 },
     { username: 'shop1', passwordHash: await pw.hash('pw'), role: 'Customer', tenantId: t1, customerName: 'T1' },
+    { username: 'plan3', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: t3 },
+    { username: 'wh3', passwordHash: await pw.hash('pw'), role: 'Warehouse', tenantId: t3 },
   ]).onConflictDoNothing();
-  for (const it of ['A', 'B', 'R1']) await db.insert(s.items).values({ itemId: it, itemDescription: it, uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
+  for (const it of ['A', 'B', 'R1', 'X1']) await db.insert(s.items).values({ itemId: it, itemDescription: it, uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
   await db.insert(s.vendors).values({ name: 'V1', isSupplier: true, approvalStatus: 'approved' }).onConflictDoNothing();
   // customer_inventory: A high (portal sale), R1 below reorder (replenishment fires)
   await db.insert(s.customerInventory).values([
     { tenantId: t1, itemId: 'A', itemDescription: 'A', uom: 'EA', currentStock: '100', reorderPoint: '0', reorderQty: '0' },
     { tenantId: t1, itemId: 'R1', itemDescription: 'R1', uom: 'EA', currentStock: '3', reorderPoint: '10', reorderQty: '50' },
+  ]);
+  // T3 branch-aware fixture: two branches; X1 low at BB while BA holds a PARTIAL surplus → transfer 20 + buy 30
+  await db.insert(s.branches).values([
+    { tenantId: t3, code: 'BA', name: 'Flagship', isHq: true, active: true },
+    { tenantId: t3, code: 'BB', name: 'Mall', isHq: false, active: true },
+  ]).onConflictDoNothing();
+  const brId = async (c: string) => Number((await db.select().from(s.branches).where(and(eq(s.branches.tenantId, t3), eq(s.branches.code, c))))[0].id);
+  const [ba, bb] = [await brId('BA'), await brId('BB')];
+  await db.insert(s.branchStock).values([
+    { tenantId: t3, branchId: ba, itemId: 'X1', itemDescription: 'X1', uom: 'EA', onHand: '30', reorderPoint: '10', reorderQty: '50' },
+    { tenantId: t3, branchId: bb, itemId: 'X1', itemDescription: 'X1', uom: 'EA', onHand: '2', reorderPoint: '10', reorderQty: '50' },
   ]);
   // two POS sales to batch into a wave (raw — wave just needs the order + its items)
   const mkSale = async (no: string, item: string, qty: number) => {
@@ -74,6 +87,7 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const [admin, wh1, plan1, plan2, shop1] = [await login('admin', 'admin123'), await login('wh1', 'pw'), await login('plan1', 'pw'), await login('plan2', 'pw'), await login('shop1', 'pw')];
+  const [plan3, wh3] = [await login('plan3', 'pw'), await login('wh3', 'pw')];
   const binQty = async (bin: string, item: string) => Number(((await pg.query(`SELECT bs.qty FROM bin_stock bs JOIN bins b ON bs.bin_id=b.id WHERE b.bin_code='${bin}' AND bs.item_id='${item}'`)).rows as any[])[0]?.qty ?? -1);
 
   // bins
@@ -129,6 +143,31 @@ async function main() {
   const autopr = await inj('POST', '/api/replenishment/auto-pr', plan1, {});
   const sugAfter = (await inj('GET', '/api/replenishment/suggestions', plan1)).json.suggestions.find((x: any) => x.item_id === 'R1');
   ok('Auto-PR consolidates suggestions → PR + status PR_Created', !!autopr.json.pr_no && autopr.json.lines >= 1 && sugAfter?.status === 'PR_Created' && sugAfter?.pr_no === autopr.json.pr_no, JSON.stringify({ pr: autopr.json.pr_no, st: sugAfter?.status }));
+
+  // 11b. Branch-aware replenishment (T3): transfer-before-buy split
+  const bsug = await inj('POST', '/api/replenishment/suggest', plan3);
+  const bsugs = bsug.json.suggestions ?? [];
+  const xfer = bsugs.find((x: any) => x.item_id === 'X1' && x.route === 'transfer');
+  const buy = bsugs.find((x: any) => x.item_id === 'X1' && x.route === 'buy');
+  ok('Branch replen: X1 low at BB → transfer 20 (from BA) + buy 30 residual', !!xfer && xfer.transfer_qty === 20 && xfer.from_branch_id === ba && xfer.branch_id === bb && !!buy && buy.buy_qty === 30, JSON.stringify({ xfer, buy }));
+  // 11c. auto-transfer moves branch_stock BA→BB + logs both legs
+  const bsOnHand = async (br: number, it: string) => Number(((await pg.query(`SELECT on_hand FROM branch_stock WHERE tenant_id=${t3} AND branch_id=${br} AND item_id='${it}'`)).rows as any[])[0]?.on_hand ?? -1);
+  const at = await inj('POST', '/api/replenishment/auto-transfer', wh3, {});
+  const baAfter = await bsOnHand(ba, 'X1'), bbAfter = await bsOnHand(bb, 'X1');
+  const xlog = (await pg.query(`SELECT log_type FROM cust_stock_log WHERE tenant_id=${t3} AND item_id='X1' AND log_type IN ('Transfer-Out','Transfer-In')`)).rows as any[];
+  ok('Auto-transfer: branch_stock BA 30→10, BB 2→22 + Transfer-Out/In for both branches', !!at.json.doc_no && at.json.transfers === 1 && baAfter === 10 && bbAfter === 22 && xlog.length === 2, JSON.stringify({ doc: at.json.doc_no, baAfter, bbAfter, logs: xlog.length }));
+  // 11d. transfer row terminal; auto-PR raises only the residual buy leg
+  const apr3 = await inj('POST', '/api/replenishment/auto-pr', plan3, {});
+  const after3 = (await inj('GET', '/api/replenishment/suggestions', plan3)).json.suggestions ?? [];
+  const xferDone = after3.find((x: any) => x.item_id === 'X1' && x.route === 'transfer');
+  const buyDone = after3.find((x: any) => x.item_id === 'X1' && x.route === 'buy');
+  ok('Branch replen: transfer row Transfer_Done; buy residual → PR_Created (1 line)', xferDone?.status === 'Transfer_Done' && !!apr3.json.pr_no && apr3.json.lines === 1 && buyDone?.status === 'PR_Created' && buyDone?.pr_no === apr3.json.pr_no, JSON.stringify({ xs: xferDone?.status, bs: buyDone?.status, pr: apr3.json.pr_no, lines: apr3.json.lines }));
+  // 11e. RLS — T1 planner sees none of T3's branch suggestions
+  const t1seeT3 = (await inj('GET', '/api/replenishment/suggestions', plan1)).json.suggestions ?? [];
+  ok('RLS: T1 planner sees 0 of T3 branch suggestions', !t1seeT3.some((x: any) => x.item_id === 'X1'), `t1 X1 rows=${t1seeT3.filter((x: any) => x.item_id === 'X1').length}`);
+  // 11f. Authorization — a user with neither warehouse nor wh_custody cannot execute inter-branch transfers
+  const noCustody = await inj('POST', '/api/replenishment/auto-transfer', shop1, {});
+  ok('Authz: no warehouse/wh_custody → auto-transfer 403 (transfer is a gated custody duty)', noCustody.status === 403, `status=${noCustody.status}`);
 
   // 12. RMA — real portal sale (captured payment) → authorize → receive → restock to bin + ReturnsService credit
   const sale = await inj('POST', '/api/portal/pos/sales', shop1, { items: [{ item_id: 'A', qty: 2, unit_price: 50 }] });

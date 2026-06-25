@@ -72,6 +72,7 @@ async function main() {
     await tx.delete(schema.stockMovements).where(eq(schema.stockMovements.createdBy, TAG));
     await tx.delete(schema.stocktakes).where(eq(schema.stocktakes.countedBy, TAG));
     await tx.delete(schema.custVariance).where(eq(schema.custVariance.tenantId, T));
+    await tx.delete(schema.itemSupplier).where(eq(schema.itemSupplier.tenantId, T)); // before vendors (FK)
     await tx.delete(schema.vendors).where(eq(schema.vendors.tenantId, T));
 
     // ── vendors ──
@@ -82,6 +83,16 @@ async function main() {
     })));
     const vendorRows = await tx.select().from(schema.vendors).where(eq(schema.vendors.tenantId, T));
     const vendorByCode = new Map(vendorRows.map((v) => [v.vendorCode, v]));
+
+    // ── item → preferred-supplier link (item_supplier) — feeds the branch-aware replenishment "buy" leg ──
+    // Each catalogue ingredient is linked to the vendor whose prefix list claims it (first match = preferred).
+    const isRows = catalogue.map((c) => {
+      const code = c.itemId ?? '';
+      const v = VENDORS.find((vv) => vv.prefixes.some((p) => p !== 'PKG' && code.startsWith(p)));
+      const vendor = v ? vendorByCode.get(v.code) : undefined;
+      return vendor ? { tenantId: T, itemId: c.itemId, vendorId: vendor.id, unitPrice: c.unitPrice ?? '1', leadTimeDays: v!.lead, preferred: true } : null;
+    }).filter(Boolean) as any[];
+    for (let i = 0; i < isRows.length; i += 500) await tx.insert(schema.itemSupplier).values(isRows.slice(i, i + 500));
 
     // pool of catalogue items per vendor (by code prefix)
     const poolFor = (prefixes: string[]) =>
@@ -179,7 +190,7 @@ async function main() {
     }));
 
     console.log(`✅ Procurement seeded into tenant ${T}:`);
-    console.log(`   ${VENDORS.length} vendors · ${poCount} POs (${lineCount} lines) · ${grCount} goods receipts · ${moveCount} stock movements`);
+    console.log(`   ${VENDORS.length} vendors · ${isRows.length} item→supplier links · ${poCount} POs (${lineCount} lines) · ${grCount} goods receipts · ${moveCount} stock movements`);
     console.log(`   1 stocktake (${stItems.length} items) · ${varItems.length} variance rows`);
   });
   await client.end();

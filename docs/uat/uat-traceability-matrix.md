@@ -255,6 +255,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-024 | STD GR PPV balanced under rounding | MFG-03 / GL-01 | 15 §9 |
 | UAT-INV-025 | Food-cost variance valued at ingredient cost | INV-04 (analytics) | 03 §12 |
 | UAT-INV-026 | Variance summary nets fav/unfav + tenant-isolated | INV-04 (analytics) | 03 §12 |
+| UAT-INV-027 | Branch replenishment splits transfer-before-buy | INV-05 | 03 §7, §9 |
+| UAT-INV-028 | Auto-transfer moves branch stock; auto-PR raises residual | INV-05, EXP-03 | 03 §7, §9 |
+| UAT-INV-029 | SoD transfer-vs-buy + RLS branch isolation | INV-05, ITGC-AC (RLS) | 03 §7, §9 |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 

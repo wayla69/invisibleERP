@@ -21,6 +21,7 @@ function mulberry32(seed: number) {
   return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 const rnd = mulberry32(135790);
+const r2b = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
 const BRANCHES = [
   { code: 'TH-THL', name: 'สาขาทองหล่อ (Thonglor Flagship)', hq: true, weight: 0.45, address: '88 ทองหล่อ ซ.10 เขตวัฒนา กรุงเทพฯ', phone: '02-712-0010' },
@@ -59,8 +60,43 @@ async function main() {
       for (let i = 0; i < ids.length; i += 500) await tx.update(schema.custPosSales).set({ branchId: bid }).where(inArray(schema.custPosSales.id, ids.slice(i, i + 500)));
     }
 
+    // ── per-branch on-hand ledger (branch_stock) — split tenant on-hand across branches by sales weight ──
+    // Keeps the rollup invariant (customer_inventory.current_stock == Σ branch_stock.on_hand) and deliberately
+    // skews a few "hero" ingredients so the non-flagship branches sit BELOW their reorder point while the
+    // flagship holds a partial surplus — guaranteeing a transfer-before-buy scenario (transfer the surplus,
+    // BUY the residual) on the very first /replenishment recompute.
+    await tx.delete(schema.branchStock).where(eq(schema.branchStock.tenantId, T));
+    const invRows = await tx.select().from(schema.customerInventory).where(eq(schema.customerInventory.tenantId, T));
+    const weights = BRANCHES.map((b) => ({ id: idByCode.get(b.code)!, w: b.weight, hq: b.hq }));
+    const heroIds = new Set(
+      [...invRows].filter((r) => Number(r.reorderPoint) > 0)
+        .sort((a, b) => String(a.itemId).localeCompare(String(b.itemId))).slice(0, 3).map((r) => r.itemId),
+    );
+    const bsRows: any[] = [];
+    for (const r of invRows) {
+      const stock = Number(r.currentStock ?? 0), rop = Number(r.reorderPoint ?? 0), roq = Number(r.reorderQty ?? 0);
+      const isHero = heroIds.has(r.itemId);
+      let sumOnHand = 0;
+      const per = weights.map((b, i) => {
+        const ropI = r2b(rop * b.w), roqI = r2b(roq * b.w);
+        let onHand: number;
+        if (isHero) {
+          // flagship lends a partial surplus; the others sit below ROP → transfer (capped) + buy residual
+          onHand = b.hq ? r2b(ropI + roqI * 0.5) : r2b(ropI * 0.2);
+        } else {
+          onHand = i < weights.length - 1 ? r2b(stock * b.w) : r2b(stock - sumOnHand); // last branch absorbs rounding
+        }
+        sumOnHand = r2b(sumOnHand + onHand);
+        return { branchId: b.id, onHand, ropI, roqI };
+      });
+      for (const p of per) bsRows.push({ tenantId: T, branchId: p.branchId, itemId: r.itemId, itemDescription: r.itemDescription, uom: r.uom, onHand: String(p.onHand), reorderPoint: String(p.ropI), reorderQty: String(p.roqI), lastUpdated: new Date() });
+      // keep the tenant rollup equal to Σ branch on-hand (zero untagged remainder at t0)
+      await tx.update(schema.customerInventory).set({ currentStock: String(sumOnHand) }).where(eq(schema.customerInventory.id, r.id));
+    }
+    for (let i = 0; i < bsRows.length; i += 500) await tx.insert(schema.branchStock).values(bsRows.slice(i, i + 500));
+
     console.log(`✅ Multi-branch seeded into tenant ${T}:`);
-    console.log(`   ${BRANCHES.length} branches · ${sales.length} sales tagged`);
+    console.log(`   ${BRANCHES.length} branches · ${sales.length} sales tagged · ${bsRows.length} branch_stock rows (${heroIds.size} hero items skewed)`);
     console.log(`   ${BRANCHES.map((b) => `${b.code} ${dist[b.code]}`).join(' · ')}`);
   });
   await client.end();

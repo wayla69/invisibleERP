@@ -1,5 +1,6 @@
-import { pgTable, bigserial, bigint, text, numeric, integer, date, timestamp, boolean, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, date, timestamp, boolean, index, unique } from 'drizzle-orm/pg-core';
 import { moveTypeEnum, lotStatusEnum, stocktakeStatusEnum } from './enums';
+import { tenants } from './tenants';
 
 // Item master — เดิม tbl_raw_inventory เป็นทั้ง master + stock fact; V2 แยกออกมา (master จริงเดิมอยู่ใน CSV)
 export const items = pgTable('items', {
@@ -154,6 +155,22 @@ export const scanLines = pgTable('scan_lines', {
   locationId: text('location_id'),
   confirmed: boolean('confirmed').default(false),
 });
+
+// Per-tenant preferred-supplier link for an item (Phase — branch-aware replenishment "buy" leg).
+// Lets the auto-PR/PO know WHICH vendor to order from + at what price. vendor_id → vendors(id) (FK in the
+// migration; kept a plain bigint here to avoid a schema import cycle). Tenant-scoped → RLS via the 0002 loop.
+export const itemSupplier = pgTable('item_supplier', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  itemId: text('item_id'),
+  vendorId: bigint('vendor_id', { mode: 'number' }), // vendors.id
+  unitPrice: numeric('unit_price', { precision: 14, scale: 2 }),
+  leadTimeDays: integer('lead_time_days').default(3),
+  preferred: boolean('preferred').default(false),
+}, (t) => ({
+  uq: unique('item_supplier_uq').on(t.tenantId, t.itemId, t.vendorId),
+  byItem: index('idx_itemsupplier_item').on(t.tenantId, t.itemId),
+}));
 
 export type Item = typeof items.$inferSelect;
 export type StockSnapshot = typeof stockSnapshots.$inferSelect;
