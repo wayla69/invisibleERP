@@ -6,6 +6,7 @@ import { CircleDollarSign, Coins, PlayCircle, ScrollText } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -143,10 +144,11 @@ function DeferredTab() {
 function SchedulesTab() {
   const q = useQuery<SchedulesResp>({ queryKey: ['rev-schedules'], queryFn: () => api('/api/revenue/schedules') });
   return (
-    <StateView q={q}>
-      {q.data && (
-        <div className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <ModulePage
+      query={q}
+      stats={
+        q.data && (
+          <>
             <StatCard label="จำนวนตาราง" value={q.data.count} icon={ScrollText} tone="primary" />
             <StatCard
               label="มูลค่ารวม"
@@ -163,25 +165,28 @@ function SchedulesTab() {
               value={baht(q.data.schedules.reduce((a, s) => a + s.remaining_amount, 0))}
               tone="warning"
             />
-          </div>
-          <DataTable
-            rows={q.data.schedules}
-            rowKey={(r) => r.schedule_no}
-            columns={[
-              { key: 'schedule_no', label: 'เลขตาราง', render: (r) => <span className="font-medium">{r.schedule_no}</span> },
-              { key: 'source_ref', label: 'อ้างอิง', render: (r) => r.source_ref ?? '—' },
-              { key: 'start_period', label: 'งวดเริ่ม' },
-              { key: 'end_period', label: 'งวดสิ้นสุด' },
-              { key: 'months', label: 'เดือน', align: 'right', render: (r) => <span className="tabular">{r.months}</span> },
-              { key: 'total_amount', label: 'มูลค่ารวม', align: 'right', render: (r) => <span className="tabular">{baht(r.total_amount)}</span> },
-              { key: 'recognized_amount', label: 'รับรู้แล้ว', align: 'right', render: (r) => <span className="tabular">{baht(r.recognized_amount)}</span> },
-              { key: 'remaining_amount', label: 'คงเหลือ', align: 'right', render: (r) => <span className="tabular">{baht(r.remaining_amount)}</span> },
-              { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-            ]}
-            emptyText="ยังไม่มีตารางรับรู้รายได้"
-          />
-        </div>
+          </>
+        )
+      }
+    >
+      {q.data && (
+        <DataTable
+          rows={q.data.schedules}
+          rowKey={(r) => r.schedule_no}
+          columns={[
+            { key: 'schedule_no', label: 'เลขตาราง', render: (r) => <span className="font-medium">{r.schedule_no}</span> },
+            { key: 'source_ref', label: 'อ้างอิง', render: (r) => r.source_ref ?? '—' },
+            { key: 'start_period', label: 'งวดเริ่ม' },
+            { key: 'end_period', label: 'งวดสิ้นสุด' },
+            { key: 'months', label: 'เดือน', align: 'right', render: (r) => <span className="tabular">{r.months}</span> },
+            { key: 'total_amount', label: 'มูลค่ารวม', align: 'right', render: (r) => <span className="tabular">{baht(r.total_amount)}</span> },
+            { key: 'recognized_amount', label: 'รับรู้แล้ว', align: 'right', render: (r) => <span className="tabular">{baht(r.recognized_amount)}</span> },
+            { key: 'remaining_amount', label: 'คงเหลือ', align: 'right', render: (r) => <span className="tabular">{baht(r.remaining_amount)}</span> },
+            { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+          ]}
+          emptyText="ยังไม่มีตารางรับรู้รายได้"
+        />
       )}
-    </StateView>
+    </ModulePage>
   );
 }

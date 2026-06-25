@@ -6,18 +6,24 @@ This chapter is for **AR Clerks**, **AP Clerks** and **Procurement / finance**
 staff. It covers customer invoices and receipts (AR), supplier bills and payments
 (AP), aging analysis, and bank reconciliation.
 
-**Main screen:** `/finance` — the Finance dashboard opens with an **executive
-overview band**:
+**Main screen:** `/finance` — organised into **three PEAK-style cycle tabs** so each
+job has its own focused screen instead of one long scroll:
 
-- **KPI cards** — MTD / YTD revenue, AR outstanding (**ลูกหนี้คงค้าง**) and AP
-  outstanding (**เจ้าหนี้คงค้าง**), each with a one-line hint.
-- **30-day revenue trend** — an area chart of daily takings (**แนวโน้มรายได้**).
-- **AR-vs-AP aging composition** (**อายุหนี้คงค้าง**) — a stacked bar for each
-  book showing how much is *current* vs *1–30 / 31–60 / 61–90 / 90+ days* overdue,
-  with a colour legend, so an overdue-heavy book reads "red" at a glance.
+- **ภาพรวม (Overview)** — the executive band: **KPI cards** (MTD / YTD revenue, AR
+  outstanding **ลูกหนี้คงค้าง**, AP outstanding **เจ้าหนี้คงค้าง**), the **30-day revenue
+  trend** (**แนวโน้มรายได้**), and the **AR-vs-AP aging composition** (**อายุหนี้คงค้าง**) —
+  a stacked bar per book (*current* vs *1–30 / 31–60 / 61–90 / 90+ days*) with a colour
+  legend, so an overdue-heavy book reads "red" at a glance.
+- **รายรับ (AR)** — the receivables cycle: the **AR worklist**, **Sync AR** and **รับชำระ
+  (receive payment)**, the **collections / dunning** worklist, and **AR aging** detail.
+- **รายจ่าย (AP)** — the payables cycle: the **AP worklist**, **บันทึกบิล (add bill)**,
+  the per-bill **pay request**, the **maker-checker approval queue**, and **AP aging**
+  detail (with Excel export).
 
-The operational **AR / AP worklists, collections and detailed aging** follow
-below. The whole page reflows to a single column on phones/tablets.
+The active tab is **deep-linkable** via `?tab=` (`/finance?tab=receivables`,
+`?tab=payables`) — the **dashboard "สิ่งที่ต้องทำวันนี้" action cards** (pending payment
+requests, overdue receivables) link straight to the right tab. Each page reflows to a
+single column on phones/tablets.
 
 ---
 
@@ -27,8 +33,8 @@ below. The whole page reflows to a single column on phones/tablets.
 
 ### A1. Create invoices from orders
 
-1. On `/finance`, run **Sync AR** (creates invoices from *Shipped* / *Completed*
-   orders).
+1. On the **รายรับ (AR)** tab, run **Sync AR** (creates invoices from *Shipped* /
+   *Completed* orders).
 2. **Expected result:** Invoices (e.g. `INV-…`) are created and the sale, revenue
    and output VAT are posted to the ledger automatically.
 
@@ -46,7 +52,7 @@ moves **Unpaid → Partial → Paid**, and the cash / AR entries post to the led
 
 ### A3. AR aging
 
-1. On `/finance`, open the **AR aging** view.
+1. On the **รายรับ (AR)** tab, scroll to the **AR aging** section.
 2. Review balances in buckets: **Current / 1–30 / 31–60 / 61–90 / 90+ days**.
 
 **Expected result:** You can see which customers are overdue and by how much.
@@ -80,8 +86,8 @@ escalates with age:
 | 61–90 | final notice |
 | 90+ | legal |
 
-1. On `/finance`, scroll to **ติดตามหนี้ค้างชำระ (Collections)**. The worklist lists
-   open overdue invoices (oldest first) with the **current stage** and the
+1. On the **รายรับ (AR)** tab, scroll to **ติดตามหนี้ค้างชำระ (Collections)**. The worklist
+   lists open overdue invoices (oldest first) with the **current stage** and the
    **recommended** next stage (highlighted when an escalation is due).
 2. Contact the customer, then click **ทวงถาม (Record dunning)** on the row: it
    pre-selects the recommended **stage** — confirm or change it, pick the **channel**
@@ -166,7 +172,8 @@ action on an account. Every action is written to a **credit-events audit trail**
 
 ### B1. Record a supplier bill
 
-1. On `/creditors` (or `/finance` → AP), click **Add bill** (creates `AP-…`).
+1. On the **รายจ่าย (AP)** tab (or `/creditors`), click **บันทึกบิลเจ้าหนี้ (Add bill)**
+   (creates `AP-…`).
 2. Enter the supplier, amount, due date, and the **VAT treatment** (standard 7%,
    exempt or zero-rated).
 3. Save.
@@ -189,7 +196,9 @@ pays a bill (SOX control **EXP-06**).
 the ledger until a different person approves.
 
 **Step 2 — approve / reject (approver, `approvals` or `gl_close`):**
-1. On `/finance`, open **คำขอจ่ายรออนุมัติ (Maker-Checker)** — the pending-payment queue.
+1. On the **รายจ่าย (AP)** tab, open **คำขอจ่ายรออนุมัติ (Maker-Checker)** — the
+   pending-payment queue (you can jump here from the dashboard **คำขอจ่ายรออนุมัติ**
+   action card).
 2. Review the request and click **อนุมัติ** (approve) or **ปฏิเสธ** (reject).
 
 **Expected result on approval:** The bill is settled (Unpaid → Partial → Paid) and the
@@ -210,7 +219,8 @@ cash-disbursement entry posts to the ledger. On rejection nothing posts.
 
 ### B3. AP aging
 
-1. On `/finance`, open the **AP aging** view.
+1. On the **รายจ่าย (AP)** tab, scroll to **วิเคราะห์อายุเจ้าหนี้ (AP Aging)** (with an
+   **Excel export**).
 2. Review what you owe in buckets: **Current / 1–30 / 31–60 / 61–90 / 90+ days**.
 
 **Expected result:** You can plan payments and avoid late fees.

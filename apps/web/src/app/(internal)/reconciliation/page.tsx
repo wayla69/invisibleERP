@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Scale, ListChecks, ShieldCheck, X, Download, Link2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -23,12 +23,10 @@ export default function ReconciliationPage() {
   const q = useQuery<any>({ queryKey: ['recon-periods'], queryFn: () => api('/api/recon/periods') });
 
   return (
-    <div>
-      <PageHeader
-        title="กระทบยอด (Reconciliation)"
-        description="เปิดงวดกระทบยอดตามบัญชี นำเข้ารายการ GL จับคู่อัตโนมัติ และรับรอง (SoD)"
-      />
-
+    <ModulePage
+      title="กระทบยอด (Reconciliation)"
+      description="เปิดงวดกระทบยอดตามบัญชี นำเข้ารายการ GL จับคู่อัตโนมัติ และรับรอง (SoD)"
+    >
       <div className="space-y-6">
         <OpenPeriod onDone={() => qc.invalidateQueries({ queryKey: ['recon-periods'] })} />
 
@@ -56,7 +54,7 @@ export default function ReconciliationPage() {
 
         {selected != null && <PeriodDetail id={selected} onClose={() => setSelected(null)} />}
       </div>
-    </div>
+    </ModulePage>
   );
 }
 

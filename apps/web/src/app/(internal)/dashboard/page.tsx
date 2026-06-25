@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TrendAreaChart, SimpleBarChart } from '@/components/charts';
+import { TodayActions } from '@/components/today-actions';
 import { statusVariant } from '@/components/ui';
 
 interface Dash {
@@ -61,6 +62,10 @@ export default function DashboardPage() {
           </Button>
         }
       />
+
+      {/* Action launcher (PEAK-Board style): live, clickable "what needs doing today" counts. Sits above
+          the metrics so the landing page leads with tasks, not just numbers. Cards self-hide by permission. */}
+      <TodayActions lowStock={d?.low_stock_count} />
 
       {/* Role-based KPI band — skeleton while it loads so it doesn't pop in under the headline figures */}
       {mine.isLoading ? (

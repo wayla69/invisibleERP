@@ -155,10 +155,16 @@ appear in **both** workspaces.
   e.g. POS shows *ขายหน้าร้าน*, *ร้าน & การจัดส่ง*, *อุปกรณ์ & การชำระเงิน*, *วิเคราะห์ร้านอาหาร*; ERP shows
   *ลูกค้า & CRM*, *ลอยัลตี้*, *สินค้าคงคลัง*, *จัดซื้อ*, *การผลิต*, *การเงิน*, *ภาษี*, *บุคลากร*, *วางแผน & BI*. Shared
   groups (*ราคา & สาขา*, *การควบคุม*, *ผู้ช่วย AI*, *ตั้งค่าระบบ*) appear in both.
-- **Settings is foldable:** the *ตั้งค่าระบบ* group is split into collapsible sub-sections — *ข้อมูลหลัก*,
-  *ปรับแต่ง*, *เชื่อมต่อ & ขยาย*, *ผู้ดูแลระบบ*. The advanced sections (*ปรับแต่ง*, *เชื่อมต่อ & ขยาย*) start
-  collapsed so the group opens compact. Click a sub-section heading to fold/unfold it; your choice is
-  remembered.
+- **Big groups fold into sub-sections:** the *ตั้งค่าระบบ* group is split into collapsible sub-sections —
+  *ข้อมูลหลัก*, *ปรับแต่ง*, *เชื่อมต่อ & ขยาย*, *ผู้ดูแลระบบ*. The advanced sections (*ปรับแต่ง*, *เชื่อมต่อ & ขยาย*)
+  start collapsed so the group opens compact. The **การเงิน (Finance)** group is likewise organised into
+  PEAK-style **cycle** sub-sections — *รายรับ–รายจ่าย*, *สมุดบัญชี & แยกประเภท*, *ธนาคาร & กระทบยอด*,
+  *งบ & วิเคราะห์การเงิน*, *ระหว่างบริษัท & สกุลเงิน* (the last two start collapsed). Click a sub-section heading
+  to fold/unfold it; your choice is remembered.
+- **"สิ่งที่ต้องทำวันนี้" on the dashboard:** the ERP home (*แดชบอร์ด*) leads with an **action launcher** — live,
+  clickable cards for *pending approvals*, *AP payment requests awaiting approval*, *overdue receivables*,
+  and *low stock* — each opening the exact screen (and finance tab) where the work is done. Cards you have
+  no permission for simply don't appear.
 - **Favourites & recent:** hover any menu item and click the **★ star** to pin it to a **รายการโปรด**
   (Favourites) group at the top of the side menu; click the star again to unpin. A **ล่าสุด** (Recent)
   group automatically lists the last few screens you opened. Both only show items you can access in the

@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Landmark, Scale, Wallet, RefreshCw, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -18,41 +18,42 @@ export default function BankPage() {
   const q = useQuery<any>({ queryKey: ['bank-accounts'], queryFn: () => api('/api/bank/accounts') });
 
   return (
-    <div>
-      <PageHeader title="ธนาคาร (Bank)" description="บัญชีธนาคาร นำเข้า statement และกระทบยอดกับบัญชี GL" />
-
-      <div className="space-y-6">
-        <StateView q={q}>
-          {q.data && (
-            <div className="space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                <StatCard label="จำนวนบัญชีธนาคาร" value={num(q.data.count)} icon={Landmark} tone="primary" />
-                <StatCard
-                  label="ยอดยกมารวม"
-                  value={baht((q.data.accounts ?? []).reduce((a: number, b: any) => a + Number(b.opening_balance ?? 0), 0))}
-                  icon={Wallet}
-                />
-              </div>
-
-              <DataTable
-                rows={q.data.accounts}
-                onRowClick={(r: any) => setSelected(r.id)}
-                columns={[
-                  { key: 'bank_name', label: 'ธนาคาร' },
-                  { key: 'account_no', label: 'เลขที่บัญชี' },
-                  { key: 'gl_account_code', label: 'บัญชี GL' },
-                  { key: 'currency', label: 'สกุลเงิน' },
-                  { key: 'opening_balance', label: 'ยอดยกมา', align: 'right', render: (r: any) => <span className="tabular">{baht(r.opening_balance)}</span> },
-                ]}
-                emptyText="ยังไม่มีบัญชีธนาคาร"
-              />
-            </div>
-          )}
-        </StateView>
-
-        {selected != null && <Reconciliation bankAccountId={selected} onClose={() => setSelected(null)} />}
-      </div>
-    </div>
+    <ModulePage
+      title="ธนาคาร (Bank)"
+      description="บัญชีธนาคาร นำเข้า statement และกระทบยอดกับบัญชี GL"
+      query={q}
+      statsClassName="xl:grid-cols-3"
+      stats={
+        q.data && (
+          <>
+            <StatCard label="จำนวนบัญชีธนาคาร" value={num(q.data.count)} icon={Landmark} tone="primary" />
+            <StatCard
+              label="ยอดยกมารวม"
+              value={baht((q.data.accounts ?? []).reduce((a: number, b: any) => a + Number(b.opening_balance ?? 0), 0))}
+              icon={Wallet}
+            />
+          </>
+        )
+      }
+    >
+      {q.data && (
+        <>
+          <DataTable
+            rows={q.data.accounts}
+            onRowClick={(r: any) => setSelected(r.id)}
+            columns={[
+              { key: 'bank_name', label: 'ธนาคาร' },
+              { key: 'account_no', label: 'เลขที่บัญชี' },
+              { key: 'gl_account_code', label: 'บัญชี GL' },
+              { key: 'currency', label: 'สกุลเงิน' },
+              { key: 'opening_balance', label: 'ยอดยกมา', align: 'right', render: (r: any) => <span className="tabular">{baht(r.opening_balance)}</span> },
+            ]}
+            emptyText="ยังไม่มีบัญชีธนาคาร"
+          />
+          {selected != null && <Reconciliation bankAccountId={selected} onClose={() => setSelected(null)} />}
+        </>
+      )}
+    </ModulePage>
   );
 }
 

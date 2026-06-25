@@ -121,6 +121,51 @@ test('System settings sub-sections are collapsible and reachable', async ({ page
   await expect(navLink(page, '/master-data')).toBeVisible();
 });
 
+test('Finance group is split into PEAK-style cycle sub-sections', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+
+  // The daily book sub-section is open by default and exposes /finance.
+  const arap = page.getByRole('button', { name: 'รายรับ–รายจ่าย (AR/AP)', exact: true });
+  await expect(arap).toHaveAttribute('aria-expanded', 'true');
+  await expect(navLink(page, '/finance')).toBeVisible();
+
+  // Advanced multi-entity/FX sub-section (defaultOpen: false) starts collapsed; /fx hidden until expanded.
+  const fxHeader = page.getByRole('button', { name: 'ระหว่างบริษัท & สกุลเงิน', exact: true });
+  await expect(fxHeader).toHaveAttribute('aria-expanded', 'false');
+  await expect(navLink(page, '/fx')).toBeHidden();
+  await fxHeader.click();
+  await expect(navLink(page, '/fx')).toBeVisible();
+});
+
+test('Finance ?tab= deep-link opens the matching PEAK-style cycle tab', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  // Stub the finance endpoints with their real shapes so the page renders (DataTable needs real arrays).
+  // Registered after bootAs → takes precedence; ordered specific-before-generic.
+  await page.route('**/api/finance/**', async (route) => {
+    const url = route.request().url();
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (url.includes('/finance/kpi')) return json({ mtd_revenue: 0, ytd_revenue: 0, ar_outstanding: 0, ap_outstanding: 0 });
+    if (url.includes('/ar/aging')) return json({ total: 0, buckets: {} });
+    if (url.includes('/ap/aging')) return json({ total: 0, buckets: {} });
+    if (url.includes('/ar/collections')) return json({ rows: [] });
+    if (url.includes('/ap/payments/pending')) return json({ payments: [] });
+    if (url.includes('/finance/ap')) return json({ transactions: [] });
+    if (url.includes('/finance/ar')) return json({ invoices: [] });
+    return json({});
+  });
+
+  // Deep-link straight to the payables cycle (as the dashboard action center does).
+  await page.goto('/finance?tab=payables');
+  await expect(page.getByRole('tab', { name: 'รายจ่าย (AP)' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('heading', { name: 'เจ้าหนี้ (AP)' })).toBeVisible();
+
+  // Switching tabs writes the param back so the view stays shareable.
+  await page.getByRole('tab', { name: 'รายรับ (AR)' }).click();
+  await expect(page.getByRole('heading', { name: 'ลูกหนี้ (AR)' })).toBeVisible();
+  await expect(page).toHaveURL(/[?&]tab=receivables/);
+});
+
 test('starring a menu item pins it to the Favourites group and persists across reload', async ({ page }) => {
   await bootAs(page, ADMIN);
   await page.goto('/dashboard');
