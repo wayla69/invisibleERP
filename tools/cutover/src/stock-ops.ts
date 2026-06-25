@@ -33,7 +33,10 @@ async function seed(db: any) {
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
   await db.insert(s.users).values({ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
-  await db.insert(s.items).values({ itemId: 'A', itemDescription: 'Apple', uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
+  await db.insert(s.items).values([
+    { itemId: 'A', itemDescription: 'Apple', uom: 'EA', unitPrice: '10' },
+    { itemId: 'B', itemDescription: 'Banana', uom: 'EA', unitPrice: '10' },
+  ]).onConflictDoNothing();
 }
 
 async function main() {
@@ -94,6 +97,36 @@ async function main() {
   ok('movements history lists Issue+Transfer+Stock Out', mv.status === 200 && ['Issue', 'Transfer', 'Stock Out'].every((t) => mv.json.movements.some((m: any) => m.move_type === t)));
   const snaps = await db.select().from(s.stockSnapshots);
   ok('stock_snapshots untouched by ops (audit model)', snaps.length === 0);
+
+  // ── Perpetual-valued bridge: a TRACKED item (B) flows valued moves + GL through stock-ops ──
+  // Item A above is legacy snapshot-only (no valued balance) → its stock-ops moves stayed audit-only
+  // (asserted above). Item B is brought under perpetual valuation by a valued goods-receipt.
+  await inj('POST', '/api/inventory/receipts', token, { item_id: 'B', item_description: 'Banana', uom: 'EA', qty: 100, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-B1' });
+  const valB0 = await inj('GET', '/api/inventory/valuation', token);
+  ok('tracked item B established by valued receipt (100 @ 10 = 1000)', valB0.json.items?.some((i: any) => i.item_id === 'B' && Number(i.on_hand_qty) === 100 && Number(i.total_value) === 1000));
+
+  // Stocktake B counted 95 → the stock-ops POST also books the valued variance (−5 @ 10 = −50) to GL.
+  const stB = await inj('POST', '/api/stocktake', token, { remarks: 'cycle B', lines: [{ item_id: 'B', uom: 'EA', system_qty: 100, physical_qty: 95 }] });
+  const postB = await inj('POST', `/api/stocktake/${stB.json.st_no}/post`, token);
+  ok('stocktake post values the variance for the tracked item (valued_lines=1)', postB.json.status === 'Posted' && postB.json.valued_lines === 1, JSON.stringify(postB.json));
+  const bRow = (await inj('GET', '/api/inventory/valuation', token)).json.items?.find((i: any) => i.item_id === 'B');
+  ok('valued on-hand for B corrected to the count (95 @ 10 = 950)', Number(bRow?.on_hand_qty) === 95 && Number(bRow?.total_value) === 950, `qty=${bRow?.on_hand_qty} val=${bRow?.total_value}`);
+
+  // Goods issue B 3 from WH-MAIN → relieves valued stock + COGS at average (→ 92 @ 10 = 920).
+  const issB = await inj('POST', '/api/inventory/issue', token, { from_location: 'WH-MAIN', ref_doc: 'WO-B', lines: [{ item_id: 'B', uom: 'EA', qty: 3 }] });
+  ok('goods issue relieves valued stock for the tracked item (valued_lines=1)', issB.json.valued_lines === 1, JSON.stringify(issB.json));
+
+  // Transfer B 2 WH-MAIN→WH-2 → value moves between locations (value-neutral): WH-MAIN 90, WH-2 2.
+  const trfB = await inj('POST', '/api/inventory/transfer', token, { from_location: 'WH-MAIN', to_location: 'WH-2', lines: [{ item_id: 'B', uom: 'EA', qty: 2 }] });
+  ok('transfer moves value between locations for the tracked item (valued_lines=1)', trfB.json.valued_lines === 1, JSON.stringify(trfB.json));
+  const valB3 = (await inj('GET', '/api/inventory/valuation', token)).json;
+  const whm = valB3.items?.find((i: any) => i.item_id === 'B' && i.location_id === 'WH-MAIN');
+  const wh2 = valB3.items?.find((i: any) => i.item_id === 'B' && i.location_id === 'WH-2');
+  ok('B split across locations after transfer (WH-MAIN 90, WH-2 2; total 920 value)', Number(whm?.on_hand_qty) === 90 && Number(wh2?.on_hand_qty) === 2);
+
+  // INV-06 reconciliation: B's sub-ledger value (920) ties to the GL inventory account (valued sources).
+  const recB = (await inj('GET', '/api/inventory/reconciliation', token)).json;
+  ok('perpetual sub-ledger ties to GL inventory account after the stock-ops bridge (reconciled 920)', Math.abs(Number(recB.sub_ledger_value) - 920) < 0.01 && Math.abs(Number(recB.gl_inventory) - 920) < 0.01 && recB.reconciled === true, `sub=${recB.sub_ledger_value} gl=${recB.gl_inventory} rec=${recB.reconciled}`);
 
   await app.close();
   await pg.close();

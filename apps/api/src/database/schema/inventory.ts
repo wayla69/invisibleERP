@@ -128,6 +128,73 @@ export const stocktakes = pgTable('stocktakes', {
   remarks: text('remarks'),
 });
 
+// ── Perpetual inventory valuation sub-ledger (0130) ──────────────────────────────────────────
+// inv_moves: append-only VALUED movement ledger; inv_balances: running moving-average position.
+// Both are tenant-scoped (RLS). Every financial move posts a balanced JE via LedgerService so the
+// inventory control account (1200) ties to inv_balances.total_value (reconcile).
+export const invMoves = pgTable('inv_moves', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }),
+  moveNo: text('move_no').notNull(),
+  moveDate: timestamp('move_date', { withTimezone: true }).defaultNow(),
+  moveType: text('move_type').notNull(), // 'receipt' | 'issue' | 'adjust'
+  itemId: text('item_id').notNull(),
+  itemDescription: text('item_description'),
+  uom: text('uom'),
+  locationId: text('location_id').default('WH-MAIN'),
+  qty: numeric('qty', { precision: 18, scale: 4 }).notNull(),        // signed: + in / − out
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),
+  totalCost: numeric('total_cost', { precision: 18, scale: 4 }).notNull().default('0'),
+  balanceQty: numeric('balance_qty', { precision: 18, scale: 4 }),   // on-hand after this move
+  avgCost: numeric('avg_cost', { precision: 18, scale: 4 }),         // moving-average after this move
+  refType: text('ref_type'),
+  refId: text('ref_id'),
+  reason: text('reason'),
+  glEntryNo: text('gl_entry_no'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byItem: index('idx_inv_moves_item').on(t.tenantId, t.itemId, t.locationId),
+  byNo: index('idx_inv_moves_no').on(t.tenantId, t.moveNo),
+}));
+
+export const invBalances = pgTable('inv_balances', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }),
+  itemId: text('item_id').notNull(),
+  itemDescription: text('item_description'),
+  locationId: text('location_id').notNull().default('WH-MAIN'),
+  onHandQty: numeric('on_hand_qty', { precision: 18, scale: 4 }).notNull().default('0'),
+  avgCost: numeric('avg_cost', { precision: 18, scale: 4 }).notNull().default('0'),
+  totalValue: numeric('total_value', { precision: 18, scale: 4 }).notNull().default('0'),
+  costingMethod: text('costing_method').notNull().default('moving_avg'), // 'moving_avg' | 'fifo' | 'fefo' (0131)
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byItem: index('idx_inv_balances_item').on(t.tenantId, t.itemId),
+}));
+
+// FIFO/FEFO cost layers (0131) — one row per valued receipt of a fifo/fefo item; issues + shrinkage
+// consume layers in order (FEFO = soonest expiry first, FIFO = oldest receipt first) at actual layer cost.
+export const invCostLayers = pgTable('inv_cost_layers', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }),
+  itemId: text('item_id').notNull(),
+  locationId: text('location_id').notNull().default('WH-MAIN'),
+  lotNo: text('lot_no'),
+  expiryDate: date('expiry_date'),
+  receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow(),
+  origQty: numeric('orig_qty', { precision: 18, scale: 4 }).notNull(),
+  remainingQty: numeric('remaining_qty', { precision: 18, scale: 4 }).notNull(),
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),
+  refType: text('ref_type'),
+  refId: text('ref_id'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byConsume: index('idx_inv_layers_consume').on(t.tenantId, t.itemId, t.locationId, t.remainingQty),
+  byFefo: index('idx_inv_layers_fefo').on(t.tenantId, t.itemId, t.locationId, t.expiryDate),
+}));
+
 export const scanSessions = pgTable('scan_sessions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   sessionNo: text('session_no').unique(),

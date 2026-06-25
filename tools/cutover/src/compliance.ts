@@ -601,7 +601,27 @@ async function main() {
     !!lineLogin.json.token && lineMe.json.member_code === 'M-LINE' && Number(lm.id) === lineMe.json.id && lineUnlinked.status === 401 && lineUnlinked.json.error?.code === 'LINE_NOT_LINKED' && relink.json.linked === true,
     `tok=${!!lineLogin.json.token} me=${lineMe.json.member_code} unlinked=${lineUnlinked.status}/${lineUnlinked.json.error?.code} link=${relink.json.linked}`);
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · LYL-03..16) ──');
+  // ════════════════════════ INV-06 — Perpetual inventory sub-ledger ↔ GL reconciliation ════════════════════════
+  // Receipts/issues/adjustments post valued moves + balanced JEs; the sub-ledger value ties to the inventory
+  // control account (1200). Negative/oversold stock is prevented (INV-01); duplicate receipts idempotent (INV-02);
+  // adjustments must be justified (INV-04). Run as admin — reconcile() filters to the INV-* sources for this tenant.
+  const invNear = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+  await inj('POST', '/api/inventory/receipts', admin, { item_id: 'INVCTL', qty: 100, unit_cost: 10, ref_type: 'GRN', ref_id: 'C-GRN-1' });
+  await inj('POST', '/api/inventory/receipts', admin, { item_id: 'INVCTL', qty: 100, unit_cost: 12, ref_type: 'GRN', ref_id: 'C-GRN-2' }); // moving avg → 11
+  const invDup = await inj('POST', '/api/inventory/receipts', admin, { item_id: 'INVCTL', qty: 100, unit_cost: 10, ref_type: 'GRN', ref_id: 'C-GRN-1' });
+  ok('INV-02: duplicate goods-receipt (same ref) is idempotent — no double stock / no double GL', invDup.json.deduped === true, `dedup=${invDup.json.deduped}`);
+  await inj('POST', '/api/inventory/issues', admin, { item_id: 'INVCTL', qty: 50 }); // COGS 550 @ avg 11 → bal 150
+  const invNeg = await inj('POST', '/api/inventory/issues', admin, { item_id: 'INVCTL', qty: 1000 });
+  ok('INV-01: issue beyond on-hand blocked in the sub-ledger (no negative/oversold stock)', invNeg.status === 400 && invNeg.json.error?.code === 'NEG_STOCK', `${invNeg.status}/${invNeg.json.error?.code}`);
+  await inj('POST', '/api/inventory/adjustments', admin, { item_id: 'INVCTL', qty_delta: -10, reason: 'Spoilage' }); // bal 140 @ 11 = 1540
+  const invNoReason = await inj('POST', '/api/inventory/adjustments', admin, { item_id: 'INVCTL', qty_delta: -1, reason: '   ' });
+  ok('INV-04: a stock adjustment without a reason is rejected (justified + audited)', invNoReason.status === 400 && invNoReason.json.error?.code === 'REASON_REQUIRED', `${invNoReason.status}/${invNoReason.json.error?.code}`);
+  const invRec = await inj('GET', '/api/inventory/reconciliation', admin);
+  ok('INV-06: perpetual sub-ledger value ties to the GL inventory control account (1200) — reconciled',
+    invNear(invRec.json.sub_ledger_value, 1540) && invNear(invRec.json.gl_inventory, 1540) && invRec.json.reconciled === true,
+    `sub=${invRec.json.sub_ledger_value} gl=${invRec.json.gl_inventory} rec=${invRec.json.reconciled}`);
+
+  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} compliance checks failed` : `\n✅ All ${checks.length} compliance control checks passed`);

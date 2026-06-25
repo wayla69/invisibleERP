@@ -3,6 +3,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { stocktakes, stockMovements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
+import { InventoryLedgerService } from '../inventory/inventory-ledger.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -15,11 +16,17 @@ export interface IssueLine { item_id: string; item_description?: string; uom?: s
 // Follows the V1 audit model: stock_movements is an append-only log; it does NOT
 // alter stock_snapshots (current stock stays snapshot-derived). stocktakes/stock_movements
 // are global audit tables (no tenant_id), matching the existing schema.
+//
+// Perpetual-valued bridge: when an item is under perpetual valuation (it has an inv_balances row,
+// established by a valued goods-receipt), the same stock-ops action ALSO posts a valued move through
+// the perpetual sub-ledger (COGS/variance GL + balance update). Legacy snapshot-only items are
+// unaffected — they keep the audit-only path. This is additive; the audit movement always records.
 @Injectable()
 export class StockOpsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
+    private readonly invLedger: InventoryLedgerService,
   ) {}
 
   // ── Stocktake ────────────────────────────────────────────────────────────
@@ -47,10 +54,10 @@ export class StockOpsService {
   // (Stock In if counted high, Stock Out if counted low). Idempotent: re-posting is a no-op.
   async postStocktake(stNo: string, user: JwtUser) {
     const db = this.db as any;
-    return db.transaction(async (tx: any) => {
+    const res = await db.transaction(async (tx: any) => {
       const lines = await tx.select().from(stocktakes).where(eq(stocktakes.stNo, stNo));
       if (!lines.length) throw new NotFoundException({ code: 'NOT_FOUND', message: `Stocktake ${stNo} not found`, messageTh: 'ไม่พบใบนับสต๊อก' });
-      if (lines.every((l: any) => l.status === 'Posted')) return { st_no: stNo, status: 'Posted', already: true };
+      if (lines.every((l: any) => l.status === 'Posted')) return { already: true, lines, movements: 0 };
       const now = new Date();
       let movements = 0;
       for (const l of lines) {
@@ -66,8 +73,17 @@ export class StockOpsService {
         }
       }
       await tx.update(stocktakes).set({ status: 'Posted' }).where(eq(stocktakes.stNo, stNo));
-      return { st_no: stNo, status: 'Posted', variance_movements: movements };
+      return { already: false, lines, movements };
     });
+    if (res.already) return { st_no: stNo, status: 'Posted', already: true };
+    // Perpetual-valued variance: for tracked items, bring valued on-hand to the counted qty + book the
+    // value variance to GL (no-op for legacy snapshot-only items). Runs in the same request transaction.
+    let valued = 0;
+    for (const l of res.lines) {
+      const r = await this.invLedger.postCountVariance({ item_id: l.itemId, physical_qty: n(l.physicalQty), doc_no: stNo }, user);
+      if (r.valued) valued++;
+    }
+    return { st_no: stNo, status: 'Posted', variance_movements: res.movements, valued_lines: valued };
   }
 
   async listStocktakes(limit = 50) {
@@ -109,7 +125,13 @@ export class StockOpsService {
         toLocation: 'Issued', refDoc: dto.ref_doc ?? null, remarks: dto.remarks ?? null, createdBy: user.username,
       });
     }
-    return { doc_no: docNo, move_type: 'Issue', lines: dto.lines.length };
+    // Tracked items also relieve valued stock + book COGS (Dr 5000 / Cr 1200) at moving-average.
+    let valued = 0;
+    for (const l of dto.lines) {
+      const r = await this.invLedger.issueIfTracked({ item_id: l.item_id, location_id: dto.from_location ?? 'WH-MAIN', qty: n(l.qty) }, user);
+      if (r.valued) valued++;
+    }
+    return { doc_no: docNo, move_type: 'Issue', lines: dto.lines.length, valued_lines: valued };
   }
 
   async transfer(dto: { ref_doc?: string; from_location: string; to_location: string; remarks?: string; lines: IssueLine[] }, user: JwtUser) {
@@ -125,7 +147,13 @@ export class StockOpsService {
         refDoc: dto.ref_doc ?? null, remarks: dto.remarks ?? null, createdBy: user.username,
       });
     }
-    return { doc_no: docNo, move_type: 'Transfer', lines: dto.lines.length };
+    // Tracked items also move qty + value between the two locations at average cost (value-neutral, no GL).
+    let valued = 0;
+    for (const l of dto.lines) {
+      const r = await this.invLedger.transferIfTracked({ item_id: l.item_id, from_location: dto.from_location, to_location: dto.to_location, qty: n(l.qty) }, user);
+      if (r.valued) valued++;
+    }
+    return { doc_no: docNo, move_type: 'Transfer', lines: dto.lines.length, valued_lines: valued };
   }
 
   async listMovements(q: { move_type?: string; limit?: number }) {

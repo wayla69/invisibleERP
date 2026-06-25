@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | INV-01, INV-02, INV-03, INV-04, INV-05, REV-07; SoD R11, EXP-03 |
+| Related RCM controls | INV-01, INV-02, INV-03, INV-04, INV-05, INV-06, REV-07; SoD R11, EXP-03 |
 | Related policy | `compliance/policies/11-financial-close-policy.md`, `compliance/policies/13-segregation-of-duties-policy.md` |
 
 ## 2. Purpose
@@ -28,7 +28,7 @@ To control inventory movements and cost of goods sold so that the perpetual inve
 - ISO 9001:2015 cl. 4.4, cl. 8.5.1 (control of production/service provision), cl. 8.5.4 (preservation).
 - `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — INV-01..05, REV-07.
 - `compliance/policies/13-segregation-of-duties-policy.md` (R11 adjust vs count; INV-05 transfer-custody vs buy-approval).
-- Code: `apps/api/src/modules/wms/` (incl. `replenishment.service.ts`), `apps/api/src/modules/stock-ops/`, `apps/api/src/modules/lots/`, `apps/api/src/modules/costing/`, `apps/api/src/modules/menu/` (recipe), `apps/api/src/modules/returns/returns.service.ts`. Schema: `branch_stock`, `item_supplier` (migration `0130`).
+- Code: `apps/api/src/modules/wms/` (incl. `replenishment.service.ts`), `apps/api/src/modules/stock-ops/`, `apps/api/src/modules/lots/`, `apps/api/src/modules/costing/`, `apps/api/src/modules/menu/` (recipe), `apps/api/src/modules/returns/returns.service.ts`, `apps/api/src/modules/inventory/inventory-ledger.service.ts` (perpetual valued sub-ledger, **INV-06**). Schema: `branch_stock`, `item_supplier` (migration `0130`); `inv_moves`/`inv_balances`/`inv_cost_layers` (migrations `0131`/`0132`).
 
 ## 5. Definitions & abbreviations
 
@@ -40,6 +40,11 @@ To control inventory movements and cost of goods sold so that the perpetual inve
 | Cycle count | Periodic partial physical count |
 | COGS | Cost of Goods Sold |
 | BOM / recipe | Bill of materials / menu recipe driving consumption |
+| Valued sub-ledger | Perpetual ledger holding qty **and value** per item/location (moving-average, or FIFO/FEFO cost layers) |
+| Moving-average cost | Running weighted-average unit cost recomputed on each valued receipt (default method) |
+| Cost layer | A FIFO/FEFO receipt lot carrying remaining qty + unit cost (+ lot/expiry) consumed on issue |
+| FIFO / FEFO | First-In-First-Out / First-Expiry-First-Out — the order cost layers are consumed |
+| Inventory control account | GL account 1200; its balance must equal the inventory sub-ledger value |
 
 ## 6. Roles & responsibilities (RACI)
 
@@ -64,6 +69,8 @@ SoD rule **R11**: the role that **adjusts** inventory (InventoryController) is n
 6. **Stocktake / cycle count (decision point).** StockCounter performs a periodic count (segregated from adjustment, **R11**). Counted vs book quantity yields a variance.
 7. **Variance review & approval.** Warehouse Mgr reviews and approves the variance; an approved adjustment posts the stock and value correction. Adjustment authority (InventoryController) is separated from counting (**INV-04**, **R11**). FinancialController reviews the resulting GL impact.
 8. **Branch-aware replenishment — transfer-before-buy (decision point).** Sales (POS direct + recipe/BOM consumption) deplete the selling branch's `branch_stock` alongside the tenant rollup, so each outlet's on-hand is real. When a branch's on-hand for an item falls to/below its reorder point, the Planner recomputes replenishment, which proposes fulfilment in priority order: first an **inter-branch transfer** drawn from a sibling branch that holds surplus (largest-surplus-first, capped at the shortfall), then a **buy** (purchase requisition) for only the residual the transfers cannot cover. Transfer execution is a **warehouse-custody** duty (`POST /api/replenishment/auto-transfer`, `wh_custody`) that moves `branch_stock` source→destination and writes a branch-attributed `cust_stock_log` entry for both legs (`Transfer-Out`/`Transfer-In`); the buy leg raises a PR through the **maker-checker** procurement flow (`POST /api/replenishment/auto-pr`, `procurement` → **EXP-03**). The two legs are segregated so the person moving stock is not the person authorising the spend (**INV-05**). The global `stock_movements` audit row is also written, but the authoritative tenant-scoped record is `branch_stock` + `cust_stock_log`.
+9. **Perpetual valued sub-ledger + GL reconciliation (decision point).** For costed flows, the perpetual **valued** sub-ledger (`inv_moves` / `inv_balances`) records every receipt, issue, and adjustment with a **moving-average** unit cost and posts a **balanced journal entry** for each financial move — receipt `Dr 1200 Inventory / Cr 2000 AP`, issue `Dr 5000 COGS / Cr 1200`, shrinkage adjustment `Dr 5810 / Cr 1200`. Posting is **idempotent** on the source reference (a duplicate goods-receipt is a no-op — no double stock or GL), and an **issue beyond on-hand is rejected** (no negative/oversold stock, reinforcing **INV-01**). Periodically the sub-ledger value is **reconciled to the GL inventory control account (1200)**; any difference is a control exception for the Controller to clear (**INV-06**). This sub-ledger is self-contained and does **not** re-post COGS on the POS sale path (which already relieves recipe COGS via 5300), so consumption is never double-costed.
+10. **Stock-ops bridge (tracked vs legacy items).** An item becomes **perpetual-tracked** once it has a valued balance (established by a valued goods-receipt). For a tracked item, the existing stock-ops operations — **goods issue** (step 2/3), **inter-location transfer**, and the **stocktake-variance posting** (step 7) — *also* drive the valued sub-ledger: an issue relieves stock at moving-average and books COGS, a transfer moves qty + value between locations (value-neutral), and posting a stocktake brings the valued on-hand to the counted quantity and books the value variance to the GL. **Legacy snapshot-only items** (no valued balance) are unaffected and keep the audit-only movement path, so the bridge is additive and backward-compatible. Costing basis is selectable per item (set on first receipt): **moving-average** (default) or **FIFO / FEFO cost layers**. For FIFO/FEFO items each valued receipt opens a **cost layer** (carrying its lot + expiry); an issue consumes layers in order — **FEFO = soonest-expiry-first** (waste control for perishables), **FIFO = oldest-receipt-first** — and books COGS at the **actual consumed layer cost**; a transfer moves the consumed layers to the destination; `inv_balances.total_value` always equals the remaining-layer value, so INV-06 reconciliation holds for either method. This is the inventory-costing engine feeding INV-03; standard-cost / PPV flows remain in the manufacturing-costing cycle (MFG-03).
 
 ## 8. Process flow
 
@@ -87,6 +94,12 @@ flowchart TD
     N -- "Yes" --> O[Transfer from sibling surplus - wh_custody]
     O --> P[Buy residual via PR - procurement / EXP-03]
     N -- "No" --> M
+    H --> R[Valued sub-ledger: receipt/issue/adjust → moving-avg or FIFO/FEFO + balanced JE INV-06]
+    E -. "tracked item (bridge)" .-> R
+    K -. "tracked item (bridge)" .-> R
+    R --> S{Sub-ledger value = GL 1200?}
+    S -- "Yes" --> T[Reconciled]
+    S -- "No" --> U[Control exception → Controller clears]
 ```
 
 **Swimlane description by role:** The **system** enforces the no-oversell pick lock, perpetual movement logging, and COGS posting. **WarehouseOperator** receives/picks/moves. **StockCounter** counts (custody/count duty). **InventoryController** raises adjustments — never counts the same stock (**R11**). **Warehouse Mgr** independently approves variances. **FinancialController** reviews COGS and adjustment postings.
@@ -102,6 +115,9 @@ flowchart TD
 | 6,7 | Book vs physical diverges; concealed shrink | Cycle count + independent variance approval | Det / Hybrid | INV-04 | Count sheets, signed variance |
 | 6,7 | Adjuster also counts (hide shrink) | SoD: `wh_adjust` vs `wh_count` segregated | Prev / Manual | R11 | SoD conflict report |
 | 8 | Over-buy while a sibling branch holds idle surplus; stock moved between branches without attribution / segregation | Transfer-before-buy routing; branch-attributed transfer log; transfer custody (`wh_custody`) segregated from PR approval (`procurement`/EXP-03) | Prev/Det / Hybrid | INV-05 | Replenishment run log; inter-branch transfer log; residual PR |
+| 9 | Perpetual stock value drifts from GL; uncosted/unposted moves | Valued sub-ledger posts a balanced JE per move (moving-avg or FIFO/FEFO); periodic reconcile to GL 1200 | Prev / Det / Auto | INV-06 | Reconciliation report (`GET /api/inventory/reconciliation`) |
+| 9 | Duplicate goods-receipt double-counts stock/GL | Idempotent posting on source ref (+ GL `ux_je_idem`) | Prev / Auto | INV-06 (INV-02) | `deduped:true`; single JE |
+| 10 | Stock-ops issue/transfer/count not costed for tracked items | Bridge posts valued moves (COGS / variance / value-move) for tracked items; legacy items audit-only | Prev / Auto | INV-06 | `valued_lines` in response; reconcile ties |
 
 ## 10. Inputs & outputs
 
@@ -133,6 +149,8 @@ flowchart TD
 | `PICK_SHORT` | Insufficient stock for pick | Re-source / backorder; investigate book vs physical |
 | (variance) | Count ≠ book | Warehouse Mgr review + approval before adjustment |
 | `SOD_VIOLATION` / SoD conflict | `wh_adjust`+`wh_count` on one user | AccessAdmin remediates (R11) |
+| `NEG_STOCK` | Sub-ledger issue/adjustment beyond on-hand | Rejected; recount / receive before issuing (INV-01/INV-06) |
+| `REASON_REQUIRED` | Stock adjustment posted with no reason | Rejected; re-submit with justification (INV-04/INV-06) |
 
 ## 14. Revision history
 
@@ -141,3 +159,6 @@ flowchart TD
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | **Food-cost variance (actual vs theoretical):** §12 — costed roll-up of EOD-count quantity variances (`GET /api/menu/food-cost/variance`), valuing `cust_variance` at ingredient cost with unfavourable/favourable split + anomaly flags. Reporting layer over INV-04; no new control. |
 | 0.3 | 2026-06-25 | Platform | **Branch-aware replenishment (transfer-before-buy):** new control **INV-05**. §3/§4 scope+refs, §7 step 8, §8 flow nodes N/O/P, §9 control-matrix row. Per-branch `branch_stock` ledger (alongside the tenant `customer_inventory` rollup) depleted by POS direct + recipe/BOM consumption; low (branch,item) routes a sibling-branch transfer first (`auto-transfer`, `wh_custody`), then a residual PR (`auto-pr`, `procurement`/EXP-03). Schema `branch_stock` + `item_supplier`, migration `0130`. ToE in `cutover/wms.ts`. |
+| 0.4 | 2026-06-25 | Platform | **Perpetual valued inventory sub-ledger (new control INV-06):** §5 definitions, §7 step 9, §8 workflow, §9 control matrix, §13 error codes. `inv_moves`/`inv_balances` (migration 0131) record moving-average cost + post a balanced JE per receipt/issue/adjustment (`inventory-ledger.service.ts`), with idempotent posting, negative-stock prevention, and sub-ledger↔GL 1200 reconciliation (`GET /api/inventory/reconciliation`). Strengthens INV-01/INV-02/INV-04. ToE in `basics.ts` + `compliance.ts`. |
+| 0.5 | 2026-06-25 | Platform | **Stock-ops → perpetual sub-ledger bridge (Tier 1):** §7 step 10 + §8/§9. For perpetual-tracked items, `stock-ops.service.ts` goods-issue / transfer / stocktake-variance now also post valued moves through the sub-ledger (COGS / value-move / count variance to GL); legacy snapshot-only items stay audit-only (additive, backward-compatible). ToE extended in `tools/cutover/src/stock-ops.ts` (tracked item B end-to-end → reconciled). No new control ID (extends INV-06). |
+| 0.6 | 2026-06-25 | Platform | **FIFO/FEFO cost-layer costing (Tier 1 lots/costing):** §5 definitions + §7 step 10. Migration 0132 adds `inv_cost_layers` + `inv_balances.costing_method` (moving_avg default \| fifo \| fefo). Receipts open layers (lot/expiry); issues/shrinkage consume FEFO/FIFO at actual layer cost; transfers move layer slices; `GET /api/inventory/layers` exposes open layers. Valuation + INV-06 reconciliation unchanged. ToE in `basics.ts` (FEFO: COGS 174 ≠ 162 moving-avg, reconciled). No new control ID (extends INV-06). |
