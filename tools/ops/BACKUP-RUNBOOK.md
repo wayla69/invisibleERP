@@ -11,14 +11,18 @@ for every tenant. This is the minimum disaster-recovery procedure.
 ## Take a backup
 ```bash
 DATABASE_URL='postgres://…' tools/ops/pg-backup.sh /var/backups/ierp
-# optional offsite: also set BACKUP_S3='s3://my-bucket/ierp' (awscli or rclone configured)
+# optional offsite (AWS S3): also set BACKUP_S3='s3://my-bucket/ierp' (awscli or rclone configured)
+# optional offsite (Alibaba OSS): also set BACKUP_OSS='oss:ierp-backups/prod' (rclone remote configured)
 ```
 Produces `ierp-YYYYMMDD-HHMMSS.dump.gz`, **verifies it is restorable** (`pg_restore --list`), uploads if
-`BACKUP_S3` set, prunes older than `RETAIN_DAYS`.
+`BACKUP_S3` and/or `BACKUP_OSS` set, prunes older than `RETAIN_DAYS`.
 
 ### Schedule (pick one)
 - **Railway cron service**: a tiny service running `pg-backup.sh` on `0 * * * *` with `DATABASE_URL` + `BACKUP_S3` env.
 - **GitHub Actions**: scheduled workflow (`on: schedule: - cron: '0 * * * *'`) with the DB URL + cloud creds in repo secrets, `apt-get install postgresql-client`, run the script, no artifact retention of the dump itself (push to object storage).
+- **Alibaba Cloud ECS (Tier 0)**: `tools/ops/alibaba/ecs-tier0-setup.sh` installs the hourly backup
+  (`backup-cron.sh` → local disk + OSS) and the monthly restore drill (`restore-drill-cron.sh`) as host
+  cron jobs. See [`alibaba/README.md`](alibaba/README.md).
 
 ## Restore (disaster recovery)
 Scripted: [`tools/ops/restore.sh`](restore.sh) handles gunzip + `pg_restore --clean --if-exists`.

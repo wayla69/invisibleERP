@@ -1,0 +1,5 @@
+# These run on the Linux ECS host — force LF so a CRLF shebang never breaks `bash`/cron.
+*.sh              text eol=lf
+docker-compose.tier0.yml text eol=lf
+Caddyfile         text eol=lf
+.env.example      text eol=lf

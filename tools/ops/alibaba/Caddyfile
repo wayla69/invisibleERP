@@ -1,0 +1,17 @@
+# Same-origin reverse proxy for Tier 0. One public origin; /api/* goes to the API,
+# everything else to the Next.js web app. SITE_ADDRESS is injected from the compose env
+# (a domain → automatic HTTPS via Let's Encrypt; or ":80" for HTTP-only testing).
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# API lives under /api/* (controllers are @Controller('api/...')).
+	@api path /api/*
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# Everything else is the web UI.
+	handle {
+		reverse_proxy web:3000
+	}
+}

@@ -130,6 +130,10 @@ Managed Multi-AZ ตั้งแต่วันแรก** เริ่มจา
 ## 9. ไฟล์ที่เกี่ยวข้อง
 - งบประมาณปรับได้ 3 ปี (มีปุ่มปรับค่า): [`alibaba-cloud-3yr-budget-th.xlsx`](alibaba-cloud-3yr-budget-th.xlsx)
   — แก้เฉพาะเซลล์สีน้ำเงิน/พื้นเหลืองในชีต **สมมติฐาน** แล้วทุกตัวเลขจะคำนวณใหม่อัตโนมัติ
+- **เครื่องมือตั้งค่า Tier 0 + สำรองข้อมูลขึ้น OSS (พร้อมใช้):** [`../../tools/ops/alibaba/`](../../tools/ops/alibaba/)
+  — `docker-compose.tier0.yml` (caddy+web+api+db, same-origin), `ecs-tier0-setup.sh` (ติดตั้งครั้งเดียว),
+  backup/restore-drill cron · คู่มือ: [`tools/ops/alibaba/README.md`](../../tools/ops/alibaba/README.md)
+- คู่มือสำรอง/กู้คืน: [`../../tools/ops/BACKUP-RUNBOOK.md`](../../tools/ops/BACKUP-RUNBOOK.md)
 - โครงสร้างการ deploy ปัจจุบัน (Railway/คอนเทนเนอร์): [`../ops/deployment.md`](../ops/deployment.md)
 
 ---

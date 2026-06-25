@@ -1,0 +1,101 @@
+# Invisible ERP V2 — Alibaba Cloud "Tier 0" single-host production stack.
+# One ECS box runs: Caddy (TLS + same-origin reverse proxy) → web (Next.js) + api (NestJS) → Postgres.
+#
+# Same-origin design (important — avoids the cross-origin cookie/login trap):
+#   the browser only ever talks to ONE origin ($PUBLIC_SITE_URL). Caddy routes
+#   /api/*  → api:8000   and   everything else → web:3000.
+#   The API's controllers are mounted under /api/* already, so NEXT_PUBLIC_API_URL
+#   is just the public site origin (no /api suffix, no separate API host, no CORS).
+#
+# Bring up (from anywhere; paths are resolved relative to THIS file):
+#   docker compose --env-file tools/ops/alibaba/.env -f tools/ops/alibaba/docker-compose.tier0.yml up -d --build
+#
+# NOT high-available (single host = single point of failure). Tier 0 is the lean
+# year-1 option from docs/deployment/alibaba-cloud-plan-th.md — backups are mandatory.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      # erp.example.co.th  → automatic HTTPS (Let's Encrypt); or ":80" for HTTP-only testing
+      SITE_ADDRESS: ${CADDY_SITE_ADDRESS:?set CADDY_SITE_ADDRESS (domain for TLS, or :80 to test)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+  web:
+    build:
+      context: ../../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        # baked at build time → must equal the public site origin (same-origin design)
+        NEXT_PUBLIC_API_URL: ${PUBLIC_SITE_URL:?set PUBLIC_SITE_URL (e.g. https://erp.example.co.th)}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-Asia/Bangkok}
+    expose:
+      - "3000"
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ../../..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # api reaches the db over the compose network; creds come from POSTGRES_* below
+      DATABASE_URL: postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:?}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      APP_ENC_KEY: ${APP_ENC_KEY:?set APP_ENC_KEY}
+      PSP_WEBHOOK_SECRET: ${PSP_WEBHOOK_SECRET:?set PSP_WEBHOOK_SECRET}
+      CORS_ORIGINS: ${PUBLIC_SITE_URL}
+      BUSINESS_TZ_OFFSET_MIN: ${BUSINESS_TZ_OFFSET_MIN:-420} # Asia/Bangkok = UTC+7
+      PORT: "8000"
+      TZ: ${TZ:-Asia/Bangkok}
+      # Tier 0 is single-node, so it is safe for the api entrypoint to apply migrations on boot.
+      # Do NOT keep this on once you run more than one api replica (Tier 1+): run migrations as a
+      # single release step instead (see docs/ops/deployment.md §3).
+      RUN_MIGRATIONS: "1"
+    expose:
+      - "8000"
+    ports:
+      # bound to localhost only: lets the host backup cron + health checks reach the api,
+      # without exposing it to the internet (Caddy is the only public ingress).
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      TZ: ${TZ:-Asia/Bangkok}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # localhost only — the host's backup/restore-drill cron connects here; never public.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
