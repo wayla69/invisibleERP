@@ -30,6 +30,23 @@ export const maintenanceWorkOrders = pgTable('maintenance_work_orders', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqWo: unique('uq_mwo_no').on(t.tenantId, t.woNo), byAsset: index('idx_mwo_asset').on(t.assetId), byStatus: index('idx_mwo_status').on(t.status) }));
 
+// Work-order cost lines — labor (hours × rate) and parts (qty × unit cost). The work order's actual_cost
+// rolls up from these, and they feed the per-asset maintenance-cost / reliability analytics.
+export const maintenanceWoLines = pgTable('maintenance_wo_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  woId: bigint('wo_id', { mode: 'number' }).references(() => maintenanceWorkOrders.id),
+  woNo: text('wo_no'),
+  kind: text('kind').notNull(),       // labor | part
+  description: text('description'),
+  quantity: numeric('quantity', { precision: 14, scale: 2 }).default('1'), // parts qty
+  hours: numeric('hours', { precision: 10, scale: 2 }).default('0'),        // labor hours
+  unitCost: numeric('unit_cost', { precision: 14, scale: 2 }).default('0'), // part unit cost / labor rate per hour
+  amount: numeric('amount', { precision: 14, scale: 2 }).default('0'),      // computed line total
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byWo: index('idx_wo_lines_wo').on(t.woId) }));
+
 export const pmSchedules = pgTable('pm_schedules', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),

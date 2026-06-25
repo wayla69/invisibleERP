@@ -105,9 +105,27 @@ of how many invoices it advanced — no manual button press needed.
   blocked with `CREDIT_OVERDUE` — even if they're under their limit — using the
   same 90-day threshold as the collections hold above.
 
+#### Credit-manager workflow (manual hold / release / limit change)
+
+Beyond the automatic over-limit / overdue holds, a *Credit Manager* can take direct
+action on an account. Every action is written to a **credit-events audit trail**
+(`GET /api/finance/ar/credit-events?tenant_id=…`).
+
+- **Place a manual hold** (`POST /api/finance/ar/credit-hold {tenant_id, reason}`):
+  flags the customer **on hold** regardless of their limit/aging. `credit-check`
+  then declines new credit with reason **`CREDIT_HOLD`**, and the hold reason is
+  surfaced on the credit-status view.
+- **Release a hold** (`POST /api/finance/ar/credit-release {tenant_id}`): clears the
+  hold. An account that isn't on hold returns `NOT_ON_HOLD`.
+- **Change a credit limit** (`POST /api/finance/ar/credit-limit {tenant_id,
+  new_limit, reason}`): updates the limit and logs the old → new value.
+
 > **Note — separation of duties:** the **credit limit** is master data maintained by
 > the *Credit Manager*, kept separate from order entry, so nobody can raise a limit
-> and then sell against it (rule R09).
+> and then sell against it (rule R09). A **release also requires a second person**:
+> the user who *placed* a hold cannot lift their own hold (`SOD_SELF_RELEASE`) — it
+> takes an approver (`approvals` / `exec`), so a single person can't both block and
+> unblock an account.
 
 ---
 

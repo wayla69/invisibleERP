@@ -855,6 +855,20 @@
       "when": 1943470000004,
       "tag": "0116_field_change_log",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1953470000004,
+      "tag": "0117_credit_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1963470000004,
+      "tag": "0118_eam_depth",
+      "breakpoints": true
     }
   ]
 }

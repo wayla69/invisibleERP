@@ -124,6 +124,35 @@ closing entries are excluded** so they don't distort the period.
 > cash accounts (1000 / 1010 / 1020). The response carries a `reconciled` flag; if it
 > ever shows `false`, an account is mis-classified — raise it with finance.
 
+### Statement of Cash Flows (direct method)
+
+The same operating cash flow shown by **nature of receipt/payment** rather than by
+adjusting net income. Run it from **Accounting** → **Cash Flow** → **Direct**
+(`GET /api/ledger/cash-flow-direct?from=&to=`). Each posted entry's net cash
+movement is attributed to the line it sits against, then bucketed into:
+
+- **Receipts from customers** (cash against AR / revenue),
+- **Payments to suppliers** (cash against AP / expense / inventory),
+- **Tax & payroll** (VAT, withholding, payroll liabilities),
+- **Other operating**, plus **Investing** (fixed assets) and **Financing**.
+
+**Expected result:** The receipts/payments net to the **same operating cash flow**
+as the indirect statement and the whole report **reconciles to the change in cash**
+(`reconciled` flag). Use whichever presentation your reviewer prefers — both are
+built from the same posted GL data.
+
+### Cash-flow forecast
+
+A forward look at cash, projected from **open receivables (inflows)** and **open
+payables (outflows)** by their due dates. Run it from **Accounting** → **Cash Flow**
+→ **Forecast** (`GET /api/ledger/cash-flow-forecast?weeks=8`, 1–52 weeks, default 8).
+
+**Expected result:** A weekly schedule starting from **today's cash balance**; each
+week shows expected inflows, outflows, the net, and the **projected running
+balance**. Anything already overdue / due now lands in **week 0** so you can see an
+immediate shortfall. This is a planning view (not a posted statement) for treasury /
+collections prioritisation.
+
 ---
 
 ## 4. Period & year-end close
@@ -248,6 +277,22 @@ the cost.
 **Expected result:** The sweep raises a preventive work order for every due
 schedule (time elapsed or meter overrun) and rolls the schedule forward. It is
 **idempotent** — a schedule with an open generated work order isn't raised again.
+
+### Cost lines & reliability KPIs
+
+1. Add **cost lines** to a work order (`POST /api/eam/work-orders/{woNo}/lines`):
+   a **labor** line (hours × rate) or a **part** line (quantity × unit cost). List
+   them with `GET /api/eam/work-orders/{woNo}/lines`.
+2. The work order's **actual cost rolls up** from its lines automatically — so when
+   you complete the WO the **AP posting reflects the real labor + parts spend**, not
+   just the estimate.
+3. Review **per-asset reliability** (`GET /api/eam/assets/{assetNo}/reliability`):
+   corrective failures, preventive count, open WOs, total **downtime hours**, **MTBF**
+   (mean time between failures), and **total maintenance spend**.
+
+**Expected result:** Cost lines give an itemised maintenance cost; the reliability
+view gives the failure-rate and lifetime-cost inputs for maintenance budgeting and
+**repair-vs-replace** decisions.
 
 ---
 

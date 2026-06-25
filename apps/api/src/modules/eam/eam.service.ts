@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { fixedAssets, maintenanceWorkOrders, pmSchedules, assetMeters } from '../../database/schema';
+import { fixedAssets, maintenanceWorkOrders, maintenanceWoLines, pmSchedules, assetMeters } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { FinanceService } from '../finance/finance.service';
 import { n, ymd } from '../../database/queries';
@@ -11,6 +11,7 @@ export interface WorkOrderDto { asset_no: string; type?: string; priority?: stri
 export interface WoStatusDto { status: string; actual_cost?: number; downtime_hours?: number; vendor_name?: string; meter_reading?: number; vat_treatment?: 'standard' | 'exempt' | 'zero' }
 export interface PmScheduleDto { asset_no: string; name: string; interval_days?: number; meter_interval?: number; next_due_date?: string }
 export interface MeterDto { meter_value: number; reading_date?: string; note?: string }
+export interface WoLineDto { kind: 'labor' | 'part'; description?: string; quantity?: number; hours?: number; unit_cost: number }
 
 const WO_TYPES = ['corrective', 'preventive', 'inspection'];
 // Allowed work-order status transitions (open → in_progress → completed; either may be cancelled).
@@ -86,7 +87,9 @@ export class EamService {
     if (dto.status === 'in_progress' && !wo.startedAt) patch.startedAt = new Date();
     let apTxnNo: string | null = wo.apTxnNo ?? null;
     if (dto.status === 'completed') {
-      const actualCost = dto.actual_cost != null ? n(dto.actual_cost) : n(wo.costEstimate);
+      // Cost precedence: explicit actual_cost → rolled-up labor/parts lines → estimate.
+      const lineTotal = await this.lineTotal(Number(wo.id));
+      const actualCost = dto.actual_cost != null ? n(dto.actual_cost) : (lineTotal > 0 ? lineTotal : n(wo.costEstimate));
       const vendorName = dto.vendor_name ?? wo.vendorName;
       patch.completedDate = ymd();
       patch.actualCost = String(actualCost);
@@ -105,6 +108,61 @@ export class EamService {
     }
     await db.update(maintenanceWorkOrders).set(patch).where(eq(maintenanceWorkOrders.id, wo.id));
     return { wo_no: woNo, status: dto.status, ap_txn_no: apTxnNo };
+  }
+
+  // ───────────────────── Work-order cost lines (labor / parts) ─────────────────────
+  private async lineTotal(woId: number): Promise<number> {
+    const db = this.db as any;
+    const [r] = await db.select({ s: sql<string>`coalesce(sum(${maintenanceWoLines.amount}),0)` }).from(maintenanceWoLines).where(eq(maintenanceWoLines.woId, woId));
+    return n(r?.s);
+  }
+
+  // Add a labor (hours × rate) or part (qty × unit cost) line; the WO's actual_cost rolls up from the lines.
+  async addWoLine(woNo: string, dto: WoLineDto, user: JwtUser) {
+    const db = this.db as any;
+    if (dto.kind !== 'labor' && dto.kind !== 'part') throw new BadRequestException({ code: 'BAD_LINE_KIND', message: 'kind must be labor|part', messageTh: 'ประเภทต้องเป็น labor หรือ part' });
+    const [wo] = await db.select().from(maintenanceWorkOrders).where(eq(maintenanceWorkOrders.woNo, woNo)).limit(1);
+    if (!wo) throw new NotFoundException({ code: 'WO_NOT_FOUND', message: `Work order ${woNo} not found`, messageTh: `ไม่พบใบสั่งงานซ่อม ${woNo}` });
+    const qty = dto.kind === 'part' ? n(dto.quantity ?? 1) : 1;
+    const hours = dto.kind === 'labor' ? n(dto.hours) : 0;
+    const amount = dto.kind === 'labor' ? hours * n(dto.unit_cost) : qty * n(dto.unit_cost);
+    await db.insert(maintenanceWoLines).values({
+      tenantId: wo.tenantId, woId: Number(wo.id), woNo, kind: dto.kind, description: dto.description ?? null,
+      quantity: String(qty), hours: String(hours), unitCost: String(n(dto.unit_cost)), amount: String(round2(amount)), createdBy: user.username,
+    });
+    const total = await this.lineTotal(Number(wo.id));
+    await db.update(maintenanceWorkOrders).set({ actualCost: String(round2(total)) }).where(eq(maintenanceWorkOrders.id, wo.id));
+    return { wo_no: woNo, kind: dto.kind, amount: round2(amount), actual_cost: round2(total) };
+  }
+
+  async listWoLines(woNo: string) {
+    const db = this.db as any;
+    const rows = await db.select().from(maintenanceWoLines).where(eq(maintenanceWoLines.woNo, woNo)).orderBy(desc(maintenanceWoLines.id));
+    const labor = round2(rows.filter((l: any) => l.kind === 'labor').reduce((a: number, l: any) => a + n(l.amount), 0));
+    const parts = round2(rows.filter((l: any) => l.kind === 'part').reduce((a: number, l: any) => a + n(l.amount), 0));
+    return { wo_no: woNo, lines: rows.map((l: any) => ({ kind: l.kind, description: l.description, quantity: n(l.quantity), hours: n(l.hours), unit_cost: n(l.unitCost), amount: n(l.amount) })), labor_total: labor, parts_total: parts, total: round2(labor + parts) };
+  }
+
+  // ───────────────────── Per-asset reliability & cost analytics ─────────────────────
+  // Failures (corrective WOs), total downtime, mean-time-between-failures (from corrective WO dates), and
+  // total maintenance spend for an asset — the EAM KPIs.
+  async reliability(assetNo: string, user: JwtUser) {
+    const db = this.db as any;
+    await this.resolveAsset(assetNo); // 404 if unknown / cross-tenant
+    const wos = await db.select().from(maintenanceWorkOrders).where(eq(maintenanceWorkOrders.assetNo, assetNo)).orderBy(maintenanceWorkOrders.scheduledDate);
+    const corrective = wos.filter((w: any) => w.type === 'corrective');
+    const downtime = round2(wos.reduce((a: number, w: any) => a + n(w.downtimeHours), 0));
+    const totalCost = round2(wos.reduce((a: number, w: any) => a + n(w.actualCost), 0));
+    // MTBF from corrective failure dates (completed/scheduled); needs ≥2 failures.
+    const dates = corrective.map((w: any) => w.completedDate ?? w.scheduledDate ?? w.createdAt).filter(Boolean).map((d: any) => Date.parse(String(d))).filter((t: number) => !isNaN(t)).sort((a: number, b: number) => a - b);
+    const mtbfDays = dates.length >= 2 ? Math.round(((dates[dates.length - 1] - dates[0]) / 86400000) / (dates.length - 1) * 10) / 10 : null;
+    return {
+      asset_no: assetNo,
+      work_orders: wos.length, corrective_failures: corrective.length,
+      preventive: wos.filter((w: any) => w.type === 'preventive').length,
+      open: wos.filter((w: any) => w.status === 'open' || w.status === 'in_progress').length,
+      total_downtime_hours: downtime, mtbf_days: mtbfDays, total_maintenance_cost: totalCost,
+    };
   }
 
   // ───────────────────── Preventive-maintenance schedules ─────────────────────
@@ -188,3 +246,5 @@ export class EamService {
     };
   }
 }
+
+function round2(x: number) { return Math.round((Number(x) || 0) * 100) / 100; }
