@@ -2,14 +2,15 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Plus, ScanLine, Trash2 } from 'lucide-react';
+import { ClipboardCheck, ClipboardList, FileText, Plus, ScanLine, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
 import { parseQrPayload } from '@/lib/qr';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -42,7 +43,6 @@ function NewCount() {
   const [phys, setPhys] = useState('');
   const [scan, setScan] = useState('');
   const [savedNo, setSavedNo] = useState('');
-  const [msg, setMsg] = useState('');
 
   function applyScan(v: string) {
     setScan(v);
@@ -61,13 +61,13 @@ function NewCount() {
 
   const save = useMutation({
     mutationFn: () => api<any>('/api/stocktake', { method: 'POST', body: JSON.stringify({ lines }) }),
-    onSuccess: (r) => { setSavedNo(r.st_no); setMsg(`✅ บันทึกใบนับ ${r.st_no} (${r.variance_lines} รายการมีผลต่าง)`); setLines([]); qc.invalidateQueries({ queryKey: ['stocktakes'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { setSavedNo(r.st_no); notifySuccess(`บันทึกใบนับ ${r.st_no} (${r.variance_lines} รายการมีผลต่าง)`); setLines([]); qc.invalidateQueries({ queryKey: ['stocktakes'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const post = useMutation({
     mutationFn: () => api<any>(`/api/stocktake/${savedNo}/post`, { method: 'POST' }),
-    onSuccess: (r) => { setMsg(`✅ ลงบัญชีใบนับ ${savedNo} แล้ว (${r.variance_movements ?? 0} รายการปรับยอด)`); setSavedNo(''); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`ลงบัญชีใบนับ ${savedNo} แล้ว (${r.variance_movements ?? 0} รายการปรับยอด)`); setSavedNo(''); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -91,7 +91,6 @@ function NewCount() {
           </div>
           <Button disabled={!itemId || phys === ''} onClick={add}><Plus className="size-4" /> เพิ่ม</Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         {savedNo && <Button variant="outline" disabled={post.isPending} onClick={() => post.mutate()}><ClipboardCheck className="size-4" /> ลงบัญชีผลต่าง (Post {savedNo})</Button>}
       </Card>
 
@@ -135,7 +134,11 @@ function History() {
               { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.st_no)}>ดู</Button> },
             ]}
-            emptyText="ยังไม่มีใบนับสต๊อก"
+            emptyState={{
+              icon: ClipboardList,
+              title: 'ยังไม่มีใบนับสต๊อก',
+              description: 'เริ่มที่แท็บ “นับใหม่” เพื่อสร้างใบตรวจนับสต๊อกใบแรก',
+            }}
           />
         )}
       </StateView>
@@ -153,7 +156,7 @@ function History() {
                   { key: 'physical_qty', label: 'นับจริง', align: 'right', render: (r: any) => num(r.physical_qty) },
                   { key: 'difference', label: 'ผลต่าง', align: 'right', render: (r: any) => num(r.difference) },
                 ]}
-                emptyText="ไม่มีรายการ"
+                emptyState={{ icon: FileText, title: 'ไม่มีรายการในใบนับนี้' }}
               />
             )}
           </StateView>

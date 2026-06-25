@@ -3,14 +3,15 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CreditCard, Banknote } from 'lucide-react';
+import { CreditCard, Banknote, ListChecks, Layers } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,11 +46,10 @@ function Terminals() {
   const intents = useQuery<any>({ queryKey: ['intents'], queryFn: () => api('/api/payments/terminal/intents') });
   const [t, setT] = useState({ terminal_code: '', name: '' });
   const [c, setC] = useState({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false });
-  const [msg, setMsg] = useState('');
   const refresh = () => { qc.invalidateQueries({ queryKey: ['terminals'] }); qc.invalidateQueries({ queryKey: ['intents'] }); };
-  const reg = useMutation({ mutationFn: () => api('/api/payments/terminal/register', { method: 'POST', body: JSON.stringify({ terminal_code: t.terminal_code, name: t.name || undefined }) }), onSuccess: () => { setMsg('✅ เพิ่มเครื่องแล้ว'); setT({ terminal_code: '', name: '' }); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const charge = useMutation({ mutationFn: () => api('/api/payments/terminal/charge', { method: 'POST', body: JSON.stringify({ terminal_code: c.terminal_code || undefined, amount: Number(c.amount), type: c.type, sale_no: c.sale_no || undefined, record_tender: c.record_tender }) }), onSuccess: (r: any) => { setMsg(`✅ ${r.intent_no} → ${r.status}${r.payment_no ? ` · tender ${r.payment_no}` : ''}`); setC({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false }); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const act = useMutation({ mutationFn: (v: { no: string; op: string; body?: any }) => api(`/api/payments/terminal/intents/${v.no}/${v.op}`, { method: 'POST', body: JSON.stringify(v.body ?? {}) }), onSuccess: () => refresh(), onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const reg = useMutation({ mutationFn: () => api('/api/payments/terminal/register', { method: 'POST', body: JSON.stringify({ terminal_code: t.terminal_code, name: t.name || undefined }) }), onSuccess: () => { notifySuccess('เพิ่มเครื่องแล้ว'); setT({ terminal_code: '', name: '' }); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const charge = useMutation({ mutationFn: () => api('/api/payments/terminal/charge', { method: 'POST', body: JSON.stringify({ terminal_code: c.terminal_code || undefined, amount: Number(c.amount), type: c.type, sale_no: c.sale_no || undefined, record_tender: c.record_tender }) }), onSuccess: (r: any) => { notifySuccess(`${r.intent_no} → ${r.status}${r.payment_no ? ` · tender ${r.payment_no}` : ''}`); setC({ terminal_code: '', amount: '', type: 'sale', sale_no: '', record_tender: false }); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const act = useMutation({ mutationFn: (v: { no: string; op: string; body?: any }) => api(`/api/payments/terminal/intents/${v.no}/${v.op}`, { method: 'POST', body: JSON.stringify(v.body ?? {}) }), onSuccess: () => refresh(), onError: (e: any) => notifyError(e.message) });
 
   return (
     <div className="space-y-4">
@@ -59,7 +59,7 @@ function Terminals() {
           <CardContent className="space-y-4">
             <Field label="รหัสเครื่อง" htmlFor="t-code"><Input id="t-code" placeholder="เช่น TERM1" value={t.terminal_code} onChange={(e) => setT({ ...t, terminal_code: e.target.value })} /></Field>
             <Field label="ชื่อ (ไม่บังคับ)" htmlFor="t-name"><Input id="t-name" placeholder="เช่น เคาน์เตอร์หน้า" value={t.name} onChange={(e) => setT({ ...t, name: e.target.value })} /></Field>
-            <Button className="w-fit" disabled={!t.terminal_code || reg.isPending} onClick={() => { setMsg(''); reg.mutate(); }}><CreditCard className="size-4" /> {reg.isPending ? 'กำลังเพิ่ม…' : 'เพิ่มเครื่อง'}</Button>
+            <Button className="w-fit" disabled={!t.terminal_code || reg.isPending} onClick={() => reg.mutate()}><CreditCard className="size-4" /> {reg.isPending ? 'กำลังเพิ่ม…' : 'เพิ่มเครื่อง'}</Button>
           </CardContent>
         </Card>
         <Card>
@@ -78,12 +78,11 @@ function Terminals() {
             <label className="flex items-center gap-2 text-sm" title="บันทึกเป็นการชำระของบิล (ให้ปิดลิ้นชัก/รายงานเห็น)">
               <input type="checkbox" className="size-4 accent-primary" checked={c.record_tender} onChange={(e) => setC({ ...c, record_tender: e.target.checked })} /> ลงรายการชำระ (ผูกกับบิล)
             </label>
-            <Button disabled={!c.amount || charge.isPending} onClick={() => { setMsg(''); charge.mutate(); }}><Banknote className="size-4" /> {charge.isPending ? 'กำลังรับชำระ…' : 'รับชำระ'}</Button>
-            {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+            <Button disabled={!c.amount || charge.isPending} onClick={() => charge.mutate()}><Banknote className="size-4" /> {charge.isPending ? 'กำลังรับชำระ…' : 'รับชำระ'}</Button>
           </CardContent>
         </Card>
       </div>
-      <StateView q={terms}>{terms.data && <DataTable rows={terms.data.terminals} rowKey={(r: any) => r.terminal_code} columns={[{ key: 'terminal_code', label: 'รหัส' }, { key: 'name', label: 'ชื่อ', render: (r: any) => r.name || '—' }, { key: 'provider', label: 'ผู้ให้บริการ' }, { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'active' ? 'active' : 'cancelled')}>{r.status}</Badge> }]} emptyText="ยังไม่มีเครื่อง" />}</StateView>
+      <StateView q={terms}>{terms.data && <DataTable rows={terms.data.terminals} rowKey={(r: any) => r.terminal_code} columns={[{ key: 'terminal_code', label: 'รหัส' }, { key: 'name', label: 'ชื่อ', render: (r: any) => r.name || '—' }, { key: 'provider', label: 'ผู้ให้บริการ' }, { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'active' ? 'active' : 'cancelled')}>{r.status}</Badge> }]} emptyState={{ icon: CreditCard, title: 'ยังไม่มีเครื่องรับบัตร', description: 'เพิ่มเครื่องรับบัตรเครื่องแรกด้วยฟอร์ม “เพิ่มเครื่องรับบัตร” ด้านบน' }} />}</StateView>
       <div>
         <h3 className="mb-3 text-sm font-semibold text-muted-foreground">รายการชำระ (Intents)</h3>
         <StateView q={intents}>
@@ -110,7 +109,7 @@ function Terminals() {
                   );
                 } },
               ]}
-              emptyText="ยังไม่มีรายการชำระ"
+              emptyState={{ icon: ListChecks, title: 'ยังไม่มีรายการชำระ', description: 'รับชำระผ่านการ์ดด้วยฟอร์ม “รับชำระ (ทดสอบ)” เพื่อสร้างรายการแรก' }}
             />
           )}
         </StateView>
@@ -123,8 +122,7 @@ function Settlements() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['settlements'], queryFn: () => api('/api/payments/terminal/settlements') });
   const [fee, setFee] = useState('2');
-  const [msg, setMsg] = useState('');
-  const settle = useMutation({ mutationFn: () => api('/api/payments/terminal/settle', { method: 'POST', body: JSON.stringify({ fee_pct: Number(fee) }) }), onSuccess: (r: any) => { setMsg(`✅ สรุปยอด ${r.batch_no}: ${r.txn_count} รายการ`); qc.invalidateQueries({ queryKey: ['settlements'] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const settle = useMutation({ mutationFn: () => api('/api/payments/terminal/settle', { method: 'POST', body: JSON.stringify({ fee_pct: Number(fee) }) }), onSuccess: (r: any) => { notifySuccess(`สรุปยอด ${r.batch_no}: ${r.txn_count} รายการ`); qc.invalidateQueries({ queryKey: ['settlements'] }); }, onError: (e: any) => notifyError(e.message) });
   const reconcile = useMutation({ mutationFn: (no: string) => api(`/api/payments/terminal/settlements/${no}/reconcile`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['settlements'] }) });
   return (
     <div className="space-y-4">
@@ -133,9 +131,8 @@ function Settlements() {
         <CardContent className="space-y-3">
           <div className="flex items-end gap-2">
             <Field label="ค่าธรรมเนียม %" htmlFor="s-fee" className="max-w-[140px]"><Input id="s-fee" type="number" inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} /></Field>
-            <Button disabled={settle.isPending} onClick={() => { setMsg(''); settle.mutate(); }}>{settle.isPending ? 'กำลังสรุป…' : 'สรุปยอดที่จับแล้ว'}</Button>
+            <Button disabled={settle.isPending} onClick={() => settle.mutate()}>{settle.isPending ? 'กำลังสรุป…' : 'สรุปยอดที่จับแล้ว'}</Button>
           </div>
-          {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
         </CardContent>
       </Card>
       <StateView q={q}>
@@ -153,7 +150,7 @@ function Settlements() {
               { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'Reconciled' ? 'paid' : 'open')}>{r.status}</Badge> },
               { key: 'act', label: '', sortable: false, render: (r: any) => r.status !== 'Reconciled' ? <Button size="sm" variant="outline" disabled={reconcile.isPending && reconcile.variables === r.batch_no} onClick={() => reconcile.mutate(r.batch_no)}>กระทบยอด</Button> : null },
             ]}
-            emptyText="ยังไม่มีรอบสรุปยอด"
+            emptyState={{ icon: Layers, title: 'ยังไม่มีรอบสรุปยอด', description: 'กด “สรุปยอดที่จับแล้ว” เพื่อปิดรอบและสร้าง batch สรุปยอดแรก' }}
           />
         )}
       </StateView>

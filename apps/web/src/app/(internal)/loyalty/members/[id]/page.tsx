@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ShieldCheck, Gift, Trophy, Target, UserPlus } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Gift, Trophy, Target, UserPlus, History, Users, Award } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -78,7 +79,7 @@ export default function Member360Page() {
               <DataTable
                 rows={history.data?.history ?? []}
                 rowKey={(_r, i) => i}
-                emptyText="ยังไม่มีรายการแต้ม"
+                emptyState={{ icon: History, title: 'ยังไม่มีรายการแต้ม', description: 'รายการได้แต้มและแลกแต้มของสมาชิกจะแสดงที่นี่' }}
                 columns={[
                   { key: 'txn_date', label: 'วันที่', render: (r) => thaiDate(r.txn_date) },
                   { key: 'txn_type', label: 'ประเภท', render: (r) => <Badge variant={r.txn_type === 'Earn' ? 'success' : r.txn_type === 'Redeem' ? 'info' : 'muted'}>{r.txn_type}</Badge> },
@@ -102,24 +103,22 @@ function ReferralsPanel({ id }: { id: string }) {
   const qc = useQueryClient();
   const q = useQuery<{ referrals: Referral[] }>({ queryKey: ['loy-member-referrals', id], queryFn: () => api(`/api/loyalty/members/${id}/referrals`) });
   const [refId, setRefId] = useState('');
-  const [msg, setMsg] = useState('');
   const inval = () => { qc.invalidateQueries({ queryKey: ['loy-member-referrals', id] }); qc.invalidateQueries({ queryKey: ['loy-member', id] }); };
-  const refer = useMutation({ mutationFn: () => api('/api/loyalty/referrals', { method: 'POST', body: JSON.stringify({ referrer_member_id: Number(id), referred_member_id: Number(refId) }) }), onSuccess: () => { setMsg('✅ บันทึกการแนะนำแล้ว'); setRefId(''); inval(); }, onError: (e: Error) => setMsg(`❌ ${e.message}`) });
+  const refer = useMutation({ mutationFn: () => api('/api/loyalty/referrals', { method: 'POST', body: JSON.stringify({ referrer_member_id: Number(id), referred_member_id: Number(refId) }) }), onSuccess: () => { notifySuccess('บันทึกการแนะนำแล้ว'); setRefId(''); inval(); }, onError: (e: Error) => notifyError(e.message) });
   const reward = useMutation({ mutationFn: (rid: number) => api(`/api/loyalty/referrals/${rid}/reward`, { method: 'POST', body: '{}' }), onSuccess: inval });
   return (
     <Card className="gap-4">
       <CardHeader><CardTitle className="flex items-center gap-2 text-base"><UserPlus className="size-4" /> แนะนำเพื่อน (Referrals)</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); setMsg(''); refer.mutate(); }}>
+        <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); refer.mutate(); }}>
           <div className="grid gap-1.5"><Label htmlFor="ref-id">รหัสสมาชิกที่ถูกแนะนำ (Member ID)</Label><Input id="ref-id" type="number" min="1" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="เช่น 2" className="w-44" /></div>
           <Button type="submit" disabled={!refId.trim() || refer.isPending}>แนะนำ</Button>
-          {msg && <span className={msg.startsWith('✅') ? 'text-sm text-success' : 'text-sm text-destructive'}>{msg}</span>}
         </form>
         <StateView q={q}>
           <DataTable
             rows={q.data?.referrals ?? []}
             rowKey={(r) => r.id}
-            emptyText="ยังไม่มีการแนะนำ"
+            emptyState={{ icon: Users, title: 'ยังไม่มีการแนะนำ', description: 'กรอกรหัสสมาชิกที่ถูกแนะนำด้านบนเพื่อบันทึกการแนะนำเพื่อนรายการแรก' }}
             columns={[
               { key: 'code', label: 'รหัส', render: (r) => <span className="font-mono text-xs">{r.code}</span> },
               { key: 'referred', label: 'ผู้ถูกแนะนำ', render: (r) => r.referred_member_id != null ? `#${r.referred_member_id}` : (r.referred_phone ?? '—') },
@@ -216,7 +215,7 @@ function WalletPanel({ id }: { id: string }) {
             <DataTable
               rows={q.data?.redemptions ?? []}
               rowKey={(r) => r.redemption_code}
-              emptyText="ยังไม่มีการแลกของรางวัล"
+              emptyState={{ icon: Award, title: 'ยังไม่มีการแลกของรางวัล', description: 'ของรางวัลที่สมาชิกแลกด้วยแต้มจะแสดงที่นี่' }}
               columns={[
                 { key: 'redemption_code', label: 'รหัส', render: (r) => <span className="font-mono text-xs">{r.redemption_code}</span> },
                 { key: 'reward', label: 'รางวัล', render: (r) => r.reward ?? '—' },

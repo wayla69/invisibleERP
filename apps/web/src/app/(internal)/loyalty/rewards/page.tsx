@@ -3,11 +3,13 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Gift, Plus, Search, Users } from 'lucide-react';
+import { Gift, Plus, SearchX, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
+import { SearchInput } from '@/components/search-input';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,7 +26,6 @@ export default function RewardsPage() {
   const list = useQuery<{ rewards: Reward[]; count: number }>({ queryKey: ['loy-rewards'], queryFn: () => api('/api/loyalty/rewards') });
 
   const [form, setForm] = useState({ name: '', type: 'evoucher', point_cost: 100, cash_value: 0, coupon_kind: 'amount', coupon_value: 0, stock: '', per_member_limit: '' });
-  const [msg, setMsg] = useState('');
   const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
 
   const create = useMutation({
@@ -34,8 +35,8 @@ export default function RewardsPage() {
       ...(form.stock !== '' ? { stock: Number(form.stock) } : {}),
       ...(form.per_member_limit !== '' ? { per_member_limit: Number(form.per_member_limit) } : {}),
     }) }),
-    onSuccess: () => { setMsg('✅ เพิ่มของรางวัลแล้ว'); setForm({ name: '', type: 'evoucher', point_cost: 100, cash_value: 0, coupon_kind: 'amount', coupon_value: 0, stock: '', per_member_limit: '' }); qc.invalidateQueries({ queryKey: ['loy-rewards'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('เพิ่มของรางวัลแล้ว'); setForm({ name: '', type: 'evoucher', point_cost: 100, cash_value: 0, coupon_kind: 'amount', coupon_value: 0, stock: '', per_member_limit: '' }); qc.invalidateQueries({ queryKey: ['loy-rewards'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const toggle = useMutation({
     mutationFn: (r: Reward) => api(`/api/loyalty/rewards/${r.id}`, { method: 'PATCH', body: JSON.stringify({ active: !r.active }) }),
@@ -67,7 +68,7 @@ export default function RewardsPage() {
         <Card className="gap-4">
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Plus className="size-4" /> เพิ่มของรางวัล</CardTitle></CardHeader>
           <CardContent>
-            <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(e) => { e.preventDefault(); setMsg(''); create.mutate(); }}>
+            <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
               <div className="grid gap-1.5 sm:col-span-2"><Label>ชื่อรางวัล</Label><Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="เช่น คูปองส่วนลด ฿50" required /></div>
               <div className="grid gap-1.5"><Label>ประเภท</Label>
                 <select className={selectCls} value={form.type} onChange={(e) => set({ type: e.target.value })}>
@@ -86,7 +87,6 @@ export default function RewardsPage() {
               <div className="grid gap-1.5"><Label>จำกัด/คน (ว่าง=ไม่จำกัด)</Label><Input type="number" min="1" value={form.per_member_limit} onChange={(e) => set({ per_member_limit: e.target.value })} /></div>
               <div className="flex items-end"><Button type="submit" disabled={!form.name.trim() || create.isPending}>{create.isPending ? 'กำลังบันทึก…' : 'เพิ่มรางวัล'}</Button></div>
             </form>
-            {msg && <p className={msg.startsWith('✅') ? 'mt-2 text-sm text-success' : 'mt-2 text-sm text-destructive'}>{msg}</p>}
           </CardContent>
         </Card>
 
@@ -94,10 +94,13 @@ export default function RewardsPage() {
           {list.data && (
             <div className="space-y-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="relative w-full sm:max-w-xs">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาชื่อ / รหัส / ประเภท…" className="pl-9" aria-label="ค้นหาของรางวัล" inputMode="search" enterKeyHint="search" />
-                </div>
+                <SearchInput
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="ค้นหาชื่อ / รหัส / ประเภท…"
+                  ariaLabel="ค้นหาของรางวัล"
+                  count={`${num(filtered.length)} รายการ`}
+                />
                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
                   {([['all', 'ทั้งหมด'], ['on', 'เปิด'], ['off', 'ปิด']] as const).map(([v, l]) => (
                     <Button key={v} variant={active === v ? 'secondary' : 'ghost'} size="sm" aria-pressed={active === v} onClick={() => setActive(v)}>{l}</Button>
@@ -107,7 +110,24 @@ export default function RewardsPage() {
             <DataTable
               rows={filtered}
               rowKey={(r) => r.id}
-              emptyText={search || active !== 'all' ? 'ไม่พบของรางวัลที่ตรงกับตัวกรอง' : 'ยังไม่มีของรางวัล — เพิ่มด้านบน'}
+              emptyState={
+                search || active !== 'all'
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบของรางวัลที่ตรงกับตัวกรอง',
+                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => { setSearch(''); setActive('all'); }}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : {
+                      icon: Gift,
+                      title: 'ยังไม่มีของรางวัล',
+                      description: 'เพิ่มของรางวัลรายการแรกจากฟอร์มด้านบน เพื่อให้สมาชิกใช้แต้มแลกได้',
+                    }
+              }
               columns={[
                 { key: 'reward_code', label: 'รหัส', render: (r) => <span className="font-mono text-xs">{r.reward_code}</span> },
                 { key: 'name', label: 'ชื่อ', render: (r) => <span className="inline-flex items-center gap-1.5"><Gift className="size-3.5 text-muted-foreground" />{r.name}</span> },

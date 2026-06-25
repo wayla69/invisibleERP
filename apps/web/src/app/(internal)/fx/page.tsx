@@ -5,11 +5,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Coins, Plus, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -43,7 +44,6 @@ function Rates() {
   const [rateDate, setRateDate] = useState(today());
   const [rate, setRate] = useState('');
   const [shared, setShared] = useState(false);
-  const [msg, setMsg] = useState('');
 
   const setRateMut = useMutation({
     mutationFn: () =>
@@ -52,11 +52,11 @@ function Rates() {
         body: JSON.stringify({ currency: currency.toUpperCase(), rate_date: rateDate, rate: Number(rate), shared }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ บันทึกอัตรา ${r.currency} @ ${num(r.rate)} (${r.rate_date})`);
+      notifySuccess(`บันทึกอัตรา ${r.currency} @ ${num(r.rate)} (${r.rate_date})`);
       setRate('');
       qc.invalidateQueries({ queryKey: ['fx-rates'] });
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -86,7 +86,6 @@ function Rates() {
             <Plus className="size-4" /> {setRateMut.isPending ? 'กำลังบันทึก…' : 'บันทึกอัตรา'}
           </Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
 
       <StateView q={q}>
@@ -101,7 +100,11 @@ function Rates() {
                 { key: 'rate', label: 'อัตรา (ต่อ THB)', align: 'right', render: (r: any) => <span className="tabular">{num(r.rate)}</span> },
                 { key: 'tenant_id', label: 'ขอบเขต', render: (r: any) => (r.tenant_id == null ? 'ใช้ร่วม' : `ร้าน #${r.tenant_id}`) },
               ]}
-              emptyText="ยังไม่มีอัตราแลกเปลี่ยน"
+              emptyState={{
+                icon: Coins,
+                title: 'ยังไม่มีอัตราแลกเปลี่ยน',
+                description: 'กรอกสกุลเงิน วันที่ และอัตราด้านบน เพื่อบันทึกอัตราสิ้นงวดรายการแรก',
+              }}
             />
           </div>
         )}
@@ -115,7 +118,6 @@ function Revalue() {
   const [asOf, setAsOf] = useState(today());
   const [currency, setCurrency] = useState('USD');
   const [autoReverse, setAutoReverse] = useState(true);
-  const [msg, setMsg] = useState('');
 
   const report = useQuery<any>({
     queryKey: ['fx-unrealized', asOf, currency],
@@ -129,12 +131,12 @@ function Revalue() {
         body: JSON.stringify({ as_of: asOf, currency: currency.toUpperCase(), auto_reverse: autoReverse }),
       }),
     onSuccess: (r) => {
-      if (r.already) setMsg(`✅ ตีราคา ${r.currency} ณ ${r.as_of} ลงบัญชีไปแล้ว`);
-      else if (!r.entry_no) setMsg(`✅ ${r.note ?? 'ไม่มียอดคงค้างสกุลต่างประเทศ'}`);
-      else setMsg(`✅ ตีราคา ${r.currency} @ ${num(r.current_rate)} · JE ${r.entry_no}${r.reverse_entry_no ? ` (กลับ ${r.reverse_entry_no})` : ''}`);
+      if (r.already) notifySuccess(`ตีราคา ${r.currency} ณ ${r.as_of} ลงบัญชีไปแล้ว`);
+      else if (!r.entry_no) notifySuccess(`${r.note ?? 'ไม่มียอดคงค้างสกุลต่างประเทศ'}`);
+      else notifySuccess(`ตีราคา ${r.currency} @ ${num(r.current_rate)} · JE ${r.entry_no}${r.reverse_entry_no ? ` (กลับ ${r.reverse_entry_no})` : ''}`);
       report.refetch();
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -160,7 +162,6 @@ function Revalue() {
             <RefreshCw className="size-4" /> {revalue.isPending ? 'กำลังตีราคา…' : 'ตีราคาและลงบัญชี'}
           </Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
 
       <StateView q={report}>
@@ -177,7 +178,7 @@ function Revalue() {
               <DataTable
                 rows={report.data.ar ?? []}
                 columns={fxRowColumns}
-                emptyText="ไม่มียอดคงค้าง"
+                emptyState={{ title: 'ไม่มีลูกหนี้สกุลต่างประเทศคงค้าง' }}
                 dense
               />
             </div>
@@ -186,7 +187,7 @@ function Revalue() {
               <DataTable
                 rows={report.data.ap ?? []}
                 columns={fxRowColumns}
-                emptyText="ไม่มียอดคงค้าง"
+                emptyState={{ title: 'ไม่มีเจ้าหนี้สกุลต่างประเทศคงค้าง' }}
                 dense
               />
             </div>

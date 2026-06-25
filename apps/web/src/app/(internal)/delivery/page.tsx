@@ -2,13 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
+import { SearchX, Truck } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
+import { SearchInput } from '@/components/search-input';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -24,11 +25,10 @@ export default function DeliveryPage() {
   const [f, setF] = useState({ order_no: '', driver: '', vehicle: '' });
   const [sel, setSel] = useState<string | null>(null);
   const detail = useQuery<any>({ queryKey: ['delivery', sel], queryFn: () => api(`/api/delivery/${sel}`), enabled: !!sel });
-  const [msg, setMsg] = useState('');
   const create = useMutation({
     mutationFn: () => api('/api/delivery', { method: 'POST', body: JSON.stringify({ order_no: f.order_no || undefined, driver: f.driver || undefined, vehicle: f.vehicle || undefined }) }),
-    onSuccess: (r: any) => { setMsg(`✅ สร้างใบส่ง ${r.do_no} (${r.lines} รายการ)`); setF({ order_no: '', driver: '', vehicle: '' }); qc.invalidateQueries({ queryKey: ['deliveries'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`สร้างใบส่ง ${r.do_no} (${r.lines} รายการ)`); setF({ order_no: '', driver: '', vehicle: '' }); qc.invalidateQueries({ queryKey: ['deliveries'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const setStatus = useMutation({
     mutationFn: (v: { no: string; status: string }) => api(`/api/delivery/${v.no}/status`, { method: 'PATCH', body: JSON.stringify({ status: v.status }) }),
@@ -60,24 +60,18 @@ export default function DeliveryPage() {
           <div className="grid gap-1.5"><Label htmlFor="do-vehicle">ทะเบียนรถ</Label><Input id="do-vehicle" placeholder="เช่น 1กก-1234" value={f.vehicle} onChange={(e) => setF({ ...f, vehicle: e.target.value })} /></div>
         </div>
         <Button className="w-fit" disabled={!f.order_no || create.isPending} onClick={() => create.mutate()}>สร้างใบส่ง</Button>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
       <StateView q={q}>
         {q.data && (
           <div className="space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="relative w-full sm:max-w-xs">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="ค้นหาเลขที่ / คนขับ / ทะเบียน…"
-                  className="pl-9"
-                  aria-label="ค้นหาใบส่งสินค้า"
-                  inputMode="search"
-                  enterKeyHint="search"
-                />
-              </div>
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                placeholder="ค้นหาเลขที่ / คนขับ / ทะเบียน…"
+                ariaLabel="ค้นหาใบส่งสินค้า"
+                count={`${filtered.length} รายการ`}
+              />
               {statuses.length > 1 && (
                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
                   <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(null)}>
@@ -109,7 +103,20 @@ export default function DeliveryPage() {
               },
               { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.do_no)}>ดูรายการ</Button> },
               ]}
-              emptyText={search || statusFilter ? 'ไม่พบใบส่งที่ตรงกับตัวกรอง' : 'ยังไม่มีใบส่งสินค้า'}
+              emptyState={
+                search || statusFilter
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบใบส่งที่ตรงกับตัวกรอง',
+                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter(null); }}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : { icon: Truck, title: 'ยังไม่มีใบส่งสินค้า', description: 'สร้างใบส่งจากออเดอร์ด้านบนเพื่อเริ่มต้น' }
+              }
             />
           </div>
         )}

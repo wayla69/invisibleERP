@@ -5,11 +5,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Factory, Plus, Play, CheckCircle2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -28,18 +28,17 @@ export default function ManufacturingPage() {
   const q = useQuery<{ work_orders: Wo[]; count: number }>({ queryKey: ['work-orders'], queryFn: () => api('/api/manufacturing/work-orders') });
   const [bomCode, setBomCode] = useState('');
   const [qty, setQty] = useState('');
-  const [msg, setMsg] = useState('');
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['work-orders'] });
   const create = useMutation({
     mutationFn: () => api<Wo>('/api/manufacturing/work-orders', { method: 'POST', body: JSON.stringify({ bom_code: bomCode, qty_planned: Number(qty) || 0 }) }),
-    onSuccess: (r) => { setMsg(`✅ สร้างใบสั่งผลิต ${r.wo_no} (ต้นทุนรวม ${baht(r.total_cost)})`); setBomCode(''); setQty(''); refresh(); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`สร้างใบสั่งผลิต ${r.wo_no} (ต้นทุนรวม ${baht(r.total_cost)})`); setBomCode(''); setQty(''); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
   const act = useMutation({
     mutationFn: (p: { woNo: string; action: 'issue' | 'complete' }) => api<any>(`/api/manufacturing/work-orders/${p.woNo}/${p.action}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (r) => { setMsg(r.status === 'Released' ? `✅ เบิกวัตถุดิบเข้างาน (WIP ${baht(r.wip_cost)}) — ${r.entry_no}` : `✅ ปิดงานผลิต รับสินค้าสำเร็จรูป (${baht(r.fg_value)}) — ${r.entry_no}`); refresh(); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(r.status === 'Released' ? `เบิกวัตถุดิบเข้างาน (WIP ${baht(r.wip_cost)}) — ${r.entry_no}` : `ปิดงานผลิต รับสินค้าสำเร็จรูป (${baht(r.fg_value)}) — ${r.entry_no}`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const wos = q.data?.work_orders ?? [];
@@ -63,7 +62,6 @@ export default function ManufacturingPage() {
           <div className="grid gap-1.5"><Label>จำนวนผลิต</Label><Input type="number" min="0" value={qty} onChange={(e) => setQty(e.target.value)} className="w-32" /></div>
           <Button onClick={() => create.mutate()} disabled={!bomCode || !qty || create.isPending}><Plus className="size-4" /> สร้าง</Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
 
       <StateView q={q}>
@@ -92,7 +90,11 @@ export default function ManufacturingPage() {
                   ),
               },
             ]}
-            emptyText="ยังไม่มีใบสั่งผลิต"
+            emptyState={{
+              icon: Factory,
+              title: 'ยังไม่มีใบสั่งผลิต',
+              description: 'สร้างใบสั่งผลิตจากสูตร (BOM) ด้านบนเพื่อเริ่มเบิกวัตถุดิบและผลิตสินค้า',
+            }}
           />
         )}
       </StateView>
