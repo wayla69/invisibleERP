@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCheck, ShieldAlert, ShieldCheck, Save, Search, Unlock } from 'lucide-react';
+import { CheckCheck, ListChecks, ShieldAlert, ShieldCheck, Save, Search, Unlock } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -66,9 +67,11 @@ function RunMatchTab() {
         body: JSON.stringify({ txn_no: txnNo, po_no: poNo || undefined }),
       }),
     onSuccess: (r) => {
+      notifySuccess(`${r.match_no} · ${r.txn_no}`);
       setLookup(r.txn_no);
       qc.invalidateQueries({ queryKey: ['match', r.txn_no] });
     },
+    onError: (e) => notifyError((e as Error).message),
   });
 
   const override = useMutation({
@@ -78,9 +81,11 @@ function RunMatchTab() {
         body: JSON.stringify({ reason: overrideReason }),
       }),
     onSuccess: () => {
+      notifySuccess('อนุมัติทับแล้ว — จ่ายเงินได้');
       setOverrideReason('');
       qc.invalidateQueries({ queryKey: ['match', lookup] });
     },
+    onError: (e) => notifyError((e as Error).message),
   });
 
   const m = result.data;
@@ -107,8 +112,6 @@ function RunMatchTab() {
             <Button disabled={run.isPending || !txnNo} onClick={() => run.mutate()}>
               <CheckCheck className="size-4" /> {run.isPending ? 'กำลังจับคู่…' : 'รันการจับคู่'}
             </Button>
-            {run.error && <Msg>{(run.error as Error).message}</Msg>}
-            {run.data && <Msg ok>✅ {run.data.match_no} · {run.data.txn_no}</Msg>}
           </CardContent>
         </Card>
 
@@ -175,7 +178,7 @@ function RunMatchTab() {
                   { key: 'price_var_pct', label: '%ต่างราคา', align: 'right', render: (r: any) => <span className="tabular">{pct(r.price_var_pct)}</span> },
                   { key: 'line_status', label: 'ผลลัพธ์', render: (r: any) => <Badge variant={lineStatusVariant(r.line_status)}>{r.line_status}</Badge> },
                 ]}
-                emptyText="ไม่มีบรรทัด"
+                emptyState={{ icon: ListChecks, title: 'ไม่มีบรรทัดสำหรับจับคู่' }}
               />
 
               {!m.payable && !m.override && (
@@ -189,8 +192,6 @@ function RunMatchTab() {
                     <Button variant="destructive" disabled={override.isPending || !overrideReason} onClick={() => override.mutate()}>
                       <Unlock className="size-4" /> {override.isPending ? 'กำลังบันทึก…' : 'อนุมัติทับ'}
                     </Button>
-                    {override.error && <Msg>{(override.error as Error).message}</Msg>}
-                    {override.data && <Msg ok>✅ อนุมัติทับแล้ว — จ่ายเงินได้</Msg>}
                   </CardContent>
                 </Card>
               )}
@@ -224,9 +225,11 @@ function ToleranceTab() {
         }),
       }),
     onSuccess: () => {
+      notifySuccess('บันทึกเกณฑ์แล้ว');
       setQtyPct(''); setPricePct(''); setAmountPct(''); setAmountAbs('');
       qc.invalidateQueries({ queryKey: ['match-tolerance'] });
     },
+    onError: (e) => notifyError((e as Error).message),
   });
 
   const t = q.data;
@@ -271,8 +274,6 @@ function ToleranceTab() {
           <Button disabled={save.isPending} onClick={() => save.mutate()}>
             <Save className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึกเกณฑ์'}
           </Button>
-          {save.error && <Msg>{(save.error as Error).message}</Msg>}
-          {save.isSuccess && <Msg ok>✅ บันทึกเกณฑ์แล้ว</Msg>}
         </CardContent>
       </Card>
     </div>

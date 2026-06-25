@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BellRing, Plus, Trash2, Play } from 'lucide-react';
+import { BellRing, Plus, Trash2, Play, History } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,17 +42,16 @@ function Rules() {
   const q = useQuery<{ rules: Rule[] }>({ queryKey: ['alert-rules'], queryFn: () => api('/api/alerts/rules') });
   const [name, setName] = useState(''); const [metric, setMetric] = useState(''); const [operator, setOperator] = useState('gte'); const [threshold, setThreshold] = useState('');
   const [channel, setChannel] = useState('notification'); const [targetRole, setTargetRole] = useState(''); const [targetTo, setTargetTo] = useState(''); const [severity, setSeverity] = useState('warning'); const [cooldown, setCooldown] = useState('12');
-  const [msg, setMsg] = useState('');
   const metrics = cat.data?.metrics ?? [];
   const create = useMutation({
     mutationFn: () => api('/api/alerts/rules', { method: 'POST', body: JSON.stringify({ name, metric: metric || metrics[0]?.key, operator, threshold: Number(threshold) || 0, channel, target_role: targetRole || undefined, target_to: targetTo || undefined, severity, cooldown_hours: Number(cooldown) || 0 }) }),
-    onSuccess: () => { setMsg(`✅ เพิ่มกฎ ${name}`); setName(''); setThreshold(''); qc.invalidateQueries({ queryKey: ['alert-rules'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`เพิ่มกฎ ${name}`); setName(''); setThreshold(''); qc.invalidateQueries({ queryKey: ['alert-rules'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const run = useMutation({
     mutationFn: () => api('/api/alerts/run', { method: 'POST' }),
-    onSuccess: (r: any) => { setMsg(`✅ ตรวจสอบแล้ว: แจ้งเตือน ${r.fired_count} · ระงับ (cooldown) ${r.suppressed}`); qc.invalidateQueries({ queryKey: ['alert-rules'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`ตรวจสอบแล้ว: แจ้งเตือน ${r.fired_count} · ระงับ (cooldown) ${r.suppressed}`); qc.invalidateQueries({ queryKey: ['alert-rules'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const toggle = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => api(`/api/alerts/rules/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }) });
   const remove = useMutation({ mutationFn: (id: number) => api(`/api/alerts/rules/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['alert-rules'] }) });
@@ -96,7 +96,6 @@ function Rules() {
           <div className="flex items-center gap-3">
             <Button disabled={!name || (!metric && !metrics.length) || create.isPending} onClick={() => create.mutate()}><Plus className="mr-1 h-4 w-4" />เพิ่มกฎ</Button>
             <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate()}><Play className="mr-1 h-4 w-4" />ตรวจสอบเดี๋ยวนี้</Button>
-            <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </div>
         </CardContent>
       </Card>
@@ -112,7 +111,7 @@ function Rules() {
             { key: 'active', label: 'สถานะ', render: (r) => <Button size="sm" variant="ghost" disabled={toggle.isPending} onClick={() => toggle.mutate({ id: r.id, active: !r.active })}><Badge variant={r.active ? 'success' : 'muted'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge></Button> },
             { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
-          emptyText="ยังไม่มีกฎแจ้งเตือน"
+          emptyState={{ icon: BellRing, title: 'ยังไม่มีกฎแจ้งเตือน', description: 'สร้างกฎจากแบบฟอร์มด้านบนเพื่อเริ่มเฝ้าดูตัวชี้วัดและส่งแจ้งเตือนเมื่อถึงเกณฑ์' }}
         />
       </StateView>
     </div>
@@ -134,7 +133,7 @@ function Events() {
           { key: 'severity', label: 'ระดับ', render: (r) => <Badge variant={r.severity === 'critical' ? 'destructive' : r.severity === 'warning' ? 'warning' : 'info'}>{r.severity}</Badge> },
           { key: 'channel', label: 'ช่องทาง', render: (r) => r.channel },
         ]}
-        emptyText="ยังไม่มีการแจ้งเตือน"
+        emptyState={{ icon: History, title: 'ยังไม่มีการแจ้งเตือน', description: 'เมื่อกฎเข้าเกณฑ์ ประวัติการแจ้งเตือนจะปรากฏที่นี่' }}
       />
     </StateView>
   );

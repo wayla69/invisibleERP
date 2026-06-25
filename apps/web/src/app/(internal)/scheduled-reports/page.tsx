@@ -2,12 +2,13 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Plus, Trash2, Play, RefreshCw } from 'lucide-react';
+import { CalendarClock, Plus, Trash2, Play, RefreshCw, History } from 'lucide-react';
 import { api } from '@/lib/api';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -38,23 +39,22 @@ function Subscriptions() {
   const cat = useQuery<Catalog>({ queryKey: ['report-types'], queryFn: () => api('/api/bi/report-types') });
   const q = useQuery<{ subscriptions: Subscription[] }>({ queryKey: ['bi-subscriptions'], queryFn: () => api('/api/bi/subscriptions') });
   const [name, setName] = useState(''); const [reportType, setReportType] = useState(''); const [frequency, setFrequency] = useState('daily'); const [email, setEmail] = useState('');
-  const [msg, setMsg] = useState('');
   const types = cat.data?.report_types ?? [];
 
   const create = useMutation({
     mutationFn: () => api('/api/bi/subscriptions', { method: 'POST', body: JSON.stringify({ name, report_type: reportType || types[0]?.key, frequency, recipients: email ? [{ email }] : [] }) }),
-    onSuccess: () => { setMsg(`✅ ตั้งรายงาน ${name}`); setName(''); setEmail(''); qc.invalidateQueries({ queryKey: ['bi-subscriptions'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`ตั้งรายงาน ${name}`); setName(''); setEmail(''); qc.invalidateQueries({ queryKey: ['bi-subscriptions'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const sweep = useMutation({
     mutationFn: () => api('/api/bi/subscriptions/run', { method: 'POST' }),
-    onSuccess: (r: any) => { setMsg(`✅ ส่งรายงานที่ถึงกำหนด: ${r.ran_count} ฉบับ`); qc.invalidateQueries({ queryKey: ['bi-subscriptions'] }); qc.invalidateQueries({ queryKey: ['bi-runs'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`ส่งรายงานที่ถึงกำหนด: ${r.ran_count} ฉบับ`); qc.invalidateQueries({ queryKey: ['bi-subscriptions'] }); qc.invalidateQueries({ queryKey: ['bi-runs'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const runNow = useMutation({
     mutationFn: (id: number) => api(`/api/bi/subscriptions/${id}/run`, { method: 'POST' }),
-    onSuccess: (r: any) => { setMsg(r.status === 'success' ? `✅ ส่งรายงานแล้ว (ผู้รับ ${r.delivered})` : `❌ ส่งไม่สำเร็จ: ${r.error ?? ''}`); qc.invalidateQueries({ queryKey: ['bi-runs'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { if (r.status === 'success') notifySuccess(`ส่งรายงานแล้ว (ผู้รับ ${r.delivered})`); else notifyError(`ส่งไม่สำเร็จ: ${r.error ?? ''}`); qc.invalidateQueries({ queryKey: ['bi-runs'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const remove = useMutation({ mutationFn: (id: number) => api(`/api/bi/subscriptions/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['bi-subscriptions'] }) });
 
@@ -82,7 +82,6 @@ function Subscriptions() {
           <div className="flex items-center gap-3">
             <Button disabled={!name || (!reportType && !types.length) || create.isPending} onClick={() => create.mutate()}><Plus className="mr-1 h-4 w-4" />ตั้งรายงาน</Button>
             <Button variant="outline" disabled={sweep.isPending} onClick={() => sweep.mutate()}><RefreshCw className="mr-1 h-4 w-4" />ส่งที่ถึงกำหนดเดี๋ยวนี้</Button>
-            <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </div>
         </CardContent>
       </Card>
@@ -99,7 +98,7 @@ function Subscriptions() {
             { key: 'run', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={runNow.isPending} onClick={() => runNow.mutate(r.id)} title="ส่งเดี๋ยวนี้"><Play className="h-4 w-4" /></Button> },
             { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
-          emptyText="ยังไม่มีรายงานที่ตั้งไว้"
+          emptyState={{ icon: CalendarClock, title: 'ยังไม่มีรายงานที่ตั้งไว้', description: 'ตั้งรายงานในแบบฟอร์มด้านบนเพื่อให้ระบบสร้างและส่งอัตโนมัติตามรอบ' }}
         />
       </StateView>
     </div>
@@ -121,7 +120,7 @@ function Runs() {
           { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'success' ? 'success' : 'destructive'}>{r.status === 'success' ? 'สำเร็จ' : 'ล้มเหลว'}</Badge> },
           { key: 'error', label: 'หมายเหตุ', render: (r) => r.error ?? '' },
         ]}
-        emptyText="ยังไม่มีประวัติการส่ง"
+        emptyState={{ icon: History, title: 'ยังไม่มีประวัติการส่ง', description: 'เมื่อรายงานถูกส่งตามรอบหรือส่งด้วยตนเอง ประวัติจะแสดงที่นี่' }}
       />
     </StateView>
   );

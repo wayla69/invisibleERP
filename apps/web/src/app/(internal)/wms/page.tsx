@@ -5,17 +5,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Boxes, MapPin, PackageCheck, Plus, Truck, Layers } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { statusVariant } from '@/components/ui';
 
 export default function WmsPage() {
   return (
@@ -52,10 +52,12 @@ function BinsTab() {
         method: 'POST',
         body: JSON.stringify({ bin_code: binCode, bin_type: binType || undefined, location_id: locationId || undefined }),
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      notifySuccess(`เพิ่มช่อง ${r.bin_code} แล้ว`);
       setBinCode(''); setBinType(''); setLocationId('');
       qc.invalidateQueries({ queryKey: ['wms-bins'] });
     },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const bins: any[] = q.data?.bins ?? [];
@@ -87,8 +89,6 @@ function BinsTab() {
               <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'เพิ่มช่อง'}
             </Button>
           </div>
-          {create.error && <Msg>{(create.error as Error).message}</Msg>}
-          {create.data && <Msg ok>✅ เพิ่มช่อง {create.data.bin_code} แล้ว</Msg>}
         </CardContent>
       </Card>
 
@@ -108,7 +108,7 @@ function BinsTab() {
                 { key: 'location_id', label: 'คลัง', render: (r: any) => r.location_id ?? '—' },
                 { key: 'active', label: 'สถานะ', render: (r: any) => <Badge variant={r.active !== false ? 'success' : 'muted'}>{r.active !== false ? 'Active' : 'Inactive'}</Badge> },
               ]}
-              emptyText="ยังไม่มีช่องเก็บ"
+              emptyState={{ icon: Boxes, title: 'ยังไม่มีช่องเก็บ', description: 'เพิ่มช่องเก็บ (bin) ด้านบนเพื่อเริ่มจัดผังคลังสินค้า' }}
             />
           </div>
         )}
@@ -131,6 +131,8 @@ function PutawayTab() {
         method: 'POST',
         body: JSON.stringify({ bin_code: binCode, item_id: itemId, qty: Number(qty), lot_no: lotNo || undefined, gr_no: grNo || undefined }),
       }),
+    onSuccess: (r) => notifySuccess(`${r.bin_code} · ${r.item_id} · คงเหลือ ${num(r.qty)}${r.duplicate ? ' (ซ้ำ — ไม่นับเพิ่ม)' : ''}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -164,8 +166,6 @@ function PutawayTab() {
         <Button disabled={mut.isPending || !binCode || !itemId || qty <= 0} onClick={() => mut.mutate()}>
           <PackageCheck className="size-4" /> {mut.isPending ? 'กำลังบันทึก…' : 'รับเข้าช่อง'}
         </Button>
-        {mut.error && <Msg>{(mut.error as Error).message}</Msg>}
-        {mut.data && <Msg ok>✅ {mut.data.bin_code} · {mut.data.item_id} · คงเหลือ {num(mut.data.qty)}{mut.data.duplicate ? ' (ซ้ำ — ไม่นับเพิ่ม)' : ''}</Msg>}
       </CardContent>
     </Card>
   );
@@ -182,6 +182,8 @@ function WaveTab() {
         method: 'POST',
         body: JSON.stringify({ orders: [{ source_type: sourceType, source_ref: sourceRef }] }),
       }),
+    onSuccess: (r) => notifySuccess(`${r.wave_no} · ${num(r.pick_count)} ใบหยิบ · ${num(r.lines)} บรรทัด`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -213,8 +215,6 @@ function WaveTab() {
         <Button disabled={mut.isPending || !sourceRef} onClick={() => mut.mutate()}>
           <Layers className="size-4" /> {mut.isPending ? 'กำลังสร้าง…' : 'สร้าง Wave'}
         </Button>
-        {mut.error && <Msg>{(mut.error as Error).message}</Msg>}
-        {mut.data && <Msg ok>✅ {mut.data.wave_no} · {num(mut.data.pick_count)} ใบหยิบ · {num(mut.data.lines)} บรรทัด</Msg>}
       </CardContent>
     </Card>
   );
@@ -226,6 +226,8 @@ function PackTab() {
 
   const mut = useMutation({
     mutationFn: () => api<{ shipment_no: string; status: string }>(`/api/wms/picks/${encodeURIComponent(pickNo)}/pack`, { method: 'POST' }),
+    onSuccess: (r) => notifySuccess(`${r.shipment_no} · ${r.status}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -242,12 +244,6 @@ function PackTab() {
         <Button disabled={mut.isPending || !pickNo} onClick={() => mut.mutate()}>
           <PackageCheck className="size-4" /> {mut.isPending ? 'กำลังแพ็ค…' : 'แพ็ค'}
         </Button>
-        {mut.error && <Msg>{(mut.error as Error).message}</Msg>}
-        {mut.data && (
-          <Msg ok>
-            ✅ {mut.data.shipment_no} · <Badge variant={statusVariant(mut.data.status)}>{mut.data.status}</Badge>
-          </Msg>
-        )}
       </CardContent>
     </Card>
   );
@@ -265,6 +261,8 @@ function ShipTab() {
         method: 'POST',
         body: JSON.stringify({ carrier, tracking_no: trackingNo }),
       }),
+    onSuccess: (r) => notifySuccess(`${r.shipment_no} · ${r.tracking_no} · ${r.status}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -290,12 +288,6 @@ function ShipTab() {
         <Button disabled={mut.isPending || !shipmentNo || !carrier || !trackingNo} onClick={() => mut.mutate()}>
           <Truck className="size-4" /> {mut.isPending ? 'กำลังจัดส่ง…' : 'จัดส่ง'}
         </Button>
-        {mut.error && <Msg>{(mut.error as Error).message}</Msg>}
-        {mut.data && (
-          <Msg ok>
-            ✅ {mut.data.shipment_no} · {mut.data.tracking_no} · <Badge variant={statusVariant(mut.data.status)}>{mut.data.status}</Badge>
-          </Msg>
-        )}
       </CardContent>
     </Card>
   );

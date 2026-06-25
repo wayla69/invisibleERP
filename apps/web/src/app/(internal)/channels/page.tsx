@@ -2,13 +2,15 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plug, RefreshCw, Search, Send } from 'lucide-react';
+import { Plug, PlugZap, PackageSearch, RefreshCw, SearchX, Send, ShoppingBag } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
+import { SearchInput } from '@/components/search-input';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -49,10 +51,7 @@ function Orders() {
       {q.data && (
         <div className="space-y-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาเลขที่ / อ้างอิง / แพลตฟอร์ม…" className="pl-9" aria-label="ค้นหาออเดอร์เดลิเวอรี" inputMode="search" enterKeyHint="search" />
-            </div>
+            <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาเลขที่ / อ้างอิง / แพลตฟอร์ม…" ariaLabel="ค้นหาออเดอร์เดลิเวอรี" count={`${filtered.length} รายการ`} />
             {statuses.length > 1 && (
               <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
                 <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(null)}>ทั้งหมด</Button>
@@ -69,7 +68,20 @@ function Orders() {
           { key: 'total', label: 'ยอด', align: 'right', render: (r: any) => baht(r.total) },
           { key: 'fulfillment_status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.fulfillment_status === 'completed' ? 'paid' : 'open')}>{r.fulfillment_status ?? '—'}</Badge> },
           { key: 'act', label: 'อัปเดตสถานะ', sortable: false, render: (r: any) => <select className={sel} value={r.fulfillment_status ?? ''} aria-label="อัปเดตสถานะ" onChange={(e) => setStatus.mutate({ no: r.order_no, status: e.target.value })}><option value="">—</option>{FS.map((f) => <option key={f} value={f}>{f}</option>)}</select> },
-        ]} emptyText={search || statusFilter ? 'ไม่พบออเดอร์ที่ตรงกับตัวกรอง' : 'ยังไม่มีออเดอร์เดลิเวอรี'} />
+        ]} emptyState={
+          search || statusFilter
+            ? {
+                icon: SearchX,
+                title: 'ไม่พบออเดอร์ที่ตรงกับตัวกรอง',
+                description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูออเดอร์ทั้งหมด',
+                action: (
+                  <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter(null); }}>
+                    ล้างตัวกรอง
+                  </Button>
+                ),
+              }
+            : { icon: ShoppingBag, title: 'ยังไม่มีออเดอร์เดลิเวอรี', description: 'ออเดอร์จาก Grab / LINE MAN / Foodpanda / Robinhood จะแสดงที่นี่เมื่อเชื่อมต่อแล้ว' }
+        } />
         </div>
       )}
     </StateView>
@@ -80,9 +92,8 @@ function Adapters() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['adapters'], queryFn: () => api('/api/channels/adapters') });
   const [f, setF] = useState({ platform: 'grab', store_ref: '' });
-  const [msg, setMsg] = useState('');
-  const save = useMutation({ mutationFn: () => api('/api/channels/adapters', { method: 'POST', body: JSON.stringify({ platform: f.platform, store_ref: f.store_ref || undefined }) }), onSuccess: () => { setMsg('✅ เชื่อมต่อแล้ว'); qc.invalidateQueries({ queryKey: ['adapters'] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const sync = useMutation({ mutationFn: (p: string) => api(`/api/channels/${p}/menu-sync`, { method: 'POST' }), onSuccess: (r: any) => setMsg(`✅ ซิงก์เมนู ${r.count} รายการไป ${r.platform}`), onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const save = useMutation({ mutationFn: () => api('/api/channels/adapters', { method: 'POST', body: JSON.stringify({ platform: f.platform, store_ref: f.store_ref || undefined }) }), onSuccess: () => { notifySuccess('เชื่อมต่อแล้ว'); qc.invalidateQueries({ queryKey: ['adapters'] }); }, onError: (e: any) => notifyError(e.message) });
+  const sync = useMutation({ mutationFn: (p: string) => api(`/api/channels/${p}/menu-sync`, { method: 'POST' }), onSuccess: (r: any) => notifySuccess(`ซิงก์เมนู ${r.count} รายการไป ${r.platform}`), onError: (e: any) => notifyError(e.message) });
   return (
     <div className="space-y-4">
       <Card className="gap-3 p-5">
@@ -92,14 +103,13 @@ function Adapters() {
           <Input className="max-w-[200px]" placeholder="Store ID ของแพลตฟอร์ม" value={f.store_ref} onChange={(e) => setF({ ...f, store_ref: e.target.value })} />
           <Button disabled={save.isPending} onClick={() => save.mutate()}><Plug className="size-4" /> เชื่อมต่อ</Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
       <StateView q={q}>
         {q.data && <DataTable rows={q.data.adapters} columns={[
           { key: 'platform', label: 'แพลตฟอร์ม' }, { key: 'store_ref', label: 'Store ID' },
           { key: 'enabled', label: 'เปิดใช้', render: (r: any) => r.enabled ? <Badge variant={statusVariant('paid')}>ใช้งาน</Badge> : '—' },
           { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={sync.isPending} onClick={() => sync.mutate(r.platform)}><Send className="size-4" /> ซิงก์เมนู</Button> },
-        ]} emptyText="ยังไม่มีการเชื่อมต่อ" />}
+        ]} emptyState={{ icon: PlugZap, title: 'ยังไม่มีการเชื่อมต่อ', description: 'เพิ่มการเชื่อมต่อแพลตฟอร์มด้านบนเพื่อเริ่มรับออเดอร์และซิงก์เมนู' }} />}
       </StateView>
     </div>
   );
@@ -108,8 +118,7 @@ function Adapters() {
 function Availability() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['availability'], queryFn: () => api('/api/pos/scale/availability') });
-  const [msg, setMsg] = useState('');
-  const recompute = useMutation({ mutationFn: () => api('/api/pos/scale/availability/recompute', { method: 'POST' }), onSuccess: (r: any) => { setMsg(`✅ ปรับปรุง ${r.count} รายการ`); qc.invalidateQueries({ queryKey: ['availability'] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const recompute = useMutation({ mutationFn: () => api('/api/pos/scale/availability/recompute', { method: 'POST' }), onSuccess: (r: any) => { notifySuccess(`ปรับปรุง ${r.count} รายการ`); qc.invalidateQueries({ queryKey: ['availability'] }); }, onError: (e: any) => notifyError(e.message) });
   const [search, setSearch] = useState('');
   const items: any[] = q.data?.items ?? [];
   const filteredItems = useMemo(() => { const t = search.trim().toLowerCase(); if (!t) return items; return items.filter((i) => [i.sku, i.name].some((v) => String(v ?? '').toLowerCase().includes(t))); }, [items, search]);
@@ -117,19 +126,28 @@ function Availability() {
     <div className="space-y-4">
       <Card className="flex-row items-center gap-3 p-5">
         <Button disabled={recompute.isPending} onClick={() => recompute.mutate()}><RefreshCw className={`size-4 ${recompute.isPending ? 'animate-spin' : ''}`} /> คำนวณ auto-86 ใหม่</Button>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
       <StateView q={q}>
         {q.data && (
           <div className="space-y-3">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา SKU / ชื่อ…" className="pl-9" aria-label="ค้นหาสินค้า" inputMode="search" enterKeyHint="search" />
-            </div>
+            <SearchInput value={search} onChange={setSearch} placeholder="ค้นหา SKU / ชื่อ…" ariaLabel="ค้นหาสินค้า" count={`${filteredItems.length} รายการ`} />
             <DataTable rows={filteredItems} rowKey={(r: any) => r.sku} columns={[
               { key: 'sku', label: 'SKU' }, { key: 'name', label: 'ชื่อ' },
               { key: 'is_available', label: 'พร้อมขาย', render: (r: any) => <Badge variant={statusVariant(r.is_available ? 'paid' : 'cancelled')}>{r.is_available ? 'พร้อม' : '86 (หมด)'}</Badge> },
-            ]} emptyText={search ? 'ไม่พบสินค้าที่ตรงกับการค้นหา' : 'ไม่มีสินค้าที่ติดตามสต๊อก'} />
+            ]} emptyState={
+              search
+                ? {
+                    icon: SearchX,
+                    title: 'ไม่พบสินค้าที่ตรงกับการค้นหา',
+                    description: 'ลองปรับคำค้นหา หรือล้างเพื่อดูสินค้าทั้งหมด',
+                    action: (
+                      <Button variant="outline" size="sm" onClick={() => setSearch('')}>
+                        ล้างตัวกรอง
+                      </Button>
+                    ),
+                  }
+                : { icon: PackageSearch, title: 'ไม่มีสินค้าที่ติดตามสต๊อก', description: 'สินค้าที่ผูกกับการติดตามสต๊อกจะแสดงสถานะความพร้อมขาย (86) ที่นี่' }
+            } />
           </div>
         )}
       </StateView>
