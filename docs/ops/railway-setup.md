@@ -62,6 +62,22 @@ the web origin via `CORS_ORIGINS`.
 ## 4. Wire the two origins together
 1. Set the api's `CORS_ORIGINS` to the **web** URL (comma-separated if more than one; never `*`).
 2. Redeploy **api** (CORS change) and **web** (so the baked `NEXT_PUBLIC_API_URL` is correct).
+3. **Make the session cookie usable across the two origins (required, or login silently bounces).**
+   The session lives in cookies the API sets (`ierp_token` httpOnly + `ierp_csrf` readable). By default
+   they are **host-only / `SameSite=Lax`**, so a cookie set on the *api* origin is invisible to the *web*
+   origin — login succeeds but the web app can't see the session and bounces straight back to `/login`.
+   Pick the option that matches your domains:
+   - **On the default `*.up.railway.app` URLs (recommended fix here): serve same-origin via the proxy.**
+     Those auto-URLs are each their **own** registrable domain (Public Suffix List) — cross-site **and**
+     unable to share a parent `Domain`, so cookie auth can't span them. Instead, on the **web** service set
+     `NEXT_PUBLIC_API_URL`=the **web's own** URL and `API_PROXY_TARGET`=the **api** URL, then redeploy web.
+     The browser now makes same-origin `/api/*` calls that Next forwards to the api ⇒ first-party cookie,
+     login sticks. No custom domain, no api change. (Both vars are build-time ⇒ a redeploy/rebuild applies them.)
+   - **With a shared custom domain — `app.example.com` + `api.example.com`:** keep the separate-origin
+     topology and set the **api** service's **`AUTH_COOKIE_DOMAIN=.example.com`**. They are *same-site*, so
+     `SameSite=Lax` still works; the web origin can read `ierp_csrf` and the api receives `ierp_token`.
+     For web/api on *different* registrable domains, also set **`AUTH_COOKIE_SAMESITE=None`** (auto-adds
+     `Secure`; HTTPS required). Redeploy **api** after setting these.
 
 ## 5. First login
 Open the **web** URL → log in with the seeded admin (`admin` / `admin123`) → you're forced to set a new
@@ -80,3 +96,4 @@ password (first-login control). Then provision your real tenant via signup or ad
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-06-23 | Platform | Initial Railway first-deploy runbook (monorepo config paths, env matrix, CORS/NEXT_PUBLIC build-order, CI deploy). |
+| 1.1 | 2026-06-25 | Platform | §4 step 3 — make the session cookie usable across the two origins (else login bounces back to `/login`). On `*.up.railway.app` auto-URLs (public-suffix ⇒ can't share a cookie): serve **same-origin** via `API_PROXY_TARGET` + `NEXT_PUBLIC_API_URL`=web URL. With a **shared custom domain**: set api `AUTH_COOKIE_DOMAIN` (+ `AUTH_COOKIE_SAMESITE=None` for cross-registrable-domain). |
