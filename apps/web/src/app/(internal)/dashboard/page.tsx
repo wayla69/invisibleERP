@@ -1,7 +1,7 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { Banknote, Gauge, Package, Receipt, ShoppingCart, TrendingUp } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Banknote, Gauge, Package, Receipt, RefreshCw, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -9,6 +9,8 @@ import { StatCard } from '@/components/stat-card';
 import { StateView } from '@/components/state-view';
 import { DataTable } from '@/components/data-table';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TrendAreaChart, SimpleBarChart } from '@/components/charts';
 import { statusVariant } from '@/components/ui';
@@ -27,11 +29,22 @@ interface Trend {
 }
 interface Widget { key: string; label: string; label_en: string; unit: string; value: number }
 
+/** Consistent loading/error/empty placeholder for the chart cards (whose queries aren't gated by StateView). */
+function ChartState({ q, height, empty }: { q: { isLoading: boolean; error: unknown }; height: number; empty: string }) {
+  const msg = q.isLoading ? 'กำลังโหลด…' : q.error ? 'โหลดข้อมูลไม่สำเร็จ' : empty;
+  return <div className="grid place-items-center text-sm text-muted-foreground" style={{ height }}>{msg}</div>;
+}
+
 export default function DashboardPage() {
-  const q = useQuery<Dash>({ queryKey: ['dashboard'], queryFn: () => api('/api/dashboard') });
+  const qc = useQueryClient();
+  // "เรียลไทม์": refresh the headline figures every 60s (and on demand) so the overview stays live.
+  const q = useQuery<Dash>({ queryKey: ['dashboard'], queryFn: () => api('/api/dashboard'), refetchInterval: 60_000 });
   const t = useQuery<Trend>({ queryKey: ['dashboard-trend'], queryFn: () => api('/api/dashboard/sales-trend?days=14') });
   const mine = useQuery<{ role: string; configured: boolean; widgets: Widget[] }>({ queryKey: ['dashboard-mine'], queryFn: () => api('/api/dashboard/layout/me') });
   const d = q.data;
+
+  const refreshing = q.isFetching || t.isFetching || mine.isFetching;
+  const refresh = () => { for (const k of ['dashboard', 'dashboard-trend', 'dashboard-mine']) qc.invalidateQueries({ queryKey: [k] }); };
 
   const trendData = (t.data?.trend ?? []).map((r) => ({ ...r, label: thaiDate(r.date) }));
   const topItems = (d?.top_items_today ?? []).slice(0, 6).map((r) => ({ name: r.Item_Description, revenue: r.revenue }));
@@ -39,8 +52,22 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <PageHeader title="แดชบอร์ด" description="ภาพรวมธุรกิจแบบเรียลไทม์" />
-      {myWidgets.length > 0 && (
+      <PageHeader
+        title="แดชบอร์ด"
+        description="ภาพรวมธุรกิจแบบเรียลไทม์"
+        actions={
+          <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} aria-label="รีเฟรชข้อมูล">
+            <RefreshCw className={`size-4 ${refreshing ? 'animate-spin' : ''}`} /> รีเฟรช
+          </Button>
+        }
+      />
+
+      {/* Role-based KPI band — skeleton while it loads so it doesn't pop in under the headline figures */}
+      {mine.isLoading ? (
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+        </div>
+      ) : myWidgets.length > 0 ? (
         <div className="mb-6">
           <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ตัวชี้วัดตามบทบาท (Your role KPIs)</h3>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -49,7 +76,8 @@ export default function DashboardPage() {
             ))}
           </div>
         </div>
-      )}
+      ) : null}
+
       <StateView q={q}>
         {d && (
           <div className="space-y-6">
@@ -66,10 +94,12 @@ export default function DashboardPage() {
                   <CardTitle className="text-base">แนวโน้มยอดขาย (14 วัน)</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {trendData.length ? (
-                    <TrendAreaChart data={trendData} xKey="label" yKey="sales" fmt={(v) => baht(v)} />
+                  {trendData.length && !t.isLoading && !t.error ? (
+                    <div role="img" aria-label="กราฟแนวโน้มยอดขายย้อนหลัง 14 วัน">
+                      <TrendAreaChart data={trendData} xKey="label" yKey="sales" fmt={(v) => baht(v)} />
+                    </div>
                   ) : (
-                    <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">ยังไม่มีข้อมูลยอดขาย</div>
+                    <ChartState q={t} height={260} empty="ยังไม่มีข้อมูลยอดขาย" />
                   )}
                 </CardContent>
               </Card>
@@ -79,7 +109,9 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   {topItems.length ? (
-                    <SimpleBarChart data={topItems} xKey="name" yKey="revenue" color="var(--chart-2)" fmt={(v) => baht(v)} />
+                    <div role="img" aria-label="กราฟสินค้าขายดีวันนี้ตามรายได้">
+                      <SimpleBarChart data={topItems} xKey="name" yKey="revenue" color="var(--chart-2)" fmt={(v) => baht(v)} />
+                    </div>
                   ) : (
                     <div className="grid h-[260px] place-items-center text-sm text-muted-foreground">ยังไม่มียอดขายวันนี้</div>
                   )}
@@ -92,10 +124,12 @@ export default function DashboardPage() {
                 <h3 className="mb-3 text-sm font-semibold text-muted-foreground">สินค้าขายดีวันนี้</h3>
                 <DataTable
                   rows={d.top_items_today}
+                  rowKey={(r, i) => `${r.Item_Description}-${i}`}
+                  emptyText="ยังไม่มียอดขายวันนี้"
                   columns={[
                     { key: 'Item_Description', label: 'สินค้า' },
                     { key: 'qty', label: 'จำนวน', align: 'right', render: (r) => num(r.qty) },
-                    { key: 'revenue', label: 'รายได้', align: 'right', render: (r) => baht(r.revenue) },
+                    { key: 'revenue', label: 'รายได้', align: 'right', render: (r) => <span className="tabular">{baht(r.revenue)}</span> },
                   ]}
                 />
               </div>
@@ -103,10 +137,12 @@ export default function DashboardPage() {
                 <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ออเดอร์ล่าสุด</h3>
                 <DataTable
                   rows={d.recent_orders}
+                  rowKey={(r) => r.Sale_No}
+                  emptyText="ยังไม่มีออเดอร์"
                   columns={[
                     { key: 'Sale_No', label: 'เลขที่' },
                     { key: 'Sale_Date', label: 'วันที่', render: (r) => thaiDate(r.Sale_Date) },
-                    { key: 'Total', label: 'ยอด', align: 'right', render: (r) => baht(r.Total) },
+                    { key: 'Total', label: 'ยอด', align: 'right', render: (r) => <span className="tabular">{baht(r.Total)}</span> },
                     { key: 'Payment_Method', label: 'ชำระ' },
                     { key: 'Status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
                   ]}

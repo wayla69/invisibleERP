@@ -18,9 +18,17 @@ replenishment, anomaly detection, and the AI assistant.
 1. Go to the dashboard for your role.
 2. Review the KPI cards and charts; drill into a figure for detail.
 
+The operational dashboard (`/dashboard`) shows headline KPIs (sales today / this
+month, low stock, AP outstanding), a **14-day sales trend**, **top sellers today**,
+and **recent orders**. It **auto-refreshes every 60 seconds** so the figures stay
+live; a **รีเฟรช** button in the header forces an immediate refresh (its icon spins
+while loading). The role-KPI strip and charts show their own loading / "ยังไม่มี
+ข้อมูล" / "โหลดข้อมูลไม่สำเร็จ" states, and the layout reflows to one column on
+phones/tablets.
+
 **Expected result:** A live summary of business performance.
 
-[screenshot: executive dashboard]
+[screenshot: operational dashboard with KPIs, 14-day trend and refresh]
 
 ---
 
