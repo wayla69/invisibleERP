@@ -17,6 +17,7 @@
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "onboarding": "tsx src/onboarding.ts",
     "opening-balances": "tsx src/opening-balances.ts",
+    "basics": "tsx src/basics.ts",
     "payroll": "tsx src/payroll.ts",
     "manufacturing": "tsx src/manufacturing.ts",
     "projects": "tsx src/projects.ts",

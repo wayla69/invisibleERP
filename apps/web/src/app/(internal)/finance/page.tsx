@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Banknote, CalendarClock, Download, HandCoins, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
+import { Banknote, BellRing, CalendarClock, Download, HandCoins, PlayCircle, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -221,6 +221,8 @@ export default function FinancePage() {
           </div>
         )}
 
+        <CollectionsSection />
+
         <AgingSection />
       </div>
 
@@ -271,6 +273,111 @@ function AgingSection() {
       </div>
       <StateView q={arA}>{row('อายุลูกหนี้ (AR)', arA.data)}</StateView>
       <StateView q={apA}>{row('อายุเจ้าหนี้ (AP)', apA.data)}</StateView>
+    </div>
+  );
+}
+
+// ── AR collections worklist: aging + dunning stage + record action + automated sweep ──
+const DUNNING_STAGES = ['reminder', 'first_notice', 'second_notice', 'final_notice', 'legal'] as const;
+const STAGE_LABEL: Record<string, string> = {
+  reminder: 'เตือนความจำ', first_notice: 'แจ้งเตือนครั้งที่ 1', second_notice: 'แจ้งเตือนครั้งที่ 2',
+  final_notice: 'แจ้งเตือนครั้งสุดท้าย', legal: 'ดำเนินคดี',
+};
+const stageBadge = (stage: string | null): 'secondary' | 'warning' | 'destructive' =>
+  stage === 'legal' || stage === 'final_notice' ? 'destructive' : stage === 'second_notice' ? 'warning' : 'secondary';
+
+function CollectionsSection() {
+  const qc = useQueryClient();
+  const wl = useQuery<any>({ queryKey: ['ar-collections'], queryFn: () => api('/api/finance/ar/collections?overdue_only=1') });
+  const refresh = () => qc.invalidateQueries({ queryKey: ['ar-collections'] });
+
+  const [dun, setDun] = useState<any | null>(null); // the worklist row being dunned
+  const [form, setForm] = useState<any>({ stage: 'reminder', channel: 'email', promise_to_pay_date: '', notes: '' });
+  const [msg, setMsg] = useState('');
+  const record = useMutation({
+    mutationFn: () => api(`/api/finance/ar/collections/${dun.invoice_no}/dunning`, {
+      method: 'POST',
+      body: JSON.stringify({ stage: form.stage, channel: form.channel, promise_to_pay_date: form.promise_to_pay_date || undefined, notes: form.notes || undefined }),
+    }),
+    onSuccess: (r: any) => {
+      const note = r.message_status === 'sent' ? ` — ส่งแจ้งเตือนแล้ว (${r.recipient ?? r.channel})`
+        : r.message_status === 'manual' ? ` — บันทึกการติดต่อ (${r.channel})`
+        : r.message_status === 'failed' ? ' — แต่ส่งแจ้งเตือนไม่สำเร็จ (ไม่มีช่องทางติดต่อ)' : '';
+      setMsg(`✅ บันทึกการทวงถาม ${r.dunning_no}${note}`); refresh(); setDun(null);
+    },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+
+  const [sweepMsg, setSweepMsg] = useState('');
+  const sweep = useMutation({
+    mutationFn: () => api('/api/finance/ar/collections/sweep', { method: 'POST' }),
+    onSuccess: (r: any) => { setSweepMsg(`✅ รันการทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการ`); refresh(); },
+    onError: (e: any) => setSweepMsg(`❌ ${e.message}`),
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold">ติดตามหนี้ค้างชำระ (Collections)</h2>
+        <Button variant="outline" size="sm" disabled={sweep.isPending} onClick={() => { setSweepMsg(''); sweep.mutate(); }}>
+          <PlayCircle className={`size-4 ${sweep.isPending ? 'animate-spin' : ''}`} /> ทวงถามอัตโนมัติ
+        </Button>
+      </div>
+      {sweepMsg && <Msg ok={sweepMsg.startsWith('✅')}>{sweepMsg}</Msg>}
+      <StateView q={wl}>
+        {wl.data && (
+          <DataTable
+            rows={wl.data.rows}
+            columns={[
+              { key: 'invoice_no', label: 'ใบแจ้งหนี้' },
+              { key: 'party', label: 'ลูกค้า' },
+              { key: 'outstanding', label: 'คงค้าง', align: 'right', render: (r: any) => <span className="tabular">{baht(r.outstanding)}</span> },
+              { key: 'days_overdue', label: 'เกินกำหนด (วัน)', align: 'right', render: (r: any) => <span className={`tabular ${r.days_overdue > 90 ? 'text-red-600' : ''}`}>{r.days_overdue}</span> },
+              { key: 'current_stage', label: 'ขั้นปัจจุบัน', render: (r: any) => r.current_stage ? <Badge variant={stageBadge(r.current_stage)}>{STAGE_LABEL[r.current_stage]}</Badge> : <span className="text-muted-foreground">—</span> },
+              { key: 'recommended_stage', label: 'แนะนำ', render: (r: any) => r.recommended_stage ? <Badge variant={r.escalate ? 'destructive' : 'outline'}>{STAGE_LABEL[r.recommended_stage]}</Badge> : <span className="text-muted-foreground">—</span> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => (
+                <Button variant="ghost" size="sm" onClick={() => { setForm({ stage: r.recommended_stage ?? 'reminder', channel: 'email', promise_to_pay_date: '', notes: '' }); setMsg(''); setDun(r); }}>
+                  <BellRing className="size-4" /> ทวงถาม
+                </Button>
+              ) },
+            ]}
+          />
+        )}
+      </StateView>
+
+      {/* Record-dunning dialog */}
+      <Dialog open={!!dun} onOpenChange={(o) => { if (!o) { setDun(null); setMsg(''); } }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>บันทึกการทวงถาม {dun?.invoice_no}</DialogTitle></DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="dun-stage">ขั้นการทวงถาม</Label>
+              <select id="dun-stage" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={form.stage} onChange={(e) => setForm((f: any) => ({ ...f, stage: e.target.value }))}>
+                {DUNNING_STAGES.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="dun-channel">ช่องทาง</Label>
+              <select id="dun-channel" className="h-9 rounded-md border bg-transparent px-3 text-sm" value={form.channel} onChange={(e) => setForm((f: any) => ({ ...f, channel: e.target.value }))}>
+                <option value="email">อีเมล</option><option value="phone">โทรศัพท์</option><option value="letter">จดหมาย</option><option value="sms">SMS</option>
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="dun-ptp">นัดชำระ (ถ้ามี)</Label>
+              <Input id="dun-ptp" type="date" value={form.promise_to_pay_date} onChange={(e) => setForm((f: any) => ({ ...f, promise_to_pay_date: e.target.value }))} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="dun-notes">บันทึก</Label>
+              <Input id="dun-notes" value={form.notes} onChange={(e) => setForm((f: any) => ({ ...f, notes: e.target.value }))} />
+            </div>
+            {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">ยกเลิก</Button></DialogClose>
+            <Button onClick={() => { setMsg(''); record.mutate(); }} disabled={record.isPending}>บันทึก</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

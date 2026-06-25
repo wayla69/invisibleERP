@@ -1,4 +1,4 @@
--- 0110_perf_indexes — Pre-production performance hardening (NASDAQ readiness audit).
+-- 0114_perf_indexes — Pre-production performance hardening (NASDAQ readiness audit).
 -- Adds indexes on financial/inventory hot-path join keys, tenant-scoped date ranges, and FK children
 -- that were previously unindexed (full table scans under peak load). All idempotent (IF NOT EXISTS).
 -- No data change, append-only DDL; mirrored in the Drizzle schema (ledger/payments/sales/inventory/procurement).

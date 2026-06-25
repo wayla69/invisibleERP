@@ -11,7 +11,7 @@ import { ymd, monthStart, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
-export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; idempotency_key?: string }
+export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
 
 @Injectable()
 export class FinanceService {
@@ -203,10 +203,11 @@ export class FinanceService {
   // POST /api/finance/ap/transactions — AP-
   async createApTxn(dto: ApTxnDto, user: JwtUser) {
     const db = this.db as any;
-    const tenantId = user.tenantId ?? null; // input VAT is per shop (ภ.พ.30) → tenant-scoped like output VAT
-    // Maker-checker: a bill cannot be booked pre-paid in one call — that would disburse cash with no
-    // second-person approval (bypassing the AP-PAY control). Disbursement must go through requestApPayment
-    // → approveApPayment. Bills are always created Unpaid here.
+    // input VAT is per shop (ภ.พ.30) → tenant-scoped. An internal caller (e.g. ESS reimbursement, EAM
+    // maintenance) may pin the AP to the source document's tenant via dto.tenant_id.
+    const tenantId = dto.tenant_id ?? user.tenantId ?? null;
+    // Maker-checker (EXP-06): a bill cannot be booked pre-paid in one call — that would disburse cash with no
+    // second-person approval. Disbursement must go through requestApPayment → approveApPayment (always Unpaid here).
     if (n(dto.paid_amount) > 0) {
       throw new BadRequestException({ code: 'AP_PREPAID_BLOCKED', message: 'A bill cannot be created pre-paid; record the payment via the approval flow', messageTh: 'ห้ามสร้างบิลพร้อมจ่าย ต้องบันทึกการจ่ายผ่านการอนุมัติ' });
     }
@@ -228,9 +229,9 @@ export class FinanceService {
       invoiceNo: dto.invoice_no ?? null, invoiceDate: dto.invoice_date ?? null, dueDate: dto.due_date ?? null,
       amount: String(apGross), vatAmount: fx(vat, 2), paidAmount: String(paid), status, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
     });
-    // GL: record expense + input VAT + payable (Dr 5100/1200 net / Dr 2100 vat / Cr 2000 gross). Zero VAT leg auto-drops.
+    // GL: record expense + input VAT + payable (Dr 5100/1200/override net / Dr 2100 vat / Cr 2000 gross). Zero VAT leg auto-drops.
     if (this.ledger && apGross > 0) {
-      const expenseAccount = (dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100';
+      const expenseAccount = dto.expense_account ?? ((dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100');
       await this.ledger.postEntry({
         date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId,
         memo: `AP bill ${txnNo}${dto.vendor_name ? ' ' + dto.vendor_name : ''}`, createdBy: user.username,

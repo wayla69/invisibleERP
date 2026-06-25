@@ -1,4 +1,4 @@
--- 0112 — ITGC-AC-14: field-level before/after change log for financially-significant tables.
+-- 0116 — ITGC-AC-14: field-level before/after change log for financially-significant tables.
 -- The central audit_log (0062) records WHO/WHEN/IP/action/status for every mutating request, but not the
 -- field-level OLD→NEW values. This adds a DB-trigger-driven change log that captures the actual row images
 -- (old_value / new_value jsonb + changed_columns) on every INSERT/UPDATE/DELETE of the core financial tables —

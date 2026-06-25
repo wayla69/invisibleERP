@@ -340,7 +340,7 @@ async function main() {
   ok('ITGC-AC-10: audit_log DELETE blocked by DB trigger (append-only)', deleteBlocked && after === before, `blocked=${deleteBlocked} rows=${after}`);
 
   // ════════════════════ ITGC-AC-14 — field-level before/after change log (financial tables) ════════════════════
-  // The DB triggers (0112) capture OLD→NEW row images on the financial tables. The AP-PAY flow above mutated
+  // The DB triggers (0116) capture OLD→NEW row images on the financial tables. The AP-PAY flow above mutated
   // ap_transactions through the app (apclerk created the bill Unpaid; fincon's approval set it Paid), so the
   // change log must hold both images with the correct actor + changed columns — captured at the DB layer.
   const apUpd = ((await pg.query(`SELECT actor, old_value->>'status' os, new_value->>'status' ns, changed_columns FROM data_change_log WHERE table_name='ap_transactions' AND op='UPDATE' AND new_value->>'txn_no'='${apNo}' ORDER BY id DESC LIMIT 1`)).rows as any[])[0];

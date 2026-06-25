@@ -32,7 +32,7 @@ Verification gates re-run green after changes: `@ierp/parity writeflow`, `@ierp/
 | 2.7 | Auto-vacuum / analyze / reindex plan for production peak load | ✅ **ADDED** (`tools/ops/sql/maintenance.sql`) |
 | 2.8 | N+1: AR sync, journal-line list, consolidation, costing-on-issue, anomaly report | ⚠️ FLAGGED (recommended batch refactors — see below) |
 
-All new indexes are in a single idempotent migration `apps/api/drizzle/0110_perf_indexes.sql` and mirrored in
+All new indexes are in a single idempotent migration `apps/api/drizzle/0114_perf_indexes.sql` and mirrored in
 the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to apply cleanly on PGlite.
 
 ### Pillar 3 — Strict SOX Compliance & Internal Control
@@ -46,7 +46,7 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
 | 3.6 | AR receipt `paidAmount` — unlocked read-modify-write (lost-update race) | ✅ **FIXED** — `FOR UPDATE` + recompute |
 | 3.7 | AP payment `paidAmount` — unlocked read-modify-write (lost-update race) | ✅ **FIXED** — `FOR UPDATE` + recompute |
 | 3.8 | Returns restock — inventory add not row-locked | ✅ **FIXED** — `FOR UPDATE` |
-| 3.9 | AP disbursement (`payAp`) has no maker-checker / second-person approval | ✅ **FIXED** — request (`creditors`) → approve (`approvals`/`gl_close`), requester ≠ approver (EXP-05) |
+| 3.9 | AP disbursement (`payAp`) has no maker-checker / second-person approval | ✅ **FIXED** — request (`creditors`) → approve (`approvals`/`gl_close`), requester ≠ approver (EXP-06) |
 | 3.10 | AP bill can be booked pre-paid in one call (`createApTxn`, `paid_amount>0`) | ✅ **FIXED** — blocked (`AP_PREPAID_BLOCKED`) |
 | 3.11 | Central `audit_log` records no old-value / new-value (before/after image) | ✅ **FIXED** — field-level change log via DB triggers (ITGC-AC-14) |
 
@@ -73,7 +73,7 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
 - `returns/returns.service.ts` — restock read now `FOR UPDATE`, matching the deduction path.
 
 **Performance — schema + migration**
-- `database/schema/{ledger,payments,sales,inventory,procurement}.ts` + `drizzle/0110_perf_indexes.sql` —
+- `database/schema/{ledger,payments,sales,inventory,procurement}.ts` + `drizzle/0114_perf_indexes.sql` —
   24 indexes on GL/POS/payment/inventory/procurement hot-path join keys, tenant-scoped date ranges, and FK
   children. `tools/ops/sql/maintenance.sql` — per-table autovacuum tuning + pg_cron analyze/reindex + bloat query.
 
@@ -84,17 +84,17 @@ the Drizzle schema (`ledger/payments/sales/inventory/procurement`). Verified to 
 - `qr/[token]/page.tsx` — `doBill()` now surfaces API errors instead of swallowing them.
 
 ## Implemented after the initial pass
-- **AP disbursement maker-checker (3.9 / 3.10 — control EXP-05).** AP payment is now a two-step segregated
+- **AP disbursement maker-checker (3.9 / 3.10 — control EXP-06).** AP payment is now a two-step segregated
   flow: `PATCH /api/finance/ap/transactions/{no}/pay` (maker, `creditors`) records a `PendingApproval` request
   with **no cash/GL effect**; `POST /api/finance/ap/payments/{no}/approve` (checker, `approvals`/`gl_close`)
   by a **different** user moves `paid_amount` (under `FOR UPDATE`) and posts the cash GL — requester ≠ approver
   enforced even for Admin (`SOD_VIOLATION`). Pre-paid bill creation blocked (`AP_PREPAID_BLOCKED`).
-  New `ap_payments` table (migration 0111, RLS) + pending queue + web approval UI. RCM **EXP-05** added
+  New `ap_payments` table (migration 0115, RLS) + pending queue + web approval UI. RCM **EXP-06** added
   (`build_rcm.py`, xlsx regenerated); ToE re-performed by `cutover/compliance.ts` (8 checks); functional
   flow in `parity/writeflow.ts` and `cutover/match.ts`; narrative/user-manual/UAT updated.
 
 ## Implemented in a follow-up pass
-- **Audit before/after capture (3.11 — control ITGC-AC-14).** DB triggers (`log_data_change`, migration 0112)
+- **Audit before/after capture (3.11 — control ITGC-AC-14).** DB triggers (`log_data_change`, migration 0116)
   capture `old_value`/`new_value` (jsonb) + `changed_columns` + actor (`app.actor` GUC) on every
   INSERT/UPDATE/DELETE of the core financial tables (`journal_entries`, `ap_transactions`, `ap_payments`,
   `ar_invoices`, `ar_receipts`, `payments`, `payment_refunds`) — at the DB layer, append-only
@@ -117,7 +117,7 @@ _No outstanding audit findings remain from this pass._
 ## Sign-off
 **Production-ready.** All findings from this four-pillar audit are remediated and verified:
 - **Data integrity** — AR/AP lost-update races and the returns restock race fixed with row locks; AP
-  disbursement maker-checker (EXP-05) and field-level change log (ITGC-AC-14) implemented and ToE-tested.
+  disbursement maker-checker (EXP-06) and field-level change log (ITGC-AC-14) implemented and ToE-tested.
 - **Performance** — 24 hot-path indexes + autovacuum/maintenance plan; all five N+1 read-path loops batched.
 - **Controls** — RCM regenerated (68 controls); compliance ToE harness green (68/68); narratives, user manual,
   UAT, and traceability matrix reconciled.
@@ -132,4 +132,4 @@ Verification gates green: parity `writeflow`/`analytics`; cutover `compliance` (
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-06-24 | Pre-production audit | Initial four-pillar gate-keeping audit; concurrency, indexing, maintenance, and double-submit fixes. |
-| 2026-06-24 | Pre-production audit | Follow-up: AP disbursement maker-checker (EXP-05); field-level change log (ITGC-AC-14); N+1 batch refactors (2.8); fleet-wide table-row double-submit guards (4.6). All findings remediated — production-ready sign-off. |
+| 2026-06-24 | Pre-production audit | Follow-up: AP disbursement maker-checker (EXP-06); field-level change log (ITGC-AC-14); N+1 batch refactors (2.8); fleet-wide table-row double-submit guards (4.6). All findings remediated — production-ready sign-off. |

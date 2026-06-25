@@ -8,7 +8,7 @@ This chapter is for **accountants** — *GlAccountant*, *FinancialController* an
 year-end close, multi-ledger reporting, and fixed assets.
 
 **Main screen:** `/accounting` — tabs include Trial Balance, Journal, Pending
-journal entries, Income Statement, Balance Sheet and Opening Balances.
+journal entries, Income Statement, Balance Sheet, Cash Flow and Opening Balances.
 
 ---
 
@@ -92,12 +92,37 @@ is recorded.
 | **Trial Balance** (**งบทดลอง**) | Trial Balance | Every account's debit/credit balance |
 | **Income Statement / P&L** (**งบกำไรขาดทุน**) | Income Statement | Revenue − Expense = Net Income, for a date range |
 | **Balance Sheet** (**งบดุล**) | Balance Sheet | Assets = Liabilities + Equity, as of a date |
+| **Statement of Cash Flows** (**งบกระแสเงินสด**) | Cash Flow | How cash moved over a date range — operating, investing, financing |
 
 To run a report: open the relevant tab, set the **period / date range** (and cost
 centre or ledger if needed), and view or export it.
 
 **Expected result:** The statement is produced from all **posted** entries (drafts
 are excluded).
+
+### Statement of Cash Flows (indirect method)
+
+The cash flow statement is the **third primary financial statement** (alongside the
+income statement and balance sheet). It explains how the cash balance changed over a
+period, in three sections:
+
+- **Operating** — starts from **net income**, then adds back non-cash charges (e.g.
+  **depreciation**) and the movement in working capital (receivables, inventory,
+  payables, accruals).
+- **Investing** — cash spent on / received from **fixed assets**.
+- **Financing** — owner **capital** contributions and **dividends**.
+
+1. Go to **Accounting** (`/accounting`) → **Cash Flow** tab.
+2. Set the **From / To** date range (and ledger if needed) and run it.
+
+**Expected result:** The statement shows each section's subtotal, the **net change
+in cash**, and the **beginning** and **ending** cash balances. It is built from the
+same posted GL data as the other statements (no separate data entry), and **year-end
+closing entries are excluded** so they don't distort the period.
+
+> **Note — it always ties out:** the three sections together equal the change in the
+> cash accounts (1000 / 1010 / 1020). The response carries a `reconciled` flag; if it
+> ever shows `false`, an account is mis-classified — raise it with finance.
 
 ---
 
@@ -186,6 +211,43 @@ posted.
 > record an asset's location or assigned holder during a physical asset count.
 
 [screenshot: asset register with depreciation schedule]
+
+---
+
+## 7. Asset maintenance (EAM)
+
+**API base:** `/api/eam` · **Required permission:** `exec` / `warehouse` / `creditors`.
+
+Keep equipment running with maintenance **work orders**, **preventive-maintenance
+(PM) schedules**, and **meter readings** — all tied to the fixed-asset register.
+
+### Raise & complete a work order
+
+1. Create a work order against an asset (`POST /api/eam/work-orders`): choose the
+   **type** (corrective / preventive / inspection), priority, description, and an
+   optional **vendor** and cost estimate.
+2. Progress it: **open → in_progress → completed** (or **cancelled**). An
+   out-of-order move is rejected (`BAD_TRANSITION`).
+3. On **completion**, enter the **actual cost**, downtime and vendor.
+
+**Expected result:** If a vendor and cost are given, the maintenance spend posts as
+an **AP payable** (`Dr 5710 Repairs & Maintenance / Cr 2000`), so it shows in AP
+aging and is paid through the normal AP flow. In-house work (no vendor) just records
+the cost.
+
+### Preventive maintenance & meters
+
+1. Create a **PM schedule** (`POST /api/eam/pm-schedules`): a cadence by **time**
+   (`interval_days`) and/or by **meter** (`meter_interval`).
+2. Record **meter readings** as equipment is used
+   (`POST /api/eam/assets/{assetNo}/meter`).
+3. Run the **PM sweep** (`POST /api/eam/pm/run`) — or schedule it daily by creating a
+   **Generate due preventive maintenance** (`eam_pm_generate`) job under Scheduled
+   reports.
+
+**Expected result:** The sweep raises a preventive work order for every due
+schedule (time elapsed or meter overrun) and rolls the schedule forward. It is
+**idempotent** — a schedule with an open generated work order isn't raised again.
 
 ---
 

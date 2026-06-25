@@ -36,6 +36,25 @@ export const arReceipts = pgTable('ar_receipts', {
   createdAt: timestamp('created_at', { withTimezone: true }),
 });
 
+// AR collections / dunning log — one row per dunning action taken on an open invoice. The collections
+// worklist derives current stage from the latest row; the history is the audit trail for the control.
+export const arDunningLog = pgTable('ar_dunning_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  dunningNo: text('dunning_no').notNull().unique(), // DUN-
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // RLS — the customer tenant
+  invoiceNo: text('invoice_no').notNull(),
+  stage: text('stage').notNull(), // reminder | first_notice | second_notice | final_notice | legal
+  channel: text('channel').default('email'), // email | phone | letter | sms
+  daysOverdue: bigint('days_overdue', { mode: 'number' }), // snapshot at action time
+  outstanding: numeric('outstanding', { precision: 14, scale: 2 }), // snapshot at action time
+  promiseToPayDate: date('promise_to_pay_date'), // customer commitment, if any
+  notes: text('notes'),
+  messageStatus: text('message_status'),   // delivery outcome of the dunning notice: sent | failed | manual | not_sent
+  messageRecipient: text('message_recipient'), // the email/phone/LINE id the notice was sent to
+  actionedBy: text('actioned_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 export const apTransactions = pgTable('ap_transactions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   txnNo: text('txn_no').notNull().unique(), // AP-
@@ -61,7 +80,7 @@ export const apTransactions = pgTable('ap_transactions', {
 
 // AP disbursement maker-checker (AP-PAY): a vendor payment is REQUESTED by a `creditors` holder (PendingApproval,
 // no cash/GL effect) and APPROVED by a DIFFERENT user (approval authority) — only then does the bill's
-// paid_amount move and the cash-disbursement GL post. Mirrors GL-05 (manual JE maker-checker). See 0111.
+// paid_amount move and the cash-disbursement GL post. Mirrors GL-05 (manual JE maker-checker). See 0115.
 export const apPayments = pgTable('ap_payments', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   paymentNo: text('payment_no').notNull().unique(), // APP-YYYYMMDD-NNN

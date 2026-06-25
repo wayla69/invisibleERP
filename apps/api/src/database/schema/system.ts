@@ -103,7 +103,7 @@ export const auditLog = pgTable(
   }),
 );
 
-// ITGC-AC-14 — field-level before/after change log (see migration 0112). Populated by DB triggers on the
+// ITGC-AC-14 — field-level before/after change log (see migration 0116). Populated by DB triggers on the
 // core financial tables; append-only. `tenant_ref` (not `tenant_id`) intentionally opts out of the RLS loop —
 // reads are admin-gated and tenant-scoped in the audit-viewer service. App code never writes this directly.
 export const dataChangeLog = pgTable('data_change_log', {

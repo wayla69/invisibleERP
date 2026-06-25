@@ -1,4 +1,4 @@
--- 0111 — AP disbursement maker-checker (AP-PAY control). A vendor payment is now a two-step,
+-- 0115 — AP disbursement maker-checker (AP-PAY control). A vendor payment is now a two-step,
 -- segregated flow: a `creditors` holder REQUESTS a payment (PendingApproval, no cash/GL effect yet) and a
 -- DIFFERENT user holding approval authority APPROVES it — only then is the bill's paid_amount incremented
 -- and the cash-disbursement GL posted. Mirrors GL-05 (manual JE maker-checker). New tenant_id table → RLS loop.
