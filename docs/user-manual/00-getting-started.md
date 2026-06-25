@@ -127,7 +127,7 @@ Common starting points by role:
 | Manager / Executive | `/dashboard`, `/executive`, `/planner` |
 | Admin | `/admin/users`, `/settings`, `/sod` |
 
-[screenshot: main app shell with side navigation]
+![The main app shell: workspace switcher, the auto-tracked ล่าสุด (Recent) group, and the area-grouped side navigation](./img/sidebar-overview.png)
 
 ### Workspaces — ERP and POS
 
@@ -158,14 +158,18 @@ appear in **both** workspaces.
 - **Settings is foldable:** the *ตั้งค่าระบบ* group is split into collapsible sub-sections — *ข้อมูลหลัก*,
   *ปรับแต่ง*, *เชื่อมต่อ & ขยาย*, *ผู้ดูแลระบบ*. The advanced sections (*ปรับแต่ง*, *เชื่อมต่อ & ขยาย*) start
   collapsed so the group opens compact. Click a sub-section heading to fold/unfold it; your choice is
-  remembered on that device.
+  remembered.
 - **Favourites & recent:** hover any menu item and click the **★ star** to pin it to a **รายการโปรด**
   (Favourites) group at the top of the side menu; click the star again to unpin. A **ล่าสุด** (Recent)
   group automatically lists the last few screens you opened. Both only show items you can access in the
   current workspace. Your **favourites and the fold-state of the Settings sub-sections follow you across
   devices** (saved to your account); the **Recent** list is per-device.
 
-[screenshot: ERP/POS workspace switcher in the sidebar header]
+| Favourites & Recent | Foldable Settings |
+|---|---|
+| ![Starred items pinned to the รายการโปรด group above the Recent group](./img/sidebar-favourites.png) | ![The ตั้งค่าระบบ group with collapsible sub-sections, one expanded and one collapsed](./img/sidebar-settings.png) |
+
+![The ERP/POS workspace switcher in the sidebar header](./img/workspace-switcher.png)
 
 > **Note:** The **Customer Portal** (`/portal/...`) is a separate experience for customer/shop users and
 > is not part of the ERP/POS toggle.
