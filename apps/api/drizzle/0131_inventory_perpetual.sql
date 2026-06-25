@@ -1,11 +1,11 @@
--- 0130 — Perpetual inventory valuation sub-ledger (INV cycle).
+-- 0131 — Perpetual inventory valuation sub-ledger (INV cycle).
 -- Turns inventory from a snapshot/report facade into a transactional, VALUED sub-ledger:
 --   inv_moves     append-only valued movement ledger (receipt / issue / adjust). Every financial move
 --                 posts a balanced JE via LedgerService (Dr/Cr 1200 Inventory ↔ 2000 AP / 5000 COGS / 5810).
 --   inv_balances  running on-hand qty + moving-average cost + total value per (tenant, item, location).
 -- Controls: strengthens INV-01 negative-stock guard + INV-02 perpetual completeness (idempotent posting
 --           via ref unique + GL ux_je_idem) + INV-04 adjustment authority (SoD wh_adjust), and ADDS
---           INV-05 perpetual sub-ledger ↔ GL control-account reconciliation (moving-average valuation).
+--           INV-06 perpetual sub-ledger ↔ GL control-account reconciliation (moving-average valuation).
 -- Both carry tenant_id → re-run the 0002 RLS loop so they are isolation-scoped.
 
 CREATE TABLE IF NOT EXISTS inv_moves (

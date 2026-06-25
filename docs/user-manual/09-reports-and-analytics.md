@@ -103,21 +103,22 @@ for [procurement](./03-procurement.md).
 
 ## 3a. Demand forecasting (multi-model + backtesting)
 
-**API:** `/api/demand` · **Required permission:** `planner` (also `exec` / `warehouse`).
+**Screen:** `/demand` · **Where:** sidebar → **วางแผน & BI → พยากรณ์ความต้องการ
+(Demand ML)** · **Required permission:** `planner` (also `exec` / `warehouse`).
 
 For items with enough sales history, the system forecasts future demand using
 several classic models (moving average, exponential smoothing, Holt trend,
 seasonal-naive, and Croston for sporadic items) and **automatically picks the
 most accurate one** by back-testing each on recent history.
 
-1. **Compare models** — `POST /api/demand/backtest` with `{ "item_id": "…" }`.
+1. **Compare models** — the **เทียบโมเดล** tab back-tests every model for an item.
    You get each model's accuracy scored by **WAPE** (lower is better) and
    **MASE** (below 1 beats a naive guess).
-2. **Forecast** — `POST /api/demand/forecast` with `{ "item_id": "…", "horizon": 14 }`.
-   The best model is selected automatically (or pin one with `"algorithm"`), and
-   you get a day-by-day forecast. Each run is saved for an accuracy audit trail.
-3. **Track accuracy** — `GET /api/demand/accuracy` shows the average WAPE/MASE of
-   recent forecasts, overall and per model.
+2. **Forecast** — the **พยากรณ์** tab forecasts a chosen horizon (days).
+   The best model is selected automatically (or pin one), and you get a
+   day-by-day forecast. Each run is saved for an accuracy audit trail.
+3. **Track accuracy** — the **ประวัติ & ความแม่น** tab shows the average WAPE/MASE
+   of recent forecasts, overall and per model.
 
 **Expected result:** A demand forecast you can feed into replenishment and
 planning. Forecasts are **advisory** — they never post to the ledger.
@@ -127,17 +128,35 @@ planning. Forecasts are **advisory** — they never post to the ledger.
 
 ---
 
-## 4. Anomaly detection
+## 4. Insights (anomalies · replenishment · AI summary)
 
-**Required permission:** `planner` / `dashboard`.
+**Screen:** `/insights` · **Where:** sidebar → **วางแผน & BI → ข้อมูลเชิงลึก
+(Insights)** · **Required permission:** `exec` / `dashboard` / `planner` /
+`warehouse`.
 
-The analytics engine highlights unusual activity (e.g. sudden cost spikes,
-unexpected stock movements) over the recent period.
+One screen that surfaces the signals the analytics engine produces, in three tabs.
 
-1. Open the **Anomalies** view (analytics / dashboard area).
-2. Review flagged items and investigate.
+### 4.1 ภาพรวม (Overview)
+At-a-glance counts (items to reorder, anomalies in the last 7 days) plus an
+**AI-written summary** of what needs attention and the top-3 items to reorder.
 
-**Expected result:** A list of unusual events worth a closer look.
+### 4.2 ความผิดปกติ (Anomalies)
+Unusual activity over a chosen window (7 / 30 / 90 days), in two lists:
+
+- **Movement anomalies** — stock movements that deviate from their norm, scored by
+  **Z-score** and flagged critical / warning.
+- **Stocktake variances** — counts that differ materially from the system quantity.
+
+Press **คำแนะนำ (AI)** on a movement row to get a short, plain-language
+recommendation for that anomaly.
+
+### 4.3 เติมสต๊อก (Replenishment)
+Items predicted to run out, ranked by urgency, with current stock, average daily
+sales, lead time, reorder point and predicted stock-out date. Click a row for the
+per-item detail and an **AI replenishment recommendation**.
+
+**Expected result:** A single place to see what is abnormal and what to reorder —
+all advisory (nothing posts to the ledger or raises an order automatically).
 
 ---
 
@@ -151,6 +170,25 @@ unexpected stock movements) over the recent period.
 - View **3-way variance**: Budget vs Forecast vs Actual.
 
 **Expected result:** You can plan, approve and track performance against budget.
+
+### 5a. Budget vs Actual (per GL account)
+
+**Screen:** `/budget` · **Where:** sidebar → **วางแผน & BI → งบประมาณเทียบจริง
+(Budget vs Actual)** · **Required permission:** `exec` / `planner`.
+
+A lighter, account-level budget that compares directly against the posted ledger
+(no scenario/version workflow — use **Planning** above for that).
+
+1. **ตั้งงบประมาณ** tab — enter a budget per **GL account** (and optional cost
+   centre) for a fiscal year, as an **annual** figure (split evenly across 12
+   months) or a single **monthly** amount.
+2. **งบเทียบจริง** tab — choose a year (and optional period) to see each account's
+   **budget vs actual**, the variance and a **Favorable / Unfavorable** flag, with
+   revenue / expense / net roll-ups at the top. Actuals come only from **posted**
+   journal lines.
+
+**Expected result:** A management view of where actual performance is running
+ahead of or behind budget, by account.
 
 ---
 

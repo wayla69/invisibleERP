@@ -46,6 +46,9 @@ export class ReplenishmentController {
   suggest(@CurrentUser() u: JwtUser) { return this.rep.suggest(u); }
   @Get('suggestions') @Permissions('planner', 'procurement')
   list(@CurrentUser() u: JwtUser) { return this.rep.list(u); }
+  // SoD: the transfer leg is a warehouse custody movement; the buy leg is a procurement act — different duties.
+  @Post('auto-transfer') @Permissions('warehouse', 'wh_custody')
+  autoTransfer(@Body(new ZodValidationPipe(z.object({ item_ids: z.array(z.string()).optional() }))) b: any, @CurrentUser() u: JwtUser) { return this.rep.autoTransfer(b, u); }
   @Post('auto-pr') @Permissions('procurement', 'planner')
   autoPr(@Body(new ZodValidationPipe(z.object({ item_ids: z.array(z.string()).optional() }))) b: any, @CurrentUser() u: JwtUser) { return this.rep.autoPr(b, u); }
 }

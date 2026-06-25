@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, custPosItems, payments, customerInventory, custStockLog, posReturns, posReturnItems, taxInvoices } from '../../database/schema';
+import { custPosSales, custPosItems, payments, customerInventory, custStockLog, branchStock, posReturns, posReturnItems, taxInvoices } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -91,7 +91,13 @@ export class ReturnsService {
         if (inv) {
           const after = round2(n(inv.currentStock) + rl.qty);
           await tx.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));
-          await tx.insert(custStockLog).values({ tenantId: sale.tenantId, itemId: rl.line.itemId, itemDescription: rl.line.itemDescription, logDate: new Date(), logType: 'Return', qtyChange: String(rl.qty), balanceAfter: String(after), refDoc: returnNo, createdBy: user.username });
+          await tx.insert(custStockLog).values({ tenantId: sale.tenantId, branchId: sale.branchId, itemId: rl.line.itemId, itemDescription: rl.line.itemDescription, logDate: new Date(), logType: 'Return', qtyChange: String(rl.qty), balanceAfter: String(after), refDoc: returnNo, createdBy: user.username });
+          // mirror the restock into the per-branch ledger (credit the sale's branch). Lock order: rollup → branch.
+          if (sale.branchId != null) {
+            const [bs] = await tx.select().from(branchStock).where(and(eq(branchStock.tenantId, sale.tenantId), eq(branchStock.branchId, sale.branchId), eq(branchStock.itemId, rl.line.itemId))).for('update').limit(1);
+            if (bs) await tx.update(branchStock).set({ onHand: String(round2(n(bs.onHand) + rl.qty)), lastUpdated: new Date() }).where(eq(branchStock.id, bs.id));
+            else await tx.insert(branchStock).values({ tenantId: sale.tenantId, branchId: sale.branchId, itemId: rl.line.itemId, itemDescription: rl.line.itemDescription, uom: rl.line.uom ?? null, onHand: String(round2(rl.qty)), lastUpdated: new Date() });
+          }
           rl.restocked = true; restockedAny = true;
         } else rl.restocked = false;
       }
@@ -116,7 +122,7 @@ export class ReturnsService {
 
       // recipe/BOM: reverse ingredient deduction (restore stock) + COGS reversal Dr 1200 / Cr 5300
       let cogsRev = 0;
-      for (const rl of retLines) { const rev = await this.recipe.reverseDeduction(tx, sale.tenantId, String(rl.line.itemId ?? ''), rl.qty, returnNo, user); cogsRev = round2(cogsRev + rev.cost); }
+      for (const rl of retLines) { const rev = await this.recipe.reverseDeduction(tx, sale.tenantId, String(rl.line.itemId ?? ''), rl.qty, returnNo, user, sale.branchId); cogsRev = round2(cogsRev + rev.cost); }
       if (cogsRev > 0 && !(await this.ledger.alreadyPosted('RTN-COGS', returnNo, sale.tenantId, tx))) {
         await this.ledger.postEntry({ source: 'RTN-COGS', sourceRef: returnNo, tenantId: sale.tenantId, memo: `COGS reversal ${returnNo}`, createdBy: user.username, lines: [{ account_code: '1200', debit: cogsRev }, { account_code: '5300', credit: cogsRev }] }, tx);
       }

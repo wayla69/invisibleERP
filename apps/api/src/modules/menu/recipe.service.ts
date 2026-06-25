@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { eq, and, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { menuRecipes, menuRecipeLines, menuItems, customerInventory, custStockLog, items } from '../../database/schema';
+import { menuRecipes, menuRecipeLines, menuItems, customerInventory, custStockLog, branchStock, items } from '../../database/schema';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { UpsertRecipeDto } from './recipe.dto';
@@ -148,7 +148,9 @@ export class RecipeService {
   }
 
   // deduct ingredients for one sold dish line. Allows negative stock (flags OVERSOLD). Returns COGS cost if post_cogs.
-  async applyDeduction(db: any, tenantId: number | null, sku: string, soldQty: number, saleNo: string, user: JwtUser): Promise<{ cost: number; deducted: boolean }> {
+  // branchId (optional): when the sale is tagged to a branch, mirror the deduction into the per-branch ledger
+  // (branch_stock) so branch-aware replenishment sees this branch deplete. NULL → rollup-only (untagged remainder).
+  async applyDeduction(db: any, tenantId: number | null, sku: string, soldQty: number, saleNo: string, user: JwtUser, branchId: number | null = null): Promise<{ cost: number; deducted: boolean }> {
     const r = await this.explode(db, tenantId, sku);
     if (!r) return { cost: 0, deducted: false };
     let cost = 0;
@@ -160,14 +162,20 @@ export class RecipeService {
       if (!inv) { [inv] = await db.insert(customerInventory).values({ tenantId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, uom: l.uom ?? null, currentStock: '0' }).returning(); }
       const after = round4(n(inv.currentStock) - needed);
       await db.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));
-      await db.insert(custStockLog).values({ tenantId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, logDate: new Date(), logType: 'Consume', qtyChange: String(-needed), balanceAfter: String(after), refDoc: saleNo, notes: after < 0 ? 'OVERSOLD' : null, createdBy: user.username });
+      await db.insert(custStockLog).values({ tenantId, branchId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, logDate: new Date(), logType: 'Consume', qtyChange: String(-needed), balanceAfter: String(after), refDoc: saleNo, notes: after < 0 ? 'OVERSOLD' : null, createdBy: user.username });
+      // mirror into the per-branch ledger. Lock order: rollup row (above) → branch row, to avoid deadlocks.
+      if (branchId != null) {
+        let [bs] = await db.select().from(branchStock).where(and(eq(branchStock.tenantId, tenantId as any), eq(branchStock.branchId, branchId), eq(branchStock.itemId, l.itemId))).for('update').limit(1);
+        if (!bs) { [bs] = await db.insert(branchStock).values({ tenantId, branchId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, uom: l.uom ?? null, onHand: '0' }).returning(); }
+        await db.update(branchStock).set({ onHand: String(round4(n(bs.onHand) - needed)), lastUpdated: new Date() }).where(eq(branchStock.id, bs.id));
+      }
       cost = round4(cost + needed * l.unitCost);
     }
     return { cost: r.postCogs ? cost : 0, deducted: true };
   }
 
   // reverse the deduction on a return (add ingredients back). Returns COGS cost to reverse if post_cogs.
-  async reverseDeduction(db: any, tenantId: number | null, sku: string, returnedQty: number, returnNo: string, user: JwtUser): Promise<{ cost: number; restored: boolean }> {
+  async reverseDeduction(db: any, tenantId: number | null, sku: string, returnedQty: number, returnNo: string, user: JwtUser, branchId: number | null = null): Promise<{ cost: number; restored: boolean }> {
     const r = await this.explode(db, tenantId, sku);
     if (!r) return { cost: 0, restored: false };
     let cost = 0;
@@ -177,7 +185,12 @@ export class RecipeService {
       if (!inv) continue;
       const after = round4(n(inv.currentStock) + back);
       await db.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));
-      await db.insert(custStockLog).values({ tenantId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, logDate: new Date(), logType: 'Consume-Reverse', qtyChange: String(back), balanceAfter: String(after), refDoc: returnNo, createdBy: user.username });
+      await db.insert(custStockLog).values({ tenantId, branchId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, logDate: new Date(), logType: 'Consume-Reverse', qtyChange: String(back), balanceAfter: String(after), refDoc: returnNo, createdBy: user.username });
+      if (branchId != null) {
+        let [bs] = await db.select().from(branchStock).where(and(eq(branchStock.tenantId, tenantId as any), eq(branchStock.branchId, branchId), eq(branchStock.itemId, l.itemId))).for('update').limit(1);
+        if (!bs) { [bs] = await db.insert(branchStock).values({ tenantId, branchId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, uom: l.uom ?? null, onHand: '0' }).returning(); }
+        await db.update(branchStock).set({ onHand: String(round4(n(bs.onHand) + back)), lastUpdated: new Date() }).where(eq(branchStock.id, bs.id));
+      }
       cost = round4(cost + back * l.unitCost);
     }
     return { cost: r.postCogs ? cost : 0, restored: true };

@@ -432,11 +432,11 @@ async function main() {
   const adjBad = await inj('POST', '/api/inventory/adjustments', invmgr, { item_id: 'SUGAR', qty_delta: -1, reason: '   ' });
   ok('Inventory: adjustment without a reason rejected (REASON_REQUIRED)', adjBad.status === 400 && adjBad.json?.error?.code === 'REASON_REQUIRED', `st=${adjBad.status} code=${adjBad.json?.error?.code}`);
 
-  // Valuation + INV-05 reconciliation: sub-ledger (140 @ 11 = 1540) ties to the GL inventory account.
+  // Valuation + INV-06 reconciliation: sub-ledger (140 @ 11 = 1540) ties to the GL inventory account.
   const val = (await inj('GET', '/api/inventory/valuation', invmgr)).json;
   ok('Inventory: valuation reports on-hand value at moving-average (140 @ 11 = 1540)', near(val.total_value, 1540) && near(val.items?.find((i: any) => i.item_id === 'SUGAR')?.total_value, 1540), `total=${val.total_value}`);
   const rec = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
-  ok('Inventory: sub-ledger ties to GL inventory control account (INV-05 reconciled 1540)', near(rec.sub_ledger_value, 1540) && near(rec.gl_inventory, 1540) && rec.reconciled === true, `sub=${rec.sub_ledger_value} gl=${rec.gl_inventory} rec=${rec.reconciled}`);
+  ok('Inventory: sub-ledger ties to GL inventory control account (INV-06 reconciled 1540)', near(rec.sub_ledger_value, 1540) && near(rec.gl_inventory, 1540) && rec.reconciled === true, `sub=${rec.sub_ledger_value} gl=${rec.gl_inventory} rec=${rec.reconciled}`);
   // Movement ledger carries the full audit trail (2 receipts + 1 issue + 1 adjust = 4 moves, each GL-linked).
   const mv = (await inj('GET', '/api/inventory/moves?item_id=SUGAR', invmgr)).json;
   ok('Inventory: movement ledger records all 4 valued moves with GL links', mv.count === 4 && (mv.moves ?? []).every((m: any) => /^JE-/.test(m.gl_entry_no ?? '')), `n=${mv.count}`);

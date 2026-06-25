@@ -143,5 +143,29 @@ overpayment and fraud.
 
 ---
 
+## 6. Supplier portal (for your vendors)
+
+This screen is for an external **vendor / supplier user** — they log in and see only
+**their own** purchase orders and invoices, never anyone else's.
+
+**Screen:** `/supplier` · **Where:** sidebar → **จัดซื้อ → พอร์ทัลซัพพลายเออร์
+(Supplier)** · **Required permission:** `vendor_portal` (grant this to the vendor's
+user account; the menu item is hidden from staff who don't have it).
+
+Tabs: **ใบสั่งซื้อ (PO)** · **ใบแจ้งหนี้**.
+
+1. **See & acknowledge a PO** — on the **ใบสั่งซื้อ (PO)** tab the vendor sees the
+   POs you issued to them. Click a PO to view its lines and press **ยืนยันรับทราบ
+   PO** to acknowledge it.
+2. **Submit an invoice** — on the **ใบแจ้งหนี้** tab the vendor enters the invoice
+   number, amount and VAT (optionally referencing a PO) and submits it. This creates
+   a **pending (Unpaid) AP transaction** that your AP clerk then **3-way matches and
+   pays** through the normal AP flow — the vendor cannot pay themselves.
+
+**Expected result:** Vendors self-serve PO acknowledgement and invoice submission;
+buyers keep full control of matching and payment (EXP-01..04 unchanged).
+
+---
+
 **Next:** [Warehouse & Inventory](./04-warehouse-inventory.md) ·
 [Finance — AR & AP](./05-finance-ar-ap.md) · [Approvals](./10-approvals.md)

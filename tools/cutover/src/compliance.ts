@@ -601,7 +601,7 @@ async function main() {
     !!lineLogin.json.token && lineMe.json.member_code === 'M-LINE' && Number(lm.id) === lineMe.json.id && lineUnlinked.status === 401 && lineUnlinked.json.error?.code === 'LINE_NOT_LINKED' && relink.json.linked === true,
     `tok=${!!lineLogin.json.token} me=${lineMe.json.member_code} unlinked=${lineUnlinked.status}/${lineUnlinked.json.error?.code} link=${relink.json.linked}`);
 
-  // ════════════════════════ INV-05 — Perpetual inventory sub-ledger ↔ GL reconciliation ════════════════════════
+  // ════════════════════════ INV-06 — Perpetual inventory sub-ledger ↔ GL reconciliation ════════════════════════
   // Receipts/issues/adjustments post valued moves + balanced JEs; the sub-ledger value ties to the inventory
   // control account (1200). Negative/oversold stock is prevented (INV-01); duplicate receipts idempotent (INV-02);
   // adjustments must be justified (INV-04). Run as admin — reconcile() filters to the INV-* sources for this tenant.
@@ -617,7 +617,7 @@ async function main() {
   const invNoReason = await inj('POST', '/api/inventory/adjustments', admin, { item_id: 'INVCTL', qty_delta: -1, reason: '   ' });
   ok('INV-04: a stock adjustment without a reason is rejected (justified + audited)', invNoReason.status === 400 && invNoReason.json.error?.code === 'REASON_REQUIRED', `${invNoReason.status}/${invNoReason.json.error?.code}`);
   const invRec = await inj('GET', '/api/inventory/reconciliation', admin);
-  ok('INV-05: perpetual sub-ledger value ties to the GL inventory control account (1200) — reconciled',
+  ok('INV-06: perpetual sub-ledger value ties to the GL inventory control account (1200) — reconciled',
     invNear(invRec.json.sub_ledger_value, 1540) && invNear(invRec.json.gl_inventory, 1540) && invRec.json.reconciled === true,
     `sub=${invRec.json.sub_ledger_value} gl=${invRec.json.gl_inventory} rec=${invRec.json.reconciled}`);
 

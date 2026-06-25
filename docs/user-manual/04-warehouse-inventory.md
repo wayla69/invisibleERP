@@ -196,7 +196,7 @@ inventory reconciliation**.
 - **Justified adjustments.** Every adjustment must carry a **reason**, or it is
   rejected with `REASON_REQUIRED`; adjustment authority (`wh_adjust`) is segregated
   from counting (`wh_count`) under rule **R11** (control **INV-04**).
-- **Reconciliation (INV-05).** `GET /api/inventory/reconciliation` returns
+- **Reconciliation (INV-06).** `GET /api/inventory/reconciliation` returns
   `sub_ledger_value`, `gl_inventory` and `reconciled`. When `reconciled` is `true`
   the perpetual stock value equals the GL inventory control account (1200); a
   non-zero `difference` is a control exception for the **Controller** to investigate.
@@ -219,6 +219,46 @@ that have never had a valued receipt are unaffected — they keep the simple aud
 | `REASON_REQUIRED` | Adjustment submitted with no reason | Re-submit with a justification |
 | `deduped: true` | Receipt reference already posted | Expected — no action needed |
 | `difference ≠ 0` on reconciliation | Sub-ledger ≠ GL 1200 | Controller reviews moves vs GL postings |
+
+---
+
+## 10. Branch replenishment — transfer first, then buy
+
+**Screen:** `/replenishment` · **Required permission:** `planner` or `procurement`
+to view and recompute; `wh_custody` (warehouse) to execute transfers; `procurement`
+to raise the purchase requisition.
+
+Each branch (outlet) keeps its own stock balance. When a branch's on-hand for an
+item falls to or below its **reorder point**, the system proposes how to refill it —
+**transferring from another branch that has spare stock first**, and only **buying**
+from a supplier for whatever the transfers can't cover. This avoids buying new stock
+while a sister branch is sitting on a surplus.
+
+The screen has two lists:
+
+- **โอนระหว่างสาขา (Transfers)** — each row shows the branch that is short, the
+  branch to transfer **from**, the item, and the quantity to move.
+- **สั่งซื้อจากซัพพลายเออร์ (Purchases)** — each row shows the branch, the item, the
+  quantity to buy, and the preferred supplier.
+
+### To replenish
+
+1. Go to **เติมสต๊อกอัตโนมัติ** (`/replenishment`).
+2. Click **คำนวณใหม่** to recompute suggestions from current per-branch stock.
+3. Review the two lists. Critical (out-of-stock) rows are flagged in red.
+4. Click **โอนสต๊อก** to execute the inter-branch transfers (warehouse custody).
+   Stock moves from the source branch to the short branch and both sides are logged.
+5. Click **สร้างใบขอซื้อ (PR)** to raise one consolidated purchase requisition for the
+   remaining quantity. The PR then follows the normal approval workflow before a PO is
+   issued (see [Procurement](./03-procurement.md)).
+
+> **Note — separation of duties:** Moving stock between branches (**โอนสต๊อก**,
+> `wh_custody`) and raising the purchase (**สร้าง PR**, `procurement`) are deliberately
+> separate actions for different roles, so the person who moves stock is not the person
+> who authorises the spend (control INV-05).
+
+**Expected result:** Transferred suggestions are marked *Transfer_Done* and the branch
+balances update; bought suggestions are marked *PR_Created* and linked to the new PR.
 
 ---
 

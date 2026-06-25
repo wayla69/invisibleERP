@@ -272,7 +272,7 @@ export class InventoryLedgerService {
     return { layers, count: layers.length, total_value: round4(layers.reduce((a: number, l: any) => a + l.layer_value, 0)) };
   }
 
-  // ── INV-05 — sub-ledger ↔ GL inventory control-account reconciliation ──────────────────────
+  // ── INV-06 — sub-ledger ↔ GL inventory control-account reconciliation ──────────────────────
   async reconcile(user: JwtUser) {
     const tenantId = this.tenant(user);
     const bals = await (this.db as any).select().from(invBalances).where(eq(invBalances.tenantId, tenantId));

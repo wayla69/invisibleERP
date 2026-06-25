@@ -23,7 +23,7 @@ interface DrawerEvt { id: number; reason: string; terminal: string | null; sale_
 export default function PeripheralsPage() {
   return (
     <div>
-      <PageHeader title="อุปกรณ์ฮาร์ดแวร์ (POS peripherals)" description="ลิ้นชักเก็บเงิน · จอแสดงผลลูกค้า · เครื่องชั่งน้ำหนัก — ทะเบียนอุปกรณ์และการตรวจสอบการเปิดลิ้นชัก" />
+      <PageHeader title="อุปกรณ์ฮาร์ดแวร์ (POS peripherals)" description="ลิ้นชักเก็บเงิน · จอแสดงผลลูกค้า · เครื่องชั่งน้ำหนัก — ทะเบียนอุปกรณ์และการตรวจสอบการเปิดลิ้นชัก · ต่อเครื่องพิมพ์/ลิ้นชัก/จอลูกค้าใช้งานจริงได้ที่ปุ่ม ⚙ “ตั้งค่าเครื่อง” บนหน้าขายหน้าร้าน (Register)" />
       <Tabs tabs={[
         { key: 'devices', label: 'ทะเบียนอุปกรณ์', content: <Devices /> },
         { key: 'drawer', label: 'ลิ้นชักเก็บเงิน', content: <Drawer /> },

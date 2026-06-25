@@ -1,9 +1,9 @@
--- 0131 — FIFO/FEFO cost layers for the perpetual inventory sub-ledger (Tier 1 lots/costing).
+-- 0132 — FIFO/FEFO cost layers for the perpetual inventory sub-ledger (Tier 1 lots/costing).
 -- Adds an opt-in costing method per item (moving_avg DEFAULT | fifo | fefo). For fifo/fefo items each
 -- valued receipt creates a cost LAYER (with optional lot/expiry); issues + shrinkage consume layers in
 -- order (FEFO = soonest-expiry-first, FIFO = oldest-receipt-first) → COGS at ACTUAL layer cost; transfers
 -- move the consumed layer slices to the destination. inv_balances.total_value stays = Σ remaining layer
--- value, so valuation + INV-05 reconciliation are unchanged. Moving-average items are entirely unaffected.
+-- value, so valuation + INV-06 reconciliation are unchanged. Moving-average items are entirely unaffected.
 
 ALTER TABLE inv_balances ADD COLUMN IF NOT EXISTS costing_method text NOT NULL DEFAULT 'moving_avg';
 --> statement-breakpoint

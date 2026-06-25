@@ -124,7 +124,7 @@ async function main() {
   const wh2 = valB3.items?.find((i: any) => i.item_id === 'B' && i.location_id === 'WH-2');
   ok('B split across locations after transfer (WH-MAIN 90, WH-2 2; total 920 value)', Number(whm?.on_hand_qty) === 90 && Number(wh2?.on_hand_qty) === 2);
 
-  // INV-05 reconciliation: B's sub-ledger value (920) ties to the GL inventory account (valued sources).
+  // INV-06 reconciliation: B's sub-ledger value (920) ties to the GL inventory account (valued sources).
   const recB = (await inj('GET', '/api/inventory/reconciliation', token)).json;
   ok('perpetual sub-ledger ties to GL inventory account after the stock-ops bridge (reconciled 920)', Math.abs(Number(recB.sub_ledger_value) - 920) < 0.01 && Math.abs(Number(recB.gl_inventory) - 920) < 0.01 && recB.reconciled === true, `sub=${recB.sub_ledger_value} gl=${recB.gl_inventory} rec=${recB.reconciled}`);
 

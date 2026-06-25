@@ -62,7 +62,7 @@ export class InventoryLedgerController {
     return this.svc.layers(u, { item_id: itemId });
   }
 
-  // INV-05 — sub-ledger ↔ GL control-account reconciliation.
+  // INV-06 — sub-ledger ↔ GL control-account reconciliation.
   @Get('reconciliation')
   @Permissions('wh_count', 'dashboard')
   reconcile(@CurrentUser() u: JwtUser) {

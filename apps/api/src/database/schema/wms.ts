@@ -87,10 +87,17 @@ export const replenishmentSuggestions = pgTable('replenishment_suggestions', {
   itemId: text('item_id').notNull(),
   onHand: numeric('on_hand').notNull(),
   reorderPoint: numeric('reorder_point').notNull(),
-  suggestedQty: numeric('suggested_qty').notNull(),
+  suggestedQty: numeric('suggested_qty').notNull(), // = transferQty + buyQty (kept for back-compat)
   urgency: text('urgency'),
-  status: text('status').notNull().default('Suggested'), // Suggested | PR_Created | Dismissed
+  status: text('status').notNull().default('Suggested'), // Suggested | PR_Created | Transfer_Done | Dismissed
   prNo: text('pr_no'),
+  // Branch-aware transfer-before-buy routing (Phase). A low (branch,item) emits a 'transfer' row per source
+  // branch + one 'buy' row for the residual. NULL on legacy/tenant-wide rows (back-compat).
+  branchId: bigint('branch_id', { mode: 'number' }),       // the branch that is short
+  route: text('route'),                                     // 'transfer' | 'buy'
+  fromBranchId: bigint('from_branch_id', { mode: 'number' }), // source branch (transfer leg only)
+  transferQty: numeric('transfer_qty'),
+  buyQty: numeric('buy_qty'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byItemStatus: index('idx_rpl_item').on(t.tenantId, t.itemId, t.status) }));
 

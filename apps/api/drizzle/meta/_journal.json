@@ -915,15 +915,22 @@
     {
       "idx": 130,
       "version": "7",
-      "when": 2013490000004,
-      "tag": "0130_inventory_perpetual",
+      "when": 2023480000004,
+      "tag": "0130_branch_replenishment",
       "breakpoints": true
     },
     {
       "idx": 131,
       "version": "7",
-      "when": 2013500000004,
-      "tag": "0131_inventory_cost_layers",
+      "when": 2023490000004,
+      "tag": "0131_inventory_perpetual",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 2023500000004,
+      "tag": "0132_inventory_cost_layers",
       "breakpoints": true
     }
   ]

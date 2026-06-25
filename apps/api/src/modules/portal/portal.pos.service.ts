@@ -2,7 +2,7 @@ import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/commo
 import { sql, eq, ne, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
-  custPosSales, custPosItems, customerInventory, custStockLog,
+  custPosSales, custPosItems, customerInventory, custStockLog, branchStock,
   loyaltyConfig, loyaltyPoints, loyaltyTxn, branches,
 } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -126,9 +126,15 @@ export class PortalPosService {
             tenantId: t.id, branchId, itemId: l.item_id, itemDescription: inv.itemDescription, logDate: now, logType: 'Sale',
             qtyChange: String(-n(l.qty)), balanceAfter: String(newStock), refDoc: saleNo, notes: null, createdBy: user.username,
           });
+          // mirror into the per-branch ledger (branch-aware replenishment). Same MAX(0) clamp as the rollup above.
+          if (branchId != null) {
+            const [bs] = await tx.select().from(branchStock).where(and(eq(branchStock.tenantId, t.id), eq(branchStock.branchId, branchId), eq(branchStock.itemId, l.item_id))).for('update').limit(1);
+            if (bs) await tx.update(branchStock).set({ onHand: String(Math.max(0, n(bs.onHand) - n(l.qty))), lastUpdated: now }).where(eq(branchStock.id, bs.id));
+            else await tx.insert(branchStock).values({ tenantId: t.id, branchId, itemId: l.item_id, itemDescription: inv.itemDescription, uom: inv.uom ?? null, onHand: '0', lastUpdated: now });
+          }
         }
         // recipe/BOM: deduct ingredients for a recipe-backed menu line (ingredient item_ids differ from the dish SKU)
-        const ded = await this.recipe.applyDeduction(tx, t.id, String(l.item_id), n(l.qty), saleNo, user);
+        const ded = await this.recipe.applyDeduction(tx, t.id, String(l.item_id), n(l.qty), saleNo, user, branchId);
         recipeCogs = roundCurrency(recipeCogs + ded.cost, 'THB');
         if (!ded.deducted) nonRecipeLines.push({ itemId: String(l.item_id), qty: n(l.qty) }); // non-recipe → costed COGS
       }

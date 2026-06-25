@@ -14,6 +14,10 @@
 // ESC/POS control sequences.
 const ESC = 0x1b;
 const GS = 0x1d;
+// Initialise/reset printer: ESC @.
+const INIT = new Uint8Array([ESC, 0x40]);
+// Feed a few lines so the slip clears the cutter before the cut.
+const FEED = new Uint8Array([0x0a, 0x0a, 0x0a]);
 // Drawer kick: ESC p m t1 t2 — pulse the solenoid on pin 0 (most cash drawers).
 const DRAWER_KICK = new Uint8Array([ESC, 0x70, 0x00, 0x19, 0xfa]);
 // Full cut: GS V 66 0.
@@ -55,6 +59,18 @@ export async function printReceiptBase64(device: any, b64: string, cut = true): 
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   await printBytes(device, bytes);
   if (cut) await printBytes(device, CUT);
+}
+
+/**
+ * Print a raw ESC/POS receipt body (the bytes the API's `?format=escpos` endpoint returns): reset the
+ * printer, send the body, feed, then cut. Used by the POS terminal bridge for direct-USB receipts.
+ * Note: the API body is plain text — Thai glyphs render only if the printer's active codepage supports
+ * them; for guaranteed Thai, the register prints the HTML slip through the OS driver instead.
+ */
+export async function printReceiptRaw(device: any, bytes: Uint8Array, cut = true): Promise<void> {
+  await printBytes(device, INIT);
+  await printBytes(device, bytes);
+  if (cut) { await printBytes(device, FEED); await printBytes(device, CUT); }
 }
 
 /** Pulse the cash drawer connected to the printer's drawer port. */

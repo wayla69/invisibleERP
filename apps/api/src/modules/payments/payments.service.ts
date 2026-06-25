@@ -10,6 +10,7 @@ import type { JwtUser } from '../../common/decorators';
 import { resolveGateway } from './gateways';
 import { PosAuditService } from '../pos-audit/pos-audit.service';
 import { JournalService } from '../pos-fiscal/journal.service';
+import { QrService } from '../qr/qr.service';
 
 export interface RecordTenderDto {
   sale_no: string;
@@ -36,6 +37,7 @@ export class PaymentService {
     private readonly ledger: LedgerService,
     @Optional() private readonly audit?: PosAuditService,   // wiring: central POS audit trail
     @Optional() private readonly journal?: JournalService,   // wiring: electronic journal
+    @Optional() private readonly qr?: QrService,             // wiring: render the PromptPay QR as an image
   ) {}
 
   // POST /api/payments — run a tender against a gateway, persist the result.
@@ -126,7 +128,9 @@ export class PaymentService {
     if (!ppId) throw new BadRequestException({ code: 'NO_PROMPTPAY', message: 'No PromptPay id configured for this business', messageTh: 'ยังไม่ได้ตั้งค่าพร้อมเพย์ของกิจการ' });
     const { gateway } = resolveGateway('promptpay');
     const r = await gateway.authorizeAndCapture(n(amount), 'THB', 'PromptPay', { promptpay_id: ppId });
-    return { promptpay_id: ppId, amount: n(amount), qr_payload: r.ref };
+    // Render the EMVCo payload to a scannable QR image so the POS can show it directly (data-URL PNG).
+    const qrImage = r.ref && this.qr ? await this.qr.dataUrl(String(r.ref), 320) : null;
+    return { promptpay_id: ppId, amount: n(amount), qr_payload: r.ref, qr_image: qrImage };
   }
 
   // POST /api/payments/refunds — refund a captured payment.
