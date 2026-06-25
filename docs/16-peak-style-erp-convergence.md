@@ -85,8 +85,10 @@ Adopted on the high-traffic screens, each a reviewed behavior-preserving change 
 per-page review — 0 flagged): **inventory · suppliers · purchase-orders** (SearchInput + a no-match-vs-no-data
 empty state with a *ล้างตัวกรอง* action), **finance** (8 mutations → toasts; guided empty states on the AR /
 AP / maker-checker / collections tables), and **reconciliation · bank · workflow** (mutation toasts + empty
-states). Inline `<Msg>` is kept for **in-dialog field validation**; only action *result* feedback moved to
-toasts.
+states). A **second reviewed sweep** extended the same toasts + guided empty states to **procurement ·
+RFQs · CRM · projects · fixed-assets · accounting · tax invoices · HCM · planning · pricing · service**
+(11/11 behavior-preserving, 0 flagged) — so **~21 screens** now share the pattern. Inline `<Msg>` is kept
+for **in-dialog field validation**; only action *result* feedback moved to toasts.
 
 ---
 

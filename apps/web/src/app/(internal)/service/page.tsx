@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Plus, AlertTriangle, ShieldCheck, ClipboardList, Repeat } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -66,10 +67,12 @@ function Contracts() {
           monthly_value: Number(monthlyValue) || 0,
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (r: any) => {
+      notifySuccess(`สร้างสัญญาสำเร็จ: ${r.contract_no}`);
       setCustomerName(''); setMonthlyValue('');
       qc.invalidateQueries({ queryKey: ['svc-contracts'] });
     },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const contracts = q.data?.contracts ?? [];
@@ -121,8 +124,6 @@ function Contracts() {
           <Button disabled={create.isPending || !customerName.trim()} onClick={() => create.mutate()}>
             <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างสัญญา'}
           </Button>
-          {create.error && <Msg>{(create.error as Error).message}</Msg>}
-          {!!create.data && <Msg ok>✅ สร้างสัญญาสำเร็จ: {(create.data as Contract).contract_no}</Msg>}
         </CardContent>
       </Card>
 
@@ -134,6 +135,7 @@ function Contracts() {
             <DataTable
               rows={contracts}
               onRowClick={(r: Contract) => setSelected((id) => (id === r.id ? null : r.id))}
+              emptyState={{ icon: ShieldCheck, title: 'ยังไม่มีสัญญาบริการ', description: 'กรอกแบบฟอร์มด้านบนเพื่อสร้างสัญญาบริการรายการแรก' }}
               columns={[
                 { key: 'contract_no', label: 'เลขที่' },
                 { key: 'customer_name', label: 'ลูกค้า' },
@@ -169,10 +171,12 @@ function ContractEvents({ contractId }: { contractId: number }) {
         method: 'POST',
         body: JSON.stringify({ title, priority }),
       }),
-    onSuccess: () => {
+    onSuccess: (r: any) => {
+      notifySuccess(`บันทึกเหตุการณ์สำเร็จ: ${r.event_no}`);
       setTitle('');
       qc.invalidateQueries({ queryKey: ['svc-events', contractId] });
     },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const events = q.data?.events ?? [];
@@ -207,13 +211,12 @@ function ContractEvents({ contractId }: { contractId: number }) {
             <Plus className="size-4" /> บันทึกเหตุการณ์
           </Button>
         </div>
-        {log.error && <Msg>{(log.error as Error).message}</Msg>}
 
         <StateView q={q}>
           {q.data && (
             <DataTable
               rows={events}
-              emptyText="ยังไม่มีเหตุการณ์ SLA"
+              emptyState={{ icon: ClipboardList, title: 'ยังไม่มีเหตุการณ์ SLA', description: 'บันทึกเหตุการณ์แรกจากแบบฟอร์มด้านบน' }}
               columns={[
                 { key: 'event_no', label: 'เลขที่' },
                 { key: 'title', label: 'หัวข้อ' },
@@ -264,6 +267,7 @@ function Subscriptions() {
         {q.data && (
           <DataTable
             rows={subs}
+            emptyState={{ icon: Repeat, title: 'ยังไม่มีการสมัครสมาชิก', description: 'การสมัครสมาชิกแบบเรียกเก็บเงินซ้ำจะแสดงที่นี่' }}
             columns={[
               { key: 'sub_no', label: 'เลขที่' },
               { key: 'customer_name', label: 'ลูกค้า' },

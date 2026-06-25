@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { ClipboardList } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -34,6 +35,11 @@ export default function ProcurementPage() {
         {pos.data && (
           <DataTable
             rows={pos.data.purchase_orders}
+            emptyState={{
+              icon: ClipboardList,
+              title: 'ยังไม่มีใบสั่งซื้อ',
+              description: 'สร้าง PR / PO ในแบบฟอร์มด้านบนเพื่อเริ่มต้นการจัดซื้อ',
+            }}
             columns={[
               { key: 'PO_No', label: 'PO' },
               { key: 'PO_Date', label: 'วันที่', render: (r: any) => thaiDate(r.PO_Date) },

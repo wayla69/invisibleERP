@@ -5,11 +5,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FolderKanban, Plus, Clock, Receipt } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -28,25 +28,23 @@ export default function ProjectsPage() {
   const qc = useQueryClient();
   const q = useQuery<{ projects: Project[]; count: number }>({ queryKey: ['projects'], queryFn: () => api('/api/projects') });
   const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '' });
-  const [msg, setMsg] = useState('');
   const refresh = () => qc.invalidateQueries({ queryKey: ['projects'] });
 
   const create = useMutation({
     mutationFn: () => api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name: f.name, project_code: f.project_code || undefined, customer_name: f.customer_name || undefined, billing_type: f.billing_type, contract_amount: Number(f.contract_amount) || 0 }) }),
-    onSuccess: (r) => { setMsg(`✅ สร้างโครงการ ${r.project_code}`); setF({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '' }); refresh(); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`สร้างโครงการ ${r.project_code}`); setF({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '' }); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   // cost / bill dialog
   const [dlg, setDlg] = useState<{ mode: 'cost' | 'bill'; code: string } | null>(null);
   const [amount, setAmount] = useState('');
   const [ctype, setCtype] = useState<'time' | 'expense'>('time');
-  const [dlgMsg, setDlgMsg] = useState('');
-  const openDlg = (mode: 'cost' | 'bill', code: string) => { setDlg({ mode, code }); setAmount(''); setCtype('time'); setDlgMsg(''); };
+  const openDlg = (mode: 'cost' | 'bill', code: string) => { setDlg({ mode, code }); setAmount(''); setCtype('time'); };
   const submit = useMutation({
     mutationFn: () => api<any>(`/api/projects/${dlg!.code}/${dlg!.mode}`, { method: 'POST', body: JSON.stringify(dlg!.mode === 'cost' ? { entry_type: ctype, amount: Number(amount) || 0 } : { amount: Number(amount) || 0 }) }),
-    onSuccess: (r) => { setDlgMsg(dlg!.mode === 'cost' ? `✅ บันทึกต้นทุน (รวม ${baht(r.cost_to_date)})` : `✅ วางบิล — กำไร ${baht(r.margin)} (${r.entry_no})`); refresh(); },
-    onError: (e: any) => setDlgMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(dlg!.mode === 'cost' ? `บันทึกต้นทุน (รวม ${baht(r.cost_to_date)})` : `วางบิล — กำไร ${baht(r.margin)} (${r.entry_no})`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const projects = q.data?.projects ?? [];
@@ -79,7 +77,6 @@ export default function ProjectsPage() {
         </div>
         <div className="flex items-center gap-3">
           <Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> สร้าง</Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </div>
       </Card>
 
@@ -106,7 +103,7 @@ export default function ProjectsPage() {
                 ),
               },
             ]}
-            emptyText="ยังไม่มีโครงการ"
+            emptyState={{ icon: FolderKanban, title: 'ยังไม่มีโครงการ', description: 'สร้างโครงการแรกจากแบบฟอร์มด้านบนเพื่อเริ่มลงต้นทุนและวางบิล' }}
           />
         )}
       </StateView>
@@ -127,7 +124,6 @@ export default function ProjectsPage() {
               </div>
             )}
             <div className="grid gap-1.5"><Label>จำนวนเงิน</Label><Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
-            <Msg ok={dlgMsg.startsWith('✅')}>{dlgMsg}</Msg>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDlg(null)}>ปิด</Button>

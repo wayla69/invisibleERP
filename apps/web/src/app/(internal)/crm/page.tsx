@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Banknote, ShoppingCart, Receipt, Users, Search, Cake, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -132,12 +133,11 @@ function Messaging() {
   const [segment, setSegment] = useState('Champions');
   const [channel, setChannel] = useState('sms');
   const [body, setBody] = useState('');
-  const [msg, setMsg] = useState('');
 
   const blast = useMutation({
     mutationFn: () => api<{ sent: number; skipped: number; targeted: number }>('/api/messaging/blast', { method: 'POST', body: JSON.stringify({ audience, segment: audience === 'segment' ? segment : undefined, channel, body }) }),
-    onSuccess: (r) => { setMsg(`✅ ส่งสำเร็จ ${r.sent} · ข้าม ${r.skipped} · เป้าหมาย ${r.targeted}`); setBody(''); qc.invalidateQueries({ queryKey: ['crm-msg-log'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`ส่งสำเร็จ ${r.sent} · ข้าม ${r.skipped} · เป้าหมาย ${r.targeted}`); setBody(''); qc.invalidateQueries({ queryKey: ['crm-msg-log'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
 
   return (
@@ -156,7 +156,7 @@ function Messaging() {
                   { key: 'name', label: 'ชื่อ', render: (r) => r.name ?? '—' },
                   { key: 'phone', label: 'เบอร์', render: (r) => r.phone ?? '—' },
                 ]}
-                emptyText="ไม่มีวันเกิดเดือนนี้"
+                emptyState={{ icon: Cake, title: 'ไม่มีวันเกิดเดือนนี้' }}
               />
             </StateView>
           </div>
@@ -181,8 +181,7 @@ function Messaging() {
               </select>
             </div>
             <Input value={body} onChange={(e) => setBody(e.target.value)} aria-label="ข้อความถึงลูกค้า" placeholder="ข้อความ เช่น สุขสันต์วันเกิด รับส่วนลด 10%" />
-            <Button disabled={!body.trim() || blast.isPending} onClick={() => { setMsg(''); blast.mutate(); }}><Send className="size-4" /> {blast.isPending ? 'กำลังส่ง…' : 'ส่งข้อความ'}</Button>
-            {msg && <p className={msg.startsWith('✅') ? 'text-sm text-success' : 'text-sm text-destructive'}>{msg}</p>}
+            <Button disabled={!body.trim() || blast.isPending} onClick={() => blast.mutate()}><Send className="size-4" /> {blast.isPending ? 'กำลังส่ง…' : 'ส่งข้อความ'}</Button>
           </div>
         </div>
 
@@ -199,7 +198,7 @@ function Messaging() {
                 { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'sent' ? 'success' : r.status === 'skipped' ? 'muted' : 'destructive'}>{r.status}</Badge> },
                 { key: 'provider', label: 'ผู้ให้บริการ', render: (r) => r.provider ?? '—' },
               ]}
-              emptyText="ยังไม่มีการส่งข้อความ"
+              emptyState={{ icon: Send, title: 'ยังไม่มีการส่งข้อความ', description: 'ประวัติการส่งข้อความถึงลูกค้าจะแสดงที่นี่' }}
             />
           </StateView>
         </div>
@@ -268,7 +267,7 @@ function CustomerLookup() {
                   <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ออเดอร์ล่าสุด</h3>
                   <DataTable
                     rows={q.data.recent_orders}
-                    emptyText="ยังไม่มีออเดอร์"
+                    emptyState={{ icon: Receipt, title: 'ยังไม่มีออเดอร์', description: 'ลูกค้ารายนี้ยังไม่มีประวัติการสั่งซื้อ' }}
                     columns={[
                       { key: 'order_no', label: 'เลขที่' },
                       { key: 'channel', label: 'ช่องทาง', render: (r) => <Badge variant="info">{r.channel}</Badge> },

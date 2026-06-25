@@ -3,14 +3,15 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Calculator, Plus, Trash2 } from 'lucide-react';
+import { Calculator, Plus, Tag, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -61,12 +62,11 @@ function Rules() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['price-rules'], queryFn: () => api('/api/pricing/rules') });
   const [f, setF] = useState<any>({ name: '', type: 'percent', scope: 'item', target_id: '', channel: 'any', dow: '', time_start: '', time_end: '', value: '', min_qty: '1', priority: '100', stackable: false });
-  const [msg, setMsg] = useState('');
   const set = (p: Record<string, unknown>) => setF((cur: any) => ({ ...cur, ...p }));
   const save = useMutation({
     mutationFn: () => api('/api/pricing/rules', { method: 'POST', body: JSON.stringify({ name: f.name, type: f.type, scope: f.scope, target_id: f.target_id || undefined, channel: f.channel, dow: f.dow || undefined, time_start: f.time_start || undefined, time_end: f.time_end || undefined, value: f.value ? Number(f.value) : 0, min_qty: Number(f.min_qty) || 1, priority: Number(f.priority) || 100, stackable: f.stackable }) }),
-    onSuccess: () => { setMsg('✅ บันทึกกฎแล้ว'); setF({ ...f, name: '', target_id: '', value: '' }); qc.invalidateQueries({ queryKey: ['price-rules'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('บันทึกกฎแล้ว'); setF({ ...f, name: '', target_id: '', value: '' }); qc.invalidateQueries({ queryKey: ['price-rules'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const del = useMutation({ mutationFn: (id: number) => api(`/api/pricing/rules/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['price-rules'] }) });
 
@@ -84,7 +84,7 @@ function Rules() {
         <CardContent className="space-y-4">
           <form
             className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
-            onSubmit={(e) => { e.preventDefault(); setMsg(''); if (f.name && !save.isPending) save.mutate(); }}
+            onSubmit={(e) => { e.preventDefault(); if (f.name && !save.isPending) save.mutate(); }}
           >
             <Field label={<>ชื่อกฎ <span className="text-destructive">*</span></>} htmlFor="pr-name" className="sm:col-span-2 lg:col-span-1">
               <Input id="pr-name" placeholder="เช่น Happy Hour −20%" value={f.name} onChange={(e) => set({ name: e.target.value })} required />
@@ -127,12 +127,11 @@ function Rules() {
             </div>
           </form>
           <div className="flex flex-wrap items-center gap-3">
-            <Button disabled={!f.name || save.isPending} onClick={() => { setMsg(''); save.mutate(); }}>
+            <Button disabled={!f.name || save.isPending} onClick={() => save.mutate()}>
               <Plus className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึกกฎ'}
             </Button>
             {!f.name && <span className="text-xs text-muted-foreground">กรอกชื่อกฎก่อนบันทึก</span>}
           </div>
-          {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
         </CardContent>
       </Card>
       <StateView q={q}>
@@ -140,7 +139,7 @@ function Rules() {
           <DataTable
             rows={q.data.rules}
             rowKey={(r: any) => r.id}
-            emptyText="ยังไม่มีกฎราคา — เพิ่มด้านบน"
+            emptyState={{ icon: Tag, title: 'ยังไม่มีกฎราคา', description: 'เพิ่มกฎราคาแรกจากแบบฟอร์ม “เพิ่มกฎราคา” ด้านบน' }}
             columns={[
               { key: 'name', label: 'ชื่อ' },
               { key: 'type', label: 'ชนิด', render: (r: any) => labelOf(TYPE_OPTS, r.type) },
@@ -164,11 +163,10 @@ function QuotePreview() {
   const [lines, setLines] = useState<QLine[]>([{ sku: '', qty: 1, unit_price: 0 }]);
   const [ctx, setCtx] = useState({ channel: 'any', party_size: '', service_charge_pct: '', rounding: '' });
   const [res, setRes] = useState<any>(null);
-  const [msg, setMsg] = useState('');
   const setLine = (i: number, p: Partial<QLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...p } : l)));
   const run = useMutation({
     mutationFn: () => api('/api/pricing/quote', { method: 'POST', body: JSON.stringify({ channel: ctx.channel, party_size: ctx.party_size ? Number(ctx.party_size) : undefined, service_charge_pct: ctx.service_charge_pct ? Number(ctx.service_charge_pct) : undefined, rounding: ctx.rounding ? Number(ctx.rounding) : undefined, lines: lines.filter((l) => l.sku).map((l) => ({ sku: l.sku, qty: Number(l.qty), unit_price: Number(l.unit_price) })) }) }),
-    onSuccess: (r: any) => { setRes(r); setMsg(''); }, onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { setRes(r); }, onError: (e: any) => notifyError(e.message),
   });
   return (
     <div className="space-y-4">
@@ -205,10 +203,9 @@ function QuotePreview() {
               <Input id="q-round" type="number" inputMode="decimal" placeholder="—" value={ctx.rounding} onChange={(e) => setCtx({ ...ctx, rounding: e.target.value })} />
             </Field>
           </div>
-          <Button disabled={run.isPending || !lines.some((l) => l.sku)} onClick={() => { setMsg(''); run.mutate(); }}>
+          <Button disabled={run.isPending || !lines.some((l) => l.sku)} onClick={() => run.mutate()}>
             <Calculator className="size-4" /> {run.isPending ? 'กำลังคำนวณ…' : 'คำนวณ'}
           </Button>
-          {msg && <Msg ok={false}>{msg}</Msg>}
         </CardContent>
       </Card>
       {res && (
@@ -239,11 +236,10 @@ function QuotePreview() {
 function Combos() {
   const [sku, setSku] = useState('');
   const [comps, setComps] = useState<{ component_sku: string; qty: number; unit_price_override?: number }[]>([{ component_sku: '', qty: 1 }]);
-  const [msg, setMsg] = useState('');
   const loaded = useQuery<any>({ queryKey: ['combo', sku], queryFn: () => api(`/api/pricing/combos/${sku}`), enabled: false });
   const save = useMutation({
     mutationFn: () => api(`/api/pricing/combos/${sku}`, { method: 'PUT', body: JSON.stringify({ components: comps.filter((c) => c.component_sku).map((c) => ({ component_sku: c.component_sku, qty: Number(c.qty), unit_price_override: c.unit_price_override != null ? Number(c.unit_price_override) : undefined })) }) }),
-    onSuccess: (r: any) => setMsg(`✅ บันทึกชุด ${r.combo_sku} (${r.components} รายการ)`), onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => notifySuccess(`บันทึกชุด ${r.combo_sku} (${r.components} รายการ)`), onError: (e: any) => notifyError(e.message),
   });
   const setComp = (i: number, p: any) => setComps((cs) => cs.map((c, j) => (j === i ? { ...c, ...p } : c)));
   return (
@@ -273,9 +269,8 @@ function Combos() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => setComps((cs) => [...cs, { component_sku: '', qty: 1 }])}><Plus className="size-4" /> เพิ่มส่วนประกอบ</Button>
-          <Button disabled={!sku || save.isPending} onClick={() => { setMsg(''); save.mutate(); }}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึกชุดเซ็ต'}</Button>
+          <Button disabled={!sku || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึกชุดเซ็ต'}</Button>
         </div>
-        {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
       </CardContent>
     </Card>
   );
