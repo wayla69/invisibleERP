@@ -156,11 +156,20 @@ When returned goods come back, receive the RMA and restock saleable items.
 
 ## 9. Inventory valuation & GL reconciliation (perpetual sub-ledger)
 
+**Screen:** `/inventory-ledger` (**บัญชีสต๊อก & มูลค่า**) · **Required permission:** `warehouse`
+/ `dashboard` to view; the write actions are gated per tab (`wh_receive` / `wh_custody` /
+`wh_adjust`).
+
 The **perpetual valued sub-ledger** keeps the *cost* of stock — not just quantity —
 and posts the matching accounting entry for every move, so the inventory balance in
 the books always matches what is on the shelf. It runs alongside the operational
 movements above and is the basis for **stock valuation** and the **month-end
 inventory reconciliation**.
+
+The screen has tabs: **มูลค่า & กระทบยอด** (valuation + the GL tie-out banner),
+**รับเข้า / เบิก / ปรับปรุง** (the three write actions), **ชั้นต้นทุน (Layers)** (open
+FIFO/FEFO cost layers), and **ความเคลื่อนไหว** (the valued move ledger). The endpoints
+behind each are:
 
 | Action | Endpoint | Required permission | What it posts |
 |---|---|---|---|
