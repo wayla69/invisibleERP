@@ -1,6 +1,6 @@
 # UAT — Cycle 05: General Ledger & Financial Close
 
-**Status: DRAFT v0.3 · 2026-06-25** · Cross-ref: process narrative `04-general-ledger-close.md` (GL-01..07, REC-01..03, R05/R06), harness `tools/cutover/src/compliance.ts`, `worldclass.ts`, `basics.ts`.
+**Status: DRAFT v0.4 · 2026-06-25** · Cross-ref: process narrative `04-general-ledger-close.md` (GL-01..08, REC-01..03, R05/R06), harness `tools/cutover/src/compliance.ts`, `worldclass.ts`, `basics.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -40,3 +40,6 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-EAM-006 | WO cost lines roll up to actual cost | Maintenance | Open WO | 1. `POST …/lines {kind:labor, hours:10, unit_cost:150}`. 2. `POST …/lines {kind:part, quantity:5, unit_cost:100}`. 3. `GET …/lines`. | — | labor line = 1500, part line = 500; `labor_total:1500`, `parts_total:500`, `total:2000`; WO `actual_cost` = 2000 (rolled up from lines). | High | Control | FA-06 | Not Run | basics.ts |
 | UAT-EAM-007 | Completion posts the rolled-up actual cost to AP | Maintenance/AP | WO with cost lines (total 2000), vendor | 1. Complete WO **without** an explicit `actual_cost`. | — | AP payable posts for **2000** (the line roll-up), not the estimate; `Dr 5710=2000 / Cr 2000=2000`. | High | Control | EXP-05, FA-06 | Not Run | basics.ts |
 | UAT-EAM-008 | Per-asset reliability & cost KPIs | Maintenance | Asset with ≥2 corrective WOs + preventive history | 1. `GET /api/eam/assets/{assetNo}/reliability`. | — | Reports `corrective_failures`≥2, `preventive`, `open`, `total_downtime_hours`, `mtbf_days` (computed, non-null), `total_maintenance_cost`. | Med | Detective | FA-06 | Not Run | basics.ts |
+| UAT-GL-027 | Unbalanced recurring template rejected | Controller | — | 1. `POST /api/ledger/recurring {frequency:daily, lines:[Dr 5710 1000, Cr 2100 500]}`. | — | 400 `UNBALANCED`; no template saved. | High | Control | GL-08 | Not Run | basics.ts |
+| UAT-GL-028 | Recurring run posts a Draft JE via maker-checker | Controller (cron) | Balanced daily template due today | 1. `POST /api/ledger/recurring` (balanced). 2. `POST /api/ledger/recurring/run`. 3. `GET /api/ledger/trial-balance` + `GET /api/ledger/journal/pending`. | Dr 5710 1000 / Cr 2100 1000 | `posted:1`, `JE-…` raised; entry is **Draft** (excluded from trial balance) and appears in the pending queue (GL-05). | High | Control | GL-08, R05 | Not Run | basics.ts |
+| UAT-GL-029 | Recurring run idempotent; second person approves → hits GL | Controller (cron) / approver | As GL-028 | 1. Re-run `POST /api/ledger/recurring/run`. 2. A **different** user approves the draft JE. 3. Re-read trial balance. | — | Re-run `posted:0` (idempotent — next_run advanced + dedup). After approval the accrual posts (5710 +1000); approver ≠ preparer enforced (`SOD_VIOLATION` on self-approval). | High | Control | GL-08, GL-05, R05 | Not Run | basics.ts |

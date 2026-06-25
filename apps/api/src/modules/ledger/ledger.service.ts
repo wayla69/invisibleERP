@@ -2,7 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
@@ -128,6 +128,17 @@ export interface PostEntryDto {
   ledgerCode?: string | null; // NULL/undefined = shared (all ledgers); a code = adjustment to that ledger only
   allowClosedPeriod?: boolean; // only the year-end CLOSE may post into the period it is closing
   pendingApproval?: boolean; // GL-05: post as DRAFT (excluded from balances) until a different user approves
+}
+
+export interface RecurringJournalDto {
+  name: string;
+  frequency: string; // 'daily' | 'weekly' | 'monthly'
+  memo?: string;
+  ledgerCode?: string | null;
+  currency?: string;
+  tenantId?: number | null;
+  startDate?: string; // first run date (YYYY-MM-DD); defaults to today
+  lines: JournalLineDto[];
 }
 
 @Injectable()
@@ -259,6 +270,73 @@ export class LedgerService {
     if (inserted === null) return { entry_no: null, balanced: true, deduped: true, lines: [] };
     const status = dto.pendingApproval ? 'Draft' : 'Posted';
     return { entry_no: entryNo, balanced: true, status, pending: !!dto.pendingApproval, lines: inserted };
+  }
+
+  // ───────────────────── Recurring / template journal entries (GL-08) ─────────────────────
+  // A balanced template + a cadence; the scheduled job posts each due template as a DRAFT JE (maker-checker,
+  // GL-05) and rolls the schedule forward. Validate the template balances UP FRONT so a malformed template
+  // can never be saved and then fail silently every night.
+  async createRecurring(dto: RecurringJournalDto, user: JwtUser) {
+    const db = this.db as any;
+    const lines = dto.lines ?? [];
+    if (!(FREQUENCIES as readonly string[]).includes(dto.frequency)) throw new BadRequestException({ code: 'BAD_FREQUENCY', message: `frequency must be one of ${FREQUENCIES.join('/')}`, messageTh: 'รอบเวลาไม่ถูกต้อง' });
+    const nz = lines.filter((l) => !(n(l.debit) === 0 && n(l.credit) === 0));
+    if (!nz.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No non-zero template lines', messageTh: 'ไม่มีรายการบัญชีที่มีมูลค่า' });
+    const td = round4(nz.reduce((a, l) => a + n(l.debit), 0));
+    const tc = round4(nz.reduce((a, l) => a + n(l.credit), 0));
+    if (td !== tc) throw new BadRequestException({ code: 'UNBALANCED', message: `Template not balanced: debit ${td} != credit ${tc}`, messageTh: 'แม่แบบไม่สมดุล (เดบิตไม่เท่าเครดิต)' });
+    const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
+    const nextRun = dto.startDate ?? ymd();
+    const [r] = await db.insert(recurringJournals).values({
+      tenantId, name: dto.name, frequency: dto.frequency, memo: dto.memo ?? null,
+      ledgerCode: dto.ledgerCode ?? null, currency: dto.currency ?? 'THB', lines: nz, active: 'true',
+      nextRunDate: nextRun, createdBy: user.username,
+    }).returning({ id: recurringJournals.id });
+    return { id: Number(r.id), name: dto.name, frequency: dto.frequency, next_run_date: nextRun, lines: nz };
+  }
+
+  async listRecurring(tenantId?: number) {
+    const db = this.db as any;
+    const where = tenantId != null ? eq(recurringJournals.tenantId, tenantId) : undefined;
+    const rows = await db.select().from(recurringJournals).where(where).orderBy(desc(recurringJournals.id));
+    return { recurring: rows.map((r: any) => ({
+      id: Number(r.id), name: r.name, frequency: r.frequency, memo: r.memo, ledger_code: r.ledgerCode,
+      currency: r.currency, lines: r.lines, active: r.active === 'true', next_run_date: r.nextRunDate,
+      last_run_date: r.lastRunDate, last_entry_no: r.lastEntryNo, created_by: r.createdBy,
+    })), count: rows.length };
+  }
+
+  async setRecurringActive(id: number, active: boolean) {
+    const db = this.db as any;
+    const [r] = await db.select({ id: recurringJournals.id }).from(recurringJournals).where(eq(recurringJournals.id, id)).limit(1);
+    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: `Recurring journal ${id} not found`, messageTh: 'ไม่พบรายการตั้งเวลา' });
+    await db.update(recurringJournals).set({ active: active ? 'true' : 'false' }).where(eq(recurringJournals.id, id));
+    return { id, active };
+  }
+
+  // Idempotent scheduled run: post every active template whose next_run_date has arrived as a DRAFT JE and
+  // roll the schedule forward. source_ref = `REC-<id>-<date>` so the ux_je_idem index dedupes a same-day
+  // re-run at the DB layer; next_run_date is also advanced on posting, so a re-run selects nothing new.
+  async runDueRecurring(user: JwtUser) {
+    const db = this.db as any;
+    const today = ymd();
+    const due = await db.select().from(recurringJournals)
+      .where(and(eq(recurringJournals.active, 'true'), sql`${recurringJournals.nextRunDate} <= ${today}`));
+    const posted: { entry_no: string | null; recurring_id: number; name: string }[] = [];
+    for (const r of due) {
+      const res = await this.postEntry({
+        date: today, source: 'Recurring', sourceRef: `REC-${Number(r.id)}-${today}`,
+        tenantId: r.tenantId ?? null, currency: r.currency ?? 'THB', memo: r.memo ?? r.name,
+        lines: r.lines as JournalLineDto[], createdBy: `${user?.username ?? 'system'} (recurring)`,
+        ledgerCode: r.ledgerCode ?? null, pendingApproval: true,
+      });
+      await db.update(recurringJournals).set({
+        lastRunDate: today, lastEntryNo: res.entry_no ?? r.lastEntryNo,
+        nextRunDate: addByFrequency(today, r.frequency),
+      }).where(eq(recurringJournals.id, r.id));
+      if (res.entry_no) posted.push({ entry_no: res.entry_no, recurring_id: Number(r.id), name: r.name });
+    }
+    return { as_of: today, scanned: due.length, posted: posted.length, entries: posted };
   }
 
   // ───────────────────── Journal listing ─────────────────────
@@ -824,6 +902,17 @@ export class LedgerService {
 }
 
 function round4(x: number): number { return Math.round(x * 10000) / 10000; }
+
+// Recurring-journal cadence: the allowed frequencies and how each advances next_run_date.
+const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
+function addByFrequency(dateStr: string, frequency: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (frequency === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+  else if (frequency === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
+  else d.setUTCDate(d.getUTCDate() + 1); // daily (default)
+  return d.toISOString().slice(0, 10);
+}
+
 // Direct-method cash-flow category from a cash entry's dominant contra account.
 function cashContraCategory(code: string | undefined, type: string | undefined): string {
   const c = code ?? '';

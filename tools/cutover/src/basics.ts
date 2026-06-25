@@ -279,7 +279,35 @@ async function main() {
   const fc = (await inj('GET', '/api/ledger/cash-flow-forecast?weeks=6', admin)).json;
   ok('Cash flow forecast: 7 buckets (week 0..6), opening cash + projected balances', (fc.periods ?? []).length === 7 && typeof fc.opening_cash === 'number' && fc.total_expected_inflow > 0, `n=${fc.periods?.length} open=${fc.opening_cash} in=${fc.total_expected_inflow}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/EAM-depth/forecast ──');
+  // ───────────────────── Recurring / template journal entries (GL-08) ─────────────────────
+  const tbDebit = async (code: string) => {
+    const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+    const row = (tb.rows ?? []).find((r: any) => r.account_code === code);
+    return row ? Number(row.debit) : 0;
+  };
+  // Unbalanced template is rejected up front (can't save a broken template that fails silently each night).
+  const badTpl = await inj('POST', '/api/ledger/recurring', admin, { name: 'bad', frequency: 'daily', lines: [{ account_code: '5710', debit: 1000 }, { account_code: '2100', credit: 500 }] });
+  ok('Recurring: unbalanced template rejected (UNBALANCED)', badTpl.status === 400 && badTpl.json?.error?.code === 'UNBALANCED', `st=${badTpl.status} code=${badTpl.json?.error?.code}`);
+  const before5710 = await tbDebit('5710');
+  const mkTpl = await inj('POST', '/api/ledger/recurring', admin, { name: 'Monthly rent accrual', frequency: 'daily', memo: 'rent', lines: [{ account_code: '5710', debit: 1000 }, { account_code: '2100', credit: 1000 }] });
+  ok('Recurring: create a balanced template (next_run = today)', mkTpl.status === 201 && typeof mkTpl.json?.id === 'number' && !!mkTpl.json?.next_run_date, JSON.stringify(mkTpl.json));
+  const run1 = await inj('POST', '/api/ledger/recurring/run', admin);
+  const recEntryNo = run1.json?.entries?.[0]?.entry_no;
+  ok('Recurring: scheduled run posts the due template (1)', run1.status === 200 && run1.json?.posted === 1 && /^JE-/.test(recEntryNo ?? ''), `posted=${run1.json?.posted} no=${recEntryNo}`);
+  // GL-05: it posts as DRAFT — excluded from balances until a different user approves.
+  const draft5710 = await tbDebit('5710');
+  ok('Recurring: posted JE is DRAFT — excluded from trial balance', near(draft5710, before5710), `before=${before5710} afterDraft=${draft5710}`);
+  const pend = (await inj('GET', '/api/ledger/journal/pending', admin)).json;
+  ok('Recurring: draft JE awaits maker-checker approval', (pend.entries ?? []).some((e: any) => e.entry_no === recEntryNo), `pending=${(pend.entries ?? []).length}`);
+  // Idempotent: a same-day re-run advances nothing (next_run rolled forward + ux_je_idem dedupe).
+  const run2 = await inj('POST', '/api/ledger/recurring/run', admin);
+  ok('Recurring: same-day re-run is idempotent (0)', run2.status === 200 && run2.json?.posted === 0, `posted=${run2.json?.posted}`);
+  // A DIFFERENT user approves → the accrual now lands in balances.
+  const recAppr = await inj('POST', `/api/ledger/journal/${recEntryNo}/approve`, mgr);
+  const posted5710 = await tbDebit('5710');
+  ok('Recurring: a second user approves → accrual hits the GL (+1000)', recAppr.status === 200 && near(posted5710, before5710 + 1000), `st=${recAppr.status} after=${posted5710}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/EAM-depth/forecast + recurring JE ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);
