@@ -141,3 +141,4 @@ The Planner lane creates budgets, versions, scenarios, and forecast lines and su
 | Version | Date | Author | Notes |
 | --- | --- | --- | --- |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 DRAFT | 2026-06-25 | `<<author>>` | **Budget-vs-actual and Demand-ML UIs surfaced** — new screens `/budget` (account/cost-centre budgets + budget-vs-actual variance, `/api/ledger/budgets` & `/budget-vs-actual`) and `/demand` (multi-algorithm demand forecast/backtest + accuracy history, `/api/demand/*`), both ERP nav → วางแผน & BI. UI-only addition over already-documented endpoints; no process/control change (budgets remain reference data, no GL). See user manual `09-reports-and-analytics.md` and UAT `09-reports-analytics-uat.md`. |

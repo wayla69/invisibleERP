@@ -224,6 +224,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-031 | Requester self-approval blocked (SoD, incl. Admin) | EXP-06, R03/R07 | 02 §7, §9 |
 | UAT-P2P-032 | Maker without approval authority blocked | EXP-06 | 02 §7, §9 |
 | UAT-P2P-033 | Reject leaves bill unpaid | EXP-06 | 02 §7, §9 |
+| UAT-UI-SUP-01 | Supplier portal screen (vendor self-service) — PO ack + invoice submit | Feature (supplier portal UI) | 02 §7 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
 
@@ -309,6 +310,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-036 | Lease modification remeasures liability + ROU | LSE-01 | 04 §7 |
 | UAT-GL-037 | Disposal recycles revaluation surplus to RE | FA-07 | 09 §7 |
 | UAT-GL-038 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |
+| UAT-UI-LSE-01 | Lease screen reachable + create + run + modify (UI) | LSE-01 | 04 §7 |
+| UAT-UI-EAM-01 | EAM screen reachable + WO lifecycle / PM sweep / reliability (UI) | FA-06 | 09 §7 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -351,6 +354,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-016 | ESS expense self-approval blocked | ITGC-AC-09 | 25 §7 |
 | UAT-PAY-017 | ESS unlinked user refused | Feature (ESS) | 25 §7 |
 | UAT-PAY-018 | Payroll run tenant-scoped | ITGC-AC-03 | 05 §7 |
+| UAT-UI-ESS-01 | ESS self-service screen reachable + own data + submit-only (UI) | Feature (ESS UI) | 25 §7 |
 
 ## 08 — Admin / SoD / Audit → `08-itgc.md`
 
@@ -482,6 +486,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-039 | BOM availability forecast (servings-remaining) | Feature (BOM availability) | 20 §rev2.9 |
 | UAT-RPT-040 | Production plan — demand-ML forecast | Feature (production plan, demand-ML) | 20 §rev3.3 |
 | UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
+| UAT-UI-DEM-01 | Demand forecasting screen (forecast / backtest / accuracy) (UI) | Feature (demand ML UI) | 13 §7 |
+| UAT-UI-BUD-01 | Budget vs Actual screen (set budget + variance) (UI) | Feature (budget-vs-actual UI) | 13 §7 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 
@@ -536,13 +542,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
 | 02 Order-to-Cash | 55 | 25 |
-| 03 Procure-to-Pay | 26 | 12 |
+| 03 Procure-to-Pay | 27 | 12 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close (incl. fixed assets / EAM) | 45 | 29 |
+| 05 GL & Close (incl. fixed assets / EAM) | 47 | 29 |
 | 06 Tax | 13 | 4 |
-| 07 Payroll | 19 | 8 |
+| 07 Payroll | 20 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
-| 09 Reports & Analytics | 26 | 6 |
+| 09 Reports & Analytics | 28 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **344** | **177** |
+| **Total** | **350** | **177** |
