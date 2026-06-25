@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { timingSafeEqual } from 'node:crypto';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, type JwtUser } from './decorators';
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { resolvePermissions } from '@ierp/shared';
@@ -8,6 +9,14 @@ import { AUTH_COOKIE, CSRF_COOKIE, readCookie } from './cookies';
 
 // State-changing methods that require a CSRF double-submit check when authenticated via cookie.
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// Constant-time CSRF token comparison — never compare a secret with `===`/`!==` (timing oracle, CWE-208).
+function csrfMatches(header: unknown, cookie: string | undefined): boolean {
+  if (typeof header !== 'string' || typeof cookie !== 'string' || !cookie) return false;
+  const a = Buffer.from(header);
+  const b = Buffer.from(cookie);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 // Map api_keys.scopes (csv) → JwtUser.permissions. A scope is either a known alias,
 // a wildcard ('*'/'admin' → full role-default set), or a literal permission key.
@@ -43,9 +52,7 @@ export class JwtAuthGuard implements CanActivate {
     // cookie (double-submit). Header/Bearer-authenticated requests (harnesses, API keys, mobile) are exempt
     // because they don't ride an ambient cookie and so aren't forgeable cross-site.
     if (fromCookie && MUTATING.has((req.method ?? '').toUpperCase())) {
-      const headerCsrf = req.headers?.['x-csrf-token'];
-      const cookieCsrf = readCookie(req, CSRF_COOKIE);
-      if (!cookieCsrf || !headerCsrf || headerCsrf !== cookieCsrf) {
+      if (!csrfMatches(req.headers?.['x-csrf-token'], readCookie(req, CSRF_COOKIE))) {
         throw new ForbiddenException({ code: 'CSRF', message: 'Missing or invalid CSRF token', messageTh: 'CSRF token ไม่ถูกต้อง' });
       }
     }
