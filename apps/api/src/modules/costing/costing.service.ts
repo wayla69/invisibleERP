@@ -1,7 +1,7 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq, and, asc, isNull, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { itemCosting, costLayers, costMovements } from '../../database/schema';
+import { itemCosting, costLayers, costMovements, invBalances } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -28,6 +28,14 @@ export class CostingService {
 
   async setMethod(tenantId: number, itemId: string | null, method: Method, standardCost: number | null, _user: JwtUser) {
     const db = this.db as any;
+    // Costing-engine boundary: an item already valued by the perpetual sub-ledger (inv_balances, INV-06) must
+    // not also be assigned a costing-module method — both capitalize to GL 1200. The two are mutually exclusive
+    // per item (see InventoryLedgerService.assertNotCostingManaged for the reverse guard). Tenant-default
+    // (item_id NULL) is exempt: it only applies to items the sub-ledger isn't already tracking.
+    if (itemId != null) {
+      const [ib] = await db.select().from(invBalances).where(and(eq(invBalances.tenantId, tenantId), eq(invBalances.itemId, itemId))).limit(1);
+      if (ib) throw new BadRequestException({ code: 'CONFLICTING_COSTING', message: `Item ${itemId} is tracked by the perpetual inventory sub-ledger (INV-06); clear its sub-ledger balance before assigning a costing method`, messageTh: 'สินค้านี้ถูกติดตามใน perpetual sub-ledger (INV-06) แล้ว — ล้างยอดใน sub-ledger ก่อนตั้งวิธีคิดต้นทุน' });
+    }
     await db.insert(itemCosting).values({ tenantId, itemId, method, standardCost: standardCost != null ? fx(standardCost, 4) : null })
       .onConflictDoUpdate({ target: [itemCosting.tenantId, itemCosting.itemId], set: { method, standardCost: standardCost != null ? fx(standardCost, 4) : null, updatedAt: new Date() } });
     return { tenant_id: tenantId, item_id: itemId, method, standard_cost: standardCost };
