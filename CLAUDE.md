@@ -86,6 +86,22 @@ For every such change, review and update as needed:
   by **not naming** the sensitive param at the read site: forward the raw query string opaquely and parse
   it server-side from the POST **body** (the body is not a GET-query source). This bit the SSO `/sso/callback`
   page (the IdP redirect carries `code`/`id_token` in the URL).
+- **Web session auth is cookie-based (ITGC-AC-07).** The browser app rides an **httpOnly** `ierp_token`
+  cookie + a JS-readable `ierp_csrf` cookie; `JwtAuthGuard` takes the token from the cookie OR
+  `Authorization: Bearer` (header wins), and enforces a **CSRF double-submit** (`X-CSRF-Token` == `ierp_csrf`)
+  on **cookie-authenticated** `POST/PUT/PATCH/DELETE` only. Bearer clients (harnesses, API keys, mobile) are
+  exempt — they carry no ambient cookie. Compare the CSRF token with **`timingSafeEqual`**, never `===`/`!==`
+  (`js/timing-attack`, CWE-208). On the web side, `hasSession()` reads the `ierp_csrf` cookie (not a
+  localStorage token), every fetch sends `credentials:'include'`, and mutations add the `X-CSRF-Token`
+  header (`apps/api/src/common/cookies.ts` + `guards.ts`, `apps/web/src/lib/api.ts`).
+- **Playwright web-e2e must mimic the cookie session, not a token.** Seed the session by setting
+  `document.cookie = 'ierp_csrf=…'` in an `addInitScript` (the old `localStorage.setItem('ierp_token', …)`
+  no longer authenticates — `hasSession()` reads the cookie, so the shell bounces to `/login`). And because
+  every fetch now sends `credentials:'include'`, the e2e build must use a **same-origin** API base
+  (`env: { NEXT_PUBLIC_API_URL: '' }` in `playwright.config.ts` `webServer`) or the browser blocks the
+  `route.fulfill` stubs as cross-origin (no `Access-Control-Allow-Credentials`). Chromium download is blocked
+  in the sandbox, so web-e2e only runs in CI — verify the cookie path locally via the `cookie-auth` ToE
+  (`pnpm --filter @ierp/cutover cookie-auth`).
 
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
