@@ -60,6 +60,20 @@ A PR is an internal *request to buy* before a real order is placed.
 
 [screenshot: PO form with vendor and line items]
 
+### Browsing POs & suppliers (lookup lists)
+
+Two read-only lookup screens (under **จัดซื้อ** in the sidebar) help you find
+records fast:
+
+- **ใบสั่งซื้อ (PO)** (`/inventory/purchase-orders`) lists recent POs with a
+  **summary band** (POs shown · total value · how many are still **awaiting /
+  in-progress**), a **search** box (PO number or vendor) and **status filter
+  chips**. It's view-only — create / approve POs from **Procurement → Order**.
+- **ผู้ขาย (Suppliers)** (`/inventory/suppliers`) lists vendors with a **search**
+  (name / code / contact / phone) and a live **count** of matches.
+
+Both reflow to a single column on phones and the tables scroll sideways.
+
 ---
 
 ## 3. Receive goods (Goods Receipt / GR)

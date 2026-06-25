@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Target, Plus, Users } from 'lucide-react';
+import { Target, Plus, Search, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -36,6 +36,19 @@ export default function MissionsPage() {
   });
   const toggle = useMutation({ mutationFn: (m: Mission) => api(`/api/loyalty/missions/${m.id}`, { method: 'PATCH', body: JSON.stringify({ active: !m.active }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-missions'] }) });
 
+  const [search, setSearch] = useState('');
+  const [active, setActive] = useState<'all' | 'on' | 'off'>('all');
+  const missions = list.data?.missions ?? [];
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return missions.filter((m) => {
+      if (active === 'on' && !m.active) return false;
+      if (active === 'off' && m.active) return false;
+      if (!term) return true;
+      return [m.mission_code, m.name, m.type].some((v) => String(v ?? '').toLowerCase().includes(term));
+    });
+  }, [missions, search, active]);
+
   return (
     <div>
       <PageHeader
@@ -67,10 +80,22 @@ export default function MissionsPage() {
 
         <StateView q={list}>
           {list.data && (
+            <div className="space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="relative w-full sm:max-w-xs">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาชื่อ / รหัส / ประเภท…" className="pl-9" aria-label="ค้นหาภารกิจ" inputMode="search" enterKeyHint="search" />
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
+                  {([['all', 'ทั้งหมด'], ['on', 'เปิด'], ['off', 'ปิด']] as const).map(([v, l]) => (
+                    <Button key={v} variant={active === v ? 'secondary' : 'ghost'} size="sm" aria-pressed={active === v} onClick={() => setActive(v)}>{l}</Button>
+                  ))}
+                </div>
+              </div>
             <DataTable
-              rows={list.data.missions}
+              rows={filtered}
               rowKey={(r) => r.id}
-              emptyText="ยังไม่มีภารกิจ — เพิ่มด้านบน"
+              emptyText={search || active !== 'all' ? 'ไม่พบภารกิจที่ตรงกับตัวกรอง' : 'ยังไม่มีภารกิจ — เพิ่มด้านบน'}
               columns={[
                 { key: 'mission_code', label: 'รหัส', render: (r) => <span className="font-mono text-xs">{r.mission_code}</span> },
                 { key: 'name', label: 'ชื่อ', render: (r) => <span className="inline-flex items-center gap-1.5"><Target className="size-3.5 text-muted-foreground" />{r.name}</span> },
@@ -80,6 +105,7 @@ export default function MissionsPage() {
                 { key: 'active', label: 'สถานะ', align: 'center', render: (r) => <button onClick={() => toggle.mutate(r)} className="cursor-pointer">{r.active ? <Badge variant="success">เปิด</Badge> : <Badge variant="muted">ปิด</Badge>}</button> },
               ]}
             />
+            </div>
           )}
         </StateView>
       </div>

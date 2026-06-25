@@ -170,6 +170,14 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    /* Mobile/touch polish: kill the grey tap flash, stop iOS auto-zooming text, prevent the
+       rubber-band overscroll behind the fixed shell. All inert on desktop. */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: 'cv11', 'ss01';
@@ -180,5 +188,24 @@
   table,
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Safe-area helpers for the installed PWA on notched/gesture-bar devices. Each falls back to a sensible
+     gutter via max() so it never under-pads in a normal browser (where the env() insets are 0). */
+  .safe-pt {
+    padding-top: env(safe-area-inset-top);
+  }
+  .app-content-pad {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  @media (min-width: 640px) {
+    .app-content-pad {
+      padding-left: max(1.5rem, env(safe-area-inset-left));
+      padding-right: max(1.5rem, env(safe-area-inset-right));
+    }
   }
 }

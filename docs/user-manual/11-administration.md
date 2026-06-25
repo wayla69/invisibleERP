@@ -25,6 +25,10 @@ of Duties (SoD) conflict report**, the MFA policy, and multi-branch setup.
 to change the password (see [Getting Started](./00-getting-started.md)), and — if
 their role requires it — to enrol in MFA.
 
+> **Finding a user.** The user list has a **search** box (username, role, or
+> company/tenant) with a live **match count**, so you can locate an account quickly
+> in a large org before changing its role or resetting its password.
+
 > **Note — usernames are not case-sensitive.** The username is stored in lowercase
 > with surrounding spaces removed, so `JohnD`, `johnd` and `  johnd ` are the same
 > account. Tell the user they can sign in regardless of capitalisation. (The

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -33,6 +34,20 @@ export default function DeliveryPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['deliveries'] }),
   });
 
+  // Client-side find/filter over the loaded delivery orders.
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const deliveries: any[] = q.data?.deliveries ?? [];
+  const statuses = useMemo(() => Array.from(new Set(deliveries.map((d) => d.status).filter(Boolean))), [deliveries]);
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return deliveries.filter((d) => {
+      if (statusFilter && d.status !== statusFilter) return false;
+      if (!term) return true;
+      return [d.do_no, d.driver, d.vehicle].some((v) => String(v ?? '').toLowerCase().includes(term));
+    });
+  }, [deliveries, search, statusFilter]);
+
   return (
     <div className="space-y-4">
       <PageHeader title="ใบส่งสินค้า (Delivery Orders)" description="สร้างใบส่งจากออเดอร์ ติดตามสถานะ และยืนยันการส่ง" />
@@ -48,13 +63,41 @@ export default function DeliveryPage() {
       </Card>
       <StateView q={q}>
         {q.data && (
-          <DataTable
-            rows={q.data.deliveries}
-            columns={[
+          <div className="space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="ค้นหาเลขที่ / คนขับ / ทะเบียน…"
+                  className="pl-9"
+                  aria-label="ค้นหาใบส่งสินค้า"
+                  inputMode="search"
+                  enterKeyHint="search"
+                />
+              </div>
+              {statuses.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
+                  <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(null)}>
+                    ทั้งหมด
+                  </Button>
+                  {statuses.map((s) => (
+                    <Button key={s} variant={statusFilter === s ? 'secondary' : 'ghost'} size="sm" aria-pressed={statusFilter === s} onClick={() => setStatusFilter((c) => (c === s ? null : s))}>
+                      {s}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <DataTable
+              rows={filtered}
+              rowKey={(r: any) => r.do_no}
+              columns={[
               { key: 'do_no', label: 'เลขที่' },
               { key: 'do_date', label: 'วันที่', render: (r: any) => thaiDate(r.do_date) },
-              { key: 'driver', label: 'คนขับ' },
-              { key: 'vehicle', label: 'ทะเบียน' },
+              { key: 'driver', label: 'คนขับ', render: (r: any) => r.driver || '—' },
+              { key: 'vehicle', label: 'ทะเบียน', render: (r: any) => r.vehicle || '—' },
               { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               {
                 key: 'act', label: 'อัปเดตสถานะ', render: (r: any) => (
@@ -64,9 +107,10 @@ export default function DeliveryPage() {
                 ),
               },
               { key: 'view', label: '', render: (r: any) => <Button variant="ghost" size="sm" onClick={() => setSel(r.do_no)}>ดูรายการ</Button> },
-            ]}
-            emptyText="ยังไม่มีใบส่งสินค้า"
-          />
+              ]}
+              emptyText={search || statusFilter ? 'ไม่พบใบส่งที่ตรงกับตัวกรอง' : 'ยังไม่มีใบส่งสินค้า'}
+            />
+          </div>
         )}
       </StateView>
       {sel && (

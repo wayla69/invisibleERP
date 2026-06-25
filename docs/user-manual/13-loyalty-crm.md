@@ -99,7 +99,9 @@ Members spend their points on **rewards** you define, and redeem **coupons** at 
 **Manage the catalog.** Go to **ของรางวัล & คูปอง** (`/loyalty/rewards`, role `marketing`/`exec`). Add a
 reward: a name, a type (e-voucher / discount / product / privilege), how many **points** it costs, its
 **value** in baht, and optionally a **stock** cap, a **per-person** limit, and a minimum tier. Toggle a
-reward on/off with the status chip.
+reward on/off with the status chip. The catalog has a **search** (name / code / type) and **ทั้งหมด /
+เปิด / ปิด** status filter to find a reward in a long list; the same search + status filter is on the
+**ภารกิจ & แสตมป์** (`/loyalty/missions`) list.
 
 **A member redeems a reward.** `POST /api/loyalty/rewards/:id/redeem` (role `loyalty`/`pos`) burns the
 member's points and issues a **single-use code** (`RDM-…`, scannable). It checks the member has enough

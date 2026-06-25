@@ -95,6 +95,7 @@ export default function NewOrderPage() {
                   <Input
                     className="col-span-2 sm:col-span-1"
                     placeholder="Item ID"
+                    aria-label={`รหัสสินค้า รายการที่ ${i + 1}`}
                     value={l.item_id}
                     onChange={(e) => setLine(i, { item_id: e.target.value })}
                   />
@@ -102,8 +103,10 @@ export default function NewOrderPage() {
                     type="number"
                     min={1}
                     step={1}
+                    inputMode="numeric"
                     className="tabular text-right"
                     placeholder="จำนวน"
+                    aria-label={`จำนวน รายการที่ ${i + 1}`}
                     value={l.order_qty}
                     onChange={(e) => setLine(i, { order_qty: +e.target.value })}
                   />
@@ -111,8 +114,10 @@ export default function NewOrderPage() {
                     type="number"
                     min={0}
                     step="0.01"
+                    inputMode="decimal"
                     className="tabular text-right"
                     placeholder="ราคา"
+                    aria-label={`ราคาต่อหน่วย รายการที่ ${i + 1}`}
                     value={l.unit_price}
                     onChange={(e) => setLine(i, { unit_price: +e.target.value })}
                   />

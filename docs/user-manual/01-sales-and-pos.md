@@ -43,6 +43,16 @@ When you are in the **POS workspace** (see *Getting Started → Workspaces*), yo
 **Expected result:** A sale is created with an order number (e.g. `SO-…`), the
 total is shown, and any loyalty points earned are recorded.
 
+> **The orders list (`/pos`).** Above the list a quick **summary band** shows the
+> **orders displayed**, **total sales**, **average per order**, and how many are
+> still **awaiting / unpaid** — figured from the recent orders on screen (not an
+> all-time total; the **Dashboard** carries those). Use the **search box** to find
+> an order by number or customer name, and the **status chips** (**ทั้งหมด** /
+> *Completed* / *Pending* …) to filter the list. These are view-only aids — they
+> never change a sale. On a phone the band stacks and the table scrolls sideways.
+
+[screenshot: /pos with summary band, search and status filter]
+
 [screenshot: /pos/new with line items and Confirm Order button]
 
 ### Taking payment
@@ -409,6 +419,10 @@ Record any cash added or removed:
 3. Choose **Approve** or **Reject** (add a reason if rejecting).
 
 **Expected result:** The claim status changes to *Approved* or *Rejected*.
+
+> **Finding a claim.** Each claim list (sales and supplier/GR) has a **search** box
+> (order / GR number, item or reason) and **status filter chips** to narrow a long
+> list before you act. They reflow for mobile.
 
 (Supplier / goods-receipt claims are covered in [Procurement](./03-procurement.md).)
 
