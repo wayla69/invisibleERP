@@ -11,8 +11,11 @@
 - **Hand-write** the `.sql` in `apps/api/drizzle/` using the **next free 4-digit number**, and **add a
   matching entry** to `apps/api/drizzle/meta/_journal.json` (idx = last + 1, a new `when`, `tag` =
   filename without `.sql`). New tenant-scoped tables must re-run the RLS loop (copy from `0081`/`0121`).
-- **Do NOT run `drizzle-kit generate`** for a normal change — the snapshot baseline is stale, so it emits a
-  ~95 KB full-schema catch-up instead of your one table (see §3).
+- **`drizzle-kit generate` is usable again** for drafting a normal change — the snapshot baseline was
+  resynced (migration `0129_baseline_resync`, §3), so generate now emits a **minimal** diff for your change
+  instead of a ~2,500-line full-schema catch-up. Two caveats remain, so review its output: it does **not**
+  emit the RLS loop for a new tenant-scoped table (hand-append it, copy from `0081`/`0121`), and the
+  filename it picks (`last idx + 1`) can still collide with a concurrent PR — see §2.
 - The **`migrations-journaled` CI gate** enforces: every `.sql` is journaled, every journal tag has a
   `.sql`, **no duplicate migration numbers**, and no duplicate journal tag/idx.
 - When you merge `main` and your number was taken by another PR, **renumber** your `.sql` + journal entry
@@ -27,39 +30,42 @@ grab the same next number; on merge the appended `_journal.json` lines conflict 
 three times in one hour (`0119`→`0121`→`0122`). **Mitigation in place:** the duplicate-number guard (CI).
 **Possible future fix:** switch new migrations to timestamp-prefixed names so two PRs never collide.
 
-## 3. The snapshot drift (the real debt)
+## 3. The snapshot drift — RESOLVED (2026-06-25)
 
-`apps/api/drizzle/meta/*_snapshot.json` no longer reflects the live schema — migrations have been
-hand-written for a long time, so the snapshot baseline never advanced. Consequences:
+**Background.** `apps/api/drizzle/meta/*_snapshot.json` had frozen at `0046` (the last time `generate` was
+used) while migrations `0047`–`0123` were hand-written, so only 3 snapshot files existed for 129
+migrations. `drizzle-kit generate` therefore diffed the live schema against a 76-migration-stale baseline
+and emitted a ~2,500-line catch-up containing non-idempotent `CREATE TYPE` / `ALTER TYPE ADD VALUE` — not
+applyable, so the generate workflow was unusable and every new migration was hand-written (→ the number
+collisions in §2).
 
-- `drizzle-kit generate` diffs current schema against the stale snapshot → a **giant catch-up migration**
-  that tries to (re)create most of the schema. It is **not safe to apply** (contains non-idempotent
-  `CREATE TYPE` / `ALTER TYPE ADD VALUE`), so the normal generate workflow is unusable.
-- New migrations are therefore hand-written (§1), which is why numbers collide (§2).
+**Why it was safe to fix.** Snapshots are read **only** by `drizzle-kit generate` (dev tooling). Neither
+`drizzle-kit migrate` (prod) nor the cutover harnesses read them — both apply the `.sql` files directly
+(the harness `readdirSync(...).filter('.sql').sort()` via PGlite). So advancing the snapshot baseline has
+**zero runtime/prod effect**.
 
-### Grandfathered exceptions (tracked in the CI gate)
-- **Unjournaled orphans:** `0085_floor_zone_geometry`, `0088_dine_in_order_zone`. Both are **idempotent**
-  (`ADD COLUMN IF NOT EXISTS` + a conditional backfill), already applied in prod via direct SQL.
+**The fix.** `drizzle-kit generate` was run to regenerate `meta/0129_snapshot.json` (now reflecting the
+current schema) and a matching journal entry; the generated catch-up `.sql` (non-idempotent) was
+**neutralised to a no-op** (`0129_baseline_resync.sql` = `SELECT 1;`) since the schema is already created by
+`0000`–`0123`. Result: a second `db:generate` reports **"No schema changes"**, and a future change once
+again produces a minimal diff. Verified: `migrations-journaled` gate ✅, `tenant-isolation` harness ✅,
+`e2e` harness ✅ (fresh PGlite DB from all 130 `.sql`).
+
+### Remaining grandfathered exceptions (tracked in the CI gate, low priority)
+- **Unjournaled orphans:** `0085_floor_zone_geometry`, `0088_dine_in_order_zone` — idempotent
+  (`ADD COLUMN IF NOT EXISTS` + a conditional backfill), already applied in prod. Could be journaled as
+  append-only entries when convenient; left grandfathered to keep this change focused on the snapshot.
 - **Duplicate numbers:** `0085`, `0088`, `0104`, `0105` (historical concurrent merges). Already applied;
-  cannot be renumbered safely.
+  cannot be renumbered. Harmless — the guard simply skips them.
 
-## 4. Remediation procedure (do on a QUIET main, in isolation)
+## 4. Adding migrations going forward
 
-Rebuilding the snapshot baseline is a careful, reviewable workstream — **not** a drive-by change:
-
-1. Branch from a quiet `main` (no other migration PRs in flight) in a throwaway worktree.
-2. Journal the two idempotent orphans (`0085_floor_zone_geometry`, `0088_dine_in_order_zone`) as
-   append-only journal entries; remove them from the gate's grandfather list. They re-run as no-ops where
-   unrecorded (IF NOT EXISTS).
-3. Regenerate the snapshot baseline so `drizzle-kit generate` produces an **empty** diff against the live
-   schema — without emitting an applyable catch-up migration. Validate by running `generate` again and
-   confirming "No schema changes".
-4. Verify against a **fresh** DB: `db:migrate` from zero must succeed, and the `cutover`/`tenant-isolation`
-   harnesses (which run every `.sql` directly) must stay green. Confirm prod's `__drizzle_migrations`
-   reconciliation plan before deploy.
-5. Only after that, drop the duplicate-number grandfather list (`0085/0088/0104/0105`) from the gate.
-
-Until then, the hand-written workflow (§1) + the CI guard (§2) are the supported path.
+- Use `db:generate` to draft, **or** hand-write — either way assign the **next free number** and ensure the
+  journal entry exists (the CI gate enforces it). Hand-append the RLS loop for new tenant tables.
+- The snapshot baseline is current; keep it that way by letting `generate` advance it, or by leaving the
+  baseline alone for hand-written no-DDL-snapshot changes (it stays valid).
+- If the snapshot drifts again, repeat the §3 fix: `generate` → keep the new snapshot + journal entry →
+  neutralise the catch-up `.sql` to a no-op → confirm a second `generate` is empty + harnesses green.
 
 ---
 
@@ -68,3 +74,4 @@ Until then, the hand-written workflow (§1) + the CI guard (§2) are the support
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-06-25 | v1.0 | Platform / DB | Initial: documents the migration-number collision pattern (+ the new CI duplicate-number guard), the snapshot drift that makes `db:generate` unusable, the grandfathered orphans/dup-numbers, and a safe remediation procedure for a quiet main. |
+| 2026-06-25 | v1.1 | Platform / DB | **Snapshot drift resolved**: regenerated the baseline (`0129_baseline_resync`, snapshot-only, catch-up neutralised to a no-op). `db:generate` now yields a minimal diff again; zero runtime/prod effect (snapshots are generate-only). Verified by the `migrations-journaled` gate + `tenant-isolation`/`e2e` harnesses. §3/§4 rewritten; orphan-journaling + dup-number grandfathering left as low-priority follow-ups. |
