@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Download, Search, ShieldCheck, UserPlus } from 'lucide-react';
+import { Download, SearchX, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
+import { SearchInput } from '@/components/search-input';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -27,12 +28,11 @@ export default function AdminUsersPage() {
   const qc = useQueryClient();
   const list = useQuery<any>({ queryKey: ['admin-users'], queryFn: () => api('/api/admin/users') });
   const [f, setF] = useState({ username: '', password: '', role: 'Sales', customer_name: '' });
-  const [msg, setMsg] = useState('');
 
   const create = useMutation({
     mutationFn: () => api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username: f.username, password: f.password, role: f.role, customer_name: f.customer_name || undefined }) }),
-    onSuccess: () => { setMsg(`✅ สร้างผู้ใช้ ${f.username}`); setF({ username: '', password: '', role: 'Sales', customer_name: '' }); qc.invalidateQueries({ queryKey: ['admin-users'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`สร้างผู้ใช้ ${f.username}`); setF({ username: '', password: '', role: 'Sales', customer_name: '' }); qc.invalidateQueries({ queryKey: ['admin-users'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const setRole = useMutation({
     mutationFn: (v: { u: string; role: string }) => api(`/api/admin/users/${v.u}`, { method: 'PATCH', body: JSON.stringify({ role: v.role }) }),
@@ -40,13 +40,13 @@ export default function AdminUsersPage() {
   });
   const reset = useMutation({
     mutationFn: (u: string) => { const pw = prompt(`รหัสผ่านใหม่สำหรับ ${u} (≥6 ตัว)`); return pw ? api(`/api/admin/users/${u}/reset-password`, { method: 'POST', body: JSON.stringify({ password: pw }) }) : Promise.resolve(null); },
-    onSuccess: (r) => { if (r) setMsg('✅ รีเซ็ตรหัสผ่านแล้ว'); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { if (r) notifySuccess('รีเซ็ตรหัสผ่านแล้ว'); },
+    onError: (e: any) => notifyError(e.message),
   });
   const del = useMutation({
     mutationFn: (u: string) => api(`/api/admin/users/${u}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   // ── ITGC-AC-08: User Access Review ──
@@ -54,8 +54,8 @@ export default function AdminUsersPage() {
   const lastCert = certs.data?.reviews?.[0];
   const certify = useMutation({
     mutationFn: () => { const period = prompt('ช่วงที่ทบทวน (เช่น 2026-Q2)'); if (!period) return Promise.resolve(null); const notes = prompt('หมายเหตุ (optional)') ?? undefined; return api('/api/admin/users/access-review/certify', { method: 'POST', body: JSON.stringify({ period, notes }) }); },
-    onSuccess: (r: any) => { if (r) { setMsg(`✅ รับรองการทบทวนสิทธิ์ ${r.period} (${r.user_count} ผู้ใช้)`); qc.invalidateQueries({ queryKey: ['uar-certs'] }); } },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { if (r) { notifySuccess(`รับรองการทบทวนสิทธิ์ ${r.period} (${r.user_count} ผู้ใช้)`); qc.invalidateQueries({ queryKey: ['uar-certs'] }); } },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const [search, setSearch] = useState('');
@@ -73,7 +73,7 @@ export default function AdminUsersPage() {
         <h3 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-4" /> การทบทวนสิทธิ์ผู้ใช้ (Access Review · ITGC-AC-08)</h3>
         <p className="text-sm text-muted-foreground">ส่งออกสิทธิ์จริงของผู้ใช้ทุกคน (พร้อมความขัดแย้ง SoD) เพื่อทบทวน แล้วบันทึกการรับรองรายไตรมาส.</p>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => apiDownload('/api/admin/users/access-review/export', 'access-review.csv').catch((e) => setMsg(`❌ ${e.message}`))}><Download className="size-4" /> ส่งออก CSV</Button>
+          <Button variant="outline" size="sm" onClick={() => apiDownload('/api/admin/users/access-review/export', 'access-review.csv').catch((e) => notifyError(e.message))}><Download className="size-4" /> ส่งออก CSV</Button>
           <Button size="sm" disabled={certify.isPending} onClick={() => certify.mutate()}><ShieldCheck className="size-4" /> รับรองการทบทวน</Button>
           {lastCert && <span className="text-sm text-muted-foreground">ล่าสุด: {lastCert.period} · โดย {lastCert.reviewed_by} · {lastCert.user_count} ผู้ใช้ ({lastCert.conflict_user_count} ขัดแย้ง)</span>}
         </div>
@@ -87,25 +87,34 @@ export default function AdminUsersPage() {
           <div className="grid gap-1.5"><Label>บริษัท (เลือก)</Label><Input value={f.customer_name} onChange={(e) => setF({ ...f, customer_name: e.target.value })} placeholder="tenant code" /></div>
         </div>
         <Button className="w-fit" disabled={!f.username || f.password.length < 6 || create.isPending} onClick={() => create.mutate()}><UserPlus className="size-4" /> สร้างผู้ใช้</Button>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
       <StateView q={list}>
         {list.data && (
           <div className="space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="relative w-full sm:max-w-xs">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา username / role / บริษัท…" className="pl-9" aria-label="ค้นหาผู้ใช้" inputMode="search" enterKeyHint="search" />
-              </div>
-              <p className="text-sm text-muted-foreground" aria-live="polite">
-                ผู้ใช้ <span className="tabular font-medium text-foreground">{filtered.length}</span>
-                {search && filtered.length !== users.length ? ` จาก ${users.length}` : ''} คน
-              </p>
-            </div>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="ค้นหา username / role / บริษัท…"
+              ariaLabel="ค้นหาผู้ใช้"
+              count={`ผู้ใช้ ${filtered.length}${search && filtered.length !== users.length ? ` จาก ${users.length}` : ''} คน`}
+            />
           <DataTable
             rows={filtered}
             rowKey={(r: any) => r.username}
-            emptyText={search ? 'ไม่พบผู้ใช้ที่ตรงกับการค้นหา' : 'ไม่มีผู้ใช้'}
+            emptyState={
+              search
+                ? {
+                    icon: SearchX,
+                    title: 'ไม่พบผู้ใช้ที่ตรงกับการค้นหา',
+                    description: 'ลองปรับคำค้นหา หรือล้างการค้นหาเพื่อดูผู้ใช้ทั้งหมด',
+                    action: (
+                      <Button variant="outline" size="sm" onClick={() => setSearch('')}>
+                        ล้างตัวกรอง
+                      </Button>
+                    ),
+                  }
+                : { icon: Users, title: 'ยังไม่มีผู้ใช้', description: 'สร้างบัญชีใหม่ในการ์ดด้านบนเพื่อเพิ่มผู้ใช้รายแรก' }
+            }
             columns={[
               { key: 'username', label: 'Username' },
               { key: 'role', label: 'Role', render: (r: any) => <select className={selectCls} value={r.role} onChange={(e) => setRole.mutate({ u: r.username, role: e.target.value })}>{ROLES.map((x) => <option key={x} value={x}>{x}</option>)}</select> },

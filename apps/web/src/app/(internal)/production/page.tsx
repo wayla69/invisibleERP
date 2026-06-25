@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Play, ClipboardCheck, Network } from 'lucide-react';
+import { Plus, Play, ClipboardCheck, Network, Route, ListChecks, ClipboardList } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -39,14 +40,13 @@ function Routings() {
   const [code, setCode] = useState('');
   const [product, setProduct] = useState('');
   const [ops, setOps] = useState<Op[]>([emptyOp()]);
-  const [msg, setMsg] = useState('');
   const create = useMutation({
     mutationFn: () => api('/api/routings', { method: 'POST', body: JSON.stringify({
       routing_code: code, product_item_id: product || undefined,
       operations: ops.filter((o) => o.op_no).map((o) => ({ op_no: Number(o.op_no), work_center: o.work_center || undefined, description: o.description || undefined, setup_min: Number(o.setup_min) || 0, run_min_per_unit: Number(o.run_min_per_unit) || 0, labor_rate: Number(o.labor_rate) || 0 })),
     }) }),
-    onSuccess: () => { setMsg('✅ บันทึกเส้นทางการผลิต'); setCode(''); setProduct(''); setOps([emptyOp()]); qc.invalidateQueries({ queryKey: ['routings'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('บันทึกเส้นทางการผลิต'); setCode(''); setProduct(''); setOps([emptyOp()]); qc.invalidateQueries({ queryKey: ['routings'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const setOp = (i: number, p: Partial<Op>) => setOps((a) => a.map((o, j) => (j === i ? { ...o, ...p } : o)));
   return (
@@ -75,10 +75,9 @@ function Routings() {
         <div className="flex items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => setOps((a) => [...a, emptyOp()])}><Plus className="size-4" /> เพิ่มขั้นตอน</Button>
           <Button onClick={() => create.mutate()} disabled={!code || create.isPending}>บันทึก</Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </div>
       </Card>
-      <StateView q={q}>{q.data && <DataTable rows={q.data.routings} columns={[{ key: 'routing_code', label: 'รหัส' }, { key: 'product_item_id', label: 'สินค้า' }, { key: 'name', label: 'ชื่อ' }]} emptyText="ยังไม่มีเส้นทางการผลิต" />}</StateView>
+      <StateView q={q}>{q.data && <DataTable rows={q.data.routings} columns={[{ key: 'routing_code', label: 'รหัส' }, { key: 'product_item_id', label: 'สินค้า' }, { key: 'name', label: 'ชื่อ' }]} emptyState={{ icon: Route, title: 'ยังไม่มีเส้นทางการผลิต', description: 'กรอกรหัส Routing และขั้นตอนงานด้านบน แล้วกดบันทึกเพื่อสร้างรายการแรก' }} />}</StateView>
     </div>
   );
 }
@@ -87,15 +86,14 @@ function Routings() {
 function ShopFloor() {
   const [woNo, setWoNo] = useState('');
   const [routing, setRouting] = useState('');
-  const [msg, setMsg] = useState('');
   const q = useQuery<any>({ queryKey: ['wo-ops', woNo], queryFn: () => api(`/api/manufacturing/work-orders/${woNo}/operations`), enabled: false });
   const gen = useMutation({
     mutationFn: () => api(`/api/manufacturing/work-orders/${woNo}/routing/${routing}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: () => { setMsg('✅ สร้างขั้นตอนงานจาก Routing'); q.refetch(); }, onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('สร้างขั้นตอนงานจาก Routing'); q.refetch(); }, onError: (e: any) => notifyError(e.message),
   });
   const report = useMutation({
     mutationFn: (p: { opNo: number; completed: number; scrap: number }) => api(`/api/manufacturing/work-orders/${woNo}/operations/${p.opNo}/report`, { method: 'POST', body: JSON.stringify({ completed_qty: p.completed, scrap_qty: p.scrap }) }),
-    onSuccess: () => { setMsg('✅ บันทึกความคืบหน้า'); q.refetch(); }, onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('บันทึกความคืบหน้า'); q.refetch(); }, onError: (e: any) => notifyError(e.message),
   });
   return (
     <div className="grid gap-5">
@@ -105,7 +103,6 @@ function ShopFloor() {
           <Button variant="outline" onClick={() => q.refetch()} disabled={!woNo}>ดูขั้นตอน</Button>
           <div className="grid gap-1.5"><Label>สร้างจาก Routing</Label><Input value={routing} onChange={(e) => setRouting(e.target.value)} className="w-40" placeholder="RT-..." /></div>
           <Button onClick={() => gen.mutate()} disabled={!woNo || !routing}><Network className="size-4" /> สร้างขั้นตอน</Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </div>
       </Card>
       {q.data && (
@@ -114,7 +111,7 @@ function ShopFloor() {
           { key: 'planned_qty', label: 'แผน', align: 'right' }, { key: 'completed_qty', label: 'เสร็จ', align: 'right' }, { key: 'scrap_qty', label: 'เสีย', align: 'right' },
           { key: 'labor_cost', label: 'ค่าแรง', align: 'right', render: (r: any) => baht(r.labor_cost) }, { key: 'status', label: 'สถานะ' },
           { key: 'act', label: 'รายงาน', sortable: false, render: (r: any) => <ReportBtn onReport={(c, sc) => report.mutate({ opNo: r.op_no, completed: c, scrap: sc })} /> },
-        ]} emptyText="ยังไม่มีขั้นตอน — สร้างจาก Routing" />
+        ]} emptyState={{ icon: ListChecks, title: 'ยังไม่มีขั้นตอนงาน', description: 'ใส่เลข Routing แล้วกด สร้างขั้นตอน เพื่อสร้างขั้นตอนงานให้ใบสั่งผลิตนี้' }} />
       )}
     </div>
   );
@@ -135,11 +132,10 @@ function Quality() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['qa'], queryFn: () => api('/api/quality') });
   const [f, setF] = useState({ ref_type: 'WO', ref_doc: '', item_id: '', qty_inspected: '', qty_passed: '', disposition: 'Accept', unit_cost: '' });
-  const [msg, setMsg] = useState('');
   const ins = useMutation({
     mutationFn: () => api('/api/quality/inspect', { method: 'POST', body: JSON.stringify({ ref_type: f.ref_type, ref_doc: f.ref_doc || undefined, item_id: f.item_id || undefined, qty_inspected: Number(f.qty_inspected) || 0, qty_passed: Number(f.qty_passed) || 0, disposition: f.disposition, unit_cost: Number(f.unit_cost) || 0 }) }),
-    onSuccess: (r: any) => { setMsg(r.scrap_value > 0 ? `✅ บันทึก — ตัดของเสีย ${baht(r.scrap_value)} (${r.entry_no})` : '✅ บันทึกผลตรวจ'); qc.invalidateQueries({ queryKey: ['qa'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(r.scrap_value > 0 ? `บันทึก — ตัดของเสีย ${baht(r.scrap_value)} (${r.entry_no})` : 'บันทึกผลตรวจ'); qc.invalidateQueries({ queryKey: ['qa'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   return (
     <div className="grid gap-5">
@@ -154,13 +150,13 @@ function Quality() {
           <div className="grid gap-1.5"><Label>ผลตัดสิน</Label><select className={selectCls} value={f.disposition} onChange={(e) => setF({ ...f, disposition: e.target.value })}><option value="Accept">รับ</option><option value="Rework">แก้ไข</option><option value="Quarantine">กักไว้</option><option value="Scrap">ทิ้ง (Scrap)</option></select></div>
           {f.disposition === 'Scrap' && <div className="grid gap-1.5"><Label>ต้นทุน/หน่วย</Label><Input type="number" value={f.unit_cost} onChange={(e) => setF({ ...f, unit_cost: e.target.value })} /></div>}
         </div>
-        <div className="flex items-center gap-3"><Button onClick={() => ins.mutate()} disabled={!f.qty_inspected || ins.isPending}><ClipboardCheck className="size-4" /> บันทึก</Button><Msg ok={msg.startsWith('✅')}>{msg}</Msg></div>
+        <div className="flex items-center gap-3"><Button onClick={() => ins.mutate()} disabled={!f.qty_inspected || ins.isPending}><ClipboardCheck className="size-4" /> บันทึก</Button></div>
       </Card>
       <StateView q={q}>{q.data && <DataTable rows={q.data.inspections} columns={[
         { key: 'insp_no', label: 'เลขที่' }, { key: 'ref_type', label: 'ประเภท' }, { key: 'ref_doc', label: 'อ้างอิง' }, { key: 'item_id', label: 'สินค้า' },
         { key: 'qty_inspected', label: 'ตรวจ', align: 'right' }, { key: 'qty_failed', label: 'ไม่ผ่าน', align: 'right' }, { key: 'disposition', label: 'ผล' },
         { key: 'scrap_value', label: 'มูลค่าตัดทิ้ง', align: 'right', render: (r: any) => baht(r.scrap_value) },
-      ]} emptyText="ยังไม่มีผลตรวจ" />}</StateView>
+      ]} emptyState={{ icon: ClipboardList, title: 'ยังไม่มีผลตรวจคุณภาพ', description: 'กรอกแบบฟอร์มด้านบนเพื่อบันทึกผลตรวจคุณภาพรายการแรก' }} />}</StateView>
     </div>
   );
 }
@@ -170,10 +166,9 @@ type Dem = { item_id: string; qty: string };
 function Mrp() {
   const [rows, setRows] = useState<Dem[]>([{ item_id: '', qty: '' }]);
   const [res, setRes] = useState<any>(null);
-  const [msg, setMsg] = useState('');
   const run = useMutation({
     mutationFn: () => api<any>('/api/mrp/run', { method: 'POST', body: JSON.stringify({ demand: rows.filter((r) => r.item_id && r.qty).map((r) => ({ item_id: r.item_id, qty: Number(r.qty) })) }) }),
-    onSuccess: (r) => { setRes(r); setMsg(`✅ วางแผน: ผลิต ${r.summary.make_orders} · สั่งซื้อ ${r.summary.buy_orders} รายการ`); }, onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { setRes(r); notifySuccess(`วางแผน: ผลิต ${r.summary.make_orders} · สั่งซื้อ ${r.summary.buy_orders} รายการ`); }, onError: (e: any) => notifyError(e.message),
   });
   const setRow = (i: number, p: Partial<Dem>) => setRows((a) => a.map((r, j) => (j === i ? { ...r, ...p } : r)));
   return (
@@ -189,13 +184,12 @@ function Mrp() {
         <div className="flex items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => setRows((a) => [...a, { item_id: '', qty: '' }])}><Plus className="size-4" /> เพิ่ม</Button>
           <Button onClick={() => run.mutate()} disabled={run.isPending}><Play className="size-4" /> รัน MRP</Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </div>
       </Card>
       {res && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="gap-2 p-5"><h4 className="font-semibold">ใบสั่งผลิต (Make)</h4><DataTable rows={res.planned_make} columns={[{ key: 'item_id', label: 'สินค้า' }, { key: 'qty', label: 'จำนวน', align: 'right' }]} emptyText="—" /></Card>
-          <Card className="gap-2 p-5"><h4 className="font-semibold">ใบสั่งซื้อ (Buy)</h4><DataTable rows={res.planned_buy} columns={[{ key: 'item_id', label: 'วัตถุดิบ' }, { key: 'gross_qty', label: 'ต้องการ', align: 'right' }, { key: 'on_hand', label: 'มีอยู่', align: 'right' }, { key: 'qty', label: 'ต้องซื้อ', align: 'right' }]} emptyText="—" /></Card>
+          <Card className="gap-2 p-5"><h4 className="font-semibold">ใบสั่งผลิต (Make)</h4><DataTable rows={res.planned_make} columns={[{ key: 'item_id', label: 'สินค้า' }, { key: 'qty', label: 'จำนวน', align: 'right' }]} emptyState={{ title: 'ไม่มีรายการที่ต้องผลิต' }} /></Card>
+          <Card className="gap-2 p-5"><h4 className="font-semibold">ใบสั่งซื้อ (Buy)</h4><DataTable rows={res.planned_buy} columns={[{ key: 'item_id', label: 'วัตถุดิบ' }, { key: 'gross_qty', label: 'ต้องการ', align: 'right' }, { key: 'on_hand', label: 'มีอยู่', align: 'right' }, { key: 'qty', label: 'ต้องซื้อ', align: 'right' }]} emptyState={{ title: 'ไม่มีรายการที่ต้องสั่งซื้อ' }} /></Card>
         </div>
       )}
     </div>

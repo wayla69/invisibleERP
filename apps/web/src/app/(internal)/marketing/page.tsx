@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Megaphone } from 'lucide-react';
+import { Megaphone, Users, Tag } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { statusVariant } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -29,8 +30,8 @@ function Campaigns() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['mk-camp'], queryFn: () => api('/api/marketing/campaigns') });
   const [name, setName] = useState(''); const [type, setType] = useState('Popup');
-  const add = useMutation({ mutationFn: () => api('/api/marketing/campaigns', { method: 'POST', body: JSON.stringify({ campaign_name: name, campaign_type: type }) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['mk-camp'] }); setName(''); } });
-  const toggle = useMutation({ mutationFn: (id: number) => api(`/api/marketing/campaigns/${id}/toggle`, { method: 'PATCH' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['mk-camp'] }) });
+  const add = useMutation({ mutationFn: () => api('/api/marketing/campaigns', { method: 'POST', body: JSON.stringify({ campaign_name: name, campaign_type: type }) }), onSuccess: () => { notifySuccess('สร้างแคมเปญแล้ว'); qc.invalidateQueries({ queryKey: ['mk-camp'] }); setName(''); }, onError: (e: any) => notifyError(e.message) });
+  const toggle = useMutation({ mutationFn: (id: number) => api(`/api/marketing/campaigns/${id}/toggle`, { method: 'PATCH' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['mk-camp'] }), onError: (e: any) => notifyError(e.message) });
   return (
     <div className="space-y-4">
       <Card className="max-w-xl gap-4 p-5">
@@ -47,11 +48,10 @@ function Campaigns() {
             </Select>
             <Button disabled={!name || add.isPending} onClick={() => add.mutate()}>สร้าง</Button>
           </div>
-          {add.error && <Msg>{(add.error as Error).message}</Msg>}
         </CardContent>
       </Card>
       <StateView q={q}>
-        {q.data && <DataTable rows={q.data.campaigns} columns={[
+        {q.data && <DataTable rows={q.data.campaigns} emptyState={{ icon: Megaphone, title: 'ยังไม่มีแคมเปญ', description: 'สร้างแคมเปญแรกด้วยฟอร์มด้านบนเพื่อเริ่มทำการตลาด' }} columns={[
           { key: 'name', label: 'ชื่อ', render: (r) => g(r, 'campaignName', 'campaign_name') },
           { key: 'type', label: 'ประเภท', render: (r) => g(r, 'campaignType', 'campaign_type') },
           { key: 'dates', label: 'ช่วงเวลา', render: (r) => `${thaiDate(g(r, 'startDate', 'start_date'))} – ${thaiDate(g(r, 'endDate', 'end_date'))}` },
@@ -73,7 +73,7 @@ function Segments() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {Object.entries(d.counts ?? {}).map(([k, v]) => <StatCard key={k} label={k} value={String(v)} />)}
           </div>
-          <DataTable rows={d.segments ?? []} columns={[
+          <DataTable rows={d.segments ?? []} emptyState={{ icon: Users, title: 'ยังไม่มีข้อมูลกลุ่มลูกค้า', description: 'เมื่อมีประวัติการซื้อ ระบบจะจัดกลุ่มลูกค้าแบบ RFM ให้อัตโนมัติ' }} columns={[
             { key: 'name', label: 'ลูกค้า', render: (r) => g(r, 'tenant', 'customer_name', 'code') },
             { key: 'segment', label: 'กลุ่ม', render: (r) => { const s = g(r, 'segment'); return <Badge variant={statusVariant(s)}>{s}</Badge>; } },
             { key: 'spend', label: 'ยอดซื้อ', align: 'right', render: (r) => baht(g(r, 'spend', 'total_spend')) },
@@ -90,8 +90,8 @@ function Promotions() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['mk-promo'], queryFn: () => api('/api/promotions') });
   const [name, setName] = useState(''); const [type, setType] = useState('Discount %'); const [pct, setPct] = useState(10);
-  const add = useMutation({ mutationFn: () => api('/api/promotions', { method: 'POST', body: JSON.stringify({ promo_name: name, promo_type: type, discount_pct: Number(pct) }) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['mk-promo'] }); setName(''); } });
-  const toggle = useMutation({ mutationFn: (id: number) => api(`/api/promotions/${id}/toggle`, { method: 'PATCH' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['mk-promo'] }) });
+  const add = useMutation({ mutationFn: () => api('/api/promotions', { method: 'POST', body: JSON.stringify({ promo_name: name, promo_type: type, discount_pct: Number(pct) }) }), onSuccess: () => { notifySuccess('สร้างโปรโมชั่นแล้ว'); qc.invalidateQueries({ queryKey: ['mk-promo'] }); setName(''); }, onError: (e: any) => notifyError(e.message) });
+  const toggle = useMutation({ mutationFn: (id: number) => api(`/api/promotions/${id}/toggle`, { method: 'PATCH' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['mk-promo'] }), onError: (e: any) => notifyError(e.message) });
   return (
     <div className="space-y-4">
       <Card className="max-w-2xl gap-4 p-5">
@@ -105,7 +105,7 @@ function Promotions() {
         </CardContent>
       </Card>
       <StateView q={q}>
-        {q.data && <DataTable rows={q.data.promotions} columns={[
+        {q.data && <DataTable rows={q.data.promotions} emptyState={{ icon: Tag, title: 'ยังไม่มีโปรโมชั่น', description: 'สร้างโปรโมชั่นส่วนลดแรกด้วยฟอร์มด้านบน' }} columns={[
           { key: 'name', label: 'ชื่อ', render: (r) => g(r, 'promoName', 'promo_name') },
           { key: 'type', label: 'ประเภท', render: (r) => g(r, 'promoType', 'promo_type') },
           { key: 'active', label: 'สถานะ', render: (r) => { const s = g(r, 'active', 'isActive') ? 'Active' : 'Paused'; return <Badge variant={statusVariant(s)}>{s}</Badge>; } },

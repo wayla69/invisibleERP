@@ -1,14 +1,14 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PackagePlus, RefreshCw, AlertTriangle, FileText } from 'lucide-react';
+import { PackagePlus, RefreshCw, AlertTriangle, FileText, PackageSearch } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
@@ -21,12 +21,14 @@ export default function ReplenishmentPage() {
 
   const recompute = useMutation({
     mutationFn: () => api<{ count: number }>('/api/replenishment/suggest', { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['replenishment'] }),
+    onSuccess: (r) => { notifySuccess(`คำนวณใหม่แล้ว · พบ ${num(r.count)} รายการ`); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const autoPr = useMutation({
     mutationFn: () => api<{ pr_no: string | null; lines: number }>('/api/replenishment/auto-pr', { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['replenishment'] }),
+    onSuccess: (r) => { notifySuccess(r.pr_no ? `สร้าง ${r.pr_no} · ${num(r.lines)} บรรทัด` : 'ไม่มีรายการที่ต้องสั่งซื้อ'); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const suggestions: any[] = q.data?.suggestions ?? [];
@@ -52,15 +54,6 @@ export default function ReplenishmentPage() {
       />
 
       <div className="space-y-5">
-        {recompute.error && <Msg>{(recompute.error as Error).message}</Msg>}
-        {recompute.data && <Msg ok>✅ คำนวณใหม่แล้ว · พบ {num(recompute.data.count)} รายการ</Msg>}
-        {autoPr.error && <Msg>{(autoPr.error as Error).message}</Msg>}
-        {autoPr.data && (
-          <Msg ok>
-            {autoPr.data.pr_no ? `✅ สร้าง ${autoPr.data.pr_no} · ${num(autoPr.data.lines)} บรรทัด` : 'ไม่มีรายการที่ต้องสั่งซื้อ'}
-          </Msg>
-        )}
-
         <StateView q={q}>
           {q.data && (
             <div className="space-y-5">
@@ -81,7 +74,11 @@ export default function ReplenishmentPage() {
                   { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={r.status === 'Suggested' ? 'info' : r.status === 'PR_Created' ? 'success' : 'muted'}>{r.status}</Badge> },
                   { key: 'pr_no', label: 'PR', render: (r: any) => r.pr_no ?? '—' },
                 ]}
-                emptyText="ยังไม่มีคำแนะนำ — กด “คำนวณใหม่” เพื่อสร้าง"
+                emptyState={{
+                  icon: PackageSearch,
+                  title: 'ยังไม่มีคำแนะนำเติมสต๊อก',
+                  description: 'กด “คำนวณใหม่” เพื่อให้ระบบวิเคราะห์สต๊อกและเสนอจำนวนที่ควรสั่งซื้อ',
+                }}
               />
             </div>
           )}

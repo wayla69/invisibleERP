@@ -87,8 +87,10 @@ empty state with a *ล้างตัวกรอง* action), **finance** (8 m
 AP / maker-checker / collections tables), and **reconciliation · bank · workflow** (mutation toasts + empty
 states). A **second reviewed sweep** extended the same toasts + guided empty states to **procurement ·
 RFQs · CRM · projects · fixed-assets · accounting · tax invoices · HCM · planning · pricing · service**
-(11/11 behavior-preserving, 0 flagged) — so **~21 screens** now share the pattern. Inline `<Msg>` is kept
-for **in-dialog field validation**; only action *result* feedback moved to toasts.
+(11/11 behavior-preserving, 0 flagged). A **third reviewed sweep** added admin/users · webhooks ·
+scheduled-reports · alerts · marketing · delivery-channels · production · WMS · 3-way-match · replenishment
+(10/10, 0 flagged) — bringing the total to **~31 screens** sharing the pattern. Inline `<Msg>` is kept for
+**in-dialog field validation**; only action *result* feedback moved to toasts.
 
 ---
 
@@ -125,3 +127,4 @@ and `00-getting-started.md` (Finance cycle sub-sections + action center).
 | 2026-06-25 | v1.0 (IMPLEMENTED) | Web / Product | Finance menu → 5 PEAK-style cycle sub-sections; `/finance` split into ภาพรวม/รายรับ/รายจ่าย tabs with `?tab=` deep-link (URL-synced `Tabs`); dashboard "สิ่งที่ต้องทำวันนี้" action center (reuses existing endpoints, self-hides by permission); `ModulePage` scaffold adopted on inventory + bank. No href/API/permission/GL/control change. Docs synced (this file, doc 15, user-manual 05 + 00). Verified: web typecheck ✅ + build ✅; 2 new e2e cases (CI). |
 | 2026-06-25 | v1.1 (IMPLEMENTED) | Web / Product | `ModulePage.title` made optional (headerless tab/section body). Scaffold rolled out to `inventory/suppliers`, `inventory/purchase-orders`, the `revenue` SchedulesTab, and `reconciliation` (minimal) — each a pure layout swap, independently review-verified (0 behavior-parity defects). Still no API/route/permission/control change. Verified: web typecheck ✅ + build ✅. |
 | 2026-06-25 | v1.2 (IMPLEMENTED) | Web / Product | **UX friendliness pass** (§1.5): new shared primitives — `notify` toasts, `SearchInput` (clearable + live count), `FormField` — and `DataTable` rich `emptyState` + keyboard-accessible focus-ringed rows (lifts all ~67 tables). Adopted on inventory/suppliers/purchase-orders/finance/reconciliation/bank/workflow: 8 finance mutations + several others → toasts, guided no-match/no-data empty states, clearable search. All review-verified behavior-preserving (6/6, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
+| 2026-06-25 | v1.3 (IMPLEMENTED) | Web / Product | **Second + third friendliness sweeps** (§1.5): same toasts + guided empty states (+ search where hand-rolled) extended to 11 more screens (procurement/RFQs/CRM/projects/assets/accounting/tax-invoices/HCM/planning/pricing/service) and then 10 more (admin-users/webhooks/scheduled-reports/alerts/marketing/channels/production/wms/3-way-match/replenishment) — **~31 screens** total. Each page independently review-verified behavior-preserving (11/11 then 10/10, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
