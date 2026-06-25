@@ -47,10 +47,10 @@ export class FinanceController {
 
   // Statement of account — running balance over [from,to] for one customer (AR) or vendor (AP).
   @Get('ar/statement') @Permissions('ar', 'exec')
-  customerStatement(@Query('tenant_id') tenantId: string, @Query('from') from?: string, @Query('to') to?: string) { return this.svc.customerStatement(Number(tenantId), from || undefined, to || undefined); }
+  customerStatement(@Query('tenant_id') tenantId: string, @Query('from') from?: string, @Query('to') to?: string, @Query('currency') currency?: string) { return this.svc.customerStatement(Number(tenantId), from || undefined, to || undefined, currency || undefined); }
 
   @Get('ap/statement') @Permissions('creditors', 'exec')
-  vendorStatement(@Query('vendor') vendor: string, @Query('from') from?: string, @Query('to') to?: string) { return this.svc.vendorStatement(vendor, from || undefined, to || undefined); }
+  vendorStatement(@Query('vendor') vendor: string, @Query('from') from?: string, @Query('to') to?: string, @Query('currency') currency?: string) { return this.svc.vendorStatement(vendor, from || undefined, to || undefined, currency || undefined); }
 
   // Petty cash / employee cash advances (EXP-07): issue a float, settle it against actual spend.
   @Post('advances') @Permissions('creditors', 'exec')

@@ -182,6 +182,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-147 | Self-release blocked, second person releases (SOD_SELF_RELEASE) | REV-08, R09 | 01 §7, §9, §13 |
 | UAT-O2C-148 | Credit-limit change is audited | REV-08, R09 | 01 §7, §9 |
 | UAT-O2C-149 | Customer statement of account (running balance) | REV-12 | 01 §7 |
+| UAT-O2C-150 | Customer statement — multi-currency (base + filter) | REV-12 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -302,7 +303,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-033 | Lease periodic run (interest + payment + ROU depreciation) | LSE-01 | 04 §7 |
 | UAT-GL-034 | Asset upward revaluation → surplus to equity | FA-07 | 09 §7 |
 | UAT-GL-035 | Asset impairment + no-change guard + audit | FA-07 | 09 §7 |
-| UAT-GL-036 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |
+| UAT-GL-036 | Lease modification remeasures liability + ROU | LSE-01 | 04 §7 |
+| UAT-GL-037 | Disposal recycles revaluation surplus to RE | FA-07 | 09 §7 |
+| UAT-GL-038 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -529,14 +532,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 54 | 24 |
+| 02 Order-to-Cash | 55 | 25 |
 | 03 Procure-to-Pay | 26 | 12 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close (incl. fixed assets / EAM) | 43 | 27 |
+| 05 GL & Close (incl. fixed assets / EAM) | 45 | 29 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 19 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **341** | **174** |
+| **Total** | **344** | **177** |

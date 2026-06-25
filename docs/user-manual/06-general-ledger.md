@@ -138,6 +138,12 @@ the balance sheet (rather than expensing rent as you pay it).
 depreciation** of the ROU asset (Dr 5210 / Cr 1690). Over the term the liability and
 the ROU asset wind down to **zero**.
 
+**Modifying a lease.** If the rent, remaining term, or rate changes, use **Modify**
+(`POST /api/leases/{leaseNo}/modify`). The system **remeasures the liability** at the
+present value of the revised payments and **adjusts the right-of-use asset by the
+same amount**; depreciation then continues straight-line over the revised remaining
+term. (A change that leaves the lease unchanged is rejected with `NO_CHANGE`.)
+
 ---
 
 ## 3. Trial balance & financial statements
@@ -305,6 +311,11 @@ revaluation (impairment) posts an **impairment loss** (**Dr Impairment Loss 5820
 Cr 1500**). The asset's net book value updates and every change is kept in the
 **revaluation history** (`GET /api/assets/{assetNo}/revaluations`). Entering the
 current value (no change) is rejected (`NO_CHANGE`).
+
+> **Note — on disposal:** if you later dispose a revalued asset, any **revaluation
+> surplus** built up in equity is **transferred to retained earnings** (Dr 3200 / Cr
+> 3100) automatically — it isn't recognised again in profit or loss. The disposal
+> response reports the amount recycled.
 
 > **Note:** Print **QR labels** from the QR Tags tab and use **scan-update** to
 > record an asset's location or assigned holder during a physical asset count.

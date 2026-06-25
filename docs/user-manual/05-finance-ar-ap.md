@@ -52,6 +52,11 @@ date), every **invoice** (charge) and **receipt** (payment) in date order with a
 **running balance**, and the **closing balance**. It's built from the same posted
 AR data as the aging view.
 
+> **Multi-currency:** each document keeps its own currency and booked exchange rate.
+> By default the statement reports in **base THB** (each foreign document converted at
+> its rate); add **`?currency=USD`** to see only that currency's documents in their
+> own units.
+
 ### A4. Collections & dunning (chasing overdue invoices)
 
 The **collections worklist** shows every open invoice with its age, the dunning
@@ -211,6 +216,8 @@ Open **AP → Statement**, pick the vendor and a date range
 **Expected result:** A statement with the **opening balance**, every **bill**
 (charge) and approved **payment** in date order with a **running balance**, and the
 **closing balance** — reconcile it to the supplier's own statement before you pay.
+Like the customer statement it is **multi-currency**: base THB by default, or add
+**`?currency=USD`** for that currency's documents in their own units.
 
 ---
 
