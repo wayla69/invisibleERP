@@ -24,12 +24,18 @@ Effort key: **S** ≈ 1–2 days · **M** ≈ 3–5 days · **L** ≈ 1–2 week
 **Goal:** real card acceptance + integrated hardware.
 - **Terminal/PSP:** implement a real `PaymentGateway` (extend `gateways.ts`) for a Thai acquirer — **Opn (Omise) / 2C2P / GB Prime** — supporting: create-charge, **EMV chip + contactless/tap**, **pre-auth + capture** (bar tabs), tip-on-terminal, void, refund-via-PSP, and a **settlement/batch** endpoint reconciled against `payments`. New tables: `payment_terminals` (pairing), `payment_intents` (PSP ref ↔ sale), `settlement_batches`.
 - **Endpoints:** `POST /api/payments/terminal/charge`, `/capture`, `/void`, `POST /api/payments/settlements/reconcile`, webhook `POST /api/payments/psp/webhook` (HMAC-verified, idempotent on PSP event id).
-- **Peripheral bridge:** a small local agent (or WebUSB/WebSerial) for **ESC/POS printer** (reuse `receipt.service` ESC/POS output), **cash-drawer kick**, **barcode scanner** (keyboard-wedge handled in web), and a **customer-facing display** screen wired to the existing CFD endpoint.
+- **Peripheral bridge:** a small local agent (or WebUSB/WebSerial) for **ESC/POS printer** (reuse `receipt.service` ESC/POS output), **cash-drawer kick**, **barcode scanner** (keyboard-wedge handled in web), and a **customer-facing display** screen wired to the existing CFD endpoint. **✅ Delivered (2026-06-25):** the WebUSB/WebSerial bridge (`apps/web/src/lib/peripherals.ts`) is now wired into the register via `apps/web/src/lib/terminal.ts` + the register's **⚙ ตั้งค่าเครื่อง** — receipt printing (print-through-driver **or** direct USB ESC/POS), automatic cash-drawer kick on cash sales, barcode quick-add, and live customer-display push (`POST /api/peripherals/display/:terminal`). PromptPay now also returns a scannable `qr_image`. *Still open:* the real PSP card-terminal (pre-auth/capture/settlement).
 - **Verify:** harness against the PSP **sandbox** (charge→capture→refund→settle, over-refund guard already exists); printer/drawer manual-tested.
 - **Depends on:** PSP merchant account (external).
 
 ### Phase P0c — Cashier speed + control · Effort **M** · Risk: med
 **Goal:** the interaction speed that defines world-class.
+> **✅ Delivered (2026-06-25) — the touch register `/pos/register`:** menu-grid tap-to-add with category
+> chips + name/SKU search + barcode quick-add, a modifier picker, a running cart with qty steppers, a
+> full-screen checkout (cash **numeric keypad** + **quick-tender** ฿100/฿500/฿1000 + live change, QR
+> PromptPay, card/transfer), **hold/recall** (`/api/pos/hold` + `/held/:no/recall`), and optional
+> table-attach (fires to the KDS at checkout). *Still open:* manager-override PIN modal and POS-native
+> returns/exchange (below).
 - **Web (retail POS page):** hotkeys + numeric keypad, **quick-tender** buttons (exact / ฿100 / ฿500), favorites/quick-keys grid, barcode quick-add, line edit by keyboard.
 - **Park/recall & tabs:** `pos_held_orders` table; `POST /api/pos/hold`, `GET /api/pos/held`, `POST /api/pos/held/:id/recall`. Bar tabs ride on P0b pre-auth.
 - **Manager override:** `pos_overrides` audit (action, reason_code, requested_by, approver, amount); a PIN/approval modal gates voids, discounts over a tenant threshold, price overrides, no-sale drawer opens, returns. Endpoint `POST /api/pos/override` (records + authorizes).

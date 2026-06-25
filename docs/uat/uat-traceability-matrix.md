@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.2 · 2026-06-23**
+**Status: DRAFT v0.3 · 2026-06-25** · *v0.3: mapped the POS touch-register cases UAT-O2C-151..155.*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -183,6 +183,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-148 | Credit-limit change is audited | REV-08, R09 | 01 §7, §9 |
 | UAT-O2C-149 | Customer statement of account (running balance) | REV-12 | 01 §7 |
 | UAT-O2C-150 | Customer statement — multi-currency (base + filter) | REV-12 | 01 §7 |
+| UAT-O2C-151 | Register quick sale (tap → cash → receipt + drawer) | Feature (POS register) | 01 §7 |
+| UAT-O2C-152 | Register modifier line priced from the catalog | Feature (POS register) | 01 §7 |
+| UAT-O2C-153 | Register PromptPay tender shows a scannable QR | Feature (POS register) | 01 §7 |
+| UAT-O2C-154 | Register hold → recall round-trips the cart | Feature (POS register) | 01 §7 |
+| UAT-O2C-155 | Register mirrors the cart to the customer display | REST-11 | 20 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 

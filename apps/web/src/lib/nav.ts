@@ -150,7 +150,8 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'ขายหน้าร้าน',
     workspace: ['pos'],
     items: [
-      { label: 'POS', href: '/pos', icon: ShoppingCart, perms: ['pos', 'order_mgt'] },
+      { label: 'ขายหน้าร้าน (Register)', href: '/pos/register', icon: ShoppingCart, perms: ['pos', 'order_mgt'] },
+      { label: 'รายการออเดอร์', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
       { label: 'โต๊ะ', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
       { label: 'ครัว (KDS)', href: '/kds', icon: ChefHat, perms: ['pos'] },
       { label: 'เมนูอาหาร', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },

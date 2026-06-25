@@ -58,8 +58,8 @@ export default function PosPage() {
         description="รายการขายและสถานะการชำระเงิน"
         actions={
           <Button asChild>
-            <Link href="/pos/new">
-              <Plus className="size-4" /> สร้างออเดอร์
+            <Link href="/pos/register">
+              <Plus className="size-4" /> เปิดหน้าขาย
             </Link>
           </Button>
         }
