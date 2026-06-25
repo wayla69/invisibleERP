@@ -1,0 +1,13 @@
+-- 0129 — Snapshot baseline (no-op).
+--
+-- This migration applies NO DDL. Its sole purpose is to advance the Drizzle snapshot baseline:
+-- `apps/api/drizzle/meta/0129_snapshot.json` was regenerated to reflect the CURRENT schema, so that
+-- `pnpm --filter @ierp/api db:generate` once again produces a minimal diff for a new change instead of a
+-- ~2,500-line full-schema catch-up (the snapshots had been frozen at 0046 while migrations 0047–0123 were
+-- hand-written). Snapshots are read ONLY by drizzle-kit `generate` (dev tooling) — never by
+-- `drizzle-kit migrate` or the cutover harness (which apply the `.sql` files directly) — so this change has
+-- zero runtime/prod effect. The schema itself is already created by migrations 0000–0123; this file must
+-- stay a no-op (the generated catch-up was non-idempotent: CREATE TYPE / ALTER TYPE ADD VALUE).
+--
+-- See docs/ops/drizzle-migration-debt.md.
+SELECT 1;
