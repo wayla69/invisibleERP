@@ -162,6 +162,25 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-121 | Status callback + mock fallback | Feature (aggregator adapter) | 20 §7.7 |
 | UAT-O2C-122 | Multi-terminal realtime KDS event | Feature (multi-terminal SSE) | 20 §rev3.0 |
 | UAT-O2C-123 | LINE marketing automation — closed loop | Feature (LINE automation), MKT-04 | 19 §7.12 |
+| UAT-O2C-130 | Collections worklist (open overdue AR) | REV-12 | 01 §7, §9 |
+| UAT-O2C-131 | Dunning stage recommended by aging | REV-12 | 01 §7 |
+| UAT-O2C-132 | Record dunning action advances stage | REV-12 | 01 §7, §9 |
+| UAT-O2C-133 | Dunning on paid invoice rejected (ALREADY_PAID) | REV-12 | 01 §9, §13 |
+| UAT-O2C-134 | Credit status flags over-limit + serious overdue | REV-12, R09 | 01 §7, §9 |
+| UAT-O2C-135 | Credit check denies further credit (held customer) | REV-12, R09 | 01 §9, §13 |
+| UAT-O2C-136 | Order entry blocks 90+ defaulter (CREDIT_OVERDUE) | REV-12 | 01 §7, §9 |
+| UAT-O2C-137 | Order entry — over-limit still blocked (parity) | REV-08 | 01 §9, §13 |
+| UAT-O2C-138 | Order entry — good-standing customer can order | REV-12 | 01 §7 |
+| UAT-O2C-139 | Automated dunning sweep advances overdue invoices | REV-12 | 01 §7 |
+| UAT-O2C-140 | Dunning sweep is idempotent | REV-12 | 01 §7 |
+| UAT-O2C-141 | Schedule daily automated dunning | REV-12 | 01 §7 |
+| UAT-O2C-142 | Scheduler tick fires the dunning job | REV-12 | 01 §7 |
+| UAT-O2C-143 | Dunning action dispatches a notice to the customer | REV-12 | 01 §7 |
+| UAT-O2C-144 | Sweep dispatches notices, channel auto-picked | REV-12 | 01 §7 |
+| UAT-O2C-145 | Credit Manager places a manual hold | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-146 | Credit check denies a manually-held customer (CREDIT_HOLD) | REV-08 | 01 §9, §13 |
+| UAT-O2C-147 | Self-release blocked, second person releases (SOD_SELF_RELEASE) | REV-08, R09 | 01 §7, §9, §13 |
+| UAT-O2C-148 | Credit-limit change is audited | REV-08, R09 | 01 §7, §9 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -171,13 +190,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-002 | PO approval (maker≠checker) | EXP-01, R02 | 02 §9 |
 | UAT-P2P-003 | Goods receipt | EXP-02 | 02 §7 |
 | UAT-P2P-004 | 3-way match success | EXP-03 | 02 §7, §9 |
-| UAT-P2P-005 | Matched pay + GL | EXP-03, GL-01 | 02 §7 |
+| UAT-P2P-005 | Matched pay (request+approve) + GL | EXP-06, GL-01 | 02 §7 |
 | UAT-P2P-006 | Price variance block (MATCH_BLOCKED) | EXP-03 | 02 §9, §13 |
 | UAT-P2P-007 | Over-invoice block | EXP-03 | 02 §9, §13 |
 | UAT-P2P-008 | Match tolerance | EXP-03 | 02 §9 |
-| UAT-P2P-009 | Override-with-reason | EXP-03, R04 | 02 §9 |
+| UAT-P2P-009 | Override-with-reason (request+approve) | EXP-06, R04 | 02 §9 |
 | UAT-P2P-010 | Override reset on re-match | EXP-03 | 02 §9, §13 |
-| UAT-P2P-011 | Non-PO bill (gate fails open) | EXP-03 | 02 §7 |
+| UAT-P2P-011 | Non-PO bill (gate fails open, request+approve) | EXP-06 | 02 §7 |
 | UAT-P2P-012 | Blocklisted vendor (SUPPLIER_BLOCKED) | EXP-04, R13 | 02 §9, §13 |
 | UAT-P2P-013 | Un-blocklist vendor | EXP-04 | 02 §7 |
 | UAT-P2P-014 | RFQ→quote→award→PO | EXP-01 | 02 §7 |
@@ -189,12 +208,17 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-020 | Supplier cannot invoice another vendor's PO | Feature (supplier portal) | 02 §7 |
 | UAT-P2P-021 | Supplier portal unlinked user refused | Feature (supplier portal) | 02 §7 |
 | UAT-P2P-022 | AP bill idempotency | EXP-03 / GL-01 | 02 §7 |
-| UAT-P2P-023 | AP payment idempotency | EXP-03 / GL-01 | 02 §7 |
+| UAT-P2P-023 | AP payment-request idempotency | EXP-06 / GL-01 | 02 §7 |
 | UAT-P2P-024 | Dimension routing — PO by vendor | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-025 | PO approval routes through the engine | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-026 | SLA escalation sweep flags + reminds | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-027 | Escalation fallback approver can act | EXP-03 (workflow) | 02 §7 |
 | UAT-P2P-028 | No-code builder replaces steps | Feature (workflow builder) | 02 §7 |
+| UAT-P2P-029 | Pre-paid bill creation blocked | EXP-06 | 02 §7, §9 |
+| UAT-P2P-030 | Payment request creates no GL/paid effect | EXP-06 | 02 §7, §9 |
+| UAT-P2P-031 | Requester self-approval blocked (SoD, incl. Admin) | EXP-06, R03/R07 | 02 §7, §9 |
+| UAT-P2P-032 | Maker without approval authority blocked | EXP-06 | 02 §7, §9 |
+| UAT-P2P-033 | Reject leaves bill unpaid | EXP-06 | 02 §7, §9 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
 
@@ -251,7 +275,23 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
 | UAT-GL-020 | Bank reconciliation tenant-scoped | ITGC-AC-03 / REC-02 | 07 §7 |
-| UAT-GL-021 | Cash-flow forecast + working-capital health | Feature (cash-flow forecast) | 07 §7.9 |
+| UAT-GL-021 | Statement of Cash Flows reconstructed from GL | GL-07 | 04 §7, §9 |
+| UAT-GL-022 | Cash flow reconciles to change in cash | GL-07 | 04 §9 |
+| UAT-GL-023 | Year-end close excluded from cash flow | GL-07 | 04 §7, §9 |
+| UAT-GL-024 | Direct-method cash flow by receipt/payment nature | GL-07 | 04 §7, §9 |
+| UAT-GL-025 | Direct method ties to operating + Δcash | GL-07 | 04 §9 |
+| UAT-GL-026 | Cash-flow forecast projects open AR/AP by due date | GL-07 | 04 §7 |
+| UAT-EAM-001 | Raise a corrective maintenance work order | FA-06 | 09 §7 |
+| UAT-EAM-002 | Complete WO → maintenance cost to AP (5710) | EXP-05, GL-01 | 09 §7, §9 |
+| UAT-EAM-003 | Illegal WO transition rejected | FA-06 | 09 §7, §13 |
+| UAT-EAM-004 | PM sweep raises due preventive WOs (time + meter) | FA-06 | 09 §7 |
+| UAT-EAM-005 | PM generation is idempotent | FA-06 | 09 §7, §9 |
+| UAT-EAM-006 | WO cost lines roll up to actual cost | FA-06 | 09 §7 |
+| UAT-EAM-007 | Completion posts the rolled-up actual cost to AP | EXP-05, FA-06 | 09 §7, §9 |
+| UAT-EAM-008 | Per-asset reliability & cost KPIs | FA-06 | 09 §7 |
+| UAT-GL-027 | Unbalanced recurring template rejected (UNBALANCED) | GL-08 | 04 §7, §9 |
+| UAT-GL-028 | Recurring run posts a Draft JE via maker-checker | GL-08, R05 | 04 §7, §9 |
+| UAT-GL-029 | Recurring run idempotent; second person approves → hits GL | GL-08, GL-05, R05 | 04 §7, §9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -289,7 +329,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-012 | RLS payroll isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-PAY-013 | RBAC non-HCM block | ITGC-AC-07 | 08 §9 |
 | UAT-PAY-014 | ESS self-service own data | Feature (ESS), ITGC-AC | 25 §7 |
-| UAT-PAY-015 | ESS expense → GL on approve | Feature (ESS), GL-01 | 25 §7 |
+| UAT-PAY-015 | ESS expense → AP reimbursement on approve | Feature (ESS), EXP-05, GL-01 | 25 §7 |
+| UAT-PAY-019 | Reimbursement is an AP payable, settled via AP | EXP-05, REC-01 | 25 §7, 02 §7 |
 | UAT-PAY-016 | ESS expense self-approval blocked | ITGC-AC-09 | 25 §7 |
 | UAT-PAY-017 | ESS unlinked user refused | Feature (ESS) | 25 §7 |
 | UAT-PAY-018 | Payroll run tenant-scoped | ITGC-AC-03 | 05 §7 |
@@ -477,14 +518,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 27 | 9 |
+| 02 Order-to-Cash | 53 | 23 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close | 20 | 11 |
+| 05 GL & Close (incl. fixed assets / EAM) | 37 | 22 |
 | 06 Tax | 13 | 4 |
-| 07 Payroll | 18 | 7 |
+| 07 Payroll | 19 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **287** | **139** |
+| **Total** | **331** | **165** |

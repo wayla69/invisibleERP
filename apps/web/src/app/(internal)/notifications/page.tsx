@@ -77,7 +77,7 @@ export default function NotificationsPage() {
                       <p className="mt-0.5 text-xs text-muted-foreground">{thaiDate(it.created_at)}</p>
                     </div>
                     {!it.is_read && (
-                      <Button variant="ghost" size="sm" className="gap-1 text-xs text-muted-foreground" onClick={() => markRead.mutate(it.id)}>
+                      <Button variant="ghost" size="sm" className="gap-1 text-xs text-muted-foreground" disabled={markRead.isPending} onClick={() => markRead.mutate(it.id)}>
                         <Check className="size-3.5" />
                         อ่านแล้ว
                       </Button>

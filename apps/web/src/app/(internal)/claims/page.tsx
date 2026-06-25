@@ -49,9 +49,9 @@ function SalesClaims() {
               {
                 key: 'act', label: 'ดำเนินการ', render: (r: any) => r.admin_status === 'Waiting' ? (
                   <div className="flex items-center gap-1">
-                    <Button size="sm" onClick={() => decide.mutate({ id: r.id, decision: 'approve' })}>อนุมัติ</Button>
+                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, decision: 'approve' })}>อนุมัติ</Button>
                     <Input className="h-8 w-32" placeholder="เหตุผลปฏิเสธ" value={reason[r.id] ?? ''} onChange={(e) => setReason((s) => ({ ...s, [r.id]: e.target.value }))} />
-                    <Button size="sm" variant="destructive" onClick={() => decide.mutate({ id: r.id, decision: 'reject' })}>ปฏิเสธ</Button>
+                    <Button size="sm" variant="destructive" disabled={decide.isPending} onClick={() => decide.mutate({ id: r.id, decision: 'reject' })}>ปฏิเสธ</Button>
                   </div>
                 ) : '—',
               },
@@ -102,7 +102,7 @@ function GrClaims() {
               { key: 'claim_qty', label: 'จำนวน', align: 'right', render: (r: any) => num(r.claim_qty) },
               { key: 'reason', label: 'เหตุผล' },
               { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-              { key: 'act', label: '', render: (r: any) => r.status === 'Open' ? <div className="flex gap-1"><Button size="sm" onClick={() => resolve.mutate({ no: r.claim_no, status: 'Resolved' })}>ปิดเคลม</Button><Button size="sm" variant="destructive" onClick={() => resolve.mutate({ no: r.claim_no, status: 'Rejected' })}>ปฏิเสธ</Button></div> : '—' },
+              { key: 'act', label: '', render: (r: any) => r.status === 'Open' ? <div className="flex gap-1"><Button size="sm" disabled={resolve.isPending} onClick={() => resolve.mutate({ no: r.claim_no, status: 'Resolved' })}>ปิดเคลม</Button><Button size="sm" variant="destructive" disabled={resolve.isPending} onClick={() => resolve.mutate({ no: r.claim_no, status: 'Rejected' })}>ปฏิเสธ</Button></div> : '—' },
             ]}
             emptyText="ไม่มีเคลมผู้ขาย"
           />

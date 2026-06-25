@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, and, asc, isNull, sql } from 'drizzle-orm';
+import { eq, and, asc, isNull, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { itemCosting, costLayers, costMovements } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
@@ -91,9 +91,20 @@ export class CostingService {
   async onIssue(p: { tenantId: number; saleNo: string; date: string; lines: { itemId: string; qty: number }[]; createdBy: string }): Promise<{ cogs: number }> {
     const db = this.db as any;
     if (p.tenantId == null) return { cogs: 0 };
+    // Resolve costing config for ALL line items up front (was 1–2 config queries per line → N+1). Resolution
+    // is unchanged: per-item row → tenant default (item_id NULL) → inactive. The FIFO/AVG/STD reads below stay
+    // per-line because they take FOR UPDATE locks and mutate cost layers / running average.
+    const lineItemIds = [...new Set(p.lines.map((l) => l.itemId))];
+    const ownRows = lineItemIds.length
+      ? await db.select().from(itemCosting).where(and(eq(itemCosting.tenantId, p.tenantId), inArray(itemCosting.itemId, lineItemIds)))
+      : [];
+    const cfgMap = new Map<string, { method: Method; standardCost: number; rowId: number; itemRow: boolean }>();
+    for (const own of ownRows) cfgMap.set(own.itemId, { method: own.method as Method, standardCost: n(own.standardCost), rowId: Number(own.id), itemRow: true });
+    const [def] = await db.select().from(itemCosting).where(and(eq(itemCosting.tenantId, p.tenantId), isNull(itemCosting.itemId))).limit(1);
+    const defaultCfg = def ? { method: def.method as Method, standardCost: n(def.standardCost), rowId: Number(def.id), itemRow: false } : null;
     let cogs = 0;
     for (const l of p.lines) {
-      const cfg = await this.config(db, p.tenantId, l.itemId);
+      const cfg = cfgMap.get(l.itemId) ?? defaultCfg;
       if (!cfg) continue;
       const qty = r4(l.qty);
       let lineCost = 0;

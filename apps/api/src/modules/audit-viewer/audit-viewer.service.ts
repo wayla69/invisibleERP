@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, gte, lte, desc, ilike, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { auditLog } from '../../database/schema';
+import { auditLog, dataChangeLog } from '../../database/schema';
+
+export interface ChangeFilters { table?: string; row_pk?: string; actor?: string; from?: string; to?: string; tenantId?: number | null }
 
 export interface AuditFilters {
   actor?: string;
@@ -58,5 +60,28 @@ export class AuditViewerService {
       lines.push([v.id, v.ts, v.actor, v.tenant_id, v.action, v.entity, v.entity_id, v.ip, v.request_id, v.status, v.meta].map(esc).join(','));
     }
     return lines.join('\n');
+  }
+
+  // Field-level OLD→NEW change log (ITGC-AC-14), captured by DB triggers on the financial tables. Append-only.
+  // Tenant scoping is applied here (data_change_log opts out of RLS): a non-Admin caller sees only their tenant.
+  async changes(f: ChangeFilters, limit: number, offset: number) {
+    const db = this.db as any;
+    const c: SQL[] = [];
+    if (f.table) c.push(eq(dataChangeLog.tableName, f.table));
+    if (f.row_pk) c.push(eq(dataChangeLog.rowPk, f.row_pk));
+    if (f.actor) c.push(ilike(dataChangeLog.actor, `%${f.actor}%`));
+    if (f.from) { const d = new Date(f.from); if (!isNaN(d.getTime())) c.push(gte(dataChangeLog.ts, d)); }
+    if (f.to) { const d = new Date(f.to); if (!isNaN(d.getTime())) c.push(lte(dataChangeLog.ts, d)); }
+    if (f.tenantId != null) c.push(eq(dataChangeLog.tenantRef, f.tenantId)); // non-Admin → own tenant only
+    const w = c.length ? and(...c) : undefined;
+    const rows = await db.select().from(dataChangeLog).where(w).orderBy(desc(dataChangeLog.ts)).limit(limit).offset(offset);
+    const [n] = await db.select({ c: sql<number>`count(*)` }).from(dataChangeLog).where(w);
+    return {
+      rows: rows.map((r: any) => ({
+        id: Number(r.id), ts: r.ts, table: r.tableName, op: r.op, row_pk: r.rowPk, tenant_id: r.tenantRef,
+        actor: r.actor, old_value: r.oldValue, new_value: r.newValue, changed_columns: r.changedColumns,
+      })),
+      total: Number(n?.c ?? 0), limit, offset,
+    };
   }
 }

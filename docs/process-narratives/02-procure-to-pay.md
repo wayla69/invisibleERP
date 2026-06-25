@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | EXP-01, EXP-02, EXP-03, EXP-04; SoD R02, R03, R04, R07, R13 |
+| Related RCM controls | EXP-01, EXP-02, EXP-03, EXP-04, EXP-05, EXP-06; SoD R02, R03, R04, R07, R13 |
 | Related policy | `compliance/policies/03-delegation-of-authority.md`, `compliance/policies/12-third-party-vendor-management-policy.md` |
 
 ## 2. Purpose
@@ -26,7 +26,7 @@ To control the expenditure cycle — purchase requisition, purchase order, goods
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4, cl. 8.4 (control of externally provided processes, products and services).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — EXP-01..04.
+- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — EXP-01..05.
 - `compliance/policies/12-third-party-vendor-management-policy.md` (vendor approval/blocklist), `03-delegation-of-authority.md` (approval thresholds).
 - Code: `apps/api/src/modules/procurement/procurement.service.ts`, `apps/api/src/modules/match/`, `apps/api/src/modules/workflow/workflow.service.ts`.
 
@@ -54,7 +54,8 @@ SoD: the **Buyer** who raises PR/PO never maintains the **vendor master** (Maste
 | Goods receipt (GR) | I | I | I | **A/R** | I | I |
 | Run 3-way match | I | I | C | I | **A/R** | C |
 | Change match tolerance | I | I | I | I | I | **A/R** |
-| AP transaction / pay (gated on match) | I | I | I | I | **A/R** | A |
+| Record AP bill / request payment (maker, gated on match) | I | I | I | I | **A/R** | A |
+| Approve / reject AP payment (checker, ≠ requester) | I | I | C | I | I | **A/R** |
 
 ## 7. Process narrative
 
@@ -65,7 +66,10 @@ SoD: the **Buyer** who raises PR/PO never maintains the **vendor master** (Maste
 5. **Goods receipt.** WarehouseOperator records the GR (`POST /api/procurement/grs`, GR-) against the PO; quantities feed the perpetual stock ledger (see `03-inventory-cogs.md`). Segregated from ordering (**R04**).
 6. **Three-way match (decision point).** ApClerk runs `POST /api/procurement/match/run`: PO ↔ GR ↔ Invoice are matched within configured tolerance. Variances beyond tolerance → `MATCH_BLOCKED` (matched = false) (**EXP-01**).
 7. **Tolerance / override control.** Changing the match tolerance requires the `creditors` permission (`PUT` tolerance) — an unauthorized change → `403`; changes are logged (**EXP-04**). Any documented override of a failed match requires a justification and is recorded.
-8. **AP payment gate.** AP disbursement (`/api/finance/ap/transactions`) is permitted only on a successful 3-way match; an unmatched invoice cannot be paid (**EXP-01**, target hard-gate per readiness plan). WHT is computed on payment (see `06-tax-compliance.md`); the expense + AP + tax journal is posted to the GL (GL-01). **Retry-safety:** a bill and a payment each accept an optional `idempotency_key`; a retried request (a second HTTP call after a timeout) with the same key returns the original bill / leaves the paid amount applied once — no duplicate payable and no double cash-out (the payment guard is evaluated **before** the paid-amount update, keyed on the client key) (**EXP-03**, **GL-01**).
+8. **AP payment gate + disbursement maker-checker (EXP-06).** AP disbursement is permitted only on a successful 3-way match; an unmatched invoice cannot be paid (**EXP-01**, target hard-gate per readiness plan). Disbursement is a **two-step, segregated** flow so no single person both books and pays a bill:
+   - **Request (maker, `creditors`).** `PATCH /api/finance/ap/transactions/{no}/pay` records a payment **request** (`ap_payments`, status `PendingApproval`). The bill's `paid_amount` is **not** touched and **no GL posts** — an over-request beyond outstanding-minus-pending is rejected (`AP_OVERPAY`). Booking a bill **pre-paid** in one call (`paid_amount>0` on create) is blocked (`AP_PREPAID_BLOCKED`).
+   - **Approve (checker, `approvals`/`gl_close`).** `POST /api/finance/ap/payments/{no}/approve` by a **different** user — a requester approving their own request is rejected with `SOD_VIOLATION` (binds even Admin). Only on approval does the bill's `paid_amount` move (under `FOR UPDATE`) and the cash-disbursement journal post (Dr 2000 / Cr 1000). `reject` records the decision with no cash/GL effect. The pending queue is `GET /api/finance/ap/payments/pending`.
+   WHT is computed on payment (see `06-tax-compliance.md`); the expense + AP + tax journal is posted to the GL (GL-01). **Retry-safety:** the bill and the payment request each accept an optional `idempotency_key`; a retried request returns the original (no duplicate payable / request), and the GL post is keyed on a stable per-request reference so an approval posts cash exactly once (**EXP-06**, **GL-01**, **GL-04**).
 
 ## 8. Process flow
 
@@ -98,6 +102,7 @@ flowchart TD
 | 6 | Pay for goods not ordered/received / wrong price | 3-way match within tolerance | Prev / Auto | EXP-01 | Match results; `MATCH_BLOCKED` |
 | 7 | Tolerance loosened to force payment | Tolerance change restricted to `creditors` perm; logged | Prev / Auto | EXP-04 | Config-change log; 403 test |
 | 8 | Disburse on unmatched invoice | AP payment gated on successful match | Prev / Auto | EXP-01 | AP→match linkage |
+| 8 | Disburse without independent approval (one person books & pays) | AP disbursement maker-checker — request (`creditors`) ≠ approve (`approvals`/`gl_close`); pre-paid creation blocked | Prev / Hybrid | EXP-06, R03, R07 | `SOD_VIOLATION`, `AP_PREPAID_BLOCKED`; ToE in `compliance.ts` |
 | 1,8 | Create vendor and pay it | SoD: vendor master vs AP disbursement | Prev / Manual | R02 | SoD conflict report |
 | 1 | Raise purchase and pay it | SoD: procurement vs AP | Prev / Manual | R03 | SoD conflict report |
 
@@ -140,5 +145,6 @@ flowchart TD
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-23 | Platform | D3: Supplier (vendor-facing) portal (`/api/supplier/*`, perm `vendor_portal`) — a vendor, resolved from the JWT username via `vendors.user_name` (migration 0065), sees ONLY their own POs, acknowledges them (`purchase_orders.vendor_ack_at`), and submits invoices → a PENDING AP transaction (Unpaid) the buyer's AP clerk then 3-way-matches/pays (EXP-01..04). A vendor cannot view or invoice another vendor's PO. Verified by the `supplier` harness. |
+| 0.3 | 2026-06-24 | Pre-production audit | **EXP-06 — AP disbursement maker-checker.** AP payment split into request (`creditors`) → approve (`approvals`/`gl_close`) with requester ≠ approver enforced (even Admin); paid_amount & cash GL move only on approval; pre-paid bill creation blocked (`AP_PREPAID_BLOCKED`). New `ap_payments` table (migration 0115) + pending queue. ToE re-performed by `cutover/compliance.ts`. |
 | 0.3 | 2026-06-23 | Platform | Security review W3 (EXP-03 / GL-01): AP bill + AP payment accept an `idempotency_key` (migration 0068) so a retried request cannot duplicate a payable or double-pay; the payment guard is evaluated before the paid-amount update. Verified by the `match` harness idempotency cases. |
 | 0.4 | 2026-06-24 | Platform | **Approval-workflow enhancements (Platform Phase 2):** §7 step 3 — **PO** now routes through the engine (mirroring PR); added **dimension-based step routing** (`match_key`/`match_value` vs instance context), **SLA + escalation** (definition/step `sla_hours`, `POST /api/workflow/run-escalations` flags overdue + reminds the escalation approver, who may then act), and a **no-code builder** (`PUT /api/workflow/definitions/:id`). Migration `0079_workflow_escalation_routing`. Verified by the `workflow` harness. |

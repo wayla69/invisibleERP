@@ -1,8 +1,8 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { sql, eq, and, desc, gt, lte } from 'drizzle-orm';
+import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
@@ -74,7 +74,46 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '5410', name: 'FX Gain/Loss (Realized)', type: 'Expense' },        // กำไร/ขาดทุนอัตราแลกเปลี่ยนที่เกิดขึ้นจริง — loss=debit, gain=credit (settlement)
   { code: '2250', name: 'Loyalty Points Liability', type: 'Liability' },      // หนี้สินแต้มสะสม — TFRS 15 contract liability for outstanding loyalty points (control acct)
   { code: '5700', name: 'Loyalty Points Expense', type: 'Expense' },          // ค่าใช้จ่ายแต้มสะสม — provision for loyalty points granted (offsets 2250)
+  { code: '5710', name: 'Repairs & Maintenance', type: 'Expense' },           // ค่าซ่อมแซมและบำรุงรักษา — EAM maintenance work-order cost
 ];
+
+// ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
+// Cash & cash-equivalents — the accounts the statement EXPLAINS (movement is the bottom line, not a flow).
+const CASH_ACCOUNTS = ['1000', '1010', '1020'];
+type CfBucket = 'addback' | 'operating' | 'investing' | 'financing';
+// Maps every NON-cash balance-sheet account to a cash-flow section. The indirect method starts operating
+// cash from net income, then layers (a) non-cash add-backs and (b) working-capital movements. Every
+// balance-sheet account is bucketed exactly once so the statement reconciles to the change in cash by
+// double-entry construction (Σ all accounts' debit−credit = 0). Accounts absent here fall back by type.
+const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = {
+  // Non-cash add-backs (P&L charge that consumed no cash) — accumulated depreciation (contra-asset, credit-normal).
+  '1590': { bucket: 'addback', label: 'ค่าเสื่อมราคาและค่าตัดจำหน่าย (Depreciation & amortization)' },
+  // Operating — current assets (an increase ties up cash)
+  '1100': { bucket: 'operating', label: 'ลูกหนี้การค้า (Accounts receivable)' },
+  '1150': { bucket: 'operating', label: 'ลูกหนี้ระหว่างบริษัท (Intercompany receivable)' },
+  '1200': { bucket: 'operating', label: 'สินค้าคงเหลือ (Inventory)' },
+  '1210': { bucket: 'operating', label: 'สินค้าสำเร็จรูป (Finished goods)' },
+  '1250': { bucket: 'operating', label: 'งานระหว่างทำ (Work-in-process)' },
+  '1260': { bucket: 'operating', label: 'ต้นทุนโครงการที่ยังไม่เรียกเก็บ (Unbilled project cost)' },
+  // Operating — current liabilities (an increase releases cash)
+  '2000': { bucket: 'operating', label: 'เจ้าหนี้การค้า (Accounts payable)' },
+  '2100': { bucket: 'operating', label: 'ภาษีค้างจ่าย (Tax payable)' },
+  '2150': { bucket: 'operating', label: 'เจ้าหนี้ระหว่างบริษัท (Intercompany payable)' },
+  '2200': { bucket: 'operating', label: 'เงินมัดจำลูกค้า/บัตรของขวัญ (Customer deposits)' },
+  '2210': { bucket: 'operating', label: 'เงินรับล่วงหน้า (Customer deposits — prepaid)' },
+  '2300': { bucket: 'operating', label: 'ทิปค้างจ่าย (Tips payable)' },
+  '2350': { bucket: 'operating', label: 'ประกันสังคมค้างจ่าย (Social security payable)' },
+  '2360': { bucket: 'operating', label: 'ภาษีหัก ณ ที่จ่ายเงินเดือนค้างจ่าย (Payroll WHT payable)' },
+  '2370': { bucket: 'operating', label: 'กองทุนสำรองเลี้ยงชีพค้างจ่าย (Provident fund payable)' },
+  '2380': { bucket: 'operating', label: 'ค่าใช้จ่ายการผลิตรอปันส่วน (Manufacturing costs applied)' },
+  '2390': { bucket: 'operating', label: 'ต้นทุนโครงการรอปันส่วน (Project costs applied)' },
+  '2400': { bucket: 'operating', label: 'รายได้รับล่วงหน้า (Unearned revenue)' },
+  // Investing — property, plant & equipment (gross)
+  '1500': { bucket: 'investing', label: 'ซื้อ/จำหน่ายสินทรัพย์ถาวร (Purchase/disposal of fixed assets)' },
+  // Financing — owners' equity & dividends
+  '3000': { bucket: 'financing', label: 'ส่วนทุน/เงินลงทุนจากเจ้าของ (Owner capital contributions)' },
+  '3100': { bucket: 'financing', label: 'เงินปันผลจ่าย / กำไรสะสม (Dividends paid)' },
+};
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null }
 export interface PostEntryDto {
@@ -89,6 +128,17 @@ export interface PostEntryDto {
   ledgerCode?: string | null; // NULL/undefined = shared (all ledgers); a code = adjustment to that ledger only
   allowClosedPeriod?: boolean; // only the year-end CLOSE may post into the period it is closing
   pendingApproval?: boolean; // GL-05: post as DRAFT (excluded from balances) until a different user approves
+}
+
+export interface RecurringJournalDto {
+  name: string;
+  frequency: string; // 'daily' | 'weekly' | 'monthly'
+  memo?: string;
+  ledgerCode?: string | null;
+  currency?: string;
+  tenantId?: number | null;
+  startDate?: string; // first run date (YYYY-MM-DD); defaults to today
+  lines: JournalLineDto[];
 }
 
 @Injectable()
@@ -222,22 +272,95 @@ export class LedgerService {
     return { entry_no: entryNo, balanced: true, status, pending: !!dto.pendingApproval, lines: inserted };
   }
 
+  // ───────────────────── Recurring / template journal entries (GL-08) ─────────────────────
+  // A balanced template + a cadence; the scheduled job posts each due template as a DRAFT JE (maker-checker,
+  // GL-05) and rolls the schedule forward. Validate the template balances UP FRONT so a malformed template
+  // can never be saved and then fail silently every night.
+  async createRecurring(dto: RecurringJournalDto, user: JwtUser) {
+    const db = this.db as any;
+    const lines = dto.lines ?? [];
+    if (!(FREQUENCIES as readonly string[]).includes(dto.frequency)) throw new BadRequestException({ code: 'BAD_FREQUENCY', message: `frequency must be one of ${FREQUENCIES.join('/')}`, messageTh: 'รอบเวลาไม่ถูกต้อง' });
+    const nz = lines.filter((l) => !(n(l.debit) === 0 && n(l.credit) === 0));
+    if (!nz.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No non-zero template lines', messageTh: 'ไม่มีรายการบัญชีที่มีมูลค่า' });
+    const td = round4(nz.reduce((a, l) => a + n(l.debit), 0));
+    const tc = round4(nz.reduce((a, l) => a + n(l.credit), 0));
+    if (td !== tc) throw new BadRequestException({ code: 'UNBALANCED', message: `Template not balanced: debit ${td} != credit ${tc}`, messageTh: 'แม่แบบไม่สมดุล (เดบิตไม่เท่าเครดิต)' });
+    const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
+    const nextRun = dto.startDate ?? ymd();
+    const [r] = await db.insert(recurringJournals).values({
+      tenantId, name: dto.name, frequency: dto.frequency, memo: dto.memo ?? null,
+      ledgerCode: dto.ledgerCode ?? null, currency: dto.currency ?? 'THB', lines: nz, active: 'true',
+      nextRunDate: nextRun, createdBy: user.username,
+    }).returning({ id: recurringJournals.id });
+    return { id: Number(r.id), name: dto.name, frequency: dto.frequency, next_run_date: nextRun, lines: nz };
+  }
+
+  async listRecurring(tenantId?: number) {
+    const db = this.db as any;
+    const where = tenantId != null ? eq(recurringJournals.tenantId, tenantId) : undefined;
+    const rows = await db.select().from(recurringJournals).where(where).orderBy(desc(recurringJournals.id));
+    return { recurring: rows.map((r: any) => ({
+      id: Number(r.id), name: r.name, frequency: r.frequency, memo: r.memo, ledger_code: r.ledgerCode,
+      currency: r.currency, lines: r.lines, active: r.active === 'true', next_run_date: r.nextRunDate,
+      last_run_date: r.lastRunDate, last_entry_no: r.lastEntryNo, created_by: r.createdBy,
+    })), count: rows.length };
+  }
+
+  async setRecurringActive(id: number, active: boolean) {
+    const db = this.db as any;
+    const [r] = await db.select({ id: recurringJournals.id }).from(recurringJournals).where(eq(recurringJournals.id, id)).limit(1);
+    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: `Recurring journal ${id} not found`, messageTh: 'ไม่พบรายการตั้งเวลา' });
+    await db.update(recurringJournals).set({ active: active ? 'true' : 'false' }).where(eq(recurringJournals.id, id));
+    return { id, active };
+  }
+
+  // Idempotent scheduled run: post every active template whose next_run_date has arrived as a DRAFT JE and
+  // roll the schedule forward. source_ref = `REC-<id>-<date>` so the ux_je_idem index dedupes a same-day
+  // re-run at the DB layer; next_run_date is also advanced on posting, so a re-run selects nothing new.
+  async runDueRecurring(user: JwtUser) {
+    const db = this.db as any;
+    const today = ymd();
+    const due = await db.select().from(recurringJournals)
+      .where(and(eq(recurringJournals.active, 'true'), sql`${recurringJournals.nextRunDate} <= ${today}`));
+    const posted: { entry_no: string | null; recurring_id: number; name: string }[] = [];
+    for (const r of due) {
+      const res = await this.postEntry({
+        date: today, source: 'Recurring', sourceRef: `REC-${Number(r.id)}-${today}`,
+        tenantId: r.tenantId ?? null, currency: r.currency ?? 'THB', memo: r.memo ?? r.name,
+        lines: r.lines as JournalLineDto[], createdBy: `${user?.username ?? 'system'} (recurring)`,
+        ledgerCode: r.ledgerCode ?? null, pendingApproval: true,
+      });
+      await db.update(recurringJournals).set({
+        lastRunDate: today, lastEntryNo: res.entry_no ?? r.lastEntryNo,
+        nextRunDate: addByFrequency(today, r.frequency),
+      }).where(eq(recurringJournals.id, r.id));
+      if (res.entry_no) posted.push({ entry_no: res.entry_no, recurring_id: Number(r.id), name: r.name });
+    }
+    return { as_of: today, scanned: due.length, posted: posted.length, entries: posted };
+  }
+
   // ───────────────────── Journal listing ─────────────────────
   private async entriesList(limit: number, status?: 'Draft' | 'Posted' | 'Voided') {
     const db = this.db as any;
     const where = status ? eq(journalEntries.status, status) : undefined;
     const heads = await db.select().from(journalEntries).where(where).orderBy(desc(journalEntries.id)).limit(limit);
-    const out: any[] = [];
-    for (const h of heads) {
-      const lines = await db.select({
-        account_code: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit, memo: journalLines.memo,
-      }).from(journalLines).where(eq(journalLines.entryId, h.id));
-      out.push({
-        entry_no: h.entryNo, entry_date: h.entryDate, period: h.period, source: h.source, source_ref: h.sourceRef,
-        memo: h.memo, currency: h.currency, status: h.status, created_by: h.createdBy, created_at: h.createdAt,
-        lines: lines.map((l: any) => ({ ...l, debit: n(l.debit), credit: n(l.credit) })),
-      });
+    if (!heads.length) return { entries: [], count: 0 };
+    // Batch every line for the page in ONE query (was a query per header → N+1), then group by entry.
+    const ids = heads.map((h: any) => Number(h.id));
+    const allLines = await db.select({
+      entryId: journalLines.entryId, account_code: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit, memo: journalLines.memo,
+    }).from(journalLines).where(inArray(journalLines.entryId, ids));
+    const byEntry = new Map<number, any[]>();
+    for (const l of allLines) {
+      const arr = byEntry.get(Number(l.entryId)) ?? [];
+      arr.push({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo });
+      byEntry.set(Number(l.entryId), arr);
     }
+    const out = heads.map((h: any) => ({
+      entry_no: h.entryNo, entry_date: h.entryDate, period: h.period, source: h.source, source_ref: h.sourceRef,
+      memo: h.memo, currency: h.currency, status: h.status, created_by: h.createdBy, created_at: h.createdAt,
+      lines: byEntry.get(Number(h.id)) ?? [],
+    }));
     return { entries: out, count: out.length };
   }
   async listJournal(limit: number) { return this.entriesList(limit); }
@@ -344,6 +467,162 @@ export class LedgerService {
       assets, liabilities, equity, retained_earnings: retainedEarnings, net_income: netIncome,
       liabilities_plus_equity: liabilitiesEquity,
       balanced: assets === liabilitiesEquity,
+    };
+  }
+
+  // ───────────────────── Statement of Cash Flows (indirect method) ─────────────────────
+  // Reconstructs operating cash from net income + non-cash add-backs + working-capital movements, then
+  // investing & financing — all off the posted GL over [from,to]. Year-end CLOSE entries are excluded
+  // (they reclassify P&L into retained earnings and carry no cash). Reconciles to the change in the cash
+  // accounts (1000/1010/1020) by double-entry construction: Σ(every account's debit−credit)=0, so
+  // Σ(non-cash credit−debit) ≡ Σ(cash debit−credit) = net change in cash.
+  async cashFlowStatement(from: string, to: string, ledgerCode?: string | null) {
+    const db = this.db as any;
+    const rows = await this.aggregateByType(db, from, to, undefined, ledgerCode, undefined, ['CLOSE']);
+    const move = (r: any) => round4(n(r.credit) - n(r.debit)); // cash effect of a balance-sheet account's movement
+
+    // Net income over the window = Σ P&L (credit−debit). Equals the income statement on an unclosed window.
+    const netIncome = round4(rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense').reduce((a: number, r: any) => a + move(r), 0));
+
+    const addbacks: any[] = [], operating: any[] = [], investing: any[] = [], financing: any[] = [], unclassified: any[] = [];
+    for (const r of rows) {
+      const t = r.account_type;
+      if (t === 'Revenue' || t === 'Expense') continue;        // already captured in net income
+      if (CASH_ACCOUNTS.includes(r.account_code)) continue;    // the cash being explained
+      const amount = move(r);
+      if (Math.abs(amount) < 1e-9) continue;
+      const line = { account_code: r.account_code, account_name: r.account_name, amount };
+      const cls = CF_CLASSIFY[r.account_code];
+      const bucket = cls?.bucket ?? (t === 'Asset' ? 'operating' : t === 'Liability' ? 'operating' : t === 'Equity' ? 'financing' : 'operating');
+      const label = cls?.label ?? r.account_name ?? r.account_code;
+      const entry = { ...line, label };
+      if (bucket === 'addback') addbacks.push(entry);
+      else if (bucket === 'investing') investing.push(entry);
+      else if (bucket === 'financing') financing.push(entry);
+      else operating.push(entry);
+      if (!cls) unclassified.push(r.account_code); // surfaced for transparency (still bucketed by type)
+    }
+
+    const sum = (xs: any[]) => round4(xs.reduce((a, x) => a + x.amount, 0));
+    const netOperating = round4(netIncome + sum(addbacks) + sum(operating));
+    const netInvesting = sum(investing);
+    const netFinancing = sum(financing);
+    const netChange = round4(netOperating + netInvesting + netFinancing);
+
+    // Actual cash balances bracketing the window (full books incl. opening/close — CLOSE never hits cash).
+    const cashBeginning = await this.cashBalanceAsOf(prevDay(from), ledgerCode);
+    const cashEnding = await this.cashBalanceAsOf(to, ledgerCode);
+
+    return {
+      from, to, ledger: ledgerCode ?? LEADING, method: 'indirect',
+      operating: { net_income: netIncome, adjustments: addbacks, working_capital: operating, net: netOperating },
+      investing: { lines: investing, net: netInvesting },
+      financing: { lines: financing, net: netFinancing },
+      net_change_in_cash: netChange,
+      cash_beginning: cashBeginning,
+      cash_ending: cashEnding,
+      // Independent tie-out: the activity sections must equal the movement in the cash accounts.
+      reconciled: Math.abs(round4(cashEnding - cashBeginning) - netChange) < 0.01,
+      unclassified_accounts: [...new Set(unclassified)],
+    };
+  }
+
+  // Net debit balance of the cash accounts (1000/1010/1020) as of a date, in one ledger.
+  private async cashBalanceAsOf(asOf: string, ledgerCode?: string | null): Promise<number> {
+    const db = this.db as any;
+    const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
+    return round4(rows.filter((r: any) => CASH_ACCOUNTS.includes(r.account_code)).reduce((a: number, r: any) => a + (n(r.debit) - n(r.credit)), 0));
+  }
+
+  // ───────────────────── Statement of Cash Flows (DIRECT method) ─────────────────────
+  // Classifies actual cash movements by the nature of their contra account: receipts from customers,
+  // payments to suppliers/employees, tax remittances, investing, financing. Each cash journal line is
+  // attributed once (to its entry's dominant non-cash leg), so the statement reconciles to Δcash. CLOSE
+  // entries are excluded (no cash effect).
+  async cashFlowDirect(from: string, to: string, ledgerCode?: string | null) {
+    const db = this.db as any;
+    const lines = await db
+      .select({
+        entry_id: journalLines.entryId, account_code: journalLines.accountCode, account_type: accounts.type,
+        debit: journalLines.debit, credit: journalLines.credit,
+      })
+      .from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
+      .where(and(eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, from), lte(journalEntries.entryDate, to), this.ledgerCond(ledgerCode), notInArray(journalEntries.source, ['CLOSE'])));
+
+    // Group lines by entry; attribute each entry's net cash movement to its dominant contra account.
+    const byEntry = new Map<number, any[]>();
+    for (const l of lines) { const k = Number(l.entry_id); (byEntry.get(k) ?? byEntry.set(k, []).get(k)!).push(l); }
+    const buckets: Record<string, number> = { receipts_from_customers: 0, payments_to_suppliers: 0, tax_and_payroll: 0, other_operating: 0, investing: 0, financing: 0 };
+    for (const legs of byEntry.values()) {
+      const cashLegs = legs.filter((l) => CASH_ACCOUNTS.includes(l.account_code));
+      if (!cashLegs.length) continue;
+      const cashNet = round4(cashLegs.reduce((a, l) => a + (n(l.debit) - n(l.credit)), 0));
+      if (Math.abs(cashNet) < 1e-9) continue;
+      const nonCash = legs.filter((l) => !CASH_ACCOUNTS.includes(l.account_code));
+      const dominant = nonCash.sort((a, b) => Math.abs(n(b.debit) - n(b.credit)) - Math.abs(n(a.debit) - n(a.credit)))[0];
+      buckets[cashContraCategory(dominant?.account_code, dominant?.account_type)] += cashNet;
+    }
+    for (const k of Object.keys(buckets)) buckets[k] = round4(buckets[k]);
+    const operatingNet = round4(buckets.receipts_from_customers + buckets.payments_to_suppliers + buckets.tax_and_payroll + buckets.other_operating);
+    const netChange = round4(operatingNet + buckets.investing + buckets.financing);
+    const cashBeginning = await this.cashBalanceAsOf(prevDay(from), ledgerCode);
+    const cashEnding = await this.cashBalanceAsOf(to, ledgerCode);
+    return {
+      from, to, ledger: ledgerCode ?? LEADING, method: 'direct',
+      operating: {
+        receipts_from_customers: buckets.receipts_from_customers,
+        payments_to_suppliers: buckets.payments_to_suppliers,
+        tax_and_payroll: buckets.tax_and_payroll,
+        other_operating: buckets.other_operating,
+        net: operatingNet,
+      },
+      investing: { net: buckets.investing },
+      financing: { net: buckets.financing },
+      net_change_in_cash: netChange,
+      cash_beginning: cashBeginning, cash_ending: cashEnding,
+      reconciled: Math.abs(round4(cashEnding - cashBeginning) - netChange) < 0.01,
+    };
+  }
+
+  // ───────────────────── Cash-flow FORECAST ─────────────────────
+  // Projects the cash balance forward from today over N weeks, using open AR (expected inflows by due date)
+  // and open AP (expected outflows by due date). Anything already past due lands in week 0 (due now).
+  async cashFlowForecast(weeks = 8, ledgerCode?: string | null) {
+    const db = this.db as any;
+    const today = ymd();
+    const opening = await this.cashBalanceAsOf(today, ledgerCode);
+    const ar = await db.select({ due: arInvoices.dueDate, out: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)` })
+      .from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
+    const ap = await db.select({ due: apTransactions.dueDate, out: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)` })
+      .from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
+
+    const weekIndex = (due: string | null): number => {
+      if (!due) return 0;
+      const d = Math.floor((Date.parse(due) - Date.parse(today)) / 86400000);
+      if (d <= 0) return 0;            // overdue / due now
+      const w = Math.floor(d / 7) + 1; // d in 1..7 → week 1
+      return Math.min(w, weeks);       // clamp beyond horizon into the last bucket
+    };
+    const inflow = new Array(weeks + 1).fill(0);
+    const outflow = new Array(weeks + 1).fill(0);
+    for (const r of ar) { const o = n(r.out); if (o > 0.0001) inflow[weekIndex(r.due)] += o; }
+    for (const r of ap) { const o = n(r.out); if (o > 0.0001) outflow[weekIndex(r.due)] += o; }
+
+    let running = opening;
+    const periods = [] as any[];
+    for (let w = 0; w <= weeks; w++) {
+      const inn = round4(inflow[w]), out = round4(outflow[w]);
+      running = round4(running + inn - out);
+      periods.push({ week: w, label: w === 0 ? 'due now / overdue' : `week +${w}`, inflow: inn, outflow: out, net: round4(inn - out), projected_balance: running });
+    }
+    return {
+      as_of: today, ledger: ledgerCode ?? LEADING, weeks, opening_cash: opening,
+      total_expected_inflow: round4(inflow.reduce((a, x) => a + x, 0)),
+      total_expected_outflow: round4(outflow.reduce((a, x) => a + x, 0)),
+      projected_closing_cash: running,
+      periods,
     };
   }
 
@@ -590,12 +869,15 @@ export class LedgerService {
     return { closed: true, fiscal_year: fiscalYear, ledger: ledgerCode, net_income: netIncome, entry_no: je.entry_no };
   }
 
-  // group Posted journal_lines by account type within optional date window
-  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null, tenantId?: number | null) {
+  // group Posted journal_lines by account type within optional date window.
+  // excludeSources drops whole entries by source (e.g. CLOSE) — used by the cash-flow statement so a
+  // year-end closing reclassification doesn't masquerade as P&L/working-capital movement.
+  private async aggregateByType(db: any, from: string | null, to: string, costCenter?: string | null, ledgerCode?: string | null, tenantId?: number | null, excludeSources?: string[]) {
     const conds = [eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${to}`, this.ledgerCond(ledgerCode)];
     if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
     // Explicit tenant scope for writes like closeYear (which may run under HQ/bypass where RLS won't narrow).
     if (tenantId !== undefined && tenantId !== null) conds.push(eq(journalEntries.tenantId, tenantId));
+    if (excludeSources && excludeSources.length) conds.push(notInArray(journalEntries.source, excludeSources));
     if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
     else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
     const rows = await db
@@ -620,6 +902,33 @@ export class LedgerService {
 }
 
 function round4(x: number): number { return Math.round(x * 10000) / 10000; }
+
+// Recurring-journal cadence: the allowed frequencies and how each advances next_run_date.
+const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
+function addByFrequency(dateStr: string, frequency: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (frequency === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+  else if (frequency === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
+  else d.setUTCDate(d.getUTCDate() + 1); // daily (default)
+  return d.toISOString().slice(0, 10);
+}
+
+// Direct-method cash-flow category from a cash entry's dominant contra account.
+function cashContraCategory(code: string | undefined, type: string | undefined): string {
+  const c = code ?? '';
+  if (c === '1100' || c === '1150' || type === 'Revenue') return 'receipts_from_customers'; // AR / sales
+  if (c === '2100' || c === '2350' || c === '2360' || c === '2370') return 'tax_and_payroll'; // VAT / SSO / WHT / PF payable
+  if (c === '1500') return 'investing';                                                       // fixed assets
+  if (c.startsWith('3') || type === 'Equity') return 'financing';                             // capital / dividends
+  if (c === '2000' || c === '2150' || c.startsWith('12') || type === 'Expense') return 'payments_to_suppliers'; // AP / inventory / expense / wages
+  return 'other_operating';
+}
+// Calendar day before an ISO date (YYYY-MM-DD) — the day the opening cash balance is struck.
+function prevDay(ymdStr: string): string {
+  const d = new Date(`${ymdStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 function typeTotal(rows: any[], type: string, side: 'debit' | 'credit'): number {
   return rows.filter((r) => r.account_type === type).reduce((a, r) => a + n(r[side]), 0);
 }

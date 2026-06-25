@@ -45,6 +45,26 @@ type OpeningBalancesBody = z.infer<typeof OpeningBalancesBody>;
 
 const RejectBody = z.object({ reason: z.string().optional() });
 
+const RecurringBody = z.object({
+  name: z.string().min(1),
+  frequency: z.enum(['daily', 'weekly', 'monthly']),
+  memo: z.string().optional(),
+  ledger_code: z.string().optional(),
+  currency: z.string().optional(),
+  tenant_id: z.number().optional(),
+  start_date: z.string().optional(),
+  lines: z.array(z.object({
+    account_code: z.string().min(1),
+    debit: z.number().nonnegative().optional(),
+    credit: z.number().nonnegative().optional(),
+    memo: z.string().optional(),
+    cost_center: z.string().optional(),
+  })).min(1),
+});
+type RecurringBodyT = z.infer<typeof RecurringBody>;
+
+const ActiveBody = z.object({ active: z.boolean() });
+
 @Controller('api/ledger')
 @Permissions('exec', 'creditors', 'ar')
 export class LedgerController {
@@ -115,6 +135,43 @@ export class LedgerController {
 
   @Get('balance-sheet')
   balanceSheet(@Query('as_of') asOf: string, @Query('ledger') ledger?: string) { return this.svc.balanceSheet(asOf, ledger || undefined); }
+
+  // Statement of Cash Flows (indirect method) over [from,to] — the third primary statement, reconstructed
+  // from the GL/trial-balance data (no separate cash-flow ledger). Reconciles to the change in cash.
+  @Get('cash-flow')
+  cashFlow(@Query('from') from: string, @Query('to') to: string, @Query('ledger') ledger?: string) { return this.svc.cashFlowStatement(from, to, ledger || undefined); }
+
+  // Statement of Cash Flows — DIRECT method (receipts/payments by nature). Also reconciles to Δcash.
+  @Get('cash-flow-direct')
+  cashFlowDirect(@Query('from') from: string, @Query('to') to: string, @Query('ledger') ledger?: string) { return this.svc.cashFlowDirect(from, to, ledger || undefined); }
+
+  // Forward cash-flow forecast: project cash N weeks out from open AR (inflows) and AP (outflows) by due date.
+  @Get('cash-flow-forecast')
+  cashFlowForecast(@Query('weeks') weeks?: string, @Query('ledger') ledger?: string) { return this.svc.cashFlowForecast(weeks ? Math.max(1, Math.min(52, parseInt(weeks, 10) || 8)) : 8, ledger || undefined); }
+
+  // ── Recurring / template journal entries (GL-08) ──
+  // A balanced template + a cadence; the scheduler posts each due template as a DRAFT JE (maker-checker).
+  @Post('recurring')
+  @Permissions('gl_post', 'exec')
+  createRecurring(@Body(new ZodValidationPipe(RecurringBody)) b: RecurringBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.createRecurring({ name: b.name, frequency: b.frequency, memo: b.memo, ledgerCode: b.ledger_code ?? null, currency: b.currency, tenantId: hqTenant(u, b.tenant_id) ?? null, startDate: b.start_date, lines: b.lines }, u);
+  }
+
+  @Get('recurring')
+  @Permissions('gl_post', 'gl_close', 'exec')
+  listRecurring(@Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listRecurring(hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
+
+  // Activate / pause a template without deleting it (keeps the audit + history).
+  @Post('recurring/:id/active')
+  @HttpCode(200)
+  @Permissions('gl_post', 'exec')
+  setRecurringActive(@Param('id') id: string, @Body(new ZodValidationPipe(ActiveBody)) b: z.infer<typeof ActiveBody>) { return this.svc.setRecurringActive(parseInt(id, 10), b.active); }
+
+  // Post every due template now (cron-callable; also rides the scheduler as `gl_recurring_journals`).
+  @Post('recurring/run')
+  @HttpCode(200)
+  @Permissions('gl_post', 'exec')
+  runRecurring(@CurrentUser() u: JwtUser) { return this.svc.runDueRecurring(u); }
 
   // ── fiscal periods + year-end close ──
   // Periods are per-tenant (0043). Operations default to the caller's own tenant; HQ/Admin may target a

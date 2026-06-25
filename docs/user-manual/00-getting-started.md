@@ -151,6 +151,13 @@ appear in **both** workspaces.
   payment method, open tills, and recent bills). Switching workspace takes you to its home.
 - **Search is global:** the command palette searches every screen you can access, regardless of the
   active workspace.
+- **Menus are grouped by area:** within each workspace the side menu is organised into focused groups —
+  e.g. POS shows *ขายหน้าร้าน*, *ร้าน & การจัดส่ง*, *อุปกรณ์ & การชำระเงิน*, *วิเคราะห์ร้านอาหาร*; ERP shows
+  *ลูกค้า & CRM*, *ลอยัลตี้*, *สินค้าคงคลัง*, *จัดซื้อ*, *การผลิต*, *การเงิน*, *ภาษี*, *บุคลากร*, *วางแผน & BI*. Shared
+  groups (*ราคา & สาขา*, *การควบคุม*, *ผู้ช่วย AI*, *ตั้งค่าระบบ*) appear in both.
+- **Settings is foldable:** the *ตั้งค่าระบบ* group is split into collapsible sub-sections — *ข้อมูลหลัก*,
+  *ปรับแต่ง*, *เชื่อมต่อ & ขยาย*, *ผู้ดูแลระบบ*. Click a sub-section heading to fold/unfold it; your choice is
+  remembered on that device.
 
 [screenshot: ERP/POS workspace switcher in the sidebar header]
 

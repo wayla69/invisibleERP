@@ -86,7 +86,7 @@ function Submissions() {
         { key: 'code', label: 'รหัส', render: (r) => g(r, 'bomCode', 'bom_code') },
         { key: 'product', label: 'สินค้า', render: (r) => g(r, 'productName', 'product_name') },
         { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(g(r, 'status') || 'Pending')}>{g(r, 'status') || 'Pending'}</Badge> },
-        { key: 'x', label: '', sortable: false, render: (r) => (g(r, 'status') === 'Approved' ? <Check className="size-4 text-success" /> : <Button size="sm" onClick={() => approve.mutate(g(r, 'id'))}>อนุมัติ</Button>) },
+        { key: 'x', label: '', sortable: false, render: (r) => (g(r, 'status') === 'Approved' ? <Check className="size-4 text-success" /> : <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate(g(r, 'id'))}>อนุมัติ</Button>) },
       ]} />}
     </StateView>
   );

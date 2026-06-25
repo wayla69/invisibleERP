@@ -38,6 +38,7 @@ export default function AccountingPage() {
           { key: 'approve', label: 'รออนุมัติ (JE)', content: <PendingJournal /> },
           { key: 'pl', label: 'งบกำไรขาดทุน', content: <IncomeStatement /> },
           { key: 'bs', label: 'งบดุล', content: <BalanceSheet /> },
+          { key: 'cf', label: 'งบกระแสเงินสด', content: <CashFlow /> },
           { key: 'opening', label: 'ยอดยกมา', content: <OpeningBalances /> },
         ]}
       />
@@ -426,6 +427,69 @@ function BalanceSheet() {
               <ShieldCheck className="size-4 text-muted-foreground" />
               สินทรัพย์ <span className="tabular">{baht(q.data.assets)}</span> = หนี้สิน+ทุน <span className="tabular">{baht(q.data.liabilities_plus_equity)}</span>{' '}
               <Badge variant={q.data.balanced ? 'success' : 'destructive'}>{q.data.balanced ? 'สมดุล' : 'ไม่สมดุล'}</Badge>
+            </Card>
+          </div>
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// ───────────────────────── งบกระแสเงินสด (Statement of Cash Flows, indirect) ─────────────────────────
+function CashFlow() {
+  const [from, setFrom] = useState(monthStart());
+  const [to, setTo] = useState(today());
+  const q = useQuery<any>({ queryKey: ['cf', from, to], queryFn: () => api(`/api/ledger/cash-flow?from=${from}&to=${to}`) });
+  const d = q.data;
+  // Render a labelled cash-flow line; positive = cash in (green), negative = cash out (red).
+  const flowRow = (label: string, amount: number, i: number) => (
+    <tr key={i}>
+      <td className="py-0.5 pr-3">{label}</td>
+      <td className={`py-0.5 text-right tabular ${amount < 0 ? 'text-red-600' : ''}`}>{baht(amount)}</td>
+    </tr>
+  );
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="cf-from">ตั้งแต่</Label>
+          <Input id="cf-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="cf-to">ถึง</Label>
+          <Input id="cf-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
+      </div>
+      <StateView q={q}>
+        {d && (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StatCard label="เงินสดจากการดำเนินงาน" value={baht(d.operating?.net)} tone={d.operating?.net >= 0 ? 'success' : 'danger'} />
+              <StatCard label="เงินสดจากการลงทุน" value={baht(d.investing?.net)} />
+              <StatCard label="เงินสดจากการจัดหาเงิน" value={baht(d.financing?.net)} />
+            </div>
+            <Card className="gap-2 p-5">
+              <table className="w-full text-sm">
+                <tbody>
+                  <tr className="text-muted-foreground"><td className="pb-1 font-medium">กิจกรรมดำเนินงาน (Operating)</td><td /></tr>
+                  {flowRow('กำไรสุทธิ (Net income)', d.operating?.net_income ?? 0, -1)}
+                  {(d.operating?.adjustments ?? []).map((a: any, i: number) => flowRow(`+ ${a.label ?? a.account_name}`, a.amount, i))}
+                  {(d.operating?.working_capital ?? []).map((a: any, i: number) => flowRow(`Δ ${a.label ?? a.account_name}`, a.amount, 1000 + i))}
+                  <tr className="border-t font-medium"><td className="py-1">เงินสดสุทธิจากการดำเนินงาน</td><td className="py-1 text-right tabular">{baht(d.operating?.net)}</td></tr>
+                  {(d.investing?.lines ?? []).length > 0 && <tr className="text-muted-foreground"><td className="pt-3 pb-1 font-medium">กิจกรรมลงทุน (Investing)</td><td /></tr>}
+                  {(d.investing?.lines ?? []).map((a: any, i: number) => flowRow(a.label ?? a.account_name, a.amount, 2000 + i))}
+                  {(d.financing?.lines ?? []).length > 0 && <tr className="text-muted-foreground"><td className="pt-3 pb-1 font-medium">กิจกรรมจัดหาเงิน (Financing)</td><td /></tr>}
+                  {(d.financing?.lines ?? []).map((a: any, i: number) => flowRow(a.label ?? a.account_name, a.amount, 3000 + i))}
+                  <tr className="border-t font-semibold"><td className="py-1.5">เงินสดเปลี่ยนแปลงสุทธิ (Net change in cash)</td><td className="py-1.5 text-right tabular">{baht(d.net_change_in_cash)}</td></tr>
+                  <tr><td className="py-0.5 pr-3 text-muted-foreground">เงินสดต้นงวด (Beginning)</td><td className="py-0.5 text-right tabular">{baht(d.cash_beginning)}</td></tr>
+                  <tr><td className="py-0.5 pr-3 text-muted-foreground">เงินสดปลายงวด (Ending)</td><td className="py-0.5 text-right tabular">{baht(d.cash_ending)}</td></tr>
+                </tbody>
+              </table>
+            </Card>
+            <Card className="flex-row flex-wrap items-center gap-2 p-5 text-sm">
+              <ShieldCheck className="size-4 text-muted-foreground" />
+              งบกระแสเงินสด (วิธีทางอ้อม) — รายการปิดบัญชีสิ้นปีไม่นับรวม{' '}
+              <Badge variant={d.reconciled ? 'success' : 'destructive'}>{d.reconciled ? 'กระทบยอดเงินสดตรง' : 'ไม่ตรง'}</Badge>
             </Card>
           </div>
         )}

@@ -73,13 +73,18 @@ function Terminals() {
                 { key: 'amount', label: 'ยอด', align: 'right', render: (r: any) => baht(r.amount) },
                 { key: 'captured_amount', label: 'จับยอด', align: 'right', render: (r: any) => baht(r.captured_amount) },
                 { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-                { key: 'act', label: '', render: (r: any) => (
+                { key: 'act', label: '', render: (r: any) => {
+                  // Disable this row's actions while a mutation against it is in flight — a double-click
+                  // must not fire a duplicate capture / void / refund (real money movement).
+                  const busy = act.isPending && act.variables?.no === r.intent_no;
+                  return (
                   <div className="flex gap-1">
-                    {r.status === 'Authorized' && <Button size="sm" onClick={() => act.mutate({ no: r.intent_no, op: 'capture' })}>จับยอด</Button>}
-                    {r.status === 'Authorized' && <Button size="sm" variant="outline" onClick={() => act.mutate({ no: r.intent_no, op: 'void' })}>ยกเลิก</Button>}
-                    {r.status === 'Captured' && <Button size="sm" variant="destructive" onClick={() => { const a = prompt('จำนวนคืนเงิน'); if (a) act.mutate({ no: r.intent_no, op: 'refund', body: { amount: Number(a) } }); }}>คืนเงิน</Button>}
+                    {r.status === 'Authorized' && <Button size="sm" disabled={busy} onClick={() => act.mutate({ no: r.intent_no, op: 'capture' })}>จับยอด</Button>}
+                    {r.status === 'Authorized' && <Button size="sm" variant="outline" disabled={busy} onClick={() => act.mutate({ no: r.intent_no, op: 'void' })}>ยกเลิก</Button>}
+                    {r.status === 'Captured' && <Button size="sm" variant="destructive" disabled={busy} onClick={() => { const a = prompt('จำนวนคืนเงิน'); if (a) act.mutate({ no: r.intent_no, op: 'refund', body: { amount: Number(a) } }); }}>คืนเงิน</Button>}
                   </div>
-                ) },
+                  );
+                } },
               ]}
               emptyText="ยังไม่มีรายการชำระ"
             />
@@ -116,7 +121,7 @@ function Settlements() {
               { key: 'net', label: 'สุทธิ', align: 'right', render: (r: any) => baht(r.net) },
               { key: 'txn_count', label: 'จำนวน', align: 'right' },
               { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'Reconciled' ? 'paid' : 'open')}>{r.status}</Badge> },
-              { key: 'act', label: '', render: (r: any) => r.status !== 'Reconciled' ? <Button size="sm" variant="outline" onClick={() => reconcile.mutate(r.batch_no)}>กระทบยอด</Button> : null },
+              { key: 'act', label: '', render: (r: any) => r.status !== 'Reconciled' ? <Button size="sm" variant="outline" disabled={reconcile.isPending && reconcile.variables === r.batch_no} onClick={() => reconcile.mutate(r.batch_no)}>กระทบยอด</Button> : null },
             ]}
             emptyText="ยังไม่มีรอบสรุปยอด"
           />

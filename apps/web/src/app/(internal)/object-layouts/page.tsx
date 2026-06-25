@@ -106,8 +106,8 @@ export default function ObjectLayoutsPage() {
                     <div key={l.id} className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm ${editId === l.id ? 'border-primary bg-primary/5' : ''}`}>
                       <button className="flex-1 text-left" onClick={() => loadLayout(l)}>{l.name} {l.role && <span className="text-xs text-muted-foreground">· {l.role}</span>} {l.is_default && <Badge variant="success" className="ml-2"><Star className="size-3" /> เริ่มต้น</Badge>}</button>
                       <div className="flex gap-2">
-                        {!l.is_default && <Button size="sm" variant="ghost" onClick={() => setDefault.mutate(l.id)}><Star className="size-4" /></Button>}
-                        <Button size="sm" variant="ghost" onClick={() => remove.mutate(l.id)}><Trash2 className="size-4 text-destructive" /></Button>
+                        {!l.is_default && <Button size="sm" variant="ghost" disabled={setDefault.isPending} onClick={() => setDefault.mutate(l.id)}><Star className="size-4" /></Button>}
+                        <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(l.id)}><Trash2 className="size-4 text-destructive" /></Button>
                       </div>
                     </div>
                   ))}

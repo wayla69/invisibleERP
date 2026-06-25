@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 
-import type { NavGroup } from '@/lib/nav';
+import { allGroupItems, type NavGroup } from '@/lib/nav';
 import {
   CommandDialog,
   CommandEmpty,
@@ -39,7 +39,7 @@ export function CommandPalette({
         <CommandEmpty>ไม่พบเมนู</CommandEmpty>
         {groups.map((group) => (
           <CommandGroup key={group.title} heading={group.title}>
-            {group.items.map((item) => (
+            {allGroupItems(group).map((item) => (
               <CommandItem
                 key={item.href}
                 value={`${item.label} ${item.href}`}

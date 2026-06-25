@@ -179,7 +179,7 @@ function ApiKeys() {
             { key: 'prefix', label: 'Prefix', render: (r: any) => <code>{r.prefix}…</code> },
             { key: 'scopes', label: 'สิทธิ์', render: (r: any) => (Array.isArray(r.scopes) ? r.scopes.join(', ') : String(r.scopes ?? '')) },
             { key: 'revoked', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.revoked ? 'Cancelled' : 'Open')}>{r.revoked ? 'Cancelled' : 'Open'}</Badge> },
-            { key: 'act', label: '', render: (r: any) => !r.revoked && <Button variant="destructive" size="sm" onClick={() => revoke.mutate(r.id)}>เพิกถอน</Button> },
+            { key: 'act', label: '', render: (r: any) => !r.revoked && <Button variant="destructive" size="sm" disabled={revoke.isPending} onClick={() => revoke.mutate(r.id)}>เพิกถอน</Button> },
           ]}
         />
       </StateView>

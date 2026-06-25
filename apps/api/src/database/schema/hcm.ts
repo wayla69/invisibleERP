@@ -70,6 +70,7 @@ export const expenseClaims = pgTable(
     decidedBy: text('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     entryNo: text('entry_no'),                           // GL JE on approval (Dr 5100 / Cr 2000)
+    apTxnNo: text('ap_txn_no'),                          // AP reimbursement payable raised on approval (AP-…)
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },

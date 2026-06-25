@@ -11,7 +11,7 @@ const TABLE = { id: 1, table_no: 'A1', status: 'available', seats: 4, zone_id: n
 
 async function boot(page: Page): Promise<string[]> {
   const posts: string[] = [];
-  await page.addInitScript(() => localStorage.setItem('ierp_token', 'e2e-token'));
+  await page.addInitScript(() => { document.cookie = 'ierp_csrf=e2e; path=/'; });
   await page.route('**/api/**', async (route) => {
     const url = route.request().url();
     const method = route.request().method();

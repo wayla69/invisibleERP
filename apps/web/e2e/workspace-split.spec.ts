@@ -19,9 +19,10 @@ const CASHIER: Me = { username: 'cashier1', role: 'Cashier', customer_name: 'T1'
 const ADMIN: Me = { username: 'admin', role: 'Admin', customer_name: null, permissions: [] };
 
 async function bootAs(page: Page, me: Me) {
-  // Seed the bearer token before any app script runs so useMe() is enabled and the shell stays put.
+  // Seed the readable CSRF cookie before any app script runs so hasSession() is true and the shell
+  // stays put (auth now rides an httpOnly cookie; the JS-readable ierp_csrf cookie is the session signal).
   await page.addInitScript(() => {
-    localStorage.setItem('ierp_token', 'e2e-token');
+    document.cookie = 'ierp_csrf=e2e; path=/';
   });
   // Stub every API call — `me`, module flags, and the dashboards' data sources.
   await page.route('**/api/**', async (route) => {
@@ -92,4 +93,23 @@ test('dual-use item (Branches) is cross-listed in both workspaces', async ({ pag
   await tab(page, 'POS').click();
   await expect(page).toHaveURL(/\/pos-home$/);
   await expect(navLink(page, '/branches')).toBeVisible(); // POS too
+});
+
+test('System settings sub-sections are collapsible and reachable', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+
+  // A "ตั้งค่าระบบ" item lives inside the "ข้อมูลหลัก" sub-section and is visible (sub-sections open by default).
+  await expect(navLink(page, '/master-data')).toBeVisible();
+  const subHeader = page.getByRole('button', { name: 'ข้อมูลหลัก', exact: true });
+  await expect(subHeader).toHaveAttribute('aria-expanded', 'true');
+
+  // Collapse the sub-section → its items hide; the header stays.
+  await subHeader.click();
+  await expect(subHeader).toHaveAttribute('aria-expanded', 'false');
+  await expect(navLink(page, '/master-data')).toBeHidden();
+
+  // Re-expand → item returns.
+  await subHeader.click();
+  await expect(navLink(page, '/master-data')).toBeVisible();
 });

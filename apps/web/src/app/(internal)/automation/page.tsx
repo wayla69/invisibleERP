@@ -109,7 +109,7 @@ export default function AutomationPage() {
                 {(rules.data?.rules ?? []).map((r) => (
                   <div key={r.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
                     <div><b>{r.name}</b> <Badge variant="secondary" className="ml-1">{r.event_type}</Badge> {r.condition?.field && <span className="text-xs text-muted-foreground">· if {r.condition.field} {r.condition.op} {String(r.condition.value)}</span>} <span className="text-xs text-muted-foreground">→ {r.action?.type}</span></div>
-                    <Button size="sm" variant="ghost" onClick={() => del.mutate(r.id)}><Trash2 className="size-4 text-destructive" /></Button>
+                    <Button size="sm" variant="ghost" disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4 text-destructive" /></Button>
                   </div>
                 ))}
               </div>

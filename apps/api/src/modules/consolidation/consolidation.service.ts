@@ -93,35 +93,35 @@ export class ConsolidationService {
 
     const runLineValues: any[] = [];
 
+    // Batch ALL entities' GL nets in one grouped query (was one aggregate per entity → N+1).
+    const glAll = await db.select({
+      tenantId: journalEntries.tenantId,
+      accountCode: journalLines.accountCode,
+      net: sql<string>`sum(${journalLines.debit}) - sum(${journalLines.credit})`,
+    }).from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(inArray(journalEntries.tenantId, entityTenantIds), eq(journalEntries.period, period), eq(journalEntries.status, 'Posted')))
+      .groupBy(journalEntries.tenantId, journalLines.accountCode);
+    const glByTenant = new Map<number, { accountCode: string; net: string }[]>();
+    for (const r of glAll) { const k = Number(r.tenantId); const a = glByTenant.get(k) ?? []; a.push({ accountCode: r.accountCode, net: r.net }); glByTenant.set(k, a); }
+    // Prefetch the latest FX rate (≤ period end) for every distinct non-THB entity currency in one query.
+    const periodEnd = `${period}-28`; // safe last-day proxy
+    const currencies = [...new Set(entities.map((e: any) => e.entityCurrency ?? 'THB').filter((c: string) => c !== 'THB'))] as string[];
+    const fxMap = new Map<string, number>();
+    if (currencies.length) {
+      const fxRows = await db.select({ currency: fxRates.currency, rate: fxRates.rate })
+        .from(fxRates).where(and(inArray(fxRates.currency, currencies), sql`${fxRates.rateDate} <= ${periodEnd}`))
+        .orderBy(sql`${fxRates.rateDate} DESC`);
+      for (const r of fxRows) if (!fxMap.has(r.currency)) fxMap.set(r.currency, n(r.rate)); // first per currency = latest (DESC)
+    }
+
     // ── Step 1: Collect each entity's GL net by account ──
     for (const ent of entities) {
       const entityTenantId = Number(ent.entityTenantId);
       const ownerPct = n(ent.ownershipPct) / 100; // e.g. 0.8 for 80%
       const entCurrency = ent.entityCurrency ?? 'THB';
-
-      const glRows = await db.select({
-        accountCode: journalLines.accountCode,
-        net: sql<string>`sum(${journalLines.debit}) - sum(${journalLines.credit})`,
-      }).from(journalLines)
-        .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-        .where(and(
-          eq(journalEntries.tenantId, entityTenantId),
-          eq(journalEntries.period, period),
-          eq(journalEntries.status, 'Posted'),
-        ))
-        .groupBy(journalLines.accountCode);
-
-      // FX rate for non-THB entities
-      let fxRate = 1;
-      if (entCurrency !== 'THB') {
-        const periodEnd = `${period}-28`; // safe last-day proxy
-        const [rateRow] = await db.select({ rate: fxRates.rate })
-          .from(fxRates)
-          .where(and(eq(fxRates.currency, entCurrency), sql`${fxRates.rateDate} <= ${periodEnd}`))
-          .orderBy(sql`${fxRates.rateDate} DESC`)
-          .limit(1);
-        if (rateRow) fxRate = n(rateRow.rate);
-      }
+      const glRows = glByTenant.get(entityTenantId) ?? [];
+      const fxRate = entCurrency === 'THB' ? 1 : (fxMap.get(entCurrency) ?? 1);
 
       // P&L net income calculation for NCI:  netIncome = -(SUM of P&L account nets)
       // P&L accounts are 4xxx (revenue, normal credit) and 5xxx (expense, normal debit).

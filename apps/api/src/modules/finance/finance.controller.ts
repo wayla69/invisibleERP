@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -9,6 +9,7 @@ import { qint, qintOpt } from '../../common/query';
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
 const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional(), vat_treatment: z.enum(['standard', 'exempt', 'zero']).optional(), idempotency_key: z.string().optional() });
 const PayBody = z.object({ amount: z.number().positive(), idempotency_key: z.string().optional() });
+const RejectBody = z.object({ reason: z.string().optional() });
 
 @Controller('api/finance')
 export class FinanceController {
@@ -51,6 +52,20 @@ export class FinanceController {
   @Post('ap/transactions') @Permissions('creditors')
   apTxn(@Body(new ZodValidationPipe(ApTxnBody)) b: ApTxnDto, @CurrentUser() u: JwtUser) { return this.svc.createApTxn(b, u); }
 
+  // AP disbursement maker-checker (AP-PAY). MAKER requests; a DIFFERENT user with approval authority approves.
+  // Request a payment (maker). Records a PendingApproval row — no cash/GL effect until approved.
   @Patch('ap/transactions/:txnNo/pay') @Permissions('creditors')
-  payAp(@Param('txnNo') txnNo: string, @Body(new ZodValidationPipe(PayBody)) b: { amount: number; idempotency_key?: string }, @CurrentUser() u: JwtUser) { return this.svc.payAp(txnNo, b.amount, u, b.idempotency_key); }
+  requestApPayment(@Param('txnNo') txnNo: string, @Body(new ZodValidationPipe(PayBody)) b: { amount: number; idempotency_key?: string }, @CurrentUser() u: JwtUser) { return this.svc.requestApPayment(txnNo, b.amount, u, b.idempotency_key); }
+
+  // Checker queue — payments awaiting approval.
+  @Get('ap/payments/pending') @Permissions('approvals', 'gl_close', 'exec')
+  pendingApPayments(@Query('limit') limit?: string, @Query('offset') offset?: string) { return this.svc.listPendingApPayments(qint('limit', limit, 50), qint('offset', offset, 0)); }
+
+  // Approve a pending payment (checker; approver ≠ requester enforced in the service, even for Admin).
+  @Post('ap/payments/:paymentNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  approveApPayment(@Param('paymentNo') paymentNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveApPayment(paymentNo, u); }
+
+  // Reject a pending payment (checker).
+  @Post('ap/payments/:paymentNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  rejectApPayment(@Param('paymentNo') paymentNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectApPayment(paymentNo, u, b.reason); }
 }

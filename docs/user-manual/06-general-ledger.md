@@ -8,7 +8,7 @@ This chapter is for **accountants** — *GlAccountant*, *FinancialController* an
 year-end close, multi-ledger reporting, and fixed assets.
 
 **Main screen:** `/accounting` — tabs include Trial Balance, Journal, Pending
-journal entries, Income Statement, Balance Sheet and Opening Balances.
+journal entries, Income Statement, Balance Sheet, Cash Flow and Opening Balances.
 
 ---
 
@@ -81,6 +81,30 @@ is recorded.
 
 [screenshot: pending journal entry approval screen]
 
+### Recurring / template journal entries
+
+For entries you post every period — **monthly rent or insurance accruals**,
+**prepaid amortization**, standing inter-company charges — set up a **template**
+once instead of re-keying it each time.
+
+1. Go to **Accounting** → **Recurring** and click **New template**
+   (`POST /api/ledger/recurring`). Give it a **name**, pick a **cadence**
+   (**daily / weekly / monthly**), a **first run date**, and enter the journal
+   **lines** (the same Dr/Cr lines as a manual entry).
+2. The template must **balance** (total debits = total credits) — an unbalanced
+   template is rejected (`UNBALANCED`) so it can't fail silently later.
+3. Leave it to run automatically, or schedule the **Post due recurring journals**
+   (`gl_recurring_journals`) job under **Reports → Scheduled reports** to run it
+   daily.
+
+**Expected result:** On each due date the template posts a journal entry **as a
+Draft** and rolls its next run date forward. Because it's a Draft, it still goes
+through **maker-checker** — a second person approves it on the **Pending** tab
+before it affects balances (just like a manual entry). Running the job twice in a
+day posts **nothing extra** (it's idempotent). Pause a template anytime with
+**Activate/Pause** (`POST /api/ledger/recurring/:id/active`) without losing its
+history.
+
 ---
 
 ## 3. Trial balance & financial statements
@@ -92,12 +116,66 @@ is recorded.
 | **Trial Balance** (**งบทดลอง**) | Trial Balance | Every account's debit/credit balance |
 | **Income Statement / P&L** (**งบกำไรขาดทุน**) | Income Statement | Revenue − Expense = Net Income, for a date range |
 | **Balance Sheet** (**งบดุล**) | Balance Sheet | Assets = Liabilities + Equity, as of a date |
+| **Statement of Cash Flows** (**งบกระแสเงินสด**) | Cash Flow | How cash moved over a date range — operating, investing, financing |
 
 To run a report: open the relevant tab, set the **period / date range** (and cost
 centre or ledger if needed), and view or export it.
 
 **Expected result:** The statement is produced from all **posted** entries (drafts
 are excluded).
+
+### Statement of Cash Flows (indirect method)
+
+The cash flow statement is the **third primary financial statement** (alongside the
+income statement and balance sheet). It explains how the cash balance changed over a
+period, in three sections:
+
+- **Operating** — starts from **net income**, then adds back non-cash charges (e.g.
+  **depreciation**) and the movement in working capital (receivables, inventory,
+  payables, accruals).
+- **Investing** — cash spent on / received from **fixed assets**.
+- **Financing** — owner **capital** contributions and **dividends**.
+
+1. Go to **Accounting** (`/accounting`) → **Cash Flow** tab.
+2. Set the **From / To** date range (and ledger if needed) and run it.
+
+**Expected result:** The statement shows each section's subtotal, the **net change
+in cash**, and the **beginning** and **ending** cash balances. It is built from the
+same posted GL data as the other statements (no separate data entry), and **year-end
+closing entries are excluded** so they don't distort the period.
+
+> **Note — it always ties out:** the three sections together equal the change in the
+> cash accounts (1000 / 1010 / 1020). The response carries a `reconciled` flag; if it
+> ever shows `false`, an account is mis-classified — raise it with finance.
+
+### Statement of Cash Flows (direct method)
+
+The same operating cash flow shown by **nature of receipt/payment** rather than by
+adjusting net income. Run it from **Accounting** → **Cash Flow** → **Direct**
+(`GET /api/ledger/cash-flow-direct?from=&to=`). Each posted entry's net cash
+movement is attributed to the line it sits against, then bucketed into:
+
+- **Receipts from customers** (cash against AR / revenue),
+- **Payments to suppliers** (cash against AP / expense / inventory),
+- **Tax & payroll** (VAT, withholding, payroll liabilities),
+- **Other operating**, plus **Investing** (fixed assets) and **Financing**.
+
+**Expected result:** The receipts/payments net to the **same operating cash flow**
+as the indirect statement and the whole report **reconciles to the change in cash**
+(`reconciled` flag). Use whichever presentation your reviewer prefers — both are
+built from the same posted GL data.
+
+### Cash-flow forecast
+
+A forward look at cash, projected from **open receivables (inflows)** and **open
+payables (outflows)** by their due dates. Run it from **Accounting** → **Cash Flow**
+→ **Forecast** (`GET /api/ledger/cash-flow-forecast?weeks=8`, 1–52 weeks, default 8).
+
+**Expected result:** A weekly schedule starting from **today's cash balance**; each
+week shows expected inflows, outflows, the net, and the **projected running
+balance**. Anything already overdue / due now lands in **week 0** so you can see an
+immediate shortfall. This is a planning view (not a posted statement) for treasury /
+collections prioritisation.
 
 ---
 
@@ -186,6 +264,59 @@ posted.
 > record an asset's location or assigned holder during a physical asset count.
 
 [screenshot: asset register with depreciation schedule]
+
+---
+
+## 7. Asset maintenance (EAM)
+
+**API base:** `/api/eam` · **Required permission:** `exec` / `warehouse` / `creditors`.
+
+Keep equipment running with maintenance **work orders**, **preventive-maintenance
+(PM) schedules**, and **meter readings** — all tied to the fixed-asset register.
+
+### Raise & complete a work order
+
+1. Create a work order against an asset (`POST /api/eam/work-orders`): choose the
+   **type** (corrective / preventive / inspection), priority, description, and an
+   optional **vendor** and cost estimate.
+2. Progress it: **open → in_progress → completed** (or **cancelled**). An
+   out-of-order move is rejected (`BAD_TRANSITION`).
+3. On **completion**, enter the **actual cost**, downtime and vendor.
+
+**Expected result:** If a vendor and cost are given, the maintenance spend posts as
+an **AP payable** (`Dr 5710 Repairs & Maintenance / Cr 2000`), so it shows in AP
+aging and is paid through the normal AP flow. In-house work (no vendor) just records
+the cost.
+
+### Preventive maintenance & meters
+
+1. Create a **PM schedule** (`POST /api/eam/pm-schedules`): a cadence by **time**
+   (`interval_days`) and/or by **meter** (`meter_interval`).
+2. Record **meter readings** as equipment is used
+   (`POST /api/eam/assets/{assetNo}/meter`).
+3. Run the **PM sweep** (`POST /api/eam/pm/run`) — or schedule it daily by creating a
+   **Generate due preventive maintenance** (`eam_pm_generate`) job under Scheduled
+   reports.
+
+**Expected result:** The sweep raises a preventive work order for every due
+schedule (time elapsed or meter overrun) and rolls the schedule forward. It is
+**idempotent** — a schedule with an open generated work order isn't raised again.
+
+### Cost lines & reliability KPIs
+
+1. Add **cost lines** to a work order (`POST /api/eam/work-orders/{woNo}/lines`):
+   a **labor** line (hours × rate) or a **part** line (quantity × unit cost). List
+   them with `GET /api/eam/work-orders/{woNo}/lines`.
+2. The work order's **actual cost rolls up** from its lines automatically — so when
+   you complete the WO the **AP posting reflects the real labor + parts spend**, not
+   just the estimate.
+3. Review **per-asset reliability** (`GET /api/eam/assets/{assetNo}/reliability`):
+   corrective failures, preventive count, open WOs, total **downtime hours**, **MTBF**
+   (mean time between failures), and **total maintenance spend**.
+
+**Expected result:** Cost lines give an itemised maintenance cost; the reliability
+view gives the failure-rate and lifetime-cost inputs for maintenance budgeting and
+**repair-vs-replace** decisions.
 
 ---
 

@@ -90,8 +90,8 @@ export default function AdminUsersPage() {
               { key: 'role', label: 'Role', render: (r: any) => <select className={selectCls} value={r.role} onChange={(e) => setRole.mutate({ u: r.username, role: e.target.value })}>{ROLES.map((x) => <option key={x} value={x}>{x}</option>)}</select> },
               { key: 'customer_name', label: 'บริษัท', render: (r: any) => r.customer_name ?? '—' },
               { key: 'must_change_password', label: 'ต้องเปลี่ยนรหัส', render: (r: any) => r.must_change_password ? <Badge variant="warning">ใช่</Badge> : '—' },
-              { key: 'reset', label: '', render: (r: any) => <Button size="sm" variant="outline" onClick={() => reset.mutate(r.username)}>รีเซ็ตรหัส</Button> },
-              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" onClick={() => del.mutate(r.username)}>ลบ</Button> },
+              { key: 'reset', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={reset.isPending} onClick={() => reset.mutate(r.username)}>รีเซ็ตรหัส</Button> },
+              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.username)}>ลบ</Button> },
             ]}
             emptyText="ไม่มีผู้ใช้"
           />

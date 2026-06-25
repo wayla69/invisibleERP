@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, timestamp, jsonb, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 
@@ -54,6 +54,10 @@ export const journalEntries = pgTable(
   (t) => ({
     bySource: index('idx_je_source').on(t.source, t.sourceRef),
     byLedger: index('idx_je_ledger').on(t.ledgerCode),
+    // Period/tenant financial reports (trial balance, P&L, balance sheet) filter status='Posted' over an
+    // entry_date range, scoped by tenant. Without these the report scans every journal entry ever posted.
+    byTenantDate: index('idx_je_tenant_date').on(t.tenantId, t.entryDate),
+    byStatusDate: index('idx_je_status_date').on(t.status, t.entryDate),
     // H4 — structural idempotency: one posting per (tenant, source, source_ref, ledger). COALESCE so a
     // NULL tenant/ledger still collides (Postgres NULLs are otherwise distinct, which would defeat this).
     // Partial: manual entries carry no source_ref and are intentionally exempt (many allowed).
@@ -76,7 +80,38 @@ export const journalLines = pgTable(
     costCenterCode: text('cost_center_code'), // nullable accounting dimension (Tier 3); untagged = Unassigned
     tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   },
-  (t) => ({ byAccount: index('idx_jl_account').on(t.accountCode), byCc: index('idx_jl_cc').on(t.costCenterCode) }),
+  (t) => ({
+    byAccount: index('idx_jl_account').on(t.accountCode),
+    byCc: index('idx_jl_cc').on(t.costCenterCode),
+    // entry_id is the join key for EVERY GL report (header ⋈ lines). journal_lines is the largest financial
+    // table; without this every trial-balance/statement/consolidation does a full scan + hash join.
+    byEntry: index('idx_jl_entry').on(t.entryId),
+    byTenant: index('idx_jl_tenant').on(t.tenantId),
+  }),
+);
+
+// Recurring / template journal entries (GL-08). A balanced template (lines stored as JSON) + a cadence
+// (daily/weekly/monthly) + a next_run_date. The scheduled job `gl_recurring_journals` posts each due
+// template as a DRAFT JE through the normal maker-checker flow (GL-05) and rolls next_run_date forward.
+export const recurringJournals = pgTable(
+  'recurring_journals',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    name: text('name').notNull(),
+    frequency: text('frequency').notNull(), // 'daily' | 'weekly' | 'monthly'
+    memo: text('memo'),
+    ledgerCode: text('ledger_code'), // NULL = shared across all ledgers
+    currency: text('currency').default('THB'),
+    lines: jsonb('lines').notNull(), // [{ account_code, debit?, credit?, memo?, cost_center? }]
+    active: text('active').default('true'),
+    nextRunDate: date('next_run_date'),
+    lastRunDate: date('last_run_date'),
+    lastEntryNo: text('last_entry_no'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byDue: index('idx_recurring_due').on(t.active, t.nextRunDate) }),
 );
 
 export type Account = typeof accounts.$inferSelect;

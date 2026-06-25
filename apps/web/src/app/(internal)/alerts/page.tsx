@@ -109,8 +109,8 @@ function Rules() {
             { key: 'metric', label: 'เงื่อนไข', render: (r) => <code className="text-xs">{r.metric} {OP_LABEL[r.operator] ?? r.operator} {r.threshold}</code> },
             { key: 'channel', label: 'ช่องทาง', render: (r) => <Badge variant="muted">{r.channel}{r.target_role ? ` · ${r.target_role}` : ''}</Badge> },
             { key: 'severity', label: 'ระดับ', render: (r) => <Badge variant={r.severity === 'critical' ? 'destructive' : r.severity === 'warning' ? 'warning' : 'info'}>{r.severity}</Badge> },
-            { key: 'active', label: 'สถานะ', render: (r) => <Button size="sm" variant="ghost" onClick={() => toggle.mutate({ id: r.id, active: !r.active })}><Badge variant={r.active ? 'success' : 'muted'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge></Button> },
-            { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
+            { key: 'active', label: 'สถานะ', render: (r) => <Button size="sm" variant="ghost" disabled={toggle.isPending} onClick={() => toggle.mutate({ id: r.id, active: !r.active })}><Badge variant={r.active ? 'success' : 'muted'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge></Button> },
+            { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
           emptyText="ยังไม่มีกฎแจ้งเตือน"
         />
