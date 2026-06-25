@@ -81,6 +81,30 @@ is recorded.
 
 [screenshot: pending journal entry approval screen]
 
+### Recurring / template journal entries
+
+For entries you post every period — **monthly rent or insurance accruals**,
+**prepaid amortization**, standing inter-company charges — set up a **template**
+once instead of re-keying it each time.
+
+1. Go to **Accounting** → **Recurring** and click **New template**
+   (`POST /api/ledger/recurring`). Give it a **name**, pick a **cadence**
+   (**daily / weekly / monthly**), a **first run date**, and enter the journal
+   **lines** (the same Dr/Cr lines as a manual entry).
+2. The template must **balance** (total debits = total credits) — an unbalanced
+   template is rejected (`UNBALANCED`) so it can't fail silently later.
+3. Leave it to run automatically, or schedule the **Post due recurring journals**
+   (`gl_recurring_journals`) job under **Reports → Scheduled reports** to run it
+   daily.
+
+**Expected result:** On each due date the template posts a journal entry **as a
+Draft** and rolls its next run date forward. Because it's a Draft, it still goes
+through **maker-checker** — a second person approves it on the **Pending** tab
+before it affects balances (just like a manual entry). Running the job twice in a
+day posts **nothing extra** (it's idempotent). Pause a template anytime with
+**Activate/Pause** (`POST /api/ledger/recurring/:id/active`) without losing its
+history.
+
 ---
 
 ## 3. Trial balance & financial statements

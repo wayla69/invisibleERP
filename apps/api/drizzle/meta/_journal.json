@@ -869,6 +869,13 @@
       "when": 1963470000004,
       "tag": "0118_eam_depth",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1973470000004,
+      "tag": "0119_recurring_journals",
+      "breakpoints": true
     }
   ]
 }

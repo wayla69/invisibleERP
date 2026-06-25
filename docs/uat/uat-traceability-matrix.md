@@ -288,6 +288,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-EAM-006 | WO cost lines roll up to actual cost | FA-06 | 09 §7 |
 | UAT-EAM-007 | Completion posts the rolled-up actual cost to AP | EXP-05, FA-06 | 09 §7, §9 |
 | UAT-EAM-008 | Per-asset reliability & cost KPIs | FA-06 | 09 §7 |
+| UAT-GL-027 | Unbalanced recurring template rejected (UNBALANCED) | GL-08 | 04 §7, §9 |
+| UAT-GL-028 | Recurring run posts a Draft JE via maker-checker | GL-08, R05 | 04 §7, §9 |
+| UAT-GL-029 | Recurring run idempotent; second person approves → hits GL | GL-08, GL-05, R05 | 04 §7, §9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -517,11 +520,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 02 Order-to-Cash | 53 | 23 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close (incl. fixed assets / EAM) | 34 | 19 |
+| 05 GL & Close (incl. fixed assets / EAM) | 37 | 22 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 19 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **328** | **162** |
+| **Total** | **331** | **165** |

@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, timestamp, jsonb, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 
@@ -88,6 +88,30 @@ export const journalLines = pgTable(
     byEntry: index('idx_jl_entry').on(t.entryId),
     byTenant: index('idx_jl_tenant').on(t.tenantId),
   }),
+);
+
+// Recurring / template journal entries (GL-08). A balanced template (lines stored as JSON) + a cadence
+// (daily/weekly/monthly) + a next_run_date. The scheduled job `gl_recurring_journals` posts each due
+// template as a DRAFT JE through the normal maker-checker flow (GL-05) and rolls next_run_date forward.
+export const recurringJournals = pgTable(
+  'recurring_journals',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    name: text('name').notNull(),
+    frequency: text('frequency').notNull(), // 'daily' | 'weekly' | 'monthly'
+    memo: text('memo'),
+    ledgerCode: text('ledger_code'), // NULL = shared across all ledgers
+    currency: text('currency').default('THB'),
+    lines: jsonb('lines').notNull(), // [{ account_code, debit?, credit?, memo?, cost_center? }]
+    active: text('active').default('true'),
+    nextRunDate: date('next_run_date'),
+    lastRunDate: date('last_run_date'),
+    lastEntryNo: text('last_entry_no'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byDue: index('idx_recurring_due').on(t.active, t.nextRunDate) }),
 );
 
 export type Account = typeof accounts.$inferSelect;
