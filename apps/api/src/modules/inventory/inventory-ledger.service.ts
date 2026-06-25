@@ -1,0 +1,374 @@
+import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { invMoves, invBalances, invCostLayers, journalEntries, journalLines } from '../../database/schema';
+import { LedgerService } from '../ledger/ledger.service';
+import { n, ymd } from '../../database/queries';
+import type { JwtUser } from '../../common/decorators';
+
+const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
+const EPS = 1e-6;
+const bad = (code: string, message: string, messageTh: string) =>
+  new BadRequestException({ code, message, messageTh });
+
+// Inventory GL accounts — all already seeded in the COA (no new accounts introduced):
+//   1200 Inventory · 2000 Accounts Payable · 5000 COGS · 5810 Scrap/Rework Loss (shrink/variance bucket).
+const ACCT_INVENTORY = '1200';
+const ACCT_AP = '2000';
+const ACCT_COGS = '5000';
+const ACCT_ADJ = '5810';
+const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ'];
+const COSTING_METHODS = ['moving_avg', 'fifo', 'fefo'] as const;
+type CostingMethod = (typeof COSTING_METHODS)[number];
+const isLayered = (m?: string | null): boolean => m === 'fifo' || m === 'fefo';
+
+interface LayerSlice { qty: number; unitCost: number; lotNo: string | null; expiry: string | null }
+
+export interface ReceiveDto { item_id: string; item_description?: string; uom?: string; location_id?: string; qty: number; unit_cost: number; ref_type?: string; ref_id?: string; costing_method?: CostingMethod; lot_no?: string; expiry_date?: string }
+export interface IssueDto { item_id: string; location_id?: string; qty: number; ref_type?: string; ref_id?: string }
+export interface AdjustDto { item_id: string; location_id?: string; qty_delta: number; reason?: string }
+
+/**
+ * Perpetual inventory valuation sub-ledger (INV cycle). Each financial movement updates the running
+ * moving-average balance AND posts a balanced JE through LedgerService, so the inventory control
+ * account (1200) always ties to the sub-ledger (reconcile()). Atomicity rides the per-request tx
+ * (same pattern as finance.issueAdvance): the move, the balance upsert and the JE commit/rollback together.
+ *
+ * Scope note: this is a self-contained valued ledger for receipts / issues / adjustments — it deliberately
+ * does NOT hook into the POS sale path (which already relieves recipe COGS via 5300) to avoid double-posting.
+ */
+@Injectable()
+export class InventoryLedgerService {
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly ledger: LedgerService,
+  ) {}
+
+  private tenant(user: JwtUser): number {
+    if (user.tenantId == null) throw bad('NO_TENANT', 'A tenant context is required', 'ต้องอยู่ในบริบทผู้เช่า');
+    return user.tenantId;
+  }
+
+  private mkNo(prefix: string): string {
+    const d = ymd().replace(/-/g, '');
+    const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
+    return `${prefix}-${d}-${rand}`;
+  }
+
+  private async balanceRow(tenantId: number, itemId: string, locationId: string) {
+    const [b] = await (this.db as any).select().from(invBalances)
+      .where(and(eq(invBalances.tenantId, tenantId), eq(invBalances.itemId, itemId), eq(invBalances.locationId, locationId))).limit(1);
+    return b ?? null;
+  }
+
+  private async findByRef(tenantId: number, refType: string, refId: string) {
+    const [r] = await (this.db as any).select().from(invMoves)
+      .where(and(eq(invMoves.tenantId, tenantId), eq(invMoves.refType, refType), eq(invMoves.refId, refId))).limit(1);
+    return r ?? null;
+  }
+
+  private async writeMove(a: {
+    tenantId: number; moveNo: string; moveType: string; itemId: string; itemDescription?: string | null; uom?: string | null;
+    locationId: string; qtySigned: number; unitCost: number; valueSigned: number; balanceQty: number; avgCost: number;
+    refType?: string | null; refId?: string | null; reason?: string | null; glNo: string | null; by: string;
+  }) {
+    await (this.db as any).insert(invMoves).values({
+      tenantId: a.tenantId, moveNo: a.moveNo, moveType: a.moveType, itemId: a.itemId,
+      itemDescription: a.itemDescription ?? null, uom: a.uom ?? null, locationId: a.locationId,
+      qty: String(a.qtySigned), unitCost: String(a.unitCost), totalCost: String(a.valueSigned),
+      balanceQty: String(a.balanceQty), avgCost: String(a.avgCost),
+      refType: a.refType ?? null, refId: a.refId ?? null, reason: a.reason ?? null,
+      glEntryNo: a.glNo, createdBy: a.by,
+    });
+  }
+
+  private async upsertBalance(tenantId: number, itemId: string, itemDescription: string | null | undefined, locationId: string, qty: number, avg: number, value: number, method: CostingMethod = 'moving_avg') {
+    // costingMethod is set only on INSERT (first touch); it is intentionally absent from the conflict
+    // SET so an item's method is fixed once established.
+    await (this.db as any).insert(invBalances).values({
+      tenantId, itemId, itemDescription: itemDescription ?? null, locationId,
+      onHandQty: String(qty), avgCost: String(avg), totalValue: String(value), costingMethod: method,
+    }).onConflictDoUpdate({
+      target: [invBalances.tenantId, invBalances.itemId, invBalances.locationId],
+      set: { onHandQty: String(qty), avgCost: String(avg), totalValue: String(value), updatedAt: sql`now()` },
+    });
+  }
+
+  // ── FIFO/FEFO cost-layer helpers (0131) ───────────────────────────────────────────────────
+  private async createLayer(tenantId: number, itemId: string, loc: string, qty: number, unitCost: number, lotNo: string | null, expiry: string | null, refType: string | null, refId: string | null, by: string) {
+    if (!(qty > EPS)) return;
+    await (this.db as any).insert(invCostLayers).values({
+      tenantId, itemId, locationId: loc, lotNo: lotNo ?? null, expiryDate: expiry ?? null,
+      origQty: String(qty), remainingQty: String(qty), unitCost: String(unitCost),
+      refType: refType ?? null, refId: refId ?? null, createdBy: by,
+    });
+  }
+
+  // Consume `qty` from a fifo/fefo item's open layers in cost order; mutates remaining_qty and returns the
+  // actual cost consumed + the per-layer slices (so a transfer can recreate them at the destination).
+  private async consumeLayers(tenantId: number, itemId: string, loc: string, qty: number, method: CostingMethod): Promise<{ cost: number; slices: LayerSlice[] }> {
+    const order = method === 'fefo'
+      ? [sql`${invCostLayers.expiryDate} asc nulls last`, asc(invCostLayers.id)]
+      : [asc(invCostLayers.id)]; // fifo = oldest receipt first (id is monotonic)
+    const layers = await (this.db as any).select().from(invCostLayers)
+      .where(and(eq(invCostLayers.tenantId, tenantId), eq(invCostLayers.itemId, itemId), eq(invCostLayers.locationId, loc), sql`${invCostLayers.remainingQty} > 0`))
+      .orderBy(...order);
+    let remaining = round4(qty), cost = 0;
+    const slices: LayerSlice[] = [];
+    for (const l of layers) {
+      if (remaining <= EPS) break;
+      const take = Math.min(n(l.remainingQty), remaining);
+      cost = round4(cost + take * n(l.unitCost));
+      slices.push({ qty: round4(take), unitCost: n(l.unitCost), lotNo: l.lotNo ?? null, expiry: l.expiryDate ?? null });
+      await (this.db as any).update(invCostLayers).set({ remainingQty: String(round4(n(l.remainingQty) - take)) }).where(eq(invCostLayers.id, l.id));
+      remaining = round4(remaining - take);
+    }
+    if (remaining > EPS) throw bad('LAYER_SHORT', `Insufficient cost layers for ${itemId} (${remaining} uncosted)`, 'ชั้นต้นทุนไม่พอสำหรับการเบิก');
+    return { cost, slices };
+  }
+
+  // ── Goods receipt → valued stock-in + GL (Dr 1200 / Cr 2000) ──────────────────────────────
+  async receive(dto: ReceiveDto, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const qty = round4(dto.qty);
+    const unitCost = round4(dto.unit_cost);
+    if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
+    if (unitCost < 0) throw bad('BAD_COST', 'unit_cost must be ≥ 0', 'ต้นทุนต้องไม่ติดลบ');
+    const loc = dto.location_id ?? 'WH-MAIN';
+    // INV-02 — idempotent posting: a receipt already recorded for this ref is a no-op (no double stock / GL).
+    if (dto.ref_type && dto.ref_id) {
+      const dup = await this.findByRef(tenantId, dto.ref_type, dto.ref_id);
+      if (dup) return { move_no: dup.moveNo, move_type: 'receipt', deduped: true, balance_qty: n(dup.balanceQty), avg_cost: n(dup.avgCost) };
+    }
+    const cur = await this.balanceRow(tenantId, dto.item_id, loc);
+    // Costing method: fixed by the first receipt; later receipts inherit the established method.
+    const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? dto.costing_method ?? 'moving_avg';
+    const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue);
+    const value = round4(qty * unitCost);
+    const newQty = round4(oldQty + qty);
+    const newVal = round4(oldVal + value);
+    const newAvg = newQty > EPS ? round4(newVal / newQty) : 0;
+    const moveNo = this.mkNo('INV-RCV');
+    const je = value > EPS ? await this.ledger.postEntry({
+      date: ymd(), source: 'INV-RCV', sourceRef: dto.ref_type && dto.ref_id ? `${dto.ref_type}:${dto.ref_id}` : moveNo,
+      tenantId, memo: `Goods receipt ${moveNo} — ${dto.item_id}`, createdBy: user.username,
+      lines: [{ account_code: ACCT_INVENTORY, debit: value }, { account_code: ACCT_AP, credit: value }],
+    }) : null;
+    await this.writeMove({
+      tenantId, moveNo, moveType: 'receipt', itemId: dto.item_id, itemDescription: dto.item_description, uom: dto.uom,
+      locationId: loc, qtySigned: qty, unitCost, valueSigned: value, balanceQty: newQty, avgCost: newAvg,
+      refType: dto.ref_type, refId: dto.ref_id, glNo: je?.entry_no ?? null, by: user.username,
+    });
+    await this.upsertBalance(tenantId, dto.item_id, dto.item_description, loc, newQty, newAvg, newVal, method);
+    // fifo/fefo: this receipt opens a cost layer (lot/expiry carried for FEFO ordering).
+    if (isLayered(method)) await this.createLayer(tenantId, dto.item_id, loc, qty, unitCost, dto.lot_no ?? null, dto.expiry_date ?? null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
+    return { move_no: moveNo, move_type: 'receipt', item_id: dto.item_id, qty, unit_cost: unitCost, value, balance_qty: newQty, avg_cost: newAvg, costing_method: method, gl_entry_no: je?.entry_no ?? null };
+  }
+
+  // ── Goods issue → COGS at moving-average + GL (Dr 5000 / Cr 1200) ─────────────────────────
+  async issue(dto: IssueDto, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const qty = round4(dto.qty);
+    if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
+    const loc = dto.location_id ?? 'WH-MAIN';
+    if (dto.ref_type && dto.ref_id) {
+      const dup = await this.findByRef(tenantId, dto.ref_type, dto.ref_id);
+      if (dup) return { move_no: dup.moveNo, move_type: 'issue', deduped: true, balance_qty: n(dup.balanceQty), avg_cost: n(dup.avgCost) };
+    }
+    const cur = await this.balanceRow(tenantId, dto.item_id, loc);
+    const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue), avg = n(cur?.avgCost);
+    const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? 'moving_avg';
+    // INV-01 — negative-stock guard: cannot issue more than is on hand.
+    if (qty > oldQty + EPS) throw bad('NEG_STOCK', `Cannot issue ${qty} of ${dto.item_id}; only ${oldQty} on hand`, 'สต๊อกไม่พอสำหรับการเบิก');
+    // COGS = actual consumed layer cost (fifo/fefo) or qty × moving-average.
+    const value = isLayered(method) ? (await this.consumeLayers(tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
+    const issueUnit = qty > EPS ? round4(value / qty) : avg;
+    const newQty = round4(oldQty - qty);
+    const newVal = round4(oldVal - value);
+    const newAvg = newQty > EPS ? round4(newVal / newQty) : avg;
+    const moveNo = this.mkNo('INV-ISS');
+    const je = value > EPS ? await this.ledger.postEntry({
+      date: ymd(), source: 'INV-ISS', sourceRef: dto.ref_type && dto.ref_id ? `${dto.ref_type}:${dto.ref_id}` : moveNo,
+      tenantId, memo: `Goods issue ${moveNo} — ${dto.item_id}`, createdBy: user.username,
+      lines: [{ account_code: ACCT_COGS, debit: value }, { account_code: ACCT_INVENTORY, credit: value }],
+    }) : null;
+    await this.writeMove({
+      tenantId, moveNo, moveType: 'issue', itemId: dto.item_id, locationId: loc,
+      qtySigned: -qty, unitCost: issueUnit, valueSigned: -value, balanceQty: newQty, avgCost: newAvg,
+      refType: dto.ref_type, refId: dto.ref_id, glNo: je?.entry_no ?? null, by: user.username,
+    });
+    await this.upsertBalance(tenantId, dto.item_id, cur?.itemDescription, loc, newQty, newAvg, newVal, method);
+    return { move_no: moveNo, move_type: 'issue', item_id: dto.item_id, qty, unit_cost: issueUnit, value, balance_qty: newQty, avg_cost: newAvg, costing_method: method, gl_entry_no: je?.entry_no ?? null };
+  }
+
+  // ── Stock adjustment (count variance / shrinkage) + GL (loss Dr 5810 / Cr 1200; gain reversed) ──
+  async adjust(dto: AdjustDto, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const delta = round4(dto.qty_delta);
+    if (!delta) throw bad('NO_CHANGE', 'qty_delta must be non-zero', 'ต้องระบุส่วนต่างที่ไม่เป็นศูนย์');
+    // INV-04 — an adjustment must carry a reason (audit + control); authority gated to wh_adjust at the route.
+    if (!dto.reason || !dto.reason.trim()) throw bad('REASON_REQUIRED', 'A reason is required for stock adjustments', 'ต้องระบุเหตุผลในการปรับสต๊อก');
+    const loc = dto.location_id ?? 'WH-MAIN';
+    const cur = await this.balanceRow(tenantId, dto.item_id, loc);
+    const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue), avg = n(cur?.avgCost);
+    const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? 'moving_avg';
+    const newQty = round4(oldQty + delta);
+    if (newQty < -EPS) throw bad('NEG_STOCK', `Adjustment would drive ${dto.item_id} below zero (${newQty})`, 'การปรับทำให้สต๊อกติดลบ');
+    const moveNo = this.mkNo('INV-ADJ');
+    // Value impact: fifo/fefo shrinkage consumes layers at actual cost; an overage opens a layer at the
+    // current average; moving-average items value the delta at the running average (unchanged).
+    let moveVal: number;
+    if (isLayered(method)) {
+      if (delta < 0) {
+        moveVal = (await this.consumeLayers(tenantId, dto.item_id, loc, Math.abs(delta), method)).cost;
+      } else {
+        moveVal = round4(delta * avg);
+        await this.createLayer(tenantId, dto.item_id, loc, delta, avg, null, null, 'ADJ', moveNo, user.username);
+      }
+    } else {
+      moveVal = round4(Math.abs(delta) * avg);
+    }
+    const newVal = round4(oldVal + (delta > 0 ? moveVal : -moveVal));
+    const newAvg = newQty > EPS ? round4(newVal / newQty) : avg;
+    const lines = delta < 0
+      ? [{ account_code: ACCT_ADJ, debit: moveVal }, { account_code: ACCT_INVENTORY, credit: moveVal }]
+      : [{ account_code: ACCT_INVENTORY, debit: moveVal }, { account_code: ACCT_ADJ, credit: moveVal }];
+    const je = moveVal > EPS ? await this.ledger.postEntry({
+      date: ymd(), source: 'INV-ADJ', sourceRef: moveNo,
+      tenantId, memo: `Stock adjustment ${moveNo} — ${dto.reason}`, createdBy: user.username, lines,
+    }) : null;
+    await this.writeMove({
+      tenantId, moveNo, moveType: 'adjust', itemId: dto.item_id, locationId: loc,
+      qtySigned: delta, unitCost: avg, valueSigned: round4(delta > 0 ? moveVal : -moveVal), balanceQty: newQty, avgCost: newAvg,
+      reason: dto.reason, glNo: je?.entry_no ?? null, by: user.username,
+    });
+    await this.upsertBalance(tenantId, dto.item_id, cur?.itemDescription, loc, newQty, newAvg, newVal);
+    return { move_no: moveNo, move_type: 'adjust', item_id: dto.item_id, qty_delta: delta, value: round4(delta > 0 ? moveVal : -moveVal), balance_qty: newQty, avg_cost: newAvg, gl_entry_no: je?.entry_no ?? null };
+  }
+
+  // ── Valuation: on-hand value at moving-average per item/location ───────────────────────────
+  async valuation(user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const rows = await (this.db as any).select().from(invBalances)
+      .where(eq(invBalances.tenantId, tenantId)).orderBy(invBalances.itemId);
+    const items = rows
+      .filter((r: any) => Math.abs(n(r.onHandQty)) > EPS || Math.abs(n(r.totalValue)) > EPS)
+      .map((r: any) => ({ item_id: r.itemId, item_description: r.itemDescription, location_id: r.locationId, on_hand_qty: n(r.onHandQty), avg_cost: n(r.avgCost), total_value: n(r.totalValue), costing_method: r.costingMethod ?? 'moving_avg' }));
+    const total = round4(items.reduce((a: number, r: any) => a + r.total_value, 0));
+    return { items, count: items.length, total_value: total };
+  }
+
+  // ── Open FIFO/FEFO cost layers (valuation depth for layer-costed items) ────────────────────
+  async layers(user: JwtUser, q: { item_id?: string }) {
+    const tenantId = this.tenant(user);
+    const conds = [eq(invCostLayers.tenantId, tenantId), sql`${invCostLayers.remainingQty} > 0`];
+    if (q.item_id) conds.push(eq(invCostLayers.itemId, q.item_id));
+    const rows = await (this.db as any).select().from(invCostLayers).where(and(...conds)).orderBy(asc(invCostLayers.itemId), asc(invCostLayers.id));
+    const layers = rows.map((r: any) => ({
+      item_id: r.itemId, location_id: r.locationId, lot_no: r.lotNo, expiry_date: r.expiryDate,
+      remaining_qty: n(r.remainingQty), unit_cost: n(r.unitCost), layer_value: round4(n(r.remainingQty) * n(r.unitCost)),
+      ref_type: r.refType, ref_id: r.refId,
+    }));
+    return { layers, count: layers.length, total_value: round4(layers.reduce((a: number, l: any) => a + l.layer_value, 0)) };
+  }
+
+  // ── INV-05 — sub-ledger ↔ GL inventory control-account reconciliation ──────────────────────
+  async reconcile(user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const bals = await (this.db as any).select().from(invBalances).where(eq(invBalances.tenantId, tenantId));
+    const subLedger = round4(bals.reduce((a: number, r: any) => a + n(r.totalValue), 0));
+    // GL inventory (1200) attributable to the inventory sub-ledger's own postings, for this tenant.
+    const [g] = await (this.db as any).select({
+      d: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
+      c: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(
+        eq(journalLines.accountCode, ACCT_INVENTORY),
+        eq(journalLines.tenantId, tenantId),
+        eq(journalEntries.status, 'Posted'),
+        inArray(journalEntries.source, INV_SOURCES),
+      ));
+    const glInventory = round4(n(g?.d) - n(g?.c));
+    const difference = round4(subLedger - glInventory);
+    return { sub_ledger_value: subLedger, gl_inventory: glInventory, difference, reconciled: Math.abs(difference) < 0.01 };
+  }
+
+  // ── Bridge for stock-ops (issue / transfer / stocktake) → perpetual valued sub-ledger ─────────
+  // A "tracked" item is one already under perpetual valuation (it has a balance row, established by a
+  // valued goods-receipt). Stock-ops drives valued postings for tracked items; legacy snapshot-only
+  // items have no balance row → these return { valued: false } and the caller keeps its audit-only path.
+
+  async isTracked(tenantId: number, itemId: string, locationId = 'WH-MAIN'): Promise<boolean> {
+    return !!(await this.balanceRow(tenantId, itemId, locationId));
+  }
+
+  // Stocktake variance for a tracked item: bring valued on-hand to the counted qty and book the value
+  // variance to GL (reuses adjust(): shortage Dr 5810 / Cr 1200, overage reversed). No-op if untracked.
+  async postCountVariance(p: { item_id: string; location_id?: string; physical_qty: number; doc_no: string }, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const loc = p.location_id ?? 'WH-MAIN';
+    const cur = await this.balanceRow(tenantId, p.item_id, loc);
+    if (!cur) return { valued: false as const };
+    const delta = round4(round4(p.physical_qty) - n(cur.onHandQty));
+    if (!delta) return { valued: true as const, move_no: null, value_delta: 0, balance_qty: n(cur.onHandQty) };
+    const r = await this.adjust({ item_id: p.item_id, location_id: loc, qty_delta: delta, reason: `Stocktake ${p.doc_no}` }, user);
+    return { valued: true as const, ...r };
+  }
+
+  // Goods issue for a tracked item → relieve valued stock + COGS (reuses issue(), incl. NEG_STOCK guard).
+  async issueIfTracked(p: { item_id: string; location_id?: string; qty: number }, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const loc = p.location_id ?? 'WH-MAIN';
+    if (!(await this.balanceRow(tenantId, p.item_id, loc))) return { valued: false as const };
+    const r = await this.issue({ item_id: p.item_id, location_id: loc, qty: p.qty }, user);
+    return { valued: true as const, ...r };
+  }
+
+  // Inter-location transfer for a tracked item: move qty + value at the from-location's average cost
+  // (value-neutral overall — no GL). No-op if the from-location is untracked.
+  async transferIfTracked(p: { item_id: string; from_location: string; to_location: string; qty: number }, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const from = await this.balanceRow(tenantId, p.item_id, p.from_location);
+    if (!from) return { valued: false as const };
+    const qty = round4(p.qty);
+    const fromOld = n(from.onHandQty), avg = n(from.avgCost);
+    if (qty > fromOld + EPS) throw bad('NEG_STOCK', `Cannot transfer ${qty} of ${p.item_id} from ${p.from_location}; only ${fromOld} on hand`, 'สต๊อกต้นทางไม่พอสำหรับการโอน');
+    const method: CostingMethod = (from.costingMethod as CostingMethod) ?? 'moving_avg';
+    const moveNo = this.mkNo('INV-TRF');
+    // fifo/fefo: physically move the consumed cost layers to the destination (preserving lot/expiry/cost);
+    // moving-average: move value at the from-location's average. Value-neutral overall — no GL.
+    let moveVal: number;
+    if (isLayered(method)) {
+      const consumed = await this.consumeLayers(tenantId, p.item_id, p.from_location, qty, method);
+      moveVal = consumed.cost;
+      for (const sl of consumed.slices) await this.createLayer(tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TRF', moveNo, user.username);
+    } else {
+      moveVal = round4(qty * avg);
+    }
+    const unit = qty > EPS ? round4(moveVal / qty) : avg;
+    const fromQty = round4(fromOld - qty), fromVal = round4(n(from.totalValue) - moveVal);
+    await this.upsertBalance(tenantId, p.item_id, from.itemDescription, p.from_location, fromQty, fromQty > EPS ? round4(fromVal / fromQty) : avg, fromVal, method);
+    const to = await this.balanceRow(tenantId, p.item_id, p.to_location);
+    const toQty = round4(n(to?.onHandQty) + qty), toVal = round4(n(to?.totalValue) + moveVal);
+    await this.upsertBalance(tenantId, p.item_id, from.itemDescription, p.to_location, toQty, toQty > EPS ? round4(toVal / toQty) : avg, toVal, method);
+    await this.writeMove({ tenantId, moveNo, moveType: 'transfer', itemId: p.item_id, locationId: p.from_location, qtySigned: -qty, unitCost: unit, valueSigned: -moveVal, balanceQty: fromQty, avgCost: fromQty > EPS ? round4(fromVal / fromQty) : avg, glNo: null, by: user.username });
+    await this.writeMove({ tenantId, moveNo, moveType: 'transfer', itemId: p.item_id, locationId: p.to_location, qtySigned: qty, unitCost: unit, valueSigned: moveVal, balanceQty: toQty, avgCost: toQty > EPS ? round4(toVal / toQty) : avg, glNo: null, by: user.username });
+    return { valued: true as const, move_no: moveNo, qty, unit_cost: unit };
+  }
+
+  // ── Movement ledger (audit trail) ─────────────────────────────────────────────────────────
+  async listMoves(user: JwtUser, q: { item_id?: string; limit?: number }) {
+    const tenantId = this.tenant(user);
+    const conds = [eq(invMoves.tenantId, tenantId)];
+    if (q.item_id) conds.push(eq(invMoves.itemId, q.item_id));
+    const rows = await (this.db as any).select().from(invMoves).where(and(...conds)).orderBy(desc(invMoves.id)).limit(q.limit ?? 100);
+    return {
+      moves: rows.map((r: any) => ({
+        move_no: r.moveNo, move_date: r.moveDate, move_type: r.moveType, item_id: r.itemId, location_id: r.locationId,
+        qty: n(r.qty), unit_cost: n(r.unitCost), total_cost: n(r.totalCost), balance_qty: n(r.balanceQty), avg_cost: n(r.avgCost),
+        ref_type: r.refType, ref_id: r.refId, reason: r.reason, gl_entry_no: r.glEntryNo, created_by: r.createdBy,
+      })),
+      count: rows.length,
+    };
+  }
+}

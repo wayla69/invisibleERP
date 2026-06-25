@@ -911,6 +911,20 @@
       "when": 2013480000004,
       "tag": "0129_baseline_resync",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 2013490000004,
+      "tag": "0130_inventory_perpetual",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 2013500000004,
+      "tag": "0131_inventory_cost_layers",
+      "breakpoints": true
     }
   ]
 }

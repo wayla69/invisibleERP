@@ -154,5 +154,73 @@ When returned goods come back, receive the RMA and restock saleable items.
 
 ---
 
+## 9. Inventory valuation & GL reconciliation (perpetual sub-ledger)
+
+The **perpetual valued sub-ledger** keeps the *cost* of stock — not just quantity —
+and posts the matching accounting entry for every move, so the inventory balance in
+the books always matches what is on the shelf. It runs alongside the operational
+movements above and is the basis for **stock valuation** and the **month-end
+inventory reconciliation**.
+
+| Action | Endpoint | Required permission | What it posts |
+|---|---|---|---|
+| Goods receipt (at cost) | `POST /api/inventory/receipts` | `wh_receive` | Dr 1200 Inventory / Cr 2000 AP; updates moving-average cost |
+| Goods issue | `POST /api/inventory/issues` | `wh_custody` | Dr 5000 COGS / Cr 1200 Inventory (at moving-average) |
+| Stock adjustment | `POST /api/inventory/adjustments` | `wh_adjust` | Dr 5810 / Cr 1200 (shrinkage) — reversed for a gain |
+| Stock valuation | `GET /api/inventory/valuation` | `wh_count` / `dashboard` | — (on-hand value + costing method) |
+| Cost layers (FIFO/FEFO) | `GET /api/inventory/layers` | `wh_count` / `dashboard` | — (open layers: lot, expiry, remaining, cost) |
+| Reconciliation | `GET /api/inventory/reconciliation` | `wh_count` / `dashboard` | — (sub-ledger value vs GL account 1200) |
+| Movement ledger | `GET /api/inventory/moves` | `wh_count` / `dashboard` | — (audit trail of every valued move) |
+
+**How costing works.** Each item uses one costing method, fixed on its first receipt:
+
+- **Moving-average** (default) — each receipt recomputes a weighted-average unit cost;
+  issues relieve stock at that average. A receipt of 100 @ ฿10 then 100 @ ฿12 gives an
+  average of ฿11, so issuing 50 books ฿550 to COGS.
+- **FIFO / FEFO** (set `costing_method` to `fifo` or `fefo` on the first receipt) — each
+  receipt opens a **cost layer** carrying its lot and expiry. An issue consumes layers in
+  order — **FEFO** takes the **soonest-to-expire** lot first (best for perishables), **FIFO**
+  the oldest receipt — and books COGS at the **actual** cost of the layers consumed. Use
+  `GET /api/inventory/layers` to see the open layers and their values.
+
+> **Example (FEFO):** receive 10 @ ฿12 (expires Jul 1) then 10 @ ฿15 (expires Jun 20);
+> issuing 12 consumes the 10 @ ฿15 (sooner expiry) + 2 @ ฿12 = **฿174** COGS, leaving 8 @ ฿12.
+
+**Built-in controls**
+
+- **No oversell.** Issuing or adjusting below zero on-hand is rejected with
+  `NEG_STOCK` — you cannot drive stock negative (control **INV-01**).
+- **No double-counting.** A goods-receipt carrying a source reference (e.g. a GR
+  number) is **idempotent**: re-posting the same reference returns `deduped: true`
+  and changes nothing (control **INV-02**).
+- **Justified adjustments.** Every adjustment must carry a **reason**, or it is
+  rejected with `REASON_REQUIRED`; adjustment authority (`wh_adjust`) is segregated
+  from counting (`wh_count`) under rule **R11** (control **INV-04**).
+- **Reconciliation (INV-05).** `GET /api/inventory/reconciliation` returns
+  `sub_ledger_value`, `gl_inventory` and `reconciled`. When `reconciled` is `true`
+  the perpetual stock value equals the GL inventory control account (1200); a
+  non-zero `difference` is a control exception for the **Controller** to investigate.
+
+> **Note:** This sub-ledger does **not** re-book COGS on the POS sale path — restaurant
+> sales already relieve recipe COGS — so consumption is never costed twice.
+
+**Bridge with everyday warehouse moves.** Once an item is **perpetual-tracked** (it has had a
+valued receipt), the ordinary operations above are automatically costed too: a **goods issue**
+(§6) relieves valued stock and books COGS, a **transfer** (§6) moves value between locations, and
+**posting a stocktake** (§7) corrects the valued on-hand to the count and books the variance to the
+GL. Each response carries a `valued_lines` count so you can see how many lines were costed. Items
+that have never had a valued receipt are unaffected — they keep the simple audit movement.
+
+**Troubleshooting**
+
+| Message / code | Meaning | What to do |
+|---|---|---|
+| `NEG_STOCK` | Issue/adjustment exceeds on-hand | Recount or receive stock first |
+| `REASON_REQUIRED` | Adjustment submitted with no reason | Re-submit with a justification |
+| `deduped: true` | Receipt reference already posted | Expected — no action needed |
+| `difference ≠ 0` on reconciliation | Sub-ledger ≠ GL 1200 | Controller reviews moves vs GL postings |
+
+---
+
 **Next:** [Procurement](./03-procurement.md) ·
 [Reports & Analytics](./09-reports-and-analytics.md) (forecasting & replenishment)

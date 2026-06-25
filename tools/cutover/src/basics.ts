@@ -400,7 +400,63 @@ async function main() {
   const disp2 = await inj('PATCH', '/api/assets/FA-EAM2/dispose', admin, { proceeds: 50000 });
   ok('Asset disposal recycles revaluation surplus to retained earnings (Dr 3200 / Cr 3100)', disp2.json?.revaluation_surplus_recycled === 10000 && near(await tbBalance('3200'), surplus3200Before + 10000), `recycled=${disp2.json?.revaluation_surplus_recycled} 3200bal=${await tbBalance('3200')}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation ──');
+  // ───────────────────── Perpetual inventory valuation sub-ledger (INV-01..04) ─────────────────────
+  // Run in a dedicated tenant so the inventory control account (1200) is isolated from the cash-flow seed.
+  const [invT] = await db.insert(s.tenants).values({ code: 'INVT', name: 'Inventory Co' }).returning({ id: s.tenants.id });
+  const invTid = Number(invT.id);
+  await db.insert(s.users).values({ username: 'invmgr', passwordHash: await pw.hash('inv123'), role: 'Admin', tenantId: invTid }).onConflictDoNothing();
+  const invmgr = (await inj('POST', '/api/login', undefined, { username: 'invmgr', password: 'inv123' })).json.token;
+
+  // Receipt 1: 100 @ 10 = 1000 in. Receipt 2: 100 @ 12 = 1200 in ⇒ moving avg = 2200/200 = 11.
+  const r1 = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'SUGAR', item_description: 'Sugar 1kg', uom: 'BAG', qty: 100, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-1' });
+  ok('Inventory: goods receipt posts valued stock-in (100 @ 10) + GL', r1.status === 201 && near(r1.json?.balance_qty, 100) && near(r1.json?.avg_cost, 10) && /^JE-/.test(r1.json?.gl_entry_no ?? ''), JSON.stringify(r1.json).slice(0, 90));
+  const r2 = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'SUGAR', qty: 100, unit_cost: 12, ref_type: 'GRN', ref_id: 'GRN-2' });
+  ok('Inventory: second receipt recomputes moving-average cost (200 @ 11)', r2.status === 201 && near(r2.json?.balance_qty, 200) && near(r2.json?.avg_cost, 11), `bal=${r2.json?.balance_qty} avg=${r2.json?.avg_cost}`);
+
+  // INV-02 — idempotent posting: re-posting GRN-1 is a no-op (no double stock / no double GL).
+  const rDup = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'SUGAR', qty: 100, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-1' });
+  const valAfterDup = (await inj('GET', '/api/inventory/valuation', invmgr)).json;
+  ok('Inventory: duplicate receipt (same GRN ref) is idempotent (INV-02)', rDup.json?.deduped === true && near(valAfterDup.items?.find((i: any) => i.item_id === 'SUGAR')?.on_hand_qty, 200), `dedup=${rDup.json?.deduped}`);
+
+  // Issue 50 @ avg 11 = 550 to COGS ⇒ balance 150 @ 11 = 1650.
+  const iss = await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'SUGAR', qty: 50, ref_type: 'MI', ref_id: 'MI-1' });
+  ok('Inventory: goods issue relieves stock at moving-average (50 @ 11 → COGS 550)', iss.status === 201 && near(iss.json?.value, 550) && near(iss.json?.balance_qty, 150) && near(iss.json?.avg_cost, 11), JSON.stringify(iss.json).slice(0, 90));
+  // INV-01 — negative-stock guard: issuing beyond on-hand (1000 > 150) is rejected.
+  const issNeg = await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'SUGAR', qty: 1000 });
+  ok('Inventory: over-issue beyond on-hand rejected (INV-01 NEG_STOCK)', issNeg.status === 400 && issNeg.json?.error?.code === 'NEG_STOCK', `st=${issNeg.status} code=${issNeg.json?.error?.code}`);
+
+  // Shrinkage adjustment: −10 @ avg 11 = −110 to 5810 ⇒ balance 140 @ 11 = 1540.
+  const adj = await inj('POST', '/api/inventory/adjustments', invmgr, { item_id: 'SUGAR', qty_delta: -10, reason: 'Spoilage' });
+  ok('Inventory: shrinkage adjustment writes stock down + posts variance (−10 @ 11)', adj.status === 201 && near(adj.json?.balance_qty, 140) && near(adj.json?.value, -110), JSON.stringify(adj.json).slice(0, 90));
+  // INV-04 — an adjustment with no reason is rejected (control: every adjustment is justified + audited).
+  const adjBad = await inj('POST', '/api/inventory/adjustments', invmgr, { item_id: 'SUGAR', qty_delta: -1, reason: '   ' });
+  ok('Inventory: adjustment without a reason rejected (REASON_REQUIRED)', adjBad.status === 400 && adjBad.json?.error?.code === 'REASON_REQUIRED', `st=${adjBad.status} code=${adjBad.json?.error?.code}`);
+
+  // Valuation + INV-05 reconciliation: sub-ledger (140 @ 11 = 1540) ties to the GL inventory account.
+  const val = (await inj('GET', '/api/inventory/valuation', invmgr)).json;
+  ok('Inventory: valuation reports on-hand value at moving-average (140 @ 11 = 1540)', near(val.total_value, 1540) && near(val.items?.find((i: any) => i.item_id === 'SUGAR')?.total_value, 1540), `total=${val.total_value}`);
+  const rec = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
+  ok('Inventory: sub-ledger ties to GL inventory control account (INV-05 reconciled 1540)', near(rec.sub_ledger_value, 1540) && near(rec.gl_inventory, 1540) && rec.reconciled === true, `sub=${rec.sub_ledger_value} gl=${rec.gl_inventory} rec=${rec.reconciled}`);
+  // Movement ledger carries the full audit trail (2 receipts + 1 issue + 1 adjust = 4 moves, each GL-linked).
+  const mv = (await inj('GET', '/api/inventory/moves?item_id=SUGAR', invmgr)).json;
+  ok('Inventory: movement ledger records all 4 valued moves with GL links', mv.count === 4 && (mv.moves ?? []).every((m: any) => /^JE-/.test(m.gl_entry_no ?? '')), `n=${mv.count}`);
+
+  // ───────────────────── FIFO/FEFO cost-layer costing (Tier 1 lots) ─────────────────────
+  // MILK is FEFO-costed: two dated layers; an issue consumes the SOONEST-EXPIRY layer first (not avg).
+  await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'MILK', uom: 'CTN', qty: 10, unit_cost: 12, costing_method: 'fefo', lot_no: 'L1', expiry_date: '2026-07-01', ref_type: 'GRN', ref_id: 'GRN-M1' });
+  const mr2 = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'MILK', uom: 'CTN', qty: 10, unit_cost: 15, lot_no: 'L2', expiry_date: '2026-06-20', ref_type: 'GRN', ref_id: 'GRN-M2' });
+  ok('FEFO: 2nd receipt inherits the fefo method + opens a layer (20 on hand, avg 13.5)', mr2.json?.costing_method === 'fefo' && near(mr2.json?.balance_qty, 20) && near(mr2.json?.avg_cost, 13.5), `m=${mr2.json?.costing_method} avg=${mr2.json?.avg_cost}`);
+  // FEFO issue 12 → consume L2 (10 @ 15 = 150, expires 06-20) then L1 (2 @ 12 = 24) ⇒ COGS 174 (≠ 162 at avg).
+  const mIss = await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'MILK', qty: 12 });
+  ok('FEFO: issue consumes soonest-expiry layer first → COGS = 174 (≠ 162 moving-avg)', near(mIss.json?.value, 174) && near(mIss.json?.balance_qty, 8), `cogs=${mIss.json?.value} bal=${mIss.json?.balance_qty}`);
+  const mLayers = (await inj('GET', '/api/inventory/layers?item_id=MILK', invmgr)).json;
+  ok('FEFO: one open layer remains (L1: 8 @ 12 = 96)', mLayers.count === 1 && mLayers.layers?.[0]?.lot_no === 'L1' && near(mLayers.layers?.[0]?.remaining_qty, 8) && near(mLayers.total_value, 96), `n=${mLayers.count} val=${mLayers.total_value}`);
+  const milkRow = (await inj('GET', '/api/inventory/valuation', invmgr)).json.items?.find((i: any) => i.item_id === 'MILK');
+  ok('FEFO: valuation shows MILK 8 @ 12 = 96, method=fefo', near(milkRow?.total_value, 96) && milkRow?.costing_method === 'fefo', `val=${milkRow?.total_value} m=${milkRow?.costing_method}`);
+  const recF = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
+  ok('FEFO: layer sub-ledger still ties to the GL inventory control account (reconciled)', recF.reconciled === true && near(recF.sub_ledger_value, recF.gl_inventory), `sub=${recF.sub_ledger_value} gl=${recF.gl_inventory} rec=${recF.reconciled}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);
