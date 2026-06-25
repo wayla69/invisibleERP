@@ -55,6 +55,8 @@ async function main() {
     { username: 'fincon', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: t1 }, // gl_close + approvals (checker)
     { username: 'execu', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 },              // legacy 'exec' → holds BOTH gl_post and gl_close (residual-risk case maker-checker backstops)
     { username: 'finT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },        // tenant-2 finance reader (creditors/ar) — RLS isolation probe
+    { username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 },          // creditors only — AP-PAY maker
+    { username: 'apdual', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },       // creditors + approvals — residual self-approval case
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
@@ -77,6 +79,8 @@ async function main() {
   const fincon = await login('fincon', 'pw');
   const execu = await login('execu', 'pw');
   const finT2 = await login('finT2', 'pw');
+  const apclerk = await login('apclerk', 'pw');
+  const apdual = await login('apdual', 'pw');
 
   // Trial-balance credit on a given account in a period (read as Admin — bypasses RLS; only our JEs exist).
   const tbCredit = async (period: string, account: string): Promise<number> => {
@@ -139,6 +143,61 @@ async function main() {
   });
   const adminSelf = await inj('POST', `/api/ledger/journal/${adminJe.json.entry_no}/approve`, admin);
   ok('GL-05: maker-checker binds even Admin (no self-approve override)', adminSelf.status === 403 && adminSelf.json.error?.code === 'SOD_VIOLATION', `${adminSelf.status} ${adminSelf.json.error?.code}`);
+
+  // ════════════════════════ AP-PAY — AP disbursement maker-checker ════════════════════════
+  // A vendor payment must be REQUESTED by a `creditors` holder and APPROVED by a DIFFERENT user with
+  // approval authority; the bill's paid_amount and the cash GL only move on approval. Mirrors GL-05.
+  const apPaid = async (txnNo: string): Promise<number> => Number((await db.select().from(s.apTransactions).where(eq(s.apTransactions.txnNo, txnNo)))[0]?.paidAmount ?? 0);
+  const payApDebit = async (): Promise<number> => {
+    const jes = await db.select().from(s.journalEntries).where(eq(s.journalEntries.source, 'PAY-AP'));
+    if (!jes.length) return 0;
+    const lines = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, jes[0].id));
+    return lines.filter((l: any) => l.accountCode === '2000').reduce((a: number, l: any) => a + Number(l.debit), 0);
+  };
+
+  // 0. A bill cannot be booked pre-paid in one call (would disburse with no approval).
+  const prepaid = await inj('POST', '/api/finance/ap/transactions', apclerk, { vendor_name: 'Acme', amount: 500, paid_amount: 500 });
+  ok('AP-PAY: pre-paid bill creation blocked → 400 AP_PREPAID_BLOCKED', prepaid.status === 400 && prepaid.json.error?.code === 'AP_PREPAID_BLOCKED', `${prepaid.status} ${prepaid.json.error?.code}`);
+
+  // 1. Maker creates an Unpaid bill, then requests payment → PendingApproval (no cash/GL effect).
+  const bill = await inj('POST', '/api/finance/ap/transactions', apclerk, { vendor_name: 'Acme', amount: 1000 });
+  const apNo = bill.json.txn_no as string;
+  const reqPay = await inj('PATCH', `/api/finance/ap/transactions/${apNo}/pay`, apclerk, { amount: 1000 });
+  const appNo = reqPay.json.payment_no as string;
+  ok('AP-PAY: payment request posts as PendingApproval (no disbursement yet)',
+    (reqPay.status === 200 || reqPay.status === 201) && reqPay.json.status === 'PendingApproval' && !!appNo && (await apPaid(apNo)) === 0 && (await payApDebit()) === 0, `${reqPay.json.status} paid=${await apPaid(apNo)}`);
+
+  // 2. It appears in the checker queue.
+  const queue = await inj('GET', '/api/finance/ap/payments/pending', fincon);
+  ok('AP-PAY: pending payment listed in the checker queue', (queue.json.payments ?? []).some((p: any) => p.payment_no === appNo), `pending=${(queue.json.payments ?? []).length}`);
+
+  // 3. Maker (creditors only) lacks approval authority → 403 (FORBIDDEN at the guard).
+  const makerApprove = await inj('POST', `/api/finance/ap/payments/${appNo}/approve`, apclerk);
+  ok('AP-PAY: maker (creditors only) cannot approve → 403', makerApprove.status === 403, `${makerApprove.status} ${makerApprove.json.error?.code}`);
+
+  // 4. Residual case — a user holding BOTH creditors AND approvals cannot approve their OWN request.
+  const dualBill = await inj('POST', '/api/finance/ap/transactions', apdual, { vendor_name: 'SelfCo', amount: 200 });
+  const dualReq = await inj('PATCH', `/api/finance/ap/transactions/${dualBill.json.txn_no}/pay`, apdual, { amount: 200 });
+  const dualSelf = await inj('POST', `/api/finance/ap/payments/${dualReq.json.payment_no}/approve`, apdual);
+  ok('AP-PAY: requester self-approval blocked → 403 SOD_VIOLATION (holder of both duties)', dualSelf.status === 403 && dualSelf.json.error?.code === 'SOD_VIOLATION', `${dualSelf.status} ${dualSelf.json.error?.code}`);
+
+  // 5. A DIFFERENT authorized user approves → bill Paid + cash-disbursement GL posts (Dr 2000 / Cr 1000).
+  const approveAp = await inj('POST', `/api/finance/ap/payments/${appNo}/approve`, fincon);
+  ok('AP-PAY: independent approver disburses → Approved, bill Paid, GL Dr 2000 = 1000',
+    approveAp.status === 200 && approveAp.json.status === 'Approved' && approveAp.json.bill_status === 'Paid' && approveAp.json.approved_by === 'fincon' && (await apPaid(apNo)) === 1000 && (await payApDebit()) === 1000,
+    `${approveAp.json.status}/${approveAp.json.bill_status} paid=${await apPaid(apNo)} dr2000=${await payApDebit()}`);
+
+  // 6. Reject path — a fresh request rejected → no disbursement.
+  const billR = await inj('POST', '/api/finance/ap/transactions', apclerk, { vendor_name: 'RejCo', amount: 300 });
+  const reqR = await inj('PATCH', `/api/finance/ap/transactions/${billR.json.txn_no}/pay`, apclerk, { amount: 300 });
+  const rejectAp = await inj('POST', `/api/finance/ap/payments/${reqR.json.payment_no}/reject`, fincon, { reason: 'duplicate' });
+  ok('AP-PAY: reject → Rejected, bill stays Unpaid (no disbursement)', rejectAp.status === 200 && rejectAp.json.status === 'Rejected' && (await apPaid(billR.json.txn_no)) === 0, `${rejectAp.json.status} paid=${await apPaid(billR.json.txn_no)}`);
+
+  // 7. Maker-checker binds even Admin: Admin cannot approve a payment Admin requested.
+  const adminBill = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: 'AdminCo', amount: 100 });
+  const adminReq = await inj('PATCH', `/api/finance/ap/transactions/${adminBill.json.txn_no}/pay`, admin, { amount: 100 });
+  const adminApprove = await inj('POST', `/api/finance/ap/payments/${adminReq.json.payment_no}/approve`, admin);
+  ok('AP-PAY: maker-checker binds even Admin (no self-approve override)', adminApprove.status === 403 && adminApprove.json.error?.code === 'SOD_VIOLATION', `${adminApprove.status} ${adminApprove.json.error?.code}`);
 
   // ════════════════════ ITGC-AC-09 — SoD preventive block on permission assignment ════════════════════
   // Raise PR / PO (procurement) + approve & pay AP (creditors) is SoD rule R03.
@@ -279,6 +338,22 @@ async function main() {
   ok('ITGC-AC-10: audit_log captured the mutating requests', before > 0, `rows=${before}`);
   ok('ITGC-AC-10: audit_log UPDATE blocked by DB trigger (append-only)', updateBlocked, `blocked=${updateBlocked}`);
   ok('ITGC-AC-10: audit_log DELETE blocked by DB trigger (append-only)', deleteBlocked && after === before, `blocked=${deleteBlocked} rows=${after}`);
+
+  // ════════════════════ ITGC-AC-14 — field-level before/after change log (financial tables) ════════════════════
+  // The DB triggers (0116) capture OLD→NEW row images on the financial tables. The AP-PAY flow above mutated
+  // ap_transactions through the app (apclerk created the bill Unpaid; fincon's approval set it Paid), so the
+  // change log must hold both images with the correct actor + changed columns — captured at the DB layer.
+  const apUpd = ((await pg.query(`SELECT actor, old_value->>'status' os, new_value->>'status' ns, changed_columns FROM data_change_log WHERE table_name='ap_transactions' AND op='UPDATE' AND new_value->>'txn_no'='${apNo}' ORDER BY id DESC LIMIT 1`)).rows as any[])[0];
+  ok('ITGC-AC-14: change log captured AP bill OLD→NEW (Unpaid→Paid) with approver + changed columns',
+    !!apUpd && apUpd.actor === 'fincon' && apUpd.os === 'Unpaid' && apUpd.ns === 'Paid' && (apUpd.changed_columns ?? []).includes('paid_amount'),
+    apUpd ? `actor=${apUpd.actor} ${apUpd.os}->${apUpd.ns} cols=${JSON.stringify(apUpd.changed_columns)}` : 'no row');
+  // Surfaced through the admin audit-viewer endpoint (tenant-scoped; Admin sees all).
+  const chgApi = await inj('GET', '/api/admin/audit/changes?table=ap_transactions', admin);
+  ok('ITGC-AC-14: change log exposed via /api/admin/audit/changes with old/new + actor', chgApi.status === 200 && (chgApi.json.rows ?? []).some((r: any) => r.op === 'UPDATE' && r.new_value && r.old_value && r.actor), `n=${(chgApi.json.rows ?? []).length}`);
+  // Append-only: the change log itself cannot be rewritten.
+  let dclBlocked = false;
+  try { await pg.query(`UPDATE data_change_log SET actor='tamper' WHERE id=(SELECT id FROM data_change_log LIMIT 1)`); } catch { dclBlocked = true; }
+  ok('ITGC-AC-14: data_change_log UPDATE blocked by DB trigger (append-only)', dclBlocked, `blocked=${dclBlocked}`);
 
   // ════════════════════ LYL-03 — Loyalty points liability posts to GL (TFRS 15, control acct 2250) ════════════════════
   // Seed a deterministic program: fair value 0.1 baht/point, two ACTIVE members holding 1000 + 500 points

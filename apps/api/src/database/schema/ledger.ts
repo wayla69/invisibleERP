@@ -54,6 +54,10 @@ export const journalEntries = pgTable(
   (t) => ({
     bySource: index('idx_je_source').on(t.source, t.sourceRef),
     byLedger: index('idx_je_ledger').on(t.ledgerCode),
+    // Period/tenant financial reports (trial balance, P&L, balance sheet) filter status='Posted' over an
+    // entry_date range, scoped by tenant. Without these the report scans every journal entry ever posted.
+    byTenantDate: index('idx_je_tenant_date').on(t.tenantId, t.entryDate),
+    byStatusDate: index('idx_je_status_date').on(t.status, t.entryDate),
     // H4 — structural idempotency: one posting per (tenant, source, source_ref, ledger). COALESCE so a
     // NULL tenant/ledger still collides (Postgres NULLs are otherwise distinct, which would defeat this).
     // Partial: manual entries carry no source_ref and are intentionally exempt (many allowed).
@@ -76,7 +80,14 @@ export const journalLines = pgTable(
     costCenterCode: text('cost_center_code'), // nullable accounting dimension (Tier 3); untagged = Unassigned
     tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   },
-  (t) => ({ byAccount: index('idx_jl_account').on(t.accountCode), byCc: index('idx_jl_cc').on(t.costCenterCode) }),
+  (t) => ({
+    byAccount: index('idx_jl_account').on(t.accountCode),
+    byCc: index('idx_jl_cc').on(t.costCenterCode),
+    // entry_id is the join key for EVERY GL report (header ⋈ lines). journal_lines is the largest financial
+    // table; without this every trial-balance/statement/consolidation does a full scan + hash join.
+    byEntry: index('idx_jl_entry').on(t.entryId),
+    byTenant: index('idx_jl_tenant').on(t.tenantId),
+  }),
 );
 
 export type Account = typeof accounts.$inferSelect;

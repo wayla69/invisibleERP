@@ -114,7 +114,7 @@ export default function DinerPage() {
     finally { setBusy(false); }
   };
 
-  const doBill = async () => { setBusy(true); try { await publicApi(`/api/qr/t/${token}/bill`, { method: 'POST' }); await load(); } finally { setBusy(false); } };
+  const doBill = async () => { setBusy(true); setErr(''); try { await publicApi(`/api/qr/t/${token}/bill`, { method: 'POST' }); await load(); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
   const doPay = async () => { setBusy(true); try { setPay(await publicApi(`/api/qr/t/${token}/pay`, { method: 'POST' })); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
   const doConfirm = async () => { if (!pay) return; setBusy(true); try { await publicApi(`/api/qr/t/${token}/confirm`, { method: 'POST', body: JSON.stringify({ payment_no: pay.payment_no }) }); setPaid(true); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
 

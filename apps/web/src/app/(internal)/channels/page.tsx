@@ -70,7 +70,7 @@ function Adapters() {
         {q.data && <DataTable rows={q.data.adapters} columns={[
           { key: 'platform', label: 'แพลตฟอร์ม' }, { key: 'store_ref', label: 'Store ID' },
           { key: 'enabled', label: 'เปิดใช้', render: (r: any) => r.enabled ? <Badge variant={statusVariant('paid')}>ใช้งาน</Badge> : '—' },
-          { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="outline" onClick={() => sync.mutate(r.platform)}><Send className="size-4" /> ซิงก์เมนู</Button> },
+          { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={sync.isPending} onClick={() => sync.mutate(r.platform)}><Send className="size-4" /> ซิงก์เมนู</Button> },
         ]} emptyText="ยังไม่มีการเชื่อมต่อ" />}
       </StateView>
     </div>

@@ -204,8 +204,10 @@ async function main() {
   const apList = (await inj('GET', '/api/finance/ap?status=Unpaid&limit=50', admin)).json;
   const reimb = (apList.transactions ?? []).find((t: any) => t.Invoice_No === `EXP-${expId}`);
   ok('Reimbursement appears in AP as a payable (500) — settle-able via AP', !!reimb && near(reimb.Outstanding_Amount, 500), `found=${!!reimb} out=${reimb?.Outstanding_Amount}`);
-  const payReimb = await inj('PATCH', `/api/finance/ap/transactions/${appr.json.ap_txn_no}/pay`, admin, { amount: 500 });
-  ok('Reimbursement paid through the normal AP pay flow', payReimb.json?.status === 'Paid', `st=${payReimb.json?.status}`);
+  // AP disbursement maker-checker (EXP-06): paying is request (admin) → approve by a DIFFERENT user (mgr).
+  const reqReimb = await inj('PATCH', `/api/finance/ap/transactions/${appr.json.ap_txn_no}/pay`, admin, { amount: 500 });
+  const payReimb = await inj('POST', `/api/finance/ap/payments/${reqReimb.json.payment_no}/approve`, mgr);
+  ok('Reimbursement settled through the AP maker-checker pay flow', reqReimb.json?.status === 'PendingApproval' && payReimb.json?.bill_status === 'Paid', `req=${reqReimb.json?.status} st=${payReimb.json?.bill_status}`);
 
   // ───────────────────── EAM: asset maintenance ─────────────────────
   const wo = await inj('POST', '/api/eam/work-orders', admin, { asset_no: 'FA-EAM1', type: 'corrective', priority: 'high', description: 'Seal leak', vendor_name: 'ACME Repairs', cost_estimate: 1000 });

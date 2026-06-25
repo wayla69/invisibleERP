@@ -85,7 +85,9 @@ export class ReturnsService {
       // restock (only for items tracked in customer_inventory) + stock log
       let restockedAny = false;
       for (const rl of retLines) {
-        const [inv] = await tx.select().from(customerInventory).where(and(eq(customerInventory.tenantId, sale.tenantId), eq(customerInventory.itemId, rl.line.itemId))).limit(1);
+        // Lock the inventory row (matches the deduction path in recipe.service.applyDeduction): a restock-add
+        // on a row another concurrent movement is also touching must not lose its increment.
+        const [inv] = await tx.select().from(customerInventory).where(and(eq(customerInventory.tenantId, sale.tenantId), eq(customerInventory.itemId, rl.line.itemId))).for('update').limit(1);
         if (inv) {
           const after = round2(n(inv.currentStock) + rl.qty);
           await tx.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));

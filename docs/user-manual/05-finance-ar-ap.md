@@ -132,17 +132,35 @@ of how many invoices it advanced — no manual button press needed.
 **Expected result:** The bill is recorded; expense and input VAT post to the
 ledger, with the balance owed to the supplier.
 
-### B2. Pay a supplier
+### B2. Pay a supplier — request, then approve (maker-checker)
 
+Paying a supplier is a **two-step** flow so that no single person both records and
+pays a bill (SOX control **EXP-06**).
+
+**Step 1 — request payment (AP Clerk, `creditors`):**
 1. Find the bill in the **AP** list.
-2. Click **Pay** (**จ่ายเจ้าหนี้**) and confirm the payment.
+2. Click **Pay** (**ขอจ่ายเจ้าหนี้**), enter the amount, and click **Send payment
+   request** (**ส่งคำขอจ่าย**).
 
-**Expected result:** The bill is settled (Unpaid → Partial → Paid) and the
-payment posts to the ledger.
+**Expected result:** A payment request is created and shown as **awaiting approval**
+(**รออนุมัติ**). **No money moves yet** — the bill stays Unpaid and nothing posts to
+the ledger until a different person approves.
+
+**Step 2 — approve / reject (approver, `approvals` or `gl_close`):**
+1. On `/finance`, open **คำขอจ่ายรออนุมัติ (Maker-Checker)** — the pending-payment queue.
+2. Review the request and click **อนุมัติ** (approve) or **ปฏิเสธ** (reject).
+
+**Expected result on approval:** The bill is settled (Unpaid → Partial → Paid) and the
+cash-disbursement entry posts to the ledger. On rejection nothing posts.
+
+> **Note — you cannot approve your own request:** The approver must be a **different**
+> user from the requester — even an Admin is blocked with `SOD_VIOLATION` (control
+> **EXP-06**, rules R03/R07). A bill also **cannot be booked already-paid** in one
+> step (`AP_PREPAID_BLOCKED`).
 
 > **Note — payment blocked by 3-way match:** If the bill has **not passed the
-> 3-way match** you'll see `MATCH_BLOCKED` and cannot pay it. Resolve the match
-> first (or have an authorised user override it with a reason). See
+> 3-way match** you'll see `MATCH_BLOCKED` and cannot request payment. Resolve the
+> match first (or have an authorised user override it with a reason). See
 > [Procurement](./03-procurement.md).
 
 > **Note — separation of duties:** Whoever **raises a purchase** should not also

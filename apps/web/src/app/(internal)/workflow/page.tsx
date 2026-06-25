@@ -164,7 +164,7 @@ function Definitions() {
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-semibold">{d.name} <span className="text-muted-foreground">· {d.doc_type}{d.sla_hours ? ` · SLA ${d.sla_hours}ชม.` : ''}</span></h3>
                 <Badge variant={d.active ? 'success' : 'muted'}>{d.active ? 'ใช้งาน' : 'ปิด'}</Badge>
-                <Button size="sm" variant="ghost" onClick={() => toggle.mutate({ id: d.id, active: !d.active })}>{d.active ? 'ปิด' : 'เปิด'}</Button>
+                <Button size="sm" variant="ghost" disabled={toggle.isPending} onClick={() => toggle.mutate({ id: d.id, active: !d.active })}>{d.active ? 'ปิด' : 'เปิด'}</Button>
               </div>
               <DataTable
                 rows={d.steps}

@@ -65,7 +65,7 @@ export default function ImagesPage() {
             columns={[
               { key: 'item_id', label: 'รหัสสินค้า' },
               { key: 'view', label: '', render: (r: any) => <Button size="sm" variant="outline" onClick={() => showImage(r.item_id)}>ดูรูป</Button> },
-              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" onClick={() => remove.mutate(r.item_id)}>ลบ</Button> },
+              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate(r.item_id)}>ลบ</Button> },
             ]}
             emptyText="ยังไม่มีรูปสินค้า"
           />

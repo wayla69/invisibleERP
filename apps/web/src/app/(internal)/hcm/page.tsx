@@ -88,7 +88,7 @@ function Leave() {
         { key: 'leave_type', label: 'ประเภท' }, { key: 'from_date', label: 'ตั้งแต่' }, { key: 'to_date', label: 'ถึง' }, { key: 'days', label: 'วัน', align: 'right' },
         { key: 'paid', label: 'ค่าจ้าง', render: (r: any) => (r.paid ? 'รับ' : 'ไม่รับ') },
         { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
-        { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'Pending' ? <Button size="sm" variant="outline" onClick={() => approve.mutate(r.id)}><Check className="size-4" /> อนุมัติ</Button> : <span className="text-xs text-muted-foreground">—</span> },
+        { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'Pending' ? <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}><Check className="size-4" /> อนุมัติ</Button> : <span className="text-xs text-muted-foreground">—</span> },
       ]} emptyText="ยังไม่มีใบลา" />}</StateView>
     </div>
   );

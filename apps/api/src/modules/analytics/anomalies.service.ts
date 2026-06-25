@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { sql, eq, and, gte } from 'drizzle-orm';
+import { sql, eq, and, gte, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { stockMovements, stocktakes, items } from '../../database/schema';
 
@@ -34,14 +34,20 @@ export class AnomaliesService {
     }).from(stockMovements).where(gte(stockMovements.moveDate, recentCutoff))
       .groupBy(stockMovements.itemId, stockMovements.moveType).having(sql`sum(abs(${stockMovements.qty})) > 0`);
 
+    // Batch the item-name lookup once (was one query per anomaly → N+1).
+    const recItemIds = [...new Set(recRows.map((r) => r.item).filter(Boolean))];
+    const nameRows: any[] = recItemIds.length
+      ? await db.select({ id: items.itemId, name: items.itemDescription }).from(items).where(inArray(items.itemId, recItemIds))
+      : [];
+    const nameMap = new Map<string, string>(nameRows.map((x: any) => [x.id, x.name]));
+
     const anomalies: any[] = [];
     for (const r of recRows) {
       const series = seriesMap.get(`${r.item}|${r.type}`) ?? [];
       const z = zscore(Number(r.total), series); // parity: เทียบ recent-sum กับ per-day baseline (คงไว้)
       if (z > Z_THRESHOLD) {
-        const [it] = await db.select({ name: items.itemDescription }).from(items).where(eq(items.itemId, r.item)).limit(1);
         anomalies.push({
-          item_id: r.item, item_name: it?.name ?? r.item, movement_type: r.type, recent_qty: round2(Number(r.total)),
+          item_id: r.item, item_name: nameMap.get(r.item) ?? r.item, movement_type: r.type, recent_qty: round2(Number(r.total)),
           hist_avg: series.length ? round2(mean(series)) : 0, z_score: round2(z), event_count: Number(r.cnt),
           severity: z > Z_CRITICAL ? 'critical' : 'warning',
         });

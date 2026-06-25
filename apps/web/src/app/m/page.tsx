@@ -123,23 +123,29 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
   }, [token, on401]);
   useEffect(() => { reload(); }, [reload]);
 
+  // `busy` gates every point-spending / coupon-issuing action so a mobile double-tap can't fire a duplicate
+  // redeem / spin / claim (double-spent points or duplicate coupons). Re-entrancy guarded at the top.
+  const [busy, setBusy] = useState(false);
   const act = async (fn: () => Promise<any>, okMsg: string) => {
-    setFlash(''); setErr('');
-    try { await fn(); setFlash(okMsg); await reload(); } catch (e: any) { setErr(e.message); }
+    if (busy) return;
+    setBusy(true); setFlash(''); setErr('');
+    try { await fn(); setFlash(okMsg); await reload(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   const spin = async (w: any) => {
-    setFlash(''); setErr('');
+    if (busy) return;
+    setBusy(true); setFlash(''); setErr('');
     try {
       const res: any = await mapi(`/api/member/wheels/${w.id}/spin`, { method: 'POST' }, token);
       const p = res.prize;
       setFlash(p?.kind === 'points' ? `🎉 ได้รับ ${p.points} แต้ม!` : p?.kind === 'coupon' ? `🎟️ ได้คูปอง “${p.label}” — ดูในคูปองของฉัน` : `🎡 ${p?.label ?? 'รอบนี้ยังไม่ได้รางวัล ลองใหม่!'}`);
       await reload();
-    } catch (e: any) { setErr(e.message); }
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   const claimPriv = async (v: any) => {
-    setFlash(''); setErr('');
+    if (busy) return;
+    setBusy(true); setFlash(''); setErr('');
     try { const res: any = await mapi(`/api/member/privileges/${v.id}/claim`, { method: 'POST' }, token); setFlash(`🎫 รับสิทธิ์แล้ว! รหัส ${res.claim_code} — แสดงที่ร้านพันธมิตร`); await reload(); }
-    catch (e: any) { setErr(e.message); }
+    catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
 
   if (err && !me) return <div className="py-10 text-center text-sm text-destructive">{err}</div>;
@@ -175,7 +181,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
       <Section icon={<Gift className="size-4" />} title="ของรางวัล — ใช้แต้มแลก">
         {rewards.length === 0 ? <Empty>ยังไม่มีของรางวัล</Empty> : rewards.map((r) => (
           <Row key={r.id} title={r.name} sub={`${Number(r.point_cost).toLocaleString()} แต้ม${r.tier_min ? ` · ขั้นต่ำ ${r.tier_min}` : ''}`}>
-            <Button size="sm" variant="outline" disabled={Number(me.balance) < Number(r.point_cost)} onClick={() => act(() => mapi(`/api/member/rewards/${r.id}/redeem`, { method: 'POST' }, token), '🎁 แลกสำเร็จ! ดูโค้ดในคูปองของฉัน')}>แลก</Button>
+            <Button size="sm" variant="outline" disabled={busy || Number(me.balance) < Number(r.point_cost)} onClick={() => act(() => mapi(`/api/member/rewards/${r.id}/redeem`, { method: 'POST' }, token), '🎁 แลกสำเร็จ! ดูโค้ดในคูปองของฉัน')}>แลก</Button>
           </Row>
         ))}
       </Section>
@@ -185,7 +191,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
         <Section icon={<Disc3 className="size-4" />} title="วงล้อนำโชค — หมุนรับรางวัล">
           {wheels.map((w) => (
             <Row key={w.id} title={w.name} sub={w.cost_points > 0 ? `${Number(w.cost_points).toLocaleString()} แต้ม/ครั้ง${w.daily_free_spins > 0 ? ` · ฟรี ${w.daily_free_spins}/วัน` : ''}` : (w.daily_free_spins > 0 ? `ฟรี ${w.daily_free_spins} ครั้ง/วัน` : 'ฟรี')}>
-              <Button size="sm" disabled={w.cost_points > 0 && Number(me.balance) < w.cost_points} onClick={() => spin(w)}>หมุน</Button>
+              <Button size="sm" disabled={busy || (w.cost_points > 0 && Number(me.balance) < w.cost_points)} onClick={() => spin(w)}>หมุน</Button>
             </Row>
           ))}
         </Section>
@@ -196,7 +202,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
         <Section icon={<Handshake className="size-4" />} title="สิทธิพิเศษพันธมิตร">
           {privileges.map((v) => (
             <Row key={v.id} title={v.name} sub={`${v.partner ?? ''}${v.kind === 'discount_percent' ? ` · ลด ${v.value}%` : v.kind === 'discount_amount' ? ` · ลด ฿${v.value}` : v.kind === 'freebie' ? ' · ของแถม' : ''}`}>
-              <Button size="sm" variant="outline" onClick={() => claimPriv(v)}>รับสิทธิ์</Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => claimPriv(v)}>รับสิทธิ์</Button>
             </Row>
           ))}
         </Section>
@@ -218,7 +224,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
         {missions.length === 0 ? <Empty>ยังไม่มีภารกิจ</Empty> : missions.map((m) => (
           <Row key={m.id} title={m.name} sub={`${Number(m.progress ?? 0)}/${Number(m.goal ?? 0)} · +${Number(m.reward_points ?? 0)} แต้ม`}>
             {m.claimed ? <Badge variant="muted">รับแล้ว</Badge>
-              : m.completed ? <Button size="sm" onClick={() => act(() => mapi(`/api/member/missions/${m.id}/claim`, { method: 'POST' }, token), '🏆 รับรางวัลภารกิจแล้ว')}>รับรางวัล</Button>
+              : m.completed ? <Button size="sm" disabled={busy} onClick={() => act(() => mapi(`/api/member/missions/${m.id}/claim`, { method: 'POST' }, token), '🏆 รับรางวัลภารกิจแล้ว')}>รับรางวัล</Button>
               : <Badge variant="info">{Math.round((Number(m.progress ?? 0) / Math.max(1, Number(m.goal ?? 1))) * 100)}%</Badge>}
           </Row>
         ))}

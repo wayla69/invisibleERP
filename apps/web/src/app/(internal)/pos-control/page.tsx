@@ -57,7 +57,7 @@ function ReasonCodes() {
       <StateView q={q}>
         {q.data && <DataTable rows={q.data.reason_codes} columns={[
           { key: 'code', label: 'รหัส' }, { key: 'label', label: 'คำอธิบาย' }, { key: 'applies_to', label: 'ใช้กับ' },
-          { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="destructive" onClick={() => del.mutate(r.id)}>ปิดใช้</Button> },
+          { key: 'act', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.id)}>ปิดใช้</Button> },
         ]} emptyText="ยังไม่มีรหัสเหตุผล" />}
       </StateView>
     </div>
@@ -94,7 +94,7 @@ function Held() {
             { key: 'customer_name', label: 'ลูกค้า' },
             { key: 'created_by', label: 'พักโดย' },
             { key: 'created_at', label: 'เวลา', render: (r: any) => thaiDate(r.created_at) },
-            { key: 'act', label: '', render: (r: any) => <div className="flex gap-1"><Button size="sm" onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>เรียกคืน</Button><Button size="sm" variant="destructive" onClick={() => { if (window.confirm(`ทิ้งบิลที่พักไว้ ${r.hold_no}? การกระทำนี้ย้อนกลับไม่ได้`)) act.mutate({ no: r.hold_no, op: 'discard' }); }}>ทิ้ง</Button></div> },
+            { key: 'act', label: '', render: (r: any) => <div className="flex gap-1"><Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>เรียกคืน</Button><Button size="sm" variant="destructive" onClick={() => { if (window.confirm(`ทิ้งบิลที่พักไว้ ${r.hold_no}? การกระทำนี้ย้อนกลับไม่ได้`)) act.mutate({ no: r.hold_no, op: 'discard' }); }}>ทิ้ง</Button></div> },
           ]}
           emptyText="ไม่มีบิลที่พักไว้"
         />
