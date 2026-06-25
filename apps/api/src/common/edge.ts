@@ -11,8 +11,12 @@ const ALLOW_LIST = new Set(['/health', '/healthz', '/health/ready', '/health/liv
 export async function registerEdge(app: NestFastifyApplication): Promise<void> {
   const fastify = app.getHttpAdapter().getInstance();
 
-  // Security headers. CSP off by default — this is a JSON API, not HTML.
-  await fastify.register(helmet, { global: true, contentSecurityPolicy: false });
+  // Security headers. This is a JSON API that serves no HTML/scripts, so lock CSP all the way down
+  // (the web app's own CSP — which governs script execution / XSS — lives in apps/web/next.config.mjs).
+  await fastify.register(helmet, {
+    global: true,
+    contentSecurityPolicy: { useDefaults: false, directives: { 'default-src': ["'none'"], 'frame-ancestors': ["'none'"] } },
+  });
 
   await fastify.register(rateLimit, {
     max: Number(process.env.RATE_LIMIT_MAX ?? 300),

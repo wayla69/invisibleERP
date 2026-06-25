@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, ShieldCheck, KeyRound } from 'lucide-react';
-import { api, publicApi, setToken } from '@/lib/api';
+import { api, publicApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -42,7 +42,7 @@ export default function LoginPage() {
         method: 'POST',
         body: JSON.stringify({ username: username.trim().toLowerCase(), password }),
       });
-      setToken(res.token);
+      // The server set the httpOnly auth cookie + readable CSRF cookie on this response — no client storage.
       router.push(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ');

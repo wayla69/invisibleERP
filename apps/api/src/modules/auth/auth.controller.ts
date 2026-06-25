@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Post, HttpCode } from '@nestjs/common';
+import { Body, Controller, Get, Post, HttpCode, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { LoginRequest, type LoginResponse, type AuthUser } from '@ierp/shared';
 import { Public, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { setAuthCookies, clearAuthCookies } from '../../common/cookies';
 import { AuthService } from './auth.service';
 
 const ChangePasswordBody = z.object({
@@ -47,8 +49,22 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200) // parity: V1 FastAPI คืน 200 (ไม่ใช่ 201 default ของ Nest POST)
-  login(@Body(new ZodValidationPipe(LoginRequest)) body: LoginRequest): Promise<LoginResponse> {
-    return this.auth.login(body.username, body.password, body.totp);
+  async login(@Body(new ZodValidationPipe(LoginRequest)) body: LoginRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<LoginResponse> {
+    const res = await this.auth.login(body.username, body.password, body.totp);
+    // Set the httpOnly auth cookie (+ readable CSRF) for the browser. The token is ALSO returned in the body
+    // for non-browser clients (mobile / scripts) — backward compatible.
+    setAuthCookies(reply, res.token);
+    return res;
+  }
+
+  // Clear the session cookies. @Public so it always succeeds (even with an expired/absent token); it only
+  // ever clears the caller's own cookies.
+  @Public()
+  @Post('auth/logout')
+  @HttpCode(200)
+  logout(@Res({ passthrough: true }) reply: FastifyReply): { ok: true } {
+    clearAuthCookies(reply);
+    return { ok: true };
   }
 
   @Get('auth/me')

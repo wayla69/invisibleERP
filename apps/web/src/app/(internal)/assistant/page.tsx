@@ -2,14 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Bot, Send, Sparkles, Square } from 'lucide-react';
-import { getToken } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 // ── SSE assistant ───────────────────────────────────────────────────────────
-// ใช้ fetch() + ReadableStream reader (ไม่ใช่ EventSource) เพราะ EventSource
-// ตั้ง Authorization header ไม่ได้ — เราต้องส่ง Bearer token ผ่าน header เดิม
+// ใช้ fetch() + ReadableStream reader (ไม่ใช่ EventSource) — auth ผ่าน httpOnly cookie (credentials:'include')
 // backend: GET /api/chat/stream?message=...&history=... → SSE `data: {json}\n\n`
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -60,7 +58,6 @@ export default function AssistantPage() {
     setInput('');
     setStreaming(true);
 
-    const token = getToken();
     const params = new URLSearchParams({ message: msg });
     if (history.length) params.set('history', JSON.stringify(history.slice(-20)));
 
@@ -70,10 +67,8 @@ export default function AssistantPage() {
     try {
       const res = await fetch(`${BASE}/api/chat/stream?${params.toString()}`, {
         method: 'GET',
-        headers: {
-          Accept: 'text/event-stream',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        credentials: 'include', // auth via the httpOnly cookie
+        headers: { Accept: 'text/event-stream' },
         signal: ctrl.signal,
       });
 

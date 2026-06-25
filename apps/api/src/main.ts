@@ -21,7 +21,8 @@ async function bootstrap() {
 
   // CORS = explicit origins (เลิก wildcard "*" ของ V1)
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((s) => s.trim());
-  app.enableCors({ origin: origins, credentials: true });
+  // credentials: true → browser sends the httpOnly auth cookie; allow the CSRF + auth headers explicitly.
+  app.enableCors({ origin: origins, credentials: true, allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'] });
 
   app.useGlobalFilters(new AllExceptionsFilter());
   await registerEdge(app); // helmet + rate-limit

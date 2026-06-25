@@ -19,9 +19,10 @@ const CASHIER: Me = { username: 'cashier1', role: 'Cashier', customer_name: 'T1'
 const ADMIN: Me = { username: 'admin', role: 'Admin', customer_name: null, permissions: [] };
 
 async function bootAs(page: Page, me: Me) {
-  // Seed the bearer token before any app script runs so useMe() is enabled and the shell stays put.
+  // Seed the readable CSRF cookie before any app script runs so hasSession() is true and the shell
+  // stays put (auth now rides an httpOnly cookie; the JS-readable ierp_csrf cookie is the session signal).
   await page.addInitScript(() => {
-    localStorage.setItem('ierp_token', 'e2e-token');
+    document.cookie = 'ierp_csrf=e2e; path=/';
   });
   // Stub every API call — `me`, module flags, and the dashboards' data sources.
   await page.route('**/api/**', async (route) => {

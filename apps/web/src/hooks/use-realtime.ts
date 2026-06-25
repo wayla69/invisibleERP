@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { getToken } from '@/lib/api';
+import { hasSession } from '@/lib/api';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -36,11 +36,11 @@ export function useRealtime(onEvent: (e: RealtimeEvent) => void, opts?: { path?:
 
     const loop = async () => {
       while (!stopped) {
-        const token = getToken();
-        if (!token) { await sleep(2000); continue; }
+        if (!hasSession()) { await sleep(2000); continue; }
         ctrl = new AbortController();
         try {
-          const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' }, signal: ctrl.signal });
+          // Auth via the httpOnly cookie (credentials:'include'); the EventSource-style stream rides the cookie.
+          const res = await fetch(`${BASE}${path}`, { credentials: 'include', headers: { Accept: 'text/event-stream' }, signal: ctrl.signal });
           if (!res.ok || !res.body) throw new Error(`SSE ${res.status}`);
           setConnected(true);
           backoff = 1000;
