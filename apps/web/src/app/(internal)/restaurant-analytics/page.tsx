@@ -93,6 +93,7 @@ export default function RestaurantAnalyticsPage() {
               <DataTable
                 rows={q.data.items}
                 rowKey={(r: any) => r.item_id}
+                emptyState={{ icon: BarChart3, title: 'ไม่มีเมนูที่ขายในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบนให้ครอบคลุมวันที่มีการขาย แล้วดูใหม่' }}
                 columns={[
                   { key: 'name', label: 'เมนู' },
                   { key: 'quadrant', label: 'กลุ่ม', render: (r: any) => <Badge variant={QUADRANT[r.quadrant] ?? 'muted'}>{r.quadrant_th} ({r.quadrant})</Badge> },
@@ -131,6 +132,7 @@ export default function RestaurantAnalyticsPage() {
               <DataTable
                 rows={q.data.by_daypart}
                 rowKey={(r: any) => r.daypart}
+                emptyState={{ icon: Clock, title: 'ไม่มียอดขายในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบนให้ครอบคลุมวันที่มีการขาย แล้วดูใหม่' }}
                 columns={[
                   { key: 'label_th', label: 'ช่วง' },
                   { key: 'revenue', label: 'ยอดขาย', align: 'right', render: (r: any) => baht(r.revenue) },
@@ -159,14 +161,14 @@ export default function RestaurantAnalyticsPage() {
               <StatCard label="ส่วนลดรวม" value={baht(q.data.summary.discount_amount)} />
             </Grid>
             <Section title="ตามเหตุผล">
-              <DataTable rows={q.data.by_reason} rowKey={(r: any, i) => r.reason_code + i} columns={[
+              <DataTable rows={q.data.by_reason} rowKey={(r: any, i) => r.reason_code + i} emptyState={{ icon: ShieldAlert, title: 'ไม่มีการยกเลิก/ส่วนลดในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบน หากต้องการดูข้อมูลช่วงอื่น' }} columns={[
                 { key: 'reason_code', label: 'เหตุผล' },
                 { key: 'count', label: 'ครั้ง', align: 'right', render: (r: any) => num(r.count) },
                 { key: 'amount', label: 'มูลค่า', align: 'right', render: (r: any) => baht(r.amount) },
               ]} />
             </Section>
             <Section title="ตามพนักงาน">
-              <DataTable rows={q.data.by_actor} rowKey={(r: any, i) => r.requested_by + i} columns={[
+              <DataTable rows={q.data.by_actor} rowKey={(r: any, i) => r.requested_by + i} emptyState={{ icon: ShieldAlert, title: 'ไม่มีการยกเลิก/ส่วนลดในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบน หากต้องการดูข้อมูลช่วงอื่น' }} columns={[
                 { key: 'requested_by', label: 'พนักงาน' },
                 { key: 'count', label: 'ครั้ง', align: 'right', render: (r: any) => num(r.count) },
                 { key: 'amount', label: 'มูลค่า', align: 'right', render: (r: any) => baht(r.amount) },
@@ -191,7 +193,7 @@ export default function RestaurantAnalyticsPage() {
               <StatCard label="จำนวนบิล" value={num(q.data.summary.sales)} />
             </Grid>
             <Section title="ผลงานพนักงาน (เรียงตามยอดขาย)">
-              <DataTable rows={q.data.staff} rowKey={(r: any) => r.staff} columns={[
+              <DataTable rows={q.data.staff} rowKey={(r: any) => r.staff} emptyState={{ icon: Users, title: 'ไม่มีข้อมูลพนักงานในช่วงนี้', description: 'ปรับช่วงวันที่ด้านบนให้ครอบคลุมวันที่มีการขาย แล้วดูใหม่' }} columns={[
                 { key: 'staff', label: 'พนักงาน' },
                 { key: 'sales', label: 'บิล', align: 'right', render: (r: any) => num(r.sales) },
                 { key: 'revenue', label: 'ยอดขาย', align: 'right', render: (r: any) => baht(r.revenue) },
@@ -245,7 +247,7 @@ export default function RestaurantAnalyticsPage() {
               <StatCard label="วัตถุดิบใกล้หมด" value={num(q.data.summary.low_ingredients)} tone="warning" />
             </Grid>
             <Section title="ทำได้อีกกี่จาน (จากวัตถุดิบที่จำกัดที่สุด)">
-              <DataTable rows={q.data.items} rowKey={(r: any) => r.sku} columns={[
+              <DataTable rows={q.data.items} rowKey={(r: any) => r.sku} emptyState={{ icon: Soup, title: 'ยังไม่มีเมนูที่มีสูตร', description: 'เพิ่มสูตร/BoM ให้เมนู เพื่อให้ระบบคำนวณจำนวนที่ทำได้จากวัตถุดิบคงเหลือ' }} columns={[
                 { key: 'name', label: 'เมนู' },
                 { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={AVAIL[r.status] ?? 'muted'}>{r.status}</Badge> },
                 { key: 'servings_left', label: 'ทำได้อีก', align: 'right', render: (r: any) => (r.servings_left == null ? '—' : num(r.servings_left)) },

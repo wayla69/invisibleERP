@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, Coins, ShieldCheck, Save, Boxes } from 'lucide-react';
+import { Calculator, Coins, ShieldCheck, Save, Boxes, SlidersHorizontal } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -65,7 +66,11 @@ function ValuationTab() {
               { key: 'unit_cost', label: 'ต้นทุน/หน่วย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.unit_cost)}</span> },
               { key: 'value', label: 'มูลค่า', align: 'right', render: (r: any) => <span className="tabular">{baht(r.value)}</span> },
             ]}
-            emptyText="ยังไม่มีรายการที่ตั้งค่าวิธีคิดต้นทุน"
+            emptyState={{
+              icon: Boxes,
+              title: 'ยังไม่มีมูลค่าสต็อกให้แสดง',
+              description: 'เมื่อมีสินค้าคงเหลือและตั้งค่าวิธีคิดต้นทุนแล้ว มูลค่าสต็อกจะปรากฏที่นี่',
+            }}
           />
         </div>
       )}
@@ -92,10 +97,12 @@ function ConfigTab() {
           standard_cost: method === 'STD' && standardCost !== '' ? Number(standardCost) : null,
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      notifySuccess(`บันทึก ${r.item_id ?? 'ค่าเริ่มต้น'} · ${r.method}`);
       qc.invalidateQueries({ queryKey: ['costing-config'] });
       qc.invalidateQueries({ queryKey: ['costing-valuation'] });
     },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const config: any[] = q.data?.config ?? [];
@@ -142,8 +149,6 @@ function ConfigTab() {
           <Button disabled={save.isPending} onClick={() => save.mutate()}>
             <Save className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึกการตั้งค่า'}
           </Button>
-          {save.error && <Msg>{(save.error as Error).message}</Msg>}
-          {save.data && <Msg ok>✅ บันทึก {save.data.item_id ?? 'ค่าเริ่มต้น'} · {save.data.method}</Msg>}
         </CardContent>
       </Card>
 
@@ -158,7 +163,11 @@ function ConfigTab() {
               { key: 'avg_cost', label: 'ต้นทุนถัวเฉลี่ย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.avg_cost)}</span> },
               { key: 'on_hand', label: 'คงเหลือ', align: 'right', render: (r: any) => <span className="tabular">{num(r.on_hand)}</span> },
             ]}
-            emptyText="ยังไม่มีการตั้งค่าวิธีคิดต้นทุน"
+            emptyState={{
+              icon: SlidersHorizontal,
+              title: 'ยังไม่มีการตั้งค่าวิธีคิดต้นทุน',
+              description: 'ใช้ฟอร์มด้านบนเพื่อกำหนดวิธีคิดต้นทุน (FIFO / AVG / STD) ให้ทั้งกิจการหรือรายสินค้า',
+            }}
           />
         )}
       </StateView>

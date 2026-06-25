@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Banknote, Receipt, ReceiptText, Target, TrendingUp, Wallet } from 'lucide-react';
+import { Banknote, CalendarDays, Receipt, ReceiptText, Target, TrendingUp, Wallet } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -140,7 +140,7 @@ export default function BiPage() {
                     { key: 'won', label: 'ชนะ', align: 'right', render: (r) => num(r.won) },
                     { key: 'win_rate_pct', label: '% ชนะ', align: 'right', render: (r) => `${num(r.win_rate_pct)}%` },
                   ]}
-                  emptyText="ไม่มีข้อมูล"
+                  emptyState={{ icon: Target, title: 'ยังไม่มีข้อมูลไปป์ไลน์', description: 'ยังไม่มีดีลในช่วงเวลานี้' }}
                 />
               </StateView>
             </CardContent>
@@ -160,7 +160,7 @@ export default function BiPage() {
                 { key: 'open_ap', label: 'เจ้าหนี้', align: 'right', render: (r) => <span className="tabular">{baht(r.open_ap)}</span> },
                 { key: 'pipeline_value', label: 'ไปป์ไลน์', align: 'right', render: (r) => <span className="tabular">{baht(r.pipeline_value)}</span> },
               ]}
-              emptyText="ยังไม่มีสแน็ปช็อต"
+              emptyState={{ icon: CalendarDays, title: 'ยังไม่มีสแน็ปช็อตรายวัน', description: 'ระบบจะบันทึกสแน็ปช็อตตัวชี้วัดให้อัตโนมัติทุกวัน — กลับมาดูใหม่ในภายหลัง' }}
             />
           </StateView>
         </div>

@@ -3,16 +3,16 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Banknote, Hourglass, Plus, Receipt, Search, TrendingUp } from 'lucide-react';
+import { Banknote, Hourglass, Plus, Receipt, SearchX, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
+import { SearchInput } from '@/components/search-input';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { statusVariant } from '@/components/ui';
 
 interface Order {
@@ -83,18 +83,12 @@ export default function PosPage() {
 
             {/* Toolbar: free-text search + status quick-filter chips (client-side) */}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="relative w-full sm:max-w-xs">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="ค้นหาเลขที่ออเดอร์ หรือลูกค้า…"
-                  className="pl-9"
-                  aria-label="ค้นหาออเดอร์"
-                  inputMode="search"
-                  enterKeyHint="search"
-                />
-              </div>
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                placeholder="ค้นหาเลขที่ออเดอร์ หรือลูกค้า…"
+                ariaLabel="ค้นหาออเดอร์"
+              />
               {statuses.length > 1 && (
                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
                   <Button variant={statusFilter === null ? 'secondary' : 'ghost'} size="sm" onClick={() => setStatusFilter(null)}>
@@ -118,7 +112,31 @@ export default function PosPage() {
             <DataTable
               rows={filtered}
               rowKey={(r) => r.Sale_No}
-              emptyText={search || statusFilter ? 'ไม่พบออเดอร์ที่ตรงกับตัวกรอง' : 'ยังไม่มีออเดอร์'}
+              emptyState={
+                search || statusFilter
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบออเดอร์ที่ตรงกับตัวกรอง',
+                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => { setSearch(''); setStatusFilter(null); }}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : {
+                      icon: Receipt,
+                      title: 'ยังไม่มีออเดอร์',
+                      description: 'สร้างออเดอร์แรกเพื่อเริ่มบันทึกการขาย',
+                      action: (
+                        <Button asChild size="sm">
+                          <Link href="/pos/new">
+                            <Plus className="size-4" /> สร้างออเดอร์
+                          </Link>
+                        </Button>
+                      ),
+                    }
+              }
               columns={[
                 { key: 'Sale_No', label: 'เลขที่' },
                 { key: 'Sale_Date', label: 'วันที่', render: (r) => thaiDate(r.Sale_Date) },

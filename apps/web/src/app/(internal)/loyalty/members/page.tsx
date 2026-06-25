@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Search, Users, Coins, Wallet, Settings } from 'lucide-react';
+import { Search, SearchX, Users, Coins, Wallet, Settings } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -75,7 +75,20 @@ export default function MembersPage() {
             <DataTable
               rows={list.data.members}
               rowKey={(r) => r.id}
-              emptyText="ไม่พบสมาชิก"
+              emptyState={
+                q || segment
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบสมาชิกที่ตรงกับเงื่อนไข',
+                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูสมาชิกทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => { setTerm(''); setQ(''); setSegment(''); }}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : { icon: Users, title: 'ยังไม่มีสมาชิก', description: 'เพิ่มสมาชิกจากหน้าขายหรือบันทึกสมาชิกใหม่เพื่อเริ่มสะสมแต้ม' }
+              }
               columns={[
                 { key: 'member_code', label: 'รหัส', render: (r) => <Link className="text-primary underline-offset-2 hover:underline" href={`/loyalty/members/${r.id}`}>{r.member_code}</Link> },
                 { key: 'name', label: 'ชื่อ', render: (r) => r.name ?? '—' },

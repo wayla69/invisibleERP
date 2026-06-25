@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Banknote, ClipboardList, CreditCard, Receipt, ShoppingCart, Store, Users } from 'lucide-react';
+import { Banknote, ClipboardList, CreditCard, Receipt, ReceiptText, ShoppingCart, Store, Users, Wallet } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -113,6 +113,11 @@ export default function PosHomePage() {
                 <h3 className="mb-3 text-sm font-semibold text-muted-foreground">กะที่เปิดอยู่ (Open tills)</h3>
                 <DataTable
                   rows={sess.data?.sessions ?? []}
+                  emptyState={{
+                    icon: Wallet,
+                    title: 'ยังไม่มีกะที่เปิดอยู่',
+                    description: 'เปิดกะขายที่หน้า POS เพื่อเริ่มรับออเดอร์',
+                  }}
                   columns={[
                     { key: 'Cashier', label: 'พนักงาน', render: (r) => (
                       <span className="inline-flex items-center gap-1.5"><Users className="size-3.5 text-muted-foreground" />{r.Cashier}</span>
@@ -126,6 +131,11 @@ export default function PosHomePage() {
                 <h3 className="mb-3 text-sm font-semibold text-muted-foreground">บิลล่าสุด</h3>
                 <DataTable
                   rows={recent.data?.orders ?? []}
+                  emptyState={{
+                    icon: ReceiptText,
+                    title: 'ยังไม่มีบิลวันนี้',
+                    description: 'บิลจะแสดงที่นี่เมื่อมีการขายผ่าน POS',
+                  }}
                   columns={[
                     { key: 'Sale_No', label: 'เลขที่' },
                     { key: 'Total', label: 'ยอด', align: 'right', render: (r) => baht(r.Total) },

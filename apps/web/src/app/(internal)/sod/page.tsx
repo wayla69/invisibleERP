@@ -81,7 +81,11 @@ function Rules() {
             { key: 'perm_b', label: 'สิทธิ์ B', render: (r) => (r.perm_b ? <Badge variant="outline">{r.perm_b}</Badge> : '—') },
             { key: 'active', label: 'สถานะ', render: (r) => <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge> },
           ]}
-          emptyText="ยังไม่มีกฎ SoD"
+          emptyState={{
+            icon: ShieldCheck,
+            title: 'ยังไม่มีกฎ SoD',
+            description: 'ยังไม่ได้กำหนดกฎการแบ่งแยกหน้าที่ — เพิ่มกฎสิทธิ์ขัดกัน (PERM_PAIR) หรือ Maker-Checker เพื่อเริ่มตรวจสอบ',
+          }}
         />
       </StateView>
     </div>
@@ -116,7 +120,11 @@ function UserConflicts() {
               </div>
             ) },
           ]}
-          emptyText="ไม่มีผู้ใช้ที่ขัดกฎ SoD — ทุกผู้ใช้สิทธิ์สอดคล้องกับการแบ่งแยกหน้าที่"
+          emptyState={{
+            icon: ShieldCheck,
+            title: 'ไม่มีผู้ใช้ที่ขัดกฎ SoD',
+            description: 'ทุกผู้ใช้มีสิทธิ์สอดคล้องกับการแบ่งแยกหน้าที่ — ไม่มีใครถือสองสิทธิ์ที่ขัดกัน',
+          }}
         />
       </StateView>
     </div>
@@ -150,7 +158,11 @@ function Violations() {
             { key: 'perm_a', label: 'สิทธิ์ A', render: (r) => <Badge variant="outline">{r.perm_a}</Badge> },
             { key: 'perm_b', label: 'สิทธิ์ B', render: (r) => <Badge variant="outline">{r.perm_b}</Badge> },
           ]}
-          emptyText="ไม่พบความขัดแย้ง — ทุกบทบาทถูกต้องตามกฎ"
+          emptyState={{
+            icon: ShieldCheck,
+            title: 'ไม่พบบทบาทที่ขัดกฎ',
+            description: 'ทุกบทบาทถูกต้องตามกฎการแบ่งแยกหน้าที่ — ไม่มีบทบาทใดถือสองสิทธิ์ที่ขัดกัน',
+          }}
         />
       </StateView>
     </div>

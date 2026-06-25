@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { CalendarCheck2, Layers, PackageSearch, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -10,6 +11,7 @@ import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { statusVariant } from '@/components/ui';
 
@@ -37,7 +39,28 @@ function Ledger() {
   return (
     <div className="space-y-3">
       <Input className="max-w-xs" placeholder="กรองด้วยรหัสสินค้า" value={item} onChange={(e) => setItem(e.target.value)} />
-      <StateView q={q}>{q.data && <DataTable rows={q.data.lots} columns={cols} emptyText="ไม่มีล็อต" />}</StateView>
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.lots}
+            columns={cols}
+            emptyState={
+              item
+                ? {
+                    icon: SearchX,
+                    title: 'ไม่พบล็อตที่ตรงกับตัวกรอง',
+                    description: 'ลองตรวจสอบรหัสสินค้า หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                    action: (
+                      <Button variant="outline" size="sm" onClick={() => setItem('')}>
+                        ล้างตัวกรอง
+                      </Button>
+                    ),
+                  }
+                : { icon: Layers, title: 'ยังไม่มีล็อตในระบบ', description: 'ล็อตจะถูกสร้างเมื่อมีการรับสินค้าเข้าคลังพร้อมเลขล็อต' }
+            }
+          />
+        )}
+      </StateView>
     </div>
   );
 }
@@ -57,7 +80,7 @@ function Expiry() {
           <DataTable
             rows={[...q.data.buckets.expired, ...q.data.buckets.d0_7, ...q.data.buckets.d8_30]}
             columns={[...cols, { key: 'days_to_expiry', label: 'เหลือ (วัน)', align: 'right' as const, render: (r: any) => num(r.days_to_expiry) }]}
-            emptyText="ไม่มีล็อตใกล้หมดอายุ"
+            emptyState={{ icon: CalendarCheck2, title: 'ไม่มีล็อตใกล้หมดอายุ', description: 'ไม่มีล็อตที่หมดอายุแล้วหรือจะหมดอายุภายใน 30 วัน' }}
           />
         </div>
       )}
@@ -71,7 +94,17 @@ function Fefo() {
   return (
     <div className="space-y-3">
       <Input className="max-w-xs" placeholder="ระบุรหัสสินค้า" value={item} onChange={(e) => setItem(e.target.value)} />
-      {item && <StateView q={q}>{q.data && <DataTable rows={q.data.lots} columns={cols} emptyText="ไม่มีล็อตคงเหลือ" />}</StateView>}
+      {item && (
+        <StateView q={q}>
+          {q.data && (
+            <DataTable
+              rows={q.data.lots}
+              columns={cols}
+              emptyState={{ icon: PackageSearch, title: 'ไม่มีล็อตคงเหลือสำหรับสินค้านี้', description: 'ตรวจสอบรหัสสินค้า หรือเลือกสินค้าที่มีสต๊อกในคลัง' }}
+            />
+          )}
+        </StateView>
+      )}
     </div>
   );
 }
