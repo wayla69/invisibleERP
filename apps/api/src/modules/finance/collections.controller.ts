@@ -11,6 +11,8 @@ const DunningBody = z.object({
   notes: z.string().optional(),
 });
 const CreditCheckBody = z.object({ tenant_id: z.number().int().positive(), amount: z.number().nonnegative() });
+const HoldBody = z.object({ tenant_id: z.number().int().positive(), reason: z.string().optional() });
+const LimitBody = z.object({ tenant_id: z.number().int().positive(), new_limit: z.number().nonnegative(), reason: z.string().optional() });
 
 @Controller('api/finance/ar')
 export class CollectionsController {
@@ -43,4 +45,21 @@ export class CollectionsController {
   creditCheck(@Body(new ZodValidationPipe(CreditCheckBody)) b: z.infer<typeof CreditCheckBody>) {
     return this.svc.creditCheck(b.tenant_id, b.amount);
   }
+
+  // ── Credit-manager workflow ──
+  // Place a manual credit hold (credit manager / AR).
+  @Post('credit-hold') @Permissions('crm', 'exec', 'ar')
+  placeHold(@Body(new ZodValidationPipe(HoldBody)) b: z.infer<typeof HoldBody>, @CurrentUser() u: JwtUser) { return this.svc.placeHold(b.tenant_id, b.reason, u); }
+
+  // Release a hold — requires `approvals` (SoD: releaser ≠ the person who placed it).
+  @Post('credit-release') @Permissions('approvals', 'exec')
+  releaseHold(@Body(new ZodValidationPipe(HoldBody)) b: z.infer<typeof HoldBody>, @CurrentUser() u: JwtUser) { return this.svc.releaseHold(b.tenant_id, b.reason, u); }
+
+  // Change a customer's credit limit (audited).
+  @Post('credit-limit') @Permissions('crm', 'exec')
+  changeLimit(@Body(new ZodValidationPipe(LimitBody)) b: z.infer<typeof LimitBody>, @CurrentUser() u: JwtUser) { return this.svc.changeLimit(b.tenant_id, b.new_limit, b.reason, u); }
+
+  // Credit-change audit (holds / releases / limit changes) for a customer.
+  @Get('credit-events') @Permissions('ar', 'exec', 'crm')
+  creditEvents(@Query('tenant_id') tenantId: string) { return this.svc.creditEventsFor(Number(tenantId)); }
 }
