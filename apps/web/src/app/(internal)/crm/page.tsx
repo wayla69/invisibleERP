@@ -164,23 +164,23 @@ function Messaging() {
           <div className="space-y-3 rounded-lg border p-3">
             <h3 className="text-sm font-semibold">ส่งข้อความหากลุ่มลูกค้า</h3>
             <div className="flex flex-wrap gap-2">
-              <select className={selectCls} value={audience} onChange={(e) => setAudience(e.target.value)}>
+              <select className={selectCls} aria-label="กลุ่มเป้าหมาย" value={audience} onChange={(e) => setAudience(e.target.value)}>
                 <option value="birthdays_today">วันเกิดวันนี้</option>
                 <option value="segment">กลุ่ม RFM</option>
                 <option value="all">สมาชิกทั้งหมด</option>
               </select>
               {audience === 'segment' && (
-                <select className={selectCls} value={segment} onChange={(e) => setSegment(e.target.value)}>
+                <select className={selectCls} aria-label="กลุ่ม RFM" value={segment} onChange={(e) => setSegment(e.target.value)}>
                   {['Champions', 'Loyal', 'At Risk', 'Lost', 'New'].map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               )}
-              <select className={selectCls} value={channel} onChange={(e) => setChannel(e.target.value)}>
+              <select className={selectCls} aria-label="ช่องทางการส่ง" value={channel} onChange={(e) => setChannel(e.target.value)}>
                 <option value="sms">SMS</option>
                 <option value="line">LINE</option>
                 <option value="email">Email</option>
               </select>
             </div>
-            <Input value={body} onChange={(e) => setBody(e.target.value)} placeholder="ข้อความ เช่น สุขสันต์วันเกิด รับส่วนลด 10%" />
+            <Input value={body} onChange={(e) => setBody(e.target.value)} aria-label="ข้อความถึงลูกค้า" placeholder="ข้อความ เช่น สุขสันต์วันเกิด รับส่วนลด 10%" />
             <Button disabled={!body.trim() || blast.isPending} onClick={() => { setMsg(''); blast.mutate(); }}><Send className="size-4" /> {blast.isPending ? 'กำลังส่ง…' : 'ส่งข้อความ'}</Button>
             {msg && <p className={msg.startsWith('✅') ? 'text-sm text-success' : 'text-sm text-destructive'}>{msg}</p>}
           </div>
