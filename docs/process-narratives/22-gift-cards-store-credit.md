@@ -64,7 +64,7 @@ Single-duty roles enforce SoD: the role that **issues or redeems** cards is neve
 5. **Store credit from returns.** During a return transaction, `creditFromReturn` mints a new card or tops up an existing one, posting **Cr 2200 Customer Deposits** within the return's atomic transaction (see `21-returns-claims-refunds.md`).
 6. **Sub-ledger.** Every movement (issue, redeem, top-up) writes a `giftCardTxns` row (prefix GCT-), providing the audit trail and sub-ledger against which GL 2200 is reconciled.
 7. **Lifecycle.** A card is **Active** while it carries value; it becomes **Redeemed** when `balance <= 0`, and returns to **Active** on a subsequent top-up (e.g., further store credit).
-8. **Periodic tie-out.** FinancialController periodically reconciles the sum of unredeemed card balances (`giftCardTxns`) to GL **2200 Customer Deposits**, addressing completeness and identifying breakage / aged balances (**GC-02**).
+8. **Periodic tie-out.** FinancialController periodically reconciles the sum of unredeemed card balances (`giftCardTxns`) to GL **2200 Customer Deposits**, addressing completeness and identifying breakage / aged balances (**GC-02**). The **gift-card register** (`GET /api/pos/gift-cards`, screen `/giftcards`) is the supporting view: it lists every card for the tenant — filterable by status / card number — with the live **outstanding liability** (Σ Active balances) and a per-card transaction drill-down (`GET /api/pos/gift-cards/:card_no/txns`), giving the reconciler the 2200 obligation at a glance without a SQL query. Both reads are tenant-scoped (an HQ/Admin request bypasses RLS, so the service filters `tenant_id` explicitly) and visible to `pos` / `creditors` / `exec`; they are **read-only** and post nothing.
 
 ## 8. Process flow
 
@@ -143,3 +143,4 @@ flowchart TD
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 | 2026-06-26 | Platform | **Gift-card register surfaced** — `GiftCardService.listCards` on `GET /api/pos/gift-cards` (every card for the tenant + `outstanding` = Σ Active balances + `active`/`total` counts; filter `status`/`search`) and `cardTxns` on `GET /api/pos/gift-cards/:card_no/txns` (per-card GCT- ledger). New screen `/giftcards` (POS nav, perms `pos`/`creditors`/`exec`). The list/audit view over the existing issue/redeem/balance backend — sizes the **2200** liability and supports the **GC-02** tie-out. Tenant-scoped (explicit `tenant_id` filter); typed builders / column refs only; read-only; no migration / no new control. ToE: `giftcards` harness (register lists T1 cards with outstanding 500 + excludes T2 by RLS; `?status=Redeemed` filter; Issue/Redeem drill-down with `balance_after`). |

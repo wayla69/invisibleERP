@@ -142,6 +142,23 @@ async function main() {
   const xcard = await inj('GET', `/api/pos/gift-cards/${issT2.json.card_no}/balance`, sales1);
   ok('RLS: T1 cannot read T2 gift card → 404', xcard.status === 404, `${xcard.status}`);
 
+  // ── 15b-d. gift-card register (list + outstanding liability) + txn drill-down ──
+  // T1 cards now: card(393,Active) · card10(0,Redeemed) · scCard(107,Active) → outstanding = 393+107 = 500.
+  const reg = await inj('GET', '/api/pos/gift-cards', sales1);
+  const regCards = reg.json.cards ?? [];
+  ok('Gift-card register: lists T1 cards + outstanding = Σ Active balances (500), tenant-scoped (T2 card excluded)',
+    regCards.some((c: any) => c.card_no === card) && regCards.some((c: any) => c.card_no === scCard) &&
+    !regCards.some((c: any) => c.card_no === issT2.json.card_no) && near(reg.json.outstanding, 500) && reg.json.active >= 2,
+    `n=${reg.json.count} active=${reg.json.active} outstanding=${reg.json.outstanding}`);
+  const regRedeemed = await inj('GET', '/api/pos/gift-cards?status=Redeemed', sales1);
+  ok('Gift-card register ?status=Redeemed filters (card10 present, Active card absent)',
+    (regRedeemed.json.cards ?? []).some((c: any) => c.card_no === card10) && !(regRedeemed.json.cards ?? []).some((c: any) => c.card_no === card),
+    `n=${regRedeemed.json.count}`);
+  const txnHist = await inj('GET', `/api/pos/gift-cards/${card}/txns`, sales1);
+  ok('Gift-card txns drill-down: Issue(+500) + Redeem(→393) ledger with balance_after',
+    (txnHist.json.txns ?? []).some((t: any) => t.type === 'Issue' && near(t.amount, 500)) && (txnHist.json.txns ?? []).some((t: any) => t.type === 'Redeem' && near(t.balance_after, 393)),
+    `n=${(txnHist.json.txns ?? []).length}`);
+
   // ── 16. permission: Warehouse (no pos) cannot issue ──
   const noPerm = await inj('POST', '/api/pos/gift-cards/issue', wh1, { amount: 100, method: 'Cash' });
   ok('Permission: Warehouse (no pos) issue → 403', noPerm.status === 403, `${noPerm.status}`);
