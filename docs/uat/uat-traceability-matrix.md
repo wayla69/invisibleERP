@@ -488,6 +488,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
 | UAT-UI-DEM-01 | Demand forecasting screen (forecast / backtest / accuracy) (UI) | Feature (demand ML UI) | 13 §7 |
 | UAT-UI-BUD-01 | Budget vs Actual screen (set budget + variance) (UI) | Feature (budget-vs-actual UI) | 13 §7 |
+| UAT-UI-INS-01 | Insights screen — anomalies / replenishment / AI insight (UI) | Feature (insights UI), BI-04 | 26 §7 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`
 
@@ -548,7 +549,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 20 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
-| 09 Reports & Analytics | 28 | 6 |
+| 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **350** | **177** |
+| **Total** | **351** | **177** |

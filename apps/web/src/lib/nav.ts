@@ -82,6 +82,7 @@ import {
   LineChart,
   PackageCheck,
   PiggyBank,
+  Lightbulb,
 } from 'lucide-react';
 
 /** Top-level workspace. The internal app is split into two surfaces selectable via the sidebar
@@ -346,6 +347,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'พยากรณ์ความต้องการ (Demand ML)', href: '/demand', icon: LineChart, perms: ['exec', 'planner', 'warehouse'] },
       { label: 'โครงการ (Projects)', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
       { label: 'กำไรตามมิติ', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
+      { label: 'ข้อมูลเชิงลึก (Insights)', href: '/insights', icon: Lightbulb, perms: ['exec', 'dashboard', 'planner', 'warehouse'] },
       { label: 'BI Analytics', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
       { label: 'เครื่องมือวิเคราะห์ (Studio)', href: '/query', icon: BarChart3, perms: ['exec', 'dashboard', 'masterdata'] },
       { label: 'ถามข้อมูล (NL Analytics)', href: '/nl-analytics', icon: MessageSquare, perms: ['exec', 'dashboard', 'masterdata'] },
