@@ -68,6 +68,27 @@ export const creditEvents = pgTable('credit_events', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
+// Petty cash / employee cash advances (EXP-07). An advance is ISSUED (cash out, Dr 1180 / Cr 1000) and
+// later SETTLED against actual expense + returned cash (Dr expense + Dr 1000 / Cr 1180) so the advance
+// clears. The outstanding balance is the asset 1180 control account.
+export const employeeAdvances = pgTable('employee_advances', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  advanceNo: text('advance_no').notNull().unique(), // ADV-YYYYMMDD-NNN
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  payee: text('payee').notNull(),       // employee code / name receiving the float
+  purpose: text('purpose'),
+  amount: numeric('amount', { precision: 14, scale: 2 }).notNull(), // amount advanced
+  status: text('status').notNull().default('open'), // open | settled
+  expenseAccount: text('expense_account').default('5100'), // where settled spend lands
+  settledExpense: numeric('settled_expense', { precision: 14, scale: 2 }).default('0'),
+  returnedCash: numeric('returned_cash', { precision: 14, scale: 2 }).default('0'),
+  issuedBy: text('issued_by'),
+  issuedDate: date('issued_date'),
+  settledBy: text('settled_by'),
+  settledDate: date('settled_date'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byStatus: index('idx_adv_status').on(t.tenantId, t.status) }));
+
 export const apTransactions = pgTable('ap_transactions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   txnNo: text('txn_no').notNull().unique(), // AP-

@@ -9,6 +9,7 @@ import { qint, qintOpt } from '../../common/query';
 
 const ScanUpdateBody = z.object({ code: z.string().min(1), location: z.string().optional(), assigned_to: z.string().optional(), note: z.string().optional() });
 type ScanUpdateBodyT = z.infer<typeof ScanUpdateBody>;
+const RevalueBody = z.object({ new_value: z.number().nonnegative(), reason: z.string().optional(), reval_date: z.string().optional() });
 
 @Controller('api/assets')
 @Permissions('exec', 'creditors')
@@ -34,6 +35,10 @@ export class AssetsController {
   @Get() register(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.assetRegister(u, status); }
   @Get(':assetNo/schedule') schedule(@Param('assetNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.depreciationSchedule(u, no); }
   @Patch(':assetNo/dispose') dispose(@Param('assetNo') no: string, @Body(new ZodValidationPipe(DisposeAssetBody)) b: DisposeAssetDto, @CurrentUser() u: JwtUser) { return this.svc.dispose(no, b, u); }
+
+  // Revaluation / impairment (FA-07): adjust carrying amount; upward → revaluation surplus, downward → impairment loss.
+  @Post(':assetNo/revalue') revalue(@Param('assetNo') no: string, @Body(new ZodValidationPipe(RevalueBody)) b: z.infer<typeof RevalueBody>, @CurrentUser() u: JwtUser) { return this.svc.revalue(no, b, u); }
+  @Get(':assetNo/revaluations') revaluations(@Param('assetNo') no: string) { return this.svc.listRevaluations(no); }
 
   @Post('depreciation/run') runDep(@Body(new ZodValidationPipe(RunDepreciationBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.runDepreciation(b.period, u); }
   @Get('depreciation/runs') runs(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listRuns(u, qint('limit', limit, 50)); }

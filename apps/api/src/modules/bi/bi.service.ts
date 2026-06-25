@@ -13,6 +13,7 @@ import { MessagingService } from '../messaging/messaging.service';
 import { CollectionsService } from '../finance/collections.service';
 import { EamService } from '../eam/eam.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LeasesService } from '../leases/leases.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -32,6 +33,10 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   eam_pm_generate: { label: 'สร้างใบสั่งงานซ่อมตามแผน (PM)', labelEn: 'Generate due preventive maintenance' },
   // Likewise: each run posts every due recurring/template journal as a Draft JE (maker-checker, idempotent).
   gl_recurring_journals: { label: 'ลงรายการบัญชีตั้งเวลาอัตโนมัติ', labelEn: 'Post due recurring journals' },
+  // Likewise: each run amortizes one period of every due prepaid schedule (Dr expense / Cr 1280, idempotent).
+  gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
+  // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
+  lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -45,6 +50,7 @@ export class BiService {
     @Optional() private readonly collections?: CollectionsService,
     @Optional() private readonly eam?: EamService,
     @Optional() private readonly ledger?: LedgerService,
+    @Optional() private readonly leases?: LeasesService,
   ) {}
 
   // ── KPI Board ─────────────────────────────────────────────────────────────
@@ -365,6 +371,16 @@ export class BiService {
       if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger service not available', messageTh: 'ระบบบัญชีแยกประเภทไม่พร้อมใช้งาน' });
       const r = await this.ledger.runDueRecurring(user); // idempotent: next_run_date advanced + ux_je_idem
       return { data: r, summary: `Recurring journals: posted ${r.posted} of ${r.scanned} due templates`, summaryTh: `ลงรายการบัญชีตั้งเวลา: ${r.posted} จาก ${r.scanned} แม่แบบ` };
+    }
+    if (reportType === 'gl_prepaid_amortize') {
+      if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger service not available', messageTh: 'ระบบบัญชีแยกประเภทไม่พร้อมใช้งาน' });
+      const r = await this.ledger.runDuePrepaid(user); // idempotent per (schedule, period)
+      return { data: r, summary: `Prepaid amortization: posted ${r.posted} of ${r.scanned} due schedules`, summaryTh: `ตัดจ่ายค่าใช้จ่ายล่วงหน้า: ${r.posted} จาก ${r.scanned} รายการ` };
+    }
+    if (reportType === 'lease_periodic_run') {
+      if (!this.leases) throw new BadRequestException({ code: 'LEASES_UNAVAILABLE', message: 'Lease service not available', messageTh: 'ระบบสัญญาเช่าไม่พร้อมใช้งาน' });
+      const r = await this.leases.runDueLeases(user); // idempotent per (lease, period)
+      return { data: r, summary: `Lease run: posted ${r.posted} of ${r.scanned} due leases`, summaryTh: `ลงรายการสัญญาเช่า: ${r.posted} จาก ${r.scanned} สัญญา` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }

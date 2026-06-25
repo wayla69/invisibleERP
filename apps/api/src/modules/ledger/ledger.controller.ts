@@ -65,6 +65,18 @@ type RecurringBodyT = z.infer<typeof RecurringBody>;
 
 const ActiveBody = z.object({ active: z.boolean() });
 
+const PrepaidBody = z.object({
+  name: z.string().min(1),
+  total_amount: z.number().positive(),
+  months: z.number().int().positive(),
+  expense_account: z.string().optional(),
+  prepaid_account: z.string().optional(),
+  tenant_id: z.number().optional(),
+  start_date: z.string().optional(),
+  capitalize: z.boolean().optional(),
+});
+type PrepaidBodyT = z.infer<typeof PrepaidBody>;
+
 @Controller('api/ledger')
 @Permissions('exec', 'creditors', 'ar')
 export class LedgerController {
@@ -172,6 +184,22 @@ export class LedgerController {
   @HttpCode(200)
   @Permissions('gl_post', 'exec')
   runRecurring(@CurrentUser() u: JwtUser) { return this.svc.runDueRecurring(u); }
+
+  // ── Prepaid amortization schedules (GL-09) ──
+  @Post('prepaid')
+  @Permissions('gl_post', 'exec')
+  createPrepaid(@Body(new ZodValidationPipe(PrepaidBody)) b: PrepaidBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.createPrepaid({ name: b.name, totalAmount: b.total_amount, months: b.months, expenseAccount: b.expense_account, prepaidAccount: b.prepaid_account, tenantId: hqTenant(u, b.tenant_id) ?? null, startDate: b.start_date, capitalize: b.capitalize }, u);
+  }
+
+  @Get('prepaid')
+  @Permissions('gl_post', 'gl_close', 'exec')
+  listPrepaid(@Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listPrepaid(hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
+
+  @Post('prepaid/run')
+  @HttpCode(200)
+  @Permissions('gl_post', 'exec')
+  runPrepaid(@CurrentUser() u: JwtUser) { return this.svc.runDuePrepaid(u); }
 
   // ── fiscal periods + year-end close ──
   // Periods are per-tenant (0043). Operations default to the caller's own tenant; HQ/Admin may target a

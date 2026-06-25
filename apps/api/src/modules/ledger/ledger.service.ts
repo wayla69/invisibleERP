@@ -2,7 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
@@ -75,6 +75,15 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '2250', name: 'Loyalty Points Liability', type: 'Liability' },      // หนี้สินแต้มสะสม — TFRS 15 contract liability for outstanding loyalty points (control acct)
   { code: '5700', name: 'Loyalty Points Expense', type: 'Expense' },          // ค่าใช้จ่ายแต้มสะสม — provision for loyalty points granted (offsets 2250)
   { code: '5710', name: 'Repairs & Maintenance', type: 'Expense' },           // ค่าซ่อมแซมและบำรุงรักษา — EAM maintenance work-order cost
+  { code: '1180', name: 'Employee Advances', type: 'Asset' },                  // เงินทดรองจ่ายพนักงาน — petty-cash / cash advances outstanding
+  { code: '1280', name: 'Prepaid Expenses', type: 'Asset' },                   // ค่าใช้จ่ายจ่ายล่วงหน้า — prepaid asset (amortized over its term)
+  { code: '1600', name: 'Right-of-Use Asset', type: 'Asset' },                 // สินทรัพย์สิทธิการใช้ (IFRS 16/TFRS 16)
+  { code: '1690', name: 'Accumulated Depreciation — ROU', type: 'Asset' },     // ค่าเสื่อมสะสม–สินทรัพย์สิทธิการใช้ (contra-asset)
+  { code: '2600', name: 'Lease Liability', type: 'Liability' },                // หนี้สินตามสัญญาเช่า (IFRS 16/TFRS 16)
+  { code: '3200', name: 'Revaluation Surplus', type: 'Equity' },               // ส่วนเกินทุนจากการตีราคาสินทรัพย์ (asset revaluation reserve)
+  { code: '5210', name: 'Depreciation Expense — ROU', type: 'Expense' },       // ค่าเสื่อมราคาสินทรัพย์สิทธิการใช้
+  { code: '5820', name: 'Impairment Loss', type: 'Expense' },                  // ผลขาดทุนจากการด้อยค่าสินทรัพย์
+  { code: '5900', name: 'Interest Expense', type: 'Expense' },                 // ดอกเบี้ยจ่าย — incl. lease-liability unwinding
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -108,11 +117,19 @@ const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = {
   '2380': { bucket: 'operating', label: 'ค่าใช้จ่ายการผลิตรอปันส่วน (Manufacturing costs applied)' },
   '2390': { bucket: 'operating', label: 'ต้นทุนโครงการรอปันส่วน (Project costs applied)' },
   '2400': { bucket: 'operating', label: 'รายได้รับล่วงหน้า (Unearned revenue)' },
-  // Investing — property, plant & equipment (gross)
+  // Operating — other current assets (an increase ties up cash)
+  '1180': { bucket: 'operating', label: 'เงินทดรองจ่ายพนักงาน (Employee advances)' },
+  '1280': { bucket: 'operating', label: 'ค่าใช้จ่ายจ่ายล่วงหน้า (Prepaid expenses)' },
+  // Non-cash add-back — accumulated ROU depreciation (contra-asset, credit-normal)
+  '1690': { bucket: 'addback', label: 'ค่าเสื่อมสะสม–สินทรัพย์สิทธิการใช้ (Accumulated ROU depreciation)' },
+  // Investing — property, plant & equipment + right-of-use assets (gross)
   '1500': { bucket: 'investing', label: 'ซื้อ/จำหน่ายสินทรัพย์ถาวร (Purchase/disposal of fixed assets)' },
-  // Financing — owners' equity & dividends
+  '1600': { bucket: 'investing', label: 'สินทรัพย์สิทธิการใช้ (Right-of-use assets)' },
+  // Financing — owners' equity, dividends, lease liabilities
+  '2600': { bucket: 'financing', label: 'หนี้สินตามสัญญาเช่า (Lease liabilities)' },
   '3000': { bucket: 'financing', label: 'ส่วนทุน/เงินลงทุนจากเจ้าของ (Owner capital contributions)' },
   '3100': { bucket: 'financing', label: 'เงินปันผลจ่าย / กำไรสะสม (Dividends paid)' },
+  '3200': { bucket: 'financing', label: 'ส่วนเกินทุนจากการตีราคา (Revaluation surplus)' },
 };
 
 export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null }
@@ -139,6 +156,17 @@ export interface RecurringJournalDto {
   tenantId?: number | null;
   startDate?: string; // first run date (YYYY-MM-DD); defaults to today
   lines: JournalLineDto[];
+}
+
+export interface PrepaidDto {
+  name: string;
+  totalAmount: number;
+  months: number;
+  expenseAccount?: string;
+  prepaidAccount?: string;
+  tenantId?: number | null;
+  startDate?: string;
+  capitalize?: boolean; // also post Dr prepaid / Cr cash for the up-front payment
 }
 
 @Injectable()
@@ -335,6 +363,61 @@ export class LedgerService {
         nextRunDate: addByFrequency(today, r.frequency),
       }).where(eq(recurringJournals.id, r.id));
       if (res.entry_no) posted.push({ entry_no: res.entry_no, recurring_id: Number(r.id), name: r.name });
+    }
+    return { as_of: today, scanned: due.length, posted: posted.length, entries: posted };
+  }
+
+  // ───────────────────── Prepaid amortization schedules (GL-09) ─────────────────────
+  // Register a prepaid asset (annual insurance, rent up front) once; the scheduled run amortizes a
+  // straight-line slice each period (Dr expense / Cr 1280), the last period taking the remainder so it
+  // fully clears. Posts directly (systematic, like depreciation) — idempotent per (schedule, period).
+  async createPrepaid(dto: PrepaidDto, user: JwtUser) {
+    const db = this.db as any;
+    const total = round2(dto.totalAmount);
+    if (!(total > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'total_amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+    if (!Number.isInteger(dto.months) || dto.months < 1) throw new BadRequestException({ code: 'BAD_MONTHS', message: 'months must be a positive integer', messageTh: 'จำนวนงวดต้องเป็นจำนวนเต็มบวก' });
+    const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
+    const start = dto.startDate ?? ymd();
+    const scheduleNo = await this.docNo.nextDaily('PPD');
+    const prepaidAcct = dto.prepaidAccount ?? '1280';
+    // Optionally record the up-front prepayment (Dr 1280 prepaid / Cr 1000 cash) when not already on the books.
+    if (dto.capitalize) {
+      await this.postEntry({ date: start, source: 'PPD-CAP', sourceRef: scheduleNo, tenantId, memo: `Prepaid ${scheduleNo} — ${dto.name}`, createdBy: user.username, lines: [{ account_code: prepaidAcct, debit: total }, { account_code: '1000', credit: total }] });
+    }
+    const [r] = await db.insert(prepaidSchedules).values({
+      scheduleNo, tenantId, name: dto.name, totalAmount: String(total), months: dto.months, amortizedAmount: '0', periodsPosted: 0,
+      expenseAccount: dto.expenseAccount ?? '5100', prepaidAccount: prepaidAcct, startDate: start, nextRunDate: start, status: 'active', createdBy: user.username,
+    }).returning({ id: prepaidSchedules.id });
+    return { id: Number(r.id), schedule_no: scheduleNo, name: dto.name, total_amount: total, months: dto.months, monthly_amount: round2(total / dto.months), next_run_date: start };
+  }
+
+  async listPrepaid(tenantId?: number) {
+    const db = this.db as any;
+    const where = tenantId != null ? eq(prepaidSchedules.tenantId, tenantId) : undefined;
+    const rows = await db.select().from(prepaidSchedules).where(where).orderBy(desc(prepaidSchedules.id));
+    return { schedules: rows.map((r: any) => ({ id: Number(r.id), schedule_no: r.scheduleNo, name: r.name, total_amount: n(r.totalAmount), months: Number(r.months), amortized_amount: n(r.amortizedAmount), remaining: round2(n(r.totalAmount) - n(r.amortizedAmount)), periods_posted: Number(r.periodsPosted), expense_account: r.expenseAccount, next_run_date: r.nextRunDate, status: r.status })), count: rows.length };
+  }
+
+  // Idempotent scheduled run: amortize one period of every active schedule whose next_run_date has arrived.
+  async runDuePrepaid(user: JwtUser) {
+    const db = this.db as any;
+    const today = ymd();
+    const due = await db.select().from(prepaidSchedules).where(and(eq(prepaidSchedules.status, 'active'), sql`${prepaidSchedules.nextRunDate} <= ${today}`));
+    const posted: { entry_no: string | null; schedule_no: string; amount: number }[] = [];
+    for (const r of due) {
+      const total = n(r.totalAmount), months = Number(r.months), already = Number(r.periodsPosted);
+      if (already >= months) { await db.update(prepaidSchedules).set({ status: 'complete' }).where(eq(prepaidSchedules.id, r.id)); continue; }
+      const isLast = already === months - 1;
+      const slice = isLast ? round2(total - n(r.amortizedAmount)) : round2(total / months);
+      const period = String(today).slice(0, 7);
+      const res = await this.postEntry({ date: today, source: 'PPD', sourceRef: `PPD-${Number(r.id)}-${period}`, tenantId: r.tenantId ?? null, memo: `Amortize prepaid ${r.scheduleNo} (${already + 1}/${months})`, createdBy: `${user?.username ?? 'system'} (prepaid)`, lines: [{ account_code: r.expenseAccount ?? '5100', debit: slice }, { account_code: r.prepaidAccount ?? '1280', credit: slice }] });
+      const newPosted = already + 1;
+      await db.update(prepaidSchedules).set({
+        amortizedAmount: String(round2(n(r.amortizedAmount) + (res.entry_no ? slice : 0))),
+        periodsPosted: newPosted, nextRunDate: addByFrequency(today, 'monthly'),
+        status: newPosted >= months ? 'complete' : 'active',
+      }).where(eq(prepaidSchedules.id, r.id));
+      if (res.entry_no) posted.push({ entry_no: res.entry_no, schedule_no: r.scheduleNo, amount: slice });
     }
     return { as_of: today, scanned: due.length, posted: posted.length, entries: posted };
   }
