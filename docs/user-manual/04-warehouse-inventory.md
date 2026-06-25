@@ -14,13 +14,22 @@ expiry, locations / bins, mobile scanning, and cycle counts / stocktakes.
 / `planner` for read access)
 
 1. Go to **Inventory** (`/inventory`).
-2. Search for an item, or filter to **low stock**.
+2. Search for an item (**ค้นหา** by Item ID or name — typing is debounced, and the
+   list stays on screen while it refreshes), or toggle **เฉพาะสต๊อกต่ำ** to show
+   only low stock.
 3. Click an item to see its detail and stock by location.
 
-**Expected result:** You see current on-hand quantities, low-stock highlights,
-and recent movements.
+A **summary band** sits above the list: the data **snapshot date**, the **total
+item count**, the **low-stock** count, and a **หมดอายุ / ใกล้หมด (≤30 วัน)** count
+(expired or expiring within 30 days, among the rows shown). In the table, an
+on-hand of **0 or less** shows in red, an **expired** date shows in red and an
+**expiring-soon** date in amber. On a phone the band stacks and the table scrolls
+sideways.
 
-[screenshot: inventory list with low-stock filter]
+**Expected result:** You see current on-hand quantities, low-stock highlights,
+near-expiry flags, and recent movements.
+
+[screenshot: inventory list with summary band, search and low-stock filter]
 
 ---
 
