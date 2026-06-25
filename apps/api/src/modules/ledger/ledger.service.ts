@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { sql, eq, and, desc, notInArray, gt, lte, inArray } from 'drizzle-orm';
+import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions } from '../../database/schema';
@@ -471,7 +471,7 @@ export class LedgerService {
       .from(journalLines)
       .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(and(eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} >= ${from}`, sql`${journalEntries.entryDate} <= ${to}`, this.ledgerCond(ledgerCode), notInArray(journalEntries.source, ['CLOSE'])));
+      .where(and(eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, from), lte(journalEntries.entryDate, to), this.ledgerCond(ledgerCode), notInArray(journalEntries.source, ['CLOSE'])));
 
     // Group lines by entry; attribute each entry's net cash movement to its dominant contra account.
     const byEntry = new Map<number, any[]>();
