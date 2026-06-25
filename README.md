@@ -32,14 +32,15 @@ pnpm --filter @ierp/shared build
 pnpm --filter @ierp/api db:generate   # สร้าง migration จาก Drizzle schema
 pnpm --filter @ierp/api db:migrate    # apply เข้า DB
 pnpm --filter @ierp/api db:seed       # permissions + role_permissions + admin user
-pnpm --filter @ierp/api db:seed:demo  # (ไม่บังคับ) ข้อมูลตัวอย่างร้านบุฟเฟ่ต์ญี่ปุ่น "Oshinei"
-                                      #   tenant OSHINEI + login oshinei/oshinei123:
-                                      #   เมนู 252 รายการ, บุฟเฟ่ต์ 4 ระดับ (350/500/590/799),
-                                      #   วัตถุดิบ 193 + สูตร/BoM, ครัว/ผังโต๊ะ + รูปเมนู (idempotent, รันซ้ำได้)
-pnpm --filter @ierp/api db:seed:demo:images # (ไม่บังคับ) ตั้งรูปเมนู (SVG ตามหมวด) ให้ tenant ที่ seed แล้ว
-pnpm --filter @ierp/api db:seed:demo:sales  # (ไม่บังคับ) ประวัติการดำเนินงาน Oshinei:
-                                      #   ขาย POS ~45 วัน (dashboard/การเงิน) + ออเดอร์ dine-in/KDS ย้อนหลัง
-                                      #   + ออเดอร์สด/โต๊ะไม่ว่าง/คิว KDS ปัจจุบัน (ผังโต๊ะ + จอครัว)
+# (ไม่บังคับ) ข้อมูลตัวอย่างร้านบุฟเฟ่ต์ญี่ปุ่น "Oshinei" — tenant OSHINEI / login oshinei/oshinei123 (idempotent ทุกตัว)
+pnpm --filter @ierp/api db:seed:demo        # แคตตาล็อก: เมนู 252 + บุฟเฟ่ต์ 4 ระดับ + สูตร/BoM + วัตถุดิบ + ครัว/ผังโต๊ะ + รูปเมนู
+pnpm --filter @ierp/api db:seed:demo:sales  # ขาย POS ~45 วัน + ออเดอร์ dine-in/KDS ย้อนหลัง + ออเดอร์สด/เดลิเวอรี (Grab/LINE MAN)
+pnpm --filter @ierp/api db:seed:demo:loyalty     # สมาชิก ~150 + ระดับ/แต้ม + ของรางวัล + แคมเปญ (CRM/Loyalty)
+pnpm --filter @ierp/api db:seed:demo:procurement # ผู้ขาย + ใบสั่งซื้อ/รับของ + ตรวจนับสต๊อก + variance
+pnpm --filter @ierp/api db:seed:demo:finance     # ลงบัญชี GL รายเดือน (รายได้/ต้นทุน/ค่าใช้จ่าย) → P&L/กระแสเงินสด  (ต้องรัน :sales ก่อน)
+pnpm --filter @ierp/api db:seed:demo:pos         # ตัวเลือกเมนู (modifiers) + โปรโมชัน/กฎราคา
+pnpm --filter @ierp/api db:seed:demo:all    # รันทั้งหมดตามลำดับ (catalog → sales → loyalty → procurement → finance → pos)
+# (db:seed:demo:images = ตั้งรูปเมนูใหม่ให้ tenant ที่ seed แล้ว — รวมอยู่ใน db:seed:demo แล้ว)
 
 # 4. รัน (api + web พร้อมกัน)
 pnpm dev

@@ -15,6 +15,11 @@
     "db:seed:demo": "tsx src/database/seed-demo.ts",
     "db:seed:demo:images": "tsx src/database/seed-demo-images.ts",
     "db:seed:demo:sales": "tsx src/database/seed-demo-sales.ts",
+    "db:seed:demo:loyalty": "tsx src/database/seed-demo-loyalty.ts",
+    "db:seed:demo:procurement": "tsx src/database/seed-demo-procurement.ts",
+    "db:seed:demo:finance": "tsx src/database/seed-demo-finance.ts",
+    "db:seed:demo:pos": "tsx src/database/seed-demo-pos.ts",
+    "db:seed:demo:all": "tsx src/database/seed-demo.ts && tsx src/database/seed-demo-sales.ts && tsx src/database/seed-demo-loyalty.ts && tsx src/database/seed-demo-procurement.ts && tsx src/database/seed-demo-finance.ts && tsx src/database/seed-demo-pos.ts",
     "lint": "echo \"(lint placeholder — add eslint)\"",
     "test": "vitest run"
   },

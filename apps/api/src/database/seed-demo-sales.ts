@@ -107,6 +107,7 @@ async function main() {
 
     // ── wipe prior demo operations (FK-safe order) ──
     await tx.delete(schema.dineInOrderItems).where(eq(schema.dineInOrderItems.tenantId, T));
+    await tx.delete(schema.orderDeliveryDetails).where(eq(schema.orderDeliveryDetails.tenantId, T));
     await tx.delete(schema.dineInOrders).where(eq(schema.dineInOrders.tenantId, T));
     await tx.delete(schema.tableSessions).where(eq(schema.tableSessions.tenantId, T));
     const prior = await tx.select({ id: schema.custPosSales.id }).from(schema.custPosSales).where(eq(schema.custPosSales.tenantId, T));
@@ -275,11 +276,69 @@ async function main() {
       await tx.update(schema.diningTables).set({ status: 'occupied' }).where(eq(schema.diningTables.id, tbl.id));
     }
 
-    const revenue = r2(tickets.reduce((a, t) => a + t.subtotal, 0));
+    // ── DELIVERY / online orders (Grab / LINE MAN) — channel orders + delivery details ──
+    const DELIVERY = 8;
+    const PLATFORMS = [['grab', 'GRAB', 'Grab'], ['lineman', 'LM', 'LINE MAN']] as const;
+    const CUST = ['คุณเอ', 'คุณบี', 'K.Nut', 'คุณแนน', 'คุณโอ๋', 'K.Ploy', 'คุณมิ้น', 'คุณตั้ม'];
+    const COURIERS = ['สมศักดิ์', 'วิชัย', 'ป๊อก', 'เอก'];
+    const dlvSales: (typeof schema.custPosSales.$inferInsert)[] = [];
+    let deliveryItems = 0;
+    for (let i = 0; i < DELIVERY; i++) {
+      const [src, pre] = PLATFORMS[i % 2];
+      const payLabel = PLATFORMS[i % 2][2];
+      const completed = i < 5;
+      const opened = completed ? plusMin(now, -between(60, 5 * 24 * 60)) : plusMin(now, -between(8, 35));
+      const dday = opened.toISOString().slice(0, 10);
+      const orderNo = `DIN-${dday.replace(/-/g, '')}-D${String(i + 1).padStart(2, '0')}`;
+      const k = between(2, 4);
+      const revLines = Array.from({ length: k }, () => { const it = pick(alacarte); return { it, qty: between(1, 2), price: Number(it.price) }; });
+      const subtotal = r2(revLines.reduce((a, l) => a + l.qty * l.price, 0));
+      const tax = r2(subtotal - subtotal / (1 + VAT));
+      const fee = between(40, 60);
+      const saleNo = completed ? `SALE-OSHI-DLV-${String(i + 1).padStart(3, '0')}` : null;
+      const fStatus = (completed ? 'completed' : pick(['preparing', 'ready', 'out_for_delivery'])) as 'completed' | 'preparing' | 'ready' | 'out_for_delivery';
+      const [ord] = await tx.insert(schema.dineInOrders).values({
+        tenantId: T, orderNo, tableId: null, zoneId: null, sessionId: null,
+        status: completed ? 'paid' : 'sent_to_kitchen', channel: src, fulfillmentType: 'delivery', fulfillmentStatus: fStatus,
+        deliveryFee: String(fee), extSource: src, extOrderId: `${pre}-${100000 + i * 37 + 1}`, guestCount: 1, server: 'ออนไลน์',
+        subtotal: String(subtotal), vat: String(tax), total: String(r2(subtotal + fee)), saleNo,
+        openedAt: opened, firedAt: plusMin(opened, 1), paidAt: completed ? plusMin(opened, 8) : null, closedAt: completed ? plusMin(opened, 45) : null,
+        createdBy: `channel:${src}`,
+      }).returning({ id: schema.dineInOrders.id });
+      const dispatched = completed || fStatus === 'out_for_delivery';
+      await tx.insert(schema.dineInOrderItems).values(revLines.map((l, idx): typeof schema.dineInOrderItems.$inferInsert => {
+        const status = (completed ? 'served' : (['preparing', 'ready', 'queued'] as const)[idx % 3]);
+        const fired = plusMin(opened, 1);
+        return {
+          tenantId: T, orderId: ord.id, stationId: dishStation(l.it), itemId: l.it.sku, name: l.it.nameEn ?? l.it.name,
+          qty: String(l.qty), unitPrice: String(l.price), amount: String(r2(l.qty * l.price)), isBuffet: false, course: 1,
+          kdsStatus: status, estPrepMinutes: 12, firedAt: fired,
+          startedAt: status === 'queued' ? null : plusMin(fired, 1), readyAt: status === 'ready' || status === 'served' ? plusMin(fired, 8) : null,
+          servedAt: status === 'served' ? plusMin(fired, 11) : null, createdBy: `channel:${src}`,
+        };
+      }));
+      deliveryItems += revLines.length;
+      await tx.insert(schema.orderDeliveryDetails).values({
+        tenantId: T, orderId: ord.id, contactName: CUST[i % CUST.length], contactPhone: `08${between(10000000, 99999999)}`,
+        addressLine: `${between(1, 199)} ถนนสุขุมวิท ซ.${between(1, 71)} แขวงคลองเตย เขตคลองเตย`,
+        addressNote: pick(['ใกล้ 7-11', `คอนโด ชั้น ${between(2, 30)}`, 'หน้าปากซอย']),
+        lat: String(r2(13.7 + rnd() * 0.1)), lng: String(r2(100.5 + rnd() * 0.1)),
+        courierName: dispatched ? pick(COURIERS) : null, courierPhone: dispatched ? `08${between(10000000, 99999999)}` : null,
+        dispatchedAt: dispatched ? plusMin(opened, 20) : null, deliveredAt: completed ? plusMin(opened, 42) : null,
+      });
+      if (completed && saleNo) dlvSales.push({
+        saleNo, saleDate: dday, tenantId: T, subtotal: String(subtotal), discount: '0', taxAmount: String(tax),
+        total: String(subtotal), currency: 'THB', paymentMethod: payLabel, status: 'Completed', createdBy: `channel:${src}`,
+      });
+    }
+    if (dlvSales.length) await tx.insert(schema.custPosSales).values(dlvSales);
+
+    const revenue = r2(tickets.reduce((a, t) => a + t.subtotal, 0) + dlvSales.reduce((a, s) => a + Number(s.total), 0));
     console.log(`✅ Demo operations seeded into tenant ${T}:`);
-    console.log(`   POS: ${tickets.length} sales · ${posItems.length} lines · ฿${revenue.toLocaleString()} gross (${DAYS} days)`);
+    console.log(`   POS: ${tickets.length + dlvSales.length} sales · ฿${revenue.toLocaleString()} gross (${DAYS} days)`);
     console.log(`   Dine-in history: ${orderRows.length} orders · ${kdsRows.length} served KDS lines (last ${DINEIN_DAYS} days)`);
     console.log(`   LIVE now: ${liveTables.length} open tickets · ${liveItems} active KDS items · ${liveTables.length} tables occupied`);
+    console.log(`   Delivery: ${DELIVERY} Grab/LINE MAN orders (${deliveryItems} items, ${dlvSales.length} completed w/ revenue)`);
   });
 
   await client.end();
