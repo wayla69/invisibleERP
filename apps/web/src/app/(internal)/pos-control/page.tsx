@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { ClipboardList, PauseCircle, ScrollText, ShieldCheck } from 'lucide-react';
 import { api } from '@/lib/api';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { baht, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
@@ -51,11 +52,10 @@ function ReasonCodes() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['reason-codes'], queryFn: () => api('/api/pos/audit/reason-codes') });
   const [f, setF] = useState({ code: '', label: '', applies_to: 'all' });
-  const [msg, setMsg] = useState('');
   const save = useMutation({
     mutationFn: () => api('/api/pos/audit/reason-codes', { method: 'POST', body: JSON.stringify({ code: f.code, label: f.label, applies_to: f.applies_to }) }),
-    onSuccess: () => { setMsg('✅ บันทึกแล้ว'); setF({ code: '', label: '', applies_to: 'all' }); qc.invalidateQueries({ queryKey: ['reason-codes'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('บันทึกแล้ว'); setF({ code: '', label: '', applies_to: 'all' }); qc.invalidateQueries({ queryKey: ['reason-codes'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const del = useMutation({ mutationFn: (id: number) => api(`/api/pos/audit/reason-codes/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['reason-codes'] }) });
   return (
@@ -70,8 +70,7 @@ function ReasonCodes() {
               <select id="rc-applies" className={selectCls} value={f.applies_to} onChange={(e) => setF({ ...f, applies_to: e.target.value })}>{APPLIES_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
             </Field>
           </div>
-          <Button disabled={!f.code || !f.label || save.isPending} onClick={() => { setMsg(''); save.mutate(); }}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}</Button>
-          {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+          <Button disabled={!f.code || !f.label || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}</Button>
         </CardContent>
       </Card>
       <StateView q={q}>
@@ -79,7 +78,7 @@ function ReasonCodes() {
           { key: 'code', label: 'รหัส' }, { key: 'label', label: 'คำอธิบาย' },
           { key: 'applies_to', label: 'ใช้กับ', render: (r: any) => APPLIES_OPTS.find(([v]) => v === r.applies_to)?.[1] ?? r.applies_to },
           { key: 'act', label: '', sortable: false, render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.id)}>ปิดใช้</Button> },
-        ]} emptyText="ยังไม่มีรหัสเหตุผล" />}
+        ]} emptyState={{ icon: ClipboardList, title: 'ยังไม่มีรหัสเหตุผล', description: 'เพิ่มรหัสเหตุผลด้านบนเพื่อใช้กับการยกเลิก ส่วนลด และการอนุมัติอื่น ๆ' }} />}
       </StateView>
     </div>
   );
@@ -95,7 +94,7 @@ function AuditLog() {
         { key: 'action', label: 'การทำงาน', render: (r: any) => <Badge variant={statusVariant('open')}>{r.action}</Badge> },
         { key: 'entity_id', label: 'อ้างอิง' },
         { key: 'meta', label: 'เหตุผล/ผู้อนุมัติ', render: (r: any) => r.meta ? `${r.meta.reason_code ?? ''} ${r.meta.approved_by ? '· ' + r.meta.approved_by : ''}`.trim() || '—' : '—' },
-      ]} emptyText="ยังไม่มีบันทึกตรวจสอบ" />}
+      ]} emptyState={{ icon: ScrollText, title: 'ยังไม่มีบันทึกตรวจสอบ', description: 'การยกเลิก ส่วนลด และการอนุมัติของผู้จัดการจะถูกบันทึกที่นี่โดยอัตโนมัติ' }} />}
     </StateView>
   );
 }
@@ -103,7 +102,7 @@ function AuditLog() {
 function Held() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['held'], queryFn: () => api('/api/pos/held') });
-  const act = useMutation({ mutationFn: (v: { no: string; op: string }) => api(`/api/pos/held/${v.no}/${v.op}`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['held'] }), onError: (e: any) => toast.error(e.message) });
+  const act = useMutation({ mutationFn: (v: { no: string; op: string }) => api(`/api/pos/held/${v.no}/${v.op}`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['held'] }), onError: (e: any) => notifyError(e.message) });
   return (
     <StateView q={q}>
       {q.data && (
@@ -118,7 +117,7 @@ function Held() {
             { key: 'created_at', label: 'เวลา', render: (r: any) => thaiDate(r.created_at) },
             { key: 'act', label: '', sortable: false, render: (r: any) => <div className="flex gap-1"><Button size="sm" disabled={act.isPending} onClick={() => act.mutate({ no: r.hold_no, op: 'recall' })}>เรียกคืน</Button><Button size="sm" variant="destructive" onClick={() => { if (window.confirm(`ทิ้งบิลที่พักไว้ ${r.hold_no}? การกระทำนี้ย้อนกลับไม่ได้`)) act.mutate({ no: r.hold_no, op: 'discard' }); }}>ทิ้ง</Button></div> },
           ]}
-          emptyText="ไม่มีบิลที่พักไว้"
+          emptyState={{ icon: PauseCircle, title: 'ไม่มีบิลที่พักไว้', description: 'บิลที่พนักงานพักไว้ (park) ที่หน้าขายจะแสดงที่นี่เพื่อเรียกคืน' }}
         />
       )}
     </StateView>
@@ -133,8 +132,8 @@ function Overrides() {
   const isVoid = f.action === 'void';
   const create = useMutation({
     mutationFn: () => api('/api/pos/override', { method: 'POST', body: JSON.stringify({ action: f.action, sale_no: f.sale_no || undefined, amount: f.amount ? Number(f.amount) : undefined, reason: f.reason || undefined, approved_by: f.approved_by || undefined }) }),
-    onSuccess: (r: any) => { setMsg(`✅ บันทึก ${r.override_no}`); setF({ action: 'discount', sale_no: '', amount: '', reason: '', approved_by: '' }); qc.invalidateQueries({ queryKey: ['overrides'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`บันทึก ${r.override_no}`); setF({ action: 'discount', sale_no: '', amount: '', reason: '', approved_by: '' }); qc.invalidateQueries({ queryKey: ['overrides'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   return (
     <div className="space-y-4">
@@ -177,7 +176,7 @@ function Overrides() {
               { key: 'requested_by', label: 'ขอโดย' },
               { key: 'approved_by', label: 'อนุมัติโดย', render: (r: any) => r.approved_by || '—' },
             ]}
-            emptyText="ยังไม่มีรายการอนุมัติ"
+            emptyState={{ icon: ShieldCheck, title: 'ยังไม่มีรายการอนุมัติ', description: 'บันทึกการอนุมัติด้านบนเพื่อเก็บประวัติการยกเลิก ส่วนลด และการแก้ราคา' }}
           />
         )}
       </StateView>

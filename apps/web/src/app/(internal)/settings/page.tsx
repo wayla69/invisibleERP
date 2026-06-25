@@ -2,14 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Lock, Plus, Power, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { KeyRound, Lock, Plus, Power, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { humanizeModule } from '@/lib/modules';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -40,16 +41,15 @@ function Modules() {
     queryKey: ['admin-modules'],
     queryFn: () => api('/api/admin/modules'),
   });
-  const [msg, setMsg] = useState('');
 
   const toggle = useMutation({
     mutationFn: (v: { key: string; enabled: boolean }) => api('/api/admin/modules', { method: 'POST', body: JSON.stringify(v) }),
     onSuccess: (_r, v) => {
-      setMsg(`✅ ${humanizeModule(v.key)} → ${v.enabled ? 'เปิด' : 'ปิด'}`);
+      notifySuccess(`${humanizeModule(v.key)} → ${v.enabled ? 'เปิด' : 'ปิด'}`);
       qc.invalidateQueries({ queryKey: ['admin-modules'] });
       qc.invalidateQueries({ queryKey: ['module-flags'] }); // refresh the sidebar nav
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   const mods = list.data?.modules ?? [];
@@ -62,13 +62,13 @@ function Modules() {
         <p className="text-sm text-muted-foreground">
           เมื่อปิดโมดูล จะถูกซ่อนจากเมนูของผู้ใช้ทุกคนและเข้าใช้งานไม่ได้ — โมดูล “Users” ปิดไม่ได้เพื่อให้ผู้ดูแลเข้าถึงได้เสมอ
         </p>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>ปิดอยู่ {disabledCount} โมดูล</Badge>}
       </Card>
 
       <StateView q={list}>
         <DataTable
           rows={mods}
+          emptyState={{ icon: ToggleLeft, title: 'ยังไม่มีโมดูลให้แสดง', description: 'รายการโมดูลของระบบจะปรากฏที่นี่' }}
           columns={[
             { key: 'key', label: 'โมดูล', render: (r: any) => <span className="font-medium">{humanizeModule(r.key)}</span> },
             { key: 'code', label: 'รหัส', render: (r: any) => <code className="text-xs text-muted-foreground">{r.key}</code> },
@@ -111,15 +111,14 @@ function ApiKeys() {
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>(['read']);
   const [newKey, setNewKey] = useState('');
-  const [msg, setMsg] = useState('');
 
   const rows = Array.isArray(list.data) ? list.data : (list.data?.keys ?? list.data?.api_keys ?? []);
   const toggleScope = (k: string) => setScopes((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
 
   const create = useMutation({
     mutationFn: () => api<{ key: string }>('/api/platform/api-keys', { method: 'POST', body: JSON.stringify({ name, scopes: scopes.length ? scopes : ['read'] }) }),
-    onSuccess: (r) => { setNewKey(r.key); setName(''); setScopes(['read']); setMsg(''); qc.invalidateQueries({ queryKey: ['api-keys'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { setNewKey(r.key); setName(''); setScopes(['read']); qc.invalidateQueries({ queryKey: ['api-keys'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const revoke = useMutation({
     mutationFn: (id: number) => api(`/api/platform/api-keys/${id}`, { method: 'DELETE' }),
@@ -160,7 +159,6 @@ function ApiKeys() {
             ))}
           </div>
         </div>
-        <Msg>{msg}</Msg>
         {newKey && (
           <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
             <div className="flex items-center gap-1.5 text-sm font-semibold text-warning-foreground dark:text-warning">
@@ -174,6 +172,7 @@ function ApiKeys() {
       <StateView q={list}>
         <DataTable
           rows={rows}
+          emptyState={{ icon: KeyRound, title: 'ยังไม่มี API Key', description: 'สร้าง API Key ด้านบนเพื่อเชื่อมต่อระบบภายนอกกับ Public API' }}
           columns={[
             { key: 'name', label: 'ชื่อ' },
             { key: 'prefix', label: 'Prefix', render: (r: any) => <code>{r.prefix}…</code> },
@@ -198,7 +197,6 @@ function Identity() {
   const [defaultRole, setDefaultRole] = useState('Customer');
   const [ssoEnabled, setSsoEnabled] = useState(false);
   const [scimToken, setScimToken] = useState('');
-  const [msg, setMsg] = useState('');
   const [seeded, setSeeded] = useState(false);
 
   // Seed the form once from the server config (secrets are never returned, so they stay blank).
@@ -217,13 +215,13 @@ function Identity() {
       sso_enabled: ssoEnabled, oidc_issuer: issuer, oidc_client_id: clientId,
       ...(secret ? { oidc_client_secret: secret } : {}), oidc_redirect_uri: redirect, default_role: defaultRole,
     }) }),
-    onSuccess: () => { setMsg('✅ บันทึกการตั้งค่า IdP แล้ว'); setSecret(''); qc.invalidateQueries({ queryKey: ['identity-config'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('บันทึกการตั้งค่า IdP แล้ว'); setSecret(''); qc.invalidateQueries({ queryKey: ['identity-config'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const rotate = useMutation({
     mutationFn: () => api<{ token: string }>('/api/platform/identity/scim-token', { method: 'POST' }),
     onSuccess: (r) => { setScimToken(r.token); qc.invalidateQueries({ queryKey: ['identity-config'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -244,7 +242,6 @@ function Identity() {
           <div className="grid gap-1.5"><Label>Redirect URI</Label><Input value={redirect} onChange={(e) => setRedirect(e.target.value)} placeholder="https://app.example/sso/callback" /></div>
           <div className="grid gap-1.5"><Label>บทบาทเริ่มต้นของผู้ใช้ใหม่</Label><Input value={defaultRole} onChange={(e) => setDefaultRole(e.target.value)} /></div>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         <div><Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}</Button></div>
       </Card>
 
@@ -272,17 +269,16 @@ function Identity() {
 function Mfa() {
   const [setup, setSetup] = useState<{ secret: string; otpauth_url: string } | null>(null);
   const [token, setToken] = useState('');
-  const [msg, setMsg] = useState('');
 
   const begin = useMutation({
     mutationFn: () => api<{ secret: string; otpauth_url: string }>('/api/platform/mfa/setup', { method: 'POST' }),
-    onSuccess: (r) => { setSetup(r); setMsg(''); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { setSetup(r); },
+    onError: (e: any) => notifyError(e.message),
   });
   const verify = useMutation({
     mutationFn: () => api('/api/platform/mfa/verify', { method: 'POST', body: JSON.stringify({ token }) }),
-    onSuccess: () => setMsg('✅ เปิดใช้งาน MFA สำเร็จ — ครั้งต่อไปต้องใส่รหัส 6 หลัก'),
-    onError: (e: any) => setMsg(`❌ รหัสไม่ถูกต้อง (${e.message})`),
+    onSuccess: () => notifySuccess('เปิดใช้งาน MFA สำเร็จ — ครั้งต่อไปต้องใส่รหัส 6 หลัก'),
+    onError: (e: any) => notifyError(`รหัสไม่ถูกต้อง (${e.message})`),
   });
 
   return (
@@ -310,7 +306,6 @@ function Mfa() {
           </Button>
         </div>
       )}
-      <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
     </Card>
   );
 }

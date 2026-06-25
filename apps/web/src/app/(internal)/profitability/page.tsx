@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { PieChart, PlayCircle, Tags, Wallet } from 'lucide-react';
+import { ListChecks, PieChart, PlayCircle, Tags, Wallet } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { SimpleBarChart } from '@/components/charts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -59,7 +60,6 @@ function ReportTab() {
   const qc = useQueryClient();
   const [period, setPeriod] = useState(currentPeriod());
   const [segmentType, setSegmentType] = useState('');
-  const [msg, setMsg] = useState('');
 
   const q = useQuery<ReportResp>({
     queryKey: ['profit-report', period, segmentType],
@@ -75,10 +75,10 @@ function ReportTab() {
         body: JSON.stringify({ period }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ ปันส่วนสำเร็จ (run #${r.run_id}) · ${r.rules_applied} กฎ · ${r.lines_created} รายการ`);
+      notifySuccess(`ปันส่วนสำเร็จ (run #${r.run_id}) · ${r.rules_applied} กฎ · ${r.lines_created} รายการ`);
       qc.invalidateQueries({ queryKey: ['profit-report'] });
     },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const chartData = q.data?.segments.map((s) => ({ name: s.name || s.code, margin: s.contribution_margin })) ?? [];
@@ -98,7 +98,6 @@ function ReportTab() {
           <PlayCircle className="size-4" /> {run.isPending ? 'กำลังปันส่วน…' : 'เดินปันส่วนต้นทุน'}
         </Button>
       </div>
-      <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
 
       <StateView q={q}>
         {q.data && (
@@ -147,7 +146,24 @@ function ReportTab() {
                   ),
                 },
               ]}
-              emptyText="ยังไม่มีมิติสำหรับงวดนี้"
+              emptyState={
+                segmentType
+                  ? {
+                      icon: PieChart,
+                      title: 'ไม่พบมิติที่ตรงกับตัวกรอง',
+                      description: 'ไม่มีมิติประเภทนี้ในงวดที่เลือก ลองล้างตัวกรองเพื่อดูทุกมิติ',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => setSegmentType('')}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : {
+                      icon: PieChart,
+                      title: 'ยังไม่มีมิติสำหรับงวดนี้',
+                      description: 'กด “เดินปันส่วนต้นทุน” เพื่อปันส่วนต้นทุนและสร้างรายงานกำไรตามมิติ',
+                    }
+              }
             />
           </div>
         )}
@@ -174,7 +190,11 @@ function SegmentsTab() {
               { key: 'code', label: 'รหัส', render: (r) => <span className="font-medium">{r.code}</span> },
               { key: 'name', label: 'ชื่อ' },
             ]}
-            emptyText="ยังไม่มีมิติ"
+            emptyState={{
+              icon: Tags,
+              title: 'ยังไม่มีมิติ',
+              description: 'เพิ่มมิติธุรกิจ (เช่น สาขา ผลิตภัณฑ์) เพื่อใช้ในการปันส่วนต้นทุนและวิเคราะห์กำไร',
+            }}
           />
         </div>
       )}
@@ -201,7 +221,11 @@ function RulesTab() {
               { key: 'to_segment_type', label: 'ปันสู่มิติ' },
               { key: 'driver', label: 'วิธีปันส่วน' },
             ]}
-            emptyText="ยังไม่มีกฎการปันส่วน"
+            emptyState={{
+              icon: ListChecks,
+              title: 'ยังไม่มีกฎการปันส่วน',
+              description: 'สร้างกฎการปันส่วนเพื่อกระจายต้นทุนจากบัญชีไปยังมิติธุรกิจตามตัวขับ',
+            }}
           />
         </div>
       )}

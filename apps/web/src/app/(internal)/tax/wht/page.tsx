@@ -2,14 +2,14 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileMinus, Coins, Receipt, Plus, ExternalLink, Ban } from 'lucide-react';
+import { FileMinus, Coins, Receipt, Plus, ExternalLink, Ban, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -69,7 +69,6 @@ export default function WhtPage() {
   const [incomeType, setIncomeType] = useState('40(2)');
   const [amount, setAmount] = useState('');
   const [rate, setRate] = useState('');
-  const [msg, setMsg] = useState('');
 
   const issue = useMutation({
     mutationFn: () =>
@@ -88,11 +87,11 @@ export default function WhtPage() {
         }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ ออกหนังสือรับรองสำเร็จ: ${r.doc_no}`);
+      notifySuccess(`ออกหนังสือรับรองสำเร็จ: ${r.doc_no}`);
       setPayeeName(''); setPayeeTaxId(''); setAmount(''); setRate('');
       qc.invalidateQueries({ queryKey: ['wht-certs'] });
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   const canIssue = !!payeeName && !!payeeTaxId && Number(amount) > 0 && !issue.isPending;
@@ -170,7 +169,6 @@ export default function WhtPage() {
           <Button disabled={!canIssue} onClick={() => issue.mutate()}>
             <Receipt className="size-4" /> {issue.isPending ? 'กำลังออก…' : 'ออกหนังสือรับรอง'}
           </Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </CardContent>
       </Card>
 
@@ -206,7 +204,24 @@ export default function WhtPage() {
                   ),
                 },
               ]}
-              emptyText="ยังไม่มีหนังสือรับรองการหักภาษี ณ ที่จ่าย"
+              emptyState={
+                filter
+                  ? {
+                      icon: SearchX,
+                      title: `ไม่พบหนังสือรับรองแบบ ${filter}`,
+                      description: 'ลองเลือกแบบ ภ.ง.ด. อื่น หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => setFilter('')}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : {
+                      icon: FileMinus,
+                      title: 'ยังไม่มีหนังสือรับรองการหักภาษี ณ ที่จ่าย',
+                      description: 'ออกหนังสือรับรอง 50 ทวิ จากแบบฟอร์มด้านบนเพื่อเริ่มต้น',
+                    }
+              }
             />
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Ban className="size-3.5" /> การยกเลิก (void) จะเปลี่ยนสถานะเป็น Voided โดยไม่ลบเลขที่เอกสาร

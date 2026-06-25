@@ -2,12 +2,12 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Printer, RefreshCw, Send, FileText } from 'lucide-react';
+import { Printer, RefreshCw, Send, FileText, Inbox } from 'lucide-react';
 import { api } from '@/lib/api';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,18 +47,17 @@ export default function PrintPage() {
   const [channel, setChannel] = useState<SendChannel>('email');
   const [to, setTo] = useState('');
   const [lang, setLang] = useState('');   // '' = tenant default; th | en | both
-  const [msg, setMsg] = useState('');
   const q = useQuery<{ jobs: Job[] }>({ queryKey: ['print-jobs'], queryFn: () => api('/api/print/jobs?limit=100'), refetchInterval: 10_000 });
 
   const reprint = useMutation({
     mutationFn: (s: string) => api(`/api/print/reprint/${encodeURIComponent(s)}${lang ? `?lang=${lang}` : ''}`, { method: 'POST' }),
-    onSuccess: () => { setMsg(`✅ ส่งพิมพ์ใบเสร็จซ้ำแล้ว (${saleNo}) — สำเนา`); qc.invalidateQueries({ queryKey: ['print-jobs'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`ส่งพิมพ์ใบเสร็จซ้ำแล้ว (${saleNo}) — สำเนา`); qc.invalidateQueries({ queryKey: ['print-jobs'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const send = useMutation({
     mutationFn: (b: { sale_no: string; channel: SendChannel; to: string }) => api(`/api/print/receipt/${encodeURIComponent(b.sale_no)}/send`, { method: 'POST', body: JSON.stringify({ channel: b.channel, to: b.to }) }),
-    onSuccess: () => setMsg(`✅ ส่งใบเสร็จทาง ${CHANNEL_META[channel].label} ไปยัง ${to} แล้ว`),
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => notifySuccess(`ส่งใบเสร็จทาง ${CHANNEL_META[channel].label} ไปยัง ${to} แล้ว`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   return (
@@ -99,7 +98,6 @@ export default function PrintPage() {
               </div>
               <Button variant="outline" disabled={!saleNo || !to || send.isPending} onClick={() => send.mutate({ sale_no: saleNo, channel, to })}><Send className="mr-1 h-4 w-4" />ส่ง</Button>
             </div>
-            <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </CardContent>
         </Card>
         <Card>
@@ -124,7 +122,11 @@ export default function PrintPage() {
             { key: 'created_at', label: 'สร้างเมื่อ', render: (r) => r.created_at ? new Date(r.created_at).toLocaleString('th-TH') : '—' },
             { key: 'act', label: '', align: 'right', render: (r) => r.sale_no ? <Button size="sm" variant="ghost" onClick={() => openReceipt(r.sale_no!)}><RefreshCw className="h-4 w-4" /></Button> : null },
           ]}
-          emptyText="ยังไม่มีงานพิมพ์"
+          emptyState={{
+            icon: Inbox,
+            title: 'ยังไม่มีงานพิมพ์',
+            description: 'งานพิมพ์จะถูกจัดคิวอัตโนมัติเมื่อปิดบิล หรือกด พิมพ์ซ้ำ (สำเนา) เพื่อสร้างงานพิมพ์',
+          }}
         />
       </StateView>
     </div>

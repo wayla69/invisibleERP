@@ -5,11 +5,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Cable, DollarSign, Scale, MonitorSmartphone } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,12 +36,12 @@ export default function PeripheralsPage() {
 
 function Devices() {
   const qc = useQueryClient();
-  const [code, setCode] = useState(''); const [kind, setKind] = useState('cash_drawer'); const [terminal, setTerminal] = useState(''); const [printerId, setPrinterId] = useState(''); const [msg, setMsg] = useState('');
+  const [code, setCode] = useState(''); const [kind, setKind] = useState('cash_drawer'); const [terminal, setTerminal] = useState(''); const [printerId, setPrinterId] = useState('');
   const q = useQuery<{ devices: Device[] }>({ queryKey: ['pos-devices'], queryFn: () => api('/api/peripherals/devices') });
   const create = useMutation({
     mutationFn: () => api('/api/peripherals/devices', { method: 'POST', body: JSON.stringify({ device_code: code, kind, terminal: terminal || undefined, printer_id: printerId || undefined }) }),
-    onSuccess: () => { setMsg(`✅ ลงทะเบียนอุปกรณ์ ${code}`); setCode(''); qc.invalidateQueries({ queryKey: ['pos-devices'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`ลงทะเบียนอุปกรณ์ ${code}`); setCode(''); qc.invalidateQueries({ queryKey: ['pos-devices'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   return (
     <div className="space-y-6">
@@ -57,7 +58,6 @@ function Devices() {
           <div><Label>พิมพ์ผ่าน (printer_id)</Label><Input value={printerId} onChange={(e) => setPrinterId(e.target.value.trim())} placeholder="PRN1" /></div>
           <div className="sm:col-span-4 flex items-center gap-3">
             <Button disabled={!code || create.isPending} onClick={() => create.mutate()}>ลงทะเบียน</Button>
-            <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </div>
         </CardContent>
       </Card>
@@ -73,7 +73,11 @@ function Devices() {
             { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'active' ? 'success' : 'muted'}>{r.status}</Badge> },
             { key: 'last_seen_at', label: 'พบล่าสุด', render: (r) => r.last_seen_at ? new Date(r.last_seen_at).toLocaleString('th-TH') : '—' },
           ]}
-          emptyText="ยังไม่มีอุปกรณ์"
+          emptyState={{
+            icon: MonitorSmartphone,
+            title: 'ยังไม่มีอุปกรณ์',
+            description: 'ลงทะเบียนลิ้นชักเก็บเงิน เครื่องพิมพ์ จอลูกค้า หรือเครื่องชั่งจากแบบฟอร์มด้านบน',
+          }}
         />
       </StateView>
     </div>
@@ -82,13 +86,13 @@ function Devices() {
 
 function Drawer() {
   const qc = useQueryClient();
-  const [terminal, setTerminal] = useState('T01'); const [msg, setMsg] = useState('');
+  const [terminal, setTerminal] = useState('T01');
   const evts = useQuery<{ events: DrawerEvt[] }>({ queryKey: ['drawer-events'], queryFn: () => api('/api/peripherals/drawer/events'), refetchInterval: 15_000 });
   const recon = useQuery<{ total_opens: number; no_sale_opens: number; by_reason: Record<string, number> }>({ queryKey: ['drawer-recon'], queryFn: () => api('/api/peripherals/drawer/reconciliation') });
   const noSale = useMutation({
     mutationFn: () => api('/api/peripherals/drawer/kick', { method: 'POST', body: JSON.stringify({ terminal, reason: 'no_sale' }) }),
-    onSuccess: () => { setMsg('✅ เปิดลิ้นชัก (ไม่มีการขาย) — บันทึกแล้ว'); qc.invalidateQueries({ queryKey: ['drawer-events'] }); qc.invalidateQueries({ queryKey: ['drawer-recon'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('เปิดลิ้นชัก (ไม่มีการขาย) — บันทึกแล้ว'); qc.invalidateQueries({ queryKey: ['drawer-events'] }); qc.invalidateQueries({ queryKey: ['drawer-recon'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   return (
     <div className="space-y-6">
@@ -102,7 +106,6 @@ function Drawer() {
         <CardContent className="flex items-end gap-3">
           <div><Label>เครื่อง POS</Label><Input value={terminal} onChange={(e) => setTerminal(e.target.value.trim())} className="w-32" /></div>
           <Button variant="outline" disabled={noSale.isPending} onClick={() => noSale.mutate()}>เปิดลิ้นชัก</Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </CardContent>
       </Card>
       <StateView q={evts}>
@@ -117,7 +120,11 @@ function Drawer() {
             { key: 'amount', label: 'จำนวน', align: 'right', render: (r) => r.amount != null ? baht(r.amount) : '—' },
             { key: 'opened_by', label: 'โดย', render: (r) => r.opened_by ?? '—' },
           ]}
-          emptyText="ยังไม่มีการเปิดลิ้นชัก"
+          emptyState={{
+            icon: DollarSign,
+            title: 'ยังไม่มีการเปิดลิ้นชัก',
+            description: 'เมื่อมีการเปิดลิ้นชักจากการขายหรือแบบไม่มีการขาย รายการจะปรากฏที่นี่เพื่อกระทบยอดกับ Z-report',
+          }}
         />
       </StateView>
     </div>
@@ -125,11 +132,11 @@ function Drawer() {
 }
 
 function ScaleTab() {
-  const [sku, setSku] = useState(''); const [gross, setGross] = useState(''); const [tare, setTare] = useState(''); const [res, setRes] = useState<any>(null); const [msg, setMsg] = useState('');
+  const [sku, setSku] = useState(''); const [gross, setGross] = useState(''); const [tare, setTare] = useState(''); const [res, setRes] = useState<any>(null);
   const read = useMutation({
     mutationFn: () => api<any>('/api/peripherals/scale/read', { method: 'POST', body: JSON.stringify({ sku, gross_weight: Number(gross), tare_weight: tare ? Number(tare) : undefined }) }),
-    onSuccess: (r) => { setRes(r); setMsg(''); },
-    onError: (e: Error) => { setRes(null); setMsg(`❌ ${e.message}`); },
+    onSuccess: (r) => { setRes(r); },
+    onError: (e: Error) => { setRes(null); notifyError(e.message); },
   });
   return (
     <Card>
@@ -141,7 +148,6 @@ function ScaleTab() {
           <div><Label>น้ำหนักภาชนะ (tare)</Label><Input value={tare} onChange={(e) => setTare(e.target.value)} placeholder="0.05" /></div>
         </div>
         <Button disabled={!sku || !gross || read.isPending} onClick={() => read.mutate()}>คำนวณราคา</Button>
-        <Msg ok={false}>{msg}</Msg>
         {res && (
           <div className="rounded-md border p-3 text-sm">
             <div className="font-medium">{res.name}</div>

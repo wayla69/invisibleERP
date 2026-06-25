@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, Layers, PlayCircle } from 'lucide-react';
+import { Building2, Layers, ListTree, PlayCircle, Rows3 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -83,7 +84,11 @@ function GroupsTab() {
               { key: 'created_by', label: 'สร้างโดย' },
               { key: 'created_at', label: 'วันที่สร้าง', render: (r) => (r.created_at ? thaiDate(r.created_at) : '—') },
             ]}
-            emptyText="ยังไม่มีกลุ่มบริษัท"
+            emptyState={{
+              icon: Layers,
+              title: 'ยังไม่มีกลุ่มบริษัท',
+              description: 'สร้างกลุ่มบริษัทเพื่อกำหนดโครงสร้างการถือหุ้นและเริ่มรวมงบการเงิน',
+            }}
           />
           {selected != null && <GroupEntities groupId={selected} />}
         </div>
@@ -110,7 +115,7 @@ function GroupEntities({ groupId }: { groupId: number }) {
                 { key: 'ownership_pct', label: 'สัดส่วนถือหุ้น', align: 'right', render: (r) => <span className="tabular">{r.ownership_pct}%</span> },
                 { key: 'entity_currency', label: 'สกุลเงิน' },
               ]}
-              emptyText="ยังไม่มีบริษัทในกลุ่มนี้"
+              emptyState={{ icon: Building2, title: 'ยังไม่มีบริษัทในกลุ่มนี้' }}
             />
           )}
         </StateView>
@@ -125,7 +130,6 @@ function RunsTab() {
   const groups = useQuery<GroupsResp>({ queryKey: ['consol-groups'], queryFn: () => api('/api/consolidation/groups') });
   const [groupId, setGroupId] = useState<number | null>(null);
   const [period, setPeriod] = useState(currentPeriod());
-  const [msg, setMsg] = useState('');
   const [openRun, setOpenRun] = useState<number | null>(null);
 
   const gid = groupId ?? groups.data?.groups[0]?.id ?? null;
@@ -143,10 +147,10 @@ function RunsTab() {
         body: JSON.stringify({ period }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ รวมงบสำเร็จ (run #${r.run_id}) · ${r.entity_count} บริษัท · ตัดรายการ ${r.ic_eliminations} · ${r.status}`);
+      notifySuccess(`รวมงบสำเร็จ (run #${r.run_id}) · ${r.entity_count} บริษัท · ตัดรายการ ${r.ic_eliminations} · ${r.status}`);
       qc.invalidateQueries({ queryKey: ['consol-runs', gid] });
     },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const selectCls =
@@ -185,7 +189,6 @@ function RunsTab() {
               <PlayCircle className="size-4" /> {run.isPending ? 'กำลังรวมงบ…' : 'รวมงบ'}
             </Button>
           </div>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </CardContent>
       </Card>
 
@@ -207,7 +210,11 @@ function RunsTab() {
                   { key: 'run_by', label: 'โดย' },
                   { key: 'run_at', label: 'เวลา', render: (r) => (r.run_at ? thaiDate(r.run_at) : '—') },
                 ]}
-                emptyText="ยังไม่มีการรวมงบ"
+                emptyState={{
+                  icon: Rows3,
+                  title: 'ยังไม่มีการรวมงบ',
+                  description: 'เลือกงวดแล้วกด รวมงบ เพื่อเดินการรวมงบครั้งแรกของกลุ่มนี้',
+                }}
               />
               {openRun != null && <RunLines runId={openRun} />}
             </div>
@@ -238,7 +245,7 @@ function RunLines({ runId }: { runId: number }) {
                 { key: 'amount_thb', label: 'ยอด (THB)', align: 'right', render: (r) => <span className="tabular">{baht(r.amount_thb)}</span> },
                 { key: 'notes', label: 'หมายเหตุ', render: (r) => r.notes ?? '—' },
               ]}
-              emptyText="ไม่มีรายการ"
+              emptyState={{ icon: ListTree, title: 'ไม่มีรายการรวมงบ' }}
             />
           )}
         </StateView>

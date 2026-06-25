@@ -2,18 +2,20 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Plus, Search, X } from 'lucide-react';
+import { Check, ClipboardList, Inbox, Plus, SearchX, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
+import { SearchInput } from '@/components/search-input';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { statusVariant } from '@/components/ui';
 
 const g = (r: any, ...keys: string[]) => { for (const k of keys) if (r[k] != null) return r[k]; return ''; };
@@ -33,7 +35,8 @@ function Library() {
   }, [boms, search]);
   const add = useMutation({
     mutationFn: () => api<{ bom_code: string }>('/api/bom/master', { method: 'POST', body: JSON.stringify({ bom_code: code, product_name: name, selling_price: Number(sell), labor_cost: Number(labor), lines: lines.filter((l) => l.item_id).map((l) => ({ item_id: l.item_id, qty_use_uom: Number(l.qty_use_uom), conv_factor: Number(l.conv_factor) })) }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bom-master'] }); setCode(''); setName(''); },
+    onSuccess: (r) => { notifySuccess(`บันทึก ${r.bom_code}`); qc.invalidateQueries({ queryKey: ['bom-master'] }); setCode(''); setName(''); },
+    onError: (e: any) => notifyError(e.message),
   });
   return (
     <div className="space-y-4">
@@ -70,21 +73,35 @@ function Library() {
             </Button>
             <Button disabled={!code || add.isPending} onClick={() => add.mutate()}>บันทึกสูตร</Button>
           </div>
-          {add.error && <Msg>{(add.error as Error).message}</Msg>}
-          {add.data && <Msg ok>✅ บันทึก {add.data.bom_code}</Msg>}
         </CardContent>
       </Card>
       <StateView q={q}>
         {q.data && (
           <div className="space-y-3">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหารหัสสูตร / ชื่อสินค้า…" className="pl-9" aria-label="ค้นหาสูตรการผลิต" inputMode="search" enterKeyHint="search" />
-            </div>
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="ค้นหารหัสสูตร / ชื่อสินค้า…"
+              ariaLabel="ค้นหาสูตรการผลิต"
+              count={`${filtered.length} สูตร`}
+            />
             <DataTable
               rows={filtered}
               rowKey={(r) => String(g(r, 'bomCode', 'bom_code'))}
-              emptyText={search ? 'ไม่พบสูตรที่ตรงกับการค้นหา' : 'ยังไม่มีสูตรการผลิต'}
+              emptyState={
+                search
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบสูตรที่ตรงกับการค้นหา',
+                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => setSearch('')}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : { icon: ClipboardList, title: 'ยังไม่มีสูตรการผลิต', description: 'สร้างสูตร (BoM) แรกของคุณจากแบบฟอร์มด้านบน' }
+              }
               columns={[
                 { key: 'code', label: 'รหัส', render: (r) => g(r, 'bomCode', 'bom_code') },
                 { key: 'product', label: 'สินค้า', render: (r) => g(r, 'productName', 'product_name') },
@@ -106,7 +123,7 @@ function Submissions() {
   const approve = useMutation({ mutationFn: (id: number) => api(`/api/bom/submissions/${id}/approve`, { method: 'PATCH' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['bom-sub'] }) });
   return (
     <StateView q={q}>
-      {q.data && <DataTable rows={q.data.submissions} columns={[
+      {q.data && <DataTable rows={q.data.submissions} emptyState={{ icon: Inbox, title: 'ยังไม่มีคำขออนุมัติ', description: 'คำขออนุมัติสูตรจากลูกค้าจะปรากฏที่นี่' }} columns={[
         { key: 'code', label: 'รหัส', render: (r) => g(r, 'bomCode', 'bom_code') },
         { key: 'product', label: 'สินค้า', render: (r) => g(r, 'productName', 'product_name') },
         { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(g(r, 'status') || 'Pending')}>{g(r, 'status') || 'Pending'}</Badge> },

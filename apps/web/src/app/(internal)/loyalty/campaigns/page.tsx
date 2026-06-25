@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Megaphone, Plus, Send, Ban, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -26,7 +27,6 @@ export default function CampaignsPage() {
 
   const [f, setF] = useState({ name: '', channel: 'sms', audience: 'all', segment: '', tier: '', body: '', schedule_at: '' });
   const set = (p: Partial<typeof f>) => setF((s) => ({ ...s, ...p }));
-  const [msg, setMsg] = useState('');
 
   const create = useMutation({
     mutationFn: () => api('/api/loyalty/campaigns', { method: 'POST', body: JSON.stringify({
@@ -34,11 +34,11 @@ export default function CampaignsPage() {
       ...(f.audience === 'segment' ? { segment: f.segment } : {}), ...(f.audience === 'tier' ? { tier: f.tier } : {}),
       ...(f.schedule_at ? { schedule_at: new Date(f.schedule_at).toISOString() } : {}),
     }) }),
-    onSuccess: () => { setMsg('✅ สร้างแคมเปญแล้ว'); setF({ name: '', channel: 'sms', audience: 'all', segment: '', tier: '', body: '', schedule_at: '' }); qc.invalidateQueries({ queryKey: ['loy-campaigns'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('สร้างแคมเปญแล้ว'); setF({ name: '', channel: 'sms', audience: 'all', segment: '', tier: '', body: '', schedule_at: '' }); qc.invalidateQueries({ queryKey: ['loy-campaigns'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
-  const sendNow = useMutation({ mutationFn: (c: Campaign) => api(`/api/loyalty/campaigns/${c.id}/send`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-campaigns'] }), onError: (e: Error) => setMsg(`❌ ${e.message}`) });
-  const cancel = useMutation({ mutationFn: (c: Campaign) => api(`/api/loyalty/campaigns/${c.id}/cancel`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-campaigns'] }), onError: (e: Error) => setMsg(`❌ ${e.message}`) });
+  const sendNow = useMutation({ mutationFn: (c: Campaign) => api(`/api/loyalty/campaigns/${c.id}/send`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-campaigns'] }), onError: (e: Error) => notifyError(e.message) });
+  const cancel = useMutation({ mutationFn: (c: Campaign) => api(`/api/loyalty/campaigns/${c.id}/cancel`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-campaigns'] }), onError: (e: Error) => notifyError(e.message) });
 
   return (
     <div>
@@ -57,7 +57,7 @@ export default function CampaignsPage() {
               <div className="grid gap-1.5"><Label>ตั้งเวลาส่ง (ว่าง=ส่งเอง)</Label><Input type="datetime-local" value={f.schedule_at} onChange={(e) => set({ schedule_at: e.target.value })} /></div>
             </div>
             <div className="grid gap-1.5"><Label>ข้อความ</Label><textarea className="min-h-20 rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" value={f.body} onChange={(e) => set({ body: e.target.value })} placeholder="สวัสดีค่ะ รับสิทธิพิเศษ…" /></div>
-            <div className="flex items-center gap-3"><Button onClick={() => { setMsg(''); create.mutate(); }} disabled={!f.name.trim() || !f.body.trim() || create.isPending}>{create.isPending ? 'กำลังบันทึก…' : 'สร้างแคมเปญ'}</Button>{msg && <span className={msg.startsWith('✅') ? 'text-sm text-success' : 'text-sm text-destructive'}>{msg}</span>}</div>
+            <div className="flex items-center gap-3"><Button onClick={() => create.mutate()} disabled={!f.name.trim() || !f.body.trim() || create.isPending}>{create.isPending ? 'กำลังบันทึก…' : 'สร้างแคมเปญ'}</Button></div>
           </CardContent>
         </Card>
 
@@ -66,7 +66,7 @@ export default function CampaignsPage() {
             <DataTable
               rows={list.data.campaigns}
               rowKey={(c) => c.id}
-              emptyText="ยังไม่มีแคมเปญ — สร้างด้านบน"
+              emptyState={{ icon: Megaphone, title: 'ยังไม่มีแคมเปญ', description: 'สร้างแคมเปญแรกจากแบบฟอร์มด้านบนเพื่อส่งข้อความถึงสมาชิก' }}
               columns={[
                 { key: 'campaign_code', label: 'รหัส', render: (c) => <span className="font-mono text-xs">{c.campaign_code}</span> },
                 { key: 'name', label: 'ชื่อ', render: (c) => <span className="inline-flex items-center gap-1.5"><Megaphone className="size-3.5 text-muted-foreground" />{c.name}</span> },
@@ -76,7 +76,7 @@ export default function CampaignsPage() {
                 { key: 'sent_count', label: 'ส่ง/ข้าม/พลาด', align: 'right', render: (c) => c.status === 'sent' ? <span className="tabular text-xs">{num(c.sent_count)}/{num(c.skipped_count)}/{num(c.failed_count)}</span> : '—' },
                 { key: 'act', label: '', align: 'right', render: (c) => (c.status === 'draft' || c.status === 'scheduled') ? (
                   <div className="flex justify-end gap-1">
-                    <Button size="sm" variant="outline" disabled={sendNow.isPending} onClick={() => { setMsg(''); sendNow.mutate(c); }}><Send className="size-3.5" /> ส่งเลย</Button>
+                    <Button size="sm" variant="outline" disabled={sendNow.isPending} onClick={() => sendNow.mutate(c)}><Send className="size-3.5" /> ส่งเลย</Button>
                     <Button size="sm" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate(c)}><Ban className="size-3.5" /></Button>
                   </div>
                 ) : null },
