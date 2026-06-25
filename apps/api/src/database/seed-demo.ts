@@ -23,6 +23,7 @@ import { eq, sql } from 'drizzle-orm';
 import { PERMISSIONS } from '@ierp/shared';
 import * as schema from './schema';
 import { PasswordService } from '../modules/auth/password.service';
+import { menuImageDataUri } from './demo/menu-image';
 
 for (const p of ['.env', resolve(process.cwd(), '../../.env')]) {
   try {
@@ -195,6 +196,7 @@ async function main() {
         price: n(m.price), cost: n(m.cost), stationCode: m.station,
         prepMinutes: STATIONS.find((s) => s.code === m.station)?.prep ?? 10,
         trackStock: false, isAvailable: true, sort: m.sort, active: true,
+        imageUrl: menuImageDataUri(m.catCode, m.nameEn || m.nameTh),
       })),
     );
     const items = await tx.select().from(schema.menuItems).where(eq(schema.menuItems.tenantId, T));

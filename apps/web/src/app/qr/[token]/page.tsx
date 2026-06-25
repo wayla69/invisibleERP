@@ -21,7 +21,7 @@ type Status = {
 };
 type Option = { option_id: number; name: string; price_delta: number; is_default: boolean };
 type Group = { group_id: number; code: string; name: string; min_select: number; max_select: number; required: boolean; options: Option[] };
-type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; description: string | null; has_modifiers: boolean; modifier_groups: Group[] };
+type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; description: string | null; image_url?: string | null; has_modifiers: boolean; modifier_groups: Group[] };
 type Category = { id: number; code: string; name: string; items: MenuItem[] };
 type Menu = { categories: Category[]; uncategorized: MenuItem[]; item_count: number };
 type Tier = { id: number; code: string; name: string; name_en: string | null; price_per_pax: number; time_limit_min: number; overtime_fee_per_pax: number };
@@ -185,12 +185,18 @@ export default function DinerPage() {
                   {c.items.map((it) => (
                     <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
                       className={cn('flex items-center justify-between rounded-lg border bg-card p-3 text-left transition', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-sm font-medium">{nm(it)}
-                          {!it.is_available && <Badge variant="secondary" className="text-[10px]">หมด</Badge>}
-                          {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">ยังไม่ถึงเวลาขาย</Badge>}
+                      <div className="flex min-w-0 items-center gap-3">
+                        {it.image_url && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={it.image_url} alt="" className="size-14 shrink-0 rounded-lg object-cover" />
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-sm font-medium">{nm(it)}
+                            {!it.is_available && <Badge variant="secondary" className="text-[10px]">หมด</Badge>}
+                            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">ยังไม่ถึงเวลาขาย</Badge>}
+                          </div>
+                          {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
                         </div>
-                        {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
                       </div>
                       <div className="ml-3 flex shrink-0 items-center gap-2">
                         <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">บุฟเฟต์</span> : baht(it.price)}</span>

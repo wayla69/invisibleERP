@@ -35,9 +35,11 @@ pnpm --filter @ierp/api db:seed       # permissions + role_permissions + admin u
 pnpm --filter @ierp/api db:seed:demo  # (ไม่บังคับ) ข้อมูลตัวอย่างร้านบุฟเฟ่ต์ญี่ปุ่น "Oshinei"
                                       #   tenant OSHINEI + login oshinei/oshinei123:
                                       #   เมนู 252 รายการ, บุฟเฟ่ต์ 4 ระดับ (350/500/590/799),
-                                      #   วัตถุดิบ 193 + สูตร/BoM, ครัว/ผังโต๊ะ (idempotent, รันซ้ำได้)
-pnpm --filter @ierp/api db:seed:demo:sales  # (ไม่บังคับ) ประวัติการขาย ~45 วันสำหรับ Oshinei
-                                      #   (cust_pos_sales/items) ให้ dashboard/รายงานการเงินมีตัวเลข
+                                      #   วัตถุดิบ 193 + สูตร/BoM, ครัว/ผังโต๊ะ + รูปเมนู (idempotent, รันซ้ำได้)
+pnpm --filter @ierp/api db:seed:demo:images # (ไม่บังคับ) ตั้งรูปเมนู (SVG ตามหมวด) ให้ tenant ที่ seed แล้ว
+pnpm --filter @ierp/api db:seed:demo:sales  # (ไม่บังคับ) ประวัติการดำเนินงาน Oshinei:
+                                      #   ขาย POS ~45 วัน (dashboard/การเงิน) + ออเดอร์ dine-in/KDS ย้อนหลัง
+                                      #   + ออเดอร์สด/โต๊ะไม่ว่าง/คิว KDS ปัจจุบัน (ผังโต๊ะ + จอครัว)
 
 # 4. รัน (api + web พร้อมกัน)
 pnpm dev
