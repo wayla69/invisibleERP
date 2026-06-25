@@ -7,7 +7,7 @@
 // + localStorage. Catalogs live in messages.ts. Per-screen coverage stays incremental (opt in via t()).
 import * as React from 'react';
 import { MESSAGES, type Lang } from './messages';
-import { api, getToken } from './api';
+import { api, hasSession } from './api';
 
 export type { Lang };
 const KEY = 'ierp_lang';
@@ -47,7 +47,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem(KEY) : null;
     if (isLang(saved)) setLangState(saved);
-    if (getToken()) {
+    if (hasSession()) {
       api<{ locale: string }>('/api/i18n/me')
         .then((r) => { if (isLang(r?.locale)) { setLangState(r.locale); try { window.localStorage.setItem(KEY, r.locale); } catch { /* ignore */ } } })
         .catch(() => { /* unauthenticated or offline — keep the cached/default locale */ });
@@ -59,7 +59,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     if (!isLang(l)) return;
     setLangState(l);
     try { window.localStorage.setItem(KEY, l); } catch { /* ignore */ }
-    if (getToken()) api('/api/i18n/me', { method: 'PUT', body: JSON.stringify({ locale: l }) }).catch(() => { /* best-effort */ });
+    if (hasSession()) api('/api/i18n/me', { method: 'PUT', body: JSON.stringify({ locale: l }) }).catch(() => { /* best-effort */ });
   }, []);
 
   const value = React.useMemo<Ctx>(() => ({

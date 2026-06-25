@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, Search } from 'lucide-react';
 
-import { getToken, clearToken } from '@/lib/api';
+import { hasSession, logout as apiLogout } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { useModuleFlags } from '@/lib/modules';
 import { navForWorkspace, defaultWorkspace, workspaceHome, WORKSPACES, type NavGroup, type Workspace } from '@/lib/nav';
@@ -93,7 +93,7 @@ export function AppShell({
   };
 
   React.useEffect(() => {
-    if (typeof window !== 'undefined' && !getToken()) router.replace('/login');
+    if (typeof window !== 'undefined' && !hasSession()) router.replace('/login');
   }, [router]);
 
   // A5 — force a default/weak password change before any back-office use
@@ -147,8 +147,7 @@ export function AppShell({
     groups.flatMap((g) => g.items).find((it) => isActive(it.href))?.label ?? brand;
 
   function logout() {
-    clearToken();
-    router.replace('/login');
+    void apiLogout().finally(() => router.replace('/login'));
   }
 
   return (

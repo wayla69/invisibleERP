@@ -111,9 +111,9 @@ add("ITGC-AC-05","ITGC · Access","ITGC","All","Machine credential escalates to 
 add("ITGC-AC-06","ITGC · Access","ITGC","All","Stolen password yields full access to finance functions.","Restricted access",
     "Multi-factor authentication (TOTP) enforced for Admin and finance roles.","Prev","Automated","Continuous","IT Security","P11",
     "auth.service.ts (login TOTP gate; setup/enable/disable); permissions.ts (requiresMfa policy); crypto.ts (AES-256-GCM seed); cutover/compliance.ts (ToE)","Inspect MFA enforcement policy for privileged roles.","Sample privileged logins require 2nd factor (MFA-enabled login w/o code → 401; un-enrolled privileged user flagged must_setup_mfa) — re-performed by the harness.","MFA config","Implemented")
-add("ITGC-AC-07","ITGC · Access","ITGC","All","Weak/stale credentials; sessions never expire.","Restricted access",
-    "Password policy, forced change on first login, JWT/session expiry, lockout on repeated failure.","Prev","Automated","Continuous","IT Security","P11",
-    "0045_must_change_password; auth (JWT_EXPIRES_IN)","Inspect password + session policy.","Sample: forced change works; expired token rejected.","Auth config","Partial")
+add("ITGC-AC-07","ITGC · Access","ITGC","All","Session token stealable via XSS; weak/stale credentials; sessions never expire.","Restricted access",
+    "Web session is an httpOnly JWT cookie (token unreadable by JS → XSS can't exfiltrate it) + CSRF double-submit on cookie-authenticated mutations + a web Content-Security-Policy; plus password policy, forced first-login change, and JWT/session expiry. Bearer/API-key clients are CSRF-exempt (no ambient cookie).","Prev","Automated","Continuous","IT Security","P11",
+    "common/cookies.ts; common/guards.ts (cookie auth + CSRF); auth.controller.ts (login/logout set/clear cookies); apps/web/next.config.mjs (CSP); 0045_must_change_password; cutover/cookie-auth.ts (ToE)","Inspect cookie flags (HttpOnly/SameSite), CSRF enforcement, and CSP.","Sample: cookie auth works; cookie mutation w/o X-CSRF-Token → 403; Bearer exempt; logout clears; expired token rejected (re-performed by the harness).","Auth config; cookie-auth ToE","Implemented")
 add("ITGC-AC-08","ITGC · Access","ITGC","All","Access creep; terminated users retain access.","Restricted access",
     "Quarterly User Access Review — recertify every user × permission; remove on termination.","Det","Manual","Quarterly","Controller / IT","P11/P16",
     "admin-users.service.ts (access-review / export CSV / certify); admin-users.controller.ts; cutover/compliance.ts (ToE)","Inspect UAR procedure + sample sign-off.","Re-perform: each quarter reviewed & exceptions remediated (automated harness re-performs report/export/certify).","UAR sign-off","Implemented")
@@ -352,7 +352,7 @@ GAP = [
  ("EXP-03","Expenditure","PR/PO approval workflow partial.","Finalize PR/PO maker-checker against DoA thresholds.","Procurement Mgr","Phase 2","Month 3-4","Medium"),
  ("INV-04","Inventory & COGS","Stocktake variance review informal.","Formalize count cadence + variance review/approval sign-off.","Warehouse Mgr","Phase 2","Month 4","Medium"),
  ("REC-03","Reconciliation","Intercompany recon partial.","Formalize IC matching + elimination sign-off each period.","Group Controller","Phase 2-3","Month 4-6","Medium"),
- ("ITGC-AC-07","ITGC · Access","Web token/session hardening deferred (localStorage).","Migrate token → httpOnly cookie + CSRF; add JWT jti + revocation. Dedicated workstream.","IT Security / Eng","Phase 2","Month 2-3","Medium"),
+ ("ITGC-AC-07","ITGC · Access","Login brute-force lockout + JWT revocation outstanding.","DONE: token → httpOnly cookie + CSRF + web CSP. Remaining: per-account login lockout/throttle + JWT jti revocation list.","IT Security / Eng","Phase 2","Month 2-3","Low"),
  ("TAX-03","Tax","WHT reporting partial.","Complete WHT calc coverage + monthly ภ.ง.ด. tie-out.","Tax","Phase 2-3","Month 4-6","Medium"),
  ("PAY-02","Payroll","Statutory payroll items partial.","Complete PF/OT/leave + ภ.ง.ด.1ก reconciliation to filings.","HR / Payroll","Phase 2-3","Month 4-6","Medium"),
  ("ELC-01","Entity-Level","No ethics policy / acknowledgements.","Issue code of conduct; annual acknowledgement register.","CEO / HR","Phase 1","Month 1-2","High"),

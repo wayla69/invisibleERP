@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
-import { publicApi, setToken } from '@/lib/api';
+import { publicApi } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -21,7 +21,7 @@ export default function SsoCallbackPage() {
     const query = window.location.search;
     publicApi<{ token: string; role: string }>('/api/auth/sso/callback', { method: 'POST', body: JSON.stringify({ query }) })
       .then((res) => {
-        setToken(res.token);
+        // The callback response set the session cookies — no client storage.
         router.replace(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'เข้าสู่ระบบด้วย SSO ไม่สำเร็จ'));
