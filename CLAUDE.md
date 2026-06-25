@@ -100,8 +100,13 @@ For every such change, review and update as needed:
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
 - Shared: `pnpm --filter @ierp/shared build` (build before harnesses that import dist)
-- Web E2E (Playwright UI smoke, e.g. ERP/POS switcher): `pnpm --filter @ierp/web test:e2e`
-  (one-time `pnpm --filter @ierp/web exec playwright install chromium`; needs browser-download network access)
+- Web E2E (Playwright UI smoke, e.g. ERP/POS switcher, sidebar favourites/collapsible Settings):
+  `pnpm --filter @ierp/web test:e2e` (one-time `playwright install chromium`; needs browser-download in CI).
+  To run e2e **locally in this env**: the project's pinned headless-shell isn't present, but a full Chromium
+  is at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` — run with a throwaway config that extends
+  `playwright.config` and sets `use.launchOptions.executablePath` to it (+ `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`).
+  `*.capture.spec.ts` (screenshot tools, e.g. `e2e/sidebar.capture.spec.ts`) are excluded from CI via
+  `testIgnore`; run them by clearing `testIgnore` in that local config.
 - Control/Integration harnesses (CI gates, run with `NODE_OPTIONS=--experimental-sqlite`):
   `pnpm --filter @ierp/cutover compliance` (ICFR controls), `e2e`, `ext`, `worldclass`, `taxdocs`,
   `restaurant`; `pnpm --filter @ierp/parity writeflow|analytics`. Keep these green.
@@ -109,4 +114,8 @@ For every such change, review and update as needed:
 ## Key references
 - RCM / readiness / policies: `compliance/` (`Oshinei_ERP_SOX_RCM_v1.xlsx`, `build_rcm.py`,
   `COSO_ICFR_Audit_Readiness_Plan.md`, `policies/`, `vulnerability-triage.md`).
-- Permissions / roles / SoD rules: `packages/shared/src/permissions.ts`. Web nav/workspaces: `apps/web/src/lib/nav.ts`.
+- Permissions / roles / SoD rules: `packages/shared/src/permissions.ts`. Web nav/workspaces: `apps/web/src/lib/nav.ts`
+  (groups support collapsible `subgroups`; the sidebar `AppShell` renders ERP/POS switcher + favourites/recents).
+- Per-user UI prefs (sidebar favourites + nav fold-state) sync across devices via `GET/PUT /api/user-prefs`
+  (`UserPrefsModule`, table `user_prefs`, RLS + owner-scoped, no `@Permissions`); recents stay per-device
+  (localStorage). See `docs/15-ui-ux-menu-restructure-plan.md`.
