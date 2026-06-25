@@ -1,4 +1,4 @@
-import { Controller, Post, Patch, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -40,6 +40,12 @@ export class ProcurementController {
   setSupplierStatus(@Param('id') id: string, @Body(new ZodValidationPipe(SupplierStatusBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setSupplierStatus(+id, b, u); }
   @Post('suppliers/:id/scorecard') @Permissions('procurement')
   scorecard(@Param('id') id: string, @Body(new ZodValidationPipe(ScorecardBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.recomputeScorecard(+id, b.period, u); }
+
+  // Supplier-performance register — scorecards ranked by score (with ?period; default = latest per vendor).
+  @Get('scorecards') @Permissions('procurement', 'exec')
+  scorecards(@CurrentUser() u: JwtUser, @Query('period') period?: string, @Query('limit') limit?: string) {
+    return this.svc.listScorecards({ period, limit: limit ? Math.min(Number(limit) || 200, 500) : 200 }, u);
+  }
 
   @Post('pos') @Permissions('procurement')
   createPo(@Body(new ZodValidationPipe(PoBody)) b: CreatePoDto, @CurrentUser() u: JwtUser) { return this.svc.createPo(b, u); }
