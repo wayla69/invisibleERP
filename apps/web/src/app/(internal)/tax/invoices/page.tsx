@@ -2,14 +2,14 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileText, Receipt, Coins, Ban, Plus, ExternalLink, FileCode, Mail } from 'lucide-react';
+import { FileText, Receipt, Coins, Ban, Plus, ExternalLink, FileCode, Mail, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,7 +53,6 @@ export default function TaxInvoicesPage() {
   const [buyerName, setBuyerName] = useState('');
   const [buyerTaxId, setBuyerTaxId] = useState('');
   const [buyerAddr, setBuyerAddr] = useState('');
-  const [msg, setMsg] = useState('');
 
   const issue = useMutation({
     mutationFn: () =>
@@ -66,11 +65,11 @@ export default function TaxInvoicesPage() {
         }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ ออกใบกำกับภาษีสำเร็จ: ${r.doc_no}`);
+      notifySuccess(`ออกใบกำกับภาษีสำเร็จ: ${r.doc_no}`);
       setSrcRef(''); setBuyerName(''); setBuyerTaxId(''); setBuyerAddr('');
       qc.invalidateQueries({ queryKey: ['tax-invoices'] });
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   const canIssue = !!srcRef && !!buyerName && !!buyerAddr && !issue.isPending;
@@ -78,17 +77,16 @@ export default function TaxInvoicesPage() {
   // ── ส่ง e-Tax Invoice by Email (ETDA, ไม่ต้องมีใบรับรอง CA) ──
   const [emailDoc, setEmailDoc] = useState<string | null>(null);
   const [emailTo, setEmailTo] = useState('');
-  const [emailMsg, setEmailMsg] = useState('');
   const sendEmail = useMutation({
     mutationFn: () =>
       api<{ cc: string }>(`/api/tax-invoices/${emailDoc}/send-etax-email`, {
         method: 'POST',
         body: JSON.stringify({ to_email: emailTo }),
       }),
-    onSuccess: (r) => setEmailMsg(`✅ ส่งแล้ว — สำเนาถึงระบบประทับเวลา ETDA (${r.cc})`),
-    onError: (e: any) => setEmailMsg(`❌ ${e.message}`),
+    onSuccess: (r) => notifySuccess(`ส่งแล้ว — สำเนาถึงระบบประทับเวลา ETDA (${r.cc})`),
+    onError: (e: any) => notifyError(e.message),
   });
-  const openEmail = (docNo: string) => { setEmailDoc(docNo); setEmailTo(''); setEmailMsg(''); };
+  const openEmail = (docNo: string) => { setEmailDoc(docNo); setEmailTo(''); };
 
   return (
     <div>
@@ -150,7 +148,6 @@ export default function TaxInvoicesPage() {
           <Button disabled={!canIssue} onClick={() => issue.mutate()}>
             <Receipt className="size-4" /> {issue.isPending ? 'กำลังออก…' : 'ออกใบกำกับภาษี'}
           </Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </CardContent>
       </Card>
 
@@ -215,7 +212,24 @@ export default function TaxInvoicesPage() {
                   ),
                 },
               ]}
-              emptyText="ยังไม่มีใบกำกับภาษี"
+              emptyState={
+                filter
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบใบกำกับภาษีที่ตรงกับตัวกรอง',
+                      description: 'ลองเลือกประเภทอื่น หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => setFilter('')}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : {
+                      icon: FileText,
+                      title: 'ยังไม่มีใบกำกับภาษี',
+                      description: 'ออกใบกำกับภาษีเต็มรูป (ม.86/4) จากฟอร์มด้านบนเพื่อเริ่มต้น',
+                    }
+              }
             />
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Ban className="size-3.5" /> การยกเลิกใบกำกับ (void) ไม่ลบเลขที่เอกสาร — ระบบจะเก็บไว้และเปลี่ยนสถานะเป็น Voided ตามข้อกำหนดสรรพากร
@@ -235,7 +249,6 @@ export default function TaxInvoicesPage() {
           <div className="grid gap-2">
             <Label htmlFor="email-to">อีเมลผู้ซื้อ</Label>
             <Input id="email-to" type="email" placeholder="buyer@example.com" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} />
-            <Msg ok={emailMsg.startsWith('✅')}>{emailMsg}</Msg>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEmailDoc(null)}>ปิด</Button>

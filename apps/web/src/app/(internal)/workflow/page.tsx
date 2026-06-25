@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, ListChecks, Workflow, X, Plus, Trash2, AlarmClock } from 'lucide-react';
+import { Check, CheckCheck, ListChecks, Workflow, X, Plus, Trash2, AlarmClock } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,16 +36,15 @@ export default function WorkflowPage() {
 function MyApprovals() {
   const qc = useQueryClient();
   const q = useQuery<{ items: Approval[] }>({ queryKey: ['wf-my-approvals'], queryFn: () => api('/api/workflow/my-approvals') });
-  const [msg, setMsg] = useState('');
   const act = useMutation({
     mutationFn: ({ id, decision }: { id: number; decision: 'approve' | 'reject' }) => api(`/api/workflow/instances/${id}/act`, { method: 'POST', body: JSON.stringify({ decision }) }),
-    onSuccess: (r: any) => { setMsg(`✅ ดำเนินการสำเร็จ — สถานะ: ${r.status}`); qc.invalidateQueries({ queryKey: ['wf-my-approvals'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`ดำเนินการสำเร็จ — สถานะ: ${r.status}`); qc.invalidateQueries({ queryKey: ['wf-my-approvals'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const sweep = useMutation({
     mutationFn: () => api('/api/workflow/run-escalations', { method: 'POST' }),
-    onSuccess: (r: any) => { setMsg(`✅ ตรวจสอบงานเกินกำหนด: เร่งรัด ${r.escalated} · แจ้งเตือน ${r.reminded}`); qc.invalidateQueries({ queryKey: ['wf-my-approvals'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`ตรวจสอบงานเกินกำหนด: เร่งรัด ${r.escalated} · แจ้งเตือน ${r.reminded}`); qc.invalidateQueries({ queryKey: ['wf-my-approvals'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const items = q.data?.items ?? [];
   const totalValue = items.reduce((s, i) => s + i.amount, 0);
@@ -58,7 +58,6 @@ function MyApprovals() {
       </div>
       <div className="flex items-center gap-3">
         <Button variant="outline" size="sm" disabled={sweep.isPending} onClick={() => sweep.mutate()}><AlarmClock className="mr-1 size-4" />ตรวจสอบงานเกินกำหนด</Button>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </div>
       <StateView q={q}>
         <DataTable
@@ -78,7 +77,7 @@ function MyApprovals() {
               </div>
             ) },
           ]}
-          emptyText="ไม่มีรายการรออนุมัติ"
+          emptyState={{ icon: CheckCheck, title: 'ไม่มีงานรออนุมัติ', description: 'เคลียร์งานอนุมัติหมดแล้ว' }}
         />
       </StateView>
     </div>
@@ -91,7 +90,7 @@ const emptyStep = (): DraftStep => ({ approver_kind: 'role', approver: '', min_a
 function Definitions() {
   const qc = useQueryClient();
   const q = useQuery<{ definitions: Definition[] }>({ queryKey: ['wf-definitions'], queryFn: () => api('/api/workflow/definitions') });
-  const [docType, setDocType] = useState('PR'); const [name, setName] = useState(''); const [sla, setSla] = useState(''); const [steps, setSteps] = useState<DraftStep[]>([emptyStep()]); const [msg, setMsg] = useState('');
+  const [docType, setDocType] = useState('PR'); const [name, setName] = useState(''); const [sla, setSla] = useState(''); const [steps, setSteps] = useState<DraftStep[]>([emptyStep()]);
   const create = useMutation({
     mutationFn: () => api('/api/workflow/definitions', { method: 'POST', body: JSON.stringify({
       doc_type: docType, name, sla_hours: sla ? Number(sla) : undefined,
@@ -103,8 +102,8 @@ function Definitions() {
         ...(s.match_key && s.match_value ? { match_key: s.match_key, match_value: s.match_value } : {}),
       })),
     }) }),
-    onSuccess: () => { setMsg(`✅ สร้างผัง ${name}`); setName(''); setSla(''); setSteps([emptyStep()]); qc.invalidateQueries({ queryKey: ['wf-definitions'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`สร้างผัง ${name}`); setName(''); setSla(''); setSteps([emptyStep()]); qc.invalidateQueries({ queryKey: ['wf-definitions'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const toggle = useMutation({
     mutationFn: ({ id, active }: { id: number; active: boolean }) => api(`/api/workflow/definitions/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }),
@@ -151,7 +150,6 @@ function Definitions() {
           </div>
           <div className="flex items-center gap-3">
             <Button disabled={!name || steps.some((s) => !s.approver) || create.isPending} onClick={() => create.mutate()}>บันทึกผัง</Button>
-            <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </div>
         </CardContent>
       </Card>

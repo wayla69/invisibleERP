@@ -5,11 +5,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Scale, ListChecks, ShieldCheck, X, Download, Link2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -23,12 +23,10 @@ export default function ReconciliationPage() {
   const q = useQuery<any>({ queryKey: ['recon-periods'], queryFn: () => api('/api/recon/periods') });
 
   return (
-    <div>
-      <PageHeader
-        title="กระทบยอด (Reconciliation)"
-        description="เปิดงวดกระทบยอดตามบัญชี นำเข้ารายการ GL จับคู่อัตโนมัติ และรับรอง (SoD)"
-      />
-
+    <ModulePage
+      title="กระทบยอด (Reconciliation)"
+      description="เปิดงวดกระทบยอดตามบัญชี นำเข้ารายการ GL จับคู่อัตโนมัติ และรับรอง (SoD)"
+    >
       <div className="space-y-6">
         <OpenPeriod onDone={() => qc.invalidateQueries({ queryKey: ['recon-periods'] })} />
 
@@ -48,7 +46,11 @@ export default function ReconciliationPage() {
                   { key: 'prepared_by', label: 'ผู้จัดทำ', render: (r: any) => r.prepared_by ?? '—' },
                   { key: 'certified_by', label: 'ผู้รับรอง', render: (r: any) => r.certified_by ?? '—' },
                 ]}
-                emptyText="ยังไม่มีงวดกระทบยอด"
+                emptyState={{
+                  icon: Scale,
+                  title: 'ยังไม่มีงวดกระทบยอด',
+                  description: 'เปิดงวดกระทบยอดตามบัญชีและงวดด้านบนเพื่อเริ่มต้น',
+                }}
               />
             </div>
           )}
@@ -56,7 +58,7 @@ export default function ReconciliationPage() {
 
         {selected != null && <PeriodDetail id={selected} onClose={() => setSelected(null)} />}
       </div>
-    </div>
+    </ModulePage>
   );
 }
 
@@ -64,16 +66,15 @@ export default function ReconciliationPage() {
 function OpenPeriod({ onDone }: { onDone: () => void }) {
   const [accountCode, setAccountCode] = useState('');
   const [period, setPeriod] = useState('2026-06');
-  const [msg, setMsg] = useState('');
 
   const open = useMutation({
     mutationFn: () => api<any>('/api/recon/periods', { method: 'POST', body: JSON.stringify({ account_code: accountCode, period }) }),
     onSuccess: (r) => {
-      setMsg(`✅ เปิดงวด ${r.period} · บัญชี ${r.account_code}`);
+      notifySuccess(`เปิดงวด ${r.period} · บัญชี ${r.account_code}`);
       setAccountCode('');
       onDone();
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -94,7 +95,6 @@ function OpenPeriod({ onDone }: { onDone: () => void }) {
           {open.isPending ? 'กำลังเปิด…' : 'เปิดงวด'}
         </Button>
       </div>
-      <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
     </Card>
   );
 }
@@ -102,7 +102,6 @@ function OpenPeriod({ onDone }: { onDone: () => void }) {
 // ───────────────────────── period detail: summary + import GL / auto-match / certify ─────────────────────────
 function PeriodDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const qc = useQueryClient();
-  const [msg, setMsg] = useState('');
   const q = useQuery<any>({ queryKey: ['recon-summary', id], queryFn: () => api(`/api/recon/periods/${id}/summary`) });
 
   const refresh = () => {
@@ -112,18 +111,18 @@ function PeriodDetail({ id, onClose }: { id: number; onClose: () => void }) {
 
   const importGl = useMutation({
     mutationFn: () => api<any>(`/api/recon/periods/${id}/import-gl`, { method: 'POST' }),
-    onSuccess: (r) => { setMsg(`✅ นำเข้ารายการ GL ${num(r.imported)} รายการ`); refresh(); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`นำเข้ารายการ GL ${num(r.imported)} รายการ`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
   const autoMatch = useMutation({
     mutationFn: () => api<any>(`/api/recon/periods/${id}/auto-match`, { method: 'POST' }),
-    onSuccess: (r) => { setMsg(`✅ จับคู่ ${num(r.matched_pairs)} คู่ · ค้าง ${num(r.unmatched_gl)} รายการ`); refresh(); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`จับคู่ ${num(r.matched_pairs)} คู่ · ค้าง ${num(r.unmatched_gl)} รายการ`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
   const certify = useMutation({
     mutationFn: () => api<any>(`/api/recon/periods/${id}/certify`, { method: 'POST' }),
-    onSuccess: (r) => { setMsg(`✅ รับรองงวดโดย ${r.certified_by}`); refresh(); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`รับรองงวดโดย ${r.certified_by}`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -164,7 +163,6 @@ function PeriodDetail({ id, onClose }: { id: number; onClose: () => void }) {
                 <ShieldCheck className="size-4" /> {certify.isPending ? 'กำลังรับรอง…' : 'รับรองงวด'}
               </Button>
             </div>
-            <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </div>
         )}
       </StateView>

@@ -261,20 +261,50 @@ export const INTERNAL_NAV: NavGroup[] = [
   },
 
   // ─── ERP: finance ───────────────────────────────────────────────────────────────────────────────
+  // PEAK-style cycle grouping (see docs/16-peak-style-erp-convergence.md): the daily รายรับ/รายจ่าย
+  // book sits on top, period-close GL next, then treasury; reporting + multi-entity/FX collapse by
+  // default to keep the group compact. **No href/perms changed** — pure shelving (cf. doc 15 §2).
   {
     title: 'การเงิน',
     workspace: ['erp'],
-    items: [
-      { label: 'การเงิน', href: '/finance', icon: Banknote, perms: ['ar', 'creditors', 'exec'] },
-      { label: 'สุขภาพการเงิน (Financial health)', href: '/financial-health', icon: CircleDollarSign, perms: ['exec', 'dashboard', 'ar', 'creditors'] },
-      { label: 'บัญชีแยกประเภท', href: '/accounting', icon: BookText, perms: ['exec', 'creditors', 'ar'] },
-      { label: 'สินทรัพย์ถาวร', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
-      { label: 'ธนาคาร', href: '/bank', icon: Landmark, perms: ['exec', 'creditors', 'ar'] },
-      { label: 'กระทบยอด', href: '/reconciliation', icon: Scale, perms: ['exec', 'creditors', 'ar'] },
-      { label: 'รับรู้รายได้', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
-      { label: 'ระหว่างบริษัท', href: '/intercompany', icon: ArrowLeftRight, perms: ['exec', 'creditors'] },
-      { label: 'งบการเงินรวม', href: '/consolidation', icon: Layers, perms: ['exec'] },
-      { label: 'อัตราแลกเปลี่ยน', href: '/fx', icon: Coins, perms: ['exec', 'creditors', 'ar'] },
+    subgroups: [
+      {
+        title: 'รายรับ–รายจ่าย (AR/AP)',
+        items: [
+          { label: 'การเงิน', href: '/finance', icon: Banknote, perms: ['ar', 'creditors', 'exec'] },
+        ],
+      },
+      {
+        title: 'สมุดบัญชี & แยกประเภท',
+        items: [
+          { label: 'บัญชีแยกประเภท', href: '/accounting', icon: BookText, perms: ['exec', 'creditors', 'ar'] },
+          { label: 'รับรู้รายได้', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
+          { label: 'สินทรัพย์ถาวร', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
+        ],
+      },
+      {
+        title: 'ธนาคาร & กระทบยอด',
+        items: [
+          { label: 'ธนาคาร', href: '/bank', icon: Landmark, perms: ['exec', 'creditors', 'ar'] },
+          { label: 'กระทบยอด', href: '/reconciliation', icon: Scale, perms: ['exec', 'creditors', 'ar'] },
+        ],
+      },
+      {
+        title: 'งบ & วิเคราะห์การเงิน',
+        defaultOpen: false, // reporting/health — opened on demand
+        items: [
+          { label: 'สุขภาพการเงิน (Financial health)', href: '/financial-health', icon: CircleDollarSign, perms: ['exec', 'dashboard', 'ar', 'creditors'] },
+          { label: 'งบการเงินรวม', href: '/consolidation', icon: Layers, perms: ['exec'] },
+        ],
+      },
+      {
+        title: 'ระหว่างบริษัท & สกุลเงิน',
+        defaultOpen: false, // advanced multi-entity / treasury — collapsed by default
+        items: [
+          { label: 'ระหว่างบริษัท', href: '/intercompany', icon: ArrowLeftRight, perms: ['exec', 'creditors'] },
+          { label: 'อัตราแลกเปลี่ยน', href: '/fx', icon: Coins, perms: ['exec', 'creditors', 'ar'] },
+        ],
+      },
     ],
   },
   {

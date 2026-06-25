@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Boxes, Coins, Landmark, Play, QrCode, ScanLine, X } from 'lucide-react';
+import { Boxes, CalendarRange, Coins, FolderTree, Landmark, Play, QrCode, ScanLine, SearchX, X } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -85,7 +86,20 @@ function Register() {
                 { key: 'net_book_value', label: 'NBV', align: 'right', render: (r: any) => <span className="tabular">{baht(r.net_book_value)}</span> },
                 { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               ]}
-              emptyText="ยังไม่มีสินทรัพย์"
+              emptyState={
+                status
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบสินทรัพย์ตามตัวกรอง',
+                      description: 'ไม่มีสินทรัพย์ในสถานะนี้ ลองล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => setStatus('')}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : { icon: Boxes, title: 'ยังไม่มีสินทรัพย์', description: 'เพิ่มสินทรัพย์ในทะเบียน หรือบันทึกการได้มาเพื่อเริ่มต้น' }
+              }
             />
           </div>
         )}
@@ -120,7 +134,7 @@ function ScheduleDrill({ assetNo, onClose }: { assetNo: string; onClose: () => v
                 { key: 'accumulated_after', label: 'สะสมหลังงวด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.accumulated_after)}</span> },
                 { key: 'nbv_after', label: 'NBV หลังงวด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.nbv_after)}</span> },
               ]}
-              emptyText="ยังไม่มีรายการค่าเสื่อม"
+              emptyState={{ title: 'ยังไม่มีรายการค่าเสื่อม' }}
               dense
             />
           </div>
@@ -141,20 +155,19 @@ function QrTags() {
     enabled: !!assetNo,
   });
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
 
   const [scanCode, setScanCode] = useState('');
   const [scanLoc, setScanLoc] = useState('');
   const scan = useMutation({
     mutationFn: () => api('/api/assets/scan-update', { method: 'POST', body: JSON.stringify({ code: scanCode, location: scanLoc || undefined }) }),
-    onSuccess: (r: any) => { setMsg(`✅ อัปเดต ${r.asset_no} → 📍 ${r.location ?? '—'}`); setScanCode(''); setScanLoc(''); qc.invalidateQueries({ queryKey: ['assets'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`อัปเดต ${r.asset_no} → 📍 ${r.location ?? '—'}`); setScanCode(''); setScanLoc(''); qc.invalidateQueries({ queryKey: ['assets'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   async function downloadLabels() {
-    setMsg(''); setBusy(true);
+    setBusy(true);
     try { await apiDownload('/api/assets/qr/labels', 'asset_tags.pdf'); }
-    catch (e: any) { setMsg(`❌ ${e.message}`); }
+    catch (e: any) { notifyError(e.message); }
     finally { setBusy(false); }
   }
 
@@ -168,7 +181,6 @@ function QrTags() {
         <div>
           <Button disabled={busy} onClick={downloadLabels}><QrCode className="size-4" /> {busy ? 'กำลังสร้าง…' : 'ดาวน์โหลดป้าย QR ทั้งหมด'}</Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -228,7 +240,7 @@ function Categories() {
               { key: 'accum_dep_account', label: 'บัญชีค่าเสื่อมสะสม' },
               { key: 'dep_expense_account', label: 'บัญชีค่าใช้จ่าย' },
             ]}
-            emptyText="ยังไม่มีหมวดหมู่"
+            emptyState={{ icon: FolderTree, title: 'ยังไม่มีหมวดหมู่สินทรัพย์', description: 'ตั้งค่าหมวดหมู่เพื่อกำหนดอายุการใช้งานและผังบัญชีเริ่มต้น' }}
           />
         </div>
       )}
@@ -241,18 +253,17 @@ function DepreciationRuns() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['dep-runs'], queryFn: () => api('/api/assets/depreciation/runs') });
   const [period, setPeriod] = useState('2026-06');
-  const [msg, setMsg] = useState('');
 
   const run = useMutation({
     mutationFn: () => api<any>('/api/assets/depreciation/run', { method: 'POST', body: JSON.stringify({ period }) }),
     onSuccess: (r) => {
-      if (r.already) setMsg(`✅ งวด ${period} ลงบัญชีไปแล้ว`);
-      else if (!r.asset_count) setMsg(`✅ ไม่มีสินทรัพย์ที่ต้องคิดค่าเสื่อมในงวด ${period}`);
-      else setMsg(`✅ คิดค่าเสื่อม ${num(r.asset_count)} รายการ · ${baht(r.total_depreciation)} · ${r.runs?.length ?? 1} รอบ`);
+      if (r.already) notifySuccess(`งวด ${period} ลงบัญชีไปแล้ว`);
+      else if (!r.asset_count) notifySuccess(`ไม่มีสินทรัพย์ที่ต้องคิดค่าเสื่อมในงวด ${period}`);
+      else notifySuccess(`คิดค่าเสื่อม ${num(r.asset_count)} รายการ · ${baht(r.total_depreciation)} · ${r.runs?.length ?? 1} รอบ`);
       qc.invalidateQueries({ queryKey: ['dep-runs'] });
       qc.invalidateQueries({ queryKey: ['assets'] });
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -268,7 +279,6 @@ function DepreciationRuns() {
             <Play className="size-4" /> {run.isPending ? 'กำลังคิด…' : 'คิดค่าเสื่อม'}
           </Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
 
       <StateView q={q}>
@@ -283,7 +293,7 @@ function DepreciationRuns() {
               { key: 'journal_no', label: 'เลขที่บัญชี', render: (r: any) => r.journal_no ?? '—' },
               { key: 'posted_at', label: 'ลงบัญชีเมื่อ', render: (r: any) => thaiDate(r.posted_at) },
             ]}
-            emptyText="ยังไม่มีรอบค่าเสื่อม"
+            emptyState={{ icon: CalendarRange, title: 'ยังไม่มีรอบค่าเสื่อมราคา', description: 'เลือกงวดด้านบนแล้วกด คิดค่าเสื่อม เพื่อสร้างรอบแรก' }}
           />
         )}
       </StateView>

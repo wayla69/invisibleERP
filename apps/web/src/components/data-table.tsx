@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown, Inbox } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import {
@@ -23,11 +24,23 @@ export interface Column<T> {
   className?: string;
 }
 
+/** Rich empty-state content. Friendlier than a bare line of text — an icon, a title, a one-line
+ *  description, and an optional call-to-action (e.g. a "Create" button or a "Clear filters" link). */
+export interface EmptyState {
+  icon?: LucideIcon;
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}
+
 interface DataTableProps<T extends Record<string, any>> {
   rows: T[];
   columns: Column<T>[];
   loading?: boolean;
+  /** Simple empty message. Prefer `emptyState` for a guided empty view. */
   emptyText?: string;
+  /** Rich empty view (icon + title + description + action). Takes precedence over `emptyText`. */
+  emptyState?: EmptyState;
   dense?: boolean;
   className?: string;
   rowKey?: (row: T, i: number) => string | number;
@@ -49,6 +62,7 @@ export function DataTable<T extends Record<string, any>>({
   columns,
   loading,
   emptyText = 'ไม่มีข้อมูล',
+  emptyState,
   dense,
   className,
   rowKey,
@@ -133,10 +147,28 @@ export function DataTable<T extends Record<string, any>>({
           ) : sorted.length === 0 ? (
             <TableRow className="hover:bg-transparent">
               <TableCell colSpan={columns.length} className="py-12 text-center">
-                <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                  <Inbox className="size-8 opacity-40" />
-                  <span className="text-sm">{emptyText}</span>
-                </div>
+                {emptyState ? (
+                  (() => {
+                    const Icon = emptyState.icon ?? Inbox;
+                    return (
+                      <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
+                        <div className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
+                          <Icon className="size-6" />
+                        </div>
+                        <span className="text-sm font-medium text-foreground">{emptyState.title}</span>
+                        {emptyState.description && (
+                          <p className="text-sm text-muted-foreground">{emptyState.description}</p>
+                        )}
+                        {emptyState.action && <div className="mt-2">{emptyState.action}</div>}
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                    <Inbox className="size-8 opacity-40" />
+                    <span className="text-sm">{emptyText}</span>
+                  </div>
+                )}
               </TableCell>
             </TableRow>
           ) : (
@@ -144,7 +176,23 @@ export function DataTable<T extends Record<string, any>>({
               <TableRow
                 key={rowKey ? rowKey(row, i) : pageClamped * pageSize + i}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={cn(onRowClick && 'cursor-pointer')}
+                // Clickable rows are keyboard-operable (Enter/Space) and focus-ringed for accessibility.
+                role={onRowClick ? 'button' : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onRowClick(row);
+                        }
+                      }
+                    : undefined
+                }
+                className={cn(
+                  onRowClick &&
+                    'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                )}
               >
                 {columns.map((c) => (
                   <TableCell key={c.key} className={cn(alignCls(c.align), dense && 'py-2', c.className)}>

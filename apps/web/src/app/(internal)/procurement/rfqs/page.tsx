@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, Plus, X, Award, FileSearch } from 'lucide-react';
+import { ClipboardList, Plus, X, Award, FileSearch, Inbox, FileText, Quote } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -62,7 +63,11 @@ function RfqList() {
               { key: 'required_date', label: 'ต้องการภายใน', render: (r: any) => (r.required_date ? thaiDate(r.required_date) : '—') },
               { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
             ]}
-            emptyText="ยังไม่มี RFQ"
+            emptyState={{
+              icon: Inbox,
+              title: 'ยังไม่มี RFQ',
+              description: 'สร้าง RFQ ใบแรกในแท็บ “สร้าง RFQ” เพื่อขอใบเสนอราคาจากผู้ขาย',
+            }}
           />
           <RfqDetailDialog rfqNo={selected} onClose={() => setSelected(null)} />
         </div>
@@ -81,10 +86,12 @@ function RfqDetailDialog({ rfqNo, onClose }: { rfqNo: string | null; onClose: ()
         method: 'POST',
         body: JSON.stringify({ quote_no: quoteNo }),
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      notifySuccess(`เลือกผู้ชนะแล้ว · สร้าง ${r.po_no}`);
       qc.invalidateQueries({ queryKey: ['rfq', rfqNo] });
       qc.invalidateQueries({ queryKey: ['rfqs'] });
     },
+    onError: (e) => notifyError((e as Error).message),
   });
 
   const data = q.data;
@@ -109,7 +116,7 @@ function RfqDetailDialog({ rfqNo, onClose }: { rfqNo: string | null; onClose: ()
                     { key: 'item_id', label: 'รหัสสินค้า' },
                     { key: 'qty', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
                   ]}
-                  emptyText="ไม่มีรายการ"
+                  emptyState={{ icon: FileText, title: 'ไม่มีรายการ' }}
                   dense
                 />
               </div>
@@ -134,12 +141,10 @@ function RfqDetailDialog({ rfqNo, onClose }: { rfqNo: string | null; onClose: ()
                         ) : null,
                     },
                   ]}
-                  emptyText="ยังไม่มีใบเสนอราคา"
+                  emptyState={{ icon: Quote, title: 'ยังไม่มีใบเสนอราคา' }}
                   dense
                 />
               </div>
-              {award.error && <Msg>{(award.error as Error).message}</Msg>}
-              {award.data && <Msg ok>✅ เลือกผู้ชนะแล้ว · สร้าง {award.data.po_no}</Msg>}
             </div>
           )}
         </StateView>
@@ -168,10 +173,12 @@ function RfqCreate() {
           items: lines.filter((l) => l.item_id).map((l) => ({ item_id: l.item_id, qty: Number(l.qty) })),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      notifySuccess(`${r.rfq_no} · ${num(r.lines)} รายการ`);
       setRequiredDate(''); setRemarks(''); setLines([{ item_id: '', qty: 1 }]);
       qc.invalidateQueries({ queryKey: ['rfqs'] });
     },
+    onError: (e) => notifyError((e as Error).message),
   });
 
   return (
@@ -210,8 +217,6 @@ function RfqCreate() {
             {create.isPending ? 'กำลังสร้าง…' : 'สร้าง RFQ'}
           </Button>
         </div>
-        {create.error && <Msg>{(create.error as Error).message}</Msg>}
-        {create.data && <Msg ok>✅ {create.data.rfq_no} · {num(create.data.lines)} รายการ</Msg>}
       </CardContent>
     </Card>
   );

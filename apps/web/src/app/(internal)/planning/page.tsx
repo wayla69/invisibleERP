@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Flag, Goal, Layers, Plus, Send } from 'lucide-react';
+import { CheckCircle2, Flag, Goal, Layers, Plus, Scale, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -54,7 +55,6 @@ function Versions() {
 
   const [name, setName] = useState('');
   const [year, setYear] = useState(2026);
-  const [msg, setMsg] = useState('');
 
   const create = useMutation({
     mutationFn: () =>
@@ -63,21 +63,21 @@ function Versions() {
         body: JSON.stringify({ name, fiscal_year: Number(year) }),
       }),
     onSuccess: (v) => {
-      setMsg(`✅ สร้างเวอร์ชัน ${v.version_no}`);
+      notifySuccess(`สร้างเวอร์ชัน ${v.version_no}`);
       setName('');
       qc.invalidateQueries({ queryKey: ['planning-versions'] });
     },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const action = useMutation({
     mutationFn: ({ id, verb }: { id: number; verb: 'submit' | 'approve' | 'baseline' }) =>
       api(`/api/planning/versions/${id}/${verb}`, { method: 'POST' }),
     onSuccess: (r: any) => {
-      setMsg(`✅ ${r.version_no}: ${r.status}`);
+      notifySuccess(`${r.version_no}: ${r.status}`);
       qc.invalidateQueries({ queryKey: ['planning-versions'] });
     },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const versions = q.data?.versions ?? [];
@@ -115,7 +115,6 @@ function Versions() {
           <Button disabled={!name || create.isPending} onClick={() => create.mutate()}>
             <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'สร้างเวอร์ชัน'}
           </Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </CardContent>
       </Card>
 
@@ -157,7 +156,11 @@ function Versions() {
                 ),
               },
             ]}
-            emptyText="ยังไม่มีเวอร์ชันงบประมาณ"
+            emptyState={{
+              icon: Layers,
+              title: 'ยังไม่มีเวอร์ชันงบประมาณ',
+              description: 'สร้างเวอร์ชันใหม่ด้านบนเพื่อเริ่มจัดทำงบประมาณรายปี',
+            }}
           />
         </StateView>
       </div>
@@ -261,7 +264,11 @@ function Variance() {
                     render: (r) => <span className={`tabular ${r.actual_vs_forecast >= 0 ? 'text-success' : 'text-destructive'}`}>{baht(r.actual_vs_forecast)}</span>,
                   },
                 ]}
-                emptyText="ไม่มีข้อมูลผลต่างในงวดนี้"
+                emptyState={{
+                  icon: Scale,
+                  title: 'ไม่มีข้อมูลผลต่างในงวดนี้',
+                  description: 'ลองเลือกเวอร์ชัน สถานการณ์ หรืองวดอื่น',
+                }}
               />
             </div>
           )}

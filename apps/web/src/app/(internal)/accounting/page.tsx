@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, Plus, Save, ShieldCheck, X } from 'lucide-react';
+import { Check, Plus, Save, Scale, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -63,6 +64,7 @@ function TrialBalance() {
           </div>
           <DataTable
             rows={q.data.rows}
+            emptyState={{ icon: Scale, title: 'ยังไม่มียอดในงบทดลอง', description: 'ลงยอดยกมาหรือบันทึกรายการในสมุดรายวันเพื่อให้ยอดปรากฏที่นี่' }}
             columns={[
               { key: 'account_code', label: 'รหัส' },
               { key: 'account_name', label: 'ชื่อบัญชี' },
@@ -89,7 +91,6 @@ function Journal() {
 
   const [memo, setMemo] = useState('');
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
-  const [msg, setMsg] = useState('');
 
   const sumDebit = lines.reduce((a, l) => a + (Number(l.debit) || 0), 0);
   const sumCredit = lines.reduce((a, l) => a + (Number(l.credit) || 0), 0);
@@ -108,12 +109,12 @@ function Journal() {
         }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ บันทึกเป็นฉบับร่าง — รออนุมัติจากผู้อื่น (maker-checker): ${r.entry_no}`);
+      notifySuccess(`บันทึกเป็นฉบับร่าง — รออนุมัติจากผู้อื่น (maker-checker): ${r.entry_no}`);
       setMemo(''); setLines([emptyLine(), emptyLine()]);
       qc.invalidateQueries({ queryKey: ['journal'] });
       qc.invalidateQueries({ queryKey: ['je-pending'] });
     },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -160,7 +161,6 @@ function Journal() {
             <Save className="size-4" /> {post.isPending ? 'กำลังบันทึก…' : 'บันทึกรายการ'}
           </Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
 
       <div>
@@ -203,10 +203,9 @@ function Journal() {
 function PendingJournal() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['je-pending'], queryFn: () => api('/api/ledger/journal/pending?limit=50') });
-  const [msg, setMsg] = useState('');
   const refresh = () => { qc.invalidateQueries({ queryKey: ['je-pending'] }); qc.invalidateQueries({ queryKey: ['journal'] }); qc.invalidateQueries({ queryKey: ['tb'] }); };
-  const approve = useMutation({ mutationFn: (no: string) => api(`/api/ledger/journal/${no}/approve`, { method: 'POST' }), onSuccess: (r: any) => { setMsg(`✅ อนุมัติแล้ว ${r.entry_no}`); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const reject = useMutation({ mutationFn: (no: string) => { const reason = prompt('เหตุผลที่ไม่อนุมัติ (optional)') ?? undefined; return api(`/api/ledger/journal/${no}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); }, onSuccess: (r: any) => { setMsg(`↩️ ไม่อนุมัติ ${r.entry_no}`); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const approve = useMutation({ mutationFn: (no: string) => api(`/api/ledger/journal/${no}/approve`, { method: 'POST' }), onSuccess: (r: any) => { notifySuccess(`อนุมัติแล้ว ${r.entry_no}`); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const reject = useMutation({ mutationFn: (no: string) => { const reason = prompt('เหตุผลที่ไม่อนุมัติ (optional)') ?? undefined; return api(`/api/ledger/journal/${no}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }); }, onSuccess: (r: any) => { notifySuccess(`ไม่อนุมัติ ${r.entry_no}`); refresh(); }, onError: (e: any) => notifyError(e.message) });
   const entries = q.data?.entries ?? [];
   return (
     <div className="space-y-4">
@@ -214,7 +213,6 @@ function PendingJournal() {
         <ShieldCheck className="size-4 text-muted-foreground" />
         แยกหน้าที่ (maker-checker): ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ — ต้องเป็นคนละคน. รายการที่ยังไม่อนุมัติจะ <strong>ไม่</strong> เข้างบทดลอง.
       </Card>
-      <Msg ok={msg.startsWith('✅') || msg.startsWith('↩️')}>{msg}</Msg>
       <StateView q={q}>
         {entries.length === 0 ? (
           <Card className="gap-0 p-5"><span className="text-sm text-muted-foreground">ไม่มีรายการรออนุมัติ</span></Card>
@@ -289,7 +287,6 @@ function OpeningBalances() {
 
   const [batchRef, setBatchRef] = useState('');
   const [lines, setLines] = useState<ObLine[]>([emptyObLine(), emptyObLine()]);
-  const [msg, setMsg] = useState('');
   const [errs, setErrs] = useState<{ row: number; error: string }[]>([]);
 
   const sumDebit = lines.reduce((a, l) => a + (Number(l.debit) || 0), 0);
@@ -318,15 +315,15 @@ function OpeningBalances() {
     onSuccess: (r) => {
       setErrs(r.row_errors ?? []);
       if (r.already) {
-        setMsg(`⚠️ batch_ref นี้ถูกใช้ลงยอดยกมาแล้ว`);
+        notifyError('batch_ref นี้ถูกใช้ลงยอดยกมาแล้ว');
         return;
       }
-      setMsg(`✅ ลงยอดยกมาสำเร็จ: ${r.entry_no} (${r.lines_posted ?? 0} บรรทัด)`);
+      notifySuccess(`ลงยอดยกมาสำเร็จ: ${r.entry_no} (${r.lines_posted ?? 0} บรรทัด)`);
       setBatchRef(''); setLines([emptyObLine(), emptyObLine()]);
       qc.invalidateQueries({ queryKey: ['tb'] });
       qc.invalidateQueries({ queryKey: ['journal'] });
     },
-    onError: (e: any) => { setErrs([]); setMsg(`❌ ${e.message}`); },
+    onError: (e: any) => { setErrs([]); notifyError(e.message); },
   });
 
   const hasRows = lines.some((l) => l.account_code && (Number(l.debit) || Number(l.credit)));
@@ -389,11 +386,10 @@ function OpeningBalances() {
               {Math.abs(diff) < 0.005 ? 'สมดุล' : `ลง 3000 ${baht(Math.abs(diff))}`}
             </Badge>
           </span>
-          <Button disabled={!hasRows || post.isPending} onClick={() => { setMsg(''); setErrs([]); post.mutate(); }}>
+          <Button disabled={!hasRows || post.isPending} onClick={() => { setErrs([]); post.mutate(); }}>
             <Save className="size-4" /> {post.isPending ? 'กำลังลงยอด…' : 'ลงยอดยกมา'}
           </Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         {errs.length > 0 && (
           <div className="grid gap-1 text-sm text-destructive">
             {errs.map((e, j) => <div key={j}>แถว {e.row}: {e.error}</div>)}

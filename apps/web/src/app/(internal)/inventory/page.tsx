@@ -3,15 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import Link from 'next/link';
-import { CalendarClock, Hourglass, Package, Search, TriangleAlert } from 'lucide-react';
+import { CalendarClock, Hourglass, Package, SearchX, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { PageHeader } from '@/components/page-header';
+import { ModulePage } from '@/components/module-page';
+import { SearchInput } from '@/components/search-input';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
-import { StateView } from '@/components/state-view';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
 interface StockResp {
@@ -60,69 +59,80 @@ export default function InventoryPage() {
   const expiringSoon = useMemo(() => (d?.items ?? []).filter((it) => expiryTone(it.Expiry_Date)).length, [d]);
 
   return (
-    <div>
-      <PageHeader title="สินค้าคงคลัง" description="ระดับสต๊อกและวันหมดอายุ" />
-
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder="ค้นหา Item ID / ชื่อสินค้า…"
-            aria-label="ค้นหาสินค้า"
-            inputMode="search"
-            enterKeyHint="search"
+    <ModulePage
+      title="สินค้าคงคลัง"
+      description="ระดับสต๊อกและวันหมดอายุ"
+      query={q}
+      toolbar={
+        <>
+          <SearchInput
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={setSearch}
+            placeholder="ค้นหา Item ID / ชื่อสินค้า…"
+            ariaLabel="ค้นหาสินค้า"
+            count={d ? `${num(d.items.length)} รายการ` : undefined}
           />
-        </div>
-        <Button variant={lowOnly ? 'default' : 'outline'} aria-pressed={lowOnly} onClick={() => setLowOnly((v) => !v)}>
-          <TriangleAlert className="size-4" /> เฉพาะสต๊อกต่ำ
-        </Button>
-        {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">กำลังอัปเดต…</span>}
-      </div>
-
-      <StateView q={q}>
-        {d && (
-          <div className={cn('space-y-5 transition-opacity', q.isFetching && 'opacity-60')}>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Snapshot" value={d.snapshot_date ? thaiDate(d.snapshot_date) : '—'} icon={CalendarClock} hint="ข้อมูล ณ วันที่" />
-              <StatCard label="รายการทั้งหมด" value={num(d.total)} icon={Package} tone="primary" />
-              <StatCard label="สต๊อกต่ำ" value={num(d.low_stock_count)} icon={TriangleAlert} tone={d.low_stock_count > 0 ? 'warning' : 'success'} hint="ต้องเติมสินค้า" />
-              <StatCard
-                label="หมดอายุ / ใกล้หมด (≤30 วัน)"
-                value={num(expiringSoon)}
-                icon={Hourglass}
-                tone={expiringSoon > 0 ? 'danger' : 'success'}
-                hint="จากรายการที่แสดง"
-              />
-            </div>
-            <DataTable
-              rows={d.items}
-              rowKey={(r) => r.Item_ID}
-              emptyText={filtering ? 'ไม่พบสินค้าที่ตรงกับตัวกรอง' : 'ไม่มีข้อมูลสินค้า'}
-              columns={[
-                { key: 'Item_ID', label: 'Item ID', render: (r) => <Link className="font-medium text-primary hover:underline" href={`/inventory/${encodeURIComponent(r.Item_ID)}`}>{r.Item_ID}</Link> },
-                { key: 'Item_Description', label: 'ชื่อสินค้า' },
-                { key: 'UOM', label: 'หน่วย' },
-                { key: 'AV_QTY', label: 'คงเหลือ', align: 'right', render: (r) => <span className={cn('tabular', Number(r.AV_QTY) <= 0 && 'font-semibold text-destructive')}>{num(r.AV_QTY)}</span> },
-                {
-                  key: 'Expiry_Date',
-                  label: 'หมดอายุ',
-                  render: (r) => {
-                    const tone = expiryTone(r.Expiry_Date);
-                    return (
-                      <span className={cn(tone === 'destructive' && 'font-medium text-destructive', tone === 'warning' && 'text-warning-foreground dark:text-warning')}>
-                        {r.Expiry_Date ? thaiDate(r.Expiry_Date) : '—'}
-                      </span>
-                    );
-                  },
-                },
-              ]}
+          <Button variant={lowOnly ? 'default' : 'outline'} aria-pressed={lowOnly} onClick={() => setLowOnly((v) => !v)}>
+            <TriangleAlert className="size-4" /> เฉพาะสต๊อกต่ำ
+          </Button>
+          {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">กำลังอัปเดต…</span>}
+        </>
+      }
+      stats={
+        d && (
+          <>
+            <StatCard label="Snapshot" value={d.snapshot_date ? thaiDate(d.snapshot_date) : '—'} icon={CalendarClock} hint="ข้อมูล ณ วันที่" />
+            <StatCard label="รายการทั้งหมด" value={num(d.total)} icon={Package} tone="primary" />
+            <StatCard label="สต๊อกต่ำ" value={num(d.low_stock_count)} icon={TriangleAlert} tone={d.low_stock_count > 0 ? 'warning' : 'success'} hint="ต้องเติมสินค้า" />
+            <StatCard
+              label="หมดอายุ / ใกล้หมด (≤30 วัน)"
+              value={num(expiringSoon)}
+              icon={Hourglass}
+              tone={expiringSoon > 0 ? 'danger' : 'success'}
+              hint="จากรายการที่แสดง"
             />
-          </div>
-        )}
-      </StateView>
-    </div>
+          </>
+        )
+      }
+    >
+      {d && (
+        <DataTable
+          rows={d.items}
+          rowKey={(r) => r.Item_ID}
+          emptyState={
+            filtering
+              ? {
+                  icon: SearchX,
+                  title: 'ไม่พบสินค้าที่ตรงกับตัวกรอง',
+                  description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                  action: (
+                    <Button variant="outline" size="sm" onClick={() => { setSearch(''); setLowOnly(false); }}>
+                      ล้างตัวกรอง
+                    </Button>
+                  ),
+                }
+              : { icon: Package, title: 'ยังไม่มีข้อมูลสินค้า', description: 'เพิ่มสินค้าในข้อมูลหลัก หรือซิงก์สต๊อกเพื่อเริ่มต้น' }
+          }
+          columns={[
+            { key: 'Item_ID', label: 'Item ID', render: (r) => <Link className="font-medium text-primary hover:underline" href={`/inventory/${encodeURIComponent(r.Item_ID)}`}>{r.Item_ID}</Link> },
+            { key: 'Item_Description', label: 'ชื่อสินค้า' },
+            { key: 'UOM', label: 'หน่วย' },
+            { key: 'AV_QTY', label: 'คงเหลือ', align: 'right', render: (r) => <span className={cn('tabular', Number(r.AV_QTY) <= 0 && 'font-semibold text-destructive')}>{num(r.AV_QTY)}</span> },
+            {
+              key: 'Expiry_Date',
+              label: 'หมดอายุ',
+              render: (r) => {
+                const tone = expiryTone(r.Expiry_Date);
+                return (
+                  <span className={cn(tone === 'destructive' && 'font-medium text-destructive', tone === 'warning' && 'text-warning-foreground dark:text-warning')}>
+                    {r.Expiry_Date ? thaiDate(r.Expiry_Date) : '—'}
+                  </span>
+                );
+              },
+            },
+          ]}
+        />
+      )}
+    </ModulePage>
   );
 }
