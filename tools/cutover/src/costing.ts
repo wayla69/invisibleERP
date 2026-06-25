@@ -147,6 +147,12 @@ async function main() {
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after all costing activity', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
 
+  // Costing-engine boundary (reverse guard): an item already valued by the perpetual sub-ledger
+  // (inv_balances, INV-06) cannot be assigned a costing-module method — both capitalize to GL 1200.
+  await db.insert(s.invBalances).values({ tenantId: t1, itemId: 'SUBLEDGERED', onHandQty: '10', avgCost: '5', totalValue: '50', costingMethod: 'moving_avg' }).onConflictDoNothing();
+  const conflictCfg = await inj('PUT', '/api/costing/config', plan1, { item_id: 'SUBLEDGERED', method: 'AVG' });
+  ok('Boundary: assigning a costing method to a sub-ledger item rejected (CONFLICTING_COSTING)', conflictCfg.status === 400 && conflictCfg.json?.error?.code === 'CONFLICTING_COSTING', `st=${conflictCfg.status} code=${conflictCfg.json?.error?.code}`);
+
   console.log('\n── Phase 17A — Inventory costing (FIFO/AVG/STD) + valuation + ATP ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

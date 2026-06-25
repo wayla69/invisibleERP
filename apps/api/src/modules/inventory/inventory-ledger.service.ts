@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { invMoves, invBalances, invCostLayers, journalEntries, journalLines } from '../../database/schema';
+import { invMoves, invBalances, invCostLayers, itemCosting, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -47,6 +47,14 @@ export class InventoryLedgerService {
   private tenant(user: JwtUser): number {
     if (user.tenantId == null) throw bad('NO_TENANT', 'A tenant context is required', 'ต้องอยู่ในบริบทผู้เช่า');
     return user.tenantId;
+  }
+
+  // Reject if the item is explicitly costed by the `costing` module (a per-item item_costing row) — the two
+  // valued-inventory engines are mutually exclusive per item (see costing.setMethod for the reverse guard).
+  private async assertNotCostingManaged(tenantId: number, itemId: string) {
+    const [ic] = await (this.db as any).select().from(itemCosting)
+      .where(and(eq(itemCosting.tenantId, tenantId), eq(itemCosting.itemId, itemId))).limit(1);
+    if (ic) throw bad('CONFLICTING_COSTING', `Item ${itemId} is managed by the costing module (method ${ic.method}); use the procurement-GR/costing path, or clear its costing config first`, 'สินค้านี้คิดต้นทุนผ่านโมดูล costing แล้ว — ใช้ช่องทาง GR/costing หรือยกเลิกการตั้งค่า costing ของสินค้านี้ก่อน');
   }
 
   private mkNo(prefix: string): string {
@@ -135,6 +143,10 @@ export class InventoryLedgerService {
     if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
     if (unitCost < 0) throw bad('BAD_COST', 'unit_cost must be ≥ 0', 'ต้นทุนต้องไม่ติดลบ');
     const loc = dto.location_id ?? 'WH-MAIN';
+    // Costing-engine boundary: an item EXPLICITLY managed by the costing module (item_costing per-item row —
+    // FIFO/AVG/STD, capitalized on procurement GR to GL 1200) must NOT also be capitalized by this perpetual
+    // sub-ledger, or inventory double-posts to 1200. The newer sub-ledger yields to the established engine.
+    await this.assertNotCostingManaged(tenantId, dto.item_id);
     // INV-02 — idempotent posting: a receipt already recorded for this ref is a no-op (no double stock / GL).
     if (dto.ref_type && dto.ref_id) {
       const dup = await this.findByRef(tenantId, dto.ref_type, dto.ref_id);

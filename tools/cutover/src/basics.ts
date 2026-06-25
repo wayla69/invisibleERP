@@ -456,6 +456,12 @@ async function main() {
   const recF = (await inj('GET', '/api/inventory/reconciliation', invmgr)).json;
   ok('FEFO: layer sub-ledger still ties to the GL inventory control account (reconciled)', recF.reconciled === true && near(recF.sub_ledger_value, recF.gl_inventory), `sub=${recF.sub_ledger_value} gl=${recF.gl_inventory} rec=${recF.reconciled}`);
 
+  // Costing-engine boundary: an item managed by the costing module (item_costing) cannot also be received
+  // into the perpetual sub-ledger — prevents double-capitalizing inventory to GL 1200 (engines are exclusive).
+  await db.insert(s.itemCosting).values({ tenantId: invTid, itemId: 'COSTITEM', method: 'AVG' }).onConflictDoNothing();
+  const conflictRcv = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'COSTITEM', qty: 5, unit_cost: 10 });
+  ok('Inventory: receipt of a costing-module-managed item rejected (CONFLICTING_COSTING)', conflictRcv.status === 400 && conflictRcv.json?.error?.code === 'CONFLICTING_COSTING', `st=${conflictRcv.status} code=${conflictRcv.json?.error?.code}`);
+
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
