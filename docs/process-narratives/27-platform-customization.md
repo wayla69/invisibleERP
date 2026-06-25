@@ -97,6 +97,20 @@ Each entry: **what it does · endpoint(s) · permission · storage/migration · 
 21. **AI configuration assistant — Phase 18 (B4).** Describe a Studio object (custom object / alert / automation rule / document template) in plain language and get a **proposed config JSON** to review and apply through the normal Studio screen — it **never auto-applies**. Claude drafts when keyed; deterministic starter templates otherwise. Suggestion-only — no writes, no GL. `GET /api/ai-config/targets`, `POST /api/ai-config/suggest`. Perm `masterdata`/`users`/`exec`. Web `/ai-config`. *Verified by `ext` (object + alert proposals, `BAD_TARGET`).*
 22. **Continuous controls monitoring — Phase 19 (B5).** A **detective-control monitor** that scans tenant-scoped books for red flags — duplicate vendor invoices (vendor + invoice no), possible duplicate payments (vendor + amount), and ghost/duplicate vendors (shared tax ID) — and raises **findings** for human review (open → reviewed/dismissed). Every detector runs over RLS-scoped tables so findings never cross tenants; re-scans **upsert by fingerprint** (no duplicates). Read-only, posts **nothing** to the GL. Table `control_findings` (migration `0092`). `GET /api/controls/catalog`, `POST /api/controls/scan`, `GET /api/controls/findings`, `POST /api/controls/findings/:id/review`. Perm `exec`/`users`/`creditors`. Web `/controls`. *Strengthens the SOX/ICFR detective-control story (formal RCM control-ID assignment is a planned follow-up); verified by `ext` (scan/findings/review/RLS/no-GL).*
 
+23. **Synced UI preferences — sidebar personalization.** Per-user sidebar **favourites** (★ pins) and the
+    nav **sub-section fold-state** follow the user **across devices** via a personal preference store, so a
+    layout set on one browser is restored on the next. A single per-user row holds a small JSON blob
+    (`{favorites, navFold}`); the web caches it in `localStorage` for instant paint and an offline
+    fallback, then reconciles to the server as source of truth on load (first use migrates the device's
+    local prefs up). The auto-tracked **"recent" list deliberately stays per-device** (it means *recent on
+    this device*) and is **not** stored server-side. Endpoint `GET`/`PUT /api/user-prefs` — **no
+    `@Permissions`**: every authenticated user reads/writes only their **own** row (service scopes by
+    username, RLS by tenant); the customer portal does not call it. Personal, presentation-only — posts
+    **nothing** to the GL and changes **no** data-access path. Table `user_prefs` (migration `0119`);
+    RLS-scoped. *No new RCM control and no RACI/control-matrix change (a personal preference store): the new
+    table is covered by the `tenant-isolation` RLS harness and the behaviour by the `web-e2e`
+    `workspace-split` Playwright suite.*
+
 ## 8. Process flow
 
 ```mermaid
@@ -173,3 +187,4 @@ Per-feature validation codes are consolidated here (all `400` unless noted): UDF
 | 0.8 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 13 — automation rules engine**: no-code when-event/condition→action over the existing event stream (po.approved/rejected, alert.fired); actions = notification/message/log (non-GL), triggered via a guarded webhook-dispatcher hook + on-demand `/run-event`, every run logged. RLS-scoped (migration `0091`). New §7.16, RACI + control-matrix rows, error codes; `ext` +9 checks (189). No new RCM control (operational). |
 | 0.9 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 14 — semantic layer + report builder**: a governed self-service analytics surface (curated measures × dimensions over POS sales; safe RLS-scoped aggregate; saved reports reuse saved-views). Read-only, no GL, no schema change. New §7.17, RACI + control-matrix rows, `BAD_DIMENSION`; `ext` +4 checks (193). No new RCM control (operational). |
 | 1.0 DRAFT | 2026-06-24 | Platform | Added **Pillar B (AI-native) — Platform Phases 15–19**: embedded copilot (§7.18, KB cite-or-refuse), document-AI intake (§7.19, extract-only AP draft), NL analytics (§7.20, over the A5 semantic layer), AI configuration assistant (§7.21, suggestion-only), continuous controls monitoring (§7.22, detective scans → findings; migration `0092`). All read-only / suggestion-only / human-in-the-loop, RLS-scoped, **no GL**; AI features degrade deterministically with no API key (CI offline-safe). New §7.18–7.22, five RACI + control-matrix rows, `BAD_TARGET`/`FINDING_NOT_FOUND`; `ext` +15 checks (208). B5 is a detective-control aid (formal RCM control-ID assignment is a planned follow-up). |
+| 1.1 DRAFT | 2026-06-25 | Web | Added capability #23 — **synced UI preferences**: per-user sidebar favourites + nav fold-state follow the user across devices via `GET`/`PUT /api/user-prefs` (no `@Permissions`; owner-scoped + RLS); recents stay per-device. Table `user_prefs` (migration `0119`), presentation-only, **no GL**, no data-access change. New §7.23; no RACI/control-matrix change and no new RCM control (personal preference store). Covered by the `tenant-isolation` RLS harness + `web-e2e` `workspace-split` suite. See `docs/15-ui-ux-menu-restructure-plan.md`. |

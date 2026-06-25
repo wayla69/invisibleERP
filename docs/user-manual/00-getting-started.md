@@ -161,8 +161,9 @@ appear in **both** workspaces.
   remembered on that device.
 - **Favourites & recent:** hover any menu item and click the **★ star** to pin it to a **รายการโปรด**
   (Favourites) group at the top of the side menu; click the star again to unpin. A **ล่าสุด** (Recent)
-  group automatically lists the last few screens you opened. Both are per-device and only show items you
-  can access in the current workspace.
+  group automatically lists the last few screens you opened. Both only show items you can access in the
+  current workspace. Your **favourites and the fold-state of the Settings sub-sections follow you across
+  devices** (saved to your account); the **Recent** list is per-device.
 
 [screenshot: ERP/POS workspace switcher in the sidebar header]
 

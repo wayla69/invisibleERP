@@ -224,6 +224,13 @@ with **zero route changes** and a small additive data-model extension. The orpha
   `defaultOpen?: boolean` (default `true`); the advanced Settings sub-sections *ปรับแต่ง* and
   *เชื่อมต่อ & ขยาย* now start collapsed so *ตั้งค่าระบบ* opens compact, while *ข้อมูลหลัก* and *ผู้ดูแลระบบ* stay
   open. A saved user toggle still overrides the default.
+- **Server-synced preferences** ✅ *(delivered 2026-06-25)* — favourites + Settings fold-state now follow the
+  user across devices via a personal preference store `GET`/`PUT /api/user-prefs` (NestJS `UserPrefsModule`,
+  table `user_prefs`, migration `0119`, RLS-scoped, owner-scoped, no `@Permissions`). `app-shell.tsx` keeps
+  `localStorage` as an instant cache/offline fallback and reconciles to the server as source of truth on
+  load (first use migrates the device's local prefs up); writes are debounced (600 ms). **Recents stay
+  per-device** (chosen scope — avoids a server write per navigation in the audited API). `NavSubSection` is
+  now controlled (fold-state lifted into `AppShell`). Process narrative `27-platform-customization` §7.23.
 - **Screenshots** — refresh the `[screenshot: …]` placeholders in the user manual once design captures new
   sidebar imagery. *(still open)*
 
@@ -238,3 +245,4 @@ with **zero route changes** and a small additive data-model extension. The orpha
 | 2026-06-25 | v1.0 (IMPLEMENTED) | Web / Product | Phases 2–5 delivered. `nav.ts`: `NavSubGroup` + optional `subgroups`/`items`, `allGroupItems()`, recursive `navForWorkspace()`, INTERNAL_NAV re-bucketed into per-domain ERP/POS groups + a 4-sub-section *ตั้งค่าระบบ* group, orphan `/loyalty` wired in — **no href changed**. `app-shell.tsx`: recursive permission filter + active-label, dependency-free collapsible `NavSubSection` (localStorage-persisted). `command-palette.tsx`: flattens subgroups. Corrected baseline counts (System 22, POS sales 19). Verified: web typecheck ✅, web build ✅, Playwright `workspace-split` 5/5 ✅ (added collapsible-sub-section case). Docs: user-manual *Workspaces* section updated. |
 | 2026-06-25 | v1.1 (IMPLEMENTED) | Web / Product | §6 follow-up delivered: **Favorites/Recents** pinned groups (*รายการโปรด* + *ล่าสุด*) at the top of the internal sidebar. `app-shell.tsx`: star menu-action toggles favourites; recents auto-tracked on route change; both `localStorage`-backed and resolved against the workspace's permission-filtered items; gated on `filterPerms` (portal unaffected). Verified: web typecheck ✅, build ✅, Playwright `workspace-split` 6/6 ✅ (added a favourite-pin/persist/un-pin case). User-manual *Workspaces* section updated. |
 | 2026-06-25 | v1.2 (IMPLEMENTED) | Web / Product | §6 follow-up delivered: **`defaultOpen`** on `NavSubGroup`. Advanced Settings sub-sections *ปรับแต่ง* + *เชื่อมต่อ & ขยาย* start collapsed (others open); saved toggle still wins. `nav.ts` + `app-shell.tsx` (`NavSubSection` accepts `defaultOpen`). Verified: web typecheck ✅, build ✅, Playwright `workspace-split` 6/6 ✅ (added a collapsed-by-default assertion). |
+| 2026-06-25 | v1.3 (IMPLEMENTED) | Web / API | §6 follow-up delivered: **server-synced preferences**. New API `UserPrefsModule` — `GET`/`PUT /api/user-prefs`, table `user_prefs` (migration `0119`, hand-journaled), RLS-scoped, owner-scoped, no `@Permissions` (any authed user, own row). `app-shell.tsx`: favourites + nav fold-state now sync (localStorage cache + reconcile-to-server + debounced PUT); `NavSubSection` lifted to controlled. Recents stay per-device (scope confirmed with user). Docs: process-narrative `27` §7.23 + revision row; user-manual *Workspaces*. Verified: API typecheck ✅ + build ✅ + journal gate ✅; web typecheck ✅ + build ✅; Playwright `workspace-split` 7/7 ✅ (added server-hydrate + PUT-on-toggle case). |

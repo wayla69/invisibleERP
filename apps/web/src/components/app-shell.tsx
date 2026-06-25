@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChevronRight, LogOut, Search, Star } from 'lucide-react';
 
-import { hasSession, logout as apiLogout } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
+
+import { api, hasSession, logout as apiLogout } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
 import { useModuleFlags } from '@/lib/modules';
 import {
@@ -56,40 +58,45 @@ function initials(name?: string | null) {
 }
 
 const WORKSPACE_KEY = 'ie-workspace';
-const FAVORITES_KEY = 'ie-nav-favorites'; // pinned hrefs (manual)
-const RECENTS_KEY = 'ie-nav-recents'; // recently visited hrefs (auto, most-recent-first)
+const FAVORITES_KEY = 'ie-nav-favorites'; // pinned hrefs (manual) — localStorage cache of the synced value
+const FOLD_KEY = 'ie-nav-fold'; // nav sub-section fold map {title: open} — localStorage cache of synced value
+const FOLD_KEY_PREFIX = 'ie-nav-sub:'; // legacy per-title fold keys (pre-sync), migrated into FOLD_KEY
+const RECENTS_KEY = 'ie-nav-recents'; // recently visited hrefs (auto, most-recent-first) — per-device only
 const RECENTS_SHOWN = 5; // how many recent items to surface
 const RECENTS_STORED = 12; // how many to retain so favourites filtering doesn't starve the list
+const PREFS_PUSH_MS = 600; // debounce for syncing pref changes to the server
 
-/** A labelled, collapsible sub-section inside a sidebar group (dependency-free). Open state persists per
- *  title in localStorage. In icon-collapsed mode the header is hidden and items stay visible (icons only). */
+type SyncedPrefs = { favorites: string[]; navFold: Record<string, boolean> };
+
+const readJson = <T,>(key: string, fallback: T): T => {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? 'null');
+    return v == null ? fallback : (v as T);
+  } catch {
+    return fallback;
+  }
+};
+
+/** A labelled, collapsible sub-section inside a sidebar group (dependency-free). Controlled: open state and
+ *  persistence live in AppShell (so they can be device-synced). In icon-collapsed mode the header is hidden
+ *  and items stay visible (icons only). */
 function NavSubSection({
   title,
-  defaultOpen = true,
+  open,
+  onToggle,
   children,
 }: {
   title: string;
-  defaultOpen?: boolean;
+  open: boolean;
+  onToggle: () => void;
   children: React.ReactNode;
 }) {
-  const storeKey = `ie-nav-sub:${title}`;
-  const [open, setOpen] = React.useState(defaultOpen);
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const saved = localStorage.getItem(storeKey);
-    if (saved != null) setOpen(saved === '1');
-  }, [storeKey]);
-  const toggle = () =>
-    setOpen((o) => {
-      const next = !o;
-      if (typeof window !== 'undefined') localStorage.setItem(storeKey, next ? '1' : '0');
-      return next;
-    });
   return (
     <div className="mt-1">
       <button
         type="button"
-        onClick={toggle}
+        onClick={onToggle}
         aria-expanded={open}
         className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
       >
@@ -121,32 +128,104 @@ export function AppShell({
   const moduleFlags = useModuleFlags();
   const [paletteOpen, setPaletteOpen] = React.useState(false);
 
-  // Favourites (pinned via the star) + auto-tracked recents — only on the permission-gated internal
-  // surface (not the small customer portal). Loaded after mount to avoid an SSR/CSR hydration mismatch.
+  // Favourites (★ pins) + nav fold-state are synced across devices via /api/user-prefs; auto-tracked
+  // recents stay per-device. All only on the permission-gated internal surface (not the customer portal).
+  // localStorage is an instant cache + offline fallback; the server is the source of truth once it loads.
   const pinsEnabled = filterPerms;
   const [favorites, setFavorites] = React.useState<string[]>([]);
+  const [navFold, setNavFold] = React.useState<Record<string, boolean>>({});
   const [recents, setRecents] = React.useState<string[]>([]);
+
+  // Hydrate from the localStorage cache after mount (avoids an SSR/CSR hydration mismatch), migrating any
+  // legacy per-title fold keys into the single fold map.
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const read = (k: string): string[] => {
-      try {
-        const v = JSON.parse(localStorage.getItem(k) ?? '[]');
-        return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
-      } catch {
-        return [];
+    const favs = readJson<string[]>(FAVORITES_KEY, []).filter((x) => typeof x === 'string');
+    const fold = { ...readJson<Record<string, boolean>>(FOLD_KEY, {}) };
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(FOLD_KEY_PREFIX)) {
+        const title = k.slice(FOLD_KEY_PREFIX.length);
+        if (!(title in fold)) fold[title] = localStorage.getItem(k) === '1';
       }
-    };
-    setFavorites(read(FAVORITES_KEY));
-    setRecents(read(RECENTS_KEY));
+    }
+    setFavorites(favs);
+    setNavFold(fold);
+    setRecents(readJson<string[]>(RECENTS_KEY, []).filter((x) => typeof x === 'string'));
   }, []);
   const favSet = React.useMemo(() => new Set(favorites), [favorites]);
-  const toggleFavorite = React.useCallback((href: string) => {
-    setFavorites((prev) => {
-      const next = prev.includes(href) ? prev.filter((h) => h !== href) : [href, ...prev];
-      if (typeof window !== 'undefined') localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
-      return next;
-    });
-  }, []);
+
+  // Debounced push of pref changes to the server (favourites + fold-state), coalescing rapid toggles.
+  const pushTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPush = React.useRef<Partial<SyncedPrefs>>({});
+  const schedulePush = React.useCallback(
+    (patch: Partial<SyncedPrefs>) => {
+      if (!pinsEnabled || !hasSession()) return;
+      pendingPush.current = {
+        ...pendingPush.current,
+        ...patch,
+        ...(patch.navFold ? { navFold: { ...pendingPush.current.navFold, ...patch.navFold } } : {}),
+      };
+      if (pushTimer.current) clearTimeout(pushTimer.current);
+      pushTimer.current = setTimeout(() => {
+        const body = pendingPush.current;
+        pendingPush.current = {};
+        void api('/api/user-prefs', { method: 'PUT', body: JSON.stringify(body) }).catch(() => {});
+      }, PREFS_PUSH_MS);
+    },
+    [pinsEnabled],
+  );
+
+  const toggleFavorite = React.useCallback(
+    (href: string) => {
+      setFavorites((prev) => {
+        const next = prev.includes(href) ? prev.filter((h) => h !== href) : [href, ...prev];
+        if (typeof window !== 'undefined') localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+        schedulePush({ favorites: next });
+        return next;
+      });
+    },
+    [schedulePush],
+  );
+  const toggleFold = React.useCallback(
+    (title: string, defaultOpen: boolean) => {
+      setNavFold((prev) => {
+        const open = !(prev[title] ?? defaultOpen);
+        const next = { ...prev, [title]: open };
+        if (typeof window !== 'undefined') localStorage.setItem(FOLD_KEY, JSON.stringify(next));
+        schedulePush({ navFold: { [title]: open } });
+        return next;
+      });
+    },
+    [schedulePush],
+  );
+
+  // Server sync: load the user's saved prefs, then reconcile once. If the server has a saved row, adopt it
+  // as the source of truth (and refresh the local cache). If not, migrate the existing local prefs up.
+  const prefsQuery = useQuery<SyncedPrefs & { saved: boolean }>({
+    queryKey: ['user-prefs'],
+    queryFn: () => api('/api/user-prefs'),
+    enabled: pinsEnabled && typeof window !== 'undefined' && !!hasSession() && !!me.data,
+    staleTime: 5 * 60_000,
+  });
+  const reconciled = React.useRef(false);
+  React.useEffect(() => {
+    if (reconciled.current || !prefsQuery.data) return;
+    reconciled.current = true;
+    const server = prefsQuery.data;
+    if (server.saved) {
+      const favs = Array.isArray(server.favorites) ? server.favorites : [];
+      const fold = server.navFold && typeof server.navFold === 'object' ? server.navFold : {};
+      setFavorites(favs);
+      setNavFold((local) => ({ ...local, ...fold }));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+        localStorage.setItem(FOLD_KEY, JSON.stringify(fold));
+      }
+    } else if (favorites.length || Object.keys(navFold).length) {
+      schedulePush({ favorites, navFold }); // first-time migration of this device's local prefs
+    }
+  }, [prefsQuery.data, favorites, navFold, schedulePush]);
 
   // Active top-level workspace (ERP | POS). Seed from the saved preference; otherwise default by role
   // once the user profile loads. A manual choice is persisted and wins thereafter.
@@ -374,11 +453,19 @@ export function AppShell({
                 {group.items && group.items.length > 0 && (
                   <SidebarMenu>{group.items.map(renderItem)}</SidebarMenu>
                 )}
-                {group.subgroups?.map((sub) => (
-                  <NavSubSection key={sub.title} title={sub.title} defaultOpen={sub.defaultOpen}>
-                    <SidebarMenu>{sub.items.map(renderItem)}</SidebarMenu>
-                  </NavSubSection>
-                ))}
+                {group.subgroups?.map((sub) => {
+                  const open = navFold[sub.title] ?? sub.defaultOpen ?? true;
+                  return (
+                    <NavSubSection
+                      key={sub.title}
+                      title={sub.title}
+                      open={open}
+                      onToggle={() => toggleFold(sub.title, sub.defaultOpen ?? true)}
+                    >
+                      <SidebarMenu>{sub.items.map(renderItem)}</SidebarMenu>
+                    </NavSubSection>
+                  );
+                })}
               </SidebarGroupContent>
             </SidebarGroup>
           ))}

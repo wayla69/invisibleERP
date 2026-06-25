@@ -142,3 +142,31 @@ test('starring a menu item pins it to the Favourites group and persists across r
   await favGroup.locator('li[data-sidebar="menu-item"] button[data-sidebar="menu-action"]').first().click();
   await expect(page.getByText('รายการโปรด', { exact: true })).toHaveCount(0);
 });
+
+test('server-saved favourites hydrate the sidebar and toggles are persisted to /api/user-prefs', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  // Override the generic stub for the prefs endpoint (registered after bootAs → takes precedence).
+  const puts: Array<{ favorites?: string[]; navFold?: Record<string, boolean> }> = [];
+  await page.route('**/api/user-prefs', async (route) => {
+    const req = route.request();
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (req.method() === 'GET') return json({ favorites: ['/procurement'], navFold: { 'ปรับแต่ง': true }, saved: true });
+    if (req.method() === 'PUT') {
+      puts.push(JSON.parse(req.postData() || '{}'));
+      return json({ favorites: [], navFold: {}, saved: true });
+    }
+    return json({});
+  });
+  await page.goto('/dashboard');
+
+  // The server-saved favourite hydrates into the Favourites group even though localStorage started empty.
+  const favGroup = page.locator('div[data-sidebar="group"]', { has: page.getByText('รายการโปรด', { exact: true }) });
+  await expect(favGroup.locator('a[href="/procurement"]')).toBeVisible();
+  // The server-saved fold-state is applied: ปรับแต่ง (collapsed by default) is now expanded.
+  await expect(page.getByRole('button', { name: 'ปรับแต่ง', exact: true })).toHaveAttribute('aria-expanded', 'true');
+
+  // Starring another item issues a PUT carrying the updated favourites.
+  const invItem = page.locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/inventory"]') });
+  await invItem.locator('button[data-sidebar="menu-action"]').click();
+  await expect.poll(() => puts.some((p) => p.favorites?.includes('/inventory'))).toBeTruthy();
+});
