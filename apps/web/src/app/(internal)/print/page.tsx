@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Printer, RefreshCw, Send, FileText } from 'lucide-react';
-import { api, getToken } from '@/lib/api';
+import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -27,9 +27,8 @@ const statusVariant: Record<string, 'success' | 'warning' | 'destructive' | 'mut
 
 // Open the server-rendered receipt HTML in a new window (auth header → can't be a plain link).
 async function openReceipt(saleNo: string, lang?: string) {
-  const token = getToken();
   const qs = lang ? `?lang=${encodeURIComponent(lang)}` : '';
-  const res = await fetch(`${BASE}/api/print/receipt/${encodeURIComponent(saleNo)}${qs}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const res = await fetch(`${BASE}/api/print/receipt/${encodeURIComponent(saleNo)}${qs}`, { credentials: 'include' });
   const html = await res.text();
   const w = window.open('', '_blank', 'width=420,height=640');
   if (w) { w.document.open(); w.document.write(html); w.document.close(); }

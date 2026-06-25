@@ -22,5 +22,10 @@ export default defineConfig({
     url: `http://localhost:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 240_000,
+    // Bake an empty API base so fetches resolve same-origin (localhost:${PORT}). Cookie auth now sends
+    // `credentials: 'include'`; a cross-origin stub (the default :8000 base) lacks the ACAC header and the
+    // browser would block it. Same-origin also keeps CSP `connect-src 'self'` sufficient. Page-route stubs
+    // intercept `**/api/**` regardless of origin, so the relative URLs still match.
+    env: { NEXT_PUBLIC_API_URL: '' },
   },
 });

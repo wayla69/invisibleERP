@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Query, Body, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, HttpCode, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { Public, NoTx } from '../../common/decorators';
+import { setAuthCookies } from '../../common/cookies';
 import { SsoService } from './sso.service';
 
 // Public SSO endpoints (no prior session). authorize → IdP redirect URL; callback → verified session.
@@ -22,7 +24,7 @@ export class SsoController {
   @Public()
   @NoTx()
   @HttpCode(200)
-  callback(@Body() body: { query?: string; state?: string; code?: string; id_token?: string }) {
+  async callback(@Body() body: { query?: string; state?: string; code?: string; id_token?: string }, @Res({ passthrough: true }) reply: FastifyReply) {
     let { state, code, id_token } = body ?? {};
     if (body?.query && !state && !code && !id_token) {
       const q = new URLSearchParams(body.query);
@@ -30,6 +32,8 @@ export class SsoController {
       code = q.get('code') ?? undefined;
       id_token = q.get('id_token') ?? undefined;
     }
-    return this.svc.callback({ state, code, id_token });
+    const res: any = await this.svc.callback({ state, code, id_token });
+    if (res?.token) setAuthCookies(reply, res.token); // browser session cookie (token also in body for non-browser)
+    return res;
   }
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { api, getToken } from './api';
+import { api, hasSession } from './api';
 
 export interface ModuleFlag { key: string; enabled: boolean; always_on: boolean }
 export interface ModuleFlags { modules: ModuleFlag[]; disabled: string[] }
@@ -12,7 +12,7 @@ export function useModuleFlags() {
   return useQuery<ModuleFlags>({
     queryKey: ['module-flags'],
     queryFn: () => api<ModuleFlags>('/api/modules/effective'),
-    enabled: typeof window !== 'undefined' && !!getToken(),
+    enabled: typeof window !== 'undefined' && !!hasSession(),
     staleTime: 30_000,
   });
 }
