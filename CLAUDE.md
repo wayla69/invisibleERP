@@ -65,6 +65,14 @@ For every such change, review and update as needed:
 - **drizzle-orm is pinned at `^0.36.4`.** 0.45 fixes a non-exploitable SQLi advisory but **regresses an
   insert path** (see `compliance/vulnerability-triage.md`) — do not bump casually; it needs its own tested
   workstream.
+- **Migration numbering — use the NEXT FREE 4-digit number.** Migrations are hand-written + hand-journaled
+  in `apps/api/drizzle/` (`db:generate` emits a huge full-schema catch-up because the snapshots are stale).
+  When two PRs are open at once they often both grab the same next number (e.g. `0119_*`) → on merge the
+  `meta/_journal.json` lines conflict and one `.sql` silently wins. The `migrations-journaled` CI gate now
+  **fails on duplicate migration numbers** (and duplicate journal tag/idx); when you merge `main` and your
+  number is taken, **renumber your `.sql` + journal entry to the next free id** and bump the comment header.
+  A few pre-existing historical collisions (`0085/0088/0104/0105`) are grandfathered in the gate. Full
+  context + the snapshot-resync remediation plan: `docs/ops/drizzle-migration-debt.md`.
 - **CI runner pnpm version comes from `package.json` `packageManager` (pnpm@11.8.0).** Do **not** also pin
   `version:` in `pnpm/action-setup` — the two conflict (`ERR_PNPM_BAD_PM_VERSION`) and break every job.
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
