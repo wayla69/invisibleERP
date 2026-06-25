@@ -1,6 +1,6 @@
 # 15 — UI/UX & Menu Restructure Plan (Navigation IA)
 
-> **Date:** 2026-06-25 · **Status:** DRAFT v0.1 · **Owner:** Web / Product
+> **Date:** 2026-06-25 · **Status:** DRAFT v0.2 (Phase 0 audit complete) · **Owner:** Web / Product
 > **Scope:** Plan a conservative, **URL-stable** restructure of the internal navigation
 > (`apps/web/src/lib/nav.ts`, rendered by `apps/web/src/components/app-shell.tsx`) so the menu matches the
 > real, grown app structure after the recent ERP + POS feature additions. **This document is a plan only —
@@ -143,12 +143,50 @@ primitive. **Favorites/Recents** is a separate localStorage-backed pseudo-group 
 
 | Phase | Outcome | Code? | Docs? |
 |---|---|---|---|
-| **0 — Audit** | Script diffs `nav.ts` hrefs vs `app/(internal)/**/page.tsx` routes → orphan nav entries & unlinked pages. Grounds the regrouping in real structure. | none (script only) | — |
+| **0 — Audit** ✅ | **DONE (2026-06-25).** Diffed `nav.ts` hrefs vs routes: 0 dead links, 3 unlinked pages (2 intentional, 1 genuine orphan `/loyalty`). See §4a. | none (script only) | this file |
 | **1 — IA sign-off** | Confirm §2 taxonomy, final Thai labels, sub-section boundaries. **(this document)** | none | this file |
 | **2 — Model + shell** | Add `subgroups` to nav types; recurse in `navForWorkspace`; render collapsible sub-sections; add Favorites/Recents. | `nav.ts`, `app-shell.tsx`, `sidebar` usage | — |
 | **3 — Migrate nav** | Re-bucket items into §2 groups/sub-sections; rename labels. **No `href` changes.** | `nav.ts` | — |
 | **4 — Docs sync** | Per CLAUDE.md: update screen/route/nav references in process narratives, user-manual route+role tables, and UAT nav cases + traceability. | — | `docs/process-narratives/`, `docs/user-manual/`, `docs/uat/` |
 | **5 — QA** | Extend Playwright e2e (switcher + nested nav + permission filtering); `pnpm -r typecheck`; `pnpm --filter @ierp/web build`. | tests | — |
+
+---
+
+## 4a. Phase 0 audit results (run 2026-06-25)
+
+Method: extracted every `href` from `INTERNAL_NAV` in `nav.ts` (excluding the customer `/portal/*` surface)
+and diffed against every `app/(internal)/**/page.tsx` route on disk.
+
+**Headline numbers**
+
+| Metric | Value |
+|---|---:|
+| Unique nav `href`s (internal) | 103 |
+| Internal `page.tsx` files | 108 |
+| — static routes | 106 |
+| — dynamic detail routes (`[id]`/`[itemId]`) | 2 |
+| **Orphan nav entries** (href in nav, no page on disk → dead links) | **0** |
+| **Unlinked pages** (route on disk, not in `INTERNAL_NAV`) | **3** |
+
+**Finding 1 — zero dead links.** All 103 nav `href`s resolve to a real page. This confirms the migration
+can be done **URL-stable with no broken sidebar links** — the conservative plan's core assumption holds.
+
+**Finding 2 — three unlinked pages, classified:**
+
+| Route | Reached via | Verdict |
+|---|---|---|
+| `/notifications` | Header notification bell (`notification-bell.tsx` → `href="/notifications"`) | **Intentional** — not a sidebar destination. Leave out of nav. |
+| `/pos/new` | In-POS "new order" flow (`pos/page.tsx` → `<Link href="/pos/new">`) | **Intentional** — sub-route of `/pos`. Leave out of nav. |
+| `/loyalty` | **Nothing internal** — the only `/loyalty` reference is the *customer-portal* `/portal/loyalty`. The internal loyalty **config/settings** page has no link anywhere. | **Genuine orphan** — unreachable except by typing the URL. **Action: add to the new "ลอยัลตี้ (Loyalty)" group in Phase 3** (e.g. "ตั้งค่าลอยัลตี้ / Loyalty settings"). |
+
+**Finding 3 — cross-listing is by tag, not duplication.** `BOTH`-workspace items (e.g. `/pricing`,
+`/branches`, the loyalty pages) appear **once** in the `nav.ts` source with `workspace: BOTH` and are
+cross-listed at render time by `navForWorkspace()`. Zero duplicate `href`s in source → the Phase 3
+re-bucketing cannot accidentally double-list an item.
+
+**Audit conclusion.** The nav is a clean, link-complete baseline. The regrouping is purely a *shelving*
+exercise; the only **content** change surfaced is wiring the orphaned `/loyalty` config page into the new
+Loyalty group. Audit script archived at `scratchpad/audit2.mjs` (re-runnable; not committed).
 
 ---
 
@@ -180,3 +218,4 @@ doc sync committed in the same series.
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-06-25 | v0.1 (DRAFT) | Web / Product | Initial plan: conservative, URL-stable navigation IA restructure for ERP + POS; proposed target taxonomy, additive `subgroups` model, 6-phase delivery, risk register. No application code changed. |
+| 2026-06-25 | v0.2 (DRAFT) | Web / Product | Phase 0 audit executed and recorded (§4a): 103 nav hrefs, 0 dead links, 3 unlinked pages classified (`/notifications` + `/pos/new` intentional; `/loyalty` config page is a genuine orphan to wire into the new Loyalty group in Phase 3). Cross-listing confirmed tag-based, not duplicated. No application code changed. |
