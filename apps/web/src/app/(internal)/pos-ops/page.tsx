@@ -3,14 +3,15 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, CreditCard, Clock } from 'lucide-react';
+import { Plus, CreditCard, Clock, Award, Receipt, CalendarClock } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,8 +48,7 @@ function Tiers() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['loyalty-tiers'], queryFn: () => api('/api/loyalty/tiers') });
   const [f, setF] = useState({ tier: '', min_lifetime: '', earn_mult: '1', redeem_mult: '1' });
-  const [msg, setMsg] = useState('');
-  const save = useMutation({ mutationFn: () => api('/api/loyalty/tiers', { method: 'POST', body: JSON.stringify({ tier: f.tier, min_lifetime: Number(f.min_lifetime) || 0, earn_mult: Number(f.earn_mult) || 1, redeem_mult: Number(f.redeem_mult) || 1 }) }), onSuccess: () => { setMsg('✅ บันทึกแล้ว'); setF({ tier: '', min_lifetime: '', earn_mult: '1', redeem_mult: '1' }); qc.invalidateQueries({ queryKey: ['loyalty-tiers'] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const save = useMutation({ mutationFn: () => api('/api/loyalty/tiers', { method: 'POST', body: JSON.stringify({ tier: f.tier, min_lifetime: Number(f.min_lifetime) || 0, earn_mult: Number(f.earn_mult) || 1, redeem_mult: Number(f.redeem_mult) || 1 }) }), onSuccess: () => { notifySuccess('บันทึกแล้ว'); setF({ tier: '', min_lifetime: '', earn_mult: '1', redeem_mult: '1' }); qc.invalidateQueries({ queryKey: ['loyalty-tiers'] }); }, onError: (e: any) => notifyError(e.message) });
   return (
     <div className="space-y-4">
       <Card>
@@ -60,8 +60,7 @@ function Tiers() {
             <Field label="ตัวคูณสะสม" htmlFor="t-earn" hint="เช่น 1.5 = ได้แต้ม ×1.5"><Input id="t-earn" type="number" inputMode="decimal" step="0.1" value={f.earn_mult} onChange={(e) => setF({ ...f, earn_mult: e.target.value })} /></Field>
             <Field label="ตัวคูณแลก" htmlFor="t-redeem"><Input id="t-redeem" type="number" inputMode="decimal" step="0.1" value={f.redeem_mult} onChange={(e) => setF({ ...f, redeem_mult: e.target.value })} /></Field>
           </div>
-          <Button disabled={!f.tier || save.isPending} onClick={() => { setMsg(''); save.mutate(); }}><Plus className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึกระดับ'}</Button>
-          {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+          <Button disabled={!f.tier || save.isPending} onClick={() => save.mutate()}><Plus className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึกระดับ'}</Button>
         </CardContent>
       </Card>
       <StateView q={q}>
@@ -69,7 +68,7 @@ function Tiers() {
           { key: 'tier', label: 'ระดับ' }, { key: 'min_lifetime', label: 'แต้มขั้นต่ำ', align: 'right' },
           { key: 'earn_mult', label: 'คูณสะสม', align: 'right', render: (r: any) => `${r.earn_mult}×` },
           { key: 'redeem_mult', label: 'คูณแลก', align: 'right', render: (r: any) => `${r.redeem_mult}×` },
-        ]} emptyText="ยังไม่มีระดับสมาชิก" />}
+        ]} emptyState={{ icon: Award, title: 'ยังไม่มีระดับสมาชิก', description: 'เพิ่มระดับสมาชิกแรกในแบบฟอร์มด้านบนเพื่อกำหนดตัวคูณสะสมและแลกแต้ม' }} />}
       </StateView>
     </div>
   );
@@ -79,10 +78,9 @@ function GiftCards() {
   const [card, setCard] = useState('');
   const [pin, setPin] = useState('');
   const [amount, setAmount] = useState('');
-  const [msg, setMsg] = useState('');
-  const setPinM = useMutation({ mutationFn: () => api(`/api/pos/giftcards/${card}/pin`, { method: 'POST', body: JSON.stringify({ pin }) }), onSuccess: () => setMsg('✅ ตั้ง PIN แล้ว'), onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const check = useMutation({ mutationFn: () => api(`/api/pos/giftcards/${card}/balance?pin=${encodeURIComponent(pin)}`), onSuccess: (r: any) => setMsg(`💳 ยอดคงเหลือ ${baht(r.balance)} (${r.status})`), onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const reload = useMutation({ mutationFn: () => api(`/api/pos/giftcards/${card}/reload`, { method: 'POST', body: JSON.stringify({ amount: Number(amount), pin: pin || undefined }) }), onSuccess: (r: any) => setMsg(`✅ เติมแล้ว · ยอดใหม่ ${baht(r.balance)}`), onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const setPinM = useMutation({ mutationFn: () => api(`/api/pos/giftcards/${card}/pin`, { method: 'POST', body: JSON.stringify({ pin }) }), onSuccess: () => notifySuccess('ตั้ง PIN แล้ว'), onError: (e: any) => notifyError(e.message) });
+  const check = useMutation({ mutationFn: () => api(`/api/pos/giftcards/${card}/balance?pin=${encodeURIComponent(pin)}`), onSuccess: (r: any) => notifySuccess(`ยอดคงเหลือ ${baht(r.balance)} (${r.status})`), onError: (e: any) => notifyError(e.message) });
+  const reload = useMutation({ mutationFn: () => api(`/api/pos/giftcards/${card}/reload`, { method: 'POST', body: JSON.stringify({ amount: Number(amount), pin: pin || undefined }) }), onSuccess: (r: any) => notifySuccess(`เติมแล้ว · ยอดใหม่ ${baht(r.balance)}`), onError: (e: any) => notifyError(e.message) });
   return (
     <Card className="max-w-xl">
       <CardHeader><CardTitle className="text-base">บัตรของขวัญ — PIN / เติมเงิน / ตรวจยอด</CardTitle></CardHeader>
@@ -97,7 +95,6 @@ function GiftCards() {
           <Button variant="outline" disabled={!card || check.isPending} onClick={() => check.mutate()}><CreditCard className="size-4" /> ตรวจยอด</Button>
           <Button disabled={!card || !amount || reload.isPending} onClick={() => reload.mutate()}>เติมเงิน</Button>
         </div>
-        {msg && <Msg ok={msg.startsWith('✅') || msg.startsWith('💳')}>{msg}</Msg>}
       </CardContent>
     </Card>
   );
@@ -107,8 +104,7 @@ function HouseAccounts() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['house-account'], queryFn: () => api('/api/pos/house-account') });
   const [f, setF] = useState({ sale_no: '', amount: '', due_date: '' });
-  const [msg, setMsg] = useState('');
-  const charge = useMutation({ mutationFn: () => api('/api/pos/house-account', { method: 'POST', body: JSON.stringify({ sale_no: f.sale_no, amount: Number(f.amount), due_date: f.due_date || undefined }) }), onSuccess: () => { setMsg('✅ บันทึกบัญชีเชื่อแล้ว'); setF({ sale_no: '', amount: '', due_date: '' }); qc.invalidateQueries({ queryKey: ['house-account'] }); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const charge = useMutation({ mutationFn: () => api('/api/pos/house-account', { method: 'POST', body: JSON.stringify({ sale_no: f.sale_no, amount: Number(f.amount), due_date: f.due_date || undefined }) }), onSuccess: () => { notifySuccess('บันทึกบัญชีเชื่อแล้ว'); setF({ sale_no: '', amount: '', due_date: '' }); qc.invalidateQueries({ queryKey: ['house-account'] }); }, onError: (e: any) => notifyError(e.message) });
   return (
     <div className="space-y-4">
       <Card>
@@ -119,8 +115,7 @@ function HouseAccounts() {
             <Field label="จำนวน (บาท)" htmlFor="h-amt"><Input id="h-amt" type="number" inputMode="decimal" placeholder="0" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
             <Field label="ครบกำหนด" htmlFor="h-due"><Input id="h-due" type="date" value={f.due_date} onChange={(e) => setF({ ...f, due_date: e.target.value })} /></Field>
           </div>
-          <Button disabled={!f.sale_no || !f.amount || charge.isPending} onClick={() => { setMsg(''); charge.mutate(); }}>{charge.isPending ? 'กำลังบันทึก…' : 'ลงบัญชีเชื่อ'}</Button>
-          {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
+          <Button disabled={!f.sale_no || !f.amount || charge.isPending} onClick={() => charge.mutate()}>{charge.isPending ? 'กำลังบันทึก…' : 'ลงบัญชีเชื่อ'}</Button>
         </CardContent>
       </Card>
       <StateView q={q}>
@@ -132,7 +127,7 @@ function HouseAccounts() {
               { key: 'amount', label: 'ยอด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
               { key: 'paid', label: 'ชำระแล้ว', align: 'right', render: (r: any) => <span className="tabular">{baht(r.paid)}</span> },
               { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'Paid' ? 'paid' : 'open')}>{r.status}</Badge> },
-            ]} emptyText="ไม่มีบัญชีเชื่อค้างชำระ" />
+            ]} emptyState={{ icon: Receipt, title: 'ไม่มีบัญชีเชื่อค้างชำระ', description: 'เมื่อขายลงบัญชีเชื่อ รายการลูกหนี้จะแสดงที่นี่' }} />
           </>
         )}
       </StateView>
@@ -144,10 +139,9 @@ function Labor() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['labor-report'], queryFn: () => api('/api/pos/labor/report') });
   const [emp, setEmp] = useState('');
-  const [msg, setMsg] = useState('');
   const refresh = () => qc.invalidateQueries({ queryKey: ['labor-report'] });
-  const cin = useMutation({ mutationFn: () => api('/api/pos/labor/clock-in', { method: 'POST', body: JSON.stringify({ emp_code: emp }) }), onSuccess: () => { setMsg('✅ ลงเวลาเข้าแล้ว'); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
-  const cout = useMutation({ mutationFn: () => api('/api/pos/labor/clock-out', { method: 'POST', body: JSON.stringify({ emp_code: emp }) }), onSuccess: (r: any) => { setMsg(`✅ ลงเวลาออก · ${r.hours} ชม.`); refresh(); }, onError: (e: any) => setMsg(`❌ ${e.message}`) });
+  const cin = useMutation({ mutationFn: () => api('/api/pos/labor/clock-in', { method: 'POST', body: JSON.stringify({ emp_code: emp }) }), onSuccess: () => { notifySuccess('ลงเวลาเข้าแล้ว'); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const cout = useMutation({ mutationFn: () => api('/api/pos/labor/clock-out', { method: 'POST', body: JSON.stringify({ emp_code: emp }) }), onSuccess: (r: any) => { notifySuccess(`ลงเวลาออก · ${r.hours} ชม.`); refresh(); }, onError: (e: any) => notifyError(e.message) });
   return (
     <div className="space-y-4">
       <Card>
@@ -160,7 +154,6 @@ function Labor() {
               <Button variant="outline" disabled={!emp || cout.isPending} onClick={() => cout.mutate()}>ออก</Button>
             </div>
           </div>
-          {msg && <Msg ok={msg.startsWith('✅')}>{msg}</Msg>}
         </CardContent>
       </Card>
       <StateView q={q}>
@@ -173,7 +166,7 @@ function Labor() {
               { key: 'clock_out', label: 'ออก', render: (r: any) => thaiDate(r.clock_out) },
               { key: 'break_minutes', label: 'พัก (น)', align: 'right' },
               { key: 'hours', label: 'ชั่วโมง', align: 'right' },
-            ]} emptyText="ยังไม่มีบันทึกเวลา" />
+            ]} emptyState={{ icon: CalendarClock, title: 'ยังไม่มีบันทึกเวลา', description: 'กรอกรหัสพนักงานแล้วกด “เข้า” เพื่อเริ่มลงเวลาทำงาน' }} />
           </>
         )}
       </StateView>

@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck, Send } from 'lucide-react';
+import { ShieldCheck, Send, BookText, FileCheck2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -44,7 +45,7 @@ function Journal() {
             { key: 'doc_no', label: 'เลขที่' },
             { key: 'created_at', label: 'เวลา', render: (r: any) => thaiDate(r.created_at) },
             { key: 'hash', label: 'Hash', render: (r: any) => <span className="font-mono text-xs">{String(r.hash).slice(0, 16)}…</span> },
-          ]} emptyText="ยังไม่มีรายการในสมุด" />
+          ]} emptyState={{ icon: BookText, title: 'ยังไม่มีรายการในสมุด', description: 'รายการขายและเอกสารจะถูกบันทึกแบบ hash-chain โดยอัตโนมัติเมื่อมีการทำรายการ' }} />
         )}
       </StateView>
     </div>
@@ -55,11 +56,10 @@ function Etax() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['etax'], queryFn: () => api('/api/tax/etax?limit=100') });
   const [docNo, setDocNo] = useState('');
-  const [msg, setMsg] = useState('');
   const submit = useMutation({
     mutationFn: () => api(`/api/tax/etax/submit/${docNo}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (r: any) => { setMsg(`✅ ${r.doc_no} → ${r.status}${r.idempotent ? ' (ส่งซ้ำ)' : ''}`); qc.invalidateQueries({ queryKey: ['etax'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r: any) => { notifySuccess(`${r.doc_no} → ${r.status}${r.idempotent ? ' (ส่งซ้ำ)' : ''}`); qc.invalidateQueries({ queryKey: ['etax'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   return (
     <div className="space-y-4">
@@ -69,7 +69,6 @@ function Etax() {
           <Input className="max-w-[240px]" placeholder="เลขที่เอกสาร (เช่น TIV-202606-0001)" value={docNo} onChange={(e) => setDocNo(e.target.value)} />
           <Button disabled={!docNo || submit.isPending} onClick={() => submit.mutate()}><Send className="size-4" /> นำส่ง</Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
       <StateView q={q}>
         {q.data && (
@@ -79,7 +78,7 @@ function Etax() {
             { key: 'provider_ref', label: 'อ้างอิง' },
             { key: 'submitted_at', label: 'นำส่งเมื่อ', render: (r: any) => thaiDate(r.submitted_at) },
             { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status === 'Accepted' ? 'paid' : r.status === 'Rejected' ? 'cancelled' : 'open')}>{r.status}</Badge> },
-          ]} emptyText="ยังไม่มีการนำส่ง" />
+          ]} emptyState={{ icon: FileCheck2, title: 'ยังไม่มีการนำส่ง', description: 'กรอกเลขที่เอกสารด้านบนแล้วกด นำส่ง เพื่อส่ง e-Tax Invoice ไปยังกรมสรรพากร' }} />
         )}
       </StateView>
     </div>

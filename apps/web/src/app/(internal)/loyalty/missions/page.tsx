@@ -3,11 +3,13 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Target, Plus, Search, Users } from 'lucide-react';
+import { Target, Plus, SearchX, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
+import { SearchInput } from '@/components/search-input';
 import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,7 +25,6 @@ export default function MissionsPage() {
   const qc = useQueryClient();
   const list = useQuery<{ missions: Mission[] }>({ queryKey: ['loy-missions'], queryFn: () => api('/api/loyalty/missions') });
   const [form, setForm] = useState({ name: '', type: 'stamp', goal: 10, reward_kind: 'points', reward_points: 100, reward_coupon_value: 0 });
-  const [msg, setMsg] = useState('');
   const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
 
   const create = useMutation({
@@ -31,8 +32,8 @@ export default function MissionsPage() {
       name: form.name, type: form.type, goal: Number(form.goal), reward_kind: form.reward_kind,
       ...(form.reward_kind === 'points' ? { reward_points: Number(form.reward_points) } : { reward_coupon_kind: 'amount', reward_coupon_value: Number(form.reward_coupon_value) }),
     }) }),
-    onSuccess: () => { setMsg('✅ เพิ่มภารกิจแล้ว'); setForm({ name: '', type: 'stamp', goal: 10, reward_kind: 'points', reward_points: 100, reward_coupon_value: 0 }); qc.invalidateQueries({ queryKey: ['loy-missions'] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess('เพิ่มภารกิจแล้ว'); setForm({ name: '', type: 'stamp', goal: 10, reward_kind: 'points', reward_points: 100, reward_coupon_value: 0 }); qc.invalidateQueries({ queryKey: ['loy-missions'] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const toggle = useMutation({ mutationFn: (m: Mission) => api(`/api/loyalty/missions/${m.id}`, { method: 'PATCH', body: JSON.stringify({ active: !m.active }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-missions'] }) });
 
@@ -60,7 +61,7 @@ export default function MissionsPage() {
         <Card className="gap-4">
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Plus className="size-4" /> เพิ่มภารกิจ</CardTitle></CardHeader>
           <CardContent>
-            <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(e) => { e.preventDefault(); setMsg(''); create.mutate(); }}>
+            <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
               <div className="grid gap-1.5 sm:col-span-2"><Label>ชื่อภารกิจ</Label><Input value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="เช่น สะสม 10 แสตมป์ รับฟรี" required /></div>
               <div className="grid gap-1.5"><Label>ประเภท</Label>
                 <select className={selectCls} value={form.type} onChange={(e) => set({ type: e.target.value })}><option value="stamp">แสตมป์</option><option value="quest">เควสต์</option></select>
@@ -74,7 +75,6 @@ export default function MissionsPage() {
                 : <div className="grid gap-1.5"><Label>มูลค่าคูปอง (บาท)</Label><Input type="number" min="0" value={form.reward_coupon_value} onChange={(e) => set({ reward_coupon_value: +e.target.value })} /></div>}
               <div className="flex items-end"><Button type="submit" disabled={!form.name.trim() || create.isPending}>{create.isPending ? 'กำลังบันทึก…' : 'เพิ่มภารกิจ'}</Button></div>
             </form>
-            {msg && <p className={msg.startsWith('✅') ? 'mt-2 text-sm text-success' : 'mt-2 text-sm text-destructive'}>{msg}</p>}
           </CardContent>
         </Card>
 
@@ -82,10 +82,13 @@ export default function MissionsPage() {
           {list.data && (
             <div className="space-y-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="relative w-full sm:max-w-xs">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาชื่อ / รหัส / ประเภท…" className="pl-9" aria-label="ค้นหาภารกิจ" inputMode="search" enterKeyHint="search" />
-                </div>
+                <SearchInput
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="ค้นหาชื่อ / รหัส / ประเภท…"
+                  ariaLabel="ค้นหาภารกิจ"
+                  count={`${num(filtered.length)} ภารกิจ`}
+                />
                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามสถานะ">
                   {([['all', 'ทั้งหมด'], ['on', 'เปิด'], ['off', 'ปิด']] as const).map(([v, l]) => (
                     <Button key={v} variant={active === v ? 'secondary' : 'ghost'} size="sm" aria-pressed={active === v} onClick={() => setActive(v)}>{l}</Button>
@@ -95,7 +98,20 @@ export default function MissionsPage() {
             <DataTable
               rows={filtered}
               rowKey={(r) => r.id}
-              emptyText={search || active !== 'all' ? 'ไม่พบภารกิจที่ตรงกับตัวกรอง' : 'ยังไม่มีภารกิจ — เพิ่มด้านบน'}
+              emptyState={
+                search || active !== 'all'
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบภารกิจที่ตรงกับตัวกรอง',
+                      description: 'ลองปรับคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => { setSearch(''); setActive('all'); }}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : { icon: Target, title: 'ยังไม่มีภารกิจ', description: 'เพิ่มภารกิจสะสมแสตมป์/เควสต์จากแบบฟอร์มด้านบนเพื่อเริ่มต้น' }
+              }
               columns={[
                 { key: 'mission_code', label: 'รหัส', render: (r) => <span className="font-mono text-xs">{r.mission_code}</span> },
                 { key: 'name', label: 'ชื่อ', render: (r) => <span className="inline-flex items-center gap-1.5"><Target className="size-3.5 text-muted-foreground" />{r.name}</span> },

@@ -4,10 +4,10 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SlidersHorizontal, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,18 +25,17 @@ export default function CustomFieldsPage() {
   const [entity, setEntity] = useState('customer');
   const [label, setLabel] = useState(''); const [type, setType] = useState('text'); const [options, setOptions] = useState(''); const [required, setRequired] = useState(false);
   const [recordId, setRecordId] = useState('');
-  const [msg, setMsg] = useState('');
   const q = useQuery<{ fields: Def[] }>({ queryKey: ['cf-defs', entity], queryFn: () => api(`/api/custom-fields/defs?entity=${entity}`) });
 
   const create = useMutation({
     mutationFn: () => api('/api/custom-fields/defs', { method: 'POST', body: JSON.stringify({ entity, label, data_type: type, required, options: type === 'select' ? options.split(',').map((s) => s.trim()).filter(Boolean) : undefined }) }),
-    onSuccess: () => { setMsg(`✅ เพิ่มฟิลด์ ${label}`); setLabel(''); setOptions(''); setRequired(false); qc.invalidateQueries({ queryKey: ['cf-defs', entity] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`เพิ่มฟิลด์ ${label}`); setLabel(''); setOptions(''); setRequired(false); qc.invalidateQueries({ queryKey: ['cf-defs', entity] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/api/custom-fields/defs/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cf-defs', entity] }),
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   return (
@@ -69,7 +68,6 @@ export default function CustomFieldsPage() {
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} /> จำเป็นต้องกรอก (required)</label>
             <div className="flex items-center gap-3">
               <Button disabled={!label || (type === 'select' && !options.trim()) || create.isPending} onClick={() => create.mutate()}>เพิ่มฟิลด์</Button>
-              <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
             </div>
           </CardContent>
         </Card>
@@ -96,7 +94,11 @@ export default function CustomFieldsPage() {
             { key: 'required', label: 'จำเป็น', render: (r) => r.required ? <Badge variant="warning">required</Badge> : '—' },
             { key: 'act', label: '', align: 'right', render: (r) => <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> },
           ]}
-          emptyText="ยังไม่มีฟิลด์กำหนดเองสำหรับประเภทนี้"
+          emptyState={{
+            icon: SlidersHorizontal,
+            title: 'ยังไม่มีฟิลด์กำหนดเองสำหรับประเภทนี้',
+            description: 'เพิ่มฟิลด์ใหม่จากแผง “เพิ่มฟิลด์ใหม่” ด้านบนเพื่อเริ่มต้น',
+          }}
         />
       </StateView>
     </div>

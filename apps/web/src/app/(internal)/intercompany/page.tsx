@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight, HandCoins, Scale } from 'lucide-react';
+import { ArrowLeftRight, HandCoins, Scale, SearchX } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -112,7 +113,24 @@ function TransactionsTab() {
                 { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
                 { key: '_act', label: '', sortable: false, render: (r) => <SettleButton txn={r} /> },
               ]}
-              emptyText="ยังไม่มีรายการระหว่างบริษัท"
+              emptyState={
+                status
+                  ? {
+                      icon: SearchX,
+                      title: 'ไม่พบรายการตามสถานะที่เลือก',
+                      description: 'ลองเลือกสถานะอื่น หรือล้างตัวกรองเพื่อดูทั้งหมด',
+                      action: (
+                        <Button variant="outline" size="sm" onClick={() => setStatus('')}>
+                          ล้างตัวกรอง
+                        </Button>
+                      ),
+                    }
+                  : {
+                      icon: ArrowLeftRight,
+                      title: 'ยังไม่มีรายการระหว่างบริษัท',
+                      description: 'รายการ Due-From / Due-To ระหว่างกิจการในเครือจะแสดงที่นี่',
+                    }
+              }
             />
           </div>
         )}
@@ -126,7 +144,6 @@ function SettleButton({ txn }: { txn: IcTxn }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(String(txn.outstanding));
-  const [msg, setMsg] = useState('');
 
   const settle = useMutation({
     mutationFn: () =>
@@ -135,11 +152,11 @@ function SettleButton({ txn }: { txn: IcTxn }) {
         body: JSON.stringify({ amount: Number(amount) }),
       }),
     onSuccess: (r) => {
-      setMsg(`✅ ชำระแล้ว ${baht(r.settled_amount)} · ${r.status}`);
+      notifySuccess(`ชำระแล้ว ${baht(r.settled_amount)} · ${r.status}`);
       qc.invalidateQueries({ queryKey: ['ic-list'] });
       qc.invalidateQueries({ queryKey: ['ic-recon'] });
     },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   if (txn.status === 'Settled') return <span className="text-xs text-muted-foreground">ชำระครบ</span>;
@@ -165,7 +182,6 @@ function SettleButton({ txn }: { txn: IcTxn }) {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </div>
         <DialogFooter>
           <Button
@@ -207,7 +223,7 @@ function ReconciliationTab() {
                 { key: 'due_from', label: 'Due-From', align: 'right', render: (r) => <span className="tabular">{baht(r.due_from)}</span> },
                 { key: 'due_to', label: 'Due-To', align: 'right', render: (r) => <span className="tabular">{baht(r.due_to)}</span> },
               ]}
-              emptyText="ไม่มียอดระหว่างกัน"
+              emptyState={{ icon: Scale, title: 'ไม่มียอดระหว่างกัน' }}
             />
           </div>
 
@@ -223,7 +239,7 @@ function ReconciliationTab() {
                 { key: 'settled', label: 'ชำระแล้ว', align: 'right', render: (r) => <span className="tabular">{baht(r.settled)}</span> },
                 { key: 'outstanding', label: 'คงค้าง', align: 'right', render: (r) => <span className="tabular">{baht(r.outstanding)}</span> },
               ]}
-              emptyText="ไม่มียอดคงค้างระหว่างกัน"
+              emptyState={{ icon: Scale, title: 'ไม่มียอดคงค้างระหว่างกัน' }}
             />
           </div>
         </div>
