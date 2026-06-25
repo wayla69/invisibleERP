@@ -1,8 +1,8 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { sql, eq, and, desc, notInArray, gt, lte, inArray } from 'drizzle-orm';
+import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
@@ -456,6 +456,98 @@ export class LedgerService {
     return round4(rows.filter((r: any) => CASH_ACCOUNTS.includes(r.account_code)).reduce((a: number, r: any) => a + (n(r.debit) - n(r.credit)), 0));
   }
 
+  // ───────────────────── Statement of Cash Flows (DIRECT method) ─────────────────────
+  // Classifies actual cash movements by the nature of their contra account: receipts from customers,
+  // payments to suppliers/employees, tax remittances, investing, financing. Each cash journal line is
+  // attributed once (to its entry's dominant non-cash leg), so the statement reconciles to Δcash. CLOSE
+  // entries are excluded (no cash effect).
+  async cashFlowDirect(from: string, to: string, ledgerCode?: string | null) {
+    const db = this.db as any;
+    const lines = await db
+      .select({
+        entry_id: journalLines.entryId, account_code: journalLines.accountCode, account_type: accounts.type,
+        debit: journalLines.debit, credit: journalLines.credit,
+      })
+      .from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
+      .where(and(eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, from), lte(journalEntries.entryDate, to), this.ledgerCond(ledgerCode), notInArray(journalEntries.source, ['CLOSE'])));
+
+    // Group lines by entry; attribute each entry's net cash movement to its dominant contra account.
+    const byEntry = new Map<number, any[]>();
+    for (const l of lines) { const k = Number(l.entry_id); (byEntry.get(k) ?? byEntry.set(k, []).get(k)!).push(l); }
+    const buckets: Record<string, number> = { receipts_from_customers: 0, payments_to_suppliers: 0, tax_and_payroll: 0, other_operating: 0, investing: 0, financing: 0 };
+    for (const legs of byEntry.values()) {
+      const cashLegs = legs.filter((l) => CASH_ACCOUNTS.includes(l.account_code));
+      if (!cashLegs.length) continue;
+      const cashNet = round4(cashLegs.reduce((a, l) => a + (n(l.debit) - n(l.credit)), 0));
+      if (Math.abs(cashNet) < 1e-9) continue;
+      const nonCash = legs.filter((l) => !CASH_ACCOUNTS.includes(l.account_code));
+      const dominant = nonCash.sort((a, b) => Math.abs(n(b.debit) - n(b.credit)) - Math.abs(n(a.debit) - n(a.credit)))[0];
+      buckets[cashContraCategory(dominant?.account_code, dominant?.account_type)] += cashNet;
+    }
+    for (const k of Object.keys(buckets)) buckets[k] = round4(buckets[k]);
+    const operatingNet = round4(buckets.receipts_from_customers + buckets.payments_to_suppliers + buckets.tax_and_payroll + buckets.other_operating);
+    const netChange = round4(operatingNet + buckets.investing + buckets.financing);
+    const cashBeginning = await this.cashBalanceAsOf(prevDay(from), ledgerCode);
+    const cashEnding = await this.cashBalanceAsOf(to, ledgerCode);
+    return {
+      from, to, ledger: ledgerCode ?? LEADING, method: 'direct',
+      operating: {
+        receipts_from_customers: buckets.receipts_from_customers,
+        payments_to_suppliers: buckets.payments_to_suppliers,
+        tax_and_payroll: buckets.tax_and_payroll,
+        other_operating: buckets.other_operating,
+        net: operatingNet,
+      },
+      investing: { net: buckets.investing },
+      financing: { net: buckets.financing },
+      net_change_in_cash: netChange,
+      cash_beginning: cashBeginning, cash_ending: cashEnding,
+      reconciled: Math.abs(round4(cashEnding - cashBeginning) - netChange) < 0.01,
+    };
+  }
+
+  // ───────────────────── Cash-flow FORECAST ─────────────────────
+  // Projects the cash balance forward from today over N weeks, using open AR (expected inflows by due date)
+  // and open AP (expected outflows by due date). Anything already past due lands in week 0 (due now).
+  async cashFlowForecast(weeks = 8, ledgerCode?: string | null) {
+    const db = this.db as any;
+    const today = ymd();
+    const opening = await this.cashBalanceAsOf(today, ledgerCode);
+    const ar = await db.select({ due: arInvoices.dueDate, out: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)` })
+      .from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
+    const ap = await db.select({ due: apTransactions.dueDate, out: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)` })
+      .from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
+
+    const weekIndex = (due: string | null): number => {
+      if (!due) return 0;
+      const d = Math.floor((Date.parse(due) - Date.parse(today)) / 86400000);
+      if (d <= 0) return 0;            // overdue / due now
+      const w = Math.floor(d / 7) + 1; // d in 1..7 → week 1
+      return Math.min(w, weeks);       // clamp beyond horizon into the last bucket
+    };
+    const inflow = new Array(weeks + 1).fill(0);
+    const outflow = new Array(weeks + 1).fill(0);
+    for (const r of ar) { const o = n(r.out); if (o > 0.0001) inflow[weekIndex(r.due)] += o; }
+    for (const r of ap) { const o = n(r.out); if (o > 0.0001) outflow[weekIndex(r.due)] += o; }
+
+    let running = opening;
+    const periods = [] as any[];
+    for (let w = 0; w <= weeks; w++) {
+      const inn = round4(inflow[w]), out = round4(outflow[w]);
+      running = round4(running + inn - out);
+      periods.push({ week: w, label: w === 0 ? 'due now / overdue' : `week +${w}`, inflow: inn, outflow: out, net: round4(inn - out), projected_balance: running });
+    }
+    return {
+      as_of: today, ledger: ledgerCode ?? LEADING, weeks, opening_cash: opening,
+      total_expected_inflow: round4(inflow.reduce((a, x) => a + x, 0)),
+      total_expected_outflow: round4(outflow.reduce((a, x) => a + x, 0)),
+      projected_closing_cash: running,
+      periods,
+    };
+  }
+
   // ───────────────────── GAAP adjustment posting ─────────────────────
   // Post a balanced entry to ONE ledger only (e.g. a tax-depreciation delta, an IFRS lease adjustment).
   // The shared books are untouched; only this ledger's reports pick it up.
@@ -732,6 +824,16 @@ export class LedgerService {
 }
 
 function round4(x: number): number { return Math.round(x * 10000) / 10000; }
+// Direct-method cash-flow category from a cash entry's dominant contra account.
+function cashContraCategory(code: string | undefined, type: string | undefined): string {
+  const c = code ?? '';
+  if (c === '1100' || c === '1150' || type === 'Revenue') return 'receipts_from_customers'; // AR / sales
+  if (c === '2100' || c === '2350' || c === '2360' || c === '2370') return 'tax_and_payroll'; // VAT / SSO / WHT / PF payable
+  if (c === '1500') return 'investing';                                                       // fixed assets
+  if (c.startsWith('3') || type === 'Equity') return 'financing';                             // capital / dividends
+  if (c === '2000' || c === '2150' || c.startsWith('12') || type === 'Expense') return 'payments_to_suppliers'; // AP / inventory / expense / wages
+  return 'other_operating';
+}
 // Calendar day before an ISO date (YYYY-MM-DD) — the day the opening cash balance is struck.
 function prevDay(ymdStr: string): string {
   const d = new Date(`${ymdStr}T00:00:00Z`);

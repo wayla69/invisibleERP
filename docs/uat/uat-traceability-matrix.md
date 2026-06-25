@@ -176,6 +176,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-142 | Scheduler tick fires the dunning job | REV-12 | 01 §7 |
 | UAT-O2C-143 | Dunning action dispatches a notice to the customer | REV-12 | 01 §7 |
 | UAT-O2C-144 | Sweep dispatches notices, channel auto-picked | REV-12 | 01 §7 |
+| UAT-O2C-145 | Credit Manager places a manual hold | REV-08, R09 | 01 §7, §9 |
+| UAT-O2C-146 | Credit check denies a manually-held customer (CREDIT_HOLD) | REV-08 | 01 §9, §13 |
+| UAT-O2C-147 | Self-release blocked, second person releases (SOD_SELF_RELEASE) | REV-08, R09 | 01 §7, §9, §13 |
+| UAT-O2C-148 | Credit-limit change is audited | REV-08, R09 | 01 §7, §9 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -273,11 +277,17 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-021 | Statement of Cash Flows reconstructed from GL | GL-07 | 04 §7, §9 |
 | UAT-GL-022 | Cash flow reconciles to change in cash | GL-07 | 04 §9 |
 | UAT-GL-023 | Year-end close excluded from cash flow | GL-07 | 04 §7, §9 |
+| UAT-GL-024 | Direct-method cash flow by receipt/payment nature | GL-07 | 04 §7, §9 |
+| UAT-GL-025 | Direct method ties to operating + Δcash | GL-07 | 04 §9 |
+| UAT-GL-026 | Cash-flow forecast projects open AR/AP by due date | GL-07 | 04 §7 |
 | UAT-EAM-001 | Raise a corrective maintenance work order | FA-06 | 09 §7 |
-| UAT-EAM-002 | Complete WO → maintenance cost to AP (5700) | EXP-05, GL-01 | 09 §7, §9 |
+| UAT-EAM-002 | Complete WO → maintenance cost to AP (5710) | EXP-05, GL-01 | 09 §7, §9 |
 | UAT-EAM-003 | Illegal WO transition rejected | FA-06 | 09 §7, §13 |
 | UAT-EAM-004 | PM sweep raises due preventive WOs (time + meter) | FA-06 | 09 §7 |
 | UAT-EAM-005 | PM generation is idempotent | FA-06 | 09 §7, §9 |
+| UAT-EAM-006 | WO cost lines roll up to actual cost | FA-06 | 09 §7 |
+| UAT-EAM-007 | Completion posts the rolled-up actual cost to AP | EXP-05, FA-06 | 09 §7, §9 |
+| UAT-EAM-008 | Per-asset reliability & cost KPIs | FA-06 | 09 §7 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -504,14 +514,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | Cycle | Cases | Control-type cases |
 |---|---|---|
 | 01 Security & Access | 19 | 13 |
-| 02 Order-to-Cash | 49 | 19 |
+| 02 Order-to-Cash | 53 | 23 |
 | 03 Procure-to-Pay | 23 | 9 |
 | 04 Inventory & WMS | 24 | 7 |
-| 05 GL & Close (incl. fixed assets / EAM) | 28 | 15 |
+| 05 GL & Close (incl. fixed assets / EAM) | 34 | 19 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 19 | 8 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 26 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **318** | **154** |
+| **Total** | **328** | **162** |

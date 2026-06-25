@@ -237,7 +237,49 @@ async function main() {
   const woPrev = (await inj('GET', '/api/eam/work-orders?type=preventive', admin)).json;
   ok('Generated preventive work orders are listed', (woPrev.work_orders ?? []).length >= 2, `n=${woPrev.count}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM ──');
+  // ───────────────────── Credit-hold approval workflow ─────────────────────
+  const mgr2 = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
+  const ph = await inj('POST', '/api/finance/ar/credit-hold', admin, { tenant_id: cust3, reason: 'Disputed balance' });
+  ok('Place manual credit hold', ph.json?.credit_hold === true, JSON.stringify(ph.json));
+  const csH = (await inj('GET', `/api/finance/ar/credit-status?tenant_id=${cust3}`, admin)).json;
+  ok('Credit status reflects manual hold + reason + on_hold', csH.manual_hold === true && csH.on_hold === true && csH.hold_reason === 'Disputed balance', `mh=${csH.manual_hold} reason=${csH.hold_reason}`);
+  const ccH = (await inj('POST', '/api/finance/ar/credit-check', admin, { tenant_id: cust3, amount: 10 })).json;
+  ok('Credit-check denies a held customer (reason CREDIT_HOLD)', ccH.approved === false && ccH.reason === 'CREDIT_HOLD', `appr=${ccH.approved} reason=${ccH.reason}`);
+  const heldOrder = await inj('POST', '/api/pos/orders', admin, { customer_name: 'CUST3', items: [{ item_id: 'WIDGET', order_qty: 1, unit_price: 10 }] });
+  ok('Order entry blocks a held customer (CREDIT_HOLD)', heldOrder.status === 409 && heldOrder.json?.error?.code === 'CREDIT_HOLD', `st=${heldOrder.status} code=${heldOrder.json?.error?.code}`);
+  const selfRel = await inj('POST', '/api/finance/ar/credit-release', admin, { tenant_id: cust3, reason: 'ok now' });
+  ok('Self-release of own hold blocked (SoD)', selfRel.status === 400 && selfRel.json?.error?.code === 'SOD_SELF_RELEASE', `st=${selfRel.status} code=${selfRel.json?.error?.code}`);
+  const rel = await inj('POST', '/api/finance/ar/credit-release', mgr2, { tenant_id: cust3, reason: 'Approved release' });
+  ok('Independent approver releases the hold', rel.json?.credit_hold === false, JSON.stringify(rel.json));
+  await inj('POST', '/api/finance/ar/credit-limit', admin, { tenant_id: cust3, new_limit: 50000, reason: 'Annual review' });
+  const ce = (await inj('GET', `/api/finance/ar/credit-events?tenant_id=${cust3}`, admin)).json;
+  const types = (ce.events ?? []).map((e: any) => e.event_type);
+  const lc = (ce.events ?? []).find((e: any) => e.event_type === 'limit_change');
+  ok('Credit-change audit logs hold/release/limit_change (old→new)', types.includes('hold') && types.includes('release') && lc?.old_limit === 100000 && lc?.new_limit === 50000, `types=${JSON.stringify(types)} lc=${lc?.old_limit}->${lc?.new_limit}`);
+
+  // ───────────────────── EAM depth: cost lines + reliability ─────────────────────
+  const woD = await inj('POST', '/api/eam/work-orders', admin, { asset_no: 'FA-EAM1', type: 'corrective', description: 'Bearing replacement' });
+  const woDno = woD.json?.wo_no;
+  await inj('POST', `/api/eam/work-orders/${woDno}/lines`, admin, { kind: 'labor', description: 'Tech 3h', hours: 3, unit_cost: 500 });   // 1500
+  const partLine = await inj('POST', `/api/eam/work-orders/${woDno}/lines`, admin, { kind: 'part', description: 'Bearing', quantity: 2, unit_cost: 250 }); // 500
+  ok('WO cost lines roll up into actual cost (1500 labor + 500 parts = 2000)', near(partLine.json?.actual_cost, 2000), `actual=${partLine.json?.actual_cost}`);
+  const woLines = (await inj('GET', `/api/eam/work-orders/${woDno}/lines`, admin)).json;
+  ok('WO line breakdown: labor 1500 / parts 500', near(woLines.labor_total, 1500) && near(woLines.parts_total, 500), `labor=${woLines.labor_total} parts=${woLines.parts_total}`);
+  // complete without explicit actual_cost → uses the rolled-up line total; downtime captured
+  const compD = await inj('PATCH', `/api/eam/work-orders/${woDno}/status`, admin, { status: 'completed', vendor_name: 'ACME Repairs', vat_treatment: 'exempt', downtime_hours: 6 });
+  ok('Complete WO uses rolled-up line cost for the AP payable', compD.json?.status === 'completed' && /^AP-/.test(compD.json?.ap_txn_no ?? ''), JSON.stringify(compD.json));
+  const rel2 = (await inj('GET', '/api/eam/assets/FA-EAM1/reliability', admin)).json;
+  // FA-EAM1 now has 2 corrective WOs (earlier MWO + this one) + the generated preventive PM WO.
+  ok('Asset reliability: ≥2 failures, downtime + cost rolled up, MTBF computed', rel2.corrective_failures >= 2 && rel2.total_downtime_hours >= 6 && rel2.total_maintenance_cost >= 2000 && rel2.mtbf_days !== null, JSON.stringify(rel2));
+
+  // ───────────────────── Cash flow — direct method + forecast ─────────────────────
+  const cfd = (await inj('GET', '/api/ledger/cash-flow-direct?from=2026-03-01&to=2026-03-31', admin)).json;
+  // March cash legs: receipt +400 (contra AR) ; cash opex −200 (contra expense). op net 200; reconciles.
+  ok('Cash flow (direct): receipts 400, payments −200, reconciled', near(cfd.operating?.receipts_from_customers, 400) && near(cfd.operating?.payments_to_suppliers, -200) && near(cfd.operating?.net, 200) && cfd.reconciled === true, `rec=${cfd.operating?.receipts_from_customers} pay=${cfd.operating?.payments_to_suppliers} ok=${cfd.reconciled}`);
+  const fc = (await inj('GET', '/api/ledger/cash-flow-forecast?weeks=6', admin)).json;
+  ok('Cash flow forecast: 7 buckets (week 0..6), opening cash + projected balances', (fc.periods ?? []).length === 7 && typeof fc.opening_cash === 'number' && fc.total_expected_inflow > 0, `n=${fc.periods?.length} open=${fc.opening_cash} in=${fc.total_expected_inflow}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/EAM-depth/forecast ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

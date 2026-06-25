@@ -30,6 +30,7 @@ const PmScheduleBody = z.object({
   next_due_date: z.string().optional(),
 });
 const MeterBody = z.object({ meter_value: z.number().nonnegative(), reading_date: z.string().optional(), note: z.string().optional() });
+const WoLineBody = z.object({ kind: z.enum(['labor', 'part']), description: z.string().optional(), quantity: z.number().positive().optional(), hours: z.number().nonnegative().optional(), unit_cost: z.number().nonnegative() });
 
 // Enterprise Asset Management — maintenance on the fixed-asset register. Operational (warehouse/maintenance)
 // + finance oversight (exec/creditors, since completion can raise an AP payable).
@@ -48,6 +49,17 @@ export class EamController {
 
   @Patch('work-orders/:woNo/status')
   status(@Param('woNo') woNo: string, @Body(new ZodValidationPipe(WoStatusBody)) b: z.infer<typeof WoStatusBody>, @CurrentUser() u: JwtUser) { return this.svc.updateWorkOrderStatus(woNo, b, u); }
+
+  // Labor/parts cost lines on a work order (roll up into its actual cost).
+  @Post('work-orders/:woNo/lines')
+  addLine(@Param('woNo') woNo: string, @Body(new ZodValidationPipe(WoLineBody)) b: z.infer<typeof WoLineBody>, @CurrentUser() u: JwtUser) { return this.svc.addWoLine(woNo, b, u); }
+
+  @Get('work-orders/:woNo/lines')
+  lines(@Param('woNo') woNo: string) { return this.svc.listWoLines(woNo); }
+
+  // Per-asset reliability & cost KPIs (failures, downtime, MTBF, total maintenance cost).
+  @Get('assets/:assetNo/reliability')
+  reliability(@Param('assetNo') assetNo: string, @CurrentUser() u: JwtUser) { return this.svc.reliability(assetNo, u); }
 
   @Post('pm-schedules')
   createPm(@Body(new ZodValidationPipe(PmScheduleBody)) b: z.infer<typeof PmScheduleBody>, @CurrentUser() u: JwtUser) { return this.svc.createPmSchedule(b, u); }

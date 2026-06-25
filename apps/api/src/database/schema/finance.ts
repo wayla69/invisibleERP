@@ -55,6 +55,19 @@ export const arDunningLog = pgTable('ar_dunning_log', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
+// Credit-control audit — every manual hold/release and credit-limit change on a customer, for the
+// credit-manager workflow + change report. The current hold/limit live on the `tenants` master.
+export const creditEvents = pgTable('credit_events', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id), // the customer
+  eventType: text('event_type').notNull(), // hold | release | limit_change
+  oldLimit: numeric('old_limit', { precision: 14, scale: 2 }),
+  newLimit: numeric('new_limit', { precision: 14, scale: 2 }),
+  reason: text('reason'),
+  actionedBy: text('actioned_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 export const apTransactions = pgTable('ap_transactions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   txnNo: text('txn_no').notNull().unique(), // AP-

@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { arInvoices, arDunningLog, tenants } from '../../database/schema';
+import { arInvoices, arDunningLog, creditEvents, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { ymd, n } from '../../database/queries';
@@ -192,7 +192,7 @@ export class CollectionsService {
   // SoD risk R09 (raise credit then sell): the limit is master data, the check is enforced at the txn.
   async creditStatus(tenantId: number) {
     const db = this.db as any;
-    const [t] = await db.select({ code: tenants.code, creditLimit: tenants.creditLimit, creditTerm: tenants.creditTerm })
+    const [t] = await db.select({ code: tenants.code, creditLimit: tenants.creditLimit, creditTerm: tenants.creditTerm, creditHold: tenants.creditHold })
       .from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
     const today = ymd();
@@ -209,13 +209,66 @@ export class CollectionsService {
     const limit = n(t.creditLimit);
     const overLimit = limit > 0 && round2(exposure) > limit;
     const seriousOverdue = isSeriousOverdue(maxOverdueDays); // 90+ past due ⇒ default territory
-    const onHold = overLimit || seriousOverdue;
+    const manualHold = t.creditHold === true; // credit-manager placed hold (master flag)
+    const onHold = manualHold || overLimit || seriousOverdue;
+    // latest manual-hold reason, if currently held
+    let holdReason: string | null = null;
+    if (manualHold) {
+      const [h] = await db.select({ reason: creditEvents.reason }).from(creditEvents)
+        .where(and(eq(creditEvents.tenantId, tenantId), eq(creditEvents.eventType, 'hold'))).orderBy(desc(creditEvents.id)).limit(1);
+      holdReason = h?.reason ?? null;
+    }
     return {
       tenant_id: tenantId, customer: t.code, credit_term: t.creditTerm ?? null,
       credit_limit: limit, exposure: round2(exposure), overdue: round2(overdue), max_overdue_days: maxOverdueDays,
       available_credit: limit > 0 ? round2(limit - exposure) : null,
-      over_limit: overLimit, serious_overdue: seriousOverdue, on_hold: onHold,
+      over_limit: overLimit, serious_overdue: seriousOverdue, manual_hold: manualHold, hold_reason: holdReason, on_hold: onHold,
     };
+  }
+
+  // ───────────────────── Credit-manager workflow (hold / release / limit change) ─────────────────────
+  // Place a manual credit hold on a customer — blocks new credit orders at order entry (CREDIT_HOLD).
+  async placeHold(tenantId: number, reason: string | undefined, user: JwtUser) {
+    const db = this.db as any;
+    const [t] = await db.select({ id: tenants.id, code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
+    await db.update(tenants).set({ creditHold: true }).where(eq(tenants.id, tenantId));
+    await db.insert(creditEvents).values({ tenantId, eventType: 'hold', reason: reason ?? null, actionedBy: user.username });
+    return { tenant_id: tenantId, customer: t.code, credit_hold: true, by: user.username };
+  }
+
+  // Release a manual hold. SoD: the releaser must differ from whoever placed the active hold (maker-checker).
+  async releaseHold(tenantId: number, reason: string | undefined, user: JwtUser) {
+    const db = this.db as any;
+    const [t] = await db.select({ id: tenants.id, code: tenants.code, creditHold: tenants.creditHold }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
+    if (t.creditHold !== true) throw new BadRequestException({ code: 'NOT_ON_HOLD', message: 'Customer is not on credit hold', messageTh: 'ลูกค้าไม่ได้ถูกระงับเครดิต' });
+    const [lastHold] = await db.select({ by: creditEvents.actionedBy }).from(creditEvents)
+      .where(and(eq(creditEvents.tenantId, tenantId), eq(creditEvents.eventType, 'hold'))).orderBy(desc(creditEvents.id)).limit(1);
+    if (lastHold?.by && lastHold.by === user.username) {
+      throw new BadRequestException({ code: 'SOD_SELF_RELEASE', message: 'You cannot release a hold you placed — release requires an independent approver', messageTh: 'ผู้ตั้งระงับเครดิตปลดระงับเองไม่ได้ (ต้องให้ผู้อื่นอนุมัติ)' });
+    }
+    await db.update(tenants).set({ creditHold: false }).where(eq(tenants.id, tenantId));
+    await db.insert(creditEvents).values({ tenantId, eventType: 'release', reason: reason ?? null, actionedBy: user.username });
+    return { tenant_id: tenantId, customer: t.code, credit_hold: false, by: user.username };
+  }
+
+  // Change a customer's credit limit, recording old→new for the credit-change report.
+  async changeLimit(tenantId: number, newLimit: number, reason: string | undefined, user: JwtUser) {
+    const db = this.db as any;
+    const [t] = await db.select({ id: tenants.id, code: tenants.code, creditLimit: tenants.creditLimit }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
+    const oldLimit = n(t.creditLimit);
+    await db.update(tenants).set({ creditLimit: String(round2(newLimit)) }).where(eq(tenants.id, tenantId));
+    await db.insert(creditEvents).values({ tenantId, eventType: 'limit_change', oldLimit: String(oldLimit), newLimit: String(round2(newLimit)), reason: reason ?? null, actionedBy: user.username });
+    return { tenant_id: tenantId, customer: t.code, old_limit: oldLimit, new_limit: round2(newLimit), by: user.username };
+  }
+
+  // Credit-change audit for a customer (holds, releases, limit changes) — newest first.
+  async creditEventsFor(tenantId: number) {
+    const db = this.db as any;
+    const rows = await db.select().from(creditEvents).where(eq(creditEvents.tenantId, tenantId)).orderBy(desc(creditEvents.id));
+    return { tenant_id: tenantId, count: rows.length, events: rows.map((e: any) => ({ event_type: e.eventType, old_limit: e.oldLimit != null ? n(e.oldLimit) : null, new_limit: e.newLimit != null ? n(e.newLimit) : null, reason: e.reason, actioned_by: e.actionedBy, created_at: e.createdAt })) };
   }
 
   // Decision endpoint for order entry: may this customer take on `amount` more credit right now?
@@ -224,7 +277,7 @@ export class CollectionsService {
     const wouldExceed = s.credit_limit > 0 && round2(s.exposure + amount) > s.credit_limit;
     const approved = !s.on_hold && !wouldExceed;
     const reason = s.on_hold
-      ? (s.over_limit ? 'CREDIT_LIMIT_EXCEEDED' : 'SERIOUS_OVERDUE')
+      ? (s.manual_hold ? 'CREDIT_HOLD' : s.over_limit ? 'CREDIT_LIMIT_EXCEEDED' : 'SERIOUS_OVERDUE')
       : wouldExceed ? 'WOULD_EXCEED_LIMIT' : null;
     return { ...s, requested_amount: round2(amount), would_exceed_limit: wouldExceed, approved, reason };
   }
