@@ -7,6 +7,9 @@ const PORT = Number(process.env.E2E_PORT ?? 3210);
 
 export default defineConfig({
   testDir: './e2e',
+  // *.capture.spec.ts are on-demand screenshot tools, not CI tests — run them with a config that clears
+  // testIgnore (see e2e/sidebar.capture.spec.ts).
+  testIgnore: ['**/*.capture.spec.ts'],
   timeout: 30_000,
   expect: { timeout: 7_000 },
   fullyParallel: false,

@@ -104,6 +104,13 @@ test('System settings sub-sections are collapsible and reachable', async ({ page
   const subHeader = page.getByRole('button', { name: 'ข้อมูลหลัก', exact: true });
   await expect(subHeader).toHaveAttribute('aria-expanded', 'true');
 
+  // Advanced sub-sections (defaultOpen: false) start collapsed — their items hidden until expanded.
+  const advHeader = page.getByRole('button', { name: 'ปรับแต่ง', exact: true });
+  await expect(advHeader).toHaveAttribute('aria-expanded', 'false');
+  await expect(navLink(page, '/automation')).toBeHidden();
+  await advHeader.click();
+  await expect(navLink(page, '/automation')).toBeVisible();
+
   // Collapse the sub-section → its items hide; the header stays.
   await subHeader.click();
   await expect(subHeader).toHaveAttribute('aria-expanded', 'false');
@@ -112,4 +119,54 @@ test('System settings sub-sections are collapsible and reachable', async ({ page
   // Re-expand → item returns.
   await subHeader.click();
   await expect(navLink(page, '/master-data')).toBeVisible();
+});
+
+test('starring a menu item pins it to the Favourites group and persists across reload', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+
+  // Star /procurement via its hover menu-action button.
+  const procItem = page.locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/procurement"]') });
+  await procItem.locator('button[data-sidebar="menu-action"]').click();
+
+  // It now appears under the "รายการโปรด" (Favourites) group, pinned at the top.
+  const favGroup = page.locator('div[data-sidebar="group"]', { has: page.getByText('รายการโปรด', { exact: true }) });
+  await expect(favGroup.locator('a[href="/procurement"]')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('ie-nav-favorites'))).toContain('/procurement');
+
+  // Survives a reload.
+  await page.reload();
+  await expect(favGroup.locator('a[href="/procurement"]')).toBeVisible();
+
+  // Un-star from the favourites entry → the group disappears.
+  await favGroup.locator('li[data-sidebar="menu-item"] button[data-sidebar="menu-action"]').first().click();
+  await expect(page.getByText('รายการโปรด', { exact: true })).toHaveCount(0);
+});
+
+test('server-saved favourites hydrate the sidebar and toggles are persisted to /api/user-prefs', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  // Override the generic stub for the prefs endpoint (registered after bootAs → takes precedence).
+  const puts: Array<{ favorites?: string[]; navFold?: Record<string, boolean> }> = [];
+  await page.route('**/api/user-prefs', async (route) => {
+    const req = route.request();
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (req.method() === 'GET') return json({ favorites: ['/procurement'], navFold: { 'ปรับแต่ง': true }, saved: true });
+    if (req.method() === 'PUT') {
+      puts.push(JSON.parse(req.postData() || '{}'));
+      return json({ favorites: [], navFold: {}, saved: true });
+    }
+    return json({});
+  });
+  await page.goto('/dashboard');
+
+  // The server-saved favourite hydrates into the Favourites group even though localStorage started empty.
+  const favGroup = page.locator('div[data-sidebar="group"]', { has: page.getByText('รายการโปรด', { exact: true }) });
+  await expect(favGroup.locator('a[href="/procurement"]')).toBeVisible();
+  // The server-saved fold-state is applied: ปรับแต่ง (collapsed by default) is now expanded.
+  await expect(page.getByRole('button', { name: 'ปรับแต่ง', exact: true })).toHaveAttribute('aria-expanded', 'true');
+
+  // Starring another item issues a PUT carrying the updated favourites.
+  const invItem = page.locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/inventory"]') });
+  await invItem.locator('button[data-sidebar="menu-action"]').click();
+  await expect.poll(() => puts.some((p) => p.favorites?.includes('/inventory'))).toBeTruthy();
 });
