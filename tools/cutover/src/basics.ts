@@ -348,6 +348,11 @@ async function main() {
   const issue = await inj('POST', '/api/finance/advances', admin, { payee: 'EMP1', amount: 1000, purpose: 'site visit' });
   ok('Petty cash: issue an advance (Dr 1180 / Cr 1000)', issue.status === 201 && /^ADV-/.test(issue.json?.advance_no ?? '') && near(await tbBalance('1180'), adv1180Before + 1000), `no=${issue.json?.advance_no} 1180=${await tbBalance('1180')}`);
   const advNo = issue.json?.advance_no;
+  // Register: GET /api/finance/advances lists the advance + the outstanding (uncleared) float total.
+  const advReg = (await inj('GET', '/api/finance/advances', admin)).json;
+  ok('Petty cash register: lists the advance + outstanding float (≥1000)', (advReg.advances ?? []).some((a: any) => a.advance_no === advNo && a.status === 'open') && advReg.outstanding >= 1000, `n=${advReg.count} out=${advReg.outstanding}`);
+  const advOpen = (await inj('GET', '/api/finance/advances?status=open', admin)).json;
+  ok('Petty cash register: status=open filter → only open advances', (advOpen.advances ?? []).every((a: any) => a.status === 'open'), `n=${advOpen.count}`);
   const badStl = await inj('POST', `/api/finance/advances/${advNo}/settle`, admin, { settled_expense: 700, returned_cash: 200 });
   ok('Petty cash: settlement must reconcile to the advance (SETTLE_MISMATCH)', badStl.status === 400 && badStl.json?.error?.code === 'SETTLE_MISMATCH', `st=${badStl.status} code=${badStl.json?.error?.code}`);
   const stl = await inj('POST', `/api/finance/advances/${advNo}/settle`, admin, { settled_expense: 700, returned_cash: 300 });
