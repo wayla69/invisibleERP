@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Banknote, Hash, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, Banknote, Hash, ShoppingBag, Truck } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -52,6 +52,11 @@ export default function StockDetailPage() {
               <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ขายล่าสุด</h3>
               <DataTable
                 rows={d.recent_sales}
+                emptyState={{
+                  icon: ShoppingBag,
+                  title: 'ยังไม่มีรายการขาย',
+                  description: 'สินค้านี้ยังไม่มีประวัติการขายในช่วงที่ผ่านมา',
+                }}
                 columns={[
                   { key: 'Sale_No', label: 'เลขที่' },
                   { key: 'Sale_Date', label: 'วันที่', render: (r: any) => thaiDate(r.Sale_Date) },
@@ -66,6 +71,11 @@ export default function StockDetailPage() {
               <h3 className="mb-3 text-sm font-semibold text-muted-foreground">การจัดซื้อล่าสุด</h3>
               <DataTable
                 rows={d.recent_pos}
+                emptyState={{
+                  icon: Truck,
+                  title: 'ยังไม่มีรายการจัดซื้อ',
+                  description: 'สินค้านี้ยังไม่มีประวัติการสั่งซื้อจากผู้ขาย',
+                }}
                 columns={[
                   { key: 'PO_No', label: 'PO' },
                   { key: 'PO_Date', label: 'วันที่', render: (r: any) => thaiDate(r.PO_Date) },

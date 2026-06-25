@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Store, Building2, ShoppingCart, CircleDollarSign, PlusCircle } from 'lucide-react';
+import { Store, Building2, ShoppingCart, CircleDollarSign, PlusCircle, CalendarSearch } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,17 +58,16 @@ function BranchesTab() {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [isHq, setIsHq] = useState(false);
-  const [msg, setMsg] = useState('');
 
   const create = useMutation({
     mutationFn: () =>
       api<Branch>('/api/branches', { method: 'POST', body: JSON.stringify({ code, name, is_hq: isHq }) }),
     onSuccess: (b) => {
-      setMsg(`✅ เพิ่มสาขา ${b.code} — ${b.name} แล้ว`);
+      notifySuccess(`เพิ่มสาขา ${b.code} — ${b.name} แล้ว`);
       setCode(''); setName(''); setIsHq(false);
       qc.invalidateQueries({ queryKey: ['branches'] });
     },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const toggleActive = useMutation({
@@ -99,7 +99,6 @@ function BranchesTab() {
               <PlusCircle className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'เพิ่มสาขา'}
             </Button>
           </div>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </CardContent>
       </Card>
 
@@ -127,7 +126,11 @@ function BranchesTab() {
                   ),
                 },
               ]}
-              emptyText="ยังไม่มีสาขา — เพิ่มสาขาแรกด้านบน"
+              emptyState={{
+                icon: Store,
+                title: 'ยังไม่มีสาขา',
+                description: 'เพิ่มสาขาหรือหน้าร้านแรกของคุณได้จากแบบฟอร์ม “เพิ่มสาขาใหม่” ด้านบน',
+              }}
             />
           </div>
         )}
@@ -184,7 +187,11 @@ function ConsolidatedTab() {
                 { key: 'tax', label: 'VAT', align: 'right', render: (r) => <span className="tabular">{baht(r.tax)}</span> },
                 { key: 'total_sales', label: 'ยอดขายรวม', align: 'right', render: (r) => <span className="tabular font-medium">{baht(r.total_sales)}</span> },
               ]}
-              emptyText="ยังไม่มียอดขายของสาขาในช่วงเวลานี้"
+              emptyState={{
+                icon: CalendarSearch,
+                title: 'ไม่มียอดขายในช่วงเวลานี้',
+                description: 'ยังไม่มียอดขายของสาขาในช่วงที่เลือก — ลองปรับช่วงวันที่ด้านบนแล้วดูอีกครั้ง',
+              }}
             />
           </div>
         )}

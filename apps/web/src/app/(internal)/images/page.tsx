@@ -2,12 +2,12 @@
 
 import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Upload } from 'lucide-react';
+import { ImageOff, Upload } from 'lucide-react';
 import { api } from '@/lib/api';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -17,13 +17,12 @@ export default function ImagesPage() {
   const list = useQuery<any>({ queryKey: ['images'], queryFn: () => api('/api/images') });
   const [itemId, setItemId] = useState('');
   const [preview, setPreview] = useState('');
-  const [msg, setMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const upload = useMutation({
     mutationFn: (dataUrl: string) => api(`/api/images/${encodeURIComponent(itemId)}`, { method: 'POST', body: JSON.stringify({ data_url: dataUrl }) }),
-    onSuccess: () => { setMsg(`✅ บันทึกรูป ${itemId}`); qc.invalidateQueries({ queryKey: ['images'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`บันทึกรูป ${itemId}`); qc.invalidateQueries({ queryKey: ['images'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
   const remove = useMutation({
     mutationFn: (id: string) => api(`/api/images/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -37,9 +36,8 @@ export default function ImagesPage() {
   }
 
   async function showImage(id: string) {
-    setMsg('');
     try { const r = await api<any>(`/api/images/${encodeURIComponent(id)}`); setItemId(id); setPreview(r.data_url); }
-    catch (e: any) { setMsg(`❌ ${e.message}`); }
+    catch (e: any) { notifyError(e.message); }
   }
 
   return (
@@ -56,7 +54,6 @@ export default function ImagesPage() {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={preview} alt="preview" className="max-h-48 w-fit rounded-md border" />
         )}
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
       <StateView q={list}>
         {list.data && (
@@ -67,7 +64,7 @@ export default function ImagesPage() {
               { key: 'view', label: '', render: (r: any) => <Button size="sm" variant="outline" onClick={() => showImage(r.item_id)}>ดูรูป</Button> },
               { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate(r.item_id)}>ลบ</Button> },
             ]}
-            emptyText="ยังไม่มีรูปสินค้า"
+            emptyState={{ icon: ImageOff, title: 'ยังไม่มีรูปสินค้า', description: 'กรอกรหัสสินค้า เลือกรูป แล้วกดบันทึกรูปด้านบนเพื่อเริ่มต้น' }}
           />
         )}
       </StateView>

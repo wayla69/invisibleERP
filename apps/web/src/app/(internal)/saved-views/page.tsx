@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,15 +24,14 @@ export default function SavedViewsPage() {
   const qc = useQueryClient();
   const [module, setModule] = useState('inventory');
   const [name, setName] = useState(''); const [shared, setShared] = useState(false);
-  const [msg, setMsg] = useState('');
   const q = useQuery<{ views: SavedView[] }>({ queryKey: ['saved-views', module], queryFn: () => api(`/api/saved-views?module=${encodeURIComponent(module)}`) });
 
   const create = useMutation({
     mutationFn: () => api('/api/saved-views', { method: 'POST', body: JSON.stringify({ module, name, config: {}, shared }) }),
-    onSuccess: () => { setMsg(`✅ บันทึกมุมมอง ${name}`); setName(''); qc.invalidateQueries({ queryKey: ['saved-views', module] }); },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onSuccess: () => { notifySuccess(`บันทึกมุมมอง ${name}`); setName(''); qc.invalidateQueries({ queryKey: ['saved-views', module] }); },
+    onError: (e: Error) => notifyError(e.message),
   });
-  const remove = useMutation({ mutationFn: (id: number) => api(`/api/saved-views/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views', module] }), onError: (e: Error) => setMsg(`❌ ${e.message}`) });
+  const remove = useMutation({ mutationFn: (id: number) => api(`/api/saved-views/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views', module] }), onError: (e: Error) => notifyError(e.message) });
 
   return (
     <div>
@@ -54,7 +53,6 @@ export default function SavedViewsPage() {
             </div>
             <div className="flex items-center gap-3">
               <Button disabled={!name || create.isPending} onClick={() => create.mutate()}><Plus className="mr-1 h-4 w-4" />บันทึก</Button>
-              <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
             </div>
           </CardContent>
         </Card>
@@ -69,7 +67,11 @@ export default function SavedViewsPage() {
               { key: 'owner', label: 'เจ้าของ', render: (r) => r.mine ? 'ฉัน' : r.owner },
               { key: 'act', label: '', align: 'right', render: (r) => r.mine ? <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}><Trash2 className="h-4 w-4" /></Button> : null },
             ]}
-            emptyText="ยังไม่มีมุมมองที่บันทึกไว้"
+            emptyState={{
+              icon: Bookmark,
+              title: `ยังไม่มีมุมมองที่บันทึกไว้สำหรับ ${module}`,
+              description: 'บันทึกมุมมองใหม่จากแบบฟอร์มด้านบน หรือกดบันทึกตัวกรองจากหน้ารายการนั้นโดยตรง',
+            }}
           />
         </StateView>
       </div>

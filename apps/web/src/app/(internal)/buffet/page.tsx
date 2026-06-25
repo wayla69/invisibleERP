@@ -5,11 +5,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BarChart3, Plus, Timer, Users, Utensils } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -89,7 +90,7 @@ function Behaviour() {
                       { key: 'qty', label: 'จำนวนที่สั่ง', align: 'right', render: (r) => num(r.qty) },
                       { key: 'orders', label: 'ครั้งที่สั่ง', align: 'right', render: (r) => num(r.orders) },
                     ]}
-                    emptyText="ยังไม่มีการสั่งอาหารในแพ็กเกจนี้"
+                    emptyState={{ icon: Utensils, title: 'ยังไม่มีการสั่งอาหารในแพ็กเกจนี้' }}
                   />
                 </div>
               </CardContent>
@@ -112,7 +113,6 @@ function Packages() {
   const [timeLimit, setTimeLimit] = useState('90');
   const [overtime, setOvertime] = useState('0');
   const [skus, setSkus] = useState('');
-  const [msg, setMsg] = useState('');
 
   const create = useMutation({
     mutationFn: () =>
@@ -128,11 +128,11 @@ function Packages() {
         }),
       }),
     onSuccess: (p) => {
-      setMsg(`✅ เพิ่มแพ็กเกจ ${p.code} · ${p.name}`);
+      notifySuccess(`เพิ่มแพ็กเกจ ${p.code} · ${p.name}`);
       setCode(''); setName(''); setPrice(''); setSkus('');
       qc.invalidateQueries({ queryKey: ['buffet-packages'] });
     },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const avgPrice = packages.length ? packages.reduce((s, p) => s + p.price_per_pax, 0) / packages.length : 0;
@@ -179,7 +179,6 @@ function Packages() {
           <Button disabled={!code || !name || price === '' || create.isPending} onClick={() => create.mutate()}>
             <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'เพิ่มแพ็กเกจ'}
           </Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </CardContent>
       </Card>
 
@@ -198,7 +197,7 @@ function Packages() {
               { key: 'item_skus', label: 'จำนวนเมนู', align: 'right', render: (r) => num(r.item_skus.length) },
               { key: 'active', label: 'สถานะ', render: (r) => <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? 'ใช้งาน' : 'ปิด'}</Badge> },
             ]}
-            emptyText="ยังไม่มีแพ็กเกจบุฟเฟต์"
+            emptyState={{ icon: Utensils, title: 'ยังไม่มีแพ็กเกจบุฟเฟต์', description: 'เพิ่มแพ็กเกจบุฟเฟต์รายการแรกจากฟอร์มด้านบนเพื่อให้ลูกค้าเลือกได้' }}
           />
         </StateView>
       </div>

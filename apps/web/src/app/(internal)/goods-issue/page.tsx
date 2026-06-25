@@ -2,14 +2,15 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, ScanLine, Send, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, Plus, ScanLine, Send, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
 import { parseQrPayload } from '@/lib/qr';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -50,7 +51,6 @@ function MoveForm({ kind }: { kind: 'issue' | 'transfer' }) {
   const [itemId, setItemId] = useState('');
   const [qty, setQty] = useState('');
   const [scan, setScan] = useState('');
-  const [msg, setMsg] = useState('');
 
   function applyScan(v: string) {
     setScan(v);
@@ -71,8 +71,8 @@ function MoveForm({ kind }: { kind: 'issue' | 'transfer' }) {
         ? { from_location: fromLoc, ref_doc: refDoc || undefined, lines }
         : { from_location: fromLoc, to_location: toLoc, ref_doc: refDoc || undefined, lines }),
     }),
-    onSuccess: (r) => { setMsg(`✅ บันทึก ${r.doc_no} (${r.lines} รายการ)`); setLines([]); qc.invalidateQueries({ queryKey: ['movements'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`บันทึก ${r.doc_no} (${r.lines} รายการ)`); setLines([]); qc.invalidateQueries({ queryKey: ['movements'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const canSubmit = lines.length > 0 && !!fromLoc && (kind === 'issue' || (!!toLoc && toLoc !== fromLoc));
@@ -114,7 +114,6 @@ function MoveForm({ kind }: { kind: 'issue' | 'transfer' }) {
           </div>
           <Button disabled={!itemId || !qty} onClick={add}><Plus className="size-4" /> เพิ่ม</Button>
         </div>
-        <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
 
       {lines.length > 0 && (
@@ -154,7 +153,11 @@ function History() {
             { key: 'from_location', label: 'จาก' },
             { key: 'to_location', label: 'ไป' },
           ]}
-          emptyText="ยังไม่มีการเคลื่อนไหว"
+          emptyState={{
+            icon: ArrowLeftRight,
+            title: 'ยังไม่มีการเคลื่อนไหว',
+            description: 'บันทึกการเบิกใช้หรือโอนย้ายที่แท็บ "เบิกใช้" หรือ "โอนย้าย" แล้วประวัติจะแสดงที่นี่',
+          }}
         />
       )}
     </StateView>

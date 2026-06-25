@@ -5,9 +5,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Megaphone, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { DataTable } from '@/components/data-table';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -28,13 +28,12 @@ export default function CampaignsPage() {
   const [name, setName] = useState('');
   const [trigger, setTrigger] = useState('lapsed');
   const [discount, setDiscount] = useState(50);
-  const [msg, setMsg] = useState('');
 
   const list = useQuery<any>({ queryKey: ['campaigns'], queryFn: () => api('/api/marketing/automation/campaigns') });
   const run = useMutation({
     mutationFn: () => api<any>('/api/marketing/automation/campaigns', { method: 'POST', body: JSON.stringify({ name: name || 'แคมเปญ LINE', trigger, channel: 'line', discount_type: 'amount', discount_value: discount }) }),
-    onSuccess: (r) => { setMsg(`ส่งแล้ว: เป้าหมาย ${r.targeted} · ส่งสำเร็จ ${r.sent} · ข้าม ${r.skipped} · ล้มเหลว ${r.failed}`); qc.invalidateQueries({ queryKey: ['campaigns'] }); },
-    onError: (e: any) => setMsg(`❌ ${e.message}`),
+    onSuccess: (r) => { notifySuccess(`ส่งแล้ว: เป้าหมาย ${r.targeted} · ส่งสำเร็จ ${r.sent} · ข้าม ${r.skipped} · ล้มเหลว ${r.failed}`); qc.invalidateQueries({ queryKey: ['campaigns'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -55,7 +54,6 @@ export default function CampaignsPage() {
           <div className="grid gap-1"><Label htmlFor="disc" className="text-xs">ส่วนลด (บาท)</Label><Input id="disc" type="number" min={0} value={discount} onChange={(e) => setDiscount(Math.max(0, +e.target.value))} className="h-9 w-32" /></div>
           <Button disabled={run.isPending} onClick={() => run.mutate()}><Send className="size-4" /> {run.isPending ? 'กำลังส่ง…' : 'ส่งแคมเปญ'}</Button>
         </div>
-        {msg && <Msg ok={!msg.startsWith('❌')}>{msg}</Msg>}
         <p className="text-xs text-muted-foreground">เฉพาะสมาชิกที่ยินยอมรับข่าวสารและผูกบัญชี LINE เท่านั้นที่จะได้รับ — ระบบข้ามผู้ที่ไม่ยินยอมโดยอัตโนมัติ</p>
       </Card>
 
@@ -66,6 +64,7 @@ export default function CampaignsPage() {
             <DataTable
               rows={list.data.campaigns}
               rowKey={(r: any) => r.id}
+              emptyState={{ icon: Megaphone, title: 'ยังไม่มีแคมเปญที่ส่ง', description: 'สร้างแคมเปญด้านบนแล้วกด “ส่งแคมเปญ” — ประวัติและอัตราการใช้คูปองจะแสดงที่นี่' }}
               columns={[
                 { key: 'name', label: 'แคมเปญ', render: (r: any) => <span className="flex items-center gap-1.5"><Megaphone className="size-3.5 text-muted-foreground" />{r.name}</span> },
                 { key: 'trigger', label: 'กลุ่ม', render: (r: any) => <Badge variant="muted">{r.trigger}</Badge> },

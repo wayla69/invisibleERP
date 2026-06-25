@@ -5,9 +5,9 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { ChefHat, ShoppingCart, Soup, FilePlus } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
-import { Msg } from '@/components/tabs';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { Card } from '@/components/ui/card';
@@ -32,7 +32,6 @@ export default function ProductionPlanPage() {
     queryKey: ['production-plan', days, lookback],
     queryFn: () => api(`/api/menu/production-plan?days=${days}&lookback=${lookback}`),
   });
-  const [poMsg, setPoMsg] = useState('');
   const createPo = useMutation({
     // one-click draft PO from the buy list (omit a null uom — the procurement API wants string-or-absent).
     mutationFn: () => api<{ po_no: string }>('/api/procurement/pos', {
@@ -42,8 +41,8 @@ export default function ProductionPlanPage() {
         items: (q.data?.purchase_orders ?? []).map((i: any) => ({ item_id: i.item_id, item_description: i.description, order_qty: i.order_qty, unit_price: i.unit_price, ...(i.uom ? { uom: i.uom } : {}) })),
       }),
     }),
-    onSuccess: (r) => setPoMsg(`สร้างใบสั่งซื้อแล้ว: ${r.po_no} — รออนุมัติ`),
-    onError: (e: any) => setPoMsg(`❌ ${e.message}`),
+    onSuccess: (r) => notifySuccess(`สร้างใบสั่งซื้อแล้ว: ${r.po_no} — รออนุมัติ`),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
@@ -71,6 +70,11 @@ export default function ProductionPlanPage() {
               <DataTable
                 rows={q.data.prep}
                 rowKey={(r: any) => r.sku}
+                emptyState={{
+                  icon: ChefHat,
+                  title: 'ยังไม่มีรายการเตรียมครัว',
+                  description: 'ไม่มีเมนูที่ต้องเตรียมสำหรับช่วงนี้ — ลองเพิ่มจำนวนวันที่วางแผนล่วงหน้า หรือยอดขายย้อนหลังอาจยังไม่พอพยากรณ์',
+                }}
                 columns={[
                   { key: 'name', label: 'เมนู' },
                   { key: 'velocity_per_day', label: 'ขาย/วัน (เฉลี่ย)', align: 'right', render: (r: any) => num(r.velocity_per_day) },
@@ -92,7 +96,6 @@ export default function ProductionPlanPage() {
                       <FilePlus className="size-4" /> {createPo.isPending ? 'กำลังสร้าง…' : 'สร้างใบสั่งซื้อ (ร่าง)'}
                     </Button>
                   </div>
-                  {poMsg && <Msg ok={!poMsg.startsWith('❌')}>{poMsg}</Msg>}
                   <DataTable
                     rows={q.data.purchase_orders}
                     rowKey={(r: any) => r.item_id}

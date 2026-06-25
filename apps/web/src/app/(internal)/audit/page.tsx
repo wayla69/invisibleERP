@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ScrollText, Download, Search } from 'lucide-react';
+import { ScrollText, Download, Search, SearchX } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
+import { notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -25,7 +26,6 @@ export default function AuditPage() {
   const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [applied, setApplied] = useState({ actor: '', action: '', status: '', from: '', to: '' });
   const [page, setPage] = useState(0);
-  const [msg, setMsg] = useState('');
 
   const qs = (extra: Record<string, string | number>) => {
     const p = new URLSearchParams();
@@ -38,6 +38,7 @@ export default function AuditPage() {
   });
 
   const apply = () => { setApplied({ actor, action, status, from, to }); setPage(0); };
+  const filtering = Object.values(applied).some((v) => v !== '');
   const total = q.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
 
@@ -57,11 +58,10 @@ export default function AuditPage() {
           <div><Label>ถึง</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
           <div className="flex items-end gap-2">
             <Button onClick={apply}><Search className="mr-1 h-4 w-4" />ค้นหา</Button>
-            <Button variant="outline" onClick={() => apiDownload(`/api/admin/audit/export?${qs({})}`, 'audit-log.csv').catch((e) => setMsg(`❌ ${e.message}`))}><Download className="h-4 w-4" /></Button>
+            <Button variant="outline" onClick={() => apiDownload(`/api/admin/audit/export?${qs({})}`, 'audit-log.csv').catch((e) => notifyError(e.message))}><Download className="h-4 w-4" /></Button>
           </div>
         </CardContent>
       </Card>
-      {msg && <p className="mb-2 text-sm text-destructive">{msg}</p>}
       <StateView q={q}>
         <DataTable
           rows={q.data?.rows ?? []}
@@ -74,7 +74,32 @@ export default function AuditPage() {
             { key: 'ip', label: 'IP', render: (r) => <span className="text-xs text-muted-foreground">{r.ip ?? '—'}</span> },
             { key: 'request_id', label: 'Request', render: (r) => <span className="text-xs text-muted-foreground">{r.request_id?.slice(0, 8) ?? '—'}</span> },
           ]}
-          emptyText="ไม่พบรายการ"
+          emptyState={
+            filtering
+              ? {
+                  icon: SearchX,
+                  title: 'ไม่พบรายการที่ตรงกับตัวกรอง',
+                  description: 'ลองปรับช่วงเวลา ผู้ใช้ หรือการกระทำ แล้วค้นหาอีกครั้ง',
+                  action: (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setActor(''); setAction(''); setStatus(''); setFrom(''); setTo('');
+                        setApplied({ actor: '', action: '', status: '', from: '', to: '' });
+                        setPage(0);
+                      }}
+                    >
+                      ล้างตัวกรอง
+                    </Button>
+                  ),
+                }
+              : {
+                  icon: ScrollText,
+                  title: 'ยังไม่มีร่องรอยการตรวจสอบ',
+                  description: 'เมื่อมีการเปลี่ยนแปลงในระบบ บันทึกจะปรากฏที่นี่โดยอัตโนมัติ',
+                }
+          }
         />
         <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">
           <span>ทั้งหมด {total.toLocaleString('th-TH')} รายการ · หน้า {page + 1}/{pages}</span>

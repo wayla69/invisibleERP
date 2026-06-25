@@ -5,11 +5,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, FolderTree, Plus, Utensils } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -90,7 +91,6 @@ function Items() {
   const [startT, setStartT] = useState('');
   const [endT, setEndT] = useState('');
   const [days, setDays] = useState<boolean[]>([true, true, true, true, true, true, true]);
-  const [msg, setMsg] = useState('');
 
   const toMin = (t: string) => (t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : undefined);
 
@@ -111,11 +111,11 @@ function Items() {
         }),
       }),
     onSuccess: (it) => {
-      setMsg(`✅ เพิ่มเมนู ${it.sku} · ${it.name}`);
+      notifySuccess(`เพิ่มเมนู ${it.sku} · ${it.name}`);
       setSku(''); setName(''); setPrice(''); setCategoryId(''); setStartT(''); setEndT(''); setDays([true, true, true, true, true, true, true]);
       qc.invalidateQueries({ queryKey: ['menu'] });
     },
-    onError: (e: Error) => setMsg(`❌ ${e.message}`),
+    onError: (e: Error) => notifyError(e.message),
   });
 
   const avgPrice = items.length ? items.reduce((s, i) => s + i.price, 0) / items.length : 0;
@@ -191,7 +191,6 @@ function Items() {
           <Button disabled={!sku || !name || price === '' || create.isPending} onClick={() => create.mutate()}>
             <Plus className="size-4" /> {create.isPending ? 'กำลังบันทึก…' : 'เพิ่มเมนู'}
           </Button>
-          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
         </CardContent>
       </Card>
 
@@ -213,7 +212,7 @@ function Items() {
               { key: 'price', label: 'ราคา', align: 'right', render: (r) => <span className="tabular">{baht(r.price)}</span> },
               { key: 'is_available', label: 'สถานะ', render: (r) => <Badge variant={r.is_available ? 'success' : 'muted'}>{r.is_available ? 'พร้อมขาย' : 'ปิดขาย'}</Badge> },
             ]}
-            emptyText="ยังไม่มีเมนู"
+            emptyState={{ icon: Utensils, title: 'ยังไม่มีเมนู', description: 'เพิ่มเมนูใหม่ด้วยฟอร์มด้านบนเพื่อเริ่มแสดงผลบนหน้า POS' }}
           />
         </StateView>
       </div>
@@ -242,7 +241,7 @@ function Categories() {
             { key: 'name_en', label: 'ชื่อ (EN)', render: (r) => r.name_en ?? '—' },
             { key: 'sort', label: 'ลำดับ', align: 'right', render: (r) => num(r.sort) },
           ]}
-          emptyText="ยังไม่มีหมวดหมู่"
+          emptyState={{ icon: FolderTree, title: 'ยังไม่มีหมวดหมู่', description: 'เพิ่มหมวดหมู่เพื่อจัดกลุ่มเมนูให้ค้นหาง่ายขึ้นบนหน้า POS' }}
         />
       </StateView>
     </div>

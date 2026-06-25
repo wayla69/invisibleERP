@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Utensils, Percent, TrendingUp, AlertTriangle, Scale } from 'lucide-react';
+import { Utensils, Percent, TrendingUp, AlertTriangle, Scale, CalendarSearch, UtensilsCrossed, Soup } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -66,7 +66,11 @@ function VarianceTab() {
                 { key: 'variance_cost', label: 'ส่วนต่าง (฿)', align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
                 { key: 'variance_pct', label: '% ', align: 'right', render: (r) => <Badge variant={r.anomaly === 'High' ? 'destructive' : r.anomaly === 'Medium' ? 'warning' : 'muted'}>{r.variance_pct}%</Badge> },
               ]}
-              emptyText="ยังไม่มีข้อมูลการนับสต๊อก (EOD count) ในช่วงนี้"
+              emptyState={{
+                icon: CalendarSearch,
+                title: 'ไม่มีข้อมูลส่วนต่างในช่วงที่เลือก',
+                description: 'ยังไม่มีการนับสต๊อก (EOD count) ในช่วงวันที่นี้ — ลองปรับช่วงวันที่แล้วดูใหม่',
+              }}
             />
           </div>
         )}
@@ -99,7 +103,11 @@ function Margins() {
               { key: 'food_cost_pct', label: 'ต้นทุน %', align: 'right', render: (r) => <Badge variant={r.food_cost_pct > q.data!.target_pct ? 'destructive' : r.costed ? 'success' : 'muted'}>{r.food_cost_pct}%</Badge> },
               { key: 'margin_pct', label: 'มาร์จิน %', align: 'right', render: (r) => <span className="tabular">{r.margin_pct}%</span> },
             ]}
-            emptyText="ยังไม่มีเมนู"
+            emptyState={{
+              icon: UtensilsCrossed,
+              title: 'ยังไม่มีเมนู',
+              description: 'เพิ่มเมนูในข้อมูลหลัก แล้วผูกสูตร (recipe/BoM) เพื่อให้คำนวณต้นทุนต่อจานได้',
+            }}
           />
         </div>
       )}
@@ -120,7 +128,11 @@ function Ingredients() {
           { key: 'recipes_using', label: 'ใช้ในสูตร', align: 'right', render: (r) => num(r.recipes_using) },
           { key: 'cost', label: 'ต้นทุนรวม/เสิร์ฟ', align: 'right', render: (r) => <span className="tabular">{baht(r.cost)}</span> },
         ]}
-        emptyText="ยังไม่มีสูตร/วัตถุดิบ"
+        emptyState={{
+          icon: Soup,
+          title: 'ยังไม่มีสูตร/วัตถุดิบ',
+          description: 'ผูกสูตร (recipe/BoM) ให้เมนู เพื่อดูต้นทุนวัตถุดิบที่ดันต้นทุนอาหาร',
+        }}
       />
     </StateView>
   );

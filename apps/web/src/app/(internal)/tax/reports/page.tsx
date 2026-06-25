@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, Scale, Calendar, Download } from 'lucide-react';
+import { TrendingUp, TrendingDown, Scale, Calendar, Download, ReceiptText, FileText } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -102,7 +102,11 @@ function OutputVat() {
                 { key: 'value', label: 'มูลค่า', align: 'right', render: (r: any) => <span className="tabular">{baht(r.value)}</span> },
                 { key: 'vat', label: 'VAT', align: 'right', render: (r: any) => <span className="tabular">{baht(r.vat)}</span> },
               ]}
-              emptyText="ไม่มีภาษีขายในรอบนี้"
+              emptyState={{
+                icon: ReceiptText,
+                title: 'ไม่มีภาษีขายในรอบนี้',
+                description: 'ยังไม่มีใบกำกับภาษีขายในเดือน/ปีที่เลือก ลองเปลี่ยนรอบด้านบนเพื่อดูข้อมูลรอบอื่น',
+              }}
             />
           </div>
         )}
@@ -141,7 +145,11 @@ function InputVat() {
                 { key: 'base', label: 'ฐานภาษี', align: 'right', render: (r: any) => <span className="tabular">{baht(r.base)}</span> },
                 { key: 'vat', label: 'VAT', align: 'right', render: (r: any) => <span className="tabular">{baht(r.vat)}</span> },
               ]}
-              emptyText="ไม่มีภาษีซื้อในรอบนี้"
+              emptyState={{
+                icon: FileText,
+                title: 'ไม่มีภาษีซื้อในรอบนี้',
+                description: 'ยังไม่มีใบกำกับภาษีซื้อในเดือน/ปีที่เลือก ลองเปลี่ยนรอบด้านบนเพื่อดูข้อมูลรอบอื่น',
+              }}
             />
           </div>
         )}

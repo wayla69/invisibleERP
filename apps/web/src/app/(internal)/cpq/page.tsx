@@ -1,13 +1,14 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, Check, X } from 'lucide-react';
+import { Send, Check, X, FileText, SlidersHorizontal } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
+import { notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
-import { Tabs, Msg } from '@/components/tabs';
+import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { statusVariant } from '@/components/ui';
@@ -39,15 +40,16 @@ function Quotes() {
     mutationFn: (v: { id: number; verb: 'send' | 'accept' | 'reject' }) =>
       api(`/api/cpq/quotes/${v.id}/${v.verb}`, { method: 'POST' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cpq-quotes'] }),
+    onError: (e: any) => notifyError(e.message),
   });
 
   return (
     <div className="space-y-4">
-      {action.error && <Msg>{(action.error as Error).message}</Msg>}
       <StateView q={q}>
         {q.data && (
           <DataTable
             rows={q.data.quotes}
+            emptyState={{ icon: FileText, title: 'ยังไม่มีใบเสนอราคา', description: 'สร้างใบเสนอราคาจากรายการตั้งค่าราคา แล้วส่งให้ลูกค้าเพื่อเริ่มติดตามสถานะ' }}
             columns={[
               { key: 'quote_no', label: 'เลขที่' },
               { key: 'customer_name', label: 'ลูกค้า' },
@@ -95,6 +97,7 @@ function Configs() {
       {q.data && (
         <DataTable
           rows={q.data.configs}
+          emptyState={{ icon: SlidersHorizontal, title: 'ยังไม่มีรายการตั้งค่าราคา', description: 'เพิ่มรายการตั้งค่าราคาเพื่อกำหนดราคาฐานและตัวเลือกสำหรับใบเสนอราคา' }}
           columns={[
             { key: 'code', label: 'รหัส' },
             { key: 'name', label: 'ชื่อ' },

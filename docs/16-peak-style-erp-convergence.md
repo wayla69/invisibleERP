@@ -93,8 +93,12 @@ scheduled-reports · alerts · marketing · delivery-channels · production · W
 mobile-scan · claims · delivery · payment accounts/terminals · loyalty member-detail/rewards (12/12, 0
 flagged). A **fifth sweep** added settings · custom-fields · pos-ops · pos-control · peripherals · pos-fiscal
 · print · loyalty missions/campaigns · tax-WHT · profitability · consolidation · intercompany · BoM (14/14, 0
-flagged) — bringing the total to **~57 screens** sharing the pattern. Inline `<Msg>` is kept for **in-dialog
-field validation**; only action *result* feedback moved to toasts.
+flagged). A **sixth (final mop-up) sweep** covered the remaining 22 table-bearing screens — read-only
+report/viewers (restaurant-analytics, SoD, lots, food-cost, tax-reports, BI, audit, POS-home, loyalty-members,
+item-detail, POS) got guided empty states, and production-plan/menu/goods-issue/CPQ/costing/buffet/branches/
+saved-views/images/campaigns/AI-actions also got toasts (22/22, 0 flagged) — bringing the total to **~79
+screens**, essentially the whole internal app. Inline `<Msg>` is kept for **in-dialog field validation**;
+only action *result* feedback moved to toasts.
 
 ---
 
@@ -134,3 +138,4 @@ and `00-getting-started.md` (Finance cycle sub-sections + action center).
 | 2026-06-25 | v1.3 (IMPLEMENTED) | Web / Product | **Second + third friendliness sweeps** (§1.5): same toasts + guided empty states (+ search where hand-rolled) extended to 11 more screens (procurement/RFQs/CRM/projects/assets/accounting/tax-invoices/HCM/planning/pricing/service) and then 10 more (admin-users/webhooks/scheduled-reports/alerts/marketing/channels/production/wms/3-way-match/replenishment) — **~31 screens** total. Each page independently review-verified behavior-preserving (11/11 then 10/10, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-06-25 | v1.4 (IMPLEMENTED) | Web / Product | **Fourth friendliness sweep** (§1.5): same toasts + guided empty states extended to 12 more screens (payroll/fx/pipeline/manufacturing/stocktake/mobile-scan/claims/delivery/payments-accounts/payments-terminals/loyalty-member-detail/loyalty-rewards) — **~43 screens** total. Independently review-verified behavior-preserving (12/12, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-06-25 | v1.5 (IMPLEMENTED) | Web / Product | **Fifth friendliness sweep** (§1.5): same toasts + guided empty states extended to 14 more screens (settings/custom-fields/pos-ops/pos-control/peripherals/pos-fiscal/print/loyalty-missions/loyalty-campaigns/tax-wht/profitability/consolidation/intercompany/bom) — **~57 screens** total. Independently review-verified behavior-preserving (14/14, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
+| 2026-06-25 | v1.6 (IMPLEMENTED) | Web / Product | **Final mop-up sweep** (§1.5): guided empty states on the remaining read-only report/viewer screens (restaurant-analytics/sod/lots/food-cost/tax-reports/bi/audit/pos-home/loyalty-members/inventory-item/pos) + toasts & empty states on the rest (production-plan/menu/goods-issue/cpq/costing/buffet/branches/saved-views/images/campaigns/ai-actions) — 22 screens, **~79 total** (essentially the whole internal app). Independently review-verified behavior-preserving (22/22, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
