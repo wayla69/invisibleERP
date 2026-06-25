@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ChevronRight, LogOut, Search } from 'lucide-react';
+import { ChevronRight, LogOut, Search, Star } from 'lucide-react';
 
 import { hasSession, logout as apiLogout } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
@@ -56,6 +56,10 @@ function initials(name?: string | null) {
 }
 
 const WORKSPACE_KEY = 'ie-workspace';
+const FAVORITES_KEY = 'ie-nav-favorites'; // pinned hrefs (manual)
+const RECENTS_KEY = 'ie-nav-recents'; // recently visited hrefs (auto, most-recent-first)
+const RECENTS_SHOWN = 5; // how many recent items to surface
+const RECENTS_STORED = 12; // how many to retain so favourites filtering doesn't starve the list
 
 /** A labelled, collapsible sub-section inside a sidebar group (dependency-free). Open state persists per
  *  title in localStorage. In icon-collapsed mode the header is hidden and items stay visible (icons only). */
@@ -109,6 +113,33 @@ export function AppShell({
   const moduleFlags = useModuleFlags();
   const [paletteOpen, setPaletteOpen] = React.useState(false);
 
+  // Favourites (pinned via the star) + auto-tracked recents — only on the permission-gated internal
+  // surface (not the small customer portal). Loaded after mount to avoid an SSR/CSR hydration mismatch.
+  const pinsEnabled = filterPerms;
+  const [favorites, setFavorites] = React.useState<string[]>([]);
+  const [recents, setRecents] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const read = (k: string): string[] => {
+      try {
+        const v = JSON.parse(localStorage.getItem(k) ?? '[]');
+        return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+      } catch {
+        return [];
+      }
+    };
+    setFavorites(read(FAVORITES_KEY));
+    setRecents(read(RECENTS_KEY));
+  }, []);
+  const favSet = React.useMemo(() => new Set(favorites), [favorites]);
+  const toggleFavorite = React.useCallback((href: string) => {
+    setFavorites((prev) => {
+      const next = prev.includes(href) ? prev.filter((h) => h !== href) : [href, ...prev];
+      if (typeof window !== 'undefined') localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   // Active top-level workspace (ERP | POS). Seed from the saved preference; otherwise default by role
   // once the user profile loads. A manual choice is persisted and wins thereafter.
   const [workspace, setWorkspace] = React.useState<Workspace>(() => {
@@ -153,6 +184,25 @@ export function AppShell({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Record the current destination into recents (most-recent-first, deduped, capped). Matches the active
+  // nav item across the full nav so it works regardless of the active workspace.
+  React.useEffect(() => {
+    if (!pinsEnabled) return;
+    const all = nav.flatMap((g) => allGroupItems(g));
+    const match =
+      all.find((it) => it.href === pathname) ??
+      all.find(
+        (it) => it.href !== '/dashboard' && it.href !== '/portal/dashboard' && pathname.startsWith(it.href + '/'),
+      );
+    if (!match) return;
+    setRecents((prev) => {
+      if (prev[0] === match.href) return prev;
+      const next = [match.href, ...prev.filter((h) => h !== match.href)].slice(0, RECENTS_STORED);
+      if (typeof window !== 'undefined') localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [pathname, nav, pinsEnabled]);
+
   // Filter groups/items by permission AND module enable/disable (back-office); drop empty groups.
   // A disabled module hides for EVERYONE (incl. Admin) — faithful to the legacy "hides for all".
   const disabledModules = React.useMemo(() => new Set(moduleFlags.data?.disabled ?? []), [moduleFlags.data]);
@@ -195,16 +245,59 @@ export function AppShell({
   const activeLabel =
     groups.flatMap((g) => allGroupItems(g)).find((it) => isActive(it.href))?.label ?? brand;
 
-  const renderItem = (item: NavItem) => (
-    <SidebarMenuItem key={item.href}>
-      <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.label}>
-        <Link href={item.href}>
-          <item.icon />
-          <span>{item.label}</span>
-        </Link>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
+  // Resolve pinned hrefs against the items actually visible in the active workspace (perm-filtered), so we
+  // never surface a favourite/recent the user can't currently reach. Recents exclude current favourites.
+  const visibleByHref = React.useMemo(() => {
+    const m = new Map<string, NavItem>();
+    for (const g of groups) for (const it of allGroupItems(g)) m.set(it.href, it);
+    return m;
+  }, [groups]);
+  const favItems = React.useMemo(
+    () => favorites.map((h) => visibleByHref.get(h)).filter((it): it is NavItem => !!it),
+    [favorites, visibleByHref],
   );
+  const recentItems = React.useMemo(
+    () =>
+      recents
+        .map((h) => visibleByHref.get(h))
+        .filter((it): it is NavItem => !!it && !favSet.has(it.href))
+        .slice(0, RECENTS_SHOWN),
+    [recents, visibleByHref, favSet],
+  );
+
+  const renderItem = (item: NavItem) => {
+    const fav = favSet.has(item.href);
+    return (
+      <SidebarMenuItem key={item.href}>
+        <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.label}>
+          <Link href={item.href}>
+            <item.icon />
+            <span>{item.label}</span>
+          </Link>
+        </SidebarMenuButton>
+        {pinsEnabled && (
+          <button
+            type="button"
+            data-sidebar="menu-action"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              toggleFavorite(item.href);
+            }}
+            aria-pressed={fav}
+            aria-label={fav ? `เอา ${item.label} ออกจากรายการโปรด` : `เพิ่ม ${item.label} ในรายการโปรด`}
+            title={fav ? 'เอาออกจากรายการโปรด' : 'เพิ่มในรายการโปรด'}
+            className={cn(
+              'absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground/50 outline-none ring-sidebar-ring transition-opacity hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:ring-2 group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 group-data-[collapsible=icon]:hidden',
+              fav ? 'text-amber-500 opacity-100' : 'opacity-0',
+            )}
+          >
+            <Star className={cn('size-3.5', fav && 'fill-current')} />
+          </button>
+        )}
+      </SidebarMenuItem>
+    );
+  };
 
   function logout() {
     void apiLogout().finally(() => router.replace('/login'));
@@ -250,6 +343,22 @@ export function AppShell({
         </SidebarHeader>
 
         <SidebarContent>
+          {pinsEnabled && favItems.length > 0 && (
+            <SidebarGroup>
+              <SidebarGroupLabel>รายการโปรด</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>{favItems.map(renderItem)}</SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
+          {pinsEnabled && recentItems.length > 0 && (
+            <SidebarGroup>
+              <SidebarGroupLabel>ล่าสุด</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>{recentItems.map(renderItem)}</SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
           {groups.map((group) => (
             <SidebarGroup key={group.title}>
               <SidebarGroupLabel>{group.title}</SidebarGroupLabel>

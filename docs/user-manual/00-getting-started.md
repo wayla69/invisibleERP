@@ -158,6 +158,10 @@ appear in **both** workspaces.
 - **Settings is foldable:** the *ตั้งค่าระบบ* group is split into collapsible sub-sections — *ข้อมูลหลัก*,
   *ปรับแต่ง*, *เชื่อมต่อ & ขยาย*, *ผู้ดูแลระบบ*. Click a sub-section heading to fold/unfold it; your choice is
   remembered on that device.
+- **Favourites & recent:** hover any menu item and click the **★ star** to pin it to a **รายการโปรด**
+  (Favourites) group at the top of the side menu; click the star again to unpin. A **ล่าสุด** (Recent)
+  group automatically lists the last few screens you opened. Both are per-device and only show items you
+  can access in the current workspace.
 
 [screenshot: ERP/POS workspace switcher in the sidebar header]
 

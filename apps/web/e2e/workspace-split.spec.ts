@@ -113,3 +113,25 @@ test('System settings sub-sections are collapsible and reachable', async ({ page
   await subHeader.click();
   await expect(navLink(page, '/master-data')).toBeVisible();
 });
+
+test('starring a menu item pins it to the Favourites group and persists across reload', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+
+  // Star /procurement via its hover menu-action button.
+  const procItem = page.locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/procurement"]') });
+  await procItem.locator('button[data-sidebar="menu-action"]').click();
+
+  // It now appears under the "รายการโปรด" (Favourites) group, pinned at the top.
+  const favGroup = page.locator('div[data-sidebar="group"]', { has: page.getByText('รายการโปรด', { exact: true }) });
+  await expect(favGroup.locator('a[href="/procurement"]')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('ie-nav-favorites'))).toContain('/procurement');
+
+  // Survives a reload.
+  await page.reload();
+  await expect(favGroup.locator('a[href="/procurement"]')).toBeVisible();
+
+  // Un-star from the favourites entry → the group disappears.
+  await favGroup.locator('li[data-sidebar="menu-item"] button[data-sidebar="menu-action"]').first().click();
+  await expect(page.getByText('รายการโปรด', { exact: true })).toHaveCount(0);
+});

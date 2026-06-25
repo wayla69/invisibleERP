@@ -214,13 +214,16 @@ It removes the three real pain points — the 22-item System catch-all (now 4 co
 with **zero route changes** and a small additive data-model extension. The orphaned `/loyalty` config page
 (Phase 0 finding) is now reachable from the new Loyalty group.
 
-**Deferred follow-ups (not blocking):**
-- **Favorites / Recents** — a localStorage-backed pinned group at the top of the sidebar for the ~85
-  destinations. Straightforward on the current model.
+**Follow-ups:**
+- **Favorites / Recents** ✅ *(delivered 2026-06-25)* — `app-shell.tsx` now renders two pinned groups at the
+  top of the internal sidebar: **รายการโปรด** (manual, via a star button that appears on hover of each item)
+  and **ล่าสุด** (auto-tracked recents, most-recent-first, deduped, cap 5). Both are `localStorage`-backed
+  (`ie-nav-favorites`, `ie-nav-recents`) and resolved against the active workspace's permission-filtered
+  items so a pin never surfaces an unreachable route. Portal surface unaffected (gated on `filterPerms`).
 - **`defaultOpen` / collapsed-by-default sub-sections** — add the flag and default the longer Settings
-  sub-sections to collapsed; persistence already exists.
+  sub-sections to collapsed; persistence already exists. *(still open)*
 - **Screenshots** — refresh the `[screenshot: …]` placeholders in the user manual once design captures new
-  sidebar imagery.
+  sidebar imagery. *(still open)*
 
 ---
 
@@ -231,3 +234,4 @@ with **zero route changes** and a small additive data-model extension. The orpha
 | 2026-06-25 | v0.1 (DRAFT) | Web / Product | Initial plan: conservative, URL-stable navigation IA restructure for ERP + POS; proposed target taxonomy, additive `subgroups` model, 6-phase delivery, risk register. No application code changed. |
 | 2026-06-25 | v0.2 (DRAFT) | Web / Product | Phase 0 audit executed and recorded (§4a): 103 nav hrefs, 0 dead links, 3 unlinked pages classified (`/notifications` + `/pos/new` intentional; `/loyalty` config page is a genuine orphan to wire into the new Loyalty group in Phase 3). Cross-listing confirmed tag-based, not duplicated. No application code changed. |
 | 2026-06-25 | v1.0 (IMPLEMENTED) | Web / Product | Phases 2–5 delivered. `nav.ts`: `NavSubGroup` + optional `subgroups`/`items`, `allGroupItems()`, recursive `navForWorkspace()`, INTERNAL_NAV re-bucketed into per-domain ERP/POS groups + a 4-sub-section *ตั้งค่าระบบ* group, orphan `/loyalty` wired in — **no href changed**. `app-shell.tsx`: recursive permission filter + active-label, dependency-free collapsible `NavSubSection` (localStorage-persisted). `command-palette.tsx`: flattens subgroups. Corrected baseline counts (System 22, POS sales 19). Verified: web typecheck ✅, web build ✅, Playwright `workspace-split` 5/5 ✅ (added collapsible-sub-section case). Docs: user-manual *Workspaces* section updated. |
+| 2026-06-25 | v1.1 (IMPLEMENTED) | Web / Product | §6 follow-up delivered: **Favorites/Recents** pinned groups (*รายการโปรด* + *ล่าสุด*) at the top of the internal sidebar. `app-shell.tsx`: star menu-action toggles favourites; recents auto-tracked on route change; both `localStorage`-backed and resolved against the workspace's permission-filtered items; gated on `filterPerms` (portal unaffected). Verified: web typecheck ✅, build ✅, Playwright `workspace-split` 6/6 ✅ (added a favourite-pin/persist/un-pin case). User-manual *Workspaces* section updated. |
