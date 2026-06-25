@@ -79,7 +79,8 @@ async function main() {
     let seq = 0;
     const post = async (date: string, period: string, memo: string, ref: string, lines: { acct: string; dr?: number; cr?: number; memo?: string }[]) => {
       seq++;
-      const entryNo = `JE-${date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
+      // demo-tagged entry_no so it never collides with real JE-YYYYMMDD-NNN already in the tenant's GL
+      const entryNo = `JE-D${T}-${date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
       const [je] = await tx.insert(schema.journalEntries).values({
         entryNo, entryDate: date, period, memo, source: 'DEMO', sourceRef: ref, ledgerCode: null,
         tenantId: T, currency: 'THB', status: 'Posted', createdBy: 'finance-demo',
