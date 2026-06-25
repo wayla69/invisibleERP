@@ -32,6 +32,10 @@ pnpm --filter @ierp/shared build
 pnpm --filter @ierp/api db:generate   # สร้าง migration จาก Drizzle schema
 pnpm --filter @ierp/api db:migrate    # apply เข้า DB
 pnpm --filter @ierp/api db:seed       # permissions + role_permissions + admin user
+pnpm --filter @ierp/api db:seed:demo  # (ไม่บังคับ) ข้อมูลตัวอย่างร้านบุฟเฟ่ต์ญี่ปุ่น "Oshinei"
+                                      #   tenant OSHINEI + login oshinei/oshinei123:
+                                      #   เมนู 252 รายการ, บุฟเฟ่ต์ 4 ระดับ (350/500/590/799),
+                                      #   วัตถุดิบ 193 + สูตร/BoM, ครัว/ผังโต๊ะ (idempotent, รันซ้ำได้)
 
 # 4. รัน (api + web พร้อมกัน)
 pnpm dev
