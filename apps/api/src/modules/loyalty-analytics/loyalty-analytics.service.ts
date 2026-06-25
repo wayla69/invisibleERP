@@ -18,6 +18,14 @@ export class LoyaltyAnalyticsService {
     return Number(t);
   }
 
+  // At-risk = active member, still holds points, dormant past the cutoff. Shared by the overview KPI
+  // count and the churn drill-down so the headline number always matches the list. Built with the typed
+  // operators (NOT a raw `sql` template) so Drizzle runs the timestamp column's encoder on `cutoff`
+  // (Date → ISO string); a raw `${cutoff}` would hand postgres-js a bare Date and crash on serialization.
+  private atRiskWhere(cutoff: Date) {
+    return and(eq(posMembers.active, true), gt(posMembers.balance, '0'), lt(posMembers.lastUpdated, cutoff));
+  }
+
   async overview(user: JwtUser, explicitTenant?: number | null) {
     const db = this.db as any; const tenantId = this.tid(user, explicitTenant);
     const cutoff90 = new Date(Date.now() - 90 * 86_400_000); // dormant threshold
@@ -29,7 +37,7 @@ export class LoyaltyAnalyticsService {
       optedIn: sql<number>`count(*) filter (where ${posMembers.marketingOptIn} = true)`,
       balance: sql<string>`coalesce(sum(${posMembers.balance}),0)`,
       lifetime: sql<string>`coalesce(sum(${posMembers.lifetime}),0)`,
-      atRisk: sql<number>`count(*) filter (where ${posMembers.active} = true and ${posMembers.balance} > 0 and ${posMembers.lastUpdated} < ${cutoff90})`,
+      atRisk: sql<number>`count(*) filter (where ${this.atRiskWhere(cutoff90)})`,
     }).from(posMembers).where(eq(posMembers.tenantId, tenantId));
     const tierRows = await db.select({ tier: posMembers.tier, c: sql<number>`count(*)` }).from(posMembers).where(eq(posMembers.tenantId, tenantId)).groupBy(posMembers.tier);
     const tierMix: Record<string, number> = {}; for (const r of tierRows) tierMix[r.tier ?? 'None'] = Number(r.c);
@@ -71,7 +79,7 @@ export class LoyaltyAnalyticsService {
     const db = this.db as any; const tenantId = this.tid(user, explicitTenant);
     const cutoff90 = new Date(Date.now() - 90 * 86_400_000);
     const rows = await db.select({ id: posMembers.id, code: posMembers.memberCode, name: posMembers.name, tier: posMembers.tier, balance: posMembers.balance, lastUpdated: posMembers.lastUpdated })
-      .from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true), gt(posMembers.balance, '0'), lt(posMembers.lastUpdated, cutoff90)))
+      .from(posMembers).where(and(eq(posMembers.tenantId, tenantId), this.atRiskWhere(cutoff90)))
       .orderBy(desc(posMembers.balance)).limit(Math.min(500, Math.max(1, limit)));
     return { tenant_id: tenantId, at_risk: rows.map((r: any) => ({ id: Number(r.id), member_code: r.code, name: r.name, tier: r.tier, balance: n(r.balance), last_activity: r.lastUpdated })) };
   }
