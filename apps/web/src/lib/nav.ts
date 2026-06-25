@@ -93,9 +93,21 @@ export interface NavItem {
   workspace?: Workspace[];
 }
 
-export interface NavGroup {
+/** Optional third level: a collapsible sub-section inside a NavGroup. Used to break very long groups
+ *  (e.g. System settings) into labelled, foldable sections without changing any route. */
+export interface NavSubGroup {
   title: string;
   items: NavItem[];
+  /** Workspaces this sub-section belongs to. Items may override per-item. Defaults to the parent group's. */
+  workspace?: Workspace[];
+}
+
+export interface NavGroup {
+  title: string;
+  /** Flat items rendered directly under the group label. Optional when the group uses `subgroups`. */
+  items?: NavItem[];
+  /** Optional collapsible sub-sections rendered after any flat `items`. */
+  subgroups?: NavSubGroup[];
   /** Workspaces this group belongs to. Items may override per-item. Defaults to both. */
   workspace?: Workspace[];
 }
@@ -110,7 +122,10 @@ export const workspaceHome = (ws: Workspace): string => WORKSPACES.find((w) => w
 
 const BOTH: Workspace[] = ['erp', 'pos'];
 
-/** Back-office navigation, grouped. `perms` gate visibility via hasPerm(); `workspace` gates the ERP/POS switcher. */
+/** Back-office navigation, grouped. `perms` gate visibility via hasPerm(); `workspace` gates the ERP/POS
+ *  switcher. Restructured 2026-06-25 (see docs/15-ui-ux-menu-restructure-plan.md): clearer per-domain
+ *  groups, a dedicated Loyalty group, and a `subgroups`-segmented System group. **Every `href` is
+ *  unchanged** — this is a regrouping/relabelling only, never a route change. */
 export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'ภาพรวม',
@@ -120,8 +135,10 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ภาพรวมหน้าร้าน', href: '/pos-home', icon: Store, perms: ['pos', 'pos_sell', 'order_mgt', 'dashboard'], workspace: ['pos'] },
     ],
   },
+
+  // ─── POS surface ────────────────────────────────────────────────────────────────────────────────
   {
-    title: 'การขาย',
+    title: 'ขายหน้าร้าน',
     workspace: ['pos'],
     items: [
       { label: 'POS', href: '/pos', icon: ShoppingCart, perms: ['pos', 'order_mgt'] },
@@ -129,25 +146,41 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ครัว (KDS)', href: '/kds', icon: ChefHat, perms: ['pos'] },
       { label: 'เมนูอาหาร', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
       { label: 'บุฟเฟต์ (แพ็กเกจ)', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
-      { label: 'ต้นทุนอาหาร (Food cost)', href: '/food-cost', icon: PieChart, perms: ['pos', 'order_mgt', 'masterdata', 'exec'] },
-      { label: 'วิเคราะห์ร้านอาหาร (Analytics)', href: '/restaurant-analytics', icon: BarChart3, perms: ['dashboard', 'exec', 'planner', 'order_mgt'] },
-      { label: 'แผนการผลิต (Production plan)', href: '/production-plan', icon: Boxes, perms: ['pos', 'order_mgt', 'masterdata', 'planner', 'exec'] },
-      { label: 'จัดการเคลม', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
-      { label: 'ใบส่งสินค้า', href: '/delivery', icon: Truck, perms: ['delivery'] },
       { label: 'ควบคุม POS (พักบิล/อนุมัติ)', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
       { label: 'ใบเสร็จ & งานพิมพ์', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
-      { label: 'อุปกรณ์ฮาร์ดแวร์ (Peripherals)', href: '/peripherals', icon: Cable, perms: ['pos', 'order_mgt'] },
-      // dual-use: pricing & branches are configured back-office but used at POS → cross-listed
-      { label: 'กฎราคา & โปรโมชั่น', href: '/pricing', icon: Coins, perms: ['pos', 'order_mgt', 'exec'], workspace: BOTH },
-      { label: 'ช่องทางเดลิเวอรี (Aggregators)', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },
-      { label: 'ลอยัลตี้ & แรงงาน (POS Ops)', href: '/pos-ops', icon: Star, perms: ['pos', 'loyalty', 'users', 'exec'] },
-      { label: 'เครื่องรับบัตร & สรุปยอด', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
-      { label: 'มัดจำ & บัญชีเครดิต (House accounts)', href: '/payments/accounts', icon: Wallet, perms: ['pos', 'order_mgt', 'exec'] },
-      { label: 'สาขา & ยอดขายรวม (Branches)', href: '/branches', icon: Store, perms: ['branch', 'exec'], workspace: BOTH },
     ],
   },
   {
-    title: 'ลูกค้า & การขาย',
+    title: 'ร้าน & การจัดส่ง',
+    workspace: ['pos'],
+    items: [
+      { label: 'จัดการเคลม', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
+      { label: 'ใบส่งสินค้า', href: '/delivery', icon: Truck, perms: ['delivery'] },
+      { label: 'ช่องทางเดลิเวอรี (Aggregators)', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },
+    ],
+  },
+  {
+    title: 'อุปกรณ์ & การชำระเงิน',
+    workspace: ['pos'],
+    items: [
+      { label: 'อุปกรณ์ฮาร์ดแวร์ (Peripherals)', href: '/peripherals', icon: Cable, perms: ['pos', 'order_mgt'] },
+      { label: 'เครื่องรับบัตร & สรุปยอด', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
+      { label: 'มัดจำ & บัญชีเครดิต (House accounts)', href: '/payments/accounts', icon: Wallet, perms: ['pos', 'order_mgt', 'exec'] },
+    ],
+  },
+  {
+    title: 'วิเคราะห์ร้านอาหาร',
+    workspace: ['pos'],
+    items: [
+      { label: 'ต้นทุนอาหาร (Food cost)', href: '/food-cost', icon: PieChart, perms: ['pos', 'order_mgt', 'masterdata', 'exec'] },
+      { label: 'วิเคราะห์ร้านอาหาร (Analytics)', href: '/restaurant-analytics', icon: BarChart3, perms: ['dashboard', 'exec', 'planner', 'order_mgt'] },
+      { label: 'แผนการผลิต (Production plan)', href: '/production-plan', icon: Boxes, perms: ['pos', 'order_mgt', 'masterdata', 'planner', 'exec'] },
+    ],
+  },
+
+  // ─── ERP: customers & commercial ────────────────────────────────────────────────────────────────
+  {
+    title: 'ลูกค้า & CRM',
     workspace: ['erp'],
     items: [
       { label: 'โอกาสการขาย', href: '/pipeline', icon: Target, perms: ['marketing', 'exec'] },
@@ -155,18 +188,39 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'บริการ & SLA', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
       { label: 'CRM 360', href: '/crm', icon: Users, perms: ['marketing', 'exec'] },
       { label: 'การตลาด', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
-      // dual-use: loyalty program is run from POS but configured/analysed in ERP → cross-listed
-      { label: 'สมาชิก & แต้ม', href: '/loyalty/members', icon: Star, perms: ['loyalty', 'marketing'], workspace: BOTH },
-      { label: 'ของรางวัล & คูปอง', href: '/loyalty/rewards', icon: Gift, perms: ['loyalty', 'marketing'], workspace: BOTH },
-      { label: 'ภารกิจ & แสตมป์', href: '/loyalty/missions', icon: Target, perms: ['loyalty', 'marketing'], workspace: BOTH },
-      { label: 'วงล้อนำโชค', href: '/loyalty/wheels', icon: Disc3, perms: ['loyalty', 'marketing'], workspace: BOTH },
-      { label: 'แคมเปญ', href: '/loyalty/campaigns', icon: Megaphone, perms: ['marketing', 'exec'], workspace: BOTH },
-      { label: 'พันธมิตร & สิทธิพิเศษ', href: '/loyalty/partners', icon: Handshake, perms: ['loyalty', 'marketing'], workspace: BOTH },
-      { label: 'วิเคราะห์ลอยัลตี้', href: '/loyalty/analytics', icon: BarChart3, perms: ['marketing', 'exec'], workspace: BOTH },
     ],
   },
   {
-    title: 'สต๊อก & จัดซื้อ',
+    // Loyalty runs at POS but is configured/analysed in ERP → BOTH. POS Ops is POS-only.
+    title: 'ลอยัลตี้',
+    workspace: BOTH,
+    items: [
+      { label: 'ลอยัลตี้ & แรงงาน (POS Ops)', href: '/pos-ops', icon: Star, perms: ['pos', 'loyalty', 'users', 'exec'], workspace: ['pos'] },
+      { label: 'สมาชิก & แต้ม', href: '/loyalty/members', icon: Star, perms: ['loyalty', 'marketing'] },
+      { label: 'ของรางวัล & คูปอง', href: '/loyalty/rewards', icon: Gift, perms: ['loyalty', 'marketing'] },
+      { label: 'ภารกิจ & แสตมป์', href: '/loyalty/missions', icon: Target, perms: ['loyalty', 'marketing'] },
+      { label: 'วงล้อนำโชค', href: '/loyalty/wheels', icon: Disc3, perms: ['loyalty', 'marketing'] },
+      { label: 'แคมเปญ', href: '/loyalty/campaigns', icon: Megaphone, perms: ['marketing', 'exec'] },
+      { label: 'พันธมิตร & สิทธิพิเศษ', href: '/loyalty/partners', icon: Handshake, perms: ['loyalty', 'marketing'] },
+      { label: 'วิเคราะห์ลอยัลตี้', href: '/loyalty/analytics', icon: BarChart3, perms: ['marketing', 'exec'] },
+      // previously unreachable from the sidebar (only typed-URL) — wired in per Phase 0 audit
+      { label: 'ตั้งค่าลอยัลตี้', href: '/loyalty', icon: SlidersHorizontal, perms: ['loyalty', 'marketing'], workspace: ['erp'] },
+    ],
+  },
+  {
+    // dual-use commercial config: priced/branched back-office, used at POS → BOTH, kept together so it
+    // reads as one coherent group in either surface.
+    title: 'ราคา & สาขา',
+    workspace: BOTH,
+    items: [
+      { label: 'กฎราคา & โปรโมชั่น', href: '/pricing', icon: Coins, perms: ['pos', 'order_mgt', 'exec'] },
+      { label: 'สาขา & ยอดขายรวม (Branches)', href: '/branches', icon: Store, perms: ['branch', 'exec'] },
+    ],
+  },
+
+  // ─── ERP: supply chain ──────────────────────────────────────────────────────────────────────────
+  {
+    title: 'สินค้าคงคลัง',
     workspace: ['erp'],
     items: [
       { label: 'สินค้าคงคลัง', href: '/inventory', icon: Package, perms: ['warehouse', 'dashboard', 'planner'] },
@@ -175,20 +229,34 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ล็อต / อายุสินค้า', href: '/lots', icon: Boxes, perms: ['lots', 'warehouse'] },
       { label: 'สแกนมือถือ', href: '/mobile-scan', icon: ScanLine, perms: ['mobile', 'warehouse'] },
       { label: 'รูปภาพสินค้า', href: '/images', icon: Camera, perms: ['images', 'masterdata'] },
+      { label: 'คลังสินค้า (WMS)', href: '/wms', icon: Warehouse, perms: ['warehouse'] },
+      { label: 'ต้นทุนสินค้า', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
+      { label: 'เติมสต๊อกอัตโนมัติ', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
+    ],
+  },
+  {
+    title: 'จัดซื้อ',
+    workspace: ['erp'],
+    items: [
       { label: 'ซัพพลายเออร์', href: '/inventory/suppliers', icon: Building2, perms: ['procurement', 'warehouse'] },
       { label: 'ใบสั่งซื้อ', href: '/inventory/purchase-orders', icon: ReceiptText, perms: ['procurement'] },
       { label: 'จัดซื้อจัดจ้าง', href: '/procurement', icon: ShoppingBag, perms: ['procurement'] },
       { label: 'ขอใบเสนอราคา (RFQ)', href: '/procurement/rfqs', icon: ClipboardList, perms: ['procurement'] },
       { label: 'จับคู่เอกสาร 3 ทาง', href: '/procurement/match', icon: CheckCheck, perms: ['procurement'] },
       { label: 'อ่านเอกสารอัตโนมัติ (Document AI)', href: '/doc-ai', icon: FileScan, perms: ['procurement', 'creditors', 'exec'] },
-      { label: 'คลังสินค้า (WMS)', href: '/wms', icon: Warehouse, perms: ['warehouse'] },
-      { label: 'ต้นทุนสินค้า', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
-      { label: 'เติมสต๊อกอัตโนมัติ', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
+    ],
+  },
+  {
+    title: 'การผลิต',
+    workspace: ['erp'],
+    items: [
       { label: 'สูตรการผลิต (BoM)', href: '/bom', icon: FlaskConical, perms: ['bom_master'] },
       { label: 'ใบสั่งผลิต (Manufacturing)', href: '/manufacturing', icon: Factory, perms: ['bom_master', 'warehouse'] },
       { label: 'การผลิตขั้นสูง (Routing/QA/MRP)', href: '/production', icon: Network, perms: ['bom_master', 'warehouse', 'planner'] },
     ],
   },
+
+  // ─── ERP: finance ───────────────────────────────────────────────────────────────────────────────
   {
     title: 'การเงิน',
     workspace: ['erp'],
@@ -205,14 +273,6 @@ export const INTERNAL_NAV: NavGroup[] = [
     ],
   },
   {
-    title: 'บุคลากร & เงินเดือน',
-    workspace: ['erp'],
-    items: [
-      { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
-      { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
-    ],
-  },
-  {
     title: 'ภาษี',
     workspace: ['erp'],
     items: [
@@ -224,7 +284,15 @@ export const INTERNAL_NAV: NavGroup[] = [
     ],
   },
   {
-    title: 'วางแผน & วิเคราะห์',
+    title: 'บุคลากร & เงินเดือน',
+    workspace: ['erp'],
+    items: [
+      { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
+      { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
+    ],
+  },
+  {
+    title: 'วางแผน & BI',
     workspace: ['erp'],
     items: [
       { label: 'งบประมาณ & แผน', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
@@ -236,6 +304,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'รายงานตามเวลา (Scheduled)', href: '/scheduled-reports', icon: CalendarClock, perms: ['exec'] },
     ],
   },
+
+  // ─── Cross-cutting (BOTH surfaces) ──────────────────────────────────────────────────────────────
   {
     title: 'การควบคุม',
     workspace: BOTH, // approvals & SoD apply to both POS managers and back-office
@@ -257,41 +327,81 @@ export const INTERNAL_NAV: NavGroup[] = [
     ],
   },
   {
-    title: 'ระบบ',
-    workspace: BOTH, // settings/users/master-data are reachable from either workspace
-    items: [
-      { label: 'ข้อมูลหลัก (Master Data)', href: '/master-data', icon: Database, perms: ['masterdata'] },
-      { label: 'ฟิลด์กำหนดเอง (Custom fields)', href: '/custom-fields', icon: SlidersHorizontal, perms: ['masterdata', 'users', 'exec'] },
-      { label: 'ออบเจ็กต์กำหนดเอง (Custom objects)', href: '/custom-objects', icon: Boxes, perms: ['masterdata', 'users', 'exec'] },
-      { label: 'เลย์เอาต์ฟอร์ม (Form layouts)', href: '/object-layouts', icon: LayoutTemplate, perms: ['masterdata', 'users', 'exec'] },
-      { label: 'การแจ้งเตือน (Alert rules)', href: '/alerts', icon: BellRing, perms: ['masterdata', 'users', 'exec', 'dashboard'] },
-      { label: 'ระบบอัตโนมัติ (Automation)', href: '/automation', icon: Workflow, perms: ['masterdata', 'users', 'exec'] },
-      { label: 'ผู้ช่วยตั้งค่า (AI Config)', href: '/ai-config', icon: Wand2, perms: ['masterdata', 'users', 'exec'] },
-      { label: 'มุมมองที่บันทึก (Saved views)', href: '/saved-views', icon: Bookmark, perms: ['dashboard', 'exec', 'masterdata', 'warehouse', 'pos'] },
-      { label: 'แดชบอร์ดตามบทบาท (Role dashboards)', href: '/dashboard-designer', icon: LayoutTemplate, perms: ['users', 'exec'] },
-      { label: 'เทมเพลตเอกสาร (Document templates)', href: '/document-templates', icon: LayoutTemplate, perms: ['users', 'exec'] },
-      { label: 'ธีมแบรนด์ (White-label)', href: '/theme', icon: Palette, perms: ['users', 'exec'] },
-      { label: 'เริ่มต้นใช้งาน (Onboarding)', href: '/onboarding', icon: Rocket, perms: ['users', 'exec', 'dashboard'] },
-      { label: 'พอร์ทัลนักพัฒนา (Developer)', href: '/developer', icon: Code, perms: ['users'] },
-      { label: 'ตัวเชื่อมต่อ (Connectors)', href: '/connectors', icon: Cable, perms: ['users', 'exec'] },
-      { label: 'ย้ายข้อมูลเข้า (Migration)', href: '/migration', icon: Upload, perms: ['masterdata', 'users', 'exec'] },
-      { label: 'ชุดประเทศ (Localization)', href: '/localization', icon: Globe, perms: ['exec', 'users', 'masterdata'] },
-      { label: 'ใบกำกับอิเล็กทรอนิกส์ (e-Invoicing)', href: '/einvoice', icon: FileCheck, perms: ['exec', 'creditors', 'ar'] },
-      { label: 'เว็บฮุค (Webhooks)', href: '/webhooks', icon: Webhook, perms: ['users'] },
-      { label: 'จัดการผู้ใช้', href: '/admin/users', icon: UserCog, perms: ['users'] },
-      { label: 'ตั้งค่ากิจการ', href: '/setup', icon: BadgeCheck, perms: ['users'] },
-      { label: 'แพ็กเกจ', href: '/billing', icon: CreditCard, perms: ['users'] },
-      { label: 'ตั้งค่า', href: '/settings', icon: Settings, perms: ['users'] },
+    // settings/users/master-data are reachable from either workspace. Segmented into collapsible
+    // sub-sections so the (formerly 22-item flat) System group is scannable.
+    title: 'ตั้งค่าระบบ',
+    workspace: BOTH,
+    subgroups: [
+      {
+        title: 'ข้อมูลหลัก',
+        items: [
+          { label: 'ข้อมูลหลัก (Master Data)', href: '/master-data', icon: Database, perms: ['masterdata'] },
+          { label: 'ฟิลด์กำหนดเอง (Custom fields)', href: '/custom-fields', icon: SlidersHorizontal, perms: ['masterdata', 'users', 'exec'] },
+          { label: 'ออบเจ็กต์กำหนดเอง (Custom objects)', href: '/custom-objects', icon: Boxes, perms: ['masterdata', 'users', 'exec'] },
+          { label: 'เลย์เอาต์ฟอร์ม (Form layouts)', href: '/object-layouts', icon: LayoutTemplate, perms: ['masterdata', 'users', 'exec'] },
+          { label: 'มุมมองที่บันทึก (Saved views)', href: '/saved-views', icon: Bookmark, perms: ['dashboard', 'exec', 'masterdata', 'warehouse', 'pos'] },
+        ],
+      },
+      {
+        title: 'ปรับแต่ง',
+        items: [
+          { label: 'การแจ้งเตือน (Alert rules)', href: '/alerts', icon: BellRing, perms: ['masterdata', 'users', 'exec', 'dashboard'] },
+          { label: 'ระบบอัตโนมัติ (Automation)', href: '/automation', icon: Workflow, perms: ['masterdata', 'users', 'exec'] },
+          { label: 'ผู้ช่วยตั้งค่า (AI Config)', href: '/ai-config', icon: Wand2, perms: ['masterdata', 'users', 'exec'] },
+          { label: 'แดชบอร์ดตามบทบาท (Role dashboards)', href: '/dashboard-designer', icon: LayoutTemplate, perms: ['users', 'exec'] },
+          { label: 'เทมเพลตเอกสาร (Document templates)', href: '/document-templates', icon: LayoutTemplate, perms: ['users', 'exec'] },
+          { label: 'ธีมแบรนด์ (White-label)', href: '/theme', icon: Palette, perms: ['users', 'exec'] },
+        ],
+      },
+      {
+        title: 'เชื่อมต่อ & ขยาย',
+        items: [
+          { label: 'ตัวเชื่อมต่อ (Connectors)', href: '/connectors', icon: Cable, perms: ['users', 'exec'] },
+          { label: 'เว็บฮุค (Webhooks)', href: '/webhooks', icon: Webhook, perms: ['users'] },
+          { label: 'พอร์ทัลนักพัฒนา (Developer)', href: '/developer', icon: Code, perms: ['users'] },
+          { label: 'ย้ายข้อมูลเข้า (Migration)', href: '/migration', icon: Upload, perms: ['masterdata', 'users', 'exec'] },
+          { label: 'ชุดประเทศ (Localization)', href: '/localization', icon: Globe, perms: ['exec', 'users', 'masterdata'] },
+          { label: 'ใบกำกับอิเล็กทรอนิกส์ (e-Invoicing)', href: '/einvoice', icon: FileCheck, perms: ['exec', 'creditors', 'ar'] },
+        ],
+      },
+      {
+        title: 'ผู้ดูแลระบบ',
+        items: [
+          { label: 'เริ่มต้นใช้งาน (Onboarding)', href: '/onboarding', icon: Rocket, perms: ['users', 'exec', 'dashboard'] },
+          { label: 'จัดการผู้ใช้', href: '/admin/users', icon: UserCog, perms: ['users'] },
+          { label: 'ตั้งค่ากิจการ', href: '/setup', icon: BadgeCheck, perms: ['users'] },
+          { label: 'แพ็กเกจ', href: '/billing', icon: CreditCard, perms: ['users'] },
+          { label: 'ตั้งค่า', href: '/settings', icon: Settings, perms: ['users'] },
+        ],
+      },
     ],
   },
 ];
 
-/** Filter a nav tree to one workspace: keep items whose workspace (item override, else group, else both)
- *  includes `ws`; drop groups left empty. */
+/** Every NavItem in a group, flattening any `subgroups` after the flat `items`. Used wherever the whole
+ *  group needs to be treated as one list (command palette, active-label lookup). */
+export function allGroupItems(g: NavGroup): NavItem[] {
+  return [...(g.items ?? []), ...(g.subgroups?.flatMap((s) => s.items) ?? [])];
+}
+
+/** Total visible-item count of a group across flat items + subgroups. */
+function groupItemCount(g: NavGroup): number {
+  return (g.items?.length ?? 0) + (g.subgroups?.reduce((n, s) => n + s.items.length, 0) ?? 0);
+}
+
+/** Filter a nav tree to one workspace: keep items whose workspace (item override, else sub-section, else
+ *  group, else both) includes `ws`; drop empty sub-sections and then empty groups. */
 export function navForWorkspace(nav: NavGroup[], ws: Workspace): NavGroup[] {
+  const keep = (it: NavItem, parentWs?: Workspace[]) => (it.workspace ?? parentWs ?? BOTH).includes(ws);
   return nav
-    .map((g) => ({ ...g, items: g.items.filter((it) => (it.workspace ?? g.workspace ?? BOTH).includes(ws)) }))
-    .filter((g) => g.items.length > 0);
+    .map((g) => ({
+      ...g,
+      items: (g.items ?? []).filter((it) => keep(it, g.workspace)),
+      subgroups: (g.subgroups ?? [])
+        .map((s) => ({ ...s, items: s.items.filter((it) => keep(it, s.workspace ?? g.workspace)) }))
+        .filter((s) => s.items.length > 0),
+    }))
+    .filter((g) => groupItemCount(g) > 0);
 }
 
 /** Pick the landing workspace from a user's permissions: POS-only operators land in POS; everyone else
