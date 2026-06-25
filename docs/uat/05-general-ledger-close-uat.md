@@ -1,6 +1,6 @@
 # UAT — Cycle 05: General Ledger & Financial Close
 
-**Status: DRAFT v0.5 · 2026-06-25** · Cross-ref: process narrative `04-general-ledger-close.md` (GL-01..09, LSE-01, REC-01..03, R05/R06), `09-fixed-assets-depreciation.md` (FA-07), harness `tools/cutover/src/compliance.ts`, `worldclass.ts`, `basics.ts`.
+**Status: DRAFT v0.6 · 2026-06-25** · Cross-ref: process narrative `04-general-ledger-close.md` (GL-01..09, LSE-01, REC-01..03, R05/R06), `09-fixed-assets-depreciation.md` (FA-07), harness `tools/cutover/src/compliance.ts`, `worldclass.ts`, `basics.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -49,3 +49,5 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-GL-033 | Lease periodic run posts interest + payment + ROU depreciation | Controller (cron) | Active lease due | 1. `POST /api/leases/run`. 2. `GET /api/leases`. | — | `posted:1`; entry has `interest + principal = 1000` (payment) + ROU `depreciation`; liability & ROU NBV **reduced**. | High | Control | LSE-01 | Not Run | basics.ts |
 | UAT-GL-034 | Asset upward revaluation → surplus to equity | FaAccountant | Asset with NBV | 1. `POST /api/assets/{assetNo}/revalue {new_value: NBV+10000}`. | — | `kind:revaluation`, `delta:10000`; posts **Dr 1500 / Cr 3200** (+10000). | High | Control | FA-07 | Not Run | basics.ts |
 | UAT-GL-035 | Asset impairment + no-change guard + audit | FaAccountant | Revalued asset | 1. `POST .../revalue {new_value: lower}`. 2. Repeat same value. 3. `GET .../revaluations`. | — | `kind:impairment` posts **Dr 5820 / Cr 1500**; same-value → `400 NO_CHANGE`; audit trail lists both events. | High | Control | FA-07 | Not Run | basics.ts |
+| UAT-GL-036 | Lease modification remeasures liability + ROU | Controller | Active lease (1 period posted) | 1. `POST /api/leases/{leaseNo}/modify {new_monthly_payment: higher}`. 2. Re-modify with no change. | — | Liability remeasured at revised PV; ROU steps up by the same delta (**Dr 1600 / Cr 2600**); `liability_delta` > 0; a no-op modify → `400 NO_CHANGE`. | High | Control | LSE-01 | Not Run | basics.ts |
+| UAT-GL-037 | Disposal recycles revaluation surplus to RE | FaAccountant | Revalued asset with surplus 10000 in 3200 | 1. `PATCH /api/assets/{assetNo}/dispose {proceeds}`. | — | `revaluation_surplus_recycled:10000`; posts **Dr 3200 / Cr 3100** (surplus → retained earnings, not P&L); 3200 surplus cleared. | High | Control | FA-07 | Not Run | basics.ts |

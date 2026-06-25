@@ -124,46 +124,57 @@ export class FinanceService {
   // ───────────────────── Statements of account (customer / vendor) ─────────────────────
   // A running-balance statement over [from,to]: opening balance struck before the window, then every
   // charge (invoice/bill) and payment (receipt/disbursement) in date order, with a closing balance.
-  async customerStatement(tenantId: number, from?: string, to?: string) {
+  // Multi-currency: each document keeps its own currency + booked fx rate. With no `currency` filter the
+  // statement reports in base THB (each doc converted at its fx rate); with `?currency=USD` it reports only
+  // that currency's documents in their own units. A receipt/payment inherits the currency of the invoice/
+  // bill it settles.
+  async customerStatement(tenantId: number, from?: string, to?: string, currency?: string) {
     const db = this.db as any;
     const lo = from ?? '0001-01-01';
     const hi = to ?? '9999-12-31';
-    const [openInv] = await db.select({ s: sql<string>`coalesce(sum(${arInvoices.amount}),0)` }).from(arInvoices).where(and(eq(arInvoices.tenantId, tenantId), lt(arInvoices.invoiceDate, lo)));
-    const [openRcp] = await db.select({ s: sql<string>`coalesce(sum(${arReceipts.amount}),0)` }).from(arReceipts).where(and(eq(arReceipts.tenantId, tenantId), lt(arReceipts.receiptDate, lo)));
-    const opening = round2(n(openInv?.s) - n(openRcp?.s));
-    const invs = await db.select({ date: arInvoices.invoiceDate, ref: arInvoices.invoiceNo, amt: arInvoices.amount }).from(arInvoices).where(and(eq(arInvoices.tenantId, tenantId), gte(arInvoices.invoiceDate, lo), lte(arInvoices.invoiceDate, hi)));
-    const rcps = await db.select({ date: arReceipts.receiptDate, ref: arReceipts.receiptNo, amt: arReceipts.amount }).from(arReceipts).where(and(eq(arReceipts.tenantId, tenantId), gte(arReceipts.receiptDate, lo), lte(arReceipts.receiptDate, hi)));
+    const invs = await db.select({ date: arInvoices.invoiceDate, ref: arInvoices.invoiceNo, amt: arInvoices.amount, cur: arInvoices.currency, fx: arInvoices.fxRate }).from(arInvoices).where(eq(arInvoices.tenantId, tenantId));
+    const invByNo = new Map<string, { cur: string; fx: number }>(invs.map((i: any) => [i.ref, { cur: i.cur ?? 'THB', fx: n(i.fx) || 1 }]));
+    const rcps = await db.select({ date: arReceipts.receiptDate, ref: arReceipts.receiptNo, amt: arReceipts.amount, inv: arReceipts.invoiceNo }).from(arReceipts).where(eq(arReceipts.tenantId, tenantId));
     const events = [
-      ...invs.map((r: any) => ({ date: r.date, type: 'invoice', ref: r.ref, charge: n(r.amt), payment: 0 })),
-      ...rcps.map((r: any) => ({ date: r.date, type: 'receipt', ref: r.ref, charge: 0, payment: n(r.amt) })),
+      ...invs.map((i: any) => ({ date: i.date, type: 'invoice', ref: i.ref, cur: i.cur ?? 'THB', fx: n(i.fx) || 1, charge: n(i.amt), payment: 0 })),
+      ...rcps.map((rc: any) => { const k = invByNo.get(rc.inv) ?? { cur: 'THB', fx: 1 }; return { date: rc.date, type: 'receipt', ref: rc.ref, cur: k.cur, fx: k.fx, charge: 0, payment: n(rc.amt) }; }),
     ];
-    return this.buildStatement('customer', String(tenantId), opening, events, lo, hi);
+    return this.buildStatement('customer', String(tenantId), events, lo, hi, currency);
   }
 
-  async vendorStatement(vendor: string, from?: string, to?: string) {
+  async vendorStatement(vendor: string, from?: string, to?: string, currency?: string) {
     const db = this.db as any;
     const lo = from ?? '0001-01-01';
     const hi = to ?? '9999-12-31';
-    const [openBill] = await db.select({ s: sql<string>`coalesce(sum(${apTransactions.amount}),0)` }).from(apTransactions).where(and(eq(apTransactions.vendorName, vendor), lt(apTransactions.invoiceDate, lo)));
-    // Approved disbursements before the window reduce the opening balance owed.
-    const [openPay] = await db.select({ s: sql<string>`coalesce(sum(${apPayments.amount}),0)` }).from(apPayments).innerJoin(apTransactions, eq(apPayments.txnNo, apTransactions.txnNo)).where(and(eq(apTransactions.vendorName, vendor), eq(apPayments.status, 'Approved'), lt(sql`${apPayments.approvedAt}::date`, lo)));
-    const opening = round2(n(openBill?.s) - n(openPay?.s));
-    const bills = await db.select({ date: apTransactions.invoiceDate, ref: apTransactions.txnNo, amt: apTransactions.amount }).from(apTransactions).where(and(eq(apTransactions.vendorName, vendor), gte(apTransactions.invoiceDate, lo), lte(apTransactions.invoiceDate, hi)));
-    const pays = await db.select({ date: sql<string>`${apPayments.approvedAt}::date`, ref: apPayments.paymentNo, amt: apPayments.amount }).from(apPayments).innerJoin(apTransactions, eq(apPayments.txnNo, apTransactions.txnNo)).where(and(eq(apTransactions.vendorName, vendor), eq(apPayments.status, 'Approved'), gte(sql`${apPayments.approvedAt}::date`, lo), lte(sql`${apPayments.approvedAt}::date`, hi)));
+    const bills = await db.select({ date: apTransactions.invoiceDate, ref: apTransactions.txnNo, amt: apTransactions.amount, cur: apTransactions.currency, fx: apTransactions.fxRate }).from(apTransactions).where(eq(apTransactions.vendorName, vendor));
+    // Approved disbursements inherit the bill's currency + booked rate (join on txn_no).
+    const pays = await db.select({ date: sql<string>`${apPayments.approvedAt}::date`, ref: apPayments.paymentNo, amt: apPayments.amount, cur: apTransactions.currency, fx: apTransactions.fxRate }).from(apPayments).innerJoin(apTransactions, eq(apPayments.txnNo, apTransactions.txnNo)).where(and(eq(apTransactions.vendorName, vendor), eq(apPayments.status, 'Approved')));
     const events = [
-      ...bills.map((r: any) => ({ date: r.date, type: 'bill', ref: r.ref, charge: n(r.amt), payment: 0 })),
-      ...pays.map((r: any) => ({ date: r.date, type: 'payment', ref: r.ref, charge: 0, payment: n(r.amt) })),
+      ...bills.map((b: any) => ({ date: b.date, type: 'bill', ref: b.ref, cur: b.cur ?? 'THB', fx: n(b.fx) || 1, charge: n(b.amt), payment: 0 })),
+      ...pays.map((p: any) => ({ date: p.date, type: 'payment', ref: p.ref, cur: p.cur ?? 'THB', fx: n(p.fx) || 1, charge: 0, payment: n(p.amt) })),
     ];
-    return this.buildStatement('vendor', vendor, opening, events, lo, hi);
+    return this.buildStatement('vendor', vendor, events, lo, hi, currency);
   }
 
-  private buildStatement(party_type: string, party: string, opening: number, events: any[], from: string, to: string) {
-    events.sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')) || String(a.ref).localeCompare(String(b.ref)));
+  private buildStatement(party_type: string, party: string, raw: any[], from: string, to: string, currency?: string) {
+    const reporting = currency || 'THB';
+    // amount in the reporting currency: filtered → the document's own units; unfiltered → base THB at fx.
+    const evs = raw
+      .filter((e) => (currency ? e.cur === currency : true))
+      .map((e) => ({
+        date: e.date, type: e.type, ref: e.ref, doc_currency: e.cur, fx_rate: e.fx,
+        doc_charge: round2(e.charge), doc_payment: round2(e.payment),
+        charge: round2(currency ? e.charge : e.charge * e.fx),
+        payment: round2(currency ? e.payment : e.payment * e.fx),
+      }));
+    const opening = round2(evs.filter((e) => String(e.date ?? '') < from).reduce((a, e) => a + e.charge - e.payment, 0));
+    const win = evs.filter((e) => { const d = String(e.date ?? ''); return d >= from && d <= to; });
+    win.sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')) || String(a.ref).localeCompare(String(b.ref)));
     let bal = opening;
-    const lines = events.map((e) => { bal = round2(bal + e.charge - e.payment); return { ...e, balance: bal }; });
-    const charges = round2(events.reduce((a, e) => a + e.charge, 0));
-    const payments = round2(events.reduce((a, e) => a + e.payment, 0));
-    return { party_type, party, from, to, opening_balance: opening, total_charges: charges, total_payments: payments, closing_balance: round2(opening + charges - payments), lines };
+    const lines = win.map((e) => { bal = round2(bal + e.charge - e.payment); return { ...e, balance: bal }; });
+    const charges = round2(win.reduce((a, e) => a + e.charge, 0));
+    const payments = round2(win.reduce((a, e) => a + e.payment, 0));
+    return { party_type, party, reporting_currency: reporting, from, to, opening_balance: opening, total_charges: charges, total_payments: payments, closing_balance: round2(opening + charges - payments), lines };
   }
 
   // ───────────────────── Petty cash / employee cash advances (EXP-07) ─────────────────────

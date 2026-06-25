@@ -19,6 +19,7 @@ export const leases = pgTable(
     annualRatePct: numeric('annual_rate_pct', { precision: 8, scale: 4 }).notNull().default('0'), // incremental borrowing rate
     initialLiability: numeric('initial_liability', { precision: 14, scale: 2 }).default('0'),    // = ROU at commencement
     liabilityBalance: numeric('liability_balance', { precision: 14, scale: 2 }).default('0'),     // running
+    rouNbv: numeric('rou_nbv', { precision: 14, scale: 2 }).default('0'),                         // running ROU net book value (remeasured on modification)
     accumulatedDep: numeric('accumulated_dep', { precision: 14, scale: 2 }).default('0'),         // running ROU depreciation
     periodsPosted: bigint('periods_posted', { mode: 'number' }).default(0),
     nextRunDate: date('next_run_date'),

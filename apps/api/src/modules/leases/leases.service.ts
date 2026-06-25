@@ -18,6 +18,13 @@ export interface LeaseDto {
   startDate?: string;
 }
 
+export interface LeaseModifyDto {
+  newMonthlyPayment?: number;
+  newRemainingMonths?: number; // revised remaining term from now
+  newAnnualRatePct?: number;
+  effectiveDate?: string;
+}
+
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 function addMonth(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -56,7 +63,7 @@ export class LeasesService {
     const [l] = await db.insert(leases).values({
       leaseNo, tenantId, name: dto.name, lessor: dto.lessor ?? null, startDate: start, termMonths: dto.termMonths,
       monthlyPayment: String(pmt), annualRatePct: String(ratePct), initialLiability: String(liability), liabilityBalance: String(liability),
-      accumulatedDep: '0', periodsPosted: 0, nextRunDate: start, status: 'active', createdBy: user.username,
+      rouNbv: String(liability), accumulatedDep: '0', periodsPosted: 0, nextRunDate: start, status: 'active', createdBy: user.username,
     }).returning({ id: leases.id });
     return { id: Number(l.id), lease_no: leaseNo, name: dto.name, term_months: dto.termMonths, monthly_payment: pmt, annual_rate_pct: ratePct, initial_liability: liability, rou_asset: liability, next_run_date: start };
   }
@@ -68,7 +75,7 @@ export class LeasesService {
     return { leases: rows.map((l: any) => ({
       id: Number(l.id), lease_no: l.leaseNo, name: l.name, lessor: l.lessor, term_months: Number(l.termMonths),
       monthly_payment: n(l.monthlyPayment), annual_rate_pct: n(l.annualRatePct), initial_liability: n(l.initialLiability),
-      liability_balance: n(l.liabilityBalance), accumulated_dep: n(l.accumulatedDep), rou_nbv: round2(n(l.initialLiability) - n(l.accumulatedDep)),
+      liability_balance: n(l.liabilityBalance), accumulated_dep: n(l.accumulatedDep), rou_nbv: n(l.rouNbv),
       periods_posted: Number(l.periodsPosted), next_run_date: l.nextRunDate, status: l.status,
     })), count: rows.length };
   }
@@ -90,8 +97,10 @@ export class LeasesService {
       const interest = round2(liab * r);
       const principal = isLast ? round2(liab) : round2(n(l.monthlyPayment) - interest);
       const payment = round2(principal + interest);
-      const rou = n(l.initialLiability);
-      const dep = isLast ? round2(rou - n(l.accumulatedDep)) : round2(rou / term);
+      // ROU depreciation = straight-line over the REMAINING term on the current ROU NBV (so a remeasurement
+      // from a modification is depreciated over what's left); the last period clears the ROU exactly.
+      const rouNbv = n(l.rouNbv);
+      const dep = isLast ? rouNbv : round2(rouNbv / (term - already));
       const period = String(today).slice(0, 7);
       const lines: any[] = [];
       if (interest > 0) lines.push({ account_code: '5900', debit: interest });
@@ -105,6 +114,7 @@ export class LeasesService {
       const newPosted = already + 1;
       await db.update(leases).set({
         liabilityBalance: String(round2(liab - principal)),
+        rouNbv: String(round2(rouNbv - dep)),
         accumulatedDep: String(round2(n(l.accumulatedDep) + dep)),
         periodsPosted: newPosted, nextRunDate: addMonth(today),
         status: newPosted >= term ? 'complete' : 'active',
@@ -112,5 +122,58 @@ export class LeasesService {
       if (res.entry_no) posted.push({ entry_no: res.entry_no, lease_no: l.leaseNo, interest, principal, depreciation: dep });
     }
     return { as_of: today, scanned: due.length, posted: posted.length, entries: posted };
+  }
+
+  // Lease modification / remeasurement (IFRS 16 §44–46): on a change to the payment, remaining term, or
+  // rate, remeasure the lease liability at the PV of the revised payments and adjust the ROU asset by the
+  // same amount (Dr/Cr 1600 ↔ 2600). If the downward remeasurement would take the ROU below zero, the ROU
+  // is reduced to zero and the excess is recognised in P&L as a gain (Cr 1510). Depreciation then runs
+  // straight-line over the revised remaining term.
+  async modifyLease(leaseNo: string, dto: LeaseModifyDto, user: JwtUser) {
+    const db = this.db as any;
+    const [l] = await db.select().from(leases).where(eq(leases.leaseNo, leaseNo)).limit(1);
+    if (!l) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Lease not found', messageTh: 'ไม่พบสัญญาเช่า' });
+    if (l.status !== 'active') throw new BadRequestException({ code: 'NOT_ACTIVE', message: 'Lease is not active', messageTh: 'สัญญาเช่าไม่อยู่ในสถานะใช้งาน' });
+    const already = Number(l.periodsPosted);
+    const remainingOld = Number(l.termMonths) - already;
+    const newRemaining = dto.newRemainingMonths ?? remainingOld;
+    if (!Number.isInteger(newRemaining) || newRemaining < 1) throw new BadRequestException({ code: 'BAD_TERM', message: 'new_remaining_months must be a positive integer', messageTh: 'จำนวนงวดคงเหลือต้องเป็นจำนวนเต็มบวก' });
+    const newPayment = round2(dto.newMonthlyPayment ?? n(l.monthlyPayment));
+    if (!(newPayment > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'monthly_payment must be > 0', messageTh: 'ค่าเช่าต้องมากกว่าศูนย์' });
+    const newRate = dto.newAnnualRatePct ?? n(l.annualRatePct);
+    const r = newRate / 100 / 12;
+    const newLiability = round2(presentValue(newPayment, newRemaining, r));
+    const liabBefore = n(l.liabilityBalance);
+    const rouBefore = n(l.rouNbv);
+    const liabDelta = round2(newLiability - liabBefore);
+    if (liabDelta === 0 && newRemaining === remainingOld && newPayment === n(l.monthlyPayment)) {
+      throw new BadRequestException({ code: 'NO_CHANGE', message: 'modification does not change the lease', messageTh: 'การแก้ไขไม่เปลี่ยนแปลงสัญญาเช่า' });
+    }
+    const newRou = round2(rouBefore + liabDelta);
+    const effective = dto.effectiveDate ?? ymd();
+    const lines: any[] = [];
+    let gain = 0;
+    if (newRou >= 0) {
+      // adjust both the liability and the ROU by the delta
+      if (liabDelta > 0) { lines.push({ account_code: '1600', debit: liabDelta }, { account_code: '2600', credit: liabDelta }); }
+      else { lines.push({ account_code: '2600', debit: -liabDelta }, { account_code: '1600', credit: -liabDelta }); }
+    } else {
+      // downward remeasurement larger than the ROU carrying amount → zero the ROU, excess is a P&L gain
+      gain = round2(-newRou);
+      lines.push({ account_code: '2600', debit: -liabDelta }); // reduce liability by |delta|
+      if (rouBefore > 0) lines.push({ account_code: '1600', credit: rouBefore }); // reduce ROU to zero
+      lines.push({ account_code: '1510', credit: gain }); // remeasurement gain to P&L
+    }
+    const je: any = this.ledger
+      ? await this.ledger.postEntry({ date: effective, source: 'LSE-MOD', sourceRef: `LSE-${Number(l.id)}-MOD-${effective}-${newLiability}`, tenantId: l.tenantId ?? null, memo: `Lease ${leaseNo} remeasurement (liability ${liabBefore}→${newLiability})`, createdBy: user.username, lines })
+      : { entry_no: `LSE-MOD-${effective}` };
+    await db.update(leases).set({
+      liabilityBalance: String(newLiability),
+      rouNbv: String(Math.max(0, newRou)),
+      monthlyPayment: String(newPayment),
+      annualRatePct: String(newRate),
+      termMonths: already + newRemaining, // remaining term from now = newRemaining
+    }).where(eq(leases.id, l.id));
+    return { lease_no: leaseNo, liability_before: liabBefore, liability_after: newLiability, liability_delta: liabDelta, rou_after: Math.max(0, newRou), remeasurement_gain: gain, new_remaining_months: newRemaining, journal_no: je?.entry_no ?? null };
   }
 }
