@@ -242,10 +242,17 @@ Like the customer statement it is **multi-currency**: base THB by default, or ad
 
 ## Part B2 — Petty cash / employee advances
 
-**Required permission:** `creditors` (held by *ApClerk*, *Admin*).
+**Screen:** `/advances` (**เงินทดรองจ่าย**, ERP nav → การเงิน) · **Required
+permission:** `creditors` (held by *ApClerk*, *Admin*).
 
 When you give an employee cash up front (a site-visit float, travel money), record
 it as an **advance** so the cash is tracked until it's accounted for.
+
+Open the **Petty Cash** screen (`/advances`) to see the **register** of every advance
+with its status, who it was issued to, and — most importantly — the **outstanding
+float** (total cash still uncleared) as a KPI. The **ทะเบียน** tab lists them (filter
+by *open* / *settled*); each open advance has a **เคลียร์ (settle)** action; the
+**เบิกเงินทดรอง** tab issues a new one.
 
 1. **Issue the advance** (`POST /api/finance/advances` — payee, amount, purpose).
    This posts **Dr Employee Advances (1180) / Cr Cash (1000)** and the advance shows
