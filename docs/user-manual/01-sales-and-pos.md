@@ -413,6 +413,20 @@ automatically. The system shows the subtotal, VAT and total returned.
 
 [screenshot: return dialog with item lines and refund method]
 
+### Returns register (all returns)
+
+**Screen:** `/returns` (**คืนสินค้า & คืนเงิน**) · **Required permission:** `returns` /
+`pos` / `order_mgt`.
+
+To review **all** returns across the store — not just one sale — open the **Returns
+Register**. It lists every return with its date, original sale, **refund method**,
+**amount returned**, **restock status**, and the linked **journal entry / credit note**,
+with KPI cards (count · total refunded · how many were restocked). Search by return or
+sale number, filter by refund method, and click any return to see its line items and the
+full breakdown (subtotal / VAT / total). The register is **store-scoped** — each tenant
+sees only its own returns. Use it for daily reconciliation and to watch refund volume for
+leakage.
+
 ---
 
 ## 6. Opening & closing the till (cash drawer) + Z-report

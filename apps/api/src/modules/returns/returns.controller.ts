@@ -3,6 +3,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ReturnsService } from './returns.service';
 import { CreateReturnBody, type CreateReturnDto } from './dto';
+import { qint } from '../../common/query';
 
 // คืนสินค้า/คืนเงิน — item-level POS returns: refund + restock + GL reversal.
 @Controller('api/pos/returns')
@@ -16,6 +17,20 @@ export class ReturnsController {
   @Get(':return_no')
   get(@Param('return_no') no: string, @CurrentUser() u: JwtUser) { return this.svc.getReturn(no, u); }
 
+  // With ?sale_no= → returns for that sale (POS flow). Without → the tenant-wide returns register
+  // (ops/finance/audit): all returns, filterable by date / status / refund method / search.
   @Get()
-  list(@Query('sale_no') saleNo: string, @CurrentUser() u: JwtUser) { return this.svc.listReturnsForSale(saleNo, u); }
+  list(
+    @CurrentUser() u: JwtUser,
+    @Query('sale_no') saleNo?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('status') status?: string,
+    @Query('method') method?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (saleNo) return this.svc.listReturnsForSale(saleNo, u);
+    return this.svc.listAll({ from, to, status, method, search, limit: qint('limit', limit, 50) }, u);
+  }
 }

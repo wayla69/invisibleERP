@@ -111,6 +111,15 @@ async function main() {
   const noPerm = await inj('POST', '/api/pos/returns', wh1, { sale_no: sale3.json.sale_no, items: [{ item_id: 'A', qty: 1 }] });
   ok('Permission: Warehouse (no returns/pos) → 403', noPerm.status === 403, `${noPerm.status}`);
 
+  // ── Returns register (list-all, tenant-scoped + filterable) ──
+  // T1 has exactly 2 returns (full 214 + partial 107 = 321; both restocked).
+  const reg = await inj('GET', '/api/pos/returns', sales1);
+  ok('Returns register: lists all tenant returns with totals (2 · ฿321 · 2 restocked)', (reg.json.returns ?? []).length === 2 && reg.json.total_count === 2 && near(reg.json.total_refunded, 321) && reg.json.restocked_count === 2, `n=${reg.json.count} total=${reg.json.total_refunded} restocked=${reg.json.restocked_count}`);
+  const regSearch = await inj('GET', `/api/pos/returns?search=${encodeURIComponent(r1.json.return_no)}`, sales1);
+  ok('Returns register: search by return_no narrows the list (1)', (regSearch.json.returns ?? []).length === 1 && regSearch.json.returns[0].return_no === r1.json.return_no, `n=${regSearch.json.count}`);
+  const regT2 = await inj('GET', '/api/pos/returns', sales2);
+  ok('Returns register: RLS — T2 sees none of T1 returns', (regT2.json.returns ?? []).length === 0 && regT2.json.total_count === 0, `n=${regT2.json.count}`);
+
   const tbEnd = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
   ok('Trial balance balanced at end', near(tbEnd.debit ?? tbEnd.total_debit, tbEnd.credit ?? tbEnd.total_credit), JSON.stringify(tbEnd).slice(0, 60));
 

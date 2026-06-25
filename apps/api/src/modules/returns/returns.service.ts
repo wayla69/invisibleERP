@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, gte, lte, like, or } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, custPosItems, payments, customerInventory, custStockLog, branchStock, posReturns, posReturnItems, taxInvoices } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -145,6 +145,28 @@ export class ReturnsService {
     const db = this.db as any;
     const rows = await db.select().from(posReturns).where(eq(posReturns.saleNo, saleNo)).orderBy(desc(posReturns.id));
     return { sale_no: saleNo, returns: rows.map(shape), count: rows.length };
+  }
+
+  // Returns register — every return for the caller's tenant (ops / finance / audit view), filterable by
+  // date / status / refund method / free-text. Tenant-scoped EXPLICITLY (an HQ/Admin request bypasses RLS,
+  // so an unfiltered list would leak another store's returns). Typed builders only (no raw SQL at user input).
+  async listAll(q: { from?: string; to?: string; status?: string; method?: string; search?: string; limit?: number; offset?: number }, user: JwtUser) {
+    const db = this.db as any;
+    const conds: any[] = [];
+    if (user.tenantId != null) conds.push(eq(posReturns.tenantId, user.tenantId));
+    if (q.from) conds.push(gte(posReturns.returnDate, q.from));
+    if (q.to) conds.push(lte(posReturns.returnDate, q.to));
+    if (q.status) conds.push(eq(posReturns.status, q.status));
+    if (q.method) conds.push(eq(posReturns.refundMethod, q.method));
+    if (q.search) conds.push(or(like(posReturns.returnNo, `%${q.search}%`), like(posReturns.saleNo, `%${q.search}%`))!);
+    const where = conds.length ? and(...conds) : undefined;
+    const rows = await db.select().from(posReturns).where(where).orderBy(desc(posReturns.id)).limit(q.limit ?? 50).offset(q.offset ?? 0);
+    const [agg] = await db.select({
+      cnt: sql<string>`count(*)`,
+      total: sql<string>`coalesce(sum(${posReturns.totalReturned}),0)`,
+      restocked: sql<string>`coalesce(sum(case when ${posReturns.restocked} then 1 else 0 end),0)`,
+    }).from(posReturns).where(where);
+    return { returns: rows.map(shape), count: rows.length, total_count: n(agg?.cnt), total_refunded: round2(n(agg?.total)), restocked_count: n(agg?.restocked) };
   }
 }
 
