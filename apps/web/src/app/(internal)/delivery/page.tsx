@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 
 const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
@@ -53,10 +54,10 @@ export default function DeliveryPage() {
       <PageHeader title="ใบส่งสินค้า (Delivery Orders)" description="สร้างใบส่งจากออเดอร์ ติดตามสถานะ และยืนยันการส่ง" />
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">สร้างใบส่งจากออเดอร์</h3>
-        <div className="grid gap-2 sm:grid-cols-3">
-          <Input placeholder="เลขที่ออเดอร์ (SO-…)" value={f.order_no} onChange={(e) => setF({ ...f, order_no: e.target.value })} />
-          <Input placeholder="คนขับ" value={f.driver} onChange={(e) => setF({ ...f, driver: e.target.value })} />
-          <Input placeholder="ทะเบียนรถ" value={f.vehicle} onChange={(e) => setF({ ...f, vehicle: e.target.value })} />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-1.5"><Label htmlFor="do-order">เลขที่ออเดอร์</Label><Input id="do-order" placeholder="SO-…" value={f.order_no} onChange={(e) => setF({ ...f, order_no: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="do-driver">คนขับ</Label><Input id="do-driver" placeholder="ชื่อคนขับ" value={f.driver} onChange={(e) => setF({ ...f, driver: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="do-vehicle">ทะเบียนรถ</Label><Input id="do-vehicle" placeholder="เช่น 1กก-1234" value={f.vehicle} onChange={(e) => setF({ ...f, vehicle: e.target.value })} /></div>
         </div>
         <Button className="w-fit" disabled={!f.order_no || create.isPending} onClick={() => create.mutate()}>สร้างใบส่ง</Button>
         <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
