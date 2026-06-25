@@ -94,3 +94,22 @@ test('dual-use item (Branches) is cross-listed in both workspaces', async ({ pag
   await expect(page).toHaveURL(/\/pos-home$/);
   await expect(navLink(page, '/branches')).toBeVisible(); // POS too
 });
+
+test('System settings sub-sections are collapsible and reachable', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+
+  // A "ตั้งค่าระบบ" item lives inside the "ข้อมูลหลัก" sub-section and is visible (sub-sections open by default).
+  await expect(navLink(page, '/master-data')).toBeVisible();
+  const subHeader = page.getByRole('button', { name: 'ข้อมูลหลัก', exact: true });
+  await expect(subHeader).toHaveAttribute('aria-expanded', 'true');
+
+  // Collapse the sub-section → its items hide; the header stays.
+  await subHeader.click();
+  await expect(subHeader).toHaveAttribute('aria-expanded', 'false');
+  await expect(navLink(page, '/master-data')).toBeHidden();
+
+  // Re-expand → item returns.
+  await subHeader.click();
+  await expect(navLink(page, '/master-data')).toBeVisible();
+});
