@@ -63,14 +63,21 @@ function handleUnauthorized(status: number): boolean {
   return true;
 }
 
+// Build request headers. Only declare a JSON content-type when there's actually a body — Fastify rejects an
+// empty body sent with `Content-Type: application/json` (this broke the body-less diner QR open-table POST
+// `/api/qr/start/:qrToken`). A caller-supplied header still wins.
+function buildHeaders(init: RequestInit): Record<string, string> {
+  return {
+    ...(init.body != null ? { 'Content-Type': 'application/json' } : {}),
+    ...csrfHeader(init.method),
+    ...((init.headers as Record<string, string>) ?? {}),
+  };
+}
+
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetchWithTimeout(`${BASE}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...csrfHeader(init.method),
-      ...(init.headers ?? {}),
-    },
+    headers: buildHeaders(init),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -113,7 +120,7 @@ export async function apiDownload(path: string, filename: string, init: RequestI
 export async function publicApi<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetchWithTimeout(`${BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...csrfHeader(init.method), ...(init.headers ?? {}) },
+    headers: buildHeaders(init),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
