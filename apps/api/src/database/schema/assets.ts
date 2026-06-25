@@ -66,6 +66,25 @@ export const assetMovements = pgTable('asset_movements', {
   byUser: text('by_user'),
 });
 
+// Asset revaluation / impairment (FA-07). An upward revaluation credits the revaluation surplus (equity
+// 3200); a downward revaluation (impairment) debits impairment loss (5820). Each event is logged here for
+// the audit trail; the asset's net_book_value is adjusted and the gross 1500 moved by the delta.
+export const assetRevaluations = pgTable('asset_revaluations', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  assetId: bigint('asset_id', { mode: 'number' }).references(() => fixedAssets.id),
+  assetNo: text('asset_no'),
+  revalDate: date('reval_date'),
+  kind: text('kind').notNull(), // revaluation (up) | impairment (down)
+  oldValue: numeric('old_value', { precision: 18, scale: 4 }).notNull(),
+  newValue: numeric('new_value', { precision: 18, scale: 4 }).notNull(),
+  delta: numeric('delta', { precision: 18, scale: 4 }).notNull(),
+  reason: text('reason'),
+  glRef: text('gl_ref'),
+  actionedBy: text('actioned_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byAsset: index('idx_reval_asset').on(t.assetNo) }));
+
 export const depreciationRuns = pgTable('depreciation_runs', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),

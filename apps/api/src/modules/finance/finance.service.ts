@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
-import { sql, eq, ne, and, gte, lt, asc, inArray, notInArray, isNull } from 'drizzle-orm';
+import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -12,6 +12,8 @@ import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
 export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
+export interface AdvanceDto { payee: string; amount: number; purpose?: string; expense_account?: string; tenant_id?: number | null }
+export interface SettleAdvanceDto { settled_expense: number; returned_cash?: number; expense_account?: string }
 
 @Injectable()
 export class FinanceService {
@@ -117,6 +119,98 @@ export class FinanceService {
       outstanding: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)`,
     }).from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
     return this.bucketize(rows.map((r: any) => ({ ref: r.ref, party: r.party, due_date: r.due_date, outstanding: n(r.outstanding) })));
+  }
+
+  // ───────────────────── Statements of account (customer / vendor) ─────────────────────
+  // A running-balance statement over [from,to]: opening balance struck before the window, then every
+  // charge (invoice/bill) and payment (receipt/disbursement) in date order, with a closing balance.
+  async customerStatement(tenantId: number, from?: string, to?: string) {
+    const db = this.db as any;
+    const lo = from ?? '0001-01-01';
+    const hi = to ?? '9999-12-31';
+    const [openInv] = await db.select({ s: sql<string>`coalesce(sum(${arInvoices.amount}),0)` }).from(arInvoices).where(and(eq(arInvoices.tenantId, tenantId), lt(arInvoices.invoiceDate, lo)));
+    const [openRcp] = await db.select({ s: sql<string>`coalesce(sum(${arReceipts.amount}),0)` }).from(arReceipts).where(and(eq(arReceipts.tenantId, tenantId), lt(arReceipts.receiptDate, lo)));
+    const opening = round2(n(openInv?.s) - n(openRcp?.s));
+    const invs = await db.select({ date: arInvoices.invoiceDate, ref: arInvoices.invoiceNo, amt: arInvoices.amount }).from(arInvoices).where(and(eq(arInvoices.tenantId, tenantId), gte(arInvoices.invoiceDate, lo), lte(arInvoices.invoiceDate, hi)));
+    const rcps = await db.select({ date: arReceipts.receiptDate, ref: arReceipts.receiptNo, amt: arReceipts.amount }).from(arReceipts).where(and(eq(arReceipts.tenantId, tenantId), gte(arReceipts.receiptDate, lo), lte(arReceipts.receiptDate, hi)));
+    const events = [
+      ...invs.map((r: any) => ({ date: r.date, type: 'invoice', ref: r.ref, charge: n(r.amt), payment: 0 })),
+      ...rcps.map((r: any) => ({ date: r.date, type: 'receipt', ref: r.ref, charge: 0, payment: n(r.amt) })),
+    ];
+    return this.buildStatement('customer', String(tenantId), opening, events, lo, hi);
+  }
+
+  async vendorStatement(vendor: string, from?: string, to?: string) {
+    const db = this.db as any;
+    const lo = from ?? '0001-01-01';
+    const hi = to ?? '9999-12-31';
+    const [openBill] = await db.select({ s: sql<string>`coalesce(sum(${apTransactions.amount}),0)` }).from(apTransactions).where(and(eq(apTransactions.vendorName, vendor), lt(apTransactions.invoiceDate, lo)));
+    // Approved disbursements before the window reduce the opening balance owed.
+    const [openPay] = await db.select({ s: sql<string>`coalesce(sum(${apPayments.amount}),0)` }).from(apPayments).innerJoin(apTransactions, eq(apPayments.txnNo, apTransactions.txnNo)).where(and(eq(apTransactions.vendorName, vendor), eq(apPayments.status, 'Approved'), lt(sql`${apPayments.approvedAt}::date`, lo)));
+    const opening = round2(n(openBill?.s) - n(openPay?.s));
+    const bills = await db.select({ date: apTransactions.invoiceDate, ref: apTransactions.txnNo, amt: apTransactions.amount }).from(apTransactions).where(and(eq(apTransactions.vendorName, vendor), gte(apTransactions.invoiceDate, lo), lte(apTransactions.invoiceDate, hi)));
+    const pays = await db.select({ date: sql<string>`${apPayments.approvedAt}::date`, ref: apPayments.paymentNo, amt: apPayments.amount }).from(apPayments).innerJoin(apTransactions, eq(apPayments.txnNo, apTransactions.txnNo)).where(and(eq(apTransactions.vendorName, vendor), eq(apPayments.status, 'Approved'), gte(sql`${apPayments.approvedAt}::date`, lo), lte(sql`${apPayments.approvedAt}::date`, hi)));
+    const events = [
+      ...bills.map((r: any) => ({ date: r.date, type: 'bill', ref: r.ref, charge: n(r.amt), payment: 0 })),
+      ...pays.map((r: any) => ({ date: r.date, type: 'payment', ref: r.ref, charge: 0, payment: n(r.amt) })),
+    ];
+    return this.buildStatement('vendor', vendor, opening, events, lo, hi);
+  }
+
+  private buildStatement(party_type: string, party: string, opening: number, events: any[], from: string, to: string) {
+    events.sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')) || String(a.ref).localeCompare(String(b.ref)));
+    let bal = opening;
+    const lines = events.map((e) => { bal = round2(bal + e.charge - e.payment); return { ...e, balance: bal }; });
+    const charges = round2(events.reduce((a, e) => a + e.charge, 0));
+    const payments = round2(events.reduce((a, e) => a + e.payment, 0));
+    return { party_type, party, from, to, opening_balance: opening, total_charges: charges, total_payments: payments, closing_balance: round2(opening + charges - payments), lines };
+  }
+
+  // ───────────────────── Petty cash / employee cash advances (EXP-07) ─────────────────────
+  // Issue an advance: cash out to the employee, Dr 1180 Employee Advances / Cr 1000 Cash. The 1180 balance
+  // is the outstanding float; it clears on settlement.
+  async issueAdvance(dto: AdvanceDto, user: JwtUser) {
+    const amount = round2(dto.amount);
+    if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+    const db = this.db as any;
+    const tenantId = dto.tenant_id ?? user.tenantId ?? null;
+    const advanceNo = await this.docNo.nextDaily('ADV');
+    const today = ymd();
+    await db.insert(employeeAdvances).values({
+      advanceNo, tenantId, payee: dto.payee, purpose: dto.purpose ?? null, amount: String(amount), status: 'open',
+      expenseAccount: dto.expense_account ?? '5100', issuedBy: user.username, issuedDate: today,
+    });
+    if (this.ledger) await this.ledger.postEntry({ date: today, source: 'ADV', sourceRef: advanceNo, tenantId, memo: `Cash advance ${advanceNo} — ${dto.payee}`, createdBy: user.username, lines: [{ account_code: '1180', debit: amount }, { account_code: '1000', credit: amount }] });
+    return { advance_no: advanceNo, payee: dto.payee, amount, status: 'open' };
+  }
+
+  // Settle an advance: the employee's actual spend posts to the expense account, any unused cash is returned.
+  // settled_expense + returned_cash must equal the advance — Dr expense + Dr 1000 / Cr 1180 (clears the float).
+  async settleAdvance(advanceNo: string, dto: SettleAdvanceDto, user: JwtUser) {
+    const db = this.db as any;
+    const [a] = await db.select().from(employeeAdvances).where(eq(employeeAdvances.advanceNo, advanceNo)).limit(1);
+    if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Advance not found', messageTh: 'ไม่พบเงินทดรองจ่าย' });
+    if (a.status === 'settled') throw new BadRequestException({ code: 'ALREADY_SETTLED', message: 'Advance already settled', messageTh: 'เงินทดรองจ่ายนี้เคลียร์แล้ว' });
+    const spent = round2(dto.settled_expense);
+    const returned = round2(dto.returned_cash ?? 0);
+    if (round2(spent + returned) !== round2(n(a.amount))) throw new BadRequestException({ code: 'SETTLE_MISMATCH', message: `settled_expense + returned_cash (${round2(spent + returned)}) must equal the advance (${n(a.amount)})`, messageTh: 'ยอดใช้จ่ายรวมเงินคืนต้องเท่ากับเงินทดรองจ่าย' });
+    const expAcct = dto.expense_account ?? a.expenseAccount ?? '5100';
+    const lines: any[] = [];
+    if (spent > 0) lines.push({ account_code: expAcct, debit: spent });
+    if (returned > 0) lines.push({ account_code: '1000', debit: returned });
+    lines.push({ account_code: '1180', credit: round2(n(a.amount)) });
+    if (this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'ADV-STL', sourceRef: advanceNo, tenantId: a.tenantId ?? null, memo: `Settle advance ${advanceNo}`, createdBy: user.username, lines });
+    await db.update(employeeAdvances).set({ status: 'settled', settledExpense: String(spent), returnedCash: String(returned), settledBy: user.username, settledDate: ymd() }).where(eq(employeeAdvances.id, a.id));
+    return { advance_no: advanceNo, status: 'settled', settled_expense: spent, returned_cash: returned };
+  }
+
+  async listAdvances(tenantId?: number, status?: string) {
+    const db = this.db as any;
+    const conds = [] as any[];
+    if (tenantId != null) conds.push(eq(employeeAdvances.tenantId, tenantId));
+    if (status) conds.push(eq(employeeAdvances.status, status));
+    const rows = await db.select().from(employeeAdvances).where(conds.length ? and(...conds) : undefined).orderBy(desc(employeeAdvances.id));
+    return { advances: rows.map((r: any) => ({ advance_no: r.advanceNo, payee: r.payee, purpose: r.purpose, amount: n(r.amount), status: r.status, settled_expense: n(r.settledExpense), returned_cash: n(r.returnedCash), issued_by: r.issuedBy, issued_date: r.issuedDate, settled_date: r.settledDate })), count: rows.length, outstanding: round2(rows.filter((r: any) => r.status === 'open').reduce((s: number, r: any) => s + n(r.amount), 0)) };
   }
 
   // ───────────────────── WRITE (Phase 3) ─────────────────────

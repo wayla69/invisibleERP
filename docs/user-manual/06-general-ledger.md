@@ -81,6 +81,63 @@ is recorded.
 
 [screenshot: pending journal entry approval screen]
 
+### Recurring / template journal entries
+
+For entries you post every period — **monthly rent or insurance accruals**,
+**prepaid amortization**, standing inter-company charges — set up a **template**
+once instead of re-keying it each time.
+
+1. Go to **Accounting** → **Recurring** and click **New template**
+   (`POST /api/ledger/recurring`). Give it a **name**, pick a **cadence**
+   (**daily / weekly / monthly**), a **first run date**, and enter the journal
+   **lines** (the same Dr/Cr lines as a manual entry).
+2. The template must **balance** (total debits = total credits) — an unbalanced
+   template is rejected (`UNBALANCED`) so it can't fail silently later.
+3. Leave it to run automatically, or schedule the **Post due recurring journals**
+   (`gl_recurring_journals`) job under **Reports → Scheduled reports** to run it
+   daily.
+
+**Expected result:** On each due date the template posts a journal entry **as a
+Draft** and rolls its next run date forward. Because it's a Draft, it still goes
+through **maker-checker** — a second person approves it on the **Pending** tab
+before it affects balances (just like a manual entry). Running the job twice in a
+day posts **nothing extra** (it's idempotent). Pause a template anytime with
+**Activate/Pause** (`POST /api/ledger/recurring/:id/active`) without losing its
+history.
+
+### Prepaid expense amortization
+
+When you pay for something **up front** that covers several months (annual
+insurance, rent), set up a **prepaid schedule** so the cost is spread over its term
+instead of hitting one month.
+
+1. **Accounting → Prepaid → New** (`POST /api/ledger/prepaid`): enter the **total**,
+   the **number of months**, and the **expense account**. Tick **capitalize** if you
+   also want to record the up-front payment now (**Dr Prepaid 1280 / Cr Cash**).
+2. Schedule the **Amortize due prepaid expenses** (`gl_prepaid_amortize`) job, or run
+   it with `POST /api/ledger/prepaid/run`.
+
+**Expected result:** Each period a **straight-line slice** (total ÷ months) posts as
+**Dr expense / Cr Prepaid (1280)**; the **last period takes the remainder** so the
+prepaid asset fully clears. Running it twice in a period posts nothing extra.
+
+### Leases (IFRS 16 / TFRS 16)
+
+Capitalize a lease so the **right-of-use asset** and **lease liability** appear on
+the balance sheet (rather than expensing rent as you pay it).
+
+1. **Accounting → Leases → New** (`POST /api/leases`): enter the **term in months**,
+   the **monthly payment**, and the **annual interest rate** (your incremental
+   borrowing rate). On save the asset + liability are recognised at the **present
+   value** of the payments (**Dr Right-of-Use 1600 / Cr Lease Liability 2600**).
+2. Schedule the **Post due lease periods** (`lease_periodic_run`) job, or run it with
+   `POST /api/leases/run`.
+
+**Expected result:** Each period posts **interest** on the liability (Dr 5900), the
+**cash payment** reducing the liability (Dr 2600 / Cr Cash), and **straight-line
+depreciation** of the ROU asset (Dr 5210 / Cr 1690). Over the term the liability and
+the ROU asset wind down to **zero**.
+
 ---
 
 ## 3. Trial balance & financial statements
@@ -235,6 +292,19 @@ is safe.
 
 **Expected result:** The asset is removed from active use and any gain / loss is
 posted.
+
+### Revalue or impair an asset
+
+To adjust an asset's carrying amount to a new value (a market revaluation, or an
+impairment write-down), open the asset and click **Revalue**
+(`POST /api/assets/{assetNo}/revalue`): enter the **new value** and a reason.
+
+**Expected result:** An **upward** revaluation credits the **revaluation surplus**
+in equity (**Dr Fixed Assets 1500 / Cr Revaluation Surplus 3200**); a **downward**
+revaluation (impairment) posts an **impairment loss** (**Dr Impairment Loss 5820 /
+Cr 1500**). The asset's net book value updates and every change is kept in the
+**revaluation history** (`GET /api/assets/{assetNo}/revaluations`). Entering the
+current value (no change) is rejected (`NO_CHANGE`).
 
 > **Note:** Print **QR labels** from the QR Tags tab and use **scan-update** to
 > record an asset's location or assigned holder during a physical asset count.

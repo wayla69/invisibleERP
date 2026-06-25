@@ -1,4 +1,4 @@
--- 0119 — Per-user UI preferences (sidebar favourites + nav fold-state), synced across devices.
+-- 0121 — Per-user UI preferences (sidebar favourites + nav fold-state), synced across devices.
 -- One row per (tenant, username); a generic `prefs` jsonb blob keeps it extensible. 'recents' deliberately
 -- stays per-device (localStorage) and is NOT stored here. Carries tenant_id → re-run the 0002 RLS loop so
 -- it is isolation-scoped.

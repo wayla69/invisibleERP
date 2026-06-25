@@ -14,6 +14,7 @@ export * from './logistics';
 export * from './system';
 export * from './ledger';
 export * from './ledgers';
+export * from './leases';
 export * from './cost-centers';
 export * from './budgets';
 export * from './revenue';

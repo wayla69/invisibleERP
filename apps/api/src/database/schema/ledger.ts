@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, timestamp, jsonb, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 
@@ -88,6 +88,55 @@ export const journalLines = pgTable(
     byEntry: index('idx_jl_entry').on(t.entryId),
     byTenant: index('idx_jl_tenant').on(t.tenantId),
   }),
+);
+
+// Recurring / template journal entries (GL-08). A balanced template (lines stored as JSON) + a cadence
+// (daily/weekly/monthly) + a next_run_date. The scheduled job `gl_recurring_journals` posts each due
+// template as a DRAFT JE through the normal maker-checker flow (GL-05) and rolls next_run_date forward.
+export const recurringJournals = pgTable(
+  'recurring_journals',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    name: text('name').notNull(),
+    frequency: text('frequency').notNull(), // 'daily' | 'weekly' | 'monthly'
+    memo: text('memo'),
+    ledgerCode: text('ledger_code'), // NULL = shared across all ledgers
+    currency: text('currency').default('THB'),
+    lines: jsonb('lines').notNull(), // [{ account_code, debit?, credit?, memo?, cost_center? }]
+    active: text('active').default('true'),
+    nextRunDate: date('next_run_date'),
+    lastRunDate: date('last_run_date'),
+    lastEntryNo: text('last_entry_no'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byDue: index('idx_recurring_due').on(t.active, t.nextRunDate) }),
+);
+
+// Prepaid amortization schedules (GL-09). A prepaid asset (annual insurance, rent paid up front, etc.) is
+// registered once with a total and a term; the scheduled job amortizes a straight-line slice each period
+// (Dr expense / Cr 1280 prepaid), the last period taking the remainder so it fully clears.
+export const prepaidSchedules = pgTable(
+  'prepaid_schedules',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    scheduleNo: text('schedule_no').notNull().unique(), // PPD-YYYYMMDD-NNN
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    name: text('name').notNull(),
+    totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).notNull(),
+    months: bigint('months', { mode: 'number' }).notNull(),
+    amortizedAmount: numeric('amortized_amount', { precision: 14, scale: 2 }).default('0'),
+    periodsPosted: bigint('periods_posted', { mode: 'number' }).default(0),
+    expenseAccount: text('expense_account').default('5100'),
+    prepaidAccount: text('prepaid_account').default('1280'),
+    startDate: date('start_date'),
+    nextRunDate: date('next_run_date'),
+    status: text('status').notNull().default('active'), // active | complete
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byDue: index('idx_prepaid_due').on(t.status, t.nextRunDate) }),
 );
 
 export type Account = typeof accounts.$inferSelect;

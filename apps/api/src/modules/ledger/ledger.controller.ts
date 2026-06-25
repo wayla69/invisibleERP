@@ -45,6 +45,38 @@ type OpeningBalancesBody = z.infer<typeof OpeningBalancesBody>;
 
 const RejectBody = z.object({ reason: z.string().optional() });
 
+const RecurringBody = z.object({
+  name: z.string().min(1),
+  frequency: z.enum(['daily', 'weekly', 'monthly']),
+  memo: z.string().optional(),
+  ledger_code: z.string().optional(),
+  currency: z.string().optional(),
+  tenant_id: z.number().optional(),
+  start_date: z.string().optional(),
+  lines: z.array(z.object({
+    account_code: z.string().min(1),
+    debit: z.number().nonnegative().optional(),
+    credit: z.number().nonnegative().optional(),
+    memo: z.string().optional(),
+    cost_center: z.string().optional(),
+  })).min(1),
+});
+type RecurringBodyT = z.infer<typeof RecurringBody>;
+
+const ActiveBody = z.object({ active: z.boolean() });
+
+const PrepaidBody = z.object({
+  name: z.string().min(1),
+  total_amount: z.number().positive(),
+  months: z.number().int().positive(),
+  expense_account: z.string().optional(),
+  prepaid_account: z.string().optional(),
+  tenant_id: z.number().optional(),
+  start_date: z.string().optional(),
+  capitalize: z.boolean().optional(),
+});
+type PrepaidBodyT = z.infer<typeof PrepaidBody>;
+
 @Controller('api/ledger')
 @Permissions('exec', 'creditors', 'ar')
 export class LedgerController {
@@ -128,6 +160,46 @@ export class LedgerController {
   // Forward cash-flow forecast: project cash N weeks out from open AR (inflows) and AP (outflows) by due date.
   @Get('cash-flow-forecast')
   cashFlowForecast(@Query('weeks') weeks?: string, @Query('ledger') ledger?: string) { return this.svc.cashFlowForecast(weeks ? Math.max(1, Math.min(52, parseInt(weeks, 10) || 8)) : 8, ledger || undefined); }
+
+  // ── Recurring / template journal entries (GL-08) ──
+  // A balanced template + a cadence; the scheduler posts each due template as a DRAFT JE (maker-checker).
+  @Post('recurring')
+  @Permissions('gl_post', 'exec')
+  createRecurring(@Body(new ZodValidationPipe(RecurringBody)) b: RecurringBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.createRecurring({ name: b.name, frequency: b.frequency, memo: b.memo, ledgerCode: b.ledger_code ?? null, currency: b.currency, tenantId: hqTenant(u, b.tenant_id) ?? null, startDate: b.start_date, lines: b.lines }, u);
+  }
+
+  @Get('recurring')
+  @Permissions('gl_post', 'gl_close', 'exec')
+  listRecurring(@Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listRecurring(hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
+
+  // Activate / pause a template without deleting it (keeps the audit + history).
+  @Post('recurring/:id/active')
+  @HttpCode(200)
+  @Permissions('gl_post', 'exec')
+  setRecurringActive(@Param('id') id: string, @Body(new ZodValidationPipe(ActiveBody)) b: z.infer<typeof ActiveBody>) { return this.svc.setRecurringActive(parseInt(id, 10), b.active); }
+
+  // Post every due template now (cron-callable; also rides the scheduler as `gl_recurring_journals`).
+  @Post('recurring/run')
+  @HttpCode(200)
+  @Permissions('gl_post', 'exec')
+  runRecurring(@CurrentUser() u: JwtUser) { return this.svc.runDueRecurring(u); }
+
+  // ── Prepaid amortization schedules (GL-09) ──
+  @Post('prepaid')
+  @Permissions('gl_post', 'exec')
+  createPrepaid(@Body(new ZodValidationPipe(PrepaidBody)) b: PrepaidBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.createPrepaid({ name: b.name, totalAmount: b.total_amount, months: b.months, expenseAccount: b.expense_account, prepaidAccount: b.prepaid_account, tenantId: hqTenant(u, b.tenant_id) ?? null, startDate: b.start_date, capitalize: b.capitalize }, u);
+  }
+
+  @Get('prepaid')
+  @Permissions('gl_post', 'gl_close', 'exec')
+  listPrepaid(@Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listPrepaid(hqTenant(u, tenantId ? Number(tenantId) : undefined)); }
+
+  @Post('prepaid/run')
+  @HttpCode(200)
+  @Permissions('gl_post', 'exec')
+  runPrepaid(@CurrentUser() u: JwtUser) { return this.svc.runDuePrepaid(u); }
 
   // ── fiscal periods + year-end close ──
   // Periods are per-tenant (0043). Operations default to the caller's own tenant; HQ/Admin may target a

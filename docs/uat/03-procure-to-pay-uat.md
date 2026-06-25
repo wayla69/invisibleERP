@@ -1,6 +1,6 @@
 # UAT — Cycle 03: Procure-to-Pay (Expenditure / AP)
 
-**Status: DRAFT v0.2 · 2026-06-24** · Cross-ref: process narrative `02-procure-to-pay.md` (EXP-01..06, R02–R04/R07/R13), harness `tools/cutover/src/match.ts`, `compliance.ts` (EXP-06 ToE), `e2e.ts`.
+**Status: DRAFT v0.3 · 2026-06-25** · Cross-ref: process narrative `02-procure-to-pay.md` (EXP-01..07, R02–R04/R07/R13), `07-cash-treasury.md` (EXP-07), harness `tools/cutover/src/match.ts`, `compliance.ts` (EXP-06 ToE), `e2e.ts`, `basics.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -39,3 +39,6 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-P2P-026 | SLA escalation sweep flags + reminds | Admin | PR workflow sla_hours, instance overdue | 1. force `due_at` past. 2. `POST /api/workflow/run-escalations`. | as left | Instance `escalated`; reminder notification written; sweep returns escalated≥1. | High | Control | EXP-03 (workflow) | Not Run | workflow.ts |
 | UAT-P2P-027 | Escalation fallback approver can act | Planner (escalate-to) | escalated instance (step approver = Procurement) | 1. `POST /api/workflow/instances/{id}/act {approve}` as Planner. | as left | Approved — the SLA-fallback approver may act once escalated. | High | Control | EXP-03 (workflow) | Not Run | workflow.ts |
 | UAT-P2P-028 | No-code builder replaces steps | MasterDataAdmin | a definition with 2 steps | 1. `PUT /api/workflow/definitions/{id} {steps:[1 step]}`. | as left | Definition now has 1 step. | Med | Positive | Feature (workflow builder) | Not Run | workflow.ts |
+| UAT-P2P-029 | Vendor statement of account | ApClerk | Vendor with bills + approved payments | 1. `GET /api/finance/ap/statement?vendor=&from=&to=`. | — | Opening balance + bills (charges) and payments in date order with a running balance; closing balance ties to AP open. | Med | Detective | EXP-06 | Not Run | basics.ts |
+| UAT-P2P-030 | Petty cash: issue an advance | ApClerk | — | 1. `POST /api/finance/advances {payee, amount:1000}`. | — | `ADV-…` open; posts **Dr 1180 / Cr 1000**; 1180 float = 1000. | High | Control | EXP-07 | Not Run | basics.ts |
+| UAT-P2P-031 | Petty cash: settle reconciles or rejects | ApClerk | Open advance 1000 | 1. settle 700+200 (≠1000). 2. settle 700+300. | — | Step 1 → `400 SETTLE_MISMATCH`; step 2 clears the float (Dr 5100 700 + Dr 1000 300 / Cr 1180 1000), advance `settled`. | High | Control | EXP-07 | Not Run | basics.ts |
