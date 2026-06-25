@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, or, like, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { apTransactions, purchaseOrders, poItems, invoiceMatchResults, invoiceMatchLines, matchTolerance } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -119,5 +119,30 @@ export class ThreeWayMatchService {
     if (!m) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No match for this invoice', messageTh: 'ไม่พบการจับคู่' });
     const lines = await db.select().from(invoiceMatchLines).where(eq(invoiceMatchLines.matchId, Number(m.id)));
     return { match_no: m.matchNo, txn_no: m.txnNo, po_no: m.poNo, match_status: m.matchStatus, payable: m.payable, override: m.override, override_reason: m.overrideReason, lines: lines.map((l: any) => ({ item_id: l.itemId, inv_qty: n(l.invQty), inv_price: n(l.invPrice), po_price: n(l.poPrice), gr_qty: n(l.grQty), price_var_pct: n(l.priceVarPct), qty_var_pct: n(l.qtyVarPct), line_status: l.lineStatus })) };
+  }
+
+  // Match-results register / blocked-invoice worklist (ops/finance): every matched invoice for the caller's
+  // tenant, filterable by status / blocked-only / search, with counts. "Blocked" = held from payment
+  // (not payable AND not overridden) — the invoices the AP-pay gate (assertPayable) will refuse. Tenant-scoped
+  // explicitly (an HQ/Admin request bypasses RLS); typed builders only at user-input sites.
+  async listResults(q: { status?: string; blocked?: boolean; search?: string; limit?: number }, user: JwtUser) {
+    const db = this.db as any;
+    const conds: any[] = [];
+    if (user.tenantId != null) conds.push(eq(invoiceMatchResults.tenantId, user.tenantId));
+    if (q.status) conds.push(eq(invoiceMatchResults.matchStatus, q.status));
+    if (q.blocked) conds.push(and(eq(invoiceMatchResults.payable, false), eq(invoiceMatchResults.override, false)));
+    if (q.search) conds.push(or(like(invoiceMatchResults.txnNo, `%${q.search}%`), like(invoiceMatchResults.poNo, `%${q.search}%`))!);
+    const where = conds.length ? and(...conds) : undefined;
+    const rows = await db.select().from(invoiceMatchResults).where(where).orderBy(desc(invoiceMatchResults.id)).limit(q.limit ?? 100);
+    const tenantWhere = user.tenantId != null ? eq(invoiceMatchResults.tenantId, user.tenantId) : undefined;
+    const [agg] = await db.select({
+      total: sql<string>`count(*)`,
+      blocked: sql<string>`coalesce(sum(case when ${invoiceMatchResults.payable}=false and ${invoiceMatchResults.override}=true then 0 when ${invoiceMatchResults.payable}=false then 1 else 0 end),0)`,
+      overridden: sql<string>`coalesce(sum(case when ${invoiceMatchResults.override}=true then 1 else 0 end),0)`,
+    }).from(invoiceMatchResults).where(tenantWhere);
+    return {
+      results: rows.map((m: any) => ({ match_no: m.matchNo, txn_no: m.txnNo, po_no: m.poNo, match_status: m.matchStatus, payable: m.payable, override: m.override, override_by: m.overrideBy, matched_by: m.matchedBy, matched_at: m.matchedAt })),
+      count: rows.length, total: n(agg?.total), blocked: n(agg?.blocked), overridden: n(agg?.overridden),
+    };
   }
 }
