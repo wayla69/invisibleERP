@@ -1,0 +1,52 @@
+name: Ops scripts check
+
+# Validates the deploy/backup tooling under tools/ops/ without running it: shell syntax, lint, and
+# docker-compose schema. No pnpm/Node needed → independent of the main CI build matrix.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'tools/ops/**'
+      - '.github/workflows/ops-scripts-check.yml'
+  pull_request:
+    paths:
+      - 'tools/ops/**'
+      - '.github/workflows/ops-scripts-check.yml'
+
+jobs:
+  ops-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check shell scripts (bash -n)
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            if bash -n "$f"; then echo "ok   $f"; else echo "FAIL $f"; fail=1; fi
+          done < <(find tools/ops -name '*.sh')
+          exit $fail
+
+      # Advisory (does not block the PR): shellcheck style/lint on the Alibaba tooling we author.
+      - name: Lint shell scripts (shellcheck, advisory)
+        continue-on-error: true
+        run: |
+          shellcheck --version
+          shellcheck -e SC1090,SC1091,SC2012 tools/ops/alibaba/*.sh
+
+      - name: Validate compose files (docker compose config)
+        env:
+          # Dummy values so the ${VAR:?} interpolation resolves. `config` only parses/validates —
+          # it never builds an image or starts a container.
+          PUBLIC_SITE_URL: https://erp.example.test
+          CADDY_SITE_ADDRESS: erp.example.test
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+          JWT_SECRET: ci
+          APP_ENC_KEY: ci
+          PSP_WEBHOOK_SECRET: ci
+          DATABASE_URL: postgresql://ci:ci@rds.example.test:5432/ci
+        run: |
+          docker compose -f tools/ops/alibaba/docker-compose.tier0.yml config -q && echo "tier0 compose ok"
+          docker compose -f tools/ops/alibaba/docker-compose.tier1.yml config -q && echo "tier1 compose ok"

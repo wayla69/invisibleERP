@@ -35,6 +35,13 @@ if [ -n "${BACKUP_S3:-}" ]; then
   else echo "[backup] WARN: BACKUP_S3 set but no aws/rclone found"; fi
 fi
 
+# optional offsite upload to Alibaba Cloud OSS via a preconfigured rclone remote
+# (BACKUP_OSS=remote:bucket/prefix, e.g. oss:ierp-backups/prod — see tools/ops/alibaba/)
+if [ -n "${BACKUP_OSS:-}" ]; then
+  if command -v rclone >/dev/null; then rclone copy "${dump}.gz" "${BACKUP_OSS}";
+  else echo "[backup] WARN: BACKUP_OSS set but rclone not found"; fi
+fi
+
 # retention
 find "$OUT_DIR" -name 'ierp-*.dump.gz' -type f -mtime "+${RETAIN_DAYS}" -print -delete
 echo "[backup] done; retained last ${RETAIN_DAYS}d"
