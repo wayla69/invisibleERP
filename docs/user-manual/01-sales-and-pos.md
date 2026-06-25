@@ -1,6 +1,9 @@
 # 01 · Sales & Point of Sale (POS)
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2** · *v0.2 (2026-06-25): added the touch **register**
+(`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender
+checkout, hold/recall — and connecting the **receipt printer / cash drawer /
+customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
 
 This chapter is for **Cashiers, Sales staff, POS Supervisors and Returns Clerks**.
 It covers ringing up sales, taking orders, credit checks, returns and refunds,
@@ -21,27 +24,46 @@ When you are in the **POS workspace** (see *Getting Started → Workspaces*), yo
 - Quick buttons to **open the POS till**, **POS control**, **card terminals**, and **branches**.
 
 > **Note:** Cashiers and POS Supervisors (single-duty roles holding `pos_sell` / `pos_till`) can view this
-> overview for their own shop — the figures are read-only. To ring up a sale, use **POS** (`/pos`).
+> overview for their own shop — the figures are read-only. To ring up a sale, use **ขายหน้าร้าน**
+> (`/pos/register`).
 
 [screenshot: POS home / store overview]
 
 ---
 
-## 1. Ringing up a sale at the till
+## 1. Ringing up a sale — the touch register
 
-**Screen:** `/pos` (list) → `/pos/new` (new sale) · **Required permission:**
-`pos_sell` (held by *Cashier*, *Sales*, *Admin*)
+**Screen:** `/pos/register` (**ขายหน้าร้าน**) · **Required permission:** `pos` /
+`order_mgt` (held by *Cashier*, *Sales*, *PosSupervisor*, *Admin*)
 
-1. Go to **POS** (`/pos`) and click **Create Order** (**สร้างออเดอร์**) to open
-   `/pos/new`.
-2. (Optional) Enter the **customer code** if the sale is for a known customer.
-3. Add each product: enter **Item ID** (**รหัสสินค้า**), **Quantity**
-   (**จำนวน**) and **Unit Price** (**ราคา**). Repeat for every line.
-4. Review the subtotal.
-5. Click **Confirm Order** (**ยืนยันออเดอร์**).
+The **register** is the everyday sell screen — a touch layout with the **menu on
+the left** and a **running cart on the right**, built for speed (it replaces the
+old keyed "create order" form for day-to-day selling):
 
-**Expected result:** A sale is created with an order number (e.g. `SO-…`), the
-total is shown, and any loyalty points earned are recorded.
+1. **Add items by tapping.** The menu is grouped into **category chips** (tap a
+   chip to filter) with a **search / barcode** box at the top — type part of a name
+   or SKU, or **scan a barcode**, to add an item instantly. Sold-out (86) and
+   out-of-hours items are greyed out and can't be added.
+2. **Options (modifiers).** Items that carry choices (size, spice, add-ons) show a
+   **ตัวเลือก** badge; tapping one opens a picker — choose options, the live price
+   updates, then **เพิ่มลงตะกร้า**. Prices (incl. option add-ons) are always taken
+   from the catalog, so a cashier can't change a price.
+3. **The cart.** Adjust quantity with **− / +**, remove a line with the bin icon,
+   and read **ยอดรวม / VAT / สุทธิ** at the bottom. **พักบิล** parks the cart and
+   **ล้างตะกร้า** clears it.
+4. **Attach a table / buffet (optional).** Tap **แนบโต๊ะ** to tag the sale to a
+   table — the order is then **fired to the kitchen (KDS)** at checkout and counts
+   toward that table's room revenue. For full table-by-table service and buffet
+   packages, open **บริการโต๊ะ/บุฟเฟต์ →** (the floor plan).
+5. **Checkout.** Tap **ชำระเงิน** to open the payment screen (next section).
+
+**Expected result:** A sale is settled with a sale number (e.g. `SALE-…`), the
+receipt prints, the cash drawer opens for a cash sale, and any loyalty points are
+recorded.
+
+> **Manual keying (fallback).** `/pos/new` still offers a plain keyed form (Item
+> ID / quantity / price) for unusual cases, and **รายการออเดอร์** (`/pos`) lists
+> recent sales — but the register above is the day-to-day sell screen.
 
 > **The orders list (`/pos`).** Above the list a quick **summary band** shows the
 > **orders displayed**, **total sales**, **average per order**, and how many are
@@ -57,9 +79,22 @@ total is shown, and any loyalty points earned are recorded.
 
 ### Taking payment
 
-1. After confirming, choose the **payment method**: Cash (**เงินสด**), Card, QR /
-   PromptPay, or Store Credit (gift card).
-2. Enter the amount tendered and record the payment.
+On the register, **ชำระเงิน** opens a full payment screen:
+
+1. Pick the **payment method**: **เงินสด** (cash), **QR พร้อมเพย์**, **บัตร**
+   (card), or **โอน** (transfer).
+2. **Cash** shows a **numeric keypad** and **quick-tender** buttons (**พอดี** /
+   **฿100** / **฿500** / **฿1000**); the **เงินทอน** (change) is shown instantly
+   (red if the amount is short).
+3. **QR พร้อมเพย์** shows a **scannable PromptPay QR for the exact amount** — the
+   customer scans it in their banking app; press **ยืนยันชำระเงิน** once paid.
+   *(Needs a PromptPay ID configured for the business; otherwise the screen
+   explains it isn't set.)*
+4. An optional **ส่วนลดบิล %** discounts the whole bill before VAT.
+5. **ยืนยันชำระเงิน** settles the sale.
+
+> The legacy keyed form (`/pos/new`) records a sale without this screen; choose
+> the method and amount there instead.
 
 > **Card payments:** when a payment provider is configured (Opn/Omise or Stripe —
 > see `OPN_SECRET_KEY` / `STRIPE_SECRET_KEY`), a Card tender is charged for real
@@ -111,13 +146,12 @@ charge + VAT + tip = total).
 
 ### Cashier speed: quick-tender, change & hotkeys
 
-On `/pos/new` the cart panel speeds up cash sales:
-
-- **Quick-tender** (**รับเงินสด**): tap **พอดี** (exact), **฿100**, **฿500** or
-  **฿1000** to fill the *cash received* field; the **change** (**เงินทอน**) is
-  shown instantly (red if not enough).
-- **Hotkeys:** **F2** adds a line, **F9** confirms the order — so a cashier can
-  ring up without leaving the keyboard.
+- **Register checkout** (`/pos/register`): the cash screen has a **numeric keypad**
+  and **quick-tender** buttons (**พอดี** / **฿100** / **฿500** / **฿1000**), with
+  the **change** (**เงินทอน**) shown instantly (red if not enough), plus a
+  **scan-to-add** box and **barcode** support for adding items hands-free.
+- **Keyed form** (`/pos/new`): **F2** adds a line and **F9** confirms — so a
+  cashier can ring up a manual sale without leaving the keyboard.
 
 ### Pricing rules, service charge & rounding (dine-in)
 
@@ -482,6 +516,33 @@ before sending.
 Register each outlet's hardware once (printers, cash drawers, customer displays,
 scales) under **ทะเบียนอุปกรณ์**, tagging the **terminal** each belongs to and —
 for a cash drawer — the **printer** that opens it.
+
+### Connecting hardware to the register (⚙ ตั้งค่าเครื่อง)
+
+For a **Windows PC + USB receipt printer** setup, pair the hardware straight from
+the register: on `/pos/register` (Chrome or Edge) open **⚙ ตั้งค่าเครื่อง**:
+
+- **รหัสเครื่อง (Terminal).** Set this terminal's code (e.g. `T01`). It pairs the
+  **customer display** and tags every **cash-drawer open** to this terminal for the
+  Z-report.
+- **Receipt printer.** Choose how receipts print:
+  - **ผ่านไดรเวอร์ (recommended)** — prints the 80 mm slip through the Windows
+    print driver. Thai text always renders correctly; works with any installed
+    thermal printer (no extra setup).
+  - **ตรง USB (ESC/POS)** — sends raw bytes straight to a USB-connected printer
+    (fast, no print dialog). Click **ต่อเครื่องพิมพ์ USB** and pick the printer
+    once; the browser remembers it. *(Thai rendering on this mode depends on the
+    printer's code page.)*
+  - **ทดสอบพิมพ์** prints a short self-test.
+- **Cash drawer.** The drawer **opens automatically on a cash sale** when a USB
+  printer is connected (it pulses the drawer wired to the printer). **ทดสอบเปิด
+  ลิ้นชัก** opens it on demand; every open is logged for reconciliation.
+- **Customer display.** **เปิดจอลูกค้า** opens the second-screen page for this
+  terminal; during a sale it mirrors the cart, total and change in real time.
+
+> WebUSB (the **ตรง USB** mode and the drawer pulse) works on **Chrome / Edge on a
+> computer**; on a browser without it, the register hides those controls and uses
+> **print-through-driver** instead.
 
 - **Cash drawer (ลิ้นชักเก็บเงิน).** A cash sale **opens the drawer
   automatically**. To open it without a sale (e.g. to make change), use

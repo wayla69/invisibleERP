@@ -2,6 +2,9 @@
 // paired with a readable double-submit CSRF token cookie (`ierp_csrf`) that we echo in the X-CSRF-Token
 // header on mutating requests. Every call sends credentials so the browser attaches the auth cookie.
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+/** API origin (or same-origin proxy base). Exported for non-JSON fetches — e.g. the POS terminal bridge
+ *  pulling raw ESC/POS receipt bytes / the HTML slip, which can't go through the JSON `api()` helper. */
+export const API_BASE = BASE;
 const CSRF_COOKIE = 'ierp_csrf';
 
 function readCookie(name: string): string | null {

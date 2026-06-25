@@ -35,7 +35,7 @@ interface Orders {
 }
 
 const QUICK = [
-  { label: 'เปิด POS ขายสินค้า', href: '/pos', icon: ShoppingCart },
+  { label: 'เปิดหน้าขาย (Register)', href: '/pos/register', icon: ShoppingCart },
   { label: 'ควบคุม POS (พักบิล/อนุมัติ)', href: '/pos-control', icon: ClipboardList },
   { label: 'เครื่องรับบัตร & สรุปยอด', href: '/payments/terminals', icon: CreditCard },
   { label: 'สาขา & ยอดขายรวม', href: '/branches', icon: Store },
