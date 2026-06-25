@@ -2,13 +2,15 @@ import { Controller, Get, Post, Patch, Param, Query, Body, HttpCode } from '@nes
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { FinanceService, type ReceiptDto, type ApTxnDto } from './finance.service';
+import { FinanceService, type ReceiptDto, type ApTxnDto, type AdvanceDto, type SettleAdvanceDto } from './finance.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
 const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional(), vat_treatment: z.enum(['standard', 'exempt', 'zero']).optional(), idempotency_key: z.string().optional() });
 const PayBody = z.object({ amount: z.number().positive(), idempotency_key: z.string().optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
+const AdvanceBody = z.object({ payee: z.string().min(1), amount: z.number().positive(), purpose: z.string().optional(), expense_account: z.string().optional(), tenant_id: z.number().optional() });
+const SettleBody = z.object({ settled_expense: z.number().nonnegative(), returned_cash: z.number().nonnegative().optional(), expense_account: z.string().optional() });
 
 @Controller('api/finance')
 export class FinanceController {
@@ -36,6 +38,23 @@ export class FinanceController {
   // sub-ledger ↔ GL reconciliation (AR 1100 == open AR, AP 2000 == open AP)
   @Get('reconciliation') @Permissions('exec', 'ar', 'creditors')
   reconciliation() { return this.svc.reconcile(); }
+
+  // Statement of account — running balance over [from,to] for one customer (AR) or vendor (AP).
+  @Get('ar/statement') @Permissions('ar', 'exec')
+  customerStatement(@Query('tenant_id') tenantId: string, @Query('from') from?: string, @Query('to') to?: string) { return this.svc.customerStatement(Number(tenantId), from || undefined, to || undefined); }
+
+  @Get('ap/statement') @Permissions('creditors', 'exec')
+  vendorStatement(@Query('vendor') vendor: string, @Query('from') from?: string, @Query('to') to?: string) { return this.svc.vendorStatement(vendor, from || undefined, to || undefined); }
+
+  // Petty cash / employee cash advances (EXP-07): issue a float, settle it against actual spend.
+  @Post('advances') @Permissions('creditors', 'exec')
+  issueAdvance(@Body(new ZodValidationPipe(AdvanceBody)) b: AdvanceDto, @CurrentUser() u: JwtUser) { return this.svc.issueAdvance(b, u); }
+
+  @Post('advances/:advanceNo/settle') @HttpCode(200) @Permissions('creditors', 'exec')
+  settleAdvance(@Param('advanceNo') advanceNo: string, @Body(new ZodValidationPipe(SettleBody)) b: SettleAdvanceDto, @CurrentUser() u: JwtUser) { return this.svc.settleAdvance(advanceNo, b, u); }
+
+  @Get('advances') @Permissions('creditors', 'exec')
+  advances(@Query('tenant_id') tenantId?: string, @Query('status') status?: string) { return this.svc.listAdvances(tenantId ? Number(tenantId) : undefined, status || undefined); }
 
   // WRITE
   @Post('ar/sync') @Permissions('ar')

@@ -41,6 +41,7 @@ import { TaxDocsModule } from './modules/tax-docs/tax-docs.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { AssetsModule } from './modules/assets/assets.module';
 import { EamModule } from './modules/eam/eam.module';
+import { LeasesModule } from './modules/leases/leases.module';
 import { TaxReportsModule } from './modules/tax-reports/tax-reports.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { ReturnsModule } from './modules/returns/returns.module';
@@ -158,6 +159,7 @@ import { OpsModule } from './modules/ops/ops.module';
     RestaurantModule,
     AssetsModule,
     EamModule,
+    LeasesModule,
     TaxReportsModule,
     MenuModule,
     ReturnsModule,

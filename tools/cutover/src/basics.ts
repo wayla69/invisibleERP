@@ -307,7 +307,78 @@ async function main() {
   const posted5710 = await tbDebit('5710');
   ok('Recurring: a second user approves → accrual hits the GL (+1000)', recAppr.status === 200 && near(posted5710, before5710 + 1000), `st=${recAppr.status} after=${posted5710}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/EAM-depth/forecast + recurring JE ──');
+  const tbCredit2 = async (code: string) => {
+    const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+    const row = (tb.rows ?? []).find((r: any) => r.account_code === code);
+    return row ? Number(row.credit) : 0;
+  };
+  const tbBalance = async (code: string) => {
+    const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+    const row = (tb.rows ?? []).find((r: any) => r.account_code === code);
+    return row ? Number(row.balance) : 0;
+  };
+
+  // ───────────────────── Customer / vendor statements of account ─────────────────────
+  const [stmtT] = await db.insert(s.tenants).values({ code: 'STMT', name: 'Statement Customer' }).returning({ id: s.tenants.id });
+  const stmtTid = Number(stmtT.id);
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-S1', invoiceDate: '2026-01-10', dueDate: '2026-02-10', tenantId: stmtTid, amount: '1000', paidAmount: '400', status: 'Partial' },
+    { invoiceNo: 'INV-S2', invoiceDate: '2026-02-10', dueDate: '2026-03-10', tenantId: stmtTid, amount: '500', paidAmount: '0', status: 'Unpaid' },
+  ]);
+  await db.insert(s.arReceipts).values([{ receiptNo: 'RCP-S1', receiptDate: '2026-02-15', tenantId: stmtTid, invoiceNo: 'INV-S1', amount: '400', method: 'Transfer' }]);
+  const stmt = (await inj('GET', `/api/finance/ar/statement?tenant_id=${stmtTid}&from=2026-01-01&to=2026-02-28`, admin)).json;
+  ok('Customer statement: opening 0, charges 1500, payments 400, closing 1100', near(stmt.opening_balance, 0) && near(stmt.total_charges, 1500) && near(stmt.total_payments, 400) && near(stmt.closing_balance, 1100), `open=${stmt.opening_balance} chg=${stmt.total_charges} pay=${stmt.total_payments} close=${stmt.closing_balance}`);
+  ok('Customer statement: running balance over 3 dated lines', (stmt.lines ?? []).length === 3 && near(stmt.lines?.[stmt.lines.length - 1]?.balance, 1100), `n=${stmt.lines?.length} last=${stmt.lines?.[stmt.lines.length - 1]?.balance}`);
+  const stmtFeb = (await inj('GET', `/api/finance/ar/statement?tenant_id=${stmtTid}&from=2026-02-01&to=2026-02-28`, admin)).json;
+  ok('Customer statement: opening balance struck before the window (1000)', near(stmtFeb.opening_balance, 1000) && near(stmtFeb.closing_balance, 1100), `open=${stmtFeb.opening_balance} close=${stmtFeb.closing_balance}`);
+
+  // ───────────────────── Petty cash / employee cash advances (EXP-07) ─────────────────────
+  const adv1180Before = await tbBalance('1180');
+  const issue = await inj('POST', '/api/finance/advances', admin, { payee: 'EMP1', amount: 1000, purpose: 'site visit' });
+  ok('Petty cash: issue an advance (Dr 1180 / Cr 1000)', issue.status === 201 && /^ADV-/.test(issue.json?.advance_no ?? '') && near(await tbBalance('1180'), adv1180Before + 1000), `no=${issue.json?.advance_no} 1180=${await tbBalance('1180')}`);
+  const advNo = issue.json?.advance_no;
+  const badStl = await inj('POST', `/api/finance/advances/${advNo}/settle`, admin, { settled_expense: 700, returned_cash: 200 });
+  ok('Petty cash: settlement must reconcile to the advance (SETTLE_MISMATCH)', badStl.status === 400 && badStl.json?.error?.code === 'SETTLE_MISMATCH', `st=${badStl.status} code=${badStl.json?.error?.code}`);
+  const stl = await inj('POST', `/api/finance/advances/${advNo}/settle`, admin, { settled_expense: 700, returned_cash: 300 });
+  ok('Petty cash: settle clears the float (700 expense + 300 returned)', stl.status === 200 && stl.json?.status === 'settled' && near(await tbBalance('1180'), adv1180Before), `1180bal=${await tbBalance('1180')}`);
+
+  // ───────────────────── Prepaid amortization schedules (GL-09) ─────────────────────
+  const pp1280Before = await tbDebit('1280');
+  const mkPp = await inj('POST', '/api/ledger/prepaid', admin, { name: 'Annual insurance', total_amount: 1200, months: 12, capitalize: true });
+  ok('Prepaid: register a 12-month schedule (monthly 100), capitalized', mkPp.status === 201 && near(mkPp.json?.monthly_amount, 100) && near(await tbDebit('1280'), pp1280Before + 1200), `monthly=${mkPp.json?.monthly_amount} 1280=${await tbDebit('1280')}`);
+  const runPp = await inj('POST', '/api/ledger/prepaid/run', admin);
+  ok('Prepaid: scheduled run amortizes one period (100 to expense)', runPp.status === 200 && runPp.json?.posted === 1 && near(runPp.json?.entries?.[0]?.amount, 100), `posted=${runPp.json?.posted} amt=${runPp.json?.entries?.[0]?.amount}`);
+  const runPp2 = await inj('POST', '/api/ledger/prepaid/run', admin);
+  ok('Prepaid: same-day re-run is idempotent (0)', runPp2.status === 200 && runPp2.json?.posted === 0, `posted=${runPp2.json?.posted}`);
+
+  // ───────────────────── Lease accounting (IFRS 16) ─────────────────────
+  const rou1600Before = await tbDebit('1600');
+  const mkLease = await inj('POST', '/api/leases', admin, { name: 'Office lease', term_months: 12, monthly_payment: 1000, annual_rate_pct: 12 });
+  const liability = mkLease.json?.initial_liability;
+  ok('Lease: commencement recognises ROU = liability = PV of payments (Dr 1600 / Cr 2600)', mkLease.status === 201 && liability > 11200 && liability < 11300 && near(await tbDebit('1600'), rou1600Before + liability) && near(await tbCredit2('2600'), liability), `liab=${liability} 1600Δ=${(await tbDebit('1600')) - rou1600Before}`);
+  const runLease = await inj('POST', '/api/leases/run', admin);
+  const le = runLease.json?.entries?.[0];
+  ok('Lease: periodic run posts interest + principal (= payment) + ROU depreciation', runLease.status === 200 && runLease.json?.posted === 1 && near(le?.interest + le?.principal, 1000) && le?.depreciation > 0, `int=${le?.interest} prin=${le?.principal} dep=${le?.depreciation}`);
+  const leList = (await inj('GET', '/api/leases', admin)).json;
+  const leRow = (leList.leases ?? []).find((x: any) => x.lease_no === mkLease.json?.lease_no);
+  ok('Lease: liability + ROU NBV reduced after the period', leRow && leRow.liability_balance < liability && leRow.rou_nbv < liability, `liab=${leRow?.liability_balance} rou=${leRow?.rou_nbv}`);
+
+  // ───────────────────── Asset revaluation / impairment (FA-07) ─────────────────────
+  const reg = (await inj('GET', '/api/assets', admin)).json;
+  const fa2 = (reg.assets ?? reg.register ?? []).find((a: any) => (a.asset_no ?? a.assetNo) === 'FA-EAM2');
+  const nbv2 = Number(fa2?.net_book_value ?? fa2?.nbv ?? fa2?.netBookValue ?? 80000);
+  const surplusBefore = await tbCredit2('3200');
+  const revUp = await inj('POST', '/api/assets/FA-EAM2/revalue', admin, { new_value: nbv2 + 10000, reason: 'market appraisal' });
+  ok('Asset revaluation (upward): surplus to equity 3200 (+10000)', revUp.status === 201 && revUp.json?.kind === 'revaluation' && near(revUp.json?.delta, 10000) && near(await tbCredit2('3200'), surplusBefore + 10000), `kind=${revUp.json?.kind} delta=${revUp.json?.delta}`);
+  const imp5820Before = await tbDebit('5820');
+  const revDown = await inj('POST', '/api/assets/FA-EAM2/revalue', admin, { new_value: nbv2 + 5000, reason: 'impairment test' });
+  ok('Asset impairment (downward): impairment loss 5820 (+5000)', revDown.status === 201 && revDown.json?.kind === 'impairment' && near(revDown.json?.delta, -5000) && near(await tbDebit('5820'), imp5820Before + 5000), `kind=${revDown.json?.kind} delta=${revDown.json?.delta}`);
+  const noChange = await inj('POST', '/api/assets/FA-EAM2/revalue', admin, { new_value: nbv2 + 5000 });
+  ok('Asset revaluation: no-change rejected (NO_CHANGE)', noChange.status === 400 && noChange.json?.error?.code === 'NO_CHANGE', `st=${noChange.status} code=${noChange.json?.error?.code}`);
+  const revList = (await inj('GET', '/api/assets/FA-EAM2/revaluations', admin)).json;
+  ok('Asset revaluation: audit trail lists both events', (revList.revaluations ?? []).length === 2, `n=${revList.revaluations?.length}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

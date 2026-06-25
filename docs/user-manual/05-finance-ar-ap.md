@@ -42,6 +42,16 @@ moves **Unpaid → Partial → Paid**, and the cash / AR entries post to the led
 
 **Expected result:** You can see which customers are overdue and by how much.
 
+### A3a. Customer statement of account
+
+To send a customer a statement of what they owe, open **AR → Statement** and pick
+the customer and a date range (`GET /api/finance/ar/statement?tenant_id=&from=&to=`).
+
+**Expected result:** A statement showing the **opening balance** (as of the start
+date), every **invoice** (charge) and **receipt** (payment) in date order with a
+**running balance**, and the **closing balance**. It's built from the same posted
+AR data as the aging view.
+
 ### A4. Collections & dunning (chasing overdue invoices)
 
 The **collections worklist** shows every open invoice with its age, the dunning
@@ -192,6 +202,37 @@ cash-disbursement entry posts to the ledger. On rejection nothing posts.
 **Expected result:** You can plan payments and avoid late fees.
 
 [screenshot: AP list with Pay action and aging]
+
+### B4. Vendor statement of account
+
+Open **AP → Statement**, pick the vendor and a date range
+(`GET /api/finance/ap/statement?vendor=&from=&to=`).
+
+**Expected result:** A statement with the **opening balance**, every **bill**
+(charge) and approved **payment** in date order with a **running balance**, and the
+**closing balance** — reconcile it to the supplier's own statement before you pay.
+
+---
+
+## Part B2 — Petty cash / employee advances
+
+**Required permission:** `creditors` (held by *ApClerk*, *Admin*).
+
+When you give an employee cash up front (a site-visit float, travel money), record
+it as an **advance** so the cash is tracked until it's accounted for.
+
+1. **Issue the advance** (`POST /api/finance/advances` — payee, amount, purpose).
+   This posts **Dr Employee Advances (1180) / Cr Cash (1000)** and the advance shows
+   as **open**. The 1180 balance is your **outstanding float**.
+2. **Settle it** when the employee reports back
+   (`POST /api/finance/advances/{advanceNo}/settle`): enter the **actual spend** and
+   any **cash returned**. The two **must add up to the advance** — otherwise it's
+   rejected (`SETTLE_MISMATCH`). This posts the spend to the expense account and
+   clears the advance (the 1180 float returns to zero for that advance).
+
+**Expected result:** Every advance is either **open** (still on 1180) or **settled**
+(fully accounted for). `GET /api/finance/advances` lists them with the total
+outstanding. Settling an already-settled advance → `ALREADY_SETTLED`.
 
 ---
 

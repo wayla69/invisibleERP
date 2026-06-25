@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Per shift (till) + monthly (bank rec) + annual |
-| Related RCM controls | REV-02, REV-03, REV-05, REV-06, REV-09, REV-11, REC-02; SoD R08 |
+| Related RCM controls | REV-02, REV-03, REV-05, REV-06, REV-09, REV-11, REC-02, EXP-07; SoD R08 |
 | Related policy | `compliance/policies/11-financial-close-policy.md`, `compliance/policies/03-delegation-of-authority.md` |
 
 ## 2. Purpose
@@ -66,6 +66,7 @@ SoD rule **R08**: the **Cashier** who records sales/tender is never the role tha
 6. **Settlement reconciliation.** Card/e-wallet payment intents are batched into a settlement and reconciled to the PSP payout statement (**REV-11**).
 7. **Bank reconciliation.** Bank balances are reconciled against statements monthly and reviewed; differences are cleared (**REC-02**; feeds the GL close, `04-general-ledger-close.md`). Auto-match and the reconciliation report scope the GL cash movements to **the bank account's own tenant** — the cash GL (e.g. 1010) is shared across tenants, so without this an HQ/Admin caller (whose request bypasses RLS) would pull another tenant's movements into the balance/match set (**REC-02**, **ITGC-AC-03**).
 
+9. **Petty cash / employee cash advances (decision point).** A cash float is issued to an employee via `POST /api/finance/advances` (doc prefix **ADV-**): cash out **Dr 1180 Employee Advances / Cr 1000**. The **1180 balance is the outstanding float** (`GET /api/finance/advances` reports it). On return the advance is **settled** (`POST /api/finance/advances/:advanceNo/settle`) against actual spend + returned cash — **Dr expense + Dr 1000 (returned) / Cr 1180** — which **must reconcile** to the advance (`settled_expense + returned_cash` = advance, else `SETTLE_MISMATCH`); a re-settle → `ALREADY_SETTLED`. So every advance is either outstanding on 1180 or fully accounted for (**EXP-07**, **GL-01**).
 8. **Reconciliation periods & certification (decision point).** The structured reconciliation workflow lives under `/api/recon` (`apps/api/src/modules/reconciliation/`): `GET /api/recon/periods` and `POST /api/recon/periods` list/create reconciliation periods; `GET /api/recon/periods/:id/summary` returns the period state; `POST /api/recon/periods/:id/import-gl` pulls the GL movements to be reconciled; `POST /api/recon/periods/:id/items` adds statement/manual items; `POST /api/recon/periods/:id/auto-match` clears matched pairs; and `POST /api/recon/periods/:id/certify` signs off the period. Certification enforces **maker-checker** — the certifier must differ from the preparer, else the call is rejected `403 SOD_VIOLATION` ("Certifier must be different from preparer (SoD)") — so the person who prepares a reconciliation cannot also certify it (**REC-02/03**; feeds the GL close, `04-general-ledger-close.md`).
 
 ## 8. Process flow
@@ -146,3 +147,4 @@ flowchart TD
 | 0.2 | 2026-06-23 | Platform | Security review W2 (REC-02 / ITGC-AC-03): bank auto-match + reconciliation now scope GL cash movements to the bank account's tenant (shared 1010 GL no longer leaks across tenants under an Admin/bypass caller). Verified by the `bankrec` harness cross-tenant case. |
 | 0.3 | 2026-06-23 | Platform | Documented the `/api/recon` reconciliation-period API (7 endpoints) and the period-certify maker-checker control (certifier ≠ preparer, `SOD_VIOLATION`) in §7. |
 | 0.4 | 2026-06-24 | Platform | Card/e-wallet tenders now make a **real PSP charge** (Opn/Omise, Stripe) on the tender path — the prior stub gateways that returned a synthetic `Captured` are replaced; a no-token or declined charge is never reported Captured. A decline now records a **durable `Failed` tender** (committed with the reason + returned, instead of a rolled-back error). Threaded the terminal `token` through `recordTender`. New `payments-gateway` harness (fetch-stubbed PSP). Updated step 2 + REV-03 control. |
+| 0.5 DRAFT | 2026-06-25 | `<<author>>` | Added step 9 — **petty cash / employee cash advances** (`/api/finance/advances`): issue Dr 1180 / Cr 1000, settle reconciled against spend + returned cash (`SETTLE_MISMATCH` guard); 1180 is the outstanding float. New control **EXP-07**. Verified by the `basics` harness. |

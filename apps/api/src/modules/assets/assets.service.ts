@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, asc, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements } from '../../database/schema';
+import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { QrService } from '../qr/qr.service';
@@ -142,6 +142,45 @@ export class AssetsService {
     });
     await db.update(fixedAssets).set({ status: 'disposed', disposedDate: date, disposalProceeds: fx(proceeds, 4), disposalGainLoss: fx(gainLoss, 4) }).where(eq(fixedAssets.id, a.id));
     return { asset_no: assetNo, status: 'disposed', nbv_at_disposal: nbv, proceeds, gain_loss: gainLoss, journal_no: je?.entry_no ?? null };
+  }
+
+  // Revaluation / impairment (FA-07): adjust an asset's carrying amount to a new value. Upward → credit
+  // the revaluation surplus (equity 3200); downward (impairment) → debit impairment loss (5820). The gross
+  // 1500 moves by the delta so the register stays tied to the GL; accumulated depreciation is unchanged.
+  async revalue(assetNo: string, dto: { new_value: number; reason?: string; reval_date?: string }, user: JwtUser) {
+    const db = this.db as any;
+    const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
+    if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Asset not found', messageTh: 'ไม่พบสินทรัพย์' });
+    if (a.status === 'disposed') throw new BadRequestException({ code: 'ALREADY_DISPOSED', message: 'Asset already disposed', messageTh: 'สินทรัพย์ถูกจำหน่ายแล้ว' });
+    const newValue = round4(dto.new_value);
+    if (newValue < 0) throw new BadRequestException({ code: 'BAD_VALUE', message: 'new_value must be >= 0', messageTh: 'มูลค่าใหม่ต้องไม่ติดลบ' });
+    const oldValue = n(a.netBookValue);
+    const delta = round4(newValue - oldValue);
+    if (delta === 0) throw new BadRequestException({ code: 'NO_CHANGE', message: 'new_value equals current net book value', messageTh: 'มูลค่าใหม่เท่ากับมูลค่าตามบัญชีเดิม' });
+    const kind = delta > 0 ? 'revaluation' : 'impairment';
+    const date = dto.reval_date ?? ymd();
+    const lines: any[] = delta > 0
+      ? [{ account_code: '1500', debit: delta }, { account_code: '3200', credit: delta }]      // upward: gross up, surplus to equity
+      : [{ account_code: '5820', debit: -delta }, { account_code: '1500', credit: -delta }];    // impairment: loss, gross down
+    const je: any = await this.ledger.postEntry({
+      // source_ref unique per event (old→new) so two revaluations of the same asset on the same day don't
+      // collide on the JE idempotency key and silently dedupe.
+      date, source: 'REVAL', sourceRef: `${assetNo}-${oldValue}-${newValue}-${date}`, tenantId: a.tenantId ?? user.tenantId ?? null,
+      memo: `${kind === 'revaluation' ? 'Revaluation surplus' : 'Impairment'} ${assetNo}: ${oldValue} → ${newValue}`, createdBy: user.username, lines,
+    });
+    await db.update(fixedAssets).set({ netBookValue: fx(newValue, 4), acquireCost: fx(round4(n(a.acquireCost) + delta), 4) }).where(eq(fixedAssets.id, a.id));
+    await db.insert(assetRevaluations).values({
+      tenantId: a.tenantId ?? null, assetId: Number(a.id), assetNo, revalDate: date, kind,
+      oldValue: fx(oldValue, 4), newValue: fx(newValue, 4), delta: fx(delta, 4), reason: dto.reason ?? null,
+      glRef: je?.entry_no ?? null, actionedBy: user.username,
+    });
+    return { asset_no: assetNo, kind, old_value: oldValue, new_value: newValue, delta, journal_no: je?.entry_no ?? null };
+  }
+
+  async listRevaluations(assetNo: string) {
+    const db = this.db as any;
+    const rows = await db.select().from(assetRevaluations).where(eq(assetRevaluations.assetNo, assetNo)).orderBy(desc(assetRevaluations.id));
+    return { asset_no: assetNo, revaluations: rows.map((r: any) => ({ kind: r.kind, old_value: n(r.oldValue), new_value: n(r.newValue), delta: n(r.delta), reason: r.reason, reval_date: r.revalDate, journal_no: r.glRef, actioned_by: r.actionedBy })), count: rows.length };
   }
 
   // ── QR asset tags ──────────────────────────────────────────────────────
