@@ -223,17 +223,17 @@ needs investigating.
 **Expected result:** The period is marked *Certified*. (You cannot certify a
 reconciliation you prepared yourself.)
 
-## Cash-flow forecast (will I have enough cash?)
+## Financial health (how healthy is my working capital?)
 
-Open **กระแสเงินสด (Cash-flow)** in the Finance menu (`/cashflow`). Pick how many
-weeks ahead, and it projects your **cash balance week by week** from four real
-sources: your current cash (from the ledger), money **coming in** from customers
-(receivables, by due date) and from daily POS sales, and money **going out** to
-suppliers (payables, by due date). If the balance is heading below zero it shows the
-**week the shortfall hits** — so you can chase a receivable or delay a payment *before*
-it happens. A **financial-health score** (0–100, A–E) summarises how comfortable your
-working capital is. You can also just ask the **AI assistant** — *"จะมีเงินสดพอไหม
-เดือนนี้?"*
+Open **สุขภาพการเงิน (Financial health)** in the Finance menu (`/financial-health`).
+It gives you a single **health score out of 100 (grade A–E)** of how comfortable your
+cash position is — built from your **current cash** (from the ledger), **money owed to
+you** (receivables) vs **money you owe** (payables), how much of your receivables is
+**overdue**, and your **daily POS sales**. It shows the drivers behind the score —
+roughly **how many days of cash** you have on hand and your **current ratio** — so you
+can see *why* it's high or low. (For the week-by-week cash *projection*, use the
+**Statement of Cash Flows / forecast** in the ledger reports.) You can also just ask
+the **AI assistant** — *"สุขภาพการเงินเป็นยังไง?"*
 
 ---
 

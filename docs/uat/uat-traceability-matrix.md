@@ -292,6 +292,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-027 | Unbalanced recurring template rejected (UNBALANCED) | GL-08 | 04 §7, §9 |
 | UAT-GL-028 | Recurring run posts a Draft JE via maker-checker | GL-08, R05 | 04 §7, §9 |
 | UAT-GL-029 | Recurring run idempotent; second person approves → hits GL | GL-08, GL-05, R05 | 04 §7, §9 |
+| UAT-GL-030 | Working-capital health score | Feature (financial-health score) | 07 §7.9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 

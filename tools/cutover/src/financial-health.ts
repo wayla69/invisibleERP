@@ -69,32 +69,30 @@ async function main() {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
   const token = (await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'boss', password: 'pw' } })).json().token;
-  const cf = (await app.inject({ method: 'GET', url: '/api/finance/cashflow?weeks=8', headers: { authorization: `Bearer ${token}` } })).json();
-  const wk = (n: number) => (cf.weekly ?? []).find((w: any) => w.week === n);
+  const h = (await app.inject({ method: 'GET', url: '/api/finance/health', headers: { authorization: `Bearer ${token}` } })).json();
 
-  // ── 1. opening cash sourced from the GL cash accounts ──
-  ok('opening cash from GL = 100,000; POS run-rate ฿2,000/day', near(cf.opening_cash, 100000) && near(cf.pos_daily_run_rate, 2000), JSON.stringify({ open: cf.opening_cash, rate: cf.pos_daily_run_rate }));
+  // ── 1. inputs sourced from real sub-ledgers ──
+  ok('cash on hand from GL = 100,000; POS run-rate ฿2,000/day', near(h.cash_on_hand, 100000) && near(h.pos_daily_run_rate, 2000), JSON.stringify({ cash: h.cash_on_hand, rate: h.pos_daily_run_rate }));
 
-  // ── 2. week 1: AR 40k (incl. overdue) + POS 14k − AP 50k → balance 104k ──
-  ok('week 1: AR 40k (incl. overdue) + POS 14k − AP 50k → projected 104k',
-    near(wk(1)?.ar_inflow, 40000) && near(wk(1)?.ap_outflow, 50000) && near(wk(1)?.pos_inflow, 14000) && near(wk(1)?.projected_balance, 104000),
-    JSON.stringify(wk(1)));
+  // ── 2. AR/AP outstanding + overdue split ──
+  ok('AR 40k (10k overdue → 25%), AP 180k outstanding',
+    near(h.ar_outstanding, 40000) && near(h.ap_outstanding, 180000) && near(h.overdue_ar, 10000) && near(h.overdue_ar_pct, 25),
+    JSON.stringify({ ar: h.ar_outstanding, ap: h.ap_outstanding, odpct: h.overdue_ar_pct }));
 
-  // ── 3. shortfall detection: the 130k AP in week 2 drives the balance negative ──
-  ok('shortfall: week 2 (130k AP) → first_shortfall_week 2, min balance −12k',
-    cf.summary?.first_shortfall_week === 2 && near(cf.summary?.min_projected_balance, -12000),
-    JSON.stringify({ wk: cf.summary?.first_shortfall_week, min: cf.summary?.min_projected_balance }));
+  // ── 3. derived ratios: days-cash-on-hand + current ratio ──
+  ok('days-cash-on-hand ≈14.9 (cash ÷ daily outflow), current ratio ≈0.78',
+    near(h.days_cash_on_hand, 14.9) && near(h.current_ratio, 0.78),
+    JSON.stringify({ dch: h.days_cash_on_hand, cr: h.current_ratio }));
 
-  // ── 4. working-capital health score (transparent drivers) ──
-  const h = cf.health ?? {};
-  ok('health score: 0–100 with A–E grade, days-cash, current ratio ≈0.78, overdue AR 25%',
-    typeof h.score === 'number' && h.score >= 0 && h.score <= 100 && ['A', 'B', 'C', 'D', 'E'].includes(h.grade) && typeof h.days_cash_on_hand === 'number' && near(h.current_ratio, 0.78) && near(h.overdue_ar_pct, 25),
-    JSON.stringify({ score: h.score, grade: h.grade, dch: h.days_cash_on_hand, cr: h.current_ratio, odar: h.overdue_ar_pct }));
+  // ── 4. working-capital health score (0–100, A–E) + transparent drivers ──
+  ok('health score 45 / grade D; drivers liquidity 25 + receivables 75 (0.6/0.4 weighted)',
+    h.score === 45 && h.grade === 'D' && h.drivers?.liquidity === 25 && h.drivers?.receivables === 75,
+    JSON.stringify({ score: h.score, grade: h.grade, drivers: h.drivers }));
 
-  console.log('\n── C11 — Merchant cash-flow forecast + health score ──');
+  console.log('\n── C11 — Working-capital financial-health score ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
-  console.log(failed ? `\n❌ ${failed}/${checks.length} cash-flow checks failed` : `\n✅ All ${checks.length} cash-flow checks passed`);
+  console.log(failed ? `\n❌ ${failed}/${checks.length} financial-health checks failed` : `\n✅ All ${checks.length} financial-health checks passed`);
   await app.close();
   process.exit(failed ? 1 : 0);
 }

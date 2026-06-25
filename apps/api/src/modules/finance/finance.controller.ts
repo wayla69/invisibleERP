@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto } from './finance.service';
-import { CashflowService } from './cashflow.service';
+import { FinancialHealthService } from './financial-health.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
@@ -13,11 +13,12 @@ const RejectBody = z.object({ reason: z.string().optional() });
 
 @Controller('api/finance')
 export class FinanceController {
-  constructor(private readonly svc: FinanceService, private readonly cashflow: CashflowService) {}
+  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService) {}
 
-  // Cash-flow forecast (week-by-week) + working-capital health score.
-  @Get('cashflow') @Permissions('exec', 'dashboard', 'ar', 'creditors')
-  cashflowForecast(@Query('weeks') weeks: string | undefined, @CurrentUser() u: JwtUser) { return this.cashflow.forecast(u, { weeks: weeks != null ? Number(weeks) : undefined }); }
+  // Working-capital health score (0–100, A–E) from cash on hand + AR/AP + overdue + POS run-rate.
+  // Complements the GL module's cash-flow projection (/api/ledger/cash-flow-forecast).
+  @Get('health') @Permissions('exec', 'dashboard', 'ar', 'creditors')
+  financialHealth(@CurrentUser() u: JwtUser) { return this.health.score(u); }
 
   // READ
   @Get('pl') @Permissions('exec', 'dashboard', 'ar', 'creditors')
