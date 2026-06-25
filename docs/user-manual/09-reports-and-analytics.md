@@ -128,17 +128,35 @@ planning. Forecasts are **advisory** — they never post to the ledger.
 
 ---
 
-## 4. Anomaly detection
+## 4. Insights (anomalies · replenishment · AI summary)
 
-**Required permission:** `planner` / `dashboard`.
+**Screen:** `/insights` · **Where:** sidebar → **วางแผน & BI → ข้อมูลเชิงลึก
+(Insights)** · **Required permission:** `exec` / `dashboard` / `planner` /
+`warehouse`.
 
-The analytics engine highlights unusual activity (e.g. sudden cost spikes,
-unexpected stock movements) over the recent period.
+One screen that surfaces the signals the analytics engine produces, in three tabs.
 
-1. Open the **Anomalies** view (analytics / dashboard area).
-2. Review flagged items and investigate.
+### 4.1 ภาพรวม (Overview)
+At-a-glance counts (items to reorder, anomalies in the last 7 days) plus an
+**AI-written summary** of what needs attention and the top-3 items to reorder.
 
-**Expected result:** A list of unusual events worth a closer look.
+### 4.2 ความผิดปกติ (Anomalies)
+Unusual activity over a chosen window (7 / 30 / 90 days), in two lists:
+
+- **Movement anomalies** — stock movements that deviate from their norm, scored by
+  **Z-score** and flagged critical / warning.
+- **Stocktake variances** — counts that differ materially from the system quantity.
+
+Press **คำแนะนำ (AI)** on a movement row to get a short, plain-language
+recommendation for that anomaly.
+
+### 4.3 เติมสต๊อก (Replenishment)
+Items predicted to run out, ranked by urgency, with current stock, average daily
+sales, lead time, reorder point and predicted stock-out date. Click a row for the
+per-item detail and an **AI replenishment recommendation**.
+
+**Expected result:** A single place to see what is abnormal and what to reorder —
+all advisory (nothing posts to the ledger or raises an order automatically).
 
 ---
 
