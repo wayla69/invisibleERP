@@ -123,15 +123,20 @@ prepaid asset fully clears. Running it twice in a period posts nothing extra.
 
 ### Leases (IFRS 16 / TFRS 16)
 
+**Screen:** `/leases` · **Where:** sidebar → **การเงิน → สมุดบัญชี & แยกประเภท →
+สัญญาเช่า (IFRS 16)** · **Required permission:** `exec` / `gl_post`.
+
 Capitalize a lease so the **right-of-use asset** and **lease liability** appear on
 the balance sheet (rather than expensing rent as you pay it).
 
-1. **Accounting → Leases → New** (`POST /api/leases`): enter the **term in months**,
-   the **monthly payment**, and the **annual interest rate** (your incremental
-   borrowing rate). On save the asset + liability are recognised at the **present
-   value** of the payments (**Dr Right-of-Use 1600 / Cr Lease Liability 2600**).
-2. Schedule the **Post due lease periods** (`lease_periodic_run`) job, or run it with
-   `POST /api/leases/run`.
+1. On the **Leases** screen fill the **สร้างสัญญาเช่าใหม่** form: the **term in
+   months**, the **monthly payment**, and the **annual discount rate** (your
+   incremental borrowing rate), then **สร้างสัญญาเช่า**. On save the asset +
+   liability are recognised at the **present value** of the payments (**Dr
+   Right-of-Use 1600 / Cr Lease Liability 2600**).
+2. Press **ลงรายการงวดที่ครบกำหนดเดี๋ยวนี้** to post due periods on demand, or
+   schedule the **Post due lease periods** (`lease_periodic_run`) job to run it
+   automatically.
 
 **Expected result:** Each period posts **interest** on the liability (Dr 5900), the
 **cash payment** reducing the liability (Dr 2600 / Cr Cash), and **straight-line
@@ -326,7 +331,11 @@ current value (no change) is rejected (`NO_CHANGE`).
 
 ## 7. Asset maintenance (EAM)
 
-**API base:** `/api/eam` · **Required permission:** `exec` / `warehouse` / `creditors`.
+**Screen:** `/eam` · **Where:** sidebar → **การผลิต → ซ่อมบำรุงสินทรัพย์ (EAM)** ·
+**Required permission:** `exec` / `warehouse` / `creditors`.
+
+The screen has three tabs — **ใบสั่งงานซ่อม** (work orders), **แผนบำรุงรักษา (PM)**,
+and **ความน่าเชื่อถือ** (reliability + meter readings).
 
 Keep equipment running with maintenance **work orders**, **preventive-maintenance
 (PM) schedules**, and **meter readings** — all tied to the fixed-asset register.

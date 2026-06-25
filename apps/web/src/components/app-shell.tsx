@@ -98,7 +98,7 @@ function NavSubSection({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+        className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
       >
         <ChevronRight className={cn('size-3 shrink-0 transition-transform', open && 'rotate-90')} />
         <span className="truncate">{title}</span>

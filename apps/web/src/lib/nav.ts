@@ -77,6 +77,11 @@ import {
   Webhook,
   Warehouse,
   Workflow,
+  Wrench,
+  IdCard,
+  LineChart,
+  PackageCheck,
+  PiggyBank,
 } from 'lucide-react';
 
 /** Top-level workspace. The internal app is split into two surfaces selectable via the sidebar
@@ -248,6 +253,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ขอใบเสนอราคา (RFQ)', href: '/procurement/rfqs', icon: ClipboardList, perms: ['procurement'] },
       { label: 'จับคู่เอกสาร 3 ทาง', href: '/procurement/match', icon: CheckCheck, perms: ['procurement'] },
       { label: 'อ่านเอกสารอัตโนมัติ (Document AI)', href: '/doc-ai', icon: FileScan, perms: ['procurement', 'creditors', 'exec'] },
+      // vendor self-service surface — visible only to users granted the vendor_portal permission
+      { label: 'พอร์ทัลซัพพลายเออร์ (Supplier)', href: '/supplier', icon: PackageCheck, perms: ['vendor_portal'] },
     ],
   },
   {
@@ -257,6 +264,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'สูตรการผลิต (BoM)', href: '/bom', icon: FlaskConical, perms: ['bom_master'] },
       { label: 'ใบสั่งผลิต (Manufacturing)', href: '/manufacturing', icon: Factory, perms: ['bom_master', 'warehouse'] },
       { label: 'การผลิตขั้นสูง (Routing/QA/MRP)', href: '/production', icon: Network, perms: ['bom_master', 'warehouse', 'planner'] },
+      { label: 'ซ่อมบำรุงสินทรัพย์ (EAM)', href: '/eam', icon: Wrench, perms: ['exec', 'warehouse', 'creditors'] },
     ],
   },
 
@@ -280,6 +288,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'บัญชีแยกประเภท', href: '/accounting', icon: BookText, perms: ['exec', 'creditors', 'ar'] },
           { label: 'รับรู้รายได้', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'สินทรัพย์ถาวร', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
+          { label: 'สัญญาเช่า (IFRS 16)', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
         ],
       },
       {
@@ -324,6 +333,8 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
       { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
+      // self-service is for every employee (incl. POS staff) → cross-listed to both surfaces
+      { label: 'พื้นที่พนักงาน (ESS)', href: '/ess', icon: IdCard, perms: ['ess'], workspace: BOTH },
     ],
   },
   {
@@ -331,6 +342,8 @@ export const INTERNAL_NAV: NavGroup[] = [
     workspace: ['erp'],
     items: [
       { label: 'งบประมาณ & แผน', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
+      { label: 'งบประมาณเทียบจริง (Budget vs Actual)', href: '/budget', icon: PiggyBank, perms: ['exec', 'planner'] },
+      { label: 'พยากรณ์ความต้องการ (Demand ML)', href: '/demand', icon: LineChart, perms: ['exec', 'planner', 'warehouse'] },
       { label: 'โครงการ (Projects)', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
       { label: 'กำไรตามมิติ', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'BI Analytics', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },

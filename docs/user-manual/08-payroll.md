@@ -85,4 +85,39 @@ for the chosen period / year.
 
 ---
 
+## 5. Employee self-service (ESS)
+
+This section is for **every employee** (not just HR). The self-service screen lets
+you see your own information and submit your own requests — you can never see
+another employee's data.
+
+**Screen:** `/ess` · **Required permission:** `ess` · **Where:** sidebar →
+**บุคลากร & เงินเดือน → พื้นที่พนักงาน (ESS)** (available in both the ERP and POS
+workspaces).
+
+Tabs: **ข้อมูลของฉัน** (My info) · **ขอลางาน** (Request leave) · **เบิกค่าใช้จ่าย**
+(Claim expense) · **ลงเวลา** (Timesheets).
+
+### 5.1 View my info, leave balances and payslips
+1. Open **ESS** (`/ess`) → **ข้อมูลของฉัน**.
+2. Review your profile, your **leave balances** (entitled / used / remaining), and
+   your **payslips** (gross, OT, SSO, pension, withholding tax, net).
+
+### 5.2 Request leave
+1. Go to the **ขอลางาน** tab, choose the leave type, dates, number of days and
+   whether it is paid, then **ส่งคำขอลา**.
+2. The request is created as **Pending** and routes to your manager for approval.
+
+> **Control:** You can only *submit* a leave/expense request. **Approval is a
+> separate manager action** (permission `approvals`) and a manager cannot approve
+> their own claim — segregation of duties (SoD R07) is preserved.
+
+### 5.3 Claim an expense
+1. Go to the **เบิกค่าใช้จ่าย** tab, enter the date, category, amount and
+   description, then **ส่งคำขอเบิก**.
+2. On manager approval the reimbursement becomes an **AP payable** and settles
+   through the normal AP pay flow (it appears in AP aging).
+
+---
+
 **Next:** [Tax](./07-tax.md) · [General Ledger](./06-general-ledger.md)
