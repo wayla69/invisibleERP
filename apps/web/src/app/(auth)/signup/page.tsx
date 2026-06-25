@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, Rocket } from 'lucide-react';
-import { api, setToken } from '@/lib/api';
+import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,11 +24,11 @@ export default function SignupPage() {
     setLoading(true);
     try {
       await api('/api/auth/signup', { method: 'POST', body: JSON.stringify(f) });
-      const res = await api<{ token: string }>('/api/login', {
+      await api('/api/login', {
         method: 'POST',
         body: JSON.stringify({ username: f.admin_username, password: f.admin_password }),
       });
-      setToken(res.token);
+      // /api/login set the session cookies on this response — no client storage needed.
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'สมัครไม่สำเร็จ');

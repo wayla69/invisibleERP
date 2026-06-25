@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { api, getToken } from './api';
+import { api, hasSession } from './api';
 
 export interface Me {
   username: string;
@@ -15,7 +15,7 @@ export function useMe() {
   return useQuery<Me>({
     queryKey: ['me'],
     queryFn: () => api<Me>('/api/auth/me'),
-    enabled: typeof window !== 'undefined' && !!getToken(),
+    enabled: typeof window !== 'undefined' && !!hasSession(),
   });
 }
 

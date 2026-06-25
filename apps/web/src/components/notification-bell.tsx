@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bell, CheckCheck } from 'lucide-react';
 
-import { api, getToken } from '@/lib/api';
+import { api, hasSession } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,7 @@ interface Inbox { items: InboxItem[]; total: number; unread_count: number }
 export function NotificationBell() {
   const qc = useQueryClient();
   const [open, setOpen] = React.useState(false);
-  const enabled = typeof window !== 'undefined' && !!getToken();
+  const enabled = typeof window !== 'undefined' && !!hasSession();
 
   // Lightweight badge poll (every 30s). The full list is only fetched while the menu is open.
   const count = useQuery<{ unread_count: number }>({

@@ -72,6 +72,7 @@ jobs:
           - { pkg: cutover, script: opening-balances }
           # ── COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability) ──
           - { pkg: cutover, script: compliance }
+          - { pkg: cutover, script: cookie-auth }
           # ── POS ──
           - { pkg: cutover, script: pos-p0 }
           - { pkg: cutover, script: pos-p1 }

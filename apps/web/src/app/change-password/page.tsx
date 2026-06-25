@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { KeyRound, Loader2, ShieldCheck } from 'lucide-react';
-import { api, getToken, clearToken } from '@/lib/api';
+import { api, hasSession, logout } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +21,7 @@ export default function ChangePasswordPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && !getToken()) router.replace('/login');
+    if (typeof window !== 'undefined' && !hasSession()) router.replace('/login');
   }, [router]);
 
   async function onSubmit(e: React.FormEvent) {
@@ -80,7 +80,7 @@ export default function ChangePasswordPage() {
         </form>
         <button
           type="button"
-          onClick={() => { clearToken(); router.replace('/login'); }}
+          onClick={() => { void logout().finally(() => router.replace('/login')); }}
           className="mt-4 text-center text-xs text-muted-foreground hover:text-foreground"
         >
           ออกจากระบบ

@@ -4,6 +4,10 @@ import { JwtService } from '@nestjs/jwt';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, type JwtUser } from './decorators';
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { resolvePermissions } from '@ierp/shared';
+import { AUTH_COOKIE, CSRF_COOKIE, readCookie } from './cookies';
+
+// State-changing methods that require a CSRF double-submit check when authenticated via cookie.
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // Map api_keys.scopes (csv) → JwtUser.permissions. A scope is either a known alias,
 // a wildcard ('*'/'admin' → full role-default set), or a literal permission key.
@@ -26,14 +30,28 @@ export class JwtAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const req = ctx.switchToHttp().getRequest();
+    // Token source: Authorization: Bearer header (harnesses, API keys, mobile) OR the httpOnly cookie
+    // (browser web app). Header wins when both are present.
     const auth: string | undefined = req.headers?.authorization;
-    if (!auth?.startsWith('Bearer ')) {
+    const fromCookie = !auth?.startsWith('Bearer ');
+    const token = fromCookie ? readCookie(req, AUTH_COOKIE) : auth!.slice(7);
+    if (!token) {
       throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Missing token', messageTh: 'ไม่พบ token' });
     }
-    const token = auth.slice(7);
 
-    // ── API-key path: Bearer ierp_... ─────────────────────────────
-    if (token.startsWith('ierp_')) {
+    // CSRF: a cookie-authenticated mutating request must carry X-CSRF-Token matching the readable CSRF
+    // cookie (double-submit). Header/Bearer-authenticated requests (harnesses, API keys, mobile) are exempt
+    // because they don't ride an ambient cookie and so aren't forgeable cross-site.
+    if (fromCookie && MUTATING.has((req.method ?? '').toUpperCase())) {
+      const headerCsrf = req.headers?.['x-csrf-token'];
+      const cookieCsrf = readCookie(req, CSRF_COOKIE);
+      if (!cookieCsrf || !headerCsrf || headerCsrf !== cookieCsrf) {
+        throw new ForbiddenException({ code: 'CSRF', message: 'Missing or invalid CSRF token', messageTh: 'CSRF token ไม่ถูกต้อง' });
+      }
+    }
+
+    // ── API-key path: Bearer ierp_... (header only; cookies only ever carry a JWT) ──
+    if (!fromCookie && token.startsWith('ierp_')) {
       const row: any = await this.apiKeys.verify(token);
       if (!row) {
         throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid or revoked API key', messageTh: 'API key ไม่ถูกต้องหรือถูกเพิกถอน' });
