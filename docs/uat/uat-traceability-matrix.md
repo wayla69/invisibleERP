@@ -342,12 +342,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 |---|---|---|---|
 | UAT-PAY-001 | Create employees | PAY-01 | 05 §7 |
 | UAT-PAY-002 | List employees | PAY-01 | 05 §7 |
-| UAT-PAY-003 | Run payroll posts GL | PAY-01, GL-01 | 05 §7 |
+| UAT-PAY-003 | Run payroll prepares Draft JE (PendingApproval) | PAY-01, PAY-03, GL-01 | 05 §7 |
 | UAT-PAY-004 | SSO+WHT+net totals | PAY-01 | 05 §9 |
 | UAT-PAY-005 | SSO cap 750 | PAY-01 | 05 §9 |
 | UAT-PAY-006 | SSO 5% below cap | PAY-01 | 05 §7 |
-| UAT-PAY-007 | GL expense/payables | PAY-01, GL-01 | 05 §9 |
-| UAT-PAY-008 | Payroll idempotency | PAY-01 | 05 §9 |
+| UAT-PAY-007 | GL expense/payables (after approval) | PAY-01, PAY-03, GL-01 | 05 §9 |
+| UAT-PAY-008 | Payroll idempotency | PAY-03 | 05 §7 |
 | UAT-PAY-009 | ภ.ง.ด.1 summary | PAY-02 | 05 §7 |
 | UAT-PAY-010 | Payslips | PAY-01 | 05 §7 |
 | UAT-PAY-011 | PIT/WHT withholding | PAY-02 | 05 §9 |
@@ -359,6 +359,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-016 | ESS expense self-approval blocked | ITGC-AC-09 | 25 §7 |
 | UAT-PAY-017 | ESS unlinked user refused | Feature (ESS) | 25 §7 |
 | UAT-PAY-018 | Payroll run tenant-scoped | ITGC-AC-03 | 05 §7 |
+| UAT-PAY-020 | Run posts Draft JE excluded from balances | PAY-03 | 05 §7 |
+| UAT-PAY-021 | Preparer cannot approve own run (SoD) | PAY-03, R07 | 05 §7 |
+| UAT-PAY-022 | Independent approver posts the run | PAY-03, GL-01 | 05 §7 |
+| UAT-PAY-023 | Reject a pending run, then re-run | PAY-03 | 05 §7 |
 | UAT-UI-ESS-01 | ESS self-service screen reachable + own data + submit-only (UI) | Feature (ESS UI) | 25 §7 |
 
 ## 08 — Admin / SoD / Audit → `08-itgc.md`

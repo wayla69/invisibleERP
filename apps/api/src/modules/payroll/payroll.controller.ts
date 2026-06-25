@@ -20,6 +20,8 @@ const EmployeeBody = z.object({
   start_date: z.string().optional(),
 });
 
+const RejectBody = z.object({ reason: z.string().optional() });
+
 @Controller('api/payroll')
 @Permissions('exec', 'users', 'creditors')
 export class PayrollController {
@@ -38,6 +40,17 @@ export class PayrollController {
   @Post('runs')
   runPayroll(@Query('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
     return this.svc.runPayroll(period, u, tenantId != null && tenantId !== '' ? Number(tenantId) : null);
+  }
+
+  // PAY-03 maker-checker: a different user approves (SoD-enforced) → the Draft payroll JE becomes effective.
+  @Post('runs/:period/approve')
+  approve(@Param('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.approvePayroll(period, u, tenantId != null && tenantId !== '' ? Number(tenantId) : null);
+  }
+
+  @Post('runs/:period/reject')
+  reject(@Param('period') period: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectPayroll(period, u, b?.reason, tenantId != null && tenantId !== '' ? Number(tenantId) : null);
   }
 
   @Get('runs')

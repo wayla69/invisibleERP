@@ -326,6 +326,9 @@ add("PAY-01","Payroll","Application","Payroll expense/liability","Payroll, SSO a
 add("PAY-02","Payroll","Application","Payroll liability","Statutory items (PF/OT/leave/ภ.ง.ด.1ก) wrong.","Accuracy/Compliance",
     "Provident fund, overtime, leave accrual and ภ.ง.ด.1ก reporting.","Auto","Automated","Per run / monthly","HR / Payroll","P10",
     "hcm; payroll (Phase 19)","Inspect statutory logic.","Sample run tied to statutory filings.","Filings","Partial")
+add("PAY-03","Payroll","Application","Payroll expense/liability; Cash","Payroll run posted to the GL without independent review — the preparer both computes and posts their own payroll (ghost employees, inflated rate/hours).","Authorization",
+    "Payroll maker-checker (SoD): a run posts its GL entry as a DRAFT (excluded from balances) with the run record 'PendingApproval'; a DIFFERENT user must approve before it becomes effective (approver ≠ preparer enforced regardless of permissions, reusing the GL-05 ledger approval). Reject voids the draft; idempotent per (tenant, period).","Prev","Automated","Per run","HR / Payroll; Controller","P10",
+    "payroll/payroll.service.ts approvePayroll/rejectPayroll; migration 0133","Inspect Draft→approve flow + the approver≠preparer check.","Re-perform: run as A, attempt self-approve (SOD_VIOLATION), approve as B; confirm the JE hits balances only after approval.","Approval log + SoD test","Implemented")
 
 # ---- Consolidation / FX ----
 add("CON-01","Consolidation & FX","Application","Consolidation","Group consolidation mis-stated (ownership/currency).","Accuracy",

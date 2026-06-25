@@ -42,6 +42,7 @@ async function main() {
   const t2 = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'T2')))[0].id);
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // PAY-03: a DIFFERENT same-tenant user approves the run
     { username: 'hqadmin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: null }, // HQ super-admin: no tenant → must name one to run payroll
   ]).onConflictDoNothing();
 
@@ -57,6 +58,7 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
+  const approver = (await inj('POST', '/api/login', undefined, { username: 'approver', password: 'admin123' })).json.token;
 
   // ── 1. create two employees (30k → SSO capped 750 + WHT; 12k → SSO 600, no WHT) ──
   const e1 = await inj('POST', '/api/payroll/employees', admin, { name: 'Somchai', national_id: '1234567890123', monthly_salary: 30000 });
@@ -68,27 +70,45 @@ async function main() {
 
   // ── 2. run payroll for 2026-06 → SSO + WHT computed, balanced GL ──
   const run = await inj('POST', '/api/payroll/runs?period=2026-06', admin);
-  ok('Run payroll → JE posted',
-    /^JE-/.test(run.json.entry_no ?? '') && run.json.headcount === 2, JSON.stringify({ e: run.json.entry_no, h: run.json.headcount }));
+  ok('Run payroll → JE created PendingApproval (PAY-03: not yet posted)',
+    /^JE-/.test(run.json.entry_no ?? '') && run.json.headcount === 2 && run.json.status === 'PendingApproval', JSON.stringify({ e: run.json.entry_no, h: run.json.headcount, st: run.json.status }));
   ok('Gross 42,000 / SSO ee 1,350 / SSO er 1,350 / WHT 170.83 / net 40,479.17',
     near(run.json.gross_total, 42000) && near(run.json.sso_employee_total, 1350) && near(run.json.sso_employer_total, 1350) &&
     near(run.json.wht_total, 170.83) && near(run.json.net_total, 40479.17),
     JSON.stringify({ g: run.json.gross_total, ee: run.json.sso_employee_total, w: run.json.wht_total, net: run.json.net_total }));
 
-  // ── 3. GL: trial balance balanced; expense + payables correct ──
+  // ── 3. PAY-03 maker-checker: the Draft JE is EXCLUDED from balances until a different user approves ──
+  const tbBefore = await inj('GET', '/api/ledger/trial-balance', admin);
+  const rowB = (code: string) => (tbBefore.json.rows ?? []).find((r: any) => r.account_code === code);
+  ok('Before approval: payroll JE is Draft → 5600 excluded from trial balance (0 / absent)',
+    !rowB('5600') || near(rowB('5600')?.debit, 0), JSON.stringify({ s5600: rowB('5600')?.debit ?? 'absent' }));
+  const selfApprove = await inj('POST', '/api/payroll/runs/2026-06/approve', admin);
+  ok('Maker cannot approve own run → 403 SOD_VIOLATION', selfApprove.status === 403 && selfApprove.json.error?.code === 'SOD_VIOLATION', `${selfApprove.status} ${selfApprove.json.error?.code}`);
+  const approve = await inj('POST', '/api/payroll/runs/2026-06/approve', approver);
+  ok('Different user approves → Posted (approved_by ≠ prepared_by)',
+    approve.json.status === 'Posted' && approve.json.approved_by === 'approver' && approve.json.prepared_by === 'admin', JSON.stringify(approve.json));
+
+  // ── 4. GL after approval: trial balance balanced; expense + payables correct ──
   const tb = await inj('GET', '/api/ledger/trial-balance', admin);
   const row = (code: string) => (tb.json.rows ?? []).find((r: any) => r.account_code === code);
   ok('Trial balance balanced', tb.json.totals?.balanced === true, `bal=${tb.json.totals?.balanced}`);
-  ok('5600 Salaries dr 42,000; 5610 Employer-SSO dr 1,350',
+  ok('After approval: 5600 Salaries dr 42,000; 5610 Employer-SSO dr 1,350',
     near(row('5600')?.debit, 42000) && near(row('5610')?.debit, 1350),
     JSON.stringify({ s5600: row('5600')?.debit, s5610: row('5610')?.debit }));
   ok('2350 SSO payable cr 2,700 (ee+er); 2360 WHT payable cr 170.83',
     near(row('2350')?.credit, 2700) && near(row('2360')?.credit, 170.83),
     JSON.stringify({ s2350: row('2350')?.credit, s2360: row('2360')?.credit }));
 
-  // ── 4. idempotent per period ──
+  // ── 4b. idempotent per period (a Posted run blocks a re-run) ──
   const rerun = await inj('POST', '/api/payroll/runs?period=2026-06', admin);
-  ok('Re-run same period → already (idempotent)', rerun.json.already === true, JSON.stringify(rerun.json).slice(0, 60));
+  ok('Re-run same period → already (idempotent)', rerun.json.already === true && rerun.json.status === 'Posted', JSON.stringify(rerun.json).slice(0, 70));
+
+  // ── 4c. reject path: a pending run can be rejected, then re-run fresh ──
+  await inj('POST', '/api/payroll/runs?period=2026-08', admin);
+  const rejectAug = await inj('POST', '/api/payroll/runs/2026-08/reject', admin, { reason: 'ตัวเลขผิด' });
+  ok('Reject pending run → Voided JE + run Rejected', rejectAug.json.status === 'Rejected' && /^JE-/.test(rejectAug.json.entry_no ?? ''), JSON.stringify(rejectAug.json));
+  const rerunAug = await inj('POST', '/api/payroll/runs?period=2026-08', admin);
+  ok('After reject, re-run same period → fresh PendingApproval (not blocked)', rerunAug.json.status === 'PendingApproval' && rerunAug.json.already !== true, JSON.stringify({ st: rerunAug.json.status, already: rerunAug.json.already }));
 
   // ── 5. ภ.ง.ด.1 monthly WHT remittance summary ──
   const pnd1 = await inj('GET', '/api/payroll/pnd1?period=2026-06', admin);

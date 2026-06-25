@@ -44,6 +44,8 @@ export const payruns = pgTable(
     entryNo: text('entry_no'),                 // GL JE reference
     runBy: text('run_by'),
     runAt: timestamp('run_at', { withTimezone: true }).defaultNow(),
+    approvedBy: text('approved_by'),           // PAY-03 maker-checker: who approved (must differ from runBy)
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
   },
   (t) => ({ byTenantPeriod: index('idx_payrun_tenant_period').on(t.tenantId, t.period) }),
 );
