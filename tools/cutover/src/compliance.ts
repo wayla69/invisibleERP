@@ -57,6 +57,8 @@ async function main() {
     { username: 'finT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },        // tenant-2 finance reader (creditors/ar) — RLS isolation probe
     { username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 },          // creditors only — AP-PAY maker
     { username: 'apdual', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },       // creditors + approvals — residual self-approval case
+    { username: 'payprep', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },            // PAY-03 payroll preparer (t1)
+    { username: 'paychk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },             // PAY-03 payroll approver (t1, ≠ preparer)
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
@@ -198,6 +200,23 @@ async function main() {
   const adminReq = await inj('PATCH', `/api/finance/ap/transactions/${adminBill.json.txn_no}/pay`, admin, { amount: 100 });
   const adminApprove = await inj('POST', `/api/finance/ap/payments/${adminReq.json.payment_no}/approve`, admin);
   ok('AP-PAY: maker-checker binds even Admin (no self-approve override)', adminApprove.status === 403 && adminApprove.json.error?.code === 'SOD_VIOLATION', `${adminApprove.status} ${adminApprove.json.error?.code}`);
+
+  // ════════════════════════ PAY-03 — Payroll run maker-checker (SoD) ════════════════════════
+  // A payroll run posts its GL entry as a DRAFT; a DIFFERENT user must approve before it hits balances —
+  // the run-er can never post their own payroll (ghost-employee / rate-manipulation fraud). Mirrors GL-05.
+  const payprep = await login('payprep', 'pw');
+  const paychk = await login('paychk', 'pw');
+  await inj('POST', '/api/payroll/employees', payprep, { name: 'พนักงานทดสอบ PAY-03', national_id: '1100200300400', monthly_salary: 30000 });
+  const payRun = await inj('POST', '/api/payroll/runs?period=2026-09', payprep);
+  ok('PAY-03: payroll run posts as Draft (PendingApproval), not Posted', payRun.json.status === 'PendingApproval' && /^JE-/.test(payRun.json.entry_no ?? ''), JSON.stringify({ st: payRun.json.status, e: payRun.json.entry_no }));
+  const ssoBefore = await tbCredit('2026-09', '2350');
+  ok('PAY-03: Draft payroll JE excluded from trial balance (2350 SSO payable = 0 until approved)', ssoBefore === 0, `2350 credit=${ssoBefore}`);
+  const paySelf = await inj('POST', '/api/payroll/runs/2026-09/approve', payprep);
+  ok('PAY-03: preparer self-approval blocked → 403 SOD_VIOLATION', paySelf.status === 403 && paySelf.json.error?.code === 'SOD_VIOLATION', `${paySelf.status} ${paySelf.json.error?.code}`);
+  const payApprove = await inj('POST', '/api/payroll/runs/2026-09/approve', paychk);
+  const ssoAfter = await tbCredit('2026-09', '2350');
+  ok('PAY-03: independent approver posts the run → Posted + 2350 SSO payable now reflected',
+    payApprove.json.status === 'Posted' && payApprove.json.approved_by === 'paychk' && ssoAfter > 0, JSON.stringify({ st: payApprove.json.status, by: payApprove.json.approved_by, sso: ssoAfter }));
 
   // ════════════════════ ITGC-AC-09 — SoD preventive block on permission assignment ════════════════════
   // Raise PR / PO (procurement) + approve & pay AP (creditors) is SoD rule R03.

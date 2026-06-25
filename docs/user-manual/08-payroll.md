@@ -41,11 +41,28 @@ payroll run.
 - **Withholding tax (PIT)** — calculated from the Thai personal-income-tax tables
 - **Pension fund** — at each employee's configured rate
 
-The run posts the relevant accounting entries automatically (salary expense, the
-employer's SSO contribution, and withholding tax payable).
+The run prepares the accounting entries automatically (salary expense, the
+employer's SSO contribution, and withholding tax payable) — but **does not post
+them yet**.
 
-> **Note:** Each period's run is recorded in the run history so you can see what
-> was paid and when.
+### 2.1 Approval (required before payroll counts) — two people
+
+Payroll uses **maker-checker**: the run you just made is **"รออนุมัติ" (PendingApproval)**
+and its accounting entry is held out of the books until **a different person approves it**.
+
+1. A second user (e.g. Payroll Manager / Financial Controller) goes to **Run Payroll**,
+   finds the pending run, and clicks **อนุมัติ (Approve)**.
+2. On approval the entry becomes effective and the run shows **"ผ่านแล้ว" (Posted)** with
+   who approved it.
+
+- **You cannot approve your own run** — the system refuses it ("ผู้บันทึกอนุมัติรายการ
+  ของตนเองไม่ได้", `SOD_VIOLATION`). This applies to **everyone, including Admin** — it
+  is the key control that stops one person from paying themselves or a ghost employee.
+- If the figures are wrong, click **ปฏิเสธ (Reject)** instead; the draft entry is voided
+  and you can run the period again with the correction.
+
+> **Note:** Each period's run is recorded in the run history with its status
+> (รออนุมัติ / ผ่านแล้ว / ปฏิเสธ), who ran it, and who approved it.
 
 ---
 

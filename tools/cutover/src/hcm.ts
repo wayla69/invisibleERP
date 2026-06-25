@@ -39,7 +39,10 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // PAY-03 maker-checker
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -53,6 +56,7 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
+  const approver = (await inj('POST', '/api/login', undefined, { username: 'approver', password: 'admin123' })).json.token;
 
   // ── 1. employee: salary 30000, hourly 200, PF 5% ──
   const e = await inj('POST', '/api/payroll/employees', admin, { name: 'Somchai', national_id: '1234567890123', monthly_salary: 30000, hourly_rate: 200, pf_rate: 0.05 });
@@ -72,7 +76,11 @@ async function main() {
     near(run.json.pf_employee_total, 1500) && near(run.json.wht_total, 220.83) && near(run.json.net_total, 28529.17),
     JSON.stringify({ ot: run.json.ot_total, gross: run.json.gross_total, pf: run.json.pf_employee_total, net: run.json.net_total }));
 
-  // ── 5. GL: 5600 dr 31000, 5620 PF dr 1500, 2370 PF payable cr 3000, TB balanced ──
+  // ── 4b. PAY-03 maker-checker: a different user approves before the JE is effective ──
+  const appro = await inj('POST', '/api/payroll/runs/2026-06/approve', approver);
+  ok('Payroll run approved by a different user → Posted (PAY-03 SoD)', appro.json.status === 'Posted' && appro.json.approved_by === 'approver', JSON.stringify(appro.json));
+
+  // ── 5. GL after approval: 5600 dr 31000, 5620 PF dr 1500, 2370 PF payable cr 3000, TB balanced ──
   const tb = await inj('GET', '/api/ledger/trial-balance', admin);
   const row = (c: string) => (tb.json.rows ?? []).find((r: any) => r.account_code === c);
   ok('GL: 5600 dr 31000, 5620 PF dr 1500, 2370 PF payable cr 3000, TB balanced',

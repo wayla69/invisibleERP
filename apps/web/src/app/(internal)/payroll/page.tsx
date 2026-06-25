@@ -11,6 +11,7 @@ import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -99,19 +100,35 @@ function Employees() {
 }
 
 // ───────────────────────── จ่ายเงินเดือน ─────────────────────────
+const runStatusTh: Record<string, string> = { PendingApproval: 'รออนุมัติ', Posted: 'ผ่านแล้ว', Rejected: 'ปฏิเสธ' };
+const runStatusTone = (s: string): 'warning' | 'success' | 'destructive' | 'secondary' =>
+  s === 'PendingApproval' ? 'warning' : s === 'Posted' ? 'success' : s === 'Rejected' ? 'destructive' : 'secondary';
+
 function RunPayroll() {
   const qc = useQueryClient();
   const [period, setPeriod] = useState(thisMonth());
   const runs = useQuery<any>({ queryKey: ['pay-runs'], queryFn: () => api('/api/payroll/runs') });
+  const refresh = () => qc.invalidateQueries({ queryKey: ['pay-runs'] });
 
   const run = useMutation({
     mutationFn: () => api<any>(`/api/payroll/runs?period=${period}`, { method: 'POST' }),
     onSuccess: (r) => {
-      notifySuccess(r.already ? `งวด ${period} จ่ายแล้ว (${r.entry_no})` : `จ่ายเงินเดือน ${period}: สุทธิ ${baht(r.net_total)} · ${r.entry_no}`);
-      qc.invalidateQueries({ queryKey: ['pay-runs'] });
+      notifySuccess(r.already ? `งวด ${period} มีรอบแล้ว (${r.status === 'Posted' ? 'ผ่านแล้ว' : 'รออนุมัติ'})` : `เตรียมจ่ายเงินเดือน ${period}: สุทธิ ${baht(r.net_total)} — รอผู้อื่นอนุมัติ`);
+      refresh();
     },
     onError: (e: any) => notifyError(e.message),
   });
+  const approve = useMutation({
+    mutationFn: (p: string) => api<any>(`/api/payroll/runs/${p}/approve`, { method: 'POST' }),
+    onSuccess: (r) => { notifySuccess(`อนุมัติงวด ${r.period} แล้ว — ลงบัญชีมีผล (${r.entry_no})`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: (p: string) => api<any>(`/api/payroll/runs/${p}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
+    onSuccess: (r) => { notifySuccess(`ปฏิเสธงวด ${r.period} — ยกเลิกรายการบัญชีแล้ว`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const busy = approve.isPending || reject.isPending;
 
   return (
     <div className="grid gap-5">
@@ -119,22 +136,31 @@ function RunPayroll() {
         <h3 className="text-base font-semibold">จ่ายเงินเดือนประจำงวด</h3>
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid gap-1.5"><Label>งวด (YYYY-MM)</Label><Input value={period} onChange={(e) => setPeriod(e.target.value)} className="w-40" /></div>
-          <Button onClick={() => run.mutate()} disabled={run.isPending}><Play className="size-4" /> จ่ายเงินเดือน</Button>
+          <Button onClick={() => run.mutate()} disabled={run.isPending}><Play className="size-4" /> เตรียมจ่ายเงินเดือน</Button>
         </div>
-        <p className="text-xs text-muted-foreground">ลงบัญชี: เดบิต เงินเดือน + ประกันสังคมนายจ้าง / เครดิต เงินสด + ประกันสังคมค้างจ่าย + ภาษีหัก ณ ที่จ่ายค้างจ่าย</p>
+        <p className="text-xs text-muted-foreground">ลงบัญชี: เดบิต เงินเดือน + ประกันสังคมนายจ้าง / เครดิต เงินสด + ประกันสังคมค้างจ่าย + ภาษีหัก ณ ที่จ่ายค้างจ่าย · <strong>ต้องให้ผู้อื่นอนุมัติก่อนจึงมีผล (แบ่งแยกหน้าที่ — ผู้ทำรายการอนุมัติเองไม่ได้)</strong></p>
       </Card>
       <StateView q={runs}>
         {runs.data && (
           <DataTable
             rows={runs.data.runs}
-            emptyState={{ icon: Wallet, title: 'ยังไม่มีการจ่ายเงินเดือน', description: 'เลือกงวดแล้วกด จ่ายเงินเดือน เพื่อสร้างรายการจ่ายงวดแรก' }}
+            rowKey={(r: any) => `${r.period}-${r.entry_no ?? r.status}`}
+            emptyState={{ icon: Wallet, title: 'ยังไม่มีการจ่ายเงินเดือน', description: 'เลือกงวดแล้วกด เตรียมจ่ายเงินเดือน เพื่อสร้างรอบจ่ายงวดแรก' }}
             columns={[
               { key: 'period', label: 'งวด' },
+              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={runStatusTone(r.status)}>{runStatusTh[r.status] ?? r.status}</Badge> },
               { key: 'headcount', label: 'จำนวนคน', align: 'right' },
               { key: 'gross_total', label: 'เงินเดือนรวม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.gross_total)}</span> },
               { key: 'wht_total', label: 'ภาษีหัก', align: 'right', render: (r: any) => <span className="tabular">{baht(r.wht_total)}</span> },
               { key: 'net_total', label: 'จ่ายสุทธิ', align: 'right', render: (r: any) => <span className="tabular">{baht(r.net_total)}</span> },
+              { key: 'run_by', label: 'ผู้ทำ/ผู้อนุมัติ', render: (r: any) => <span className="text-xs text-muted-foreground">{r.run_by ?? '—'}{r.approved_by ? ` → ${r.approved_by}` : ''}</span> },
               { key: 'entry_no', label: 'เลขที่บัญชี' },
+              { key: 'act', label: '', align: 'right', render: (r: any) => r.status === 'PendingApproval' ? (
+                <div className="flex justify-end gap-1.5">
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => approve.mutate(r.period)}>อนุมัติ</Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate(r.period)}>ปฏิเสธ</Button>
+                </div>
+              ) : null },
             ]}
           />
         )}

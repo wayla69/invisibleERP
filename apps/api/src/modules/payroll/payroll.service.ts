@@ -50,10 +50,12 @@ export class PayrollService {
     // EVERY tenant and posts one cross-tenant JE under tenant_id null (escaping RLS + the close calendar).
     const tenantId = user.tenantId ?? (explicitTenantId != null ? Number(explicitTenantId) : null);
     if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id to run payroll', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id เพื่อรันเงินเดือน' });
-    if (await this.ledger.alreadyPosted('PAYROLL', period, tenantId)) {
-      const [existing] = await db.select().from(payruns).where(and(eq(payruns.period, period), eq(payruns.tenantId, tenantId))).orderBy(desc(payruns.id)).limit(1);
-      return { already: true, period, entry_no: existing?.entryNo ?? null };
-    }
+    // Idempotency on the run record, not the JE: a run that is PendingApproval or Posted blocks a re-run;
+    // a Rejected run may be re-run (it produces a fresh Draft for re-approval — the old JE stays Voided).
+    const [existingRun] = await db.select().from(payruns)
+      .where(and(eq(payruns.period, period), eq(payruns.tenantId, tenantId), sql`${payruns.status} in ('PendingApproval','Posted')`))
+      .orderBy(desc(payruns.id)).limit(1);
+    if (existingRun) return { already: true, period, status: existingRun.status, entry_no: existingRun.entryNo };
 
     // Explicit tenant filter so the run is correct even for an Admin caller whose request bypasses RLS.
     const emps = await db.select().from(employees).where(and(eq(employees.active, true), eq(employees.tenantId, tenantId)));
@@ -89,13 +91,16 @@ export class PayrollService {
       lines.push({ account_code: '5620', debit: pfEr, memo: 'Employer provident fund' });
       lines.push({ account_code: '2370', credit: r2(pfEe + pfEr), memo: 'Provident fund payable' });
     }
+    // PAY-03: post the JE as a DRAFT (excluded from balances) — a DIFFERENT user must approve it (below)
+    // before it becomes effective. The run record mirrors this with status 'PendingApproval'.
     const je: any = await this.ledger.postEntry({
       date: `${period}-28`, source: 'PAYROLL', sourceRef: period, tenantId,
       memo: `Payroll ${period} (${slips.length} staff)`, createdBy: user.username, lines,
+      pendingApproval: true,
     });
 
     const [run] = await db.insert(payruns).values({
-      tenantId, period, status: 'Posted', headcount: slips.length,
+      tenantId, period, status: 'PendingApproval', headcount: slips.length,
       grossTotal: fx(grossTotal, 2), ssoEeTotal: fx(ssoEe, 2), ssoErTotal: fx(ssoEr, 2),
       whtTotal: fx(whtTotal, 2), netTotal: fx(netTotal, 2), entryNo: je.entry_no, runBy: user.username,
     }).returning({ id: payruns.id });
@@ -107,11 +112,41 @@ export class PayrollService {
     })));
 
     return {
-      period, entry_no: je.entry_no, headcount: slips.length,
+      period, entry_no: je.entry_no, status: 'PendingApproval', headcount: slips.length,
       gross_total: grossTotal, ot_total: otTotal, unpaid_total: unpaidTotal,
       sso_employee_total: ssoEe, sso_employer_total: ssoEr, pf_employee_total: pfEe, pf_employer_total: pfEr,
       wht_total: whtTotal, net_total: netTotal,
     };
+  }
+
+  // ── PAY-03 maker-checker: a DIFFERENT user approves the pending run → the Draft JE becomes effective. ──
+  // Reuses the GL-05 ledger approval, which enforces approver ≠ preparer (SoD) and re-checks the period is
+  // open at approval time. Payroll is a top fraud-risk cycle, so the run-er can never post their own pay.
+  async approvePayroll(period: string, user: JwtUser, explicitTenantId?: number | null) {
+    const db = this.db as any;
+    const run = await this.pendingRun(period, user, explicitTenantId);
+    const res: any = await this.ledger.approveEntry(run.entryNo, user);
+    await db.update(payruns).set({ status: 'Posted', approvedBy: user.username, approvedAt: new Date() }).where(eq(payruns.id, Number(run.id)));
+    return { period, entry_no: run.entryNo, status: 'Posted', approved_by: user.username, prepared_by: res.prepared_by ?? run.runBy };
+  }
+
+  // Reject a pending run → voids the Draft JE and marks the run Rejected (a fresh run may then be made).
+  async rejectPayroll(period: string, user: JwtUser, reason?: string, explicitTenantId?: number | null) {
+    const db = this.db as any;
+    const run = await this.pendingRun(period, user, explicitTenantId);
+    await this.ledger.rejectEntry(run.entryNo, user, reason);
+    await db.update(payruns).set({ status: 'Rejected' }).where(eq(payruns.id, Number(run.id)));
+    return { period, entry_no: run.entryNo, status: 'Rejected', rejected_by: user.username };
+  }
+
+  // Resolve the single PendingApproval run for (tenant, period) or raise a clean 4xx.
+  private async pendingRun(period: string, user: JwtUser, explicitTenantId?: number | null) {
+    const db = this.db as any;
+    const tenantId = user.tenantId ?? (explicitTenantId != null ? Number(explicitTenantId) : null);
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id' });
+    const [run] = await db.select().from(payruns).where(and(eq(payruns.period, period), eq(payruns.tenantId, tenantId), eq(payruns.status, 'PendingApproval'))).orderBy(desc(payruns.id)).limit(1);
+    if (!run) throw new BadRequestException({ code: 'NO_PENDING_PAYROLL', message: `No payroll run pending approval for ${period}`, messageTh: 'ไม่มีรอบเงินเดือนที่รออนุมัติสำหรับงวดนี้' });
+    return run;
   }
 
   // ภ.ง.ด.1ก — annual withholding summary per employee (income + WHT for the year).
@@ -134,7 +169,7 @@ export class PayrollService {
   async listRuns(user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select().from(payruns).orderBy(desc(payruns.period), desc(payruns.id)).limit(36);
-    return { runs: rows.map((r: any) => ({ period: r.period, status: r.status, headcount: Number(r.headcount), gross_total: n(r.grossTotal), sso_employee_total: n(r.ssoEeTotal), sso_employer_total: n(r.ssoErTotal), wht_total: n(r.whtTotal), net_total: n(r.netTotal), entry_no: r.entryNo, run_at: r.runAt })), count: rows.length };
+    return { runs: rows.map((r: any) => ({ period: r.period, status: r.status, headcount: Number(r.headcount), gross_total: n(r.grossTotal), sso_employee_total: n(r.ssoEeTotal), sso_employer_total: n(r.ssoErTotal), wht_total: n(r.whtTotal), net_total: n(r.netTotal), entry_no: r.entryNo, run_by: r.runBy, approved_by: r.approvedBy, run_at: r.runAt, approved_at: r.approvedAt })), count: rows.length };
   }
 
   async getSlips(period: string, user: JwtUser) {
