@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { CheckCheck, ListChecks, ShieldAlert, ShieldCheck, Save, Search, Unlock } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
@@ -38,9 +38,67 @@ export default function MatchPage() {
       <Tabs
         tabs={[
           { key: 'run', label: 'รันการจับคู่ + ผลลัพธ์', content: <RunMatchTab /> },
+          { key: 'worklist', label: 'รายการ / ใบที่ถูกระงับ', content: <WorklistTab /> },
           { key: 'tolerance', label: 'เกณฑ์ความคลาดเคลื่อน', content: <ToleranceTab /> },
         ]}
       />
+    </div>
+  );
+}
+
+// ───────────────────────── Worklist / blocked-invoice register ─────────────────────────
+function WorklistTab() {
+  const [blockedOnly, setBlockedOnly] = useState(false);
+  const [search, setSearch] = useState('');
+  const [debounced, setDebounced] = useState('');
+  useEffect(() => { const t = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(t); }, [search]);
+
+  const q = useQuery<any>({
+    queryKey: ['match-worklist', blockedOnly, debounced],
+    queryFn: () => api(`/api/procurement/match?limit=200${blockedOnly ? '&blocked=true' : ''}${debounced ? `&search=${encodeURIComponent(debounced)}` : ''}`),
+    placeholderData: keepPreviousData,
+  });
+  const d = q.data;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+          <Input className="pl-8 sm:w-72" placeholder="ค้นหา เลขที่บิล / PO…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="ค้นหาผลการจับคู่" />
+        </div>
+        <Button variant={blockedOnly ? 'default' : 'outline'} aria-pressed={blockedOnly} onClick={() => setBlockedOnly((v) => !v)}>
+          <ShieldAlert className="size-4" /> เฉพาะใบที่ถูกระงับ
+        </Button>
+        {q.isFetching && !q.isLoading && <span className="text-xs text-muted-foreground">กำลังอัปเดต…</span>}
+      </div>
+      <StateView q={q}>
+        {d && (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <StatCard label="ผลการจับคู่ทั้งหมด" value={num(d.total)} icon={ListChecks} tone="primary" />
+              <StatCard label="ถูกระงับการจ่าย" value={num(d.blocked)} icon={ShieldAlert} tone={d.blocked > 0 ? 'danger' : 'success'} hint="ไม่ผ่าน + ยังไม่ override" />
+              <StatCard label="ใช้สิทธิ์ทับ (override)" value={num(d.overridden)} icon={Unlock} tone={d.overridden > 0 ? 'warning' : 'default'} />
+            </div>
+            <DataTable
+              rows={d.results}
+              rowKey={(r: any) => r.txn_no}
+              emptyState={{
+                icon: ListChecks,
+                title: blockedOnly ? 'ไม่มีใบที่ถูกระงับ' : 'ยังไม่มีผลการจับคู่',
+                description: blockedOnly ? 'ทุกใบแจ้งหนี้ที่จับคู่ผ่านหรือถูก override แล้ว' : 'รันการจับคู่ที่แท็บ "รันการจับคู่" แล้วผลจะแสดงที่นี่',
+              }}
+              columns={[
+                { key: 'txn_no', label: 'เลขที่บิล (AP)', render: (r: any) => <span className="font-medium">{r.txn_no}</span> },
+                { key: 'po_no', label: 'PO', render: (r: any) => r.po_no ?? '—' },
+                { key: 'match_status', label: 'ผลจับคู่', render: (r: any) => <Badge variant={lineStatusVariant(r.match_status)}>{r.match_status}</Badge> },
+                { key: 'state', label: 'สถานะจ่าย', render: (r: any) => (r.override ? <Badge variant="warning">ใช้สิทธิ์ทับ</Badge> : r.payable ? <Badge variant="success">จ่ายได้</Badge> : <Badge variant="destructive">ระงับ</Badge>) },
+                { key: 'matched_by', label: 'จับคู่โดย', render: (r: any) => r.matched_by ?? '—' },
+              ]}
+            />
+          </>
+        )}
+      </StateView>
     </div>
   );
 }

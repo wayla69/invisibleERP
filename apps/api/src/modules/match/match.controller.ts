@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Put, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ThreeWayMatchService } from './three-way-match.service';
+import { qint } from '../../common/query';
 
 const MatchRunBody = z.object({
   txn_no: z.string().min(1), po_no: z.string().optional(),
@@ -22,6 +23,12 @@ export class MatchController {
   getTolerance() { return this.svc.getTolerance(); }
   @Put('tolerance') @Permissions('creditors')
   setTolerance(@Body(new ZodValidationPipe(ToleranceBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setTolerance(b, u); }
+
+  // Match-results register / blocked-invoice worklist (use ?blocked=true for held-from-payment only).
+  @Get() @Permissions('procurement', 'creditors')
+  list(@CurrentUser() u: JwtUser, @Query('status') status?: string, @Query('blocked') blocked?: string, @Query('search') search?: string, @Query('limit') limit?: string) {
+    return this.svc.listResults({ status, blocked: blocked === 'true' || blocked === '1', search, limit: qint('limit', limit, 100) }, u);
+  }
 
   @Get(':txnNo') @Permissions('procurement', 'creditors')
   getMatch(@Param('txnNo') txnNo: string) { return this.svc.getMatch(txnNo); }

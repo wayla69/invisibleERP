@@ -125,6 +125,16 @@ overpayment and fraud.
 > **Note — separation of duties:** The person who **orders** goods should not be
 > the one who **pays** the invoice. The system flags this conflict (rule R03/R04).
 
+### Match worklist — which invoices are blocked
+
+Open the **รายการ / ใบที่ถูกระงับ** tab on the Match screen to see **every** matched
+invoice in one list — not just the one you just ran. It shows each invoice's match
+result and **payment status** (*payable* / *blocked* / *overridden*), with KPI cards
+(total matched · how many are **blocked from payment** · how many were overridden).
+Toggle **เฉพาะใบที่ถูกระงับ** to show only invoices held by a variance, or search by
+invoice / PO number. Use it to triage what needs investigation or an override before
+AP can pay. The list is **store-scoped** (you see only your own).
+
 [screenshot: 3-way match result with variances]
 
 ---

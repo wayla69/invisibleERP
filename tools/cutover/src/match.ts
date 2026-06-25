@@ -221,6 +221,14 @@ async function main() {
   const invPaid = Number((await pg.query(`SELECT paid_amount FROM ar_invoices WHERE invoice_no='INV-IDEM-1'`)).rows[0].paid_amount);
   ok('AR receipt idempotent: retried key → collected once (paid 500), same receipt, 1 RCP entry', rc1.json.receipt_no === rc2.json.receipt_no && rc2.json.idempotent === true && near(invPaid, 500) && (await countEntries('RCP', rc1.json.receipt_no)) === 1, JSON.stringify({ r1: rc1.json.receipt_no, r2: rc2.json.receipt_no, paid: invPaid }));
 
+  // ── O. match-results worklist (register) — all results, blocked filter, tenant isolation ──
+  const wl = await inj('GET', '/api/procurement/match', admin);
+  ok('Match worklist: lists all results + blocked/overridden counts', (wl.json.results ?? []).length >= 4 && wl.json.total >= 4 && wl.json.blocked >= 1 && wl.json.overridden >= 1, `n=${wl.json.count} total=${wl.json.total} blocked=${wl.json.blocked} ovr=${wl.json.overridden}`);
+  const wlBlocked = await inj('GET', '/api/procurement/match?blocked=true', admin);
+  ok('Match worklist: ?blocked=true → only held invoices (not payable, not overridden)', (wlBlocked.json.results ?? []).length >= 1 && (wlBlocked.json.results ?? []).every((r: any) => !truthy(r.payable) && !truthy(r.override)), `n=${wlBlocked.json.count}`);
+  const wlT2 = await inj('GET', '/api/procurement/match', procT2);
+  ok('Match worklist: RLS — tenant T2 sees none of HQ match results', (wlT2.json.results ?? []).length === 0 && wlT2.json.total === 0, `n=${wlT2.json.count}`);
+
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
