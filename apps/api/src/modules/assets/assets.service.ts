@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, asc, desc } from 'drizzle-orm';
+import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -141,7 +141,21 @@ export class AssetsService {
       memo: gainLoss >= 0 ? `Disposal gain ${gainLoss}` : `Disposal loss ${-gainLoss}`, createdBy: user.username, lines,
     });
     await db.update(fixedAssets).set({ status: 'disposed', disposedDate: date, disposalProceeds: fx(proceeds, 4), disposalGainLoss: fx(gainLoss, 4) }).where(eq(fixedAssets.id, a.id));
-    return { asset_no: assetNo, status: 'disposed', nbv_at_disposal: nbv, proceeds, gain_loss: gainLoss, journal_no: je?.entry_no ?? null };
+    // Revaluation-reserve recycling (FA-07, IFRS): any revaluation surplus held in equity (3200) for this
+    // asset is transferred directly to retained earnings on disposal (Dr 3200 / Cr 3100) — it does not pass
+    // through P&L. The surplus is the sum of upward revaluations booked to 3200 (impairments went to P&L).
+    const [rev] = await db.select({ s: sql<string>`coalesce(sum(${assetRevaluations.delta}),0)` }).from(assetRevaluations)
+      .where(and(eq(assetRevaluations.assetNo, assetNo), eq(assetRevaluations.kind, 'revaluation')));
+    const surplus = round4(n(rev?.s));
+    let recycleJe: any = null;
+    if (surplus > 0) {
+      recycleJe = await this.ledger.postEntry({
+        date, source: 'REVAL-RECYCLE', sourceRef: assetNo, tenantId: a.tenantId ?? user.tenantId ?? null,
+        memo: `Revaluation surplus recycled to retained earnings on disposal of ${assetNo}`, createdBy: user.username,
+        lines: [{ account_code: '3200', debit: surplus }, { account_code: '3100', credit: surplus }],
+      });
+    }
+    return { asset_no: assetNo, status: 'disposed', nbv_at_disposal: nbv, proceeds, gain_loss: gainLoss, journal_no: je?.entry_no ?? null, revaluation_surplus_recycled: surplus, recycle_journal_no: recycleJe?.entry_no ?? null };
   }
 
   // Revaluation / impairment (FA-07): adjust an asset's carrying amount to a new value. Upward → credit

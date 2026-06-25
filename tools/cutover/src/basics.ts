@@ -331,6 +331,17 @@ async function main() {
   ok('Customer statement: running balance over 3 dated lines', (stmt.lines ?? []).length === 3 && near(stmt.lines?.[stmt.lines.length - 1]?.balance, 1100), `n=${stmt.lines?.length} last=${stmt.lines?.[stmt.lines.length - 1]?.balance}`);
   const stmtFeb = (await inj('GET', `/api/finance/ar/statement?tenant_id=${stmtTid}&from=2026-02-01&to=2026-02-28`, admin)).json;
   ok('Customer statement: opening balance struck before the window (1000)', near(stmtFeb.opening_balance, 1000) && near(stmtFeb.closing_balance, 1100), `open=${stmtFeb.opening_balance} close=${stmtFeb.closing_balance}`);
+  // Multi-currency: a separate customer with a THB invoice + a USD invoice (fx 34).
+  const [stmt2T] = await db.insert(s.tenants).values({ code: 'STMT2', name: 'FX Customer' }).returning({ id: s.tenants.id });
+  const stmt2Tid = Number(stmt2T.id);
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-T1', invoiceDate: '2026-02-05', tenantId: stmt2Tid, amount: '1000', currency: 'THB', fxRate: '1', status: 'Unpaid' },
+    { invoiceNo: 'INV-U1', invoiceDate: '2026-02-10', tenantId: stmt2Tid, amount: '100', currency: 'USD', fxRate: '34', status: 'Unpaid' },
+  ]);
+  const stBase = (await inj('GET', `/api/finance/ar/statement?tenant_id=${stmt2Tid}&from=2026-02-01&to=2026-02-28`, admin)).json;
+  ok('Customer statement (multi-currency): base THB converts USD at fx (1000 + 100×34 = 4400)', stBase.reporting_currency === 'THB' && near(stBase.total_charges, 4400) && (stBase.lines ?? []).length === 2, `cur=${stBase.reporting_currency} chg=${stBase.total_charges} n=${stBase.lines?.length}`);
+  const stUsd = (await inj('GET', `/api/finance/ar/statement?tenant_id=${stmt2Tid}&from=2026-02-01&to=2026-02-28&currency=USD`, admin)).json;
+  ok('Customer statement (multi-currency): ?currency=USD reports USD docs in their own units', stUsd.reporting_currency === 'USD' && near(stUsd.total_charges, 100) && near(stUsd.closing_balance, 100) && (stUsd.lines ?? []).every((l: any) => l.doc_currency === 'USD'), `cur=${stUsd.reporting_currency} chg=${stUsd.total_charges} close=${stUsd.closing_balance} n=${stUsd.lines?.length}`);
 
   // ───────────────────── Petty cash / employee cash advances (EXP-07) ─────────────────────
   const adv1180Before = await tbBalance('1180');
@@ -362,6 +373,13 @@ async function main() {
   const leList = (await inj('GET', '/api/leases', admin)).json;
   const leRow = (leList.leases ?? []).find((x: any) => x.lease_no === mkLease.json?.lease_no);
   ok('Lease: liability + ROU NBV reduced after the period', leRow && leRow.liability_balance < liability && leRow.rou_nbv < liability, `liab=${leRow?.liability_balance} rou=${leRow?.rou_nbv}`);
+  // Lease modification (IFRS 16 remeasurement): raise the payment → liability + ROU step up by the delta.
+  const lease1600Before = await tbDebit('1600');
+  const lease2600Before = await tbCredit2('2600');
+  const mod = await inj('POST', `/api/leases/${mkLease.json?.lease_no}/modify`, admin, { new_monthly_payment: 1200 });
+  ok('Lease modification: remeasures liability + ROU by the delta (Dr 1600 / Cr 2600)', mod.status === 200 && mod.json?.liability_delta > 0 && mod.json?.liability_after > mod.json?.liability_before && mod.json?.rou_after > leRow.rou_nbv && near(await tbDebit('1600'), lease1600Before + mod.json.liability_delta) && near(await tbCredit2('2600'), lease2600Before + mod.json.liability_delta), `delta=${mod.json?.liability_delta} rouAfter=${mod.json?.rou_after}`);
+  const modNoChange = await inj('POST', `/api/leases/${mkLease.json?.lease_no}/modify`, admin, {});
+  ok('Lease modification: a no-op modification is rejected (NO_CHANGE)', modNoChange.status === 400 && modNoChange.json?.error?.code === 'NO_CHANGE', `st=${modNoChange.status} code=${modNoChange.json?.error?.code}`);
 
   // ───────────────────── Asset revaluation / impairment (FA-07) ─────────────────────
   const reg = (await inj('GET', '/api/assets', admin)).json;
@@ -377,6 +395,10 @@ async function main() {
   ok('Asset revaluation: no-change rejected (NO_CHANGE)', noChange.status === 400 && noChange.json?.error?.code === 'NO_CHANGE', `st=${noChange.status} code=${noChange.json?.error?.code}`);
   const revList = (await inj('GET', '/api/assets/FA-EAM2/revaluations', admin)).json;
   ok('Asset revaluation: audit trail lists both events', (revList.revaluations ?? []).length === 2, `n=${revList.revaluations?.length}`);
+  // Revaluation-reserve recycling on disposal: FA-EAM2 holds a 10000 surplus in 3200 → transfers to 3100.
+  const surplus3200Before = await tbBalance('3200');
+  const disp2 = await inj('PATCH', '/api/assets/FA-EAM2/dispose', admin, { proceeds: 50000 });
+  ok('Asset disposal recycles revaluation surplus to retained earnings (Dr 3200 / Cr 3100)', disp2.json?.revaluation_surplus_recycled === 10000 && near(await tbBalance('3200'), surplus3200Before + 10000), `recycled=${disp2.json?.revaluation_surplus_recycled} 3200bal=${await tbBalance('3200')}`);
 
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

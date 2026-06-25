@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -12,6 +12,13 @@ const LeaseBody = z.object({
   annual_rate_pct: z.number().nonnegative().optional(),
   tenant_id: z.number().optional(),
   start_date: z.string().optional(),
+});
+
+const LeaseModifyBody = z.object({
+  new_monthly_payment: z.number().positive().optional(),
+  new_remaining_months: z.number().int().positive().optional(),
+  new_annual_rate_pct: z.number().nonnegative().optional(),
+  effective_date: z.string().optional(),
 });
 
 // Lease accounting (IFRS 16 / TFRS 16) — control LSE-01. gl_post books the GL effect.
@@ -34,4 +41,11 @@ export class LeasesController {
   @Post('run')
   @HttpCode(200)
   run(@CurrentUser() u: JwtUser) { return this.svc.runDueLeases(u); }
+
+  // Lease modification / remeasurement (IFRS 16): revise payment / remaining term / rate.
+  @Post(':leaseNo/modify')
+  @HttpCode(200)
+  modify(@Param('leaseNo') leaseNo: string, @Body(new ZodValidationPipe(LeaseModifyBody)) b: z.infer<typeof LeaseModifyBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.modifyLease(leaseNo, { newMonthlyPayment: b.new_monthly_payment, newRemainingMonths: b.new_remaining_months, newAnnualRatePct: b.new_annual_rate_pct, effectiveDate: b.effective_date }, u);
+  }
 }
