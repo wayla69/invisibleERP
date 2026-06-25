@@ -63,9 +63,17 @@ const RECENTS_STORED = 12; // how many to retain so favourites filtering doesn't
 
 /** A labelled, collapsible sub-section inside a sidebar group (dependency-free). Open state persists per
  *  title in localStorage. In icon-collapsed mode the header is hidden and items stay visible (icons only). */
-function NavSubSection({ title, children }: { title: string; children: React.ReactNode }) {
+function NavSubSection({
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
   const storeKey = `ie-nav-sub:${title}`;
-  const [open, setOpen] = React.useState(true);
+  const [open, setOpen] = React.useState(defaultOpen);
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = localStorage.getItem(storeKey);
@@ -367,7 +375,7 @@ export function AppShell({
                   <SidebarMenu>{group.items.map(renderItem)}</SidebarMenu>
                 )}
                 {group.subgroups?.map((sub) => (
-                  <NavSubSection key={sub.title} title={sub.title}>
+                  <NavSubSection key={sub.title} title={sub.title} defaultOpen={sub.defaultOpen}>
                     <SidebarMenu>{sub.items.map(renderItem)}</SidebarMenu>
                   </NavSubSection>
                 ))}

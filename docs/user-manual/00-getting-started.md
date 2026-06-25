@@ -156,7 +156,8 @@ appear in **both** workspaces.
   *ลูกค้า & CRM*, *ลอยัลตี้*, *สินค้าคงคลัง*, *จัดซื้อ*, *การผลิต*, *การเงิน*, *ภาษี*, *บุคลากร*, *วางแผน & BI*. Shared
   groups (*ราคา & สาขา*, *การควบคุม*, *ผู้ช่วย AI*, *ตั้งค่าระบบ*) appear in both.
 - **Settings is foldable:** the *ตั้งค่าระบบ* group is split into collapsible sub-sections — *ข้อมูลหลัก*,
-  *ปรับแต่ง*, *เชื่อมต่อ & ขยาย*, *ผู้ดูแลระบบ*. Click a sub-section heading to fold/unfold it; your choice is
+  *ปรับแต่ง*, *เชื่อมต่อ & ขยาย*, *ผู้ดูแลระบบ*. The advanced sections (*ปรับแต่ง*, *เชื่อมต่อ & ขยาย*) start
+  collapsed so the group opens compact. Click a sub-section heading to fold/unfold it; your choice is
   remembered on that device.
 - **Favourites & recent:** hover any menu item and click the **★ star** to pin it to a **รายการโปรด**
   (Favourites) group at the top of the side menu; click the star again to unpin. A **ล่าสุด** (Recent)

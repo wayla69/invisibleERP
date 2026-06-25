@@ -104,6 +104,13 @@ test('System settings sub-sections are collapsible and reachable', async ({ page
   const subHeader = page.getByRole('button', { name: 'ข้อมูลหลัก', exact: true });
   await expect(subHeader).toHaveAttribute('aria-expanded', 'true');
 
+  // Advanced sub-sections (defaultOpen: false) start collapsed — their items hidden until expanded.
+  const advHeader = page.getByRole('button', { name: 'ปรับแต่ง', exact: true });
+  await expect(advHeader).toHaveAttribute('aria-expanded', 'false');
+  await expect(navLink(page, '/automation')).toBeHidden();
+  await advHeader.click();
+  await expect(navLink(page, '/automation')).toBeVisible();
+
   // Collapse the sub-section → its items hide; the header stays.
   await subHeader.click();
   await expect(subHeader).toHaveAttribute('aria-expanded', 'false');

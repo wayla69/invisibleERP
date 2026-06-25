@@ -220,8 +220,10 @@ with **zero route changes** and a small additive data-model extension. The orpha
   and **ล่าสุด** (auto-tracked recents, most-recent-first, deduped, cap 5). Both are `localStorage`-backed
   (`ie-nav-favorites`, `ie-nav-recents`) and resolved against the active workspace's permission-filtered
   items so a pin never surfaces an unreachable route. Portal surface unaffected (gated on `filterPerms`).
-- **`defaultOpen` / collapsed-by-default sub-sections** — add the flag and default the longer Settings
-  sub-sections to collapsed; persistence already exists. *(still open)*
+- **`defaultOpen` / collapsed-by-default sub-sections** ✅ *(delivered 2026-06-25)* — `NavSubGroup` gained a
+  `defaultOpen?: boolean` (default `true`); the advanced Settings sub-sections *ปรับแต่ง* and
+  *เชื่อมต่อ & ขยาย* now start collapsed so *ตั้งค่าระบบ* opens compact, while *ข้อมูลหลัก* and *ผู้ดูแลระบบ* stay
+  open. A saved user toggle still overrides the default.
 - **Screenshots** — refresh the `[screenshot: …]` placeholders in the user manual once design captures new
   sidebar imagery. *(still open)*
 
@@ -235,3 +237,4 @@ with **zero route changes** and a small additive data-model extension. The orpha
 | 2026-06-25 | v0.2 (DRAFT) | Web / Product | Phase 0 audit executed and recorded (§4a): 103 nav hrefs, 0 dead links, 3 unlinked pages classified (`/notifications` + `/pos/new` intentional; `/loyalty` config page is a genuine orphan to wire into the new Loyalty group in Phase 3). Cross-listing confirmed tag-based, not duplicated. No application code changed. |
 | 2026-06-25 | v1.0 (IMPLEMENTED) | Web / Product | Phases 2–5 delivered. `nav.ts`: `NavSubGroup` + optional `subgroups`/`items`, `allGroupItems()`, recursive `navForWorkspace()`, INTERNAL_NAV re-bucketed into per-domain ERP/POS groups + a 4-sub-section *ตั้งค่าระบบ* group, orphan `/loyalty` wired in — **no href changed**. `app-shell.tsx`: recursive permission filter + active-label, dependency-free collapsible `NavSubSection` (localStorage-persisted). `command-palette.tsx`: flattens subgroups. Corrected baseline counts (System 22, POS sales 19). Verified: web typecheck ✅, web build ✅, Playwright `workspace-split` 5/5 ✅ (added collapsible-sub-section case). Docs: user-manual *Workspaces* section updated. |
 | 2026-06-25 | v1.1 (IMPLEMENTED) | Web / Product | §6 follow-up delivered: **Favorites/Recents** pinned groups (*รายการโปรด* + *ล่าสุด*) at the top of the internal sidebar. `app-shell.tsx`: star menu-action toggles favourites; recents auto-tracked on route change; both `localStorage`-backed and resolved against the workspace's permission-filtered items; gated on `filterPerms` (portal unaffected). Verified: web typecheck ✅, build ✅, Playwright `workspace-split` 6/6 ✅ (added a favourite-pin/persist/un-pin case). User-manual *Workspaces* section updated. |
+| 2026-06-25 | v1.2 (IMPLEMENTED) | Web / Product | §6 follow-up delivered: **`defaultOpen`** on `NavSubGroup`. Advanced Settings sub-sections *ปรับแต่ง* + *เชื่อมต่อ & ขยาย* start collapsed (others open); saved toggle still wins. `nav.ts` + `app-shell.tsx` (`NavSubSection` accepts `defaultOpen`). Verified: web typecheck ✅, build ✅, Playwright `workspace-split` 6/6 ✅ (added a collapsed-by-default assertion). |
