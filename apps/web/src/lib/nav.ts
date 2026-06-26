@@ -424,6 +424,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'แดชบอร์ดตามบทบาท (Role dashboards)', href: '/dashboard-designer', icon: LayoutTemplate, perms: ['users', 'exec'] },
           { label: 'เทมเพลตเอกสาร (Document templates)', href: '/document-templates', icon: LayoutTemplate, perms: ['users', 'exec'] },
           { label: 'ธีมแบรนด์ (White-label)', href: '/theme', icon: Palette, perms: ['users', 'exec'] },
+          { label: 'โมดูลทดลอง (Labs)', href: '/settings/labs', icon: SlidersHorizontal, perms: ['md_config', 'exec', 'users'] },
         ],
       },
       {
