@@ -132,6 +132,22 @@ async function main() {
   ok('clock-out → Closed + hours', out.json.status === 'Closed' && out.json.hours >= 0);
   ok('labor report totals hours', (await inj('GET', '/api/pos/labor/report', token)).json.count === 1);
 
+  // ── Step 9: anti-buddy-punch clock-in integrity ──
+  const dupPunch = await inj('POST', '/api/pos/labor/clock-in', token, { emp_code: 'E1' });
+  ok('Step9: re-punch within 15 min of clock-out → DUPLICATE_PUNCH', dupPunch.status === 400 && dupPunch.json.error?.code === 'DUPLICATE_PUNCH', `${dupPunch.status} ${dupPunch.json.error?.code}`);
+  const ovr = await inj('POST', '/api/pos/labor/clock-in/override', token, { emp_code: 'E1', reason: 'forgot to punch in' });
+  ok('Step9: supervisor override bypasses the dup window (method SUPERVISOR)', ovr.json.clock_in_method === 'SUPERVISOR' && ovr.json.override_by != null, JSON.stringify(ovr.json).slice(0, 110));
+  await inj('POST', '/api/pos/labor/clock-out', token, { emp_code: 'E1', break_minutes: 0 });
+  const ovrNoReason = await inj('POST', '/api/pos/labor/clock-in/override', token, { emp_code: 'E1', reason: '' });
+  ok('Step9: override without a reason → 400', ovrNoReason.status === 400, `${ovrNoReason.status} ${ovrNoReason.json.error?.code}`);
+  // geofence: a zone within ~200m; an in-fence punch passes, a far one is accepted but flagged
+  await db.insert(s.employees).values([{ tenantId: hq.id, empCode: 'E2', name: 'Two', nationalId: '0000000000002' }, { tenantId: hq.id, empCode: 'E3', name: 'Three', nationalId: '0000000000003' }]).onConflictDoNothing?.();
+  await inj('PUT', '/api/pos/labor/geofence-zones', token, { lat: 13.7563, lng: 100.5018, radius_m: 200 });
+  const inFence = await inj('POST', '/api/pos/labor/clock-in', token, { emp_code: 'E2', method: 'QR', lat: 13.7564, lng: 100.5019 });
+  ok('Step9: in-fence GPS → geofence_pass true, method QR recorded', inFence.json.geofence_pass === true && inFence.json.clock_in_method === 'QR', JSON.stringify(inFence.json));
+  const outFence = await inj('POST', '/api/pos/labor/clock-in', token, { emp_code: 'E3', lat: 13.9, lng: 100.9 });
+  ok('Step9: out-of-fence GPS accepted but flagged (geofence_pass false)', outFence.json.status === 'Open' && outFence.json.geofence_pass === false, JSON.stringify(outFence.json));
+
   await app.close();
   await pg.close();
   console.log('\n── POS P2 (locking/auto-86 + aggregators + loyalty/house/gift/labor) ──');
