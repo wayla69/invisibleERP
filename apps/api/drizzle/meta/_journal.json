@@ -974,6 +974,13 @@
       "when": 2023560000004,
       "tag": "0138_wms_bin_layout",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 2023570000004,
+      "tag": "0139_tenant_coa_templates",
+      "breakpoints": true
     }
   ]
 }
