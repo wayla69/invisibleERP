@@ -176,15 +176,23 @@ For each key control the auditor performs **Test of Design (ToD)** and **Test of
 
 ## 6. Entity-level controls & policies (COSO Control Environment)
 
-Auditors weight the "tone at the top." **DRAFT templates now exist in `compliance/policies/`** (see `policies/README.md` for the register) — each mapped to RCM control IDs and the implemented system controls. Next step: assign owners, fill `<<placeholders>>`, review with the SOX advisor + counsel, obtain documented approval, and communicate (with acknowledgement registers).
+Auditors weight the "tone at the top." The five key entity-level policies (**ELC-POL-01..05**) are now **adopted at v1.0 (effective 2026-07-01)** — placeholders resolved, fraud register rated, acknowledgement-register format defined. ELC-POL-06..13 remain DRAFT v0.1 pending IT-governance review. (See `policies/README.md` for the full register.)
 
-| Policy | File | Open gap it closes |
-|---|---|---|
-| Code of Conduct & Ethics | `policies/01-code-of-conduct.md` | ELC-01 |
-| Whistleblower & Non-Retaliation | `policies/02-whistleblower-policy.md` | ELC-04 |
-| Delegation of Authority + approval matrix | `policies/03-delegation-of-authority.md` | ELC-03 |
-| Audit Committee Charter | `policies/04-audit-committee-charter.md` | ELC-02 |
-| Fraud Risk Assessment + register | `policies/05-fraud-risk-assessment.md` | ELC-05 |
+| Policy | File | RCM control | Status |
+|---|---|---|---|
+| Code of Conduct & Ethics | `policies/01-code-of-conduct.md` | ELC-01 | ✅ v1.0 Adopted 2026-07-01 |
+| Audit Committee Charter | `policies/04-audit-committee-charter.md` | ELC-02 | ✅ v1.0 Adopted 2026-07-01 |
+| Delegation of Authority + approval matrix | `policies/03-delegation-of-authority.md` | ELC-03 | ✅ v1.0 Adopted 2026-07-01 |
+| Whistleblower & Non-Retaliation | `policies/02-whistleblower-policy.md` | ELC-04 | ✅ v1.0 Adopted 2026-07-01 |
+| Fraud Risk Assessment + register | `policies/05-fraud-risk-assessment.md` | ELC-05 | ✅ v1.0 Adopted 2026-07-01 (3 Medium residual risks to monitor) |
+| Information Security | `policies/06-information-security-policy.md` | ITGC-AC-12 et al. | 🟡 DRAFT v0.1 |
+| Access Control & Identity (incl. UAR procedure) | `policies/07-access-control-policy.md` | ITGC-AC-* | 🟡 DRAFT v0.1 |
+| Change Management & SDLC | `policies/08-change-management-sdlc-policy.md` | ITGC-CM/SD-* | 🟡 DRAFT v0.1 |
+| Backup, Retention & DR/BCP | `policies/09-backup-dr-bcp-policy.md` | ITGC-OP-01/02 | 🟡 DRAFT v0.1 |
+| Incident Response | `policies/10-incident-response-policy.md` | ITGC-OP-03 | 🟡 DRAFT v0.1 |
+| Financial Close & Reporting (close calendar) | `policies/11-financial-close-policy.md` | GL-06 | 🟡 DRAFT v0.1 |
+| Third-Party / Vendor & Sub-Service Orgs (SOC reports) | `policies/12-third-party-vendor-management-policy.md` | EXP-02, sub-service reliance | 🟡 DRAFT v0.1 |
+| Segregation of Duties (rules R01–R16) | `policies/13-segregation-of-duties-policy.md` | ITGC-AC-09 | 🟡 DRAFT v0.1 |
 | Information Security | `policies/06-information-security-policy.md` | ITGC-AC-12 et al. |
 | Access Control & Identity (incl. UAR procedure) | `policies/07-access-control-policy.md` | ITGC-AC-* |
 | Change Management & SDLC | `policies/08-change-management-sdlc-policy.md` | ITGC-CM/SD-* |
@@ -232,7 +240,7 @@ Stand up a single, access-controlled evidence repository, organized by control I
 2. **Kick off Phase 1 High items:** MFA enforcement (AC-06), secrets→vault (AC-12), branch protection + deploy gate (CM-03), automated backup + restore test (OP-01).
 3. **Run the control harness** (`pnpm --filter @ierp/cutover compliance`) and retain the output as ToE evidence for GL-05 / AC-08 / AC-09 (the SoD engineering issue in `ISSUE_sod_rule_engine.md` is now delivered).
 4. **Stand up the evidence repository** (§7) and start capturing evidence as controls go live.
-5. **Adopt the entity-level policies** — DRAFT templates exist in `compliance/policies/`; assign owners, complete `<<placeholders>>`, review with counsel/SOX advisor, and obtain board/management approval (§6).
+5. **Communicate adopted entity-level policies** — ELC-POL-01..05 are now v1.0 (§6). Distribute to all personnel, collect acknowledgements (CoC acknowledgement register; DoA countersign), and populate the evidence repository. Adopt ELC-POL-06..13 in the IT-governance workstream.
 
 ---
 

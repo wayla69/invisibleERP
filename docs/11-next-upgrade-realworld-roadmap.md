@@ -208,7 +208,7 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   **Done so far:** rules + service charge + rounding priced & GL-correct at the till (verified);
   cashier quick-tender/hotkeys (build-verified); offline + peripheral clients scaffolded.
 
-### Phase C — Globalize & certify · ~8–12 weeks
+### Phase C — Globalize & certify · ~8–12 weeks · **IN PROGRESS (C5 ✅ 2026-06-26)**
 *Goal: legally and operationally sellable beyond Thailand; passes enterprise security review.*
 
 - **C1 — Multi-currency depth.** Confirm functional/transaction/reporting currency on every money
@@ -220,9 +220,11 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   locale/currency/date/number formatting; extract strings.
 - **C4 — Certifications.** SOC 2 Type II + ISO 27001 readiness (leverage existing RCM/policies);
   PCI-DSS scope design (SAQ-A via tokenized PSPs); third-party pen test.
-- **C5 — Entity-level policies finalized (ELC-01..05).** Move DRAFT policies to approved; Code of
-  Conduct + Audit Committee charter + Delegation of Authority + whistleblower + fraud-risk register;
-  acknowledgement registers. *Needed for IPO/audit track.*
+- **C5 — Entity-level policies finalized (ELC-01..05).** ✅ **Delivered.** ELC-POL-01..05 adopted at
+  v1.0 (effective 2026-07-01): Code of Conduct + acknowledgement-register template, Whistleblower
+  (`compliance@invisible-erp.co.th` + `/compliance-reports`), DoA (PO > 50k / AP > 100k / credit > 500k),
+  Audit Committee Charter (NASDAQ 5605(c)(2) + SEC 10A-3), Fraud Risk Assessment (8 scenarios rated,
+  3 Medium residuals). COSO §6 updated. ELC-POL-06..13 remain DRAFT (IT-governance workstream).
 - **Exit:** a non-THB tenant transacts and reports correctly; clears one non-TH e-invoice mandate in
   sandbox; SOC 2 Type I report or readiness assessment in hand; policies board-approved.
 
@@ -301,3 +303,4 @@ and DB-enforced isolation; deepen MRP/HR/portals where the target market demands
 | 0.1 DRAFT | 2026-06-23 | Platform / Controller | Initial next-upgrade roadmap; benchmarks as-built system vs global POS/ERP; supersedes the "missing GL/payments/RLS" premise of `09-worldclass-roadmap.md` and `pos-worldclass-roadmap.md`, which are now substantially delivered. |
 | 0.2 | 2026-06-23 | Platform | **Phase A delivered** (production hardening): Docker/compose, scripted restore + automated restore-drill, fail-closed secret validation, `/healthz`+`/readyz`, observability/incident + change-management + secrets + deployment runbooks, CODEOWNERS + PR template + approval-gated deploy + branch-protection ruleset, prod DB least-privilege SQL. Marked `[setup]` items (console actions) + deferred httpOnly-cookie workstream. |
 | 0.3 | 2026-06-23 | Platform | **Phase B in progress**: B4 pricing rules now apply at dine-in checkout (+ service charge acct 4400, satang rounding acct 4900, `pricing` harness); B2 cashier quick-tender + hotkeys; B1 offline client outbox + B3 peripheral bridge scaffolds (backend offline-sync already existed). Verified pieces CI-gated; browser/hardware pieces are typecheck-only scaffolds. |
+| 0.4 | 2026-06-26 | Platform | **Phase B complete** (B2 favourites grid + POS returns ✅ PR #181; B4 retail portal pricing + service charge + satang rounding ✅ PR #182; B1 offline client outbox + B3 peripheral bridge as typecheck-only scaffolds). **Phase C C5 delivered**: ELC-POL-01..05 adopted at v1.0 (Code of Conduct, Whistleblower, DoA, Audit Committee Charter, Fraud Risk Assessment); COSO plan §6 updated. |

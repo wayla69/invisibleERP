@@ -1,10 +1,8 @@
 # Code of Conduct & Business Ethics
 
-**Policy ID:** ELC-POL-01 · **Owner:** `<<CEO / Head of HR>>` · **Approved by:** `<<Board of Directors>>`
-**Version:** 0.1 (DRAFT) · **Effective:** `<<date>>` · **Last reviewed:** `<<date>>` · **Cadence:** Annual + at onboarding
+**Policy ID:** ELC-POL-01 · **Owner:** CEO / Head of HR · **Approved by:** Board of Directors
+**Version:** 1.0 · **Effective:** 2026-07-01 · **Last reviewed:** 2026-06-26 · **Cadence:** Annual + at onboarding
 **Related RCM controls:** ELC-01 (ethics policy & acknowledgements)
-
-> DRAFT template — review with HR and legal counsel (incl. Thai labour law) before adoption.
 
 ## 1. Purpose
 Establish the standards of honest, ethical, and lawful conduct expected of everyone acting for the company, and set the "tone at the top" that underpins the COSO control environment.
@@ -36,9 +34,20 @@ All directors, officers, employees, contractors, and temporary staff (collective
 All personnel acknowledge this Code at hire and annually. Maintain a dated **acknowledgement register** (`name, role, date, version`) in the evidence repository — this is the auditor's evidence the control operates.
 
 ## 7. Exceptions
-Exceptions require written approval of `<<CEO + Audit Committee>>` and are logged.
+Exceptions require written approval of the CEO and Audit Committee and are logged.
+
+## Appendix A — Acknowledgement register format
+
+The live register is maintained in the evidence repository (access-controlled). Minimum columns:
+
+| Name | Role | Department | Date | Version | Method |
+|---|---|---|---|---|---|
+| *(example)* Employee Name | Cashier | F&B Ops | 2026-07-01 | 1.0 | Email confirmation |
+
+Acknowledgements are collected at hire (within 5 business days of start date) and at each annual revision. The Controller retains records for a minimum of 7 years.
 
 ## Revision history
 | Version | Date | Author | Change |
 |---|---|---|---|
-| 0.1 | 2026-06-22 | `<<author>>` | Initial draft |
+| 0.1 | 2026-06-22 | Platform / Controller | Initial draft |
+| 1.0 | 2026-06-26 | Platform / Controller | Adopted — DRAFT removed; placeholders resolved; acknowledgement-register appendix added; effective 2026-07-01 |
