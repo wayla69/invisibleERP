@@ -224,6 +224,52 @@ export class FinanceService {
     return { advances: rows.map((r: any) => ({ advance_no: r.advanceNo, payee: r.payee, purpose: r.purpose, amount: n(r.amount), status: r.status, settled_expense: n(r.settledExpense), returned_cash: n(r.returnedCash), issued_by: r.issuedBy, issued_date: r.issuedDate, settled_date: r.settledDate })), count: rows.length, outstanding: round2(rows.filter((r: any) => r.status === 'open').reduce((s: number, r: any) => s + n(r.amount), 0)) };
   }
 
+  // ── AR bad-debt write-off (REV-14, maker-checker) ──
+  // An uncollectible receivable is written off as bad debt — Dr 5720 Bad Debt Expense / Cr 1100 AR. It posts
+  // as a DRAFT via the ledger maker-checker (GL-05): excluded from balances until a DIFFERENT user approves
+  // (POST /api/ledger/journal/:entryNo/approve), so one person can't both declare a receivable uncollectible
+  // and post the write-off (concealing a misappropriated collection). It appears in the pending-approvals
+  // monitor automatically (it is a Draft JE).
+  async writeOffAr(dto: { tenant_id?: number | null; customer_name?: string; amount: number; reason: string }, user: JwtUser) {
+    if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger not available', messageTh: 'ระบบบัญชีไม่พร้อมใช้งาน' });
+    const amount = round2(Number(dto.amount) || 0);
+    if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Write-off amount must be positive', messageTh: 'จำนวนหนี้สูญต้องมากกว่า 0' });
+    if (!dto.reason || !dto.reason.trim()) throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A write-off reason is required', messageTh: 'ต้องระบุเหตุผลการตัดหนี้สูญ' });
+    const tenantId = user.tenantId ?? (dto.tenant_id != null ? Number(dto.tenant_id) : null);
+    const who = dto.customer_name?.trim() ? ` — ${dto.customer_name.trim()}` : (dto.tenant_id != null ? ` — ลูกค้า #${dto.tenant_id}` : '');
+    const je: any = await this.ledger.postEntry({
+      date: ymd(), source: 'AR-WRITEOFF', sourceRef: `${dto.tenant_id ?? 'NA'}:${new Date().toISOString()}`, tenantId,
+      memo: `ตัดหนี้สูญ${who}: ${dto.reason.trim()}`, createdBy: user.username, pendingApproval: true,
+      lines: [
+        { account_code: '5720', debit: amount, memo: `Bad debt write-off${who}` },
+        { account_code: '1100', credit: amount, memo: 'AR written off' },
+      ],
+    });
+    return { entry_no: je.entry_no, status: je.status, pending: !!je.pending, amount, reason: dto.reason.trim(), customer_tenant_id: dto.tenant_id ?? null };
+  }
+
+  // The write-off register: every AR-WRITEOFF entry — Draft (pending approval), Posted (approved/effective),
+  // or Voided (rejected) — with its amount (the 5720 debit), so the controller can review bad-debt activity.
+  async listWriteOffs(tenantId?: number) {
+    const db = this.db as any;
+    // Each write-off has exactly one 5720 debit line, so an inner join on that line yields one row per write-off
+    // with its amount directly (no correlated subquery).
+    const conds = [eq(journalEntries.source, 'AR-WRITEOFF'), eq(journalLines.accountCode, '5720')] as any[];
+    if (tenantId != null) conds.push(eq(journalEntries.tenantId, tenantId));
+    const rows = await db.select({
+      entryNo: journalEntries.entryNo, status: journalEntries.status, memo: journalEntries.memo,
+      createdBy: journalEntries.createdBy, date: journalEntries.entryDate, debit: journalLines.debit,
+    }).from(journalEntries).innerJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
+      .where(and(...conds)).orderBy(desc(journalEntries.id)).limit(200);
+    const list = rows.map((r: any) => ({ entry_no: r.entryNo, status: r.status, memo: r.memo, created_by: r.createdBy, date: r.date, amount: n(r.debit), state: r.status === 'Draft' ? 'pending' : r.status === 'Posted' ? 'approved' : 'rejected' }));
+    return {
+      write_offs: list, count: list.length,
+      pending_count: list.filter((w: any) => w.status === 'Draft').length,
+      total_pending: round2(list.filter((w: any) => w.status === 'Draft').reduce((s: number, w: any) => s + w.amount, 0)),
+      total_written_off: round2(list.filter((w: any) => w.status === 'Posted').reduce((s: number, w: any) => s + w.amount, 0)),
+    };
+  }
+
   // ───────────────────── WRITE (Phase 3) ─────────────────────
   // POST /api/finance/ar/sync — สร้าง INV-{order_no} จาก order ที่ Shipped/Completed ที่ยังไม่มี invoice
   async syncArInvoices(user: JwtUser) {
