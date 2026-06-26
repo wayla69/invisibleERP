@@ -1,7 +1,10 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { alertRules, alertEvents, notifications, customerInventory, workflowInstances, purchaseRequests } from '../../database/schema';
+import { custPosSales } from '../../database/schema/sales';
+import { arInvoices } from '../../database/schema/finance';
+import { opportunities } from '../../database/schema/pipeline';
 import type { JwtUser } from '../../common/decorators';
 import { MessagingService } from '../messaging/messaging.service';
 import { WebhookService } from '../platform/webhook.service';
@@ -17,6 +20,10 @@ const METRICS: Record<string, { label: string; labelEn: string; unit: string }> 
   low_stock_count: { label: 'สินค้าต่ำกว่าจุดสั่งซื้อ', labelEn: 'Items below reorder point', unit: 'items' },
   approvals_overdue: { label: 'งานอนุมัติเกินกำหนด (SLA)', labelEn: 'Overdue approvals', unit: 'docs' },
   open_pr_count: { label: 'ใบขอซื้อรออนุมัติ', labelEn: 'Open purchase requisitions', unit: 'PRs' },
+  // BI-domain KPI metrics (RLS-scoped to caller's tenant via DB connection)
+  mtd_sales: { label: 'ยอดขายเดือนนี้ (MTD)', labelEn: 'MTD sales revenue', unit: 'THB' },
+  overdue_ar_amount: { label: 'ยอดลูกหนี้เกินกำหนด', labelEn: 'Overdue AR amount', unit: 'THB' },
+  open_pipeline_value: { label: 'มูลค่าไปป์ไลน์เปิด', labelEn: 'Open pipeline value', unit: 'THB' },
 };
 
 // Alert/notification rules engine. Tenant-defined rules over the metric catalog; the sweep evaluates each
@@ -83,6 +90,24 @@ export class AlertsService {
     if (key === 'open_pr_count') {
       const [r] = await db.select({ c: sql<number>`count(*)` }).from(purchaseRequests).where(eq(purchaseRequests.status, 'Pending'));
       return Number(r?.c ?? 0);
+    }
+    if (key === 'mtd_sales') {
+      const today = new Date().toISOString().slice(0, 10);
+      const monthStart = today.slice(0, 7) + '-01';
+      const [r] = await db.select({ total: sql<number>`coalesce(sum(${custPosSales.total}),0)` })
+        .from(custPosSales).where(gte(custPosSales.saleDate, monthStart));
+      return Number(r?.total ?? 0);
+    }
+    if (key === 'overdue_ar_amount') {
+      const today = new Date().toISOString().slice(0, 10);
+      const [r] = await db.select({ total: sql<number>`coalesce(sum(${arInvoices.amount} - ${arInvoices.paidAmount}),0)` })
+        .from(arInvoices).where(and(eq(arInvoices.status, 'Unpaid'), lt(arInvoices.dueDate, today)));
+      return Number(r?.total ?? 0);
+    }
+    if (key === 'open_pipeline_value') {
+      const [r] = await db.select({ total: sql<number>`coalesce(sum(${opportunities.expectedValue}),0)` })
+        .from(opportunities).where(eq(opportunities.status, 'Open'));
+      return Number(r?.total ?? 0);
     }
     return 0;
   }
