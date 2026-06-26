@@ -26,6 +26,7 @@ const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
 async function main() {
   const pg = await PGlite.create();
@@ -117,6 +118,66 @@ async function main() {
   ok('HQ admin recognize tenant_id=T1 → ONLY T1 line (count 1, amount 300)', recT1.json.recognized_count === 1 && near(recT1.json.total_recognized, 300), JSON.stringify({ c: recT1.json.recognized_count, t: recT1.json.total_recognized }));
   const recT2 = await inj('POST', `/api/revenue/recognize?period=2035-01&tenant_id=${t2}`, hqadmin);
   ok('T2 line untouched by the T1 run → recognized only now (count 1, amount 400)', recT2.json.recognized_count === 1 && near(recT2.json.total_recognized, 400), JSON.stringify({ c: recT2.json.recognized_count, t: recT2.json.total_recognized }));
+
+  // ──────────────────────────────────────────────────────────────────────────────────────────────────
+  // WS3.4 — TFRS 15 / IFRS 15 revenue recognition (REV-19): contract → POs → SSP allocation → schedule →
+  // recognize (release deferred revenue 2410 → revenue 4300) + refund liability (2420). Uses admin (HQ
+  // tenant). Dedicated future periods so they don't collide with the DEFREV recognition above.
+  ok('COA seeded with 2410 Deferred Revenue + 2420 Refund Liability', accJson.includes('2410') && accJson.includes('2420'));
+
+  // total 1000 with SSP A=800 (over_time 4 months) + B=400 (point_in_time) → forces a real allocation+rounding
+  const tbBefore = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+  const rev2410Before = -Number((tbBefore.rows ?? []).find((r: any) => r.account_code === '2410')?.balance ?? 0);
+  const c1 = await inj('POST', '/api/revenue/contracts', admin, {
+    total_price: 1000, contract_date: '2040-01-05', description: 'TFRS15 test contract',
+    obligations: [
+      { name: 'Implementation (over time)', ssp: 800, method: 'over_time', start_date: '2040-01-01', end_date: '2040-04-30' },
+      { name: 'License (point in time)', ssp: 400, method: 'point_in_time', start_date: '2040-01-15' },
+    ],
+  });
+  ok('REV-19: create contract (REVC-, 2 POs, Draft)', /^REVC-/.test(c1.json.contract_no ?? '') && c1.json.obligations?.length === 2 && c1.json.status === 'Draft', `${c1.status} ${JSON.stringify(c1.json).slice(0, 80)}`);
+  const cid = c1.json.id;
+
+  // Step 4 — allocate by SSP: A=1000×800/1200=666.6667, B=1000×400/1200=333.3333; residual on largest (A)
+  const alloc = await inj('POST', `/api/revenue/contracts/${cid}/allocate`, admin);
+  const sumAlloc = (alloc.json.allocation ?? []).reduce((a: number, x: any) => a + x.allocated_price, 0);
+  ok('REV-19: SSP allocation Σ == total_price (exact, residual handled)', near(alloc.json.sum_allocated, 1000) && near(round2(sumAlloc), 1000), JSON.stringify(alloc.json.allocation));
+  const allocA = alloc.json.allocation.find((x: any) => x.name.startsWith('Implementation'))?.allocated_price;
+  const allocB = alloc.json.allocation.find((x: any) => x.name.startsWith('License'))?.allocated_price;
+  ok('REV-19: A≈666.67 (gets residual), B≈333.33', near(allocA, 666.6667) && near(allocB, 333.3333), `A=${allocA} B=${allocB}`);
+
+  // activate → Dr 1100 AR 1000 / Cr 2410 1000
+  const act = await inj('POST', `/api/revenue/contracts/${cid}/activate`, admin, {});
+  ok('REV-19: activate → status Active, deferred 1000', act.json.status === 'Active' && near(act.json.deferred_revenue, 1000), JSON.stringify(act.json));
+  const jInv = await jBy('REVREC-INV', `REVREC-INV:${c1.json.contract_no}`);
+  ok('REV-19: activation GL Dr1100=1000 / Cr2410=1000', near(leg(jInv, '1100', 'debit'), 1000) && near(leg(jInv, '2410', 'credit'), 1000), JSON.stringify({ ar: leg(jInv, '1100', 'debit'), def: leg(jInv, '2410', 'credit') }));
+
+  // buildSchedule → A has 4 monthly rows (~166.6667), B has 1 row at 2040-01
+  const sch = await inj('POST', `/api/revenue/contracts/${cid}/schedule`, admin);
+  const aRows = (sch.json.schedule ?? []).filter((r: any) => near(r.planned_amount, 166.6667) || (r.planned_amount > 100 && r.planned_amount < 200));
+  ok('REV-19: schedule A=4 monthly rows + B=1 row (5 total)', sch.json.schedule?.length === 5 && aRows.length === 4, `rows=${sch.json.schedule?.length}`);
+
+  // recognize period 2040-01 → one month of A (166.6667) + B point-in-time (333.3333) = 500.0000
+  const r1 = await inj('POST', '/api/revenue/contracts/recognize', admin, { contract_id: cid, period: '2040-01' });
+  ok('REV-19: recognize 2040-01 → 2 rows, total 500', r1.json.recognized_count === 2 && near(r1.json.total_recognized, 500), JSON.stringify({ c: r1.json.recognized_count, t: r1.json.total_recognized }));
+  const tbAfter1 = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+  const rev2410After = -Number((tbAfter1.rows ?? []).find((r: any) => r.account_code === '2410')?.balance ?? 0);
+  const rev4300 = Number((tbAfter1.rows ?? []).find((r: any) => r.account_code === '4300')?.balance ?? 0);
+  ok('REV-19: 2410 deferred decreases by 500 (1000 raised → 500 left)', near(rev2410After - rev2410Before, 500), `Δ2410=${round2(rev2410After - rev2410Before)}`);
+  ok('REV-19: 4300 revenue recognized (credit balance ≥ 500)', Math.abs(rev4300) >= 499.99, `4300=${rev4300}`);
+
+  // idempotent: recognize the SAME period again → 0 new
+  const r1b = await inj('POST', '/api/revenue/contracts/recognize', admin, { contract_id: cid, period: '2040-01' });
+  ok('REV-19: recognize same period again → no double post (0 new)', r1b.json.recognized_count === 0, JSON.stringify(r1b.json).slice(0, 50));
+
+  // accrueRefundLiability rate 10% → Cr 2420 posted (base = recognized 500 → expected 50)
+  const refResp = await inj('POST', `/api/revenue/contracts/${cid}/refund-liability`, admin, { expected_refund_rate: 0.10, as_of_date: '2040-01-31' });
+  ok('REV-19: refund liability 10% of recognized 500 = 50', near(refResp.json.expected_refund_amount, 50) && near(refResp.json.posted_delta, 50), JSON.stringify(refResp.json));
+  const jRef = await jBy('REVREC-REF', `REVREC-REF:${c1.json.contract_no}:2040-01-31`);
+  ok('REV-19: refund GL Dr4300=50 (contra) / Cr2420=50', near(leg(jRef, '4300', 'debit'), 50) && near(leg(jRef, '2420', 'credit'), 50), JSON.stringify({ d: leg(jRef, '4300', 'debit'), c: leg(jRef, '2420', 'credit') }));
+
+  const tbFinal = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
+  ok('REV-19: trial balance still balanced after TFRS15 postings', near(tbFinal.debit ?? tbFinal.total_debit, tbFinal.credit ?? tbFinal.total_credit), JSON.stringify(tbFinal).slice(0, 60));
 
   await app.close();
   await pg.close();
