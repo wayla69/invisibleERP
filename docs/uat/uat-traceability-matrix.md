@@ -193,6 +193,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-153 | Register PromptPay tender shows a scannable QR | Feature (POS register) | 01 §7 |
 | UAT-O2C-154 | Register hold → recall round-trips the cart | Feature (POS register) | 01 §7 |
 | UAT-O2C-155 | Register mirrors the cart to the customer display | REST-11 | 20 §7 |
+| UAT-O2C-180 | Create a customer-of-record linking B2C + B2B | REV-15 | 01 §7 |
+| UAT-O2C-181 | 360 view ties AR to the sub-ledger + shows loyalty | REV-15 | 01 §7, §9 |
+| UAT-O2C-182 | Customer master register search | REV-15 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
