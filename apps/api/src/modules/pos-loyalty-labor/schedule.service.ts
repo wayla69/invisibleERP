@@ -1,12 +1,23 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { shiftSchedules, timeClock, custPosSales } from '../../database/schema';
+import { shiftSchedules, timeClock, custPosSales, laborOtRules, laborAlerts } from '../../database/schema';
 import { n, fx } from '../../database/queries';
 import { round2 } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 
 export interface CreateShiftDto { emp_code: string; shift_date: string; start_time: string; end_time: string; hourly_rate?: number; position?: string; notes?: string }
+
+// Thai Labour Protection Act overtime multipliers + statutory caps (the fallback when a tenant has no
+// override row). REGULAR_OT 1.5× (beyond 8h/day), HOLIDAY 2× (work on a holiday), HOLIDAY_OT 3× (OT on a
+// holiday), NIGHT 1.0× (tracked, no statutory premium). Weekly working-hours cap = 48h.
+const THAI_OT_DEFAULTS: Record<string, { multiplier: number; daily: number; weekly: number }> = {
+  REGULAR_OT: { multiplier: 1.5, daily: 8, weekly: 48 },
+  HOLIDAY: { multiplier: 2.0, daily: 8, weekly: 48 },
+  HOLIDAY_OT: { multiplier: 3.0, daily: 8, weekly: 48 },
+  NIGHT: { multiplier: 1.0, daily: 8, weekly: 48 },
+};
+const DEFAULT_LABOR_PCT_TARGET = 35;
 
 // W4 — shift scheduling / roster + labor %. A planned shift; the labor summary sums scheduled hours × rate,
 // compares it to sales (labor % of sales) and to actual punched hours (time_clock). Operational — no GL.
@@ -83,6 +94,99 @@ export class ScheduleService {
       hours_variance: round2(actualHours - scheduledHours), sales: salesTotal, labor_pct: laborPct,
       by_staff: Object.entries(byStaff).map(([emp_code, v]) => ({ emp_code, ...v })).sort((a, b) => b.cost - a.cost),
     };
+  }
+
+  // ───────────────────── Step 8: tiered OT rules (Thai LPA) ─────────────────────
+  // Effective rules = the statutory defaults overlaid with any per-tenant override rows.
+  async getOtRules(user: JwtUser) {
+    const db = this.db as any;
+    const overrides = await db.select().from(laborOtRules).where(eq(laborOtRules.tenantId, user.tenantId as number));
+    const byType = new Map<string, any>(overrides.map((o: any) => [o.ruleType, o]));
+    const rules = Object.entries(THAI_OT_DEFAULTS).map(([rule_type, d]) => {
+      const o = byType.get(rule_type);
+      return {
+        rule_type,
+        multiplier: o ? n(o.multiplier) : d.multiplier,
+        daily_trigger_hours: o ? o.dailyTriggerHours : d.daily,
+        weekly_trigger_hours: o ? o.weeklyTriggerHours : d.weekly,
+        source: o ? 'override' : 'statutory_default',
+      };
+    });
+    return { rules, weekly_cap_hours: 48 };
+  }
+
+  async upsertOtRule(dto: { rule_type: string; multiplier: number; daily_trigger_hours?: number; weekly_trigger_hours?: number }, user: JwtUser) {
+    const db = this.db as any;
+    if (!THAI_OT_DEFAULTS[dto.rule_type]) throw new BadRequestException({ code: 'BAD_RULE_TYPE', message: 'rule_type must be REGULAR_OT/HOLIDAY/HOLIDAY_OT/NIGHT', messageTh: 'ประเภทกฎ OT ไม่ถูกต้อง' });
+    const d = THAI_OT_DEFAULTS[dto.rule_type];
+    await db.insert(laborOtRules).values({
+      tenantId: user.tenantId, ruleType: dto.rule_type, multiplier: fx(dto.multiplier, 2),
+      dailyTriggerHours: dto.daily_trigger_hours ?? d.daily, weeklyTriggerHours: dto.weekly_trigger_hours ?? d.weekly,
+    }).onConflictDoUpdate({
+      target: [laborOtRules.tenantId, laborOtRules.ruleType],
+      set: { multiplier: fx(dto.multiplier, 2), dailyTriggerHours: dto.daily_trigger_hours ?? d.daily, weeklyTriggerHours: dto.weekly_trigger_hours ?? d.weekly },
+    });
+    return this.getOtRules(user);
+  }
+
+  // Compute OT pay for one rule tier, capping the paid hours at the weekly statutory limit (48h) so an
+  // entry beyond the cap is flagged, not silently paid.
+  async computeOtPay(dto: { rule_type: string; ot_hours: number; hourly_rate: number; week_hours_already?: number }, user: JwtUser) {
+    const { rules, weekly_cap_hours } = await this.getOtRules(user);
+    const rule = rules.find((r) => r.rule_type === (dto.rule_type || 'REGULAR_OT'));
+    if (!rule) throw new BadRequestException({ code: 'BAD_RULE_TYPE', message: 'unknown rule_type', messageTh: 'ประเภทกฎ OT ไม่ถูกต้อง' });
+    const already = Math.max(0, n(dto.week_hours_already));
+    const otHours = Math.max(0, n(dto.ot_hours));
+    const roomToCap = Math.max(0, weekly_cap_hours - already);
+    const paidHours = Math.min(otHours, roomToCap);
+    const cappedHours = round2(otHours - paidHours);
+    const pay = round2(paidHours * Math.max(0, n(dto.hourly_rate)) * rule.multiplier);
+    return { rule_type: rule.rule_type, multiplier: rule.multiplier, ot_hours: otHours, paid_hours: round2(paidHours), capped_hours: cappedHours, weekly_cap_hours, over_cap: cappedHours > 0, pay };
+  }
+
+  // ───────────────────── Step 8: labor-% alert ─────────────────────
+  // Compute the labor summary for a period and, if labor % of sales exceeds the target, persist + return a
+  // LABOR_PCT_EXCEEDED alert (idempotent per tenant/period). The manager's "are we over on labor?" check.
+  async checkLaborAlert(opts: { from: string; to: string; threshold?: number; branch_id?: number }, user: JwtUser) {
+    const db = this.db as any;
+    const threshold = opts.threshold != null ? n(opts.threshold) : DEFAULT_LABOR_PCT_TARGET;
+    const summary = await this.laborSummary({ from: opts.from, to: opts.to }, user);
+    const exceeded = summary.labor_pct > threshold;
+    let alert: any = null;
+    if (exceeded) {
+      const [existing] = await db.select().from(laborAlerts).where(and(
+        eq(laborAlerts.tenantId, user.tenantId as number), eq(laborAlerts.periodFrom, opts.from), eq(laborAlerts.periodTo, opts.to),
+        sql`${laborAlerts.alertType}::text = 'LABOR_PCT_EXCEEDED'`, sql`${laborAlerts.resolvedAt} is null`,
+      )).limit(1);
+      if (existing) {
+        await db.update(laborAlerts).set({ thresholdPct: fx(threshold, 4), actualPct: fx(summary.labor_pct, 4) }).where(eq(laborAlerts.id, existing.id));
+        alert = { ...existing, threshold_pct: threshold, actual_pct: summary.labor_pct };
+      } else {
+        const [row] = await db.insert(laborAlerts).values({
+          tenantId: user.tenantId, branchId: opts.branch_id ?? null, periodFrom: opts.from, periodTo: opts.to,
+          alertType: 'LABOR_PCT_EXCEEDED', thresholdPct: fx(threshold, 4), actualPct: fx(summary.labor_pct, 4),
+        }).returning();
+        alert = row;
+      }
+    }
+    return { ...summary, threshold_pct: threshold, exceeded, alert_id: alert ? Number(alert.id) : null };
+  }
+
+  async listAlerts(user: JwtUser, opts?: { resolved?: boolean }) {
+    const db = this.db as any;
+    const conds = [eq(laborAlerts.tenantId, user.tenantId as number)];
+    if (opts?.resolved === false) conds.push(sql`${laborAlerts.resolvedAt} is null`);
+    if (opts?.resolved === true) conds.push(sql`${laborAlerts.resolvedAt} is not null`);
+    const rows = await db.select().from(laborAlerts).where(and(...conds)).orderBy(asc(laborAlerts.id)).limit(500);
+    return { alerts: rows.map((r: any) => ({ id: Number(r.id), branch_id: r.branchId, period_from: r.periodFrom, period_to: r.periodTo, alert_type: r.alertType, threshold_pct: n(r.thresholdPct), actual_pct: n(r.actualPct), resolved_at: r.resolvedAt })), count: rows.length };
+  }
+
+  async resolveAlert(id: number, user: JwtUser) {
+    const db = this.db as any;
+    const [row] = await db.select().from(laborAlerts).where(and(eq(laborAlerts.id, id), eq(laborAlerts.tenantId, user.tenantId as number))).limit(1);
+    if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Alert not found', messageTh: 'ไม่พบการแจ้งเตือน' });
+    await db.update(laborAlerts).set({ resolvedAt: new Date() }).where(eq(laborAlerts.id, id));
+    return { id, resolved: true };
   }
 
   private shape(r: any) {

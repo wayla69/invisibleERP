@@ -62,3 +62,32 @@ export const shiftSchedules = pgTable('shift_schedules', {
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+// Step 8 — tiered overtime rules (Thai LPA): a per-tenant override of the multiplier + daily/weekly trigger
+// hours per rule type. The service falls back to the statutory defaults (REGULAR_OT 1.5×, HOLIDAY 2×,
+// HOLIDAY_OT 3×, NIGHT 1.0×; 8h/day, 48h/week) when a tenant has no override.
+export const laborOtRules = pgTable('labor_ot_rules', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  ruleType: text('rule_type').notNull(),                    // REGULAR_OT | HOLIDAY | HOLIDAY_OT | NIGHT
+  multiplier: numeric('multiplier', { precision: 4, scale: 2 }).notNull().default('1.5'),
+  dailyTriggerHours: integer('daily_trigger_hours').notNull().default(8),
+  weeklyTriggerHours: integer('weekly_trigger_hours').notNull().default(48),
+  effectiveFrom: text('effective_from'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// Step 8 — labor-% alerts: when scheduled labor cost exceeds a target % of sales for a period, an alert is
+// raised so the manager can act (cut a shift, push sales). Operational — no GL.
+export const laborAlerts = pgTable('labor_alerts', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  branchId: bigint('branch_id', { mode: 'number' }),
+  periodFrom: text('period_from'),
+  periodTo: text('period_to'),
+  alertType: text('alert_type').notNull(),                  // LABOR_PCT_EXCEEDED | OT_CAP_APPROACHING | SCHEDULE_GAP
+  thresholdPct: numeric('threshold_pct', { precision: 7, scale: 4 }),
+  actualPct: numeric('actual_pct', { precision: 7, scale: 4 }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
