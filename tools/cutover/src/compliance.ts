@@ -675,6 +675,13 @@ async function main() {
     invNear(invRec.json.sub_ledger_value, 1540) && invNear(invRec.json.gl_inventory, 1540) && invRec.json.reconciled === true,
     `sub=${invRec.json.sub_ledger_value} gl=${invRec.json.gl_inventory} rec=${invRec.json.reconciled}`);
 
+  // REC-04 — period-end control-account reconciliation PACK ties every sub-ledger to its GL control account.
+  const recPack = await inj('GET', '/api/finance/reconciliation/controls', admin);
+  const inv1200 = (recPack.json.lines ?? []).find((l: any) => l.account === '1200');
+  ok('REC-04: control-account pack lists 5 accounts (1100/2000/1200/2200/2400); inventory 1200 sub-ledger ties to GL',
+    (recPack.json.lines ?? []).length === 5 && ['1100', '2000', '1200', '2200', '2400'].every((a) => (recPack.json.lines ?? []).some((l: any) => l.account === a)) && inv1200?.reconciled === true && invNear(inv1200.sub_ledger, 1540) && typeof recPack.json.exceptions === 'number',
+    JSON.stringify({ n: recPack.json.lines?.length, inv: inv1200?.sub_ledger, rec: inv1200?.reconciled, exc: recPack.json.exceptions }));
+
   console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -450,6 +450,31 @@ export class FinanceService {
       ar: { sub_ledger: n(arSub?.v), gl_control: arGl, reconciled: Math.abs(n(arSub?.v) - arGl) < 0.01 },
       ap: { sub_ledger: n(apSub?.v), gl_control: apGl, reconciled: Math.abs(n(apSub?.v) - apGl) < 0.01 },
     };
+  }
+
+  // REC-04 — period-end control-account reconciliation PACK. Ties every major sub-ledger to its GL control
+  // account in one view and flags any out-of-balance (a detective control over completeness/accuracy across
+  // the whole close): AR↔1100, AP↔2000, Inventory↔1200, Gift cards↔2200, Deferred revenue↔2400. Liability
+  // controls (2000/2200/2400) carry a credit balance, so the GL balance is sign-flipped to compare to the
+  // (positive) sub-ledger open value. Tenant-scoped via the caller's RLS (HQ/Admin aggregates all tenants).
+  async reconcileControls() {
+    const db = this.db as any;
+    const tb: any = this.ledger ? await this.ledger.trialBalance() : { rows: [] };
+    const glBal = (code: string) => { const r = tb.rows.find((x: any) => x.account_code === code); return r ? n(r.balance) : 0; };
+    const [arSub] = await db.select({ v: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)),0)` }).from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
+    const [apSub] = await db.select({ v: sql<string>`coalesce(sum(${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)),0)` }).from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
+    const [invSub] = await db.select({ v: sql<string>`coalesce(sum(${invBalances.totalValue}),0)` }).from(invBalances);
+    const [gcSub] = await db.select({ v: sql<string>`coalesce(sum(${giftCards.balance}),0)` }).from(giftCards).where(sql`${giftCards.status}::text = 'Active'`);
+    const [drSub] = await db.select({ v: sql<string>`coalesce(sum(${revRecLines.amount}),0)` }).from(revRecLines).where(eq(revRecLines.recognized, false));
+    const mk = (account: string, label: string, sub: number, gl: number) => { const s = round2(sub), g = round2(gl); return { account, label, sub_ledger: s, gl_control: g, variance: round2(s - g), reconciled: Math.abs(s - g) < 0.01 }; };
+    const lines = [
+      mk('1100', 'ลูกหนี้การค้า (AR)', n(arSub?.v), glBal('1100')),
+      mk('2000', 'เจ้าหนี้การค้า (AP)', n(apSub?.v), -glBal('2000')),
+      mk('1200', 'สินค้าคงเหลือ (Inventory)', n(invSub?.v), glBal('1200')),
+      mk('2200', 'บัตรของขวัญ / เงินรับล่วงหน้า (Gift cards)', n(gcSub?.v), -glBal('2200')),
+      mk('2400', 'รายได้รอตัดบัญชี (Deferred revenue)', n(drSub?.v), -glBal('2400')),
+    ];
+    return { as_of: ymd(), lines, all_reconciled: lines.every((l) => l.reconciled), exceptions: lines.filter((l) => !l.reconciled).length };
   }
 }
 
