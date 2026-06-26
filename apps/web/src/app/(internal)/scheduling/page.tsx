@@ -43,6 +43,18 @@ export default function SchedulingPage() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  const alerts = useQuery<{ alerts: any[]; count: number }>({ queryKey: ['labor-alerts'], queryFn: () => api('/api/pos/labor/alerts?resolved=false') });
+  const checkAlert = useMutation({
+    mutationFn: () => api('/api/pos/labor/labor-alert/check', { method: 'POST', body: JSON.stringify({ from, to, threshold: 35 }) }),
+    onSuccess: (r: any) => { notifySuccess(r?.exceeded ? `แรงงาน ${num(r.labor_pct)}% เกินเป้า — แจ้งเตือนแล้ว` : `แรงงาน ${num(r.labor_pct)}% อยู่ในเป้า`); qc.invalidateQueries({ queryKey: ['labor-alerts'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const resolveAlert = useMutation({
+    mutationFn: (id: number) => api(`/api/pos/labor/alerts/${id}/resolve`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess('ปิดการแจ้งเตือนแล้ว'); qc.invalidateQueries({ queryKey: ['labor-alerts'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const sm = summary.data;
   return (
     <ModulePage
@@ -63,7 +75,19 @@ export default function SchedulingPage() {
         <Button size="sm" variant="outline" onClick={() => setFrom(addDays(from, -7))}>← สัปดาห์ก่อน</Button>
         <span className="text-sm font-medium">{thaiDate(from)} – {thaiDate(to)}</span>
         <Button size="sm" variant="outline" onClick={() => setFrom(addDays(from, 7))}>สัปดาห์ถัดไป →</Button>
+        <Button size="sm" variant="outline" disabled={checkAlert.isPending} onClick={() => checkAlert.mutate()}>ตรวจแรงงาน % (เป้า 35%)</Button>
       </div>
+
+      {(alerts.data?.alerts?.length ?? 0) > 0 && (
+        <div className="mb-4 space-y-2">
+          {alerts.data!.alerts.map((a) => (
+            <div key={a.id} className="flex items-center justify-between rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-2 text-sm">
+              <span>⚠️ แรงงาน <b>{num(a.actual_pct)}%</b> เกินเป้า {num(a.threshold_pct)}% · งวด {a.period_from} – {a.period_to}</span>
+              <Button size="sm" variant="ghost" onClick={() => resolveAlert.mutate(a.id)}>ปิด</Button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mb-4 rounded-xl border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">เพิ่มกะงาน</h3>

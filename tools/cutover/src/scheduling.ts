@@ -92,6 +92,33 @@ async function main() {
   const t2list = await inj('GET', '/api/pos/labor/shifts?from=2026-07-01&to=2026-07-07', mgr2);
   ok('RLS: T2 sees 0 of T1 shifts', t2list.json.count === 0, `t2=${t2list.json.count}`);
 
+  // ── 7. Step 8: tiered OT rules (Thai LPA) ──
+  const otr = await inj('GET', '/api/pos/labor/ot-rules', mgr1);
+  const reg = (otr.json.rules ?? []).find((r: any) => r.rule_type === 'REGULAR_OT');
+  const hol = (otr.json.rules ?? []).find((r: any) => r.rule_type === 'HOLIDAY_OT');
+  ok('OT rules: Thai defaults (REGULAR_OT 1.5×, HOLIDAY_OT 3×, weekly cap 48)', reg?.multiplier === 1.5 && hol?.multiplier === 3 && otr.json.weekly_cap_hours === 48, JSON.stringify(otr.json.rules?.map((r: any) => `${r.rule_type}:${r.multiplier}`)));
+  const putR = await inj('PUT', '/api/pos/labor/ot-rules', mgr1, { rule_type: 'REGULAR_OT', multiplier: 2.0 });
+  ok('OT rules: per-tenant override REGULAR_OT → 2.0 (source override)', (putR.json.rules ?? []).find((r: any) => r.rule_type === 'REGULAR_OT')?.multiplier === 2 && (putR.json.rules ?? []).find((r: any) => r.rule_type === 'REGULAR_OT')?.source === 'override', JSON.stringify(putR.json.rules?.find((r: any) => r.rule_type === 'REGULAR_OT')));
+  const pay = await inj('POST', '/api/pos/labor/ot-pay', mgr1, { rule_type: 'HOLIDAY_OT', ot_hours: 2, hourly_rate: 100 });
+  ok('OT pay: HOLIDAY_OT 2h × ฿100 × 3 = ฿600', near(pay.json.pay, 600) && pay.json.multiplier === 3, JSON.stringify(pay.json));
+  const cap = await inj('POST', '/api/pos/labor/ot-pay', mgr1, { rule_type: 'REGULAR_OT', ot_hours: 5, hourly_rate: 100, week_hours_already: 47 });
+  ok('OT pay: 48h weekly cap → only 1h paid, 4h over-cap flagged', near(cap.json.paid_hours, 1) && near(cap.json.capped_hours, 4) && cap.json.over_cap === true, JSON.stringify(cap.json));
+
+  // ── 8. Step 8: labor-% alert ──
+  const chkHi = await inj('POST', '/api/pos/labor/labor-alert/check', mgr1, { from: '2026-07-01', to: '2026-07-07', threshold: 5 });
+  ok('Labor alert: 8% > 5% target → exceeded + alert raised', chkHi.json.exceeded === true && near(chkHi.json.labor_pct, 8) && chkHi.json.alert_id != null, JSON.stringify({ ex: chkHi.json.exceeded, pct: chkHi.json.labor_pct, id: chkHi.json.alert_id }));
+  const chkReHi = await inj('POST', '/api/pos/labor/labor-alert/check', mgr1, { from: '2026-07-01', to: '2026-07-07', threshold: 5 });
+  ok('Labor alert: re-check is idempotent per period (same alert id)', chkReHi.json.alert_id === chkHi.json.alert_id, `${chkHi.json.alert_id} ${chkReHi.json.alert_id}`);
+  const chkLo = await inj('POST', '/api/pos/labor/labor-alert/check', mgr1, { from: '2026-07-01', to: '2026-07-07', threshold: 50 });
+  ok('Labor alert: 17.6% < 50% target → not exceeded, no new alert', chkLo.json.exceeded === false && chkLo.json.alert_id == null, JSON.stringify({ ex: chkLo.json.exceeded }));
+  const alerts = await inj('GET', '/api/pos/labor/alerts?resolved=false', mgr1);
+  ok('Labor alert: open alerts list includes the raised one', (alerts.json.alerts ?? []).some((a: any) => a.id === chkHi.json.alert_id && a.alert_type === 'LABOR_PCT_EXCEEDED'), `n=${alerts.json.count}`);
+  const res = await inj('POST', `/api/pos/labor/alerts/${chkHi.json.alert_id}/resolve`, mgr1, {});
+  ok('Labor alert: resolve clears it from the open list', res.json.resolved === true && !(await inj('GET', '/api/pos/labor/alerts?resolved=false', mgr1)).json.alerts.some((a: any) => a.id === chkHi.json.alert_id), `${res.json.resolved}`);
+  // RLS: T2 manager sees none of T1's alerts
+  const t2alerts = await inj('GET', '/api/pos/labor/alerts', mgr2);
+  ok('RLS: T2 sees 0 of T1 labor alerts', t2alerts.json.count === 0, `t2=${t2alerts.json.count}`);
+
   await app.close();
   await pg.close();
   console.log('\n── Labor Shift scheduling + labor % (จัดตารางเวร + แรงงาน%) ──');
