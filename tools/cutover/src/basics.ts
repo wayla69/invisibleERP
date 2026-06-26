@@ -418,6 +418,35 @@ async function main() {
   const dispAppr = await inj('POST', '/api/assets/FA-EAM2/dispose/approve', mgr);
   ok('Asset disposal approved by a different user → disposed + recycles surplus to RE (Dr 3200 / Cr 3100)', dispAppr.json?.status === 'disposed' && dispAppr.json?.revaluation_surplus_recycled === 10000 && near(await tbBalance('3200'), surplus3200Before + 10000), `recycled=${dispAppr.json?.revaluation_surplus_recycled} 3200bal=${await tbBalance('3200')}`);
 
+  // ───────────────── Procure-to-Capitalize: PR → PO → GR → asset register (FA-10 maker-checker) ─────────────────
+  // A capital purchase line, when received, is capitalised onto the asset register via a maker-checker
+  // request — receiving goods and putting them on the books (and at what cost) are segregated duties, and
+  // the asset carries its source GR/PO for end-to-end traceability.
+  const prCap = await inj('POST', '/api/procurement/prs', admin, { remarks: 'Need 2 laptops', priority: 'Normal', items: [{ item_id: 'LAPTOP', item_description: 'Dev laptop', request_qty: 2, uom: 'EA', reason: 'capex' }] });
+  ok('Capitalize: PR raised for the capital request', prCap.status === 201 && /^PR-/.test(prCap.json?.pr_no ?? ''), JSON.stringify(prCap.json).slice(0, 80));
+  const poCap = await inj('POST', '/api/procurement/pos', admin, { vendor_name: 'Capital Vendor', expected_date: daysAgo(0), items: [{ item_id: 'LAPTOP', item_description: 'Dev laptop', order_qty: 2, unit_price: 25000, uom: 'EA', is_capital: true }] });
+  ok('Capitalize: PO raised with a capital line (2 @ 25000 = 50000)', poCap.status === 201 && /^PO-/.test(poCap.json?.po_no ?? '') && near(poCap.json?.total_amount, 50000), JSON.stringify(poCap.json).slice(0, 90));
+  await inj('PATCH', `/api/procurement/pos/${poCap.json?.po_no}/approve`, admin, { approve: true });
+  const grCap = await inj('POST', '/api/procurement/grs', admin, { po_no: poCap.json?.po_no, items: [{ item_id: 'LAPTOP', received_qty: 2, unit_cost: 25000, uom: 'EA' }] });
+  ok('Capitalize: GR receives the capital line, PO auto-closes', grCap.status === 201 && /^GR-/.test(grCap.json?.gr_no ?? '') && grCap.json?.po_status === 'Closed', JSON.stringify(grCap.json).slice(0, 90));
+  // Capital goods must NOT be capitalised into inventory (1200) at receipt — they route to 1500 via FA-10.
+  const elig = (await inj('GET', `/api/assets/registrations/eligible?gr_no=${grCap.json?.gr_no}`, admin)).json;
+  ok('Capitalize: GR capital line is eligible for capitalisation (suggested cost = 50000)', (elig.eligible ?? []).length === 1 && near(elig.eligible?.[0]?.suggested_cost, 50000), `n=${elig.eligible?.length} cost=${elig.eligible?.[0]?.suggested_cost}`);
+  const grItemId = elig.eligible?.[0]?.gr_item_id;
+  const cap1500Before = await tbDebit('1500');
+  const cap2000Before = await tbCredit2('2000');
+  const regReq = await inj('POST', '/api/assets/registrations', admin, { gr_no: grCap.json?.gr_no, gr_item_id: grItemId, name: 'Dev laptop (capex)', useful_life_months: 36 });
+  ok('Capitalize: registration raised as PendingApproval — NO GL yet (Dr 1500 unchanged)', regReq.status === 201 && regReq.json?.status === 'PendingApproval' && near(regReq.json?.acquire_cost, 50000) && near(await tbDebit('1500'), cap1500Before), `st=${regReq.json?.status} 1500=${await tbDebit('1500')}`);
+  const regSelf = await inj('POST', `/api/assets/registrations/${regReq.json?.reg_no}/approve`, admin);
+  ok('Capitalize: preparer self-approval blocked → 403 SOD_VIOLATION (FA-10)', regSelf.status === 403 && regSelf.json?.error?.code === 'SOD_VIOLATION', `${regSelf.status} ${regSelf.json?.error?.code}`);
+  const regAppr = await inj('POST', `/api/assets/registrations/${regReq.json?.reg_no}/approve`, mgr);
+  ok('Capitalize: a different user approves → asset created, GL posts (Dr 1500 / Cr 2000 +50000)', regAppr.status === 201 && /^FA-/.test(regAppr.json?.asset_no ?? '') && /^JE-/.test(regAppr.json?.journal_no ?? '') && near(await tbDebit('1500'), cap1500Before + 50000) && near(await tbCredit2('2000'), cap2000Before + 50000), `asset=${regAppr.json?.asset_no} 1500=${await tbDebit('1500')}`);
+  const capReg = (await inj('GET', '/api/assets', admin)).json;
+  const newFa = (capReg.assets ?? []).find((x: any) => x.asset_no === regAppr.json?.asset_no);
+  ok('Capitalize: new asset is on the register with source GR/PO traceability', !!newFa && newFa.source_gr_no === grCap.json?.gr_no && newFa.source_po_no === poCap.json?.po_no && near(newFa.acquire_cost, 50000), `gr=${newFa?.source_gr_no} po=${newFa?.source_po_no}`);
+  const regDup = await inj('POST', '/api/assets/registrations', admin, { gr_no: grCap.json?.gr_no, gr_item_id: grItemId, name: 'dup', useful_life_months: 36 });
+  ok('Capitalize: the same GR line cannot be capitalised twice (ALREADY_REGISTERED)', regDup.status === 400 && regDup.json?.error?.code === 'ALREADY_REGISTERED', `st=${regDup.status} code=${regDup.json?.error?.code}`);
+
   // ───────────────────── Perpetual inventory valuation sub-ledger (INV-01..04) ─────────────────────
   // Run in a dedicated tenant so the inventory control account (1200) is isolated from the cash-flow seed.
   const [invT] = await db.insert(s.tenants).values({ code: 'INVT', name: 'Inventory Co' }).returning({ id: s.tenants.id });

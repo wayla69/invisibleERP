@@ -230,6 +230,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-032 | Maker without approval authority blocked | EXP-06 | 02 §7, §9 |
 | UAT-P2P-033 | Reject leaves bill unpaid | EXP-06 | 02 §7, §9 |
 | UAT-UI-SUP-01 | Supplier portal screen (vendor self-service) — PO ack + invoice submit | Feature (supplier portal UI) | 02 §7 |
+| UAT-P2P-040 | Capital PO line → GR eligible (not stocked) | FA-10 | 02 §7, 09 §7 |
+| UAT-P2P-041 | Register asset from GR → PendingApproval, no GL | FA-10 | 09 §7 |
+| UAT-P2P-042 | Capitalization self-approval blocked (SoD, incl. Admin) | FA-10, R07 | 09 §7 |
+| UAT-P2P-043 | Independent approval creates asset + posts GL (Dr 1500/Cr 2000) | FA-10, GL-01 | 09 §7 |
+| UAT-P2P-044 | GR line cannot be capitalised twice | FA-10 | 09 §7 |
+| UAT-UI-CAP-01 | Capitalize-from-GR screen (eligible → request → approve) | FA-10 | 09 §7 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
 

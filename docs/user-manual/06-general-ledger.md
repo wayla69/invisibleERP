@@ -304,7 +304,7 @@ deferred tax).
 
 **Screen:** `/assets` · **Required permission:** `exec` / `creditors` (finance).
 
-Tabs: Register, QR Tags, Categories, Depreciation Runs.
+Tabs: Register, **ตั้งทรัพย์สินจาก GR (Capitalize from GR)**, QR Tags, Categories, Depreciation Runs.
 
 ### Acquire an asset
 
@@ -315,6 +315,35 @@ Tabs: Register, QR Tags, Categories, Depreciation Runs.
 
 **Expected result:** The asset is registered and the purchase posts to the ledger
 (Dr Fixed Assets / Cr Cash).
+
+### Register an asset from a goods receipt (Procure-to-Capitalize)
+
+Capital goods bought through procurement become fixed assets here instead of being
+typed in by hand — keeping an audit trail from **PR → PO → GR → asset**.
+
+1. Flag the purchase as capital: either set **is_fixed_asset** on the item master, or
+   tick **ทุน (capital)** on the PO line when creating the order. When the goods are
+   received (GR), capital lines are **not** added to inventory stock — they wait to be
+   capitalized.
+2. Go to **Assets** (`/assets`) → **ตั้งทรัพย์สินจาก GR**, enter the **GR number** and
+   click **ค้นหา (Search)**. Eligible capital lines are listed with their suggested cost
+   (received qty × unit cost).
+3. Click **ตั้งทรัพย์สิน (Register)** on a line, give the asset a **name** and **useful
+   life (months)**, and **ส่งคำขอ (Submit request)**.
+
+**Expected result:** a registration request (**FAR-…**) is created as
+**"รออนุมัติ" (PendingApproval)** — nothing posts to the books yet.
+
+#### Approval (required before it counts) — two people
+
+Like disposal, capitalization uses **maker-checker** (the person who receives goods
+must not also decide, alone, what goes on the asset register and at what value). A
+**different** person opens the **"คำขอตั้งทรัพย์สินที่รออนุมัติ"** queue on the same tab and
+clicks **อนุมัติ (Approve)** — only then is the fixed asset created and the acquisition
+entry posts (**Dr Fixed Assets 1500 / Cr Accounts Payable 2000**). **You cannot approve
+your own request** (`SOD_VIOLATION`, binds **everyone, including Admin**). **ปฏิเสธ (Reject)**
+re-opens the line so it can be raised again. A GR line cannot be capitalized twice
+(`ALREADY_REGISTERED`). The created asset shows its **source GR / PO** on the register.
 
 ### Run monthly depreciation
 
