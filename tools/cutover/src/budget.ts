@@ -130,6 +130,27 @@ async function main() {
   const l1 = await inj('GET', '/api/ledger/budgets?fiscal_year=2031', plan1);
   ok('RLS: T1 sees only its 2031 budget (111, not 222)', l1.json.count === 1 && near(l1.json.budgets?.[0]?.amount, 111), JSON.stringify(l1.json.budgets));
 
+  // ── ELC-06: budget-variance management review — materiality flag + recorded sign-off ──
+  await setBudget({ fiscal_year: 2032, account_code: '5100', mode: 'monthly', period: '2032-06', amount: 5000 });
+  await J('2032-06-10', [{ account_code: '5100', debit: 7000 }, { account_code: '1000', credit: 7000 }]); // actual 7000 vs budget 5000 → +2000 (40%)
+  const elc = await inj('GET', '/api/ledger/budget-vs-actual?fiscal_year=2032&period=2032-06', admin);
+  const elc5100 = row(elc, '5100');
+  ok('ELC-06: a material unfavourable variance is flagged (material + requires_review); review summary counts it',
+    elc5100?.material === true && elc5100?.requires_review === true && elc.json.review?.material_count >= 1 && elc.json.review?.requires_review_count >= 1 && elc.json.review?.last_signoff === null,
+    JSON.stringify({ m: elc5100?.material, rr: elc5100?.requires_review, mc: elc.json.review?.material_count, ls: elc.json.review?.last_signoff }));
+  const soNoNotes = await inj('POST', '/api/ledger/budget-review/sign-off', admin, { fiscal_year: 2032, period: '2032-06' });
+  ok('ELC-06: sign-off requires a review note (400)', soNoNotes.status === 400, `${soNoNotes.status} ${soNoNotes.json?.error?.code}`);
+  const so = await inj('POST', '/api/ledger/budget-review/sign-off', admin, { fiscal_year: 2032, period: '2032-06', notes: 'สอบทานแล้ว 5100 เกินงบ 40% — ติดตามกับฝ่ายผลิต' });
+  ok('ELC-06: management sign-off records the review (material_count captured, reviewer set)',
+    so.status === 200 && so.json.material_count >= 1 && so.json.reviewed_by === 'admin' && near(so.json.unfavorable_total, 2000),
+    JSON.stringify({ mc: so.json.material_count, by: so.json.reviewed_by, uf: so.json.unfavorable_total }));
+  const elc2 = await inj('GET', '/api/ledger/budget-vs-actual?fiscal_year=2032&period=2032-06', admin);
+  ok('ELC-06: the report now shows the latest sign-off (review evidence on the period)',
+    elc2.json.review?.last_signoff?.reviewed_by === 'admin' && elc2.json.review?.last_signoff?.material_count >= 1,
+    JSON.stringify(elc2.json.review?.last_signoff));
+  const revList = await inj('GET', '/api/ledger/budget-reviews?fiscal_year=2032', admin);
+  ok('ELC-06: review history lists the sign-off', revList.json.count >= 1 && (revList.json.reviews ?? []).some((r: any) => r.reviewed_by === 'admin'), JSON.stringify({ n: revList.json.count }));
+
   await app.close();
   await pg.close();
 

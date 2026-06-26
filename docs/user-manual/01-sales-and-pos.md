@@ -107,6 +107,27 @@ On the register, **ชำระเงิน** opens a full payment screen:
 **Expected result:** The payment is captured and a receipt can be printed or
 sent.
 
+### Selling when the internet is down (offline)
+
+The register keeps working if the network drops. A badge in the top bar shows
+**ออนไลน์** or **ออฟไลน์ — บันทึกในเครื่อง**.
+
+- While **offline**, ring up a **quick cash sale** as usual. On payment the screen
+  confirms **บันทึกออฟไลน์แล้ว** — the bill is stored safely on the device. (It does
+  not yet have a sale number or a printed receipt; those are issued when it syncs.)
+- A **รอซิงค์ N** button shows how many bills are waiting.
+- When the connection returns, the register **automatically sends the waiting bills**
+  to the server (you can also tap **รอซิงค์** to sync now). Each bill is posted
+  **exactly once** — re-sending never creates a duplicate. The synced sale then
+  appears in **รายการออเดอร์** with its real sale number.
+
+> **Table (dine-in) sales need the internet** (the kitchen display and table state
+> are live), so offline selling is limited to **quick sales**. If you're offline with
+> a table attached, remove the table and ring it as a quick sale. *(Control BRANCH-03 —
+> no offline sale is lost or double-counted.)*
+
+[screenshot: register offline badge + รอซิงค์ pending bills]
+
 ### Printing / sending the receipt
 
 **Screen:** `/print` (**ใบเสร็จ & งานพิมพ์**) · **Required permission:** `pos` /

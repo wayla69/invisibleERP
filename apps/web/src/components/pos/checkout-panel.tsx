@@ -21,7 +21,7 @@ const METHODS: { id: Method; label: string; icon: typeof Banknote }[] = [
   { id: 'Transfer', label: 'โอน', icon: ArrowLeftRight },
 ];
 
-export interface SettleResult { sale_no: string; total: number; change?: number }
+export interface SettleResult { sale_no: string; total: number; change?: number; offline?: boolean }
 
 export function CheckoutPanel({
   lines, onSettle, onReprint, onSendReceipt, onClose, onFinish,
@@ -72,9 +72,11 @@ export function CheckoutPanel({
       <Dialog open onOpenChange={() => onFinish()}>
         <DialogContent className="max-w-md text-center">
           <div className="flex flex-col items-center gap-3 py-2">
-            <CheckCircle2 className="size-14 text-success" />
-            <h2 className="text-xl font-semibold">ขายสำเร็จ</h2>
-            <p className="text-sm text-muted-foreground">เลขที่ขาย <strong className="text-foreground">{result.sale_no}</strong></p>
+            <CheckCircle2 className={cn('size-14', result.offline ? 'text-warning' : 'text-success')} />
+            <h2 className="text-xl font-semibold">{result.offline ? 'บันทึกออฟไลน์แล้ว' : 'ขายสำเร็จ'}</h2>
+            {result.offline
+              ? <p className="text-sm text-muted-foreground">บิลถูกเก็บไว้ในเครื่อง — จะออกเลขที่ขายและใบเสร็จเมื่อกลับมาออนไลน์</p>
+              : <p className="text-sm text-muted-foreground">เลขที่ขาย <strong className="text-foreground">{result.sale_no}</strong></p>}
             <div className="tabular text-3xl font-bold">{baht(result.total)}</div>
             {result.change != null && result.change > 0 && (
               <div className="rounded-lg bg-success/10 px-4 py-2 text-success">
@@ -83,26 +85,32 @@ export function CheckoutPanel({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => onReprint(result.sale_no).catch((e) => notifyError((e as Error).message))}>
-              <Printer className="size-4" /> พิมพ์ใบเสร็จ
-            </Button>
-            <Button onClick={onFinish}>ขายต่อไป</Button>
-          </div>
+          {result.offline ? (
+            <Button className="w-full" onClick={onFinish}>ขายต่อไป</Button>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => onReprint(result.sale_no).catch((e) => notifyError((e as Error).message))}>
+                  <Printer className="size-4" /> พิมพ์ใบเสร็จ
+                </Button>
+                <Button onClick={onFinish}>ขายต่อไป</Button>
+              </div>
 
-          <div className="mt-1 flex items-center gap-2 border-t pt-3">
-            <Input placeholder="อีเมล / LINE ID ลูกค้า" value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!sendTo}
-              onClick={() => onSendReceipt(result.sale_no, sendTo.includes('@') ? 'email' : 'line', sendTo)
-                .then(() => notifySuccess('ส่งใบเสร็จแล้ว'))
-                .catch((e) => notifyError((e as Error).message))}
-            >
-              <Send className="size-4" /> ส่ง
-            </Button>
-          </div>
+              <div className="mt-1 flex items-center gap-2 border-t pt-3">
+                <Input placeholder="อีเมล / LINE ID ลูกค้า" value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!sendTo}
+                  onClick={() => onSendReceipt(result.sale_no, sendTo.includes('@') ? 'email' : 'line', sendTo)
+                    .then(() => notifySuccess('ส่งใบเสร็จแล้ว'))
+                    .catch((e) => notifyError((e as Error).message))}
+                >
+                  <Send className="size-4" /> ส่ง
+                </Button>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     );
