@@ -307,6 +307,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'รับรู้รายได้', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'สินทรัพย์ถาวร', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
           { label: 'สัญญาเช่า (IFRS 16)', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
+          { label: 'ปิดงวดบัญชี (Period-close)', href: '/finance/period-close', icon: CalendarClock, perms: ['gl_close', 'exec'] },
         ],
       },
       {
@@ -353,6 +354,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
       { label: 'จัดตารางเวร & แรงงาน', href: '/scheduling', icon: CalendarRange, perms: ['pos', 'users', 'exec'] },
+      { label: 'กฎ OT & แจ้งเตือนแรงงาน', href: '/labor/ot-rules', icon: Timer, perms: ['pos', 'users', 'exec'] },
       { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
       // self-service is for every employee (incl. POS staff) → cross-listed to both surfaces
       { label: 'พื้นที่พนักงาน (ESS)', href: '/ess', icon: IdCard, perms: ['ess'], workspace: BOTH },
