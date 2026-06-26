@@ -11,7 +11,7 @@ const OppBody = z.object({ name: z.string().min(1), customer_no: z.string().opti
 const StageBody = z.object({ stage: z.string().min(1), lost_reason: z.string().optional(), probability: z.number().int().min(0).max(100).optional() });
 const ActivityBody = z.object({ entity_type: z.enum(['lead', 'opportunity']), entity_no: z.string().min(1), type: z.enum(['call', 'email', 'meeting', 'note', 'task']), subject: z.string().optional(), notes: z.string().optional(), due_date: z.string().optional(), done: z.boolean().optional() });
 
-// CRM sales pipeline (REV-16) — leads → opportunities (stage machine) → activities, on the customer-of-record.
+// CRM sales pipeline (REV-17) — leads → opportunities (stage machine) → activities, on the customer-of-record.
 @Controller('api/crm/pipeline')
 @Permissions('crm', 'exec', 'ar')
 export class CrmPipelineController {

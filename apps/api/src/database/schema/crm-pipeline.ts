@@ -1,5 +1,5 @@
-// CRM sales pipeline (REV-16): leads → opportunities (stage machine) → activities, on the customer-of-record.
-// Tenant-scoped (RLS via migration 0150).
+// CRM sales pipeline (REV-17): leads → opportunities (stage machine) → activities, on the customer-of-record.
+// Tenant-scoped (RLS via migration 0152).
 import { pgTable, bigserial, bigint, text, numeric, integer, date, boolean, timestamp, unique, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 

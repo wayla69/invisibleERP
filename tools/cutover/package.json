@@ -46,6 +46,7 @@
     "restaurant-offline": "tsx src/restaurant-offline.ts",
     "reservations": "tsx src/reservations.ts",
     "waste": "tsx src/waste.ts",
+    "refund-approval": "tsx src/refund-approval.ts",
     "tips": "tsx src/tips.ts",
     "menu": "tsx src/menu.ts",
     "splitbill": "tsx src/splitbill.ts",

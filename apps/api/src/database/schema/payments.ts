@@ -51,6 +51,25 @@ export const paymentRefunds = pgTable('payment_refunds', {
   byPayment: index('idx_refunds_payment').on(t.paymentNo),
 }));
 
+// REV-16 — refund maker-checker. A standalone refund at/above the materiality threshold is a REQUEST
+// that moves no money until a DIFFERENT user approves it (SoD); below the threshold refunds run immediately,
+// and a refund that is part of a goods-return (the return is the authorizing document) is never gated.
+export const refundRequests = pgTable('refund_requests', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  paymentNo: text('payment_no').notNull(),
+  amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
+  reason: text('reason'),
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),               // checker — must differ from requested_by
+  refundNo: text('refund_no'),                   // the REF- once approved
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+}, (t) => ({
+  byStatus: index('idx_refund_requests_status').on(t.tenantId, t.status),
+}));
+
 export const tillSessions = pgTable('till_sessions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   sessionNo: text('session_no').notNull().unique(), // TILL-YYYYMMDDHHMMSS

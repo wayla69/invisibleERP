@@ -10,7 +10,7 @@ const STAGES = ['prospecting', 'qualification', 'proposal', 'negotiation', 'won'
 const OPEN_STAGES = ['prospecting', 'qualification', 'proposal', 'negotiation'];
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
-// CRM sales pipeline (REV-16): leads → opportunities (controlled stage machine) → activities, on the
+// CRM sales pipeline (REV-17): leads → opportunities (controlled stage machine) → activities, on the
 // customer-of-record. Lost is terminal and requires a reason; won is terminal and weights to 100%.
 @Injectable()
 export class CrmPipelineService {

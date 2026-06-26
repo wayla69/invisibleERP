@@ -24,7 +24,7 @@ interface Resp { items: Item[]; count: number; by_type: Record<string, number>; 
 const TYPE_TH: Record<string, string> = {
   journal: 'รายการบัญชี (JE)', ap_payment: 'จ่ายเจ้าหนี้ (AP)', payroll: 'เงินเดือน',
   asset_revaluation: 'ตีมูลค่าสินทรัพย์', asset_disposal: 'จำหน่ายสินทรัพย์', inventory_writeoff: 'ตัดสต๊อก',
-  till_variance: 'เงินสดขาด/เกิน (ปิดกะ)',
+  till_variance: 'เงินสดขาด/เกิน (ปิดกะ)', refund: 'คืนเงิน (Refund)',
 };
 
 export default function ApprovalsPage() {
@@ -37,14 +37,20 @@ export default function ApprovalsPage() {
   // REV-13: a material till-close cash over/short is the one pending type with no dedicated module
   // screen, so the manager approves/rejects it inline here (SoD is enforced server-side: the approver
   // must differ from the cashier who closed → SOD_VIOLATION).
+  // inline approve/reject for the pending types that have no dedicated module screen: a material till
+  // variance (REV-13, ref=sessionNo) and a large refund (REV-16, ref=RR-<id>).
+  const endpoint = (it: Item, action: 'approve' | 'reject') =>
+    it.type === 'refund'
+      ? `/api/payments/refund-requests/${it.ref.replace('RR-', '')}/${action}`
+      : `/api/payments/till/variance/${it.ref}/${action}`;
   const approve = useMutation({
-    mutationFn: (sessionNo: string) => api<any>(`/api/payments/till/variance/${sessionNo}/approve`, { method: 'POST' }),
-    onSuccess: () => { notifySuccess('อนุมัติผลต่างเงินสด — ลงบัญชีเงินสดขาด/เกินแล้ว'); refresh(); },
+    mutationFn: (it: Item) => api<any>(endpoint(it, 'approve'), { method: 'POST' }),
+    onSuccess: () => { notifySuccess('อนุมัติแล้ว'); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const reject = useMutation({
-    mutationFn: (sessionNo: string) => api<any>(`/api/payments/till/variance/${sessionNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
-    onSuccess: () => { notifySuccess('ปฏิเสธผลต่างเงินสด — ยกเลิกรายการบัญชีร่าง'); refresh(); },
+    mutationFn: (it: Item) => api<any>(endpoint(it, 'reject'), { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
+    onSuccess: () => { notifySuccess('ปฏิเสธแล้ว'); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -79,10 +85,10 @@ export default function ApprovalsPage() {
             { key: 'requested_by', label: 'ผู้ขอ', render: (r) => r.requested_by ?? '—' },
             { key: 'age_days', label: 'ค้าง (วัน)', align: 'right', render: (r) => r.age_days == null ? '—' : <span className={cn('tabular font-medium', r.age_days >= overdueDays ? 'text-destructive' : 'text-muted-foreground')}>{num(r.age_days)}{r.age_days >= overdueDays ? ' ⚠' : ''}</span> },
             { key: 'requested_at', label: 'วันที่ขอ', render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
-            { key: 'actions', label: '', align: 'right', render: (r) => r.type === 'till_variance' ? (
+            { key: 'actions', label: '', align: 'right', render: (r) => (r.type === 'till_variance' || r.type === 'refund') ? (
               <div className="flex justify-end gap-2">
-                <Button size="sm" variant="outline" disabled={approve.isPending || reject.isPending} onClick={() => approve.mutate(r.ref)}>อนุมัติ</Button>
-                <Button size="sm" variant="ghost" disabled={approve.isPending || reject.isPending} onClick={() => reject.mutate(r.ref)}>ปฏิเสธ</Button>
+                <Button size="sm" variant="outline" disabled={approve.isPending || reject.isPending} onClick={() => approve.mutate(r)}>อนุมัติ</Button>
+                <Button size="sm" variant="ghost" disabled={approve.isPending || reject.isPending} onClick={() => reject.mutate(r)}>ปฏิเสธ</Button>
               </div>
             ) : null },
           ]}

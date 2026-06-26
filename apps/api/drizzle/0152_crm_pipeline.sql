@@ -1,4 +1,4 @@
--- 0151 — CRM sales pipeline (REV-16): leads → opportunities (stage machine) → activities, on the
+-- 0152 — CRM sales pipeline (REV-17): leads → opportunities (stage machine) → activities, on the
 -- customer-of-record (customer_master, 0149). Closes the structural gap where the CRM was RFM-only with no
 -- B2B sales motion. A lead is qualified then CONVERTED (attaching/creating a customer_master + an
 -- opportunity); an opportunity moves through a controlled stage machine (won/lost are terminal; lost needs a

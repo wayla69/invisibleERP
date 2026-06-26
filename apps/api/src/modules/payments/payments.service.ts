@@ -1,7 +1,7 @@
-import { Inject, Injectable, Optional, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, Optional, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { payments, paymentRefunds, tillSessions, cashMovements, tenants } from '../../database/schema';
+import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundRequests } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
@@ -16,6 +16,9 @@ import { QrService } from '../qr/qr.service';
 // below it the over/short posts to GL immediately. A flat threshold for now — a tenant-level override
 // can replace this constant without changing the close/approve flow.
 const CASH_VARIANCE_THRESHOLD = 100;
+// REV-16: a standalone refund at/above this absolute THB amount needs a different user's approval
+// (maker-checker, anti-fraud); below it the refund runs immediately. Flat threshold for now.
+const REFUND_APPROVAL_THRESHOLD = 1000;
 
 export interface RecordTenderDto {
   sale_no: string;
@@ -145,8 +148,16 @@ export class PaymentService {
   // restock and return record commit atomically. When present we reuse that tx; otherwise we own one.
   // Either way the payment row is locked FOR UPDATE and prior refunds are summed UNDER the lock, so two
   // concurrent refunds against the same payment can never jointly exceed the captured amount (over-refund).
-  async refund(dto: RefundDto, user: JwtUser, outerTx?: any) {
+  async refund(dto: RefundDto, user: JwtUser, outerTx?: any, opts?: { force?: boolean }) {
     if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+
+    // REV-16 maker-checker: a STANDALONE refund (no outerTx — a goods-return refund is authorized by the
+    // return) at/above the materiality threshold is parked as a request and moves no money until a DIFFERENT
+    // user approves. opts.force lets approveRefund run the real refund past the gate.
+    if (!outerTx && !opts?.force && n(dto.amount) >= REFUND_APPROVAL_THRESHOLD) {
+      return this.requestRefund(dto, user);
+    }
+
     const refundNo = await this.docNo.nextDaily('REF');
 
     const run = async (tx: any) => {
@@ -197,6 +208,53 @@ export class PaymentService {
       if (this.journal) { try { await this.journal.append({ doc_type: 'REFUND', doc_no: refundNo, payload: { payment_no: dto.payment_no, amount: n(dto.amount), fully_refunded: res.fully_refunded } }, user); } catch { /* journal best-effort */ } }
     }
     return res;
+  }
+
+  // REV-16: park a large refund as a request (light-validate; no money moves until approved).
+  private async requestRefund(dto: RefundDto, user: JwtUser) {
+    const db = this.db as any;
+    const [pay] = await db.select().from(payments).where(eq(payments.paymentNo, dto.payment_no)).limit(1);
+    if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
+    const status = String(pay.status ?? '');
+    if (status !== 'Captured' && status !== 'Settled' && status !== 'Refunded') throw new BadRequestException({ code: 'NOT_REFUNDABLE', message: `Payment in status ${status} cannot be refunded`, messageTh: 'รายการนี้ยังไม่ได้รับชำระ จึงคืนเงินไม่ได้' });
+    const [prior] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).where(eq(paymentRefunds.paymentNo, dto.payment_no));
+    const remaining = round2(n(pay.amount) - n(prior?.v));
+    if (n(dto.amount) > remaining + 1e-9) throw new BadRequestException({ code: 'OVER_REFUND', message: `Refund ${n(dto.amount)} exceeds remaining refundable ${remaining}`, messageTh: `จำนวนเงินคืนเกินยอดคงเหลือที่คืนได้ (${remaining})` });
+    const [req] = await db.insert(refundRequests).values({ tenantId: pay.tenantId, paymentNo: dto.payment_no, amount: fx(dto.amount, 4), reason: dto.reason ?? null, status: 'PendingApproval', requestedBy: user.username }).returning({ id: refundRequests.id });
+    return { status: 'PendingApproval', request_id: Number(req.id), payment_no: dto.payment_no, amount: n(dto.amount), message: 'Refund needs manager approval', messageTh: 'การคืนเงินต้องรอผู้จัดการอนุมัติ' };
+  }
+
+  // POST /api/payments/refund-requests/:id/approve — a DIFFERENT user approves a parked refund → runs it.
+  async approveRefund(requestId: number, approver: JwtUser) {
+    const db = this.db as any;
+    const [req] = await db.select().from(refundRequests).where(eq(refundRequests.id, requestId)).limit(1);
+    if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Refund request not found', messageTh: 'ไม่พบคำขอคืนเงิน' });
+    if (String(req.status) !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request is ${req.status}`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
+    if (req.requestedBy && req.requestedBy === approver.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a refund you requested', messageTh: 'ผู้ขออนุมัติคืนเงินของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    // run the real refund past the gate (force), crediting it to the approver (who authorizes the money-out).
+    const res: any = await this.refund({ payment_no: req.paymentNo, amount: n(req.amount), reason: req.reason ?? undefined }, approver, undefined, { force: true });
+    await db.update(refundRequests).set({ status: 'Approved', approvedBy: approver.username, refundNo: res.refund_no, approvedAt: new Date() }).where(eq(refundRequests.id, requestId));
+    return { request_id: requestId, status: 'Approved', refund_no: res.refund_no, approved_by: approver.username, requested_by: req.requestedBy };
+  }
+
+  // POST /api/payments/refund-requests/:id/reject
+  async rejectRefund(requestId: number, approver: JwtUser, reason?: string) {
+    const db = this.db as any;
+    const [req] = await db.select().from(refundRequests).where(eq(refundRequests.id, requestId)).limit(1);
+    if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Refund request not found', messageTh: 'ไม่พบคำขอคืนเงิน' });
+    if (String(req.status) !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request is ${req.status}`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
+    if (req.requestedBy && req.requestedBy === approver.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot reject a refund you requested', messageTh: 'ผู้ขอปฏิเสธคำขอของตนเองไม่ได้' });
+    await db.update(refundRequests).set({ status: 'Rejected', approvedBy: approver.username, approvedAt: new Date() }).where(eq(refundRequests.id, requestId));
+    return { request_id: requestId, status: 'Rejected', rejected_by: approver.username, reason: reason ?? null };
+  }
+
+  // GET /api/payments/refund-requests — the refund-approval worklist (tenant-scoped).
+  async listRefundRequests(status: string | undefined, user: JwtUser) {
+    const db = this.db as any;
+    const conds = [eq(refundRequests.tenantId, user.tenantId as number)];
+    if (status) conds.push(eq(refundRequests.status, status));
+    const rows = await db.select().from(refundRequests).where(and(...conds)).orderBy(desc(refundRequests.createdAt)).limit(300);
+    return { requests: rows.map((r: any) => ({ id: Number(r.id), payment_no: r.paymentNo, amount: n(r.amount), reason: r.reason, status: r.status, requested_by: r.requestedBy, approved_by: r.approvedBy, refund_no: r.refundNo, created_at: r.createdAt })), count: rows.length, pending: rows.filter((r: any) => r.status === 'PendingApproval').length };
   }
 
   // PATCH /api/payments/:no/void — void a payment that has not been captured/settled.

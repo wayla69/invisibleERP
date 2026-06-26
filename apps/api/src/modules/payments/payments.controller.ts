@@ -50,6 +50,20 @@ export class PaymentsController {
     return this.svc.refund(b, u);
   }
 
+  // REV-16: a large refund parks as a request; a DIFFERENT user (manager) approves/rejects it (SoD).
+  @Get('refund-requests') @Permissions('pos_refund', 'ar', 'exec')
+  refundRequests(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.listRefundRequests(status, u);
+  }
+  @Post('refund-requests/:id/approve') @Permissions('pos_refund', 'ar', 'exec')
+  approveRefund(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.svc.approveRefund(Number(id), u);
+  }
+  @Post('refund-requests/:id/reject') @Permissions('pos_refund', 'ar', 'exec')
+  rejectRefund(@Param('id') id: string, @Body(new ZodValidationPipe(RejectVarianceBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectRefund(Number(id), u, b?.reason);
+  }
+
   @Patch(':no/void') @Permissions('pos_refund', 'ar')
   void(@Param('no') no: string, @CurrentUser() u: JwtUser) {
     return this.svc.voidPayment(no, u);

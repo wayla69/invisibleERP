@@ -457,6 +457,14 @@ automatically. The system shows the subtotal, VAT and total returned.
 > **Note — over-return guard:** You cannot return more than was originally sold.
 > Attempting to do so is blocked (`OVER_RETURN`).
 
+> **Big refunds need a manager's OK.** A **standalone refund** (refunding a payment
+> directly, not as part of a product return) of **฿1,000 or more** doesn't go through
+> straight away — it's **held for approval**. A **different** person (a manager) opens
+> **รายการรออนุมัติ** (`/approvals`) and taps **อนุมัติ** to release it (or **ปฏิเสธ**).
+> The person who asked for the refund **can't approve their own** — this stops refund
+> fraud. Refunds under ฿1,000, and refunds that come with a **product return**, go
+> through immediately as before. (Control **REV-16**.)
+
 [screenshot: return dialog with item lines and refund method]
 
 ### Returns register (all returns)
