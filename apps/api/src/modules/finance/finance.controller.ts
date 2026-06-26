@@ -49,6 +49,12 @@ export class FinanceController {
   @Get('reconciliation/controls') @Permissions('exec', 'ar', 'creditors')
   reconciliationControls() { return this.svc.reconcileControls(); }
 
+  // GOV-01 — unified pending-approvals monitor across every maker-checker (GL-05/EXP-06/PAY-03/FA-08/FA-09/INV-07).
+  @Get('approvals/pending') @Permissions('exec', 'approvals', 'creditors')
+  pendingApprovals(@Query('overdue_days') overdueDays?: string) {
+    return this.svc.pendingApprovals({ overdue_days: overdueDays ? Math.max(1, Number(overdueDays) || 3) : undefined });
+  }
+
   // Statement of account — running balance over [from,to] for one customer (AR) or vendor (AP).
   @Get('ar/statement') @Permissions('ar', 'exec')
   customerStatement(@Query('tenant_id') tenantId: string, @Query('from') from?: string, @Query('to') to?: string, @Query('currency') currency?: string) { return this.svc.customerStatement(Number(tenantId), from || undefined, to || undefined, currency || undefined); }

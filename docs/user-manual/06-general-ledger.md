@@ -246,6 +246,20 @@ balance, the **ส่วนต่าง (variance)**, and a **ตรง / ไม
 **before** closing the period. This is the detective check that catches a sub-ledger
 drifting from the GL before the financial statements go out (control **REC-04**).
 
+### Clear the approval backlog first (pending approvals)
+
+**Screen:** `/approvals` (**รายการรออนุมัติ**) · **Required permission:** `exec` /
+`approvals` / `creditors`.
+
+The system holds many actions until a **second person approves** them (a manual
+journal, an AP payment, a payroll run, an asset revaluation or disposal, a stock
+write-off). The **Pending approvals** screen lists **all** of them in one place with
+how many **days** each has been waiting. The cards show the total waiting, how many are
+**ค้างเกิน N วัน (overdue)**, and the oldest age. Before you close a period, work the
+list to zero — an item stuck here is either a transaction that can't take effect yet, or
+a control that's being skipped because nobody chased the approval. Overdue rows are
+flagged ⚠ in red so you can escalate them (control **GOV-01**).
+
 ### To close an accounting period
 
 1. Go to the **Periods** view.

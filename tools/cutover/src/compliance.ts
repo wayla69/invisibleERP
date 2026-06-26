@@ -682,6 +682,14 @@ async function main() {
     (recPack.json.lines ?? []).length === 5 && ['1100', '2000', '1200', '2200', '2400'].every((a) => (recPack.json.lines ?? []).some((l: any) => l.account === a)) && inv1200?.reconciled === true && invNear(inv1200.sub_ledger, 1540) && typeof recPack.json.exceptions === 'number',
     JSON.stringify({ n: recPack.json.lines?.length, inv: inv1200?.sub_ledger, rec: inv1200?.reconciled, exc: recPack.json.exceptions }));
 
+  // GOV-01 — pending-approvals monitor: a fresh Draft JE (not approved) surfaces in the unified worklist.
+  const govJe = await inj('POST', '/api/ledger/journal', glacct, { date: today, memo: 'GOV-01 pending JE', source: 'Manual', lines: [{ account_code: '1000', debit: 321 }, { account_code: '4000', credit: 321 }] });
+  const govPend = await inj('GET', '/api/finance/approvals/pending', admin);
+  const govItem = (govPend.json.items ?? []).find((i: any) => i.ref === govJe.json.entry_no);
+  ok('GOV-01: pending-approvals monitor surfaces the Draft JE (control GL-05, amount + age + overdue roll-up)',
+    govItem?.type === 'journal' && govItem?.control === 'GL-05' && invNear(govItem?.amount, 321) && typeof govItem?.age_days === 'number' && govPend.json.count >= 1 && typeof govPend.json.overdue === 'number',
+    JSON.stringify({ n: govPend.json.count, oldest: govPend.json.oldest_age_days, ctrl: govItem?.control, amt: govItem?.amount }));
+
   console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
