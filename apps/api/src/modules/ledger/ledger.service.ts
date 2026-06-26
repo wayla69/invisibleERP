@@ -84,6 +84,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '5210', name: 'Depreciation Expense — ROU', type: 'Expense' },       // ค่าเสื่อมราคาสินทรัพย์สิทธิการใช้
   { code: '5820', name: 'Impairment Loss', type: 'Expense' },                  // ผลขาดทุนจากการด้อยค่าสินทรัพย์
   { code: '5900', name: 'Interest Expense', type: 'Expense' },                 // ดอกเบี้ยจ่าย — incl. lease-liability unwinding
+  { code: '5830', name: 'Cash Over/Short', type: 'Expense' },                  // เงินสดขาด/เกินบัญชี — POS-01 till-close variance (short=debit, over=credit)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
