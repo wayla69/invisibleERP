@@ -78,7 +78,7 @@ export class ChannelOrderService {
           lat: dto.delivery.lat != null ? String(dto.delivery.lat) : null, lng: dto.delivery.lng != null ? String(dto.delivery.lng) : null,
         });
       }
-      return { order_no: view.order_no, token, fulfillment_type: dto.fulfillment_type ?? 'takeaway', subtotal: n(view.subtotal), vat: n(view.vat), delivery_fee: fee, total: roundCurrency(n(view.total) + fee, 'THB') };
+      return { order_no: view.order_no, token, track_url: `/track/${token}`, fulfillment_type: dto.fulfillment_type ?? 'takeaway', subtotal: n(view.subtotal), vat: n(view.vat), delivery_fee: fee, total: roundCurrency(n(view.total) + fee, 'THB') };
     });
   }
 
@@ -174,7 +174,9 @@ export class ChannelOrderService {
     const [created] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
     const fee = roundCurrency(n(dto.delivery_fee), 'THB');
     const kioskMemberId = dto.member_id ? Number(dto.member_id) : null;
-    await db.update(dineInOrders).set({ channel: 'kiosk', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received', deliveryFee: fx(fee, 2), memberId: kioskMemberId }).where(eq(dineInOrders.id, created.id));
+    // mint a per-order public token so the takeaway customer can track the order (GET /api/order/t/:token).
+    const trackToken = mintChannelToken({ tenantId: user.tenantId ?? 0, orderId: Number(created.id) });
+    await db.update(dineInOrders).set({ channel: 'kiosk', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received', deliveryFee: fx(fee, 2), memberId: kioskMemberId, publicToken: trackToken }).where(eq(dineInOrders.id, created.id));
     const o = await this.dineIn.loadOrderForUpdate(view.order_no);
     const saleNo = await this.dineIn.mintSaleNo(user.tenantId ?? null);
     const built: any = await this.dineIn.buildSale(o, saleNo, 0, user);
@@ -189,7 +191,7 @@ export class ChannelOrderService {
         kioskPoints = await this.member!.earnInTx(tx, user.tenantId!, kioskMemberId, n(built.total), saleNo, user.username);
       });
     }
-    return { order_no: view.order_no, sale_no: saleNo, total: built.total, delivery_fee: fee, payment_no: tender?.payment_no ?? null, tax_invoice_no: invNo, points_earned: kioskPoints };
+    return { order_no: view.order_no, sale_no: saleNo, total: built.total, delivery_fee: fee, payment_no: tender?.payment_no ?? null, tax_invoice_no: invNo, points_earned: kioskPoints, track_token: trackToken, track_url: `/track/${trackToken}` };
   }
 
   // STAFF: advance the fulfillment/handoff machine (separate from KDS item state)
