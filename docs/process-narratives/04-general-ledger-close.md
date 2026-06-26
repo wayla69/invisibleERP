@@ -190,6 +190,7 @@ flowchart TD
 | 0.9 DRAFT | 2026-06-26 | Platform | §7 step 13 — added the **lease-liability reconciliation** (`GET /api/leases/liability-reconciliation`): ties GL **2600** to the sum of the remaining liability balances on the lease schedule (`gl_liability` vs `schedule_liability`, `difference`, `reconciled`), surfaced as a tie-out banner on `/leases`. Detective tie-out over the existing **LSE-01**; no new control, no migration. Verified by the `basics` harness (after run + remeasurement, GL 2600 = schedule, reconciled, difference 0). |
 | 1.0 DRAFT | 2026-06-26 | WS1.3 | WS1.3 — added **multi-dimensional GL postings**: `branch_id`, `project_id`, `department_id` columns on `journal_lines`; `PostingService` context stamping; `GET /api/ledger/income-statement/by-branch` per-branch P&L endpoint; `departments` master table with RLS. New control **GL-13**. Verified by the `basics` harness (TC-GL-13-01/02/03). Migration 0157. |
 | 1.1 DRAFT | 2026-06-26 | WS1.4 | WS1.4 — added **sub-ledger tie-out / reconciliation**: `POST /api/ledger/tie-out/run` reconciles each GL control account (1100 AR / 2000 AP / 1200 INV / 1500 FA) to the sum of its sub-ledger detail, recording the variance + a Matched/Variance status; `POST /api/ledger/tie-out/:id/certify` is **maker-checker** (certifier ≠ runner → `SELF_CERTIFY`). New `subledger_tieout_runs` table (RLS), new control **GL-14**. Verified by the `basics` harness (TC-GL-14-01/02/03). Migration 0160. |
+| 1.3 DRAFT | 2026-06-26 | WS2.2 | WS2.2 — **GL immutability + audit log + reversal** (§2.2): a **Posted** journal entry is immutable — a production DB trigger (`gl_block_posted_mutation`, migration 0164) blocks UPDATE/DELETE of posted `journal_entries` (permitting only the `is_reversed` flag flip), and an app guard (`attemptVoidPosted`) returns `GL_IMMUTABLE` + logs `MUTATE_BLOCKED`. Corrections happen ONLY via **reversal** (`POST /api/ledger/journal/:id/reverse`): a new immediately-posted contra entry (swapped Dr/Cr, `reversal_of`, original flagged `is_reversed`) that respects the period gates; errors `ENTRY_NOT_FOUND`/`NOT_POSTED`/`ALREADY_REVERSED`. New `gl_audit_log` table (RLS) recording POST/APPROVE/REVERSE/MUTATE_BLOCKED (`GET /api/ledger/audit?entryId=`). New control **GL-17**. Verified by the `basics` harness (TC-GL-17-01/02/03). Migration 0164. |
 | 1.2 DRAFT | 2026-06-26 | WS2.1 | WS2.1 — **hard period close + checklist**: `POST /api/ledger/close/start` opens a `close_runs` record (InProgress) per (tenant, period) and seeds a standard checklist (`close_run_steps`); `POST /api/ledger/close/step` marks steps Done → run advances to **ReadyToLock** when all required steps are done; `POST /api/ledger/close/lock` hard-locks the period (requires ReadyToLock else `STEPS_INCOMPLETE`; **maker-checker** locker ≠ starter → `SELF_LOCK`). New `'Locked'` period status; `postEntry` now rejects ALL postings into a Locked period with `PERIOD_LOCKED` regardless of the legacy `allowClosedPeriod` escape (only the system year-end closing entry, `source='CLOSE'`, is exempt). New `close_runs` / `close_run_steps` tables (RLS), new controls **GL-15** (checklist completeness) + **GL-16** (segregated lock). Verified by the `basics` harness (TC-GL-15-01/02/03, TC-GL-16-01/02). Migration 0162. |
 
 ## 1.3 Multi-dimensional GL Postings (WS1.3)
@@ -358,12 +359,53 @@ December. (Locked is not exposed as a normal re-open; reversing a hard close is 
 | Owner | Financial Controller |
 | Test | TC-GL-16-01/02 (basics.ts harness) |
 
-### Control GL-17 — Controlled emergency reopen of a locked period
+## 2.2 GL Immutability & Reversal (WS2.2)
+
+### Overview
+A **posted** journal entry is the ledger's record of record and is **immutable** — it can never be edited or
+deleted. The only way to correct a posted entry is a transparent **reversal**: a new, immediately-posted
+contra entry that swaps every line's debit/credit so the original and its reversal net to zero on every
+affected account. Every important GL action and every blocked mutation attempt is written to a dedicated
+**GL audit trail** (`gl_audit_log`).
+
+### Two-layer immutability enforcement
+1. **Production DB trigger** (`gl_block_posted_mutation`, migration 0164) — a `BEFORE UPDATE OR DELETE`
+   trigger on `journal_entries` that `RAISE`s on any attempt to UPDATE or DELETE a `Posted` row. The single
+   permitted change is the reversal bookkeeping flag `is_reversed` (the trigger blocks only changes to
+   `status` or `entry_date`), so the reversal flow can flag the original without re-opening it.
+2. **Application guard** (`attemptVoidPosted`) — refuses to mutate a posted entry, returns
+   `GL_IMMUTABLE` (HTTP 400) and records a `MUTATE_BLOCKED` audit row. This is the deterministically-testable
+   layer (the DB trigger is the prod backstop); there is no edit/delete endpoint for a posted JE.
+
+### Reversal flow (`POST /api/ledger/journal/:id/reverse`)
+- Loads the original posted entry + lines. Errors: `ENTRY_NOT_FOUND`, `NOT_POSTED` (only Posted entries are
+  reversible), `ALREADY_REVERSED` (an entry may be reversed only once).
+- Posts a NEW contra entry (`source = 'REVERSAL'`, `reversal_of = <original id>`, dated `date ?? today` on the
+  Asia/Bangkok business day) with every line's Dr/Cr swapped and all dimensions (branch/project/dept/cost
+  centre) carried over. The reversal goes through the **normal posting path**, so the WS2.1 `PERIOD_LOCKED`
+  and the `PERIOD_CLOSED` gates still apply to the reversal date.
+- Flags the original `is_reversed = true` (the only column the DB trigger permits changing) and logs a
+  `REVERSE` audit row `{ originalId, reversalId, reason }`.
+
+### GL audit trail (`gl_audit_log`, `GET /api/ledger/audit?entryId=`)
+Tenant-scoped (RLS), append-only by intent. Actions: `POST` (an entry reached Posted), `APPROVE` (a Draft was
+approved to Posted via GL-05 maker-checker), `REVERSE`, `MUTATE_BLOCKED`. Each row carries the actor, a
+detail JSON, and a timestamp.
+
+### Error codes
+| Code | Meaning |
+|------|---------|
+| `ENTRY_NOT_FOUND` | No journal entry with that id |
+| `NOT_POSTED` | The entry is not Posted (only posted entries can be reversed) |
+| `ALREADY_REVERSED` | The entry has already been reversed |
+| `GL_IMMUTABLE` | A posted entry cannot be edited/deleted — correct it via a reversal |
+
+### Control GL-17 — Posted-entry immutability + reversal-only correction
 | Control ID | GL-17 |
 |------------|-------|
-| Name | Controlled emergency reopen (maker-checker + mandatory reason, audited) |
-| Type | Application — Automated (Preventive/Detective, per exception) |
-| Risk | A locked period is silently unlocked and re-posted (integrity of locked financials destroyed), or there is no reopen path so corrections go through unauthorized back-doors |
-| Mitigation | `POST /api/ledger/close/reopen` requires a non-blank `reason` (`REASON_REQUIRED`) and the reopener ≠ the locker (`SELF_REOPEN`); flips the run to `ReadyToLock` + the period to `Open`; a *different* `gl_close` user must re-lock (GL-16 still binds); the reason is stamped on `close_runs.note` and the POST is captured by the append-only, hash-chained `audit_log` (ITGC-AC-16) |
-| Owner | Financial Controller / CFO |
-| Test | TC-GL-16b (basics.ts harness) |
+| Name | Posted GL immutable; corrections via reversal only; full audit trail |
+| Type | Application — Automated (Preventive, Per entry / continuous) |
+| Risk | A posted entry is silently edited/deleted (restating history with no trail) instead of being corrected by a transparent, auditable reversal |
+| Mitigation | DB trigger (`gl_block_posted_mutation`) blocks UPDATE/DELETE of posted entries; app guard returns `GL_IMMUTABLE`; corrections only via `reverseEntry` (contra entry, `reversal_of`, original `is_reversed`); every POST/APPROVE/REVERSE/MUTATE_BLOCKED logged to `gl_audit_log` |
+| Owner | Financial Controller |
+| Test | TC-GL-17-01/02/03 (basics.ts harness) |

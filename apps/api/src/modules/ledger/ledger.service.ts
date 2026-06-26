@@ -2,7 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules, tenantAccounts } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules, tenantAccounts, glAuditLog } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
@@ -150,6 +150,7 @@ export interface PostEntryDto {
   allowClosedPeriod?: boolean; // only the year-end CLOSE may post into the period it is closing
   pendingApproval?: boolean; // GL-05: post as DRAFT (excluded from balances) until a different user approves
   viaSubledger?: boolean; // WS1.1: set true by AR/AP/INV/FA service methods to allow posting to control accounts
+  _reversalOf?: number | null; // GL-17 internal: set by reverseEntry so the contra entry records its origin
 }
 
 export interface RecurringJournalDto {
@@ -364,10 +365,14 @@ export class LedgerService {
       // ON CONFLICT DO NOTHING backstops the pre-check (alreadyPosted): if a concurrent caller already
       // posted this (tenant, source, source_ref, ledger), the header insert no-ops and `h` is undefined,
       // so we skip the lines and report a dedupe instead of double-posting the GL. ux_je_idem enforces it.
+      const willPost = !dto.pendingApproval;
       const [h] = await tx.insert(journalEntries).values({
         entryNo, entryDate, period, memo: dto.memo ?? null,
         source: dto.source ?? 'Manual', sourceRef: dto.sourceRef ?? null, ledgerCode: dto.ledgerCode ?? null,
-        tenantId: entryTenantId, currency, status: dto.pendingApproval ? 'Draft' : 'Posted', createdBy: dto.createdBy,
+        tenantId: entryTenantId, currency, status: willPost ? 'Posted' : 'Draft', createdBy: dto.createdBy,
+        // GL-17: stamp the posting moment for entries that reach Posted immediately (Drafts get it on approve).
+        postedAt: willPost ? new Date() : null,
+        reversalOf: dto._reversalOf ?? null,
       }).onConflictDoNothing().returning({ id: journalEntries.id });
       if (!h) return null;
       await tx.insert(journalLines).values(nzLines.map((l) => ({
@@ -376,6 +381,13 @@ export class LedgerService {
         currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: entryTenantId,
         branchId: l.branch_id ?? null, projectId: l.project_id ?? null, departmentId: l.dept_id ?? null,
       })));
+      // GL-17: record a POST audit-trail row for entries that land Posted (skip Drafts — APPROVE logs them).
+      if (willPost) {
+        await tx.insert(glAuditLog).values({
+          tenantId: entryTenantId, entryId: Number(h.id), action: 'POST', actor: dto.createdBy ?? null,
+          detail: { entry_no: entryNo, source: dto.source ?? 'Manual', reversal_of: dto._reversalOf ?? null },
+        });
+      }
       return nzLines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
     };
     // Reuse the caller's tx when nested; else open our own.
@@ -551,7 +563,12 @@ export class LedgerService {
     const [pp] = e.tenantId == null ? [undefined]
       : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.code, e.period), eq(fiscalPeriods.tenantId, e.tenantId))).limit(1);
     if (pp && pp.status === 'Closed') throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${e.period} is closed`, messageTh: `งวดบัญชี ${e.period} ถูกปิดแล้ว` });
-    await db.update(journalEntries).set({ status: 'Posted' }).where(eq(journalEntries.id, e.id));
+    // GL-17: a Draft → Posted transition is the moment of posting; stamp postedAt and log the APPROVE.
+    await db.update(journalEntries).set({ status: 'Posted', postedAt: new Date() }).where(eq(journalEntries.id, e.id));
+    await db.insert(glAuditLog).values({
+      tenantId: e.tenantId ?? null, entryId: Number(e.id), action: 'APPROVE', actor: approver.username,
+      detail: { entry_no: entryNo, prepared_by: e.createdBy },
+    });
     return { entry_no: entryNo, status: 'Posted', approved_by: approver.username, prepared_by: e.createdBy };
   }
 
@@ -564,6 +581,84 @@ export class LedgerService {
     const memo = `${e.memo ?? ''} [REJECTED by ${approver.username}${reason ? `: ${reason}` : ''}]`.trim();
     await db.update(journalEntries).set({ status: 'Voided', memo }).where(eq(journalEntries.id, e.id));
     return { entry_no: entryNo, status: 'Voided', rejected_by: approver.username };
+  }
+
+  // ───────────────────── GL immutability + reversal (WS2.2, GL-17) ─────────────────────
+  // A Posted journal entry is IMMUTABLE — never edited or deleted (DB trigger in prod + this app guard).
+  // The ONLY correction is a contra REVERSAL: a new, immediately-Posted entry that swaps every line's
+  // debit/credit so original + reversal net to zero on every affected account. The original is flagged
+  // is_reversed (the one column the DB trigger permits changing on a posted entry). Every action is logged.
+  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string }) {
+    const db = this.db as any;
+    const [orig] = await db.select().from(journalEntries).where(eq(journalEntries.id, dto.entryId)).limit(1);
+    if (!orig) throw new NotFoundException({ code: 'ENTRY_NOT_FOUND', message: `Journal entry ${dto.entryId} not found`, messageTh: `ไม่พบรายการบัญชี ${dto.entryId}` });
+    if (orig.status !== 'Posted') throw new BadRequestException({ code: 'NOT_POSTED', message: `Entry ${orig.entryNo} is ${orig.status}; only Posted entries can be reversed`, messageTh: 'กลับรายการได้เฉพาะรายการที่ผ่านรายการแล้ว' });
+    if (orig.isReversed) throw new BadRequestException({ code: 'ALREADY_REVERSED', message: `Entry ${orig.entryNo} has already been reversed`, messageTh: 'รายการนี้ถูกกลับรายการไปแล้ว' });
+
+    const lines = await db.select().from(journalLines).where(eq(journalLines.entryId, orig.id));
+    if (!lines.length) throw new BadRequestException({ code: 'NOT_POSTED', message: `Entry ${orig.entryNo} has no lines to reverse`, messageTh: 'ไม่มีรายการบัญชีให้กลับรายการ' });
+
+    // Swap Dr/Cr on every line; carry dimensions over. Post through the normal posting path so the period
+    // gates (PERIOD_LOCKED/PERIOD_CLOSED), balance invariant and idempotency all still apply.
+    const reversalLines: JournalLineDto[] = lines.map((l: any) => ({
+      account_code: l.accountCode,
+      debit: n(l.credit), credit: n(l.debit),
+      memo: `Reversal of ${orig.entryNo}${l.memo ? ` — ${l.memo}` : ''}`,
+      cost_center: l.costCenterCode ?? null,
+      branch_id: l.branchId ?? null, project_id: l.projectId ?? null, dept_id: l.departmentId ?? null,
+    }));
+    const date = dto.date ?? ymd();
+    const res = await this.postEntry({
+      date, source: 'REVERSAL', sourceRef: `REV-${Number(orig.id)}`,
+      tenantId: orig.tenantId ?? null, currency: orig.currency ?? 'THB',
+      memo: `Reversal of ${orig.entryNo}${dto.reason ? ` — ${dto.reason}` : ''}`,
+      lines: reversalLines, createdBy: dto.reversedBy, ledgerCode: orig.ledgerCode ?? null,
+      // a posted contra account leg may legitimately touch a control account (it mirrors the original)
+      viaSubledger: true, _reversalOf: Number(orig.id),
+    });
+
+    // Resolve the new entry's id (postEntry returns entry_no; could be a dedupe on a same-source re-run).
+    const [rev] = await db.select({ id: journalEntries.id }).from(journalEntries)
+      .where(eq(journalEntries.sourceRef, `REV-${Number(orig.id)}`)).orderBy(desc(journalEntries.id)).limit(1);
+    const reversalId = rev ? Number(rev.id) : null;
+
+    // Flag the original reversed — ONLY is_reversed changes, so the DB trigger permits this UPDATE.
+    await db.update(journalEntries).set({ isReversed: true }).where(eq(journalEntries.id, orig.id));
+    await db.insert(glAuditLog).values({
+      tenantId: orig.tenantId ?? null, entryId: Number(orig.id), action: 'REVERSE', actor: dto.reversedBy,
+      detail: { originalId: Number(orig.id), original_entry_no: orig.entryNo, reversalId, reversal_entry_no: res.entry_no, reason: dto.reason ?? null },
+    });
+    return { reversalId, originalId: Number(orig.id), reversal_entry_no: res.entry_no, original_entry_no: orig.entryNo };
+  }
+
+  // GL-17 app-level immutability guard (complements the prod DB trigger; harness-verifiable). There is no
+  // edit/delete endpoint for a posted JE — this method DEMONSTRATES the guard: it refuses to mutate a Posted
+  // entry, records a MUTATE_BLOCKED audit row, and signals the block. It returns a discriminated result
+  // (rather than throwing) so the audit row commits with the request tx; the controller renders the block
+  // as HTTP 400 GL_IMMUTABLE. A thrown exception would roll the whole request tx back and discard the audit
+  // row, because each request runs in a single tenant-scoped transaction (see TenantTxInterceptor).
+  async attemptVoidPosted(entryId: number, actor: string) {
+    const db = this.db as any;
+    const [e] = await db.select().from(journalEntries).where(eq(journalEntries.id, entryId)).limit(1);
+    if (!e) throw new NotFoundException({ code: 'ENTRY_NOT_FOUND', message: `Journal entry ${entryId} not found`, messageTh: `ไม่พบรายการบัญชี ${entryId}` });
+    if (e.status === 'Posted') {
+      await db.insert(glAuditLog).values({
+        tenantId: e.tenantId ?? null, entryId: Number(e.id), action: 'MUTATE_BLOCKED', actor,
+        detail: { entry_no: e.entryNo, attempted: 'void/delete', message: 'posted entry is immutable; correct via reversal' },
+      });
+      return { blocked: true as const, code: 'GL_IMMUTABLE' as const, entry_id: entryId, entry_no: e.entryNo, status: e.status, immutable: true,
+        message: `Posted journal entry ${e.entryNo} is immutable; correct it via a reversal`, messageTh: 'รายการที่ผ่านรายการแล้วแก้ไข/ลบไม่ได้ ต้องกลับรายการเท่านั้น' };
+    }
+    // Non-posted (Draft) entries are not GL-17-protected; nothing to block here.
+    return { blocked: false as const, entry_id: entryId, status: e.status, immutable: false };
+  }
+
+  // GL-17: the GL audit trail (optionally filtered to one entry), scoped to the caller's tenant by RLS.
+  async listGlAudit(entryId?: number, limit = 100) {
+    const db = this.db as any;
+    const where = entryId != null ? eq(glAuditLog.entryId, entryId) : undefined;
+    const rows = await db.select().from(glAuditLog).where(where).orderBy(desc(glAuditLog.id)).limit(limit);
+    return { audit: rows.map((r: any) => ({ id: Number(r.id), entry_id: r.entryId != null ? Number(r.entryId) : null, action: r.action, actor: r.actor, detail: r.detail, at: r.at })), count: rows.length };
   }
 
   // ───────────────────── Trial Balance ─────────────────────
