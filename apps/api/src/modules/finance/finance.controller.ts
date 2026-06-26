@@ -49,7 +49,8 @@ export class FinanceController {
   @Get('reconciliation/controls') @Permissions('exec', 'ar', 'creditors')
   reconciliationControls() { return this.svc.reconcileControls(); }
 
-  // GOV-01 — unified pending-approvals monitor across every maker-checker (GL-05/EXP-06/PAY-03/FA-08/FA-09/INV-07).
+  // GOV-01 — unified pending-approvals monitor across every maker-checker
+  // (GL-05/BANK-02/EXP-06/PAY-03/FA-08/FA-09/INV-07/FX-04/BUD-01).
   @Get('approvals/pending') @Permissions('exec', 'approvals', 'creditors')
   pendingApprovals(@Query('overdue_days') overdueDays?: string) {
     return this.svc.pendingApprovals({ overdue_days: overdueDays ? Math.max(1, Number(overdueDays) || 3) : undefined });

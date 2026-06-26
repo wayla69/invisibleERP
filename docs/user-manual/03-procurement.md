@@ -127,6 +127,13 @@ overpayment and fraud.
 > authority can **override** the failed match with a written reason; only then can
 > AP pay it. See [Finance — AR & AP](./05-finance-ar-ap.md).
 
+> **Note — who may override (separation of duties):** The person who **ran the
+> match cannot override it** — the override must come from a **different** user with
+> approval authority (otherwise you'll see `SOD_VIOLATION`, and this binds even an
+> Admin). This stops one clerk from both matching and force-approving their own
+> off-tolerance invoice. Re-running the match also **clears** any earlier override.
+> (Control **EXP-01**.)
+
 > **Note — separation of duties:** The person who **orders** goods should not be
 > the one who **pays** the invoice. The system flags this conflict (rule R03/R04).
 

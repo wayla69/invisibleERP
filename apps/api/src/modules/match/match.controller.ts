@@ -32,6 +32,8 @@ export class MatchController {
 
   @Get(':txnNo') @Permissions('procurement', 'creditors')
   getMatch(@Param('txnNo') txnNo: string) { return this.svc.getMatch(txnNo); }
-  @Post(':txnNo/override') @Permissions('creditors')
+  // EXP-01 override is maker-checked in the service (overrider ≠ matcher, binds Admin). Allow approval-authority
+  // roles (controller/approvals) as well as creditors — an override is a checker action, not a clerk's.
+  @Post(':txnNo/override') @Permissions('creditors', 'approvals', 'gl_close')
   override(@Param('txnNo') txnNo: string, @Body(new ZodValidationPipe(OverrideBody)) b: { reason: string }, @CurrentUser() u: JwtUser) { return this.svc.override(txnNo, b.reason, u); }
 }

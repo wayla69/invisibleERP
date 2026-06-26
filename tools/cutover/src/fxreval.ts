@@ -39,7 +39,10 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'fxchk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq }, // FX-02 approver — Admin-tier so it can see the shared (HQ/null-tenant) rate; ≠ admin so SoD passes (binds even Admin)
+  ]).onConflictDoNothing();
   // foreign open balances (booked at their rate): USD AR $100 @ 35; EUR AP €100 @ 39
   await db.insert(s.arInvoices).values({ invoiceNo: 'INV-FX-USD', currency: 'USD', fxRate: '35', amount: '100', paidAmount: '0', status: 'Unpaid', invoiceDate: '2031-12-01', tenantId: hq }).onConflictDoNothing();
   await db.insert(s.apTransactions).values({ txnNo: 'AP-FX-EUR', currency: 'EUR', fxRate: '39', amount: '100', paidAmount: '0', status: 'Unpaid', invoiceDate: '2031-12-01', tenantId: hq }).onConflictDoNothing();
@@ -62,11 +65,21 @@ async function main() {
   const accJson = JSON.stringify((await inj('GET', '/api/ledger/accounts', admin)).json);
   ok('COA seeded with 5400 FX Gain/Loss', accJson.includes('5400'));
 
+  const fxchk = (await inj('POST', '/api/login', undefined, { username: 'fxchk', password: 'pw' })).json.token as string;
   const sr = await inj('POST', '/api/fx/rates', admin, { currency: 'USD', rate_date: '2031-12-31', rate: 36, shared: true });
-  ok('Set USD rate 36', (sr.status === 200 || sr.status === 201) && near(sr.json.rate, 36), `${sr.status}`);
+  ok('FX-04: manual USD rate 36 requested → PendingApproval (not yet usable)', (sr.status === 200 || sr.status === 201) && near(sr.json.rate, 36) && sr.json.status === 'PendingApproval', `${sr.status} ${sr.json.status}`);
   await inj('POST', '/api/fx/rates', admin, { currency: 'EUR', rate_date: '2031-12-31', rate: 40, shared: true });
   const lr = await inj('GET', '/api/fx/rates?currency=USD', admin);
   ok('List rates returns USD 36', (lr.json.rates ?? []).some((r: any) => near(r.rate, 36)));
+
+  // FX-04: an unapproved manual rate cannot drive a revaluation; requester cannot self-approve.
+  const revBefore = await inj('POST', '/api/fx/revalue', admin, { as_of: '2031-12-31', currency: 'USD' });
+  ok('FX-04: revalue blocked while rate is PendingApproval → 400 NO_RATE', revBefore.status === 400 && revBefore.json.error?.code === 'NO_RATE', `${revBefore.status} ${revBefore.json.error?.code}`);
+  const selfAppr = await inj('POST', '/api/fx/rates/approve', admin, { currency: 'USD', rate_date: '2031-12-31', shared: true });
+  ok('FX-04: requester self-approval blocked → 403 SOD_VIOLATION (binds even Admin)', selfAppr.status === 403 && selfAppr.json.error?.code === 'SOD_VIOLATION', `${selfAppr.status} ${selfAppr.json.error?.code}`);
+  const apprUsd = await inj('POST', '/api/fx/rates/approve', fxchk, { currency: 'USD', rate_date: '2031-12-31', shared: true });
+  ok('FX-04: independent approver approves USD rate → Approved (now usable)', apprUsd.status === 200 && apprUsd.json.status === 'Approved' && apprUsd.json.approved_by === 'fxchk', `${apprUsd.status} ${apprUsd.json.status}`);
+  await inj('POST', '/api/fx/rates/approve', fxchk, { currency: 'EUR', rate_date: '2031-12-31', shared: true });
 
   // report before revalue (USD): AR booked 3500 / current 3600 / delta 100
   const rep = await inj('GET', '/api/fx/unrealized?as_of=2031-12-31&currency=USD', admin);

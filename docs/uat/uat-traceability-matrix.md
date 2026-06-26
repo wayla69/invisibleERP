@@ -201,7 +201,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-006 | Price variance block (MATCH_BLOCKED) | EXP-03 | 02 §9, §13 |
 | UAT-P2P-007 | Over-invoice block | EXP-03 | 02 §9, §13 |
 | UAT-P2P-008 | Match tolerance | EXP-03 | 02 §9 |
-| UAT-P2P-009 | Override-with-reason (request+approve) | EXP-06, R04 | 02 §9 |
+| UAT-P2P-009 | Override-with-reason (independent overrider) | EXP-01, EXP-06, R04 | 02 §6, §9 |
+| UAT-P2P-009b | Matcher cannot self-override (SoD) | EXP-01 | 02 §6 |
 | UAT-P2P-010 | Override reset on re-match | EXP-03 | 02 §9, §13 |
 | UAT-P2P-011 | Non-PO bill (gate fails open, request+approve) | EXP-06 | 02 §7 |
 | UAT-P2P-012 | Blocklisted vendor (SUPPLIER_BLOCKED) | EXP-04, R13 | 02 §9, §13 |
@@ -303,6 +304,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
 | UAT-GL-020 | Bank reconciliation tenant-scoped | ITGC-AC-03 / REC-02 | 07 §7 |
+| UAT-GL-048 | Bank adjustment maker-checker (request→Draft) | BANK-02 | 07 §7 |
+| UAT-GL-049 | Bank adjustment self-approve blocked / approve closes diff | BANK-02 | 07 §7 |
+| UAT-GL-050 | FX rate maker-checker — manual rate not usable until approved | FX-04 | 14 §7 |
+| UAT-GL-051 | FX rate approved by different user → revaluation works | FX-04 | 14 §7 |
 | UAT-GL-021 | Statement of Cash Flows reconstructed from GL | GL-07 | 04 §7, §9 |
 | UAT-GL-022 | Cash flow reconciles to change in cash | GL-07 | 04 §9 |
 | UAT-GL-023 | Year-end close excluded from cash flow | GL-07 | 04 §7, §9 |
@@ -518,6 +523,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
 | UAT-UI-DEM-01 | Demand forecasting screen (forecast / backtest / accuracy) (UI) | Feature (demand ML UI) | 13 §7 |
 | UAT-UI-BUD-01 | Budget vs Actual screen (set budget + variance) (UI) | Feature (budget-vs-actual UI) | 13 §7 |
+| UAT-BUD-02 | Budget maker-checker — pending excluded until approved | BUD-01 | 13 §7 |
 | UAT-UI-INS-01 | Insights screen — anomalies / replenishment / AI insight (UI) | Feature (insights UI), BI-04 | 26 §7 |
 
 ## 10 — Customer Portal → `01-order-to-cash.md` / `08-itgc.md`

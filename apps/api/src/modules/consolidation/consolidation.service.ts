@@ -110,7 +110,7 @@ export class ConsolidationService {
     const fxMap = new Map<string, number>();
     if (currencies.length) {
       const fxRows = await db.select({ currency: fxRates.currency, rate: fxRates.rate })
-        .from(fxRates).where(and(inArray(fxRates.currency, currencies), sql`${fxRates.rateDate} <= ${periodEnd}`))
+        .from(fxRates).where(and(inArray(fxRates.currency, currencies), eq(fxRates.status, 'Approved'), sql`${fxRates.rateDate} <= ${periodEnd}`))
         .orderBy(sql`${fxRates.rateDate} DESC`);
       for (const r of fxRows) if (!fxMap.has(r.currency)) fxMap.set(r.currency, n(r.rate)); // first per currency = latest (DESC)
     }

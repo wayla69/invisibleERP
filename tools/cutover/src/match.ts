@@ -124,11 +124,14 @@ async function main() {
   ok('Tolerance: 10.15 @ price_pct 2% → matched; @ 0% → price_variance', m4.json.match_status === 'matched' && m4.json.payable === true && m4b.json.match_status === 'price_variance', JSON.stringify({ at2: m4.json.match_status, at0: m4b.json.match_status }));
   await inj('PUT', '/api/procurement/match/tolerance', admin, { price_pct: 2 }); // restore
 
-  // ── F. override gate ──
-  const ovr = await inj('POST', `/api/procurement/match/${ap2}/override`, admin, { reason: 'manager approved variance' });
+  // ── F. override gate (EXP-01 maker-checker: overrider ≠ matcher, binds Admin) ──
+  // the match was RUN by admin → admin cannot also override it.
+  const ovrSelf = await inj('POST', `/api/procurement/match/${ap2}/override`, admin, { reason: 'self-override attempt' });
+  ok('EXP-01: matcher cannot override their own 3-way match → 403 SOD_VIOLATION (binds even Admin)', ovrSelf.status === 403 && ovrSelf.json.error?.code === 'SOD_VIOLATION', `${ovrSelf.status} ${ovrSelf.json.error?.code}`);
+  const ovr = await inj('POST', `/api/procurement/match/${ap2}/override`, apprv, { reason: 'manager approved variance' });
   const pay2b = await payFull(ap2, 1200);
   const gl2 = await payGl(ap2);
-  ok('Override unblocks: override→request+approve → bill Paid + PAY-AP GL posted', ovr.json.override === true && pay2b.json.bill_status === 'Paid' && near(leg(gl2, '2000', 'debit'), 1200), JSON.stringify({ ovr: ovr.json.override, pay: pay2b.json.bill_status }));
+  ok('Override unblocks: independent override→request+approve → bill Paid + PAY-AP GL posted', ovr.json.override === true && ovr.json.override_by !== 'admin' && pay2b.json.bill_status === 'Paid' && near(leg(gl2, '2000', 'debit'), 1200), JSON.stringify({ ovr: ovr.json.override, pay: pay2b.json.bill_status }));
 
   // ── G. RFQ → award → PO ──
   const rfq = await inj('POST', '/api/procurement/rfqs', admin, { items: [{ item_id: 'X', qty: 50 }] });
@@ -171,7 +174,7 @@ async function main() {
   // ── L. override does NOT survive a re-match (stale override must not keep a failing invoice payable) ──
   const ap5 = await apTxn(1200);
   await runMatch(ap5, poNo, [{ item_id: 'X', qty: 100, unit_price: 12 }]); // price_variance
-  await inj('POST', `/api/procurement/match/${ap5}/override`, admin, { reason: 'one-time' });
+  await inj('POST', `/api/procurement/match/${ap5}/override`, apprv, { reason: 'one-time' }); // independent overrider (≠ matcher)
   await runMatch(ap5, poNo, [{ item_id: 'X', qty: 100, unit_price: 12 }]); // re-match → must RESET override
   const pay5 = await payAttempt(ap5, 1200);
   ok('Override cleared by re-match → still-failing invoice BLOCKED again (409)', pay5.status === 409 && pay5.json.error?.code === 'MATCH_BLOCKED', `${pay5.status} ${pay5.json.error?.code}`);
