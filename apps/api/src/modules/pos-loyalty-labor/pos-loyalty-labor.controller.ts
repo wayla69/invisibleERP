@@ -6,6 +6,7 @@ import { LoyaltyTierService } from './loyalty-tier.service';
 import { HouseAccountService } from './house-account.service';
 import { GiftCardExtraService } from './giftcard-extra.service';
 import { TimeClockService } from './timeclock.service';
+import { ScheduleService, type CreateShiftDto } from './schedule.service';
 import { qint, qintOpt } from '../../common/query';
 
 const TierBody = z.object({ id: z.number().optional(), tier: z.string().min(1), min_lifetime: z.number().optional(), earn_mult: z.number().optional(), redeem_mult: z.number().optional() });
@@ -13,6 +14,7 @@ const HouseBody = z.object({ sale_no: z.string().min(1), amount: z.number().posi
 const PinBody = z.object({ pin: z.string().min(1) });
 const ReloadBody = z.object({ amount: z.number().positive(), pin: z.string().optional() });
 const ClockBody = z.object({ emp_code: z.string().min(1), break_minutes: z.number().int().optional() });
+const ShiftBody = z.object({ emp_code: z.string().min(1), shift_date: z.string().min(8), start_time: z.string().min(4), end_time: z.string().min(4), hourly_rate: z.number().nonnegative().optional(), position: z.string().max(60).optional(), notes: z.string().max(300).optional() });
 
 @Controller('api/loyalty')
 @Permissions('loyalty', 'marketing', 'pos', 'exec')
@@ -38,9 +40,15 @@ export class PosBillingController {
 @Controller('api/pos/labor')
 @Permissions('pos', 'users', 'exec')
 export class LaborController {
-  constructor(private readonly svc: TimeClockService) {}
+  constructor(private readonly svc: TimeClockService, private readonly schedule: ScheduleService) {}
   @Post('clock-in') clockIn(@Body(new ZodValidationPipe(ClockBody)) b: z.infer<typeof ClockBody>, @CurrentUser() u: JwtUser) { return this.svc.clockIn(b.emp_code, u); }
   @Post('clock-out') clockOut(@Body(new ZodValidationPipe(ClockBody)) b: z.infer<typeof ClockBody>) { return this.svc.clockOut(b.emp_code, b.break_minutes); }
   @Get('report') report() { return this.svc.report(); }
   @Get('productivity') productivity(@Query('date') date?: string) { return this.svc.productivity(date); }
+
+  // W4 — shift scheduling / roster + labor %
+  @Post('shifts') createShift(@Body(new ZodValidationPipe(ShiftBody)) b: CreateShiftDto, @CurrentUser() u: JwtUser) { return this.schedule.createShift(b, u); }
+  @Get('shifts') listShifts(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) { return this.schedule.list({ from, to }, u); }
+  @Post('shifts/:id/cancel') cancelShift(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.schedule.cancelShift(+id, u); }
+  @Get('labor-summary') laborSummary(@Query('from') from: string, @Query('to') to: string, @CurrentUser() u: JwtUser) { return this.schedule.laborSummary({ from, to }, u); }
 }

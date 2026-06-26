@@ -1079,6 +1079,13 @@
       "when": 2023710000004,
       "tag": "0153_bank_deposits",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 2023720000004,
+      "tag": "0154_shift_schedules",
+      "breakpoints": true
     }
   ]
 }

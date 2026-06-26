@@ -89,6 +89,7 @@ jobs:
           - { pkg: cutover, script: reservations }
           - { pkg: cutover, script: tips }
           - { pkg: cutover, script: waste }
+          - { pkg: cutover, script: scheduling }
           - { pkg: cutover, script: cash-banking }
           - { pkg: cutover, script: refund-approval }
           - { pkg: cutover, script: menu }

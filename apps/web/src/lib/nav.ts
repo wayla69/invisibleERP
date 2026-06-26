@@ -10,6 +10,7 @@ import {
   BookOpen,
   BookText,
   CalendarClock,
+  CalendarRange,
   Trash2,
   Vault,
   Bot,
@@ -350,6 +351,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     workspace: ['erp'],
     items: [
       { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
+      { label: 'จัดตารางเวร & แรงงาน', href: '/scheduling', icon: CalendarRange, perms: ['pos', 'users', 'exec'] },
       { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
       // self-service is for every employee (incl. POS staff) → cross-listed to both surfaces
       { label: 'พื้นที่พนักงาน (ESS)', href: '/ess', icon: IdCard, perms: ['ess'], workspace: BOTH },
