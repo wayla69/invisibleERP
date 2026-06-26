@@ -409,6 +409,17 @@ async function main() {
   ok('ITGC-AC-10: audit_log UPDATE blocked by DB trigger (append-only)', updateBlocked, `blocked=${updateBlocked}`);
   ok('ITGC-AC-10: audit_log DELETE blocked by DB trigger (append-only)', deleteBlocked && after === before, `blocked=${deleteBlocked} rows=${after}`);
 
+  // ════════════════════ ITGC-AC-16 — audit trail is tamper-EVIDENT (hash-chained) ════════════════════
+  const v1 = await inj('GET', '/api/admin/audit/verify', admin);
+  ok('ITGC-AC-16: audit hash chain verifies intact (ok=true)', v1.json?.ok === true && v1.json?.rows_checked > 0, JSON.stringify({ ok: v1.json?.ok, n: v1.json?.rows_checked }));
+  // Simulate a privileged tamper that BYPASSES the append-only trigger (the threat AC-10 alone can't detect),
+  // then prove the hash chain catches it.
+  await pg.exec(`ALTER TABLE audit_log DISABLE TRIGGER USER`);
+  await pg.query(`UPDATE audit_log SET actor='tamper' WHERE id = (SELECT id FROM audit_log WHERE seq IS NOT NULL ORDER BY tenant_id, seq LIMIT 1)`);
+  await pg.exec(`ALTER TABLE audit_log ENABLE TRIGGER USER`);
+  const v2 = await inj('GET', '/api/admin/audit/verify', admin);
+  ok('ITGC-AC-16: a past row altered behind the trigger is DETECTED → ok=false, hash mismatch', v2.json?.ok === false && /hash mismatch/.test(v2.json?.reason ?? ''), JSON.stringify({ ok: v2.json?.ok, at: v2.json?.broken_at, reason: v2.json?.reason }));
+
   // ════════════════════ ITGC-AC-14 — field-level before/after change log (financial tables) ════════════════════
   // The DB triggers (0116) capture OLD→NEW row images on the financial tables. The AP-PAY flow above mutated
   // ap_transactions through the app (apclerk created the bill Unpaid; fincon's approval set it Paid), so the

@@ -9,7 +9,8 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import { Observable, tap } from 'rxjs';
-import { sql } from 'drizzle-orm';
+import { sql, eq, isNull, desc } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { auditLog } from '../database/schema';
@@ -17,6 +18,17 @@ import { logger, requestId } from '../observability/logger';
 import type { JwtUser } from './decorators';
 
 const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+
+// ITGC-AC-16 — bind each audit row to the previous one. Altering/removing any past row breaks every later hash.
+export function auditRowHash(prevHash: string | null, seq: number, r: { actor: string | null; tenantId: number | null; action: string | null; ip: string | null; requestId: string | null; status: string | null; meta: unknown }): string {
+  const metaStr = r.meta == null ? '' : stableStringify(r.meta);
+  return createHash('sha256').update(`${prevHash ?? ''}|${seq}|${r.tenantId ?? ''}|${r.actor ?? ''}|${r.action ?? ''}|${r.ip ?? ''}|${r.requestId ?? ''}|${r.status ?? ''}|${metaStr}`).digest('hex');
+}
+function stableStringify(v: any): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
+  return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(v[k])}`).join(',')}}`;
+}
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
@@ -67,7 +79,15 @@ export class AuditInterceptor implements NestInterceptor {
       // the audit row; the base connection role already holds INSERT and the bypass GUC satisfies RLS.
       await db.transaction(async (tx: any) => {
         await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-        await tx.insert(auditLog).values({ actor, tenantId, action, ip, requestId: rid, status, meta: meta ?? null });
+        // ITGC-AC-16 — append to the per-tenant hash chain. Lock the latest row (FOR UPDATE) so concurrent
+        // audit writes can't fork the chain; each hash binds the previous hash + this row's content.
+        const [last] = await tx.select({ seq: auditLog.seq, hash: auditLog.hash }).from(auditLog)
+          .where(tenantId == null ? isNull(auditLog.tenantId) : eq(auditLog.tenantId, tenantId))
+          .orderBy(desc(auditLog.seq)).limit(1).for('update');
+        const seq = (last?.seq ?? 0) + 1;
+        const prevHash = last?.hash ?? null;
+        const hash = auditRowHash(prevHash, seq, { actor, tenantId, action, ip, requestId: rid, status, meta: meta ?? null });
+        await tx.insert(auditLog).values({ actor, tenantId, action, ip, requestId: rid, status, meta: meta ?? null, seq, prevHash, hash });
       });
     } catch (e) {
       // Audit must never break the request. Log and move on.
