@@ -17,6 +17,7 @@ import { ProcurementModule } from './modules/procurement/procurement.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { CrmPipelineModule } from './modules/crm-pipeline/crm-pipeline.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -137,6 +138,7 @@ import { OpsModule } from './modules/ops/ops.module';
     FinanceModule,
     ReportsModule,
     CustomersModule,
+    CrmPipelineModule,
     NotificationsModule,
     AnalyticsModule,
     AiModule,
