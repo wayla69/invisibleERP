@@ -649,7 +649,83 @@ async function main() {
     genAcc.accounts?.some((a: any) => a.code === '4300') && genAcc.accounts?.some((a: any) => a.code === '5300') && genAcc.count === restoAll.count,
     `n=${genAcc.count} src=${genAcc.source}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA ──');
+  // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
+  // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
+  // Both legs use the same depreciation amount; pass both role keys so the engine maps them.
+  const prevDep = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'DEPRECIATION.FA', amounts: { dep_expense: 1000, accum_dep: 1000 } });
+  const depLines: any[] = Array.isArray(prevDep.json) ? prevDep.json : [];
+  const depDR = depLines.find((l: any) => l.side === 'DR');
+  const depCR = depLines.find((l: any) => l.side === 'CR');
+  ok('GL-12: preview DEPRECIATION.FA → DR 5200 / CR 1590 (amount 1000)',
+    prevDep.status === 200 && depDR?.accountCode === '5200' && near(depDR?.amount, 1000) && depCR?.accountCode === '1590' && near(depCR?.amount, 1000),
+    `st=${prevDep.status} DR=${depDR?.accountCode}:${depDR?.amount} CR=${depCR?.accountCode}:${depCR?.amount}`);
+
+  // TC-GL-12-02: preview goods-receipt legs — DR 1200 / CR 2000
+  // Both legs use the same amount; pass both role keys so the engine maps them.
+  const prevGR = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'GR.INVENTORY', amounts: { inventory: 500, ap_control: 500 } });
+  const grLines: any[] = Array.isArray(prevGR.json) ? prevGR.json : [];
+  const grDR = grLines.find((l: any) => l.side === 'DR');
+  const grCR = grLines.find((l: any) => l.side === 'CR');
+  ok('GL-12: preview GR.INVENTORY → DR 1200 / CR 2000 (amount 500)',
+    prevGR.status === 200 && grDR?.accountCode === '1200' && near(grDR?.amount, 500) && grCR?.accountCode === '2000' && near(grCR?.amount, 500),
+    `st=${prevGR.status} DR=${grDR?.accountCode}:${grDR?.amount} CR=${grCR?.accountCode}:${grCR?.amount}`);
+
+  // TC-GL-12-03: unknown event type → NO_POSTING_RULE
+  const prevUnknown = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'UNKNOWN_EVENT', amounts: {} });
+  ok('GL-12: unknown eventType → 400/422 NO_POSTING_RULE',
+    (prevUnknown.status === 400 || prevUnknown.status === 422) && prevUnknown.json?.error?.code === 'NO_POSTING_RULE',
+    `st=${prevUnknown.status} code=${prevUnknown.json?.error?.code}`);
+
+  // TC-GL-12-04: event-type catalogue returns ≥20 entries
+  const evTypes = await inj('GET', '/api/ledger/posting-rules/event-types', admin);
+  const evList: any[] = Array.isArray(evTypes.json) ? evTypes.json : [];
+  ok('GL-12: event-type catalogue lists ≥20 seeded event types',
+    evTypes.status === 200 && evList.length >= 20,
+    `st=${evTypes.status} n=${evList.length}`);
+
+  // ───────────────────── WS1.3 — Multi-dimensional GL Postings (GL-13) ─────────────────────
+  // TC-GL-13-01: smoke test — by-branch endpoint returns a branches key
+  const today = new Date().toISOString().slice(0, 10);
+  const bb0 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
+  ok('GL-13: income-statement/by-branch returns a branches key (smoke)', bb0.status === 200 && typeof bb0.json?.branches === 'object', `st=${bb0.status}`);
+
+  // TC-GL-13-02: post JEs with branch_id on lines, then verify both branches appear
+  // Using direct DB insert so we can set branch_id (the API POST /journal doesn't yet expose branch_id in the Zod schema)
+  jeSeq++;
+  const [hb1] = await db.insert(s.journalEntries).values({
+    entryNo: `JE-B${String(jeSeq).padStart(4, '0')}`, entryDate: today, period: today.slice(0, 7),
+    source: 'TEST-GL13', sourceRef: `GL13-${jeSeq}`, tenantId: hq, currency: 'THB', status: 'Posted', createdBy: 'seed',
+  }).returning({ id: s.journalEntries.id });
+  await db.insert(s.journalLines).values([
+    { entryId: Number(hb1.id), accountCode: '4000', debit: '0', credit: '500', currency: 'THB', tenantId: hq, branchId: 1 },
+    { entryId: Number(hb1.id), accountCode: '1000', debit: '500', credit: '0', currency: 'THB', tenantId: hq, branchId: 1 },
+  ]);
+  jeSeq++;
+  const [hb2] = await db.insert(s.journalEntries).values({
+    entryNo: `JE-B${String(jeSeq).padStart(4, '0')}`, entryDate: today, period: today.slice(0, 7),
+    source: 'TEST-GL13', sourceRef: `GL13-${jeSeq}`, tenantId: hq, currency: 'THB', status: 'Posted', createdBy: 'seed',
+  }).returning({ id: s.journalEntries.id });
+  await db.insert(s.journalLines).values([
+    { entryId: Number(hb2.id), accountCode: '4000', debit: '0', credit: '300', currency: 'THB', tenantId: hq, branchId: 2 },
+    { entryId: Number(hb2.id), accountCode: '1000', debit: '300', credit: '0', currency: 'THB', tenantId: hq, branchId: 2 },
+  ]);
+  const bb2 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
+  ok('GL-13: branch_id=1 and branch_id=2 both appear in by-branch P&L', bb2.status === 200 && !!bb2.json?.branches?.['1'] && !!bb2.json?.branches?.['2'], `branches=${Object.keys(bb2.json?.branches ?? {}).join(',')}`);
+
+  // TC-GL-13-03: post without branch_id → appears under 'unassigned'
+  jeSeq++;
+  const [hb3] = await db.insert(s.journalEntries).values({
+    entryNo: `JE-B${String(jeSeq).padStart(4, '0')}`, entryDate: today, period: today.slice(0, 7),
+    source: 'TEST-GL13', sourceRef: `GL13-${jeSeq}`, tenantId: hq, currency: 'THB', status: 'Posted', createdBy: 'seed',
+  }).returning({ id: s.journalEntries.id });
+  await db.insert(s.journalLines).values([
+    { entryId: Number(hb3.id), accountCode: '5100', debit: '200', credit: '0', currency: 'THB', tenantId: hq },
+    { entryId: Number(hb3.id), accountCode: '1000', debit: '0', credit: '200', currency: 'THB', tenantId: hq },
+  ]);
+  const bb3 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
+  ok('GL-13: journal lines without branch_id appear under "unassigned"', bb3.status === 200 && !!bb3.json?.branches?.['unassigned'], `branches=${Object.keys(bb3.json?.branches ?? {}).join(',')}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

@@ -146,6 +146,12 @@ export class LedgerController {
   @Get('income-statement')
   incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.incomeStatement(from, to, costCenter, ledger || undefined); }
 
+  @Get('income-statement/by-branch')
+  @Permissions('exec', 'fin_report', 'creditors', 'ar')
+  incomeStatementByBranch(@Query('from') from: string, @Query('to') to: string) {
+    return this.svc.incomeStatementByBranch({ from, to });
+  }
+
   @Get('balance-sheet')
   balanceSheet(@Query('as_of') asOf: string, @Query('ledger') ledger?: string) { return this.svc.balanceSheet(asOf, ledger || undefined); }
 
