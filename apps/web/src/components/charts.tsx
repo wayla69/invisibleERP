@@ -85,6 +85,7 @@ export function SimpleBarChart({
   height = 260,
   color = 'var(--chart-1)',
   fmt,
+  onBarClick,
 }: {
   data: any[];
   xKey: string;
@@ -92,10 +93,16 @@ export function SimpleBarChart({
   height?: number;
   color?: string;
   fmt?: (v: number) => string;
+  onBarClick?: (entry: any) => void;
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <BarChart
+        data={data}
+        margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+        onClick={onBarClick ? (d) => { if (d?.activePayload?.[0]) onBarClick(d.activePayload[0].payload); } : undefined}
+        style={onBarClick ? { cursor: 'pointer' } : undefined}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis dataKey={xKey} {...axisProps} />
         <YAxis {...axisProps} width={48} />

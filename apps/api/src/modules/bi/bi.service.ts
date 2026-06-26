@@ -3,7 +3,7 @@ import { eq, and, sql, gte, lt, desc, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { biDailySnapshots, reportSubscriptions, reportRuns } from '../../database/schema/bi';
 import { notifications } from '../../database/schema/system';
-import { custPosSales } from '../../database/schema/sales';
+import { custPosSales, custPosItems } from '../../database/schema/sales';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { arInvoices } from '../../database/schema/finance';
 import { apTransactions } from '../../database/schema/finance';
@@ -243,6 +243,41 @@ export class BiService {
         ...m, open_value: round2(m.open_value), won_value: round2(m.won_value),
         win_rate_pct: m.total_created > 0 ? round2(m.won / m.total_created * 100) : 0,
       })),
+    };
+  }
+
+  // ── Sales Cube Drill-down ──────────────────────────────────────────────────
+  // Top-selling items for a date range — clicked from the sales cube bar chart.
+
+  async salesCubeTopItems(dto: { start_date?: string; end_date?: string; months?: number; limit?: number }, user: JwtUser) {
+    const db = this.db as any;
+    const tid = user.tenantId!;
+    const months = dto.months ?? 1;
+    const today = new Date().toISOString().slice(0, 10);
+    const start = dto.start_date ?? this.monthsAgo(today, months);
+    const end = dto.end_date ?? today;
+    const limit = Math.min(dto.limit ?? 20, 100);
+
+    const rows = await db.select({
+      item_id: custPosItems.itemId,
+      item_description: custPosItems.itemDescription,
+      qty: sql<string>`coalesce(sum(${custPosItems.qty}),0)`,
+      revenue: sql<string>`coalesce(sum(${custPosItems.amount}),0)`,
+      tx_count: sql<string>`count(distinct ${custPosSales.id})`,
+    }).from(custPosItems)
+      .innerJoin(custPosSales, eq(custPosItems.saleId, custPosSales.id))
+      .where(and(eq(custPosSales.tenantId, tid), gte(custPosSales.saleDate, start), lte(custPosSales.saleDate, end)))
+      .groupBy(custPosItems.itemId, custPosItems.itemDescription)
+      .orderBy(desc(sql`coalesce(sum(${custPosItems.amount}),0)`))
+      .limit(limit);
+
+    return {
+      start, end,
+      items: rows.map((r: any) => ({
+        item_id: r.item_id ?? '—', item_description: r.item_description ?? '—',
+        qty: round2(n(r.qty)), revenue: round2(n(r.revenue)), tx_count: Number(r.tx_count),
+      })),
+      count: rows.length,
     };
   }
 

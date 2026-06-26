@@ -23,6 +23,12 @@ export class BiController {
     return this.svc.salesCube({ period: period as any, months: qintOpt('months', months), start_date: start, end_date: end }, user!);
   }
 
+  @Get('sales-cube/top-items')
+  @Permissions('exec')
+  topItems(@Query('months') months?: string, @Query('start') start?: string, @Query('end') end?: string, @Query('limit') limit?: string, @CurrentUser() user?: JwtUser) {
+    return this.svc.salesCubeTopItems({ months: qintOpt('months', months), start_date: start, end_date: end, limit: qintOpt('limit', limit) }, user!);
+  }
+
   @Get('finance-trend')
   @Permissions('exec')
   financeTrend(@Query('months') months?: string, @Query('ledger') ledger?: string, @CurrentUser() user?: JwtUser) {
