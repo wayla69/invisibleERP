@@ -292,6 +292,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
 | UAT-GL-020 | Bank reconciliation tenant-scoped | ITGC-AC-03 / REC-02 | 07 §7 |
+| UAT-GL-048 | Bank adjustment maker-checker (request→Draft) | BANK-02 | 07 §7 |
+| UAT-GL-049 | Bank adjustment self-approve blocked / approve closes diff | BANK-02 | 07 §7 |
 | UAT-GL-021 | Statement of Cash Flows reconstructed from GL | GL-07 | 04 §7, §9 |
 | UAT-GL-022 | Cash flow reconciles to change in cash | GL-07 | 04 §9 |
 | UAT-GL-023 | Year-end close excluded from cash flow | GL-07 | 04 §7, §9 |

@@ -89,12 +89,17 @@ export class BankService {
     return { statement_line_id: statementLineId, reconciled: false };
   }
 
-  // post a fee/interest adjustment found on the statement, into the GL, then self-match it
-  async postAdjustment(statementLineId: number, dto: AdjustmentDto, user: JwtUser) {
+  // BANK-02 maker-checker — a fee/interest adjustment is a REQUEST that posts a DRAFT JE (no GL/balance impact;
+  // the statement line stays UNreconciled) until a DIFFERENT user approves it. A single user can no longer post a
+  // bank fee straight to the books (e.g. mis-booking an outflow as interest income). The Draft JE (source BANKADJ,
+  // sourceRef STMTLN-<id>) is also surfaced, aged, by the pending-approvals monitor (MON-01). The line carries the
+  // Draft entry_no in adjustmentJournalNo while reconciled='false' (= pending); approval flips reconciled='true'.
+  async requestAdjustment(statementLineId: number, dto: AdjustmentDto, user: JwtUser) {
     const db = this.db as any;
     const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
     if (!sl) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Statement line not found', messageTh: 'ไม่พบรายการ statement' });
     if (sl.reconciled === 'true') throw new BadRequestException({ code: 'ALREADY_RECONCILED', message: 'Line already reconciled', messageTh: 'รายการนี้กระทบยอดแล้ว' });
+    if (sl.adjustmentJournalNo) throw new BadRequestException({ code: 'ADJUSTMENT_PENDING', message: 'An adjustment is already pending approval for this line', messageTh: 'มีคำขอปรับปรุงรออนุมัติสำหรับรายการนี้แล้ว' });
     const acct = await this.loadAccount(Number(sl.bankAccountId));
     const bankGl = acct.glAccountCode;
     const amt = round4(Math.abs(n(sl.amount)));
@@ -103,10 +108,46 @@ export class BankService {
     const lines = dto.kind === 'interest'
       ? [{ account_code: bankGl, debit: amt }, { account_code: '4000', credit: amt }]
       : [{ account_code: '5100', debit: amt }, { account_code: bankGl, credit: amt }];
-    const je: any = await this.ledger.postEntry({ date: sl.lineDate, source: 'BANKADJ', sourceRef, tenantId: acct.tenantId ?? null, memo: `Bank ${dto.kind} ${sourceRef}${dto.memo ? ' ' + dto.memo : ''}`, createdBy: user.username, lines });
+    const je: any = await this.ledger.postEntry({ date: sl.lineDate, source: 'BANKADJ', sourceRef, tenantId: acct.tenantId ?? null, memo: `Bank ${dto.kind} ${sourceRef}${dto.memo ? ' ' + dto.memo : ''}`, createdBy: user.username, lines, pendingApproval: true });
+    await db.update(bankStatementLines).set({ adjustmentJournalNo: je?.entry_no ?? null }).where(eq(bankStatementLines.id, statementLineId));
+    return { statement_line_id: statementLineId, journal_no: je?.entry_no ?? null, kind: dto.kind, amount: amt, status: 'PendingApproval', requested_by: user.username };
+  }
+
+  // Checker queue — bank adjustments awaiting approval (Draft JE posted, line not yet reconciled).
+  async listPendingAdjustments(_user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select({ id: bankStatementLines.id, bankAccountId: bankStatementLines.bankAccountId, lineDate: bankStatementLines.lineDate, description: bankStatementLines.description, amount: bankStatementLines.amount, journalNo: bankStatementLines.adjustmentJournalNo })
+      .from(bankStatementLines).where(and(isNotNull(bankStatementLines.adjustmentJournalNo), eq(bankStatementLines.reconciled, 'false'))).orderBy(asc(bankStatementLines.lineDate));
+    return { pending: rows.map((r: any) => ({ statement_line_id: Number(r.id), bank_account_id: Number(r.bankAccountId), date: r.lineDate, description: r.description, amount: round4(n(r.amount)), journal_no: r.journalNo })), count: rows.length };
+  }
+
+  // Approve a pending bank adjustment (checker; approver ≠ requester enforced by ledger.approveEntry, binds Admin).
+  async approveAdjustment(statementLineId: number, user: JwtUser) {
+    const db = this.db as any;
+    const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
+    if (!sl || sl.reconciled === 'true' || !sl.adjustmentJournalNo) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No bank adjustment pending approval for this line', messageTh: 'ไม่พบรายการปรับปรุงที่รออนุมัติ' });
+    const acct = await this.loadAccount(Number(sl.bankAccountId));
+    const bankGl = acct.glAccountCode;
+    const sourceRef = `STMTLN-${statementLineId}`;
+    const [draft] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries).where(and(eq(journalEntries.source, 'BANKADJ'), eq(journalEntries.sourceRef, sourceRef), eq(journalEntries.status, 'Draft'))).orderBy(desc(journalEntries.id)).limit(1);
+    if (!draft) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No draft adjustment entry for this line', messageTh: 'ไม่พบรายการบัญชีปรับปรุงที่รออนุมัติ' });
+    const res: any = await this.ledger.approveEntry(draft.entryNo, user);
     const [jl] = await db.select({ id: journalLines.id }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(eq(journalEntries.source, 'BANKADJ'), eq(journalEntries.sourceRef, sourceRef), eq(journalLines.accountCode, bankGl))).limit(1);
-    await db.update(bankStatementLines).set({ reconciled: 'true', matchedJournalLineId: jl ? Number(jl.id) : null, adjustmentJournalNo: je?.entry_no ?? null }).where(eq(bankStatementLines.id, statementLineId));
-    return { statement_line_id: statementLineId, journal_no: je?.entry_no ?? null, kind: dto.kind, amount: amt };
+    await db.update(bankStatementLines).set({ reconciled: 'true', matchedJournalLineId: jl ? Number(jl.id) : null }).where(eq(bankStatementLines.id, statementLineId));
+    return { statement_line_id: statementLineId, journal_no: draft.entryNo, status: 'Posted', approved_by: user.username, prepared_by: res?.prepared_by ?? null };
+  }
+
+  // Reject a pending bank adjustment (checker) — voids the Draft JE and frees the line.
+  async rejectAdjustment(statementLineId: number, user: JwtUser, reason?: string) {
+    const db = this.db as any;
+    const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
+    if (!sl || sl.reconciled === 'true' || !sl.adjustmentJournalNo) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No bank adjustment pending approval for this line', messageTh: 'ไม่พบรายการปรับปรุงที่รออนุมัติ' });
+    const sourceRef = `STMTLN-${statementLineId}`;
+    const [draft] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries).where(and(eq(journalEntries.source, 'BANKADJ'), eq(journalEntries.sourceRef, sourceRef), eq(journalEntries.status, 'Draft'))).orderBy(desc(journalEntries.id)).limit(1);
+    if (!draft) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No draft adjustment entry for this line', messageTh: 'ไม่พบรายการบัญชีปรับปรุงที่รออนุมัติ' });
+    await this.ledger.rejectEntry(draft.entryNo, user, reason);
+    await db.update(bankStatementLines).set({ adjustmentJournalNo: null }).where(eq(bankStatementLines.id, statementLineId));
+    return { statement_line_id: statementLineId, journal_no: draft.entryNo, status: 'Rejected', rejected_by: user.username };
   }
 
   async reconciliation(bankAccountId: number, asOf: string | undefined, _user: JwtUser) {
