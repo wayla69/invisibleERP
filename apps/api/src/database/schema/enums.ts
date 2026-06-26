@@ -23,6 +23,9 @@ export const stocktakeStatusEnum = pgEnum('stocktake_status', ['Draft', 'Posted'
 export const dineInOrderStatusEnum = pgEnum('dine_in_order_status', ['open', 'sent_to_kitchen', 'partially_ready', 'served', 'bill_requested', 'partially_paid', 'paid', 'closed', 'cancelled']);
 export const kdsItemStatusEnum = pgEnum('kds_item_status', ['new', 'queued', 'preparing', 'ready', 'served', 'voided']);
 export const tableStatusEnum = pgEnum('table_status', ['available', 'reserved', 'occupied', 'bill_requested', 'paying', 'cleaning', 'out_of_service']);
+// Reservations + walk-in waitlist share one lifecycle: a future booking starts 'booked', a walk-in queue
+// entry starts 'waiting'; both move to 'ready' (guest notified), then 'seated' — or 'cancelled'/'no_show'.
+export const reservationStatusEnum = pgEnum('reservation_status', ['booked', 'waiting', 'ready', 'seated', 'cancelled', 'no_show']);
 // ── Online ordering / delivery / kiosk (POS Tier 2 #10) ──
 export const orderChannelEnum = pgEnum('order_channel', ['dine_in', 'web', 'kiosk', 'grab', 'lineman', 'in_store']);
 export const fulfillmentTypeEnum = pgEnum('fulfillment_type', ['dine_in', 'takeaway', 'delivery', 'pickup']);

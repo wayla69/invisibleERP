@@ -86,6 +86,7 @@ jobs:
           # ── restaurant ──
           - { pkg: cutover, script: restaurant }
           - { pkg: cutover, script: restaurant-offline }
+          - { pkg: cutover, script: reservations }
           - { pkg: cutover, script: menu }
           - { pkg: cutover, script: recipe }
           # ── tax / Thai compliance ──

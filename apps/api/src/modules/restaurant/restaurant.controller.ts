@@ -10,6 +10,7 @@ import { BuffetService } from './buffet.service';
 import { PrintService } from '../printing/print.service';
 import { PeripheralsService } from '../peripherals/peripherals.service';
 import { RestaurantOfflineSyncService, type RegisterOfflineSyncBatchDto } from './offline-sync.service';
+import { ReservationService, type CreateReservationDto, type ListReservationsDto } from './reservation.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
   TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
@@ -26,6 +27,18 @@ const FulfillmentBody = z.object({ action: z.enum(['accepted', 'preparing', 'rea
 const OfflineLineBody = z.object({ sku: z.string().optional(), menu_item_id: z.number().int().optional(), qty: z.number().positive(), modifier_option_ids: z.array(z.number().int()).optional(), notes: z.string().optional() }).refine((it) => it.sku != null || it.menu_item_id != null, { message: 'menu item (sku or menu_item_id) required' });
 const OfflineSaleBody = z.object({ client_uuid: z.string().min(1).max(200), device_id: z.string().max(120).optional(), client_seq: z.number().int().optional(), captured_at: z.string().min(1), lines: z.array(OfflineLineBody).min(1).max(100), method: z.string().optional(), discount_pct: z.number().min(0).max(100).optional() });
 const OfflineSyncBody = z.object({ sales: z.array(OfflineSaleBody).min(1).max(200) });
+// Reservations + walk-in waitlist
+const CreateReservationBody = z.object({
+  kind: z.enum(['reservation', 'waitlist']).optional(),
+  table_id: z.number().int().optional(),
+  reserved_for: z.string().min(1).optional(),
+  party_size: z.number().int().positive().optional(),
+  customer_name: z.string().max(120).optional(),
+  customer_phone: z.string().max(40).optional(),
+  member_id: z.number().int().optional(),
+  quoted_wait_min: z.number().int().nonnegative().optional(),
+  notes: z.string().max(500).optional(),
+});
 
 @Controller('api/restaurant')
 @Permissions('pos')
@@ -39,7 +52,26 @@ export class RestaurantController {
     private readonly print: PrintService,
     private readonly peripherals: PeripheralsService,
     private readonly offlineSync: RestaurantOfflineSyncService,
+    private readonly reservations: ReservationService,
   ) {}
+
+  // ── Reservations + walk-in waitlist ──
+  @Post('reservations')
+  createReservation(@Body(new ZodValidationPipe(CreateReservationBody)) b: CreateReservationDto, @CurrentUser() u: JwtUser) {
+    return this.reservations.create(b, u);
+  }
+  @Get('reservations')
+  listReservations(@Query('kind') kind: string | undefined, @Query('status') status: string | undefined, @Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.reservations.list({ kind, status, from, to } as ListReservationsDto, u);
+  }
+  @Post('reservations/:id/notify')
+  notifyReservation(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.reservations.notifyReady(+id, u); }
+  @Post('reservations/:id/seat')
+  seatReservation(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.reservations.seat(+id, u); }
+  @Post('reservations/:id/cancel')
+  cancelReservation(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.reservations.cancel(+id, u); }
+  @Post('reservations/:id/no-show')
+  noShowReservation(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.reservations.noShow(+id, u); }
 
   // Replay register sales captured offline. Idempotent on (tenant, client_uuid) — a re-sent batch
   // returns 'duplicate' for already-posted sales and never double-posts.

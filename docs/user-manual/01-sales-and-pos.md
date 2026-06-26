@@ -304,6 +304,31 @@ actually behave: the **most-ordered dishes**, number of **sessions and covers**,
 **dishes per head**, **average bill per session**, and how often tables run into
 **overtime** — so you can tune pricing, time limits and the dish line-up per tier.
 
+### Reservations & walk-in waitlist
+
+**Screen:** `/reservations` (**จองโต๊ะ & รอคิว**) · **Required permission:** `pos` /
+`order_mgt`.
+
+Take **bookings** for a future time and manage a **walk-in queue** in one place,
+and let the system **text the guest when their table is ready**.
+
+- **Book a table (จองล่วงหน้า).** Choose **จองล่วงหน้า**, fill in the guest's name,
+  phone, party size and **time** (optionally a specific table), then **จองโต๊ะ**. If
+  you pick a table it's held as **reserved** so no one else seats it.
+- **Add a walk-in (รับเข้าคิว).** Choose **รับเข้าคิว**, enter the name, phone, party
+  size and an optional **estimated wait** (minutes), then **เข้าคิว**.
+- **Tell the guest it's ready.** Tap **แจ้งโต๊ะพร้อม** — the guest gets a **LINE or SMS**
+  "your table is ready" message (LINE if they're a linked member, otherwise SMS to
+  the phone). The entry turns **พร้อมแล้ว**.
+- **Seat them.** Tap **รับเข้านั่ง** — the assigned table becomes **occupied**; ring the
+  order on the register/table as usual.
+- **No-show / left the queue.** Tap **ไม่มา** (reservation) or **ออกคิว** (walk-in) to
+  close it — any table you were holding is freed back to **available**.
+
+The top cards show how many guests are **waiting**, how many tables are **booked**,
+and the total **covers** you still have to seat — a quick read on how busy the next
+hour will be.
+
 **Day-parting (time-limited menus).** When adding a menu item in **เมนูอาหาร**
 you can set a **ช่วงเวลาขาย** (selling window) — a start/end time and which days
 of the week — for breakfast, lunch or happy-hour items. Outside that window the
