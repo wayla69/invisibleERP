@@ -545,6 +545,20 @@ Record any cash added or removed:
 > **Note:** Use the **X-report** during a shift for an interim total without
 > closing the drawer. The **Z-report** is the final, end-of-shift report.
 
+#### Signing the Z-report (close-of-day archive)
+
+**Screen:** `/pos/close-of-day` (**ปิดกะ (Z-Report)**) · **Required permission:** `pos_close`
+(manager) — separate from the cashier's `pos_till`.
+
+After a till is **closed**, a manager **signs** the Z-report to lock it into a permanent,
+**tamper-evident** record. Enter the closed session's id (**TILL-…**) and click **ลงนาม Z-Report**.
+The signed report snapshots the shift's totals and the denomination count and stamps a
+**content-hash**. Re-signing the same session just returns the existing record (you can't create a
+second Z-tape). The archive list shows every signed Z with a **ความถูกต้อง** badge — **ถูกต้อง**
+(hash matches) or **ถูกแก้ไข** (the stored figures were altered after signing), so an auditor can
+prove the day's takings as originally counted. You can only sign a **closed** till, and a sell-only
+cashier cannot sign.
+
 #### Cash over/short — what happens to a variance
 
 When you close the till, the **over or short is automatically booked to the
