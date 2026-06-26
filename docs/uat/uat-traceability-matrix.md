@@ -317,6 +317,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-048 | Overlay curates the picker but never gates postings | GL-10 | 04 §7 (step 14), §9 |
 | UAT-GL-049 | Signup without industry defaults to the full chart | GL-10 | 04 §7 (step 14) |
 | UAT-GL-050 | Industry template can't drift from the engine's codes | GL-10 | 04 §7 (step 14) |
+| UAT-UI-COA-01 | Pick business type at signup (industry selector) | GL-10 | 04 §7 (step 14) |
+| UAT-UI-COA-02 | View the industry chart of accounts (ผังบัญชี tab) | GL-10 | 04 §7 (step 14) |
 | UAT-GL-017 | Reconciliation prepare→certify | REC-02/03 | 04 §9 |
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
