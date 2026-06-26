@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, ParseIntPipe, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { ConsolidationService } from './consolidation.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -8,6 +8,8 @@ import type { JwtUser } from '../../common/decorators';
 const CreateGroupBody = z.object({ name: z.string().min(1), fiscal_year: z.number().int(), base_currency: z.string().optional(), notes: z.string().optional() });
 const AddEntityBody = z.object({ entity_tenant_id: z.number().int(), ownership_pct: z.number().min(0).max(100).optional(), entity_currency: z.string().optional() });
 const RunBody = z.object({ period: z.string().min(1) });
+const RuleBody = z.object({ group_id: z.number().int(), name: z.string().min(1), rule_type: z.enum(['ic_balance', 'ic_revenue', 'investment', 'manual']).optional(), match_account_pattern: z.string().optional(), debit_account: z.string().optional(), credit_account: z.string().optional() });
+const SegmentBody = z.object({ code: z.string().min(1), name: z.string().min(1), dimension: z.enum(['branch', 'project', 'department', 'entity']).optional(), member_keys: z.array(z.union([z.number(), z.string()])).optional() });
 
 @Controller('api/consolidation')
 export class ConsolidationController {
@@ -60,5 +62,45 @@ export class ConsolidationController {
   @Permissions('exec')
   getRunLines(@Param('runId', ParseIntPipe) runId: number, @CurrentUser() user: JwtUser) {
     return this.svc.getRunLines(runId, user);
+  }
+
+  // ── WS3.3: maker-checker post (CON-03) ──
+  @Post('runs/:runId/post')
+  @Permissions('approvals')
+  @HttpCode(200)
+  postRun(@Param('runId', ParseIntPipe) runId: number, @CurrentUser() user: JwtUser) {
+    return this.svc.postConsolidation(runId, { postedBy: user.username }, user);
+  }
+
+  // ── WS3.3: elimination rules ──
+  @Post('rules')
+  @Permissions('exec')
+  defineRule(@Body(new ZodValidationPipe(RuleBody)) dto: z.infer<typeof RuleBody>, @CurrentUser() user: JwtUser) {
+    return this.svc.defineEliminationRule(dto, user);
+  }
+
+  @Get('rules')
+  @Permissions('exec')
+  listRules(@Query('group_id', ParseIntPipe) groupId: number, @CurrentUser() user: JwtUser) {
+    return this.svc.listRules(groupId, user);
+  }
+
+  // ── WS3.3: segment definitions + segment report (CON-04) ──
+  @Post('segments')
+  @Permissions('exec')
+  defineSegment(@Body(new ZodValidationPipe(SegmentBody)) dto: z.infer<typeof SegmentBody>, @CurrentUser() user: JwtUser) {
+    return this.svc.defineSegment(dto, user);
+  }
+
+  @Get('segments')
+  @Permissions('exec')
+  listSegments(@CurrentUser() user: JwtUser) {
+    return this.svc.listSegments(user);
+  }
+
+  @Get('segment-report')
+  @Permissions('exec')
+  segmentReport(@Query('period') period: string, @Query('dimension') dimension: string | undefined, @CurrentUser() user: JwtUser) {
+    return this.svc.segmentReport({ period, dimension }, user);
   }
 }
