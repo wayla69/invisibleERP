@@ -92,8 +92,9 @@ export class ManufacturingService {
     return { wo_no: woNo, status: 'Released', entry_no: je.entry_no, wip_cost: r2(material + applied) };
   }
 
-  // Complete: receive finished goods. Stock receipt + GL Dr Finished Goods / Cr WIP (total cost).
-  async complete(woNo: string, qtyProduced: number | undefined, user: JwtUser) {
+  // Complete: receive finished goods. Stock receipt + GL Dr Finished Goods / Cr WIP (total cost), with a
+  // YIELD variance and an optional MATERIAL-USAGE variance (actual material consumed vs the standard BOM).
+  async complete(woNo: string, qtyProduced: number | undefined, user: JwtUser, actualMaterial?: number) {
     const db = this.db as any;
     const wo = await this.row(woNo);
     if (wo.status !== 'Released') throw new BadRequestException({ code: 'BAD_STATUS', message: `Work order is ${wo.status}, must be Released to complete`, messageTh: 'ต้องเบิกวัตถุดิบ (Released) ก่อนปิดงาน' });
@@ -119,12 +120,21 @@ export class ManufacturingService {
     if (variance > 0.005) lines.push({ account_code: '5810', debit: variance, memo: `Yield variance (loss) ${woNo}` });
     else if (variance < -0.005) lines.push({ account_code: '5810', credit: r2(-variance), memo: `Yield variance (gain) ${woNo}` });
     lines.push({ account_code: '1250', credit: total, memo: `WIP cleared ${woNo}` });
+    // MATERIAL USAGE VARIANCE (optional): if the ACTUAL material consumed differs from the standard BOM
+    // material, book the difference as a balanced pair — over-usage (actual > standard) debits 5810 / Cr 1200
+    // (extra inventory drawn); under-usage credits 5810 / Dr 1200 (material returned). Net-zero so the JE balances.
+    let materialVar = 0;
+    if (actualMaterial != null && n(actualMaterial) >= 0) {
+      materialVar = r2(n(actualMaterial) - n(wo.materialCost));
+      if (materialVar > 0.005) { lines.push({ account_code: '5810', debit: materialVar, memo: `Material usage variance (over) ${woNo}` }, { account_code: '1200', credit: materialVar, memo: 'Extra material consumed' }); }
+      else if (materialVar < -0.005) { lines.push({ account_code: '1200', debit: r2(-materialVar), memo: 'Material returned' }, { account_code: '5810', credit: r2(-materialVar), memo: `Material usage variance (under) ${woNo}` }); }
+    }
     const je: any = await this.ledger.postEntry({
       source: 'WO-DONE', sourceRef: woNo, tenantId, memo: `Work order complete ${woNo}`, createdBy: user.username, lines,
     });
 
     await db.update(workOrders).set({ status: 'Completed', qtyProduced: fx(produced, 3), entryNoComplete: je.entry_no, completedAt: now }).where(eq(workOrders.id, Number(wo.id)));
-    return { wo_no: woNo, status: 'Completed', entry_no: je.entry_no, qty_planned: planned, qty_produced: produced, fg_value: fgValue, yield_variance: variance };
+    return { wo_no: woNo, status: 'Completed', entry_no: je.entry_no, qty_planned: planned, qty_produced: produced, fg_value: fgValue, yield_variance: variance, material_variance: materialVar };
   }
 
   async list(user: JwtUser) {
