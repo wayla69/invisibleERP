@@ -7,15 +7,40 @@ export const accountTypeEnum = pgEnum('account_type', ['Asset', 'Liability', 'Eq
 export const journalStatusEnum = pgEnum('journal_status', ['Draft', 'Posted', 'Voided']);
 export const periodStatusEnum = pgEnum('period_status', ['Open', 'Closed']);
 
+// Account Groups — tenant-scoped (nullable: NULL = global template visible to all tenants)
+export const accountGroups = pgTable('account_groups', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  code: text('code').notNull(),
+  nameTh: text('name_th').notNull(),
+  nameEn: text('name_en').notNull(),
+  type: accountTypeEnum('type').notNull(),
+  parentGroupId: bigint('parent_group_id', { mode: 'number' }),
+  sortOrder: bigint('sort_order', { mode: 'number' }).default(0),
+  active: boolean('active').default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqCode: uniqueIndex('uq_account_groups').on(sql`COALESCE(${t.tenantId}, 0)`, t.code),
+}));
+
 // Chart of Accounts
 export const accounts = pgTable('accounts', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   code: text('code').notNull().unique(), // e.g. '1000' Cash, '1100' AR, '4000' Revenue
   name: text('name').notNull(),
+  nameTh: text('name_th'),
   type: accountTypeEnum('type').notNull(),
   parentCode: text('parent_code'),
   currency: text('currency').default('THB'),
   active: text('active').default('true'),
+  accountGroupId: bigint('account_group_id', { mode: 'number' }),
+  isControl: boolean('is_control').default(false),
+  controlSubledger: text('control_subledger'),  // 'AR'|'AP'|'INV'|'FA' or null
+  normalBalance: text('normal_balance').default('D'), // 'D'=debit | 'C'=credit
+  isPostable: boolean('is_postable').default(true),
+  requireDimension: jsonb('require_dimension'),  // e.g. {"branch":true}
+  effectiveFrom: date('effective_from'),
+  effectiveTo: date('effective_to'),
 });
 
 // Per-tenant fiscal calendar. tenant_id added in 0043 so one tenant's period/year-end close
@@ -161,4 +186,5 @@ export const tenantAccounts = pgTable(
 );
 
 export type Account = typeof accounts.$inferSelect;
+export type AccountGroup = typeof accountGroups.$inferSelect;
 export type TenantAccount = typeof tenantAccounts.$inferSelect;

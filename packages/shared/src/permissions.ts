@@ -15,7 +15,7 @@ export const PERMISSIONS = [
   // ── SoD sub-permissions (single-duty splits of coarse permissions; see PERMISSION_IMPLICATIONS) ──
   'pos_sell', 'pos_refund', 'pos_till',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
-  'gl_post', 'gl_close', 'recon_prep', 'fin_report',
+  'gl_post', 'gl_close', 'gl_coa', 'gl_posting_rules', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
   // ── CRM single-duty splits (loyalty back-office; see SoD R14–R16). Standalone granular perms: NOT implied
   //    by a coarse perm (so a transacting/portal role can't inherit them and trip R14–R16); assigned directly
@@ -29,7 +29,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const SUB_PERMISSIONS: Permission[] = [
   'pos_sell', 'pos_refund', 'pos_till',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
-  'gl_post', 'gl_close', 'recon_prep', 'fin_report',
+  'gl_post', 'gl_close', 'gl_coa', 'gl_posting_rules', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
   'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
 ];
@@ -48,7 +48,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Sales & Orders': ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
   'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
-  'Finance & AR/AP': ['ar', 'creditors'],
+  'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules'],
   'Procurement': ['procurement'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
@@ -73,7 +73,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   InventoryController: ['wh_adjust'],
   StockCounter: ['wh_count'],
   GlAccountant: ['gl_post', 'recon_prep', 'fin_report'],
-  FinancialController: ['gl_close', 'approvals', 'fin_report'],
+  FinancialController: ['gl_close', 'gl_coa', 'gl_posting_rules', 'approvals', 'fin_report'],
   MasterDataAdmin: ['masterdata', 'bom_master'], // coarse 'masterdata' expands to md_vendor/item/config (conflict-free: no transactional perms)
   PricingManager: ['pricelist', 'promos'],
   CreditManager: ['crm'],

@@ -149,6 +149,7 @@ export interface PostEntryDto {
   ledgerCode?: string | null; // NULL/undefined = shared (all ledgers); a code = adjustment to that ledger only
   allowClosedPeriod?: boolean; // only the year-end CLOSE may post into the period it is closing
   pendingApproval?: boolean; // GL-05: post as DRAFT (excluded from balances) until a different user approves
+  viaSubledger?: boolean; // WS1.1: set true by AR/AP/INV/FA service methods to allow posting to control accounts
 }
 
 export interface RecurringJournalDto {
@@ -329,6 +330,25 @@ export class LedgerService {
     if (pp && pp.status === 'Closed' && !dto.allowClosedPeriod) {
       // a year-end closing journal legitimately posts INTO the period it closes; everything else is blocked
       throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${period} is closed`, messageTh: `งวดบัญชี ${period} ถูกปิดแล้ว` });
+    }
+    // Control-account guard (WS1.1): reject direct postings to control accounts unless
+    // the caller explicitly marks viaSubledger:true (only AR/AP/INV/FA service methods do this).
+    if (!dto.viaSubledger) {
+      const controlCodes = nzLines.map(l => l.account_code);
+      if (controlCodes.length) {
+        const controlAccounts = await db.select({ code: accounts.code, controlSubledger: accounts.controlSubledger })
+          .from(accounts)
+          .where(and(eq(accounts.isControl, true), inArray(accounts.code, controlCodes)));
+        if (controlAccounts.length > 0) {
+          const hitCode = controlAccounts[0].code;
+          const subledger = controlAccounts[0].controlSubledger;
+          throw new BadRequestException({
+            code: 'CONTROL_ACCOUNT',
+            message: `Account ${hitCode} is a ${subledger} control account; post via its sub-ledger only`,
+            messageTh: `บัญชี ${hitCode} เป็นบัญชีคุมลูกหนี้/เจ้าหนี้ ต้องโพสต์ผ่านระบบย่อยเท่านั้น`,
+          });
+        }
+      }
     }
     const currency = dto.currency ?? 'THB';
     const entryNo = await this.docNo.nextDaily('JE');
