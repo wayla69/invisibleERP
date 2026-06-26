@@ -846,6 +846,23 @@ async function main() {
     lockedPost.status === 400 && lockedPost.json?.error?.code === 'PERIOD_LOCKED',
     `st=${lockedPost.status} code=${lockedPost.json?.error?.code}`);
 
+  // TC-GL-16b — controlled emergency reopen (mandatory reason; reopener ≠ locker; audited).
+  const reopenNoReason = await inj('POST', '/api/ledger/close/reopen', admin, { close_run_id: closeRunId });
+  ok('GL-16b: reopen without a reason → REASON_REQUIRED',
+    reopenNoReason.status === 400 && reopenNoReason.json?.error?.code === 'REASON_REQUIRED', `st=${reopenNoReason.status} code=${reopenNoReason.json?.error?.code}`);
+  const reopenSelf = await inj('POST', '/api/ledger/close/reopen', mgrLock, { close_run_id: closeRunId, reason: 'fix dep' });
+  ok('GL-16b: the locker cannot reopen their own lock → SELF_REOPEN',
+    reopenSelf.status === 400 && reopenSelf.json?.error?.code === 'SELF_REOPEN', `st=${reopenSelf.status} code=${reopenSelf.json?.error?.code}`);
+  const reopened = await inj('POST', '/api/ledger/close/reopen', admin, { close_run_id: closeRunId, reason: 'late depreciation adjustment' });
+  ok('GL-16b: a different user reopens with a reason → ReadyToLock',
+    reopened.status === 200 && reopened.json?.status === 'ReadyToLock', `st=${reopened.status} status=${reopened.json?.status}`);
+  const repostAfterReopen = await inj('POST', '/api/ledger/journal', admin, { date: `${closePeriod}-15`, source: 'Manual', lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
+  ok('GL-16b: posting into the reopened period now succeeds (period back to Open)',
+    repostAfterReopen.status === 200 || repostAfterReopen.status === 201, `st=${repostAfterReopen.status} code=${repostAfterReopen.json?.error?.code ?? ''}`);
+  const reLock = await inj('POST', '/api/ledger/close/lock', mgrLock, { close_run_id: closeRunId });
+  ok('GL-16b: a different user can re-lock the reopened period → Locked',
+    reLock.status === 200 && reLock.json?.status === 'Locked', `st=${reLock.status} status=${reLock.json?.status}`);
+
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

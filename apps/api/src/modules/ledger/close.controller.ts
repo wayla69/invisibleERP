@@ -17,6 +17,9 @@ type StepBodyT = z.infer<typeof StepBody>;
 const LockBody = z.object({ close_run_id: z.number().int().positive() });
 type LockBodyT = z.infer<typeof LockBody>;
 
+const ReopenBody = z.object({ close_run_id: z.number().int().positive(), reason: z.string().optional() });
+type ReopenBodyT = z.infer<typeof ReopenBody>;
+
 // WS2.1 — Hard period close + checklist (GL-15/GL-16). startClose seeds the checklist; completeStep marks
 // steps Done; lockPeriod hard-locks the period (maker-checker: locker ≠ starter, SELF_LOCK).
 @Controller('api/ledger/close')
@@ -54,5 +57,13 @@ export class CloseController {
   @Permissions('gl_close')
   lock(@Body(new ZodValidationPipe(LockBody)) b: LockBodyT, @CurrentUser() u: JwtUser) {
     return this.svc.lockPeriod({ closeRunId: b.close_run_id, lockedBy: u.username });
+  }
+
+  // GL-16b — controlled emergency reopen of a Locked period (mandatory reason; reopener ≠ locker; audited).
+  @Post('reopen')
+  @HttpCode(200)
+  @Permissions('gl_close')
+  reopen(@Body(new ZodValidationPipe(ReopenBody)) b: ReopenBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.reopenPeriod({ closeRunId: b.close_run_id, reopenedBy: u.username, reason: b.reason ?? '' });
   }
 }

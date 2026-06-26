@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, boolean, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, timestamp, boolean, integer, unique, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 export const customerItems = pgTable('customer_items', {
@@ -80,6 +80,9 @@ export const branchStock = pgTable('branch_stock', {
   onHand: numeric('on_hand').default('0'),
   reorderPoint: numeric('reorder_point').default('0'),
   reorderQty: numeric('reorder_qty').default('0'),
+  // Step 5 — supplier lead time for this (branch,item); feeds the demand-driven reorder-point recommendation
+  // (avg daily usage × lead_time_days × safety factor).
+  leadTimeDays: integer('lead_time_days').notNull().default(3),
   lastUpdated: timestamp('last_updated', { withTimezone: true }),
 }, (t) => ({
   uq: unique('branch_stock_uq').on(t.tenantId, t.branchId, t.itemId),
