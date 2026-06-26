@@ -9,6 +9,7 @@ import { ChannelOrderService } from './channel-order.service';
 import { BuffetService } from './buffet.service';
 import { PrintService } from '../printing/print.service';
 import { PeripheralsService } from '../peripherals/peripherals.service';
+import { RestaurantOfflineSyncService, type RegisterOfflineSyncBatchDto } from './offline-sync.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
   TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
@@ -21,6 +22,10 @@ const CancelBody = z.object({ reason: z.string().optional() });
 const KioskItem = z.object({ sku: z.string().optional(), menu_item_id: z.number().int().optional(), modifier_option_ids: z.array(z.number().int()).optional(), name: z.string().optional(), unit_price: z.number().nonnegative().optional(), station_code: z.string().optional(), qty: z.number().positive().default(1), notes: z.string().optional() }).refine((it) => it.sku != null || it.menu_item_id != null || (it.name != null && it.unit_price != null), { message: 'provide sku/menu_item_id or name+unit_price' });
 const KioskBody = z.object({ fulfillment_type: z.enum(['takeaway', 'delivery', 'pickup']).optional(), items: z.array(KioskItem).min(1), delivery_fee: z.number().nonnegative().optional(), method: z.string().optional(), notes: z.string().optional() });
 const FulfillmentBody = z.object({ action: z.enum(['accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'rejected']) });
+// Register offline-sync: a batch of sales captured on the touch register while the network was down.
+const OfflineLineBody = z.object({ sku: z.string().optional(), menu_item_id: z.number().int().optional(), qty: z.number().positive(), modifier_option_ids: z.array(z.number().int()).optional(), notes: z.string().optional() }).refine((it) => it.sku != null || it.menu_item_id != null, { message: 'menu item (sku or menu_item_id) required' });
+const OfflineSaleBody = z.object({ client_uuid: z.string().min(1).max(200), device_id: z.string().max(120).optional(), client_seq: z.number().int().optional(), captured_at: z.string().min(1), lines: z.array(OfflineLineBody).min(1).max(100), method: z.string().optional(), discount_pct: z.number().min(0).max(100).optional() });
+const OfflineSyncBody = z.object({ sales: z.array(OfflineSaleBody).min(1).max(200) });
 
 @Controller('api/restaurant')
 @Permissions('pos')
@@ -33,7 +38,15 @@ export class RestaurantController {
     private readonly buffet: BuffetService,
     private readonly print: PrintService,
     private readonly peripherals: PeripheralsService,
+    private readonly offlineSync: RestaurantOfflineSyncService,
   ) {}
+
+  // Replay register sales captured offline. Idempotent on (tenant, client_uuid) — a re-sent batch
+  // returns 'duplicate' for already-posted sales and never double-posts.
+  @Post('offline-sync')
+  offlineSyncBatch(@Body(new ZodValidationPipe(OfflineSyncBody)) b: RegisterOfflineSyncBatchDto, @CurrentUser() u: JwtUser) {
+    return this.offlineSync.syncBatch(b, u);
+  }
 
   // ── floor-plan / tables ──
   @Get('zones') zones(@CurrentUser() u: JwtUser) { return this.tables.listZones(u); }

@@ -163,6 +163,16 @@ async function main() {
   const noPerm = await inj('POST', '/api/pos/gift-cards/issue', wh1, { amount: 100, method: 'Cash' });
   ok('Permission: Warehouse (no pos) issue → 403', noPerm.status === 403, `${noPerm.status}`);
 
+  // ── 16b. Gift-card PIN is hashed, never plaintext (security fix) ──
+  const setPin = await inj('POST', `/api/pos/giftcards/${card}/pin`, sales1, { pin: '4321' });
+  ok('Gift-card setPin: 200, pin_set', setPin.status < 300 && setPin.json?.pin_set === true, `${setPin.status}`);
+  const pinRow = (await pg.query(`SELECT pin FROM gift_cards WHERE card_no='${card}'`)).rows as any[];
+  ok('Gift-card PIN stored HASHED (scrypt$…), not plaintext "4321"', typeof pinRow[0]?.pin === 'string' && pinRow[0].pin.startsWith('scrypt$') && pinRow[0].pin !== '4321', `pin=${String(pinRow[0]?.pin).slice(0, 12)}…`);
+  const balGood = await inj('GET', `/api/pos/giftcards/${card}/balance?pin=4321`, sales1);
+  ok('Gift-card balance with correct PIN → 200', balGood.status === 200 && near(balGood.json.balance, 393), `${balGood.status} bal=${balGood.json?.balance}`);
+  const balBad = await inj('GET', `/api/pos/giftcards/${card}/balance?pin=0000`, sales1);
+  ok('Gift-card balance with wrong PIN → 403 BAD_PIN', balBad.status === 403 && balBad.json?.error?.code === 'BAD_PIN', `${balBad.status} ${balBad.json?.error?.code}`);
+
   // ── 17. trial balance balanced overall ──
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after all tip + gift + store-credit activity', near(Number(tb.totals?.debit), Number(tb.totals?.credit)), JSON.stringify(tb.totals ?? {}).slice(0, 80));

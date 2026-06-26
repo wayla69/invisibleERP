@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { ListChecks, Store, Utensils, X } from 'lucide-react';
+import { CloudOff, ListChecks, RefreshCw, Store, Utensils, Wifi, WifiOff, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useTerminal } from '@/lib/terminal';
+import { useOnline } from '@/lib/offline';
+import { enqueueRegisterSale, useRegisterOutbox } from '@/lib/register-offline';
 import { StateView } from '@/components/state-view';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -28,7 +30,16 @@ interface HeldCart { lines: CartLine[]; mode: Mode; tableId: number | null; tabl
 export default function RegisterPage() {
   const qc = useQueryClient();
   const tm = useTerminal();
+  const online = useOnline();
+  // Register offline outbox: queued quick sales replay to /api/restaurant/offline-sync on reconnect.
+  const outbox = useRegisterOutbox();
   const menu = useQuery<MenuResp>({ queryKey: ['menu'], queryFn: () => api('/api/menu') });
+
+  // when sales flush on reconnect, refresh the order list so the synced bills appear
+  useEffect(() => {
+    if (online && outbox.count > 0) void outbox.flush().then(() => qc.invalidateQueries({ queryKey: ['orders'] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
 
   const [lines, setLines] = useState<CartLine[]>([]);
   const [mode, setMode] = useState<Mode>('quick');
@@ -77,6 +88,20 @@ export default function RegisterPage() {
   //    then drive the hardware (customer display → print → drawer). Returns the authoritative sale. ──
   const settle = useCallback(async ({ method, discountPct, cashReceived }: { method: Method; discountPct: number; cashReceived?: number }): Promise<SettleResult> => {
     const items = lines.map((l) => ({ sku: l.sku, qty: l.qty, modifier_option_ids: l.modifier_option_ids, notes: l.notes }));
+
+    // ── offline path: queue a QUICK (no-table) cash-ish sale and replay it on reconnect. Dine-in needs
+    //    the kitchen/online path (fire + table state), so it is blocked offline with a clear message. ──
+    if (!online) {
+      if (mode === 'dinein') throw new Error('ออฟไลน์: โหมดโต๊ะ/ครัวต้องออนไลน์ — ปลดโต๊ะแล้วใช้โหมดขายเร็ว');
+      const offlineTotal = cartTotals(lines, discountPct).total;
+      const change = cashReceived != null ? Math.round((cashReceived - offlineTotal) * 100) / 100 : undefined;
+      await enqueueRegisterSale({ lines: items, method, discount_pct: discountPct || undefined, captured_at: new Date().toISOString(), device_id: tm.terminalCode, total: offlineTotal });
+      outbox.refresh();
+      tm.pushDisplay({ message: 'บันทึกออฟไลน์', total: offlineTotal, amount_due: cashReceived ?? undefined, change });
+      if (method === 'Cash') void tm.kickDrawer({ saleNo: 'OFFLINE', amount: offlineTotal, reason: 'sale' });
+      return { sale_no: 'ออฟไลน์ (รอซิงค์)', total: offlineTotal, change, offline: true };
+    }
+
     const created = await api<{ order_no: string }>('/api/restaurant/orders', {
       method: 'POST',
       body: JSON.stringify({ table_id: tableId ?? undefined, items }),
@@ -101,7 +126,7 @@ export default function RegisterPage() {
     qc.invalidateQueries({ queryKey: ['orders'] });
     qc.invalidateQueries({ queryKey: ['pos-summary'] });
     return { sale_no: sale.sale_no, total, change };
-  }, [lines, tableId, mode, t.total, tm, qc]);
+  }, [lines, tableId, mode, t.total, tm, qc, online, outbox]);
 
   const finishSale = () => { setCheckout(false); resetSale(); tm.pushDisplay({ message: 'ยินดีต้อนรับ / Welcome' }); };
 
@@ -136,6 +161,16 @@ export default function RegisterPage() {
           <Store className="size-5 text-primary" /> ขายหน้าร้าน
         </h1>
         <div className="flex flex-wrap items-center gap-1.5">
+          {/* offline status + pending-sync badge */}
+          <Badge variant={online ? 'success' : 'warning'} className="gap-1">
+            {online ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
+            {online ? 'ออนไลน์' : 'ออฟไลน์ — บันทึกในเครื่อง'}
+          </Badge>
+          {outbox.count > 0 && (
+            <Button variant="outline" size="sm" disabled={!online} onClick={() => outbox.flush().then(() => qc.invalidateQueries({ queryKey: ['orders'] })).catch((e) => notifyError((e as Error).message))}>
+              {online ? <RefreshCw className="size-4" /> : <CloudOff className="size-4" />} รอซิงค์ {outbox.count}
+            </Button>
+          )}
           {mode === 'dinein' && tableNo ? (
             <Badge variant="info" className="gap-1">
               <Utensils className="size-3" /> โต๊ะ {tableNo}
