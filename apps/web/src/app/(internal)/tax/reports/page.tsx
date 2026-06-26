@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, Scale, Calendar, Download, ReceiptText, FileText } from 'lucide-react';
 import { api } from '@/lib/api';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -225,18 +226,72 @@ function Pp30() {
   );
 }
 
+// ── การยื่นแบบ + ปฏิทินกำหนดยื่น (filing register + remittance calendar, TAX-05) ──
+const FILING_STATUS_TH: Record<string, string> = { NOT_FILED: 'ยังไม่ยื่น', DRAFT: 'ฉบับร่าง', SUBMITTED: 'ยื่นแล้ว', ACCEPTED: 'รับแล้ว' };
+const filingVariant = (s: string) => (s === 'ACCEPTED' ? 'success' : s === 'SUBMITTED' ? 'info' : s === 'DRAFT' ? 'warning' : 'muted');
+
+function Filings() {
+  const [year, setYear] = useState(2026);
+  const qc = useQueryClient();
+  const cal = useQuery<any>({ queryKey: ['remittance-calendar', year], queryFn: () => api(`/api/tax-reports/remittance-calendar?year=${year}`) });
+
+  const file = useMutation({
+    mutationFn: (v: { filing_type: string; month: number }) => api('/api/tax-reports/filings', { method: 'POST', body: JSON.stringify({ ...v, year }) }),
+    onSuccess: (r: any) => { notifySuccess(r?.already_filed ? `ยื่นไว้แล้ว (${r.status})` : `สร้างฉบับร่าง ${r.filing_type} แล้ว`); qc.invalidateQueries({ queryKey: ['remittance-calendar'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const submit = useMutation({
+    mutationFn: (id: number) => api(`/api/tax-reports/filings/${id}/submit`, { method: 'POST', body: JSON.stringify({ submission_ref: window.prompt('เลขอ้างอิงการยื่น (RD reference)') ?? '' }) }),
+    onSuccess: () => { notifySuccess('ยื่นแบบแล้ว'); qc.invalidateQueries({ queryKey: ['remittance-calendar'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <div>
+      <div className="mb-4 grid w-[110px] gap-1.5">
+        <Label>ปี (ค.ศ.)</Label>
+        <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>{[2024, 2025, 2026, 2027].map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+        </Select>
+      </div>
+      <StateView q={cal}>
+        {cal.data && (
+          <DataTable
+            rows={(cal.data.calendar ?? []).filter((c: any) => c.filing_type !== 'PND3' || c.status !== 'NOT_FILED')}
+            columns={[
+              { key: 'filing_type', label: 'แบบ' },
+              { key: 'period_month', label: 'งวด', render: (r: any) => `${THAI_MONTHS[r.period_month - 1]} ${r.period_year}` },
+              { key: 'deadline', label: 'กำหนดยื่น', render: (r: any) => r.deadline },
+              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={filingVariant(r.status)}>{FILING_STATUS_TH[r.status] ?? r.status}</Badge> },
+              { key: 'submission_ref', label: 'เลขอ้างอิง', render: (r: any) => r.submission_ref ?? '—' },
+              {
+                key: 'act', label: '', align: 'right', render: (r: any) =>
+                  r.status === 'NOT_FILED' ? <Button size="sm" variant="outline" disabled={file.isPending} onClick={() => file.mutate({ filing_type: r.filing_type, month: r.period_month })}>สร้างร่าง</Button>
+                  : r.status === 'DRAFT' ? <Button size="sm" variant="outline" disabled={submit.isPending} onClick={() => submit.mutate(r.filing_id)}>ยื่น</Button>
+                  : null,
+              },
+            ]}
+          />
+        )}
+      </StateView>
+    </div>
+  );
+}
+
 export default function TaxReportsPage() {
   return (
     <div>
       <PageHeader
         title="รายงานภาษี"
-        description="รายงานภาษีขาย / ภาษีซื้อ และแบบ ภ.พ.30 — เลือกเดือน/ปีเพื่อดูข้อมูลแต่ละรอบ"
+        description="รายงานภาษีขาย / ภาษีซื้อ และแบบ ภ.พ.30 / ภ.ง.ด. — เลือกเดือน/ปีเพื่อดูข้อมูลแต่ละรอบ และติดตามการยื่นแบบ"
       />
       <Tabs
         tabs={[
           { key: 'output', label: 'ภาษีขาย (Output VAT)', content: <OutputVat /> },
           { key: 'input', label: 'ภาษีซื้อ (Input VAT)', content: <InputVat /> },
           { key: 'pp30', label: 'ภ.พ.30', content: <Pp30 /> },
+          { key: 'filings', label: 'การยื่นแบบ & ปฏิทิน', content: <Filings /> },
         ]}
       />
     </div>

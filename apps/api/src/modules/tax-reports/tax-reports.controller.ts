@@ -1,8 +1,13 @@
-import { Controller, Get, Query, Res, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Res, BadRequestException } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { Permissions } from '../../common/decorators';
+import { z } from 'zod';
+import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { TaxReportsService } from './tax-reports.service';
 import { TaxReportsPdfService } from './tax-reports-pdf.service';
+
+const FileBody = z.object({ filing_type: z.enum(['PP30', 'PND3', 'PND53']), month: z.number().int().min(1).max(12), year: z.number().int().min(2000) });
+const SubmitBody = z.object({ submission_ref: z.string().min(1) });
 
 function parseMY(month: string, year: string) {
   const m = parseInt(month, 10), y = parseInt(year, 10);
@@ -51,6 +56,22 @@ export class TaxReportsController {
     const { m, y } = parseMY(month, year);
     await this.send(reply, this.pdf.pndHtml(await this.svc.pnd(type, m, y)), `pnd-${type}-${y}-${String(m).padStart(2, '0')}`);
   }
+
+  // ── filing register + remittance calendar (TAX-05) ──
+  @Get('filings') @Permissions('exec', 'creditors', 'ar')
+  listFilings(@Query('year') year?: string) { return this.svc.listFilings({ year: year ? parseInt(year, 10) : undefined }); }
+
+  @Get('remittance-calendar') @Permissions('exec', 'creditors', 'ar')
+  remittanceCalendar(@Query('year') year: string) { const y = parseInt(year, 10); if (!y) throw new BadRequestException({ code: 'VALIDATION_ERROR', message: 'year required', messageTh: 'ต้องระบุปี' }); return this.svc.remittanceCalendar(y); }
+
+  @Post('filings') @Permissions('exec')
+  file(@Body(new ZodValidationPipe(FileBody)) b: { filing_type: string; month: number; year: number }, @CurrentUser() u: JwtUser) { return this.svc.fileReturn(b.filing_type, b.month, b.year, u); }
+
+  @Post('filings/:id/submit') @Permissions('exec')
+  submit(@Param('id') id: string, @Body(new ZodValidationPipe(SubmitBody)) b: { submission_ref: string }, @CurrentUser() u: JwtUser) { return this.svc.submitFiling(Number(id), b.submission_ref, u); }
+
+  @Post('filings/:id/accept') @Permissions('exec')
+  accept(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.acceptFiling(Number(id), u); }
 
   private async send(reply: FastifyReply, html: string, fname: string) {
     const buf = await this.pdf.renderHtmlToPdf(html);
