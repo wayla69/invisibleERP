@@ -45,7 +45,12 @@ your code below.
 
 | Code | Meaning | What to do |
 |------|---------|-----------|
-| `PERIOD_CLOSED` | You tried to post to a closed accounting period. | Post to an open period, or ask a *FinancialController* to reopen the period, post, then close it again. See [General Ledger](./06-general-ledger.md). |
+| `PERIOD_CLOSED` | You tried to post to a closed (soft) accounting period. | Post to an open period, or ask a *FinancialController* to reopen the period, post, then close it again. See [General Ledger](./06-general-ledger.md). |
+| `PERIOD_LOCKED` | You tried to post into a **hard-closed (Locked)** period. A locked period is irreversible — there is no reopen escape (only the system year-end close can post into it). | Post to an open period. A locked period is final; if a genuine correction is needed it is an out-of-band, audited action by Finance. See [General Ledger → Hard period close](./06-general-ledger.md). |
+| `STEPS_INCOMPLETE` | You tried to **lock** a period before all required close-checklist steps were done. | Complete every required step (`POST /api/ledger/close/step`) — the error lists the pending steps — then lock. |
+| `SELF_LOCK` | You tried to **lock** a period close that you started yourself (segregation of duties, GL-16). | A **different** `gl_close` colleague must perform the lock. |
+| `PERIOD_ALREADY_LOCKED` | You tried to start or update a close run for a period that is already hard-locked. | No action — the period is final. |
+| `CLOSE_RUN_NOT_FOUND` / `STEP_NOT_FOUND` | The close run or checklist step referenced doesn't exist. | Check the `close_run_id` / `step_key`; start the close first with `POST /api/ledger/close/start`. |
 | `UNBALANCED` | A journal entry's debits don't equal its credits (or it has no lines) — also raised when saving a **recurring template** that doesn't balance. | Correct the lines so total debits = total credits. |
 | `BAD_FREQUENCY` | A recurring journal was created with a cadence other than `daily` / `weekly` / `monthly`. | Choose one of the three supported cadences. |
 | `SETTLE_MISMATCH` | When settling a petty-cash advance, the **spend + cash returned** didn't equal the amount advanced. | Re-enter so `settled_expense + returned_cash` exactly equals the advance. See [Finance — AR & AP](./05-finance-ar-ap.md). |

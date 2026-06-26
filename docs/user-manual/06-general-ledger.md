@@ -292,6 +292,41 @@ flagged ⚠ in red so you can escalate them (control **GOV-01**).
 `PERIOD_CLOSED`. (If you must post a late entry, an authorised user can **reopen**
 the period, post, and close it again.)
 
+### Hard period close + checklist (irreversible lock)
+
+A *soft* close (above) can be reopened. When the books are final, run a **hard close**:
+a checklist-driven, segregated, irreversible **lock**. Once a period is **Locked**, *all*
+postings into it are rejected with `PERIOD_LOCKED` — there is no `allowClosedPeriod`
+escape (only the system year-end closing entry is exempt).
+
+**Required permission:** `gl_close` (start / complete steps / lock). Reading status also
+allows `gl_post` and `exec`.
+
+The lifecycle is **Open → InProgress → ReadyToLock → Locked**:
+
+1. **Start the close** — `POST /api/ledger/close/start` `{ "period": "YYYY-MM" }`. This
+   creates a *close run* (status **InProgress**) and seeds the standard checklist:
+   sub-ledger tie-out, bank reconciliation, depreciation, recurring/prepaid journals, FX
+   revaluation (advisory), and trial-balance review.
+2. **Complete each step** — `POST /api/ledger/close/step`
+   `{ "close_run_id": N, "step_key": "bank_rec" }` as you finish each procedure. When all
+   **required** steps are done, the run automatically becomes **ReadyToLock**.
+3. **Lock the period** — `POST /api/ledger/close/lock` `{ "close_run_id": N }`. Locking is
+   **maker-checker**: the person who locks **must be different** from the person who started
+   the close. The period status becomes **Locked**.
+
+Check progress any time with `GET /api/ledger/close/status?period=YYYY-MM`, or list recent
+runs with `GET /api/ledger/close`.
+
+> **Note — separation of duties (GL-16):** you cannot lock a close you started yourself
+> (`SELF_LOCK`). A second `gl_close` colleague must perform the lock. The starter, locker,
+> and lock time are all recorded as audit evidence.
+
+**Possible errors:** `STEPS_INCOMPLETE` (you tried to lock before all required steps are
+done — the response lists what's pending), `SELF_LOCK` (you tried to lock your own close),
+`PERIOD_LOCKED` (you tried to post into a locked period), `PERIOD_ALREADY_LOCKED` (the
+period is already hard-closed), `CLOSE_RUN_NOT_FOUND`, `STEP_NOT_FOUND`.
+
 ### To run year-end close
 
 1. Open the **Close Year** action and choose the fiscal year.

@@ -5,7 +5,9 @@ import { tenants } from './tenants';
 // Double-entry General Ledger (move #2) — เปลี่ยน "POS add-on" → "ERP" จริง
 export const accountTypeEnum = pgEnum('account_type', ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense']);
 export const journalStatusEnum = pgEnum('journal_status', ['Draft', 'Posted', 'Voided']);
-export const periodStatusEnum = pgEnum('period_status', ['Open', 'Closed']);
+// 'Locked' (WS2.1, GL-15/GL-16) is the hard-close state: a Locked period rejects ALL postEntry postings
+// except the system year-end closing entry (source='CLOSE'), regardless of allowClosedPeriod.
+export const periodStatusEnum = pgEnum('period_status', ['Open', 'Closed', 'Locked']);
 
 // Account Groups — tenant-scoped (nullable: NULL = global template visible to all tenants)
 export const accountGroups = pgTable('account_groups', {

@@ -327,6 +327,13 @@ export class LedgerService {
       ? [undefined]
       : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods)
           .where(and(eq(fiscalPeriods.code, period), eq(fiscalPeriods.tenantId, entryTenantId))).limit(1);
+    // WS2.1 hard gate (GL-15/GL-16): a LOCKED period rejects ALL postings regardless of allowClosedPeriod —
+    // the new irreversible hard close. The ONLY exception is the system year-end closing entry (source
+    // 'CLOSE'), which must still be able to post into the period it closes. lockPeriod() writes 'Locked'
+    // into fiscal_periods.status, so this is authoritative and strictly stronger than the soft 'Closed' gate.
+    if (pp && pp.status === 'Locked' && dto.source !== 'CLOSE') {
+      throw new BadRequestException({ code: 'PERIOD_LOCKED', message: `Period ${period} is locked (hard close)`, messageTh: `งวดบัญชี ${period} ถูกล็อก (ปิดงวดถาวร)` });
+    }
     if (pp && pp.status === 'Closed' && !dto.allowClosedPeriod) {
       // a year-end closing journal legitimately posts INTO the period it closes; everything else is blocked
       throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${period} is closed`, messageTh: `งวดบัญชี ${period} ถูกปิดแล้ว` });

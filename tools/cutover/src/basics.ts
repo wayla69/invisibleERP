@@ -763,7 +763,52 @@ async function main() {
     cert.status === 200 && cert.json?.status === 'Certified' && cert.json?.certified_by === 'mgr',
     `st=${cert.status} status=${cert.json?.status} by=${cert.json?.certified_by}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out ──');
+  // ───────────────────── WS2.1 — Hard Period Close + Checklist (GL-15/GL-16) ─────────────────────
+  // Lock a clearly-PAST period (2020-01) that no other harness check posts into (all postings above are
+  // dated 2025/2026 or runtime-now), so locking it cannot retroactively break any earlier or later check.
+  const closePeriod = '2020-01';
+
+  // TC-GL-15-01: start a close run → InProgress with the checklist seeded (≥4 steps).
+  const startClose = await inj('POST', '/api/ledger/close/start', admin, { period: closePeriod });
+  const closeRunId = Number(startClose.json?.id);
+  ok('GL-15: start close seeds the checklist (InProgress, ≥4 steps)',
+    (startClose.status === 200 || startClose.status === 201) && startClose.json?.status === 'InProgress' && Array.isArray(startClose.json?.steps) && startClose.json.steps.length >= 4,
+    `st=${startClose.status} status=${startClose.json?.status} steps=${startClose.json?.steps?.length}`);
+
+  // TC-GL-15-02: lock before steps are done → STEPS_INCOMPLETE.
+  const lockEarly = await inj('POST', '/api/ledger/close/lock', admin, { close_run_id: closeRunId });
+  ok('GL-15: lock before steps complete → STEPS_INCOMPLETE',
+    lockEarly.status === 400 && lockEarly.json?.error?.code === 'STEPS_INCOMPLETE',
+    `st=${lockEarly.status} code=${lockEarly.json?.error?.code}`);
+
+  // Complete every REQUIRED step → run becomes ReadyToLock.
+  let stepRes: any = null;
+  for (const stp of (startClose.json?.steps ?? []).filter((s: any) => s.required))
+    stepRes = await inj('POST', '/api/ledger/close/step', admin, { close_run_id: closeRunId, step_key: stp.step_key });
+  ok('GL-15: all required steps done → run ReadyToLock',
+    stepRes?.status === 200 && stepRes?.json?.status === 'ReadyToLock',
+    `st=${stepRes?.status} status=${stepRes?.json?.status}`);
+
+  // TC-GL-16-01: self-lock blocked — the starter (admin) cannot lock their own run → SELF_LOCK.
+  const selfLock = await inj('POST', '/api/ledger/close/lock', admin, { close_run_id: closeRunId });
+  ok('GL-16: self-lock blocked (starter cannot lock own run) → SELF_LOCK',
+    selfLock.status === 400 && selfLock.json?.error?.code === 'SELF_LOCK',
+    `st=${selfLock.status} code=${selfLock.json?.error?.code}`);
+
+  // TC-GL-16-02: lock by a DIFFERENT user (mgr, also gl_close) → status Locked.
+  const mgrLock = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
+  const locked = await inj('POST', '/api/ledger/close/lock', mgrLock, { close_run_id: closeRunId });
+  ok('GL-16: lock by a different user → Locked',
+    locked.status === 200 && locked.json?.status === 'Locked' && locked.json?.locked_by === 'mgr',
+    `st=${locked.status} status=${locked.json?.status} by=${locked.json?.locked_by}`);
+
+  // TC-GL-15-03: post a JE dated INTO the locked period → PERIOD_LOCKED (the new hard gate).
+  const lockedPost = await inj('POST', '/api/ledger/journal', admin, { date: `${closePeriod}-15`, source: 'Manual', lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
+  ok('GL-15: posting into a locked period → PERIOD_LOCKED',
+    lockedPost.status === 400 && lockedPost.json?.error?.code === 'PERIOD_LOCKED',
+    `st=${lockedPost.status} code=${lockedPost.json?.error?.code}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);
