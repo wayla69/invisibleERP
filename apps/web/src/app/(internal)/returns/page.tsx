@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Banknote, PackageCheck, Plus, Receipt, RotateCcw, SearchX, Undo2, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useMe, hasPerm } from '@/lib/auth';
 import { num, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { ModulePage } from '@/components/module-page';
@@ -37,6 +38,8 @@ interface SaleDetail { order: { saleNo: string; total: string; saleDate: string 
 
 export default function ReturnsPage() {
   const qc = useQueryClient();
+  const me = useMe();
+  const canRefund = hasPerm(me.data, 'pos_refund', 'pos', 'ar'); // SoD R12: authorize refunds = pos_refund duty
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const [method, setMethod] = useState('');
@@ -59,9 +62,13 @@ export default function ReturnsPage() {
       description="ทะเบียนการคืนสินค้า/คืนเงินทั้งหมด — วิธีคืนเงิน, ยอดคืน, การคืนเข้าสต๊อก, ลิงก์บัญชี (REV-07)"
       query={q}
       actions={
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-1.5 size-4" />บันทึกคืนสินค้า
-        </Button>
+        // SoD R12: creating/authorizing a return requires pos_refund (POS Supervisor) — a Cashier
+        // (pos_sell only) can view the register but cannot issue refunds from this page.
+        canRefund ? (
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1.5 size-4" />บันทึกคืนสินค้า
+          </Button>
+        ) : undefined
       }
       toolbar={
         <>

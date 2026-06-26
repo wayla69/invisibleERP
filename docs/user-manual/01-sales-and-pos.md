@@ -1,6 +1,6 @@
 # 01 · Sales & Point of Sale (POS)
 
-**Status: DRAFT v0.4** · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
+**Status: DRAFT v0.5** · *v0.5 (2026-06-27): SoD screen split — new dedicated screens `/pos/refunds` (refund authorization queue, `pos_refund`) and `/pos/till` (till management, `pos_till`); `/pos/register` now shows as `pos_sell` primary perm; "บันทึกคืนสินค้า" button on `/returns` hidden from `pos_sell`-only cashiers (requires `pos_refund`). Controls R08/R12.* · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
 
 This chapter is for **Cashiers, Sales staff, POS Supervisors and Returns Clerks**.
 It covers ringing up sales, taking orders, credit checks, returns and refunds,
@@ -465,12 +465,16 @@ audit. A **void** requires a reason and a manager's confirmation.
 
 ## 5. Returns & refunds
 
-**Required permission:** `returns` to process the return; `pos_refund` to issue
-the refund (held by *ReturnsClerk*, *PosSupervisor*, *Admin*).
+**Required permission:** `returns` to view/process the return; `pos_refund` to
+issue the refund or authorize a pending request (held by *ReturnsClerk*,
+*PosSupervisor*, *Admin*).
 
-> **Note — separation of duties:** The person who **rang up** the sale should not
-> be the one who issues the refund. POS Supervisors hold the refund right
-> (`pos_refund`); cashiers (`pos_sell`) do not.
+> **Note — separation of duties (R08/R12):** The person who **rang up** the sale
+> should not be the one who issues the refund. POS Supervisors hold the refund
+> right (`pos_refund`); cashiers (`pos_sell`) do not. The **"บันทึกคืนสินค้า"**
+> button on `/returns` is hidden from `pos_sell`-only cashiers. For the **refund
+> authorization queue** (large refunds routed for supervisor approval), use the
+> dedicated **อนุมัติการคืนเงิน** screen (`/pos/refunds`) — see §5.1 below.
 
 ### To process a return
 
@@ -519,7 +523,25 @@ leakage.
 
 The **"บันทึกคืนสินค้า"** button (top right) opens the create-return dialog directly
 from this screen — enter the sale number, pick items and quantities, choose the refund
-method, and submit. See "To process a return" above for the full flow.
+method, and submit. See "To process a return" above for the full flow. **Cashiers
+(`pos_sell` only) do not see this button** — creating a return requires `pos_refund`
+(POS Supervisor or Returns Clerk).
+
+### 5.1 Refund authorization queue
+
+**Screen:** `/pos/refunds` (**อนุมัติการคืนเงิน**) · **Required permission:** `pos_refund`
+(held by *PosSupervisor*, *Admin*) — **not** accessible to `pos_sell`-only cashiers (SoD R08/R12).
+
+Large standalone refunds (฿1,000 +) are routed to a **pending queue** instead of
+processing immediately. The **Refund Authorization** screen shows all pending requests
+by default (filter to Approved / Rejected / All). For each pending request:
+
+1. Review the **sale number**, **payment number**, **amount**, and **reason**.
+2. Click **อนุมัติ** (approve) — the refund is issued immediately.
+3. Or click **ปฏิเสธ** (reject) — enter a reason; the request is closed without issuing.
+
+The maker-checker rule still applies: **the person who submitted the refund request
+cannot approve their own request** (the API blocks it with `SOD_VIOLATION`).
 
 ### Gift-card / store-credit register
 
@@ -542,8 +564,14 @@ and to tie the outstanding balance out to the GL at period close.
 
 ## 6. Opening & closing the till (cash drawer) + Z-report
 
-**Screen:** `/pos-control` / POS terminal · **Required permission:** `pos_till`
-(held by *PosSupervisor*, *Admin*)
+**Screen:** `/pos/till` (**จัดการลิ้นชัก**) · **Required permission:** `pos_till`
+(held by *PosSupervisor*, *Admin*) — **not** accessible to `pos_sell`-only cashiers (SoD R08).
+
+The **Till Management** screen is the POS Supervisor's central view for live cash drawer management:
+- **เปิดลิ้นชักใหม่** — open a new till session with an opening float.
+- View all open/closed sessions with gross sales, expected cash, counted cash, and variance.
+- **Variance approval** (POS-01): sessions closed with a large cash over/short appear as **"ผลต่าง"** — the Supervisor reviews and approves/rejects (a different person from the cashier who closed, enforced by the API).
+- Close-of-day Z-report signing is on the separate `/pos/close-of-day` screen (`pos_close` permission).
 
 > **Banking the safe cash.** When you move cash from the drawer to the safe during a
 > shift (a **drop**), it's tracked as **cash in the safe** until it's banked. The

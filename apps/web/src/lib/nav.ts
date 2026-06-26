@@ -157,9 +157,12 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'ขายหน้าร้าน',
     workspace: ['pos'],
     items: [
-      { label: 'ขายหน้าร้าน (Register)', href: '/pos/register', icon: ShoppingCart, perms: ['pos', 'order_mgt'] },
+      // pos_sell = primary sell perm; coarse 'pos' holders (e.g. Sales role) still pass via implication.
+      { label: 'ขายหน้าร้าน (Register)', href: '/pos/register', icon: ShoppingCart, perms: ['pos_sell', 'pos', 'order_mgt'] },
       { label: 'รายการออเดอร์', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
       { label: 'คืนสินค้า & คืนเงิน', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt'] },
+      // SoD R08/R12: refund authorization is a supervisor duty (pos_refund), not a cashier duty (pos_sell).
+      { label: 'อนุมัติการคืนเงิน (Refund Auth)', href: '/pos/refunds', icon: Banknote, perms: ['pos_refund', 'pos'] },
       { label: 'บัตรของขวัญ / เครดิตร้าน', href: '/giftcards', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
       { label: 'โต๊ะ', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
       { label: 'จองโต๊ะ & รอคิว', href: '/reservations', icon: CalendarClock, perms: ['pos', 'order_mgt'] },
@@ -168,6 +171,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'เมนูอาหาร', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
       { label: 'บุฟเฟต์ (แพ็กเกจ)', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
       { label: 'ควบคุม POS (พักบิล/อนุมัติ)', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
+      // SoD R08: till management (open/close/variance) is pos_till — segregated from pos_sell cashier.
+      { label: 'จัดการลิ้นชัก (Till)', href: '/pos/till', icon: CircleDollarSign, perms: ['pos_till', 'pos'] },
       { label: 'ปิดกะ (Z-Report)', href: '/pos/close-of-day', icon: ReceiptText, perms: ['pos', 'pos_till', 'pos_close'] },
       { label: 'ใบเสร็จ & งานพิมพ์', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
     ],

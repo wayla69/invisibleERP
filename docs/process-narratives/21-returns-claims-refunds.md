@@ -152,4 +152,5 @@ flowchart TD
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.2 | 2026-06-27 | Platform | **SoD screen split — R08/R12.** New `/pos/refunds` screen (`pos_refund`) for refund authorization queue; `/returns` "บันทึกคืนสินค้า" button now hidden from `pos_sell`-only cashiers; `/pos/till` screen (`pos_till`) for till management / variance approval. The R08 (sell ≠ refund/till) and R12 (return ≠ refund-issue) SoD controls are now enforced at the screen level in addition to the API layer: Cashiers accessing `/pos/register` cannot navigate to `/pos/refunds` or open the create-return dialog. |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
