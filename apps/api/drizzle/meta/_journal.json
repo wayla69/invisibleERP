@@ -1163,6 +1163,13 @@
       "when": 2023770000005,
       "tag": "0165_gl_immutability",
       "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 2023780000004,
+      "tag": "0166_thai_tax_filings",
+      "breakpoints": true
     }
   ]
 }
