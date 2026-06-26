@@ -27,6 +27,9 @@ const SaleBody = z.object({
   apply_pricing: z.boolean().optional(),
   channel: z.string().optional(),
   party_size: z.number().int().optional(),
+  service_charge_pct: z.number().min(0).max(100).optional(),
+  service_min_party: z.number().int().positive().optional(),
+  rounding: z.number().nonnegative().optional(),
   branch_id: z.number().int().positive().optional(),
 });
 
