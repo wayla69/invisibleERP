@@ -43,6 +43,29 @@ near-expiry flags, and recent movements.
 
 **Expected result:** Bins are available for put-away, picking and counting.
 
+### Bin capacity, layout & the 3D warehouse view
+
+**Screen:** `/wms` → tabs **ช่องเก็บ (Bins)** and **ผังคลัง 3D** · **Required permission:** `warehouse` / `locations`
+
+Give each bin a **capacity** (max units) and a **position** (X = aisle, Y = depth, Z = shelf
+level) when you create it on the **Bins** tab, or adjust it later. Capacity drives two things:
+
+- **Over-fill protection (control INV-08):** a put-away that would push a bin past its capacity
+  is **rejected** (`เกินความจุของช่องเก็บ`, `BIN_CAPACITY_EXCEEDED`) and nothing is stored — so
+  stock never silently overflows into an unrecorded spot. Bins left without a capacity are
+  unlimited (unchanged behaviour).
+- **The 3D view (`ผังคลัง 3D` tab):** the warehouse is drawn as a 3-D model — each bin is a box at
+  its X/Y/Z position, **coloured by how full it is** (green = empty → red = full; grey = no
+  capacity set; **over-capacity bins show red**). Drag to orbit, scroll to zoom, **click a bin** to
+  see what's inside.
+
+**Find where a product is:** on the **ผังคลัง 3D** tab type an **Item ID** in *ค้นหาตำแหน่งสินค้า* and
+press **ค้นหา** — every bin holding it is **highlighted in purple** with the quantity, and the panel
+shows the total on hand across bins.
+
+**Expected result:** the warehouse layout is visible at a glance, full bins stand out, and any item
+can be located to its exact bin(s).
+
 ---
 
 ## 3. Lots & expiry tracking
