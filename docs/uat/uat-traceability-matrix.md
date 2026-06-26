@@ -525,6 +525,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-078 | e-Invoicing — submit, idempotent, validation | Feature (e-invoicing) | 28 §4 |
 | UAT-ADM-079 | Ops — metrics + cache round-trip | Feature (scale/ops) | 30 §4 |
 | UAT-ADM-080 | PWA — installable + offline shell | Feature (PWA) | 30 §4 |
+| UAT-ADM-084 | R08 — Cashier cannot access `/pos/refunds` or `/pos/till` | SoD R08, ITGC-AC-09 | 21 §6 |
+| UAT-ADM-085 | R08/R12 — Cashier cannot see "บันทึกคืนสินค้า" button | SoD R08/R12, ITGC-AC-09 | 21 §6 |
+| UAT-ADM-086 | R12 — POS Supervisor can authorize pending refunds | SoD R12, ITGC-AC-09 | 21 §7 |
+| UAT-ADM-087 | R12 — Self-approve refund request blocked | SoD R12, REV-16 | 21 §7 |
+| UAT-ADM-088 | R08 — POS Supervisor can manage till + approve variance | SoD R08, POS-01 | 20 §6 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
