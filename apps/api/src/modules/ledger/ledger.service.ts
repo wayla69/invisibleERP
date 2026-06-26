@@ -92,6 +92,8 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '1700', name: 'Deferred Tax Asset', type: 'Asset' },                 // สินทรัพย์ภาษีเงินได้รอการตัดบัญชี (TAS 12) — deductible temporary differences × CIT (TAX-06)
   { code: '2700', name: 'Deferred Tax Liability', type: 'Liability' },         // หนี้สินภาษีเงินได้รอการตัดบัญชี (TAS 12) — taxable temporary differences × CIT (TAX-06)
   { code: '5950', name: 'Deferred Tax Expense', type: 'Expense' },             // ค่าใช้จ่าย(รายได้)ภาษีเงินได้รอการตัดบัญชี — deferred tax expense/benefit (TAX-06)
+  { code: '2410', name: 'Contract Liability / Deferred Revenue', type: 'Liability' }, // หนี้สินตามสัญญา/รายได้รอรับรู้ (TFRS 15) — deferred revenue released as POs are satisfied (REV-19)
+  { code: '2420', name: 'Refund Liability', type: 'Liability' },               // หนี้สินค่าคืนเงิน — provision for expected returns/refunds (TFRS 15, REV-19)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -125,6 +127,8 @@ const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = {
   '2380': { bucket: 'operating', label: 'ค่าใช้จ่ายการผลิตรอปันส่วน (Manufacturing costs applied)' },
   '2390': { bucket: 'operating', label: 'ต้นทุนโครงการรอปันส่วน (Project costs applied)' },
   '2400': { bucket: 'operating', label: 'รายได้รับล่วงหน้า (Unearned revenue)' },
+  '2410': { bucket: 'operating', label: 'หนี้สินตามสัญญา/รายได้รอรับรู้ (Contract liability / deferred revenue)' },
+  '2420': { bucket: 'operating', label: 'หนี้สินค่าคืนเงิน (Refund liability)' },
   // Operating — other current assets (an increase ties up cash)
   '1180': { bucket: 'operating', label: 'เงินทดรองจ่ายพนักงาน (Employee advances)' },
   '1280': { bucket: 'operating', label: 'ค่าใช้จ่ายจ่ายล่วงหน้า (Prepaid expenses)' },

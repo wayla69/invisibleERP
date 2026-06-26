@@ -640,5 +640,53 @@ unmapped values appear as their own / an `Unassigned` bucket.
 
 ---
 
+## Revenue recognition — contracts & deferred revenue (TFRS 15 / IFRS 15, control REV-19)
+
+For service, subscription, and project-style contracts the system recognizes revenue under the
+**TFRS 15 / IFRS 15 five-step model** — revenue is earned as you satisfy your promises, not when
+you invoice. (Restaurant POS sales keep their immediate recognition; this is the deferred-revenue
+engine for "real ERP" contracts.) Required permission: `exec`, `ar`, or `fin_report`.
+
+**1. Create the contract with its performance obligations**
+`POST /api/revenue/contracts` with `total_price` and an `obligations` list. Each obligation has a
+name, a **standalone selling price (`ssp`)**, and a `method`:
+
+- `over_time` — straight-line across the months between `start_date` and `end_date` (e.g. an
+  implementation or support period).
+- `point_in_time` — recognized in full at its `start_date` (e.g. a licence handed over once).
+
+The contract opens in **Draft** and gets a contract number (`REVC-…`).
+
+**2. Allocate the price by SSP** — `POST /api/revenue/contracts/{id}/allocate`. The transaction
+price is split across the obligations in proportion to their SSP
+(`allocated = total × ssp ÷ Σssp`); the rounding residual lands on the largest obligation so the
+allocation **sums exactly to the contract price**.
+
+**3. Activate (raise deferred revenue)** — `POST /api/revenue/contracts/{id}/activate` posts
+**Dr 1100 Accounts Receivable / Cr 2410 Deferred Revenue** for the full price and moves the
+contract to **Active**.
+
+**4. Build the recognition schedule** — `POST /api/revenue/contracts/{id}/schedule` lays out the
+monthly plan (one row per month for over-time obligations, a single row for point-in-time). Safe to
+re-run: it rebuilds only rows not yet recognized.
+
+**5. Recognize revenue for a period** — `POST /api/revenue/contracts/recognize` with `{ period }`
+(optionally `contract_id`). Every schedule row due in or before that period posts
+**Dr 2410 Deferred Revenue / Cr 4300 Recognized Revenue**, and the obligation's progress
+(`satisfied_pct` / status) is updated. Re-running the same period posts nothing again
+(`recognized_count: 0`). An HQ/Admin caller must add `?tenant_id=` (`TENANT_REQUIRED`).
+
+**Provide for expected refunds** — `POST /api/revenue/contracts/{id}/refund-liability` with
+`{ expected_refund_rate }` (0–1) posts **Dr 4300 Revenue (contra) / Cr 2420 Refund Liability** for
+the expected return, booking only the change since the prior provision.
+
+**Review** — `GET /api/revenue/contracts` (list) and `GET /api/revenue/contracts/{id}` (the
+contract with its obligations and schedule).
+
+**Errors:** `CONTRACT_NOT_FOUND` (404), `INVALID_ALLOCATION` (bad price/SSP/missing over-time
+dates), `ALREADY_ACTIVE`, `TENANT_REQUIRED`, `PERIOD_LOCKED` (the target period is hard-closed).
+
+---
+
 **Next:** [Tax](./07-tax.md) · [Finance — AR & AP](./05-finance-ar-ap.md) ·
 [Approvals](./10-approvals.md)
