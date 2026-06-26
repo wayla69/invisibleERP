@@ -155,6 +155,14 @@ async function main() {
   const pp = await inj('GET', '/api/tax-reports/pp30?month=6&year=2026', admin);
   ok('PP30: net VAT = output − input (internally consistent)', near(pp.json.form.output_vat - pp.json.form.input_vat, pp.json.reconciliation.report_net_vat));
   ok('PP30: GL 2100 movement reflects AP input VAT (−70)', near(pp.json.reconciliation.gl_net_movement, -70), JSON.stringify(pp.json.reconciliation));
+  // TAX-04: the VAT-return ↔ GL-2100 reconciliation block is the detective pre-filing control — it must
+  // expose the 2100 net movement, the report net VAT (output − input) and a boolean tie verdict.
+  ok('TAX-04: ภ.พ.30 reconciles to GL account 2100 (net movement + tie verdict present)',
+    pp.json.reconciliation.gl_account === '2100'
+    && typeof pp.json.reconciliation.tied === 'boolean'
+    && near(pp.json.reconciliation.report_net_vat, pp.json.form.output_vat - pp.json.form.input_vat)
+    && pp.json.reconciliation.tied === (Math.abs(pp.json.reconciliation.gl_net_movement - pp.json.reconciliation.report_net_vat) < 0.01),
+    JSON.stringify(pp.json.reconciliation));
   ok('PP30: filing deadline = 15th of next month (2026-07-15)', pp.json.deadline === '2026-07-15');
   // ภ.ง.ด.3 / ภ.ง.ด.53
   const p53 = await inj('GET', '/api/tax-reports/pnd?type=PND53&month=6&year=2026', admin);
