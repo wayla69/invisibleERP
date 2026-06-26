@@ -1023,6 +1023,13 @@
       "when": 2023610000004,
       "tag": "0145_table_reservations",
       "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 2023620000004,
+      "tag": "0146_tip_distribution",
+      "breakpoints": true
     }
   ]
 }
