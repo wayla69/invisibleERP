@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { eq, and, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { menuRecipes, menuRecipeLines, menuItems, customerInventory, custStockLog, branchStock, items } from '../../database/schema';
+import { menuRecipes, menuRecipeLines, menuItems, customerInventory, custStockLog, branchStock, items, modifierOptions } from '../../database/schema';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { UpsertRecipeDto } from './recipe.dto';
@@ -172,6 +172,18 @@ export class RecipeService {
       cost = round4(cost + needed * l.unitCost);
     }
     return { cost: r.postCogs ? cost : 0, deducted: true };
+  }
+
+  // Step 1 — flat standard COGS for the modifier options chosen on a sold line (e.g. "extra patty" +12).
+  // Returns summed cogs_delta × soldQty so the sale path folds it into the line's recipe COGS (Dr 5300 /
+  // Cr 1200). Options are tenant-scoped explicitly (sale runs under app.bypass_rls for HQ checkouts).
+  // recipe_ref_id ingredient-level deduction is a reserved forward hook — not costed here yet.
+  async modifierCogs(db: any, tenantId: number | null, optionIds: number[], soldQty: number): Promise<number> {
+    if (!optionIds?.length) return 0;
+    const opts = await db.select({ cogsDelta: modifierOptions.cogsDelta }).from(modifierOptions)
+      .where(and(eq(modifierOptions.tenantId, tenantId as any), inArray(modifierOptions.id, optionIds)));
+    const perUnit = opts.reduce((a: number, o: any) => a + n(o.cogsDelta), 0);
+    return round4(perUnit * soldQty);
   }
 
   // reverse the deduction on a return (add ingredients back). Returns COGS cost to reverse if post_cogs.

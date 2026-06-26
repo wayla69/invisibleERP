@@ -57,6 +57,8 @@ export const SetAvailabilityBody = z.object({ available: z.boolean() });
 export const OptionBody = z.object({
   name: z.string().min(1),
   price_delta: z.number().default(0),
+  cogs_delta: z.number().nonnegative().default(0),
+  recipe_ref_id: z.number().int().optional(),
   is_default: z.boolean().optional(),
   sort: z.number().int().optional(),
 });

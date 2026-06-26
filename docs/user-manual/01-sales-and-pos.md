@@ -47,7 +47,10 @@ old keyed "create order" form for day-to-day selling):
 2. **Options (modifiers).** Items that carry choices (size, spice, add-ons) show a
    **ตัวเลือก** badge; tapping one opens a picker — choose options, the live price
    updates, then **เพิ่มลงตะกร้า**. Prices (incl. option add-ons) are always taken
-   from the catalog, so a cashier can't change a price.
+   from the catalog, so a cashier can't change a price. Each option can also carry a
+   **standard COGS delta** (set on the modifier via the menu API, e.g. "extra patty" =
+   ฿12) so choosing it raises the sold line's cost of goods at checkout — keeping
+   food-cost reporting honest. This is back-office only; cashiers and diners never see it.
 3. **The cart.** Adjust quantity with **− / +**, remove a line with the bin icon,
    and read **ยอดรวม / VAT / สุทธิ** at the bottom. **พักบิล** parks the cart and
    **ล้างตะกร้า** clears it.
@@ -541,6 +544,20 @@ Record any cash added or removed:
 
 > **Note:** Use the **X-report** during a shift for an interim total without
 > closing the drawer. The **Z-report** is the final, end-of-shift report.
+
+#### Signing the Z-report (close-of-day archive)
+
+**Screen:** `/pos/close-of-day` (**ปิดกะ (Z-Report)**) · **Required permission:** `pos_close`
+(manager) — separate from the cashier's `pos_till`.
+
+After a till is **closed**, a manager **signs** the Z-report to lock it into a permanent,
+**tamper-evident** record. Enter the closed session's id (**TILL-…**) and click **ลงนาม Z-Report**.
+The signed report snapshots the shift's totals and the denomination count and stamps a
+**content-hash**. Re-signing the same session just returns the existing record (you can't create a
+second Z-tape). The archive list shows every signed Z with a **ความถูกต้อง** badge — **ถูกต้อง**
+(hash matches) or **ถูกแก้ไข** (the stored figures were altered after signing), so an auditor can
+prove the day's takings as originally counted. You can only sign a **closed** till, and a sell-only
+cashier cannot sign.
 
 #### Cash over/short — what happens to a variance
 

@@ -32,6 +32,7 @@ const OpenTillBody = z.object({ opening_float: z.number().nonnegative().optional
 const CloseTillBody = z.object({ session_no: z.string().min(1), closing_count: z.number().nonnegative(), denominations: z.record(z.string(), z.number()).optional() });
 const CashMovementBody = z.object({ type: z.enum(['paid_in', 'paid_out', 'drop']), amount: z.number().positive(), reason: z.string().optional() });
 const RejectVarianceBody = z.object({ reason: z.string().max(500).optional() });
+const SignZBody = z.object({ denominations: z.record(z.string(), z.number()).optional() });
 
 @Controller('api/payments')
 export class PaymentsController {
@@ -122,5 +123,21 @@ export class PaymentsController {
   @Get('till/:id/z-report') @Permissions('pos_till', 'ar')
   zReport(@Param('id') id: string, @CurrentUser() u: JwtUser) {
     return this.svc.zReport(Number(id), u);
+  }
+
+  // ── POS-07: sign + archive the Z-report (manager attestation: pos_close) ──
+  @Post('till/:sessionNo/z-report/sign') @Permissions('pos_close', 'ar')
+  signZReport(@Param('sessionNo') sessionNo: string, @Body(new ZodValidationPipe(SignZBody)) b: { denominations?: Record<string, number> }, @CurrentUser() u: JwtUser) {
+    return this.svc.signZReport(sessionNo, u, b.denominations);
+  }
+
+  @Get('xz-reports') @Permissions('pos_till', 'pos_close', 'ar')
+  listXzReports(@CurrentUser() u: JwtUser, @Query('limit') limit?: string) {
+    return this.svc.listXzReports(u, limit ? Math.min(200, Math.max(1, parseInt(limit, 10) || 50)) : 50);
+  }
+
+  @Get('xz-reports/:id') @Permissions('pos_till', 'pos_close', 'ar')
+  getXzReport(@Param('id') id: string) {
+    return this.svc.getXzReport(Number(id));
   }
 }

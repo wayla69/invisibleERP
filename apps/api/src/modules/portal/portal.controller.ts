@@ -19,6 +19,7 @@ const SaleBody = z.object({
     item_id: z.string().min(1), item_description: z.string().optional(),
     qty: z.number().positive(), unit_price: z.number().nonnegative(),
     uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
+    modifier_option_ids: z.array(z.number().int()).optional(),
   })).min(1),
   discount: z.number().nonnegative().optional(),
   payment_method: z.string().optional(),
