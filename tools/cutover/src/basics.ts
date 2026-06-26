@@ -649,7 +649,41 @@ async function main() {
     genAcc.accounts?.some((a: any) => a.code === '4300') && genAcc.accounts?.some((a: any) => a.code === '5300') && genAcc.count === restoAll.count,
     `n=${genAcc.count} src=${genAcc.source}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA ──');
+  // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
+  // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
+  // Both legs use the same depreciation amount; pass both role keys so the engine maps them.
+  const prevDep = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'DEPRECIATION.FA', amounts: { dep_expense: 1000, accum_dep: 1000 } });
+  const depLines: any[] = Array.isArray(prevDep.json) ? prevDep.json : [];
+  const depDR = depLines.find((l: any) => l.side === 'DR');
+  const depCR = depLines.find((l: any) => l.side === 'CR');
+  ok('GL-12: preview DEPRECIATION.FA → DR 5200 / CR 1590 (amount 1000)',
+    prevDep.status === 200 && depDR?.accountCode === '5200' && near(depDR?.amount, 1000) && depCR?.accountCode === '1590' && near(depCR?.amount, 1000),
+    `st=${prevDep.status} DR=${depDR?.accountCode}:${depDR?.amount} CR=${depCR?.accountCode}:${depCR?.amount}`);
+
+  // TC-GL-12-02: preview goods-receipt legs — DR 1200 / CR 2000
+  // Both legs use the same amount; pass both role keys so the engine maps them.
+  const prevGR = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'GR.INVENTORY', amounts: { inventory: 500, ap_control: 500 } });
+  const grLines: any[] = Array.isArray(prevGR.json) ? prevGR.json : [];
+  const grDR = grLines.find((l: any) => l.side === 'DR');
+  const grCR = grLines.find((l: any) => l.side === 'CR');
+  ok('GL-12: preview GR.INVENTORY → DR 1200 / CR 2000 (amount 500)',
+    prevGR.status === 200 && grDR?.accountCode === '1200' && near(grDR?.amount, 500) && grCR?.accountCode === '2000' && near(grCR?.amount, 500),
+    `st=${prevGR.status} DR=${grDR?.accountCode}:${grDR?.amount} CR=${grCR?.accountCode}:${grCR?.amount}`);
+
+  // TC-GL-12-03: unknown event type → NO_POSTING_RULE
+  const prevUnknown = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'UNKNOWN_EVENT', amounts: {} });
+  ok('GL-12: unknown eventType → 400/422 NO_POSTING_RULE',
+    (prevUnknown.status === 400 || prevUnknown.status === 422) && prevUnknown.json?.error?.code === 'NO_POSTING_RULE',
+    `st=${prevUnknown.status} code=${prevUnknown.json?.error?.code}`);
+
+  // TC-GL-12-04: event-type catalogue returns ≥20 entries
+  const evTypes = await inj('GET', '/api/ledger/posting-rules/event-types', admin);
+  const evList: any[] = Array.isArray(evTypes.json) ? evTypes.json : [];
+  ok('GL-12: event-type catalogue lists ≥20 seeded event types',
+    evTypes.status === 200 && evList.length >= 20,
+    `st=${evTypes.status} n=${evList.length}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

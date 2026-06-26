@@ -1093,6 +1093,13 @@
       "when": 2023720000005,
       "tag": "0155_coa_master",
       "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 2023720000006,
+      "tag": "0156_posting_rules",
+      "breakpoints": true
     }
   ]
 }

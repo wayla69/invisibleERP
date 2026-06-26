@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Each period close + annual |
-| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, GL-07, GL-08, GL-09, GL-10, GL-11, LSE-01, REC-01, REC-02, REC-03, REC-04, GOV-01, CON-01, CON-02; SoD R05, R06 |
+| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, GL-07, GL-08, GL-09, GL-10, GL-11, GL-12, LSE-01, REC-01, REC-02, REC-03, REC-04, GOV-01, CON-01, CON-02; SoD R05, R06 |
 | Related policy | `compliance/policies/11-financial-close-policy.md`, `compliance/policies/13-segregation-of-duties-policy.md` |
 
 ## 2. Purpose
@@ -83,6 +83,15 @@ SoD: the **preparer** of a manual JE (GlAccountant) is never its **approver** (F
 
     (**GL-11**, see also the industry-CoA template layer at step 15 below.)
 
+16. **Posting / Account-Determination Engine (WS1.2 — GL-12).** Rather than each service file hard-coding `account_code` literals inside `postEntry` calls, account assignment is driven by a centralised **posting-rules engine**:
+
+    - Two new tables — **`posting_event_types`** (a catalogue of business events: `SALE.FOOD`, `GR.INVENTORY`, `DEPRECIATION.FA`, etc.) and **`posting_rules`** (maps each event × leg-order to a semantic role → account code + DR/CR side) — replace the scattered literals.
+    - **`PostingService.post(eventType, ctx)`** resolves the applicable rules (global or tenant-specific, ordered by `leg_order`), translates the caller's role-keyed amounts into DR/CR lines, and delegates to `LedgerService.postEntry`. Tenant-specific rules **shadow** global defaults for the same leg; if no rules exist for an event the call fails fast with `NO_POSTING_RULE`.
+    - **`PostingService.preview(eventType, ctx)`** (`POST /api/ledger/posting-rules/preview`) is a dry-run: returns the lines that `post` would produce without writing to the GL — used by the UI to show the accountant the expected entries before committing.
+    - **REST endpoints** (`GET /api/ledger/posting-rules`, `GET /api/ledger/posting-rules/event-types`, `POST /api/ledger/posting-rules`) let a FinancialController maintain tenant-specific overrides (e.g. use a different revenue account for a subsidiary). Write access requires `gl_posting_rules`; read access requires any of `gl_coa`/`gl_posting_rules`/`exec`/`gl_post`.
+    - Migration **0156** seeds 28 event types and their global-default rules, matching all existing inline literals exactly.
+    - Callers are migrated per-module in subsequent PRs; this WS ships the engine and proves parity via the golden snapshot in the `basics` harness (**GL-12**).
+
 15. **Industry Chart-of-Accounts at company creation.** The GL engine binds to a **fixed, global account universe** (canonical codes are immutable — every posting hard-references its code). On top of that, each tenant gets a **per-tenant overlay** (`tenant_accounts`) that curates *which* canonical accounts are active and *how* they are named/grouped for its industry. At **company creation** the customer picks a business type (`restaurant` / `retail` / `distribution` / `services` / `general`); `signup` materialises the chosen template into the overlay (`provisionTenantCoA`) **inside the signup transaction**, right after fiscal-year provisioning. Adopting an industry pack later (`POST /api/onboarding/apply-pack`) does the same. Every template account code is **asserted to exist in the canonical chart at boot** (`assertTemplatesSubsetOf` in `seedChartOfAccounts`) so a drifted template **fails fast** and can never reach a tenant; provisioning is **idempotent + additive** (never deletes), so re-running only adds missing accounts. The overlay is **presentation-only — it never gates postings**: `GET /api/ledger/accounts` returns the tenant's curated chart by default but `?all=true` exposes the full canonical universe, and reports surface any account that is **active OR carries activity** (so a curated-out account that receives a posting still appears) (**GL-10**).
 
 ## 8. Process flow
@@ -132,6 +141,7 @@ flowchart TD
 | 13 | Lease liability (2600) diverges from the schedule (manual JE / missed run) | Lease-liability reconciliation: GL 2600 vs Σ remaining schedule liability, with a `reconciled` flag + tie-out banner reviewed at close | **Det / Auto** | **LSE-01** | Lease-liability reconciliation; `basics` lease checks |
 | 14 | CoA changed without authorisation; code changed after postings; account deactivated with live balance; direct JE bypasses sub-ledger on a control account | CoA Change Control: `gl_coa` permission required; code-change blocked if postings exist (`CODE_HAS_POSTINGS`); deactivation blocked if non-zero balance (`ACCOUNT_HAS_BALANCE`); control accounts (1100/2000/1200/1500) reject direct postings unless `viaSubledger:true` (`CONTROL_ACCOUNT`) | Prev / Auto | GL-11 | `gl_coa` permission tests; control-account guard test |
 | 15 | New company starts on an unguided chart, or an industry template drifts from the engine's fixed codes | Industry CoA templates: per-tenant overlay over an **immutable** canonical universe; chosen at signup (`provisionTenantCoA`, in-txn); every template code **asserted ⊆ canonical at boot**; idempotent + additive; overlay is presentation-only (never gates postings — `?all=true` exposes the full universe) | Prev / Auto | GL-10 | `basics` + `compliance` industry-CoA checks |
+| 16 | Account-assignment errors (wrong account code) introduced by scattered inline literals; tenant needing a different account for a given event type has no mechanism to override without a code change | Posting / Account-Determination Engine: `posting_event_types` + `posting_rules` drive account assignment; `PostingService.post` resolves rules (global, shadowed by tenant-specific) and delegates to `LedgerService.postEntry`; rule changes require `gl_posting_rules` permission; `NO_POSTING_RULE` fast-fails if no rule is found | Prev / Auto | GL-12 | `basics` harness golden snapshot; `POST /api/ledger/posting-rules/preview` dry-run; rule table audit trail |
 
 ## 10. Inputs & outputs
 
@@ -168,6 +178,7 @@ flowchart TD
 | `CODE_HAS_POSTINGS` | Attempt to disable postability on an account with posted entries | Retain postability; use `effective_to` date-fence instead |
 | `ACCOUNT_HAS_BALANCE` | Attempt to deactivate an account with non-zero balance | Clear the balance via a correcting JE first |
 | `CONTROL_ACCOUNT` | Direct JE to a control account (1100/2000/1200/1500) without `viaSubledger:true` | Post via the relevant sub-ledger (AR/AP/Inventory/Fixed Assets) |
+| `NO_POSTING_RULE` | `PostingService.post` called with an event type that has no active rules | Register the event type and its rules in `posting_rules` (requires `gl_posting_rules`) |
 
 ## 14. Revision history
 
@@ -187,3 +198,4 @@ flowchart TD
 | 0.7 DRAFT | 2026-06-25 | `<<author>>` | §7 step 13 — added **lease modification / remeasurement** (`/api/leases/:leaseNo/modify`): remeasures the liability at the revised PV and adjusts the ROU by the same delta (Dr/Cr 1600↔2600), then depreciates over the remaining term (**LSE-01**). Verified by the `basics` harness. |
 | 0.8 DRAFT | 2026-06-25 | `<<author>>` | **Lease management UI surfaced** — new screen `/leases` (ERP nav → การเงิน ▸ สมุดบัญชี & แยกประเภท) drives the already-documented IFRS 16 endpoints: create lease (ROU+liability at PV), "run-due" periodic posting, and modification/remeasurement. UI-only addition; no process/GL/control change (**LSE-01**). See user manual `06-general-ledger.md` §Leases and UAT `05-general-ledger-close-uat.md`. |
 | 0.9 DRAFT | 2026-06-26 | Platform | §7 step 13 — added the **lease-liability reconciliation** (`GET /api/leases/liability-reconciliation`): ties GL **2600** to the sum of the remaining liability balances on the lease schedule (`gl_liability` vs `schedule_liability`, `difference`, `reconciled`), surfaced as a tie-out banner on `/leases`. Detective tie-out over the existing **LSE-01**; no new control, no migration. Verified by the `basics` harness (after run + remeasurement, GL 2600 = schedule, reconciled, difference 0). |
+| 1.0 | 2026-06-26 | Platform | **WS1.2 — Posting / Account-Determination Engine (GL-12).** New step 16: `posting_event_types` + `posting_rules` tables (migration 0156, seeded with 28 event types + global-default rules); `PostingService` resolves rules and delegates to `LedgerService.postEntry`; tenant-specific rules shadow globals; `NO_POSTING_RULE` fast-fails; `POST /api/ledger/posting-rules/preview` dry-run; write access requires `gl_posting_rules`. Control matrix gains GL-12 preventive row; error table gains `NO_POSTING_RULE`. ToE: `basics` harness golden-snapshot checks. |
