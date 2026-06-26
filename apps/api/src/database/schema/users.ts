@@ -16,8 +16,17 @@ export const users = pgTable('users', {
   totpSecret: text('totp_secret'),
   ssoSubject: text('sso_subject'), // OIDC/SAML subject for SSO users
   isActive: boolean('is_active').notNull().default(true), // SCIM deprovisioning deactivates (no hard delete)
+  tokensValidFrom: timestamp('tokens_valid_from', { withTimezone: true }), // ITGC-AC-15: JWTs issued before this are rejected ("revoke all sessions")
   locale: text('locale'), // C1 (Phase 20) — per-user UI locale override; resolves user → tenant.default_language → 'th'
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// ITGC-AC-15 — JWT denylist by jti for explicit single-session logout (kills a token before its expiry).
+export const revokedTokens = pgTable('revoked_tokens', {
+  jti: text('jti').primaryKey(),
+  username: text('username'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }).defaultNow(),
 });
 
 // แทน Permissions CSV (de-serialized)

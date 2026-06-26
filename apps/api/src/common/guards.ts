@@ -1,9 +1,12 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, Inject, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { timingSafeEqual } from 'node:crypto';
+import { eq, and, gt } from 'drizzle-orm';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, type JwtUser } from './decorators';
 import { ApiKeyService } from '../modules/platform/api-key.service';
+import { DRIZZLE, type DrizzleDb } from '../database/database.module';
+import { users, revokedTokens } from '../database/schema';
 import { resolvePermissions } from '@ierp/shared';
 import { AUTH_COOKIE, CSRF_COOKIE, readCookie } from './cookies';
 
@@ -32,6 +35,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly jwt: JwtService,
     private readonly apiKeys: ApiKeyService,
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -82,20 +86,36 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     // ── JWT path ──────────────────────────────────────────────────
+    let payload: any;
     try {
-      const payload = await this.jwt.verifyAsync(token);
-      req.user = {
-        username: payload.sub,
-        role: payload.role,
-        customerName: payload.customerName ?? null,
-        tenantId: payload.tenantId ?? null,
-        permissions: payload.permissions ?? [],
-        memberId: payload.memberId ?? null, // loyalty member principal (role==='Member'); null for staff
-      } satisfies JwtUser;
-      return true;
+      payload = await this.jwt.verifyAsync(token);
     } catch {
       throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid or expired token', messageTh: 'token ไม่ถูกต้องหรือหมดอายุ' });
     }
+    // ITGC-AC-15 — session revocation: a logged-out token (jti denylist), a deactivated account, or a token
+    // issued before a "revoke all sessions" watermark is rejected even though the signature is still valid.
+    const db = this.db as any;
+    const revoked = new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Session has been revoked — please sign in again', messageTh: 'เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบใหม่' });
+    if (payload.jti) {
+      const [rev] = await db.select({ j: revokedTokens.jti }).from(revokedTokens).where(and(eq(revokedTokens.jti, payload.jti), gt(revokedTokens.expiresAt, new Date()))).limit(1);
+      if (rev) throw revoked;
+    }
+    if (payload.sub) {
+      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom }).from(users).where(eq(users.username, payload.sub)).limit(1);
+      if (u) { // staff principal — members aren't in `users`, so they skip this check
+        if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
+        if (u.tvf && payload.iat && payload.iat * 1000 < new Date(u.tvf).getTime()) throw revoked;
+      }
+    }
+    req.user = {
+      username: payload.sub,
+      role: payload.role,
+      customerName: payload.customerName ?? null,
+      tenantId: payload.tenantId ?? null,
+      permissions: payload.permissions ?? [],
+      memberId: payload.memberId ?? null, // loyalty member principal (role==='Member'); null for staff
+    } satisfies JwtUser;
+    return true;
   }
 }
 

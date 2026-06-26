@@ -1030,6 +1030,13 @@
       "when": 2023620000004,
       "tag": "0146_tip_distribution",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 2023650000004,
+      "tag": "0147_auth_lockout_revocation",
+      "breakpoints": true
     }
   ]
 }

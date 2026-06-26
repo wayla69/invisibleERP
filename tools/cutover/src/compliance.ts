@@ -723,6 +723,29 @@ async function main() {
   const pcOver = await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCFZ-1', kind: 'expense', payee: 'Too big', amount: 5000 });
   ok('EXP-08: a draw beyond the fund balance is rejected → 422 INSUFFICIENT_FLOAT', pcOver.status === 422 && pcOver.json?.error?.code === 'INSUFFICIENT_FLOAT', `${pcOver.status}/${pcOver.json?.error?.code}`);
 
+  // ════════════════════════ ITGC-AC-15 — Session revocation ════════════════════════
+  await db.insert(s.users).values([
+    { username: 'revokeme', passwordHash: await pw.hash('rightpw'), role: 'Sales', tenantId: t1 },
+    { username: 'deactme', passwordHash: await pw.hash('rightpw'), role: 'Sales', tenantId: t1 },
+    { username: 'revallme', passwordHash: await pw.hash('rightpw'), role: 'Sales', tenantId: t1 },
+  ]).onConflictDoNothing();
+  // Single-session revocation: logout denylists the token's jti → it stops working immediately.
+  const rvTok = await login('revokeme', 'rightpw');
+  const rvBefore = await inj('GET', '/api/auth/me', rvTok);
+  await inj('POST', '/api/auth/logout', rvTok);
+  const rvAfter = await inj('GET', '/api/auth/me', rvTok);
+  ok('ITGC-AC-15: logged-out token is revoked → 401 TOKEN_REVOKED (worked before logout)', rvBefore.status === 200 && rvAfter.status === 401 && rvAfter.json?.error?.code === 'TOKEN_REVOKED', `before=${rvBefore.status} after=${rvAfter.status}/${rvAfter.json?.error?.code}`);
+  // Deactivation enforced live: an existing token is rejected once the account is deactivated.
+  const dvTok = await login('deactme', 'rightpw');
+  await db.update(s.users).set({ isActive: false }).where(eq(s.users.username, 'deactme'));
+  const dvAfter = await inj('GET', '/api/auth/me', dvTok);
+  ok('ITGC-AC-15: deactivated account’s existing token is rejected → 401 USER_DEACTIVATED', dvAfter.status === 401 && dvAfter.json?.error?.code === 'USER_DEACTIVATED', `${dvAfter.status}/${dvAfter.json?.error?.code}`);
+  // Revoke-all (incident response): an admin forces logout everywhere; pre-existing tokens die.
+  const raTok = await login('revallme', 'rightpw');
+  const raAdmin = await inj('POST', '/api/auth/users/revallme/revoke-sessions', admin);
+  const raAfter = await inj('GET', '/api/auth/me', raTok);
+  ok('ITGC-AC-15: revoke-all-sessions invalidates pre-existing tokens → 401', raAdmin.status === 200 && raAdmin.json?.revoked_all === true && raAfter.status === 401, `revoke=${raAdmin.status} after=${raAfter.status}`);
+
   // REC-04 — period-end control-account reconciliation PACK ties every sub-ledger to its GL control account.
   const recPack = await inj('GET', '/api/finance/reconciliation/controls', admin);
   const inv1200 = (recPack.json.lines ?? []).find((l: any) => l.account === '1200');

@@ -31,6 +31,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-019 | Input-validation hardening (qint/Zod) | ITGC-AC-02 | 08 §7 |
 | UAT-SEC-020 | Username login case/whitespace-insensitive | ITGC-AC-01 | 08 §7 |
 | UAT-SEC-021 | Password remains case-sensitive (not trimmed) | ITGC-AC-01 | 08 §7, §13 |
+| UAT-SEC-022 | Logout revokes the token (jti denylist) | ITGC-AC-15 | 08 §7, §9 |
+| UAT-SEC-023 | Deactivated account's existing token rejected live | ITGC-AC-15 | 08 §7, §9 |
+| UAT-SEC-024 | Revoke-all-sessions invalidates pre-existing tokens | ITGC-AC-15 | 08 §7, §9 |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 

@@ -41,8 +41,15 @@ their role requires it — to enrol in MFA.
 | Change role / permissions | Open the user and edit |
 | Reset password | **Reset password** — forces a change at next login |
 | Delete a user | **Delete** |
+| Force-logout everywhere (compromised account) | `POST /api/auth/users/{username}/revoke-sessions` — immediately invalidates **all** of that user's existing sessions/tokens |
 
 [screenshot: user management list]
+
+> **Session security (ITGC-AC-15).** Signing out (**Logout**) immediately revokes the
+> token used — it can't be replayed even if copied. **Deactivating** an account takes
+> effect at once: any token the person still holds stops working on the next request
+> (no waiting for it to expire). For a suspected compromise, use **revoke-sessions**
+> above to log the user out of every device instantly.
 
 ---
 

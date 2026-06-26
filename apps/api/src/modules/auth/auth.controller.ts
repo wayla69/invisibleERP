@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Post, HttpCode, Res } from '@nestjs/common';
-import type { FastifyReply } from 'fastify';
+import { Body, Controller, Get, Post, Param, HttpCode, Res, Req } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { LoginRequest, type LoginResponse, type AuthUser } from '@ierp/shared';
-import { Public, CurrentUser, type JwtUser } from '../../common/decorators';
+import { Public, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { setAuthCookies, clearAuthCookies } from '../../common/cookies';
+import { setAuthCookies, clearAuthCookies, readCookie, AUTH_COOKIE } from '../../common/cookies';
 import { AuthService } from './auth.service';
 
 const ChangePasswordBody = z.object({
@@ -62,9 +62,22 @@ export class AuthController {
   @Public()
   @Post('auth/logout')
   @HttpCode(200)
-  logout(@Res({ passthrough: true }) reply: FastifyReply): { ok: true } {
+  async logout(@Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<{ ok: true }> {
+    // Revoke the presented token (jti denylist) so it can't be replayed before its 8h expiry, then clear cookies.
+    const auth = req.headers['authorization'];
+    const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : undefined;
+    const token = bearer ?? readCookie(req, AUTH_COOKIE);
+    await this.auth.revokeToken(token);
     clearAuthCookies(reply);
     return { ok: true };
+  }
+
+  // Incident-response / admin: revoke ALL of a user's sessions immediately (forces re-login everywhere).
+  @Post('auth/users/:username/revoke-sessions')
+  @Permissions('users')
+  @HttpCode(200)
+  revokeSessions(@Param('username') username: string): Promise<{ username: string; revoked_all: boolean }> {
+    return this.auth.revokeAllSessions(username);
   }
 
   @Get('auth/me')
