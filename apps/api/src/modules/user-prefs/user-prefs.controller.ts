@@ -10,6 +10,7 @@ import type { JwtUser } from '../../common/decorators';
 const UpdateBody = z.object({
   favorites: z.array(z.string().min(1).max(200)).max(100).optional(),
   navFold: z.record(z.boolean()).optional(),
+  pos_fav: z.array(z.number().int().positive()).max(200).optional(),
 });
 
 @Controller('api/user-prefs')

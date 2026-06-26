@@ -8,10 +8,12 @@ import type { JwtUser } from '../../common/decorators';
 export interface UserPrefs {
   favorites: string[]; // sidebar ★ pins (hrefs), order = display order
   navFold: Record<string, boolean>; // nav sub-section title → open?
+  pos_fav: number[]; // POS menu-item id quick-access list (B2 favourites grid)
 }
 
 const MAX_FAVORITES = 100;
 const MAX_FOLD_KEYS = 100;
+const MAX_POS_FAV = 200;
 
 // Normalise an arbitrary stored/incoming value into a clean UserPrefs (drops junk, caps sizes, dedupes).
 function normalize(raw: unknown): UserPrefs {
@@ -25,7 +27,10 @@ function normalize(raw: unknown): UserPrefs {
       if (typeof val === 'boolean' && Object.keys(navFold).length < MAX_FOLD_KEYS) navFold[k] = val;
     }
   }
-  return { favorites, navFold };
+  const pos_fav = Array.isArray(v.pos_fav)
+    ? Array.from(new Set(v.pos_fav.filter((x): x is number => typeof x === 'number' && Number.isInteger(x) && x > 0))).slice(0, MAX_POS_FAV)
+    : [];
+  return { favorites, navFold, pos_fav };
 }
 
 // Per-user UI preferences (sidebar favourites + nav fold-state). Personal: every query is scoped to the
@@ -53,6 +58,7 @@ export class UserPrefsService {
     const merged = normalize({
       favorites: patch.favorites ?? current.favorites,
       navFold: patch.navFold ? { ...current.navFold, ...patch.navFold } : current.navFold,
+      pos_fav: patch.pos_fav ?? current.pos_fav,
     });
     if (row) {
       await db.update(userPrefs).set({ prefs: merged, updatedAt: new Date() }).where(eq(userPrefs.id, row.id));
