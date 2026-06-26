@@ -696,6 +696,17 @@ async function main() {
     invNear(invRec.json.sub_ledger_value, 1540) && invNear(invRec.json.gl_inventory, 1540) && invRec.json.reconciled === true,
     `sub=${invRec.json.sub_ledger_value} gl=${invRec.json.gl_inventory} rec=${invRec.json.reconciled}`);
 
+  // ════════════════════════ INV-08 — Bin-capacity / location integrity ════════════════════════
+  // Putaway cannot fill a bin beyond its physical capacity; layout/locate expose where stock physically is.
+  await inj('POST', '/api/wms/bins', admin, { bin_code: 'CAPZ-1', bin_type: 'storage', capacity: 5, pos_x: 0, pos_y: 0, pos_z: 0 });
+  const capOk = await inj('POST', '/api/wms/putaway', admin, { gr_no: 'GR-CAPZ-1', bin_code: 'CAPZ-1', item_id: 'INVCTL', qty: 4 });
+  ok('INV-08: putaway within bin capacity accepted (4 ≤ 5)', capOk.status < 300, `st=${capOk.status}`);
+  const capBad = await inj('POST', '/api/wms/putaway', admin, { gr_no: 'GR-CAPZ-2', bin_code: 'CAPZ-1', item_id: 'INVCTL', qty: 3 });
+  ok('INV-08: putaway beyond bin capacity rejected → 422 BIN_CAPACITY_EXCEEDED', capBad.status === 422 && capBad.json.error?.code === 'BIN_CAPACITY_EXCEEDED', `${capBad.status}/${capBad.json.error?.code}`);
+  const capLay = await inj('GET', '/api/wms/layout', admin);
+  const capBin = (capLay.json.bins ?? []).find((b: any) => b.bin_code === 'CAPZ-1');
+  ok('INV-08: layout reports the bin utilisation (4 ÷ 5 = 0.8)', !!capBin && capBin.capacity === 5 && capBin.on_hand === 4 && invNear(capBin.utilization, 0.8), JSON.stringify({ cap: capBin?.capacity, oh: capBin?.on_hand, u: capBin?.utilization }));
+
   // REC-04 — period-end control-account reconciliation PACK ties every sub-ledger to its GL control account.
   const recPack = await inj('GET', '/api/finance/reconciliation/controls', admin);
   const inv1200 = (recPack.json.lines ?? []).find((l: any) => l.account === '1200');

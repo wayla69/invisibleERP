@@ -273,6 +273,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-027 | Branch replenishment splits transfer-before-buy | INV-05 | 03 §7, §9 |
 | UAT-INV-028 | Auto-transfer moves branch stock; auto-PR raises residual | INV-05, EXP-03 | 03 §7, §9 |
 | UAT-INV-029 | SoD transfer-vs-buy + RLS branch isolation | INV-05, ITGC-AC (RLS) | 03 §7, §9 |
+| UAT-INV-040 | Bin layout geometry + utilisation in warehouse map | INV-08 | 03 §7, §9 |
+| UAT-INV-041 | Locate an item to its bin(s) | INV-08 | 03 §7 |
+| UAT-INV-042 | Bin capacity over-fill blocked on putaway | INV-08 | 03 §7, §9 |
+| UAT-INV-043 | 3D warehouse view screen (utilisation colour + locate) | INV-08 | 03 §7 |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 

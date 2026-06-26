@@ -23,7 +23,8 @@ const CostBody = z.object({
   billable: z.boolean().optional(),
   entry_date: z.string().optional(),
 });
-const BillBody = z.object({ amount: z.number().positive() });
+const BillBody = z.object({ amount: z.number().positive().optional(), percent: z.number().positive().max(100).optional() })
+  .refine((b) => b.amount != null || b.percent != null, { message: 'amount or percent is required' });
 
 @Controller('api/projects')
 @Permissions('exec', 'planner', 'ar')

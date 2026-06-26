@@ -972,14 +972,21 @@
       "idx": 138,
       "version": "7",
       "when": 2023560000004,
-      "tag": "0138_fx_rate_maker_checker",
+      "tag": "0138_wms_bin_layout",
       "breakpoints": true
     },
     {
       "idx": 139,
       "version": "7",
       "when": 2023570000004,
-      "tag": "0139_budget_maker_checker",
+      "tag": "0139_fx_rate_maker_checker",
+      "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 2023580000004,
+      "tag": "0140_budget_maker_checker",
       "breakpoints": true
     }
   ]

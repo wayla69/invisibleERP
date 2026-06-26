@@ -12,7 +12,7 @@ export const budgets = pgTable('budgets', {
   period: text('period').notNull(),           // 'YYYY-MM'
   amount: numeric('amount', { precision: 18, scale: 4 }).notNull().default('0'),
   notes: text('notes'),
-  // BUD-01 maker-checker (0139): an upserted budget is PendingApproval and excluded from budget-vs-actual until
+  // BUD-01 maker-checker (0140): an upserted budget is PendingApproval and excluded from budget-vs-actual until
   // a DIFFERENT user approves it. DEFAULT 'Approved' keeps existing rows + direct seeds usable.
   status: text('status').notNull().default('Approved'), // Approved | PendingApproval | Rejected
   requestedBy: text('requested_by'),

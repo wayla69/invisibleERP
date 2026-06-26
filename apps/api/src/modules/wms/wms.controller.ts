@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -6,7 +6,8 @@ import { WmsService } from './wms.service';
 import { ReplenishmentService } from './replenishment.service';
 import { RmaService } from './rma.service';
 
-const BinBody = z.object({ bin_code: z.string().min(1), location_id: z.string().optional(), bin_type: z.string().optional(), aisle: z.string().optional(), rack: z.string().optional(), level: z.string().optional() });
+const BinBody = z.object({ bin_code: z.string().min(1), location_id: z.string().optional(), bin_type: z.string().optional(), aisle: z.string().optional(), rack: z.string().optional(), level: z.string().optional(), capacity: z.number().nonnegative().optional(), pos_x: z.number().optional(), pos_y: z.number().optional(), pos_z: z.number().optional(), dim_w: z.number().positive().optional(), dim_d: z.number().positive().optional(), dim_h: z.number().positive().optional() });
+const BinLayoutBody = z.object({ capacity: z.number().nonnegative().optional(), pos_x: z.number().optional(), pos_y: z.number().optional(), pos_z: z.number().optional(), dim_w: z.number().positive().optional(), dim_d: z.number().positive().optional(), dim_h: z.number().positive().optional() });
 const PutawayBody = z.object({ gr_no: z.string().optional(), bin_code: z.string().min(1), item_id: z.string().min(1), lot_no: z.string().optional(), qty: z.number().positive(), uom: z.string().optional(), expiry_date: z.string().optional() });
 const WaveBody = z.object({ orders: z.array(z.object({ source_type: z.enum(['DINEIN', 'POS', 'SO']), source_ref: z.string().min(1) })).min(1) });
 const PickBody = z.object({ lines: z.array(z.object({ pick_line_id: z.number(), picked_qty: z.number().nonnegative(), bin_code: z.string().optional() })).min(1) });
@@ -19,6 +20,13 @@ export class WmsController {
   createBin(@Body(new ZodValidationPipe(BinBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.createBin(b, u); }
   @Get('bins') @Permissions('locations', 'warehouse')
   listBins(@CurrentUser() u: JwtUser) { return this.wms.listBins(u); }
+  // Storage layout / 3D view: bin geometry + live utilisation; set a bin's geometry; locate an item spatially.
+  @Get('layout') @Permissions('locations', 'warehouse', 'wh_custody')
+  layout(@Query('location_id') loc: string | undefined, @CurrentUser() u: JwtUser) { return this.wms.warehouseLayout(u, loc); }
+  @Patch('bins/:binCode/layout') @Permissions('locations', 'warehouse')
+  setLayout(@Param('binCode') c: string, @Body(new ZodValidationPipe(BinLayoutBody)) b: any, @CurrentUser() u: JwtUser) { return this.wms.setBinLayout(c, b, u); }
+  @Get('locate') @Permissions('locations', 'warehouse', 'wh_custody')
+  locate(@Query('item_id') itemId: string, @CurrentUser() u: JwtUser) { return this.wms.locateItem(u, itemId); }
   // SoD warehouse sub-duties: receiving (wh_receive) vs picking/packing/shipping custody (wh_custody).
   // Legacy 'warehouse' holders still pass (it implies all wh_* sub-permissions).
   @Get('bins/:binCode/stock') @Permissions('warehouse', 'wh_custody', 'lots')

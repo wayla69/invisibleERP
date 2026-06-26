@@ -9,7 +9,7 @@ export const fxRates = pgTable('fx_rates', {
   rateDate: date('rate_date').notNull(),
   rate: numeric('rate', { precision: 18, scale: 8 }).notNull(),
   source: text('source').default('manual'),
-  // FX-04 maker-checker (0138): a manual rate is PendingApproval (unusable for revaluation/reporting) until a
+  // FX-04 maker-checker (0139): a manual rate is PendingApproval (unusable for revaluation/reporting) until a
   // DIFFERENT user approves it; external-feed rates auto-approve. DEFAULT 'Approved' keeps existing rows usable.
   status: text('status').notNull().default('Approved'), // Approved | PendingApproval | Rejected
   requestedBy: text('requested_by'),

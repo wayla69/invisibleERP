@@ -6,21 +6,91 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
+// Build the partial geometry update from a layout DTO (only the fields actually supplied).
+function layoutSet(dto: { pos_x?: number; pos_y?: number; pos_z?: number; dim_w?: number; dim_d?: number; dim_h?: number }) {
+  const set: any = {};
+  if (dto.pos_x != null) set.posX = String(dto.pos_x);
+  if (dto.pos_y != null) set.posY = String(dto.pos_y);
+  if (dto.pos_z != null) set.posZ = String(dto.pos_z);
+  if (dto.dim_w != null) set.dimW = String(dto.dim_w);
+  if (dto.dim_d != null) set.dimD = String(dto.dim_d);
+  if (dto.dim_h != null) set.dimH = String(dto.dim_h);
+  return set;
+}
+
 // Warehouse execution: bins, putaway, wave → pick → pack → ship. Posts ZERO GL (COGS booked at sale-issue).
 // Moves physical stock between bins via bin_stock + the existing stock_movements/lot_ledger audit.
 @Injectable()
 export class WmsService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService) {}
 
-  async createBin(dto: { bin_code: string; location_id?: string; bin_type?: string; aisle?: string; rack?: string; level?: string }, user: JwtUser) {
+  async createBin(dto: { bin_code: string; location_id?: string; bin_type?: string; aisle?: string; rack?: string; level?: string; capacity?: number; pos_x?: number; pos_y?: number; pos_z?: number; dim_w?: number; dim_d?: number; dim_h?: number }, user: JwtUser) {
     const db = this.db as any;
-    const [b] = await db.insert(bins).values({ tenantId: user.tenantId ?? null, binCode: dto.bin_code, locationId: dto.location_id ?? null, binType: dto.bin_type ?? 'storage', aisle: dto.aisle ?? null, rack: dto.rack ?? null, level: dto.level ?? null }).returning({ id: bins.id });
+    const [b] = await db.insert(bins).values({
+      tenantId: user.tenantId ?? null, binCode: dto.bin_code, locationId: dto.location_id ?? null, binType: dto.bin_type ?? 'storage',
+      aisle: dto.aisle ?? null, rack: dto.rack ?? null, level: dto.level ?? null, capacity: dto.capacity != null ? String(dto.capacity) : null,
+      ...layoutSet(dto),
+    }).returning({ id: bins.id });
     return { id: Number(b.id), bin_code: dto.bin_code };
+  }
+  // Set/adjust a bin's storage-layout geometry + capacity (drives the 2D map / 3D view + INV-08 over-fill guard).
+  async setBinLayout(binCode: string, dto: { capacity?: number; pos_x?: number; pos_y?: number; pos_z?: number; dim_w?: number; dim_d?: number; dim_h?: number }, user: JwtUser) {
+    const db = this.db as any;
+    const conds = [eq(bins.binCode, binCode)];
+    if (user.tenantId != null) conds.push(eq(bins.tenantId, user.tenantId));
+    const set: any = { ...layoutSet(dto) };
+    if (dto.capacity != null) set.capacity = String(dto.capacity);
+    if (!Object.keys(set).length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No layout fields to update', messageTh: 'ไม่มีข้อมูลผังให้แก้ไข' });
+    const upd = await db.update(bins).set(set).where(and(...conds)).returning({ id: bins.id });
+    if (!upd.length) throw new NotFoundException({ code: 'BIN_NOT_FOUND', message: 'Bin not found', messageTh: 'ไม่พบช่องเก็บ' });
+    return { bin_code: binCode, ...dto };
   }
   async listBins(_user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select().from(bins).orderBy(asc(bins.binCode));
-    return { bins: rows.map((b: any) => ({ id: Number(b.id), bin_code: b.binCode, location_id: b.locationId, bin_type: b.binType, active: b.active })) };
+    return { bins: rows.map((b: any) => ({ id: Number(b.id), bin_code: b.binCode, location_id: b.locationId, bin_type: b.binType, capacity: b.capacity != null ? n(b.capacity) : null, active: b.active })) };
+  }
+
+  // ── Storage layout (2D map / 3D view) ── bins with geometry + live utilisation (on-hand ÷ capacity). ──
+  async warehouseLayout(user: JwtUser, locationId?: string) {
+    const db = this.db as any;
+    const conds: any[] = [];
+    if (user.tenantId != null) conds.push(eq(bins.tenantId, user.tenantId));
+    if (locationId) conds.push(eq(bins.locationId, locationId));
+    const rows = await db.select({
+      id: bins.id, binCode: bins.binCode, locationId: bins.locationId, binType: bins.binType, capacity: bins.capacity,
+      aisle: bins.aisle, rack: bins.rack, level: bins.level, active: bins.active,
+      posX: bins.posX, posY: bins.posY, posZ: bins.posZ, dimW: bins.dimW, dimD: bins.dimD, dimH: bins.dimH,
+      onHand: sql<string>`coalesce((select sum(${binStock.qty}) from ${binStock} where ${binStock.binId} = ${bins.id}),0)`,
+      itemCount: sql<string>`(select count(distinct ${binStock.itemId}) from ${binStock} where ${binStock.binId} = ${bins.id} and ${binStock.qty} > 0)`,
+    }).from(bins).where(conds.length ? and(...conds) : undefined).orderBy(asc(bins.binCode));
+    const layoutBins = rows.map((b: any) => {
+      const cap = b.capacity != null ? n(b.capacity) : 0;
+      const onHand = n(b.onHand);
+      const utilization = cap > 0 ? Math.round((onHand / cap) * 1000) / 1000 : null;
+      return {
+        bin_code: b.binCode, location_id: b.locationId, bin_type: b.binType, aisle: b.aisle, rack: b.rack, level: b.level, active: b.active,
+        pos: { x: n(b.posX), y: n(b.posY), z: n(b.posZ) }, dim: { w: n(b.dimW), d: n(b.dimD), h: n(b.dimH) },
+        capacity: cap || null, on_hand: onHand, item_count: Number(b.itemCount ?? 0), utilization,
+      };
+    });
+    const withCap = layoutBins.filter((b: any) => b.capacity);
+    const avgUtil = withCap.length ? Math.round((withCap.reduce((s: number, b: any) => s + (b.utilization ?? 0), 0) / withCap.length) * 1000) / 1000 : 0;
+    return { bins: layoutBins, count: layoutBins.length, avg_utilization: avgUtil, over_capacity: layoutBins.filter((b: any) => b.utilization != null && b.utilization > 1).length };
+  }
+
+  // Locate an item: every bin currently holding it (+ qty + geometry), for "where is this product" search.
+  async locateItem(user: JwtUser, itemId: string) {
+    const db = this.db as any;
+    const conds = [eq(binStock.itemId, itemId), sql`${binStock.qty} > 0`];
+    if (user.tenantId != null) conds.push(eq(binStock.tenantId, user.tenantId));
+    const rows = await db.select({
+      binCode: bins.binCode, locationId: bins.locationId, aisle: bins.aisle, rack: bins.rack, level: bins.level,
+      lotNo: binStock.lotNo, qty: binStock.qty, uom: binStock.uom, expiryDate: binStock.expiryDate,
+      posX: bins.posX, posY: bins.posY, posZ: bins.posZ,
+    }).from(binStock).innerJoin(bins, eq(binStock.binId, bins.id)).where(and(...conds)).orderBy(asc(binStock.expiryDate), asc(bins.binCode));
+    const locations = rows.map((r: any) => ({ bin_code: r.binCode, location_id: r.locationId, aisle: r.aisle, rack: r.rack, level: r.level, lot_no: r.lotNo, qty: n(r.qty), uom: r.uom, expiry_date: r.expiryDate, pos: { x: n(r.posX), y: n(r.posY), z: n(r.posZ) } }));
+    return { item_id: itemId, locations, count: locations.length, total_qty: Math.round(locations.reduce((s: number, l: any) => s + l.qty, 0) * 1000) / 1000 };
   }
   async binStockOf(binCode: string, user: JwtUser) {
     const db = this.db as any;
@@ -52,6 +122,13 @@ export class WmsService {
     if (dto.gr_no) {
       const [done] = await db.select({ id: stockMovements.id }).from(stockMovements).where(and(eq(stockMovements.docNo, dto.gr_no), eq(stockMovements.itemId, dto.item_id), eq(stockMovements.toLocation, `BIN:${dto.bin_code}`))).limit(1);
       if (done) { const [bs] = await db.select().from(binStock).where(and(eq(binStock.binId, Number(bin.id)), eq(binStock.itemId, dto.item_id), eq(binStock.lotNo, lot))).limit(1); return { bin_code: dto.bin_code, item_id: dto.item_id, qty: n(bs?.qty), duplicate: true }; }
+    }
+    // INV-08 — bin capacity integrity: a putaway cannot fill a bin beyond its defined capacity (prevents
+    // mis-located / unrecorded overflow stock). Enforced only when a capacity is set (>0); uncapped bins skip it.
+    const cap = bin.capacity != null ? n(bin.capacity) : 0;
+    if (cap > 0) {
+      const [tot] = await db.select({ s: sql<string>`coalesce(sum(${binStock.qty}),0)` }).from(binStock).where(and(eq(binStock.tenantId, tenantId), eq(binStock.binId, Number(bin.id))));
+      if (n(tot?.s) + qty > cap + 1e-9) throw new UnprocessableEntityException({ code: 'BIN_CAPACITY_EXCEEDED', message: `Bin ${dto.bin_code} capacity ${cap} would be exceeded (on-hand ${n(tot?.s)} + ${qty})`, messageTh: `เกินความจุของช่องเก็บ ${dto.bin_code}` });
     }
     const [bs] = await db.insert(binStock).values({ tenantId, binId: Number(bin.id), itemId: dto.item_id, lotNo: lot, qty: String(qty), uom: dto.uom ?? null, expiryDate: dto.expiry_date ?? null })
       .onConflictDoUpdate({ target: [binStock.tenantId, binStock.binId, binStock.itemId, binStock.lotNo], set: { qty: sql`${binStock.qty} + ${qty}`, lastUpdated: new Date() } }).returning({ qty: binStock.qty });
