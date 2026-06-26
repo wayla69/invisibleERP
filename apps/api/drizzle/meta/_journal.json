@@ -1170,6 +1170,13 @@
       "when": 2023780000004,
       "tag": "0166_thai_tax_filings",
       "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 2023790000004,
+      "tag": "0167_labor_ot_rules",
+      "breakpoints": true
     }
   ]
 }
