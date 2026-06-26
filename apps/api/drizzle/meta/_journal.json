@@ -1086,6 +1086,13 @@
       "when": 2023720000004,
       "tag": "0154_shift_schedules",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 2023720000005,
+      "tag": "0155_coa_master",
+      "breakpoints": true
     }
   ]
 }
