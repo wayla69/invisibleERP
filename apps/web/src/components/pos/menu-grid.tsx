@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { UtensilsCrossed } from 'lucide-react';
+import { Star, UtensilsCrossed } from 'lucide-react';
 import { baht } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { onBarcodeScan } from '@/lib/peripherals';
@@ -10,10 +10,17 @@ import { SearchInput } from '@/components/search-input';
 import type { MenuItem, MenuResp } from './types';
 import { sellable } from './types';
 
-type CatKey = 'all' | number | 'none';
+type CatKey = 'all' | 'fav' | number | 'none';
 
-/** Touch product grid: category chips + free-text/scan search + tap-to-add cards. */
-export function MenuGrid({ data, onPick, className }: { data: MenuResp; onPick: (item: MenuItem) => void; className?: string }) {
+/** Touch product grid: category chips + free-text/scan search + tap-to-add cards.
+ *  Pass `favIds` + `onToggleFav` to activate the ★ Favourites tab and per-card star toggles. */
+export function MenuGrid({ data, onPick, favIds, onToggleFav, className }: {
+  data: MenuResp;
+  onPick: (item: MenuItem) => void;
+  favIds?: Set<number>;
+  onToggleFav?: (id: number) => void;
+  className?: string;
+}) {
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState<CatKey>('all');
 
@@ -39,6 +46,8 @@ export function MenuGrid({ data, onPick, className }: { data: MenuResp; onPick: 
     });
   }, [allItems, onPick]);
 
+  const favSet = favIds ?? new Set<number>();
+
   const filtered = useMemo<MenuItem[]>(() => {
     const term = search.trim().toLowerCase();
     if (term) {
@@ -48,10 +57,12 @@ export function MenuGrid({ data, onPick, className }: { data: MenuResp; onPick: 
         (i.name_en ?? '').toLowerCase().includes(term),
       );
     }
+    if (cat === 'fav') return allItems.filter((i) => favSet.has(i.id));
     if (cat === 'all') return allItems;
     if (cat === 'none') return data.uncategorized;
     return data.categories.find((c) => c.id === cat)?.items ?? [];
-  }, [search, cat, allItems, data]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, cat, allItems, data, favIds]);
 
   const chip = (active: boolean) =>
     cn(
@@ -65,6 +76,12 @@ export function MenuGrid({ data, onPick, className }: { data: MenuResp; onPick: 
 
       {!search && (
         <div className="flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="หมวดหมู่เมนู">
+          {onToggleFav && (
+            <button type="button" className={chip(cat === 'fav')} onClick={() => setCat('fav')} title="รายการโปรด">
+              <Star className={cn('mr-1 inline size-3.5 align-middle', favSet.size > 0 && cat === 'fav' && 'fill-current')} />
+              รายการโปรด {favSet.size > 0 && `(${favSet.size})`}
+            </button>
+          )}
           <button type="button" className={chip(cat === 'all')} onClick={() => setCat('all')}>ทั้งหมด</button>
           {data.categories.filter((c) => c.items.length > 0).map((c) => (
             <button key={c.id} type="button" className={chip(cat === c.id)} onClick={() => setCat(c.id)}>
@@ -83,7 +100,7 @@ export function MenuGrid({ data, onPick, className }: { data: MenuResp; onPick: 
           <div className="grid h-40 place-items-center text-center text-sm text-muted-foreground">
             <div>
               <UtensilsCrossed className="mx-auto mb-2 size-7 opacity-40" />
-              {search ? 'ไม่พบเมนูที่ค้นหา' : 'ยังไม่มีเมนูในหมวดนี้'}
+              {search ? 'ไม่พบเมนูที่ค้นหา' : cat === 'fav' ? 'ยังไม่มีรายการโปรด — กด ★ บนการ์ดเมนูเพื่อเพิ่ม' : 'ยังไม่มีเมนูในหมวดนี้'}
             </div>
           </div>
         ) : (
@@ -91,6 +108,7 @@ export function MenuGrid({ data, onPick, className }: { data: MenuResp; onPick: 
             {filtered.map((it) => {
               const ok = sellable(it);
               const color = it.category_id != null ? catColor.get(it.category_id) ?? null : null;
+              const isFav = favSet.has(it.id);
               return (
                 <button
                   key={it.id}
@@ -99,7 +117,7 @@ export function MenuGrid({ data, onPick, className }: { data: MenuResp; onPick: 
                   onClick={() => onPick(it)}
                   title={it.name}
                   className={cn(
-                    'group flex min-h-[92px] flex-col overflow-hidden rounded-xl border bg-card text-left transition-all',
+                    'group relative flex min-h-[92px] flex-col overflow-hidden rounded-xl border bg-card text-left transition-all',
                     ok ? 'hover:border-primary hover:shadow-sm active:scale-[0.98]' : 'cursor-not-allowed opacity-50',
                   )}
                 >
@@ -127,6 +145,21 @@ export function MenuGrid({ data, onPick, className }: { data: MenuResp; onPick: 
                     <span className="line-clamp-2 text-xs font-medium leading-tight">{it.name}</span>
                     <span className="tabular text-sm font-semibold">{baht(it.price)}</span>
                   </div>
+                  {onToggleFav && (
+                    <button
+                      type="button"
+                      aria-label={isFav ? 'ลบออกจากรายการโปรด' : 'เพิ่มในรายการโปรด'}
+                      onClick={(e) => { e.stopPropagation(); onToggleFav(it.id); }}
+                      className={cn(
+                        'absolute left-1 top-1 rounded p-0.5 transition-colors',
+                        isFav
+                          ? 'text-amber-400 hover:text-amber-500'
+                          : 'text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-amber-400',
+                      )}
+                    >
+                      <Star className={cn('size-3.5', isFav && 'fill-current')} />
+                    </button>
+                  )}
                 </button>
               );
             })}

@@ -1,9 +1,6 @@
 # 01 · Sales & Point of Sale (POS)
 
-**Status: DRAFT v0.2** · *v0.2 (2026-06-25): added the touch **register**
-(`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender
-checkout, hold/recall — and connecting the **receipt printer / cash drawer /
-customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
+**Status: DRAFT v0.3** · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
 
 This chapter is for **Cashiers, Sales staff, POS Supervisors and Returns Clerks**.
 It covers ringing up sales, taking orders, credit checks, returns and refunds,
@@ -167,6 +164,25 @@ charge + VAT + tip = total).
 > **Troubleshooting:** “SALE_NOT_FOUND” — the sale number is mistyped or belongs
 > to another branch/tenant. If a job stays **queued**, the printer/agent isn't
 > pulling — check it is online and pointed at this outlet.
+
+### Favourites quick-access grid (★ รายการโปรด)
+
+Star any menu item to pin it to your personal **Favourites** tab for one-tap access
+during a busy shift.
+
+**To add an item to Favourites:**
+- Hover over the item card in the menu grid — a ★ icon appears in the top-left corner.
+- Click / tap the ★ to star it (it turns gold). Tap again to unstar.
+
+**To browse your Favourites:**
+- Click the **"★ รายการโปรด"** chip at the left of the category bar.
+- Only your starred items appear. If the grid is empty, no items are starred yet.
+
+Your favourites are **saved to your account** (via `PUT /api/user-prefs`) and sync
+across devices — a barista who stars espresso drinks on tablet sees the same list
+on the counter POS. Up to 200 items can be starred.
+
+---
 
 ### Cashier speed: quick-tender, change & hotkeys
 
@@ -446,19 +462,24 @@ the refund (held by *ReturnsClerk*, *PosSupervisor*, *Admin*).
 
 ### To process a return
 
-1. Locate the original sale (e.g. `S-…`).
-2. Select the item(s) and **quantity** to return.
-3. Enter a **reason** (e.g. *Defective*).
-4. Choose the **Refund Method** (**วิธีคืนเงิน**): Cash, Card, QR / PromptPay, or
-   Store Credit (issues a gift card instead of cash).
-5. Confirm the return.
+1. Open the **Returns Register** (`/returns` — **คืนสินค้า & คืนเงิน**).
+2. Click **"บันทึกคืนสินค้า"** (top right).
+3. Enter the **Sale No.** (e.g. `SALE-0001-…`) and click **ค้นหา**. The original
+   sale lines appear.
+4. Set the **return quantity** for each item you want to return (0 = keep; up to
+   the quantity sold).
+5. Choose the **Refund Method** (**วิธีคืนเงิน**): เงินสด (Cash) / บัตร (Card) /
+   QR / พร้อมเพย์ (PromptPay) / เครดิตร้าน (Store Credit) / ไม่คืนเงิน (None).
+6. Optionally enter a **reason**.
+7. Click **บันทึกคืนสินค้า** to confirm.
 
-**Expected result:** A return record is created (e.g. `RTN-…`) with a refund
+**Expected result:** A return record is created (`RTN-…`) with a refund
 reference, the stock is restocked, and the accounting reversal is posted
-automatically. The system shows the subtotal, VAT and total returned.
+automatically. The dialog shows the RTN number, total returned and refund method.
 
 > **Note — over-return guard:** You cannot return more than was originally sold.
-> Attempting to do so is blocked (`OVER_RETURN`).
+> The server enforces this — entering a qty above the sold qty is capped in the UI
+> and rejected server-side (`OVER_RETURN`).
 
 > **Big refunds need a manager's OK.** A **standalone refund** (refunding a payment
 > directly, not as part of a product return) of **฿1,000 or more** doesn't go through
@@ -483,6 +504,10 @@ sale number, filter by refund method, and click any return to see its line items
 full breakdown (subtotal / VAT / total). The register is **store-scoped** — each tenant
 sees only its own returns. Use it for daily reconciliation and to watch refund volume for
 leakage.
+
+The **"บันทึกคืนสินค้า"** button (top right) opens the create-return dialog directly
+from this screen — enter the sale number, pick items and quantities, choose the refund
+method, and submit. See "To process a return" above for the full flow.
 
 ### Gift-card / store-credit register
 
