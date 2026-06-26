@@ -2,11 +2,11 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules, tenantAccounts } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
-import { assertTemplatesSubsetOf } from './coa-templates';
+import { assertTemplatesSubsetOf, isIndustryKey, COA_TEMPLATES, type IndustryKey, type CoaTemplateRow } from './coa-templates';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -190,10 +190,63 @@ export class LedgerService {
     return { seeded: COA.length };
   }
 
-  async listAccounts() {
+  // Materialise an industry CoA template into a tenant's overlay (GL-10). 'general'/unknown ⇒ the full
+  // canonical chart with canonical names. Idempotent + additive (never deletes) so it is safe to re-run
+  // — adopting a richer pack later only adds the missing accounts. Canonical codes/types are authoritative;
+  // the overlay only curates which accounts are visible and how they are named/grouped per tenant.
+  async provisionTenantCoA(tenantId: number, industry?: string | null) {
     const db = this.db as any;
-    const rows = await db.select().from(accounts).orderBy(accounts.code);
-    return { accounts: rows, count: rows.length };
+    const key: IndustryKey = isIndustryKey(industry) ? industry : 'general';
+    // Canonical accounts are read from the DB (the authoritative universe — includes any account a
+    // migration inserts beyond the COA constant), so 'general' mirrors the live chart exactly.
+    const canon: any[] = await db.select().from(accounts).orderBy(accounts.code);
+    const typeOf = new Map<string, string>(canon.map((a) => [a.code, a.type] as const));
+    const rows: CoaTemplateRow[] =
+      key === 'general' ? canon.map((a) => ({ code: a.code, name: a.name, nameTh: '' })) : COA_TEMPLATES[key];
+    const values = rows.map((r, i) => ({
+      tenantId,
+      accountCode: r.code,
+      displayName: r.name,
+      displayNameTh: r.nameTh || null,
+      groupLabel: typeOf.get(r.code) ?? null,
+      active: true,
+      sortOrder: i,
+    }));
+    if (values.length) {
+      await db.insert(tenantAccounts).values(values).onConflictDoNothing({ target: [tenantAccounts.tenantId, tenantAccounts.accountCode] });
+    }
+    return { tenant_id: tenantId, industry: key, accounts: values.length };
+  }
+
+  // Tenant-aware Chart of Accounts. Default = the tenant's curated industry chart (active overlay rows,
+  // industry names/order). `all=true` (or a tenant with no overlay, e.g. legacy/HQ) ⇒ the full canonical
+  // universe (so a user can still post to any account outside their template). NEVER used to gate postings.
+  async listAccounts(opts?: { all?: boolean; tenantId?: number | null }) {
+    const db = this.db as any;
+    const tid = resolveTenantId(opts?.tenantId ?? null);
+    const canon = await db.select().from(accounts).orderBy(accounts.code);
+    if (opts?.all || tid == null) return { accounts: canon, count: canon.length, source: 'canonical' };
+    const overlay = await db.select().from(tenantAccounts).where(eq(tenantAccounts.tenantId, tid));
+    if (!overlay.length) return { accounts: canon, count: canon.length, source: 'canonical' };
+    const byCode = new Map<string, any>(canon.map((a: any) => [a.code, a]));
+    const merged = overlay
+      .filter((o: any) => o.active !== false)
+      .map((o: any) => {
+        const a = byCode.get(o.accountCode);
+        return {
+          code: o.accountCode,
+          name: o.displayName || a?.name || o.accountCode,
+          name_th: o.displayNameTh ?? null,
+          type: a?.type ?? null,
+          parentCode: a?.parentCode ?? null,
+          group_label: o.groupLabel ?? a?.type ?? null,
+          currency: a?.currency ?? 'THB',
+          active: 'true',
+          sort_order: Number(o.sortOrder ?? 0),
+        };
+      })
+      .sort((x: any, y: any) => x.sort_order - y.sort_order || x.code.localeCompare(y.code));
+    return { accounts: merged, count: merged.length, source: 'overlay', industry_scoped: true };
   }
 
   // ───────────────────── Ledgers (multi-GAAP) ─────────────────────
