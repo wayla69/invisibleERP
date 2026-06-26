@@ -94,6 +94,10 @@ export class FoodCostService {
     const rows = await db.select().from(custVariance).where(and(gte(custVariance.varDate, from), lte(custVariance.varDate, to)));
     // aggregate per ingredient across the window
     const byItem = new Map<string, { item_id: string; description: string | null; theoretical_use: number; actual_use: number; variance_qty: number; unit_cost: number }>();
+    // Step 4 — also roll the valued variance up by WHY (reason_code) and WHERE (station), at the row level
+    // (one ingredient can appear under several reasons), so a manager sees the actionable breakdown.
+    const byReason = new Map<string, { reason_code: string; variance_cost: number; theoretical_cost: number; lines: number }>();
+    const byStation = new Map<string, { station: string; variance_cost: number; theoretical_cost: number; lines: number }>();
     for (const v of rows) {
       const k = String(v.itemId);
       const e = byItem.get(k) ?? { item_id: k, description: v.itemDescription ?? null, theoretical_use: 0, actual_use: 0, variance_qty: 0, unit_cost: costByItem.get(k) ?? 0 };
@@ -101,6 +105,16 @@ export class FoodCostService {
       e.actual_use = r2(e.actual_use + n(v.actualUse));
       e.variance_qty = r2(e.variance_qty + n(v.variance));
       byItem.set(k, e);
+      const uc = costByItem.get(k) ?? 0;
+      const rowVar = r2(n(v.variance) * uc), rowTheo = r2(n(v.theoreticalUse) * uc);
+      const rc = String(v.reasonCode ?? 'OTHER');
+      const re = byReason.get(rc) ?? { reason_code: rc, variance_cost: 0, theoretical_cost: 0, lines: 0 };
+      re.variance_cost = r2(re.variance_cost + rowVar); re.theoretical_cost = r2(re.theoretical_cost + rowTheo); re.lines += 1;
+      byReason.set(rc, re);
+      const st = v.station ? String(v.station) : '(unassigned)';
+      const se = byStation.get(st) ?? { station: st, variance_cost: 0, theoretical_cost: 0, lines: 0 };
+      se.variance_cost = r2(se.variance_cost + rowVar); se.theoretical_cost = r2(se.theoretical_cost + rowTheo); se.lines += 1;
+      byStation.set(st, se);
     }
     const items = [...byItem.values()].map((e) => {
       const theoretical_cost = r2(e.theoretical_use * e.unit_cost);
@@ -131,6 +145,12 @@ export class FoodCostService {
         favorable_cost: r2(items.filter((i) => i.variance_cost < 0).reduce((a, i) => a + i.variance_cost, 0)),
         anomalies: items.filter((i) => i.anomaly !== 'Normal').length,
       },
+      by_reason: [...byReason.values()]
+        .map((r) => ({ ...r, variance_pct: r.theoretical_cost !== 0 ? r1((r.variance_cost / r.theoretical_cost) * 100) : 0 }))
+        .sort((a, b) => Math.abs(b.variance_cost) - Math.abs(a.variance_cost)),
+      by_station: [...byStation.values()]
+        .map((s) => ({ ...s, variance_pct: s.theoretical_cost !== 0 ? r1((s.variance_cost / s.theoretical_cost) * 100) : 0 }))
+        .sort((a, b) => Math.abs(b.variance_cost) - Math.abs(a.variance_cost)),
       items,
     };
   }
