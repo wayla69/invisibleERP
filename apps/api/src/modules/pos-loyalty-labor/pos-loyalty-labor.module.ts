@@ -3,11 +3,12 @@ import { LoyaltyTierService } from './loyalty-tier.service';
 import { HouseAccountService } from './house-account.service';
 import { GiftCardExtraService } from './giftcard-extra.service';
 import { TimeClockService } from './timeclock.service';
+import { ScheduleService } from './schedule.service';
 import { LoyaltyTierController, PosBillingController, LaborController } from './pos-loyalty-labor.controller';
 
 @Module({
   controllers: [LoyaltyTierController, PosBillingController, LaborController],
-  providers: [LoyaltyTierService, HouseAccountService, GiftCardExtraService, TimeClockService],
-  exports: [LoyaltyTierService, HouseAccountService, GiftCardExtraService, TimeClockService],
+  providers: [LoyaltyTierService, HouseAccountService, GiftCardExtraService, TimeClockService, ScheduleService],
+  exports: [LoyaltyTierService, HouseAccountService, GiftCardExtraService, TimeClockService, ScheduleService],
 })
 export class PosLoyaltyLaborModule {}
