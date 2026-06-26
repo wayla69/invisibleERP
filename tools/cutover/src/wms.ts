@@ -187,6 +187,20 @@ async function main() {
   const t2bins = await inj('GET', '/api/wms/bins', plan2);
   const t2sug = await inj('GET', '/api/replenishment/suggestions', plan2);
   ok('RLS: T2 sees 0 T1 bins + 0 T1 suggestions', (t2bins.json.bins ?? []).length === 0 && (t2sug.json.suggestions ?? []).length === 0, JSON.stringify({ b: (t2bins.json.bins ?? []).length, s: (t2sug.json.suggestions ?? []).length }));
+  // 13b. Storage layout (2D/3D map) + locate item + bin-capacity integrity (INV-08)
+  await inj('PATCH', '/api/wms/bins/A-01-01/layout', wh1, { pos_x: 0, pos_y: 0, pos_z: 0, dim_w: 1.2, dim_d: 1, dim_h: 2, capacity: 1000 });
+  await inj('POST', '/api/wms/bins', wh1, { bin_code: 'CAP-01', bin_type: 'storage', capacity: 5, pos_x: 2, pos_y: 0, pos_z: 0 });
+  const lay = (await inj('GET', '/api/wms/layout', wh1)).json;
+  const aBin = (lay.bins ?? []).find((b: any) => b.bin_code === 'A-01-01');
+  ok('Layout: bins carry geometry + live utilisation (on-hand ÷ capacity)', !!aBin && aBin.pos?.x === 0 && aBin.dim?.h === 2 && aBin.capacity === 1000 && aBin.on_hand > 0 && aBin.utilization !== null, JSON.stringify({ pos: aBin?.pos, oh: aBin?.on_hand, u: aBin?.utilization }));
+  const loc = (await inj('GET', '/api/wms/locate?item_id=A', wh1)).json;
+  ok('Locate item A → bin(s) with qty + position', (loc.locations ?? []).some((l: any) => l.bin_code === 'A-01-01' && l.qty > 0) && loc.total_qty > 0, `n=${loc.count} total=${loc.total_qty}`);
+  const cap1 = await inj('POST', '/api/wms/putaway', wh1, { gr_no: 'GR-CAP-1', bin_code: 'CAP-01', item_id: 'A', qty: 4 });
+  ok('INV-08: putaway within capacity ok (4 ≤ 5)', cap1.status < 300 && (await binQty('CAP-01', 'A')) === 4, `st=${cap1.status}`);
+  const cap2 = await inj('POST', '/api/wms/putaway', wh1, { gr_no: 'GR-CAP-2', bin_code: 'CAP-01', item_id: 'A', qty: 3 });
+  ok('INV-08: putaway beyond capacity rejected (4+3 > 5) → 422 BIN_CAPACITY_EXCEEDED', cap2.status === 422 && cap2.json?.error?.code === 'BIN_CAPACITY_EXCEEDED', `st=${cap2.status} code=${cap2.json?.error?.code}`);
+  ok('INV-08: rejected putaway left bin stock unchanged (stays 4)', (await binQty('CAP-01', 'A')) === 4, `qty=${await binQty('CAP-01', 'A')}`);
+
   // 14. trial balance still balanced (only the portal sale + RMA return touched GL)
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced (WMS no GL; RMA via returns)', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
