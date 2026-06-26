@@ -423,6 +423,29 @@ async function main() {
     leRecon.reconciled === true && near(leRecon.difference, 0) && near(leRecon.gl_liability, leRecon.schedule_liability) && leSched && leSched.liability_balance > 0,
     JSON.stringify({ gl: leRecon.gl_liability, sched: leRecon.schedule_liability, diff: leRecon.difference, rec: leRecon.reconciled }));
 
+  // ───────────────── AR bad-debt write-off maker-checker (REV-14) ─────────────────
+  const woMgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
+  const wo5720Before = await tbDebit('5720');
+  const woReq = await inj('POST', '/api/finance/ar/write-off', admin, { amount: 500, reason: 'ลูกค้าปิดกิจการ', customer_name: 'ABC Co' });
+  ok('AR write-off: maker posts a Draft (pending), excluded from balances (5720 unchanged)',
+    woReq.json?.pending === true && /^JE-/.test(woReq.json?.entry_no ?? '') && near(await tbDebit('5720'), wo5720Before),
+    JSON.stringify({ p: woReq.json?.pending, e: woReq.json?.entry_no, d: await tbDebit('5720') }));
+  const woBad = await inj('POST', '/api/finance/ar/write-off', admin, { amount: 0, reason: 'x' });
+  ok('AR write-off: non-positive amount rejected (400)', woBad.status === 400, `${woBad.status}`);
+  const woNoReason = await inj('POST', '/api/finance/ar/write-off', admin, { amount: 100 });
+  ok('AR write-off: missing reason rejected (400)', woNoReason.status === 400, `${woNoReason.status}`);
+  const woSelf = await inj('POST', `/api/ledger/journal/${woReq.json?.entry_no}/approve`, admin);
+  ok('AR write-off: maker cannot approve own write-off (SOD_VIOLATION, binds even Admin)',
+    woSelf.status === 403 && woSelf.json?.error?.code === 'SOD_VIOLATION', `${woSelf.status} ${woSelf.json?.error?.code}`);
+  await inj('POST', `/api/ledger/journal/${woReq.json?.entry_no}/approve`, woMgr);
+  ok('AR write-off: a different user approves → 5720 bad-debt expense effective (+500)',
+    near(await tbDebit('5720'), wo5720Before + 500), JSON.stringify({ d: await tbDebit('5720'), exp: wo5720Before + 500 }));
+  const woListResp = await inj('GET', '/api/finance/ar/write-offs', admin);
+  const woList = woListResp.json;
+  ok('AR write-off register: lists the approved write-off (total_written_off 500)',
+    near(woList.total_written_off, 500) && (woList.write_offs ?? []).some((w: any) => w.state === 'approved' && near(w.amount, 500)),
+    `st=${woListResp.status} ${JSON.stringify(woList).slice(0, 200)}`);
+
   // ───────────────── Asset revaluation / impairment maker-checker (FA-07 valuation + FA-08 SoD) ─────────────────
   const reg = (await inj('GET', '/api/assets', admin)).json;
   const fa2 = (reg.assets ?? reg.register ?? []).find((a: any) => (a.asset_no ?? a.assetNo) === 'FA-EAM2');

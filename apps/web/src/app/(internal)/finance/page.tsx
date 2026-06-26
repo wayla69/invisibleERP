@@ -2,7 +2,7 @@
 
 import { useState, type ComponentProps, type Dispatch, type SetStateAction } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Banknote, BellRing, CalendarClock, CheckCheck, Download, HandCoins, PlayCircle, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
+import { Banknote, BellRing, CalendarClock, CheckCheck, Download, Eraser, HandCoins, PlayCircle, Plus, ReceiptText, RefreshCw, TrendingUp, Wallet } from 'lucide-react';
 import { api, apiDownload } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -222,7 +222,68 @@ function ReceivablesTab() {
       </StateView>
 
       <CollectionsSection />
+      <WriteOffSection />
       <ArAgingSection />
+    </div>
+  );
+}
+
+// ── AR bad-debt write-off (REV-14): request (Draft) → independent approval (maker-checker) + register ──
+function WriteOffSection() {
+  const qc = useQueryClient();
+  const wo = useQuery<any>({ queryKey: ['fin-ar-writeoffs'], queryFn: () => api('/api/finance/ar/write-offs'), retry: false });
+  const refresh = () => { for (const k of ['fin-ar-writeoffs', 'fin-ar', 'fin-kpi']) qc.invalidateQueries({ queryKey: [k] }); };
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<any>({ customer_name: '', amount: '', reason: '' });
+  const request = useMutation({
+    mutationFn: () => api('/api/finance/ar/write-off', { method: 'POST', body: JSON.stringify({ customer_name: form.customer_name || undefined, amount: Number(form.amount), reason: form.reason }) }),
+    onSuccess: (r: any) => { notifySuccess(`ขอตัดหนี้สูญ ${baht(r.amount)} — รออนุมัติจากผู้อื่น (${r.entry_no})`); setForm({ customer_name: '', amount: '', reason: '' }); setOpen(false); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const approve = useMutation({
+    mutationFn: (entryNo: string) => api(`/api/ledger/journal/${entryNo}/approve`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess('อนุมัติตัดหนี้สูญแล้ว — ลงบัญชีมีผล'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-muted-foreground">ตัดหนี้สูญ (Bad-debt write-off) — ต้องมีผู้อื่นอนุมัติ (แบ่งแยกหน้าที่)</h3>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild><Button variant="outline" size="sm"><Eraser className="size-4" /> ขอตัดหนี้สูญ</Button></DialogTrigger>
+          <DialogContent>
+            <DialogHeader><DialogTitle>ขอตัดหนี้สูญ (หนี้ที่เก็บไม่ได้)</DialogTitle></DialogHeader>
+            <div className="grid gap-4">
+              <Field label="ชื่อลูกค้า (ไม่บังคับ)" name="customer_name" form={form} set={setForm} />
+              <Field label="จำนวนเงิน" name="amount" type="number" step="0.01" form={form} set={setForm} />
+              <Field label="เหตุผล" name="reason" placeholder="เช่น ลูกค้าปิดกิจการ / ติดตามแล้วเก็บไม่ได้" form={form} set={setForm} />
+            </div>
+            <DialogFooter>
+              <Button onClick={() => request.mutate()} disabled={request.isPending || !(Number(form.amount) > 0) || !form.reason.trim()}>ขออนุมัติ (Dr หนี้สูญ / Cr ลูกหนี้)</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <StateView q={wo}>
+        {wo.data && (
+          <DataTable
+            rows={wo.data.write_offs}
+            rowKey={(r: any) => r.entry_no}
+            emptyState={{ icon: Eraser, title: 'ยังไม่มีรายการตัดหนี้สูญ', description: 'เมื่อมีหนี้ที่เก็บไม่ได้ ให้กด ขอตัดหนี้สูญ แล้วให้ผู้มีอำนาจอีกคนอนุมัติ' }}
+            columns={[
+              { key: 'entry_no', label: 'เลขที่บัญชี' },
+              { key: 'memo', label: 'รายละเอียด' },
+              { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+              { key: 'created_by', label: 'ผู้ขอ' },
+              { key: 'state', label: 'สถานะ', render: (r: any) => <Badge variant={r.state === 'approved' ? 'success' : r.state === 'rejected' ? 'destructive' : 'warning'}>{r.state === 'approved' ? 'อนุมัติแล้ว' : r.state === 'rejected' ? 'ปฏิเสธ' : 'รออนุมัติ'}</Badge> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => r.state === 'pending' ? (
+                <Button variant="outline" size="sm" disabled={approve.isPending} onClick={() => approve.mutate(r.entry_no)}>อนุมัติ</Button>
+              ) : null },
+            ]}
+          />
+        )}
+      </StateView>
     </div>
   );
 }
