@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Each filing period + annual |
-| Related RCM controls | TAX-01, TAX-02, TAX-03, REV-10, PAY-02 |
+| Related RCM controls | TAX-01, TAX-02, TAX-03, TAX-04, REV-10, PAY-02 |
 | Related policy | `compliance/policies/11-financial-close-policy.md` |
 
 ## 2. Purpose
@@ -62,7 +62,7 @@ To control the computation, documentation, transmission, and reconciliation of T
 4. **e-Tax invoice generation, signing & transmission.** The e-Tax invoice is generated as ETDA UBL 2.1 XML; when a CA-issued certificate is configured (`ETAX_SIGNING_*`) it is sealed with an enveloped **XAdES** digital signature (RSA-SHA256 over the document + XAdES SignedProperties carrying SigningTime and the SigningCertificate digest), making it tamper-evident. The signed document is transmitted either to the customer by *e-Tax by Email* (CC the ETDA timestamp mailbox) or to a service provider (`ETAX_PROVIDER`: `mock` sandbox, or `http` for INET/Frank/Leceipt). Submission is idempotent (an `Accepted` document is never re-sent). XML schema correctness/escaping and signature integrity are tested (**TAX-02**).
 5. **WHT computation.** On qualifying supplier payments/transactions, WHT is computed and a withholding certificate / ภ.ง.ด. line is prepared (**TAX-03**).
 6. **Return preparation & filing.** Monthly ภ.พ.30 (VAT) and ภ.ง.ด. (WHT) returns are prepared and filed by the period deadline.
-7. **Reconciliation (decision point).** Output/input VAT and WHT per the returns are reconciled to the GL VAT/WHT liability and input-VAT accounts; differences are investigated and cleared before filing, with evidence retained (**TAX-03**; ties to REC-01).
+7. **Reconciliation (decision point).** Output/input VAT and WHT per the returns are reconciled to the GL VAT/WHT liability and input-VAT accounts; differences are investigated and cleared before filing, with evidence retained (ties to REC-01). For **VAT**, the ภ.พ.30 report (`GET /api/tax-reports/pp30`) computes net VAT = output (from issued tax invoices) − input (from AP bills) and **reconciles it to the GL account 2100 (Tax Payable) net movement** for the period (Σ credit − Σ debit over Posted entries), returning a `reconciliation.tied` verdict; a non-tie is a finding to clear before submitting (**TAX-04**). Output VAT posts to 2100 on each sale (Cr) and reverses on returns (Dr); input VAT posts on AP bills (Dr). WHT remittance is likewise tied to its GL account before filing (**TAX-03**).
 
 ## 8. Process flow
 
@@ -75,7 +75,7 @@ flowchart TD
     B --> F[VAT carried into auto revenue/expense JE REV-10]
     E --> G[Prepare ภ.ง.ด. / ภ.พ.30 returns]
     F --> G
-    G --> H{Returns reconcile to GL tax accounts? TAX-03}
+    G --> H{Returns reconcile to GL tax accounts? VAT TAX-04 / WHT TAX-03}
     H -- "difference" --> H1[Investigate + adjust before filing]
     H -- "agrees" --> I[File returns by deadline]
 ```
@@ -90,7 +90,8 @@ flowchart TD
 | 3 | Non-sequential / non-compliant tax-invoice number | Atomic monthly per-seller numbering (ม.86/4(4)) | Prev / Auto | TAX-01 | Doc-number sequence |
 | 4 | Non-compliant / unsigned / untransmitted e-Tax invoice | ETDA UBL 2.1 XML generation + XAdES digital signature (tamper-evident) + idempotent transmission (email CC ETDA or SP) | Auto | TAX-02 | e-Tax XML/signature samples, submission log, email log |
 | 5 | WHT mis-computed / not reported | WHT computation + ภ.ง.ด. reporting | Auto | TAX-03 | WHT report; certificates |
-| 7 | Filings diverge from GL tax accounts | Tax-account-to-GL reconciliation before filing | Det / Hybrid | TAX-03 | Reconciliation evidence |
+| 6,7 | VAT return (ภ.พ.30) diverges from the GL VAT account | ภ.พ.30 ↔ GL-2100 reconciliation: net VAT (output − input) tied to the 2100 net movement, with a tie verdict, before filing | Det / Auto | TAX-04 | ภ.พ.30 return + GL-2100 reconciliation tie |
+| 7 | WHT remittance diverges from GL | WHT-account-to-GL reconciliation before filing | Det / Hybrid | TAX-03 | Reconciliation evidence |
 
 ## 10. Inputs & outputs
 
@@ -128,3 +129,4 @@ flowchart TD
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 DRAFT | 2026-06-24 | `<<author>>` | e-Tax invoices: added XAdES digital signing (`etax-sign.ts`, configurable cert) and idempotent provider submission (mock + generic `http` SP). Updated step 4, control TAX-02 matrix, and code refs. New harness `tools/cutover/src/etax-sign.ts`; `etax.ts` extended (submit + signed-fallback). |
+| 0.3 | 2026-06-26 | Platform | **Registered the VAT-return ↔ GL reconciliation as a named control (TAX-04).** The ภ.พ.30 report (`GET /api/tax-reports/pp30`) already computes net VAT (output − input) and ties it to the **GL 2100 (Tax Payable)** net movement for the period with a `reconciliation.tied` verdict — but the §9 control matrix mis-attributed this VAT reconciliation to TAX-03 (WHT). Split step 6/7 into **TAX-04** (VAT ภ.พ.30 ↔ GL-2100, detective, pre-filing) vs TAX-03 (WHT remittance ↔ GL); strengthened §7. No app-code change (capability pre-existed: output VAT posts Cr 2100 on sale, Dr on return; input VAT Dr 2100 on AP). ToE: `taxdocs` harness adds an explicit reconciliation-block assertion. RCM 94 → 95. |
