@@ -26,7 +26,9 @@ const ScorecardBody = z.object({ period: z.string().min(1) });
 export class ProcurementController {
   constructor(private readonly svc: ProcurementService) {}
 
-  @Post('prs') @Permissions('procurement', 'planner')
+  // PR = a request anyone in the company can raise (pr_raise). It is NOT a commitment — approval + PO
+  // remain procurement-only. 'procurement'/'planner' imply pr_raise, so buyers/planners still qualify.
+  @Post('prs') @Permissions('pr_raise', 'procurement', 'planner')
   createPr(@Body(new ZodValidationPipe(PrBody)) b: CreatePrDto, @CurrentUser() u: JwtUser) { return this.svc.createPr(b, u); }
 
   @Patch('prs/:prNo/approve') @Permissions('procurement')
@@ -60,6 +62,9 @@ export class ProcurementController {
     return this.svc.cancelPo(poNo, b.reason, u);
   }
 
-  @Post('grs') @Permissions('procurement', 'warehouse')
+  // GR = a warehouse/receiving duty (wh_receive), deliberately segregated from purchase ordering so the
+  // buyer cannot also confirm receipt (SoD R04 — preserves the 3-way match). Coarse 'warehouse' implies
+  // wh_receive, so existing warehouse roles keep access; 'procurement' alone no longer can receive.
+  @Post('grs') @Permissions('wh_receive')
   createGr(@Body(new ZodValidationPipe(GrBody)) b: CreateGrDto, @CurrentUser() u: JwtUser) { return this.svc.createGr(b, u); }
 }

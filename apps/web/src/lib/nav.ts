@@ -246,6 +246,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'สินค้าคงคลัง', href: '/inventory', icon: Package, perms: ['warehouse', 'dashboard', 'planner'] },
       { label: 'ตรวจนับสต๊อก', href: '/stocktake', icon: ClipboardCheck, perms: ['warehouse', 'mobile'] },
       { label: 'ของเสีย / ทิ้ง', href: '/waste', icon: Trash2, perms: ['warehouse', 'pos', 'order_mgt'] },
+      { label: 'รับสินค้า (GR)', href: '/receiving', icon: PackageCheck, perms: ['wh_receive', 'warehouse'] },
       { label: 'เบิก / โอนสินค้า', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
       { label: 'ล็อต / อายุสินค้า', href: '/lots', icon: Boxes, perms: ['lots', 'warehouse'] },
       { label: 'สแกนมือถือ', href: '/mobile-scan', icon: ScanLine, perms: ['mobile', 'warehouse'] },
@@ -260,9 +261,12 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'จัดซื้อ',
     workspace: ['erp'],
     items: [
+      // PR is company-wide (anyone can request) → cross-listed to BOTH surfaces so POS staff can raise one
+      // without switching workspaces; buying (PO) + receiving (GR) stay role-segregated (SoD R03/R04).
+      { label: 'คำขอซื้อ (PR)', href: '/requisitions', icon: FileText, perms: ['pr_raise', 'procurement', 'planner'], workspace: BOTH },
       { label: 'ซัพพลายเออร์', href: '/inventory/suppliers', icon: Building2, perms: ['procurement', 'warehouse'] },
       { label: 'ใบสั่งซื้อ', href: '/inventory/purchase-orders', icon: ReceiptText, perms: ['procurement'] },
-      { label: 'จัดซื้อจัดจ้าง', href: '/procurement', icon: ShoppingBag, perms: ['procurement'] },
+      { label: 'จัดซื้อจัดจ้าง (PO)', href: '/procurement', icon: ShoppingBag, perms: ['procurement'] },
       { label: 'ขอใบเสนอราคา (RFQ)', href: '/procurement/rfqs', icon: ClipboardList, perms: ['procurement'] },
       { label: 'จับคู่เอกสาร 3 ทาง', href: '/procurement/match', icon: CheckCheck, perms: ['procurement'] },
       { label: 'คะแนนซัพพลายเออร์', href: '/supplier-scorecards', icon: Award, perms: ['procurement', 'exec'] },
@@ -294,6 +298,9 @@ export const INTERNAL_NAV: NavGroup[] = [
         title: 'รายรับ–รายจ่าย (AR/AP)',
         items: [
           { label: 'การเงิน', href: '/finance', icon: Banknote, perms: ['ar', 'creditors', 'exec'] },
+          // AP (book bills, request payment) = accounting/creditors on /finance; releasing the cash
+          // (approve disbursement) = finance, on its own page (SoD R07 — approver ≠ requester).
+          { label: 'จ่ายเงินเจ้าหนี้ (Disbursements)', href: '/disbursements', icon: Wallet, perms: ['approvals', 'gl_close', 'exec'] },
           { label: 'เงินทดรองจ่าย (Petty cash)', href: '/advances', icon: HandCoins, perms: ['creditors', 'exec'] },
           { label: 'กองทุนเงินสดย่อย & ค่าใช้จ่าย', href: '/petty-cash', icon: HandCoins, perms: ['creditors', 'exec'] },
         ],

@@ -49,6 +49,14 @@ async function main() {
     { username: 'plan1',  passwordHash: await pw.hash('pw1'),      role: 'Planner', tenantId: t1 },
     { username: 'plan2',  passwordHash: await pw.hash('pw2'),      role: 'Planner', tenantId: t2 },
   ]).onConflictDoNothing();
+  // Planner role is now SoD-clean; plan1/plan2 keep the old bundled perms via per-user override
+  // so EPM planning/budgeting (exec/approvals for version submit/approve) continues to pass.
+  for (const un of ['plan1', 'plan2']) {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, un)))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing();
+  }
 
   const ref = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();

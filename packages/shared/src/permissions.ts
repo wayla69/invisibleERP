@@ -4,6 +4,7 @@ import type { Role } from './enums.js';
 // Tokens gate nav routes; ported verbatim. Admin bypasses to all.
 export const PERMISSIONS = [
   'pos', 'dashboard', 'order_mgt', 'claim_mgt', 'crm', 'users', 'warehouse', 'procurement',
+  'pr_raise', // company-wide purchase-requisition raising (low-risk; PR ≠ PO. Implied by 'procurement'.)
   'creditors', 'ar', 'delivery', 'returns', 'pricelist', 'lots', 'locations', 'promos', 'mobile',
   'images', 'masterdata', 'bom_master', 'planner', 'exec', 'order_cust', 'cust_dash',
   'cust_inventory', 'cust_pos', 'cust_bom', 'cust_variance', 'loyalty', 'survey',
@@ -49,7 +50,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
   'Finance & AR/AP': ['ar', 'creditors'],
-  'Procurement': ['procurement'],
+  'Procurement': ['procurement', 'pr_raise'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
 };
@@ -58,28 +59,37 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
 // Admin is resolved to ALL permissions in code (not data-driven) — see resolvePermissions().
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Admin: [...PERMISSIONS],
-  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals'],
+  // 'pr_raise' is seeded into every internal staff role: raising a purchase requisition is company-wide
+  // (PR ≠ PO). Customer-portal roles are excluded; Procurement/Planner inherit it via implication.
+  Sales: ['pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'delivery', 'returns', 'pricelist', 'promos', 'marketing', 'planner', 'approvals', 'pr_raise'],
   Customer: ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track', 'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
-  Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata'],
-  Procurement: ['procurement', 'creditors', 'ar', 'delivery', 'masterdata', 'approvals'],
-  Planner: ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'],
+  Warehouse: ['warehouse', 'lots', 'locations', 'mobile', 'images', 'masterdata', 'pr_raise'],
+  // Procurement is now a SoD-clean buying role (0 conflicts): it buys (procurement) and may raise PRs
+  // (pr_raise) — it no longer bundles paying (creditors), approving (approvals) or the vendor master
+  // (masterdata). AP is the ApClerk's duty; vendor-master is MasterDataAdmin's (SoD R02/R03/R07/R13).
+  Procurement: ['procurement', 'pr_raise', 'delivery'],
+  // Planner is now a SoD-clean supply-chain/analytics role (0 conflicts): can raise and track POs
+  // (procurement), view stock (wh_count/wh_custody/lots/locations), read financial reports (fin_report)
+  // — but cannot approve workflow items (approvals), post/close GL (exec → R05), adjust stock
+  // (wh_adjust → R11), receive goods (wh_receive → R04), or maintain master data (masterdata → R13).
+  Planner: ['planner', 'dashboard', 'procurement', 'pr_raise', 'fin_report', 'wh_count', 'wh_custody', 'lots', 'locations'],
   // ── SoD-clean single-duty roles (the remediated design — each verified to produce 0 SoD conflicts) ──
-  Cashier: ['pos_sell'],
-  PosSupervisor: ['pos_refund', 'pos_till'],
-  ArClerk: ['ar', 'order_mgt', 'claim_mgt', 'delivery'],
-  ApClerk: ['creditors'],
+  Cashier: ['pos_sell', 'pr_raise'],
+  PosSupervisor: ['pos_refund', 'pos_till', 'pr_raise'],
+  ArClerk: ['ar', 'order_mgt', 'claim_mgt', 'delivery', 'pr_raise'],
+  ApClerk: ['creditors', 'pr_raise'],
   Buyer: ['procurement'],
-  WarehouseOperator: ['wh_receive', 'wh_custody', 'lots', 'locations', 'mobile', 'images'],
-  InventoryController: ['wh_adjust'],
-  StockCounter: ['wh_count'],
-  GlAccountant: ['gl_post', 'recon_prep', 'fin_report'],
-  FinancialController: ['gl_close', 'approvals', 'fin_report'],
-  MasterDataAdmin: ['masterdata', 'bom_master'], // coarse 'masterdata' expands to md_vendor/item/config (conflict-free: no transactional perms)
-  PricingManager: ['pricelist', 'promos'],
-  CreditManager: ['crm'],
-  ReturnsClerk: ['returns'],
+  WarehouseOperator: ['wh_receive', 'wh_custody', 'lots', 'locations', 'mobile', 'images', 'pr_raise'],
+  InventoryController: ['wh_adjust', 'pr_raise'],
+  StockCounter: ['wh_count', 'pr_raise'],
+  GlAccountant: ['gl_post', 'recon_prep', 'fin_report', 'pr_raise'],
+  FinancialController: ['gl_close', 'approvals', 'fin_report', 'pr_raise'],
+  MasterDataAdmin: ['masterdata', 'bom_master', 'pr_raise'], // coarse 'masterdata' expands to md_vendor/item/config (conflict-free: no transactional perms)
+  PricingManager: ['pricelist', 'promos', 'pr_raise'],
+  CreditManager: ['crm', 'pr_raise'],
+  ReturnsClerk: ['returns', 'pr_raise'],
   AccessAdmin: ['users'],
-  ExecutiveViewer: ['fin_report', 'dashboard', 'planner', 'marketing'],
+  ExecutiveViewer: ['fin_report', 'dashboard', 'planner', 'marketing', 'pr_raise'],
 };
 
 // ── SoD sub-permission model ────────────────────────────────────────────────
@@ -92,6 +102,9 @@ export const PERMISSION_IMPLICATIONS: Partial<Record<Permission, Permission[]>> 
   warehouse: ['wh_receive', 'wh_adjust', 'wh_count', 'wh_custody'],
   exec: ['gl_post', 'gl_close', 'recon_prep', 'fin_report'],
   masterdata: ['md_vendor', 'md_item', 'md_config'],
+  // A buyer or planner can always raise a requisition (PR is the lowest-risk step of P2P).
+  procurement: ['pr_raise'],
+  planner: ['pr_raise'],
 };
 
 // Expand a permission set to include every implied sub-permission (idempotent, deduped). The original
@@ -211,7 +224,8 @@ export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   dashboard: '/dashboard', exec: '/executive', planner: '/planner',
   warehouse: '/warehouse', lots: '/lots', locations: '/locations', mobile: '/mobile-scan',
   images: '/images', masterdata: '/master-data', bom_master: '/bom-master',
-  procurement: '/procurement', creditors: '/creditors', ar: '/ar',
+  procurement: '/procurement', pr_raise: '/requisitions', wh_receive: '/receiving',
+  creditors: '/creditors', ar: '/ar',
   delivery: '/delivery', returns: '/returns', pricelist: '/price-list',
   promos: '/promotions', marketing: '/marketing', users: '/admin/users', ai_chat: '/assistant',
   // portal

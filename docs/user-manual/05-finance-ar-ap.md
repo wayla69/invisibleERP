@@ -16,9 +16,11 @@ job has its own focused screen instead of one long scroll:
   legend, so an overdue-heavy book reads "red" at a glance.
 - **รายรับ (AR)** — the receivables cycle: the **AR worklist**, **Sync AR** and **รับชำระ
   (receive payment)**, the **collections / dunning** worklist, and **AR aging** detail.
-- **รายจ่าย (AP)** — the payables cycle: the **AP worklist**, **บันทึกบิล (add bill)**,
-  the per-bill **pay request**, the **maker-checker approval queue**, and **AP aging**
-  detail (with Excel export).
+- **รายจ่าย (AP)** — the payables cycle for **Accounting** (`creditors`): the **AP
+  worklist**, **บันทึกบิล (add bill)**, the per-bill **pay request**, and **AP aging**
+  detail (with Excel export). *Approving and releasing* a payment is a **Finance** job
+  and lives on its own screen, **จ่ายเงินเจ้าหนี้ (Disbursements)** (`/disbursements`),
+  not on this tab — see Part B step B2.
 
 The active tab is **deep-linkable** via `?tab=` (`/finance?tab=receivables`,
 `?tab=payables`) — the **dashboard "สิ่งที่ต้องทำวันนี้" action cards** (pending payment
@@ -183,11 +185,14 @@ ledger, with the balance owed to the supplier.
 
 ### B2. Pay a supplier — request, then approve (maker-checker)
 
-Paying a supplier is a **two-step** flow so that no single person both records and
-pays a bill (SOX control **EXP-06**).
+Paying a supplier is a **two-step** flow split across **two teams and two screens**, so
+that no single person both records and pays a bill (SOX control **EXP-06**):
+**Accounting** books the bill and requests payment; **Finance** approves and releases
+the cash.
 
-**Step 1 — request payment (AP Clerk, `creditors`):**
-1. Find the bill in the **AP** list.
+**Step 1 — request payment (Accounting / AP Clerk, `creditors`, on `/finance`):**
+1. On the **รายจ่าย (AP)** tab of **การเงิน** (`/finance`), find the bill in the **AP**
+   list.
 2. Click **Pay** (**ขอจ่ายเจ้าหนี้**), enter the amount, and click **Send payment
    request** (**ส่งคำขอจ่าย**).
 
@@ -195,11 +200,13 @@ pays a bill (SOX control **EXP-06**).
 (**รออนุมัติ**). **No money moves yet** — the bill stays Unpaid and nothing posts to
 the ledger until a different person approves.
 
-**Step 2 — approve / reject (approver, `approvals` or `gl_close`):**
-1. On the **รายจ่าย (AP)** tab, open **คำขอจ่ายรออนุมัติ (Maker-Checker)** — the
-   pending-payment queue (you can jump here from the dashboard **คำขอจ่ายรออนุมัติ**
-   action card).
-2. Review the request and click **อนุมัติ** (approve) or **ปฏิเสธ** (reject).
+**Step 2 — approve / release (Finance, `approvals` or `gl_close`, on `/disbursements`):**
+1. Open **จ่ายเงินเจ้าหนี้ (Disbursements)** (`/disbursements`, ERP nav → การเงิน →
+   รายรับ–รายจ่าย) — the finance-owned pending-payment queue. (You can also jump here
+   from the dashboard **คำขอจ่ายรออนุมัติ** action card.) This screen is **separate
+   from the accounting AP screen** so the team that books bills is not the team that
+   releases cash.
+2. Review the request and click **อนุมัติจ่าย** (approve) or **ปฏิเสธ** (reject).
 
 **Expected result on approval:** The bill is settled (Unpaid → Partial → Paid) and the
 cash-disbursement entry posts to the ledger. On rejection nothing posts.

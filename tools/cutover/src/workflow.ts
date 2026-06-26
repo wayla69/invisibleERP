@@ -48,6 +48,22 @@ async function main() {
     { username: 'deleg2', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 },       // delegate holding ONLY the creator's delegation
     { username: 'sales2', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t2 },       // T2 isolation
   ]).onConflictDoNothing();
+  // The Procurement role default is now SoD-clean (procurement/pr_raise only). proc1 (PR maker) and mgr1
+  // (workflow approver — creates definitions [masterdata] and acts/delegates [approvals]) keep their old
+  // bundled permissions via an explicit per-user override. Roles stay 'Procurement' so the engine's
+  // role-name approver matching (approver_role: 'Procurement') still resolves to them.
+  for (const un of ['proc1', 'mgr1']) {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, un)))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['procurement', 'creditors', 'ar', 'delivery', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing();
+  }
+  // Planner role is now SoD-clean; plan1 (step-2 approver + exec) keeps the old bundled perms via
+  // per-user override so workflow approval and BI/exec tests continue to pass.
+  { const uid = Number((await db.select().from(s.users).where(eq(s.users.username, 'plan1')))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing(); }
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

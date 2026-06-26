@@ -56,6 +56,14 @@ async function main() {
     { username: 'sales1', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 },
     { username: 'proc2', passwordHash: await pw.hash('pw4'), role: 'Procurement', tenantId: t2 }, // T2 creditors (AP per shop)
   ]).onConflictDoNothing();
+  // The Procurement role default is now SoD-clean (procurement/pr_raise only); proc2 books T2 AP bills
+  // and reads input-VAT (creditors/ar) → grant the legacy bundle via an explicit per-user override.
+  {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, 'proc2')))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['procurement', 'creditors', 'ar', 'delivery', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing();
+  }
 
   // seed POS sales (VAT-separated) directly + items
   const seedSale = async (saleNo: string, tenantId: number, sub: number, vat: number, total: number, itemId: string) => {

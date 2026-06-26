@@ -2,27 +2,40 @@
 
 **Status: DRAFT v0.1**
 
-This chapter is for **Procurement** staff and **Buyers**. It covers the full
-buying cycle — purchase requisition (PR) → purchase order (PO) → goods receipt
-(GR) → 3-way match — plus managing vendors.
+This chapter covers the full buying cycle — purchase requisition (PR) → purchase
+order (PO) → goods receipt (GR) → 3-way match — plus managing vendors.
 
-**Main screen:** `/procurement` · **Required permission:** `procurement`
+**Each step is on its own screen, because each belongs to a different user group.**
+This is deliberate separation of duties (the person who *orders* must not also
+*receive* or *pay*):
 
-The procurement screen is organised as tabs: **Request** (PR) → **Order** (PO) →
-**Receive** (GR).
+| Step | Screen | Who / required permission |
+|---|---|---|
+| Raise a requisition (PR) | `/requisitions` | **Anyone in the company** — `pr_raise` |
+| Create / approve a PO | `/procurement` | **Procurement** — `procurement` |
+| Receive goods (GR) | `/receiving` | **Warehouse** — `wh_receive` |
+| 3-way match | `/procurement/match` | **Procurement / Accounting** — `procurement` |
+
+> A PR only *requests* a purchase — it commits nothing, so anyone may raise one.
+> Turning it into a real order (PO), and confirming receipt (GR), are restricted to
+> the procurement and warehouse teams respectively.
 
 ---
 
 ## 1. Raise a purchase requisition (PR)
 
-A PR is an internal *request to buy* before a real order is placed.
+A PR is an internal *request to buy* before a real order is placed. Because it
+commits nothing, **anyone in the company can raise one** — you don't need to be in
+Procurement.
 
-**Required permission:** `procurement` (also available to *Planner*)
+**Screen:** `/requisitions` (**คำขอซื้อ (PR)**, ERP nav → จัดซื้อ) ·
+**Required permission:** `pr_raise` (held by every internal staff role; Procurement
+and Planner have it automatically)
 
-1. Go to **Procurement** (`/procurement`) → **Request** tab.
-2. Click **Create PR** (**สร้างใบขอซื้อ (PR)**).
-3. Add the items and quantities you want to buy, and the reason / cost centre.
-4. Submit.
+1. Go to **คำขอซื้อ (PR)** (`/requisitions`).
+2. Add the items and quantities you want to buy, and the reason / cost centre.
+3. Submit. Your request is sent to Procurement for approval automatically — track
+   its status on the **Approvals** screen.
 
 **Expected result:** A purchase requisition is created, awaiting approval.
 
@@ -41,18 +54,18 @@ A PR is an internal *request to buy* before a real order is placed.
 
 ## 2. Create a purchase order (PO)
 
-**Required permission:** `procurement`
+**Screen:** `/procurement` (**ใบสั่งซื้อ (PO)**, ERP nav → จัดซื้อ) ·
+**Required permission:** `procurement` (Procurement team only)
 
-1. Go to **Procurement** → **Order** tab.
-2. Click **Create PO** (**สร้างใบสั่งซื้อ (PO)**).
-3. Select the **vendor**, add items, quantities and agreed prices, and a delivery
-   date.
-4. For a **capital purchase** (a fixed asset such as equipment or a vehicle), tick
+1. Go to **ใบสั่งซื้อ (PO)** (`/procurement`).
+2. In **Create PO** (**สร้างใบสั่งซื้อ (PO)**), select the **vendor**, add items,
+   quantities and agreed prices, and a delivery date.
+3. For a **capital purchase** (a fixed asset such as equipment or a vehicle), tick
    **ทุน (capital)** on that line. When received, capital lines are routed to the
    fixed-asset register instead of inventory — see *Register an asset from a goods
    receipt* in `06-general-ledger.md` (control **FA-10**). Items flagged
    **is_fixed_asset** on the item master are treated as capital automatically.
-5. Submit.
+4. Submit.
 
 **Expected result:** A purchase order is created with a PO number.
 
@@ -83,13 +96,19 @@ Both reflow to a single column on phones and the tables scroll sideways.
 
 ## 3. Receive goods (Goods Receipt / GR)
 
-When stock physically arrives, record a goods receipt against the PO.
+When stock physically arrives, the **warehouse** records a goods receipt against the
+PO. This is a warehouse duty kept separate from buying: a Buyer with only the
+`procurement` permission **cannot** record a receipt (they'd get a permission error),
+so the person who ordered the goods can't also confirm they arrived. (Separation of
+duties **R04** — it protects the 3-way match.)
 
-**Required permission:** `procurement` and/or `warehouse` (warehouse staff
-typically receive; see [Warehouse & Inventory](./04-warehouse-inventory.md)).
+**Screen:** `/receiving` (**รับสินค้า (GR)**, ERP nav → สินค้าคงคลัง) ·
+**Required permission:** `wh_receive` (held by warehouse roles; the coarse
+`warehouse` permission includes it). See [Warehouse & Inventory](./04-warehouse-inventory.md).
 
-1. Go to **Procurement** → **Receive** tab.
-2. Click **Goods Receipt** (**รับสินค้า (GR)**) and select the PO.
+1. Go to **รับสินค้า (GR)** (`/receiving`). The list shows POs awaiting receipt — use
+   it to look up the PO number.
+2. In **Goods Receipt** (**รับสินค้า (GR)**), enter the PO number.
 3. Enter the **quantity received** for each line (it may differ from ordered).
 4. Record lot / expiry details if the item is batch-tracked.
 5. Submit.

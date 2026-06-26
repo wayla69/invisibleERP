@@ -48,6 +48,14 @@ async function main() {
     { username: 'plan3', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: t3 },
     { username: 'wh3', passwordHash: await pw.hash('pw'), role: 'Warehouse', tenantId: t3 },
   ]).onConflictDoNothing();
+  // Planner role is now SoD-clean; plan1/plan2/plan3 keep the old bundled perms (warehouse/procurement)
+  // via per-user override so replenishment, WMS bins, and inter-branch transfer tests continue to pass.
+  for (const un of ['plan1', 'plan2', 'plan3']) {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, un)))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing();
+  }
   for (const it of ['A', 'B', 'R1', 'X1']) await db.insert(s.items).values({ itemId: it, itemDescription: it, uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
   await db.insert(s.vendors).values({ name: 'V1', isSupplier: true, approvalStatus: 'approved' }).onConflictDoNothing();
   // customer_inventory: A high (portal sale), R1 below reorder (replenishment fires)
