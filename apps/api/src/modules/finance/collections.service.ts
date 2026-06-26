@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
-import { sql, eq, and, desc } from 'drizzle-orm';
+import { sql, eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { arInvoices, arDunningLog, creditEvents, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -269,6 +269,56 @@ export class CollectionsService {
     const db = this.db as any;
     const rows = await db.select().from(creditEvents).where(eq(creditEvents.tenantId, tenantId)).orderBy(desc(creditEvents.id));
     return { tenant_id: tenantId, count: rows.length, events: rows.map((e: any) => ({ event_type: e.eventType, old_limit: e.oldLimit != null ? n(e.oldLimit) : null, new_limit: e.newLimit != null ? n(e.newLimit) : null, reason: e.reason, actioned_by: e.actionedBy, created_at: e.createdAt })) };
+  }
+
+  // All-customer credit-position summary — aggregate exposure/overdue/hold state across every customer
+  // with open AR. Used by the credit-hold management dashboard to show the full book at a glance.
+  async creditPositions() {
+    const db = this.db as any;
+    const today = ymd();
+    const openAr = await db.select({
+      tenant_id: arInvoices.tenantId,
+      due_date: arInvoices.dueDate,
+      outstanding: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)`,
+    }).from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
+
+    const byTenant = new Map<number, { exposure: number; overdue: number; maxOverdueDays: number }>();
+    for (const r of openAr) {
+      if (r.tenant_id == null) continue;
+      const o = n(r.outstanding);
+      if (o <= 0.0001) continue;
+      const d = r.due_date ? Math.max(0, daysBetween(String(r.due_date), today)) : 0;
+      const cur = byTenant.get(r.tenant_id) ?? { exposure: 0, overdue: 0, maxOverdueDays: 0 };
+      cur.exposure += o;
+      if (d > 0) { cur.overdue += o; cur.maxOverdueDays = Math.max(cur.maxOverdueDays, d); }
+      byTenant.set(r.tenant_id, cur);
+    }
+
+    if (byTenant.size === 0) return { positions: [], count: 0, on_hold_count: 0, as_of: today };
+
+    const tenantIds = Array.from(byTenant.keys());
+    const tenantRows: any[] = await db.select({
+      id: tenants.id, code: tenants.code, creditLimit: tenants.creditLimit,
+      creditTerm: tenants.creditTerm, creditHold: tenants.creditHold,
+    }).from(tenants).where(inArray(tenants.id, tenantIds));
+
+    const positions = tenantRows.map((t) => {
+      const ar = byTenant.get(t.id) ?? { exposure: 0, overdue: 0, maxOverdueDays: 0 };
+      const limit = n(t.creditLimit);
+      const overLimit = limit > 0 && round2(ar.exposure) > limit;
+      const seriousOverdue = isSeriousOverdue(ar.maxOverdueDays);
+      const manualHold = t.creditHold === true;
+      const onHold = manualHold || overLimit || seriousOverdue;
+      return {
+        tenant_id: t.id, customer: t.code, credit_term: t.creditTerm ?? null,
+        credit_limit: limit, exposure: round2(ar.exposure), overdue: round2(ar.overdue),
+        max_overdue_days: ar.maxOverdueDays,
+        available_credit: limit > 0 ? round2(limit - ar.exposure) : null,
+        over_limit: overLimit, serious_overdue: seriousOverdue, manual_hold: manualHold, on_hold: onHold,
+      };
+    }).sort((a, b) => (b.on_hold ? 1 : 0) - (a.on_hold ? 1 : 0) || b.max_overdue_days - a.max_overdue_days || b.exposure - a.exposure);
+
+    return { positions, count: positions.length, on_hold_count: positions.filter((p) => p.on_hold).length, as_of: today };
   }
 
   // Decision endpoint for order entry: may this customer take on `amount` more credit right now?
