@@ -1009,6 +1009,13 @@
       "when": 2023610000004,
       "tag": "0143_petty_cash_expense",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 2023620000004,
+      "tag": "0144_auth_lockout_revocation",
+      "breakpoints": true
     }
   ]
 }

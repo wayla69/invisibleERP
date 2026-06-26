@@ -1,10 +1,11 @@
 import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { authenticator } from 'otplib';
 import { resolvePermissions, requiresMfa, type Role, type Permission, type LoginResponse, type AuthUser } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { users, userPermissions, tenants } from '../../database/schema';
+import { users, userPermissions, tenants, revokedTokens } from '../../database/schema';
 import { PasswordService } from './password.service';
 import { encrypt, decrypt } from '../../common/crypto';
 import { normalizeUsername } from '../../common/username';
@@ -61,8 +62,28 @@ export class AuthService {
 
     // Carry the STORED username (not the typed input) so later exact-match lookups by JWT sub resolve the
     // same row — important for legacy mixed-case accounts authenticated via the case-insensitive match above.
-    const token = await this.jwt.signAsync({ sub: row.username, role, customerName, tenantId: row.tenantId ?? null, permissions: perms });
+    // jti gives each token an identity so it can be revoked (logout) before its expiry (ITGC-AC-15).
+    const token = await this.jwt.signAsync({ sub: row.username, role, customerName, tenantId: row.tenantId ?? null, permissions: perms, jti: randomUUID() });
     return { token, username: row.username, role, customer_name: customerName, must_change_password: !!row.mustChangePassword, must_setup_mfa: mustSetupMfa };
+  }
+
+  // ── ITGC-AC-15: session revocation ───────────────────────────────────────────
+  // Revoke a single session: add the presented token's jti to the denylist (the guard rejects it thereafter).
+  async revokeToken(token: string | undefined) {
+    if (!token) return { revoked: false };
+    let payload: any;
+    try { payload = await this.jwt.verifyAsync(token); } catch { return { revoked: false }; }
+    if (!payload?.jti) return { revoked: false };
+    const expiresAt = payload.exp ? new Date(payload.exp * 1000) : new Date(Date.now() + 24 * 3600_000);
+    await (this.db as any).insert(revokedTokens).values({ jti: payload.jti, username: payload.sub ?? null, expiresAt }).onConflictDoNothing();
+    return { revoked: true };
+  }
+
+  // Revoke ALL of a user's sessions (incident response / forced logout): any JWT issued before now is rejected.
+  async revokeAllSessions(username: string) {
+    const norm = normalizeUsername(username);
+    await this.db.update(users).set({ tokensValidFrom: new Date() }).where(sql`lower(${users.username}) = ${norm}`);
+    return { username: norm, revoked_all: true };
   }
 
   // ── ITGC-AC-06: TOTP enrolment lifecycle ────────────────────────────────────
