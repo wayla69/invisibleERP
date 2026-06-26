@@ -22,6 +22,7 @@ type Project = {
   project_code: string; name: string; customer_name: string | null; billing_type: string; status: string;
   contract_amount: number; cost_to_date: number; billed_to_date: number; wip: number; margin: number;
   non_billable_cost: number; total_cost: number; billed_pct: number | null; remaining_to_bill: number | null;
+  budget_amount: number; budget_variance: number | null; budget_used_pct: number | null; over_budget: boolean;
 };
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
@@ -94,6 +95,7 @@ export default function ProjectsPage() {
               { key: 'name', label: 'โครงการ', render: (r: Project) => `${r.name}${r.customer_name ? ` · ${r.customer_name}` : ''}` },
               { key: 'billing_type', label: 'รูปแบบ' },
               { key: 'cost_to_date', label: 'ต้นทุนสะสม', align: 'right', render: (r: Project) => <span className="tabular">{baht(r.cost_to_date)}</span> },
+              { key: 'budget_used_pct', label: 'ใช้งบ', align: 'right', render: (r: Project) => r.budget_used_pct == null ? '—' : <span className={`tabular ${r.over_budget ? 'font-medium text-destructive' : r.budget_used_pct >= 85 ? 'text-warning-foreground dark:text-warning' : 'text-muted-foreground'}`} title={`งบ ${baht(r.budget_amount)} · คงเหลือ ${baht(r.budget_variance ?? 0)}`}>{r.budget_used_pct}%{r.over_budget ? ' ⚠' : ''}</span> },
               { key: 'billed_to_date', label: 'วางบิลแล้ว', align: 'right', render: (r: Project) => <span className="tabular">{baht(r.billed_to_date)}{r.billed_pct != null ? <span className="ml-1 text-xs text-muted-foreground">({r.billed_pct}%)</span> : null}</span> },
               { key: 'wip', label: 'WIP', align: 'right', render: (r: Project) => <span className="tabular">{baht(r.wip)}</span> },
               { key: 'non_billable_cost', label: 'เบิกลูกค้าไม่ได้', align: 'right', render: (r: Project) => <span className={`tabular ${r.non_billable_cost > 0 ? 'text-destructive' : 'text-muted-foreground'}`} title="ต้นทุนที่เบิกลูกค้าไม่ได้ — ลงเป็นค่าใช้จ่ายทันที (5800) ไม่เข้า WIP">{baht(r.non_billable_cost)}</span> },

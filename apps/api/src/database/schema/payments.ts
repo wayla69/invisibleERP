@@ -65,6 +65,12 @@ export const tillSessions = pgTable('till_sessions', {
   variance: numeric('variance', { precision: 18, scale: 4 }),
   denominations: jsonb('denominations'),   // {"1000":2,"500":1,...} captured on close
   status: tillStatusEnum('status').default('Open'),
+  // POS-01: cash over/short is posted to GL (5830↔1000) on close. A variance over the materiality
+  // threshold posts a DRAFT JE and waits for a different user (manager) to approve — maker-checker.
+  varianceJournalNo: text('variance_journal_no'),                                  // JE-... for the over/short posting
+  varianceStatus: text('variance_status').notNull().default('NotRequired'),        // NotRequired | PendingApproval | Approved | Rejected
+  varianceApprovedBy: text('variance_approved_by'),
+  varianceApprovedAt: timestamp('variance_approved_at', { withTimezone: true }),
 });
 
 export type Payment = typeof payments.$inferSelect;

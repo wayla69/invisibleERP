@@ -128,12 +128,18 @@ export class ProjectsService {
 
   private fmt(p: any, nonBillable = 0) {
     const cost = n(p.costToDate), recognized = n(p.recognizedCost), billed = n(p.billedToDate), nb = r2(nonBillable);
+    const budget = n(p.budgetAmount), totalCost = r2(cost + nb);
     return {
       project_code: p.projectCode, name: p.name, customer_name: p.customerName, billing_type: p.billingType, status: p.status,
-      budget_amount: n(p.budgetAmount), contract_amount: n(p.contractAmount),
+      budget_amount: budget, contract_amount: n(p.contractAmount),
       cost_to_date: cost, recognized_cost: recognized, billed_to_date: billed,
       non_billable_cost: nb,                       // expensed straight to 5800 (unrecoverable)
-      total_cost: r2(cost + nb),                   // all costs incurred (recoverable WIP + non-billable)
+      total_cost: totalCost,                       // all costs incurred (recoverable WIP + non-billable)
+      // Budget control: variance = budget − total cost incurred (negative = OVER budget); budget_used_pct +
+      // over_budget flag let the controller catch a cost overrun before it eats the margin (null if no budget).
+      budget_variance: budget > 0 ? r2(budget - totalCost) : null,
+      budget_used_pct: budget > 0 ? r2((totalCost / budget) * 100) : null,
+      over_budget: budget > 0 && totalCost > budget,
       wip: r2(cost - recognized),                  // unbilled BILLABLE cost sitting in 1260
       margin: r2(billed - recognized - nb),        // recognized revenue − recognized billable cost − absorbed non-billable
       // Fixed-price progress: how much of the contract is billed + what's left to bill (null for T&M).

@@ -1,4 +1,4 @@
--- 0141 — Budget maker-checker (BUD-01). A budget line was fire-and-forget: one person upserted any amount and
+-- 0142 — Budget maker-checker (BUD-01). A budget line was fire-and-forget: one person upserted any amount and
 -- it immediately drove the budget-vs-actual variance report (the basis for performance/spend decisions). Now an
 -- upserted budget is PendingApproval and is EXCLUDED from budget-vs-actual until a DIFFERENT user approves it.
 -- status DEFAULT 'Approved' keeps every existing row + any direct seed usable with no behaviour change; only the

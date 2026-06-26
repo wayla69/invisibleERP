@@ -1,4 +1,4 @@
--- 0140 — FX rate maker-checker (FX-04). A manually-entered FX rate is now a REQUEST that is NOT usable for
+-- 0141 — FX rate maker-checker (FX-04). A manually-entered FX rate is now a REQUEST that is NOT usable for
 -- revaluation or reporting until a DIFFERENT user approves it. A fat-fingered rate (USD 36 keyed as 63) can no
 -- longer flow straight into a revaluation JE that mis-states earnings/equity. Externally-sourced rates (a feed
 -- with an explicit non-manual source) are auto-approved. status DEFAULT 'Approved' keeps every existing row +
