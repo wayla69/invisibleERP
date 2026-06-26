@@ -306,6 +306,7 @@ export const INTERNAL_NAV: NavGroup[] = [
         items: [
           { label: 'ธนาคาร', href: '/bank', icon: Landmark, perms: ['exec', 'creditors', 'ar'] },
           { label: 'กระทบยอด', href: '/reconciliation', icon: Scale, perms: ['exec', 'creditors', 'ar'] },
+          { label: 'รายการรออนุมัติ', href: '/approvals', icon: ClipboardCheck, perms: ['exec', 'approvals', 'creditors'] },
         ],
       },
       {

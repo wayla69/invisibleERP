@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -475,6 +475,53 @@ export class FinanceService {
       mk('2400', 'รายได้รอตัดบัญชี (Deferred revenue)', n(drSub?.v), -glBal('2400')),
     ];
     return { as_of: ymd(), lines, all_reconciled: lines.every((l) => l.reconciled), exceptions: lines.filter((l) => !l.reconciled).length };
+  }
+
+  // GOV-01 — pending-approvals monitor. One worklist of EVERY item awaiting independent (maker-checker)
+  // approval across the system, with its age — so the controller can see what is stuck and catch a stale
+  // approval (a control breakdown / bottleneck) before close. Spans the manual-JE (GL-05), AP-disbursement
+  // (EXP-06), payroll (PAY-03), asset-revaluation (FA-08), asset-disposal (FA-09) and inventory-write-off
+  // (INV-07) maker-checkers. Read-only; tenant-scoped via the caller's RLS (HQ/Admin sees every tenant).
+  async pendingApprovals(opts?: { overdue_days?: number }) {
+    const db = this.db as any;
+    const overdueDays = opts?.overdue_days ?? 3;
+    const ageDays = (d: any): number | null => (d ? Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000)) : null);
+    const items: any[] = [];
+
+    // 1. GL-05 — manual journals posted as Draft, awaiting approval. Amount = Σ debit of the entry's lines.
+    const drafts = await db.select().from(journalEntries).where(eq(journalEntries.status, 'Draft'));
+    if (drafts.length) {
+      const ids = drafts.map((e: any) => Number(e.id));
+      const sums = await db.select({ entryId: journalLines.entryId, dr: sql<string>`coalesce(sum(${journalLines.debit}),0)` }).from(journalLines).where(inArray(journalLines.entryId, ids)).groupBy(journalLines.entryId);
+      const byId = new Map<number, number>(sums.map((s: any) => [Number(s.entryId), n(s.dr)]));
+      for (const e of drafts) items.push({ type: 'journal', control: 'GL-05', ref: e.entryNo, label: e.memo ?? 'Manual journal', amount: byId.get(Number(e.id)) ?? 0, requested_by: e.createdBy ?? null, requested_at: e.createdAt ?? null, age_days: ageDays(e.createdAt) });
+    }
+    // 2. EXP-06 — AP disbursements awaiting approval.
+    for (const p of await db.select().from(apPayments).where(eq(apPayments.status, 'PendingApproval')))
+      items.push({ type: 'ap_payment', control: 'EXP-06', ref: p.paymentNo, label: `จ่ายเจ้าหนี้ ${p.txnNo}`, amount: n(p.amount), requested_by: p.requestedBy ?? null, requested_at: p.requestedAt ?? null, age_days: ageDays(p.requestedAt) });
+    // 3. PAY-03 — payroll runs awaiting approval.
+    for (const r of await db.select().from(payruns).where(eq(payruns.status, 'PendingApproval')))
+      items.push({ type: 'payroll', control: 'PAY-03', ref: r.period, label: `เงินเดือนงวด ${r.period} (${Number(r.headcount)} คน)`, amount: n(r.netTotal), requested_by: r.runBy ?? null, requested_at: r.runAt ?? null, age_days: ageDays(r.runAt) });
+    // 4. FA-08 — asset revaluations/impairments awaiting approval.
+    for (const v of await db.select().from(assetRevaluations).where(eq(assetRevaluations.status, 'PendingApproval')))
+      items.push({ type: 'asset_revaluation', control: 'FA-08', ref: v.assetNo, label: `ตีมูลค่า ${v.assetNo} (${v.kind})`, amount: Math.abs(n(v.delta)), requested_by: v.actionedBy ?? null, requested_at: v.createdAt ?? null, age_days: ageDays(v.createdAt) });
+    // 5. FA-09 — asset disposals awaiting approval (disposed_date is the requested date).
+    for (const a of await db.select().from(fixedAssets).where(eq(fixedAssets.disposalPending, true)))
+      items.push({ type: 'asset_disposal', control: 'FA-09', ref: a.assetNo, label: `จำหน่าย ${a.assetNo}`, amount: a.disposalProceeds != null ? n(a.disposalProceeds) : 0, requested_by: a.disposalRequestedBy ?? null, requested_at: a.disposedDate ?? null, age_days: ageDays(a.disposedDate) });
+    // 6. INV-07 — inventory write-offs awaiting approval.
+    for (const w of await db.select().from(invWriteoffRequests).where(eq(invWriteoffRequests.status, 'PendingApproval')))
+      items.push({ type: 'inventory_writeoff', control: 'INV-07', ref: `WO-${Number(w.id)}`, label: `ตัดสต๊อก ${w.itemId} (${n(w.qtyDelta)})`, amount: n(w.estValue), requested_by: w.requestedBy ?? null, requested_at: w.createdAt ?? null, age_days: ageDays(w.createdAt) });
+
+    items.sort((a, b) => (b.age_days ?? -1) - (a.age_days ?? -1));
+    const byType: Record<string, number> = {};
+    for (const it of items) byType[it.type] = (byType[it.type] ?? 0) + 1;
+    const ages = items.map((i) => i.age_days).filter((x): x is number => x != null);
+    return {
+      items, count: items.length, by_type: byType,
+      oldest_age_days: ages.length ? Math.max(...ages) : 0,
+      overdue_days: overdueDays, overdue: items.filter((i) => (i.age_days ?? 0) >= overdueDays).length,
+      total_amount: round2(items.reduce((s, i) => s + (i.amount ?? 0), 0)),
+    };
   }
 }
 
