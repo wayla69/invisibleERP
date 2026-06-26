@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { docCounters, docCountersTenant } from '../database/schema';
 import { bizYmdCompact, bizStamp, bizHourMin } from './bizdate';
 
-type DailyType = 'PO' | 'GR' | 'ST' | 'PR' | 'DO' | 'RCP' | 'GRC' | 'AP' | 'RTN' | 'JE' | 'PAY' | 'REF' | 'TILL' | 'DIN' | 'TS' | 'FA' | 'DEP' | 'SPLIT' | 'CASHMOV' | 'BANKSTMT' | 'BANKADJ' | 'DEFREV' | 'REVREC' | 'IC' | 'GC' | 'GCT' | 'RFQ' | 'QTE' | 'MAT' | 'WAVE' | 'PICK' | 'SHP' | 'RPL' | 'RMA' | 'MI' | 'WO' | 'HOLD' | 'OVR' | 'PTI' | 'STL' | 'HA' | 'HAE' | 'RWD' | 'RDM' | 'CPN' | 'MSN' | 'RFL' | 'WHL' | 'SPN' | 'CMP' | 'PTR' | 'PRV' | 'APP' | 'DUN' | 'MWO' | 'ADV' | 'PPD' | 'LSE' | 'FAR' | 'PEX' | 'PCF' | 'TIP';
+type DailyType = 'PO' | 'GR' | 'ST' | 'PR' | 'DO' | 'RCP' | 'GRC' | 'AP' | 'RTN' | 'JE' | 'PAY' | 'REF' | 'TILL' | 'DIN' | 'TS' | 'FA' | 'DEP' | 'SPLIT' | 'CASHMOV' | 'BANKSTMT' | 'BANKADJ' | 'DEFREV' | 'REVREC' | 'IC' | 'GC' | 'GCT' | 'RFQ' | 'QTE' | 'MAT' | 'WAVE' | 'PICK' | 'SHP' | 'RPL' | 'RMA' | 'MI' | 'WO' | 'HOLD' | 'OVR' | 'PTI' | 'STL' | 'HA' | 'HAE' | 'RWD' | 'RDM' | 'CPN' | 'MSN' | 'RFL' | 'WHL' | 'SPN' | 'CMP' | 'PTR' | 'PRV' | 'APP' | 'DUN' | 'MWO' | 'ADV' | 'PPD' | 'LSE' | 'FAR' | 'PEX' | 'PCF' | 'TIP' | 'CUS';
 type MonthlyTenantType = 'TIV' | 'ATV' | 'WHT'; // tax invoice (full) / abbreviated / withholding cert
 
 /**
