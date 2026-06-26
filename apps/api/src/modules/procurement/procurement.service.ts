@@ -13,7 +13,7 @@ import type { JwtUser } from '../../common/decorators';
 const n = (v: unknown) => Number(v ?? 0);
 
 export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string }[]; remarks?: string; priority?: string; amount?: number }
-export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean }[] }
+export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean }[] }
 export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
 export interface UpsertSupplierPriceDto { vendor_id: number; item_id: string; item_description?: string; uom?: string; currency?: string; unit_price: number; min_qty?: number; effective_from: string; effective_to?: string; notes?: string }
 
@@ -266,6 +266,7 @@ export class ProcurementService {
       const [h] = await tx.insert(purchaseOrders).values({
         poNo, poDate: ymd(), vendorId, vendorName, status: 'Pending', totalAmount: String(total),
         createdBy: user.username, expectedDate: dto.expected_date ?? null, remarks: dto.remarks ?? null,
+        currency: dto.currency ?? 'THB', fxRate: String(dto.fx_rate ?? 1),
       }).returning({ id: purchaseOrders.id });
       await tx.insert(poItems).values(dto.items.map((it) => ({
         poId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null,
@@ -343,6 +344,7 @@ export class ProcurementService {
     await db.transaction(async (tx: any) => {
       const [gh] = await tx.insert(goodsReceipts).values({
         grNo, grDate: today, poNo: dto.po_no, vendorId: po.vendorId, vendorName: po.vendorName, receivedBy: user.username, remarks: dto.remarks ?? null,
+        currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000',
       }).returning({ id: goodsReceipts.id });
 
       for (const it of lines) {

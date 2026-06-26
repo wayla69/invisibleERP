@@ -379,6 +379,14 @@ async function main() {
   ok('Customer statement (multi-currency): base THB converts USD at fx (1000 + 100×34 = 4400)', stBase.reporting_currency === 'THB' && near(stBase.total_charges, 4400) && (stBase.lines ?? []).length === 2, `cur=${stBase.reporting_currency} chg=${stBase.total_charges} n=${stBase.lines?.length}`);
   const stUsd = (await inj('GET', `/api/finance/ar/statement?tenant_id=${stmt2Tid}&from=2026-02-01&to=2026-02-28&currency=USD`, admin)).json;
   ok('Customer statement (multi-currency): ?currency=USD reports USD docs in their own units', stUsd.reporting_currency === 'USD' && near(stUsd.total_charges, 100) && near(stUsd.closing_balance, 100) && (stUsd.lines ?? []).every((l: any) => l.doc_currency === 'USD'), `cur=${stUsd.reporting_currency} chg=${stUsd.total_charges} close=${stUsd.closing_balance} n=${stUsd.lines?.length}`);
+  // C1: JPY has 0 decimal places — roundCurrency must not introduce fractional yen
+  const [stmtJpyT] = await db.insert(s.tenants).values({ code: 'STMTJPY', name: 'JPY Customer' }).returning({ id: s.tenants.id });
+  const stmtJpyTid = Number(stmtJpyT.id);
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-J1', invoiceDate: '2026-02-05', tenantId: stmtJpyTid, amount: '10000', currency: 'JPY', fxRate: '0.24', status: 'Unpaid' },
+  ]);
+  const stJpy = (await inj('GET', `/api/finance/ar/statement?tenant_id=${stmtJpyTid}&from=2026-02-01&to=2026-02-28&currency=JPY`, admin)).json;
+  ok('C1: JPY statement rounds to 0 dp — charge=10000 (integer, no .xx)', stJpy.reporting_currency === 'JPY' && stJpy.total_charges === 10000 && Number.isInteger(stJpy.total_charges) && Number.isInteger(stJpy.closing_balance), `cur=${stJpy.reporting_currency} chg=${stJpy.total_charges} close=${stJpy.closing_balance}`);
 
   // ───────────────────── Petty cash / employee cash advances (EXP-07) ─────────────────────
   const adv1180Before = await tbBalance('1180');
@@ -956,7 +964,7 @@ async function main() {
   ok('GL-16b: a different user can re-lock the reopened period → Locked',
     reLock.status === 200 && reLock.json?.status === 'Locked', `st=${reLock.status} status=${reLock.json?.status}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close ──');
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

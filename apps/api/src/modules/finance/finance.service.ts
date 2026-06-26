@@ -8,6 +8,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { TaxService } from '../tax/tax.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { ymd, monthStart, n, fx } from '../../database/queries';
+import { roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
@@ -163,18 +164,18 @@ export class FinanceService {
       .filter((e) => (currency ? e.cur === currency : true))
       .map((e) => ({
         date: e.date, type: e.type, ref: e.ref, doc_currency: e.cur, fx_rate: e.fx,
-        doc_charge: round2(e.charge), doc_payment: round2(e.payment),
-        charge: round2(currency ? e.charge : e.charge * e.fx),
-        payment: round2(currency ? e.payment : e.payment * e.fx),
+        doc_charge: roundCurrency(e.charge, e.cur), doc_payment: roundCurrency(e.payment, e.cur),
+        charge: roundCurrency(currency ? e.charge : e.charge * e.fx, reporting),
+        payment: roundCurrency(currency ? e.payment : e.payment * e.fx, reporting),
       }));
-    const opening = round2(evs.filter((e) => String(e.date ?? '') < from).reduce((a, e) => a + e.charge - e.payment, 0));
+    const opening = roundCurrency(evs.filter((e) => String(e.date ?? '') < from).reduce((a, e) => a + e.charge - e.payment, 0), reporting);
     const win = evs.filter((e) => { const d = String(e.date ?? ''); return d >= from && d <= to; });
     win.sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')) || String(a.ref).localeCompare(String(b.ref)));
     let bal = opening;
-    const lines = win.map((e) => { bal = round2(bal + e.charge - e.payment); return { ...e, balance: bal }; });
-    const charges = round2(win.reduce((a, e) => a + e.charge, 0));
-    const payments = round2(win.reduce((a, e) => a + e.payment, 0));
-    return { party_type, party, reporting_currency: reporting, from, to, opening_balance: opening, total_charges: charges, total_payments: payments, closing_balance: round2(opening + charges - payments), lines };
+    const lines = win.map((e) => { bal = roundCurrency(bal + e.charge - e.payment, reporting); return { ...e, balance: bal }; });
+    const charges = roundCurrency(win.reduce((a, e) => a + e.charge, 0), reporting);
+    const payments = roundCurrency(win.reduce((a, e) => a + e.payment, 0), reporting);
+    return { party_type, party, reporting_currency: reporting, from, to, opening_balance: opening, total_charges: charges, total_payments: payments, closing_balance: roundCurrency(opening + charges - payments, reporting), lines };
   }
 
   // ───────────────────── Petty cash / employee cash advances (EXP-07) ─────────────────────

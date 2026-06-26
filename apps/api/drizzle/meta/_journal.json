@@ -1226,6 +1226,13 @@
       "when": 2023820000001,
       "tag": "0174_supplier_pricelist",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 2023820000002,
+      "tag": "0175_multi_currency_depth",
+      "breakpoints": true
     }
   ]
 }

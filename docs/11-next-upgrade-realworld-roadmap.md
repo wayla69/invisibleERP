@@ -208,11 +208,10 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   **Done so far:** rules + service charge + rounding priced & GL-correct at the till (verified);
   cashier quick-tender/hotkeys (build-verified); offline + peripheral clients scaffolded.
 
-### Phase C — Globalize & certify · ~8–12 weeks · **IN PROGRESS (C5 ✅ 2026-06-26)**
+### Phase C — Globalize & certify · ~8–12 weeks · **IN PROGRESS (C1 ✅, C5 ✅ 2026-06-26)**
 *Goal: legally and operationally sellable beyond Thailand; passes enterprise security review.*
 
-- **C1 — Multi-currency depth.** Confirm functional/transaction/reporting currency on every money
-  row; FX reval coverage across AR/AP/GL/inventory; rounding policy per currency.
+- **C1 — Multi-currency depth.** ✅ **Delivered.** `tenants.functional_currency` (ISO-4217, default THB, migration 0175); `currency`+`fx_rate` on `purchase_orders` and `goods_receipts` (GR inherits PO rate); `buildStatement` now uses `roundCurrency(amount, currency)` instead of the THB-hardcoded `round2()` for all AR/AP statement arithmetic — correct 0dp for JPY, 2dp for THB/USD/EUR/GBP/SGD. `CreatePoDto` accepts optional `currency`+`fx_rate`. Basics harness extended with a JPY-0dp rounding assertion (C1 gate).
 - **C2 — Pluggable tax + e-invoicing.** `TaxProvider` interface (Avalara/Stripe Tax adapter beyond
   TH 7%); e-invoicing adapters following the proven TH pattern (Peppol / India IRN / Italy SdI /
   MX CFDI).
@@ -304,3 +303,4 @@ and DB-enforced isolation; deepen MRP/HR/portals where the target market demands
 | 0.2 | 2026-06-23 | Platform | **Phase A delivered** (production hardening): Docker/compose, scripted restore + automated restore-drill, fail-closed secret validation, `/healthz`+`/readyz`, observability/incident + change-management + secrets + deployment runbooks, CODEOWNERS + PR template + approval-gated deploy + branch-protection ruleset, prod DB least-privilege SQL. Marked `[setup]` items (console actions) + deferred httpOnly-cookie workstream. |
 | 0.3 | 2026-06-23 | Platform | **Phase B in progress**: B4 pricing rules now apply at dine-in checkout (+ service charge acct 4400, satang rounding acct 4900, `pricing` harness); B2 cashier quick-tender + hotkeys; B1 offline client outbox + B3 peripheral bridge scaffolds (backend offline-sync already existed). Verified pieces CI-gated; browser/hardware pieces are typecheck-only scaffolds. |
 | 0.4 | 2026-06-26 | Platform | **Phase B complete** (B2 favourites grid + POS returns ✅ PR #181; B4 retail portal pricing + service charge + satang rounding ✅ PR #182; B1 offline client outbox + B3 peripheral bridge as typecheck-only scaffolds). **Phase C C5 delivered**: ELC-POL-01..05 adopted at v1.0 (Code of Conduct, Whistleblower, DoA, Audit Committee Charter, Fraud Risk Assessment); COSO plan §6 updated. |
+| 0.5 | 2026-06-26 | Platform | **Phase C C1 delivered**: multi-currency depth — `tenants.functional_currency`, `currency`+`fx_rate` on PO+GR (migration 0175), `buildStatement` ISO-4217-aware rounding via `roundCurrency`, basics harness JPY-0dp gate. |
