@@ -43,10 +43,16 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
-    { username: 'plan1', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: t1 },       // config/PO/GR/valuation/ATP
+    { username: 'plan1', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: t1 },       // config/PO/GR/valuation/ATP — needs procurement+wh_receive (override below)
     { username: 'shop1', passwordHash: await pw.hash('pw'), role: 'Customer', tenantId: t1, customerName: 'T1' }, // portal sale
     { username: 'shop2', passwordHash: await pw.hash('pw'), role: 'Customer', tenantId: t2, customerName: 'T2' }, // RLS
   ]).onConflictDoNothing();
+  // Planner role is now SoD-clean; plan1 creates POs (procurement) AND GRs (wh_receive) in this harness,
+  // so it keeps the old bundled perms via a per-user override (intentional R04 gap for test purposes).
+  { const uid = Number((await db.select().from(s.users).where(eq(s.users.username, 'plan1')))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing(); }
   for (const it of ['WIDGET', 'GADGET', 'STDPART']) await db.insert(s.items).values({ itemId: it, itemDescription: it, uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
   const [v1] = await db.insert(s.vendors).values({ name: 'V1', isSupplier: true, approvalStatus: 'approved' }).returning({ id: s.vendors.id });
   const V1 = Number(v1.id);

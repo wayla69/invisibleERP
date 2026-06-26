@@ -45,6 +45,15 @@ async function main() {
     { username: 'preparer', passwordHash: await pw.hash('pw1'),     role: 'Planner', tenantId: t1 },
     { username: 'reviewer', passwordHash: await pw.hash('pw2'),     role: 'Planner', tenantId: t1 },
   ]).onConflictDoNothing();
+  // Planner role is now SoD-clean; preparer/reviewer keep the old bundled perms (exec + approvals)
+  // via per-user override. The SoD certify test (preparer cannot certify own work) is user-ID-based
+  // in business logic — not perm-based — so giving preparer 'approvals' does not break that test.
+  for (const un of ['preparer', 'reviewer']) {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, un)))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing();
+  }
 
   const ref = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();

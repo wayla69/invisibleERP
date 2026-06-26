@@ -9,10 +9,12 @@ Our SoD analysis (computed from `packages/shared/src/permissions.ts` → `DEFAUL
 
 ### Current conflicts
 - **Sales (7):** `exec`+`approvals` (post & close/certify), `pos` bundles sell+refund+till, `pricelist`/`promos`+`pos`, `crm`+`pos`, `returns`+`pos`.
-- **Procurement (4):** `masterdata`+`creditors` (create vendor & pay), `procurement`+`creditors`.
-- **Planner (6):** `procurement`+`warehouse` (order & receive), `exec`+`approvals`, `masterdata`+`procurement`.
+- **Procurement (0 — remediated 2026-06-26):** was 4 (`masterdata`+`creditors` create-vendor-&-pay, `procurement`+`creditors` buy-&-pay). The role is now a SoD-clean buying role (`procurement`+`pr_raise`+`delivery`); paying is the ApClerk's duty and vendor-master the MasterDataAdmin's.
+- **Planner (0 — remediated 2026-06-26):** was 6 (R04 order+receive, R05 gl_post+gl_close, R06 recon_prep+approvals, R07 procurement+approvals, R11 wh_adjust+wh_count, R13 masterdata+procurement). The role is now a SoD-clean supply-chain/analytics role (`planner`+`dashboard`+`procurement`+`pr_raise`+`fin_report`+`wh_count`+`wh_custody`+`lots`+`locations`); approvals, gl_post/close, wh_adjust/receive, and masterdata are removed.
 - **Warehouse (1):** `warehouse` bundles adjust+custody+count.
 - **Admin:** inherent superuser (expected; compensating controls).
+
+> **Update (2026-06-26):** the live role-level total is now **8** (was 18 → 14 after Procurement fix → 8 after Planner fix). Regenerate `Oshinei_ERP_SoD_Matrix_v1.xlsx` via `python3 compliance/build_sod.py`.
 
 ## Scope
 

@@ -13,7 +13,7 @@ thin=Side(style="thin",color="BFBFBF"); BORDER=Border(left=thin,right=thin,top=t
 WRAP=Alignment(wrap_text=True,vertical="top"); CTR=Alignment(wrap_text=True,vertical="center",horizontal="center")
 
 # ---------- source of truth: permissions.ts ----------
-PERMS=["pos","dashboard","order_mgt","claim_mgt","crm","users","warehouse","procurement",
+PERMS=["pos","dashboard","order_mgt","claim_mgt","crm","users","warehouse","procurement","pr_raise",
 "creditors","ar","delivery","returns","pricelist","lots","locations","promos","mobile",
 "images","masterdata","bom_master","planner","exec","order_cust","cust_dash",
 "cust_inventory","cust_pos","cust_bom","cust_variance","loyalty","survey",
@@ -21,10 +21,10 @@ PERMS=["pos","dashboard","order_mgt","claim_mgt","crm","users","warehouse","proc
 
 ROLES={
  "Admin":set(PERMS),
- "Sales":{"pos","dashboard","exec","order_mgt","claim_mgt","crm","ar","delivery","returns","pricelist","promos","marketing","planner","approvals"},
- "Procurement":{"procurement","creditors","ar","delivery","masterdata","approvals"},
- "Planner":{"dashboard","exec","warehouse","procurement","planner","masterdata","approvals"},
- "Warehouse":{"warehouse","lots","locations","mobile","images","masterdata"},
+ "Sales":{"pos","dashboard","exec","order_mgt","claim_mgt","crm","ar","delivery","returns","pricelist","promos","marketing","planner","approvals","pr_raise"},
+ "Procurement":{"procurement","pr_raise","delivery"},
+ "Planner":{"planner","dashboard","procurement","pr_raise","fin_report","wh_count","wh_custody","lots","locations"},
+ "Warehouse":{"warehouse","lots","locations","mobile","images","masterdata","pr_raise"},
  "Customer":{"order_cust","cust_pos","cust_dash","cust_inventory","cust_bom","cust_variance","loyalty","survey","track","cust_my_crm","cust_my_suppliers","cust_my_pos","cust_my_users"},
 }
 ROLE_ORDER=["Admin","Sales","Procurement","Planner","Warehouse","Customer"]
@@ -50,7 +50,8 @@ META={
  "images":("Warehouse","Item images","Low","images"),
  "ar":("Finance & AR/AP","Accounts receivable; AR/JE posting","High","ledger.controller; finance"),
  "creditors":("Finance & AR/AP","Accounts payable: pay vendors, match tolerance","High","payments; match.controller; ledger"),
- "procurement":("Procurement","Raise purchase requisitions / POs","High","procurement.controller"),
+ "procurement":("Procurement","Create & approve purchase orders (buying)","High","procurement.controller"),
+ "pr_raise":("Procurement","Raise a purchase requisition (company-wide; PR is a request, not a commitment)","Low","procurement.controller /requisitions"),
  "masterdata":("Administration","Master data: vendor/item/config maintenance","High","masterdata; admin-config"),
  "bom_master":("Administration","BOM master maintenance","Medium","bom; mfg"),
  "users":("Administration","User & access administration (grant permissions)","High","admin-users; platform"),
@@ -153,7 +154,7 @@ crow(6,"Entity","Invisible Consulting — Oshinei Enterprise ERP (EGC)")
 crow(7,"Source of truth","packages/shared/src/permissions.ts — PERMISSIONS + DEFAULT_ROLE_PERMISSIONS")
 crow(8,"Enforcement today","RBAC via @Permissions (OR-semantics) + PermissionsGuard; tenant isolation via RLS")
 crow(9,"Method","16 SoD conflict rules; a role conflicts when it holds duties on BOTH sides of a rule")
-crow(10,"Prepared (draft)",DATE+"  ·  Version 1.0 — review with auditor + SOX advisor")
+crow(10,"Prepared (draft)",DATE+"  ·  Version 1.1 — Planner remediated 2026-06-26 (was 14 conflicts, now 8)")
 cov["B13"]="How to read"; cov["B13"].font=f(11,True,NAVY)
 cov["B14"]=("Tabs: Permission Inventory (what each permission grants + sensitivity) · SoD Rules (the conflict library) · "
  "Role × Permission (assignment grid) · Conflict Matrix (Role × Rule heat grid + counts) · Detected Conflicts (every "
@@ -410,7 +411,8 @@ for i,(name,perms,_) in enumerate(TB_ROLES,3):
 note_r=len(TB_ROLES)+4
 rm.cell(note_r,1,(f"Result: {tb_total} residual conflicts across the 17 operational roles (target 0). 'Superuser/Admin' remains an "
  "inherent superuser (break-glass) — mitigated by minimal named users, MFA, and the tamper-evident audit log + hash-chained "
- "journal. Compare with the 'Conflict Matrix' tab (current design: 18 conflicts)."))
+ "journal. Compare with the 'Conflict Matrix' tab (current design: 8 conflicts — Procurement remediated 2026-06-26 from 18→14; "
+ "Planner then remediated 2026-06-26 from 14→8)."))
 rm.merge_cells(start_row=note_r,start_column=1,end_row=note_r+2,end_column=ccol2)
 rm.cell(note_r,1).font=f(9,False,GREY); rm.cell(note_r,1).alignment=WRAP
 rm.freeze_panes="B3"; rm.row_dimensions[2].height=16

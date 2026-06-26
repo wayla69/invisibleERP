@@ -50,6 +50,14 @@ async function main() {
     { username: 'approverFc', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: t1 }, // approvals but NO gl_post → blocked on JE
     { username: 't2sales', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t2 },           // approvals + dashboard, other tenant → RLS
   ]).onConflictDoNothing();
+  // The Procurement role default is now SoD-clean (procurement/pr_raise only); approverProc needs both
+  // procurement + approvals to approve a PO action → grant via an explicit per-user override.
+  {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, 'approverProc')))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['procurement', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing();
+  }
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

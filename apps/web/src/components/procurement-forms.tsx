@@ -1,20 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { Plus, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Msg } from '@/components/tabs';
 
 // ── PR ──
 interface PrLine { item_id: string; item_description: string; request_qty: number; uom: string; required_date: string }
 const emptyPrLine = (): PrLine => ({ item_id: '', item_description: '', request_qty: 1, uom: '', required_date: '' });
 
-function PrForm({ onDone }: { onDone: () => void }) {
+export function PrForm({ onDone }: { onDone?: () => void }) {
   const [remarks, setRemarks] = useState('');
   const [priority, setPriority] = useState('');
   const [lines, setLines] = useState<PrLine[]>([emptyPrLine()]);
@@ -35,7 +34,7 @@ function PrForm({ onDone }: { onDone: () => void }) {
         })),
       }),
     }),
-    onSuccess: () => onDone(),
+    onSuccess: () => onDone?.(),
   });
 
   const valid = lines.some((l) => l.item_id && Number(l.request_qty) > 0);
@@ -85,7 +84,7 @@ function PrForm({ onDone }: { onDone: () => void }) {
 interface PoLine { item_id: string; item_description: string; order_qty: number; unit_price: number; uom: string; is_capital: boolean }
 const emptyPoLine = (): PoLine => ({ item_id: '', item_description: '', order_qty: 1, unit_price: 0, uom: '', is_capital: false });
 
-function PoForm({ onDone }: { onDone: () => void }) {
+export function PoForm({ onDone }: { onDone?: () => void }) {
   const [vendorName, setVendorName] = useState('');
   const [vendorId, setVendorId] = useState('');
   const [expectedDate, setExpectedDate] = useState('');
@@ -111,7 +110,7 @@ function PoForm({ onDone }: { onDone: () => void }) {
         })),
       }),
     }),
-    onSuccess: () => onDone(),
+    onSuccess: () => onDone?.(),
   });
 
   const valid = lines.some((l) => l.item_id && Number(l.order_qty) > 0 && Number(l.unit_price) >= 0);
@@ -172,7 +171,7 @@ function PoForm({ onDone }: { onDone: () => void }) {
 interface GrLine { item_id: string; received_qty: number; lot_no: string; expiry_date: string; unit_cost: number | ''; uom: string }
 const emptyGrLine = (): GrLine => ({ item_id: '', received_qty: 1, lot_no: '', expiry_date: '', unit_cost: '', uom: '' });
 
-function GrForm({ onDone }: { onDone: () => void }) {
+export function GrForm({ onDone }: { onDone?: () => void }) {
   const [poNo, setPoNo] = useState('');
   const [remarks, setRemarks] = useState('');
   const [lines, setLines] = useState<GrLine[]>([emptyGrLine()]);
@@ -194,7 +193,7 @@ function GrForm({ onDone }: { onDone: () => void }) {
         })),
       }),
     }),
-    onSuccess: () => onDone(),
+    onSuccess: () => onDone?.(),
   });
 
   const valid = !!poNo && lines.some((l) => l.item_id && Number(l.received_qty) > 0);
@@ -239,20 +238,3 @@ function GrForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-export function ProcurementForms({ poListQueryKey }: { poListQueryKey: unknown[] }) {
-  const qc = useQueryClient();
-  const refresh = () => qc.invalidateQueries({ queryKey: poListQueryKey });
-
-  return (
-    <Tabs defaultValue="pr" className="gap-4">
-      <TabsList className="flex-wrap">
-        <TabsTrigger value="pr">สร้าง PR</TabsTrigger>
-        <TabsTrigger value="po">สร้าง PO</TabsTrigger>
-        <TabsTrigger value="gr">รับสินค้า GR</TabsTrigger>
-      </TabsList>
-      <TabsContent value="pr"><PrForm onDone={refresh} /></TabsContent>
-      <TabsContent value="po"><PoForm onDone={refresh} /></TabsContent>
-      <TabsContent value="gr"><GrForm onDone={refresh} /></TabsContent>
-    </Tabs>
-  );
-}

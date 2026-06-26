@@ -209,6 +209,14 @@ async function main() {
     { username: 'hqex', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: hq.id },
     { username: 'cf2ex', passwordHash: await pw.hash('pw'), role: 'Planner', tenantId: cf2.id },
   ]).onConflictDoNothing();
+  // Planner role is now SoD-clean; hqex/cf2ex need 'exec' for BI subscriptions and dashboard layout
+  // configuration — they keep the old bundled perms via per-user override.
+  for (const un of ['hqex', 'cf2ex']) {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, un)))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing();
+  }
   const hqex = (await inj('POST', '/api/login', undefined, { username: 'hqex', password: 'pw' })).json.token;
   const cf2ex = (await inj('POST', '/api/login', undefined, { username: 'cf2ex', password: 'pw' })).json.token;
 

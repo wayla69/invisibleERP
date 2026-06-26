@@ -62,6 +62,14 @@ async function main() {
     { username: 'paychk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },             // PAY-03 payroll approver (t1, ≠ preparer)
     { username: 'whchk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq },              // INV-07 write-off approver (hq, ≠ admin)
   ]).onConflictDoNothing();
+  // The Procurement role default is now SoD-clean (procurement/pr_raise only). These residual-risk
+  // fixtures deliberately hold conflicting duties, granted via an explicit per-user override (overrides
+  // take precedence over the role default — see resolvePermissions): finT2 = a t2 finance reader
+  // (creditors/ar) for the RLS probe; apdual = a single holder of BOTH creditors + approvals.
+  for (const [un, perms] of [['finT2', ['creditors', 'ar']], ['apdual', ['creditors', 'approvals']]] as const) {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, un)))[0].id);
+    await db.insert(s.userPermissions).values(perms.map((perm) => ({ userId: uid, perm }))).onConflictDoNothing();
+  }
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

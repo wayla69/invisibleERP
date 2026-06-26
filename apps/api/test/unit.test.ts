@@ -176,15 +176,17 @@ describe('RBAC sub-permission expansion (backward compatibility)', () => {
 });
 
 describe('Segregation of Duties — conflict detection (ITGC-AC-09)', () => {
-  // Current (as-is) role design — documented conflict counts from the SoD matrix.
-  it('current roles produce the documented conflicts (total 18 non-admin)', () => {
+  // Current (as-is) role design — documented conflict counts from the SoD matrix. Procurement was
+  // remediated to a SoD-clean buying role (no longer bundles pay/approve/vendor-master) → 0 conflicts,
+  // dropping the non-admin total from 18 to 14; Planner then remediated 2026-06-26 → 8.
+  it('current roles produce the documented conflicts (total 8 non-admin)', () => {
     const c = (r: keyof typeof DEFAULT_ROLE_PERMISSIONS) => detectSodConflicts(DEFAULT_ROLE_PERMISSIONS[r]).length;
     expect(c('Sales')).toBe(7);
-    expect(c('Procurement')).toBe(4);
-    expect(c('Planner')).toBe(6);
+    expect(c('Procurement')).toBe(0);
+    expect(c('Planner')).toBe(0);
     expect(c('Warehouse')).toBe(1);
     expect(c('Customer')).toBe(0);
-    expect(c('Sales') + c('Procurement') + c('Planner') + c('Warehouse') + c('Customer')).toBe(18);
+    expect(c('Sales') + c('Procurement') + c('Planner') + c('Warehouse') + c('Customer')).toBe(8);
   });
   it('Admin is the inherent superuser (violates all 16 rules)', () => {
     expect(detectSodConflicts(resolvePermissions('Admin')).length).toBe(16);

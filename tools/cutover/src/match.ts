@@ -48,6 +48,15 @@ async function main() {
     { username: 'procT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },
     { username: 'apprv', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: hq }, // AP-PAY checker (≠ admin requester)
   ]).onConflictDoNothing();
+  // The Procurement role default is now SoD-clean (procurement/pr_raise only). These fixtures need the
+  // legacy bundle (md_vendor for supplier screening, etc.) → grant it via an explicit per-user override
+  // (overrides take precedence over the role default — see resolvePermissions).
+  for (const un of ['procT1', 'procT2']) {
+    const uid = Number((await db.select().from(s.users).where(eq(s.users.username, un)))[0].id);
+    await db.insert(s.userPermissions).values(
+      ['procurement', 'creditors', 'ar', 'delivery', 'masterdata', 'approvals'].map((perm) => ({ userId: uid, perm })),
+    ).onConflictDoNothing();
+  }
   await db.insert(s.items).values({ itemId: 'X', itemDescription: 'วัตถุดิบ X', uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
   // V1 = legacy shared master (tenant_id NULL). Seeded via the raw superuser db so RLS WITH CHECK is bypassed.
   const [v1] = await db.insert(s.vendors).values({ name: 'ผู้ขาย V1', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });

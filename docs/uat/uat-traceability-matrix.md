@@ -249,6 +249,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-031 | Requester self-approval blocked (SoD, incl. Admin) | EXP-06, R03/R07 | 02 §7, §9 |
 | UAT-P2P-032 | Maker without approval authority blocked | EXP-06 | 02 §7, §9 |
 | UAT-P2P-033 | Reject leaves bill unpaid | EXP-06 | 02 §7, §9 |
+| UAT-P2P-060 | PR raised by any employee (company-wide `pr_raise`) | R03 (access design) | 02 §3, §6, §7 |
+| UAT-P2P-061 | GR refused for a procurement-only user (R04 at permission layer) | R04 | 02 §7, §9 |
+| UAT-P2P-062 | AP disbursement approved on finance Disbursements screen | EXP-06, R07 | 02 §3, §7 |
+| UAT-UI-P2P-ACC-01 | Procurement & AP screens split by user group | R03/R04/R07 | 02 §3 |
 | UAT-UI-SUP-01 | Supplier portal screen (vendor self-service) — PO ack + invoice submit | Feature (supplier portal UI) | 02 §7 |
 | UAT-P2P-040 | Capital PO line → GR eligible (not stocked) | FA-10 | 02 §7, 09 §7 |
 | UAT-P2P-041 | Register asset from GR → PendingApproval, no GL | FA-10 | 09 §7 |

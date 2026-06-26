@@ -292,10 +292,7 @@ function WriteOffSection() {
 function PayablesTab() {
   const qc = useQueryClient();
   const ap = useQuery<any>({ queryKey: ['fin-ap'], queryFn: () => api('/api/finance/ap?status=Unpaid&limit=50') });
-  // Awaiting-approval AP payments (checker queue). retry:false so a maker without approval rights simply
-  // doesn't see the section (the 403 leaves data undefined) instead of getting an error banner.
-  const pendingPay = useQuery<any>({ queryKey: ['fin-ap-pending'], queryFn: () => api('/api/finance/ap/payments/pending'), retry: false });
-  const refresh = () => { for (const k of ['fin-ap', 'fin-ap-pending', 'fin-kpi', 'fin-ap-aging']) qc.invalidateQueries({ queryKey: [k] }); };
+  const refresh = () => { for (const k of ['fin-ap', 'fin-kpi', 'fin-ap-aging']) qc.invalidateQueries({ queryKey: [k] }); };
 
   // ── AP vendor invoice entry ──
   const [apOpen, setApOpen] = useState(false);
@@ -315,17 +312,8 @@ function PayablesTab() {
     onError: (e: any) => notifyError(e.message),
   });
 
-  // ── AP payment approval (checker) — approve / reject a pending payment (approver ≠ requester) ──
-  const approvePay = useMutation({
-    mutationFn: (no: string) => api(`/api/finance/ap/payments/${no}/approve`, { method: 'POST' }),
-    onSuccess: (r: any) => { notifySuccess(`อนุมัติจ่าย ${r.payment_no} — บิล ${r.bill_status}`); refresh(); },
-    onError: (e: any) => notifyError(e.message),
-  });
-  const rejectPay = useMutation({
-    mutationFn: (no: string) => api(`/api/finance/ap/payments/${no}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'rejected by approver' }) }),
-    onSuccess: (r: any) => { notifySuccess(`ปฏิเสธคำขอ ${r.payment_no}`); refresh(); },
-    onError: (e: any) => notifyError(e.message),
-  });
+  // The CHECKER side (approve/reject + release cash) lives on /disbursements, owned by finance —
+  // accounting books the bill and requests payment here; finance approves there (SoD R07 / EXP-06).
 
   return (
     <div className="space-y-6">
@@ -377,32 +365,12 @@ function PayablesTab() {
         )}
       </StateView>
 
-      {/* AP payments awaiting approval (maker-checker) — only shown to users with approval authority */}
-      {pendingPay.data && (
-        <div>
-          <h3 className="mb-3 text-sm font-semibold text-muted-foreground">คำขอจ่ายรออนุมัติ (Maker-Checker)</h3>
-          <DataTable
-            rows={pendingPay.data.payments}
-            emptyState={{ icon: CheckCheck, title: 'ไม่มีคำขอจ่ายรออนุมัติ', description: 'คำขอจ่ายที่รอการอนุมัติจะแสดงที่นี่' }}
-            columns={[
-              { key: 'payment_no', label: 'เลขที่คำขอ' },
-              { key: 'txn_no', label: 'บิล AP' },
-              { key: 'vendor_name', label: 'เจ้าหนี้' },
-              { key: 'requested_by', label: 'ผู้ขอจ่าย' },
-              { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-              { key: 'act', label: '', sortable: false, render: (r: any) => {
-                const busy = (approvePay.isPending && approvePay.variables === r.payment_no) || (rejectPay.isPending && rejectPay.variables === r.payment_no);
-                return (
-                  <div className="flex gap-1">
-                    <Button size="sm" disabled={busy} onClick={() => approvePay.mutate(r.payment_no)}>อนุมัติ</Button>
-                    <Button size="sm" variant="outline" disabled={busy} onClick={() => rejectPay.mutate(r.payment_no)}>ปฏิเสธ</Button>
-                  </div>
-                );
-              } },
-            ]}
-          />
-        </div>
-      )}
+      {/* The maker-checker approval queue moved to the finance-owned /disbursements page (SoD R07). */}
+      <p className="text-xs text-muted-foreground">
+        คำขอจ่ายที่ส่งแล้วจะรอการอนุมัติจากฝ่ายการเงินที่หน้า{' '}
+        <a href="/disbursements" className="font-medium underline underline-offset-2">จ่ายเงินเจ้าหนี้ (Disbursements)</a>{' '}
+        — ผู้อนุมัติต้องไม่ใช่ผู้ขอจ่าย (แบ่งแยกหน้าที่)
+      </p>
 
       <ApAgingSection />
 
