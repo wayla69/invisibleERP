@@ -505,6 +505,14 @@ and to tie the outstanding balance out to the GL at period close.
 **Screen:** `/pos-control` / POS terminal · **Required permission:** `pos_till`
 (held by *PosSupervisor*, *Admin*)
 
+> **Banking the safe cash.** When you move cash from the drawer to the safe during a
+> shift (a **drop**), it's tracked as **cash in the safe** until it's banked. The
+> finance/treasury team opens **นำเงินสดฝากธนาคาร** (`/cash-banking`), where the top card
+> shows how much cash is sitting in the safe; they pick a bank account and tap
+> **นำฝากทั้งหมด** to record the deposit (the books move the cash from on-hand to the
+> bank), then **กระทบยอด** once it shows on the bank statement. The person who drops the
+> cash **can't** bank it — that's a separate finance role (control **REC-05**).
+
 ### Open the till at the start of a shift
 
 1. Click **Open Till** (**เปิดรอบเงิน**).

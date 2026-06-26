@@ -1,10 +1,11 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, asc, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts } from '../../database/schema';
+import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts, cashMovements, bankDeposits } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
+import { roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 import type { CreateBankAccountDto, ImportStatementDto, AdjustmentDto } from './dto';
 
@@ -19,6 +20,61 @@ export class BankService {
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
   ) {}
+
+  // ── REC-05: cash banking — batch till safe-drops into a bank deposit + reconcile ──
+
+  // Till 'drop's not yet banked = cash still in the safe (deposit_id NULL). The detective exposure.
+  async undepositedDrops(user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select().from(cashMovements)
+      .where(and(eq(cashMovements.tenantId, user.tenantId as number), sql`${cashMovements.type}::text = 'drop'`, sql`${cashMovements.depositId} is null`))
+      .orderBy(asc(cashMovements.createdAt));
+    const total = roundCurrency(rows.reduce((a: number, r: any) => a + n(r.amount), 0), 'THB');
+    return { drops: rows.map((r: any) => ({ movement_no: r.movementNo, amount: n(r.amount), reason: r.reason, created_at: r.createdAt })), count: rows.length, total };
+  }
+
+  // Bank the safe cash: batch the unbanked drops (all, or a chosen set) into a deposit and post the GL
+  // (Dr <bank account GL> / Cr 1000 Cash). SoD: banking is exec/ar — segregated from the cashier (pos_till).
+  async createDeposit(dto: { bank_account_id: number; movement_nos?: string[]; deposit_date?: string }, user: JwtUser) {
+    const db = this.db as any;
+    const [bank] = await db.select().from(bankAccounts).where(and(eq(bankAccounts.id, dto.bank_account_id), eq(bankAccounts.tenantId, user.tenantId as number))).limit(1);
+    if (!bank) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Bank account not found', messageTh: 'ไม่พบบัญชีธนาคาร' });
+    const conds = [eq(cashMovements.tenantId, user.tenantId as number), sql`${cashMovements.type}::text = 'drop'`, sql`${cashMovements.depositId} is null`];
+    const drops = await db.select().from(cashMovements).where(and(...conds));
+    const chosen = dto.movement_nos?.length ? drops.filter((d: any) => dto.movement_nos!.includes(d.movementNo)) : drops;
+    if (!chosen.length) throw new BadRequestException({ code: 'NO_DROPS', message: 'No undeposited cash drops to bank', messageTh: 'ไม่มีเงินสดฝากเซฟที่ยังไม่ได้นำฝากธนาคาร' });
+    const amount = roundCurrency(chosen.reduce((a: number, d: any) => a + n(d.amount), 0), 'THB');
+    const depositNo = await this.docNo.nextDaily('BDEP');
+
+    return await db.transaction(async (tx: any) => {
+      const je: any = await this.ledger.postEntry({ source: 'BDEP', sourceRef: depositNo, tenantId: user.tenantId ?? null, memo: `Bank deposit ${depositNo} → ${bank.bankName} ${bank.accountNo}`, createdBy: user.username, lines: [{ account_code: bank.glAccountCode, debit: amount }, { account_code: '1000', credit: amount }] }, tx);
+      const [dep] = await tx.insert(bankDeposits).values({ tenantId: user.tenantId, depositNo, bankAccountId: dto.bank_account_id, amount: fx(amount, 4), status: 'Deposited', depositDate: dto.deposit_date ?? null, journalNo: je?.entry_no ?? null, createdBy: user.username }).returning({ id: bankDeposits.id });
+      await tx.update(cashMovements).set({ depositId: Number(dep.id) }).where(and(eq(cashMovements.tenantId, user.tenantId as number), sql`${cashMovements.movementNo} = ANY(${sql.raw(`ARRAY[${chosen.map((c: any) => `'${c.movementNo}'`).join(',')}]`)})`));
+      return { deposit_no: depositNo, bank: `${bank.bankName} ${bank.accountNo}`, amount, drops_banked: chosen.length, journal_no: je?.entry_no ?? null, status: 'Deposited' };
+    });
+  }
+
+  // Mark a deposit reconciled to the bank statement (it appeared as a credit on the statement).
+  async reconcileDeposit(depositId: number, user: JwtUser) {
+    const db = this.db as any;
+    const [dep] = await db.select().from(bankDeposits).where(and(eq(bankDeposits.id, depositId), eq(bankDeposits.tenantId, user.tenantId as number))).limit(1);
+    if (!dep) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Deposit not found', messageTh: 'ไม่พบรายการนำฝาก' });
+    if (String(dep.status) === 'Reconciled') throw new BadRequestException({ code: 'ALREADY_RECONCILED', message: 'Deposit already reconciled', messageTh: 'รายการนี้กระทบยอดแล้ว' });
+    await db.update(bankDeposits).set({ status: 'Reconciled', reconciledBy: user.username, reconciledAt: new Date() }).where(eq(bankDeposits.id, depositId));
+    return { deposit_no: dep.depositNo, status: 'Reconciled', reconciled_by: user.username };
+  }
+
+  async listDeposits(user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select().from(bankDeposits).where(eq(bankDeposits.tenantId, user.tenantId as number)).orderBy(desc(bankDeposits.createdAt)).limit(300);
+    const undep = await this.undepositedDrops(user);
+    return {
+      deposits: rows.map((r: any) => ({ id: Number(r.id), deposit_no: r.depositNo, bank_account_id: Number(r.bankAccountId), amount: n(r.amount), status: r.status, deposit_date: r.depositDate, journal_no: r.journalNo, created_by: r.createdBy, created_at: r.createdAt })),
+      count: rows.length,
+      unreconciled: rows.filter((r: any) => r.status !== 'Reconciled').length,
+      cash_in_safe: undep.total, undeposited_drops: undep.count,
+    };
+  }
 
   async createBankAccount(dto: CreateBankAccountDto, user: JwtUser) {
     const db = this.db as any;

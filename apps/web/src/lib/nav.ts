@@ -11,6 +11,7 @@ import {
   BookText,
   CalendarClock,
   Trash2,
+  Vault,
   Bot,
   Disc3,
   Handshake,
@@ -310,6 +311,7 @@ export const INTERNAL_NAV: NavGroup[] = [
         title: 'ธนาคาร & กระทบยอด',
         items: [
           { label: 'ธนาคาร', href: '/bank', icon: Landmark, perms: ['exec', 'creditors', 'ar'] },
+          { label: 'นำเงินสดฝากธนาคาร', href: '/cash-banking', icon: Vault, perms: ['exec', 'ar'] },
           { label: 'กระทบยอด', href: '/reconciliation', icon: Scale, perms: ['exec', 'creditors', 'ar'] },
           { label: 'รายการรออนุมัติ', href: '/approvals', icon: ClipboardCheck, perms: ['exec', 'approvals', 'creditors'] },
         ],
