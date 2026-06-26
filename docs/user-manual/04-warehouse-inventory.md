@@ -167,9 +167,9 @@ movements above and is the basis for **stock valuation** and the **month-end
 inventory reconciliation**.
 
 The screen has tabs: **มูลค่า & กระทบยอด** (valuation + the GL tie-out banner),
-**รับเข้า / เบิก / ปรับปรุง** (the three write actions), **ชั้นต้นทุน (Layers)** (open
-FIFO/FEFO cost layers), and **ความเคลื่อนไหว** (the valued move ledger). The endpoints
-behind each are:
+**รับเข้า / เบิก / ปรับปรุง** (the three write actions), **อนุมัติตัดสต๊อก** (write-off
+approvals — see below), **ชั้นต้นทุน (Layers)** (open FIFO/FEFO cost layers), and
+**ความเคลื่อนไหว** (the valued move ledger). The endpoints behind each are:
 
 | Action | Endpoint | Required permission | What it posts |
 |---|---|---|---|
@@ -205,6 +205,14 @@ behind each are:
 - **Justified adjustments.** Every adjustment must carry a **reason**, or it is
   rejected with `REASON_REQUIRED`; adjustment authority (`wh_adjust`) is segregated
   from counting (`wh_count`) under rule **R11** (control **INV-04**).
+- **Write-offs need a second person (INV-07).** Writing stock **down** (a negative
+  adjustment — spoilage, shrinkage) is **theft-sensitive**, so it uses **maker-checker**:
+  your write-off is a **request** that changes **nothing** until a *different* `wh_adjust`
+  holder opens the **อนุมัติตัดสต๊อก (Write-off approvals)** tab and clicks **อนุมัติ
+  (Approve)** — only then does the stock move and `Dr 5810 / Cr 1200` post. You **cannot
+  approve your own** write-off (`SOD_VIOLATION`, binds even Admin); **ปฏิเสธ (Reject)**
+  leaves stock untouched. A **gain** (positive adjustment) and a **stocktake** posting are
+  immediate — only ad-hoc write-offs wait for approval.
 - **Reconciliation (INV-06).** `GET /api/inventory/reconciliation` returns
   `sub_ledger_value`, `gl_inventory` and `reconciled`. When `reconciled` is `true`
   the perpetual stock value equals the GL inventory control account (1200); a

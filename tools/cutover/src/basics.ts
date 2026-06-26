@@ -422,8 +422,12 @@ async function main() {
   // Run in a dedicated tenant so the inventory control account (1200) is isolated from the cash-flow seed.
   const [invT] = await db.insert(s.tenants).values({ code: 'INVT', name: 'Inventory Co' }).returning({ id: s.tenants.id });
   const invTid = Number(invT.id);
-  await db.insert(s.users).values({ username: 'invmgr', passwordHash: await pw.hash('inv123'), role: 'Admin', tenantId: invTid }).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'invmgr', passwordHash: await pw.hash('inv123'), role: 'Admin', tenantId: invTid },
+    { username: 'invchk', passwordHash: await pw.hash('inv123'), role: 'Admin', tenantId: invTid }, // INV-07: a different write-off approver
+  ]).onConflictDoNothing();
   const invmgr = (await inj('POST', '/api/login', undefined, { username: 'invmgr', password: 'inv123' })).json.token;
+  const invchk = (await inj('POST', '/api/login', undefined, { username: 'invchk', password: 'inv123' })).json.token;
 
   // Receipt 1: 100 @ 10 = 1000 in. Receipt 2: 100 @ 12 = 1200 in ⇒ moving avg = 2200/200 = 11.
   const r1 = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'SUGAR', item_description: 'Sugar 1kg', uom: 'BAG', qty: 100, unit_cost: 10, ref_type: 'GRN', ref_id: 'GRN-1' });
@@ -443,9 +447,16 @@ async function main() {
   const issNeg = await inj('POST', '/api/inventory/issues', invmgr, { item_id: 'SUGAR', qty: 1000 });
   ok('Inventory: over-issue beyond on-hand rejected (INV-01 NEG_STOCK)', issNeg.status === 400 && issNeg.json?.error?.code === 'NEG_STOCK', `st=${issNeg.status} code=${issNeg.json?.error?.code}`);
 
-  // Shrinkage adjustment: −10 @ avg 11 = −110 to 5810 ⇒ balance 140 @ 11 = 1540.
+  // Shrinkage write-off maker-checker (INV-07): −10 @ avg 11 = −110 to 5810 ⇒ balance 140 @ 11 = 1540 —
+  // but only AFTER a different user approves. The request alone posts nothing.
   const adj = await inj('POST', '/api/inventory/adjustments', invmgr, { item_id: 'SUGAR', qty_delta: -10, reason: 'Spoilage' });
-  ok('Inventory: shrinkage adjustment writes stock down + posts variance (−10 @ 11)', adj.status === 201 && near(adj.json?.balance_qty, 140) && near(adj.json?.value, -110), JSON.stringify(adj.json).slice(0, 90));
+  ok('Inventory: write-off is a REQUEST (pending), nothing posted yet (INV-07)', (adj.status === 201 || adj.status === 200) && adj.json?.status === 'pending_approval' && adj.json?.request_id > 0, JSON.stringify(adj.json).slice(0, 90));
+  const valPending = (await inj('GET', '/api/inventory/valuation', invmgr)).json;
+  ok('Inventory: write-off not applied until approved (on-hand still 150 @ 11 = 1650)', near(valPending.items?.find((i: any) => i.item_id === 'SUGAR')?.on_hand_qty, 150), `qty=${valPending.items?.find((i: any) => i.item_id === 'SUGAR')?.on_hand_qty}`);
+  const adjSelf = await inj('POST', `/api/inventory/writeoffs/${adj.json.request_id}/approve`, invmgr);
+  ok('Inventory: requester self-approval blocked → 403 SOD_VIOLATION (INV-07)', adjSelf.status === 403 && adjSelf.json?.error?.code === 'SOD_VIOLATION', `st=${adjSelf.status} code=${adjSelf.json?.error?.code}`);
+  const adjAppr = await inj('POST', `/api/inventory/writeoffs/${adj.json.request_id}/approve`, invchk);
+  ok('Inventory: write-off approved by a different user → applied (−10 @ 11 ⇒ 140, variance −110)', adjAppr.json?.status === 'Posted' && near(adjAppr.json?.balance_qty, 140) && near(adjAppr.json?.value, -110) && adjAppr.json?.approved_by === 'invchk', JSON.stringify(adjAppr.json).slice(0, 110));
   // INV-04 — an adjustment with no reason is rejected (control: every adjustment is justified + audited).
   const adjBad = await inj('POST', '/api/inventory/adjustments', invmgr, { item_id: 'SUGAR', qty_delta: -1, reason: '   ' });
   ok('Inventory: adjustment without a reason rejected (REASON_REQUIRED)', adjBad.status === 400 && adjBad.json?.error?.code === 'REASON_REQUIRED', `st=${adjBad.status} code=${adjBad.json?.error?.code}`);

@@ -59,6 +59,7 @@ async function main() {
     { username: 'apdual', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },       // creditors + approvals — residual self-approval case
     { username: 'payprep', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },            // PAY-03 payroll preparer (t1)
     { username: 'paychk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },             // PAY-03 payroll approver (t1, ≠ preparer)
+    { username: 'whchk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq },              // INV-07 write-off approver (hq, ≠ admin)
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
@@ -659,7 +660,14 @@ async function main() {
   await inj('POST', '/api/inventory/issues', admin, { item_id: 'INVCTL', qty: 50 }); // COGS 550 @ avg 11 → bal 150
   const invNeg = await inj('POST', '/api/inventory/issues', admin, { item_id: 'INVCTL', qty: 1000 });
   ok('INV-01: issue beyond on-hand blocked in the sub-ledger (no negative/oversold stock)', invNeg.status === 400 && invNeg.json.error?.code === 'NEG_STOCK', `${invNeg.status}/${invNeg.json.error?.code}`);
-  await inj('POST', '/api/inventory/adjustments', admin, { item_id: 'INVCTL', qty_delta: -10, reason: 'Spoilage' }); // bal 140 @ 11 = 1540
+  // INV-07: a write-off is maker-checker — request (admin) posts nothing; a different user (whchk) approves → applied.
+  const whchk = await login('whchk', 'pw');
+  const invWo = await inj('POST', '/api/inventory/adjustments', admin, { item_id: 'INVCTL', qty_delta: -10, reason: 'Spoilage' });
+  ok('INV-07: stock write-off is a request (pending), nothing posted yet', invWo.json.status === 'pending_approval' && invWo.json.request_id > 0, JSON.stringify(invWo.json).slice(0, 70));
+  const invWoSelf = await inj('POST', `/api/inventory/writeoffs/${invWo.json.request_id}/approve`, admin);
+  ok('INV-07: requester self-approval blocked → 403 SOD_VIOLATION', invWoSelf.status === 403 && invWoSelf.json.error?.code === 'SOD_VIOLATION', `${invWoSelf.status}/${invWoSelf.json.error?.code}`);
+  const invWoAppr = await inj('POST', `/api/inventory/writeoffs/${invWo.json.request_id}/approve`, whchk);
+  ok('INV-07: write-off approved by a different user → applied (bal 140 @ 11 = 1540)', invWoAppr.json.status === 'Posted' && invNear(invWoAppr.json.balance_qty, 140) && invWoAppr.json.approved_by === 'whchk', JSON.stringify(invWoAppr.json).slice(0, 90));
   const invNoReason = await inj('POST', '/api/inventory/adjustments', admin, { item_id: 'INVCTL', qty_delta: -1, reason: '   ' });
   ok('INV-04: a stock adjustment without a reason is rejected (justified + audited)', invNoReason.status === 400 && invNoReason.json.error?.code === 'REASON_REQUIRED', `${invNoReason.status}/${invNoReason.json.error?.code}`);
   const invRec = await inj('GET', '/api/inventory/reconciliation', admin);
