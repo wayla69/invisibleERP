@@ -103,6 +103,9 @@ export const journalLines = pgTable(
     currency: text('currency').default('THB'),
     memo: text('memo'),
     costCenterCode: text('cost_center_code'), // nullable accounting dimension (Tier 3); untagged = Unassigned
+    branchId: bigint('branch_id', { mode: 'number' }),
+    projectId: bigint('project_id', { mode: 'number' }),
+    departmentId: bigint('department_id', { mode: 'number' }),
     tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   },
   (t) => ({
@@ -112,6 +115,8 @@ export const journalLines = pgTable(
     // table; without this every trial-balance/statement/consolidation does a full scan + hash join.
     byEntry: index('idx_jl_entry').on(t.entryId),
     byTenant: index('idx_jl_tenant').on(t.tenantId),
+    byBranch: index('idx_jl_branch').on(t.branchId),
+    byProject: index('idx_jl_project').on(t.projectId),
   }),
 );
 
