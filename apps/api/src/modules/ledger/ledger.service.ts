@@ -6,6 +6,7 @@ import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMemb
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
+import { assertTemplatesSubsetOf } from './coa-templates';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -85,6 +86,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '5210', name: 'Depreciation Expense — ROU', type: 'Expense' },       // ค่าเสื่อมราคาสินทรัพย์สิทธิการใช้
   { code: '5820', name: 'Impairment Loss', type: 'Expense' },                  // ผลขาดทุนจากการด้อยค่าสินทรัพย์
   { code: '5900', name: 'Interest Expense', type: 'Expense' },                 // ดอกเบี้ยจ่าย — incl. lease-liability unwinding
+  { code: '5830', name: 'Cash Over/Short', type: 'Expense' },                  // เงินสดขาด/เกินบัญชี — POS-01 till-close variance (short=debit, over=credit)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -180,6 +182,8 @@ export class LedgerService {
   // ───────────────────── Chart of Accounts ─────────────────────
   // idempotent seed — onConflictDoNothing บน accounts.code (unique)
   async seedChartOfAccounts() {
+    // Fail fast at boot if any industry CoA template drifts from the canonical universe (unknown/dup code).
+    assertTemplatesSubsetOf(COA.map((a) => a.code));
     const db = this.db as any;
     await db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code });
     return { seeded: COA.length };

@@ -10,7 +10,7 @@ const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 
 export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string }
 export interface CostDto { entry_type?: 'time' | 'expense'; description?: string; qty?: number; rate?: number; amount?: number; billable?: boolean; entry_date?: string }
-export interface BillDto { amount: number }
+export interface BillDto { amount?: number; percent?: number }
 
 @Injectable()
 export class ProjectsService {
@@ -67,10 +67,21 @@ export class ProjectsService {
   async bill(code: string, dto: BillDto, user: JwtUser) {
     const db = this.db as any;
     const p = await this.row(code);
-    const bill = r2(n(dto.amount));
+    // Milestone / progressive billing: a Fixed-price contract can be billed by PERCENT of the contract
+    // value (e.g. 30% at a phase) instead of a raw amount. T&M still bills a raw amount.
+    let bill: number;
+    if (dto.percent != null) {
+      if (n(p.contractAmount) <= 0) throw new BadRequestException({ code: 'NO_CONTRACT', message: 'Percent billing requires a contract amount', messageTh: 'การวางบิลตาม % ต้องมีมูลค่าสัญญา' });
+      bill = r2(n(p.contractAmount) * n(dto.percent) / 100);
+    } else {
+      bill = r2(n(dto.amount));
+    }
     if (bill <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Bill amount must be positive', messageTh: 'จำนวนเงินวางบิลต้องมากกว่าศูนย์' });
     const tenantId = p.tenantId ?? user.tenantId ?? null;
     const newBilled = r2(n(p.billedToDate) + bill);
+    // Fixed-price guard: cumulative billing can never exceed the contract value (over-billing the customer).
+    if (p.billingType === 'Fixed' && n(p.contractAmount) > 0 && newBilled > n(p.contractAmount) + 0.01)
+      throw new BadRequestException({ code: 'BILL_EXCEEDS_CONTRACT', message: `Billing ${bill} would exceed the contract ${n(p.contractAmount)} (already billed ${n(p.billedToDate)})`, messageTh: 'วางบิลเกินมูลค่าสัญญา' });
     if (await this.ledger.alreadyPosted('PRJ-BILL', `${code}:${newBilled}`, tenantId)) return { already: true, project_code: code };
 
     const relieve = r2(Math.max(0, n(p.costToDate) - n(p.recognizedCost)));
@@ -117,14 +128,23 @@ export class ProjectsService {
 
   private fmt(p: any, nonBillable = 0) {
     const cost = n(p.costToDate), recognized = n(p.recognizedCost), billed = n(p.billedToDate), nb = r2(nonBillable);
+    const budget = n(p.budgetAmount), totalCost = r2(cost + nb);
     return {
       project_code: p.projectCode, name: p.name, customer_name: p.customerName, billing_type: p.billingType, status: p.status,
-      budget_amount: n(p.budgetAmount), contract_amount: n(p.contractAmount),
+      budget_amount: budget, contract_amount: n(p.contractAmount),
       cost_to_date: cost, recognized_cost: recognized, billed_to_date: billed,
       non_billable_cost: nb,                       // expensed straight to 5800 (unrecoverable)
-      total_cost: r2(cost + nb),                   // all costs incurred (recoverable WIP + non-billable)
+      total_cost: totalCost,                       // all costs incurred (recoverable WIP + non-billable)
+      // Budget control: variance = budget − total cost incurred (negative = OVER budget); budget_used_pct +
+      // over_budget flag let the controller catch a cost overrun before it eats the margin (null if no budget).
+      budget_variance: budget > 0 ? r2(budget - totalCost) : null,
+      budget_used_pct: budget > 0 ? r2((totalCost / budget) * 100) : null,
+      over_budget: budget > 0 && totalCost > budget,
       wip: r2(cost - recognized),                  // unbilled BILLABLE cost sitting in 1260
       margin: r2(billed - recognized - nb),        // recognized revenue − recognized billable cost − absorbed non-billable
+      // Fixed-price progress: how much of the contract is billed + what's left to bill (null for T&M).
+      billed_pct: p.billingType === 'Fixed' && n(p.contractAmount) > 0 ? r2((billed / n(p.contractAmount)) * 100) : null,
+      remaining_to_bill: p.billingType === 'Fixed' && n(p.contractAmount) > 0 ? r2(Math.max(0, n(p.contractAmount) - billed)) : null,
       start_date: p.startDate, end_date: p.endDate, created_at: p.createdAt,
     };
   }

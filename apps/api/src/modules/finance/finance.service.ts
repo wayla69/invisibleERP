@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, expenseRequests, tillSessions } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -514,6 +514,9 @@ export class FinanceService {
     // 7. EXP-08 — petty-cash expense / advance requests awaiting approval.
     for (const e of await db.select().from(expenseRequests).where(eq(expenseRequests.status, 'PendingApproval')))
       items.push({ type: 'petty_cash', control: 'EXP-08', ref: e.reqNo, label: `${e.kind === 'advance' ? 'เงินเบิกล่วงหน้า' : 'ค่าใช้จ่าย'} ${e.payee ?? ''}`.trim(), amount: n(e.amount), requested_by: e.requestedBy ?? null, requested_at: e.requestedAt ?? null, age_days: ageDays(e.requestedAt) });
+    // 8. REV-13 — material till-close cash over/short awaiting a manager's approval.
+    for (const t of await db.select().from(tillSessions).where(eq(tillSessions.varianceStatus, 'PendingApproval')))
+      items.push({ type: 'till_variance', control: 'REV-13', ref: t.sessionNo, label: `เงินสด${n(t.variance) < 0 ? 'ขาด' : 'เกิน'} ${t.sessionNo}`, amount: Math.abs(n(t.variance)), requested_by: t.closedBy ?? null, requested_at: t.closedAt ?? null, age_days: ageDays(t.closedAt) });
 
     items.sort((a, b) => (b.age_days ?? -1) - (a.age_days ?? -1));
     const byType: Record<string, number> = {};

@@ -21,7 +21,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 type Project = {
   project_code: string; name: string; customer_name: string | null; billing_type: string; status: string;
   contract_amount: number; cost_to_date: number; billed_to_date: number; wip: number; margin: number;
-  non_billable_cost: number; total_cost: number;
+  non_billable_cost: number; total_cost: number; billed_pct: number | null; remaining_to_bill: number | null;
+  budget_amount: number; budget_variance: number | null; budget_used_pct: number | null; over_budget: boolean;
 };
 const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
@@ -42,9 +43,12 @@ export default function ProjectsPage() {
   const [amount, setAmount] = useState('');
   const [ctype, setCtype] = useState<'time' | 'expense'>('time');
   const [billable, setBillable] = useState(true);
-  const openDlg = (mode: 'cost' | 'bill', code: string) => { setDlg({ mode, code }); setAmount(''); setCtype('time'); setBillable(true); };
+  const [byPercent, setByPercent] = useState(false);
+  const openDlg = (mode: 'cost' | 'bill', code: string) => { setDlg({ mode, code }); setAmount(''); setCtype('time'); setBillable(true); setByPercent(false); };
   const submit = useMutation({
-    mutationFn: () => api<any>(`/api/projects/${dlg!.code}/${dlg!.mode}`, { method: 'POST', body: JSON.stringify(dlg!.mode === 'cost' ? { entry_type: ctype, amount: Number(amount) || 0, billable } : { amount: Number(amount) || 0 }) }),
+    mutationFn: () => api<any>(`/api/projects/${dlg!.code}/${dlg!.mode}`, { method: 'POST', body: JSON.stringify(
+      dlg!.mode === 'cost' ? { entry_type: ctype, amount: Number(amount) || 0, billable }
+        : byPercent ? { percent: Number(amount) || 0 } : { amount: Number(amount) || 0 }) }),
     onSuccess: (r) => { notifySuccess(dlg!.mode === 'cost' ? `บันทึกต้นทุน (รวม ${baht(r.cost_to_date)})` : `วางบิล — กำไร ${baht(r.margin)} (${r.entry_no})`); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
@@ -91,7 +95,8 @@ export default function ProjectsPage() {
               { key: 'name', label: 'โครงการ', render: (r: Project) => `${r.name}${r.customer_name ? ` · ${r.customer_name}` : ''}` },
               { key: 'billing_type', label: 'รูปแบบ' },
               { key: 'cost_to_date', label: 'ต้นทุนสะสม', align: 'right', render: (r: Project) => <span className="tabular">{baht(r.cost_to_date)}</span> },
-              { key: 'billed_to_date', label: 'วางบิลแล้ว', align: 'right', render: (r: Project) => <span className="tabular">{baht(r.billed_to_date)}</span> },
+              { key: 'budget_used_pct', label: 'ใช้งบ', align: 'right', render: (r: Project) => r.budget_used_pct == null ? '—' : <span className={`tabular ${r.over_budget ? 'font-medium text-destructive' : r.budget_used_pct >= 85 ? 'text-warning-foreground dark:text-warning' : 'text-muted-foreground'}`} title={`งบ ${baht(r.budget_amount)} · คงเหลือ ${baht(r.budget_variance ?? 0)}`}>{r.budget_used_pct}%{r.over_budget ? ' ⚠' : ''}</span> },
+              { key: 'billed_to_date', label: 'วางบิลแล้ว', align: 'right', render: (r: Project) => <span className="tabular">{baht(r.billed_to_date)}{r.billed_pct != null ? <span className="ml-1 text-xs text-muted-foreground">({r.billed_pct}%)</span> : null}</span> },
               { key: 'wip', label: 'WIP', align: 'right', render: (r: Project) => <span className="tabular">{baht(r.wip)}</span> },
               { key: 'non_billable_cost', label: 'เบิกลูกค้าไม่ได้', align: 'right', render: (r: Project) => <span className={`tabular ${r.non_billable_cost > 0 ? 'text-destructive' : 'text-muted-foreground'}`} title="ต้นทุนที่เบิกลูกค้าไม่ได้ — ลงเป็นค่าใช้จ่ายทันที (5800) ไม่เข้า WIP">{baht(r.non_billable_cost)}</span> },
               { key: 'margin', label: 'กำไร', align: 'right', render: (r: Project) => <span className={`tabular ${r.margin < 0 ? 'text-destructive' : ''}`}>{baht(r.margin)}</span> },
@@ -126,11 +131,17 @@ export default function ProjectsPage() {
                 </select>
               </div>
             )}
-            <div className="grid gap-1.5"><Label>จำนวนเงิน</Label><Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+            <div className="grid gap-1.5"><Label>{dlg?.mode === 'bill' && byPercent ? 'เปอร์เซ็นต์ของสัญญา (%)' : 'จำนวนเงิน'}</Label><Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={dlg?.mode === 'bill' && byPercent ? 'เช่น 30' : ''} /></div>
             {dlg?.mode === 'cost' && (
               <label className="flex items-start gap-2 text-sm">
                 <input type="checkbox" className="mt-0.5" checked={billable} onChange={(e) => setBillable(e.target.checked)} />
                 <span>เบิกลูกค้าได้ (billable)<span className="block text-xs text-muted-foreground">ติ๊กออก = เบิกไม่ได้ → ลงเป็นค่าใช้จ่ายทันที (5800) ไม่เข้า WIP และไม่นำไปวางบิล</span></span>
+              </label>
+            )}
+            {dlg?.mode === 'bill' && (
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-0.5" checked={byPercent} onChange={(e) => setByPercent(e.target.checked)} />
+                <span>วางบิลตาม % ของสัญญา (สำหรับงานเหมา/Fixed)<span className="block text-xs text-muted-foreground">วางบิลเป็นงวดตามความคืบหน้า เช่น 30% — ระบบกันไม่ให้วางบิลเกินมูลค่าสัญญา</span></span>
               </label>
             )}
           </div>

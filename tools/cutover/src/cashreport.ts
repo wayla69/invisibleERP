@@ -108,6 +108,37 @@ async function main() {
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
   ok('GL: trial balance balanced after cash movements', near(tb.debit ?? tb.total_debit, tb.credit ?? tb.total_credit), JSON.stringify(tb).slice(0, 70));
 
+  // ── REV-13: cash over/short → GL + maker-checker ──
+  // Immaterial short (-7, the close above) posts to GL immediately (5830 Dr / 1000 Cr), no approval.
+  ok('REV-13: immaterial variance status NotRequired + JE posted', z.json.variance_status === 'NotRequired' && /^JE-/.test(z.json.variance_journal_no ?? ''), `st=${z.json.variance_status} je=${z.json.variance_journal_no}`);
+  const short7 = (await pg.query(`SELECT coalesce(sum(jl.debit),0) d FROM journal_lines jl JOIN journal_entries je ON je.id=jl.entry_id WHERE je.source='TILL_CLOSE' AND je.entry_no='${z.json.variance_journal_no}' AND jl.account_code='5830'`)).rows as any[];
+  ok('REV-13: immaterial short books Dr 5830 Cash Over/Short = 7', near(short7[0]?.d, 7), `d=${short7[0]?.d}`);
+
+  // Material short: open float 0, one cash sale (107), close counting 0 → variance -107 (> 100) → Draft JE + PendingApproval.
+  const tillM = await inj('POST', '/api/payments/till/open', sales1, { opening_float: 0 });
+  await cashSale(); // 107 cash, links to tillM (most-recent open till)
+  const zM = await inj('POST', '/api/payments/till/close', sales1, { session_no: tillM.json.session_no, closing_count: 0 });
+  ok('REV-13: material short parks PendingApproval', zM.json.variance_status === 'PendingApproval' && near(zM.json.variance, -107) && /^JE-/.test(zM.json.variance_journal_no ?? ''), JSON.stringify(zM.json).slice(0, 120));
+  const jeM = (await pg.query(`SELECT status, created_by FROM journal_entries WHERE entry_no='${zM.json.variance_journal_no}'`)).rows as any[];
+  ok('REV-13: material variance JE is Draft (excluded from balances)', jeM[0]?.status === 'Draft' && jeM[0]?.created_by === 'sales1', JSON.stringify(jeM[0]));
+
+  // SoD: the cashier who closed cannot approve their own variance.
+  const selfApprove = await inj('POST', `/api/payments/till/variance/${tillM.json.session_no}/approve`, sales1);
+  ok('REV-13: self-approval blocked (403 SOD_VIOLATION)', selfApprove.status === 403 && selfApprove.json.error?.code === 'SOD_VIOLATION', `${selfApprove.status} ${selfApprove.json.error?.code}`);
+
+  // A different user (manager/admin) approves → JE becomes Posted, till variance Approved.
+  const appr = await inj('POST', `/api/payments/till/variance/${tillM.json.session_no}/approve`, admin);
+  ok('REV-13: manager approves material variance', appr.json.variance_status === 'Approved' && appr.json.approved_by === 'admin', JSON.stringify(appr.json).slice(0, 110));
+  const jeM2 = (await pg.query(`SELECT status FROM journal_entries WHERE entry_no='${zM.json.variance_journal_no}'`)).rows as any[];
+  ok('REV-13: approved variance JE now Posted', jeM2[0]?.status === 'Posted', JSON.stringify(jeM2[0]));
+
+  // Re-approving a settled variance is rejected.
+  const reAppr = await inj('POST', `/api/payments/till/variance/${tillM.json.session_no}/approve`, admin);
+  ok('REV-13: re-approval rejected (NOT_PENDING)', reAppr.status === 400 && reAppr.json.error?.code === 'NOT_PENDING', `${reAppr.status} ${reAppr.json.error?.code}`);
+
+  const tb2 = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
+  ok('REV-13: trial balance still balanced after variance postings', near(tb2.debit ?? tb2.total_debit, tb2.credit ?? tb2.total_credit), JSON.stringify(tb2).slice(0, 70));
+
   // ── Finding #1: cross-till refund attribution. A cash sale rung on till A (then CLOSED) and refunded
   //    while a different till B is open must reduce B's drawer (cash physically leaves B), NOT the
   //    already-closed A. (Single-connection PGlite can't reproduce the concurrent shifts, so we assert
