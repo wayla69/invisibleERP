@@ -42,6 +42,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '5200', name: 'Depreciation Expense', type: 'Expense' },
   { code: '1510', name: 'Gain/Loss on Disposal', type: 'Revenue' }, // gain=credit, loss=debit
   { code: '1010', name: 'Bank — Current', type: 'Asset' }, // house-bank GL accounts (bank reconciliation)
+  { code: '1015', name: 'Petty Cash', type: 'Asset' }, // petty-cash imprest float (EXP-08) — a cash account
   { code: '1020', name: 'Bank — Savings', type: 'Asset' },
   { code: '2400', name: 'Unearned Revenue', type: 'Liability' }, // รายได้รอตัดบัญชี — deferred revenue
   { code: '5400', name: 'FX Gain/Loss (Unrealized)', type: 'Expense' }, // กำไร/ขาดทุนอัตราแลกเปลี่ยน — loss=debit, gain=credit
@@ -88,7 +89,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
 // Cash & cash-equivalents — the accounts the statement EXPLAINS (movement is the bottom line, not a flow).
-const CASH_ACCOUNTS = ['1000', '1010', '1020'];
+const CASH_ACCOUNTS = ['1000', '1010', '1015', '1020'];
 type CfBucket = 'addback' | 'operating' | 'investing' | 'financing';
 // Maps every NON-cash balance-sheet account to a cash-flow section. The indirect method starts operating
 // cash from net income, then layers (a) non-cash add-backs and (b) working-capital movements. Every
