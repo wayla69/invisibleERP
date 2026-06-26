@@ -128,6 +128,38 @@ export class CloseService {
     return this.shape(locked, await this.stepsFor(dto.closeRunId));
   }
 
+  // ───────────────────── Emergency reopen (controlled override) ─────────────────────
+  // GL-16b: a Locked period can be reopened ONLY for a documented exception — a mandatory `reason` is
+  // required (REASON_REQUIRED) and the reopener MUST differ from the user who locked it (SELF_REOPEN), so the
+  // override is two-person and never self-served. Flips the run back to ReadyToLock (the signed-off steps
+  // stay Done) and the fiscal period back to Open so corrective postings are allowed; a different user must
+  // then re-lock. The POST is captured by the append-only audit_log (tamper-evident hash chain) with the
+  // actor + reason, so every reopen is attributable.
+  async reopenPeriod(dto: { closeRunId: number; reopenedBy: string; reason: string }) {
+    const db = this.db as any;
+    const tenantId = this.tenantId();
+    const run = await this.getRun(dto.closeRunId);
+    if (run.status !== 'Locked') {
+      throw new BadRequestException({ code: 'NOT_LOCKED', message: `Period ${run.period} is not locked`, messageTh: `งวดบัญชี ${run.period} ยังไม่ถูกล็อก` });
+    }
+    if (!dto.reason || !dto.reason.trim()) {
+      throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A reason is required to reopen a locked period', messageTh: 'ต้องระบุเหตุผลในการเปิดงวดที่ล็อกแล้ว' });
+    }
+    if (run.lockedBy === dto.reopenedBy) {
+      throw new BadRequestException({ code: 'SELF_REOPEN', message: 'Maker-checker: the user who locked the period cannot reopen it', messageTh: 'ผู้ที่ล็อกงวดเปิดงวดเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
+    const [reopened] = await db.update(closeRuns).set({
+      status: 'ReadyToLock',
+      lockedBy: null,
+      lockedAt: null,
+      note: `REOPENED by ${dto.reopenedBy}: ${dto.reason.trim()}`,
+    }).where(eq(closeRuns.id, dto.closeRunId)).returning();
+    // Unlock the fiscal period so postEntry accepts corrective postings again.
+    await db.update(fiscalPeriods).set({ status: 'Open' })
+      .where(and(eq(fiscalPeriods.tenantId, tenantId as number), eq(fiscalPeriods.code, run.period)));
+    return this.shape(reopened, await this.stepsFor(dto.closeRunId));
+  }
+
   // ───────────────────── Read ─────────────────────
   async status(period: string) {
     const tenantId = this.tenantId();
