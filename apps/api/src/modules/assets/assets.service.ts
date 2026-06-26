@@ -145,7 +145,7 @@ export class AssetsService {
     // asset is transferred directly to retained earnings on disposal (Dr 3200 / Cr 3100) — it does not pass
     // through P&L. The surplus is the sum of upward revaluations booked to 3200 (impairments went to P&L).
     const [rev] = await db.select({ s: sql<string>`coalesce(sum(${assetRevaluations.delta}),0)` }).from(assetRevaluations)
-      .where(and(eq(assetRevaluations.assetNo, assetNo), eq(assetRevaluations.kind, 'revaluation')));
+      .where(and(eq(assetRevaluations.assetNo, assetNo), eq(assetRevaluations.kind, 'revaluation'), eq(assetRevaluations.status, 'Posted')));
     const surplus = round4(n(rev?.s));
     let recycleJe: any = null;
     if (surplus > 0) {
@@ -171,30 +171,64 @@ export class AssetsService {
     const oldValue = n(a.netBookValue);
     const delta = round4(newValue - oldValue);
     if (delta === 0) throw new BadRequestException({ code: 'NO_CHANGE', message: 'new_value equals current net book value', messageTh: 'มูลค่าใหม่เท่ากับมูลค่าตามบัญชีเดิม' });
+    // FA-08: only one revaluation may be pending approval at a time (the carrying value is deferred until
+    // approval, so a second proposal would compute its delta off a stale base).
+    const [pending] = await db.select().from(assetRevaluations).where(and(eq(assetRevaluations.assetNo, assetNo), eq(assetRevaluations.status, 'PendingApproval'))).limit(1);
+    if (pending) throw new BadRequestException({ code: 'REVALUATION_PENDING', message: `A revaluation of ${assetNo} is already pending approval`, messageTh: 'มีรายการตีมูลค่าใหม่ของสินทรัพย์นี้รออนุมัติอยู่แล้ว' });
     const kind = delta > 0 ? 'revaluation' : 'impairment';
     const date = dto.reval_date ?? ymd();
     const lines: any[] = delta > 0
       ? [{ account_code: '1500', debit: delta }, { account_code: '3200', credit: delta }]      // upward: gross up, surplus to equity
       : [{ account_code: '5820', debit: -delta }, { account_code: '1500', credit: -delta }];    // impairment: loss, gross down
+    // FA-08: post the JE as a DRAFT (excluded from balances) and DEFER the carrying-value change. A
+    // different user must approve before the revaluation/impairment is effective.
     const je: any = await this.ledger.postEntry({
       // source_ref unique per event (old→new) so two revaluations of the same asset on the same day don't
       // collide on the JE idempotency key and silently dedupe.
       date, source: 'REVAL', sourceRef: `${assetNo}-${oldValue}-${newValue}-${date}`, tenantId: a.tenantId ?? user.tenantId ?? null,
       memo: `${kind === 'revaluation' ? 'Revaluation surplus' : 'Impairment'} ${assetNo}: ${oldValue} → ${newValue}`, createdBy: user.username, lines,
+      pendingApproval: true,
     });
-    await db.update(fixedAssets).set({ netBookValue: fx(newValue, 4), acquireCost: fx(round4(n(a.acquireCost) + delta), 4) }).where(eq(fixedAssets.id, a.id));
     await db.insert(assetRevaluations).values({
       tenantId: a.tenantId ?? null, assetId: Number(a.id), assetNo, revalDate: date, kind,
       oldValue: fx(oldValue, 4), newValue: fx(newValue, 4), delta: fx(delta, 4), reason: dto.reason ?? null,
-      glRef: je?.entry_no ?? null, actionedBy: user.username,
+      glRef: je?.entry_no ?? null, actionedBy: user.username, status: 'PendingApproval',
     });
-    return { asset_no: assetNo, kind, old_value: oldValue, new_value: newValue, delta, journal_no: je?.entry_no ?? null };
+    return { asset_no: assetNo, kind, old_value: oldValue, new_value: newValue, delta, status: 'PendingApproval', journal_no: je?.entry_no ?? null };
+  }
+
+  // FA-08 maker-checker: a DIFFERENT user approves the pending revaluation → the Draft JE becomes effective
+  // AND the asset's carrying value moves. Reuses GL-05's approveEntry (approver ≠ preparer, period re-check).
+  async approveRevaluation(assetNo: string, user: JwtUser) {
+    const db = this.db as any;
+    const rev = await this.pendingReval(assetNo);
+    await this.ledger.approveEntry(rev.glRef, user);
+    const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.id, Number(rev.assetId))).limit(1);
+    await db.update(fixedAssets).set({ netBookValue: fx(n(rev.newValue), 4), acquireCost: fx(round4(n(a?.acquireCost) + n(rev.delta)), 4) }).where(eq(fixedAssets.id, Number(rev.assetId)));
+    await db.update(assetRevaluations).set({ status: 'Posted', approvedBy: user.username, approvedAt: new Date() }).where(eq(assetRevaluations.id, Number(rev.id)));
+    return { asset_no: assetNo, kind: rev.kind, new_value: n(rev.newValue), delta: n(rev.delta), status: 'Posted', approved_by: user.username, prepared_by: rev.actionedBy, journal_no: rev.glRef };
+  }
+
+  // Reject a pending revaluation → voids the Draft JE; the carrying value never moved.
+  async rejectRevaluation(assetNo: string, user: JwtUser, reason?: string) {
+    const db = this.db as any;
+    const rev = await this.pendingReval(assetNo);
+    await this.ledger.rejectEntry(rev.glRef, user, reason);
+    await db.update(assetRevaluations).set({ status: 'Rejected' }).where(eq(assetRevaluations.id, Number(rev.id)));
+    return { asset_no: assetNo, status: 'Rejected', rejected_by: user.username, journal_no: rev.glRef };
+  }
+
+  private async pendingReval(assetNo: string) {
+    const db = this.db as any;
+    const [rev] = await db.select().from(assetRevaluations).where(and(eq(assetRevaluations.assetNo, assetNo), eq(assetRevaluations.status, 'PendingApproval'))).orderBy(desc(assetRevaluations.id)).limit(1);
+    if (!rev) throw new BadRequestException({ code: 'NO_PENDING_REVALUATION', message: `No revaluation pending approval for ${assetNo}`, messageTh: 'ไม่มีรายการตีมูลค่าใหม่ที่รออนุมัติสำหรับสินทรัพย์นี้' });
+    return rev;
   }
 
   async listRevaluations(assetNo: string) {
     const db = this.db as any;
     const rows = await db.select().from(assetRevaluations).where(eq(assetRevaluations.assetNo, assetNo)).orderBy(desc(assetRevaluations.id));
-    return { asset_no: assetNo, revaluations: rows.map((r: any) => ({ kind: r.kind, old_value: n(r.oldValue), new_value: n(r.newValue), delta: n(r.delta), reason: r.reason, reval_date: r.revalDate, journal_no: r.glRef, actioned_by: r.actionedBy })), count: rows.length };
+    return { asset_no: assetNo, revaluations: rows.map((r: any) => ({ kind: r.kind, old_value: n(r.oldValue), new_value: n(r.newValue), delta: n(r.delta), reason: r.reason, reval_date: r.revalDate, status: r.status, journal_no: r.glRef, actioned_by: r.actionedBy, approved_by: r.approvedBy })), count: rows.length };
   }
 
   // ── QR asset tags ──────────────────────────────────────────────────────

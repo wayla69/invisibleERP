@@ -386,20 +386,28 @@ async function main() {
   const modNoChange = await inj('POST', `/api/leases/${mkLease.json?.lease_no}/modify`, admin, {});
   ok('Lease modification: a no-op modification is rejected (NO_CHANGE)', modNoChange.status === 400 && modNoChange.json?.error?.code === 'NO_CHANGE', `st=${modNoChange.status} code=${modNoChange.json?.error?.code}`);
 
-  // ───────────────────── Asset revaluation / impairment (FA-07) ─────────────────────
+  // ───────────────── Asset revaluation / impairment maker-checker (FA-07 valuation + FA-08 SoD) ─────────────────
   const reg = (await inj('GET', '/api/assets', admin)).json;
   const fa2 = (reg.assets ?? reg.register ?? []).find((a: any) => (a.asset_no ?? a.assetNo) === 'FA-EAM2');
   const nbv2 = Number(fa2?.net_book_value ?? fa2?.nbv ?? fa2?.netBookValue ?? 80000);
   const surplusBefore = await tbCredit2('3200');
+  // 1. Request an upward revaluation → Draft JE + PendingApproval; the surplus does NOT hit equity yet.
   const revUp = await inj('POST', '/api/assets/FA-EAM2/revalue', admin, { new_value: nbv2 + 10000, reason: 'market appraisal' });
-  ok('Asset revaluation (upward): surplus to equity 3200 (+10000)', revUp.status === 201 && revUp.json?.kind === 'revaluation' && near(revUp.json?.delta, 10000) && near(await tbCredit2('3200'), surplusBefore + 10000), `kind=${revUp.json?.kind} delta=${revUp.json?.delta}`);
+  ok('Asset revaluation request: PendingApproval, Draft JE excluded from 3200 (FA-08)', revUp.status === 201 && revUp.json?.kind === 'revaluation' && near(revUp.json?.delta, 10000) && revUp.json?.status === 'PendingApproval' && near(await tbCredit2('3200'), surplusBefore), `st=${revUp.json?.status} 3200=${await tbCredit2('3200')}`);
+  // 2. Preparer cannot approve own revaluation (SoD).
+  const revSelf = await inj('POST', '/api/assets/FA-EAM2/revalue/approve', admin);
+  ok('Asset revaluation: preparer self-approval blocked → 403 SOD_VIOLATION (FA-08)', revSelf.status === 403 && revSelf.json?.error?.code === 'SOD_VIOLATION', `${revSelf.status} ${revSelf.json?.error?.code}`);
+  // 3. A different user approves → surplus to equity 3200, carrying value moves.
+  const revUpAppr = await inj('POST', '/api/assets/FA-EAM2/revalue/approve', mgr);
+  ok('Asset revaluation approved by a different user → surplus to equity 3200 (+10000)', revUpAppr.json?.status === 'Posted' && !!revUpAppr.json?.approved_by && near(await tbCredit2('3200'), surplusBefore + 10000), `st=${revUpAppr.json?.status} 3200=${await tbCredit2('3200')}`);
   const imp5820Before = await tbDebit('5820');
   const revDown = await inj('POST', '/api/assets/FA-EAM2/revalue', admin, { new_value: nbv2 + 5000, reason: 'impairment test' });
-  ok('Asset impairment (downward): impairment loss 5820 (+5000)', revDown.status === 201 && revDown.json?.kind === 'impairment' && near(revDown.json?.delta, -5000) && near(await tbDebit('5820'), imp5820Before + 5000), `kind=${revDown.json?.kind} delta=${revDown.json?.delta}`);
+  await inj('POST', '/api/assets/FA-EAM2/revalue/approve', mgr);
+  ok('Asset impairment (downward, approved): impairment loss 5820 (+5000)', revDown.json?.kind === 'impairment' && near(revDown.json?.delta, -5000) && near(await tbDebit('5820'), imp5820Before + 5000), `kind=${revDown.json?.kind} delta=${revDown.json?.delta}`);
   const noChange = await inj('POST', '/api/assets/FA-EAM2/revalue', admin, { new_value: nbv2 + 5000 });
   ok('Asset revaluation: no-change rejected (NO_CHANGE)', noChange.status === 400 && noChange.json?.error?.code === 'NO_CHANGE', `st=${noChange.status} code=${noChange.json?.error?.code}`);
   const revList = (await inj('GET', '/api/assets/FA-EAM2/revaluations', admin)).json;
-  ok('Asset revaluation: audit trail lists both events', (revList.revaluations ?? []).length === 2, `n=${revList.revaluations?.length}`);
+  ok('Asset revaluation: audit trail lists both events, both Posted', (revList.revaluations ?? []).length === 2 && (revList.revaluations ?? []).every((r: any) => r.status === 'Posted'), `n=${revList.revaluations?.length}`);
   // Revaluation-reserve recycling on disposal: FA-EAM2 holds a 10000 surplus in 3200 → transfers to 3100.
   const surplus3200Before = await tbBalance('3200');
   const disp2 = await inj('PATCH', '/api/assets/FA-EAM2/dispose', admin, { proceeds: 50000 });

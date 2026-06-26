@@ -310,8 +310,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-031 | Prepaid amortization run (straight-line) + idempotent | GL-09 | 04 §7 |
 | UAT-GL-032 | Lease commencement recognises ROU + liability at PV | LSE-01 | 04 §7 |
 | UAT-GL-033 | Lease periodic run (interest + payment + ROU depreciation) | LSE-01 | 04 §7 |
-| UAT-GL-034 | Asset upward revaluation → surplus to equity | FA-07 | 09 §7 |
-| UAT-GL-035 | Asset impairment + no-change guard + audit | FA-07 | 09 §7 |
+| UAT-GL-034 | Asset upward revaluation request → Draft, deferred | FA-07, FA-08 | 09 §7 |
+| UAT-GL-035 | Asset impairment (after approval) + no-change guard + audit | FA-07, FA-08 | 09 §7 |
+| UAT-GL-040 | Asset revaluation: preparer cannot self-approve (SoD) | FA-08, R07 | 09 §7 |
+| UAT-GL-041 | Asset revaluation: independent approver makes it effective | FA-08, GL-01 | 09 §7 |
 | UAT-GL-036 | Lease modification remeasures liability + ROU | LSE-01 | 04 §7 |
 | UAT-GL-037 | Disposal recycles revaluation surplus to RE | FA-07 | 09 §7 |
 | UAT-GL-038 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |

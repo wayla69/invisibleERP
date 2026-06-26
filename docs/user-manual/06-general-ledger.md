@@ -307,15 +307,26 @@ posted.
 ### Revalue or impair an asset
 
 To adjust an asset's carrying amount to a new value (a market revaluation, or an
-impairment write-down), open the asset and click **Revalue**
-(`POST /api/assets/{assetNo}/revalue`): enter the **new value** and a reason.
+impairment write-down), open the asset (click its row in the register) and use the
+**ตีมูลค่าใหม่ / ด้อยค่า (Revalue / impair)** panel: enter the **new value (NBV)** and
+a reason, then **ส่งคำขอ (Submit request)**.
 
 **Expected result:** An **upward** revaluation credits the **revaluation surplus**
 in equity (**Dr Fixed Assets 1500 / Cr Revaluation Surplus 3200**); a **downward**
 revaluation (impairment) posts an **impairment loss** (**Dr Impairment Loss 5820 /
-Cr 1500**). The asset's net book value updates and every change is kept in the
-**revaluation history** (`GET /api/assets/{assetNo}/revaluations`). Entering the
+Cr 1500**). Every change is kept in the **revaluation history**. Entering the
 current value (no change) is rejected (`NO_CHANGE`).
+
+#### Approval (required before it counts) — two people
+
+Because a revaluation moves equity or profit on a judgement call, it uses
+**maker-checker**: your request is **"รออนุมัติ" (PendingApproval)** and **the asset's
+value and the accounting entry do not change yet**. A **different** person opens the
+same asset and clicks **อนุมัติ (Approve)** — only then does the carrying value move and
+the entry post. **You cannot approve your own request** ("ผู้บันทึกอนุมัติรายการของตนเอง
+ไม่ได้", `SOD_VIOLATION`) — this binds **everyone, including Admin**. To cancel a wrong
+request, click **ปฏิเสธ (Reject)**; the draft entry is voided and you can request again.
+Only **one** revaluation can be pending per asset at a time.
 
 > **Note — on disposal:** if you later dispose a revalued asset, any **revaluation
 > surplus** built up in equity is **transferred to retained earnings** (Dr 3200 / Cr

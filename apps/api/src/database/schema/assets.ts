@@ -81,7 +81,10 @@ export const assetRevaluations = pgTable('asset_revaluations', {
   delta: numeric('delta', { precision: 18, scale: 4 }).notNull(),
   reason: text('reason'),
   glRef: text('gl_ref'),
-  actionedBy: text('actioned_by'),
+  actionedBy: text('actioned_by'),                  // preparer (maker)
+  status: text('status').notNull().default('Posted'), // FA-08 maker-checker: PendingApproval | Posted | Rejected
+  approvedBy: text('approved_by'),                   // checker — must differ from actionedBy
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byAsset: index('idx_reval_asset').on(t.assetNo) }));
 
