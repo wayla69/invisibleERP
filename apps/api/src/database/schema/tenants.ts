@@ -30,6 +30,7 @@ export const tenants = pgTable('tenants', {
   postalCode: text('postal_code'),
   promptpayId: text('promptpay_id'),                              // PromptPay merchant target (mobile/13-digit ID) for QR (0049)
   defaultLanguage: text('default_language').default('th'),         // 'th' | 'en' — customer-facing output language (receipts, display, QR) (0077)
+  industry: text('industry'),                                      // CoA template chosen at signup (0138): 'restaurant'|'retail'|'distribution'|'services'|'general'
   // ── Branding (0085, Phase 9) — rendered on customer-facing documents ──
   logoUrl: text('logo_url'),                                       // https URL or small image data-URI
   tagline: text('tagline'),                                        // short company tagline under the name
