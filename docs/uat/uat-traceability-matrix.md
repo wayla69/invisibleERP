@@ -286,6 +286,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-041 | Locate an item to its bin(s) | INV-08 | 03 §7 |
 | UAT-INV-042 | Bin capacity over-fill blocked on putaway | INV-08 | 03 §7, §9 |
 | UAT-INV-043 | 3D warehouse view screen (utilisation colour + locate) | INV-08 | 03 §7 |
+| UAT-INV-044 | Reservation reduces ATP; idempotent re-allocate (no leak) | INV-09 | 03 §7, §9 |
+| UAT-INV-045 | Reserving beyond ATP blocked (INSUFFICIENT_ATP) | INV-09 | 03 §7, §9 |
+| UAT-INV-046 | Release frees a cancelled reservation | INV-09 | 03 §7 |
+| UAT-INV-047 | Fulfil is ATP-neutral vs on-hand drop | INV-09 | 03 §7 |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 

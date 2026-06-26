@@ -129,6 +129,27 @@ async function main() {
   const c2 = await inj('POST', '/api/costing/atp/check', plan1, { item_id: 'WIDGET', qty: 120, date: '2026-12-31' });
   ok('canPromise: 90 → true; 120 → false, shortfall 20', c1.json.can_promise === true && c2.json.can_promise === false && near(c2.json.shortfall, 20), JSON.stringify({ q90: c1.json.can_promise, q120: c2.json.can_promise, sh: c2.json.shortfall }));
 
+  // ── E2. Reservation lifecycle so ATP cannot drift (INV-09) ──
+  const al1 = await inj('POST', '/api/costing/allocate', plan1, { item_id: 'WIDGET', qty: 30, ref_doc: 'SO-2', need_by: '2026-12-31' });
+  const atpA = await inj('GET', '/api/costing/atp?item_id=WIDGET&need_by=2026-12-31', plan1);
+  ok('INV-09: allocate SO-2 (30) reserves stock → ATP 100 → 70', al1.status === 201 && near(atpA.json.atp_qty, 70), `atp=${atpA.json.atp_qty}`);
+  const al1b = await inj('POST', '/api/costing/allocate', plan1, { item_id: 'WIDGET', qty: 30, ref_doc: 'SO-2', need_by: '2026-12-31' });
+  const atpB = await inj('GET', '/api/costing/atp?item_id=WIDGET&need_by=2026-12-31', plan1);
+  const so2rows = (await inj('GET', '/api/costing/allocations?ref_doc=SO-2', plan1)).json;
+  ok('INV-09: re-allocating the same ref is idempotent (one row, ATP stays 70 — no leak)', al1b.json?.adjusted === true && (so2rows.allocations ?? []).filter((a: any) => a.status === 'Open').length === 1 && near(atpB.json.atp_qty, 70), `n=${so2rows.count} atp=${atpB.json.atp_qty}`);
+  const alOver = await inj('POST', '/api/costing/allocate', plan1, { item_id: 'WIDGET', qty: 200, ref_doc: 'SO-3', need_by: '2026-12-31' });
+  ok('INV-09: reserving beyond ATP is rejected → 422 INSUFFICIENT_ATP', alOver.status === 422 && alOver.json?.error?.code === 'INSUFFICIENT_ATP', `st=${alOver.status} code=${alOver.json?.error?.code}`);
+  const rel = await inj('POST', '/api/costing/allocations/SO-1/release', plan1);
+  const atpC = await inj('GET', '/api/costing/atp?item_id=WIDGET&need_by=2026-12-31', plan1);
+  ok('INV-09: releasing SO-1 (cancelled) frees 20 back to ATP → 90', rel.json?.released_qty === 20 && near(atpC.json.atp_qty, 90), `rel=${rel.json?.released_qty} atp=${atpC.json.atp_qty}`);
+  // ship SO-2: the issue path reduces on-hand 50→20; fulfilling the reservation must be ATP-neutral (no double count)
+  await db.update(s.customerInventory).set({ currentStock: '20' }).where(and(eq(s.customerInventory.tenantId, t1), eq(s.customerInventory.itemId, 'WIDGET')));
+  const ful = await inj('POST', '/api/costing/allocations/SO-2/fulfill', plan1);
+  const atpD = await inj('GET', '/api/costing/atp?item_id=WIDGET&need_by=2026-12-31', plan1);
+  ok('INV-09: fulfilling SO-2 + on-hand drop is ATP-neutral (stays 90 — reservation not double-counted)', ful.json?.fulfilled_qty === 30 && near(atpD.json.atp_qty, 90), `ful=${ful.json?.fulfilled_qty} atp=${atpD.json.atp_qty}`);
+  const reg = (await inj('GET', '/api/costing/allocations?item_id=WIDGET', plan1)).json;
+  ok('INV-09: register shows SO-1 Cancelled + SO-2 Fulfilled, 0 open', (reg.allocations ?? []).find((a: any) => a.ref_doc === 'SO-1')?.status === 'Cancelled' && (reg.allocations ?? []).find((a: any) => a.ref_doc === 'SO-2')?.status === 'Fulfilled' && reg.open_qty === 0, `open=${reg.open_qty}`);
+
   // ── F. idempotency + RLS + recipe-COGS regression ──
   const grvCnt = (await pg.query(`SELECT count(*)::int n FROM journal_entries WHERE source='GRV' AND source_ref='${grW1.json.gr_no}'`)).rows as any[];
   ok('GR valuation idempotent (one GRV JE per GR)', grvCnt[0].n === 1, `n=${grvCnt[0].n}`);
