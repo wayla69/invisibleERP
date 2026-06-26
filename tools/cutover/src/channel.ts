@@ -113,6 +113,9 @@ async function main() {
   const k8 = await inj('POST', '/api/restaurant/kiosk/checkout', sales1, { fulfillment_type: 'takeaway', items: [item(100)], method: 'Cash' });
   const glK = await glOf('POS', k8.json.sale_no);
   ok('Kiosk checkout → sale_no + POS GL Dr1000=107', /^SALE-/.test(k8.json.sale_no ?? '') && near(leg(glK, '1000', 'debit'), 107) && bal(glK), JSON.stringify({ sale: k8.json.sale_no }));
+  // B4: kiosk takeaway returns a public track token; the customer can follow the order with no login.
+  const kTrack = k8.json.track_token ? await inj('GET', `/api/order/t/${k8.json.track_token}`, undefined) : { json: {} };
+  ok('Kiosk: returns track_url + public tracker resolves the order (received)', typeof k8.json.track_url === 'string' && k8.json.track_url.startsWith('/track/') && kTrack.json.order_no === k8.json.order_no && kTrack.json.fulfillment_status === 'received', JSON.stringify({ url: k8.json.track_url, st: kTrack.json.fulfillment_status }));
 
   // ── 9. third-party ingest idempotent ──
   const wbody = { store_ref: 'T1', ext_order_id: 'G-1', ext_event_id: 'E-1', fulfillment_type: 'delivery', items: [{ name: 'ข้าวมันไก่', qty: 2, unit_price: 60 }], customer: { name: 'ลูกค้า Grab', phone: '0899999999', address: 'คอนโด ABC' } };
