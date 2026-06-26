@@ -42,6 +42,30 @@ export const custStockLog = pgTable('cust_stock_log', {
   createdBy: text('created_by'),
 });
 
+// ── Waste / spoilage log (W1) ──
+// Reason-coded ingredient waste: decrements customer_inventory + (when costed) posts Dr 5810 Scrap/Waste
+// Loss / Cr 1200 Inventory (mirrors recipe COGS, which credits 1200 on consumption). The food-cost lever —
+// what was wasted, why, how much it cost. Distinct from the INV-07 maker-checker write-off (perpetual items).
+export const wasteLog = pgTable('waste_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  branchId: bigint('branch_id', { mode: 'number' }),
+  wasteNo: text('waste_no').notNull(),                 // WASTE-YYYYMMDD-NNN
+  itemId: text('item_id').notNull(),
+  itemDescription: text('item_description'),
+  qty: numeric('qty', { precision: 18, scale: 4 }).notNull(),
+  uom: text('uom'),
+  reasonCode: text('reason_code').notNull(),           // damage | expiry | spoilage | overproduction | prep_error | other
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),
+  totalCost: numeric('total_cost', { precision: 18, scale: 4 }).notNull().default('0'),
+  notes: text('notes'),
+  journalNo: text('journal_no'),                        // JE-... when the waste was costed to GL
+  loggedBy: text('logged_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byPeriod: index('idx_waste_log_period').on(t.tenantId, t.reasonCode),
+}));
+
 // Per-branch on-hand ledger (Phase — branch-aware replenishment). Runs ALONGSIDE customer_inventory:
 // customer_inventory stays the tenant rollup (13 readers untouched); branch_stock is the per-branch detail
 // the transfer-before-buy router consumes. Invariant: customer_inventory.current_stock == Σ branch_stock.on_hand
