@@ -358,6 +358,37 @@ async function main() {
   const stl = await inj('POST', `/api/finance/advances/${advNo}/settle`, admin, { settled_expense: 700, returned_cash: 300 });
   ok('Petty cash: settle clears the float (700 expense + 300 returned)', stl.status === 200 && stl.json?.status === 'settled' && near(await tbBalance('1180'), adv1180Before), `1180bal=${await tbBalance('1180')}`);
 
+  // ───────── Petty cash imprest float (วงเงิน) + direct-expense / advance maker-checker (EXP-08) ─────────
+  const pc1015Before = await tbBalance('1015');
+  const pc5100Before = await tbDebit('5100');
+  const pc1180Before = await tbBalance('1180');
+  const fund = await inj('POST', '/api/finance/petty-cash/funds', admin, { fund_code: 'PCF-1', name: 'HQ petty cash', float_limit: 5000, initial_amount: 5000 });
+  ok('EXP-08: establish fund within float (Dr 1015 / Cr 1000 = 5000)', fund.status === 201 && fund.json?.balance === 5000 && near(await tbBalance('1015'), pc1015Before + 5000), `bal=${fund.json?.balance} 1015=${await tbBalance('1015')}`);
+  const overFund = await inj('POST', '/api/finance/petty-cash/funds', admin, { fund_code: 'PCF-OVER', float_limit: 1000, initial_amount: 2000 });
+  ok('EXP-08: initial cash above the float is rejected (OVER_FLOAT)', overFund.status === 400 && overFund.json?.error?.code === 'OVER_FLOAT', `st=${overFund.status} code=${overFund.json?.error?.code}`);
+  // direct expense request → maker-checker, no GL until approved
+  const pcExp = await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCF-1', kind: 'expense', payee: 'Taxi', amount: 1200, expense_account: '5100', doc_ref: 'RCPT-001' });
+  ok('EXP-08: expense request raised PendingApproval — no GL yet (5100/1015 unchanged)', pcExp.status === 201 && pcExp.json?.status === 'PendingApproval' && near(await tbDebit('5100'), pc5100Before) && near(await tbBalance('1015'), pc1015Before + 5000), `st=${pcExp.json?.status}`);
+  const expSelf = await inj('POST', `/api/finance/petty-cash/requests/${pcExp.json?.req_no}/approve`, admin);
+  ok('EXP-08: preparer self-approval blocked → 403 SOD_VIOLATION', expSelf.status === 403 && expSelf.json?.error?.code === 'SOD_VIOLATION', `${expSelf.status} ${expSelf.json?.error?.code}`);
+  const expAppr = await inj('POST', `/api/finance/petty-cash/requests/${pcExp.json?.req_no}/approve`, mgr);
+  ok('EXP-08: a different user approves expense → Dr 5100 / Cr 1015 (1200); fund 3800', expAppr.status === 200 && expAppr.json?.status === 'Approved' && expAppr.json?.fund_balance === 3800 && near(await tbDebit('5100'), pc5100Before + 1200) && near(await tbBalance('1015'), pc1015Before + 3800), `fb=${expAppr.json?.fund_balance} 5100=${await tbDebit('5100')}`);
+  // advance request → approve (disburse Dr 1180 / Cr 1015) → settle
+  const adv = await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCF-1', kind: 'advance', payee: 'EMP9', amount: 2000, purpose: 'buying trip' });
+  await inj('POST', `/api/finance/petty-cash/requests/${adv.json?.req_no}/approve`, mgr);
+  ok('EXP-08: advance approved → Dr 1180 / Cr 1015 (2000); fund 1800', near(await tbBalance('1180'), pc1180Before + 2000) && near(await tbBalance('1015'), pc1015Before + 1800), `1180=${await tbBalance('1180')} 1015=${await tbBalance('1015')}`);
+  const tooMuch = await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCF-1', kind: 'expense', payee: 'Big', amount: 5000 });
+  ok('EXP-08: a draw beyond the fund balance is rejected (INSUFFICIENT_FLOAT)', tooMuch.status === 422 && tooMuch.json?.error?.code === 'INSUFFICIENT_FLOAT', `st=${tooMuch.status} code=${tooMuch.json?.error?.code}`);
+  const stlAdv = await inj('POST', `/api/finance/petty-cash/requests/${adv.json?.req_no}/settle`, admin, { settled_expense: 1500, returned_cash: 500 });
+  ok('EXP-08: settle advance (1500 spend + 500 back to fund) clears 1180; fund 2300', stlAdv.status === 200 && stlAdv.json?.status === 'Settled' && near(await tbBalance('1180'), pc1180Before) && near(await tbBalance('1015'), pc1015Before + 2300), `1180=${await tbBalance('1180')} 1015=${await tbBalance('1015')}`);
+  const rplOver = await inj('POST', '/api/finance/petty-cash/funds/PCF-1/replenish', admin, { amount: 4000 });
+  ok('EXP-08: replenish beyond the float limit rejected (OVER_FLOAT)', rplOver.status === 422 && rplOver.json?.error?.code === 'OVER_FLOAT', `st=${rplOver.status} code=${rplOver.json?.error?.code}`);
+  const rplOk = await inj('POST', '/api/finance/petty-cash/funds/PCF-1/replenish', admin, { amount: 2000 });
+  ok('EXP-08: replenish within the float tops the fund back up (2300 → 4300)', rplOk.status === 200 && rplOk.json?.balance === 4300 && near(await tbBalance('1015'), pc1015Before + 4300), `bal=${rplOk.json?.balance}`);
+  await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCF-1', kind: 'expense', payee: 'Pending one', amount: 100, doc_ref: 'RCPT-PEND' });
+  const pcPend = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
+  ok('EXP-08: pending petty-cash requests surface in the GOV-01 monitor', (pcPend.items ?? []).some((i: any) => i.control === 'EXP-08'), `types=${JSON.stringify(pcPend.by_type ?? {})}`);
+
   // ───────────────────── Prepaid amortization schedules (GL-09) ─────────────────────
   const pp1280Before = await tbDebit('1280');
   const mkPp = await inj('POST', '/api/ledger/prepaid', admin, { name: 'Annual insurance', total_amount: 1200, months: 12, capitalize: true });
@@ -385,6 +416,12 @@ async function main() {
   ok('Lease modification: remeasures liability + ROU by the delta (Dr 1600 / Cr 2600)', mod.status === 200 && mod.json?.liability_delta > 0 && mod.json?.liability_after > mod.json?.liability_before && mod.json?.rou_after > leRow.rou_nbv && near(await tbDebit('1600'), lease1600Before + mod.json.liability_delta) && near(await tbCredit2('2600'), lease2600Before + mod.json.liability_delta), `delta=${mod.json?.liability_delta} rouAfter=${mod.json?.rou_after}`);
   const modNoChange = await inj('POST', `/api/leases/${mkLease.json?.lease_no}/modify`, admin, {});
   ok('Lease modification: a no-op modification is rejected (NO_CHANGE)', modNoChange.status === 400 && modNoChange.json?.error?.code === 'NO_CHANGE', `st=${modNoChange.status} code=${modNoChange.json?.error?.code}`);
+  // LSE-01 lease-liability reconciliation: GL 2600 net == Σ remaining liability on the schedule, after run + remeasurement.
+  const leRecon = (await inj('GET', '/api/leases/liability-reconciliation', admin)).json;
+  const leSched = (leRecon.leases ?? []).find((x: any) => x.lease_no === mkLease.json?.lease_no);
+  ok('Lease-liability reconciliation: GL 2600 ties to the schedule liability (reconciled, difference 0)',
+    leRecon.reconciled === true && near(leRecon.difference, 0) && near(leRecon.gl_liability, leRecon.schedule_liability) && leSched && leSched.liability_balance > 0,
+    JSON.stringify({ gl: leRecon.gl_liability, sched: leRecon.schedule_liability, diff: leRecon.difference, rec: leRecon.reconciled }));
 
   // ───────────────── Asset revaluation / impairment maker-checker (FA-07 valuation + FA-08 SoD) ─────────────────
   const reg = (await inj('GET', '/api/assets', admin)).json;

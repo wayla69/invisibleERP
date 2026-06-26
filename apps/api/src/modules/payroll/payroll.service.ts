@@ -2,6 +2,7 @@ import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, payruns, payslips, timesheets, leaveRequests } from '../../database/schema';
+import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -164,6 +165,74 @@ export class PayrollService {
       total_wht: r2(lines.reduce((a: number, l: any) => a + l.wht, 0)),
       deadline: 'ยื่นแบบ ภ.ง.ด.1ก ภายในเดือนกุมภาพันธ์ของปีถัดไป',
     };
+  }
+
+  // ── Payroll-liability reconciliation & remittance (PAY-02) ──
+  // The statutory withholdings posted by a payrun (SSO 2350, WHT/PND1 2360, PF 2370) are LIABILITIES owed to
+  // outside authorities. This schedule ties each account's GL net balance (accrued − remitted = outstanding)
+  // back to the independent payrun accrual, and lets treasury REMIT the cash so the liability is cleared and
+  // the books reconcile to the statutory filings.
+  private readonly LIAB = [
+    { code: '2350', label: 'ประกันสังคม (SSO)', authority: 'สำนักงานประกันสังคม', deadline: 'นำส่งภายในวันที่ 15 ของเดือนถัดไป' },
+    { code: '2360', label: 'ภาษีหัก ณ ที่จ่าย (ภ.ง.ด.1)', authority: 'กรมสรรพากร', deadline: 'นำส่ง ภ.ง.ด.1 ภายในวันที่ 7 ของเดือนถัดไป' },
+    { code: '2370', label: 'กองทุนสำรองเลี้ยงชีพ (PF)', authority: 'บริษัทจัดการกองทุน', deadline: 'นำส่งภายใน 3 วันทำการ' },
+  ];
+
+  private liabTenant(user: JwtUser, explicitTenantId?: number | null) {
+    const tenantId = user.tenantId ?? (explicitTenantId != null ? Number(explicitTenantId) : null);
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id' });
+    return tenantId;
+  }
+
+  // GL debit/credit totals for one account (Posted entries only — Draft JEs are excluded from balances).
+  private async glAcct(accountCode: string, tenantId: number) {
+    const db = this.db as any;
+    const [r] = await db.select({
+      debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
+      credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalEntries.tenantId, tenantId), eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode)));
+    return { debit: n(r?.debit ?? 0), credit: n(r?.credit ?? 0) };
+  }
+
+  async liabilities(user: JwtUser, explicitTenantId?: number | null) {
+    const tenantId = this.liabTenant(user, explicitTenantId);
+    const db = this.db as any;
+    // Independent expected accrual from the payrun aggregates (NOT the GL) for SSO + WHT — a divergence from the
+    // GL credits means a manual JE touched a payroll-liability account outside the payroll process.
+    const [pr] = await db.select({
+      sso: sql<string>`coalesce(sum(${payruns.ssoEeTotal} + ${payruns.ssoErTotal}),0)`,
+      wht: sql<string>`coalesce(sum(${payruns.whtTotal}),0)`,
+    }).from(payruns).where(and(eq(payruns.tenantId, tenantId), eq(payruns.status, 'Posted')));
+    const expected: Record<string, number | null> = { '2350': r2(n(pr?.sso ?? 0)), '2360': r2(n(pr?.wht ?? 0)), '2370': null };
+    const lines = [] as any[];
+    for (const L of this.LIAB) {
+      const g = await this.glAcct(L.code, tenantId);
+      const accrued = r2(g.credit), remitted = r2(g.debit), outstanding = r2(g.credit - g.debit);
+      const exp = expected[L.code];
+      lines.push({ account_code: L.code, label: L.label, authority: L.authority, deadline: L.deadline, accrued, remitted, outstanding, expected_accrued: exp, reconciled: exp == null ? true : Math.abs(accrued - exp) < 0.01 });
+    }
+    return { lines, total_outstanding: r2(lines.reduce((a, l) => a + l.outstanding, 0)), all_reconciled: lines.every((l) => l.reconciled) };
+  }
+
+  async remitLiability(dto: { account_code: string; amount: number; ref?: string }, user: JwtUser, explicitTenantId?: number | null) {
+    const tenantId = this.liabTenant(user, explicitTenantId);
+    const L = this.LIAB.find((x) => x.code === dto.account_code);
+    if (!L) throw new BadRequestException({ code: 'NOT_LIABILITY_ACCOUNT', message: `${dto.account_code} is not a payroll-liability account (2350/2360/2370)`, messageTh: 'ไม่ใช่บัญชีหนี้สินเงินเดือน (2350/2360/2370)' });
+    const amount = r2(dto.amount);
+    if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่า 0' });
+    const g = await this.glAcct(dto.account_code, tenantId);
+    const outstanding = r2(g.credit - g.debit);
+    if (amount > outstanding + 0.01) throw new BadRequestException({ code: 'REMIT_EXCEEDS_OUTSTANDING', message: `Remittance ${amount} exceeds outstanding ${outstanding}`, messageTh: `ยอดนำส่งเกินยอดค้างชำระ (คงเหลือ ${outstanding})` });
+    const je: any = await this.ledger.postEntry({
+      source: 'PAY-REMIT', sourceRef: `${dto.account_code}:${dto.ref ?? new Date().toISOString()}`, tenantId,
+      memo: `นำส่ง ${L.label} → ${L.authority}`, createdBy: user.username,
+      lines: [
+        { account_code: dto.account_code, debit: amount, memo: `Remit ${L.label}` },
+        { account_code: '1000', credit: amount, memo: `Cash paid to ${L.authority}` },
+      ],
+    });
+    return { account_code: dto.account_code, label: L.label, remitted: amount, outstanding_after: r2(outstanding - amount), entry_no: je.entry_no };
   }
 
   async listRuns(user: JwtUser) {

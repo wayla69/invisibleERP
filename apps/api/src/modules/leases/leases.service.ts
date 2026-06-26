@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException, BadRequestException, Optional } 
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { leases } from '../../database/schema';
+import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { currentTenantStore } from '../../common/tenant-context';
@@ -66,6 +67,32 @@ export class LeasesService {
       rouNbv: String(liability), accumulatedDep: '0', periodsPosted: 0, nextRunDate: start, status: 'active', createdBy: user.username,
     }).returning({ id: leases.id });
     return { id: Number(l.id), lease_no: leaseNo, name: dto.name, term_months: dto.termMonths, monthly_payment: pmt, annual_rate_pct: ratePct, initial_liability: liability, rou_asset: liability, next_run_date: start };
+  }
+
+  // LSE-01 detective tie-out: the GL lease-liability control account (2600) must equal the sum of the
+  // remaining liability balances on the lease schedule. A divergence means a manual JE hit 2600 outside the
+  // lease engine, or a periodic run / remeasurement didn't post — surfaced for the controller at close.
+  async reconcileLiability(tenantId?: number) {
+    const db = this.db as any;
+    const where = tenantId != null ? eq(leases.tenantId, tenantId) : undefined;
+    const rows = await db.select().from(leases).where(where).orderBy(desc(leases.id));
+    const scheduleLiability = round2(rows.reduce((s: number, l: any) => s + n(l.liabilityBalance), 0));
+
+    const glConds = [eq(journalLines.accountCode, '2600'), eq(journalEntries.status, 'Posted')];
+    if (tenantId != null) glConds.push(eq(journalEntries.tenantId, tenantId));
+    const [g] = await db.select({
+      credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
+      debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...glConds));
+    const glLiability = round2(n(g?.credit ?? 0) - n(g?.debit ?? 0));
+    const difference = round2(glLiability - scheduleLiability);
+
+    return {
+      gl_account: '2600', gl_liability: glLiability, schedule_liability: scheduleLiability,
+      difference, reconciled: Math.abs(difference) < 0.01,
+      leases: rows.map((l: any) => ({ lease_no: l.leaseNo, name: l.name, status: l.status, liability_balance: n(l.liabilityBalance), rou_nbv: n(l.rouNbv) })),
+      count: rows.length,
+    };
   }
 
   async listLeases(tenantId?: number) {
