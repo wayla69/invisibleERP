@@ -1056,7 +1056,14 @@
       "idx": 150,
       "version": "7",
       "when": 2023680000004,
-      "tag": "0150_crm_pipeline",
+      "tag": "0150_waste_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 2023690000004,
+      "tag": "0151_crm_pipeline",
       "breakpoints": true
     }
   ]
