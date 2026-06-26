@@ -1,9 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { eq, and, asc, gte, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerInventory, branchStock, replenishmentSuggestions, branches, itemSupplier, vendors, custStockLog, stockMovements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { ProcurementService } from '../procurement/procurement.service';
+import { DemandForecastService } from '../demand-ml/demand-forecast.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -20,6 +21,8 @@ export class ReplenishmentService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly procurement: ProcurementService,
+    // @Optional so partial harnesses that don't wire DemandMlModule can still construct this service.
+    @Optional() private readonly demand?: DemandForecastService,
   ) {}
 
   private urgency(onHand: number, rop: number): string {
@@ -231,5 +234,67 @@ export class ReplenishmentService {
     await db.update(branchStock).set({ reorderPoint: String(rec.recommended_reorder_point), lastUpdated: new Date() })
       .where(and(eq(branchStock.tenantId, tenantId), eq(branchStock.branchId, branchId), eq(branchStock.itemId, itemId)));
     return { applied: true, branch_id: branchId, item_id: itemId, reorder_point: rec.recommended_reorder_point, previous: rec.current_reorder_point };
+  }
+
+  // Demand-ML order-quantity advisor (INV-13): for every item at or below its reorder point, uses the
+  // demand-ML multi-model forecast (auto-selects the lowest-WAPE model) to derive a suggested order quantity =
+  // Σ forecast[0..horizon-1]. Falls back to the static reorder_qty from master data when the ML service is
+  // unavailable or the item has insufficient history (< 14 days). Read-only; advisory only — does not write to
+  // replenishment_suggestions. The planner uses the ml_qty alongside the static suggestion to decide how much
+  // to requisition. Horizon must be 7, 14, or 28 days (clamped to [7,28]).
+  async demandForecast(user: JwtUser, opts?: { horizon?: number }) {
+    const db = this.db as any;
+    const tenantId = user.tenantId as number;
+    const horizon = Math.min(28, Math.max(7, Math.round(opts?.horizon ?? 14)));
+
+    // Determine candidates: items whose stock is at/below their reorder point
+    const branchRows = await db.select().from(branchStock).where(eq(branchStock.tenantId, tenantId));
+    const useBranch = branchRows.length > 0;
+    const invRows = useBranch ? [] : await db.select().from(customerInventory).where(eq(customerInventory.tenantId, tenantId));
+
+    const candidates: { itemId: string; onHand: number; rop: number; staticQty: number; branchId: number | null }[] = useBranch
+      ? branchRows
+          .filter((b: any) => n(b.reorderPoint) > 0 && n(b.onHand) <= n(b.reorderPoint) && n(b.reorderQty) > 0)
+          .map((b: any) => ({ itemId: b.itemId as string, onHand: n(b.onHand), rop: n(b.reorderPoint), staticQty: n(b.reorderQty), branchId: Number(b.branchId) }))
+      : invRows
+          .filter((r: any) => n(r.reorderPoint) > 0 && n(r.currentStock) <= n(r.reorderPoint) && n(r.reorderQty) > 0)
+          .map((r: any) => ({ itemId: r.itemId as string, onHand: n(r.currentStock), rop: n(r.reorderPoint), staticQty: n(r.reorderQty), branchId: null }));
+
+    const items: any[] = [];
+    for (const c of candidates) {
+      let mlQty: number = c.staticQty;
+      let mlAlgo: string | null = null;
+      let mlWape: number | null = null;
+      let mlSource: 'ml' | 'static_fallback' | 'service_unavailable' = 'service_unavailable';
+
+      if (this.demand) {
+        const fc = await this.demand.planForecast(c.itemId, horizon);
+        if (fc) {
+          mlQty = Math.ceil(fc.forecast.reduce((a, b) => a + b, 0));
+          mlAlgo = fc.algorithm;
+          mlWape = fc.wape;
+          mlSource = 'ml';
+        } else {
+          mlSource = 'static_fallback'; // insufficient POS history
+        }
+      }
+
+      items.push({
+        item_id: c.itemId, on_hand: c.onHand, reorder_point: c.rop,
+        static_qty: c.staticQty, ml_qty: mlQty,
+        ml_algo: mlAlgo, ml_wape: mlWape, ml_source: mlSource,
+        horizon_days: horizon,
+        ...(c.branchId != null ? { branch_id: c.branchId } : {}),
+      });
+    }
+
+    items.sort((a, b) => a.on_hand - b.on_hand); // most urgent first
+    return {
+      horizon_days: horizon,
+      ml_available: !!this.demand,
+      count: items.length,
+      ml_count: items.filter((i) => i.ml_source === 'ml').length,
+      items,
+    };
   }
 }
