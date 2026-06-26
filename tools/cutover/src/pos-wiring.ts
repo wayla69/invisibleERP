@@ -75,6 +75,24 @@ async function main() {
   const noPrice = await inj('POST', '/api/portal/pos/sales', token, { payment_method: 'Cash', items: [{ item_id: 'A', qty: 1, unit_price: 100 }] });
   ok('pricing NOT applied without opt-in (back-compat)', noPrice.json.pricing_discount === 0 && noPrice.json.total === 107);
 
+  // ── Wiring: B4 service charge + satang rounding at retail checkout ──
+  // Item A 100, no rule discount (rule is item-scoped but the existing 50% rule still applies here —
+  // use party_size 3 which is below the service-charge threshold of 6, so service charge is 0, to
+  // isolate the rounding test). Then verify service charge fires for party ≥ 6.
+  // Test 1: service charge opt-in (party 6 ≥ min 6, 10% SC on 53.5 net... but the 50% rule is still
+  // active. Use a fresh item B at 200 with no rule. Add it to the inventory/menu.
+  await db.insert(s.menuItems).values({ tenantId: hq.id, sku: 'B', name: 'Item B', type: 'food', price: '200' }).onConflictDoNothing();
+  // Retail sale: item B 200, party 6, service_charge_pct 10, no rule discount, rounding 1
+  // net goods = 200, SC = 20, taxableTotal = 220, vat = 15.40, preRound = 235.40, rounded = 235, adj = -0.40
+  const scSale = await inj('POST', '/api/portal/pos/sales', token, { apply_pricing: true, payment_method: 'Cash', items: [{ item_id: 'B', qty: 1, unit_price: 200 }], party_size: 6, service_charge_pct: 10, service_min_party: 6, rounding: 1 });
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.02;
+  ok('B4 service charge applied (SC=20)', near(scSale.json.service_charge, 20), `sc=${scSale.json.service_charge} body=${JSON.stringify(scSale.json)}`);
+  ok('B4 satang rounding applied (total=235, adj=-0.40)', near(scSale.json.total, 235) && near(scSale.json.rounding_adjustment, -0.40), `tot=${scSale.json.total} adj=${scSale.json.rounding_adjustment}`);
+  // Test 2: service charge skipped when party below threshold
+  const noSc = await inj('POST', '/api/portal/pos/sales', token, { apply_pricing: true, payment_method: 'Cash', items: [{ item_id: 'B', qty: 1, unit_price: 200 }], party_size: 3, service_charge_pct: 10, service_min_party: 6 });
+  ok('B4 service charge skipped for small party (SC=0)', noSc.json.service_charge === 0, `sc=${noSc.json.service_charge}`);
+  ok('B4 no-SC: total=214 (200+7%VAT)', near(noSc.json.total, 214), `tot=${noSc.json.total}`);
+
   // ── Wiring: auto-86 on sale (recipe ingredient depletes → dish unavailable) ──
   await inj('POST', '/api/portal/pos/sales', token, { payment_method: 'Cash', items: [{ item_id: 'DISH', qty: 1, unit_price: 50 }] });
   const avail = await inj('GET', '/api/pos/scale/availability', token);

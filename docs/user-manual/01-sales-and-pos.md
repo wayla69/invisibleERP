@@ -1,6 +1,6 @@
 # 01 · Sales & Point of Sale (POS)
 
-**Status: DRAFT v0.3** · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
+**Status: DRAFT v0.4** · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
 
 This chapter is for **Cashiers, Sales staff, POS Supervisors and Returns Clerks**.
 It covers ringing up sales, taking orders, credit checks, returns and refunds,
@@ -193,16 +193,28 @@ on the counter POS. Up to 200 items can be starred.
 - **Keyed form** (`/pos/new`): **F2** adds a line and **F9** confirms — so a
   cashier can ring up a manual sale without leaving the keyboard.
 
-### Pricing rules, service charge & rounding (dine-in)
+### Pricing rules, service charge & rounding
 
-At dine-in checkout you can apply the shop's **pricing rules** automatically
+At checkout you can apply the shop's **pricing rules** automatically
 (happy-hour %, buy-one-get-one, quantity breaks, item/category discounts) instead
 of keying discounts by hand — turn on **apply pricing rules** at checkout. For
 large parties an **auto service charge** is added (a VATable ค่าบริการ that the
 receipt lists as its own line), and the bill can be **satang-rounded** to a
 cash-friendly total. Cashiers *apply* rules; only Pricing/Marketing roles may
-*create* them (segregation of duties). See **Dine-in / restaurant** for the full
-flow.
+*create* them (segregation of duties).
+
+This applies to **both** the **dine-in** checkout and the **retail portal POS**
+(`POST /api/portal/pos/sales`). For the retail path, pass the following optional
+fields alongside `apply_pricing: true`:
+
+| Field | Purpose |
+|---|---|
+| `service_charge_pct` | Service charge rate (e.g. `10` for 10%). Added to the VAT base (→ acct 4400). |
+| `service_min_party` | Minimum party size to trigger the charge (default 6). |
+| `rounding` | Round the total to the nearest step (e.g. `1` for whole baht; 0 = disabled) → acct 4900. |
+
+The response includes `service_charge` and `rounding_adjustment` alongside the existing
+`pricing_discount` field. Without `apply_pricing`, the path is unchanged (backward-compatible).
 
 **Building rules (`/pricing` — กฎราคา & โปรโมชั่น).** Pricing/Marketing roles define
 rules on the **กฎราคา** tab: a labelled form for the **rule name**, **type** (ส่วนลด

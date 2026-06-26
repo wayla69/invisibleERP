@@ -27,7 +27,10 @@ export interface PortalSaleDto {
   apply_pricing?: boolean;   // opt-in: fold pricing-engine rule discounts into the order discount
   channel?: string;
   party_size?: number;
-  branch_id?: number;        // multi-branch: tag the sale to an outlet (must belong to this tenant)
+  service_charge_pct?: number;  // B4: auto service charge for large parties (VATable → acct 4400)
+  service_min_party?: number;   // B4: party threshold for service charge (default 6)
+  rounding?: number;            // B4: satang rounding step (0 = disabled) → acct 4900
+  branch_id?: number;           // multi-branch: tag the sale to an outlet (must belong to this tenant)
 }
 
 @Injectable()
@@ -79,10 +82,19 @@ export class PortalPosService {
     }
     const discount = roundCurrency(n(dto.discount) + pricingDiscount, 'THB');
     const taxable = Math.max(0, subtotal - discount);
+    // B4: auto service charge for large parties (VATable service income → acct 4400). Zero unless opted-in.
+    const scPct = dto.apply_pricing ? (dto.service_charge_pct ?? 0) : 0;
+    const minParty = dto.service_min_party ?? 6;
+    const serviceCharge = scPct > 0 && (dto.party_size ?? 0) >= minParty ? roundCurrency(taxable * scPct / 100, 'THB') : 0;
+    const taxableTotal = roundCurrency(taxable + serviceCharge, 'THB');
     // pluggable tax (move #5) — no more hard-coded VAT 7%
-    const taxCalc = this.tax.calcTax({ net: taxable, country: 'TH' });
+    const taxCalc = this.tax.calcTax({ net: taxableTotal, country: 'TH' });
     const vat = taxCalc.tax;
-    const total = roundCurrency(taxable + vat, 'THB');
+    // B4: satang rounding (→ acct 4900). Zero unless opted-in with rounding > 0.
+    const roundTo = dto.apply_pricing ? (dto.rounding ?? 0) : 0;
+    const preRoundTotal = roundCurrency(taxableTotal + vat, 'THB');
+    const total = roundTo > 0 ? roundCurrency(Math.round(preRoundTotal / roundTo) * roundTo, 'THB') : preRoundTotal;
+    const roundingAdj = roundCurrency(total - preRoundTotal, 'THB');
 
     // SALE- number, collision-safe: the second-precision stamp can clash for rapid sales → retry on a
     // bumped second until cust_pos_sales.sale_no (UNIQUE) is free.
@@ -105,7 +117,7 @@ export class PortalPosService {
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(custPosSales).values({
         saleNo, saleDate: today, tenantId: t.id, branchId, subtotal: fx(subtotal, 2), discount: fx(discount, 2),
-        taxAmount: fx(vat, 2), total: fx(total, 2), paymentMethod: dto.payment_method ?? 'Cash',
+        taxAmount: fx(vat, 2), total: fx(total, 2), serviceCharge: fx(serviceCharge, 2), paymentMethod: dto.payment_method ?? 'Cash',
         pointsUsed: '0', pointsEarned: String(pointsEarned), status: 'Completed', notes: dto.notes ?? null, createdBy: user.username,
       }).returning({ id: custPosSales.id });
 
@@ -179,9 +191,12 @@ export class PortalPosService {
       je = await this.ledger.postEntry({
         date: today, source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
         lines: [
-          { account_code: '1000', debit: total },   // Dr Cash
-          { account_code: '4000', credit: taxable }, // Cr Sales Revenue
+          { account_code: '1000', debit: total },    // Dr Cash (rounded total)
+          ...(roundingAdj < 0 ? [{ account_code: '4900', debit: roundCurrency(-roundingAdj, 'THB') }] : []),
+          { account_code: '4000', credit: taxable }, // Cr Sales Revenue (goods)
+          ...(serviceCharge > 0 ? [{ account_code: '4400', credit: serviceCharge }] : []),
           { account_code: '2100', credit: vat },     // Cr Tax Payable
+          ...(roundingAdj > 0 ? [{ account_code: '4900', credit: roundingAdj }] : []),
         ],
       });
     }
@@ -192,7 +207,7 @@ export class PortalPosService {
     if (this.journal) { try { await this.journal.append({ doc_type: 'SALE', doc_no: saleNo, payload: { subtotal, discount, vat, total, lines: lines.length, payment_method: dto.payment_method ?? 'Cash' } }, ju); } catch { /* journal best-effort */ } }
     if (this.locking) { try { await this.locking.recomputeAvailability(); } catch { /* auto-86 best-effort */ } }
 
-    return { sale_no: saleNo, branch_id: branchId, subtotal, discount, pricing_discount: pricingDiscount, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
+    return { sale_no: saleNo, branch_id: branchId, subtotal, discount, pricing_discount: pricingDiscount, service_charge: serviceCharge, rounding_adjustment: roundingAdj, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
   }
 
   // GET /api/portal/pos/sales — history (this tenant)
