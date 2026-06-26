@@ -6,6 +6,7 @@ import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMemb
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
+import { assertTemplatesSubsetOf } from './coa-templates';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -180,6 +181,8 @@ export class LedgerService {
   // ───────────────────── Chart of Accounts ─────────────────────
   // idempotent seed — onConflictDoNothing บน accounts.code (unique)
   async seedChartOfAccounts() {
+    // Fail fast at boot if any industry CoA template drifts from the canonical universe (unknown/dup code).
+    assertTemplatesSubsetOf(COA.map((a) => a.code));
     const db = this.db as any;
     await db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code });
     return { seeded: COA.length };

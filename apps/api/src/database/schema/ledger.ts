@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, timestamp, jsonb, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, boolean, date, timestamp, jsonb, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tenants } from './tenants';
 
@@ -139,4 +139,26 @@ export const prepaidSchedules = pgTable(
   (t) => ({ byDue: index('idx_prepaid_due').on(t.status, t.nextRunDate) }),
 );
 
+// Per-tenant Chart-of-Accounts overlay (0139). The canonical `accounts` table is the GLOBAL, immutable
+// posting universe (the engine hard-references its codes); this table curates a PER-TENANT VIEW over it:
+// which canonical accounts a tenant sees as "active", and how they are named/grouped on that tenant's
+// chart. Materialised from an industry template at signup (LedgerService.provisionTenantCoA). It NEVER
+// gates postings — reports surface any account that is active OR carries activity. tenant_id → RLS-scoped.
+export const tenantAccounts = pgTable(
+  'tenant_accounts',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    accountCode: text('account_code').notNull(), // FK-ish to accounts.code (canonical universe)
+    displayName: text('display_name'), // industry display name (EN); null = use canonical accounts.name
+    displayNameTh: text('display_name_th'),
+    groupLabel: text('group_label'), // section heading (defaults to account type)
+    active: boolean('active').default(true),
+    sortOrder: bigint('sort_order', { mode: 'number' }).default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ uqTenantCode: uniqueIndex('uq_tenant_accounts_tenant_code').on(t.tenantId, t.accountCode) }),
+);
+
 export type Account = typeof accounts.$inferSelect;
+export type TenantAccount = typeof tenantAccounts.$inferSelect;
