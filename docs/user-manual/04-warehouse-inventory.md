@@ -165,6 +165,31 @@ accounts.
 
 ---
 
+## 7a. Logging waste & spoilage
+
+**Screen:** `/waste` (**ของเสีย / ทิ้ง**) · **Required permission:** `warehouse`,
+`pos`, or `order_mgt`.
+
+When ingredients are thrown away — spoiled, expired, damaged, over-prepped — log
+it so you can see **how much food cost you're losing and why**.
+
+1. Enter the **item code**, **quantity**, and pick a **reason** (เน่าเสีย / หมดอายุ /
+   ชำรุด / ทำเกิน / เตรียมผิด / อื่น ๆ).
+2. Optionally enter the **cost per unit**. If you do, the loss is **posted to the
+   accounts** (Dr 5810 ของเสีย / Cr 1200 สินค้าคงคลัง); if you leave it blank, it's
+   recorded for tracking only.
+3. **บันทึก** — the ingredient stock drops and the entry appears in the list, with a
+   **by-reason breakdown** at the top showing where your waste cost is going.
+
+> **Note:** This is for **ingredients/consumables**. For **stock-controlled
+> products** (those on the perpetual valued ledger), use the proper **write-off**
+> (which needs a manager's approval) — the waste screen will tell you to switch
+> (*USE_WRITEOFF*). This stops shrinkage being hidden as "waste". (Control **INV-10**.)
+
+[screenshot: waste log with by-reason cost breakdown]
+
+---
+
 ## 8. Returns to stock (RMA)
 
 When returned goods come back, receive the RMA and restock saleable items.

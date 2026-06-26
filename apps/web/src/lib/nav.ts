@@ -10,6 +10,7 @@ import {
   BookOpen,
   BookText,
   CalendarClock,
+  Trash2,
   Bot,
   Disc3,
   Handshake,
@@ -243,6 +244,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     items: [
       { label: 'สินค้าคงคลัง', href: '/inventory', icon: Package, perms: ['warehouse', 'dashboard', 'planner'] },
       { label: 'ตรวจนับสต๊อก', href: '/stocktake', icon: ClipboardCheck, perms: ['warehouse', 'mobile'] },
+      { label: 'ของเสีย / ทิ้ง', href: '/waste', icon: Trash2, perms: ['warehouse', 'pos', 'order_mgt'] },
       { label: 'เบิก / โอนสินค้า', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
       { label: 'ล็อต / อายุสินค้า', href: '/lots', icon: Boxes, perms: ['lots', 'warehouse'] },
       { label: 'สแกนมือถือ', href: '/mobile-scan', icon: ScanLine, perms: ['mobile', 'warehouse'] },
