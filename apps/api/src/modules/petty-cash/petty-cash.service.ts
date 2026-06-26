@@ -1,0 +1,174 @@
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
+import { eq, and, desc } from 'drizzle-orm';
+import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { pettyCashFunds, expenseRequests } from '../../database/schema';
+import { DocNumberService } from '../../common/doc-number.service';
+import { StatusLogService } from '../../common/status-log.service';
+import { LedgerService } from '../ledger/ledger.service';
+import { ymd } from '../../database/queries';
+import type { JwtUser } from '../../common/decorators';
+import type { EstablishFundDto, ReplenishDto, ExpenseRequestDto, SettleExpenseDto } from './dto';
+
+const n = (v: unknown) => Number(v ?? 0);
+const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+
+// Petty cash imprest float (วงเงิน) + direct-expense / advance maker-checker with document tracking (EXP-08).
+// A fund holds cash capped at a credit limit; requests draw against it and post to the GL only on independent
+// approval (requester ≠ approver). The 1015 petty-cash account is a cash account (cash-flow + reconciliation).
+@Injectable()
+export class PettyCashService {
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly docNo: DocNumberService,
+    @Optional() private readonly statusLog?: StatusLogService,
+    @Optional() private readonly ledger?: LedgerService,
+  ) {}
+
+  // ── Fund: establish (fund it Dr 1015 / Cr 1000 up to the float) + replenish (top up to the float) ──
+  async establishFund(dto: EstablishFundDto, user: JwtUser) {
+    const db = this.db as any;
+    const tenantId = user.tenantId ?? null;
+    const float = round2(dto.float_limit);
+    if (!(float > 0)) throw new BadRequestException({ code: 'BAD_FLOAT', message: 'float_limit must be > 0', messageTh: 'วงเงินต้องมากกว่าศูนย์' });
+    const initial = round2(dto.initial_amount ?? 0);
+    if (initial > float) throw new BadRequestException({ code: 'OVER_FLOAT', message: 'initial_amount cannot exceed the float limit', messageTh: 'เงินตั้งต้นเกินวงเงิน' });
+    const glAccount = dto.gl_account ?? '1015';
+    const [f] = await db.insert(pettyCashFunds).values({
+      tenantId, fundCode: dto.fund_code, name: dto.name ?? null, custodian: dto.custodian ?? null, department: dto.department ?? null,
+      glAccount, floatLimit: String(float), balance: String(initial), status: 'active', createdBy: user.username,
+    }).onConflictDoNothing().returning({ id: pettyCashFunds.id });
+    if (!f) throw new BadRequestException({ code: 'FUND_EXISTS', message: `Fund ${dto.fund_code} already exists`, messageTh: 'มีกองทุนนี้อยู่แล้ว' });
+    if (initial > 0 && this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'PCF', sourceRef: dto.fund_code, tenantId, memo: `Establish petty cash ${dto.fund_code}`, createdBy: user.username, lines: [{ account_code: glAccount, debit: initial }, { account_code: '1000', credit: initial }] });
+    await this.statusLog?.log('PCF', dto.fund_code, '', 'active', user.username);
+    return { fund_code: dto.fund_code, float_limit: float, balance: initial, gl_account: glAccount };
+  }
+
+  async replenishFund(fundCode: string, dto: ReplenishDto, user: JwtUser) {
+    const db = this.db as any;
+    const fund = await this.fundByCode(fundCode, user);
+    const amount = round2(dto.amount);
+    if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+    const newBal = round2(n(fund.balance) + amount);
+    if (newBal > n(fund.floatLimit) + 1e-9) throw new UnprocessableEntityException({ code: 'OVER_FLOAT', message: `Replenish would exceed the float limit ${n(fund.floatLimit)} (balance ${n(fund.balance)} + ${amount})`, messageTh: `เกินวงเงินของกองทุน (${n(fund.floatLimit)})` });
+    await db.update(pettyCashFunds).set({ balance: String(newBal) }).where(eq(pettyCashFunds.id, Number(fund.id)));
+    if (this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'PCF-RPL', sourceRef: `${fundCode}:${ymd()}:${amount}`, tenantId: fund.tenantId ?? user.tenantId ?? null, memo: `Replenish petty cash ${fundCode}`, createdBy: user.username, lines: [{ account_code: fund.glAccount, debit: amount }, { account_code: '1000', credit: amount }] });
+    return { fund_code: fundCode, replenished: amount, balance: newBal, float_limit: n(fund.floatLimit) };
+  }
+
+  async listFunds(user: JwtUser) {
+    const db = this.db as any;
+    const conds = user.tenantId != null ? [eq(pettyCashFunds.tenantId, user.tenantId)] : [];
+    const rows = await db.select().from(pettyCashFunds).where(conds.length ? and(...conds) : undefined).orderBy(desc(pettyCashFunds.id));
+    return { funds: rows.map(shapeFund), count: rows.length };
+  }
+
+  private async fundByCode(fundCode: string, user: JwtUser) {
+    const db = this.db as any;
+    const conds = [eq(pettyCashFunds.fundCode, fundCode)];
+    if (user.tenantId != null) conds.push(eq(pettyCashFunds.tenantId, user.tenantId));
+    const [f] = await db.select().from(pettyCashFunds).where(and(...conds)).limit(1);
+    if (!f) throw new NotFoundException({ code: 'FUND_NOT_FOUND', message: `Fund ${fundCode} not found`, messageTh: 'ไม่พบกองทุนเงินสดย่อย' });
+    return f;
+  }
+
+  // ── Request: a direct expense or an advance drawn against a fund (maker; NO GL until approved) ──
+  // The draw cannot exceed the fund's available balance (the imprest float is finite).
+  async createRequest(dto: ExpenseRequestDto, user: JwtUser) {
+    const db = this.db as any;
+    const fund = await this.fundByCode(dto.fund_code, user);
+    if (fund.status !== 'active') throw new BadRequestException({ code: 'FUND_CLOSED', message: 'Fund is not active', messageTh: 'กองทุนปิดอยู่' });
+    const amount = round2(dto.amount);
+    if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
+    if (amount > n(fund.balance) + 1e-9) throw new UnprocessableEntityException({ code: 'INSUFFICIENT_FLOAT', message: `Amount ${amount} exceeds the fund balance ${n(fund.balance)}`, messageTh: `จำนวนเงินเกินยอดคงเหลือในกองทุน (${n(fund.balance)})` });
+    const reqNo = await this.docNo.nextDaily('PEX');
+    await db.insert(expenseRequests).values({
+      tenantId: user.tenantId ?? null, reqNo, fundId: Number(fund.id), kind: dto.kind, payee: dto.payee ?? null, purpose: dto.purpose ?? null,
+      amount: String(amount), expenseAccount: dto.expense_account ?? '5100', docRef: dto.doc_ref ?? null, receiptKey: dto.receipt_key ?? null,
+      status: 'PendingApproval', requestedBy: user.username,
+    });
+    await this.statusLog?.log('PEX', reqNo, '', 'PendingApproval', user.username);
+    return { req_no: reqNo, fund_code: dto.fund_code, kind: dto.kind, amount, status: 'PendingApproval', doc_ref: dto.doc_ref ?? null };
+  }
+
+  // ── Approve (checker ≠ maker): post GL + decrement the fund. Expense → Dr <acct> / Cr 1015;
+  //    advance → Dr 1180 / Cr 1015. Re-checks the fund still has the cash. ──
+  async approveRequest(reqNo: string, user: JwtUser) {
+    const db = this.db as any;
+    const req = await this.pendingRequest(reqNo, user);
+    if (req.requestedBy && req.requestedBy === user.username)
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an expense you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
+    const fund = (await db.select().from(pettyCashFunds).where(eq(pettyCashFunds.id, Number(req.fundId))).limit(1))[0];
+    if (!fund) throw new NotFoundException({ code: 'FUND_NOT_FOUND', message: 'Fund not found', messageTh: 'ไม่พบกองทุน' });
+    const amount = round2(n(req.amount));
+    if (amount > n(fund.balance) + 1e-9) throw new UnprocessableEntityException({ code: 'INSUFFICIENT_FLOAT', message: `Fund balance ${n(fund.balance)} is now below the request ${amount}`, messageTh: 'ยอดคงเหลือในกองทุนไม่พอ' });
+    const tenantId = req.tenantId ?? user.tenantId ?? null;
+    const lines = req.kind === 'advance'
+      ? [{ account_code: '1180', debit: amount }, { account_code: fund.glAccount, credit: amount }]
+      : [{ account_code: req.expenseAccount ?? '5100', debit: amount }, { account_code: fund.glAccount, credit: amount }];
+    let glRef: string | null = null;
+    if (this.ledger) { const je: any = await this.ledger.postEntry({ date: ymd(), source: 'PEX', sourceRef: reqNo, tenantId, memo: `${req.kind === 'advance' ? 'Advance' : 'Expense'} ${reqNo} — ${req.payee ?? ''}`, createdBy: user.username, lines }); glRef = je?.entry_no ?? null; }
+    await db.update(pettyCashFunds).set({ balance: String(round2(n(fund.balance) - amount)) }).where(eq(pettyCashFunds.id, Number(fund.id)));
+    await db.update(expenseRequests).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date(), glRef }).where(eq(expenseRequests.id, Number(req.id)));
+    await this.statusLog?.log('PEX', reqNo, 'PendingApproval', 'Approved', user.username);
+    return { req_no: reqNo, kind: req.kind, status: 'Approved', amount, journal_no: glRef, approved_by: user.username, prepared_by: req.requestedBy, fund_balance: round2(n(fund.balance) - amount) };
+  }
+
+  async rejectRequest(reqNo: string, user: JwtUser, reason?: string) {
+    const db = this.db as any;
+    const req = await this.pendingRequest(reqNo, user);
+    await db.update(expenseRequests).set({ status: 'Rejected', approvedBy: user.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(expenseRequests.id, Number(req.id)));
+    await this.statusLog?.log('PEX', reqNo, 'PendingApproval', 'Rejected', user.username, reason);
+    return { req_no: reqNo, status: 'Rejected', rejected_by: user.username };
+  }
+
+  // ── Settle an approved ADVANCE: spend posts to the expense account, unused cash returns to the fund.
+  //    settled_expense + returned_cash must equal the advance — Dr expense + Dr 1015 / Cr 1180. ──
+  async settleRequest(reqNo: string, dto: SettleExpenseDto, user: JwtUser) {
+    const db = this.db as any;
+    const conds = [eq(expenseRequests.reqNo, reqNo)];
+    if (user.tenantId != null) conds.push(eq(expenseRequests.tenantId, user.tenantId));
+    const [req] = await db.select().from(expenseRequests).where(and(...conds)).limit(1);
+    if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Expense request not found', messageTh: 'ไม่พบรายการ' });
+    if (req.kind !== 'advance') throw new BadRequestException({ code: 'NOT_ADVANCE', message: 'Only advances are settled', messageTh: 'เฉพาะเงินเบิกล่วงหน้าที่ต้องเคลียร์' });
+    if (req.status !== 'Approved') throw new BadRequestException({ code: 'NOT_APPROVED', message: 'Advance must be Approved (disbursed) before settling', messageTh: 'ต้องอนุมัติ (จ่าย) ก่อนจึงเคลียร์ได้' });
+    const spent = round2(dto.settled_expense);
+    const returned = round2(dto.returned_cash ?? 0);
+    if (round2(spent + returned) !== round2(n(req.amount))) throw new BadRequestException({ code: 'SETTLE_MISMATCH', message: `settled_expense + returned_cash (${round2(spent + returned)}) must equal the advance (${n(req.amount)})`, messageTh: 'ยอดใช้จ่ายรวมเงินคืนต้องเท่ากับเงินเบิกล่วงหน้า' });
+    const fund = (await db.select().from(pettyCashFunds).where(eq(pettyCashFunds.id, Number(req.fundId))).limit(1))[0];
+    const glAccount = fund?.glAccount ?? '1015';
+    const lines: any[] = [];
+    if (spent > 0) lines.push({ account_code: req.expenseAccount ?? '5100', debit: spent });
+    if (returned > 0) lines.push({ account_code: glAccount, debit: returned });
+    lines.push({ account_code: '1180', credit: round2(n(req.amount)) });
+    if (this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'PEX-STL', sourceRef: reqNo, tenantId: req.tenantId ?? user.tenantId ?? null, memo: `Settle advance ${reqNo}`, createdBy: user.username, lines });
+    if (returned > 0 && fund) await db.update(pettyCashFunds).set({ balance: String(round2(n(fund.balance) + returned)) }).where(eq(pettyCashFunds.id, Number(fund.id)));
+    await db.update(expenseRequests).set({ status: 'Settled', settledExpense: String(spent), returnedCash: String(returned), settledBy: user.username, settledAt: new Date() }).where(eq(expenseRequests.id, Number(req.id)));
+    await this.statusLog?.log('PEX', reqNo, 'Approved', 'Settled', user.username);
+    return { req_no: reqNo, status: 'Settled', settled_expense: spent, returned_cash: returned };
+  }
+
+  async listRequests(user: JwtUser, opts: { status?: string; fund_code?: string }) {
+    const db = this.db as any;
+    const conds: any[] = [];
+    if (user.tenantId != null) conds.push(eq(expenseRequests.tenantId, user.tenantId));
+    if (opts.status) conds.push(eq(expenseRequests.status, opts.status));
+    const rows = await db.select().from(expenseRequests).where(conds.length ? and(...conds) : undefined).orderBy(desc(expenseRequests.id));
+    return { requests: rows.map(shapeReq), count: rows.length };
+  }
+
+  private async pendingRequest(reqNo: string, user: JwtUser) {
+    const db = this.db as any;
+    const conds = [eq(expenseRequests.reqNo, reqNo), eq(expenseRequests.status, 'PendingApproval')];
+    if (user.tenantId != null) conds.push(eq(expenseRequests.tenantId, user.tenantId));
+    const [req] = await db.select().from(expenseRequests).where(and(...conds)).limit(1);
+    if (!req) throw new BadRequestException({ code: 'NO_PENDING_REQUEST', message: `No expense request pending approval for ${reqNo}`, messageTh: 'ไม่มีรายการที่รออนุมัติ' });
+    return req;
+  }
+}
+
+function shapeFund(f: any) {
+  return { fund_code: f.fundCode, name: f.name, custodian: f.custodian, department: f.department, gl_account: f.glAccount, float_limit: n(f.floatLimit), balance: n(f.balance), available: round2(n(f.floatLimit) - n(f.balance)), status: f.status, created_by: f.createdBy };
+}
+function shapeReq(r: any) {
+  return { req_no: r.reqNo, kind: r.kind, payee: r.payee, purpose: r.purpose, amount: n(r.amount), expense_account: r.expenseAccount, doc_ref: r.docRef, receipt_key: r.receiptKey, status: r.status, requested_by: r.requestedBy, requested_at: r.requestedAt, approved_by: r.approvedBy, approved_at: r.approvedAt, reject_reason: r.rejectReason, settled_expense: r.settledExpense != null ? n(r.settledExpense) : null, returned_cash: r.returnedCash != null ? n(r.returnedCash) : null, journal_no: r.glRef };
+}
