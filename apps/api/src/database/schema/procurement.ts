@@ -153,6 +153,9 @@ export const purchaseOrders = pgTable('purchase_orders', {
   totalAmount: numeric('total_amount', { precision: 14, scale: 2 }),
   createdBy: text('created_by'),
   expectedDate: date('expected_date'),
+  // C1: transaction currency (ISO-4217) + booked exchange rate vs functional currency (migration 0175)
+  currency: text('currency').notNull().default('THB'),
+  fxRate: numeric('fx_rate', { precision: 14, scale: 6 }).notNull().default('1.000000'),
 });
 
 export const poItems = pgTable('po_items', {
@@ -189,6 +192,9 @@ export const goodsReceipts = pgTable('goods_receipts', {
   vendorName: text('vendor_name'),
   receivedBy: text('received_by'),
   remarks: text('remarks'),
+  // C1: inherits the PO's transaction currency + rate at receipt date (migration 0175)
+  currency: text('currency').notNull().default('THB'),
+  fxRate: numeric('fx_rate', { precision: 14, scale: 6 }).notNull().default('1.000000'),
 }, (t) => ({ byPo: index('idx_gr_pono').on(t.poNo) }));
 
 export const grItems = pgTable('gr_items', {

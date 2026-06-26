@@ -36,6 +36,9 @@ export const tenants = pgTable('tenants', {
   tagline: text('tagline'),                                        // short company tagline under the name
   brandingPrefs: jsonb('branding_prefs').default({}),              // {show_logo_on_receipt?: bool, ...}
   themePrefs: jsonb('theme_prefs').default({}),                    // E4 (Phase 29) white-label theme tokens {primary_hue, radius, brand_name, logo_url, tagline}
+  // ── C1: Functional currency (ISO-4217) for this tenant's reporting/GL (migration 0175) ──
+  // Default 'THB'. Change only at entity setup — all historical GL remains in the prior currency.
+  functionalCurrency: text('functional_currency').notNull().default('THB'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
