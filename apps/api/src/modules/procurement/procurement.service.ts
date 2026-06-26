@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, items } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -13,7 +13,7 @@ import type { JwtUser } from '../../common/decorators';
 const n = (v: unknown) => Number(v ?? 0);
 
 export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string }[]; remarks?: string; priority?: string; amount?: number }
-export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string }[] }
+export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean }[] }
 export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
 
 @Injectable()
@@ -158,7 +158,7 @@ export class ProcurementService {
       await tx.insert(poItems).values(dto.items.map((it) => ({
         poId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null,
         orderQty: String(n(it.order_qty)), unitPrice: String(n(it.unit_price)), uom: it.uom ?? null,
-        amount: String(n(it.order_qty) * n(it.unit_price)), receivedQty: '0', status: 'Open',
+        amount: String(n(it.order_qty) * n(it.unit_price)), receivedQty: '0', isCapital: it.is_capital === true, status: 'Open',
       })));
     });
     await this.statusLog.log('PO', poNo, '', 'Pending', user.username);
@@ -236,14 +236,23 @@ export class ProcurementService {
       for (const it of lines) {
         const recv = n(it.received_qty);
         const [poi] = await tx.select().from(poItems).where(and(eq(poItems.poId, po.id), eq(poItems.itemId, it.item_id))).limit(1);
+        // FA-10: a capital line (PO-line override, else item-master flag) is routed to the asset register
+        // (Dr 1500 via the registration maker-checker) — NOT capitalised into inventory (Dr 1200) here, or it
+        // would double-count. We still record the GR line + stock movement for the receipt audit trail.
+        let isCapital = poi?.isCapital === true;
+        if (!isCapital) {
+          const [im] = await tx.select({ f: items.isFixedAsset }).from(items).where(eq(items.itemId, it.item_id)).limit(1);
+          isCapital = im?.f === true;
+        }
         await tx.insert(grItems).values({
           grId: Number(gh.id), poNo: dto.po_no, itemId: it.item_id, itemDescription: poi?.itemDescription ?? null,
           poQty: poi?.orderQty ?? null, receivedQty: String(recv), uom: it.uom ?? poi?.uom ?? null,
           lotNo: it.lot_no ?? null, expiryDate: it.expiry_date ?? null, unitCost: it.unit_cost != null ? String(it.unit_cost) : (poi?.unitPrice ?? null),
+          isCapital,
         });
         if (poi) await tx.update(poItems).set({ receivedQty: sql`${poItems.receivedQty} + ${recv}` }).where(eq(poItems.id, poi.id));
-        // Phase 17A — build cost basis (FIFO layer / AVG running cost) for configured items
-        if (this.costing && user.tenantId != null) {
+        // Phase 17A — build cost basis (FIFO layer / AVG running cost) for configured items (capital goods excluded)
+        if (this.costing && user.tenantId != null && !isCapital) {
           const actualCost = Number(it.unit_cost ?? poi?.unitPrice ?? 0);
           const c = await this.costing.onReceipt(tx, { tenantId: user.tenantId, itemId: it.item_id, qty: recv, unitCost: actualCost, grNo, date: today });
           if (c.active) costingLines.push({ itemId: it.item_id, qty: recv, actualCost, method: c.method, standardCost: c.standardCost ?? 0 });

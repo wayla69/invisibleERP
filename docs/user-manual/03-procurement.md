@@ -47,7 +47,12 @@ A PR is an internal *request to buy* before a real order is placed.
 2. Click **Create PO** (**สร้างใบสั่งซื้อ (PO)**).
 3. Select the **vendor**, add items, quantities and agreed prices, and a delivery
    date.
-4. Submit.
+4. For a **capital purchase** (a fixed asset such as equipment or a vehicle), tick
+   **ทุน (capital)** on that line. When received, capital lines are routed to the
+   fixed-asset register instead of inventory — see *Register an asset from a goods
+   receipt* in `06-general-ledger.md` (control **FA-10**). Items flagged
+   **is_fixed_asset** on the item master are treated as capital automatically.
+5. Submit.
 
 **Expected result:** A purchase order is created with a PO number.
 

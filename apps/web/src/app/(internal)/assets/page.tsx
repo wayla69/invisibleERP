@@ -31,6 +31,7 @@ export default function AssetsPage() {
       <Tabs
         tabs={[
           { key: 'register', label: 'ทะเบียนสินทรัพย์', content: <Register /> },
+          { key: 'capitalize', label: 'ตั้งทรัพย์สินจาก GR', content: <Capitalize /> },
           { key: 'qr', label: 'QR ป้ายทรัพย์สิน', content: <QrTags /> },
           { key: 'categories', label: 'หมวดหมู่', content: <Categories /> },
           { key: 'runs', label: 'รอบค่าเสื่อมราคา', content: <DepreciationRuns /> },
@@ -266,6 +267,108 @@ function ScheduleDrill({ assetNo, onClose }: { assetNo: string; onClose: () => v
         )}
       </StateView>
     </Card>
+  );
+}
+
+// ───────────────────────── Procure-to-Capitalize: register an asset from a GR (FA-10) ─────────────────────────
+// A capital goods-receipt line is capitalised onto the asset register via a maker-checker request: a preparer
+// raises it (no GL), and a DIFFERENT user approves before the asset + acquisition JE are created.
+function Capitalize() {
+  const qc = useQueryClient();
+  const [grNo, setGrNo] = useState('');
+  const [lookup, setLookup] = useState('');
+  const [form, setForm] = useState<{ gr_item_id: number; name: string; life: string } | null>(null);
+
+  const elig = useQuery<any>({ queryKey: ['fa-eligible', lookup], queryFn: () => api(`/api/assets/registrations/eligible?gr_no=${encodeURIComponent(lookup)}`), enabled: !!lookup });
+  const queue = useQuery<any>({ queryKey: ['fa-registrations'], queryFn: () => api('/api/assets/registrations?status=PendingApproval') });
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['fa-eligible'] }); qc.invalidateQueries({ queryKey: ['fa-registrations'] }); qc.invalidateQueries({ queryKey: ['assets'] }); };
+
+  const register = useMutation({
+    mutationFn: (b: any) => api<any>('/api/assets/registrations', { method: 'POST', body: JSON.stringify(b) }),
+    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอตั้งทรัพย์สิน ${r.reg_no} (${baht(r.acquire_cost)}) — รอผู้อื่นอนุมัติ`); setForm(null); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const approve = useMutation({
+    mutationFn: (regNo: string) => api<any>(`/api/assets/registrations/${regNo}/approve`, { method: 'POST' }),
+    onSuccess: (r: any) => { notifySuccess(`อนุมัติ — สร้างสินทรัพย์ ${r.asset_no} และลงบัญชีแล้ว`); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: (regNo: string) => api<any>(`/api/assets/registrations/${regNo}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
+    onSuccess: () => { notifySuccess('ปฏิเสธคำขอตั้งทรัพย์สินแล้ว'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">ค้นหารายการทุน (Capital) จากใบรับสินค้า</h3>
+        <p className="text-sm text-muted-foreground">ระบุเลขที่ใบรับสินค้า (GR) เพื่อดูรายการที่ตั้งเป็นสินทรัพย์ถาวรได้ — รายการทุนจะไม่ถูกบันทึกเข้าสต๊อก แต่รอตั้งทะเบียนทรัพย์สิน</p>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="grid gap-1.5"><Label htmlFor="gr-no">เลขที่ GR</Label><Input id="gr-no" placeholder="GR-YYYYMMDD-NNN" value={grNo} onChange={(e) => setGrNo(e.target.value)} className="w-56" /></div>
+          <Button disabled={!grNo} onClick={() => setLookup(grNo.trim())}>ค้นหา</Button>
+        </div>
+      </Card>
+
+      {lookup && (
+        <StateView q={elig}>
+          {elig.data && (
+            <Card className="gap-3 p-5">
+              <h3 className="text-base font-semibold">รายการทุนที่รอตั้งทรัพย์สิน · {elig.data.gr_no} <span className="text-sm font-normal text-muted-foreground">(PO {elig.data.po_no})</span></h3>
+              <DataTable
+                rows={elig.data.eligible}
+                emptyState={{ icon: Boxes, title: 'ไม่มีรายการทุนที่รอตั้งทรัพย์สินใน GR นี้', description: 'รายการอาจถูกตั้งทรัพย์สินไปแล้ว หรือไม่ได้ถูกตั้งค่าเป็นสินทรัพย์ถาวร' }}
+                dense
+                columns={[
+                  { key: 'item_id', label: 'รหัสสินค้า' },
+                  { key: 'item_description', label: 'รายละเอียด' },
+                  { key: 'received_qty', label: 'รับ', align: 'right', render: (r: any) => <span className="tabular">{num(r.received_qty)}</span> },
+                  { key: 'unit_cost', label: 'ต้นทุน/หน่วย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.unit_cost)}</span> },
+                  { key: 'suggested_cost', label: 'มูลค่ารวม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.suggested_cost)}</span> },
+                  { key: 'act', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" onClick={() => setForm({ gr_item_id: r.gr_item_id, name: r.item_description || r.item_id, life: '60' })}>ตั้งทรัพย์สิน</Button> },
+                ]}
+              />
+              {form && (
+                <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-muted/40 p-3">
+                  <div className="grid gap-1.5"><Label>ชื่อสินทรัพย์</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-64" /></div>
+                  <div className="grid gap-1.5"><Label>อายุการใช้งาน (เดือน)</Label><Input type="number" min="1" value={form.life} onChange={(e) => setForm({ ...form, life: e.target.value })} className="w-36" /></div>
+                  <Button disabled={!form.name || !form.life || register.isPending} onClick={() => register.mutate({ gr_no: elig.data.gr_no, gr_item_id: form.gr_item_id, name: form.name, useful_life_months: Number(form.life) })}>ส่งคำขอ</Button>
+                  <Button variant="ghost" onClick={() => setForm(null)}>ยกเลิก</Button>
+                </div>
+              )}
+            </Card>
+          )}
+        </StateView>
+      )}
+
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">คำขอตั้งทรัพย์สินที่รออนุมัติ</h3>
+        <p className="text-xs text-muted-foreground">ผู้อนุมัติต้องเป็นคนละคนกับผู้ขอ (แบ่งแยกหน้าที่) — สินทรัพย์ถูกสร้างและลงบัญชี (Dr 1500 / Cr 2000) เมื่ออนุมัติเท่านั้น</p>
+        <StateView q={queue}>
+          {queue.data && (
+            <DataTable
+              rows={queue.data.registrations}
+              emptyState={{ icon: Landmark, title: 'ไม่มีคำขอที่รออนุมัติ' }}
+              dense
+              columns={[
+                { key: 'reg_no', label: 'เลขที่คำขอ' },
+                { key: 'name', label: 'ชื่อสินทรัพย์' },
+                { key: 'gr_no', label: 'GR / PO', render: (r: any) => <span className="text-xs text-muted-foreground">{r.gr_no}{r.po_no ? ` · ${r.po_no}` : ''}</span> },
+                { key: 'acquire_cost', label: 'มูลค่า', align: 'right', render: (r: any) => <span className="tabular">{baht(r.acquire_cost)}</span> },
+                { key: 'useful_life_months', label: 'อายุ (ด.)', align: 'right', render: (r: any) => <span className="tabular">{num(r.useful_life_months)}</span> },
+                { key: 'requested_by', label: 'ผู้ขอ', render: (r: any) => <span className="text-xs text-muted-foreground">{r.requested_by ?? '—'}</span> },
+                { key: 'act', label: '', align: 'right', render: (r: any) => (
+                  <div className="flex justify-end gap-1.5">
+                    <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(r.reg_no)}>อนุมัติ</Button>
+                    <Button size="sm" variant="ghost" disabled={reject.isPending} onClick={() => reject.mutate(r.reg_no)}>ปฏิเสธ</Button>
+                  </div>
+                ) },
+              ]}
+            />
+          )}
+        </StateView>
+      </Card>
+    </div>
   );
 }
 
