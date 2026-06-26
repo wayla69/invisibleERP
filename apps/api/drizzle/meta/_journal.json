@@ -1051,6 +1051,13 @@
       "when": 2023670000004,
       "tag": "0149_customer_master",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 2023680000004,
+      "tag": "0150_crm_pipeline",
+      "breakpoints": true
     }
   ]
 }
