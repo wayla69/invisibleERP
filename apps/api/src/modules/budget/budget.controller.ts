@@ -24,6 +24,13 @@ const ApproveBudgetBody = z.object({
 });
 type ApproveBudgetBodyT = z.infer<typeof ApproveBudgetBody>;
 
+const ReviewBody = z.object({
+  fiscal_year: z.number().int(),
+  period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  cost_center: z.string().optional(),
+  notes: z.string().min(1),
+});
+
 // งบประมาณเทียบจริง — budgets (reference data, no GL) + budget-vs-actual variance report.
 @Controller('api/ledger')
 @Permissions('exec', 'planner')
@@ -58,4 +65,12 @@ export class BudgetController {
   report(@Query('fiscal_year') fy: string, @Query('period') period?: string, @Query('cost_center') cc?: string) {
     return this.svc.budgetVsActual({ fiscal_year: +fy, period, cost_center: cc });
   }
+
+  // ELC-06 — management budget-variance review: record a sign-off + list the review history (evidence).
+  @Post('budget-review/sign-off') @HttpCode(200) @Permissions('exec', 'approvals', 'gl_close')
+  signOff(@Body(new ZodValidationPipe(ReviewBody)) b: z.infer<typeof ReviewBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.signOffReview(b, u);
+  }
+  @Get('budget-reviews') @Permissions('exec', 'planner', 'approvals')
+  reviews(@Query('fiscal_year') fy?: string) { return this.svc.listReviews(qintOpt('fiscal_year', fy)); }
 }
