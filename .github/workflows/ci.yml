@@ -89,6 +89,7 @@ jobs:
           - { pkg: cutover, script: reservations }
           - { pkg: cutover, script: tips }
           - { pkg: cutover, script: waste }
+          - { pkg: cutover, script: refund-approval }
           - { pkg: cutover, script: menu }
           - { pkg: cutover, script: recipe }
           # ── tax / Thai compliance ──
