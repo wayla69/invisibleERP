@@ -14,6 +14,14 @@ export const bins = pgTable('bins', {
   aisle: text('aisle'), rack: text('rack'), level: text('level'),
   binType: text('bin_type').notNull().default('storage'), // storage | picking | quarantine | receiving | staging
   capacity: numeric('capacity'),
+  // Storage-layout geometry (migration 0138) — bin position + size for the 2D floor plan / 3D warehouse view.
+  // pos_x = aisle axis, pos_y = depth axis, pos_z = level/height; dim_* = footprint/height (display units).
+  posX: numeric('pos_x', { precision: 10, scale: 2 }).notNull().default('0'),
+  posY: numeric('pos_y', { precision: 10, scale: 2 }).notNull().default('0'),
+  posZ: numeric('pos_z', { precision: 10, scale: 2 }).notNull().default('0'),
+  dimW: numeric('dim_w', { precision: 10, scale: 2 }).notNull().default('1'),
+  dimD: numeric('dim_d', { precision: 10, scale: 2 }).notNull().default('1'),
+  dimH: numeric('dim_h', { precision: 10, scale: 2 }).notNull().default('1'),
   active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqBin: unique('bins_tenant_code_uq').on(t.tenantId, t.binCode) }));
