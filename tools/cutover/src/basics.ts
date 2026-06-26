@@ -124,6 +124,18 @@ async function main() {
     { invoiceNo: 'INV-E', invoiceDate: daysAgo(45), dueDate: daysAgo(20), tenantId: cust3, amount: '500', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },  // only 20d overdue
   ]).onConflictDoNothing();
 
+  // ───────── Unified customer master / customer-of-record (REV-15) — links B2C loyalty + B2B AR ─────────
+  const [mem] = await db.insert(s.posMembers).values({ tenantId: cust, memberCode: 'M-CUST', name: 'Acme Co', tier: 'Gold', balance: '250', lifetime: '1800', active: true }).returning({ id: s.posMembers.id });
+  const cm = await inj('POST', '/api/customer-master', admin, { name: 'Acme Co', kind: 'company', email: 'ar@cust.example', account_code: 'CUST', member_id: Number(mem.id) });
+  ok('REV-15: create a customer-of-record (CUS-…) linking a B2B account + B2C member', cm.status === 201 && /^CUS-/.test(cm.json?.customer_no ?? ''), JSON.stringify(cm.json).slice(0, 70));
+  const cno = cm.json?.customer_no;
+  const v360 = (await inj('GET', `/api/customer-master/${cno}/360`, admin)).json;
+  const cdetail = (await inj('GET', '/api/customers/CUST', admin)).json;
+  ok('REV-15: 360 AR outstanding ties to the AR sub-ledger (3000)', near(v360.summary?.ar_outstanding, 3000) && near(v360.b2b?.ar_balance?.outstanding, cdetail.ar_balance?.outstanding), `360=${v360.summary?.ar_outstanding} detail=${cdetail.ar_balance?.outstanding}`);
+  ok('REV-15: 360 surfaces the linked loyalty (B2C) tier + points', v360.loyalty?.tier === 'Gold' && near(v360.loyalty?.points_balance, 250) && v360.summary?.has_loyalty === true, JSON.stringify(v360.loyalty));
+  const cmList = (await inj('GET', '/api/customer-master?search=Acme', admin)).json;
+  ok('REV-15: customer master register search finds the record', (cmList.customers ?? []).some((c: any) => c.customer_no === cno), `n=${cmList.count}`);
+
   const wl = (await inj('GET', '/api/finance/ar/collections', admin)).json;
   const a = (wl.rows ?? []).find((r: any) => r.invoice_no === 'INV-A');
   const b = (wl.rows ?? []).find((r: any) => r.invoice_no === 'INV-B');
@@ -424,7 +436,7 @@ async function main() {
     leRecon.reconciled === true && near(leRecon.difference, 0) && near(leRecon.gl_liability, leRecon.schedule_liability) && leSched && leSched.liability_balance > 0,
     JSON.stringify({ gl: leRecon.gl_liability, sched: leRecon.schedule_liability, diff: leRecon.difference, rec: leRecon.reconciled }));
 
-  // ───────────────── AR bad-debt write-off maker-checker (REV-14) ─────────────────
+  // ───────────────── AR bad-debt write-off maker-checker (REV-15) ─────────────────
   const woMgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
   const wo5720Before = await tbDebit('5720');
   const woReq = await inj('POST', '/api/finance/ar/write-off', admin, { amount: 500, reason: 'ลูกค้าปิดกิจการ', customer_name: 'ABC Co' });

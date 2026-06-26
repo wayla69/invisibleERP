@@ -37,6 +37,7 @@ export * from './tax-docs';
 export * from './restaurant';
 export * from './assets';
 export * from './petty-cash';
+export * from './customer-master';
 export * from './menu';
 export * from './recipes';
 export * from './split';
