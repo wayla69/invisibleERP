@@ -3,7 +3,7 @@
 //  - wht_certificates / wht_cert_lines : หนังสือรับรองการหักภาษี ณ ที่จ่าย 50 ทวิ (ม.50 ทวิ)
 // Seller/buyer/payer/payee are SNAPSHOT columns (frozen at issue) so an issued legal document is
 // immutable even if the underlying tenant/vendor record later changes.
-import { pgTable, bigserial, bigint, text, numeric, date, boolean, timestamp, pgEnum, unique } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, date, boolean, timestamp, integer, jsonb, pgEnum, unique } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 export const taxInvoiceTypeEnum = pgEnum('tax_invoice_type', ['full', 'abbreviated']);
@@ -113,7 +113,30 @@ export const whtCertLines = pgTable('wht_cert_lines', {
   taxWithheld: numeric('tax_withheld', { precision: 14, scale: 2 }).notNull(),
 });
 
+// Step 7 — Thai tax filing register. Snapshots a computed PP30/PND return into a DRAFT→SUBMITTED→ACCEPTED
+// record (one per tenant/type/period) with the figures as filed + the RD submission reference, for the
+// auditable filing trail + the remittance calendar.
+export const thaiTaxFilings = pgTable('thai_tax_filings', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  filingType: text('filing_type').notNull(),               // 'PP30' | 'PND3' | 'PND53'
+  periodMonth: integer('period_month').notNull(),
+  periodYear: integer('period_year').notNull(),
+  status: text('status').notNull().default('DRAFT'),       // DRAFT | SUBMITTED | ACCEPTED
+  outputVat: numeric('output_vat', { precision: 18, scale: 2 }).default('0'),
+  inputVat: numeric('input_vat', { precision: 18, scale: 2 }).default('0'),
+  netVat: numeric('net_vat', { precision: 18, scale: 2 }).default('0'),
+  taxWithheld: numeric('tax_withheld', { precision: 18, scale: 2 }).default('0'),
+  deadline: date('deadline'),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  submissionRef: text('submission_ref'),
+  snapshot: jsonb('snapshot'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uq: unique('uq_thai_tax_filing').on(t.tenantId, t.filingType, t.periodMonth, t.periodYear) }));
+
 export type TaxInvoice = typeof taxInvoices.$inferSelect;
 export type TaxInvoiceLine = typeof taxInvoiceLines.$inferSelect;
 export type WhtCertificate = typeof whtCertificates.$inferSelect;
 export type WhtCertLine = typeof whtCertLines.$inferSelect;
+export type ThaiTaxFiling = typeof thaiTaxFilings.$inferSelect;
