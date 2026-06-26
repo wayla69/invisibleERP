@@ -41,6 +41,10 @@ export const fixedAssets = pgTable('fixed_assets', {
   disposalRequestedBy: text('disposal_requested_by'),                     // preparer (maker)
   disposalApprovedBy: text('disposal_approved_by'),                       // checker — must differ from requester
   acquireSource: text('acquire_source').notNull().default('cash'),
+  // Procure-to-Capitalize traceability (FA-10): the goods receipt / purchase order this asset was
+  // capitalised from. NULL for assets acquired directly (cash purchase via POST /api/assets).
+  sourceGrNo: text('source_gr_no'),
+  sourcePoNo: text('source_po_no'),
   // Physical-tracking fields (for QR asset tags + scan-to-locate). Accounting
   // status stays in `status`; these track where the asset physically is / who holds it.
   location: text('location'),
@@ -90,6 +94,38 @@ export const assetRevaluations = pgTable('asset_revaluations', {
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byAsset: index('idx_reval_asset').on(t.assetNo) }));
+
+// Asset registration request (FA-10 maker-checker). A capital GR line is capitalised onto the asset register
+// only via this request: a preparer raises it (PendingApproval, NO GL effect) and a DIFFERENT user approves,
+// at which point the fixed_assets row + acquisition JE (Dr 1500 / Cr 2000) are created and asset_no stamped
+// back here. tenant-scoped → covered by the RLS loop re-run in migration 0137.
+export const assetRegistrationRequests = pgTable('asset_registration_requests', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  regNo: text('reg_no').notNull(),                  // FAR-YYYYMMDD-NNN
+  grNo: text('gr_no'),                              // source goods receipt
+  poNo: text('po_no'),                              // source purchase order (traceability)
+  grItemId: bigint('gr_item_id', { mode: 'number' }), // the specific GR line being capitalised
+  itemId: text('item_id'),
+  name: text('name').notNull(),
+  categoryId: bigint('category_id', { mode: 'number' }).references(() => assetCategories.id),
+  acquireDate: date('acquire_date'),
+  acquireCost: numeric('acquire_cost', { precision: 18, scale: 4 }).notNull(),
+  salvageValue: numeric('salvage_value', { precision: 18, scale: 4 }).notNull().default('0'),
+  usefulLifeMonths: integer('useful_life_months'),
+  acquireSource: text('acquire_source').notNull().default('credit'),
+  location: text('location'),
+  department: text('department'),
+  serialNo: text('serial_no'),
+  notes: text('notes'),
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Posted | Rejected
+  assetNo: text('asset_no'),                        // the created fixed asset, once approved
+  requestedBy: text('requested_by'),                // preparer (maker)
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),                  // checker — must differ from requestedBy
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+}, (t) => ({ uqRegNo: unique('uq_asset_reg_no').on(t.tenantId, t.regNo), byStatus: index('idx_asset_reg_status').on(t.tenantId, t.status), byGr: index('idx_asset_reg_gr').on(t.grNo) }));
 
 export const depreciationRuns = pgTable('depreciation_runs', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

@@ -962,6 +962,20 @@
       "breakpoints": true
     },
     {
+      "idx": 137,
+      "version": "7",
+      "when": 2023550000004,
+      "tag": "0137_asset_capitalization_from_gr",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 2023560000004,
+      "tag": "0138_wms_bin_layout",
+      "breakpoints": true
+    },
+    {
       "idx": 139,
       "version": "7",
       "when": 2023570000004,
