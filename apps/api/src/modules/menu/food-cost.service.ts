@@ -9,6 +9,12 @@ const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const r1 = (x: number) => Math.round((Number(x) || 0) * 10) / 10;
 // variance anomaly bands (|variance %| of theoretical usage)
 const HIGH_VAR = 10, MED_VAR = 5;
+// Step 3 — gross qty divisor (same formula as recipe.service.ts). qty_per is the EDIBLE (plated) amount;
+// raw stock consumption = qty_per / (yield_factor − waste_factor). Guard: non-positive divisor → 1.0.
+const grossDiv = (yieldFactor: any, wasteFactor: any) => {
+  const ef = (Number(yieldFactor ?? 1) || 1) - (Number(wasteFactor ?? 0) || 0);
+  return ef > 0 ? ef : 1;
+};
 
 // Food-cost / margin analytics — theoretical (recipe-based). Computes per-item cost from the recipe
 // (falling back to menu_items.cost), margin %, food-cost %, and an ingredient cost-contribution view.
@@ -26,7 +32,7 @@ export class FoodCostService {
     const costByItem = new Map<number, number>();
     for (const rec of recs) {
       const yld = Math.max(n(rec.yieldQty), 1);
-      const cost = (byRecipe.get(Number(rec.id)) ?? []).reduce((a: number, l: any) => a + (n(l.qtyPer) / yld) * n(l.unitCost), 0);
+      const cost = (byRecipe.get(Number(rec.id)) ?? []).reduce((a: number, l: any) => a + (n(l.qtyPer) / grossDiv(l.yieldFactor, l.wasteFactor) / yld) * n(l.unitCost), 0);
       costByItem.set(Number(rec.menuItemId), r2(cost));
     }
     return costByItem;
@@ -67,7 +73,7 @@ export class FoodCostService {
     const agg = new Map<string, { ingredient_item_id: string; description: string | null; cost: number; recipes_using: number }>();
     for (const l of lines) {
       const yld = yldByRecipe.get(Number(l.recipeId)) ?? 1;
-      const perServing = (n(l.qtyPer) / yld) * n(l.unitCost);
+      const perServing = (n(l.qtyPer) / grossDiv(l.yieldFactor, l.wasteFactor) / yld) * n(l.unitCost);
       const key = l.ingredientItemId;
       const e = agg.get(key) ?? { ingredient_item_id: key, description: l.ingredientDescription ?? null, cost: 0, recipes_using: 0 };
       e.cost = r2(e.cost + perServing); e.recipes_using += 1;
