@@ -42,6 +42,7 @@ export default function AssetsPage() {
 
 // ───────────────────────── Register + per-asset schedule drill-in ─────────────────────────
 function Register() {
+  const qc = useQueryClient();
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const q = useQuery<any>({
@@ -106,7 +107,77 @@ function Register() {
       </StateView>
 
       {selected && <ScheduleDrill assetNo={selected} onClose={() => setSelected(null)} />}
+      {selected && <RevaluationPanel assetNo={selected} onChange={() => qc.invalidateQueries({ queryKey: ['assets'] })} />}
     </div>
+  );
+}
+
+// Revaluation / impairment with maker-checker (FA-08): request defers the carrying-value change as a
+// Draft; a DIFFERENT user approves before it is effective. Preparer self-approval → SOD_VIOLATION.
+function RevaluationPanel({ assetNo, onChange }: { assetNo: string; onChange: () => void }) {
+  const qc = useQueryClient();
+  const [newValue, setNewValue] = useState('');
+  const [reason, setReason] = useState('');
+  const q = useQuery<any>({ queryKey: ['asset-revals', assetNo], queryFn: () => api(`/api/assets/${assetNo}/revaluations`) });
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['asset-revals', assetNo] }); onChange(); };
+  const pending = (q.data?.revaluations ?? []).find((r: any) => r.status === 'PendingApproval');
+
+  const request = useMutation({
+    mutationFn: () => api<any>(`/api/assets/${assetNo}/revalue`, { method: 'POST', body: JSON.stringify({ new_value: Number(newValue), reason: reason || undefined }) }),
+    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอตีมูลค่าใหม่ (${r.kind === 'impairment' ? 'ด้อยค่า' : 'เพิ่มมูลค่า'} ${baht(r.delta)}) — รอผู้อื่นอนุมัติ`); setNewValue(''); setReason(''); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const approve = useMutation({
+    mutationFn: () => api<any>(`/api/assets/${assetNo}/revalue/approve`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess('อนุมัติการตีมูลค่าใหม่ — ลงบัญชีมีผล'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: () => api<any>(`/api/assets/${assetNo}/revalue/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
+    onSuccess: () => { notifySuccess('ปฏิเสธการตีมูลค่าใหม่ — ยกเลิกรายการบัญชี'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const busy = approve.isPending || reject.isPending;
+
+  return (
+    <Card className="gap-4 p-5">
+      <h3 className="text-base font-semibold">ตีมูลค่าใหม่ / ด้อยค่า · {assetNo}</h3>
+      {pending ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+          <Badge variant="warning">รออนุมัติ</Badge>
+          <span>{pending.kind === 'impairment' ? 'ด้อยค่า' : 'เพิ่มมูลค่า'}: {baht(pending.old_value)} → {baht(pending.new_value)} · ผู้ขอ {pending.actioned_by}</span>
+          <div className="ml-auto flex gap-1.5">
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => approve.mutate()}>อนุมัติ</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate()}>ปฏิเสธ</Button>
+          </div>
+          <p className="w-full text-xs text-muted-foreground">ต้องเป็นคนละคนกับผู้ขอ (แบ่งแยกหน้าที่) — มูลค่ามีผลต่อบัญชีเมื่ออนุมัติเท่านั้น</p>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5"><Label>มูลค่าใหม่ (NBV)</Label><Input type="number" min="0" value={newValue} onChange={(e) => setNewValue(e.target.value)} className="w-40" /></div>
+          <div className="grid gap-1.5"><Label>เหตุผล</Label><Input value={reason} onChange={(e) => setReason(e.target.value)} className="w-56" placeholder="เช่น ประเมินราคาตลาด" /></div>
+          <Button disabled={!newValue || request.isPending} onClick={() => request.mutate()}>ส่งคำขอ</Button>
+        </div>
+      )}
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.revaluations}
+            emptyState={{ title: 'ยังไม่มีประวัติการตีมูลค่า' }}
+            dense
+            columns={[
+              { key: 'reval_date', label: 'วันที่', render: (r: any) => (r.reval_date ? thaiDate(r.reval_date) : '—') },
+              { key: 'kind', label: 'ประเภท', render: (r: any) => <Badge variant={r.kind === 'impairment' ? 'destructive' : 'success'}>{r.kind === 'impairment' ? 'ด้อยค่า' : 'เพิ่มมูลค่า'}</Badge> },
+              { key: 'old_value', label: 'เดิม', align: 'right', render: (r: any) => <span className="tabular">{baht(r.old_value)}</span> },
+              { key: 'new_value', label: 'ใหม่', align: 'right', render: (r: any) => <span className="tabular">{baht(r.new_value)}</span> },
+              { key: 'delta', label: 'ส่วนต่าง', align: 'right', render: (r: any) => <span className={`tabular ${r.delta < 0 ? 'text-destructive' : 'text-success'}`}>{baht(r.delta)}</span> },
+              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={r.status === 'Posted' ? 'success' : r.status === 'Rejected' ? 'destructive' : 'warning'}>{r.status === 'Posted' ? 'ผ่านแล้ว' : r.status === 'Rejected' ? 'ปฏิเสธ' : 'รออนุมัติ'}</Badge> },
+              { key: 'by', label: 'ผู้ขอ/อนุมัติ', render: (r: any) => <span className="text-xs text-muted-foreground">{r.actioned_by ?? '—'}{r.approved_by ? ` → ${r.approved_by}` : ''}</span> },
+            ]}
+          />
+        )}
+      </StateView>
+    </Card>
   );
 }
 

@@ -10,6 +10,7 @@ import { qint, qintOpt } from '../../common/query';
 const ScanUpdateBody = z.object({ code: z.string().min(1), location: z.string().optional(), assigned_to: z.string().optional(), note: z.string().optional() });
 type ScanUpdateBodyT = z.infer<typeof ScanUpdateBody>;
 const RevalueBody = z.object({ new_value: z.number().nonnegative(), reason: z.string().optional(), reval_date: z.string().optional() });
+const RevalRejectBody = z.object({ reason: z.string().optional() });
 
 @Controller('api/assets')
 @Permissions('exec', 'creditors')
@@ -36,8 +37,11 @@ export class AssetsController {
   @Get(':assetNo/schedule') schedule(@Param('assetNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.depreciationSchedule(u, no); }
   @Patch(':assetNo/dispose') dispose(@Param('assetNo') no: string, @Body(new ZodValidationPipe(DisposeAssetBody)) b: DisposeAssetDto, @CurrentUser() u: JwtUser) { return this.svc.dispose(no, b, u); }
 
-  // Revaluation / impairment (FA-07): adjust carrying amount; upward → revaluation surplus, downward → impairment loss.
+  // Revaluation / impairment (FA-07 valuation): adjust carrying amount; upward → revaluation surplus, downward → impairment loss.
+  // FA-08 maker-checker: a revalue request posts a Draft JE + 'PendingApproval'; a DIFFERENT user must approve before it is effective.
   @Post(':assetNo/revalue') revalue(@Param('assetNo') no: string, @Body(new ZodValidationPipe(RevalueBody)) b: z.infer<typeof RevalueBody>, @CurrentUser() u: JwtUser) { return this.svc.revalue(no, b, u); }
+  @Post(':assetNo/revalue/approve') approveReval(@Param('assetNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveRevaluation(no, u); }
+  @Post(':assetNo/revalue/reject') rejectReval(@Param('assetNo') no: string, @Body(new ZodValidationPipe(RevalRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectRevaluation(no, u, b?.reason); }
   @Get(':assetNo/revaluations') revaluations(@Param('assetNo') no: string) { return this.svc.listRevaluations(no); }
 
   @Post('depreciation/run') runDep(@Body(new ZodValidationPipe(RunDepreciationBody)) b: { period: string }, @CurrentUser() u: JwtUser) { return this.svc.runDepreciation(b.period, u); }

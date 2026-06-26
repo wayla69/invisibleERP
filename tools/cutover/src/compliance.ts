@@ -218,6 +218,20 @@ async function main() {
   ok('PAY-03: independent approver posts the run → Posted + 2350 SSO payable now reflected',
     payApprove.json.status === 'Posted' && payApprove.json.approved_by === 'paychk' && ssoAfter > 0, JSON.stringify({ st: payApprove.json.status, by: payApprove.json.approved_by, sso: ssoAfter }));
 
+  // ════════════════════════ FA-08 — Asset revaluation maker-checker (SoD) ════════════════════════
+  // A revaluation/impairment posts a DRAFT JE and DEFERS the carrying-value change; a different user must
+  // approve before the surplus/impairment hits the books — the preparer can never revalue assets alone.
+  await db.insert(s.fixedAssets).values({ tenantId: t1, assetNo: 'FA-MC1', name: 'เตาอบ (FA-08)', acquireDate: '2026-01-01', acquireCost: '100000', usefulLifeMonths: 60, netBookValue: '100000', status: 'active' }).onConflictDoNothing();
+  const revReq = await inj('POST', '/api/assets/FA-MC1/revalue', payprep, { new_value: 130000, reason: 'fair-value appraisal', reval_date: '2026-09-15' });
+  const surplusPre = await tbCredit('2026-09', '3200');
+  ok('FA-08: revaluation request posts Draft (PendingApproval); 3200 surplus excluded until approved', revReq.json?.status === 'PendingApproval' && revReq.json?.delta === 30000 && surplusPre === 0, JSON.stringify({ st: revReq.json?.status, d: revReq.json?.delta, s3200: surplusPre }));
+  const revSelf2 = await inj('POST', '/api/assets/FA-MC1/revalue/approve', payprep);
+  ok('FA-08: preparer self-approval blocked → 403 SOD_VIOLATION', revSelf2.status === 403 && revSelf2.json?.error?.code === 'SOD_VIOLATION', `${revSelf2.status} ${revSelf2.json?.error?.code}`);
+  const revAppr2 = await inj('POST', '/api/assets/FA-MC1/revalue/approve', paychk);
+  const surplusPost = await tbCredit('2026-09', '3200');
+  ok('FA-08: independent approver → revaluation effective, surplus to equity 3200 (+30000)',
+    revAppr2.json?.status === 'Posted' && revAppr2.json?.approved_by === 'paychk' && surplusPost === 30000, JSON.stringify({ st: revAppr2.json?.status, by: revAppr2.json?.approved_by, s3200: surplusPost }));
+
   // ════════════════════ ITGC-AC-09 — SoD preventive block on permission assignment ════════════════════
   // Raise PR / PO (procurement) + approve & pay AP (creditors) is SoD rule R03.
   const conflictPerms = ['procurement', 'creditors'];
