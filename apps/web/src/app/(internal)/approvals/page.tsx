@@ -1,0 +1,68 @@
+'use client';
+
+import { useQuery } from '@tanstack/react-query';
+import { ClipboardCheck, Clock, AlarmClock, Coins } from 'lucide-react';
+import { api } from '@/lib/api';
+import { baht, num, thaiDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import { ModulePage } from '@/components/module-page';
+import { StatCard } from '@/components/stat-card';
+import { DataTable } from '@/components/data-table';
+import { Badge } from '@/components/ui/badge';
+
+// GOV-01 — unified pending-approvals monitor: every item awaiting independent (maker-checker) approval
+// across the system, with its age, so the controller can chase stale approvals before close.
+
+interface Item {
+  type: string; control: string; ref: string; label: string; amount: number;
+  requested_by: string | null; requested_at: string | null; age_days: number | null;
+}
+interface Resp { items: Item[]; count: number; by_type: Record<string, number>; oldest_age_days: number; overdue_days: number; overdue: number; total_amount: number }
+
+const TYPE_TH: Record<string, string> = {
+  journal: 'รายการบัญชี (JE)', ap_payment: 'จ่ายเจ้าหนี้ (AP)', payroll: 'เงินเดือน',
+  asset_revaluation: 'ตีมูลค่าสินทรัพย์', asset_disposal: 'จำหน่ายสินทรัพย์', inventory_writeoff: 'ตัดสต๊อก',
+};
+
+export default function ApprovalsPage() {
+  const q = useQuery<Resp>({ queryKey: ['pending-approvals'], queryFn: () => api('/api/finance/approvals/pending'), refetchInterval: 30_000 });
+  const d = q.data;
+  const overdueDays = d?.overdue_days ?? 3;
+
+  return (
+    <ModulePage
+      title="รายการรออนุมัติ (Pending approvals)"
+      description="ทุกรายการที่รอการอนุมัติแบบแบ่งแยกหน้าที่ (maker-checker) ทั้งระบบ พร้อมอายุการค้าง — เพื่อไล่ตามรายการที่ค้างนานก่อนปิดงวด (GOV-01)"
+      query={q}
+      stats={
+        d && (
+          <>
+            <StatCard label="รออนุมัติทั้งหมด" value={num(d.count)} icon={ClipboardCheck} tone="primary" />
+            <StatCard label={`ค้างเกิน ${overdueDays} วัน`} value={num(d.overdue)} icon={AlarmClock} tone={d.overdue > 0 ? 'danger' : 'success'} hint="ควรเร่งรัด/escalate" />
+            <StatCard label="ค้างนานสุด (วัน)" value={num(d.oldest_age_days)} icon={Clock} tone={d.oldest_age_days >= overdueDays ? 'warning' : 'default'} />
+            <StatCard label="มูลค่ารวมที่รออนุมัติ" value={`฿${num(d.total_amount)}`} icon={Coins} tone="default" />
+          </>
+        )
+      }
+      statsClassName="xl:grid-cols-4"
+    >
+      {d && (
+        <DataTable
+          rows={d.items}
+          rowKey={(r, i) => `${r.control}-${r.ref}-${i}`}
+          emptyState={{ icon: ClipboardCheck, title: 'ไม่มีรายการรออนุมัติ', description: 'ทุกรายการได้รับการอนุมัติแล้ว — ไม่มีงานค้างในระบบ maker-checker' }}
+          columns={[
+            { key: 'control', label: 'การควบคุม', render: (r) => <Badge variant="outline" className="font-mono">{r.control}</Badge> },
+            { key: 'type', label: 'ประเภท', render: (r) => TYPE_TH[r.type] ?? r.type },
+            { key: 'ref', label: 'อ้างอิง', render: (r) => <span className="font-mono text-sm">{r.ref}</span> },
+            { key: 'label', label: 'รายละเอียด', render: (r) => <span className="text-muted-foreground">{r.label}</span> },
+            { key: 'amount', label: 'มูลค่า', align: 'right', render: (r) => <span className="tabular">฿{num(r.amount)}</span> },
+            { key: 'requested_by', label: 'ผู้ขอ', render: (r) => r.requested_by ?? '—' },
+            { key: 'age_days', label: 'ค้าง (วัน)', align: 'right', render: (r) => r.age_days == null ? '—' : <span className={cn('tabular font-medium', r.age_days >= overdueDays ? 'text-destructive' : 'text-muted-foreground')}>{num(r.age_days)}{r.age_days >= overdueDays ? ' ⚠' : ''}</span> },
+            { key: 'requested_at', label: 'วันที่ขอ', render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
+          ]}
+        />
+      )}
+    </ModulePage>
+  );
+}

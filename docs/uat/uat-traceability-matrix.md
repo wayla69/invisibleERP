@@ -231,6 +231,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-032 | Maker without approval authority blocked | EXP-06 | 02 §7, §9 |
 | UAT-P2P-033 | Reject leaves bill unpaid | EXP-06 | 02 §7, §9 |
 | UAT-UI-SUP-01 | Supplier portal screen (vendor self-service) — PO ack + invoice submit | Feature (supplier portal UI) | 02 §7 |
+| UAT-P2P-040 | Capital PO line → GR eligible (not stocked) | FA-10 | 02 §7, 09 §7 |
+| UAT-P2P-041 | Register asset from GR → PendingApproval, no GL | FA-10 | 09 §7 |
+| UAT-P2P-042 | Capitalization self-approval blocked (SoD, incl. Admin) | FA-10, R07 | 09 §7 |
+| UAT-P2P-043 | Independent approval creates asset + posts GL (Dr 1500/Cr 2000) | FA-10, GL-01 | 09 §7 |
+| UAT-P2P-044 | GR line cannot be capitalised twice | FA-10 | 09 §7 |
+| UAT-UI-CAP-01 | Capitalize-from-GR screen (eligible → request → approve) | FA-10 | 09 §7 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
 
@@ -260,6 +266,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-022 | MRP lot-sizing (min/multiple/EOQ) | Feature (MRP lot-sizing) | 15 §5a |
 | UAT-INV-023 | Rough-cut capacity overload flag | Feature (RCCP) | 15 §5a |
 | UAT-INV-024 | STD GR PPV balanced under rounding | MFG-03 / GL-01 | 15 §9 |
+| UAT-MFG-01 | WO completion full-yield (no variance) | MFG-02, GL-01 | 15 §7 |
+| UAT-MFG-02 | WO completion short-yield → variance to 5810 | MFG-02, GL-01 | 15 §7 |
 | UAT-INV-025 | Food-cost variance valued at ingredient cost | INV-04 (analytics) | 03 §12 |
 | UAT-INV-026 | Variance summary nets fav/unfav + tenant-isolated | INV-04 (analytics) | 03 §12 |
 | UAT-INV-027 | Branch replenishment splits transfer-before-buy | INV-05 | 03 §7, §9 |
@@ -287,8 +295,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-015 | Year-end close idempotency | GL-06 | 04 §9 |
 | UAT-GL-016 | Sub-ledger reconciliation | REC-01 | 04 §9 |
 | UAT-GL-045 | Control-account reconciliation pack (period-end) | REC-04 | 04 §7 |
-| UAT-GL-046 | Pending-approvals aging monitor (fresh) | MON-01 | 04 §7 |
-| UAT-GL-047 | Pending-approvals aging — SLA breach exception | MON-01 | 04 §7 |
+| UAT-GL-046 | Pending-approvals monitor (maker-checker backlog) | GOV-01 | 04 §7 |
 | UAT-GL-017 | Reconciliation prepare→certify | REC-02/03 | 04 §9 |
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
@@ -377,6 +384,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-022 | Independent approver posts the run | PAY-03, GL-01 | 05 §7 |
 | UAT-PAY-023 | Reject a pending run, then re-run | PAY-03 | 05 §7 |
 | UAT-UI-ESS-01 | ESS self-service screen reachable + own data + submit-only (UI) | Feature (ESS UI) | 25 §7 |
+| UAT-PAY-024 | Approver inbox lists pending expense claims (tenant-scoped) | Feature (ESS), ITGC-AC-03 | 25 §7 |
+| UAT-UI-ESS-02 | Expense approval screen — approve/reject + self-block (UI) | Feature (ESS UI), ITGC-AC-09 | 25 §7 |
 
 ## 08 — Admin / SoD / Audit → `08-itgc.md`
 
@@ -570,9 +579,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 04 Inventory & WMS | 24 | 7 |
 | 05 GL & Close (incl. fixed assets / EAM) | 47 | 29 |
 | 06 Tax | 13 | 4 |
-| 07 Payroll | 20 | 8 |
+| 07 Payroll | 22 | 9 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **351** | **177** |
+| **Total** | **353** | **178** |

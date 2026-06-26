@@ -165,6 +165,7 @@ export const poItems = pgTable('po_items', {
   uom: text('uom'),
   amount: numeric('amount', { precision: 14, scale: 2 }),
   receivedQty: numeric('received_qty').default('0'),
+  isCapital: boolean('is_capital').notNull().default(false), // FA-10: capitalise on receipt (per-line override of item master)
   status: text('status').default('Open'),
 }, (t) => ({ byPo: index('idx_po_items_po').on(t.poId) }));
 
@@ -202,6 +203,7 @@ export const grItems = pgTable('gr_items', {
   lotNo: text('lot_no'),
   expiryDate: date('expiry_date'),
   unitCost: numeric('unit_cost', { precision: 14, scale: 2 }),
+  isCapital: boolean('is_capital').notNull().default(false), // FA-10: eligible for capitalisation to the asset register
   remarks: text('remarks'),
 }, (t) => ({ byGr: index('idx_gr_items_gr').on(t.grId), byPo: index('idx_gr_items_pono').on(t.poNo) }));
 

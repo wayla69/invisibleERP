@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Scale, ListChecks, ShieldCheck, X, Download, Link2, Clock } from 'lucide-react';
+import { Scale, ListChecks, ShieldCheck, X, Download, Link2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { ModulePage } from '@/components/module-page';
@@ -29,7 +29,6 @@ export default function ReconciliationPage() {
     >
       <div className="space-y-6">
         <ControlAccountPack />
-        <PendingApprovalsMonitor />
         <OpenPeriod onDone={() => qc.invalidateQueries({ queryKey: ['recon-periods'] })} />
 
         <StateView q={q}>
@@ -95,53 +94,6 @@ function ControlAccountPack() {
             emptyState={{ title: 'ไม่มีข้อมูล' }}
             dense
           />
-        )}
-      </StateView>
-      {d?.as_of && <p className="text-xs text-muted-foreground">ณ วันที่ {thaiDate(d.as_of)}</p>}
-    </Card>
-  );
-}
-
-// ────────── MON-01 pending-approvals aging monitor (every maker-checker queue, aged) ──────────
-function PendingApprovalsMonitor() {
-  const q = useQuery<any>({ queryKey: ['approvals-aging'], queryFn: () => api('/api/finance/approvals/aging') });
-  const d = q.data;
-  return (
-    <Card className="gap-4 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-base font-semibold"><Clock className="size-4 text-muted-foreground" /> รายการรออนุมัติค้างนาน (Pending approvals aging)</h3>
-        {d && (
-          d.all_clear
-            ? <Badge variant="success">ไม่มีรายการค้างเกินกำหนด ✓</Badge>
-            : <Badge variant="destructive">{num(d.stale_count)} รายการเกินกำหนด — ต้องเร่งอนุมัติ</Badge>
-        )}
-      </div>
-      <p className="text-sm text-muted-foreground">รวมทุกคิว maker-checker (รายการบัญชี Draft + ตัดสต๊อก + จ่ายเจ้าหนี้) เรียงตามอายุที่รออนุมัติ — รายการที่ค้างเกิน SLA คือสัญญาณการควบคุมไม่ทำงาน (MON-01)</p>
-      <StateView q={q}>
-        {d && (
-          <>
-            <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-4">
-              <StatCard label="รออนุมัติทั้งหมด" value={num(d.total_pending)} icon={Clock} tone="primary" />
-              <StatCard label="มูลค่ารวม" value={baht(d.total_value)} />
-              <StatCard label="อายุสูงสุด (วัน)" value={num(d.oldest_age_days)} />
-              <StatCard label="เกินกำหนด" value={num(d.stale_count)} tone={d.stale_count ? 'danger' : 'success'} hint={`SLA ${num(d.stale_threshold_days)} วัน`} />
-            </div>
-            <DataTable
-              rows={d.items}
-              rowKey={(r: any) => `${r.type}-${r.ref}`}
-              columns={[
-                { key: 'control', label: 'ควบคุม', render: (r: any) => <span className="font-mono text-xs">{r.control}</span> },
-                { key: 'label', label: 'ประเภท' },
-                { key: 'ref', label: 'เลขที่', render: (r: any) => <span className="font-mono text-sm">{r.ref}</span> },
-                { key: 'requested_by', label: 'ผู้ขอ', render: (r: any) => r.requested_by ?? '—' },
-                { key: 'amount', label: 'มูลค่า', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
-                { key: 'age_days', label: 'อายุ (วัน)', align: 'right', render: (r: any) => <span className={`tabular ${r.stale ? 'font-medium text-destructive' : 'text-muted-foreground'}`}>{num(r.age_days)}</span> },
-                { key: 'stale', label: 'สถานะ', render: (r: any) => <Badge variant={r.stale ? 'destructive' : 'success'}>{r.stale ? 'เกินกำหนด' : 'ปกติ'}</Badge> },
-              ]}
-              emptyState={{ icon: Clock, title: 'ไม่มีรายการรออนุมัติ', description: 'ทุกคิว maker-checker ว่าง' }}
-              dense
-            />
-          </>
         )}
       </StateView>
       {d?.as_of && <p className="text-xs text-muted-foreground">ณ วันที่ {thaiDate(d.as_of)}</p>}

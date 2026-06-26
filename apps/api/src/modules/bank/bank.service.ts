@@ -92,7 +92,7 @@ export class BankService {
   // BANK-02 maker-checker — a fee/interest adjustment is a REQUEST that posts a DRAFT JE (no GL/balance impact;
   // the statement line stays UNreconciled) until a DIFFERENT user approves it. A single user can no longer post a
   // bank fee straight to the books (e.g. mis-booking an outflow as interest income). The Draft JE (source BANKADJ,
-  // sourceRef STMTLN-<id>) is also surfaced, aged, by the pending-approvals monitor (MON-01). The line carries the
+  // sourceRef STMTLN-<id>) is also surfaced, aged, by the pending-approvals monitor (GOV-01). The line carries the
   // Draft entry_no in adjustmentJournalNo while reconciled='false' (= pending); approval flips reconciled='true'.
   async requestAdjustment(statementLineId: number, dto: AdjustmentDto, user: JwtUser) {
     const db = this.db as any;

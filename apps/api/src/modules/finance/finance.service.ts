@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, invWriteoffRequests, fxRates, budgets } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, fxRates, budgets } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -477,93 +477,63 @@ export class FinanceService {
     return { as_of: ymd(), lines, all_reconciled: lines.every((l) => l.reconciled), exceptions: lines.filter((l) => !l.reconciled).length };
   }
 
-  // MON-01 — pending-approvals aging monitor (DETECTIVE). One read across every maker-checker queue, aged by
-  // how long each item has waited for its second signature. A stale pending item is itself a control finding:
-  // a maker-checker only works if the checker actually acts — an item sitting in the queue for weeks means the
-  // segregation is operating slowly or not at all (and ties up cash / mis-states the books until cleared).
-  // Scans EVERY Draft journal entry, so it AUTO-COVERS any control that posts a Draft JE via
-  // ledger.postEntry({pendingApproval:true}) — GL-05 manual JE, PAY-03 payroll, FA-08 revaluation, FA-09
-  // disposal, BANK-02 bank adjustment, FX-02 rate change — PLUS the two queues that deliberately post NOTHING
-  // until approval (INV-07 inventory write-offs, AP-PAY vendor payments). Read-only; tenant-scoped by the
-  // caller's RLS (HQ/Admin aggregates all tenants). `stale_days` is the SLA after which a pending item is an
-  // exception (default 7 calendar days).
-  async pendingApprovalsAging(staleDays = 7) {
+  // GOV-01 — pending-approvals monitor. One worklist of EVERY item awaiting independent (maker-checker)
+  // approval across the system, with its age — so the controller can see what is stuck and catch a stale
+  // approval (a control breakdown / bottleneck) before close. Spans the manual-JE (GL-05), bank-adjustment
+  // (BANK-02), AP-disbursement (EXP-06), payroll (PAY-03), asset-revaluation (FA-08), asset-disposal (FA-09),
+  // inventory-write-off (INV-07), FX-rate (FX-04) and budget (BUD-01) maker-checkers. Read-only; tenant-scoped
+  // via the caller's RLS (HQ/Admin sees every tenant).
+  async pendingApprovals(opts?: { overdue_days?: number }) {
     const db = this.db as any;
-    const today = ymd();
-    const ageDays = (ts: any): number => (ts ? Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 86400000)) : 0);
-    const bucket = (d: number) => (d <= 3 ? '0-3' : d <= 7 ? '4-7' : d <= 14 ? '8-14' : '15+');
-    // Map a Draft JE's source → the maker-checker control it belongs to.
-    const JE_META: Record<string, { control: string; label: string }> = {
-      Manual: { control: 'GL-05', label: 'รายการบัญชีปรับปรุง (Manual JE)' },
-      PAYROLL: { control: 'PAY-03', label: 'เงินเดือน (Payroll run)' },
-      REVAL: { control: 'FA-08', label: 'ตีราคา/ด้อยค่าสินทรัพย์ (Revaluation/Impairment)' },
-      DISP: { control: 'FA-09', label: 'จำหน่ายสินทรัพย์ (Disposal)' },
-      BANKADJ: { control: 'BANK-02', label: 'ปรับปรุงรายการธนาคาร (Bank adjustment)' },
-    };
+    const overdueDays = opts?.overdue_days ?? 3;
+    const ageDays = (d: any): number | null => (d ? Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000)) : null);
     const items: any[] = [];
-    // 1) Every Draft journal entry (Draft = pending approval, excluded from balances until approved). Sum the
-    // debits per Draft entry separately and map by id (a correlated sub-select mis-aliases under Drizzle).
-    const drafts = await db.select({
-      id: journalEntries.id, entryNo: journalEntries.entryNo, source: journalEntries.source, sourceRef: journalEntries.sourceRef,
-      memo: journalEntries.memo, createdBy: journalEntries.createdBy, createdAt: journalEntries.createdAt,
-    }).from(journalEntries).where(eq(journalEntries.status, 'Draft')).orderBy(asc(journalEntries.createdAt));
-    const draftSums = await db.select({ entryId: journalLines.entryId, total: sql<string>`coalesce(sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(eq(journalEntries.status, 'Draft')).groupBy(journalLines.entryId);
-    const sumByEntry = new Map<number, number>(draftSums.map((r: any) => [Number(r.entryId), n(r.total)]));
-    for (const d of drafts) {
-      const meta = JE_META[String(d.source ?? '')] ?? { control: '—', label: d.source ?? 'Journal entry' };
-      const age = ageDays(d.createdAt);
-      items.push({ type: 'journal_entry', control: meta.control, label: meta.label, ref: d.entryNo, source: d.source, requested_by: d.createdBy, requested_at: d.createdAt, amount: round2(sumByEntry.get(Number(d.id)) ?? 0), memo: d.memo, age_days: age, bucket: bucket(age), stale: age > staleDays });
+
+    // 1. GL-05 — manual journals posted as Draft, awaiting approval. Amount = Σ debit of the entry's lines.
+    // A Draft JE from another maker-checker that posts via ledger.postEntry (e.g. a bank fee/interest
+    // adjustment, source BANKADJ → BANK-02) is tagged to its own control here.
+    const JE_CONTROL: Record<string, { control: string; type: string }> = { BANKADJ: { control: 'BANK-02', type: 'bank_adjustment' } };
+    const drafts = await db.select().from(journalEntries).where(eq(journalEntries.status, 'Draft'));
+    if (drafts.length) {
+      const ids = drafts.map((e: any) => Number(e.id));
+      const sums = await db.select({ entryId: journalLines.entryId, dr: sql<string>`coalesce(sum(${journalLines.debit}),0)` }).from(journalLines).where(inArray(journalLines.entryId, ids)).groupBy(journalLines.entryId);
+      const byId = new Map<number, number>(sums.map((s: any) => [Number(s.entryId), n(s.dr)]));
+      for (const e of drafts) {
+        const meta = JE_CONTROL[String(e.source ?? '')] ?? { control: 'GL-05', type: 'journal' };
+        items.push({ type: meta.type, control: meta.control, ref: e.entryNo, label: e.memo ?? 'Manual journal', amount: byId.get(Number(e.id)) ?? 0, requested_by: e.createdBy ?? null, requested_at: e.createdAt ?? null, age_days: ageDays(e.createdAt) });
+      }
     }
-    // 2) Inventory write-off requests — post nothing (no Draft JE) until a different wh_adjust holder approves.
-    const wrq = await db.select().from(invWriteoffRequests).where(eq(invWriteoffRequests.status, 'PendingApproval')).orderBy(asc(invWriteoffRequests.createdAt));
-    for (const w of wrq) {
-      const age = ageDays(w.createdAt);
-      items.push({ type: 'inventory_writeoff', control: 'INV-07', label: 'ตัดสต๊อก (Inventory write-off)', ref: `WOFF-${w.id}`, source: 'INV-WRITEOFF', requested_by: w.requestedBy, requested_at: w.createdAt, amount: round2(n(w.estValue)), memo: `${w.itemId} ${n(w.qtyDelta)} @ ${w.locationId} — ${w.reason}`, age_days: age, bucket: bucket(age), stale: age > staleDays });
-    }
-    // 3) AP vendor payments — request posts nothing (no Draft JE) until a different approver approves.
-    const aps = await db.select().from(apPayments).where(eq(apPayments.status, 'PendingApproval')).orderBy(asc(apPayments.requestedAt));
-    for (const p of aps) {
-      const age = ageDays(p.requestedAt);
-      items.push({ type: 'ap_payment', control: 'AP-PAY', label: 'จ่ายเจ้าหนี้ (AP disbursement)', ref: p.paymentNo, source: 'AP-PAY', requested_by: p.requestedBy, requested_at: p.requestedAt, amount: round2(n(p.amount)), memo: `→ ${p.txnNo}`, age_days: age, bucket: bucket(age), stale: age > staleDays });
-    }
-    // 4) FX rate changes — a manual rate is PendingApproval (unusable) until a different user approves; not a JE.
-    const fxr = await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')).orderBy(asc(fxRates.createdAt));
-    for (const r of fxr) {
-      const age = ageDays(r.createdAt);
-      items.push({ type: 'fx_rate', control: 'FX-04', label: 'อัตราแลกเปลี่ยน (FX rate change)', ref: `${r.currency}@${r.rateDate}`, source: 'FX-RATE', requested_by: r.requestedBy, requested_at: r.createdAt, amount: 0, memo: `${r.currency} = ${n(r.rate)} THB (${r.rateDate})`, age_days: age, bucket: bucket(age), stale: age > staleDays });
-    }
-    // 5) Budgets — an upserted budget is PendingApproval (excluded from budget-vs-actual) until a different user
-    // approves; grouped per (fiscal_year, account, cost center) line, not per split month.
-    const bud = await db.select({
-      fiscalYear: budgets.fiscalYear, accountCode: budgets.accountCode, costCenterCode: budgets.costCenterCode,
-      requestedBy: sql<string>`max(${budgets.requestedBy})`, total: sql<string>`coalesce(sum(${budgets.amount}),0)`, oldest: sql<string>`min(${budgets.updatedAt})`,
-    }).from(budgets).where(eq(budgets.status, 'PendingApproval')).groupBy(budgets.fiscalYear, budgets.accountCode, budgets.costCenterCode);
-    for (const b of bud) {
-      const age = ageDays(b.oldest);
-      items.push({ type: 'budget', control: 'BUD-01', label: 'งบประมาณ (Budget)', ref: `FY${b.fiscalYear}/${b.accountCode}${b.costCenterCode ? '/' + b.costCenterCode : ''}`, source: 'BUDGET', requested_by: b.requestedBy, requested_at: b.oldest, amount: round2(n(b.total)), memo: `FY${b.fiscalYear} ${b.accountCode}${b.costCenterCode ? ' @ ' + b.costCenterCode : ''}`, age_days: age, bucket: bucket(age), stale: age > staleDays });
-    }
-    items.sort((a, b) => b.age_days - a.age_days);
-    const byType = Object.values(items.reduce((acc: any, it) => {
-      (acc[it.control] ??= { control: it.control, label: it.label, count: 0, value: 0, oldest_age_days: 0, stale_count: 0 });
-      acc[it.control].count++; acc[it.control].value = round2(acc[it.control].value + it.amount);
-      acc[it.control].oldest_age_days = Math.max(acc[it.control].oldest_age_days, it.age_days);
-      if (it.stale) acc[it.control].stale_count++;
-      return acc;
-    }, {}));
-    const stale = items.filter((it) => it.stale);
+    // 2. EXP-06 — AP disbursements awaiting approval.
+    for (const p of await db.select().from(apPayments).where(eq(apPayments.status, 'PendingApproval')))
+      items.push({ type: 'ap_payment', control: 'EXP-06', ref: p.paymentNo, label: `จ่ายเจ้าหนี้ ${p.txnNo}`, amount: n(p.amount), requested_by: p.requestedBy ?? null, requested_at: p.requestedAt ?? null, age_days: ageDays(p.requestedAt) });
+    // 3. PAY-03 — payroll runs awaiting approval.
+    for (const r of await db.select().from(payruns).where(eq(payruns.status, 'PendingApproval')))
+      items.push({ type: 'payroll', control: 'PAY-03', ref: r.period, label: `เงินเดือนงวด ${r.period} (${Number(r.headcount)} คน)`, amount: n(r.netTotal), requested_by: r.runBy ?? null, requested_at: r.runAt ?? null, age_days: ageDays(r.runAt) });
+    // 4. FA-08 — asset revaluations/impairments awaiting approval.
+    for (const v of await db.select().from(assetRevaluations).where(eq(assetRevaluations.status, 'PendingApproval')))
+      items.push({ type: 'asset_revaluation', control: 'FA-08', ref: v.assetNo, label: `ตีมูลค่า ${v.assetNo} (${v.kind})`, amount: Math.abs(n(v.delta)), requested_by: v.actionedBy ?? null, requested_at: v.createdAt ?? null, age_days: ageDays(v.createdAt) });
+    // 5. FA-09 — asset disposals awaiting approval (disposed_date is the requested date).
+    for (const a of await db.select().from(fixedAssets).where(eq(fixedAssets.disposalPending, true)))
+      items.push({ type: 'asset_disposal', control: 'FA-09', ref: a.assetNo, label: `จำหน่าย ${a.assetNo}`, amount: a.disposalProceeds != null ? n(a.disposalProceeds) : 0, requested_by: a.disposalRequestedBy ?? null, requested_at: a.disposedDate ?? null, age_days: ageDays(a.disposedDate) });
+    // 6. INV-07 — inventory write-offs awaiting approval.
+    for (const w of await db.select().from(invWriteoffRequests).where(eq(invWriteoffRequests.status, 'PendingApproval')))
+      items.push({ type: 'inventory_writeoff', control: 'INV-07', ref: `WO-${Number(w.id)}`, label: `ตัดสต๊อก ${w.itemId} (${n(w.qtyDelta)})`, amount: n(w.estValue), requested_by: w.requestedBy ?? null, requested_at: w.createdAt ?? null, age_days: ageDays(w.createdAt) });
+    // 7. FX-04 — manual FX rates awaiting approval (PendingApproval, unusable until approved; not a JE).
+    for (const r of await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')))
+      items.push({ type: 'fx_rate', control: 'FX-04', ref: `${r.currency}@${r.rateDate}`, label: `อัตรา ${r.currency} = ${n(r.rate)} (${r.rateDate})`, amount: 0, requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
+    // 8. BUD-01 — budgets awaiting approval (excluded from budget-vs-actual); grouped per fiscal-year/account/cost-centre.
+    for (const b of await db.select({ fiscalYear: budgets.fiscalYear, accountCode: budgets.accountCode, costCenterCode: budgets.costCenterCode, requestedBy: sql<string>`max(${budgets.requestedBy})`, total: sql<string>`coalesce(sum(${budgets.amount}),0)`, oldest: sql<string>`min(${budgets.updatedAt})` }).from(budgets).where(eq(budgets.status, 'PendingApproval')).groupBy(budgets.fiscalYear, budgets.accountCode, budgets.costCenterCode))
+      items.push({ type: 'budget', control: 'BUD-01', ref: `FY${b.fiscalYear}/${b.accountCode}${b.costCenterCode ? '/' + b.costCenterCode : ''}`, label: `งบประมาณ FY${b.fiscalYear} ${b.accountCode}${b.costCenterCode ? ' @ ' + b.costCenterCode : ''}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
+
+    items.sort((a, b) => (b.age_days ?? -1) - (a.age_days ?? -1));
+    const byType: Record<string, number> = {};
+    for (const it of items) byType[it.type] = (byType[it.type] ?? 0) + 1;
+    const ages = items.map((i) => i.age_days).filter((x): x is number => x != null);
     return {
-      as_of: today,
-      stale_threshold_days: staleDays,
-      total_pending: items.length,
-      total_value: round2(items.reduce((a, it) => a + it.amount, 0)),
-      oldest_age_days: items.length ? items[0].age_days : 0,
-      stale_count: stale.length,
-      all_clear: stale.length === 0,
-      by_type: byType,
-      items,
-      exceptions: stale,
+      items, count: items.length, by_type: byType,
+      oldest_age_days: ages.length ? Math.max(...ages) : 0,
+      overdue_days: overdueDays, overdue: items.filter((i) => (i.age_days ?? 0) >= overdueDays).length,
+      total_amount: round2(items.reduce((s, i) => s + (i.amount ?? 0), 0)),
     };
   }
 }

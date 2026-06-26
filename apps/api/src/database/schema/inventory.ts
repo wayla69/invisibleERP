@@ -24,6 +24,11 @@ export const items = pgTable('items', {
   orderCost: numeric('order_cost', { precision: 14, scale: 2 }).default('0'),   // S: per-PO cost
   holdingCost: numeric('holding_cost', { precision: 14, scale: 4 }).default('0'), // H: per unit/yr
   imageKey: text('image_key'),
+  // Capital goods (FA-10): items flagged as fixed assets are routed to the asset register on receipt
+  // (Dr 1500) rather than capitalised into inventory (Dr 1200). default_asset_category_id seeds the
+  // depreciation category when the GR line is registered.
+  isFixedAsset: boolean('is_fixed_asset').notNull().default(false),
+  defaultAssetCategoryId: bigint('default_asset_category_id', { mode: 'number' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

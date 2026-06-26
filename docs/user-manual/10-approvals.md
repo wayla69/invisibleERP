@@ -100,30 +100,31 @@ dimension condition), and save. Toggle a definition active/inactive anytime.
 
 ---
 
-## 4d. Pending-approvals aging monitor (supervisory view)
+## 4d. Pending-approvals monitor (supervisory view)
 
 A maker-checker only protects you if the **checker actually acts**. If a payment,
 a payroll run, a write-off or a journal entry sits waiting for its second
 signature for weeks, the segregation is defeated in practice — cash is tied up
 and the books stay mis-stated, with no one watching the queue.
 
-The **pending-approvals aging monitor** (`GET /api/finance/approvals/aging`,
-permission `exec` / `approvals` / `gl_close`) gives a Controller one supervisory
-read across **every** maker-checker queue at once:
+The **pending-approvals monitor** (`GET /api/finance/approvals/pending`,
+permission `exec` / `approvals` / `creditors`) gives a Controller one supervisory
+worklist across **every** maker-checker queue at once:
 
-- every **Draft journal entry** — so it automatically covers manual JEs (GL-05),
-  payroll runs (PAY-03), asset revaluations (FA-08) and disposals (FA-09), and
-  bank adjustments (BANK-02);
+- every **Draft journal entry** — manual JEs (GL-05) and **bank adjustments**
+  (BANK-02), which post a Draft entry that doesn't affect balances until approved;
+- payroll runs (PAY-03), asset revaluations (FA-08) and disposals (FA-09);
 - **inventory write-off** requests (INV-07), **vendor payment** requests
-  (AP-PAY), **manual FX rate** changes (FX-04), and **budgets** (BUD-01) — which
-  post nothing (and don't count) until approved.
+  (AP-PAY/EXP-06), **manual FX rate** changes (FX-04), and **budgets** (BUD-01) —
+  which post nothing (and don't count) until approved.
 
 Each item is **control-tagged**, attributed to **who requested it**, valued, and
-**aged** into buckets (0–3, 4–7, 8–14, 15+ days). Anything older than the **SLA**
-(default **7 days**, override with `?stale_days=N`) is surfaced as an
-**exception**, with an `all_clear` flag, a `stale_count`, and a per-control
-roll-up. A stale pending approval is itself a **control finding** to chase down.
-(Control **MON-01**.)
+shows its **age in days**. The response rolls up the `count`, the
+`oldest_age_days`, and an **`overdue`** count of items past the threshold
+(`?overdue_days=N`, default 3). An item stuck past the threshold is itself a
+**control finding** — either a transaction stalled before it can take effect, or
+a control quietly bypassed because no one chased the second sign-off.
+(Control **GOV-01**, COSO *Monitoring*.)
 
 ---
 

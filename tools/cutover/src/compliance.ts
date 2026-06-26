@@ -91,6 +91,11 @@ async function main() {
     const row = (tb.json.rows ?? []).find((r: any) => r.account_code === account);
     return row ? Number(row.credit) : 0;
   };
+  const tbDebit = async (period: string, account: string): Promise<number> => {
+    const tb = await inj('GET', `/api/ledger/trial-balance?period=${period}`, admin);
+    const row = (tb.json.rows ?? []).find((r: any) => r.account_code === account);
+    return row ? Number(row.debit) : 0;
+  };
 
   // ════════════════════════ GL-05 — Manual journal-entry maker-checker ════════════════════════
   const amt = 1234;
@@ -245,6 +250,22 @@ async function main() {
   const faDisposed = (await inj('GET', '/api/assets?status=disposed', payprep)).json;
   ok('FA-09: independent approver → asset disposed (status + approver recorded)',
     dispAppr2.json?.status === 'disposed' && dispAppr2.json?.approved_by === 'paychk' && (faDisposed.assets ?? []).some((x: any) => x.asset_no === 'FA-MC2'), JSON.stringify({ st: dispAppr2.json?.status, by: dispAppr2.json?.approved_by }));
+
+  // ════════════════════════ FA-10 — Capitalization from GR maker-checker (SoD) ════════════════════════
+  // A capital goods-receipt line is capitalised onto the asset register only via a maker-checker request: the
+  // preparer raises it (NO GL effect) and a DIFFERENT user approves before the asset + acquisition JE
+  // (Dr 1500 / Cr 2000) are created — receiving goods and putting them on the books are segregated duties.
+  const [grMc] = await db.insert(s.goodsReceipts).values({ grNo: 'GR-MC1', grDate: '2026-09-25', poNo: 'PO-MC1', vendorName: 'Capital Vendor (FA-10)', receivedBy: 'payprep' }).returning({ id: s.goodsReceipts.id });
+  const [grItemMc] = await db.insert(s.grItems).values({ grId: Number(grMc.id), poNo: 'PO-MC1', itemId: 'SERVER-MC', itemDescription: 'Rack server (FA-10)', poQty: '1', receivedQty: '1', uom: 'EA', unitCost: '40000', isCapital: true }).returning({ id: s.grItems.id });
+  const fa1500Pre = await tbDebit('2026-09', '1500');
+  const capReq = await inj('POST', '/api/assets/registrations', payprep, { gr_no: 'GR-MC1', gr_item_id: Number(grItemMc.id), name: 'Rack server (capex)', useful_life_months: 60 });
+  ok('FA-10: registration request raised as PendingApproval; 1500 unchanged (no GL until approved)', capReq.json?.status === 'PendingApproval' && capReq.json?.acquire_cost === 40000 && (await tbDebit('2026-09', '1500')) === fa1500Pre, JSON.stringify({ st: capReq.json?.status, cost: capReq.json?.acquire_cost, fa1500: fa1500Pre }));
+  const capSelf = await inj('POST', `/api/assets/registrations/${capReq.json?.reg_no}/approve`, payprep);
+  ok('FA-10: preparer self-approval blocked → 403 SOD_VIOLATION', capSelf.status === 403 && capSelf.json?.error?.code === 'SOD_VIOLATION', `${capSelf.status} ${capSelf.json?.error?.code}`);
+  const capAppr = await inj('POST', `/api/assets/registrations/${capReq.json?.reg_no}/approve`, paychk);
+  const fa1500Post = await tbDebit('2026-09', '1500');
+  ok('FA-10: independent approver → asset created + acquisition JE effective (Dr 1500 +40000)',
+    capAppr.json?.status === 'Posted' && /^FA-/.test(capAppr.json?.asset_no ?? '') && capAppr.json?.approved_by === 'paychk' && capAppr.json?.source_gr_no === 'GR-MC1' && fa1500Post === fa1500Pre + 40000, JSON.stringify({ st: capAppr.json?.status, fa: capAppr.json?.asset_no, fa1500: fa1500Post }));
 
   // ════════════════════ ITGC-AC-09 — SoD preventive block on permission assignment ════════════════════
   // Raise PR / PO (procurement) + approve & pay AP (creditors) is SoD rule R03.
@@ -682,20 +703,13 @@ async function main() {
     (recPack.json.lines ?? []).length === 5 && ['1100', '2000', '1200', '2200', '2400'].every((a) => (recPack.json.lines ?? []).some((l: any) => l.account === a)) && inv1200?.reconciled === true && invNear(inv1200.sub_ledger, 1540) && typeof recPack.json.exceptions === 'number',
     JSON.stringify({ n: recPack.json.lines?.length, inv: inv1200?.sub_ledger, rec: inv1200?.reconciled, exc: recPack.json.exceptions }));
 
-  // MON-01 — pending-approvals aging monitor: a Draft maker-checker item surfaces in the queue, aged, and is
-  // flagged an exception once it breaches the SLA. Post a fresh Draft manual JE (GL-05), then read the monitor.
-  const monJe = await inj('POST', '/api/ledger/journal', glacct, { date: today, memo: 'MON-01 aging probe', source: 'Manual', lines: [{ account_code: '1000', debit: 777 }, { account_code: '4000', credit: 777 }] });
-  const monRef = monJe.json.entry_no as string;
-  const aging = await inj('GET', '/api/finance/approvals/aging', admin);
-  const monItem = (aging.json.items ?? []).find((i: any) => i.ref === monRef);
-  ok('MON-01: a Draft maker-checker item appears in the pending-approvals monitor (aged, control-tagged GL-05, fresh = not stale)',
-    aging.status === 200 && !!monItem && monItem.control === 'GL-05' && monItem.requested_by === 'glacct' && monItem.amount === 777 && monItem.age_days === 0 && monItem.stale === false && aging.json.total_pending >= 1,
-    JSON.stringify({ found: !!monItem, ctl: monItem?.control, by: monItem?.requested_by, amt: monItem?.amount, age: monItem?.age_days, stale: monItem?.stale, total: aging.json.total_pending }));
-  const agingStale = await inj('GET', '/api/finance/approvals/aging?stale_days=-1', admin);
-  const monStale = (agingStale.json.exceptions ?? []).find((i: any) => i.ref === monRef);
-  ok('MON-01: tightening the SLA flags the pending item as a control exception (all_clear=false, surfaced in exceptions)',
-    agingStale.status === 200 && !!monStale && monStale.stale === true && agingStale.json.all_clear === false && agingStale.json.stale_count >= 1,
-    JSON.stringify({ flagged: !!monStale, clear: agingStale.json.all_clear, stale: agingStale.json.stale_count }));
+  // GOV-01 — pending-approvals monitor: a fresh Draft JE (not approved) surfaces in the unified worklist.
+  const govJe = await inj('POST', '/api/ledger/journal', glacct, { date: today, memo: 'GOV-01 pending JE', source: 'Manual', lines: [{ account_code: '1000', debit: 321 }, { account_code: '4000', credit: 321 }] });
+  const govPend = await inj('GET', '/api/finance/approvals/pending', admin);
+  const govItem = (govPend.json.items ?? []).find((i: any) => i.ref === govJe.json.entry_no);
+  ok('GOV-01: pending-approvals monitor surfaces the Draft JE (control GL-05, amount + age + overdue roll-up)',
+    govItem?.type === 'journal' && govItem?.control === 'GL-05' && invNear(govItem?.amount, 321) && typeof govItem?.age_days === 'number' && govPend.json.count >= 1 && typeof govPend.json.overdue === 'number',
+    JSON.stringify({ n: govPend.json.count, oldest: govPend.json.oldest_age_days, ctrl: govItem?.control, amt: govItem?.amount }));
 
   console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

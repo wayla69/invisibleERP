@@ -49,10 +49,12 @@ export class FinanceController {
   @Get('reconciliation/controls') @Permissions('exec', 'ar', 'creditors')
   reconciliationControls() { return this.svc.reconcileControls(); }
 
-  // MON-01 — pending-approvals aging monitor: every maker-checker queue (Draft JEs + write-offs + AP payments),
-  // aged. Stale items (default >7 days) are control exceptions. ?stale_days overrides the SLA.
-  @Get('approvals/aging') @Permissions('exec', 'approvals', 'gl_close')
-  approvalsAging(@Query('stale_days') staleDays?: string) { return this.svc.pendingApprovalsAging(qint('stale_days', staleDays, 7)); }
+  // GOV-01 — unified pending-approvals monitor across every maker-checker
+  // (GL-05/BANK-02/EXP-06/PAY-03/FA-08/FA-09/INV-07/FX-04/BUD-01).
+  @Get('approvals/pending') @Permissions('exec', 'approvals', 'creditors')
+  pendingApprovals(@Query('overdue_days') overdueDays?: string) {
+    return this.svc.pendingApprovals({ overdue_days: overdueDays ? Math.max(1, Number(overdueDays) || 3) : undefined });
+  }
 
   // Statement of account — running balance over [from,to] for one customer (AR) or vendor (AP).
   @Get('ar/statement') @Permissions('ar', 'exec')
