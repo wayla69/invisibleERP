@@ -1181,8 +1181,15 @@
     {
       "idx": 168,
       "version": "7",
-      "when": 2023780000006,
-      "tag": "0168_deferred_tax_fx",
+      "when": 2023790000004,
+      "tag": "0168_labor_ot_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 2023790000005,
+      "tag": "0169_deferred_tax_fx",
       "breakpoints": true
     }
   ]
