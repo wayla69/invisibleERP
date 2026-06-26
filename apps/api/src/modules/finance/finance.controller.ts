@@ -45,6 +45,10 @@ export class FinanceController {
   @Get('reconciliation') @Permissions('exec', 'ar', 'creditors')
   reconciliation() { return this.svc.reconcile(); }
 
+  // REC-04 — period-end control-account reconciliation pack (AR/AP/Inventory/Gift cards/Deferred revenue ↔ GL).
+  @Get('reconciliation/controls') @Permissions('exec', 'ar', 'creditors')
+  reconciliationControls() { return this.svc.reconcileControls(); }
+
   // Statement of account — running balance over [from,to] for one customer (AR) or vendor (AP).
   @Get('ar/statement') @Permissions('ar', 'exec')
   customerStatement(@Query('tenant_id') tenantId: string, @Query('from') from?: string, @Query('to') to?: string, @Query('currency') currency?: string) { return this.svc.customerStatement(Number(tenantId), from || undefined, to || undefined, currency || undefined); }

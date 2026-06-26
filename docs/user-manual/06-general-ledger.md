@@ -231,6 +231,21 @@ collections prioritisation.
 > approver who is **distinct from** the people who prepare journal entries (rule
 > R05).
 
+### Check the books reconcile first (control-account overview)
+
+**Screen:** `/reconciliation` (**กระทบยอด**) → the **ภาพรวมบัญชีคุมยอด (Control
+accounts)** card at the top · **Required permission:** `exec` / `ar` / `creditors`.
+
+Before you close a period, confirm every sub-ledger still agrees with its general-ledger
+control account. The **control-account overview** ties them all in one view —
+**ลูกหนี้ (AR) ↔ 1100**, **เจ้าหนี้ (AP) ↔ 2000**, **สินค้าคงเหลือ ↔ 1200**, **บัตรของขวัญ
+↔ 2200**, **รายได้รอตัดบัญชี ↔ 2400** — showing each account's sub-ledger total, its GL
+balance, the **ส่วนต่าง (variance)**, and a **ตรง / ไม่ตรง** status. A green **"กระทบยอดครบ
+ทุกบัญชี"** banner means the books tie; otherwise the banner shows how many accounts are
+**ไม่ตรง** — investigate each one (a difference means a posting is missing or mis-booked)
+**before** closing the period. This is the detective check that catches a sub-ledger
+drifting from the GL before the financial statements go out (control **REC-04**).
+
 ### To close an accounting period
 
 1. Go to the **Periods** view.

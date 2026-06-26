@@ -28,6 +28,7 @@ export default function ReconciliationPage() {
       description="เปิดงวดกระทบยอดตามบัญชี นำเข้ารายการ GL จับคู่อัตโนมัติ และรับรอง (SoD)"
     >
       <div className="space-y-6">
+        <ControlAccountPack />
         <OpenPeriod onDone={() => qc.invalidateQueries({ queryKey: ['recon-periods'] })} />
 
         <StateView q={q}>
@@ -59,6 +60,44 @@ export default function ReconciliationPage() {
         {selected != null && <PeriodDetail id={selected} onClose={() => setSelected(null)} />}
       </div>
     </ModulePage>
+  );
+}
+
+// ────────── REC-04 control-account reconciliation pack (sub-ledger ↔ GL, period-end overview) ──────────
+function ControlAccountPack() {
+  const q = useQuery<any>({ queryKey: ['recon-controls'], queryFn: () => api('/api/finance/reconciliation/controls') });
+  const d = q.data;
+  return (
+    <Card className="gap-4 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-base font-semibold"><ShieldCheck className="size-4 text-muted-foreground" /> ภาพรวมบัญชีคุมยอด ↔ บัญชีแยกประเภท (Control accounts)</h3>
+        {d && (
+          d.all_reconciled
+            ? <Badge variant="success">กระทบยอดครบทุกบัญชี ✓</Badge>
+            : <Badge variant="destructive">{num(d.exceptions)} บัญชีไม่ตรง — ต้องตรวจสอบ</Badge>
+        )}
+      </div>
+      <p className="text-sm text-muted-foreground">เทียบยอดบัญชีย่อย (sub-ledger) กับบัญชีคุมยอดใน GL ทุกบัญชีหลักในคราวเดียว — ใช้ก่อนปิดงวด/รับรอง (REC-04)</p>
+      <StateView q={q}>
+        {d && (
+          <DataTable
+            rows={d.lines}
+            rowKey={(r: any) => r.account}
+            columns={[
+              { key: 'account', label: 'บัญชี', render: (r: any) => <span className="font-mono text-sm">{r.account}</span> },
+              { key: 'label', label: 'รายการ' },
+              { key: 'sub_ledger', label: 'ยอดบัญชีย่อย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.sub_ledger)}</span> },
+              { key: 'gl_control', label: 'ยอด GL คุมยอด', align: 'right', render: (r: any) => <span className="tabular">{baht(r.gl_control)}</span> },
+              { key: 'variance', label: 'ส่วนต่าง', align: 'right', render: (r: any) => <span className={`tabular ${Math.abs(r.variance) >= 0.01 ? 'font-medium text-destructive' : 'text-muted-foreground'}`}>{baht(r.variance)}</span> },
+              { key: 'reconciled', label: 'สถานะ', render: (r: any) => <Badge variant={r.reconciled ? 'success' : 'destructive'}>{r.reconciled ? 'ตรง' : 'ไม่ตรง'}</Badge> },
+            ]}
+            emptyState={{ title: 'ไม่มีข้อมูล' }}
+            dense
+          />
+        )}
+      </StateView>
+      {d?.as_of && <p className="text-xs text-muted-foreground">ณ วันที่ {thaiDate(d.as_of)}</p>}
+    </Card>
   );
 }
 

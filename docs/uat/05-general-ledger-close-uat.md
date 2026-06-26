@@ -1,6 +1,6 @@
 # UAT — Cycle 05: General Ledger & Financial Close
 
-**Status: DRAFT v0.8 · 2026-06-26** · Cross-ref: process narrative `04-general-ledger-close.md` (GL-01..09, LSE-01, REC-01..03, R05/R06), `09-fixed-assets-depreciation.md` (FA-07, FA-08, FA-09), harness `tools/cutover/src/compliance.ts`, `worldclass.ts`, `basics.ts`.
+**Status: DRAFT v0.9 · 2026-06-26** · Cross-ref: process narrative `04-general-ledger-close.md` (GL-01..09, LSE-01, REC-01..04, R05/R06), `09-fixed-assets-depreciation.md` (FA-07, FA-08, FA-09), harnesses `tools/cutover/src/compliance.ts`, `worldclass.ts`, `basics.ts`, `giftcards.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -22,6 +22,7 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-GL-014 | Balance sheet balanced + RE updated | Admin | After year-end close | 1. `GET /api/ledger/balance-sheet?as_of=2025-12-31`. | — | `balanced: true`; `retained_earnings`≈1000. | High | Detective | GL-06 | Not Run | worldclass.ts |
 | UAT-GL-015 | Year-end close idempotent | FinancialController | FY2025 already closed | 1. Re-run `close-year` FY2025. | — | `already: true` (no double posting). | Med | Control | GL-06 | Not Run | worldclass.ts |
 | UAT-GL-016 | Sub-ledger ↔ GL reconciliation | FinancialController | AR/AP activity | 1. `GET /api/finance/reconciliation`. | — | `ar.reconciled: true` (and AP balanced). | Med | Detective | REC-01 | Not Run | worldclass.ts |
+| UAT-GL-045 | Control-account reconciliation pack (period-end) | Controller (`exec`/`ar`/`creditors`) | sub-ledger + GL activity | 1. `GET /api/finance/reconciliation/controls`. | — | 5 lines (1100/2000/1200/2200/2400), each `{sub_ledger, gl_control, variance, reconciled}`; gift-card 2200 & inventory 1200 sub-ledgers tie to GL; `all_reconciled` / `exceptions` roll-up; a known difference surfaces as an exception. | High | Detective | REC-04 | Pass | giftcards.ts, compliance.ts |
 | UAT-GL-017 | Reconciliation prepare → certify | FinancialController | reconciliation available | 1. Prepare reconciliation. 2. Certify (different/authorized user). | `<<period>>` | Prepared then certified; sign-off recorded. | Med | Control | REC-02/03 | Not Run | reconciliation |
 | UAT-GL-018 | RLS — tenant cannot see another's GL | Procurement (T2) | T1 JEs exist | 1. `GET /api/ledger/journal?limit=100` as T2. | bearer finT2 | No T1 entries; no T1 4000 credit in trial balance. | High | Control | ITGC-AC (RLS) | Not Run | compliance.ts |
 | UAT-GL-019 | Revenue recognition is tenant-scoped (W2) | HQ/Admin (no tenant) | due rev-rec lines in two tenants, same period | 1. `POST /api/revenue/recognize?period=P` (no tenant_id). 2. Retry with `&tenant_id=<T1>`. | — | (1) 400 `TENANT_REQUIRED`; (2) recognizes ONLY T1's line — T2's stays unrecognized. | High | Control | ITGC-AC-03 / REVREC-03 | Not Run | revrec.ts |

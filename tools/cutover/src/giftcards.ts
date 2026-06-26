@@ -167,6 +167,13 @@ async function main() {
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after all tip + gift + store-credit activity', near(Number(tb.totals?.debit), Number(tb.totals?.credit)), JSON.stringify(tb.totals ?? {}).slice(0, 80));
 
+  // ── 18. REC-04 control-account reconciliation pack: gift-card sub-ledger ties to GL 2200 ──
+  const rc = (await inj('GET', '/api/finance/reconciliation/controls', admin)).json;
+  const gc2200 = (rc.lines ?? []).find((l: any) => l.account === '2200');
+  ok('REC-04: control-account pack lists 5 accounts incl. gift-card 2200, all reconciled',
+    (rc.lines ?? []).length === 5 && ['1100', '2000', '1200', '2200', '2400'].every((a) => (rc.lines ?? []).some((l: any) => l.account === a)) && gc2200?.reconciled === true && near(gc2200.sub_ledger, gc2200.gl_control) && rc.all_reconciled === true && rc.exceptions === 0,
+    `n=${rc.lines?.length} gc(sub=${gc2200?.sub_ledger}/gl=${gc2200?.gl_control}) all=${rc.all_reconciled} exc=${rc.exceptions}`);
+
   console.log('\n── POS Tier 2 #7 Tips + Gift Cards / Store Credit (ทิป + บัตรของขวัญ) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
