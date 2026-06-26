@@ -91,6 +91,11 @@ async function main() {
     const row = (tb.json.rows ?? []).find((r: any) => r.account_code === account);
     return row ? Number(row.credit) : 0;
   };
+  const tbDebit = async (period: string, account: string): Promise<number> => {
+    const tb = await inj('GET', `/api/ledger/trial-balance?period=${period}`, admin);
+    const row = (tb.json.rows ?? []).find((r: any) => r.account_code === account);
+    return row ? Number(row.debit) : 0;
+  };
 
   // ════════════════════════ GL-05 — Manual journal-entry maker-checker ════════════════════════
   const amt = 1234;
@@ -245,6 +250,22 @@ async function main() {
   const faDisposed = (await inj('GET', '/api/assets?status=disposed', payprep)).json;
   ok('FA-09: independent approver → asset disposed (status + approver recorded)',
     dispAppr2.json?.status === 'disposed' && dispAppr2.json?.approved_by === 'paychk' && (faDisposed.assets ?? []).some((x: any) => x.asset_no === 'FA-MC2'), JSON.stringify({ st: dispAppr2.json?.status, by: dispAppr2.json?.approved_by }));
+
+  // ════════════════════════ FA-10 — Capitalization from GR maker-checker (SoD) ════════════════════════
+  // A capital goods-receipt line is capitalised onto the asset register only via a maker-checker request: the
+  // preparer raises it (NO GL effect) and a DIFFERENT user approves before the asset + acquisition JE
+  // (Dr 1500 / Cr 2000) are created — receiving goods and putting them on the books are segregated duties.
+  const [grMc] = await db.insert(s.goodsReceipts).values({ grNo: 'GR-MC1', grDate: '2026-09-25', poNo: 'PO-MC1', vendorName: 'Capital Vendor (FA-10)', receivedBy: 'payprep' }).returning({ id: s.goodsReceipts.id });
+  const [grItemMc] = await db.insert(s.grItems).values({ grId: Number(grMc.id), poNo: 'PO-MC1', itemId: 'SERVER-MC', itemDescription: 'Rack server (FA-10)', poQty: '1', receivedQty: '1', uom: 'EA', unitCost: '40000', isCapital: true }).returning({ id: s.grItems.id });
+  const fa1500Pre = await tbDebit('2026-09', '1500');
+  const capReq = await inj('POST', '/api/assets/registrations', payprep, { gr_no: 'GR-MC1', gr_item_id: Number(grItemMc.id), name: 'Rack server (capex)', useful_life_months: 60 });
+  ok('FA-10: registration request raised as PendingApproval; 1500 unchanged (no GL until approved)', capReq.json?.status === 'PendingApproval' && capReq.json?.acquire_cost === 40000 && (await tbDebit('2026-09', '1500')) === fa1500Pre, JSON.stringify({ st: capReq.json?.status, cost: capReq.json?.acquire_cost, fa1500: fa1500Pre }));
+  const capSelf = await inj('POST', `/api/assets/registrations/${capReq.json?.reg_no}/approve`, payprep);
+  ok('FA-10: preparer self-approval blocked → 403 SOD_VIOLATION', capSelf.status === 403 && capSelf.json?.error?.code === 'SOD_VIOLATION', `${capSelf.status} ${capSelf.json?.error?.code}`);
+  const capAppr = await inj('POST', `/api/assets/registrations/${capReq.json?.reg_no}/approve`, paychk);
+  const fa1500Post = await tbDebit('2026-09', '1500');
+  ok('FA-10: independent approver → asset created + acquisition JE effective (Dr 1500 +40000)',
+    capAppr.json?.status === 'Posted' && /^FA-/.test(capAppr.json?.asset_no ?? '') && capAppr.json?.approved_by === 'paychk' && capAppr.json?.source_gr_no === 'GR-MC1' && fa1500Post === fa1500Pre + 40000, JSON.stringify({ st: capAppr.json?.status, fa: capAppr.json?.asset_no, fa1500: fa1500Post }));
 
   // ════════════════════ ITGC-AC-09 — SoD preventive block on permission assignment ════════════════════
   // Raise PR / PO (procurement) + approve & pay AP (creditors) is SoD rule R03.

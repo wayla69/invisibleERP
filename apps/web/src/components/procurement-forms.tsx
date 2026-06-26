@@ -82,8 +82,8 @@ function PrForm({ onDone }: { onDone: () => void }) {
 }
 
 // ── PO ──
-interface PoLine { item_id: string; item_description: string; order_qty: number; unit_price: number; uom: string }
-const emptyPoLine = (): PoLine => ({ item_id: '', item_description: '', order_qty: 1, unit_price: 0, uom: '' });
+interface PoLine { item_id: string; item_description: string; order_qty: number; unit_price: number; uom: string; is_capital: boolean }
+const emptyPoLine = (): PoLine => ({ item_id: '', item_description: '', order_qty: 1, unit_price: 0, uom: '', is_capital: false });
 
 function PoForm({ onDone }: { onDone: () => void }) {
   const [vendorName, setVendorName] = useState('');
@@ -107,6 +107,7 @@ function PoForm({ onDone }: { onDone: () => void }) {
           order_qty: Number(l.order_qty),
           unit_price: Number(l.unit_price),
           uom: l.uom || undefined,
+          is_capital: l.is_capital || undefined,
         })),
       }),
     }),
@@ -138,12 +139,15 @@ function PoForm({ onDone }: { onDone: () => void }) {
       <div className="space-y-2">
         <Label>รายการสินค้า</Label>
         {lines.map((l, i) => (
-          <div key={i} className="grid grid-cols-[1.5fr_2fr_1fr_1fr_1fr_auto] gap-2">
+          <div key={i} className="grid grid-cols-[1.5fr_2fr_1fr_1fr_1fr_auto_auto] items-center gap-2">
             <Input placeholder="Item ID" value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} />
             <Input placeholder="รายละเอียด" value={l.item_description} onChange={(e) => setLine(i, { item_description: e.target.value })} />
             <Input type="number" min="0" placeholder="จำนวน" value={l.order_qty} onChange={(e) => setLine(i, { order_qty: +e.target.value })} />
             <Input type="number" min="0" step="0.01" placeholder="ราคา/หน่วย" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: +e.target.value })} />
             <Input placeholder="หน่วย" value={l.uom} onChange={(e) => setLine(i, { uom: e.target.value })} />
+            <label className="flex items-center gap-1 whitespace-nowrap text-xs text-muted-foreground" title="รายการทุน (สินทรัพย์ถาวร) — เมื่อรับของจะนำไปตั้งทะเบียนทรัพย์สิน">
+              <input type="checkbox" checked={l.is_capital} onChange={(e) => setLine(i, { is_capital: e.target.checked })} /> ทุน
+            </label>
             <Button variant="destructive" size="icon" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
               <X className="size-4" />
             </Button>

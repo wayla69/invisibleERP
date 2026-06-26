@@ -960,6 +960,13 @@
       "when": 2023540000004,
       "tag": "0136_inventory_writeoff_maker_checker",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 2023550000004,
+      "tag": "0137_asset_capitalization_from_gr",
+      "breakpoints": true
     }
   ]
 }

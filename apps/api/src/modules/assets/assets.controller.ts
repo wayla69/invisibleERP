@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { AssetsService } from './assets.service';
-import { CreateCategoryBody, AcquireAssetBody, RunDepreciationBody, DisposeAssetBody, type CreateCategoryDto, type AcquireAssetDto, type DisposeAssetDto } from './dto';
+import { CreateCategoryBody, AcquireAssetBody, RunDepreciationBody, DisposeAssetBody, RegisterFromGrBody, type CreateCategoryDto, type AcquireAssetDto, type DisposeAssetDto, type RegisterFromGrDto } from './dto';
 import { qint, qintOpt } from '../../common/query';
 
 const ScanUpdateBody = z.object({ code: z.string().min(1), location: z.string().optional(), assigned_to: z.string().optional(), note: z.string().optional() });
@@ -34,6 +34,14 @@ export class AssetsController {
 
   @Post() acquire(@Body(new ZodValidationPipe(AcquireAssetBody)) b: AcquireAssetDto, @CurrentUser() u: JwtUser) { return this.svc.acquire(b, u); }
   @Get() register(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.assetRegister(u, status); }
+
+  // ── Procure-to-Capitalize (FA-10): register a fixed asset from a capital goods-receipt line (maker-checker).
+  // List capital GR lines awaiting capitalisation; raise a registration (preparer); a DIFFERENT user approves.
+  @Get('registrations/eligible') eligibleFromGr(@Query('gr_no') grNo: string, @CurrentUser() u: JwtUser) { return this.svc.eligibleFromGr(grNo, u); }
+  @Get('registrations') listRegistrations(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listRegistrations(status, u); }
+  @Post('registrations') registerFromGr(@Body(new ZodValidationPipe(RegisterFromGrBody)) b: RegisterFromGrDto, @CurrentUser() u: JwtUser) { return this.svc.registerFromGr(b, u); }
+  @Post('registrations/:regNo/approve') approveReg(@Param('regNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveRegistration(no, u); }
+  @Post('registrations/:regNo/reject') rejectReg(@Param('regNo') no: string, @Body(new ZodValidationPipe(RevalRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectRegistration(no, u, b?.reason); }
   @Get(':assetNo/schedule') schedule(@Param('assetNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.depreciationSchedule(u, no); }
   // Disposal (FA-03) + FA-09 maker-checker: a dispose request posts a Draft JE + flags disposal_pending; a DIFFERENT user must approve before it is effective.
   @Patch(':assetNo/dispose') dispose(@Param('assetNo') no: string, @Body(new ZodValidationPipe(DisposeAssetBody)) b: DisposeAssetDto, @CurrentUser() u: JwtUser) { return this.svc.dispose(no, b, u); }
