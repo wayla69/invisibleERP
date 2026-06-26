@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, gte, lte, desc, ilike, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gte, lte, desc, asc, ilike, sql, isNotNull, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { auditLog, dataChangeLog } from '../../database/schema';
+import { auditRowHash } from '../../common/audit.interceptor';
 
 export interface ChangeFilters { table?: string; row_pk?: string; actor?: string; from?: string; to?: string; tenantId?: number | null }
 
@@ -83,5 +84,30 @@ export class AuditViewerService {
       })),
       total: Number(n?.c ?? 0), limit, offset,
     };
+  }
+
+  // ITGC-AC-16 — re-walk the hash chain(s) and report the first row where it breaks (tamper / gap / forgery).
+  // Tenant isolation is by RLS: a tenant admin verifies their own chain; HQ/Admin (bypass) verifies all.
+  async verifyChain() {
+    const db = this.db as any;
+    const rows = await db.select().from(auditLog).where(isNotNull(auditLog.seq)).orderBy(asc(auditLog.tenantId), asc(auditLog.seq));
+    const chains = new Map<string, any[]>();
+    for (const r of rows) { const k = String(r.tenantId ?? ''); if (!chains.has(k)) chains.set(k, []); chains.get(k)!.push(r); }
+    let checked = 0;
+    for (const [k, list] of chains) {
+      let prevHash: string | null = null;
+      let expectedSeq = 1;
+      for (const r of list) {
+        checked++;
+        const seq = Number(r.seq);
+        if (seq !== expectedSeq) return { ok: false, tenant: k || null, broken_at: seq, reason: 'sequence gap (a row was deleted)' };
+        if ((r.prevHash ?? null) !== prevHash) return { ok: false, tenant: k || null, broken_at: seq, reason: 'prev_hash mismatch' };
+        const expect = auditRowHash(prevHash, seq, { actor: r.actor, tenantId: r.tenantId != null ? Number(r.tenantId) : null, action: r.action, ip: r.ip, requestId: r.requestId, status: r.status, meta: r.meta });
+        if (r.hash !== expect) return { ok: false, tenant: k || null, broken_at: seq, reason: 'hash mismatch (a row was altered)' };
+        prevHash = r.hash;
+        expectedSeq++;
+      }
+    }
+    return { ok: true, chains: chains.size, rows_checked: checked };
   }
 }

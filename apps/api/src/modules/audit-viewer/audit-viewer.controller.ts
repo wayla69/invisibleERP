@@ -26,6 +26,13 @@ export class AuditViewerController {
     return this.svc.query(filters, Math.min(qint('limit', limit, 50), 200), Math.max(qint('offset', offset, 0), 0));
   }
 
+  // ITGC-AC-16 — tamper-evidence: re-walk the audit hash chain(s) and report the first break (or ok).
+  @Get('verify')
+  @Permissions('users')
+  verify() {
+    return this.svc.verifyChain();
+  }
+
   // Field-level OLD→NEW change log (ITGC-AC-14) for the core financial tables. Non-Admin is scoped to own tenant.
   @Get('changes')
   @Permissions('users')

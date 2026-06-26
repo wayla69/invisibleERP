@@ -91,6 +91,11 @@ export const auditLog = pgTable(
     traceId: text('trace_id'),
     status: text('status'), // success | fail
     meta: jsonb('meta'),
+    // ITGC-AC-16 — per-tenant hash chain for tamper-evidence (migration 0148). Each hash binds the previous
+    // hash + the row's content; re-walking the chain detects any edit/delete/insert of a past row.
+    seq: bigint('seq', { mode: 'number' }),
+    prevHash: text('prev_hash'),
+    hash: text('hash'),
   },
   (t) => ({
     byActor: index('idx_audit_actor').on(t.actor),

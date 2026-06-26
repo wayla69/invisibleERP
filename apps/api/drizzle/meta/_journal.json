@@ -1037,6 +1037,13 @@
       "when": 2023650000004,
       "tag": "0147_auth_lockout_revocation",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 2023660000004,
+      "tag": "0148_audit_hash_chain",
+      "breakpoints": true
     }
   ]
 }

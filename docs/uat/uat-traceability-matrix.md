@@ -34,6 +34,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-022 | Logout revokes the token (jti denylist) | ITGC-AC-15 | 08 §7, §9 |
 | UAT-SEC-023 | Deactivated account's existing token rejected live | ITGC-AC-15 | 08 §7, §9 |
 | UAT-SEC-024 | Revoke-all-sessions invalidates pre-existing tokens | ITGC-AC-15 | 08 §7, §9 |
+| UAT-SEC-025 | Audit hash chain verifies intact | ITGC-AC-16 | 08 §7, §9 |
+| UAT-SEC-026 | Tampering a past audit row is detected (hash mismatch) | ITGC-AC-16 | 08 §7, §9 |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 
