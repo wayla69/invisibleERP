@@ -38,10 +38,12 @@ const UpdateInventoryBody = z.object({
   current_stock: z.number().optional(), reorder_point: z.number().optional(), reorder_qty: z.number().optional(), notes: z.string().optional(),
 });
 
+const VARIANCE_REASONS = ['WASTE', 'OVERSTOCK', 'SPOILAGE', 'PORTIONING', 'THEFT', 'OTHER'] as const;
 const VarianceBody = z.object({
   items: z.array(z.object({
     item_id: z.string().min(1), item_description: z.string().optional(), bom_code: z.string().optional(),
     uom: z.string().optional(), theoretical_use: z.number().optional(), actual_use: z.number(), reason: z.string().optional(),
+    reason_code: z.enum(VARIANCE_REASONS).optional(), station: z.string().optional(),
   })).min(1),
   shift: z.string().optional(),
 });

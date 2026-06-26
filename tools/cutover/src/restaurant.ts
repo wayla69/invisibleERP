@@ -468,14 +468,20 @@ async function main() {
     { itemId: 'OIL', itemDescription: 'น้ำมัน', unitPrice: '50' },
   ]).onConflictDoNothing();
   await db.insert(s.custVariance).values([
-    { varDate: '2026-06-23', tenantId: t1, itemId: 'NOODLE', itemDescription: 'เส้น', theoreticalUse: '10', actualUse: '12', variance: '2', variancePct: '20', uom: 'kg' },   // used 2 more → unfavorable
-    { varDate: '2026-06-23', tenantId: t1, itemId: 'OIL', itemDescription: 'น้ำมัน', theoreticalUse: '5', actualUse: '4', variance: '-1', variancePct: '-20', uom: 'L' },        // used 1 less → favorable
-    { varDate: '2026-06-23', tenantId: t2, itemId: 'NOODLE', itemDescription: 'เส้น', theoreticalUse: '99', actualUse: '99', variance: '0', variancePct: '0', uom: 'kg' },       // T2 — must not leak into T1's report
+    { varDate: '2026-06-23', tenantId: t1, itemId: 'NOODLE', itemDescription: 'เส้น', theoreticalUse: '10', actualUse: '12', variance: '2', variancePct: '20', uom: 'kg', reasonCode: 'PORTIONING', station: 'Sauce' },   // over-portioned at the sauce station
+    { varDate: '2026-06-23', tenantId: t1, itemId: 'OIL', itemDescription: 'น้ำมัน', theoreticalUse: '5', actualUse: '4', variance: '-1', variancePct: '-20', uom: 'L', reasonCode: 'WASTE', station: 'Fry' },        // used 1 less → favorable
+    { varDate: '2026-06-23', tenantId: t2, itemId: 'NOODLE', itemDescription: 'เส้น', theoreticalUse: '99', actualUse: '99', variance: '0', variancePct: '0', uom: 'kg', reasonCode: 'OTHER' },       // T2 — must not leak into T1's report
   ]);
   const fcv = await inj('GET', '/api/menu/food-cost/variance?from=2020-01-01&to=2099-12-31', sales1);
   const vNoodle = (fcv.json.items ?? []).find((i: any) => i.item_id === 'NOODLE');
   ok('Food-cost variance: per-ingredient variance valued at cost (NOODLE +2 × ฿15 = +฿30 unfavorable, High)', !!vNoodle && near(vNoodle.variance_cost, 30) && near(vNoodle.theoretical_cost, 150) && vNoodle.anomaly === 'High', `${JSON.stringify(vNoodle ?? {}).slice(0, 150)}`);
   ok('Food-cost variance: summary nets unfavorable/favorable (+30 / −50 = −20) and is tenant-isolated', fcv.status === 200 && near(fcv.json.summary?.variance_cost, -20) && near(fcv.json.summary?.unfavorable_cost, 30) && near(fcv.json.summary?.favorable_cost, -50) && fcv.json.summary?.items === 2, `${JSON.stringify(fcv.json.summary ?? {})}`);
+  // Step 4 — by-reason + by-station breakdown (the actionable "why / where" lever)
+  const byPort = (fcv.json.by_reason ?? []).find((r: any) => r.reason_code === 'PORTIONING');
+  const byWaste = (fcv.json.by_reason ?? []).find((r: any) => r.reason_code === 'WASTE');
+  ok('Food-cost variance: by_reason rolls cost up (PORTIONING +฿30 / WASTE −฿50)', near(byPort?.variance_cost, 30) && near(byWaste?.variance_cost, -50), `${JSON.stringify(fcv.json.by_reason ?? [])}`);
+  const sauce = (fcv.json.by_station ?? []).find((st: any) => st.station === 'Sauce');
+  ok('Food-cost variance: by_station flags Sauce +฿30 over theoretical (20%)', near(sauce?.variance_cost, 30) && near(sauce?.variance_pct, 20), `${JSON.stringify(fcv.json.by_station ?? [])}`);
 
   // ── receipts & printing (Phase 4) ──
   const rcSale = co.json.sale_no; // sale settled at checkout above
