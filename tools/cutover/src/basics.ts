@@ -725,7 +725,45 @@ async function main() {
   const bb3 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
   ok('GL-13: journal lines without branch_id appear under "unassigned"', bb3.status === 200 && !!bb3.json?.branches?.['unassigned'], `branches=${Object.keys(bb3.json?.branches ?? {}).join(',')}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings ──');
+  // ───────────────────── WS1.4 — Sub-ledger Tie-out / Reconciliation (GL-14) ─────────────────────
+  // Flag the four control accounts (1100/2000/1200/1500). Migration 0155 sets these via UPDATE, but it
+  // runs before the COA is seeded (seedChartOfAccounts at boot), so the flags are re-applied HERE — after
+  // all the AP/INV/FA posting tests above have run — so the tie-out can resolve the control accounts
+  // without the CONTROL_ACCOUNT guard tripping those earlier direct postings.
+  for (const [code, sub] of [['1100', 'AR'], ['2000', 'AP'], ['1200', 'INV'], ['1500', 'FA']] as const)
+    await db.update(s.accounts).set({ isControl: true, controlSubledger: sub }).where(eq(s.accounts.code, code));
+
+  // TC-GL-14-01: run an AR tie-out → 200/201 with the balance fields and a Matched/Variance status.
+  const tieRun = await inj('POST', '/api/ledger/tie-out/run', admin, { subledger: 'AR' });
+  ok('GL-14: run AR tie-out returns glBalance/subledgerBalance/variance/status',
+    (tieRun.status === 200 || tieRun.status === 201)
+      && typeof tieRun.json?.glBalance === 'number'
+      && typeof tieRun.json?.subledgerBalance === 'number'
+      && typeof tieRun.json?.variance === 'number'
+      && ['Matched', 'Variance'].includes(tieRun.json?.status),
+    `st=${tieRun.status} status=${tieRun.json?.status} gl=${tieRun.json?.glBalance} sl=${tieRun.json?.subledgerBalance}`);
+  const tieId = Number(tieRun.json?.id);
+
+  // TC-GL-14-?: list returns an array including the AR run.
+  const tieList = await inj('GET', '/api/ledger/tie-out', admin);
+  ok('GL-14: list tie-out runs returns the AR run',
+    tieList.status === 200 && Array.isArray(tieList.json?.runs) && tieList.json.runs.some((r: any) => r.id === tieId && r.subledger === 'AR'),
+    `st=${tieList.status} count=${tieList.json?.count}`);
+
+  // TC-GL-14-02: self-certify blocked — the runner (admin) cannot certify their own run → SELF_CERTIFY.
+  const selfCert = await inj('POST', `/api/ledger/tie-out/${tieId}/certify`, admin, {});
+  ok('GL-14: self-certify blocked (runner cannot certify own run) → SELF_CERTIFY',
+    selfCert.status === 400 && selfCert.json?.error?.code === 'SELF_CERTIFY',
+    `st=${selfCert.status} code=${selfCert.json?.error?.code}`);
+
+  // TC-GL-14-03: certify by a DIFFERENT user (mgr, also gl_close) → status becomes 'Certified'.
+  const mgrCert = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
+  const cert = await inj('POST', `/api/ledger/tie-out/${tieId}/certify`, mgrCert, { note: 'Reviewed — ties out' });
+  ok('GL-14: certify by a different user → Certified',
+    cert.status === 200 && cert.json?.status === 'Certified' && cert.json?.certified_by === 'mgr',
+    `st=${cert.status} status=${cert.json?.status} by=${cert.json?.certified_by}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

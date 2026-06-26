@@ -188,6 +188,7 @@ flowchart TD
 | 0.8 DRAFT | 2026-06-25 | `<<author>>` | **Lease management UI surfaced** — new screen `/leases` (ERP nav → การเงิน ▸ สมุดบัญชี & แยกประเภท) drives the already-documented IFRS 16 endpoints: create lease (ROU+liability at PV), "run-due" periodic posting, and modification/remeasurement. UI-only addition; no process/GL/control change (**LSE-01**). See user manual `06-general-ledger.md` §Leases and UAT `05-general-ledger-close-uat.md`. |
 | 0.9 DRAFT | 2026-06-26 | Platform | §7 step 13 — added the **lease-liability reconciliation** (`GET /api/leases/liability-reconciliation`): ties GL **2600** to the sum of the remaining liability balances on the lease schedule (`gl_liability` vs `schedule_liability`, `difference`, `reconciled`), surfaced as a tie-out banner on `/leases`. Detective tie-out over the existing **LSE-01**; no new control, no migration. Verified by the `basics` harness (after run + remeasurement, GL 2600 = schedule, reconciled, difference 0). |
 | 1.0 DRAFT | 2026-06-26 | WS1.3 | WS1.3 — added **multi-dimensional GL postings**: `branch_id`, `project_id`, `department_id` columns on `journal_lines`; `PostingService` context stamping; `GET /api/ledger/income-statement/by-branch` per-branch P&L endpoint; `departments` master table with RLS. New control **GL-13**. Verified by the `basics` harness (TC-GL-13-01/02/03). Migration 0157. |
+| 1.1 DRAFT | 2026-06-26 | WS1.4 | WS1.4 — added **sub-ledger tie-out / reconciliation**: `POST /api/ledger/tie-out/run` reconciles each GL control account (1100 AR / 2000 AP / 1200 INV / 1500 FA) to the sum of its sub-ledger detail, recording the variance + a Matched/Variance status; `POST /api/ledger/tie-out/:id/certify` is **maker-checker** (certifier ≠ runner → `SELF_CERTIFY`). New `subledger_tieout_runs` table (RLS), new control **GL-14**. Verified by the `basics` harness (TC-GL-14-01/02/03). Migration 0160. |
 
 ## 1.3 Multi-dimensional GL Postings (WS1.3)
 
@@ -227,3 +228,62 @@ RLS policy `tenant_isolation_departments` restricts reads to the caller's tenant
 | Risk | Revenue / expense mis-attributed to wrong branch / project, obscuring per-location P&L |
 | Mitigation | `branch_id`, `project_id`, `department_id` columns on `journal_lines`; `PostingService` stamps from context; `income-statement/by-branch` provides per-location P&L review |
 | Test | TC-GL-13-01/02/03 (basics.ts harness) |
+
+## 1.4 Sub-ledger Tie-out / Reconciliation (WS1.4)
+
+### Overview
+At period-end the four GL **control accounts** must each equal the sum of their sub-ledger detail. A
+tie-out run computes both sides as of a date, records the **variance**, and requires an independent
+**certification** (maker-checker) so the reconciliation is reviewed by someone other than its preparer.
+
+The control accounts (flagged `is_control=TRUE`, `control_subledger` set in WS1.1):
+- **1100** — Accounts Receivable (`AR`)
+- **2000** — Accounts Payable (`AP`)
+- **1200** — Inventory (`INV`)
+- **1500** — Fixed Assets (`FA`)
+
+### Running a tie-out
+`POST /api/ledger/tie-out/run` — body `{ "subledger": "AR" | "AP" | "INV" | "FA", "as_of_date"?: "YYYY-MM-DD" }`
+(permission `gl_close` or `gl_post`). `runBy` is taken from the authenticated user. It computes:
+
+- **GL balance** — Σ(`debit − credit`) of **posted** `journal_lines` on the control account up to the
+  as-of date, scoped to the caller's tenant.
+- **Sub-ledger balance** — summed from the originating detail tables (queried directly):
+  - **AR** — Σ outstanding (`amount − paid_amount`) of `ar_invoices` issued up to the as-of date.
+  - **AP** — Σ outstanding (`amount − paid_amount`) of `ap_transactions` dated up to the as-of date.
+  - **INV** — Σ `inv_balances.total_value` (perpetual on-hand × cost). `inv_balances` is a current
+    snapshot with no per-date history, so the as-of is **advisory** for INV.
+  - **FA** — Σ (`acquire_cost − accumulated_depreciation`) of non-disposed `fixed_assets` (a current
+    register snapshot — as-of **advisory**).
+- **variance** = `gl_balance − subledger_balance`; **status** = `Matched` when `|variance| < 0.01`,
+  else `Variance`.
+
+Runs **upsert** on (`tenant_id`, `subledger`, `as_of_date`) — a same-day re-run refreshes the figures
+and clears any prior certification. Results persist in `subledger_tieout_runs` (RLS-isolated by tenant).
+
+`GET /api/ledger/tie-out` (optional `?subledger=`/`?as_of_date=`) lists runs newest-first;
+`GET /api/ledger/tie-out/:id` fetches one.
+
+### Certification (maker-checker)
+`POST /api/ledger/tie-out/:id/certify` — body `{ "note"?: string }` (permission `gl_close`). Sets
+`status = Certified` and records the certifier + timestamp. A `Variance` may be certified with an
+explanatory `note` describing the reconciling items. **Segregation of duties:** the certifier must
+**differ** from the runner — certifying your own run is rejected with **`SELF_CERTIFY`** (HTTP 400).
+
+### Error codes
+| Code | Meaning |
+|------|---------|
+| `SELF_CERTIFY` | The certifier equals the runner — maker-checker SoD violation (a different `gl_close` user must certify). |
+| `BAD_SUBLEDGER` | `subledger` not one of AR/AP/INV/FA. |
+| `NO_CONTROL_ACCOUNT` | No account is flagged `is_control` for the requested sub-ledger. |
+| `NOT_FOUND` | Tie-out run id does not exist. |
+
+### Control GL-14 — Sub-ledger Tie-out
+| Control ID | GL-14 |
+|------------|-------|
+| Name | Sub-ledger tie-out / control-account reconciliation |
+| Type | Application — Automated (Detective, Monthly) |
+| Risk | GL control-account balances drift from sub-ledger detail without detection, masking posting errors or fraud |
+| Mitigation | Tie-out run computes GL vs sub-ledger balance + variance per control account; maker-checker certification (certifier ≠ runner, `SELF_CERTIFY`) |
+| Owner | Financial Controller |
+| Test | TC-GL-14-01/02/03 (basics.ts harness) |
