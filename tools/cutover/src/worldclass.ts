@@ -46,6 +46,7 @@ async function main() {
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'mgr', passwordHash: await pw.hash('mgr123'), role: 'Admin', tenantId: hq }, // FA-09: a different approver for asset disposal
     { username: 'cust1', passwordHash: await pw.hash('pw1'), role: 'Customer', tenantId: t1 },
     { username: 'cust2', passwordHash: await pw.hash('pw2'), role: 'Customer', tenantId: t2 },
     { username: 'sales1', passwordHash: await pw.hash('pw3'), role: 'Sales', tenantId: t1 }, // non-Admin staff bound to shop T1
@@ -90,6 +91,7 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const admin = await login('admin', 'admin123');
+  const mgr = await login('mgr', 'mgr123');
   const c1 = await login('cust1', 'pw1');
   const c2 = await login('cust2', 'pw2');
   const sales1 = await login('sales1', 'pw3');
@@ -153,8 +155,11 @@ async function main() {
   ok('FA: asset nbv decreased to 11000 after 1 month', near(reg.assets.find((a: any) => a.asset_no === acq.json.asset_no)?.net_book_value, 11000), JSON.stringify(reg.assets?.[0]).slice(0, 80));
   const run2 = await inj('POST', '/api/assets/depreciation/run', admin, { period: '2027-01' });
   ok('FA: depreciation run idempotent per period', run2.json.already === true || near(run2.json.total_depreciation, 0), JSON.stringify(run2.json).slice(0, 60));
+  // FA-09 maker-checker: dispose request → Draft + pending; a different user approves → effective.
   const disp = await inj('PATCH', `/api/assets/${acq.json.asset_no}/dispose`, admin, { disposal_date: '2027-02-10', proceeds: 11500 });
-  ok('FA: disposal posts gain 500', near(disp.json.gain_loss, 500) && disp.json.status === 'disposed', JSON.stringify(disp.json).slice(0, 90));
+  ok('FA: disposal request computes gain 500, pending approval', near(disp.json.gain_loss, 500) && disp.json.status === 'pending_disposal', JSON.stringify(disp.json).slice(0, 90));
+  const dispAppr = await inj('POST', `/api/assets/${acq.json.asset_no}/dispose/approve`, mgr);
+  ok('FA: disposal approved by a different user → disposed', dispAppr.json.status === 'disposed' && dispAppr.json.approved_by === 'mgr', JSON.stringify(dispAppr.json).slice(0, 90));
   const jDis = (await inj('GET', '/api/ledger/journal?limit=8', admin)).json.entries.find((e: any) => e.source === 'DISP');
   ok('FA: disposal Dr1590 1000 + Cr1500 12000 + Cr1510 gain 500', near(leg(jDis, '1590', 'debit'), 1000) && near(leg(jDis, '1500', 'credit'), 12000) && near(leg(jDis, '1510', 'credit'), 500));
   const tbZ = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};

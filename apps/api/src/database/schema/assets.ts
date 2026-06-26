@@ -1,6 +1,6 @@
 // Fixed Assets (FI-AA): asset register + straight-line monthly depreciation + disposal.
 // Every table carries tenant_id → the 0007 RLS loop scopes them. GL effects via LedgerService.postEntry.
-import { pgTable, bigserial, bigint, text, numeric, date, integer, timestamp, pgEnum, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, boolean, text, numeric, date, integer, timestamp, pgEnum, unique, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 export const depMethodEnum = pgEnum('dep_method', ['straight_line']);
@@ -37,6 +37,9 @@ export const fixedAssets = pgTable('fixed_assets', {
   disposedDate: date('disposed_date'),
   disposalProceeds: numeric('disposal_proceeds', { precision: 18, scale: 4 }),
   disposalGainLoss: numeric('disposal_gain_loss', { precision: 18, scale: 4 }),
+  disposalPending: boolean('disposal_pending').notNull().default(false), // FA-09 maker-checker: disposal requested, awaiting approval
+  disposalRequestedBy: text('disposal_requested_by'),                     // preparer (maker)
+  disposalApprovedBy: text('disposal_approved_by'),                       // checker — must differ from requester
   acquireSource: text('acquire_source').notNull().default('cash'),
   // Physical-tracking fields (for QR asset tags + scan-to-locate). Accounting
   // status stays in `status`; these track where the asset physically is / who holds it.

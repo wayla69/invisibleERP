@@ -298,11 +298,23 @@ is safe.
 
 ### Dispose of an asset
 
-1. Open the asset and click **Dispose**: enter the disposal date and any proceeds.
-2. Confirm.
+1. Open the asset (click its row) and use the **จำหน่ายสินทรัพย์ (Dispose)** panel:
+   enter the **proceeds** (money received) and **ส่งคำขอจำหน่าย (Submit request)**.
 
-**Expected result:** The asset is removed from active use and any gain / loss is
-posted.
+**Expected result:** the gain / loss is computed, but the asset is **not disposed
+yet** — the request is **"รออนุมัติจำหน่าย" (PendingApproval)** and posts nothing to the
+books until approved.
+
+#### Approval (required before it counts) — two people
+
+Disposal uses **maker-checker** (it's how an asset leaves the books and cash comes
+in, so it's a theft-sensitive step): a **different** person opens the same asset and
+clicks **อนุมัติ (Approve)** — only then is the asset marked **disposed**, the accounting
+entry posts, and any revaluation surplus is recycled. **You cannot approve your own
+disposal request** ("ผู้บันทึกอนุมัติรายการของตนเองไม่ได้", `SOD_VIOLATION`) — this binds
+**everyone, including Admin**. To cancel, click **ปฏิเสธ (Reject)**; the draft entry is
+voided and the asset stays in service. While a disposal is pending, the asset is frozen
+(it stops depreciating). Only **one** disposal can be pending per asset at a time.
 
 ### Revalue or impair an asset
 

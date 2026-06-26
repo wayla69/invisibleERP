@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations } from '../../database/schema';
+import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetMovements, assetRevaluations, journalEntries } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { QrService } from '../qr/qr.service';
@@ -74,8 +74,9 @@ export class AssetsService {
     const endExcl = m < 12 ? `${y}-${String(m + 1).padStart(2, '0')}-01` : `${y + 1}-01-01`;
     const periodEnd = new Date(new Date(endExcl + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
 
-    // Compute each eligible asset's monthly charge, bucketed by owning tenant.
-    const assets = await db.select().from(fixedAssets).where(eq(fixedAssets.status, 'active'));
+    // Compute each eligible asset's monthly charge, bucketed by owning tenant. A disposal-pending asset is
+    // frozen (the Draft disposal JE was computed off its current NBV) — exclude it until the disposal resolves.
+    const assets = await db.select().from(fixedAssets).where(and(eq(fixedAssets.status, 'active'), eq(fixedAssets.disposalPending, false)));
     const groups = new Map<string, { tenantId: number | null; computed: any[] }>();
     for (const a of assets) {
       if (String(a.acquireDate) > periodEnd) continue;                       // not yet in service
@@ -124,12 +125,15 @@ export class AssetsService {
     return { run_no: runs[0].run_no, period, total_depreciation: aggTotal, asset_count: aggCount, journal_no: runs[0].journal_no, runs };
   }
 
-  // disposal: Dr 1590 accum + Dr 1000 proceeds ± 1510 / Cr 1500 cost
+  // disposal: Dr 1590 accum + Dr 1000 proceeds ± 1510 / Cr 1500 cost. FA-09 maker-checker — a disposal
+  // REQUEST posts the JE as a Draft (excluded from balances) and flags the asset disposal_pending WITHOUT
+  // marking it disposed; a DIFFERENT user must approve before it is effective (asset-stripping control).
   async dispose(assetNo: string, dto: DisposeAssetDto, user: JwtUser) {
     const db = this.db as any;
     const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
     if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Asset not found', messageTh: 'ไม่พบสินทรัพย์' });
     if (a.status === 'disposed') throw new BadRequestException({ code: 'ALREADY_DISPOSED', message: 'Asset already disposed', messageTh: 'สินทรัพย์ถูกจำหน่ายแล้ว' });
+    if (a.disposalPending) throw new BadRequestException({ code: 'DISPOSAL_PENDING', message: 'A disposal of this asset is already pending approval', messageTh: 'มีรายการจำหน่ายสินทรัพย์นี้รออนุมัติอยู่แล้ว' });
     const cost = n(a.acquireCost), accum = n(a.accumulatedDepreciation), nbv = n(a.netBookValue), proceeds = n(dto.proceeds);
     const gainLoss = round4(proceeds - nbv);
     const lines: any[] = [{ account_code: '1590', debit: accum }, { account_code: '1000', debit: proceeds }, { account_code: '1500', credit: cost }];
@@ -137,25 +141,57 @@ export class AssetsService {
     else if (gainLoss < 0) lines.push({ account_code: '1510', debit: -gainLoss });
     const date = dto.disposal_date ?? ymd();
     const je: any = await this.ledger.postEntry({
-      date, source: 'DISP', sourceRef: assetNo, tenantId: user.tenantId ?? null,
+      date, source: 'DISP', sourceRef: assetNo, tenantId: a.tenantId ?? user.tenantId ?? null,
       memo: gainLoss >= 0 ? `Disposal gain ${gainLoss}` : `Disposal loss ${-gainLoss}`, createdBy: user.username, lines,
+      pendingApproval: true,
     });
-    await db.update(fixedAssets).set({ status: 'disposed', disposedDate: date, disposalProceeds: fx(proceeds, 4), disposalGainLoss: fx(gainLoss, 4) }).where(eq(fixedAssets.id, a.id));
-    // Revaluation-reserve recycling (FA-07, IFRS): any revaluation surplus held in equity (3200) for this
-    // asset is transferred directly to retained earnings on disposal (Dr 3200 / Cr 3100) — it does not pass
-    // through P&L. The surplus is the sum of upward revaluations booked to 3200 (impairments went to P&L).
+    await db.update(fixedAssets).set({ disposalPending: true, disposedDate: date, disposalProceeds: fx(proceeds, 4), disposalGainLoss: fx(gainLoss, 4), disposalRequestedBy: user.username }).where(eq(fixedAssets.id, a.id));
+    return { asset_no: assetNo, status: 'pending_disposal', nbv_at_disposal: nbv, proceeds, gain_loss: gainLoss, journal_no: je?.entry_no ?? null };
+  }
+
+  // FA-09 maker-checker: a DIFFERENT user approves the pending disposal → the Draft JE becomes effective,
+  // the asset is marked disposed, and any revaluation surplus is recycled to retained earnings (posted fresh
+  // here — approval is the authorization). Reuses GL-05's approveEntry (approver ≠ requester, period re-check).
+  async approveDisposal(assetNo: string, user: JwtUser) {
+    const db = this.db as any;
+    const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
+    if (!a || !a.disposalPending) throw new BadRequestException({ code: 'NO_PENDING_DISPOSAL', message: `No disposal pending approval for ${assetNo}`, messageTh: 'ไม่มีรายการจำหน่ายที่รออนุมัติสำหรับสินทรัพย์นี้' });
+    const draft = await this.pendingDisposalJe(assetNo);
+    await this.ledger.approveEntry(draft.entryNo, user);
+    await db.update(fixedAssets).set({ status: 'disposed', disposalPending: false, disposalApprovedBy: user.username }).where(eq(fixedAssets.id, a.id));
+    // Revaluation-reserve recycling (FA-07, IFRS): surplus held in 3200 transfers directly to retained
+    // earnings (Dr 3200 / Cr 3100), not through P&L. Posted here (effective) once the disposal is approved.
     const [rev] = await db.select({ s: sql<string>`coalesce(sum(${assetRevaluations.delta}),0)` }).from(assetRevaluations)
       .where(and(eq(assetRevaluations.assetNo, assetNo), eq(assetRevaluations.kind, 'revaluation'), eq(assetRevaluations.status, 'Posted')));
     const surplus = round4(n(rev?.s));
     let recycleJe: any = null;
     if (surplus > 0) {
       recycleJe = await this.ledger.postEntry({
-        date, source: 'REVAL-RECYCLE', sourceRef: assetNo, tenantId: a.tenantId ?? user.tenantId ?? null,
+        date: a.disposedDate ?? ymd(), source: 'REVAL-RECYCLE', sourceRef: assetNo, tenantId: a.tenantId ?? user.tenantId ?? null,
         memo: `Revaluation surplus recycled to retained earnings on disposal of ${assetNo}`, createdBy: user.username,
         lines: [{ account_code: '3200', debit: surplus }, { account_code: '3100', credit: surplus }],
       });
     }
-    return { asset_no: assetNo, status: 'disposed', nbv_at_disposal: nbv, proceeds, gain_loss: gainLoss, journal_no: je?.entry_no ?? null, revaluation_surplus_recycled: surplus, recycle_journal_no: recycleJe?.entry_no ?? null };
+    return { asset_no: assetNo, status: 'disposed', proceeds: n(a.disposalProceeds), gain_loss: n(a.disposalGainLoss), journal_no: draft.entryNo, approved_by: user.username, prepared_by: a.disposalRequestedBy, revaluation_surplus_recycled: surplus, recycle_journal_no: recycleJe?.entry_no ?? null };
+  }
+
+  // Reject a pending disposal → voids the Draft JE; the asset stays in service (fields cleared).
+  async rejectDisposal(assetNo: string, user: JwtUser, reason?: string) {
+    const db = this.db as any;
+    const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
+    if (!a || !a.disposalPending) throw new BadRequestException({ code: 'NO_PENDING_DISPOSAL', message: `No disposal pending approval for ${assetNo}`, messageTh: 'ไม่มีรายการจำหน่ายที่รออนุมัติสำหรับสินทรัพย์นี้' });
+    const draft = await this.pendingDisposalJe(assetNo);
+    await this.ledger.rejectEntry(draft.entryNo, user, reason);
+    await db.update(fixedAssets).set({ disposalPending: false, disposedDate: null, disposalProceeds: null, disposalGainLoss: null, disposalRequestedBy: null }).where(eq(fixedAssets.id, a.id));
+    return { asset_no: assetNo, status: 'active', rejected_by: user.username, journal_no: draft.entryNo };
+  }
+
+  private async pendingDisposalJe(assetNo: string) {
+    const db = this.db as any;
+    const [je] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries)
+      .where(and(eq(journalEntries.source, 'DISP'), eq(journalEntries.sourceRef, assetNo), eq(journalEntries.status, 'Draft'))).orderBy(desc(journalEntries.id)).limit(1);
+    if (!je) throw new BadRequestException({ code: 'NO_PENDING_DISPOSAL', message: `No draft disposal entry for ${assetNo}`, messageTh: 'ไม่พบรายการบัญชีจำหน่ายที่รออนุมัติ' });
+    return je;
   }
 
   // Revaluation / impairment (FA-07): adjust an asset's carrying amount to a new value. Upward → credit
@@ -316,5 +352,5 @@ export class AssetsService {
 
 function shapeCat(c: any) { return { id: Number(c.id), code: c.code, name: c.name, default_useful_life_years: c.defaultUsefulLifeYears, asset_account: c.assetAccount, accum_dep_account: c.accumDepAccount, dep_expense_account: c.depExpenseAccount }; }
 function shapeAsset(a: any) {
-  return { asset_no: a.assetNo, name: a.name, category_id: a.categoryId, status: a.status, acquire_date: a.acquireDate, acquire_cost: n(a.acquireCost), salvage_value: n(a.salvageValue), useful_life_months: a.usefulLifeMonths, accumulated_depreciation: n(a.accumulatedDepreciation), net_book_value: n(a.netBookValue), last_depreciated_period: a.lastDepreciatedPeriod, disposed_date: a.disposedDate, disposal_proceeds: a.disposalProceeds != null ? n(a.disposalProceeds) : null, disposal_gain_loss: a.disposalGainLoss != null ? n(a.disposalGainLoss) : null, location: a.location ?? null, department: a.department ?? null, serial_no: a.serialNo ?? null, assigned_to: a.assignedTo ?? null };
+  return { asset_no: a.assetNo, name: a.name, category_id: a.categoryId, status: a.status, acquire_date: a.acquireDate, acquire_cost: n(a.acquireCost), salvage_value: n(a.salvageValue), useful_life_months: a.usefulLifeMonths, accumulated_depreciation: n(a.accumulatedDepreciation), net_book_value: n(a.netBookValue), last_depreciated_period: a.lastDepreciatedPeriod, disposed_date: a.disposedDate, disposal_proceeds: a.disposalProceeds != null ? n(a.disposalProceeds) : null, disposal_gain_loss: a.disposalGainLoss != null ? n(a.disposalGainLoss) : null, disposal_pending: a.disposalPending === true, disposal_requested_by: a.disposalRequestedBy ?? null, disposal_approved_by: a.disposalApprovedBy ?? null, location: a.location ?? null, department: a.department ?? null, serial_no: a.serialNo ?? null, assigned_to: a.assignedTo ?? null };
 }

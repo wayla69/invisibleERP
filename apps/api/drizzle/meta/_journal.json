@@ -946,6 +946,13 @@
       "when": 2023520000004,
       "tag": "0134_asset_revaluation_maker_checker",
       "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 2023530000004,
+      "tag": "0135_asset_disposal_maker_checker",
+      "breakpoints": true
     }
   ]
 }

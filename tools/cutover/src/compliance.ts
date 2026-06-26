@@ -232,6 +232,19 @@ async function main() {
   ok('FA-08: independent approver → revaluation effective, surplus to equity 3200 (+30000)',
     revAppr2.json?.status === 'Posted' && revAppr2.json?.approved_by === 'paychk' && surplusPost === 30000, JSON.stringify({ st: revAppr2.json?.status, by: revAppr2.json?.approved_by, s3200: surplusPost }));
 
+  // ════════════════════════ FA-09 — Asset disposal maker-checker (SoD) ════════════════════════
+  // A disposal posts a DRAFT JE and flags the asset disposal_pending; a different user must approve before
+  // it is effective (status→disposed) — one person can't write an asset off the books on their own.
+  await db.insert(s.fixedAssets).values({ tenantId: t1, assetNo: 'FA-MC2', name: 'รถตู้ (FA-09)', acquireDate: '2026-01-01', acquireCost: '60000', usefulLifeMonths: 60, netBookValue: '60000', status: 'active' }).onConflictDoNothing();
+  const dispReq = await inj('PATCH', '/api/assets/FA-MC2/dispose', payprep, { proceeds: 50000, disposal_date: '2026-09-20' });
+  ok('FA-09: disposal request → pending_disposal, Draft (asset not yet disposed)', dispReq.json?.status === 'pending_disposal' && /^JE-/.test(dispReq.json?.journal_no ?? ''), JSON.stringify({ st: dispReq.json?.status, je: dispReq.json?.journal_no }));
+  const dispSelf2 = await inj('POST', '/api/assets/FA-MC2/dispose/approve', payprep);
+  ok('FA-09: requester self-approval blocked → 403 SOD_VIOLATION', dispSelf2.status === 403 && dispSelf2.json?.error?.code === 'SOD_VIOLATION', `${dispSelf2.status} ${dispSelf2.json?.error?.code}`);
+  const dispAppr2 = await inj('POST', '/api/assets/FA-MC2/dispose/approve', paychk);
+  const faDisposed = (await inj('GET', '/api/assets?status=disposed', payprep)).json;
+  ok('FA-09: independent approver → asset disposed (status + approver recorded)',
+    dispAppr2.json?.status === 'disposed' && dispAppr2.json?.approved_by === 'paychk' && (faDisposed.assets ?? []).some((x: any) => x.asset_no === 'FA-MC2'), JSON.stringify({ st: dispAppr2.json?.status, by: dispAppr2.json?.approved_by }));
+
   // ════════════════════ ITGC-AC-09 — SoD preventive block on permission assignment ════════════════════
   // Raise PR / PO (procurement) + approve & pay AP (creditors) is SoD rule R03.
   const conflictPerms = ['procurement', 'creditors'];
