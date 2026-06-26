@@ -345,6 +345,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
       // self-service is for every employee (incl. POS staff) → cross-listed to both surfaces
       { label: 'พื้นที่พนักงาน (ESS)', href: '/ess', icon: IdCard, perms: ['ess'], workspace: BOTH },
+      // manager surface: approve/reject employee expense claims (perm `approvals`, independent of `ess`)
+      { label: 'อนุมัติเบิกพนักงาน', href: '/expense-approvals', icon: ReceiptText, perms: ['approvals'], workspace: BOTH },
     ],
   },
   {

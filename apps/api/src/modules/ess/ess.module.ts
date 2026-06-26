@@ -21,6 +21,9 @@ export class EssController {
   @Post('leave') @Permissions('ess') requestLeave(@Body(new ZodValidationPipe(LeaveBody)) b: z.infer<typeof LeaveBody>, @CurrentUser() u: JwtUser) { return this.ess.requestLeave(b, u); }
   @Get('payslips') @Permissions('ess') payslips(@CurrentUser() u: JwtUser) { return this.ess.myPayslips(u); }
   @Get('expenses') @Permissions('ess') expenses(@CurrentUser() u: JwtUser) { return this.ess.myExpenses(u); }
+  // Approver inbox — list every pending claim awaiting a decision (perm `approvals`, NOT self-scoped).
+  // Declared before the `expenses/:id/decide` route so the literal `pending` segment is never captured as an id.
+  @Get('expenses/pending') @Permissions('approvals') pendingExpenses() { return this.ess.listPendingExpenses(); }
   @Post('expenses') @Permissions('ess') submitExpense(@Body(new ZodValidationPipe(ExpenseBody)) b: z.infer<typeof ExpenseBody>, @CurrentUser() u: JwtUser) { return this.ess.submitExpense(b, u); }
   @Post('expenses/:id/decide') @Permissions('approvals') decide(@Param('id') id: string, @Body(new ZodValidationPipe(DecideBody)) b: z.infer<typeof DecideBody>, @CurrentUser() u: JwtUser) { return this.ess.approveExpense(+id, b.approve, u); }
 }
