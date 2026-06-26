@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, invWriteoffRequests } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, invWriteoffRequests, fxRates } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -499,7 +499,6 @@ export class FinanceService {
       REVAL: { control: 'FA-08', label: 'ตีราคา/ด้อยค่าสินทรัพย์ (Revaluation/Impairment)' },
       DISP: { control: 'FA-09', label: 'จำหน่ายสินทรัพย์ (Disposal)' },
       BANKADJ: { control: 'BANK-02', label: 'ปรับปรุงรายการธนาคาร (Bank adjustment)' },
-      FXRATE: { control: 'FX-02', label: 'อัตราแลกเปลี่ยน (FX rate change)' },
     };
     const items: any[] = [];
     // 1) Every Draft journal entry (Draft = pending approval, excluded from balances until approved). Sum the
@@ -528,6 +527,12 @@ export class FinanceService {
     for (const p of aps) {
       const age = ageDays(p.requestedAt);
       items.push({ type: 'ap_payment', control: 'AP-PAY', label: 'จ่ายเจ้าหนี้ (AP disbursement)', ref: p.paymentNo, source: 'AP-PAY', requested_by: p.requestedBy, requested_at: p.requestedAt, amount: round2(n(p.amount)), memo: `→ ${p.txnNo}`, age_days: age, bucket: bucket(age), stale: age > staleDays });
+    }
+    // 4) FX rate changes — a manual rate is PendingApproval (unusable) until a different user approves; not a JE.
+    const fxr = await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')).orderBy(asc(fxRates.createdAt));
+    for (const r of fxr) {
+      const age = ageDays(r.createdAt);
+      items.push({ type: 'fx_rate', control: 'FX-04', label: 'อัตราแลกเปลี่ยน (FX rate change)', ref: `${r.currency}@${r.rateDate}`, source: 'FX-RATE', requested_by: r.requestedBy, requested_at: r.createdAt, amount: 0, memo: `${r.currency} = ${n(r.rate)} THB (${r.rateDate})`, age_days: age, bucket: bucket(age), stale: age > staleDays });
     }
     items.sort((a, b) => b.age_days - a.age_days);
     const byType = Object.values(items.reduce((acc: any, it) => {

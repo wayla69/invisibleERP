@@ -12,7 +12,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | FX-01, FX-02, FX-03, GL-01 |
+| Related RCM controls | FX-01, FX-02, FX-03, FX-04, GL-01, MON-01 |
 | Related policy | `compliance/policies/foreign-currency-policy.md` |
 
 ## 2. Purpose
@@ -60,7 +60,7 @@ Segregation of duties is enforced per **R07** — the user who authorizes/mainta
 
 ## 7. Process narrative
 
-1. **Maintain FX rate.** Treasury calls `POST /api/fx/rates`, upserting a rate by `tenant + currency + rate_date` (delete-then-insert). An unsupported currency raises **UNSUPPORTED_CURRENCY (400)**. Control: **FX-01**.
+1. **Maintain FX rate (maker-checker).** Treasury calls `POST /api/fx/rates`, upserting a rate by `tenant + currency + rate_date` (delete-then-insert). An unsupported currency raises **UNSUPPORTED_CURRENCY (400)**. A **manually-entered** rate is recorded as **PendingApproval** and is **NOT usable** — rate resolution for revaluation, the unrealized-FX report, and consolidation translation all use **Approved** rates only — until a **different** user with approval authority approves it (`POST /api/fx/rates/approve`); self-approval is rejected **`403 SOD_VIOLATION`** (binds even Admin), `reject` marks it Rejected (never usable), and re-entering a rate returns it to PendingApproval. An **externally-sourced** rate (a feed carrying an explicit non-manual `source`) is **auto-approved**. This stops a fat-fingered rate (e.g. USD 36 keyed as 63) from flowing straight into a revaluation JE that mis-states earnings/equity. Pending rates are also surfaced, aged, by the pending-approvals monitor (**MON-01**). Control: **FX-01**, **FX-04**.
 2. **Look up rate.** `GET /api/fx/rates` filters by `currency` and `as_of`, returning the latest rate with `rate_date <= as_of`. Control: Operational.
 3. **Report unrealized FX.** `GET /api/fx/unrealized` computes, as of a date, the unrealized gain/loss on OPEN non-THB AR invoices and AP transactions: `open_foreign = invoice − paid`; `booked_thb = open_foreign × booked_rate` (at invoice date); `current_thb = open_foreign × current_rate`; `delta = current_thb − booked_thb`. The summary reports AR total, AP total, and net. Control: **FX-02** (completeness over open foreign balances).
 4. **Post period-end revaluation.** Treasury calls `POST /api/fx/revalue` for a currency as-of a date. Source `FXREVAL`, reference `FXREVAL|as_of:currency`. The JE is balanced as follows: AR **1100** is Dr if delta > 0 else Cr; AP **2000** is Cr if delta > 0 else Dr; Bank **1010** follows its delta; and **5400 FX Gain/Loss (Unrealized)** is the balancing line — Cr when net gain, Dr when net loss. Posting is idempotent via `alreadyPosted('FXREVAL', ref)`. If no rate exists for the currency as-of the date, **NO_RATE (400)** is raised. THB returns early with a "base currency" note. Control: **GL-01**, **FX-02**.
@@ -92,6 +92,7 @@ The Treasury lane authorizes rates and initiates the revaluation; the AR/AP lane
 | Step | Risk | Control | Type | RCM ID | Evidence / Record |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Unauthorized or erroneous FX rate used | Rate upsert by tenant+currency+date; UNSUPPORTED_CURRENCY 400 | Preventive | FX-01 | Rate table; source documentation |
+| 1 | A wrong manual rate drives revaluation/reporting with no review | **FX rate maker-checker** — manual rate is PendingApproval (unusable); revaluation/report/consolidation resolve Approved rates only; approver ≠ requester (binds Admin) | **Preventive** | **FX-04** | `SOD_VIOLATION`; `NO_RATE` while pending; `fxreval` harness |
 | 3,4 | Open foreign balances not fully revalued | Reval iterates all open non-THB AR/AP; unrealized report tie | Detective | FX-02 | Unrealized report; FXREVAL JE |
 | 4 | Unbalanced revaluation JE | 5400 booked as balancing line; balanced double-entry enforced | Preventive | GL-01 | Posted FXREVAL JE |
 | 4 | Revaluation posted twice | Idempotent `alreadyPosted('FXREVAL', ref)` | Preventive | FX-02 | Idempotency log |
@@ -134,3 +135,4 @@ The Treasury lane authorizes rates and initiates the revaluation; the AR/AP lane
 | Version | Date | Author | Notes |
 | --- | --- | --- | --- |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 | 2026-06-26 | Platform | **FX-04 — FX rate maker-checker.** Step 1: a manually-entered rate is now PendingApproval and excluded from rate resolution (revaluation, unrealized-FX report, consolidation translation use Approved rates only) until a different user approves it (`POST /api/fx/rates/approve`, gated `approvals`/`gl_close`); self-approval → `403 SOD_VIOLATION` (binds Admin); external-feed rates auto-approve. `fx.service.ts` setRate/approveRate/rejectRate/rateAsOf(Approved-only); `consolidation.service.ts` translation filtered to Approved. New RCM control **FX-04** (RCM now 87); migration **0137** (`fx_rates.status`/`requested_by`/`approved_by`/`approved_at`, DEFAULT 'Approved' for backward compat); also surfaced by the pending-approvals monitor (MON-01). ToE: `fxreval` (manual rate PendingApproval → revalue blocked NO_RATE; self-approve SOD_VIOLATION; independent approve → revalue succeeds). |

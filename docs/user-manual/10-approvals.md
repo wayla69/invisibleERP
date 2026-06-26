@@ -112,10 +112,10 @@ permission `exec` / `approvals` / `gl_close`) gives a Controller one supervisory
 read across **every** maker-checker queue at once:
 
 - every **Draft journal entry** — so it automatically covers manual JEs (GL-05),
-  payroll runs (PAY-03), asset revaluations (FA-08) and disposals (FA-09), bank
-  adjustments (BANK-02) and FX rate changes (FX-02);
-- **inventory write-off** requests (INV-07) and **vendor payment** requests
-  (AP-PAY), which post nothing until approved.
+  payroll runs (PAY-03), asset revaluations (FA-08) and disposals (FA-09), and
+  bank adjustments (BANK-02);
+- **inventory write-off** requests (INV-07), **vendor payment** requests
+  (AP-PAY), and **manual FX rate** changes (FX-04) — which post nothing until approved.
 
 Each item is **control-tagged**, attributed to **who requested it**, valued, and
 **aged** into buckets (0–3, 4–7, 8–14, 15+ days). Anything older than the **SLA**
