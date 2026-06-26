@@ -39,6 +39,14 @@ export default function ReplenishmentPage() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  const par = useQuery<any>({ queryKey: ['par-recommendations'], queryFn: () => api('/api/replenishment/par-recommendations') });
+  const applyPar = useMutation({
+    mutationFn: (v: { branch_id: number; item_id: string }) => api('/api/replenishment/par-recommendations/apply', { method: 'POST', body: JSON.stringify(v) }),
+    onSuccess: (r: any) => { notifySuccess(r?.applied ? `ปรับจุดสั่งซื้อเป็น ${num(r.reorder_point)} แล้ว` : 'ไม่มีคำแนะนำ'); qc.invalidateQueries({ queryKey: ['par-recommendations'] }); qc.invalidateQueries({ queryKey: ['replenishment'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const parRecs: any[] = (par.data?.recommendations ?? []).filter((r: any) => r.under_buffered);
+
   const suggestions: any[] = q.data?.suggestions ?? [];
   const transfers = suggestions.filter((s) => s.route === 'transfer');
   const purchases = suggestions.filter((s) => s.route !== 'transfer'); // 'buy' or legacy
@@ -121,6 +129,29 @@ export default function ReplenishmentPage() {
                     icon: PackageSearch,
                     title: 'ยังไม่มีรายการสั่งซื้อ',
                     description: 'กด “คำนวณใหม่” เพื่อให้ระบบวิเคราะห์สต๊อกแต่ละสาขาและเสนอจำนวนที่ควรสั่งซื้อ',
+                  }}
+                />
+              </section>
+
+              {/* ── จุดสั่งซื้อตามดีมานด์ (demand-driven par recommendations, INV-12) ── */}
+              <section className="space-y-2">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><AlertTriangle className="size-4 text-warning" /> จุดสั่งซื้อต่ำกว่าดีมานด์ (Par recommendations)</h2>
+                <p className="text-xs text-muted-foreground">จุดสั่งซื้อปัจจุบันต่ำกว่าอัตราการใช้จริง × lead time — แนะนำให้ปรับขึ้นเพื่อกันของขาด</p>
+                <DataTable
+                  rows={parRecs}
+                  columns={[
+                    { key: 'branch_id', label: 'สาขา', render: (r: any) => r.branch_id != null ? `#${r.branch_id}` : '—' },
+                    { key: 'item_id', label: 'รหัสสินค้า' },
+                    { key: 'avg_daily_usage', label: 'ใช้/วัน', align: 'right', render: (r: any) => <span className="tabular">{num(r.avg_daily_usage)}</span> },
+                    { key: 'lead_time_days', label: 'lead (วัน)', align: 'right', render: (r: any) => <span className="tabular">{num(r.lead_time_days)}</span> },
+                    { key: 'current_reorder_point', label: 'จุดสั่งซื้อปัจจุบัน', align: 'right', render: (r: any) => <span className="tabular">{num(r.current_reorder_point)}</span> },
+                    { key: 'recommended_reorder_point', label: 'แนะนำ', align: 'right', render: (r: any) => <span className="tabular font-medium text-warning">{num(r.recommended_reorder_point)}</span> },
+                    { key: 'apply', label: '', align: 'right', render: (r: any) => <Button size="sm" variant="outline" disabled={applyPar.isPending} onClick={() => applyPar.mutate({ branch_id: r.branch_id, item_id: r.item_id })}>ปรับ</Button> },
+                  ]}
+                  emptyState={{
+                    icon: PackageSearch,
+                    title: 'จุดสั่งซื้อเหมาะสมกับดีมานด์แล้ว',
+                    description: 'ทุกสาขามีจุดสั่งซื้อสูงพอเทียบกับอัตราการใช้จริง × lead time',
                   }}
                 />
               </section>
