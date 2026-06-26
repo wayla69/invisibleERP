@@ -483,6 +483,41 @@ async function main() {
     near(woList.total_written_off, 500) && (woList.write_offs ?? []).some((w: any) => w.state === 'approved' && near(w.amount, 500)),
     `st=${woListResp.status} ${JSON.stringify(woList).slice(0, 200)}`);
 
+  // ───────────────── AR allowance for doubtful accounts (ECL, REV-18) ─────────────────
+  // Dedicated customer + invoices so the aging buckets are deterministic and we don't disturb other AR checks.
+  await db.insert(s.tenants).values([{ code: 'ECLCUST', name: 'ECL Customer', creditLimit: '0' }]).onConflictDoNothing();
+  const eclTid = await tid('ECLCUST');
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-ECL1', invoiceDate: daysAgo(200), dueDate: daysAgo(170), tenantId: eclTid, amount: '1000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }, // 170d → 120+ bucket, rate 1.0 → 1000
+    { invoiceNo: 'INV-ECL2', invoiceDate: daysAgo(80), dueDate: daysAgo(50), tenantId: eclTid, amount: '2000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },  // 50d → 31-60 bucket, rate 0.05 → 100
+    { invoiceNo: 'INV-ECL3', invoiceDate: daysAgo(10), dueDate: daysAgo(-20), tenantId: eclTid, amount: '5000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }, // not due → current, rate 0 → 0
+  ]).onConflictDoNothing();
+  const alw5720Before = await tbDebit('5720');
+  const alw1190CrBefore = await tbCredit2('1190');
+  const cmp = await inj('POST', '/api/finance/ar-allowance/compute', admin, { tenant_id: eclTid });
+  // allowance = 1000*1.0 + 2000*0.05 + 5000*0 = 1100; total AR = 8000.
+  ok('AR allowance: aging compute → allowance 1100 on total AR 8000',
+    cmp.status === 200 && near(cmp.json?.allowance, 1100) && near(cmp.json?.total_ar, 8000) && cmp.json?.posted === false,
+    `st=${cmp.status} alw=${cmp.json?.allowance} ar=${cmp.json?.total_ar}`);
+  const cmpId = cmp.json?.id;
+  // Maker-checker: the computer cannot also post (SoD).
+  const alwSelf = await inj('POST', `/api/finance/ar-allowance/${cmpId}/post`, admin);
+  ok('AR allowance: computer cannot post own allowance (SOD_SELF_POST)',
+    alwSelf.status === 403 && alwSelf.json?.error?.code === 'SOD_SELF_POST', `st=${alwSelf.status} code=${alwSelf.json?.error?.code}`);
+  const alwPost = await inj('POST', `/api/finance/ar-allowance/${cmpId}/post`, mgr);
+  ok('AR allowance: a different user posts the delta (1100) → Dr 5720 / Cr 1190',
+    alwPost.status === 200 && near(alwPost.json?.posted_amount, 1100) && /^JE-/.test(alwPost.json?.entry_no ?? ''),
+    `st=${alwPost.status} amt=${alwPost.json?.posted_amount} je=${alwPost.json?.entry_no}`);
+  ok('AR allowance: GL reflects the provision (5720 +1100 debit, 1190 +1100 credit)',
+    near(await tbDebit('5720'), alw5720Before + 1100) && near(await tbCredit2('1190'), alw1190CrBefore + 1100),
+    JSON.stringify({ d5720: await tbDebit('5720'), c1190: await tbCredit2('1190') }));
+  // Re-post is blocked.
+  const alwRepost = await inj('POST', `/api/finance/ar-allowance/${cmpId}/post`, admin);
+  ok('AR allowance: a posted allowance cannot be re-posted (ALREADY_POSTED)',
+    alwRepost.status === 400 && alwRepost.json?.error?.code === 'ALREADY_POSTED', `st=${alwRepost.status} code=${alwRepost.json?.error?.code}`);
+  const alwList = (await inj('GET', `/api/finance/ar-allowance?tenant_id=${eclTid}`, admin)).json;
+  ok('AR allowance register: lists the posted computation', (alwList.allowances ?? []).some((a: any) => a.id === cmpId && a.posted === true && near(a.allowance, 1100)), `n=${alwList.count}`);
+
   // ───────────────── Asset revaluation / impairment maker-checker (FA-07 valuation + FA-08 SoD) ─────────────────
   const reg = (await inj('GET', '/api/assets', admin)).json;
   const fa2 = (reg.assets ?? reg.register ?? []).find((a: any) => (a.asset_no ?? a.assetNo) === 'FA-EAM2');
