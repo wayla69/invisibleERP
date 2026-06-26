@@ -14,6 +14,9 @@ const HouseBody = z.object({ sale_no: z.string().min(1), amount: z.number().posi
 const PinBody = z.object({ pin: z.string().min(1) });
 const ReloadBody = z.object({ amount: z.number().positive(), pin: z.string().optional() });
 const ClockBody = z.object({ emp_code: z.string().min(1), break_minutes: z.number().int().optional() });
+const ClockInBody = z.object({ emp_code: z.string().min(1), method: z.enum(['PIN', 'QR', 'FACE_HASH']).optional(), lat: z.number().optional(), lng: z.number().optional(), branch_id: z.number().int().optional() });
+const OverrideBody = z.object({ emp_code: z.string().min(1), reason: z.string().min(1) });
+const ZoneBody = z.object({ branch_id: z.number().int().optional(), lat: z.number(), lng: z.number(), radius_m: z.number().int().positive().optional() });
 const ShiftBody = z.object({ emp_code: z.string().min(1), shift_date: z.string().min(8), start_time: z.string().min(4), end_time: z.string().min(4), hourly_rate: z.number().nonnegative().optional(), position: z.string().max(60).optional(), notes: z.string().max(300).optional() });
 const OT_TYPES = ['REGULAR_OT', 'HOLIDAY', 'HOLIDAY_OT', 'NIGHT'] as const;
 const OtRuleBody = z.object({ rule_type: z.enum(OT_TYPES), multiplier: z.number().min(1).max(5), daily_trigger_hours: z.number().int().optional(), weekly_trigger_hours: z.number().int().optional() });
@@ -45,10 +48,14 @@ export class PosBillingController {
 @Permissions('pos', 'users', 'exec')
 export class LaborController {
   constructor(private readonly svc: TimeClockService, private readonly schedule: ScheduleService) {}
-  @Post('clock-in') clockIn(@Body(new ZodValidationPipe(ClockBody)) b: z.infer<typeof ClockBody>, @CurrentUser() u: JwtUser) { return this.svc.clockIn(b.emp_code, u); }
+  @Post('clock-in') clockIn(@Body(new ZodValidationPipe(ClockInBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.clockIn(b.emp_code, u, { method: b.method, lat: b.lat, lng: b.lng, branch_id: b.branch_id }); }
   @Post('clock-out') clockOut(@Body(new ZodValidationPipe(ClockBody)) b: z.infer<typeof ClockBody>) { return this.svc.clockOut(b.emp_code, b.break_minutes); }
   @Get('report') report() { return this.svc.report(); }
   @Get('productivity') productivity(@Query('date') date?: string) { return this.svc.productivity(date); }
+  // Step 9 — clock-in integrity: supervisor override + geofence zone config
+  @Post('clock-in/override') clockOverride(@Body(new ZodValidationPipe(OverrideBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.supervisorOverride(b.emp_code, b.reason, u); }
+  @Get('geofence-zones') listZones(@CurrentUser() u: JwtUser) { return this.svc.listGeofenceZones(u); }
+  @Put('geofence-zones') setZone(@Body(new ZodValidationPipe(ZoneBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setGeofenceZone(b, u); }
 
   // W4 — shift scheduling / roster + labor %
   @Post('shifts') createShift(@Body(new ZodValidationPipe(ShiftBody)) b: CreateShiftDto, @CurrentUser() u: JwtUser) { return this.schedule.createShift(b, u); }
