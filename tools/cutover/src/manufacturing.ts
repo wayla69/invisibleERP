@@ -115,6 +115,20 @@ async function main() {
     near(wo2Row?.yield_variance, 105) && near((woList.work_orders ?? []).find((w: any) => w.wo_no === woNo)?.yield_variance, 0),
     `wo2=${wo2Row?.yield_variance}`);
 
+  // ── 8. material usage variance: complete at full yield but report ACTUAL material above standard ──
+  const wo3 = await inj('POST', '/api/manufacturing/work-orders', admin, { bom_code: 'BOM-CAKE', qty_planned: 20, product_item_id: 'CAKE', product_name: 'เค้ก' });
+  const wo3No = wo3.json.wo_no;
+  await inj('POST', `/api/manufacturing/work-orders/${wo3No}/issue`, admin);
+  // std material 260; report actual 300 → over-usage variance 40 → Dr 5810 40 / Cr 1200 40. Full yield → no yield var.
+  const done3 = await inj('POST', `/api/manufacturing/work-orders/${wo3No}/complete`, admin, { qty_produced: 20, actual_material: 300 });
+  ok('Material usage variance: actual 300 vs std 260 → material_variance 40 (over), no yield variance',
+    near(done3.json.material_variance, 40) && near(done3.json.yield_variance, 0), JSON.stringify({ mv: done3.json.material_variance, yv: done3.json.yield_variance }));
+  const tb4 = await inj('GET', '/api/ledger/trial-balance', admin);
+  const row4 = (c: string) => (tb4.json.rows ?? []).find((r: any) => r.account_code === c);
+  ok('Material variance GL: 5810 cumulative 145 (105 yield + 40 material), TB balanced',
+    tb4.json.totals?.balanced === true && near(row4('5810')?.debit, 145),
+    JSON.stringify({ bal: tb4.json.totals?.balanced, v5810: row4('5810')?.debit }));
+
   console.log('\n── Phase 18 — Manufacturing (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

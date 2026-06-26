@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 // ── API contract (apps/api/src/modules/budget — mounted at /api/ledger) ────────
-interface BudgetRow { fiscal_year: number; account_code: string; cost_center_code: string | null; period: string; amount: number }
+interface BudgetRow { fiscal_year: number; account_code: string; cost_center_code: string | null; period: string; amount: number; status?: string; requested_by?: string | null }
 interface BvaRow { account_code: string; account_name: string | null; account_type: string | null; budget: number; actual: number; variance: number; variance_pct: number | null; favorable: boolean; status: string }
 interface BvaResp {
   fiscal_year: number; period: string | null; cost_center: string | null; rows: BvaRow[];
@@ -159,10 +159,18 @@ function SetBudgetTab() {
         }),
       }),
     onSuccess: (r: any) => {
-      notifySuccess(`บันทึกงบประมาณบัญชี ${r.account_code} แล้ว`, `${num(r.lines)} งวด · รวม ${baht(r.total)}`);
+      notifySuccess(`ส่งคำขอตั้งงบประมาณบัญชี ${r.account_code}`, `${num(r.lines)} งวด · รวม ${baht(r.total)} — รออนุมัติจากผู้มีสิทธิ์ (คนละคนกับผู้ขอ)`);
       setAccountCode(''); setAmount(''); setNotes('');
       qc.invalidateQueries({ queryKey: ['budgets', fy] });
     },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  // BUD-01 maker-checker: approve/reject a pending budget (whole account/cost-centre group) — different user.
+  const decide = useMutation({
+    mutationFn: ({ r, action }: { r: BudgetRow; action: 'approve' | 'reject' }) =>
+      api(`/api/ledger/budgets/${action}`, { method: 'POST', body: JSON.stringify({ fiscal_year: r.fiscal_year, account_code: r.account_code, cost_center_code: r.cost_center_code ?? undefined }) }),
+    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? 'อนุมัติงบประมาณแล้ว' : 'ปฏิเสธงบประมาณแล้ว'); qc.invalidateQueries({ queryKey: ['budgets', fy] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -230,6 +238,13 @@ function SetBudgetTab() {
                 { key: 'cost_center_code', label: 'ศูนย์ต้นทุน', render: (r) => r.cost_center_code ?? '—' },
                 { key: 'period', label: 'งวด' },
                 { key: 'amount', label: 'จำนวนเงิน', align: 'right', render: (r) => <span className="tabular">{baht(r.amount)}</span> },
+                { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'PendingApproval' ? 'warning' : r.status === 'Rejected' ? 'destructive' : 'secondary'}>{r.status === 'Approved' ? 'อนุมัติแล้ว' : r.status === 'PendingApproval' ? 'รออนุมัติ' : r.status === 'Rejected' ? 'ปฏิเสธ' : (r.status ?? '—')}</Badge> },
+                { key: 'act', label: '', align: 'right', render: (r) => r.status === 'PendingApproval' ? (
+                  <div className="flex justify-end gap-1">
+                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'approve' })}>อนุมัติ</Button>
+                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'reject' })}>ปฏิเสธ</Button>
+                  </div>
+                ) : null },
               ]}
             />
           )}

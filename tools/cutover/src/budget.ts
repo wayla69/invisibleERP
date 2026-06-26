@@ -69,11 +69,30 @@ async function main() {
   };
   const J = (date: string, lines: any[]) => postJE(admin, { date, source: 'Manual', lines });
   const row = (rep: any, code: string) => (rep.json.rows ?? []).find((r: any) => r.account_code === code);
+  // BUD-01 maker-checker: a budget upsert is PendingApproval; a DIFFERENT user must approve it before it counts
+  // in budget-vs-actual. setBudget upserts (admin) then approves (approver) so the variance assertions see it.
+  const setBudget = async (payload: any) => {
+    const r = await inj('POST', '/api/ledger/budgets', admin, payload);
+    await inj('POST', '/api/ledger/budgets/approve', approver, { fiscal_year: payload.fiscal_year, account_code: payload.account_code, cost_center_code: payload.cost_center_code, period: payload.mode === 'monthly' ? payload.period : undefined });
+    return r;
+  };
+
+  // ── BUD-01 maker-checker: a budget is PendingApproval (excluded from B/A) until a DIFFERENT user approves ──
+  const bmReq = await inj('POST', '/api/ledger/budgets', admin, { fiscal_year: 2030, account_code: '5105', mode: 'monthly', period: '2030-01', amount: 300 });
+  ok('BUD-01: budget upsert lands as PendingApproval', bmReq.json.status === 'PendingApproval', JSON.stringify(bmReq.json));
+  const repPend = await inj('GET', '/api/ledger/budget-vs-actual?fiscal_year=2030&period=2030-01', admin);
+  ok('BUD-01: a PendingApproval budget is EXCLUDED from budget-vs-actual', !row(repPend, '5105'), JSON.stringify(row(repPend, '5105')));
+  const budSelf = await inj('POST', '/api/ledger/budgets/approve', admin, { fiscal_year: 2030, account_code: '5105', period: '2030-01' });
+  ok('BUD-01: preparer self-approval blocked → 403 SOD_VIOLATION (binds even Admin)', budSelf.status === 403 && budSelf.json.error?.code === 'SOD_VIOLATION', `${budSelf.status} ${budSelf.json.error?.code}`);
+  const budAppr = await inj('POST', '/api/ledger/budgets/approve', approver, { fiscal_year: 2030, account_code: '5105', period: '2030-01' });
+  ok('BUD-01: independent approver approves the budget → Approved', budAppr.status === 200 && budAppr.json.status === 'Approved', JSON.stringify(budAppr.json));
+  const repAppr = await inj('GET', '/api/ledger/budget-vs-actual?fiscal_year=2030&period=2030-01', admin);
+  ok('BUD-01: approved budget now appears in budget-vs-actual (5105 budget 300)', near(row(repAppr, '5105')?.budget, 300), JSON.stringify(row(repAppr, '5105')));
 
   // ── Phase 1: monthly budgets + actuals (tenant-wide, untagged) ──
-  const bm = await inj('POST', '/api/ledger/budgets', admin, { fiscal_year: 2030, account_code: '5100', mode: 'monthly', period: '2030-01', amount: 1000 });
+  const bm = await setBudget({ fiscal_year: 2030, account_code: '5100', mode: 'monthly', period: '2030-01', amount: 1000 });
   ok('Budget monthly upsert (5100 = 1000 for 2030-01)', bm.json.lines === 1 && near(bm.json.total, 1000), JSON.stringify(bm.json));
-  await inj('POST', '/api/ledger/budgets', admin, { fiscal_year: 2030, account_code: '4000', mode: 'monthly', period: '2030-01', amount: 2000 });
+  await setBudget({ fiscal_year: 2030, account_code: '4000', mode: 'monthly', period: '2030-01', amount: 2000 });
   await J('2030-01-10', [{ account_code: '5100', debit: 1200 }, { account_code: '1000', credit: 1200 }]); // actual OpEx 1200
   await J('2030-01-11', [{ account_code: '1000', debit: 1500 }, { account_code: '4000', credit: 1500 }]); // actual Sales 1500
 
@@ -84,7 +103,7 @@ async function main() {
   ok('B/A rollup: net (rev-exp) budget 1000 / actual 300 / Unfavorable', near(rep.json.rollup?.net?.budget, 1000) && near(rep.json.rollup?.net?.actual, 300) && rep.json.rollup?.net?.favorable === false, JSON.stringify(rep.json.rollup?.net));
 
   // ── Phase 2: annual budget splits into 12 months ──
-  const ann = await inj('POST', '/api/ledger/budgets', admin, { fiscal_year: 2030, account_code: '5200', mode: 'annual', amount: 1200 });
+  const ann = await setBudget({ fiscal_year: 2030, account_code: '5200', mode: 'annual', amount: 1200 });
   ok('Budget annual upsert splits into 12 months (total 1200)', ann.json.lines === 12 && near(ann.json.total, 1200), JSON.stringify(ann.json));
   const list = await inj('GET', '/api/ledger/budgets?fiscal_year=2030&account_code=5200', admin);
   ok('Budget list: 12 monthly lines of 100, sum 1200', list.json.count === 12 && near(list.json.total, 1200) && (list.json.budgets ?? []).every((b: any) => near(b.amount, 100)), `count=${list.json.count} total=${list.json.total}`);
@@ -92,7 +111,7 @@ async function main() {
   ok('B/A full-year: 5200 annual budget 1200 (no actual → variance -1200 favorable)', near(row(repYtd, '5200')?.budget, 1200), JSON.stringify(row(repYtd, '5200')));
 
   // ── Phase 3: cost-center-scoped budget + actual ──
-  await inj('POST', '/api/ledger/budgets', admin, { fiscal_year: 2030, account_code: '5100', cost_center_code: 'CC-X', mode: 'monthly', period: '2030-01', amount: 500 });
+  await setBudget({ fiscal_year: 2030, account_code: '5100', cost_center_code: 'CC-X', mode: 'monthly', period: '2030-01', amount: 500 });
   await J('2030-01-12', [{ account_code: '5100', debit: 600, cost_center: 'CC-X' }, { account_code: '1000', credit: 600, cost_center: 'CC-X' }]);
   const repCc = await inj('GET', '/api/ledger/budget-vs-actual?fiscal_year=2030&period=2030-01&cost_center=CC-X', admin);
   ok('B/A cost_center=CC-X: 5100 budget 500 / actual 600 (scoped, excludes tenant-wide)', near(row(repCc, '5100')?.budget, 500) && near(row(repCc, '5100')?.actual, 600), JSON.stringify(row(repCc, '5100')));

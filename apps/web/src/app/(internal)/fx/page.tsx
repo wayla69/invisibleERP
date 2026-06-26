@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -52,10 +53,20 @@ function Rates() {
         body: JSON.stringify({ currency: currency.toUpperCase(), rate_date: rateDate, rate: Number(rate), shared }),
       }),
     onSuccess: (r) => {
-      notifySuccess(`บันทึกอัตรา ${r.currency} @ ${num(r.rate)} (${r.rate_date})`);
+      notifySuccess(r.status === 'PendingApproval'
+        ? `ส่งคำขออัตรา ${r.currency} @ ${num(r.rate)} — รออนุมัติจากผู้มีสิทธิ์ (คนละคนกับผู้ขอ)`
+        : `บันทึกอัตรา ${r.currency} @ ${num(r.rate)} (${r.rate_date})`);
       setRate('');
       qc.invalidateQueries({ queryKey: ['fx-rates'] });
     },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  // FX-04 maker-checker: approve/reject a pending manual rate (must be a different user from the requester).
+  const decide = useMutation({
+    mutationFn: ({ r, action }: { r: any; action: 'approve' | 'reject' }) =>
+      api<any>(`/api/fx/rates/${action}`, { method: 'POST', body: JSON.stringify({ currency: r.currency, rate_date: r.rate_date, shared: r.tenant_id == null }) }),
+    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? 'อนุมัติอัตราแล้ว — พร้อมใช้งาน' : 'ปฏิเสธอัตราแล้ว'); qc.invalidateQueries({ queryKey: ['fx-rates'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -99,6 +110,13 @@ function Rates() {
                 { key: 'rate_date', label: 'วันที่', render: (r: any) => thaiDate(r.rate_date) },
                 { key: 'rate', label: 'อัตรา (ต่อ THB)', align: 'right', render: (r: any) => <span className="tabular">{num(r.rate)}</span> },
                 { key: 'tenant_id', label: 'ขอบเขต', render: (r: any) => (r.tenant_id == null ? 'ใช้ร่วม' : `ร้าน #${r.tenant_id}`) },
+                { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'PendingApproval' ? 'warning' : 'destructive'}>{r.status === 'Approved' ? 'อนุมัติแล้ว' : r.status === 'PendingApproval' ? 'รออนุมัติ' : 'ปฏิเสธ'}</Badge> },
+                { key: 'act', label: '', align: 'right', render: (r: any) => r.status === 'PendingApproval' ? (
+                  <div className="flex justify-end gap-1">
+                    <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'approve' })}>อนุมัติ</Button>
+                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ r, action: 'reject' })}>ปฏิเสธ</Button>
+                  </div>
+                ) : null },
               ]}
               emptyState={{
                 icon: Coins,
