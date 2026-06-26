@@ -37,8 +37,8 @@ export default function ManufacturingPage() {
     onError: (e: any) => notifyError(e.message),
   });
   const act = useMutation({
-    mutationFn: (p: { woNo: string; action: 'issue' | 'complete' }) => api<any>(`/api/manufacturing/work-orders/${p.woNo}/${p.action}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (r) => { notifySuccess(r.status === 'Released' ? `เบิกวัตถุดิบเข้างาน (WIP ${baht(r.wip_cost)}) — ${r.entry_no}` : `ปิดงานผลิต รับสินค้าสำเร็จรูป (${baht(r.fg_value)})${r.yield_variance ? ` · ส่วนต่างผลผลิต ${baht(r.yield_variance)}` : ''} — ${r.entry_no}`); refresh(); },
+    mutationFn: (p: { woNo: string; action: 'issue' | 'complete'; actual_material?: number }) => api<any>(`/api/manufacturing/work-orders/${p.woNo}/${p.action}`, { method: 'POST', body: JSON.stringify(p.action === 'complete' && p.actual_material != null ? { actual_material: p.actual_material } : {}) }),
+    onSuccess: (r) => { notifySuccess(r.status === 'Released' ? `เบิกวัตถุดิบเข้างาน (WIP ${baht(r.wip_cost)}) — ${r.entry_no}` : `ปิดงานผลิต รับ FG ${baht(r.fg_value)}${r.yield_variance ? ` · ส่วนต่างผลผลิต ${baht(r.yield_variance)}` : ''}${r.material_variance ? ` · ส่วนต่างวัตถุดิบ ${baht(r.material_variance)}` : ''} — ${r.entry_no}`); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -86,7 +86,7 @@ export default function ManufacturingPage() {
                   r.status === 'Open' ? (
                     <Button variant="outline" size="sm" disabled={act.isPending} onClick={() => act.mutate({ woNo: r.wo_no, action: 'issue' })}><Play className="size-4" /> เบิกวัตถุดิบ</Button>
                   ) : r.status === 'Released' ? (
-                    <Button variant="outline" size="sm" disabled={act.isPending} onClick={() => act.mutate({ woNo: r.wo_no, action: 'complete' })}><CheckCircle2 className="size-4" /> ปิดงาน/รับสินค้า</Button>
+                    <Button variant="outline" size="sm" disabled={act.isPending} onClick={() => { const am = window.prompt('วัตถุดิบที่ใช้จริง (บาท) — เว้นว่างถ้าใช้ตามมาตรฐาน BOM'); act.mutate({ woNo: r.wo_no, action: 'complete', actual_material: am && am.trim() ? Number(am) : undefined }); }}><CheckCircle2 className="size-4" /> ปิดงาน/รับสินค้า</Button>
                   ) : (
                     <span className="text-xs text-muted-foreground">—</span>
                   ),

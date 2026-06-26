@@ -10,7 +10,7 @@ const CreateWoBody = z.object({
   product_item_id: z.string().optional(),
   product_name: z.string().optional(),
 });
-const CompleteBody = z.object({ qty_produced: z.number().positive().optional() });
+const CompleteBody = z.object({ qty_produced: z.number().positive().optional(), actual_material: z.number().nonnegative().optional() });
 
 @Controller('api/manufacturing')
 @Permissions('bom_master', 'warehouse', 'exec')
@@ -38,7 +38,7 @@ export class ManufacturingController {
   }
 
   @Post('work-orders/:woNo/complete')
-  complete(@Param('woNo') woNo: string, @Body(new ZodValidationPipe(CompleteBody)) b: { qty_produced?: number }, @CurrentUser() u: JwtUser) {
-    return this.svc.complete(woNo, b.qty_produced, u);
+  complete(@Param('woNo') woNo: string, @Body(new ZodValidationPipe(CompleteBody)) b: { qty_produced?: number; actual_material?: number }, @CurrentUser() u: JwtUser) {
+    return this.svc.complete(woNo, b.qty_produced, u, b.actual_material);
   }
 }
