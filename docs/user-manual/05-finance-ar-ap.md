@@ -269,6 +269,53 @@ outstanding. Settling an already-settled advance → `ALREADY_SETTLED`.
 
 ---
 
+## Part B3 — Petty cash funds, direct expenses & advances with approval (EXP-08)
+
+**Screen:** `/petty-cash` (**กองทุนเงินสดย่อย & ค่าใช้จ่าย**, ERP nav → การเงิน) ·
+**Required permission:** `creditors` / `exec`.
+
+This is the controlled way to run a **petty-cash fund** with a spending limit and a
+**two-person sign-off** on every payout — use it when a branch or department holds a
+cash float and pays small expenses or staff advances from it.
+
+### Open a fund and set its limit (วงเงิน)
+
+On the **กองทุน (Funds)** tab, create a fund with a **float limit** (the most cash it
+may ever hold) and an optional **starting amount**. Funding it posts **Dr Petty Cash
+(1015) / Cr Cash (1000)**. You can never put in more than the float (`OVER_FLOAT`).
+**เติมเงิน (Replenish)** tops a fund back up — also capped at the float.
+
+### Open a direct expense or an advance — then a *different* person approves
+
+On the **เปิดค่าใช้จ่าย / เบิกล่วงหน้า** tab choose the **fund**, the **type**
+(**ค่าใช้จ่ายโดยตรง** = direct expense, or **เงินเบิกล่วงหน้า** = advance), the **amount**,
+the **payee**, and a **document/receipt number** (for the audit trail). Submitting
+**posts nothing yet** — the request is **รออนุมัติ (PendingApproval)**, and a draw can't
+exceed the fund's balance (`INSUFFICIENT_FLOAT`).
+
+A **different** person opens the **อนุมัติ (Maker-checker)** tab and clicks **อนุมัติ
+(Approve)** — only then does the accounting post and the fund balance drop:
+
+- **direct expense →** Dr the expense account / Cr Petty Cash (1015);
+- **advance →** Dr Employee Advances (1180) / Cr Petty Cash (1015).
+
+**You cannot approve your own request** (`SOD_VIOLATION`, binds **everyone, including
+Admin**). **ปฏิเสธ (Reject)** discards it. Pending requests also show up in the
+**Approvals** dashboard (`/finance` → approvals) so nothing sits unseen.
+
+### Settle an advance
+
+When the employee reports back, the advance row (now **อนุมัติแล้ว**) has a **เคลียร์
+(settle)** action: enter the **actual spend** and **cash returned to the fund** — they
+must add up to the advance (`SETTLE_MISMATCH`) — which posts the spend to the expense
+account, returns the unused cash to the fund (Dr 1015), and clears the advance (Cr 1180).
+
+**Expected result:** the fund's cash is always within its limit, every payout was
+approved by a second person, and each request carries its receipt and a full status
+trail (รออนุมัติ → อนุมัติแล้ว/ปฏิเสธ → เคลียร์แล้ว).
+
+---
+
 ## Part C — Bank reconciliation
 
 **Screen:** `/reconciliation` · **Required permission:** `recon_prep` to prepare;

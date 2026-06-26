@@ -40,6 +40,7 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { TaxDocsModule } from './modules/tax-docs/tax-docs.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { AssetsModule } from './modules/assets/assets.module';
+import { PettyCashModule } from './modules/petty-cash/petty-cash.module';
 import { EamModule } from './modules/eam/eam.module';
 import { LeasesModule } from './modules/leases/leases.module';
 import { TaxReportsModule } from './modules/tax-reports/tax-reports.module';
@@ -159,6 +160,7 @@ import { OpsModule } from './modules/ops/ops.module';
     TaxDocsModule,
     RestaurantModule,
     AssetsModule,
+    PettyCashModule,
     EamModule,
     LeasesModule,
     TaxReportsModule,
