@@ -1135,6 +1135,13 @@
       "when": 2023750000005,
       "tag": "0161_subledger_tieout",
       "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
+      "when": 2023760000004,
+      "tag": "0162_food_cost_variance_reasons",
+      "breakpoints": true
     }
   ]
 }

@@ -133,5 +133,9 @@ export const custVariance = pgTable('cust_variance', {
   variancePct: numeric('variance_pct'),
   uom: text('uom'),
   reason: text('reason'),
+  // Step 4 — normalized reason for the variance (WASTE/OVERSTOCK/SPOILAGE/PORTIONING/THEFT/OTHER) + the
+  // station/section it was counted at, so the baht variance rolls up by why + where (actionable lever).
+  reasonCode: text('reason_code').notNull().default('OTHER'),
+  station: text('station'),
   shift: text('shift').default('Day'),
 });

@@ -18,7 +18,11 @@ interface MarginItem { sku: string; name: string; price: number; cost: number; m
 interface FoodCost { target_pct: number; summary: { items: number; costed: number; uncosted: number; avg_food_cost_pct: number; over_target: number }; items: MarginItem[] }
 interface Ingredient { ingredient_item_id: string; description: string | null; cost: number; recipes_using: number }
 interface VarItem { item_id: string; description: string | null; unit_cost: number; theoretical_use: number; actual_use: number; variance_qty: number; theoretical_cost: number; actual_cost: number; variance_cost: number; variance_pct: number; anomaly: string }
-interface Variance { from: string; to: string; summary: { items: number; theoretical_cost: number; actual_cost: number; variance_cost: number; variance_pct: number; unfavorable_cost: number; favorable_cost: number; anomalies: number }; items: VarItem[] }
+interface VarReason { reason_code: string; variance_cost: number; theoretical_cost: number; lines: number; variance_pct: number }
+interface VarStation { station: string; variance_cost: number; theoretical_cost: number; lines: number; variance_pct: number }
+interface Variance { from: string; to: string; summary: { items: number; theoretical_cost: number; actual_cost: number; variance_cost: number; variance_pct: number; unfavorable_cost: number; favorable_cost: number; anomalies: number }; by_reason?: VarReason[]; by_station?: VarStation[]; items: VarItem[] }
+
+const REASON_TH: Record<string, string> = { WASTE: 'ของเสีย', OVERSTOCK: 'สต๊อกเกิน', SPOILAGE: 'เน่าเสีย', PORTIONING: 'การตัก/แบ่ง', THEFT: 'สูญหาย', OTHER: 'อื่นๆ' };
 
 export default function FoodCostPage() {
   return (
@@ -55,6 +59,36 @@ function VarianceTab() {
               <StatCard label="ส่วนเกิน (ขาดทุน)" value={baht(s?.unfavorable_cost ?? 0)} icon={AlertTriangle} tone={(s?.unfavorable_cost ?? 0) > 0 ? 'warning' : 'default'} hint="ใช้เกินสูตร (ของเสีย/ตัก)" />
               <StatCard label="รายการผิดปกติ" value={num(s?.anomalies ?? 0)} icon={TrendingUp} tone={(s?.anomalies ?? 0) > 0 ? 'danger' : 'default'} />
             </div>
+            {((q.data.by_reason?.length ?? 0) > 0 || (q.data.by_station?.length ?? 0) > 0) && (
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">ส่วนต่างตามสาเหตุ (why)</h3>
+                  <DataTable
+                    rows={q.data.by_reason ?? []}
+                    rowKey={(r) => r.reason_code}
+                    columns={[
+                      { key: 'reason_code', label: 'สาเหตุ', render: (r) => REASON_TH[r.reason_code] ?? r.reason_code },
+                      { key: 'variance_cost', label: 'ส่วนต่าง (฿)', align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
+                      { key: 'variance_pct', label: '%', align: 'right', render: (r) => <span className="tabular">{r.variance_pct}%</span> },
+                    ]}
+                    emptyState={{ icon: Scale, title: 'ไม่มีข้อมูลตามสาเหตุ' }}
+                  />
+                </div>
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">ส่วนต่างตามสถานี (where)</h3>
+                  <DataTable
+                    rows={q.data.by_station ?? []}
+                    rowKey={(r) => r.station}
+                    columns={[
+                      { key: 'station', label: 'สถานี', render: (r) => r.station },
+                      { key: 'variance_cost', label: 'ส่วนต่าง (฿)', align: 'right', render: (r) => <span className={r.variance_cost > 0 ? 'text-destructive tabular' : 'text-success tabular'}>{baht(r.variance_cost)}</span> },
+                      { key: 'variance_pct', label: '%', align: 'right', render: (r) => <span className="tabular">{r.variance_pct}%</span> },
+                    ]}
+                    emptyState={{ icon: Scale, title: 'ยังไม่ได้ระบุสถานี' }}
+                  />
+                </div>
+              </div>
+            )}
             <DataTable
               rows={q.data.items}
               rowKey={(r) => r.item_id}
