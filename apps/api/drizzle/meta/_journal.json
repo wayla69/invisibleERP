@@ -1065,6 +1065,13 @@
       "when": 2023690000004,
       "tag": "0151_refund_maker_checker",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 2023700000004,
+      "tag": "0152_crm_pipeline",
+      "breakpoints": true
     }
   ]
 }

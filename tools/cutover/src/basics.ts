@@ -136,6 +136,30 @@ async function main() {
   const cmList = (await inj('GET', '/api/customer-master?search=Acme', admin)).json;
   ok('REV-15: customer master register search finds the record', (cmList.customers ?? []).some((c: any) => c.customer_no === cno), `n=${cmList.count}`);
 
+  // ───────── CRM sales pipeline: leads → opportunities (stage machine) → activities (REV-17) ─────────
+  const lead = await inj('POST', '/api/crm/pipeline/leads', admin, { name: 'Jane Buyer', company: 'Beta Corp', email: 'jane@beta.example', source: 'web' });
+  ok('REV-17: create a lead (LEAD-…)', lead.status === 201 && /^LEAD-/.test(lead.json?.lead_no ?? ''), JSON.stringify(lead.json));
+  const leadNo = lead.json?.lead_no;
+  await inj('POST', `/api/crm/pipeline/leads/${leadNo}/qualify`, admin);
+  const conv = await inj('POST', `/api/crm/pipeline/leads/${leadNo}/convert`, admin, { opportunity_name: 'Beta rollout', amount: 100000, expected_close_date: '2026-09-30' });
+  ok('REV-17: convert lead → customer-of-record (CUS-) + opportunity (OPP-)', conv.status === 201 && conv.json?.status === 'converted' && /^CUS-/.test(conv.json?.customer_no ?? '') && /^OPP-/.test(conv.json?.opp_no ?? ''), JSON.stringify(conv.json));
+  const oppNo = conv.json?.opp_no;
+  const convAgain = await inj('POST', `/api/crm/pipeline/leads/${leadNo}/convert`, admin, {});
+  ok('REV-17: a converted lead cannot be re-converted (LEAD_CONVERTED)', convAgain.status === 400 && convAgain.json?.error?.code === 'LEAD_CONVERTED', `st=${convAgain.status} code=${convAgain.json?.error?.code}`);
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${oppNo}/stage`, admin, { stage: 'proposal' });
+  const won = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppNo}/stage`, admin, { stage: 'won' });
+  ok('REV-17: advance opportunity through the stage machine → won (probability 100)', won.status === 200 && won.json?.stage === 'won' && won.json?.probability === 100, JSON.stringify(won.json));
+  const reWon = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppNo}/stage`, admin, { stage: 'negotiation' });
+  ok('REV-17: a closed (won) opportunity is terminal (OPP_CLOSED)', reWon.status === 400 && reWon.json?.error?.code === 'OPP_CLOSED', `st=${reWon.status} code=${reWon.json?.error?.code}`);
+  const opp2 = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'Gamma deal', amount: 40000, probability: 50 });
+  const lostNoReason = await inj('PATCH', `/api/crm/pipeline/opportunities/${opp2.json?.opp_no}/stage`, admin, { stage: 'lost' });
+  ok('REV-17: marking lost requires a reason (LOST_REASON_REQUIRED)', lostNoReason.status === 400 && lostNoReason.json?.error?.code === 'LOST_REASON_REQUIRED', `st=${lostNoReason.status} code=${lostNoReason.json?.error?.code}`);
+  const pipe = (await inj('GET', '/api/crm/pipeline/summary', admin)).json;
+  ok('REV-17: weighted pipeline forecast + won total computed', near(pipe.won_amount, 100000) && pipe.weighted_forecast >= 20000 && (pipe.by_stage?.won?.count ?? 0) >= 1, JSON.stringify({ won: pipe.won_amount, wf: pipe.weighted_forecast }));
+  await inj('POST', '/api/crm/pipeline/activities', admin, { entity_type: 'opportunity', entity_no: oppNo, type: 'call', subject: 'Kickoff call' });
+  const acts = (await inj('GET', `/api/crm/pipeline/activities?entity_type=opportunity&entity_no=${oppNo}`, admin)).json;
+  ok('REV-17: log + list an activity against the opportunity', (acts.activities ?? []).some((a: any) => a.type === 'call' && a.subject === 'Kickoff call'), `n=${acts.count}`);
+
   const wl = (await inj('GET', '/api/finance/ar/collections', admin)).json;
   const a = (wl.rows ?? []).find((r: any) => r.invoice_no === 'INV-A');
   const b = (wl.rows ?? []).find((r: any) => r.invoice_no === 'INV-B');

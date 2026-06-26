@@ -196,6 +196,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-180 | Create a customer-of-record linking B2C + B2B | REV-15 | 01 §7 |
 | UAT-O2C-181 | 360 view ties AR to the sub-ledger + shows loyalty | REV-15 | 01 §7, §9 |
 | UAT-O2C-182 | Customer master register search | REV-15 | 01 §7 |
+| UAT-O2C-183 | Small refund immediate; large refund needs approval | REV-16 | 07 §7 |
+| UAT-O2C-184 | Refund SoD: requester ≠ approver | REV-16 | 07 §7, §9 |
+| UAT-O2C-185 | Lead → convert → customer-of-record + opportunity | REV-17 | 01 §7, §9 |
+| UAT-O2C-186 | Opportunity stage machine (won terminal) | REV-17 | 01 §7, §9 |
+| UAT-O2C-187 | Marking lost requires a reason | REV-17 | 01 §7, §9 |
+| UAT-O2C-188 | Weighted pipeline forecast + win-rate | REV-17 | 01 §7 |
+| UAT-O2C-189 | Log + list a CRM activity | REV-17 | 01 §7 |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
