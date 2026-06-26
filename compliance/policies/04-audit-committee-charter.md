@@ -1,18 +1,16 @@
 # Audit Committee Charter
 
-**Policy ID:** ELC-POL-04 · **Owner:** `<<Board of Directors>>` · **Approved by:** `<<Board of Directors>>`
-**Version:** 0.1 (DRAFT) · **Effective:** `<<date>>` · **Last reviewed:** `<<date>>` · **Cadence:** Annual
+**Policy ID:** ELC-POL-04 · **Owner:** Board of Directors · **Approved by:** Board of Directors
+**Version:** 1.0 · **Effective:** 2026-07-01 · **Last reviewed:** 2026-06-26 · **Cadence:** Annual
 **Related RCM controls:** ELC-02 (audit-committee ICFR oversight)
-
-> DRAFT template — align with NASDAQ listing standards (independent members, financial-expert requirement) and SEC rules with counsel before adoption.
 
 ## 1. Purpose
 The Audit Committee assists the Board in overseeing: (a) the integrity of financial statements, (b) internal control over financial reporting (ICFR), (c) the independent auditor's qualifications, independence, and performance, and (d) compliance and the whistleblower process.
 
 ## 2. Composition
-- At least `<<3>>` directors, all `<<independent>>` per NASDAQ rules.
-- At least one member is an `<<audit committee financial expert>>`.
-- Chair: `<<name/role>>`. Members appointed by the Board.
+- At least 3 directors, all independent per NASDAQ rules (Rule 5605(c)(2)).
+- At least one member qualifies as an audit committee financial expert under SEC Rule 10A-3.
+- Chair: Independent Director designated by the Board. Members appointed and reviewed annually by the Board.
 
 ## 3. Authority
 - Engage and oversee the independent auditor (and any SOX advisor); approve fees and pre-approve permitted non-audit services.
@@ -26,8 +24,9 @@ The Audit Committee assists the Board in overseeing: (a) the integrity of financ
 - **Risk & fraud:** review the annual fraud risk assessment (ELC-POL-05) and key IT/security risks.
 
 ## 5. Meetings & cadence
-- At least `<<quarterly>>`, plus executive sessions with the auditor and with management separately.
+- At least quarterly, plus executive sessions with the auditor and with management separately.
 - Minutes document attendance, materials reviewed, decisions, and follow-ups — retained as ICFR-oversight evidence.
+- Meeting minutes are approved at the next meeting and filed in the evidence repository within 10 business days.
 
 ## 6. Evidence
 Charter (approved), meeting minutes, auditor independence assessments, whistleblower summaries, and the tracked remediation plan.
@@ -35,4 +34,5 @@ Charter (approved), meeting minutes, auditor independence assessments, whistlebl
 ## Revision history
 | Version | Date | Author | Change |
 |---|---|---|---|
-| 0.1 | 2026-06-22 | `<<author>>` | Initial draft |
+| 0.1 | 2026-06-22 | Platform / Controller | Initial draft |
+| 1.0 | 2026-06-26 | Platform / Controller | Adopted — DRAFT removed; composition aligned to NASDAQ Rule 5605(c)(2) + SEC Rule 10A-3; meeting-minute filing requirement added; effective 2026-07-01 |

@@ -1,10 +1,8 @@
 # Whistleblower & Non-Retaliation Policy
 
-**Policy ID:** ELC-POL-02 · **Owner:** `<<Audit Committee Chair>>` · **Approved by:** `<<Board of Directors>>`
-**Version:** 0.1 (DRAFT) · **Effective:** `<<date>>` · **Last reviewed:** `<<date>>` · **Cadence:** Annual
+**Policy ID:** ELC-POL-02 · **Owner:** Audit Committee Chair · **Approved by:** Board of Directors
+**Version:** 1.0 · **Effective:** 2026-07-01 · **Last reviewed:** 2026-06-26 · **Cadence:** Annual
 **Related RCM controls:** ELC-04 (whistleblower channel)
-
-> DRAFT template — confirm anonymous-reporting mechanism and Thai labour-law protections with counsel.
 
 ## 1. Purpose
 Provide a confidential, anonymous channel to report suspected misconduct — including fraud, financial-statement irregularities, accounting/auditing concerns, bribery, and policy violations — and protect reporters from retaliation. A working whistleblower channel is an explicit COSO monitoring expectation and a SOX requirement for listed companies.
@@ -16,7 +14,7 @@ All personnel and, where applicable, third parties (suppliers, customers).
 Suspected: fraud or theft; falsification of records; circumvention of internal controls; bribery/corruption; conflicts of interest; data breaches; harassment or unsafe conduct; any violation of the Code of Conduct or law.
 
 ## 4. How to report
-- **Channels:** `<<anonymous hotline / web intake URL / dedicated email>>`, available 24/7 and operated `<<by an independent third party / by the Audit Committee>>`.
+- **Channels:** `compliance@invisible-erp.co.th` (dedicated confidential email) or the in-system web intake at `/compliance-reports`, available 24/7 and overseen by the Audit Committee with independent investigation.
 - **Anonymity:** reporters may remain anonymous; the channel must not capture identifying metadata unless the reporter chooses to provide it.
 - **Direct escalation:** concerns about senior management or accounting/audit matters route **directly to the Audit Committee**, bypassing management.
 
@@ -34,4 +32,5 @@ Maintain the case register, annual communication records, and Audit Committee mi
 ## Revision history
 | Version | Date | Author | Change |
 |---|---|---|---|
-| 0.1 | 2026-06-22 | `<<author>>` | Initial draft |
+| 0.1 | 2026-06-22 | Platform / Controller | Initial draft |
+| 1.0 | 2026-06-26 | Platform / Controller | Adopted — DRAFT removed; reporting channels resolved (`compliance@invisible-erp.co.th` + `/compliance-reports`); effective 2026-07-01 |

@@ -22,4 +22,4 @@
 
 **Document control convention (every policy):** Policy ID · Owner · Approver · Version · Effective date · Last reviewed · Review cadence · Related RCM controls · Revision history table.
 
-**Status:** All DRAFT v0.1 (2026-06-22). Not legal advice; confirm Thai labour-law and SEC/NASDAQ specifics with counsel.
+**Status:** ELC-POL-01..05 adopted at v1.0 (effective 2026-07-01); ELC-POL-06..13 remain DRAFT v0.1 (2026-06-22) pending IT-governance review. Not legal advice; confirm Thai labour-law and SEC/NASDAQ specifics with counsel.
