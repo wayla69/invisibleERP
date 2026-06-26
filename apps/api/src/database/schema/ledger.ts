@@ -139,7 +139,7 @@ export const prepaidSchedules = pgTable(
   (t) => ({ byDue: index('idx_prepaid_due').on(t.status, t.nextRunDate) }),
 );
 
-// Per-tenant Chart-of-Accounts overlay (0138). The canonical `accounts` table is the GLOBAL, immutable
+// Per-tenant Chart-of-Accounts overlay (0139). The canonical `accounts` table is the GLOBAL, immutable
 // posting universe (the engine hard-references its codes); this table curates a PER-TENANT VIEW over it:
 // which canonical accounts a tenant sees as "active", and how they are named/grouped on that tenant's
 // chart. Materialised from an industry template at signup (LedgerService.provisionTenantCoA). It NEVER

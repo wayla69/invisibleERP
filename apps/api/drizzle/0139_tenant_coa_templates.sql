@@ -1,4 +1,4 @@
--- 0138 — Industry Chart-of-Accounts templates (per-tenant CoA overlay).
+-- 0139 — Industry Chart-of-Accounts templates (per-tenant CoA overlay).
 -- The canonical `accounts` table stays the GLOBAL, immutable posting universe (the engine hard-references
 -- its codes). This adds:
 --   tenants.industry   the CoA template a company picked at signup ('restaurant'|'retail'|'distribution'
