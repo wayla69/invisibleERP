@@ -77,6 +77,12 @@ export const journalEntries = pgTable(
     status: journalStatusEnum('status').default('Posted'),
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    // WS2.2 (GL-17) — GL immutability & reversal. postedAt stamps when an entry reached Posted; a posted
+    // entry is immutable (DB trigger + app guard) and may only be corrected by a contra REVERSAL entry.
+    // reversalOf points the contra entry at the original; isReversed flags the original once reversed.
+    postedAt: timestamp('posted_at', { withTimezone: true }),
+    reversalOf: bigint('reversal_of', { mode: 'number' }),
+    isReversed: boolean('is_reversed').default(false),
   },
   (t) => ({
     bySource: index('idx_je_source').on(t.source, t.sourceRef),

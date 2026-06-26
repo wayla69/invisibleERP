@@ -104,6 +104,34 @@ is recorded.
 
 [screenshot: pending journal entry approval screen]
 
+### Correcting a posted entry — reversal only (GL-17)
+
+Once a journal entry is **Posted** it is **immutable**: it can never be edited or
+deleted. This keeps the ledger a true, auditable record of record (a system control,
+GL-17, enforced both in the database and in the application — any attempt to delete a
+posted entry is refused with `GL_IMMUTABLE`).
+
+To correct a posted entry, **reverse** it:
+
+1. Open the posted entry and click **Reverse** (**กลับรายการ**), optionally giving a
+   reason (and a reversal date — defaults to today).
+2. The system posts a **new contra entry** that swaps every line's debit and credit,
+   so the original and its reversal **net to zero** on every account. The original is
+   marked **reversed**, and the new entry links back to it.
+
+**Expected result:** a new Posted reversal entry; the original flagged as reversed; the
+net effect on the affected accounts is zero. If you then need the corrected figures,
+post a fresh entry with the right amounts.
+
+Notes:
+- You can only reverse a **Posted** entry (`NOT_POSTED` otherwise) and only **once**
+  (`ALREADY_REVERSED` on a second attempt).
+- A reversal still respects the period rules — if its date falls in a **locked** or
+  **closed** period it is blocked (`PERIOD_LOCKED` / `PERIOD_CLOSED`); choose an open
+  date or reopen the period (soft close) first.
+- Every post, approval, reversal and blocked edit attempt is written to the **GL audit
+  trail** for review.
+
 ### Recurring / template journal entries
 
 For entries you post every period — **monthly rent or insurance accruals**,

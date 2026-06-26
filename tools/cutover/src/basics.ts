@@ -763,6 +763,44 @@ async function main() {
     cert.status === 200 && cert.json?.status === 'Certified' && cert.json?.certified_by === 'mgr',
     `st=${cert.status} status=${cert.json?.status} by=${cert.json?.certified_by}`);
 
+  // ───────────────────── WS2.2 — GL immutability + audit log + reversal (GL-17) ─────────────────────
+  // Post a manual JE (Draft) then approve it (mgr ≠ admin) to obtain a freshly-Posted entry, dated TODAY
+  // (an open period) so it does not disturb other checks' balances. Use unique accounts 1280/2400.
+  const glPost = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', memo: 'GL-17 reversible', lines: [{ account_code: '1280', debit: 777 }, { account_code: '2400', credit: 777 }] });
+  const glEntryNo = glPost.json?.entry_no;
+  const glAppr = await inj('POST', `/api/ledger/journal/${glEntryNo}/approve`, mgr);
+  ok('GL-17: post + approve a JE → Posted (test fixture)', glAppr.status === 200 && glAppr.json?.status === 'Posted', `st=${glAppr.status} status=${glAppr.json?.status}`);
+  // Resolve the numeric id of the posted entry.
+  const [glRow] = await db.select({ id: s.journalEntries.id }).from(s.journalEntries).where(eq(s.journalEntries.entryNo, glEntryNo));
+  const glId = Number(glRow.id);
+
+  // TC-GL-17-01: attempting to void/delete a posted entry → GL_IMMUTABLE + a MUTATE_BLOCKED audit row.
+  const voidPosted = await inj('POST', `/api/ledger/journal/${glId}/attempt-void`, admin);
+  ok('GL-17: void of a posted entry blocked (GL_IMMUTABLE)', voidPosted.status === 400 && voidPosted.json?.error?.code === 'GL_IMMUTABLE', `st=${voidPosted.status} code=${voidPosted.json?.error?.code}`);
+  const aud1 = (await inj('GET', `/api/ledger/audit?entryId=${glId}`, admin)).json;
+  ok('GL-17: MUTATE_BLOCKED recorded in the GL audit trail', (aud1.audit ?? []).some((a: any) => a.action === 'MUTATE_BLOCKED') && (aud1.audit ?? []).some((a: any) => a.action === 'APPROVE'), `actions=${JSON.stringify((aud1.audit ?? []).map((a: any) => a.action))}`);
+
+  // TC-GL-17-02: reverse the posted entry → a contra entry with swapped Dr/Cr; original flagged is_reversed.
+  const tb1280Pre = await (async () => { const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json; return (tb.rows ?? []).find((r: any) => r.account_code === '1280')?.balance ?? 0; })();
+  const rev = await inj('POST', `/api/ledger/journal/${glId}/reverse`, admin, { reason: 'duplicate posting' });
+  ok('GL-17: reverse a posted entry → returns reversalId/originalId', rev.status === 200 && typeof rev.json?.reversalId === 'number' && rev.json?.originalId === glId, JSON.stringify(rev.json));
+  const revId = rev.json?.reversalId;
+  const [revRow] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, revId));
+  const revLines = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, revId));
+  const rl1280 = revLines.find((l: any) => l.accountCode === '1280');
+  ok('GL-17: contra entry swaps Dr/Cr (1280 now a 777 credit), reversal_of set, Posted', revRow?.status === 'Posted' && Number(revRow?.reversalOf) === glId && near(rl1280?.credit, 777) && near(rl1280?.debit, 0), `rof=${revRow?.reversalOf} cr=${rl1280?.credit}`);
+  const [origRow] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, glId));
+  ok('GL-17: original entry flagged is_reversed', origRow?.isReversed === true, `is_reversed=${origRow?.isReversed}`);
+  // Net effect on 1280 is zero (original 777 Dr + reversal 777 Cr).
+  const tb1280Post = await (async () => { const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json; return (tb.rows ?? []).find((r: any) => r.account_code === '1280')?.balance ?? 0; })();
+  ok('GL-17: original + reversal net to zero on 1280', near(tb1280Post, tb1280Pre - 777), `pre=${tb1280Pre} post=${tb1280Post}`);
+  const aud2 = (await inj('GET', `/api/ledger/audit?entryId=${glId}`, admin)).json;
+  ok('GL-17: REVERSE recorded in the audit trail', (aud2.audit ?? []).some((a: any) => a.action === 'REVERSE'), `actions=${JSON.stringify((aud2.audit ?? []).map((a: any) => a.action))}`);
+
+  // TC-GL-17-03: reversing an already-reversed entry → ALREADY_REVERSED.
+  const revAgain = await inj('POST', `/api/ledger/journal/${glId}/reverse`, admin, { reason: 'again' });
+  ok('GL-17: double reversal blocked (ALREADY_REVERSED)', revAgain.status === 400 && revAgain.json?.error?.code === 'ALREADY_REVERSED', `st=${revAgain.status} code=${revAgain.json?.error?.code}`);
+
   // ───────────────────── WS2.1 — Hard Period Close + Checklist (GL-15/GL-16) ─────────────────────
   // Lock a clearly-PAST period (2020-01) that no other harness check posts into (all postings above are
   // dated 2025/2026 or runtime-now), so locking it cannot retroactively break any earlier or later check.
