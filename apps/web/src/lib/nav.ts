@@ -158,6 +158,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'คืนสินค้า & คืนเงิน', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt'] },
       { label: 'บัตรของขวัญ / เครดิตร้าน', href: '/giftcards', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
       { label: 'โต๊ะ', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
+      { label: 'จองโต๊ะ & รอคิว', href: '/reservations', icon: CalendarClock, perms: ['pos', 'order_mgt'] },
       { label: 'ครัว (KDS)', href: '/kds', icon: ChefHat, perms: ['pos'] },
       { label: 'เมนูอาหาร', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
       { label: 'บุฟเฟต์ (แพ็กเกจ)', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
