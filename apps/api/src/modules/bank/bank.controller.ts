@@ -6,12 +6,19 @@ import { BankService } from './bank.service';
 import { CreateBankAccountBody, ImportStatementBody, ManualMatchBody, AdjustmentBody, type CreateBankAccountDto, type ImportStatementDto, type AdjustmentDto } from './dto';
 
 const RejectBody = z.object({ reason: z.string().optional() });
+const CreateDepositBody = z.object({ bank_account_id: z.number().int(), movement_nos: z.array(z.string()).optional(), deposit_date: z.string().optional() });
 
 // กระทบยอดธนาคาร — house-bank accounts, statement import, auto-match to GL cash, fee/interest adjustment.
 @Controller('api/bank')
 @Permissions('exec', 'ar')
 export class BankController {
   constructor(private readonly svc: BankService) {}
+
+  // REC-05 — cash banking: batch till safe-drops into a bank deposit (Dr bank / Cr 1000) + reconcile.
+  @Get('deposits/undeposited-drops') undepositedDrops(@CurrentUser() u: JwtUser) { return this.svc.undepositedDrops(u); }
+  @Get('deposits') listDeposits(@CurrentUser() u: JwtUser) { return this.svc.listDeposits(u); }
+  @Post('deposits') createDeposit(@Body(new ZodValidationPipe(CreateDepositBody)) b: z.infer<typeof CreateDepositBody>, @CurrentUser() u: JwtUser) { return this.svc.createDeposit(b, u); }
+  @Post('deposits/:id/reconcile') @HttpCode(200) reconcileDeposit(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.reconcileDeposit(+id, u); }
 
   @Post('accounts') createAccount(@Body(new ZodValidationPipe(CreateBankAccountBody)) b: CreateBankAccountDto, @CurrentUser() u: JwtUser) { return this.svc.createBankAccount(b, u); }
   @Get('accounts') listAccounts(@CurrentUser() u: JwtUser) { return this.svc.listBankAccounts(u); }

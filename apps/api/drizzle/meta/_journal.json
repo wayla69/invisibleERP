@@ -1072,6 +1072,13 @@
       "when": 2023700000004,
       "tag": "0152_crm_pipeline",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 2023710000004,
+      "tag": "0153_bank_deposits",
+      "breakpoints": true
     }
   ]
 }
