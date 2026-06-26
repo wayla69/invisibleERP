@@ -28,6 +28,7 @@ interface Lease {
 export default function LeasesPage() {
   const qc = useQueryClient();
   const q = useQuery<{ leases: Lease[]; count: number }>({ queryKey: ['leases'], queryFn: () => api('/api/leases') });
+  const recon = useQuery<{ gl_liability: number; schedule_liability: number; difference: number; reconciled: boolean }>({ queryKey: ['lease-recon'], queryFn: () => api('/api/leases/liability-reconciliation') });
 
   const [name, setName] = useState('');
   const [lessor, setLessor] = useState('');
@@ -53,7 +54,7 @@ export default function LeasesPage() {
     onSuccess: (r: any) => {
       notifySuccess(`สร้างสัญญาเช่าสำเร็จ: ${r.lease_no}`, `ROU ${baht(r.rou_asset)} · หนี้สิน ${baht(r.initial_liability)}`);
       setName(''); setLessor(''); setMonthlyPayment('');
-      qc.invalidateQueries({ queryKey: ['leases'] });
+      qc.invalidateQueries({ queryKey: ['leases'] }); qc.invalidateQueries({ queryKey: ['lease-recon'] });
     },
     onError: (e: any) => notifyError(e.message),
   });
@@ -62,7 +63,7 @@ export default function LeasesPage() {
     mutationFn: () => api('/api/leases/run', { method: 'POST' }),
     onSuccess: (r: any) => {
       notifySuccess(`ลงรายการงวดสัญญาเช่าแล้ว — สแกน ${r.scanned} สัญญา ลงบัญชี ${r.posted} งวด`);
-      qc.invalidateQueries({ queryKey: ['leases'] });
+      qc.invalidateQueries({ queryKey: ['leases'] }); qc.invalidateQueries({ queryKey: ['lease-recon'] });
     },
     onError: (e: any) => notifyError(e.message),
   });
@@ -90,6 +91,16 @@ export default function LeasesPage() {
             </div>
           )}
         </StateView>
+
+        {recon.data && (
+          <Card className={`flex flex-row flex-wrap items-center justify-between gap-3 px-5 py-3 ${recon.data.reconciled ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'}`}>
+            <div className="flex items-center gap-3">
+              <Badge variant={recon.data.reconciled ? 'success' : 'destructive'}>{recon.data.reconciled ? 'กระทบยอดตรง ✓' : 'พบผลต่าง ⚠'}</Badge>
+              <span className="text-sm text-muted-foreground">หนี้สินตามบัญชี (GL 2600) <span className="tabular font-medium text-foreground">{baht(recon.data.gl_liability)}</span> เทียบกับยอดตามตารางสัญญา <span className="tabular font-medium text-foreground">{baht(recon.data.schedule_liability)}</span></span>
+            </div>
+            <span className={`text-sm tabular ${recon.data.reconciled ? 'text-muted-foreground' : 'font-medium text-destructive'}`}>ผลต่าง {baht(recon.data.difference)}</span>
+          </Card>
+        )}
 
         <Card className="max-w-4xl gap-4">
           <CardHeader>
@@ -157,7 +168,7 @@ export default function LeasesPage() {
           )}
         </StateView>
 
-        {selected && <ModifyLease lease={selected} onDone={() => { setSelected(null); qc.invalidateQueries({ queryKey: ['leases'] }); }} />}
+        {selected && <ModifyLease lease={selected} onDone={() => { setSelected(null); qc.invalidateQueries({ queryKey: ['leases'] }); qc.invalidateQueries({ queryKey: ['lease-recon'] }); }} />}
       </div>
     </div>
   );
