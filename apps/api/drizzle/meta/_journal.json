@@ -1191,6 +1191,13 @@
       "when": 2023790000005,
       "tag": "0169_deferred_tax_fx",
       "breakpoints": true
+    },
+    {
+      "idx": 170,
+      "version": "7",
+      "when": 2023790000006,
+      "tag": "0170_consolidation",
+      "breakpoints": true
     }
   ]
 }

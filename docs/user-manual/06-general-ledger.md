@@ -595,5 +595,50 @@ reflects the deferred portion. Re-posting a posted period is blocked (`ALREADY_P
 
 ---
 
+## Consolidation — eliminations & segment reporting (controls CON-03 / CON-04)
+
+**Who:** Group / Financial Controller. All consolidation actions are **HQ (Admin) only**
+(`CONSOL_HQ_ONLY` for any other tenant). The run uses the `approvals` permission; group,
+rule, segment and report endpoints use `exec`.
+
+Consolidation combines several **entities** (tenants) into a group view, eliminates the
+**intercompany (IC)** balances they owe each other, and reports results **by segment**.
+
+### Run a consolidation (CON-03)
+
+1. **Set up the group** — create a group (`POST /api/consolidation/groups`) and add member
+   entities with ownership % and currency (`POST /api/consolidation/groups/{id}/entities`).
+2. **Run** — `POST /api/consolidation/groups/{id}/run` with the period (`YYYY-MM`). The run:
+   - **combines** each member's trial balance (FX-translated, ownership-weighted),
+   - **eliminates** in-group IC: for each IC transaction it cancels **1150 Due-From**
+     against **2150 Due-To** (the reciprocal receivable/payable),
+   - records **NCI** (account 3300) for entities owned < 100%,
+   - and **asserts the consolidated trial balance still balances**. If eliminations don't
+     net to zero the run is rejected with **`CONSOL_UNBALANCED`** and rolled back.
+   Eliminations live at the **group** layer — they are **not** posted into any operating
+   entity's books.
+3. **Post** — a **different** user calls `POST /api/consolidation/runs/{runId}/post` to freeze
+   the run as the official group result for the period. You **cannot post a run you ran**
+   (`SELF_POST`), and a posted period cannot be re-run (`ALREADY_POSTED`).
+
+Optional: define configurable elimination rules (`POST /api/consolidation/rules`,
+`GET /api/consolidation/rules?group_id=`).
+
+**Expected result:** consolidated TB = Σ entity TBs − IC eliminations, balanced (Σ Dr = Σ Cr);
+1150/2150 net to ~0; the run shows `balanced: true`.
+
+### Segment report (CON-04, IFRS 8)
+
+`GET /api/consolidation/segment-report?period=YYYY-MM&dimension=branch` returns
+**revenue / expense / net** grouped by reportable **segment**. Map dimension values
+(`branch` / `project` / `department`) into named segments first via
+`POST /api/consolidation/segments` (`member_keys` = the dimension values in that segment);
+unmapped values appear as their own / an `Unassigned` bucket.
+
+**Errors:** `CONSOL_UNBALANCED`, `SELF_POST`, `ALREADY_POSTED`, `CONSOL_RUN_NOT_FOUND`,
+`GROUP_NOT_FOUND`, `NO_ENTITIES`, `CONSOL_HQ_ONLY`.
+
+---
+
 **Next:** [Tax](./07-tax.md) · [Finance — AR & AP](./05-finance-ar-ap.md) ·
 [Approvals](./10-approvals.md)
