@@ -40,7 +40,25 @@ export const timeClock = pgTable('time_clock', {
   hours: numeric('hours', { precision: 8, scale: 2 }),
   status: text('status').default('Open'), // Open | Closed
   note: text('note'),
+  // Step 9 — clock-in integrity (anti-buddy-punch): how the punch was made, where, and whether it passed
+  // the branch geofence (null = no GPS supplied / no zone configured).
+  clockInMethod: text('clock_in_method').notNull().default('PIN'),  // PIN | QR | FACE_HASH | SUPERVISOR
+  clockInLat: numeric('clock_in_lat', { precision: 9, scale: 6 }),
+  clockInLng: numeric('clock_in_lng', { precision: 9, scale: 6 }),
+  geofencePass: boolean('geofence_pass'),
   createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// Step 9 — per-branch geofence: a punch is expected within radius_m of (lat,lng). When a zone is configured
+// and GPS is supplied, the clock-in computes geofence_pass; out-of-fence punches are flagged for review.
+export const geofenceZones = pgTable('geofence_zones', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  branchId: bigint('branch_id', { mode: 'number' }),
+  lat: numeric('lat', { precision: 9, scale: 6 }).notNull(),
+  lng: numeric('lng', { precision: 9, scale: 6 }).notNull(),
+  radiusM: integer('radius_m').notNull().default(150),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

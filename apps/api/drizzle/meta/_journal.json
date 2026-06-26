@@ -1184,6 +1184,13 @@
       "when": 2023790000004,
       "tag": "0168_labor_ot_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 2023800000004,
+      "tag": "0169_clock_integrity",
+      "breakpoints": true
     }
   ]
 }

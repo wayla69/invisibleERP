@@ -166,6 +166,8 @@ function Labor() {
               { key: 'clock_out', label: 'ออก', render: (r: any) => thaiDate(r.clock_out) },
               { key: 'break_minutes', label: 'พัก (น)', align: 'right' },
               { key: 'hours', label: 'ชั่วโมง', align: 'right' },
+              { key: 'clock_in_method', label: 'วิธี', render: (r: any) => r.clock_in_method ?? 'PIN' },
+              { key: 'geofence_pass', label: 'พิกัด', align: 'center', render: (r: any) => r.geofence_pass === false ? <Badge variant="destructive">นอกพื้นที่</Badge> : r.geofence_pass === true ? <Badge variant="secondary">ในพื้นที่</Badge> : <span className="text-muted-foreground">—</span> },
             ]} emptyState={{ icon: CalendarClock, title: 'ยังไม่มีบันทึกเวลา', description: 'กรอกรหัสพนักงานแล้วกด “เข้า” เพื่อเริ่มลงเวลาทำงาน' }} />
           </>
         )}
