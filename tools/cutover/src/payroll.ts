@@ -99,6 +99,25 @@ async function main() {
     near(row('2350')?.credit, 2700) && near(row('2360')?.credit, 170.83),
     JSON.stringify({ s2350: row('2350')?.credit, s2360: row('2360')?.credit }));
 
+  // ── 4a-bis. PAY-02: payroll-liability schedule (outstanding vs payrun accrual) + cash remittance ──
+  const liab1 = await inj('GET', '/api/payroll/liabilities', admin);
+  const lrow = (c: string) => (liab1.json.lines ?? []).find((l: any) => l.account_code === c);
+  ok('Liability schedule: 2350 outstanding 2700 reconciled to the payrun accrual; 2360 outstanding 170.83; all reconciled',
+    near(lrow('2350')?.outstanding, 2700) && lrow('2350')?.reconciled === true && near(lrow('2360')?.outstanding, 170.83) && liab1.json.all_reconciled === true,
+    JSON.stringify({ o2350: lrow('2350')?.outstanding, r2350: lrow('2350')?.reconciled, o2360: lrow('2360')?.outstanding, all: liab1.json.all_reconciled }));
+  const overRemit = await inj('POST', '/api/payroll/liabilities/remit', admin, { account_code: '2350', amount: 99999 });
+  ok('Remit beyond outstanding → 400 REMIT_EXCEEDS_OUTSTANDING', overRemit.status === 400 && overRemit.json.error?.code === 'REMIT_EXCEEDS_OUTSTANDING', `${overRemit.status} ${overRemit.json.error?.code}`);
+  const notLiab = await inj('POST', '/api/payroll/liabilities/remit', admin, { account_code: '5600', amount: 100 });
+  ok('Remit a non-liability account → 400 NOT_LIABILITY_ACCOUNT', notLiab.status === 400 && notLiab.json.error?.code === 'NOT_LIABILITY_ACCOUNT', `${notLiab.status} ${notLiab.json.error?.code}`);
+  const remit = await inj('POST', '/api/payroll/liabilities/remit', admin, { account_code: '2350', amount: 1000, ref: 'SSO-2026-06' });
+  ok('Remit 1000 SSO → outstanding_after 1700, JE posted', near(remit.json.outstanding_after, 1700) && /^JE-/.test(remit.json.entry_no ?? ''), JSON.stringify(remit.json));
+  const liab2 = await inj('GET', '/api/payroll/liabilities', admin);
+  const l2 = (liab2.json.lines ?? []).find((l: any) => l.account_code === '2350');
+  const tbR = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('After remit: 2350 accrued 2700 / remitted 1000 / outstanding 1700, still reconciled, TB balanced',
+    near(l2?.accrued, 2700) && near(l2?.remitted, 1000) && near(l2?.outstanding, 1700) && l2?.reconciled === true && tbR.json.totals?.balanced === true,
+    JSON.stringify({ a: l2?.accrued, rem: l2?.remitted, o: l2?.outstanding, rec: l2?.reconciled, bal: tbR.json.totals?.balanced }));
+
   // ── 4b. idempotent per period (a Posted run blocks a re-run) ──
   const rerun = await inj('POST', '/api/payroll/runs?period=2026-06', admin);
   ok('Re-run same period → already (idempotent)', rerun.json.already === true && rerun.json.status === 'Posted', JSON.stringify(rerun.json).slice(0, 70));

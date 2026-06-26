@@ -21,6 +21,7 @@ const EmployeeBody = z.object({
 });
 
 const RejectBody = z.object({ reason: z.string().optional() });
+const RemitBody = z.object({ account_code: z.string().min(1), amount: z.number().positive(), ref: z.string().optional() });
 
 @Controller('api/payroll')
 @Permissions('exec', 'users', 'creditors')
@@ -71,5 +72,16 @@ export class PayrollController {
   @Get('pnd1a')
   pnd1a(@Query('year') year: string, @CurrentUser() u: JwtUser) {
     return this.svc.pnd1a(year, u);
+  }
+
+  // PAY-02 — payroll-liability schedule (SSO/WHT/PF outstanding vs the payrun accrual) + cash remittance.
+  @Get('liabilities')
+  liabilities(@Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.liabilities(u, tenantId != null && tenantId !== '' ? Number(tenantId) : null);
+  }
+
+  @Post('liabilities/remit')
+  remit(@Body(new ZodValidationPipe(RemitBody)) b: { account_code: string; amount: number; ref?: string }, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.remitLiability(b, u, tenantId != null && tenantId !== '' ? Number(tenantId) : null);
   }
 }

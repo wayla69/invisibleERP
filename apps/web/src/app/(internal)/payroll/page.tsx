@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FileText, Play, Plus, Users, Wallet } from 'lucide-react';
+import { FileText, Play, Plus, Users, Wallet, Landmark } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -30,6 +30,7 @@ export default function PayrollPage() {
         tabs={[
           { key: 'emp', label: 'พนักงาน', content: <Employees /> },
           { key: 'run', label: 'จ่ายเงินเดือน', content: <RunPayroll /> },
+          { key: 'liab', label: 'หนี้สินค้างนำส่ง', content: <Liabilities /> },
           { key: 'pnd1', label: 'ภ.ง.ด.1', content: <Pnd1 /> },
           { key: 'pnd1a', label: 'ภ.ง.ด.1ก (รายปี)', content: <Pnd1a /> },
         ]}
@@ -163,6 +164,51 @@ function RunPayroll() {
               ) : null },
             ]}
           />
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// ───────────────────────── หนี้สินค้างนำส่ง (PAY-02) ─────────────────────────
+function Liabilities() {
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['pay-liab'], queryFn: () => api('/api/payroll/liabilities') });
+  const remit = useMutation({
+    mutationFn: (p: { account_code: string; amount: number }) => api<any>('/api/payroll/liabilities/remit', { method: 'POST', body: JSON.stringify(p) }),
+    onSuccess: (r) => { notifySuccess(`นำส่ง ${r.label} ${baht(r.remitted)} — คงเหลือ ${baht(r.outstanding_after)} (${r.entry_no})`); qc.invalidateQueries({ queryKey: ['pay-liab'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <div className="grid gap-5">
+      <Card className="gap-2 p-5">
+        <h3 className="text-base font-semibold">หนี้สินจากเงินเดือนที่ค้างนำส่งหน่วยงานภายนอก</h3>
+        <p className="text-xs text-muted-foreground">ประกันสังคม (2350) · ภาษีหัก ณ ที่จ่าย ภ.ง.ด.1 (2360) · กองทุนสำรองเลี้ยงชีพ (2370) — ยอดค้าง = ตั้งหนี้จากการจ่ายเงินเดือน − ที่นำส่งแล้ว และกระทบยอดกับยอดตั้งหนี้ของรอบจ่าย เมื่อนำส่งเงินสดระบบจะตัดยอดค้างและลงบัญชี เดบิตหนี้สิน/เครดิตเงินสดให้</p>
+      </Card>
+      <StateView q={q}>
+        {q.data && (
+          <>
+            <div className="mb-1 grid gap-4 sm:grid-cols-2">
+              <StatCard label="ค้างนำส่งทั้งหมด" value={baht(q.data.total_outstanding)} icon={Landmark} tone="primary" />
+              <StatCard label="กระทบยอด" value={q.data.all_reconciled ? 'ตรงกับรอบจ่าย ✓' : 'มีผลต่าง ⚠'} tone={q.data.all_reconciled ? 'success' : 'danger'} />
+            </div>
+            <DataTable
+              rows={q.data.lines}
+              rowKey={(r: any) => r.account_code}
+              emptyState={{ icon: Landmark, title: 'ไม่มีหนี้สินค้างนำส่ง', description: 'เมื่อมีการจ่ายเงินเดือนที่อนุมัติแล้ว ยอดประกันสังคม/ภาษีหัก/กองทุนที่ต้องนำส่งจะปรากฏที่นี่' }}
+              columns={[
+                { key: 'label', label: 'รายการ', render: (r: any) => <span>{r.label}<span className="block text-xs text-muted-foreground">{r.account_code} · {r.authority}</span></span> },
+                { key: 'accrued', label: 'ตั้งหนี้', align: 'right', render: (r: any) => <span className="tabular">{baht(r.accrued)}</span> },
+                { key: 'remitted', label: 'นำส่งแล้ว', align: 'right', render: (r: any) => <span className="tabular text-muted-foreground">{baht(r.remitted)}</span> },
+                { key: 'outstanding', label: 'คงค้าง', align: 'right', render: (r: any) => <span className="tabular font-medium">{baht(r.outstanding)}</span> },
+                { key: 'reconciled', label: 'กระทบยอด', render: (r: any) => <Badge variant={r.reconciled ? 'success' : 'destructive'}>{r.reconciled ? 'ตรง' : 'ต่าง'}</Badge> },
+                { key: 'deadline', label: 'กำหนดนำส่ง', render: (r: any) => <span className="text-xs text-muted-foreground">{r.deadline}</span> },
+                { key: 'act', label: '', align: 'right', render: (r: any) => r.outstanding > 0 ? (
+                  <Button size="sm" variant="outline" disabled={remit.isPending} onClick={() => { const a = window.prompt(`นำส่ง ${r.label} (คงค้าง ${baht(r.outstanding)})`, String(r.outstanding)); const amt = a && a.trim() ? Number(a) : 0; if (amt > 0) remit.mutate({ account_code: r.account_code, amount: amt }); }}>นำส่ง</Button>
+                ) : null },
+              ]}
+            />
+          </>
         )}
       </StateView>
     </div>
