@@ -13,7 +13,7 @@ export const PERMISSIONS = [
   'ess',           // Phase D3 — employee self-service (own timesheets/leave/payslips/expenses)
   'vendor_portal', // Phase D3 — supplier portal (own POs, acknowledge, submit invoice)
   // ── SoD sub-permissions (single-duty splits of coarse permissions; see PERMISSION_IMPLICATIONS) ──
-  'pos_sell', 'pos_refund', 'pos_till',
+  'pos_sell', 'pos_refund', 'pos_till', 'pos_close',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
   'gl_post', 'gl_close', 'gl_coa', 'gl_posting_rules', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
@@ -27,7 +27,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 // The single-duty sub-permissions (excluded from the system-wide module toggle list below — they are
 // access-control granularity, not user-facing modules).
 export const SUB_PERMISSIONS: Permission[] = [
-  'pos_sell', 'pos_refund', 'pos_till',
+  'pos_sell', 'pos_refund', 'pos_till', 'pos_close',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
   'gl_post', 'gl_close', 'gl_coa', 'gl_posting_rules', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
@@ -65,7 +65,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Planner: ['dashboard', 'exec', 'warehouse', 'procurement', 'planner', 'masterdata', 'approvals'],
   // ── SoD-clean single-duty roles (the remediated design — each verified to produce 0 SoD conflicts) ──
   Cashier: ['pos_sell'],
-  PosSupervisor: ['pos_refund', 'pos_till'],
+  PosSupervisor: ['pos_refund', 'pos_till', 'pos_close'],
   ArClerk: ['ar', 'order_mgt', 'claim_mgt', 'delivery'],
   ApClerk: ['creditors'],
   Buyer: ['procurement'],
@@ -88,7 +88,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 // while new granular roles can be granted just one sub-permission. The bundling is ALSO why coarse
 // permissions are flagged by SoD analysis — e.g. 'pos' alone holds both sides of the sell/refund rule.
 export const PERMISSION_IMPLICATIONS: Partial<Record<Permission, Permission[]>> = {
-  pos: ['pos_sell', 'pos_refund', 'pos_till'],
+  pos: ['pos_sell', 'pos_refund', 'pos_till', 'pos_close'],
   warehouse: ['wh_receive', 'wh_adjust', 'wh_count', 'wh_custody'],
   exec: ['gl_post', 'gl_close', 'recon_prep', 'fin_report'],
   masterdata: ['md_vendor', 'md_item', 'md_config'],

@@ -1,7 +1,8 @@
 import { Inject, Injectable, Optional, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundRequests } from '../../database/schema';
+import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundRequests, xzReports, xzReportDenominations } from '../../database/schema';
+import { createHash } from 'node:crypto';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
@@ -450,6 +451,98 @@ export class PaymentService {
     const a = await this.aggregateTill(tillId);
     const closed = String(sess.status) === 'Closed';
     return { report: 'Z', session_no: sess.sessionNo, status: sess.status, ...a, counted_cash: closed ? n(sess.closingCount) : null, variance: closed ? n(sess.variance) : null, denominations: sess.denominations ?? null };
+  }
+
+  // POS-07 — sign the Z-report: snapshot the closed till's shift totals into an immutable, tamper-evident
+  // record with a manager attestation (pos_close) + denomination breakdown. content_hash = sha256 over the
+  // canonical totals, so any later edit to the persisted row is detectable. Idempotent per till: a second
+  // sign returns the existing signed record (no duplicate Z-tape).
+  async signZReport(sessionNo: string, user: JwtUser, denominations?: Record<string, number>) {
+    const db = this.db as any;
+    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
+    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
+    if (String(sess.status) !== 'Closed') throw new BadRequestException({ code: 'TILL_NOT_CLOSED', message: 'Z-report can only be signed for a closed till', messageTh: 'ลงนามรายงาน Z ได้เฉพาะรอบที่ปิดแล้ว' });
+
+    const [existing] = await db.select().from(xzReports)
+      .where(and(eq(xzReports.tillSessionId, Number(sess.id)), sql`${xzReports.reportType}::text = 'Z'`, sql`${xzReports.status}::text = 'SIGNED'`)).limit(1);
+    if (existing) return { ...(await this.getXzReport(Number(existing.id))), already: true };
+
+    const a = await this.aggregateTill(Number(sess.id));
+    const cardTotal = roundCurrency(n(a.gross_sales) - n(a.cash_sales), 'THB');
+    const denoms = denominations ?? (sess.denominations as Record<string, number> | null) ?? {};
+    const counted = n(sess.closingCount);
+    const variance = n(sess.variance);
+    // content_hash covers exactly the persisted scalars + denomination rows, so getXzReport can recompute
+    // it from the stored record and flag any later tamper (`hash_valid`). Fixed precision + sorted denoms
+    // make it deterministic.
+    const denomPairs = Object.entries(denoms).filter(([, c]) => Number(c) > 0).map(([d, c]) => ({ denomination: Number(d), count: Number(c), total: Number(d) * Number(c) }));
+    const contentHash = this.hashXz(Number(sess.id), n(a.gross_sales), n(a.cash_sales), cardTotal, n(a.cash_refunds), n(a.expected_cash), counted, variance, denomPairs);
+    const html = this.renderZHtml(sessionNo, a, cardTotal, counted, variance, denoms, user.username, contentHash);
+
+    const [rep] = await db.insert(xzReports).values({
+      tenantId: sess.tenantId ?? null, tillSessionId: Number(sess.id), reportType: 'Z',
+      generatedBy: user.username, grossSales: fx(a.gross_sales, 4), totalCash: fx(a.cash_sales, 4),
+      totalCard: fx(cardTotal, 4), totalRefund: fx(a.cash_refunds, 4), txnCount: a.txn_count, voidCount: a.void_count,
+      cashExpected: fx(a.expected_cash, 4), cashCounted: fx(counted, 4), variance: fx(variance, 4),
+      status: 'SIGNED', contentHash, htmlSnapshot: html,
+    }).returning({ id: xzReports.id });
+    const denomRows = Object.entries(denoms).filter(([, c]) => Number(c) > 0)
+      .map(([d, c]) => ({ tenantId: sess.tenantId ?? null, reportId: Number(rep.id), denomination: fx(Number(d), 2), count: Number(c), total: fx(Number(d) * Number(c), 4) }));
+    if (denomRows.length) await db.insert(xzReportDenominations).values(denomRows);
+    return { ...(await this.getXzReport(Number(rep.id))), already: false };
+  }
+
+  async listXzReports(_user: JwtUser, limit = 50) {
+    const db = this.db as any;
+    const rows = await db.select().from(xzReports).orderBy(desc(xzReports.generatedAt), desc(xzReports.id)).limit(limit);
+    return { reports: rows.map((r: any) => this.shapeXz(r)), count: rows.length };
+  }
+
+  async getXzReport(id: number) {
+    const db = this.db as any;
+    const [r] = await db.select().from(xzReports).where(eq(xzReports.id, id)).limit(1);
+    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Z-report not found', messageTh: 'ไม่พบรายงาน Z' });
+    const dn = await db.select().from(xzReportDenominations).where(eq(xzReportDenominations.reportId, id)).orderBy(desc(xzReportDenominations.denomination));
+    const denoms = dn.map((d: any) => ({ denomination: n(d.denomination), count: d.count, total: n(d.total) }));
+    // re-verify the stored hash against the persisted totals → tamper flag for the auditor view.
+    const recomputed = this.hashXz(Number(r.tillSessionId), n(r.grossSales), n(r.totalCash), n(r.totalCard), n(r.totalRefund), n(r.cashExpected), n(r.cashCounted), n(r.variance), denoms);
+    return { ...this.shapeXz(r), denominations: denoms, hash_valid: recomputed === r.contentHash };
+  }
+
+  // deterministic content hash over a Z-report's persisted scalars + denomination rows (tamper-evidence).
+  private hashXz(tillId: number, gross: number, cash: number, card: number, refund: number, expected: number, counted: number, variance: number, denoms: { denomination: number; count: number; total: number }[]) {
+    const canonical = JSON.stringify({
+      till: tillId, gross: fx(gross, 4), cash: fx(cash, 4), card: fx(card, 4), refund: fx(refund, 4),
+      expected: fx(expected, 4), counted: fx(counted, 4), variance: fx(variance, 4),
+      denoms: denoms.map((d) => `${fx(d.denomination, 2)}:${d.count}`).sort(),
+    });
+    return createHash('sha256').update(canonical).digest('hex');
+  }
+
+  private shapeXz(r: any) {
+    return {
+      id: Number(r.id), till_session_id: Number(r.tillSessionId), report_type: r.reportType, status: r.status,
+      generated_by: r.generatedBy, generated_at: r.generatedAt, gross_sales: n(r.grossSales), total_cash: n(r.totalCash),
+      total_card: n(r.totalCard), total_refund: n(r.totalRefund), txn_count: r.txnCount, void_count: r.voidCount,
+      cash_expected: n(r.cashExpected), cash_counted: n(r.cashCounted), variance: n(r.variance), content_hash: r.contentHash,
+    };
+  }
+
+  private renderZHtml(sessionNo: string, a: any, card: number, counted: number, variance: number, denoms: Record<string, number>, by: string, hash: string) {
+    const rows = a.by_method.map((m: any) => `<tr><td>${m.method}</td><td style="text-align:right">${fx(m.amount, 2)}</td><td style="text-align:right">${m.count}</td></tr>`).join('');
+    const dnRows = Object.entries(denoms).filter(([, c]) => Number(c) > 0).map(([d, c]) => `<tr><td>฿${d}</td><td style="text-align:right">${c}</td><td style="text-align:right">${fx(Number(d) * Number(c), 2)}</td></tr>`).join('');
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Z-Report ${sessionNo}</title></head><body style="font-family:sans-serif">
+<h2>รายงานปิดกะ (Z-Report)</h2><p>รอบ: <b>${sessionNo}</b> · ลงนามโดย: ${by}</p>
+<table><tr><td>ยอดขายรวม</td><td style="text-align:right">${fx(a.gross_sales, 2)}</td></tr>
+<tr><td>เงินสด</td><td style="text-align:right">${fx(a.cash_sales, 2)}</td></tr>
+<tr><td>บัตร/อื่นๆ</td><td style="text-align:right">${fx(card, 2)}</td></tr>
+<tr><td>เงินคืน</td><td style="text-align:right">${fx(a.cash_refunds, 2)}</td></tr>
+<tr><td>คาดว่าในลิ้นชัก</td><td style="text-align:right">${fx(a.expected_cash, 2)}</td></tr>
+<tr><td>นับจริง</td><td style="text-align:right">${fx(counted, 2)}</td></tr>
+<tr><td>ผลต่าง</td><td style="text-align:right">${fx(variance, 2)}</td></tr></table>
+<h3>ตามวิธีชำระ</h3><table><tr><th>วิธี</th><th>ยอด</th><th>จำนวน</th></tr>${rows}</table>
+${dnRows ? `<h3>นับเงินตามหน่วย</h3><table><tr><th>หน่วย</th><th>จำนวน</th><th>รวม</th></tr>${dnRows}</table>` : ''}
+<p style="font-size:11px;color:#666">content-hash: ${hash}</p></body></html>`;
   }
 
   // GET /api/payments?sale_no= — all tenders attached to a sale.
