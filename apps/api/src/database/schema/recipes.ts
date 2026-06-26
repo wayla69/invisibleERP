@@ -25,9 +25,15 @@ export const menuRecipeLines = pgTable('menu_recipe_lines', {
   recipeId: bigint('recipe_id', { mode: 'number' }).notNull().references(() => menuRecipes.id),
   ingredientItemId: text('ingredient_item_id').notNull(),  // → customer_inventory.item_id
   ingredientDescription: text('ingredient_description'),
-  qtyPer: numeric('qty_per').notNull(),       // per ONE serving (divided by yield at explode time)
+  qtyPer: numeric('qty_per').notNull(),       // edible/plated qty per ONE serving (divided by yield at explode time)
   uom: text('uom'),
   unitCost: numeric('unit_cost', { precision: 14, scale: 4 }),
+  // Step 3 — yield/waste factors. The plated qty_per is the EDIBLE amount; the kitchen must issue more raw
+  // stock to cover trim/cook loss. gross_qty = qty_per / (yield_factor − waste_factor). yield_factor = usable
+  // fraction after trimming (1.0 = no loss); waste_factor = expected extra shrink on top. Defaults keep the
+  // historic 100%-yield behaviour (gross = qty_per), so existing recipes are unchanged.
+  yieldFactor: numeric('yield_factor', { precision: 5, scale: 4 }).notNull().default('1.0000'),
+  wasteFactor: numeric('waste_factor', { precision: 5, scale: 4 }).notNull().default('0.0000'),
 }, (t) => ({ byRecipe: index('idx_recipe_line_recipe').on(t.recipeId) }));
 
 export type MenuRecipe = typeof menuRecipes.$inferSelect;

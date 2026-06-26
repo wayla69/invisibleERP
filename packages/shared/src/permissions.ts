@@ -14,9 +14,9 @@ export const PERMISSIONS = [
   'ess',           // Phase D3 — employee self-service (own timesheets/leave/payslips/expenses)
   'vendor_portal', // Phase D3 — supplier portal (own POs, acknowledge, submit invoice)
   // ── SoD sub-permissions (single-duty splits of coarse permissions; see PERMISSION_IMPLICATIONS) ──
-  'pos_sell', 'pos_refund', 'pos_till',
+  'pos_sell', 'pos_refund', 'pos_till', 'pos_close',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
-  'gl_post', 'gl_close', 'recon_prep', 'fin_report',
+  'gl_post', 'gl_close', 'gl_coa', 'gl_posting_rules', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
   // ── CRM single-duty splits (loyalty back-office; see SoD R14–R16). Standalone granular perms: NOT implied
   //    by a coarse perm (so a transacting/portal role can't inherit them and trip R14–R16); assigned directly
@@ -28,9 +28,9 @@ export type Permission = (typeof PERMISSIONS)[number];
 // The single-duty sub-permissions (excluded from the system-wide module toggle list below — they are
 // access-control granularity, not user-facing modules).
 export const SUB_PERMISSIONS: Permission[] = [
-  'pos_sell', 'pos_refund', 'pos_till',
+  'pos_sell', 'pos_refund', 'pos_till', 'pos_close',
   'wh_receive', 'wh_adjust', 'wh_count', 'wh_custody',
-  'gl_post', 'gl_close', 'recon_prep', 'fin_report',
+  'gl_post', 'gl_close', 'gl_coa', 'gl_posting_rules', 'recon_prep', 'fin_report',
   'md_vendor', 'md_item', 'md_config',
   'crm_member', 'crm_points_adjust', 'crm_reward', 'crm_campaign',
 ];
@@ -49,7 +49,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Sales & Orders': ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
   'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
-  'Finance & AR/AP': ['ar', 'creditors'],
+  'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules'],
   'Procurement': ['procurement', 'pr_raise'],
   'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
@@ -75,7 +75,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Planner: ['planner', 'dashboard', 'procurement', 'pr_raise', 'fin_report', 'wh_count', 'wh_custody', 'lots', 'locations'],
   // ── SoD-clean single-duty roles (the remediated design — each verified to produce 0 SoD conflicts) ──
   Cashier: ['pos_sell', 'pr_raise'],
-  PosSupervisor: ['pos_refund', 'pos_till', 'pr_raise'],
+  PosSupervisor: ['pos_refund', 'pos_till', 'pos_close', 'pr_raise'],
   ArClerk: ['ar', 'order_mgt', 'claim_mgt', 'delivery', 'pr_raise'],
   ApClerk: ['creditors', 'pr_raise'],
   Buyer: ['procurement'],
@@ -83,7 +83,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   InventoryController: ['wh_adjust', 'pr_raise'],
   StockCounter: ['wh_count', 'pr_raise'],
   GlAccountant: ['gl_post', 'recon_prep', 'fin_report', 'pr_raise'],
-  FinancialController: ['gl_close', 'approvals', 'fin_report', 'pr_raise'],
+  FinancialController: ['gl_close', 'gl_coa', 'gl_posting_rules', 'approvals', 'fin_report', 'pr_raise'],
   MasterDataAdmin: ['masterdata', 'bom_master', 'pr_raise'], // coarse 'masterdata' expands to md_vendor/item/config (conflict-free: no transactional perms)
   PricingManager: ['pricelist', 'promos', 'pr_raise'],
   CreditManager: ['crm', 'pr_raise'],
@@ -98,7 +98,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 // while new granular roles can be granted just one sub-permission. The bundling is ALSO why coarse
 // permissions are flagged by SoD analysis — e.g. 'pos' alone holds both sides of the sell/refund rule.
 export const PERMISSION_IMPLICATIONS: Partial<Record<Permission, Permission[]>> = {
-  pos: ['pos_sell', 'pos_refund', 'pos_till'],
+  pos: ['pos_sell', 'pos_refund', 'pos_till', 'pos_close'],
   warehouse: ['wh_receive', 'wh_adjust', 'wh_count', 'wh_custody'],
   exec: ['gl_post', 'gl_close', 'recon_prep', 'fin_report'],
   masterdata: ['md_vendor', 'md_item', 'md_config'],

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { CloudOff, ListChecks, RefreshCw, Store, Utensils, Wifi, WifiOff, X } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -27,6 +27,8 @@ type Method = 'Cash' | 'PromptPay' | 'Card' | 'Transfer';
 
 interface HeldCart { lines: CartLine[]; mode: Mode; tableId: number | null; tableNo: string | null; customerName: string }
 
+interface UserPrefs { favorites: string[]; navFold: Record<string, boolean>; pos_fav: number[]; saved: boolean }
+
 export default function RegisterPage() {
   const qc = useQueryClient();
   const tm = useTerminal();
@@ -34,6 +36,16 @@ export default function RegisterPage() {
   // Register offline outbox: queued quick sales replay to /api/restaurant/offline-sync on reconnect.
   const outbox = useRegisterOutbox();
   const menu = useQuery<MenuResp>({ queryKey: ['menu'], queryFn: () => api('/api/menu') });
+  const prefsQ = useQuery<UserPrefs>({ queryKey: ['user-prefs'], queryFn: () => api('/api/user-prefs') });
+  const favIds = useMemo(() => new Set<number>(prefsQ.data?.pos_fav ?? []), [prefsQ.data]);
+  const favMut = useMutation({
+    mutationFn: (ids: number[]) => api('/api/user-prefs', { method: 'PUT', body: JSON.stringify({ pos_fav: ids }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['user-prefs'] }),
+  });
+  const toggleFav = useCallback((id: number) => {
+    const next = favIds.has(id) ? [...favIds].filter((x) => x !== id) : [...favIds, id];
+    favMut.mutate(next);
+  }, [favIds, favMut]);
 
   // when sales flush on reconnect, refresh the order list so the synced bills appear
   useEffect(() => {
@@ -187,7 +199,7 @@ export default function RegisterPage() {
       <StateView q={menu}>
         {menu.data && (
           <div className="grid h-[calc(100dvh-13.5rem)] min-h-[440px] gap-4 lg:grid-cols-[1fr_minmax(320px,360px)]">
-            <MenuGrid data={menu.data} onPick={pick} className="h-full rounded-xl border bg-card p-3" />
+            <MenuGrid data={menu.data} onPick={pick} favIds={favIds} onToggleFav={toggleFav} className="h-full rounded-xl border bg-card p-3" />
             <CartPanel
               lines={lines}
               mode={mode}

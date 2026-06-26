@@ -203,6 +203,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-187 | Marking lost requires a reason | REV-17 | 01 §7, §9 |
 | UAT-O2C-188 | Weighted pipeline forecast + win-rate | REV-17 | 01 §7 |
 | UAT-O2C-189 | Log + list a CRM activity | REV-17 | 01 §7 |
+| UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
+| UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
+| UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |
+| UAT-O2C-197 | AR allowance: no double-post; register | REV-18 | 01 §7 (8d) |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -213,13 +217,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-003 | Goods receipt | EXP-02 | 02 §7 |
 | UAT-P2P-004 | 3-way match success | EXP-03 | 02 §7, §9 |
 | UAT-P2P-005 | Matched pay (request+approve) + GL | EXP-06, GL-01 | 02 §7 |
-| UAT-P2P-006 | Price variance block (MATCH_BLOCKED) | EXP-03 | 02 §9, §13 |
+| UAT-P2P-006 | Price variance block at AP-pay gate (MATCH_BLOCKED) | EXP-09, EXP-01 | 02 §8, §9, §13 |
 | UAT-P2P-007 | Over-invoice block | EXP-03 | 02 §9, §13 |
 | UAT-P2P-008 | Match tolerance | EXP-03 | 02 §9 |
 | UAT-P2P-009 | Override-with-reason (independent overrider) | EXP-01, EXP-06, R04 | 02 §6, §9 |
 | UAT-P2P-009b | Matcher cannot self-override (SoD) | EXP-01 | 02 §6 |
 | UAT-P2P-010 | Override reset on re-match | EXP-03 | 02 §9, §13 |
-| UAT-P2P-011 | Non-PO bill (gate fails open, request+approve) | EXP-06 | 02 §7 |
+| UAT-P2P-011 | Non-PO bill (AP-pay gate fails open, request+approve) | EXP-09, EXP-06 | 02 §7, §8 |
 | UAT-P2P-012 | Blocklisted vendor (SUPPLIER_BLOCKED) | EXP-04, R13 | 02 §9, §13 |
 | UAT-P2P-013 | Un-blocklist vendor | EXP-04 | 02 §7 |
 | UAT-P2P-014 | RFQ→quote→award→PO | EXP-01 | 02 §7 |
@@ -379,6 +383,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-038 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |
 | UAT-UI-LSE-01 | Lease screen reachable + create + run + modify (UI) | LSE-01 | 04 §7 |
 | UAT-UI-EAM-01 | EAM screen reachable + WO lifecycle / PM sweep / reliability (UI) | FA-06 | 09 §7 |
+| TC-GL-18-01 | FX revaluation run computes unrealized gain/loss | GL-18 | 04 §3.2 |
+| TC-GL-18-02 | FX revaluation post maker-checker + idempotent (5400/1100/2000) | GL-18, R05 | 04 §3.2 |
+| TC-CON-02-01 | Consolidation eliminates IC + keeps group TB balanced | CON-03 | 11 §7.8 |
+| TC-CON-02-02 | Consolidation run→post maker-checker (SELF_POST/ALREADY_POSTED) | CON-03, R07 | 11 §7.9 |
+| TC-CON-02-03 | Unbalanced eliminations → CONSOL_UNBALANCED (rolled back) | CON-03 | 11 §7.8 |
+| TC-CON-03-01 | Segment report (IFRS 8) groups P&L by dimension | CON-04 | 11 §7.10 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -397,6 +407,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-011 | e-Tax resubmit idempotency | TAX-02 | 06 §9 |
 | UAT-TAX-012 | Tax-invoice numbering | TAX-03 | 06 §9 |
 | UAT-TAX-013 | WHT on payroll | PAY-02 | 05 §7, 06 §7 |
+| UAT-TAX-017 | Deferred tax run → DTA from AR allowance (×CIT) | TAX-06 | 06 §9a, 04 §3.2 |
+| UAT-TAX-018 | Deferred tax post maker-checker + idempotent (Dr 1700/Cr 5950) | TAX-06, R05 | 06 §9a, 04 §3.2 |
 
 ## 07 — Payroll → `05-payroll.md`
 

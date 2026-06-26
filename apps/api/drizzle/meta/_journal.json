@@ -1079,6 +1079,153 @@
       "when": 2023710000004,
       "tag": "0153_bank_deposits",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 2023720000004,
+      "tag": "0154_shift_schedules",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 2023720000005,
+      "tag": "0155_coa_master",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 2023730000004,
+      "tag": "0156_modifier_cogs",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 2023740000004,
+      "tag": "0157_xz_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 2023740000005,
+      "tag": "0158_posting_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 2023740000006,
+      "tag": "0159_gl_dimensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 2023750000004,
+      "tag": "0160_bom_yield_factors",
+      "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 2023750000005,
+      "tag": "0161_subledger_tieout",
+      "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
+      "when": 2023760000004,
+      "tag": "0162_food_cost_variance_reasons",
+      "breakpoints": true
+    },
+    {
+      "idx": 163,
+      "version": "7",
+      "when": 2023760000005,
+      "tag": "0163_close_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 2023770000004,
+      "tag": "0164_branch_lead_time",
+      "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 2023770000005,
+      "tag": "0165_gl_immutability",
+      "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 2023780000004,
+      "tag": "0166_thai_tax_filings",
+      "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 2023780000005,
+      "tag": "0167_arap_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 2023790000004,
+      "tag": "0168_labor_ot_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 2023790000005,
+      "tag": "0169_deferred_tax_fx",
+      "breakpoints": true
+    },
+    {
+      "idx": 170,
+      "version": "7",
+      "when": 2023800000004,
+      "tag": "0170_clock_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 2023800000005,
+      "tag": "0171_consolidation",
+      "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 2023810000004,
+      "tag": "0172_feature_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "7",
+      "when": 2023810000005,
+      "tag": "0173_revrec",
+      "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "7",
+      "when": 2023820000001,
+      "tag": "0174_supplier_pricelist",
+      "breakpoints": true
     }
   ]
 }

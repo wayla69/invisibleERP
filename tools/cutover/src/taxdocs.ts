@@ -179,6 +179,27 @@ async function main() {
   ok('PND3: sums person WHT (250)', near(p3.json.totals?.tax_withheld, 250), JSON.stringify(p3.json.totals));
   const badPnd = await inj('GET', '/api/tax-reports/pnd?type=PND99&month=6&year=2026', admin);
   ok('PND: rejects invalid type (400)', badPnd.status === 400, `${badPnd.status}`);
+
+  // ── TAX-05: filing register (DRAFT → SUBMITTED → ACCEPTED) + remittance calendar ──
+  const fileP = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: 6, year: 2026 });
+  ok('TAX-05: file PP30 → DRAFT snapshot (output 38.5, input 70)', fileP.json.status === 'DRAFT' && near(fileP.json.output_vat, 38.5) && near(fileP.json.input_vat, 70), JSON.stringify(fileP.json).slice(0, 130));
+  const refileP = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: 6, year: 2026 });
+  ok('TAX-05: re-file refreshes the same DRAFT (idempotent per period)', refileP.json.id === fileP.json.id && refileP.json.already_filed === false, JSON.stringify({ a: fileP.json.id, b: refileP.json.id }));
+  const subNoRef = await inj('POST', `/api/tax-reports/filings/${fileP.json.id}/submit`, admin, {});
+  ok('TAX-05: submit without a reference → 400', subNoRef.status === 400, `${subNoRef.status} ${subNoRef.json.error?.code}`);
+  const sub = await inj('POST', `/api/tax-reports/filings/${fileP.json.id}/submit`, admin, { submission_ref: 'RD-2026-06-PP30-001' });
+  ok('TAX-05: submit with ref → SUBMITTED + submitted_at', sub.json.status === 'SUBMITTED' && sub.json.submission_ref === 'RD-2026-06-PP30-001' && !!sub.json.submitted_at, JSON.stringify(sub.json).slice(0, 120));
+  const acc = await inj('POST', `/api/tax-reports/filings/${fileP.json.id}/accept`, admin, {});
+  ok('TAX-05: accept → ACCEPTED', acc.json.status === 'ACCEPTED', `${acc.json.status}`);
+  const refileFiled = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: 6, year: 2026 });
+  ok('TAX-05: re-file an already-filed period returns it (no overwrite)', refileFiled.json.already_filed === true && refileFiled.json.status === 'ACCEPTED', `${refileFiled.json.already_filed} ${refileFiled.json.status}`);
+  const fileW = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PND53', month: 6, year: 2026 });
+  ok('TAX-05: file PND53 → tax_withheld 609.28', near(fileW.json.tax_withheld, 609.28), JSON.stringify(fileW.json).slice(0, 110));
+  const cal = await inj('GET', '/api/tax-reports/remittance-calendar?year=2026', admin);
+  const junePp = (cal.json.calendar ?? []).find((c: any) => c.filing_type === 'PP30' && c.period_month === 6);
+  ok('TAX-05: remittance calendar shows June PP30 ACCEPTED, deadline 2026-07-15', junePp?.status === 'ACCEPTED' && junePp?.deadline === '2026-07-15', JSON.stringify(junePp ?? {}));
+  const listF = await inj('GET', '/api/tax-reports/filings?year=2026', admin);
+  ok('TAX-05: filings list includes PP30 + PND53', (listF.json.filings ?? []).length >= 2, `n=${listF.json.count}`);
   // exports (PDF → HTML fallback when chromium absent): Thai title present
   const ovx = await inj('GET', '/api/tax-reports/output-vat/export?month=6&year=2026', admin);
   ok('Export รายงานภาษีขาย: title present', ovx.status === 200 && ovx.text.includes('รายงานภาษีขาย'));

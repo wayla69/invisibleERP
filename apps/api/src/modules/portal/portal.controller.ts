@@ -19,6 +19,7 @@ const SaleBody = z.object({
     item_id: z.string().min(1), item_description: z.string().optional(),
     qty: z.number().positive(), unit_price: z.number().nonnegative(),
     uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
+    modifier_option_ids: z.array(z.number().int()).optional(),
   })).min(1),
   discount: z.number().nonnegative().optional(),
   payment_method: z.string().optional(),
@@ -26,6 +27,9 @@ const SaleBody = z.object({
   apply_pricing: z.boolean().optional(),
   channel: z.string().optional(),
   party_size: z.number().int().optional(),
+  service_charge_pct: z.number().min(0).max(100).optional(),
+  service_min_party: z.number().int().positive().optional(),
+  rounding: z.number().nonnegative().optional(),
   branch_id: z.number().int().positive().optional(),
 });
 
@@ -37,10 +41,12 @@ const UpdateInventoryBody = z.object({
   current_stock: z.number().optional(), reorder_point: z.number().optional(), reorder_qty: z.number().optional(), notes: z.string().optional(),
 });
 
+const VARIANCE_REASONS = ['WASTE', 'OVERSTOCK', 'SPOILAGE', 'PORTIONING', 'THEFT', 'OTHER'] as const;
 const VarianceBody = z.object({
   items: z.array(z.object({
     item_id: z.string().min(1), item_description: z.string().optional(), bom_code: z.string().optional(),
     uom: z.string().optional(), theoretical_use: z.number().optional(), actual_use: z.number(), reason: z.string().optional(),
+    reason_code: z.enum(VARIANCE_REASONS).optional(), station: z.string().optional(),
   })).min(1),
   shift: z.string().optional(),
 });

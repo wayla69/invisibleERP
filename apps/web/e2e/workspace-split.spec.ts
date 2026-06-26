@@ -149,6 +149,7 @@ test('Finance ?tab= deep-link opens the matching PEAK-style cycle tab', async ({
     if (url.includes('/ar/aging')) return json({ total: 0, buckets: {} });
     if (url.includes('/ap/aging')) return json({ total: 0, buckets: {} });
     if (url.includes('/ar/collections')) return json({ rows: [] });
+    if (url.includes('/ar/write-offs')) return json({ write_offs: [] });
     if (url.includes('/ap/payments/pending')) return json({ payments: [] });
     if (url.includes('/finance/ap')) return json({ transactions: [] });
     if (url.includes('/finance/ar')) return json({ invoices: [] });

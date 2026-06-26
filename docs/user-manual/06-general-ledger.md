@@ -104,6 +104,34 @@ is recorded.
 
 [screenshot: pending journal entry approval screen]
 
+### Correcting a posted entry — reversal only (GL-17)
+
+Once a journal entry is **Posted** it is **immutable**: it can never be edited or
+deleted. This keeps the ledger a true, auditable record of record (a system control,
+GL-17, enforced both in the database and in the application — any attempt to delete a
+posted entry is refused with `GL_IMMUTABLE`).
+
+To correct a posted entry, **reverse** it:
+
+1. Open the posted entry and click **Reverse** (**กลับรายการ**), optionally giving a
+   reason (and a reversal date — defaults to today).
+2. The system posts a **new contra entry** that swaps every line's debit and credit,
+   so the original and its reversal **net to zero** on every account. The original is
+   marked **reversed**, and the new entry links back to it.
+
+**Expected result:** a new Posted reversal entry; the original flagged as reversed; the
+net effect on the affected accounts is zero. If you then need the corrected figures,
+post a fresh entry with the right amounts.
+
+Notes:
+- You can only reverse a **Posted** entry (`NOT_POSTED` otherwise) and only **once**
+  (`ALREADY_REVERSED` on a second attempt).
+- A reversal still respects the period rules — if its date falls in a **locked** or
+  **closed** period it is blocked (`PERIOD_LOCKED` / `PERIOD_CLOSED`); choose an open
+  date or reopen the period (soft close) first.
+- Every post, approval, reversal and blocked edit attempt is written to the **GL audit
+  trail** for review.
+
 ### Recurring / template journal entries
 
 For entries you post every period — **monthly rent or insurance accruals**,
@@ -291,6 +319,41 @@ flagged ⚠ in red so you can escalate them (control **GOV-01**).
 **Expected result:** The period is closed. New postings to it are blocked with
 `PERIOD_CLOSED`. (If you must post a late entry, an authorised user can **reopen**
 the period, post, and close it again.)
+
+### Hard period close + checklist (irreversible lock)
+
+A *soft* close (above) can be reopened. When the books are final, run a **hard close**:
+a checklist-driven, segregated, irreversible **lock**. Once a period is **Locked**, *all*
+postings into it are rejected with `PERIOD_LOCKED` — there is no `allowClosedPeriod`
+escape (only the system year-end closing entry is exempt).
+
+**Required permission:** `gl_close` (start / complete steps / lock). Reading status also
+allows `gl_post` and `exec`.
+
+The lifecycle is **Open → InProgress → ReadyToLock → Locked**:
+
+1. **Start the close** — `POST /api/ledger/close/start` `{ "period": "YYYY-MM" }`. This
+   creates a *close run* (status **InProgress**) and seeds the standard checklist:
+   sub-ledger tie-out, bank reconciliation, depreciation, recurring/prepaid journals, FX
+   revaluation (advisory), and trial-balance review.
+2. **Complete each step** — `POST /api/ledger/close/step`
+   `{ "close_run_id": N, "step_key": "bank_rec" }` as you finish each procedure. When all
+   **required** steps are done, the run automatically becomes **ReadyToLock**.
+3. **Lock the period** — `POST /api/ledger/close/lock` `{ "close_run_id": N }`. Locking is
+   **maker-checker**: the person who locks **must be different** from the person who started
+   the close. The period status becomes **Locked**.
+
+Check progress any time with `GET /api/ledger/close/status?period=YYYY-MM`, or list recent
+runs with `GET /api/ledger/close`.
+
+> **Note — separation of duties (GL-16):** you cannot lock a close you started yourself
+> (`SELF_LOCK`). A second `gl_close` colleague must perform the lock. The starter, locker,
+> and lock time are all recorded as audit evidence.
+
+**Possible errors:** `STEPS_INCOMPLETE` (you tried to lock before all required steps are
+done — the response lists what's pending), `SELF_LOCK` (you tried to lock your own close),
+`PERIOD_LOCKED` (you tried to post into a locked period), `PERIOD_ALREADY_LOCKED` (the
+period is already hard-closed), `CLOSE_RUN_NOT_FOUND`, `STEP_NOT_FOUND`.
 
 ### To run year-end close
 
@@ -487,6 +550,141 @@ schedule (time elapsed or meter overrun) and rolls the schedule forward. It is
 **Expected result:** Cost lines give an itemised maintenance cost; the reliability
 view gives the failure-rate and lifetime-cost inputs for maintenance budgeting and
 **repair-vs-replace** decisions.
+
+---
+
+## FX revaluation (period-end) — control GL-18
+
+**Who:** Financial Controller (`gl_close`/`gl_post`); a *different* user posts.
+
+At period-end, open invoices/bills in a **foreign currency** must be restated to the
+**closing exchange rate** so the unrealized FX gain/loss is in the books.
+
+1. **Run** — `POST /api/ledger/fx-reval/run` with the period (`YYYY-MM`). Supply the
+   closing `rates` (e.g. `{ "USD": 36 }`) or rely on the latest **approved** FX rate.
+   You get the per-document gain/loss and the **net**, staged as **Open**.
+2. **Review** the detail (each open AR/AP doc: booked rate → closing rate → delta).
+3. **Post** — a **different** user calls `POST /api/ledger/fx-reval/{id}/post`. A net
+   gain credits **5400 FX Gain/Loss**, a net loss debits it; the AR/AP control accounts
+   (1100/2000) are restated. You **cannot post a run you ran** (segregation of duties).
+
+**Expected result:** the FX line (5400) carries the net unrealized gain/loss and AR/AP
+reflect the closing rate. Re-running or re-posting a posted period is blocked.
+
+**Errors:** `MISSING_RATE` (no rate for a currency — pass it in `rates` or approve an FX
+rate first), `SELF_POST` (you ran it — ask a colleague to post), `ALREADY_POSTED`.
+
+## Deferred tax (TAS 12) — control TAX-06
+
+**Who:** Tax / Financial Controller (`gl_close`/`gl_post`); a *different* user posts.
+
+Recognise **deferred tax** on book-vs-tax **temporary** differences (the AR allowance
+and accelerated depreciation) at the Thai CIT rate (20%).
+
+1. **Run** — `POST /api/ledger/deferred-tax/run` with the period. It computes a deferred
+   tax **asset** from the posted AR allowance and a deferred tax **liability** from
+   accelerated depreciation, nets them, and shows the **delta** vs the last posted run.
+2. **Post** — a **different** user calls `POST /api/ledger/deferred-tax/{id}/post`. An
+   increase in the net asset posts **Dr 1700 Deferred Tax Asset / Cr 5950 Deferred Tax
+   Expense** (a deferred tax benefit). You **cannot post a run you ran**.
+
+**Expected result:** 1700 (and 5950) move by the period delta; income tax expense
+reflects the deferred portion. Re-posting a posted period is blocked (`ALREADY_POSTED`).
+
+**Errors:** `SELF_POST`, `ALREADY_POSTED`, `DT_RUN_NOT_FOUND`.
+
+---
+
+## Consolidation — eliminations & segment reporting (controls CON-03 / CON-04)
+
+**Who:** Group / Financial Controller. All consolidation actions are **HQ (Admin) only**
+(`CONSOL_HQ_ONLY` for any other tenant). The run uses the `approvals` permission; group,
+rule, segment and report endpoints use `exec`.
+
+Consolidation combines several **entities** (tenants) into a group view, eliminates the
+**intercompany (IC)** balances they owe each other, and reports results **by segment**.
+
+### Run a consolidation (CON-03)
+
+1. **Set up the group** — create a group (`POST /api/consolidation/groups`) and add member
+   entities with ownership % and currency (`POST /api/consolidation/groups/{id}/entities`).
+2. **Run** — `POST /api/consolidation/groups/{id}/run` with the period (`YYYY-MM`). The run:
+   - **combines** each member's trial balance (FX-translated, ownership-weighted),
+   - **eliminates** in-group IC: for each IC transaction it cancels **1150 Due-From**
+     against **2150 Due-To** (the reciprocal receivable/payable),
+   - records **NCI** (account 3300) for entities owned < 100%,
+   - and **asserts the consolidated trial balance still balances**. If eliminations don't
+     net to zero the run is rejected with **`CONSOL_UNBALANCED`** and rolled back.
+   Eliminations live at the **group** layer — they are **not** posted into any operating
+   entity's books.
+3. **Post** — a **different** user calls `POST /api/consolidation/runs/{runId}/post` to freeze
+   the run as the official group result for the period. You **cannot post a run you ran**
+   (`SELF_POST`), and a posted period cannot be re-run (`ALREADY_POSTED`).
+
+Optional: define configurable elimination rules (`POST /api/consolidation/rules`,
+`GET /api/consolidation/rules?group_id=`).
+
+**Expected result:** consolidated TB = Σ entity TBs − IC eliminations, balanced (Σ Dr = Σ Cr);
+1150/2150 net to ~0; the run shows `balanced: true`.
+
+### Segment report (CON-04, IFRS 8)
+
+`GET /api/consolidation/segment-report?period=YYYY-MM&dimension=branch` returns
+**revenue / expense / net** grouped by reportable **segment**. Map dimension values
+(`branch` / `project` / `department`) into named segments first via
+`POST /api/consolidation/segments` (`member_keys` = the dimension values in that segment);
+unmapped values appear as their own / an `Unassigned` bucket.
+
+**Errors:** `CONSOL_UNBALANCED`, `SELF_POST`, `ALREADY_POSTED`, `CONSOL_RUN_NOT_FOUND`,
+`GROUP_NOT_FOUND`, `NO_ENTITIES`, `CONSOL_HQ_ONLY`.
+
+---
+
+## Revenue recognition — contracts & deferred revenue (TFRS 15 / IFRS 15, control REV-19)
+
+For service, subscription, and project-style contracts the system recognizes revenue under the
+**TFRS 15 / IFRS 15 five-step model** — revenue is earned as you satisfy your promises, not when
+you invoice. (Restaurant POS sales keep their immediate recognition; this is the deferred-revenue
+engine for "real ERP" contracts.) Required permission: `exec`, `ar`, or `fin_report`.
+
+**1. Create the contract with its performance obligations**
+`POST /api/revenue/contracts` with `total_price` and an `obligations` list. Each obligation has a
+name, a **standalone selling price (`ssp`)**, and a `method`:
+
+- `over_time` — straight-line across the months between `start_date` and `end_date` (e.g. an
+  implementation or support period).
+- `point_in_time` — recognized in full at its `start_date` (e.g. a licence handed over once).
+
+The contract opens in **Draft** and gets a contract number (`REVC-…`).
+
+**2. Allocate the price by SSP** — `POST /api/revenue/contracts/{id}/allocate`. The transaction
+price is split across the obligations in proportion to their SSP
+(`allocated = total × ssp ÷ Σssp`); the rounding residual lands on the largest obligation so the
+allocation **sums exactly to the contract price**.
+
+**3. Activate (raise deferred revenue)** — `POST /api/revenue/contracts/{id}/activate` posts
+**Dr 1100 Accounts Receivable / Cr 2410 Deferred Revenue** for the full price and moves the
+contract to **Active**.
+
+**4. Build the recognition schedule** — `POST /api/revenue/contracts/{id}/schedule` lays out the
+monthly plan (one row per month for over-time obligations, a single row for point-in-time). Safe to
+re-run: it rebuilds only rows not yet recognized.
+
+**5. Recognize revenue for a period** — `POST /api/revenue/contracts/recognize` with `{ period }`
+(optionally `contract_id`). Every schedule row due in or before that period posts
+**Dr 2410 Deferred Revenue / Cr 4300 Recognized Revenue**, and the obligation's progress
+(`satisfied_pct` / status) is updated. Re-running the same period posts nothing again
+(`recognized_count: 0`). An HQ/Admin caller must add `?tenant_id=` (`TENANT_REQUIRED`).
+
+**Provide for expected refunds** — `POST /api/revenue/contracts/{id}/refund-liability` with
+`{ expected_refund_rate }` (0–1) posts **Dr 4300 Revenue (contra) / Cr 2420 Refund Liability** for
+the expected return, booking only the change since the prior provision.
+
+**Review** — `GET /api/revenue/contracts` (list) and `GET /api/revenue/contracts/{id}` (the
+contract with its obligations and schedule).
+
+**Errors:** `CONTRACT_NOT_FOUND` (404), `INVALID_ALLOCATION` (bad price/SSP/missing over-time
+dates), `ALREADY_ACTIVE`, `TENANT_REQUIRED`, `PERIOD_LOCKED` (the target period is hard-closed).
 
 ---
 

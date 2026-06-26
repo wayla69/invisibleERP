@@ -159,6 +159,39 @@ action on an account. Every action is written to a **credit-events audit trail**
 > takes an approver (`approvals` / `exec`), so a single person can't both block and
 > unblock an account.
 
+### A5. Allowance for doubtful accounts (provision for bad debts)
+
+**Required permission:** `creditors` / `ar` / `gl_post` / `exec`.
+
+At period-end you set aside a **provision for the receivables you expect not to
+collect** (an *allowance for doubtful accounts*), so AR on the balance sheet is shown
+at the amount you realistically expect to receive — without writing off any specific
+invoice yet.
+
+1. **Compute the allowance** (`POST /api/finance/ar-allowance/compute`). The system
+   ages your open AR into buckets (**current / 1–30 / 31–60 / 61–90 / 91–120 / 120+
+   days**) and applies a **loss rate** to each (defaults **0% / 1% / 5% / 20% / 50% /
+   100%** — older debt is more likely to go bad). The **allowance** is the sum of
+   `outstanding × rate`. You can override the rates, choose an `as_of_date`, or use a
+   flat **percentage** of total AR instead. This produces an **unposted** draft — it
+   does not touch the GL yet.
+2. **A different person posts it** (`POST /api/finance/ar-allowance/:id/post`). The
+   person who computed the allowance **cannot** post it (`SOD_SELF_POST`) — a second
+   reviewer does, so nobody can quietly inflate or shrink the provision to manage the
+   numbers. Posting books only the **change since the last posted allowance**: if the
+   provision went up it posts **Dr Bad Debt Expense (5720) / Cr Allowance (1190)**; if
+   it went down it reverses. Your gross AR (1100) is never touched — the allowance sits
+   in a separate contra-asset account (**1190**) that nets against AR on the balance
+   sheet.
+3. **Review the register** (`GET /api/finance/ar-allowance`) — every computation with
+   its buckets, allowance and posted amount.
+
+> A posted allowance can't be posted twice (`ALLOWANCE_POSTED` / `ALREADY_POSTED`); to
+> revise, compute a fresh allowance for a later date. Posting into a **hard-closed**
+> period is blocked (`PERIOD_LOCKED`). This is the **allowance** (an estimate across all
+> AR); writing off a **specific** uncollectible invoice is the separate maker-checker
+> **bad-debt write-off** (Dr 5720 / Cr 1100).
+
 ---
 
 ## Part B — Accounts Payable (money you owe suppliers)
@@ -199,6 +232,14 @@ the cash.
 **Expected result:** A payment request is created and shown as **awaiting approval**
 (**รออนุมัติ**). **No money moves yet** — the bill stays Unpaid and nothing posts to
 the ledger until a different person approves.
+
+> **3-way-match gate (EXP-09).** For a bill tied to a **purchase order**, the request
+> is refused (**`MATCH_BLOCKED`**) if the invoice hasn't passed its 3-way match (PO ↔
+> goods receipt ↔ invoice within tolerance) and hasn't been independently overridden —
+> so you can't pay for goods at the wrong quantity or price, or that were never
+> received. Resolve the variance (correct the receipt/invoice, or get an independent
+> override) on `/procurement/match`, then request the payment again. **Non-PO bills**
+> (utilities, services, reimbursements) have no match and pay normally.
 
 **Step 2 — approve / release (Finance, `approvals` or `gl_close`, on `/disbursements`):**
 1. Open **จ่ายเงินเจ้าหนี้ (Disbursements)** (`/disbursements`, ERP nav → การเงิน →

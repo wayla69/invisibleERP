@@ -207,6 +207,27 @@ export const grItems = pgTable('gr_items', {
   remarks: text('remarks'),
 }, (t) => ({ byGr: index('idx_gr_items_gr').on(t.grId), byPo: index('idx_gr_items_pono').on(t.poNo) }));
 
+// ── T2-D: Supplier price-list versioning (migration 0174) ──────────────────
+// Versioned purchase price per vendor+item+uom. On upsert the prior active row is superseded
+// (status → 'superseded'), keeping a full audit trail. Feeds price_var_pct in supplier scorecards.
+export const supplierPriceLists = pgTable('supplier_price_lists', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  vendorId: bigint('vendor_id', { mode: 'number' }).notNull().references(() => vendors.id),
+  itemId: text('item_id').notNull(),
+  itemDescription: text('item_description'),
+  uom: text('uom').notNull().default('EA'),
+  currency: text('currency').notNull().default('THB'),
+  unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
+  minQty: numeric('min_qty', { precision: 14, scale: 4 }).notNull().default('1'),
+  effectiveFrom: date('effective_from').notNull(),
+  effectiveTo: date('effective_to'),
+  status: text('status').notNull().default('active'), // 'active' | 'superseded'
+  notes: text('notes'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byVendorItem: index('idx_spl_vendor_item').on(t.tenantId, t.vendorId, t.itemId) }));
+
 export const grClaims = pgTable('gr_claims', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   claimNo: text('claim_no').notNull().unique(),

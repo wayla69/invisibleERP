@@ -197,3 +197,13 @@ export const webhookDeliveries = pgTable('webhook_deliveries', {
   deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+// Step 10 — feature flags / Labs. Per-tenant override of the in-code default registry (CORE on / LABS off),
+// so a tenant can hide thin demo-grade modules behind a Labs section.
+export const featureFlags = pgTable('feature_flags', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }),
+  flagKey: text('flag_key').notNull(),
+  enabled: boolean('enabled').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uq: uniqueIndex('uq_feature_flag').on(t.tenantId, t.flagKey) }));

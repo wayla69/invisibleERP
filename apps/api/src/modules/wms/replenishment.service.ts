@@ -1,9 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { eq, and, asc, inArray } from 'drizzle-orm';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { eq, and, asc, gte, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerInventory, branchStock, replenishmentSuggestions, branches, itemSupplier, vendors, custStockLog, stockMovements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { ProcurementService } from '../procurement/procurement.service';
+import { DemandForecastService } from '../demand-ml/demand-forecast.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -20,6 +21,8 @@ export class ReplenishmentService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly procurement: ProcurementService,
+    // @Optional so partial harnesses that don't wire DemandMlModule can still construct this service.
+    @Optional() private readonly demand?: DemandForecastService,
   ) {}
 
   private urgency(onHand: number, rop: number): string {
@@ -178,5 +181,120 @@ export class ReplenishmentService {
     const pr = await this.procurement.createPr({ items: picked.map((r: any) => ({ item_id: r.itemId, request_qty: n(r.buyQty ?? r.suggestedQty), reason: 'Auto-replenishment' })) } as any, user);
     await db.update(replenishmentSuggestions).set({ status: 'PR_Created', prNo: pr.pr_no }).where(inArray(replenishmentSuggestions.id, picked.map((r: any) => Number(r.id))));
     return { pr_no: pr.pr_no, lines: picked.length };
+  }
+
+  // Step 5 — demand-driven par-level recommendation (INV-12). For each (branch,item) it derives the average
+  // daily usage from the trailing window of branch-tagged consumption (cust_stock_log Sale/Consume rows) and
+  // recommends reorder_point = ceil(avg_daily × lead_time_days × SAFETY), flagging branches whose STATIC
+  // reorder_point is below their actual run-rate buffer (under_buffered). Read-only; planners apply per row.
+  private static readonly SAFETY = 1.25;
+  async parRecommendations(user: JwtUser, opts?: { branchId?: number; windowDays?: number }) {
+    const db = this.db as any;
+    const tenantId = user.tenantId as number;
+    const windowDays = Math.min(365, Math.max(1, opts?.windowDays ?? 30));
+    const cutoff = new Date(Date.now() - windowDays * 86400 * 1000);
+    const stock = await db.select().from(branchStock).where(
+      opts?.branchId != null ? and(eq(branchStock.tenantId, tenantId), eq(branchStock.branchId, opts.branchId)) : eq(branchStock.tenantId, tenantId),
+    );
+    if (!stock.length) return { window_days: windowDays, recommendations: [], count: 0 };
+    const logs = await db.select().from(custStockLog).where(and(eq(custStockLog.tenantId, tenantId), gte(custStockLog.logDate, cutoff)));
+    // Σ usage per (branch,item): only real consumption (Sale/Consume) with a negative qty; EOD recounts and
+    // reversals (returns) are excluded so demand isn't double-counted.
+    const used = new Map<string, number>();
+    for (const l of logs) {
+      const q = n(l.qtyChange);
+      if (q >= 0) continue;
+      if (!['Sale', 'Consume'].includes(String(l.logType ?? ''))) continue;
+      const k = `${l.branchId ?? ''}|${l.itemId}`;
+      used.set(k, (used.get(k) ?? 0) + Math.abs(q));
+    }
+    const recs = stock.map((s: any) => {
+      const totalUsed = used.get(`${s.branchId ?? ''}|${s.itemId}`) ?? 0;
+      const avgDaily = round2(totalUsed / windowDays);
+      const lead = Number(s.leadTimeDays ?? 3);
+      const recommended = Math.ceil(avgDaily * lead * ReplenishmentService.SAFETY);
+      const current = n(s.reorderPoint);
+      return {
+        branch_id: Number(s.branchId), item_id: s.itemId, item_description: s.itemDescription,
+        on_hand: n(s.onHand), avg_daily_usage: avgDaily, lead_time_days: lead,
+        current_reorder_point: current, recommended_reorder_point: recommended,
+        gap: round2(recommended - current), under_buffered: recommended > current,
+      };
+    }).filter((r: any) => r.avg_daily_usage > 0 || r.current_reorder_point > 0)
+      .sort((a: any, b: any) => b.gap - a.gap);
+    return { window_days: windowDays, recommendations: recs, count: recs.length, under_buffered: recs.filter((r: any) => r.under_buffered).length };
+  }
+
+  // Apply a recommendation: write the demand-driven reorder_point onto the (branch,item) row (planner duty).
+  async applyPar(user: JwtUser, branchId: number, itemId: string, opts?: { windowDays?: number }) {
+    const db = this.db as any;
+    const tenantId = user.tenantId as number;
+    const rec = (await this.parRecommendations(user, { branchId, windowDays: opts?.windowDays })).recommendations.find((r: any) => r.item_id === itemId);
+    if (!rec) return { applied: false, reason: 'NO_RECOMMENDATION' };
+    await db.update(branchStock).set({ reorderPoint: String(rec.recommended_reorder_point), lastUpdated: new Date() })
+      .where(and(eq(branchStock.tenantId, tenantId), eq(branchStock.branchId, branchId), eq(branchStock.itemId, itemId)));
+    return { applied: true, branch_id: branchId, item_id: itemId, reorder_point: rec.recommended_reorder_point, previous: rec.current_reorder_point };
+  }
+
+  // Demand-ML order-quantity advisor (INV-13): for every item at or below its reorder point, uses the
+  // demand-ML multi-model forecast (auto-selects the lowest-WAPE model) to derive a suggested order quantity =
+  // Σ forecast[0..horizon-1]. Falls back to the static reorder_qty from master data when the ML service is
+  // unavailable or the item has insufficient history (< 14 days). Read-only; advisory only — does not write to
+  // replenishment_suggestions. The planner uses the ml_qty alongside the static suggestion to decide how much
+  // to requisition. Horizon must be 7, 14, or 28 days (clamped to [7,28]).
+  async demandForecast(user: JwtUser, opts?: { horizon?: number }) {
+    const db = this.db as any;
+    const tenantId = user.tenantId as number;
+    const horizon = Math.min(28, Math.max(7, Math.round(opts?.horizon ?? 14)));
+
+    // Determine candidates: items whose stock is at/below their reorder point
+    const branchRows = await db.select().from(branchStock).where(eq(branchStock.tenantId, tenantId));
+    const useBranch = branchRows.length > 0;
+    const invRows = useBranch ? [] : await db.select().from(customerInventory).where(eq(customerInventory.tenantId, tenantId));
+
+    const candidates: { itemId: string; onHand: number; rop: number; staticQty: number; branchId: number | null }[] = useBranch
+      ? branchRows
+          .filter((b: any) => n(b.reorderPoint) > 0 && n(b.onHand) <= n(b.reorderPoint) && n(b.reorderQty) > 0)
+          .map((b: any) => ({ itemId: b.itemId as string, onHand: n(b.onHand), rop: n(b.reorderPoint), staticQty: n(b.reorderQty), branchId: Number(b.branchId) }))
+      : invRows
+          .filter((r: any) => n(r.reorderPoint) > 0 && n(r.currentStock) <= n(r.reorderPoint) && n(r.reorderQty) > 0)
+          .map((r: any) => ({ itemId: r.itemId as string, onHand: n(r.currentStock), rop: n(r.reorderPoint), staticQty: n(r.reorderQty), branchId: null }));
+
+    const items: any[] = [];
+    for (const c of candidates) {
+      let mlQty: number = c.staticQty;
+      let mlAlgo: string | null = null;
+      let mlWape: number | null = null;
+      let mlSource: 'ml' | 'static_fallback' | 'service_unavailable' = 'service_unavailable';
+
+      if (this.demand) {
+        const fc = await this.demand.planForecast(c.itemId, horizon);
+        if (fc) {
+          mlQty = Math.ceil(fc.forecast.reduce((a, b) => a + b, 0));
+          mlAlgo = fc.algorithm;
+          mlWape = fc.wape;
+          mlSource = 'ml';
+        } else {
+          mlSource = 'static_fallback'; // insufficient POS history
+        }
+      }
+
+      items.push({
+        item_id: c.itemId, on_hand: c.onHand, reorder_point: c.rop,
+        static_qty: c.staticQty, ml_qty: mlQty,
+        ml_algo: mlAlgo, ml_wape: mlWape, ml_source: mlSource,
+        horizon_days: horizon,
+        ...(c.branchId != null ? { branch_id: c.branchId } : {}),
+      });
+    }
+
+    items.sort((a, b) => a.on_hand - b.on_hand); // most urgent first
+    return {
+      horizon_days: horizon,
+      ml_available: !!this.demand,
+      count: items.length,
+      ml_count: items.filter((i) => i.ml_source === 'ml').length,
+      items,
+    };
   }
 }

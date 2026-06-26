@@ -59,6 +59,21 @@ export class ReplenishmentController {
   autoTransfer(@Body(new ZodValidationPipe(z.object({ item_ids: z.array(z.string()).optional() }))) b: any, @CurrentUser() u: JwtUser) { return this.rep.autoTransfer(b, u); }
   @Post('auto-pr') @Permissions('procurement', 'planner')
   autoPr(@Body(new ZodValidationPipe(z.object({ item_ids: z.array(z.string()).optional() }))) b: any, @CurrentUser() u: JwtUser) { return this.rep.autoPr(b, u); }
+  // Step 5 — demand-driven par-level recommendations + apply (INV-12)
+  @Get('par-recommendations') @Permissions('planner', 'procurement')
+  parRecommendations(@CurrentUser() u: JwtUser, @Query('branch_id') branchId?: string, @Query('window_days') windowDays?: string) {
+    return this.rep.parRecommendations(u, { branchId: branchId ? Number(branchId) : undefined, windowDays: windowDays ? Number(windowDays) : undefined });
+  }
+  @Post('par-recommendations/apply') @Permissions('planner')
+  applyPar(@Body(new ZodValidationPipe(z.object({ branch_id: z.number(), item_id: z.string().min(1), window_days: z.number().optional() }))) b: any, @CurrentUser() u: JwtUser) {
+    return this.rep.applyPar(u, b.branch_id, b.item_id, { windowDays: b.window_days });
+  }
+  // Demand-ML order-quantity advisor (INV-13): advisory ML-driven suggested quantities for items at/below ROP.
+  // horizon=7|14|28 (days); defaults to 14. Falls back to static reorder_qty when ML unavailable.
+  @Get('demand-forecast') @Permissions('planner', 'procurement')
+  demandForecast(@CurrentUser() u: JwtUser, @Query('horizon') horizon?: string) {
+    return this.rep.demandForecast(u, { horizon: horizon ? Number(horizon) : undefined });
+  }
 }
 
 const RmaBody = z.object({ sale_no: z.string().min(1), reason: z.string().optional(), customer_ref: z.string().optional(), lines: z.array(z.object({ sale_item_id: z.number().optional(), item_id: z.string().min(1), qty: z.number().positive(), lot_no: z.string().optional(), uom: z.string().optional() })).min(1) });

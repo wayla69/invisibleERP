@@ -96,6 +96,19 @@ async function main() {
   const oldLogin = await login('admin', 'admin123');
   ok('Old password no longer works (401)', oldLogin.status === 401, `${oldLogin.status}`);
 
+  // ── 5. Step 10: feature flags / Labs ──
+  const ff = await inj('GET', '/api/feature-flags', owner);
+  const consol = (ff.json.flags ?? []).find((f: any) => f.key === 'consolidation');
+  const labs0 = (ff.json.flags ?? []).find((f: any) => f.key === 'labs_visible');
+  ok('Feature flags: LABS module consolidation default off; labs_visible default off', consol?.tier === 'LABS' && consol?.enabled === false && labs0?.enabled === false && labs0?.source === 'default', JSON.stringify({ consol: consol?.enabled, labs: labs0?.enabled }));
+  const setLabs = await inj('PUT', '/api/feature-flags/labs_visible', owner, { enabled: true });
+  const labs1 = (setLabs.json.flags ?? []).find((f: any) => f.key === 'labs_visible');
+  ok('Feature flags: enable labs_visible → override on', labs1?.enabled === true && labs1?.source === 'override', JSON.stringify(labs1 ?? {}));
+  const badFlag = await inj('PUT', '/api/feature-flags/nonsense', owner, { enabled: true });
+  ok('Feature flags: unknown flag → 400 UNKNOWN_FLAG', badFlag.status === 400 && badFlag.json.error?.code === 'UNKNOWN_FLAG', `${badFlag.status} ${badFlag.json.error?.code}`);
+  const ffAdmin = await inj('GET', '/api/feature-flags', a2.json.token);
+  ok('Feature flags: RLS — HQ admin tenant unaffected by the other tenant override (labs_visible still off)', (ffAdmin.json.flags ?? []).find((f: any) => f.key === 'labs_visible')?.enabled === false, JSON.stringify((ffAdmin.json.flags ?? []).find((f: any) => f.key === 'labs_visible') ?? {}));
+
   console.log('\n── A4+A5 — Onboarding / provisioning / password ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

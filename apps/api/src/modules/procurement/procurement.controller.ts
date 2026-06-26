@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProcurementService, type CreatePrDto, type CreatePoDto, type CreateGrDto } from './procurement.service';
+import { ProcurementService, type CreatePrDto, type CreatePoDto, type CreateGrDto, type UpsertSupplierPriceDto } from './procurement.service';
 
 const PrBody = z.object({
   remarks: z.string().optional(), priority: z.string().optional(),
@@ -21,6 +21,19 @@ const ApproveBody = z.object({ approve: z.boolean().default(true), reason: z.str
 const CancelBody = z.object({ reason: z.string().min(1) });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
 const ScorecardBody = z.object({ period: z.string().min(1) });
+// T2-D: Supplier price-list versioning — create/version a purchase price; list active; history.
+const SupplierPriceBody = z.object({
+  vendor_id: z.number().int().positive(),
+  item_id: z.string().min(1),
+  item_description: z.string().optional(),
+  uom: z.string().optional(),
+  currency: z.string().optional(),
+  unit_price: z.number().positive(),
+  min_qty: z.number().positive().optional(),
+  effective_from: z.string().min(1), // YYYY-MM-DD
+  effective_to: z.string().optional(),
+  notes: z.string().optional(),
+});
 
 @Controller('api/procurement')
 export class ProcurementController {
@@ -47,6 +60,21 @@ export class ProcurementController {
   @Get('scorecards') @Permissions('procurement', 'exec')
   scorecards(@CurrentUser() u: JwtUser, @Query('period') period?: string, @Query('limit') limit?: string) {
     return this.svc.listScorecards({ period, limit: limit ? Math.min(Number(limit) || 200, 500) : 200 }, u);
+  }
+
+  // T2-D: Supplier price-list versioning. md_vendor creates/versions prices; procurement/planner/exec view.
+  // SoD: price maintenance (md_vendor) is segregated from buying (procurement) and paying (creditors).
+  @Post('supplier-prices') @Permissions('md_vendor', 'procurement')
+  upsertSupplierPrice(@Body(new ZodValidationPipe(SupplierPriceBody)) b: UpsertSupplierPriceDto, @CurrentUser() u: JwtUser) {
+    return this.svc.upsertSupplierPrice(b, u);
+  }
+  @Get('supplier-prices') @Permissions('procurement', 'planner', 'exec')
+  listSupplierPrices(@CurrentUser() u: JwtUser, @Query('vendor_id') vendorId?: string, @Query('item_id') itemId?: string) {
+    return this.svc.listSupplierPrices({ vendor_id: vendorId ? Number(vendorId) : undefined, item_id: itemId }, u);
+  }
+  @Get('supplier-prices/history') @Permissions('procurement', 'planner')
+  supplierPriceHistory(@CurrentUser() u: JwtUser, @Query('vendor_id') vendorId: string, @Query('item_id') itemId: string) {
+    return this.svc.supplierPriceHistory(Number(vendorId), itemId, u);
   }
 
   @Post('pos') @Permissions('procurement')

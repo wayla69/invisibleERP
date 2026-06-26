@@ -1,9 +1,6 @@
 # 01 · Sales & Point of Sale (POS)
 
-**Status: DRAFT v0.2** · *v0.2 (2026-06-25): added the touch **register**
-(`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender
-checkout, hold/recall — and connecting the **receipt printer / cash drawer /
-customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
+**Status: DRAFT v0.4** · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
 
 This chapter is for **Cashiers, Sales staff, POS Supervisors and Returns Clerks**.
 It covers ringing up sales, taking orders, credit checks, returns and refunds,
@@ -47,7 +44,10 @@ old keyed "create order" form for day-to-day selling):
 2. **Options (modifiers).** Items that carry choices (size, spice, add-ons) show a
    **ตัวเลือก** badge; tapping one opens a picker — choose options, the live price
    updates, then **เพิ่มลงตะกร้า**. Prices (incl. option add-ons) are always taken
-   from the catalog, so a cashier can't change a price.
+   from the catalog, so a cashier can't change a price. Each option can also carry a
+   **standard COGS delta** (set on the modifier via the menu API, e.g. "extra patty" =
+   ฿12) so choosing it raises the sold line's cost of goods at checkout — keeping
+   food-cost reporting honest. This is back-office only; cashiers and diners never see it.
 3. **The cart.** Adjust quantity with **− / +**, remove a line with the bin icon,
    and read **ยอดรวม / VAT / สุทธิ** at the bottom. **พักบิล** parks the cart and
    **ล้างตะกร้า** clears it.
@@ -165,6 +165,25 @@ charge + VAT + tip = total).
 > to another branch/tenant. If a job stays **queued**, the printer/agent isn't
 > pulling — check it is online and pointed at this outlet.
 
+### Favourites quick-access grid (★ รายการโปรด)
+
+Star any menu item to pin it to your personal **Favourites** tab for one-tap access
+during a busy shift.
+
+**To add an item to Favourites:**
+- Hover over the item card in the menu grid — a ★ icon appears in the top-left corner.
+- Click / tap the ★ to star it (it turns gold). Tap again to unstar.
+
+**To browse your Favourites:**
+- Click the **"★ รายการโปรด"** chip at the left of the category bar.
+- Only your starred items appear. If the grid is empty, no items are starred yet.
+
+Your favourites are **saved to your account** (via `PUT /api/user-prefs`) and sync
+across devices — a barista who stars espresso drinks on tablet sees the same list
+on the counter POS. Up to 200 items can be starred.
+
+---
+
 ### Cashier speed: quick-tender, change & hotkeys
 
 - **Register checkout** (`/pos/register`): the cash screen has a **numeric keypad**
@@ -174,16 +193,28 @@ charge + VAT + tip = total).
 - **Keyed form** (`/pos/new`): **F2** adds a line and **F9** confirms — so a
   cashier can ring up a manual sale without leaving the keyboard.
 
-### Pricing rules, service charge & rounding (dine-in)
+### Pricing rules, service charge & rounding
 
-At dine-in checkout you can apply the shop's **pricing rules** automatically
+At checkout you can apply the shop's **pricing rules** automatically
 (happy-hour %, buy-one-get-one, quantity breaks, item/category discounts) instead
 of keying discounts by hand — turn on **apply pricing rules** at checkout. For
 large parties an **auto service charge** is added (a VATable ค่าบริการ that the
 receipt lists as its own line), and the bill can be **satang-rounded** to a
 cash-friendly total. Cashiers *apply* rules; only Pricing/Marketing roles may
-*create* them (segregation of duties). See **Dine-in / restaurant** for the full
-flow.
+*create* them (segregation of duties).
+
+This applies to **both** the **dine-in** checkout and the **retail portal POS**
+(`POST /api/portal/pos/sales`). For the retail path, pass the following optional
+fields alongside `apply_pricing: true`:
+
+| Field | Purpose |
+|---|---|
+| `service_charge_pct` | Service charge rate (e.g. `10` for 10%). Added to the VAT base (→ acct 4400). |
+| `service_min_party` | Minimum party size to trigger the charge (default 6). |
+| `rounding` | Round the total to the nearest step (e.g. `1` for whole baht; 0 = disabled) → acct 4900. |
+
+The response includes `service_charge` and `rounding_adjustment` alongside the existing
+`pricing_discount` field. Without `apply_pricing`, the path is unchanged (backward-compatible).
 
 **Building rules (`/pricing` — กฎราคา & โปรโมชั่น).** Pricing/Marketing roles define
 rules on the **กฎราคา** tab: a labelled form for the **rule name**, **type** (ส่วนลด
@@ -443,19 +474,24 @@ the refund (held by *ReturnsClerk*, *PosSupervisor*, *Admin*).
 
 ### To process a return
 
-1. Locate the original sale (e.g. `S-…`).
-2. Select the item(s) and **quantity** to return.
-3. Enter a **reason** (e.g. *Defective*).
-4. Choose the **Refund Method** (**วิธีคืนเงิน**): Cash, Card, QR / PromptPay, or
-   Store Credit (issues a gift card instead of cash).
-5. Confirm the return.
+1. Open the **Returns Register** (`/returns` — **คืนสินค้า & คืนเงิน**).
+2. Click **"บันทึกคืนสินค้า"** (top right).
+3. Enter the **Sale No.** (e.g. `SALE-0001-…`) and click **ค้นหา**. The original
+   sale lines appear.
+4. Set the **return quantity** for each item you want to return (0 = keep; up to
+   the quantity sold).
+5. Choose the **Refund Method** (**วิธีคืนเงิน**): เงินสด (Cash) / บัตร (Card) /
+   QR / พร้อมเพย์ (PromptPay) / เครดิตร้าน (Store Credit) / ไม่คืนเงิน (None).
+6. Optionally enter a **reason**.
+7. Click **บันทึกคืนสินค้า** to confirm.
 
-**Expected result:** A return record is created (e.g. `RTN-…`) with a refund
+**Expected result:** A return record is created (`RTN-…`) with a refund
 reference, the stock is restocked, and the accounting reversal is posted
-automatically. The system shows the subtotal, VAT and total returned.
+automatically. The dialog shows the RTN number, total returned and refund method.
 
 > **Note — over-return guard:** You cannot return more than was originally sold.
-> Attempting to do so is blocked (`OVER_RETURN`).
+> The server enforces this — entering a qty above the sold qty is capped in the UI
+> and rejected server-side (`OVER_RETURN`).
 
 > **Big refunds need a manager's OK.** A **standalone refund** (refunding a payment
 > directly, not as part of a product return) of **฿1,000 or more** doesn't go through
@@ -480,6 +516,10 @@ sale number, filter by refund method, and click any return to see its line items
 full breakdown (subtotal / VAT / total). The register is **store-scoped** — each tenant
 sees only its own returns. Use it for daily reconciliation and to watch refund volume for
 leakage.
+
+The **"บันทึกคืนสินค้า"** button (top right) opens the create-return dialog directly
+from this screen — enter the sale number, pick items and quantities, choose the refund
+method, and submit. See "To process a return" above for the full flow.
 
 ### Gift-card / store-credit register
 
@@ -541,6 +581,20 @@ Record any cash added or removed:
 
 > **Note:** Use the **X-report** during a shift for an interim total without
 > closing the drawer. The **Z-report** is the final, end-of-shift report.
+
+#### Signing the Z-report (close-of-day archive)
+
+**Screen:** `/pos/close-of-day` (**ปิดกะ (Z-Report)**) · **Required permission:** `pos_close`
+(manager) — separate from the cashier's `pos_till`.
+
+After a till is **closed**, a manager **signs** the Z-report to lock it into a permanent,
+**tamper-evident** record. Enter the closed session's id (**TILL-…**) and click **ลงนาม Z-Report**.
+The signed report snapshots the shift's totals and the denomination count and stamps a
+**content-hash**. Re-signing the same session just returns the existing record (you can't create a
+second Z-tape). The archive list shows every signed Z with a **ความถูกต้อง** badge — **ถูกต้อง**
+(hash matches) or **ถูกแก้ไข** (the stored figures were altered after signing), so an auditor can
+prove the day's takings as originally counted. You can only sign a **closed** till, and a sell-only
+cashier cannot sign.
 
 #### Cash over/short — what happens to a variance
 

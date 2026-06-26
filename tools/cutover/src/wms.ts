@@ -170,6 +170,18 @@ async function main() {
   const xferDone = after3.find((x: any) => x.item_id === 'X1' && x.route === 'transfer');
   const buyDone = after3.find((x: any) => x.item_id === 'X1' && x.route === 'buy');
   ok('Branch replen: transfer row Transfer_Done; buy residual → PR_Created (1 line)', xferDone?.status === 'Transfer_Done' && !!apr3.json.pr_no && apr3.json.lines === 1 && buyDone?.status === 'PR_Created' && buyDone?.pr_no === apr3.json.pr_no, JSON.stringify({ xs: xferDone?.status, bs: buyDone?.status, pr: apr3.json.pr_no, lines: apr3.json.lines }));
+  // 11d-bis. Step 5 — demand-driven par recommendation for X1@BB (avg 10/day × lead 3 × 1.25 safety → ROP 38)
+  await db.insert(s.custStockLog).values([
+    { tenantId: t3, branchId: bb, itemId: 'X1', itemDescription: 'X1', logDate: new Date(), logType: 'Consume', qtyChange: '-150', balanceAfter: '0', refDoc: 'SALE-PAR1' },
+    { tenantId: t3, branchId: bb, itemId: 'X1', itemDescription: 'X1', logDate: new Date(), logType: 'Sale', qtyChange: '-150', balanceAfter: '0', refDoc: 'SALE-PAR2' },
+  ]);
+  const par = await inj('GET', `/api/replenishment/par-recommendations?branch_id=${bb}&window_days=30`, plan3);
+  const xpar = (par.json.recommendations ?? []).find((r: any) => r.item_id === 'X1');
+  ok('Par: X1@BB avg 10/day × lead 3 × 1.25 → recommend ROP 38, under-buffered vs static', !!xpar && xpar.avg_daily_usage === 10 && xpar.recommended_reorder_point === 38 && xpar.under_buffered === true, JSON.stringify(xpar ?? {}));
+  const applyPar = await inj('POST', '/api/replenishment/par-recommendations/apply', plan3, { branch_id: bb, item_id: 'X1', window_days: 30 });
+  const ropAfter = Number(((await pg.query(`SELECT reorder_point FROM branch_stock WHERE tenant_id=${t3} AND branch_id=${bb} AND item_id='X1'`)).rows as any[])[0]?.reorder_point);
+  ok('Par: apply writes recommended ROP 38 onto branch_stock', applyPar.json.applied === true && ropAfter === 38, JSON.stringify({ applied: applyPar.json.applied, ropAfter }));
+
   // 11e. RLS — T1 planner sees none of T3's branch suggestions
   const t1seeT3 = (await inj('GET', '/api/replenishment/suggestions', plan1)).json.suggestions ?? [];
   ok('RLS: T1 planner sees 0 of T3 branch suggestions', !t1seeT3.some((x: any) => x.item_id === 'X1'), `t1 X1 rows=${t1seeT3.filter((x: any) => x.item_id === 'X1').length}`);

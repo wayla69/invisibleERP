@@ -10,6 +10,7 @@ import {
   BookOpen,
   BookText,
   CalendarClock,
+  CalendarRange,
   Trash2,
   Vault,
   Bot,
@@ -88,6 +89,7 @@ import {
   PackageCheck,
   PiggyBank,
   Lightbulb,
+  Tag,
 } from 'lucide-react';
 
 /** Top-level workspace. The internal app is split into two surfaces selectable via the sidebar
@@ -166,6 +168,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'เมนูอาหาร', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
       { label: 'บุฟเฟต์ (แพ็กเกจ)', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
       { label: 'ควบคุม POS (พักบิล/อนุมัติ)', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
+      { label: 'ปิดกะ (Z-Report)', href: '/pos/close-of-day', icon: ReceiptText, perms: ['pos', 'pos_till', 'pos_close'] },
       { label: 'ใบเสร็จ & งานพิมพ์', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
     ],
   },
@@ -270,6 +273,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ขอใบเสนอราคา (RFQ)', href: '/procurement/rfqs', icon: ClipboardList, perms: ['procurement'] },
       { label: 'จับคู่เอกสาร 3 ทาง', href: '/procurement/match', icon: CheckCheck, perms: ['procurement'] },
       { label: 'คะแนนซัพพลายเออร์', href: '/supplier-scorecards', icon: Award, perms: ['procurement', 'exec'] },
+      { label: 'ราคาซัพพลายเออร์', href: '/supplier-prices', icon: Tag, perms: ['procurement', 'md_vendor', 'planner', 'exec'] },
       { label: 'อ่านเอกสารอัตโนมัติ (Document AI)', href: '/doc-ai', icon: FileScan, perms: ['procurement', 'creditors', 'exec'] },
       // vendor self-service surface — visible only to users granted the vendor_portal permission
       { label: 'พอร์ทัลซัพพลายเออร์ (Supplier)', href: '/supplier', icon: PackageCheck, perms: ['vendor_portal'] },
@@ -301,6 +305,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           // AP (book bills, request payment) = accounting/creditors on /finance; releasing the cash
           // (approve disbursement) = finance, on its own page (SoD R07 — approver ≠ requester).
           { label: 'จ่ายเงินเจ้าหนี้ (Disbursements)', href: '/disbursements', icon: Wallet, perms: ['approvals', 'gl_close', 'exec'] },
+          { label: 'จัดการเครดิต & ระงับบัญชี', href: '/finance/credit-hold', icon: ShieldAlert, perms: ['ar', 'crm', 'exec'] },
           { label: 'เงินทดรองจ่าย (Petty cash)', href: '/advances', icon: HandCoins, perms: ['creditors', 'exec'] },
           { label: 'กองทุนเงินสดย่อย & ค่าใช้จ่าย', href: '/petty-cash', icon: HandCoins, perms: ['creditors', 'exec'] },
         ],
@@ -312,6 +317,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'รับรู้รายได้', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'สินทรัพย์ถาวร', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
           { label: 'สัญญาเช่า (IFRS 16)', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
+          { label: 'ปิดงวดบัญชี (Period-close)', href: '/finance/period-close', icon: CalendarClock, perms: ['gl_close', 'exec'] },
         ],
       },
       {
@@ -357,6 +363,8 @@ export const INTERNAL_NAV: NavGroup[] = [
     workspace: ['erp'],
     items: [
       { label: 'บุคลากร (HR)', href: '/hcm', icon: Users, perms: ['exec', 'users', 'creditors'] },
+      { label: 'จัดตารางเวร & แรงงาน', href: '/scheduling', icon: CalendarRange, perms: ['pos', 'users', 'exec'] },
+      { label: 'กฎ OT & แจ้งเตือนแรงงาน', href: '/labor/ot-rules', icon: Timer, perms: ['pos', 'users', 'exec'] },
       { label: 'เงินเดือน (Payroll)', href: '/payroll', icon: Briefcase, perms: ['exec', 'users', 'creditors'] },
       // self-service is for every employee (incl. POS staff) → cross-listed to both surfaces
       { label: 'พื้นที่พนักงาน (ESS)', href: '/ess', icon: IdCard, perms: ['ess'], workspace: BOTH },
@@ -428,6 +436,7 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'แดชบอร์ดตามบทบาท (Role dashboards)', href: '/dashboard-designer', icon: LayoutTemplate, perms: ['users', 'exec'] },
           { label: 'เทมเพลตเอกสาร (Document templates)', href: '/document-templates', icon: LayoutTemplate, perms: ['users', 'exec'] },
           { label: 'ธีมแบรนด์ (White-label)', href: '/theme', icon: Palette, perms: ['users', 'exec'] },
+          { label: 'โมดูลทดลอง (Labs)', href: '/settings/labs', icon: SlidersHorizontal, perms: ['md_config', 'exec', 'users'] },
         ],
       },
       {

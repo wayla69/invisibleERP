@@ -5,17 +5,44 @@ import { tenants } from './tenants';
 // Double-entry General Ledger (move #2) — เปลี่ยน "POS add-on" → "ERP" จริง
 export const accountTypeEnum = pgEnum('account_type', ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense']);
 export const journalStatusEnum = pgEnum('journal_status', ['Draft', 'Posted', 'Voided']);
-export const periodStatusEnum = pgEnum('period_status', ['Open', 'Closed']);
+// 'Locked' (WS2.1, GL-15/GL-16) is the hard-close state: a Locked period rejects ALL postEntry postings
+// except the system year-end closing entry (source='CLOSE'), regardless of allowClosedPeriod.
+export const periodStatusEnum = pgEnum('period_status', ['Open', 'Closed', 'Locked']);
+
+// Account Groups — tenant-scoped (nullable: NULL = global template visible to all tenants)
+export const accountGroups = pgTable('account_groups', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  code: text('code').notNull(),
+  nameTh: text('name_th').notNull(),
+  nameEn: text('name_en').notNull(),
+  type: accountTypeEnum('type').notNull(),
+  parentGroupId: bigint('parent_group_id', { mode: 'number' }),
+  sortOrder: bigint('sort_order', { mode: 'number' }).default(0),
+  active: boolean('active').default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqCode: uniqueIndex('uq_account_groups').on(sql`COALESCE(${t.tenantId}, 0)`, t.code),
+}));
 
 // Chart of Accounts
 export const accounts = pgTable('accounts', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   code: text('code').notNull().unique(), // e.g. '1000' Cash, '1100' AR, '4000' Revenue
   name: text('name').notNull(),
+  nameTh: text('name_th'),
   type: accountTypeEnum('type').notNull(),
   parentCode: text('parent_code'),
   currency: text('currency').default('THB'),
   active: text('active').default('true'),
+  accountGroupId: bigint('account_group_id', { mode: 'number' }),
+  isControl: boolean('is_control').default(false),
+  controlSubledger: text('control_subledger'),  // 'AR'|'AP'|'INV'|'FA' or null
+  normalBalance: text('normal_balance').default('D'), // 'D'=debit | 'C'=credit
+  isPostable: boolean('is_postable').default(true),
+  requireDimension: jsonb('require_dimension'),  // e.g. {"branch":true}
+  effectiveFrom: date('effective_from'),
+  effectiveTo: date('effective_to'),
 });
 
 // Per-tenant fiscal calendar. tenant_id added in 0043 so one tenant's period/year-end close
@@ -50,6 +77,12 @@ export const journalEntries = pgTable(
     status: journalStatusEnum('status').default('Posted'),
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    // WS2.2 (GL-17) — GL immutability & reversal. postedAt stamps when an entry reached Posted; a posted
+    // entry is immutable (DB trigger + app guard) and may only be corrected by a contra REVERSAL entry.
+    // reversalOf points the contra entry at the original; isReversed flags the original once reversed.
+    postedAt: timestamp('posted_at', { withTimezone: true }),
+    reversalOf: bigint('reversal_of', { mode: 'number' }),
+    isReversed: boolean('is_reversed').default(false),
   },
   (t) => ({
     bySource: index('idx_je_source').on(t.source, t.sourceRef),
@@ -78,6 +111,9 @@ export const journalLines = pgTable(
     currency: text('currency').default('THB'),
     memo: text('memo'),
     costCenterCode: text('cost_center_code'), // nullable accounting dimension (Tier 3); untagged = Unassigned
+    branchId: bigint('branch_id', { mode: 'number' }),
+    projectId: bigint('project_id', { mode: 'number' }),
+    departmentId: bigint('department_id', { mode: 'number' }),
     tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   },
   (t) => ({
@@ -87,6 +123,8 @@ export const journalLines = pgTable(
     // table; without this every trial-balance/statement/consolidation does a full scan + hash join.
     byEntry: index('idx_jl_entry').on(t.entryId),
     byTenant: index('idx_jl_tenant').on(t.tenantId),
+    byBranch: index('idx_jl_branch').on(t.branchId),
+    byProject: index('idx_jl_project').on(t.projectId),
   }),
 );
 
@@ -161,4 +199,5 @@ export const tenantAccounts = pgTable(
 );
 
 export type Account = typeof accounts.$inferSelect;
+export type AccountGroup = typeof accountGroups.$inferSelect;
 export type TenantAccount = typeof tenantAccounts.$inferSelect;

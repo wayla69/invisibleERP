@@ -95,6 +95,30 @@ async function main() {
   const zr = await inj('GET', `/api/payments/till/${tillId}/z-report`, sales1);
   ok('Z-report GET: Closed + counted 900 + variance -7 + denominations', zr.json.report === 'Z' && zr.json.status === 'Closed' && near(zr.json.counted_cash, 900) && near(zr.json.variance, -7) && zr.json.denominations?.['100'] === 4, JSON.stringify(zr.json).slice(0, 110));
 
+  // ── POS-07: sign + archive the Z-report (tamper-evident, manager-attested) ──
+  const sign = await inj('POST', `/api/payments/till/${till.json.session_no}/z-report/sign`, sales1, {});
+  ok('POS-07: sign Z-report → SIGNED + content_hash', sign.json.status === 'SIGNED' && sign.json.already === false && /^[0-9a-f]{64}$/.test(sign.json.content_hash ?? ''), JSON.stringify(sign.json).slice(0, 120));
+  ok('POS-07: signed Z snapshots totals (counted 900, variance -7) + denominations (500×1,100×4)', near(sign.json.cash_counted, 900) && near(sign.json.variance, -7) && sign.json.denominations?.find((d: any) => d.denomination === 100)?.count === 4, JSON.stringify(sign.json.denominations));
+  const reSign = await inj('POST', `/api/payments/till/${till.json.session_no}/z-report/sign`, sales1, {});
+  ok('POS-07: re-sign is idempotent (already=true, same hash)', reSign.json.already === true && reSign.json.content_hash === sign.json.content_hash, `${reSign.json.already} ${reSign.json.content_hash === sign.json.content_hash}`);
+  const xzList = await inj('GET', '/api/payments/xz-reports', sales1);
+  ok('POS-07: xz-reports list includes the signed Z', (xzList.json.reports ?? []).some((r: any) => r.id === sign.json.id && r.report_type === 'Z'), `n=${xzList.json.count}`);
+  const fetched = await inj('GET', `/api/payments/xz-reports/${sign.json.id}`, sales1);
+  ok('POS-07: fresh fetch verifies hash_valid=true', fetched.json.hash_valid === true, JSON.stringify({ hv: fetched.json.hash_valid }));
+  // tamper: mutate a persisted total directly → recomputed hash no longer matches → hash_valid=false
+  await pg.query(`UPDATE xz_reports SET gross_sales = gross_sales + 999 WHERE id = ${sign.json.id}`);
+  const tampered = await inj('GET', `/api/payments/xz-reports/${sign.json.id}`, sales1);
+  ok('POS-07: tampered row detected (hash_valid=false)', tampered.json.hash_valid === false, JSON.stringify({ hv: tampered.json.hash_valid }));
+  // guard: cannot sign a Z for an open till
+  const tillOpenForSign = await inj('POST', '/api/payments/till/open', sales1, { opening_float: 100 });
+  const signOpen = await inj('POST', `/api/payments/till/${tillOpenForSign.json.session_no}/z-report/sign`, sales1, {});
+  ok('POS-07: sign rejected for an open till (400 TILL_NOT_CLOSED)', signOpen.status === 400 && signOpen.json.error?.code === 'TILL_NOT_CLOSED', `${signOpen.status} ${signOpen.json.error?.code}`);
+  // permission: a sell-only Cashier (no pos_close/ar) cannot sign
+  await db.insert(s.users).values({ username: 'cashier1', passwordHash: await pw.hash('pc1'), role: 'Cashier', tenantId: t1 }).onConflictDoNothing();
+  const cashier1 = await login('cashier1', 'pc1');
+  const cashierSign = await inj('POST', `/api/payments/till/${till.json.session_no}/z-report/sign`, cashier1, {});
+  ok('POS-07: Cashier (pos_sell only) cannot sign Z (403)', cashierSign.status === 403, `${cashierSign.status}`);
+
   // guard: cash-movement on a closed till → 400
   const closedMv = await inj('POST', `/api/payments/till/${tillId}/cash-movement`, sales1, { type: 'drop', amount: 50 });
   ok('CashMov: rejected on closed till (400 TILL_CLOSED)', closedMv.status === 400 && closedMv.json.error?.code === 'TILL_CLOSED', `${closedMv.status} ${closedMv.json.error?.code}`);

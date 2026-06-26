@@ -171,6 +171,62 @@ async function main() {
   const groups = await inj('GET', '/api/consolidation/groups', admin);
   ok('List groups → 1 group', groups.json.groups?.length === 1, `count=${groups.json.groups?.length}`);
 
+  // ── WS3.3 CON-03: elimination integrity (balanced consolidated TB) ──
+
+  // 15. Run returns a balanced flag + zero elimination net (1150/2150 cancel)
+  ok('CON-03 run is balanced (TB nets ~0)', run.json.balanced === true && near(run.json.tb_net, 0) && near(run.json.elimination_net, 0), `balanced=${run.json.balanced} tb=${run.json.tb_net} elim=${run.json.elimination_net}`);
+
+  // 16. Elimination lines net to zero (1150 −1000 + 2150 +1000)
+  const elimNet = lines.json.lines.filter((l: any) => l.line_type === 'Elimination').reduce((a: number, l: any) => a + Number(l.amount_thb), 0);
+  ok('CON-03 IC eliminations net to ~0', Math.abs(elimNet) < 0.01, `elimNet=${elimNet}`);
+
+  // ── WS3.3 CON-03: maker-checker post ──
+
+  // 17. Self-post by the runner (admin ran it) → SELF_POST
+  const selfPost = await inj('POST', `/api/consolidation/runs/${runId}/post`, admin);
+  ok('CON-03 self-post → SELF_POST', selfPost.status === 403 && selfPost.json.error?.code === 'SELF_POST', JSON.stringify(selfPost.json));
+
+  // 18. Post by a DIFFERENT admin user → Posted
+  await db.insert(s.users).values([{ username: 'admin2', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  const admin2 = await login('admin2', 'admin123');
+  const posted = await inj('POST', `/api/consolidation/runs/${runId}/post`, admin2);
+  ok('CON-03 post by other user → Posted', posted.status === 200 && posted.json.status === 'Posted', JSON.stringify(posted.json));
+
+  // 19. Re-run a Posted period → ALREADY_POSTED
+  const rerun = await inj('POST', `/api/consolidation/groups/${groupId}/run`, admin, { period: '2026-01' });
+  ok('CON-03 re-run posted period → ALREADY_POSTED', rerun.status === 400 && rerun.json.error?.code === 'ALREADY_POSTED', JSON.stringify(rerun.json));
+
+  // ── WS3.3 CON-04: segment reporting (IFRS 8) ──
+
+  // Seed a branch-tagged P&L JE for HQ tenant so the segment report has dimensioned data.
+  await db.insert(s.journalEntries).values({ entryNo: 'JE-SEG-001', entryDate: '2026-02-10', period: '2026-02', memo: 'Seg Feb', source: 'Manual', tenantId: hq, status: 'Posted' }).onConflictDoNothing();
+  const [jeSeg] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, 'JE-SEG-001'));
+  await db.insert(s.journalLines).values([
+    { entryId: Number(jeSeg.id), accountCode: '4000', debit: '0', credit: '6000', tenantId: hq, branchId: 1 },
+    { entryId: Number(jeSeg.id), accountCode: '5100', debit: '2000', credit: '0', tenantId: hq, branchId: 1 },
+    { entryId: Number(jeSeg.id), accountCode: '4000', debit: '0', credit: '3000', tenantId: hq, branchId: 2 },
+    { entryId: Number(jeSeg.id), accountCode: '5100', debit: '1000', credit: '0', tenantId: hq, branchId: 2 },
+  ]).onConflictDoNothing();
+
+  // 20. Define a segment grouping branches 1+2 into 'NORTH'
+  const seg = await inj('POST', '/api/consolidation/segments', admin, { code: 'NORTH', name: 'Northern Region', dimension: 'branch', member_keys: [1, 2] });
+  ok('CON-04 define segment → has id', seg.status === 201 && seg.json.id > 0, JSON.stringify(seg.json));
+
+  // 21. Segment report by branch for 2026-02 → NORTH revenue 9000 / expense 3000 / net 6000
+  const segRep = await inj('GET', '/api/consolidation/segment-report?period=2026-02&dimension=branch', admin);
+  const north = segRep.json.segments?.find((x: any) => x.segment === 'NORTH');
+  ok('CON-04 segment report NORTH rev=9000 exp=3000 net=6000', !!north && near(north.revenue, 9000) && near(north.expense, 3000) && near(north.net, 6000), JSON.stringify(segRep.json));
+
+  // 22. List segments → at least 1
+  const segs = await inj('GET', '/api/consolidation/segments', admin);
+  ok('CON-04 list segments → ≥1', segs.json.segments?.length >= 1, `count=${segs.json.segments?.length}`);
+
+  // 23. Define + list an elimination rule
+  const rule = await inj('POST', '/api/consolidation/rules', admin, { group_id: groupId, name: 'IC due-from/due-to', rule_type: 'ic_balance', debit_account: '2150', credit_account: '1150' });
+  ok('CON-03 define elimination rule → has id', rule.status === 201 && rule.json.id > 0, JSON.stringify(rule.json));
+  const rules = await inj('GET', `/api/consolidation/rules?group_id=${groupId}`, admin);
+  ok('CON-03 list elimination rules → ≥1', rules.json.rules?.length >= 1, `count=${rules.json.rules?.length}`);
+
   await app.close();
 }
 

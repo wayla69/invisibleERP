@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb, integer, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Payments + tender layer (move #3) — 1 sale → N tenders; proof money moved
@@ -92,4 +92,39 @@ export const tillSessions = pgTable('till_sessions', {
   varianceApprovedAt: timestamp('variance_approved_at', { withTimezone: true }),
 });
 
+// POS-07 — signed, persisted, tamper-evident Z-report archive. The live X/Z endpoints compute totals on
+// demand; signing snapshots those totals into an immutable record (content_hash over the canonical totals)
+// with a manager attestation (generated_by, pos_close) and a denomination breakdown, so the close-of-day
+// tape can be proven unaltered to an auditor.
+export const xzReports = pgTable('xz_reports', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  tillSessionId: bigint('till_session_id', { mode: 'number' }).references(() => tillSessions.id),
+  reportType: text('report_type').notNull(),                  // 'X' | 'Z'
+  generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow(),
+  generatedBy: text('generated_by'),
+  grossSales: numeric('gross_sales', { precision: 18, scale: 4 }).default('0'),
+  totalCash: numeric('total_cash', { precision: 18, scale: 4 }).default('0'),
+  totalCard: numeric('total_card', { precision: 18, scale: 4 }).default('0'),
+  totalRefund: numeric('total_refund', { precision: 18, scale: 4 }).default('0'),
+  txnCount: integer('txn_count').default(0),
+  voidCount: integer('void_count').default(0),
+  cashExpected: numeric('cash_expected', { precision: 18, scale: 4 }).default('0'),
+  cashCounted: numeric('cash_counted', { precision: 18, scale: 4 }),
+  variance: numeric('variance', { precision: 18, scale: 4 }),
+  status: text('status').notNull().default('SIGNED'),         // DRAFT | SIGNED
+  contentHash: text('content_hash'),                          // sha256 of the canonical totals — tamper-evidence
+  htmlSnapshot: text('html_snapshot'),
+}, (t) => ({ byTill: index('idx_xz_reports_till').on(t.tenantId, t.tillSessionId) }));
+
+export const xzReportDenominations = pgTable('xz_report_denominations', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  reportId: bigint('report_id', { mode: 'number' }).notNull().references(() => xzReports.id),
+  denomination: numeric('denomination', { precision: 10, scale: 2 }).notNull(),
+  count: integer('count').notNull().default(0),
+  total: numeric('total', { precision: 18, scale: 4 }).notNull().default('0'),
+});
+
 export type Payment = typeof payments.$inferSelect;
+export type XzReport = typeof xzReports.$inferSelect;

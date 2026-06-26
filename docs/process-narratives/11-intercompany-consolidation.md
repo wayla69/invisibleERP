@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Each period close + annual |
-| Related RCM controls | IC-01, IC-02, IC-03, IC-04, CONS-01, CONS-02, CONS-03, CONS-04, GL-01, REC-03; SoD R01, R07, R05 |
+| Related RCM controls | IC-01, IC-02, IC-03, IC-04, CONS-01, CONS-02, CONS-03, CONS-04, CON-03 (elimination integrity / run→post maker-checker), CON-04 (segment reporting), GL-01, REC-03; SoD R01, R07, R05 |
 | Related policy | `compliance/policies/03-delegation-of-authority.md`, `compliance/policies/07-access-control-policy.md`, `compliance/policies/11-financial-close-policy.md` |
 
 ## 2. Purpose
@@ -70,6 +70,9 @@ SoD: IC posting and consolidation runs are **HQ-only (Admin)** — subsidiaries 
    - **NCI lines** — account **3300**, NCI% × net income for entities owned < 100%.
    - **Elimination lines** — for IC where both tenants are in the group, eliminate **1150** / **2150**.
 7. **Consolidated-TB tie-out.** GroupController/FinancialController reviews the run via `GET /api/consolidation/groups/:groupId/runs` and `GET /api/consolidation/runs/:runId/lines`: the consolidated TB must tie to the sum of entity TBs **less** IC eliminations. Any residual unmatched IC (not flagged `eliminates`) is investigated before sign-off (**CONS-03**, **CONS-04**, **REC-03**).
+8. **Elimination integrity (WS3.3, RCM `CON-03`).** The run now **asserts the consolidated TB still balances**: every line is a signed net (debit − credit), so each entity's lines and each reciprocal elimination pair (**−amt on 1150**, **+amt on 2150**) must net to **~0** (the NCI presentation reclass on 3300 is excluded from the check). If the residual TB net or the elimination net is not ~0 the run throws **`CONSOL_UNBALANCED`** and is **rolled back** (no half-finished Draft) — eliminations cannot silently leave the group books unbalanced. Eliminations live at the **group layer** (`consolidation_run_lines`), and are **not** pushed into any operating entity's GL. Configurable elimination rules are held in `consol_elimination_rules` (`POST /api/consolidation/rules`, `GET /api/consolidation/rules?group_id=`).
+9. **Consolidation run → post maker-checker (WS3.3, RCM `CON-03`).** A balanced run is finalised (`status='Final'`, `balanced=true`). A **different** user then freezes it as the official group result via `POST /api/consolidation/runs/:runId/post` (`approvals`): the consolidated TB becomes the period's group result. Self-post (poster = runner) → **`SELF_POST`** (403); a re-run of a **Posted** period → **`ALREADY_POSTED`** (400); posting an unknown run → **`CONSOL_RUN_NOT_FOUND`** (404). One run per `(group, period)` — a fresh recompute supersedes a prior Draft/Final but never a Posted run.
+10. **Segment reporting (WS3.3, RCM `CON-04`, IFRS 8).** `GET /api/consolidation/segment-report?period=&dimension=` produces P&L (revenue / expense / net) grouped by reportable segment, sourced from the WS1.3 dimension columns on `journal_lines` (`branch_id` / `project_id` / `department_id`) and mapped through configurable `segment_definitions` (`POST /api/consolidation/segments`, `GET /api/consolidation/segments`); `member_keys` map dimension values into a segment, and unmapped values surface as their own/`Unassigned` bucket. HQ/Admin-only, gated `exec`.
 
 ## 8. Process flow
 
@@ -108,6 +111,9 @@ flowchart TD
 | 6 | FX / NCI / ownership mis-stated | Entity FX-translation, ownership weighting, NCI 3300 lines | Auto | CONS-02 | Run lines export |
 | 7 | IC not eliminated on consolidation | Elimination lines remove 1150/2150 for in-group pairs | Auto / Det | CONS-03 | Elimination lines |
 | 7 | Consolidated TB does not tie | Consolidated-TB tie-out to entity TBs less eliminations | Det / Hybrid | CONS-04, REC-03 | Tie-out workpaper |
+| 8 | Eliminations mis-stated → group TB out of balance | Balanced-TB assertion; `CONSOL_UNBALANCED` rolls back the run | Prev / Auto | **CON-03** | Consolidated TB net + elimination net (~0) |
+| 9 | Run posted/frozen without independent review | Run → post maker-checker (`SELF_POST`); idempotent per (group, period) (`ALREADY_POSTED`) | Prev / Auto | **CON-03** | Post log (`posted_by` ≠ `run_by`) |
+| 10 | Segment (IFRS 8) results not reported | Segment P&L grouped by dimension via `segment_definitions` | Det / Auto | **CON-04** | Segment P&L report |
 
 ## 10. Inputs & outputs
 
@@ -143,6 +149,10 @@ flowchart TD
 | `GROUP_NOT_FOUND` (404) | Run on unknown group | Verify group ID |
 | `NO_ENTITIES` (400) | Run on group with no entities | Add entities before running |
 | `403` on run | Lacks `approvals` permission | Independent approver runs/approves (≠ initiator) |
+| `CONSOL_UNBALANCED` (400) | Consolidated TB / eliminations do not net to ~0 | Run is rolled back; investigate IC pairs / elimination rules before re-running |
+| `SELF_POST` (403) | Poster = runner of the consolidation run | A different user posts (maker-checker) |
+| `ALREADY_POSTED` (400) | Re-run/post of a Posted (group, period) | The run is frozen; period result is final |
+| `CONSOL_RUN_NOT_FOUND` (404) | Post an unknown run id | Verify run id |
 | `SOD_VIOLATION` / SoD conflict | Conflicting initiate/approve or HQ-access duties | AccessAdmin remediates (see `08-itgc.md`) |
 
 ## 14. Revision history
@@ -150,3 +160,4 @@ flowchart TD
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 DRAFT | 2026-06-26 | WS3.3 | Added elimination-integrity balanced-TB assertion (`CONSOL_UNBALANCED`) + consolidation run→post maker-checker (`SELF_POST`/`ALREADY_POSTED`/`CONSOL_RUN_NOT_FOUND`) mapping to RCM **CON-03**, and IFRS-8 segment reporting (`segment_definitions` + `/segment-report`) mapping to RCM **CON-04**. Migration 0170; tables `consol_elimination_rules`, `segment_definitions`, `consolidation_runs.balanced/posted_by`. |

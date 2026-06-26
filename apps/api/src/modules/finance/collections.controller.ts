@@ -36,6 +36,10 @@ export class CollectionsController {
     return this.svc.recordDunning(invoiceNo, b, u);
   }
 
+  // All-customer credit positions — aggregate view for the credit-hold management dashboard.
+  @Get('credit-positions') @Permissions('ar', 'exec', 'crm')
+  creditPositions() { return this.svc.creditPositions(); }
+
   // Credit position of a customer (exposure vs limit, overdue, hold flag).
   @Get('credit-status') @Permissions('ar', 'exec', 'crm')
   creditStatus(@Query('tenant_id') tenantId: string) { return this.svc.creditStatus(Number(tenantId)); }

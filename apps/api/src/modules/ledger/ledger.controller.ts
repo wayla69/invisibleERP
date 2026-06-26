@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Query, Body, Param, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param, HttpCode, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -44,6 +45,9 @@ const OpeningBalancesBody = z.object({
 type OpeningBalancesBody = z.infer<typeof OpeningBalancesBody>;
 
 const RejectBody = z.object({ reason: z.string().optional() });
+
+// GL-17: reverse a posted JE with an optional reason and an optional reversal date (defaults to today).
+const ReverseBody = z.object({ reason: z.string().optional(), date: z.string().optional() });
 
 const RecurringBody = z.object({
   name: z.string().min(1),
@@ -143,8 +147,43 @@ export class LedgerController {
   @Permissions('gl_close', 'approvals')
   rejectJournal(@Param('entryNo') entryNo: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectEntry(entryNo, u, b.reason); }
 
+  // ── GL immutability + reversal (WS2.2, GL-17) ──
+  // A Posted JE is immutable; corrections happen only via a contra reversal (a new, immediately-Posted entry
+  // with every line's Dr/Cr swapped). :id is the numeric journal_entries.id.
+  @Post('journal/:id/reverse')
+  @HttpCode(200)
+  @Permissions('gl_post')
+  reverseJournal(@Param('id') id: string, @Body(new ZodValidationPipe(ReverseBody)) b: z.infer<typeof ReverseBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.reverseEntry({ entryId: parseInt(id, 10), reversedBy: u.username, reason: b.reason, date: b.date });
+  }
+
+  // Demonstrates the GL-17 immutability guard (for ops/tests): attempting to void/delete a posted entry is
+  // refused with GL_IMMUTABLE and logged as MUTATE_BLOCKED. Posted entries are never editable/deletable.
+  // The service returns a discriminated result so the MUTATE_BLOCKED audit row commits with the request tx
+  // (a thrown exception would roll it back); we then render the block as HTTP 400 on the same committed reply.
+  @Post('journal/:id/attempt-void')
+  @Permissions('gl_post')
+  async attemptVoid(@Param('id') id: string, @CurrentUser() u: JwtUser, @Res({ passthrough: true }) reply: FastifyReply) {
+    const res = await this.svc.attemptVoidPosted(parseInt(id, 10), u.username);
+    if (res.blocked) reply.code(400);
+    return res.blocked ? { error: { code: res.code, message: res.message, messageTh: res.messageTh } } : res;
+  }
+
+  // The GL audit trail (POST/APPROVE/REVERSE/MUTATE_BLOCKED), optionally filtered to one entry.
+  @Get('audit')
+  @Permissions('gl_post', 'gl_close', 'exec')
+  glAudit(@Query('entryId') entryId?: string, @Query('limit') limit?: string) {
+    return this.svc.listGlAudit(entryId ? parseInt(entryId, 10) : undefined, qint('limit', limit, 100));
+  }
+
   @Get('income-statement')
   incomeStatement(@Query('from') from: string, @Query('to') to: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.incomeStatement(from, to, costCenter, ledger || undefined); }
+
+  @Get('income-statement/by-branch')
+  @Permissions('exec', 'fin_report', 'creditors', 'ar')
+  incomeStatementByBranch(@Query('from') from: string, @Query('to') to: string) {
+    return this.svc.incomeStatementByBranch({ from, to });
+  }
 
   @Get('balance-sheet')
   balanceSheet(@Query('as_of') asOf: string, @Query('ledger') ledger?: string) { return this.svc.balanceSheet(asOf, ledger || undefined); }

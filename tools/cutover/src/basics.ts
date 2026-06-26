@@ -483,6 +483,99 @@ async function main() {
     near(woList.total_written_off, 500) && (woList.write_offs ?? []).some((w: any) => w.state === 'approved' && near(w.amount, 500)),
     `st=${woListResp.status} ${JSON.stringify(woList).slice(0, 200)}`);
 
+  // ───────────────── AR allowance for doubtful accounts (ECL, REV-18) ─────────────────
+  // Dedicated customer + invoices so the aging buckets are deterministic and we don't disturb other AR checks.
+  await db.insert(s.tenants).values([{ code: 'ECLCUST', name: 'ECL Customer', creditLimit: '0' }]).onConflictDoNothing();
+  const eclTid = await tid('ECLCUST');
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-ECL1', invoiceDate: daysAgo(200), dueDate: daysAgo(170), tenantId: eclTid, amount: '1000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }, // 170d → 120+ bucket, rate 1.0 → 1000
+    { invoiceNo: 'INV-ECL2', invoiceDate: daysAgo(80), dueDate: daysAgo(50), tenantId: eclTid, amount: '2000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' },  // 50d → 31-60 bucket, rate 0.05 → 100
+    { invoiceNo: 'INV-ECL3', invoiceDate: daysAgo(10), dueDate: daysAgo(-20), tenantId: eclTid, amount: '5000', paidAmount: '0', status: 'Unpaid', createdBy: 'seed' }, // not due → current, rate 0 → 0
+  ]).onConflictDoNothing();
+  const alw5720Before = await tbDebit('5720');
+  const alw1190CrBefore = await tbCredit2('1190');
+  const cmp = await inj('POST', '/api/finance/ar-allowance/compute', admin, { tenant_id: eclTid });
+  // allowance = 1000*1.0 + 2000*0.05 + 5000*0 = 1100; total AR = 8000.
+  ok('AR allowance: aging compute → allowance 1100 on total AR 8000',
+    cmp.status === 200 && near(cmp.json?.allowance, 1100) && near(cmp.json?.total_ar, 8000) && cmp.json?.posted === false,
+    `st=${cmp.status} alw=${cmp.json?.allowance} ar=${cmp.json?.total_ar}`);
+  const cmpId = cmp.json?.id;
+  // Maker-checker: the computer cannot also post (SoD).
+  const alwSelf = await inj('POST', `/api/finance/ar-allowance/${cmpId}/post`, admin);
+  ok('AR allowance: computer cannot post own allowance (SOD_SELF_POST)',
+    alwSelf.status === 403 && alwSelf.json?.error?.code === 'SOD_SELF_POST', `st=${alwSelf.status} code=${alwSelf.json?.error?.code}`);
+  const alwPost = await inj('POST', `/api/finance/ar-allowance/${cmpId}/post`, mgr);
+  ok('AR allowance: a different user posts the delta (1100) → Dr 5720 / Cr 1190',
+    alwPost.status === 200 && near(alwPost.json?.posted_amount, 1100) && /^JE-/.test(alwPost.json?.entry_no ?? ''),
+    `st=${alwPost.status} amt=${alwPost.json?.posted_amount} je=${alwPost.json?.entry_no}`);
+  ok('AR allowance: GL reflects the provision (5720 +1100 debit, 1190 +1100 credit)',
+    near(await tbDebit('5720'), alw5720Before + 1100) && near(await tbCredit2('1190'), alw1190CrBefore + 1100),
+    JSON.stringify({ d5720: await tbDebit('5720'), c1190: await tbCredit2('1190') }));
+  // Re-post is blocked.
+  const alwRepost = await inj('POST', `/api/finance/ar-allowance/${cmpId}/post`, admin);
+  ok('AR allowance: a posted allowance cannot be re-posted (ALREADY_POSTED)',
+    alwRepost.status === 400 && alwRepost.json?.error?.code === 'ALREADY_POSTED', `st=${alwRepost.status} code=${alwRepost.json?.error?.code}`);
+  const alwList = (await inj('GET', `/api/finance/ar-allowance?tenant_id=${eclTid}`, admin)).json;
+  ok('AR allowance register: lists the posted computation', (alwList.allowances ?? []).some((a: any) => a.id === cmpId && a.posted === true && near(a.allowance, 1100)), `n=${alwList.count}`);
+
+  // ───────────────── WS3.2 — FX revaluation (GL-18) + Deferred tax (TAX-06) ─────────────────
+  // FX reval on a dedicated tenant with one open foreign-currency AR + AP, closing rates passed explicitly.
+  await db.insert(s.tenants).values([{ code: 'FXCO', name: 'FX Co', creditLimit: '0' }]).onConflictDoNothing();
+  const fxTid = await tid('FXCO');
+  // AR USD 1,000 booked @ 34 (THB 34,000); AP USD 400 booked @ 34 (THB 13,600). Closing rate 36.
+  //  AR delta = 1000 × (36−34) = +2000 (gain); AP delta = 400 × (36−34) = +800 (loss).
+  //  net P&L = AR gain − AP loss = 2000 − 800 = +1200 (net gain) → Cr 5400 1200; Dr 1100 2000; Cr 2000 800.
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-FX1', invoiceDate: daysAgo(20), dueDate: daysAgo(-10), tenantId: fxTid, amount: '1000', paidAmount: '0', status: 'Unpaid', currency: 'USD', fxRate: '34', createdBy: 'seed' },
+  ]).onConflictDoNothing();
+  await db.insert(s.apTransactions).values([
+    { txnNo: 'AP-FX1', invoiceNo: 'BILL-FX1', invoiceDate: daysAgo(20), dueDate: daysAgo(-10), tenantId: fxTid, amount: '400', paidAmount: '0', status: 'Unpaid', currency: 'USD', fxRate: '34', createdBy: 'seed' },
+  ]).onConflictDoNothing();
+  const fx1100Before = await tbDebit('1100'); const fx2000CrBefore = await tbCredit2('2000'); const fx5400CrBefore = await tbCredit2('5400');
+  const fxRun = await inj('POST', '/api/ledger/fx-reval/run', admin, { period: '2026-12', as_of_date: '2026-12-31', rates: { USD: 36 }, tenant_id: fxTid });
+  ok('FX reval: run computes net unrealized gain 1200 (AR +2000 gain, AP +800 loss)',
+    fxRun.status === 200 && near(fxRun.json?.net, 1200) && near(fxRun.json?.ar_delta, 2000) && near(fxRun.json?.ap_delta, 800) && fxRun.json?.status === 'Open',
+    `st=${fxRun.status} net=${fxRun.json?.net} ar=${fxRun.json?.ar_delta} ap=${fxRun.json?.ap_delta}`);
+  const fxRunId = fxRun.json?.id;
+  const fxSelf = await inj('POST', `/api/ledger/fx-reval/${fxRunId}/post`, admin);
+  ok('FX reval: runner cannot post own run (SELF_POST)',
+    fxSelf.status === 403 && fxSelf.json?.error?.code === 'SELF_POST', `st=${fxSelf.status} code=${fxSelf.json?.error?.code}`);
+  const fxPost = await inj('POST', `/api/ledger/fx-reval/${fxRunId}/post`, mgr);
+  ok('FX reval: a different user posts → JE with net gain 1200',
+    fxPost.status === 200 && near(fxPost.json?.net, 1200) && /^JE-/.test(fxPost.json?.entry_no ?? ''),
+    `st=${fxPost.status} net=${fxPost.json?.net} je=${fxPost.json?.entry_no}`);
+  ok('FX reval: GL reflects the reval (5400 +1200 credit, 1100 +2000 debit, 2000 +800 credit)',
+    near(await tbCredit2('5400'), fx5400CrBefore + 1200) && near(await tbDebit('1100'), fx1100Before + 2000) && near(await tbCredit2('2000'), fx2000CrBefore + 800),
+    JSON.stringify({ c5400: await tbCredit2('5400'), d1100: await tbDebit('1100'), c2000: await tbCredit2('2000') }));
+  const fxRepost = await inj('POST', `/api/ledger/fx-reval/${fxRunId}/post`, mgr);
+  ok('FX reval: a posted run cannot be re-posted (ALREADY_POSTED)',
+    fxRepost.status === 400 && fxRepost.json?.error?.code === 'ALREADY_POSTED', `st=${fxRepost.status} code=${fxRepost.json?.error?.code}`);
+  const fxRerun = await inj('POST', '/api/ledger/fx-reval/run', admin, { period: '2026-12', as_of_date: '2026-12-31', rates: { USD: 36 }, tenant_id: fxTid });
+  ok('FX reval: re-running a posted period is rejected (ALREADY_POSTED)',
+    fxRerun.status === 400 && fxRerun.json?.error?.code === 'ALREADY_POSTED', `st=${fxRerun.status} code=${fxRerun.json?.error?.code}`);
+
+  // Deferred tax on the ECLCUST tenant — it has a posted AR allowance (1100) and no fixed assets, so the
+  // sole temporary difference is the deductible allowance → DTA = 1100 × 0.20 = 220, net deferred asset 220.
+  const dt1700Before = await tbDebit('1700'); const dt5950CrBefore = await tbCredit2('5950');
+  const dtRun = await inj('POST', '/api/ledger/deferred-tax/run', admin, { period: '2026-12', as_of_date: '2026-12-31', tenant_id: eclTid });
+  ok('Deferred tax: run computes DTA 220 from the AR allowance (1100 × 20%)',
+    dtRun.status === 200 && near(dtRun.json?.dta, 220) && near(dtRun.json?.net_deferred, 220) && near(dtRun.json?.delta_posted, 220) && dtRun.json?.status === 'Open',
+    `st=${dtRun.status} dta=${dtRun.json?.dta} net=${dtRun.json?.net_deferred} delta=${dtRun.json?.delta_posted}`);
+  const dtRunId = dtRun.json?.id;
+  const dtSelf = await inj('POST', `/api/ledger/deferred-tax/${dtRunId}/post`, admin);
+  ok('Deferred tax: runner cannot post own run (SELF_POST)',
+    dtSelf.status === 403 && dtSelf.json?.error?.code === 'SELF_POST', `st=${dtSelf.status} code=${dtSelf.json?.error?.code}`);
+  const dtPost = await inj('POST', `/api/ledger/deferred-tax/${dtRunId}/post`, mgr);
+  ok('Deferred tax: a different user posts delta 220 → Dr 1700 / Cr 5950',
+    dtPost.status === 200 && near(dtPost.json?.delta_posted, 220) && /^JE-/.test(dtPost.json?.entry_no ?? ''),
+    `st=${dtPost.status} delta=${dtPost.json?.delta_posted} je=${dtPost.json?.entry_no}`);
+  ok('Deferred tax: GL reflects the deferral (1700 +220 debit, 5950 +220 credit)',
+    near(await tbDebit('1700'), dt1700Before + 220) && near(await tbCredit2('5950'), dt5950CrBefore + 220),
+    JSON.stringify({ d1700: await tbDebit('1700'), c5950: await tbCredit2('5950') }));
+  const dtRepost = await inj('POST', `/api/ledger/deferred-tax/${dtRunId}/post`, mgr);
+  ok('Deferred tax: a posted run cannot be re-posted (ALREADY_POSTED)',
+    dtRepost.status === 400 && dtRepost.json?.error?.code === 'ALREADY_POSTED', `st=${dtRepost.status} code=${dtRepost.json?.error?.code}`);
+
   // ───────────────── Asset revaluation / impairment maker-checker (FA-07 valuation + FA-08 SoD) ─────────────────
   const reg = (await inj('GET', '/api/assets', admin)).json;
   const fa2 = (reg.assets ?? reg.register ?? []).find((a: any) => (a.asset_no ?? a.assetNo) === 'FA-EAM2');
@@ -649,7 +742,221 @@ async function main() {
     genAcc.accounts?.some((a: any) => a.code === '4300') && genAcc.accounts?.some((a: any) => a.code === '5300') && genAcc.count === restoAll.count,
     `n=${genAcc.count} src=${genAcc.source}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA ──');
+  // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
+  // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
+  // Both legs use the same depreciation amount; pass both role keys so the engine maps them.
+  const prevDep = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'DEPRECIATION.FA', amounts: { dep_expense: 1000, accum_dep: 1000 } });
+  const depLines: any[] = Array.isArray(prevDep.json) ? prevDep.json : [];
+  const depDR = depLines.find((l: any) => l.side === 'DR');
+  const depCR = depLines.find((l: any) => l.side === 'CR');
+  ok('GL-12: preview DEPRECIATION.FA → DR 5200 / CR 1590 (amount 1000)',
+    prevDep.status === 200 && depDR?.accountCode === '5200' && near(depDR?.amount, 1000) && depCR?.accountCode === '1590' && near(depCR?.amount, 1000),
+    `st=${prevDep.status} DR=${depDR?.accountCode}:${depDR?.amount} CR=${depCR?.accountCode}:${depCR?.amount}`);
+
+  // TC-GL-12-02: preview goods-receipt legs — DR 1200 / CR 2000
+  // Both legs use the same amount; pass both role keys so the engine maps them.
+  const prevGR = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'GR.INVENTORY', amounts: { inventory: 500, ap_control: 500 } });
+  const grLines: any[] = Array.isArray(prevGR.json) ? prevGR.json : [];
+  const grDR = grLines.find((l: any) => l.side === 'DR');
+  const grCR = grLines.find((l: any) => l.side === 'CR');
+  ok('GL-12: preview GR.INVENTORY → DR 1200 / CR 2000 (amount 500)',
+    prevGR.status === 200 && grDR?.accountCode === '1200' && near(grDR?.amount, 500) && grCR?.accountCode === '2000' && near(grCR?.amount, 500),
+    `st=${prevGR.status} DR=${grDR?.accountCode}:${grDR?.amount} CR=${grCR?.accountCode}:${grCR?.amount}`);
+
+  // TC-GL-12-03: unknown event type → NO_POSTING_RULE
+  const prevUnknown = await inj('POST', '/api/ledger/posting-rules/preview', admin, { eventType: 'UNKNOWN_EVENT', amounts: {} });
+  ok('GL-12: unknown eventType → 400/422 NO_POSTING_RULE',
+    (prevUnknown.status === 400 || prevUnknown.status === 422) && prevUnknown.json?.error?.code === 'NO_POSTING_RULE',
+    `st=${prevUnknown.status} code=${prevUnknown.json?.error?.code}`);
+
+  // TC-GL-12-04: event-type catalogue returns ≥20 entries
+  const evTypes = await inj('GET', '/api/ledger/posting-rules/event-types', admin);
+  const evList: any[] = Array.isArray(evTypes.json) ? evTypes.json : [];
+  ok('GL-12: event-type catalogue lists ≥20 seeded event types',
+    evTypes.status === 200 && evList.length >= 20,
+    `st=${evTypes.status} n=${evList.length}`);
+
+  // ───────────────────── WS1.3 — Multi-dimensional GL Postings (GL-13) ─────────────────────
+  // TC-GL-13-01: smoke test — by-branch endpoint returns a branches key
+  const today = new Date().toISOString().slice(0, 10);
+  const bb0 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
+  ok('GL-13: income-statement/by-branch returns a branches key (smoke)', bb0.status === 200 && typeof bb0.json?.branches === 'object', `st=${bb0.status}`);
+
+  // TC-GL-13-02: post JEs with branch_id on lines, then verify both branches appear
+  // Using direct DB insert so we can set branch_id (the API POST /journal doesn't yet expose branch_id in the Zod schema)
+  jeSeq++;
+  const [hb1] = await db.insert(s.journalEntries).values({
+    entryNo: `JE-B${String(jeSeq).padStart(4, '0')}`, entryDate: today, period: today.slice(0, 7),
+    source: 'TEST-GL13', sourceRef: `GL13-${jeSeq}`, tenantId: hq, currency: 'THB', status: 'Posted', createdBy: 'seed',
+  }).returning({ id: s.journalEntries.id });
+  await db.insert(s.journalLines).values([
+    { entryId: Number(hb1.id), accountCode: '4000', debit: '0', credit: '500', currency: 'THB', tenantId: hq, branchId: 1 },
+    { entryId: Number(hb1.id), accountCode: '1000', debit: '500', credit: '0', currency: 'THB', tenantId: hq, branchId: 1 },
+  ]);
+  jeSeq++;
+  const [hb2] = await db.insert(s.journalEntries).values({
+    entryNo: `JE-B${String(jeSeq).padStart(4, '0')}`, entryDate: today, period: today.slice(0, 7),
+    source: 'TEST-GL13', sourceRef: `GL13-${jeSeq}`, tenantId: hq, currency: 'THB', status: 'Posted', createdBy: 'seed',
+  }).returning({ id: s.journalEntries.id });
+  await db.insert(s.journalLines).values([
+    { entryId: Number(hb2.id), accountCode: '4000', debit: '0', credit: '300', currency: 'THB', tenantId: hq, branchId: 2 },
+    { entryId: Number(hb2.id), accountCode: '1000', debit: '300', credit: '0', currency: 'THB', tenantId: hq, branchId: 2 },
+  ]);
+  const bb2 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
+  ok('GL-13: branch_id=1 and branch_id=2 both appear in by-branch P&L', bb2.status === 200 && !!bb2.json?.branches?.['1'] && !!bb2.json?.branches?.['2'], `branches=${Object.keys(bb2.json?.branches ?? {}).join(',')}`);
+
+  // TC-GL-13-03: post without branch_id → appears under 'unassigned'
+  jeSeq++;
+  const [hb3] = await db.insert(s.journalEntries).values({
+    entryNo: `JE-B${String(jeSeq).padStart(4, '0')}`, entryDate: today, period: today.slice(0, 7),
+    source: 'TEST-GL13', sourceRef: `GL13-${jeSeq}`, tenantId: hq, currency: 'THB', status: 'Posted', createdBy: 'seed',
+  }).returning({ id: s.journalEntries.id });
+  await db.insert(s.journalLines).values([
+    { entryId: Number(hb3.id), accountCode: '5100', debit: '200', credit: '0', currency: 'THB', tenantId: hq },
+    { entryId: Number(hb3.id), accountCode: '1000', debit: '0', credit: '200', currency: 'THB', tenantId: hq },
+  ]);
+  const bb3 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
+  ok('GL-13: journal lines without branch_id appear under "unassigned"', bb3.status === 200 && !!bb3.json?.branches?.['unassigned'], `branches=${Object.keys(bb3.json?.branches ?? {}).join(',')}`);
+
+  // ───────────────────── WS1.4 — Sub-ledger Tie-out / Reconciliation (GL-14) ─────────────────────
+  // Flag the four control accounts (1100/2000/1200/1500). Migration 0155 sets these via UPDATE, but it
+  // runs before the COA is seeded (seedChartOfAccounts at boot), so the flags are re-applied HERE — after
+  // all the AP/INV/FA posting tests above have run — so the tie-out can resolve the control accounts
+  // without the CONTROL_ACCOUNT guard tripping those earlier direct postings.
+  for (const [code, sub] of [['1100', 'AR'], ['2000', 'AP'], ['1200', 'INV'], ['1500', 'FA']] as const)
+    await db.update(s.accounts).set({ isControl: true, controlSubledger: sub }).where(eq(s.accounts.code, code));
+
+  // TC-GL-14-01: run an AR tie-out → 200/201 with the balance fields and a Matched/Variance status.
+  const tieRun = await inj('POST', '/api/ledger/tie-out/run', admin, { subledger: 'AR' });
+  ok('GL-14: run AR tie-out returns glBalance/subledgerBalance/variance/status',
+    (tieRun.status === 200 || tieRun.status === 201)
+      && typeof tieRun.json?.glBalance === 'number'
+      && typeof tieRun.json?.subledgerBalance === 'number'
+      && typeof tieRun.json?.variance === 'number'
+      && ['Matched', 'Variance'].includes(tieRun.json?.status),
+    `st=${tieRun.status} status=${tieRun.json?.status} gl=${tieRun.json?.glBalance} sl=${tieRun.json?.subledgerBalance}`);
+  const tieId = Number(tieRun.json?.id);
+
+  // TC-GL-14-?: list returns an array including the AR run.
+  const tieList = await inj('GET', '/api/ledger/tie-out', admin);
+  ok('GL-14: list tie-out runs returns the AR run',
+    tieList.status === 200 && Array.isArray(tieList.json?.runs) && tieList.json.runs.some((r: any) => r.id === tieId && r.subledger === 'AR'),
+    `st=${tieList.status} count=${tieList.json?.count}`);
+
+  // TC-GL-14-02: self-certify blocked — the runner (admin) cannot certify their own run → SELF_CERTIFY.
+  const selfCert = await inj('POST', `/api/ledger/tie-out/${tieId}/certify`, admin, {});
+  ok('GL-14: self-certify blocked (runner cannot certify own run) → SELF_CERTIFY',
+    selfCert.status === 400 && selfCert.json?.error?.code === 'SELF_CERTIFY',
+    `st=${selfCert.status} code=${selfCert.json?.error?.code}`);
+
+  // TC-GL-14-03: certify by a DIFFERENT user (mgr, also gl_close) → status becomes 'Certified'.
+  const mgrCert = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
+  const cert = await inj('POST', `/api/ledger/tie-out/${tieId}/certify`, mgrCert, { note: 'Reviewed — ties out' });
+  ok('GL-14: certify by a different user → Certified',
+    cert.status === 200 && cert.json?.status === 'Certified' && cert.json?.certified_by === 'mgr',
+    `st=${cert.status} status=${cert.json?.status} by=${cert.json?.certified_by}`);
+
+  // ───────────────────── WS2.2 — GL immutability + audit log + reversal (GL-17) ─────────────────────
+  // Post a manual JE (Draft) then approve it (mgr ≠ admin) to obtain a freshly-Posted entry, dated TODAY
+  // (an open period) so it does not disturb other checks' balances. Use unique accounts 1280/2400.
+  const glPost = await inj('POST', '/api/ledger/journal', admin, { source: 'Manual', memo: 'GL-17 reversible', lines: [{ account_code: '1280', debit: 777 }, { account_code: '2400', credit: 777 }] });
+  const glEntryNo = glPost.json?.entry_no;
+  const glAppr = await inj('POST', `/api/ledger/journal/${glEntryNo}/approve`, mgr);
+  ok('GL-17: post + approve a JE → Posted (test fixture)', glAppr.status === 200 && glAppr.json?.status === 'Posted', `st=${glAppr.status} status=${glAppr.json?.status}`);
+  // Resolve the numeric id of the posted entry.
+  const [glRow] = await db.select({ id: s.journalEntries.id }).from(s.journalEntries).where(eq(s.journalEntries.entryNo, glEntryNo));
+  const glId = Number(glRow.id);
+
+  // TC-GL-17-01: attempting to void/delete a posted entry → GL_IMMUTABLE + a MUTATE_BLOCKED audit row.
+  const voidPosted = await inj('POST', `/api/ledger/journal/${glId}/attempt-void`, admin);
+  ok('GL-17: void of a posted entry blocked (GL_IMMUTABLE)', voidPosted.status === 400 && voidPosted.json?.error?.code === 'GL_IMMUTABLE', `st=${voidPosted.status} code=${voidPosted.json?.error?.code}`);
+  const aud1 = (await inj('GET', `/api/ledger/audit?entryId=${glId}`, admin)).json;
+  ok('GL-17: MUTATE_BLOCKED recorded in the GL audit trail', (aud1.audit ?? []).some((a: any) => a.action === 'MUTATE_BLOCKED') && (aud1.audit ?? []).some((a: any) => a.action === 'APPROVE'), `actions=${JSON.stringify((aud1.audit ?? []).map((a: any) => a.action))}`);
+
+  // TC-GL-17-02: reverse the posted entry → a contra entry with swapped Dr/Cr; original flagged is_reversed.
+  const tb1280Pre = await (async () => { const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json; return (tb.rows ?? []).find((r: any) => r.account_code === '1280')?.balance ?? 0; })();
+  const rev = await inj('POST', `/api/ledger/journal/${glId}/reverse`, admin, { reason: 'duplicate posting' });
+  ok('GL-17: reverse a posted entry → returns reversalId/originalId', rev.status === 200 && typeof rev.json?.reversalId === 'number' && rev.json?.originalId === glId, JSON.stringify(rev.json));
+  const revId = rev.json?.reversalId;
+  const [revRow] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, revId));
+  const revLines = await db.select().from(s.journalLines).where(eq(s.journalLines.entryId, revId));
+  const rl1280 = revLines.find((l: any) => l.accountCode === '1280');
+  ok('GL-17: contra entry swaps Dr/Cr (1280 now a 777 credit), reversal_of set, Posted', revRow?.status === 'Posted' && Number(revRow?.reversalOf) === glId && near(rl1280?.credit, 777) && near(rl1280?.debit, 0), `rof=${revRow?.reversalOf} cr=${rl1280?.credit}`);
+  const [origRow] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.id, glId));
+  ok('GL-17: original entry flagged is_reversed', origRow?.isReversed === true, `is_reversed=${origRow?.isReversed}`);
+  // Net effect on 1280 is zero (original 777 Dr + reversal 777 Cr).
+  const tb1280Post = await (async () => { const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json; return (tb.rows ?? []).find((r: any) => r.account_code === '1280')?.balance ?? 0; })();
+  ok('GL-17: original + reversal net to zero on 1280', near(tb1280Post, tb1280Pre - 777), `pre=${tb1280Pre} post=${tb1280Post}`);
+  const aud2 = (await inj('GET', `/api/ledger/audit?entryId=${glId}`, admin)).json;
+  ok('GL-17: REVERSE recorded in the audit trail', (aud2.audit ?? []).some((a: any) => a.action === 'REVERSE'), `actions=${JSON.stringify((aud2.audit ?? []).map((a: any) => a.action))}`);
+
+  // TC-GL-17-03: reversing an already-reversed entry → ALREADY_REVERSED.
+  const revAgain = await inj('POST', `/api/ledger/journal/${glId}/reverse`, admin, { reason: 'again' });
+  ok('GL-17: double reversal blocked (ALREADY_REVERSED)', revAgain.status === 400 && revAgain.json?.error?.code === 'ALREADY_REVERSED', `st=${revAgain.status} code=${revAgain.json?.error?.code}`);
+
+  // ───────────────────── WS2.1 — Hard Period Close + Checklist (GL-15/GL-16) ─────────────────────
+  // Lock a clearly-PAST period (2020-01) that no other harness check posts into (all postings above are
+  // dated 2025/2026 or runtime-now), so locking it cannot retroactively break any earlier or later check.
+  const closePeriod = '2020-01';
+
+  // TC-GL-15-01: start a close run → InProgress with the checklist seeded (≥4 steps).
+  const startClose = await inj('POST', '/api/ledger/close/start', admin, { period: closePeriod });
+  const closeRunId = Number(startClose.json?.id);
+  ok('GL-15: start close seeds the checklist (InProgress, ≥4 steps)',
+    (startClose.status === 200 || startClose.status === 201) && startClose.json?.status === 'InProgress' && Array.isArray(startClose.json?.steps) && startClose.json.steps.length >= 4,
+    `st=${startClose.status} status=${startClose.json?.status} steps=${startClose.json?.steps?.length}`);
+
+  // TC-GL-15-02: lock before steps are done → STEPS_INCOMPLETE.
+  const lockEarly = await inj('POST', '/api/ledger/close/lock', admin, { close_run_id: closeRunId });
+  ok('GL-15: lock before steps complete → STEPS_INCOMPLETE',
+    lockEarly.status === 400 && lockEarly.json?.error?.code === 'STEPS_INCOMPLETE',
+    `st=${lockEarly.status} code=${lockEarly.json?.error?.code}`);
+
+  // Complete every REQUIRED step → run becomes ReadyToLock.
+  let stepRes: any = null;
+  for (const stp of (startClose.json?.steps ?? []).filter((s: any) => s.required))
+    stepRes = await inj('POST', '/api/ledger/close/step', admin, { close_run_id: closeRunId, step_key: stp.step_key });
+  ok('GL-15: all required steps done → run ReadyToLock',
+    stepRes?.status === 200 && stepRes?.json?.status === 'ReadyToLock',
+    `st=${stepRes?.status} status=${stepRes?.json?.status}`);
+
+  // TC-GL-16-01: self-lock blocked — the starter (admin) cannot lock their own run → SELF_LOCK.
+  const selfLock = await inj('POST', '/api/ledger/close/lock', admin, { close_run_id: closeRunId });
+  ok('GL-16: self-lock blocked (starter cannot lock own run) → SELF_LOCK',
+    selfLock.status === 400 && selfLock.json?.error?.code === 'SELF_LOCK',
+    `st=${selfLock.status} code=${selfLock.json?.error?.code}`);
+
+  // TC-GL-16-02: lock by a DIFFERENT user (mgr, also gl_close) → status Locked.
+  const mgrLock = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'mgr123' })).json.token;
+  const locked = await inj('POST', '/api/ledger/close/lock', mgrLock, { close_run_id: closeRunId });
+  ok('GL-16: lock by a different user → Locked',
+    locked.status === 200 && locked.json?.status === 'Locked' && locked.json?.locked_by === 'mgr',
+    `st=${locked.status} status=${locked.json?.status} by=${locked.json?.locked_by}`);
+
+  // TC-GL-15-03: post a JE dated INTO the locked period → PERIOD_LOCKED (the new hard gate).
+  const lockedPost = await inj('POST', '/api/ledger/journal', admin, { date: `${closePeriod}-15`, source: 'Manual', lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
+  ok('GL-15: posting into a locked period → PERIOD_LOCKED',
+    lockedPost.status === 400 && lockedPost.json?.error?.code === 'PERIOD_LOCKED',
+    `st=${lockedPost.status} code=${lockedPost.json?.error?.code}`);
+
+  // TC-GL-16b — controlled emergency reopen (mandatory reason; reopener ≠ locker; audited).
+  const reopenNoReason = await inj('POST', '/api/ledger/close/reopen', admin, { close_run_id: closeRunId });
+  ok('GL-16b: reopen without a reason → REASON_REQUIRED',
+    reopenNoReason.status === 400 && reopenNoReason.json?.error?.code === 'REASON_REQUIRED', `st=${reopenNoReason.status} code=${reopenNoReason.json?.error?.code}`);
+  const reopenSelf = await inj('POST', '/api/ledger/close/reopen', mgrLock, { close_run_id: closeRunId, reason: 'fix dep' });
+  ok('GL-16b: the locker cannot reopen their own lock → SELF_REOPEN',
+    reopenSelf.status === 400 && reopenSelf.json?.error?.code === 'SELF_REOPEN', `st=${reopenSelf.status} code=${reopenSelf.json?.error?.code}`);
+  const reopened = await inj('POST', '/api/ledger/close/reopen', admin, { close_run_id: closeRunId, reason: 'late depreciation adjustment' });
+  ok('GL-16b: a different user reopens with a reason → ReadyToLock',
+    reopened.status === 200 && reopened.json?.status === 'ReadyToLock', `st=${reopened.status} status=${reopened.json?.status}`);
+  const repostAfterReopen = await inj('POST', '/api/ledger/journal', admin, { date: `${closePeriod}-15`, source: 'Manual', lines: [{ account_code: '1000', debit: 10 }, { account_code: '4000', credit: 10 }] });
+  ok('GL-16b: posting into the reopened period now succeeds (period back to Open)',
+    repostAfterReopen.status === 200 || repostAfterReopen.status === 201, `st=${repostAfterReopen.status} code=${repostAfterReopen.json?.error?.code ?? ''}`);
+  const reLock = await inj('POST', '/api/ledger/close/lock', mgrLock, { close_run_id: closeRunId });
+  ok('GL-16b: a different user can re-lock the reopened period → Locked',
+    reLock.status === 200 && reLock.json?.status === 'Locked', `st=${reLock.status} status=${reLock.json?.status}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

@@ -32,6 +32,8 @@ your code below.
 | `CREDIT_LIMIT` (เกินวงเงินเครดิต) | The order would exceed the customer's credit limit. | Reduce the order, collect payment on overdue invoices, or have a credit manager raise the limit. |
 | `CREDIT_OVERDUE` (ลูกค้ามีหนี้ค้างชำระเกินกำหนด) | The customer has an invoice **90+ days past due** (in default), so new credit orders are blocked even within their limit. | Collect/settle the overdue invoice (or arrange a promise-to-pay) before placing new credit orders; take payment now for a cash sale. |
 | `OVER_RETURN` | Returning more than was originally sold. | Check the original sale quantities; return only up to what was bought. |
+| `SOD_SELF_POST` | The same person who **computed** an AR allowance (provision for doubtful accounts) tried to **post** it. | A different reviewer (`gl_post` / `exec`) posts the allowance — the computer can't post their own. See [Finance — AR & AP → Allowance](./05-finance-ar-ap.md). |
+| `ALLOWANCE_POSTED` / `ALREADY_POSTED` | You tried to (re)post an AR allowance that is already posted. | A given allowance posts once; to revise, **compute a fresh allowance** for a later `as_of_date`. |
 
 ### Procurement & AP
 
@@ -45,7 +47,16 @@ your code below.
 
 | Code | Meaning | What to do |
 |------|---------|-----------|
-| `PERIOD_CLOSED` | You tried to post to a closed accounting period. | Post to an open period, or ask a *FinancialController* to reopen the period, post, then close it again. See [General Ledger](./06-general-ledger.md). |
+| `PERIOD_CLOSED` | You tried to post to a closed (soft) accounting period. | Post to an open period, or ask a *FinancialController* to reopen the period, post, then close it again. See [General Ledger](./06-general-ledger.md). |
+| `PERIOD_LOCKED` | You tried to post into a **hard-closed (Locked)** period. A locked period is irreversible — there is no reopen escape (only the system year-end close can post into it). | Post to an open period. A locked period is final; if a genuine correction is needed it is an out-of-band, audited action by Finance. See [General Ledger → Hard period close](./06-general-ledger.md). |
+| `STEPS_INCOMPLETE` | You tried to **lock** a period before all required close-checklist steps were done. | Complete every required step (`POST /api/ledger/close/step`) — the error lists the pending steps — then lock. |
+| `SELF_LOCK` | You tried to **lock** a period close that you started yourself (segregation of duties, GL-16). | A **different** `gl_close` colleague must perform the lock. |
+| `PERIOD_ALREADY_LOCKED` | You tried to start or update a close run for a period that is already hard-locked. | No action — the period is final. |
+| `CLOSE_RUN_NOT_FOUND` / `STEP_NOT_FOUND` | The close run or checklist step referenced doesn't exist. | Check the `close_run_id` / `step_key`; start the close first with `POST /api/ledger/close/start`. |
+| `GL_IMMUTABLE` | You tried to edit or delete a **posted** journal entry. Posted entries are immutable (control GL-17) — the ledger is a permanent record. | Don't edit/delete — **reverse** the entry instead (it posts a contra entry that nets to zero), then post a fresh corrected entry. See [General Ledger → Correcting a posted entry](./06-general-ledger.md). |
+| `ALREADY_REVERSED` | You tried to reverse a journal entry that has already been reversed. | An entry can be reversed only once. Check the existing reversal entry (linked via *reversal of*); post a new entry if a further adjustment is needed. |
+| `NOT_POSTED` | You tried to reverse an entry that isn't **Posted** (e.g. a Draft or Voided entry). | Only posted entries are reversible. A Draft is rejected via the approval flow; a Voided entry needs no reversal. |
+| `ENTRY_NOT_FOUND` | The journal entry id given to reverse/void doesn't exist. | Check the entry id. |
 | `UNBALANCED` | A journal entry's debits don't equal its credits (or it has no lines) — also raised when saving a **recurring template** that doesn't balance. | Correct the lines so total debits = total credits. |
 | `BAD_FREQUENCY` | A recurring journal was created with a cadence other than `daily` / `weekly` / `monthly`. | Choose one of the three supported cadences. |
 | `SETTLE_MISMATCH` | When settling a petty-cash advance, the **spend + cash returned** didn't equal the amount advanced. | Re-enter so `settled_expense + returned_cash` exactly equals the advance. See [Finance — AR & AP](./05-finance-ar-ap.md). |
@@ -62,6 +73,18 @@ your code below.
 | `Cash flow shows reconciled: false` | The statement of cash flows didn't tie out to the change in cash — an account isn't classified. | Note the `unclassified_accounts` in the response and raise it with finance / engineering; the figure may be mis-stated until fixed. |
 | `BAD_TRANSITION` | A maintenance work order was moved out of order (e.g. `open → completed` skipping `in_progress`, or changed after it was completed/cancelled). | Follow the lifecycle **open → in_progress → completed** (or **cancelled**). See [General Ledger → Asset maintenance](./06-general-ledger.md). |
 | `ASSET_NOT_FOUND` | A work order or maintenance action referenced an asset that isn't in the register. | Capitalise the asset first (`POST /api/assets`), then raise the work order against its asset number. |
+
+### Consolidation
+
+| Code | Meaning | What to do |
+|------|---------|-----------|
+| `CONSOL_HQ_ONLY` | A non-HQ tenant tried a consolidation action. | Consolidation is HQ (Admin) only — run it from the HQ tenant. |
+| `GROUP_NOT_FOUND` | The consolidation group id doesn't exist. | Verify the group id (`GET /api/consolidation/groups`). |
+| `NO_ENTITIES` | You ran a group that has no active member entities. | Add entities first (`POST /api/consolidation/groups/{id}/entities`). |
+| `CONSOL_UNBALANCED` | The consolidated trial balance didn't balance after eliminations (the IC pairs don't net to zero). | The run was rolled back. Reconcile the IC balances (`GET /api/intercompany/reconciliation`) so 1150/2150 agree, then re-run. See [General Ledger → Consolidation](./06-general-ledger.md). |
+| `SELF_POST` | You tried to **post** a consolidation run that **you ran**. | A **different** person must post the run (maker-checker). |
+| `ALREADY_POSTED` | You re-ran or re-posted a period that's already **Posted**. | The group result for that period is frozen — no action needed. |
+| `CONSOL_RUN_NOT_FOUND` | The run id passed to post doesn't exist. | Verify the run id (`GET /api/consolidation/groups/{id}/runs`). |
 
 ### Administration
 

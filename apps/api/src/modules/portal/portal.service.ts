@@ -17,7 +17,7 @@ export interface UpdateInventoryDto {
   current_stock?: number; reorder_point?: number; reorder_qty?: number; notes?: string;
 }
 export interface VarianceDto {
-  items: { item_id: string; item_description?: string; bom_code?: string; uom?: string; theoretical_use?: number; actual_use: number; reason?: string }[];
+  items: { item_id: string; item_description?: string; bom_code?: string; uom?: string; theoretical_use?: number; actual_use: number; reason?: string; reason_code?: string; station?: string }[];
   shift?: string;
 }
 
@@ -236,7 +236,8 @@ export class PortalService {
           varDate: today, tenantId: t.id, itemId: it.item_id, itemDescription: it.item_description ?? invRow?.itemDescription ?? null,
           bomCode: it.bom_code ?? null, theoreticalUse: String(theoretical), actualUse: String(actual),
           variance: String(variance), variancePct: String(Math.round(variancePct * 100) / 100),
-          uom: it.uom ?? invRow?.uom ?? null, reason: it.reason ?? null, shift,
+          uom: it.uom ?? invRow?.uom ?? null, reason: it.reason ?? null,
+          reasonCode: it.reason_code ?? 'OTHER', station: it.station ?? null, shift,
         });
 
         // overwrite current_stock = actual + log

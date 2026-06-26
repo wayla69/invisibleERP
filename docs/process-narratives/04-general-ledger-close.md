@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Each period close + annual |
-| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, GL-07, GL-08, GL-09, GL-10, LSE-01, REC-01, REC-02, REC-03, REC-04, GOV-01, CON-01, CON-02; SoD R05, R06 |
+| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, GL-07, GL-08, GL-09, GL-10, GL-11, LSE-01, REC-01, REC-02, REC-03, REC-04, GOV-01, CON-01, CON-02; SoD R05, R06 |
 | Related policy | `compliance/policies/11-financial-close-policy.md`, `compliance/policies/13-segregation-of-duties-policy.md` |
 
 ## 2. Purpose
@@ -73,7 +73,17 @@ SoD: the **preparer** of a manual JE (GlAccountant) is never its **approver** (F
 12. **Prepaid amortization.** A prepaid asset (annual insurance, rent paid up front) is registered once via `POST /api/ledger/prepaid` with a **total + term in months** (optionally capitalizing the up-front payment **Dr 1280 / Cr 1000**). The scheduled job **`gl_prepaid_amortize`** (`POST /api/ledger/prepaid/run`, daily-schedulable) amortizes a **straight-line slice each period** (**Dr expense / Cr 1280**), the **last period taking the remainder** so the prepaid asset fully clears. Posting is **direct** (systematic, like depreciation) and **idempotent per `(schedule, period)`** via the JE idempotency key + `next_run_date` advance (**GL-09**).
 13. **Lease accounting (IFRS 16 / TFRS 16).** A lease is capitalized via `POST /api/leases`: at commencement a **right-of-use asset** and a **lease liability** are recognised at the **present value of the lease payments** (**Dr 1600 / Cr 2600**, non-cash). The scheduled job **`lease_periodic_run`** (`POST /api/leases/run`) posts each period — **interest unwinding** on the liability (**Dr 5900**), the **cash payment** reducing the liability (**Dr 2600 / Cr 1000**), and **straight-line ROU depreciation** (**Dr 5210 / Cr 1690**) — with the **last period clearing the liability + ROU exactly**. Idempotent per `(lease, period)`. A **lease modification / remeasurement** (`POST /api/leases/:leaseNo/modify` — revised payment, remaining term, or rate) **remeasures the liability** at the PV of the revised payments and **adjusts the ROU asset by the same delta** (Dr/Cr **1600 ↔ 2600**); a downward remeasurement larger than the ROU floors it at zero and books the excess as a P&L gain (**Cr 1510**). Depreciation then runs straight-line over the **revised remaining term** (**LSE-01**, see also `09-fixed-assets-depreciation.md`). At close the **lease-liability reconciliation** (`GET /api/leases/liability-reconciliation`) ties the **GL lease-liability control account (2600)** to the **sum of the remaining liability balances on the lease schedule** — `gl_liability` vs `schedule_liability` with a `difference` and a `reconciled` flag (a divergence means a manual JE hit 2600 outside the lease engine, or a periodic run / remeasurement didn't post). The `/leases` screen surfaces this as a tie-out banner (**LSE-01**).
 
-14. **Industry Chart-of-Accounts at company creation.** The GL engine binds to a **fixed, global account universe** (canonical codes are immutable — every posting hard-references its code). On top of that, each tenant gets a **per-tenant overlay** (`tenant_accounts`) that curates *which* canonical accounts are active and *how* they are named/grouped for its industry. At **company creation** the customer picks a business type (`restaurant` / `retail` / `distribution` / `services` / `general`); `signup` materialises the chosen template into the overlay (`provisionTenantCoA`) **inside the signup transaction**, right after fiscal-year provisioning. Adopting an industry pack later (`POST /api/onboarding/apply-pack`) does the same. Every template account code is **asserted to exist in the canonical chart at boot** (`assertTemplatesSubsetOf` in `seedChartOfAccounts`) so a drifted template **fails fast** and can never reach a tenant; provisioning is **idempotent + additive** (never deletes), so re-running only adds missing accounts. The overlay is **presentation-only — it never gates postings**: `GET /api/ledger/accounts` returns the tenant's curated chart by default but `?all=true` exposes the full canonical universe, and reports surface any account that is **active OR carries activity** (so a curated-out account that receives a posting still appears) (**GL-10**).
+14. **Chart of Accounts management (WS1.1 — GL-11).** The Chart of Accounts is now **master data** — editable via API by authorised users (`gl_coa` permission, held by FinancialController and Admin) rather than hardcoded. The account hierarchy is: **account_groups** (tenant-scoped groups, `NULL tenant_id` = global template visible to all tenants) → **accounts** (the canonical posting universe, extended with Thai name, group link, control flags, normal balance, postability, dimension requirements, and effective dates). Key controls:
+
+    - **Account creation** (`POST /api/ledger/accounts`): creates a new account with an auto-defaulted `normal_balance` (`C` for Liability/Equity/Revenue, `D` for Asset/Expense). Duplicate code → `DUPLICATE_ACCOUNT`.
+    - **Account update** (`PATCH /api/ledger/accounts/:code`): changes name, Thai name, group, postability, dimension requirements, and effective dates. Disabling postability when the account already has posted entries → `CODE_HAS_POSTINGS`.
+    - **Account deactivation** (`POST /api/ledger/accounts/:code/deactivate`): sets `active=false` and `is_postable=false`. Blocked if the account carries a **non-zero net balance** → `ACCOUNT_HAS_BALANCE`. This prevents orphaning a balance in a "closed" account.
+    - **Control-account guard**: four accounts are flagged `is_control = true` at setup — **1100 (AR)**, **2000 (AP)**, **1200 (INV)**, **1500 (FA)**. Direct manual JE postings to a control account are **rejected** (`CONTROL_ACCOUNT`) unless the caller sets `viaSubledger: true`. Only the AR, AP, Inventory, and Fixed-Assets service methods set this flag, ensuring those balances are exclusively maintained by their respective sub-ledgers (defeats a common audit bypass where a direct JE hides a sub-ledger discrepancy).
+    - **Permissions / SoD**: `gl_coa` is a dedicated sub-permission for CoA maintenance — separated from `gl_post` so the accountant who posts JEs cannot also reclassify accounts (COSO control environment integrity). FinancialController is granted both `gl_coa` and `gl_close`; GlAccountant is not granted `gl_coa`.
+
+    (**GL-11**, see also the industry-CoA template layer at step 15 below.)
+
+15. **Industry Chart-of-Accounts at company creation.** The GL engine binds to a **fixed, global account universe** (canonical codes are immutable — every posting hard-references its code). On top of that, each tenant gets a **per-tenant overlay** (`tenant_accounts`) that curates *which* canonical accounts are active and *how* they are named/grouped for its industry. At **company creation** the customer picks a business type (`restaurant` / `retail` / `distribution` / `services` / `general`); `signup` materialises the chosen template into the overlay (`provisionTenantCoA`) **inside the signup transaction**, right after fiscal-year provisioning. Adopting an industry pack later (`POST /api/onboarding/apply-pack`) does the same. Every template account code is **asserted to exist in the canonical chart at boot** (`assertTemplatesSubsetOf` in `seedChartOfAccounts`) so a drifted template **fails fast** and can never reach a tenant; provisioning is **idempotent + additive** (never deletes), so re-running only adds missing accounts. The overlay is **presentation-only — it never gates postings**: `GET /api/ledger/accounts` returns the tenant's curated chart by default but `?all=true` exposes the full canonical universe, and reports surface any account that is **active OR carries activity** (so a curated-out account that receives a posting still appears) (**GL-10**).
 
 ## 8. Process flow
 
@@ -120,7 +130,8 @@ flowchart TD
 | 12 | Prepaid not amortized over its term | Prepaid schedule amortizes a straight-line slice each period (Dr expense / Cr 1280); last period clears the asset; idempotent | Det / Auto | GL-09 | `basics` prepaid checks |
 | 13 | Lease not capitalised (ROU + liability omitted) | Commencement recognises ROU=liability=PV; periodic run posts interest + payment + ROU depreciation; idempotent | Det / Auto | LSE-01 | `basics` lease checks |
 | 13 | Lease liability (2600) diverges from the schedule (manual JE / missed run) | Lease-liability reconciliation: GL 2600 vs Σ remaining schedule liability, with a `reconciled` flag + tie-out banner reviewed at close | **Det / Auto** | **LSE-01** | Lease-liability reconciliation; `basics` lease checks |
-| 14 | New company starts on an unguided chart, or an industry template drifts from the engine's fixed codes | Industry CoA templates: per-tenant overlay over an **immutable** canonical universe; chosen at signup (`provisionTenantCoA`, in-txn); every template code **asserted ⊆ canonical at boot**; idempotent + additive; overlay is presentation-only (never gates postings — `?all=true` exposes the full universe) | Prev / Auto | GL-10 | `basics` + `compliance` industry-CoA checks |
+| 14 | CoA changed without authorisation; code changed after postings; account deactivated with live balance; direct JE bypasses sub-ledger on a control account | CoA Change Control: `gl_coa` permission required; code-change blocked if postings exist (`CODE_HAS_POSTINGS`); deactivation blocked if non-zero balance (`ACCOUNT_HAS_BALANCE`); control accounts (1100/2000/1200/1500) reject direct postings unless `viaSubledger:true` (`CONTROL_ACCOUNT`) | Prev / Auto | GL-11 | `gl_coa` permission tests; control-account guard test |
+| 15 | New company starts on an unguided chart, or an industry template drifts from the engine's fixed codes | Industry CoA templates: per-tenant overlay over an **immutable** canonical universe; chosen at signup (`provisionTenantCoA`, in-txn); every template code **asserted ⊆ canonical at boot**; idempotent + additive; overlay is presentation-only (never gates postings — `?all=true` exposes the full universe) | Prev / Auto | GL-10 | `basics` + `compliance` industry-CoA checks |
 
 ## 10. Inputs & outputs
 
@@ -153,6 +164,10 @@ flowchart TD
 | `SOD_VIOLATION` | Preparer approves own JE | Route to independent approver (always, incl. Admin) |
 | `NOT_PENDING` | Approve/reject a non-Draft JE | Verify JE state |
 | `403` on year-end close | Lacks `exec` permission | CFO/Controller performs close |
+| `DUPLICATE_ACCOUNT` | Account code already exists in CoA | Use a new code or update the existing account |
+| `CODE_HAS_POSTINGS` | Attempt to disable postability on an account with posted entries | Retain postability; use `effective_to` date-fence instead |
+| `ACCOUNT_HAS_BALANCE` | Attempt to deactivate an account with non-zero balance | Clear the balance via a correcting JE first |
+| `CONTROL_ACCOUNT` | Direct JE to a control account (1100/2000/1200/1500) without `viaSubledger:true` | Post via the relevant sub-ledger (AR/AP/Inventory/Fixed Assets) |
 
 ## 14. Revision history
 
@@ -160,9 +175,11 @@ flowchart TD
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-24 | Platform | Steps 8–9: period close and year-end close now auto-accrue the loyalty points liability before locking (year-end `5700` swept to RE). Cross-ref `19-marketing-pricing-loyalty.md` §7 (CRM Phase 1.5). |
+| 0.3 | 2026-06-26 | Platform | WS1.1: Added step 14 — CoA as master data (account_groups table, accounts extended, GL-11 control). Control-account guard for 1100/2000/1200/1500. `gl_coa` permission. Updated control matrix (step 14 GL-11, renumbered former 14→15), error-handling table, and RCM control list. |
 | 0.4 | 2026-06-26 | Platform | **GOV-01 — pending-approvals monitor (COSO Monitoring).** Step 7: `FinanceService.pendingApprovals` on `GET /api/finance/approvals/pending` — one worklist of every item awaiting independent (maker-checker) approval across the system (manual JE GL-05, AP disbursement EXP-06, payroll PAY-03, asset revaluation FA-08, asset disposal FA-09, inventory write-off INV-07), each with its age in days + an overdue roll-up + total amount. The controller's pre-close 'what is stuck?' view; a stale item is a control finding. Read-only; no migration. New RCM control **GOV-01** (RCM now 85); control matrix gains a step-7 monitoring row. New `/approvals` screen. ToE: `compliance` (a Draft JE surfaces in the worklist with its control ID, amount + age). |
 | 0.3 | 2026-06-26 | Platform | **REC-04 — period-end control-account reconciliation PACK.** Step 7: `FinanceService.reconcileControls` on `GET /api/finance/reconciliation/controls` ties every major sub-ledger to its GL control account in one read — AR↔1100, AP↔2000, Inventory↔1200, Gift cards↔2200, Deferred revenue↔2400 — with per-line `{sub_ledger, gl_control, variance, reconciled}` + `all_reconciled`/`exceptions` (liabilities sign-flipped). New RCM control **REC-04** (RCM now 84); control matrix gains a step-7 detective row. New control-account overview on `/reconciliation`. Read-only detective; no migration. ToE: `giftcards` (2200 ties, 5 lines, all reconciled) + `compliance` (inventory 1200 ties, exceptions surfaced). |
 | 0.4 | 2026-06-26 | Platform | **Pending-approvals monitor extended (GOV-01).** The unified pending-approvals monitor (`FinanceService.pendingApprovals` on `GET /api/finance/approvals/pending`, control **GOV-01**) now also covers the **bank-adjustment (BANK-02)**, **FX-rate (FX-04)** and **budget (BUD-01)** maker-checkers added in this series — a Draft BANKADJ journal entry is control-tagged BANK-02, and the pending FX-rate and budget queues are aggregated alongside the existing GL-05/EXP-06/PAY-03/FA-08/FA-09/INV-07 sources. (An earlier branch-local "aging monitor" was consolidated into GOV-01 rather than shipped as a second endpoint.) No new control / no migration. ToE: `compliance` (GOV-01 surfaces a Draft JE with control + amount + age + overdue roll-up). |
+| 0.6 | 2026-06-26 | Platform | **GL-17 — controlled emergency reopen of a locked period (operating-spine PR6 complement to GL-15/16).** `POST /api/ledger/close/reopen` unlocks a `Locked` period ONLY with a mandatory `reason` (`REASON_REQUIRED`) and only by a user ≠ the locker (`SELF_REOPEN`); it flips the close run to `ReadyToLock` and `fiscal_periods.status` back to `Open` so corrective postings are allowed, after which a *different* `gl_close` user must re-lock (GL-16 still binds). The reason is stamped on `close_runs.note` and the reopen is captured by the append-only hash-chained `audit_log` (ITGC-AC-16). No migration (reuses the GL-15/16 schema). New RCM control **GL-17**. ToE: `basics` harness (TC-GL-16b: no-reason→REASON_REQUIRED, locker→SELF_REOPEN, different-user→ReadyToLock + period Open + JE posts, re-lock→Locked). UAT `05-general-ledger-close-uat.md` updated. |
 | 0.5 | 2026-06-26 | Platform | **GL-10 — industry Chart-of-Accounts at company creation.** New step 14: the customer picks a business type at signup (`restaurant`/`retail`/`distribution`/`services`/`general`) and `BillingService.signup` materialises the matching template into a per-tenant overlay (`tenant_accounts`) via `LedgerService.provisionTenantCoA`, in-transaction after fiscal-year provisioning; `applyPack` does the same when an industry pack is adopted later. The canonical chart stays the **immutable** posting universe; every template code is **asserted ⊆ canonical at boot** (`assertTemplatesSubsetOf`); provisioning is idempotent + additive; the overlay is **presentation-only** (`GET /api/ledger/accounts` curated by default, `?all=true` = full universe — never gates postings). Migration **0139** (`tenant_accounts` + `tenants.industry`). New RCM control **GL-10** (RCM now 98); control matrix gains a step-14 preventive row. ToE: `basics` + `compliance` industry-CoA checks. |
 | 0.3 DRAFT | 2026-06-24 | `<<author>>` | Added **Statement of Cash Flows (indirect)** (`GET /api/ledger/cash-flow`) as the third primary statement, control **GL-07** (reconciles to Δcash; CLOSE excluded), and the `basics` reconciliation harness. |
 | 0.4 DRAFT | 2026-06-25 | `<<author>>` | §7.6 — added the **direct-method** statement of cash flows (`/api/ledger/cash-flow-direct`, receipts/payments by nature, reconciles to Δcash) and a forward **cash-flow forecast** (`/api/ledger/cash-flow-forecast`, AR/AP due-date projection). Verified by the `basics` harness. |
@@ -171,3 +188,304 @@ flowchart TD
 | 0.7 DRAFT | 2026-06-25 | `<<author>>` | §7 step 13 — added **lease modification / remeasurement** (`/api/leases/:leaseNo/modify`): remeasures the liability at the revised PV and adjusts the ROU by the same delta (Dr/Cr 1600↔2600), then depreciates over the remaining term (**LSE-01**). Verified by the `basics` harness. |
 | 0.8 DRAFT | 2026-06-25 | `<<author>>` | **Lease management UI surfaced** — new screen `/leases` (ERP nav → การเงิน ▸ สมุดบัญชี & แยกประเภท) drives the already-documented IFRS 16 endpoints: create lease (ROU+liability at PV), "run-due" periodic posting, and modification/remeasurement. UI-only addition; no process/GL/control change (**LSE-01**). See user manual `06-general-ledger.md` §Leases and UAT `05-general-ledger-close-uat.md`. |
 | 0.9 DRAFT | 2026-06-26 | Platform | §7 step 13 — added the **lease-liability reconciliation** (`GET /api/leases/liability-reconciliation`): ties GL **2600** to the sum of the remaining liability balances on the lease schedule (`gl_liability` vs `schedule_liability`, `difference`, `reconciled`), surfaced as a tie-out banner on `/leases`. Detective tie-out over the existing **LSE-01**; no new control, no migration. Verified by the `basics` harness (after run + remeasurement, GL 2600 = schedule, reconciled, difference 0). |
+| 1.0 DRAFT | 2026-06-26 | WS1.3 | WS1.3 — added **multi-dimensional GL postings**: `branch_id`, `project_id`, `department_id` columns on `journal_lines`; `PostingService` context stamping; `GET /api/ledger/income-statement/by-branch` per-branch P&L endpoint; `departments` master table with RLS. New control **GL-13**. Verified by the `basics` harness (TC-GL-13-01/02/03). Migration 0157. |
+| 1.1 DRAFT | 2026-06-26 | WS1.4 | WS1.4 — added **sub-ledger tie-out / reconciliation**: `POST /api/ledger/tie-out/run` reconciles each GL control account (1100 AR / 2000 AP / 1200 INV / 1500 FA) to the sum of its sub-ledger detail, recording the variance + a Matched/Variance status; `POST /api/ledger/tie-out/:id/certify` is **maker-checker** (certifier ≠ runner → `SELF_CERTIFY`). New `subledger_tieout_runs` table (RLS), new control **GL-14**. Verified by the `basics` harness (TC-GL-14-01/02/03). Migration 0160. |
+| 1.5 | 2026-06-26 | Platform | **Period-close UI surfaced.** New screen `/finance/period-close` (ERP nav → การเงิน ▸ สมุดบัญชี & แยกประเภท, perm `gl_close`/`exec`) drives the already-documented GL-15/GL-16/GL-17 workflow: start a close run → sign-off checklist steps → lock (maker-checker; locker ≠ starter) → emergency reopen with mandatory reason (SoD: reopener ≠ locker). Run list sidebar + live checklist status from `GET /api/ledger/close` + `/status`. UI-only addition; no process/GL/control change. |
+| 1.4 DRAFT | 2026-06-26 | WS3.2 | WS3.2 — **FX revaluation + deferred tax** (§3.2): two period-scoped, maker-checker, idempotent-per-(tenant, period) close runs. **FX revaluation (GL-18)** — `POST /api/ledger/fx-reval/run` restates open foreign-currency AR/AP to the closing rate (from the request `rates` map or the latest **approved** `fx_rates`; else `MISSING_RATE`) → unrealized FX to **5400**; `/:id/post` (poster ≠ runner → `SELF_POST`) posts net gain (Cr 5400) / loss (Dr 5400) with the 1100/2000 control restatements through the `PERIOD_LOCKED` gate; `ALREADY_POSTED` on re-post/re-run. **Deferred tax (TAX-06)** — `POST /api/ledger/deferred-tax/run` computes DTA from the posted AR allowance (× CIT 20%) + DTL from accelerated depreciation (book NBV vs an assumed tax NBV — documented 1.5× simplification, no tax-dep ledger yet), nets to `net_deferred` and the **delta vs the prior posted run**; `/:id/post` (poster ≠ runner → `SELF_POST`) posts the delta to **1700/5950** (benefit Dr 1700 / Cr 5950). New COA **1700/2700/5950**; new `fx_reval_runs` + `deferred_tax_runs` tables (RLS); close checklist gains `fx_reval`(advisory) + `deferred_tax`(advisory) steps. New controls **GL-18** + **TAX-06**. Verified by the `basics` harness (TC-GL-18-01/02, TC-TAX-06-01/02). Migration 0168. |
+| 1.3 DRAFT | 2026-06-26 | WS2.2 | WS2.2 — **GL immutability + audit log + reversal** (§2.2): a **Posted** journal entry is immutable — a production DB trigger (`gl_block_posted_mutation`, migration 0164) blocks UPDATE/DELETE of posted `journal_entries` (permitting only the `is_reversed` flag flip), and an app guard (`attemptVoidPosted`) returns `GL_IMMUTABLE` + logs `MUTATE_BLOCKED`. Corrections happen ONLY via **reversal** (`POST /api/ledger/journal/:id/reverse`): a new immediately-posted contra entry (swapped Dr/Cr, `reversal_of`, original flagged `is_reversed`) that respects the period gates; errors `ENTRY_NOT_FOUND`/`NOT_POSTED`/`ALREADY_REVERSED`. New `gl_audit_log` table (RLS) recording POST/APPROVE/REVERSE/MUTATE_BLOCKED (`GET /api/ledger/audit?entryId=`). New control **GL-17**. Verified by the `basics` harness (TC-GL-17-01/02/03). Migration 0164. |
+| 1.2 DRAFT | 2026-06-26 | WS2.1 | WS2.1 — **hard period close + checklist**: `POST /api/ledger/close/start` opens a `close_runs` record (InProgress) per (tenant, period) and seeds a standard checklist (`close_run_steps`); `POST /api/ledger/close/step` marks steps Done → run advances to **ReadyToLock** when all required steps are done; `POST /api/ledger/close/lock` hard-locks the period (requires ReadyToLock else `STEPS_INCOMPLETE`; **maker-checker** locker ≠ starter → `SELF_LOCK`). New `'Locked'` period status; `postEntry` now rejects ALL postings into a Locked period with `PERIOD_LOCKED` regardless of the legacy `allowClosedPeriod` escape (only the system year-end closing entry, `source='CLOSE'`, is exempt). New `close_runs` / `close_run_steps` tables (RLS), new controls **GL-15** (checklist completeness) + **GL-16** (segregated lock). Verified by the `basics` harness (TC-GL-15-01/02/03, TC-GL-16-01/02). Migration 0162. |
+
+## 1.3 Multi-dimensional GL Postings (WS1.3)
+
+### Overview
+`journal_lines` now carries three optional dimension columns: `branch_id`, `project_id`, and `department_id`.
+These enable per-location and per-project P&L views without separate ledger books.
+
+### How dimensions are stamped
+- **Manual JEs** (`POST /api/ledger/journal`): pass `branch_id`, `project_id`, `dept_id` on each line object.
+- **Automated postings via `PostingService.post()`**: `PostingContext` accepts `branchId?`, `projectId?`, `departmentId?`; the service stamps all lines in the generated entry with those values.
+
+### Per-branch income statement
+`GET /api/ledger/income-statement/by-branch?from=YYYY-MM-DD&to=YYYY-MM-DD`
+
+Returns:
+```json
+{
+  "period": { "from": "...", "to": "..." },
+  "branches": {
+    "1":           { "revenue": 500, "expense": 0, "net": 500, "lines": [...] },
+    "2":           { "revenue": 300, "expense": 0, "net": 300, "lines": [...] },
+    "unassigned":  { "revenue": 0,   "expense": 200, "net": -200, "lines": [...] }
+  }
+}
+```
+Lines without a `branch_id` are grouped under `"unassigned"`.
+
+### Departments master table
+The `departments` table holds a tenant-scoped department registry (code, name, active flag).
+RLS policy `tenant_isolation_departments` restricts reads to the caller's tenant.
+
+### Control GL-13 — Dimension Completeness
+| Control ID | GL-13 |
+|------------|-------|
+| Name | Multi-dimensional GL posting dimension completeness |
+| Type | Application — Automated |
+| Risk | Revenue / expense mis-attributed to wrong branch / project, obscuring per-location P&L |
+| Mitigation | `branch_id`, `project_id`, `department_id` columns on `journal_lines`; `PostingService` stamps from context; `income-statement/by-branch` provides per-location P&L review |
+| Test | TC-GL-13-01/02/03 (basics.ts harness) |
+
+## 1.4 Sub-ledger Tie-out / Reconciliation (WS1.4)
+
+### Overview
+At period-end the four GL **control accounts** must each equal the sum of their sub-ledger detail. A
+tie-out run computes both sides as of a date, records the **variance**, and requires an independent
+**certification** (maker-checker) so the reconciliation is reviewed by someone other than its preparer.
+
+The control accounts (flagged `is_control=TRUE`, `control_subledger` set in WS1.1):
+- **1100** — Accounts Receivable (`AR`)
+- **2000** — Accounts Payable (`AP`)
+- **1200** — Inventory (`INV`)
+- **1500** — Fixed Assets (`FA`)
+
+### Running a tie-out
+`POST /api/ledger/tie-out/run` — body `{ "subledger": "AR" | "AP" | "INV" | "FA", "as_of_date"?: "YYYY-MM-DD" }`
+(permission `gl_close` or `gl_post`). `runBy` is taken from the authenticated user. It computes:
+
+- **GL balance** — Σ(`debit − credit`) of **posted** `journal_lines` on the control account up to the
+  as-of date, scoped to the caller's tenant.
+- **Sub-ledger balance** — summed from the originating detail tables (queried directly):
+  - **AR** — Σ outstanding (`amount − paid_amount`) of `ar_invoices` issued up to the as-of date.
+  - **AP** — Σ outstanding (`amount − paid_amount`) of `ap_transactions` dated up to the as-of date.
+  - **INV** — Σ `inv_balances.total_value` (perpetual on-hand × cost). `inv_balances` is a current
+    snapshot with no per-date history, so the as-of is **advisory** for INV.
+  - **FA** — Σ (`acquire_cost − accumulated_depreciation`) of non-disposed `fixed_assets` (a current
+    register snapshot — as-of **advisory**).
+- **variance** = `gl_balance − subledger_balance`; **status** = `Matched` when `|variance| < 0.01`,
+  else `Variance`.
+
+Runs **upsert** on (`tenant_id`, `subledger`, `as_of_date`) — a same-day re-run refreshes the figures
+and clears any prior certification. Results persist in `subledger_tieout_runs` (RLS-isolated by tenant).
+
+`GET /api/ledger/tie-out` (optional `?subledger=`/`?as_of_date=`) lists runs newest-first;
+`GET /api/ledger/tie-out/:id` fetches one.
+
+### Certification (maker-checker)
+`POST /api/ledger/tie-out/:id/certify` — body `{ "note"?: string }` (permission `gl_close`). Sets
+`status = Certified` and records the certifier + timestamp. A `Variance` may be certified with an
+explanatory `note` describing the reconciling items. **Segregation of duties:** the certifier must
+**differ** from the runner — certifying your own run is rejected with **`SELF_CERTIFY`** (HTTP 400).
+
+### Error codes
+| Code | Meaning |
+|------|---------|
+| `SELF_CERTIFY` | The certifier equals the runner — maker-checker SoD violation (a different `gl_close` user must certify). |
+| `BAD_SUBLEDGER` | `subledger` not one of AR/AP/INV/FA. |
+| `NO_CONTROL_ACCOUNT` | No account is flagged `is_control` for the requested sub-ledger. |
+| `NOT_FOUND` | Tie-out run id does not exist. |
+
+### Control GL-14 — Sub-ledger Tie-out
+| Control ID | GL-14 |
+|------------|-------|
+| Name | Sub-ledger tie-out / control-account reconciliation |
+| Type | Application — Automated (Detective, Monthly) |
+| Risk | GL control-account balances drift from sub-ledger detail without detection, masking posting errors or fraud |
+| Mitigation | Tie-out run computes GL vs sub-ledger balance + variance per control account; maker-checker certification (certifier ≠ runner, `SELF_CERTIFY`) |
+| Owner | Financial Controller |
+| Test | TC-GL-14-01/02/03 (basics.ts harness) |
+
+## 2.1 Hard Period Close + Checklist (WS2.1)
+
+Period close is now a **controlled, checklist-driven, irreversible workflow** rather than a single soft
+status flip. A `close_runs` record (one per tenant+period) drives a sequence of `close_run_steps`; the
+period can only be **Locked** once every required step is complete, and the lock is **segregated** from the
+preparer (maker-checker).
+
+### Close-run lifecycle
+`Open → InProgress → ReadyToLock → Locked`
+
+1. **InProgress** — `POST /api/ledger/close/start { period }` (perm `gl_close`) creates the run as
+   `InProgress` and seeds the standard checklist. Upsert-safe: a re-start of a non-locked period returns the
+   existing run; a re-start of a Locked period is rejected (`PERIOD_ALREADY_LOCKED`).
+2. **ReadyToLock** — `POST /api/ledger/close/step { close_run_id, step_key, detail? }` (perm `gl_close`)
+   marks a step `Done` (records `completed_by` + timestamp). When **all required** steps are `Done`, the run
+   automatically advances to `ReadyToLock`.
+3. **Locked** — `POST /api/ledger/close/lock { close_run_id }` (perm `gl_close`) hard-locks the period.
+   - Requires `ReadyToLock` — else `STEPS_INCOMPLETE` (the response lists the pending required `step_key`s).
+   - **Maker-checker**: the locker (`locked_by`) MUST differ from the starter (`started_by`) — else
+     `SELF_LOCK`. Both identities + `locked_at` are retained as the SoD evidence trail.
+   - Locking writes `'Locked'` into `fiscal_periods.status`.
+
+Read endpoints: `GET /api/ledger/close/status?period=YYYY-MM` (the run + its steps) and `GET /api/ledger/close`
+(recent runs) — perms `gl_close`, `gl_post`, `exec`.
+
+### Seeded checklist (`close_run_steps`)
+| step_key | Title | Required |
+|---|---|---|
+| `subledger_tieout` | Sub-ledger tie-out (AR/AP/INV/FA) reconciled | Yes |
+| `bank_rec` | Bank reconciliation complete | Yes |
+| `depreciation` | Depreciation posted for the period | Yes |
+| `recurring` | Recurring / prepaid journals run | Yes |
+| `fx_reval` | FX revaluation posted | No (advisory) |
+| `trial_balance_review` | Trial-balance review & sign-off | Yes |
+
+### The new hard `PERIOD_LOCKED` gate (replaces the soft escape)
+Previously a `Closed` period could be posted into by any caller passing `allowClosedPeriod: true`. WS2.1 adds
+a strictly stronger gate: `LedgerService.postEntry` now rejects **every** entry dated into a **Locked** period
+with **`PERIOD_LOCKED`**, *regardless* of `allowClosedPeriod`. The legacy soft `Closed` / `allowClosedPeriod`
+behaviour is unchanged (backward compatible) — `Locked` is additive and irreversible. The **only** exemption
+is the system year-end closing entry (`source = 'CLOSE'`), so `closeYear` can still post its P&L-sweep JE into
+December. (Locked is not exposed as a normal re-open; reversing a hard close is an out-of-band/audited action.)
+
+### New error codes
+`PERIOD_LOCKED` (post into a locked period), `PERIOD_ALREADY_LOCKED` (start/step on a locked run),
+`STEPS_INCOMPLETE` (lock before required steps done), `SELF_LOCK` (locker = starter),
+`CLOSE_RUN_NOT_FOUND`, `STEP_NOT_FOUND`.
+
+### Control GL-15 — Close-checklist completeness
+| Control ID | GL-15 |
+|------------|-------|
+| Name | Hard period close — checklist completeness |
+| Type | Application — Automated (Preventive, Monthly) |
+| Risk | A period is closed with key close procedures skipped, or a closed period is silently re-posted |
+| Mitigation | Required checklist steps must all be `Done` before lock (`STEPS_INCOMPLETE`); a Locked period rejects all postings (`PERIOD_LOCKED`, except `source='CLOSE'`) |
+| Owner | Financial Controller |
+| Test | TC-GL-15-01/02/03 (basics.ts harness) |
+
+### Control GL-16 — Segregated period lock (SoD)
+| Control ID | GL-16 |
+|------------|-------|
+| Name | Segregated period lock (maker-checker) |
+| Type | Application — Automated (Preventive, Monthly) |
+| Risk | One person both performs and locks the close, concealing a misstatement over their own work |
+| Mitigation | Locker (`locked_by`) must differ from starter (`started_by`) → `SELF_LOCK`; both identities + `locked_at` retained as evidence |
+| Owner | Financial Controller |
+| Test | TC-GL-16-01/02 (basics.ts harness) |
+
+## 2.2 GL Immutability & Reversal (WS2.2)
+
+### Overview
+A **posted** journal entry is the ledger's record of record and is **immutable** — it can never be edited or
+deleted. The only way to correct a posted entry is a transparent **reversal**: a new, immediately-posted
+contra entry that swaps every line's debit/credit so the original and its reversal net to zero on every
+affected account. Every important GL action and every blocked mutation attempt is written to a dedicated
+**GL audit trail** (`gl_audit_log`).
+
+### Two-layer immutability enforcement
+1. **Production DB trigger** (`gl_block_posted_mutation`, migration 0164) — a `BEFORE UPDATE OR DELETE`
+   trigger on `journal_entries` that `RAISE`s on any attempt to UPDATE or DELETE a `Posted` row. The single
+   permitted change is the reversal bookkeeping flag `is_reversed` (the trigger blocks only changes to
+   `status` or `entry_date`), so the reversal flow can flag the original without re-opening it.
+2. **Application guard** (`attemptVoidPosted`) — refuses to mutate a posted entry, returns
+   `GL_IMMUTABLE` (HTTP 400) and records a `MUTATE_BLOCKED` audit row. This is the deterministically-testable
+   layer (the DB trigger is the prod backstop); there is no edit/delete endpoint for a posted JE.
+
+### Reversal flow (`POST /api/ledger/journal/:id/reverse`)
+- Loads the original posted entry + lines. Errors: `ENTRY_NOT_FOUND`, `NOT_POSTED` (only Posted entries are
+  reversible), `ALREADY_REVERSED` (an entry may be reversed only once).
+- Posts a NEW contra entry (`source = 'REVERSAL'`, `reversal_of = <original id>`, dated `date ?? today` on the
+  Asia/Bangkok business day) with every line's Dr/Cr swapped and all dimensions (branch/project/dept/cost
+  centre) carried over. The reversal goes through the **normal posting path**, so the WS2.1 `PERIOD_LOCKED`
+  and the `PERIOD_CLOSED` gates still apply to the reversal date.
+- Flags the original `is_reversed = true` (the only column the DB trigger permits changing) and logs a
+  `REVERSE` audit row `{ originalId, reversalId, reason }`.
+
+### GL audit trail (`gl_audit_log`, `GET /api/ledger/audit?entryId=`)
+Tenant-scoped (RLS), append-only by intent. Actions: `POST` (an entry reached Posted), `APPROVE` (a Draft was
+approved to Posted via GL-05 maker-checker), `REVERSE`, `MUTATE_BLOCKED`. Each row carries the actor, a
+detail JSON, and a timestamp.
+
+### Error codes
+| Code | Meaning |
+|------|---------|
+| `ENTRY_NOT_FOUND` | No journal entry with that id |
+| `NOT_POSTED` | The entry is not Posted (only posted entries can be reversed) |
+| `ALREADY_REVERSED` | The entry has already been reversed |
+| `GL_IMMUTABLE` | A posted entry cannot be edited/deleted — correct it via a reversal |
+
+### Control GL-17 — Posted-entry immutability + reversal-only correction
+| Control ID | GL-17 |
+|------------|-------|
+| Name | Posted GL immutable; corrections via reversal only; full audit trail |
+| Type | Application — Automated (Preventive, Per entry / continuous) |
+| Risk | A posted entry is silently edited/deleted (restating history with no trail) instead of being corrected by a transparent, auditable reversal |
+| Mitigation | DB trigger (`gl_block_posted_mutation`) blocks UPDATE/DELETE of posted entries; app guard returns `GL_IMMUTABLE`; corrections only via `reverseEntry` (contra entry, `reversal_of`, original `is_reversed`); every POST/APPROVE/REVERSE/MUTATE_BLOCKED logged to `gl_audit_log` |
+| Owner | Financial Controller |
+| Test | TC-GL-17-01/02/03 (basics.ts harness) |
+
+## 3.2 FX Revaluation & Deferred Tax (WS3.2)
+
+Two period-end close runs, each a governed wrapper (compute → maker-checker post) over a balance-sheet
+valuation, one row per `(tenant, period)`, idempotent, posting through the normal `LedgerService.postEntry`
+path so the WS2.1 `PERIOD_LOCKED` gate and the GL-17 audit trail apply.
+
+### FX Revaluation (GL-18) — `fx_reval_runs`
+Restates open foreign-currency monetary balances (AR/AP whose `currency <> 'THB'` and `status <> 'Paid'`,
+dated on/before the as-of) to the period-end **closing rate**.
+
+- **Run** — `POST /api/ledger/fx-reval/run` (`{ period: 'YYYY-MM', as_of_date?, rates?, tenant_id? }`).
+  For each open document: `delta_thb = open_foreign × (closing_rate − booked_rate)`. The closing rate per
+  currency comes from the request `rates` map first, else the latest **Approved** `fx_rates` row (FX-04 —
+  an unapproved manual rate can never drive the reval); a currency with no rate from either → `MISSING_RATE`.
+  Stages an **Open** run with per-document `detail` and the net. Re-running an Open period refreshes it;
+  a Posted period → `ALREADY_POSTED`.
+- **Post** — `POST /api/ledger/fx-reval/:id/post`. Maker-checker: the poster MUST differ from the runner
+  (`SELF_POST`). Posts the GL entry (`source = 'FXREVAL-RUN'`, `viaSubledger: true` for the control legs):
+  - **AR** (asset): `delta > 0` is a **gain** → **Dr 1100**; `delta < 0` → **Cr 1100**.
+  - **AP** (liability): `delta > 0` is a **loss** → **Cr 2000**; `delta < 0` → **Dr 2000**.
+  - **5400** takes the balancing P&L **net = Σ(AR delta) − Σ(AP delta)**: net **gain → Cr 5400** (income),
+    net **loss → Dr 5400**.
+  Marks the run Posted. (This is the governed, period-close counterpart of the ad-hoc `FxService.revalue`.)
+
+### Deferred Tax (TAS 12 / TFRS, TAX-06) — `deferred_tax_runs`
+Recognises deferred tax from book-vs-tax **temporary** differences at the CIT rate (default **0.20**).
+
+- **Run** — `POST /api/ledger/deferred-tax/run` (`{ period, as_of_date?, tax_rate?, tax_dep_factor?, tenant_id? }`).
+  Temporary differences gathered:
+  1. **AR allowance** (deductible temp diff) — the latest **posted** `ar_allowance` (WS2.3/REV-18). Book
+     recognises the allowance now; tax deducts the loss only on write-off ⇒ a deductible temp diff ⇒
+     **DTA = allowance × CIT**.
+  2. **Accelerated depreciation** (taxable temp diff) — book NBV (`fixed_assets.net_book_value`) vs an
+     **assumed** tax NBV. *Simplifying assumption:* the model has no parallel tax-depreciation ledger, so
+     tax depreciation is assumed **faster than book by a documented factor** (default **1.5×**, capped at
+     the depreciable base cost − salvage), overridable per run via `tax_dep_factor`. `bookNBV − taxNBV > 0`
+     ⇒ a taxable temp diff ⇒ **DTL = (bookNBV − taxNBV) × CIT**. A deliberate approximation until a tax-dep
+     ledger is modelled.
+  `net_deferred = DTA − DTL`; the run records the **delta vs the prior posted run**. Stages an **Open** run;
+  a Posted period → `ALREADY_POSTED`.
+- **Post** — `POST /api/ledger/deferred-tax/:id/post`. Maker-checker (`SELF_POST`). Posts the period
+  **delta** (`source = 'DEFTAX'`): an **increase** in the net asset (`delta > 0`) is a deferred tax
+  **benefit** → **Dr 1700 DTA / Cr 5950** (a credit to 5950 reduces tax expense); a **decrease**
+  (`delta < 0`) → **Dr 5950 / Cr 1700**. The net is carried on **1700** for simplicity (account **2700**
+  exists for split DTL presentation/disclosure; the P&L and net effect are identical). Marks the run Posted.
+
+### COA accounts (added WS3.2)
+| Code | Name | Type | Normal balance |
+|------|------|------|----------------|
+| 1700 | Deferred Tax Asset | Asset | D |
+| 2700 | Deferred Tax Liability | Liability | C |
+| 5950 | Deferred Tax Expense | Expense | D |
+| 5400 | FX Gain/Loss (Unrealized) — *pre-existing* | Expense | D (loss) / C (gain) |
+
+### Close-checklist integration
+The WS2.1 close checklist gains two **advisory** steps — `fx_reval` (pre-existing) and `deferred_tax` (new)
+— so the period close surfaces both as expected procedures. Both are advisory (do not gate the lock),
+keeping existing close runs backward-compatible.
+
+### Error codes
+| Code | Meaning |
+|------|---------|
+| `FX_RUN_NOT_FOUND` | No FX revaluation run with that id |
+| `DT_RUN_NOT_FOUND` | No deferred tax run with that id |
+| `MISSING_RATE` | No closing rate for a currency (pass it in `rates` or set an approved `fx_rate`) |
+| `ALREADY_POSTED` | The run (or its period) is already posted |
+| `SELF_POST` | Maker-checker: the poster cannot be the runner |
+
+### Controls
+| Control ID | GL-18 | TAX-06 |
+|------------|-------|--------|
+| Name | Period-end FX revaluation (maker-checker) | Deferred tax recognition (maker-checker) |
+| Type | Application — Automated (Preventive, Monthly/period-end) | Application — Automated (Preventive, Quarterly/year-end) |
+| Risk | Open FX monetary balances not restated, or revalued/posted by one person | Temporary differences not recognised as deferred tax, or posted by one person |
+| Mitigation | Run→post run table; rate from approved `fx_rates`/explicit; `SELF_POST`; 5400/1100/2000 via period-lock gate | Run→post run table; DTA(allowance)+DTL(accel-dep, documented simplification); delta posting; `SELF_POST`; 1700/5950 |
+| Owner | Financial Controller | Tax / Financial Controller |
+| Test | TC-GL-18-01/02 (basics.ts) | TC-TAX-06-01/02 (basics.ts) |

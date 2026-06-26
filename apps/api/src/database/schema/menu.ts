@@ -69,6 +69,11 @@ export const modifierOptions = pgTable('modifier_options', {
   groupId: bigint('group_id', { mode: 'number' }).notNull().references(() => modifierGroups.id),
   name: text('name').notNull(),
   priceDelta: numeric('price_delta', { precision: 14, scale: 2 }).notNull().default('0'),
+  // Step 1 — standard COGS impact of choosing this option (e.g. "extra patty" → 12.00). Folded into the
+  // sold line's recipe COGS at checkout (Dr 5300 / Cr 1200). recipeRefId is a forward hook for future
+  // ingredient-level deduction off a mini-recipe (not yet costed).
+  cogsDelta: numeric('cogs_delta', { precision: 14, scale: 2 }).notNull().default('0'),
+  recipeRefId: bigint('recipe_ref_id', { mode: 'number' }),
   isDefault: boolean('is_default').notNull().default(false),
   sort: integer('sort').default(0),
   active: boolean('active').notNull().default(true),
