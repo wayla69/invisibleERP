@@ -709,6 +709,20 @@ async function main() {
   const capBin = (capLay.json.bins ?? []).find((b: any) => b.bin_code === 'CAPZ-1');
   ok('INV-08: layout reports the bin utilisation (4 ÷ 5 = 0.8)', !!capBin && capBin.capacity === 5 && capBin.on_hand === 4 && invNear(capBin.utilization, 0.8), JSON.stringify({ cap: capBin?.capacity, oh: capBin?.on_hand, u: capBin?.utilization }));
 
+  // ════════════════════════ EXP-08 — Petty-cash float + disbursement maker-checker (SoD) ════════════════════════
+  // A petty-cash fund holds cash capped at a credit limit; each expense/advance is a request a DIFFERENT user
+  // must approve before the GL posts and the fund is decremented; a draw cannot exceed the fund balance.
+  const pcFund = await inj('POST', '/api/finance/petty-cash/funds', admin, { fund_code: 'PCFZ-1', float_limit: 3000, initial_amount: 3000 });
+  ok('EXP-08: establish a petty-cash fund within its float (balance 3000)', pcFund.json?.balance === 3000, JSON.stringify({ st: pcFund.status, bal: pcFund.json?.balance }));
+  const pcReq = await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCFZ-1', kind: 'expense', payee: 'Office supplies', amount: 1000, expense_account: '5100', doc_ref: 'RCPT-Z1' });
+  ok('EXP-08: expense request raised PendingApproval (no GL yet)', pcReq.json?.status === 'PendingApproval' && pcReq.json?.amount === 1000, JSON.stringify({ st: pcReq.json?.status }));
+  const pcSelf = await inj('POST', `/api/finance/petty-cash/requests/${pcReq.json?.req_no}/approve`, admin);
+  ok('EXP-08: preparer self-approval blocked → 403 SOD_VIOLATION', pcSelf.status === 403 && pcSelf.json?.error?.code === 'SOD_VIOLATION', `${pcSelf.status}/${pcSelf.json?.error?.code}`);
+  const pcAppr = await inj('POST', `/api/finance/petty-cash/requests/${pcReq.json?.req_no}/approve`, whchk);
+  ok('EXP-08: independent approver disburses → Dr 5100 / Cr 1015 (1000); fund 2000', pcAppr.json?.status === 'Approved' && pcAppr.json?.fund_balance === 2000 && pcAppr.json?.approved_by === 'whchk', JSON.stringify({ st: pcAppr.json?.status, fb: pcAppr.json?.fund_balance }));
+  const pcOver = await inj('POST', '/api/finance/petty-cash/requests', admin, { fund_code: 'PCFZ-1', kind: 'expense', payee: 'Too big', amount: 5000 });
+  ok('EXP-08: a draw beyond the fund balance is rejected → 422 INSUFFICIENT_FLOAT', pcOver.status === 422 && pcOver.json?.error?.code === 'INSUFFICIENT_FLOAT', `${pcOver.status}/${pcOver.json?.error?.code}`);
+
   // REC-04 — period-end control-account reconciliation PACK ties every sub-ledger to its GL control account.
   const recPack = await inj('GET', '/api/finance/reconciliation/controls', admin);
   const inv1200 = (recPack.json.lines ?? []).find((l: any) => l.account === '1200');

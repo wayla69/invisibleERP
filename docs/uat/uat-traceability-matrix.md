@@ -237,6 +237,15 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-043 | Independent approval creates asset + posts GL (Dr 1500/Cr 2000) | FA-10, GL-01 | 09 §7 |
 | UAT-P2P-044 | GR line cannot be capitalised twice | FA-10 | 09 §7 |
 | UAT-UI-CAP-01 | Capitalize-from-GR screen (eligible → request → approve) | FA-10 | 09 §7 |
+| UAT-P2P-050 | Establish petty-cash fund within float (วงเงิน) | EXP-08 | 07 §7, §9 |
+| UAT-P2P-051 | Expense request → PendingApproval, no GL | EXP-08 | 07 §7 |
+| UAT-P2P-052 | Petty-cash disbursement self-approval blocked (SoD, incl. Admin) | EXP-08, R07 | 07 §7, §9 |
+| UAT-P2P-053 | Independent approval posts GL + decrements fund | EXP-08, GL-01 | 07 §7, §9 |
+| UAT-P2P-054 | Draw beyond the fund balance blocked | EXP-08 | 07 §7 |
+| UAT-P2P-055 | Advance approve → disburse → settle to fund | EXP-08, GL-01 | 07 §7 |
+| UAT-P2P-056 | Replenish capped at the float limit | EXP-08 | 07 §7 |
+| UAT-P2P-057 | Pending petty-cash requests in GOV-01 monitor | EXP-08, GOV-01 | 07 §7 |
+| UAT-UI-PCX-01 | Petty-cash fund + expense screen (funds → request → approve) | EXP-08 | 07 §7 |
 
 ## 04 — Inventory & WMS → `03-inventory-cogs.md`
 
