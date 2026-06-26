@@ -296,6 +296,7 @@ export const INTERNAL_NAV: NavGroup[] = [
         title: 'รายรับ–รายจ่าย (AR/AP)',
         items: [
           { label: 'การเงิน', href: '/finance', icon: Banknote, perms: ['ar', 'creditors', 'exec'] },
+          { label: 'จัดการเครดิต & ระงับบัญชี', href: '/finance/credit-hold', icon: ShieldAlert, perms: ['ar', 'crm', 'exec'] },
           { label: 'เงินทดรองจ่าย (Petty cash)', href: '/advances', icon: HandCoins, perms: ['creditors', 'exec'] },
           { label: 'กองทุนเงินสดย่อย & ค่าใช้จ่าย', href: '/petty-cash', icon: HandCoins, perms: ['creditors', 'exec'] },
         ],
