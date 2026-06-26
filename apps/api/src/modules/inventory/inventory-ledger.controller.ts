@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -19,6 +19,7 @@ const AdjustBody = z.object({
   item_id: z.string().min(1), location_id: z.string().optional(), qty_delta: z.number(),
   reason: z.string().optional(),
 });
+const WriteoffRejectBody = z.object({ reason: z.string().optional() });
 type ReceiveBodyT = z.infer<typeof ReceiveBody>;
 type IssueBodyT = z.infer<typeof IssueBody>;
 type AdjustBodyT = z.infer<typeof AdjustBody>;
@@ -73,5 +74,25 @@ export class InventoryLedgerController {
   @Permissions('wh_count', 'dashboard')
   moves(@CurrentUser() u: JwtUser, @Query('item_id') itemId?: string, @Query('limit') limit?: string) {
     return this.svc.listMoves(u, { item_id: itemId, limit: qint('limit', limit, 100) });
+  }
+
+  // INV-07 — inventory write-off maker-checker (theft concealment / SoD). A write-off request posts nothing
+  // until a DIFFERENT wh_adjust holder approves; self-approval → SOD_VIOLATION.
+  @Get('writeoffs')
+  @Permissions('wh_count', 'dashboard')
+  writeoffs(@CurrentUser() u: JwtUser, @Query('status') status?: string) {
+    return this.svc.listWriteOffs(u, status);
+  }
+
+  @Post('writeoffs/:id/approve')
+  @Permissions('wh_adjust')
+  approveWriteoff(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.svc.approveWriteOff(Number(id), u);
+  }
+
+  @Post('writeoffs/:id/reject')
+  @Permissions('wh_adjust')
+  rejectWriteoff(@Param('id') id: string, @Body(new ZodValidationPipe(WriteoffRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectWriteOff(Number(id), u, b?.reason);
   }
 }

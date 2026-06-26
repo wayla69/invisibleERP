@@ -953,6 +953,13 @@
       "when": 2023530000004,
       "tag": "0135_asset_disposal_maker_checker",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 2023540000004,
+      "tag": "0136_inventory_writeoff_maker_checker",
+      "breakpoints": true
     }
   ]
 }

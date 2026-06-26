@@ -173,6 +173,27 @@ export const invBalances = pgTable('inv_balances', {
   byItem: index('idx_inv_balances_item').on(t.tenantId, t.itemId),
 }));
 
+// Inventory write-off maker-checker (INV-07, 0136) — a stock write-off (negative adjustment) is a REQUEST
+// that posts nothing until a DIFFERENT user approves; on approval the real valued adjustment runs.
+export const invWriteoffRequests = pgTable('inv_writeoff_requests', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }),
+  itemId: text('item_id').notNull(),
+  locationId: text('location_id').notNull().default('WH-MAIN'),
+  qtyDelta: numeric('qty_delta', { precision: 18, scale: 4 }).notNull(),     // negative (a write-off)
+  estValue: numeric('est_value', { precision: 18, scale: 4 }).notNull().default('0'),
+  reason: text('reason').notNull(),
+  status: text('status').notNull().default('PendingApproval'),               // PendingApproval | Posted | Rejected
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),                                           // checker — must differ from requestedBy
+  moveNo: text('move_no'),
+  glEntryNo: text('gl_entry_no'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+}, (t) => ({
+  byStatus: index('idx_inv_writeoff_status').on(t.tenantId, t.status),
+}));
+
 // FIFO/FEFO cost layers (0131) — one row per valued receipt of a fifo/fefo item; issues + shrinkage
 // consume layers in order (FEFO = soonest expiry first, FIFO = oldest receipt first) at actual layer cost.
 export const invCostLayers = pgTable('inv_cost_layers', {

@@ -43,6 +43,7 @@ export default function InventoryLedgerPage() {
           { key: 'receipt', label: 'รับเข้า (Receipt)', content: <ReceiptForm /> },
           { key: 'issue', label: 'เบิก (Issue)', content: <IssueForm /> },
           { key: 'adjust', label: 'ปรับปรุง (Adjust)', content: <AdjustForm /> },
+          { key: 'writeoffs', label: 'อนุมัติตัดสต๊อก', content: <WriteOffsView /> },
           { key: 'layers', label: 'ชั้นต้นทุน (Layers)', content: <LayersView /> },
           { key: 'moves', label: 'ความเคลื่อนไหว', content: <MovesView /> },
         ]}
@@ -223,9 +224,11 @@ function AdjustForm() {
       body: JSON.stringify({ item_id: form.item_id.trim(), location_id: form.location_id.trim() || undefined, qty_delta: Number(form.qty_delta), reason: form.reason.trim() }),
     }),
     onSuccess: (r) => {
-      notifySuccess(`ปรับปรุง ${r.move_no} · มูลค่า ฿${num(r.value)} · คงเหลือ ${num(r.balance_qty)}`);
+      if (r.status === 'pending_approval') notifySuccess(`ส่งคำขอตัดสต๊อก (≈฿${num(Math.abs(r.estimated_value))}) — รอผู้อื่นอนุมัติ`);
+      else notifySuccess(`ปรับปรุง ${r.move_no} · มูลค่า ฿${num(r.value)} · คงเหลือ ${num(r.balance_qty)}`);
       setForm((f) => ({ ...f, qty_delta: '', reason: '' }));
       invalidateLedger(qc);
+      qc.invalidateQueries({ queryKey: ['inv-writeoffs'] });
     },
     onError: (e: any) => notifyError(e.message),
   });
@@ -240,11 +243,63 @@ function AdjustForm() {
         <Field id="aj-reason" label="เหตุผล" required hint="จำเป็นต่อการควบคุม (ตรวจสอบได้)"><Input id="aj-reason" value={form.reason} onChange={set('reason')} placeholder="เช่น ของเสีย / นับใหม่" /></Field>
       </div>
       <ItemDatalist id="inv-items-aj" items={items} />
-      <p className="text-xs text-muted-foreground">ของขาด: เดบิต 5810 / เครดิต 1200 · ต้องระบุเหตุผล (REASON_REQUIRED) · สิทธิ์ wh_adjust แยกจากการนับ (R11)</p>
+      <p className="text-xs text-muted-foreground">ของขาด: เดบิต 5810 / เครดิต 1200 · ต้องระบุเหตุผล (REASON_REQUIRED) · สิทธิ์ wh_adjust แยกจากการนับ (R11) · <strong>การตัดสต๊อก (ติดลบ) ต้องให้ผู้อื่นอนุมัติก่อนจึงมีผล (INV-07 — ผู้ขออนุมัติเองไม่ได้)</strong> ดูแท็บ “อนุมัติตัดสต๊อก”</p>
       <Button className="w-fit" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>
         <Scale className="size-4" /> {submit.isPending ? 'กำลังบันทึก…' : 'ปรับปรุงสต๊อก'}
       </Button>
     </Card>
+  );
+}
+
+// ───────────── Write-off approvals (INV-07 maker-checker) ─────────────
+const woStatusTh: Record<string, string> = { PendingApproval: 'รออนุมัติ', Posted: 'อนุมัติแล้ว', Rejected: 'ปฏิเสธ' };
+const woStatusTone = (s: string): 'warning' | 'success' | 'destructive' | 'secondary' =>
+  s === 'PendingApproval' ? 'warning' : s === 'Posted' ? 'success' : s === 'Rejected' ? 'destructive' : 'secondary';
+
+function WriteOffsView() {
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['inv-writeoffs'], queryFn: () => api('/api/inventory/writeoffs'), placeholderData: keepPreviousData });
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['inv-writeoffs'] }); invalidateLedger(qc); };
+  const approve = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/inventory/writeoffs/${id}/approve`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess('อนุมัติตัดสต๊อก — ลงบัญชี (Dr 5810 / Cr 1200) แล้ว'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/inventory/writeoffs/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
+    onSuccess: () => { notifySuccess('ปฏิเสธคำขอตัดสต๊อก — สต๊อกไม่เปลี่ยนแปลง'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const busy = approve.isPending || reject.isPending;
+  const d = q.data;
+
+  return (
+    <StateView q={q}>
+      {d && (
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">การตัดสต๊อก (ของขาด/เสีย) ต้องให้ผู้อื่นอนุมัติก่อนจึงมีผล — กันการตัดสต๊อกปกปิดการขาดหาย (INV-07) · <strong>{num(d.pending)} รายการรออนุมัติ</strong></p>
+          <DataTable
+            rows={d.writeoffs}
+            rowKey={(r: any) => r.request_id}
+            emptyState={{ icon: Scale, title: 'ยังไม่มีคำขอตัดสต๊อก', description: 'คำขอตัดสต๊อก (ปรับปรุงแบบติดลบ) จะมาแสดงที่นี่เพื่อรออนุมัติ' }}
+            columns={[
+              { key: 'item_id', label: 'รหัสสินค้า', render: (r: any) => <span className="font-medium">{r.item_id}</span> },
+              { key: 'qty_delta', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular text-destructive">{num(r.qty_delta)}</span> },
+              { key: 'est_value', label: 'มูลค่าโดยประมาณ', align: 'right', render: (r: any) => <span className="tabular">฿{num(r.est_value)}</span> },
+              { key: 'reason', label: 'เหตุผล' },
+              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={woStatusTone(r.status)}>{woStatusTh[r.status] ?? r.status}</Badge> },
+              { key: 'by', label: 'ผู้ขอ/อนุมัติ', render: (r: any) => <span className="text-xs text-muted-foreground">{r.requested_by ?? '—'}{r.approved_by ? ` → ${r.approved_by}` : ''}</span> },
+              { key: 'act', label: '', align: 'right', render: (r: any) => r.status === 'PendingApproval' ? (
+                <div className="flex justify-end gap-1.5">
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => approve.mutate(r.request_id)}>อนุมัติ</Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate(r.request_id)}>ปฏิเสธ</Button>
+                </div>
+              ) : (r.move_no ? <span className="font-mono text-xs text-muted-foreground">{r.move_no}</span> : null) },
+            ]}
+          />
+        </div>
+      )}
+    </StateView>
   );
 }
 
