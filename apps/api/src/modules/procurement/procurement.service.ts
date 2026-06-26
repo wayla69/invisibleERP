@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
-import { sql, eq, and, desc } from 'drizzle-orm';
+import { sql, eq, and, desc, asc, isNull, or } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, items } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -15,6 +15,7 @@ const n = (v: unknown) => Number(v ?? 0);
 export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string }[]; remarks?: string; priority?: string; amount?: number }
 export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean }[] }
 export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
+export interface UpsertSupplierPriceDto { vendor_id: number; item_id: string; item_description?: string; uom?: string; currency?: string; unit_price: number; min_qty?: number; effective_from: string; effective_to?: string; notes?: string }
 
 @Injectable()
 export class ProcurementService {
@@ -96,17 +97,40 @@ export class ProcurementService {
     if (!updated.length) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
     return { vendor_id: vendorId, approval_status: dto.approval_status, blocklisted: dto.blocklisted };
   }
-  // simple rolling scorecard from GR activity (on-time/quality placeholders until claims feed it)
+  // Scorecard recompute: on-time/quality remain at 100 (placeholder until claims feed them).
+  // price_var_pct: for each GR item received from this vendor, compare unit_cost vs the active
+  // list price (supplier_price_lists) for that item+uom. avg(abs(actual − list) / list * 100).
   async recomputeScorecard(vendorId: number, period: string, user: JwtUser) {
     const db = this.db as any;
     const [g] = await db.select({ c: sql<string>`count(*)` }).from(goodsReceipts).where(eq(goodsReceipts.vendorId, vendorId));
     const grCount = Number(g?.c ?? 0);
-    const onTime = 100, quality = 100, priceVar = 0;
-    const score = Math.round(((onTime + quality + (100 - priceVar)) / 3) * 100) / 100;
+    const onTime = 100, quality = 100;
+
+    // Compute price variance: join GR items with active price-list entries for this vendor
+    const priceRows = await db.select({
+      actualCost: grItems.unitCost,
+      listPrice: supplierPriceLists.unitPrice,
+    }).from(grItems)
+      .innerJoin(goodsReceipts, eq(grItems.grId, goodsReceipts.id))
+      .innerJoin(supplierPriceLists, and(
+        eq(supplierPriceLists.vendorId, vendorId),
+        eq(supplierPriceLists.itemId, grItems.itemId),
+        eq(supplierPriceLists.status, 'active'),
+      ))
+      .where(eq(goodsReceipts.vendorId, vendorId));
+    let priceVar = 0;
+    if (priceRows.length) {
+      const variances = priceRows
+        .map((r: any) => { const list = Number(r.listPrice); return list > 0 ? Math.abs(Number(r.actualCost ?? 0) - list) / list * 100 : 0; })
+        .filter((v: number) => isFinite(v));
+      if (variances.length) priceVar = Math.round((variances.reduce((a: number, b: number) => a + b, 0) / variances.length) * 100) / 100;
+    }
+
+    const score = Math.round(((onTime + quality + (100 - Math.min(priceVar, 100))) / 3) * 100) / 100;
     await db.insert(supplierScorecards).values({ tenantId: user.tenantId ?? null, vendorId, period, onTimePct: String(onTime), qualityPct: String(quality), priceVarPct: String(priceVar), score: String(score), grCount, claimCount: 0, createdBy: user.username })
-      .onConflictDoUpdate({ target: [supplierScorecards.vendorId, supplierScorecards.period], set: { score: String(score), grCount } });
+      .onConflictDoUpdate({ target: [supplierScorecards.vendorId, supplierScorecards.period], set: { score: String(score), grCount, priceVarPct: String(priceVar) } });
     await db.update(vendors).set({ scorecardScore: String(score) }).where(eq(vendors.id, vendorId));
-    return { vendor_id: vendorId, period, score, gr_count: grCount };
+    return { vendor_id: vendorId, period, score, gr_count: grCount, price_var_pct: priceVar };
   }
 
   // Supplier-performance register: scorecards for the caller's tenant ranked by score. With ?period → that
@@ -132,6 +156,94 @@ export class ProcurementService {
       .sort((a: any, b: any) => b.score - a.score);
     const avg = scorecards.length ? Math.round((scorecards.reduce((s: number, r: any) => s + r.score, 0) / scorecards.length) * 100) / 100 : 0;
     return { scorecards, count: scorecards.length, avg_score: avg, underperformers: scorecards.filter((r: any) => r.score < 70).length };
+  }
+
+  // ── Supplier price-list versioning (T2-D, migration 0174) ──────────
+  // Upsert: creates a new 'active' price row, supersedes any existing active row for the same
+  // (tenant, vendor, item, uom). Returns the new row id + the prior version id if superseded.
+  async upsertSupplierPrice(dto: UpsertSupplierPriceDto, user: JwtUser) {
+    const db = this.db as any;
+    const tenantId = user.tenantId ?? null;
+    const uom = dto.uom ?? 'EA';
+    // supersede any existing active version for this vendor+item+uom in this tenant
+    const superseded = await db.update(supplierPriceLists)
+      .set({ status: 'superseded', effectiveTo: dto.effective_from })
+      .where(and(
+        tenantId != null ? eq(supplierPriceLists.tenantId, tenantId) : isNull(supplierPriceLists.tenantId),
+        eq(supplierPriceLists.vendorId, dto.vendor_id),
+        eq(supplierPriceLists.itemId, dto.item_id),
+        eq(supplierPriceLists.uom, uom),
+        eq(supplierPriceLists.status, 'active'),
+      ))
+      .returning({ id: supplierPriceLists.id });
+    const [row] = await db.insert(supplierPriceLists).values({
+      tenantId, vendorId: dto.vendor_id, itemId: dto.item_id,
+      itemDescription: dto.item_description ?? null,
+      uom, currency: dto.currency ?? 'THB',
+      unitPrice: String(dto.unit_price),
+      minQty: String(dto.min_qty ?? 1),
+      effectiveFrom: dto.effective_from,
+      effectiveTo: dto.effective_to ?? null,
+      status: 'active', notes: dto.notes ?? null, createdBy: user.username,
+    }).returning({ id: supplierPriceLists.id });
+    return { id: Number(row.id), superseded_id: superseded[0] ? Number(superseded[0].id) : null };
+  }
+
+  // List active supplier prices. Optionally filter by vendor_id. Returns newest effective_from first.
+  async listSupplierPrices(q: { vendor_id?: number; item_id?: string }, user: JwtUser) {
+    const db = this.db as any;
+    const tenantId = user.tenantId;
+    const conds: any[] = [eq(supplierPriceLists.status, 'active')];
+    if (tenantId != null) conds.push(or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId)) as any);
+    if (q.vendor_id) conds.push(eq(supplierPriceLists.vendorId, q.vendor_id));
+    if (q.item_id) conds.push(eq(supplierPriceLists.itemId, q.item_id));
+    const rows = await db.select({
+      id: supplierPriceLists.id, vendorId: supplierPriceLists.vendorId, vendorName: vendors.name,
+      itemId: supplierPriceLists.itemId, itemDescription: supplierPriceLists.itemDescription,
+      uom: supplierPriceLists.uom, currency: supplierPriceLists.currency,
+      unitPrice: supplierPriceLists.unitPrice, minQty: supplierPriceLists.minQty,
+      effectiveFrom: supplierPriceLists.effectiveFrom, effectiveTo: supplierPriceLists.effectiveTo,
+      notes: supplierPriceLists.notes,
+    }).from(supplierPriceLists)
+      .leftJoin(vendors, eq(supplierPriceLists.vendorId, vendors.id))
+      .where(and(...conds))
+      .orderBy(desc(supplierPriceLists.effectiveFrom));
+    return {
+      prices: rows.map((r: any) => ({
+        id: Number(r.id), vendor_id: Number(r.vendorId), vendor_name: r.vendorName,
+        item_id: r.itemId, item_description: r.itemDescription,
+        uom: r.uom, currency: r.currency,
+        unit_price: Number(r.unitPrice), min_qty: Number(r.minQty),
+        effective_from: r.effectiveFrom, effective_to: r.effectiveTo, notes: r.notes,
+      })),
+      count: rows.length,
+    };
+  }
+
+  // Full version history for a vendor+item pair (all statuses, newest first).
+  async supplierPriceHistory(vendorId: number, itemId: string, user: JwtUser) {
+    const db = this.db as any;
+    const tenantId = user.tenantId;
+    const conds: any[] = [eq(supplierPriceLists.vendorId, vendorId), eq(supplierPriceLists.itemId, itemId)];
+    if (tenantId != null) conds.push(or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId)) as any);
+    const rows = await db.select({
+      id: supplierPriceLists.id, uom: supplierPriceLists.uom, currency: supplierPriceLists.currency,
+      unitPrice: supplierPriceLists.unitPrice, minQty: supplierPriceLists.minQty,
+      effectiveFrom: supplierPriceLists.effectiveFrom, effectiveTo: supplierPriceLists.effectiveTo,
+      status: supplierPriceLists.status, notes: supplierPriceLists.notes,
+      createdBy: supplierPriceLists.createdBy, createdAt: supplierPriceLists.createdAt,
+    }).from(supplierPriceLists)
+      .where(and(...conds))
+      .orderBy(desc(supplierPriceLists.effectiveFrom));
+    return {
+      vendor_id: vendorId, item_id: itemId,
+      history: rows.map((r: any) => ({
+        id: Number(r.id), uom: r.uom, currency: r.currency,
+        unit_price: Number(r.unitPrice), min_qty: Number(r.minQty),
+        effective_from: r.effectiveFrom, effective_to: r.effectiveTo,
+        status: r.status, notes: r.notes, created_by: r.createdBy, created_at: r.createdAt,
+      })),
+    };
   }
 
   // ── PO ──────────────────────────────────────────────────────────────

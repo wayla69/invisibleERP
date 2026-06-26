@@ -1219,6 +1219,13 @@
       "when": 2023810000005,
       "tag": "0173_revrec",
       "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "7",
+      "when": 2023820000001,
+      "tag": "0174_supplier_pricelist",
+      "breakpoints": true
     }
   ]
 }

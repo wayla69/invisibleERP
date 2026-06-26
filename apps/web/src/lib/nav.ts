@@ -89,6 +89,7 @@ import {
   PackageCheck,
   PiggyBank,
   Lightbulb,
+  Tag,
 } from 'lucide-react';
 
 /** Top-level workspace. The internal app is split into two surfaces selectable via the sidebar
@@ -268,6 +269,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'ขอใบเสนอราคา (RFQ)', href: '/procurement/rfqs', icon: ClipboardList, perms: ['procurement'] },
       { label: 'จับคู่เอกสาร 3 ทาง', href: '/procurement/match', icon: CheckCheck, perms: ['procurement'] },
       { label: 'คะแนนซัพพลายเออร์', href: '/supplier-scorecards', icon: Award, perms: ['procurement', 'exec'] },
+      { label: 'ราคาซัพพลายเออร์', href: '/supplier-prices', icon: Tag, perms: ['procurement', 'md_vendor', 'planner', 'exec'] },
       { label: 'อ่านเอกสารอัตโนมัติ (Document AI)', href: '/doc-ai', icon: FileScan, perms: ['procurement', 'creditors', 'exec'] },
       // vendor self-service surface — visible only to users granted the vendor_portal permission
       { label: 'พอร์ทัลซัพพลายเออร์ (Supplier)', href: '/supplier', icon: PackageCheck, perms: ['vendor_portal'] },
