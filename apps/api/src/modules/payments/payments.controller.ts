@@ -31,6 +31,7 @@ const RefundBody = z.object({ payment_no: z.string().min(1), amount: z.number().
 const OpenTillBody = z.object({ opening_float: z.number().nonnegative().optional() });
 const CloseTillBody = z.object({ session_no: z.string().min(1), closing_count: z.number().nonnegative(), denominations: z.record(z.string(), z.number()).optional() });
 const CashMovementBody = z.object({ type: z.enum(['paid_in', 'paid_out', 'drop']), amount: z.number().positive(), reason: z.string().optional() });
+const RejectVarianceBody = z.object({ reason: z.string().max(500).optional() });
 
 @Controller('api/payments')
 export class PaymentsController {
@@ -68,6 +69,18 @@ export class PaymentsController {
   @Post('till/close') @Permissions('pos_till', 'ar')
   closeTill(@Body(new ZodValidationPipe(CloseTillBody)) b: CloseTillDto, @CurrentUser() u: JwtUser) {
     return this.svc.closeTill(b, u);
+  }
+
+  // POS-01: a material cash over/short parked on close is cleared by a manager (maker-checker).
+  // Approving/rejecting requires a DIFFERENT user than the cashier who closed (SoD, enforced in ledger).
+  @Post('till/variance/:sessionNo/approve') @Permissions('pos_till', 'ar')
+  approveVariance(@Param('sessionNo') sessionNo: string, @CurrentUser() u: JwtUser) {
+    return this.svc.approveVariance(sessionNo, u);
+  }
+
+  @Post('till/variance/:sessionNo/reject') @Permissions('pos_till', 'ar')
+  rejectVariance(@Param('sessionNo') sessionNo: string, @Body(new ZodValidationPipe(RejectVarianceBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectVariance(sessionNo, u, b?.reason);
   }
 
   @Get() @Permissions('pos_sell', 'cust_pos', 'ar')

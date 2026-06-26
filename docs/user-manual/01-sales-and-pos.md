@@ -480,7 +480,27 @@ Record any cash added or removed:
 > **Note:** Use the **X-report** during a shift for an interim total without
 > closing the drawer. The **Z-report** is the final, end-of-shift report.
 
+#### Cash over/short — what happens to a variance
+
+When you close the till, the **over or short is automatically booked to the
+accounts** (GL account **5830 Cash Over/Short**) so the books match the cash you
+actually counted — you don't post anything by hand.
+
+- A **small** variance (under **฿100**) is recorded straight away; the shift is done.
+- A **large** variance (**฿100 or more**) still closes the drawer, but the
+  over/short is held as **"รออนุมัติ" (pending approval)**. It then appears in the
+  **รายการรออนุมัติ** screen (**`/approvals`**), where a **manager — a different
+  person from the one who closed** — reviews it and taps **อนุมัติ** (approve) or
+  **ปฏิเสธ** (reject). The cashier **cannot approve their own** big discrepancy
+  (the system blocks it — *แบ่งแยกหน้าที่ / segregation of duties*). Rejecting
+  leaves the discrepancy flagged for follow-up.
+
+> This protects against a shortage being quietly written off by the same person
+> who caused it. (Control **REV-13**; the held item also rolls up in the
+> system-wide pending-approvals monitor, **GOV-01**.)
+
 [screenshot: Z-report showing expected vs counted cash and variance]
+[screenshot: /approvals — manager approving a large cash variance (รออนุมัติ → อนุมัติ)]
 
 ---
 

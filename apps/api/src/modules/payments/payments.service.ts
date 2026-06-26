@@ -12,6 +12,11 @@ import { PosAuditService } from '../pos-audit/pos-audit.service';
 import { JournalService } from '../pos-fiscal/journal.service';
 import { QrService } from '../qr/qr.service';
 
+// POS-01: cash over/short at/above this absolute THB amount needs manager approval (maker-checker);
+// below it the over/short posts to GL immediately. A flat threshold for now — a tenant-level override
+// can replace this constant without changing the close/approve flow.
+const CASH_VARIANCE_THRESHOLD = 100;
+
 export interface RecordTenderDto {
   sale_no: string;
   tenant_id?: number;
@@ -258,11 +263,66 @@ export class PaymentService {
     const a = await this.aggregateTill(Number(sess.id));
     const expectedCash = roundCurrency(a.expected_cash, 'THB');
     const variance = roundCurrency(n(dto.closing_count) - expectedCash, 'THB');
+
+    // POS-01: post the cash over/short to GL so book-cash (1000) tracks the physical count.
+    //   short (counted < expected): Dr 5830 Cash Over/Short, Cr 1000 Cash
+    //   over  (counted > expected): Dr 1000 Cash,            Cr 5830 Cash Over/Short
+    // A variance over the materiality threshold posts a DRAFT JE (pendingApproval) and parks the
+    // session in PendingApproval — a different user (manager) must approve it (maker-checker, GL-05
+    // SoD). Sub-threshold variances post immediately (no approval required). The till still CLOSES
+    // either way — the cash has physically left the drawer; only the GL clearing is gated.
+    let varianceJournalNo: string | null = null;
+    let varianceStatus: 'NotRequired' | 'PendingApproval' = 'NotRequired';
+    if (Math.abs(variance) >= 0.005 && !(await this.ledger.alreadyPosted('TILL_CLOSE', dto.session_no, sess.tenantId ?? null))) {
+      const material = Math.abs(variance) > CASH_VARIANCE_THRESHOLD;
+      const v = Math.abs(variance);
+      const lines = variance < 0
+        ? [{ account_code: '5830', debit: v }, { account_code: '1000', credit: v }]
+        : [{ account_code: '1000', debit: v }, { account_code: '5830', credit: v }];
+      const je: any = await this.ledger.postEntry({
+        source: 'TILL_CLOSE', sourceRef: dto.session_no, tenantId: sess.tenantId ?? null,
+        memo: `Till close variance ${dto.session_no} (${variance < 0 ? 'short' : 'over'} ${v})`,
+        createdBy: user.username, pendingApproval: material, lines,
+      });
+      varianceJournalNo = je?.entry_no ?? null;
+      varianceStatus = material ? 'PendingApproval' : 'NotRequired';
+    }
+
     await db.update(tillSessions).set({
       closedBy: user.username, closedAt: new Date(), closingCount: fx(dto.closing_count, 4),
       expectedCash: fx(expectedCash, 4), variance: fx(variance, 4), denominations: dto.denominations ?? null, status: 'Closed',
+      varianceJournalNo, varianceStatus,
     }).where(eq(tillSessions.id, sess.id));
-    return { session_no: dto.session_no, status: 'Closed', expected_cash: expectedCash, closing_count: n(dto.closing_count), variance, z_report: { ...a, counted_cash: n(dto.closing_count), variance, denominations: dto.denominations ?? null } };
+    return { session_no: dto.session_no, status: 'Closed', expected_cash: expectedCash, closing_count: n(dto.closing_count), variance, variance_status: varianceStatus, variance_journal_no: varianceJournalNo, z_report: { ...a, counted_cash: n(dto.closing_count), variance, denominations: dto.denominations ?? null } };
+  }
+
+  // POST /api/payments/till/variance/:sessionNo/approve — manager clears a material cash variance.
+  // Maker-checker: the approver must differ from the cashier who closed the till (enforced by
+  // ledger.approveEntry → SOD_VIOLATION). Approving makes the parked Draft over/short JE effective.
+  async approveVariance(sessionNo: string, approver: JwtUser) {
+    const db = this.db as any;
+    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
+    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
+    if (String(sess.varianceStatus) !== 'PendingApproval' || !sess.varianceJournalNo) {
+      throw new BadRequestException({ code: 'NOT_PENDING', message: 'No cash variance pending approval for this till', messageTh: 'รอบเงินสดนี้ไม่มีผลต่างที่รออนุมัติ' });
+    }
+    await this.ledger.approveEntry(sess.varianceJournalNo, approver); // SoD: approver ≠ preparer (binds Admin)
+    await db.update(tillSessions).set({ varianceStatus: 'Approved', varianceApprovedBy: approver.username, varianceApprovedAt: new Date() }).where(eq(tillSessions.id, sess.id));
+    return { session_no: sessionNo, variance_status: 'Approved', variance_journal_no: sess.varianceJournalNo, variance: n(sess.variance), approved_by: approver.username, closed_by: sess.closedBy };
+  }
+
+  // POST /api/payments/till/variance/:sessionNo/reject — manager rejects a material cash variance.
+  // Voids the parked Draft over/short JE (the discrepancy stays recorded on the till for follow-up).
+  async rejectVariance(sessionNo: string, approver: JwtUser, reason?: string) {
+    const db = this.db as any;
+    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
+    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
+    if (String(sess.varianceStatus) !== 'PendingApproval' || !sess.varianceJournalNo) {
+      throw new BadRequestException({ code: 'NOT_PENDING', message: 'No cash variance pending approval for this till', messageTh: 'รอบเงินสดนี้ไม่มีผลต่างที่รออนุมัติ' });
+    }
+    await this.ledger.rejectEntry(sess.varianceJournalNo, approver, reason); // SoD: rejecter ≠ preparer
+    await db.update(tillSessions).set({ varianceStatus: 'Rejected', varianceApprovedBy: approver.username, varianceApprovedAt: new Date() }).where(eq(tillSessions.id, sess.id));
+    return { session_no: sessionNo, variance_status: 'Rejected', variance_journal_no: sess.varianceJournalNo, rejected_by: approver.username };
   }
 
   // ── Cash management: drawer movements + X/Z shift report ──
