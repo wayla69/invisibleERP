@@ -189,6 +189,7 @@ flowchart TD
 | 0.9 DRAFT | 2026-06-26 | Platform | §7 step 13 — added the **lease-liability reconciliation** (`GET /api/leases/liability-reconciliation`): ties GL **2600** to the sum of the remaining liability balances on the lease schedule (`gl_liability` vs `schedule_liability`, `difference`, `reconciled`), surfaced as a tie-out banner on `/leases`. Detective tie-out over the existing **LSE-01**; no new control, no migration. Verified by the `basics` harness (after run + remeasurement, GL 2600 = schedule, reconciled, difference 0). |
 | 1.0 DRAFT | 2026-06-26 | WS1.3 | WS1.3 — added **multi-dimensional GL postings**: `branch_id`, `project_id`, `department_id` columns on `journal_lines`; `PostingService` context stamping; `GET /api/ledger/income-statement/by-branch` per-branch P&L endpoint; `departments` master table with RLS. New control **GL-13**. Verified by the `basics` harness (TC-GL-13-01/02/03). Migration 0157. |
 | 1.1 DRAFT | 2026-06-26 | WS1.4 | WS1.4 — added **sub-ledger tie-out / reconciliation**: `POST /api/ledger/tie-out/run` reconciles each GL control account (1100 AR / 2000 AP / 1200 INV / 1500 FA) to the sum of its sub-ledger detail, recording the variance + a Matched/Variance status; `POST /api/ledger/tie-out/:id/certify` is **maker-checker** (certifier ≠ runner → `SELF_CERTIFY`). New `subledger_tieout_runs` table (RLS), new control **GL-14**. Verified by the `basics` harness (TC-GL-14-01/02/03). Migration 0160. |
+| 1.2 DRAFT | 2026-06-26 | WS2.1 | WS2.1 — **hard period close + checklist**: `POST /api/ledger/close/start` opens a `close_runs` record (InProgress) per (tenant, period) and seeds a standard checklist (`close_run_steps`); `POST /api/ledger/close/step` marks steps Done → run advances to **ReadyToLock** when all required steps are done; `POST /api/ledger/close/lock` hard-locks the period (requires ReadyToLock else `STEPS_INCOMPLETE`; **maker-checker** locker ≠ starter → `SELF_LOCK`). New `'Locked'` period status; `postEntry` now rejects ALL postings into a Locked period with `PERIOD_LOCKED` regardless of the legacy `allowClosedPeriod` escape (only the system year-end closing entry, `source='CLOSE'`, is exempt). New `close_runs` / `close_run_steps` tables (RLS), new controls **GL-15** (checklist completeness) + **GL-16** (segregated lock). Verified by the `basics` harness (TC-GL-15-01/02/03, TC-GL-16-01/02). Migration 0162. |
 
 ## 1.3 Multi-dimensional GL Postings (WS1.3)
 
@@ -287,3 +288,71 @@ explanatory `note` describing the reconciling items. **Segregation of duties:** 
 | Mitigation | Tie-out run computes GL vs sub-ledger balance + variance per control account; maker-checker certification (certifier ≠ runner, `SELF_CERTIFY`) |
 | Owner | Financial Controller |
 | Test | TC-GL-14-01/02/03 (basics.ts harness) |
+
+## 2.1 Hard Period Close + Checklist (WS2.1)
+
+Period close is now a **controlled, checklist-driven, irreversible workflow** rather than a single soft
+status flip. A `close_runs` record (one per tenant+period) drives a sequence of `close_run_steps`; the
+period can only be **Locked** once every required step is complete, and the lock is **segregated** from the
+preparer (maker-checker).
+
+### Close-run lifecycle
+`Open → InProgress → ReadyToLock → Locked`
+
+1. **InProgress** — `POST /api/ledger/close/start { period }` (perm `gl_close`) creates the run as
+   `InProgress` and seeds the standard checklist. Upsert-safe: a re-start of a non-locked period returns the
+   existing run; a re-start of a Locked period is rejected (`PERIOD_ALREADY_LOCKED`).
+2. **ReadyToLock** — `POST /api/ledger/close/step { close_run_id, step_key, detail? }` (perm `gl_close`)
+   marks a step `Done` (records `completed_by` + timestamp). When **all required** steps are `Done`, the run
+   automatically advances to `ReadyToLock`.
+3. **Locked** — `POST /api/ledger/close/lock { close_run_id }` (perm `gl_close`) hard-locks the period.
+   - Requires `ReadyToLock` — else `STEPS_INCOMPLETE` (the response lists the pending required `step_key`s).
+   - **Maker-checker**: the locker (`locked_by`) MUST differ from the starter (`started_by`) — else
+     `SELF_LOCK`. Both identities + `locked_at` are retained as the SoD evidence trail.
+   - Locking writes `'Locked'` into `fiscal_periods.status`.
+
+Read endpoints: `GET /api/ledger/close/status?period=YYYY-MM` (the run + its steps) and `GET /api/ledger/close`
+(recent runs) — perms `gl_close`, `gl_post`, `exec`.
+
+### Seeded checklist (`close_run_steps`)
+| step_key | Title | Required |
+|---|---|---|
+| `subledger_tieout` | Sub-ledger tie-out (AR/AP/INV/FA) reconciled | Yes |
+| `bank_rec` | Bank reconciliation complete | Yes |
+| `depreciation` | Depreciation posted for the period | Yes |
+| `recurring` | Recurring / prepaid journals run | Yes |
+| `fx_reval` | FX revaluation posted | No (advisory) |
+| `trial_balance_review` | Trial-balance review & sign-off | Yes |
+
+### The new hard `PERIOD_LOCKED` gate (replaces the soft escape)
+Previously a `Closed` period could be posted into by any caller passing `allowClosedPeriod: true`. WS2.1 adds
+a strictly stronger gate: `LedgerService.postEntry` now rejects **every** entry dated into a **Locked** period
+with **`PERIOD_LOCKED`**, *regardless* of `allowClosedPeriod`. The legacy soft `Closed` / `allowClosedPeriod`
+behaviour is unchanged (backward compatible) — `Locked` is additive and irreversible. The **only** exemption
+is the system year-end closing entry (`source = 'CLOSE'`), so `closeYear` can still post its P&L-sweep JE into
+December. (Locked is not exposed as a normal re-open; reversing a hard close is an out-of-band/audited action.)
+
+### New error codes
+`PERIOD_LOCKED` (post into a locked period), `PERIOD_ALREADY_LOCKED` (start/step on a locked run),
+`STEPS_INCOMPLETE` (lock before required steps done), `SELF_LOCK` (locker = starter),
+`CLOSE_RUN_NOT_FOUND`, `STEP_NOT_FOUND`.
+
+### Control GL-15 — Close-checklist completeness
+| Control ID | GL-15 |
+|------------|-------|
+| Name | Hard period close — checklist completeness |
+| Type | Application — Automated (Preventive, Monthly) |
+| Risk | A period is closed with key close procedures skipped, or a closed period is silently re-posted |
+| Mitigation | Required checklist steps must all be `Done` before lock (`STEPS_INCOMPLETE`); a Locked period rejects all postings (`PERIOD_LOCKED`, except `source='CLOSE'`) |
+| Owner | Financial Controller |
+| Test | TC-GL-15-01/02/03 (basics.ts harness) |
+
+### Control GL-16 — Segregated period lock (SoD)
+| Control ID | GL-16 |
+|------------|-------|
+| Name | Segregated period lock (maker-checker) |
+| Type | Application — Automated (Preventive, Monthly) |
+| Risk | One person both performs and locks the close, concealing a misstatement over their own work |
+| Mitigation | Locker (`locked_by`) must differ from starter (`started_by`) → `SELF_LOCK`; both identities + `locked_at` retained as evidence |
+| Owner | Financial Controller |
+| Test | TC-GL-16-01/02 (basics.ts harness) |
