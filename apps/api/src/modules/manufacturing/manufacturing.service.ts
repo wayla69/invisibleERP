@@ -101,23 +101,30 @@ export class ManufacturingService {
     if (await this.ledger.alreadyPosted('WO-DONE', woNo, tenantId)) return { already: true, wo_no: woNo };
 
     const produced = qtyProduced != null && n(qtyProduced) > 0 ? n(qtyProduced) : n(wo.qtyPlanned);
-    const total = n(wo.totalCost);
+    const total = n(wo.totalCost), planned = n(wo.qtyPlanned);
+    // YIELD VARIANCE: WIP was charged the full PLANNED-batch cost at issue. Value finished goods at the
+    // standard unit cost × the ACTUAL quantity produced, and book the difference to 5810 — a yield LOSS
+    // (produced < planned: e.g. spoilage/waste) DEBITS 5810; an over-yield CREDITS it. Full yield → variance
+    // 0 → FG = full cost (unchanged). WIP is always fully relieved (FG + variance = total).
+    const stdUnit = planned > 0 ? total / planned : 0;
+    const fgValue = r2(stdUnit * produced);
+    const variance = r2(total - fgValue);
     const now = new Date();
     await db.insert(stockMovements).values({
       moveDate: now, docNo: woNo, moveType: 'Stock In', itemId: wo.productItemId, itemDescription: wo.productName,
       uom: wo.uom, qty: fx(produced, 3), refDoc: woNo, remarks: 'WO finished goods receipt', createdBy: user.username,
     });
 
+    const lines: any[] = [{ account_code: '1210', debit: fgValue, memo: 'Finished goods' }];
+    if (variance > 0.005) lines.push({ account_code: '5810', debit: variance, memo: `Yield variance (loss) ${woNo}` });
+    else if (variance < -0.005) lines.push({ account_code: '5810', credit: r2(-variance), memo: `Yield variance (gain) ${woNo}` });
+    lines.push({ account_code: '1250', credit: total, memo: `WIP cleared ${woNo}` });
     const je: any = await this.ledger.postEntry({
-      source: 'WO-DONE', sourceRef: woNo, tenantId, memo: `Work order complete ${woNo}`, createdBy: user.username,
-      lines: [
-        { account_code: '1210', debit: total, memo: 'Finished goods' },
-        { account_code: '1250', credit: total, memo: `WIP cleared ${woNo}` },
-      ],
+      source: 'WO-DONE', sourceRef: woNo, tenantId, memo: `Work order complete ${woNo}`, createdBy: user.username, lines,
     });
 
     await db.update(workOrders).set({ status: 'Completed', qtyProduced: fx(produced, 3), entryNoComplete: je.entry_no, completedAt: now }).where(eq(workOrders.id, Number(wo.id)));
-    return { wo_no: woNo, status: 'Completed', entry_no: je.entry_no, qty_produced: produced, fg_value: total };
+    return { wo_no: woNo, status: 'Completed', entry_no: je.entry_no, qty_planned: planned, qty_produced: produced, fg_value: fgValue, yield_variance: variance };
   }
 
   async list(user: JwtUser) {
@@ -148,6 +155,9 @@ export class ManufacturingService {
       qty_planned: n(r.qtyPlanned), qty_produced: n(r.qtyProduced), status: r.status,
       material_cost: n(r.materialCost), labor_cost: n(r.laborCost), overhead_cost: n(r.overheadCost),
       total_cost: n(r.totalCost), unit_cost: n(r.unitCost), entry_no_issue: r.entryNoIssue, entry_no_complete: r.entryNoComplete,
+      // Yield variance (5810): the cost of the lost (or gained) yield on a completed WO — total batch cost
+      // minus the standard cost of what was actually produced. Positive = loss, negative = over-yield gain.
+      yield_variance: r.status === 'Completed' && n(r.qtyPlanned) > 0 ? r2(n(r.totalCost) - (n(r.totalCost) / n(r.qtyPlanned)) * n(r.qtyProduced)) : null,
       started_at: r.startedAt, completed_at: r.completedAt, created_at: r.createdAt,
     };
   }

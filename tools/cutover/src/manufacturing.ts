@@ -95,6 +95,26 @@ async function main() {
     tb2.json.totals?.balanced === true && near(row2('1210')?.debit, 420) && near(row2('1250')?.balance, 0),
     JSON.stringify({ bal: tb2.json.totals?.balanced, fg: row2('1210')?.debit, wip: row2('1250')?.balance }));
 
+  // ── 7. Yield variance: a 2nd WO produces 15 of 20 planned → FG at standard cost of 15, loss to 5810 ──
+  const wo2 = await inj('POST', '/api/manufacturing/work-orders', admin, { bom_code: 'BOM-CAKE', qty_planned: 20, product_item_id: 'CAKE', product_name: 'เค้ก' });
+  const wo2No = wo2.json.wo_no;
+  await inj('POST', `/api/manufacturing/work-orders/${wo2No}/issue`, admin);
+  // std unit = total 420 / 20 = 21; produce 15 → FG = 21×15 = 315; yield loss = 420 − 315 = 105 → 5810.
+  const done2 = await inj('POST', `/api/manufacturing/work-orders/${wo2No}/complete`, admin, { qty_produced: 15 });
+  ok('Yield variance: produce 15/20 → FG value 315, yield_variance 105 (loss)',
+    done2.json.status === 'Completed' && near(done2.json.fg_value, 315) && near(done2.json.yield_variance, 105),
+    JSON.stringify({ fg: done2.json.fg_value, var: done2.json.yield_variance }));
+  const tb3 = await inj('GET', '/api/ledger/trial-balance', admin);
+  const row3 = (c: string) => (tb3.json.rows ?? []).find((r: any) => r.account_code === c);
+  ok('Yield variance GL: 5810 dr 105, 1210 FG cumulative 735, WIP nets 0, TB balanced',
+    tb3.json.totals?.balanced === true && near(row3('5810')?.debit, 105) && near(row3('1210')?.debit, 735) && near(row3('1250')?.balance, 0),
+    JSON.stringify({ bal: tb3.json.totals?.balanced, var5810: row3('5810')?.debit, fg: row3('1210')?.debit, wip: row3('1250')?.balance }));
+  const woList = (await inj('GET', '/api/manufacturing/work-orders', admin)).json;
+  const wo2Row = (woList.work_orders ?? []).find((w: any) => w.wo_no === wo2No);
+  ok('WO register exposes yield_variance on the completed order (105); full-yield WO has 0',
+    near(wo2Row?.yield_variance, 105) && near((woList.work_orders ?? []).find((w: any) => w.wo_no === woNo)?.yield_variance, 0),
+    `wo2=${wo2Row?.yield_variance}`);
+
   console.log('\n── Phase 18 — Manufacturing (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

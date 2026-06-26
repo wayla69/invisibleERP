@@ -135,6 +135,27 @@ Tabs: **ข้อมูลของฉัน** (My info) · **ขอลางา
 2. On manager approval the reimbursement becomes an **AP payable** and settles
    through the normal AP pay flow (it appears in AP aging).
 
+### 5.4 Approve expense claims (manager)
+
+This is the **manager side** of §5.3 — a separate screen, so an approver does not
+need the `ess` permission.
+
+**Screen:** `/expense-approvals` · **Where:** sidebar → **บุคลากร & เงินเดือน →
+อนุมัติเบิกพนักงาน** (ERP and POS) · **Required permission:** `approvals`.
+
+1. Open **อนุมัติเบิกพนักงาน** (`/expense-approvals`). It lists every employee
+   expense claim still **Pending**, with the claimant, date, category and amount.
+2. Press **อนุมัติ** to approve, or **ปฏิเสธ** to reject.
+
+**Expected result:** On **approve**, the claim becomes **Approved** and an **AP
+reimbursement payable** is raised to the employee (Dr 5100 / Cr 2000) — it then
+settles through the normal AP pay flow. On **reject**, the claim is closed with no
+GL impact.
+
+> **Control:** You **cannot approve your own claim** — the system blocks it with
+> `SOD_SELF_APPROVAL` (segregation of duties, R07). The approver must differ from
+> the claimant.
+
 ---
 
 **Next:** [Tax](./07-tax.md) · [General Ledger](./06-general-ledger.md)

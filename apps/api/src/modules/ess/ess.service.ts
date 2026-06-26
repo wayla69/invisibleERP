@@ -81,6 +81,25 @@ export class EssService {
     return { id: Number(r.id), status: 'Pending', amount: n(dto.amount) };
   }
 
+  // Approver inbox — every PENDING expense claim awaiting a decision, with the claimant's name/code so a
+  // manager can act on it (perm 'approvals', gated at the controller). Tenant-scoped by RLS; self-scoping
+  // does NOT apply here (an approver sees other employees' claims). The decide call still blocks
+  // self-approval (SoD), so a claim the approver raised themselves can be listed but not approved by them.
+  async listPendingExpenses() {
+    const db = this.db as any;
+    const rows = await db
+      .select({
+        id: expenseClaims.id, claim_date: expenseClaims.claimDate, category: expenseClaims.category,
+        amount: expenseClaims.amount, description: expenseClaims.description, status: expenseClaims.status,
+        emp_code: employees.empCode, employee_name: employees.name,
+      })
+      .from(expenseClaims)
+      .leftJoin(employees, eq(expenseClaims.employeeId, employees.id))
+      .where(eq(expenseClaims.status, 'Pending'))
+      .orderBy(desc(expenseClaims.id));
+    return { pending: rows.map((r: any) => ({ ...r, amount: n(r.amount) })), count: rows.length };
+  }
+
   // Manager approval (perm 'approvals'/'exec', gated at the controller). SoD: the approver must not be
   // the claimant. On approval, raise an **AP reimbursement payable** to the employee — this posts the GL
   // (Dr 5100 Operating Expense / Cr 2000 AP) AND creates the AP sub-ledger row, so the reimbursement shows

@@ -265,6 +265,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-022 | MRP lot-sizing (min/multiple/EOQ) | Feature (MRP lot-sizing) | 15 §5a |
 | UAT-INV-023 | Rough-cut capacity overload flag | Feature (RCCP) | 15 §5a |
 | UAT-INV-024 | STD GR PPV balanced under rounding | MFG-03 / GL-01 | 15 §9 |
+| UAT-MFG-01 | WO completion full-yield (no variance) | MFG-02, GL-01 | 15 §7 |
+| UAT-MFG-02 | WO completion short-yield → variance to 5810 | MFG-02, GL-01 | 15 §7 |
 | UAT-INV-025 | Food-cost variance valued at ingredient cost | INV-04 (analytics) | 03 §12 |
 | UAT-INV-026 | Variance summary nets fav/unfav + tenant-isolated | INV-04 (analytics) | 03 §12 |
 | UAT-INV-027 | Branch replenishment splits transfer-before-buy | INV-05 | 03 §7, §9 |
@@ -377,6 +379,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-022 | Independent approver posts the run | PAY-03, GL-01 | 05 §7 |
 | UAT-PAY-023 | Reject a pending run, then re-run | PAY-03 | 05 §7 |
 | UAT-UI-ESS-01 | ESS self-service screen reachable + own data + submit-only (UI) | Feature (ESS UI) | 25 §7 |
+| UAT-PAY-024 | Approver inbox lists pending expense claims (tenant-scoped) | Feature (ESS), ITGC-AC-03 | 25 §7 |
+| UAT-UI-ESS-02 | Expense approval screen — approve/reject + self-block (UI) | Feature (ESS UI), ITGC-AC-09 | 25 §7 |
 
 ## 08 — Admin / SoD / Audit → `08-itgc.md`
 
@@ -569,9 +573,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 04 Inventory & WMS | 24 | 7 |
 | 05 GL & Close (incl. fixed assets / EAM) | 47 | 29 |
 | 06 Tax | 13 | 4 |
-| 07 Payroll | 20 | 8 |
+| 07 Payroll | 22 | 9 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **351** | **177** |
+| **Total** | **353** | **178** |
