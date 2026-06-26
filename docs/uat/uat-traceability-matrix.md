@@ -201,7 +201,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-006 | Price variance block (MATCH_BLOCKED) | EXP-03 | 02 §9, §13 |
 | UAT-P2P-007 | Over-invoice block | EXP-03 | 02 §9, §13 |
 | UAT-P2P-008 | Match tolerance | EXP-03 | 02 §9 |
-| UAT-P2P-009 | Override-with-reason (request+approve) | EXP-06, R04 | 02 §9 |
+| UAT-P2P-009 | Override-with-reason (independent overrider) | EXP-01, EXP-06, R04 | 02 §6, §9 |
+| UAT-P2P-009b | Matcher cannot self-override (SoD) | EXP-01 | 02 §6 |
 | UAT-P2P-010 | Override reset on re-match | EXP-03 | 02 §9, §13 |
 | UAT-P2P-011 | Non-PO bill (gate fails open, request+approve) | EXP-06 | 02 §7 |
 | UAT-P2P-012 | Blocklisted vendor (SUPPLIER_BLOCKED) | EXP-04, R13 | 02 §9, §13 |
