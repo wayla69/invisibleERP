@@ -379,6 +379,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-038 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |
 | UAT-UI-LSE-01 | Lease screen reachable + create + run + modify (UI) | LSE-01 | 04 §7 |
 | UAT-UI-EAM-01 | EAM screen reachable + WO lifecycle / PM sweep / reliability (UI) | FA-06 | 09 §7 |
+| TC-GL-18-01 | FX revaluation run computes unrealized gain/loss | GL-18 | 04 §3.2 |
+| TC-GL-18-02 | FX revaluation post maker-checker + idempotent (5400/1100/2000) | GL-18, R05 | 04 §3.2 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -397,6 +399,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-011 | e-Tax resubmit idempotency | TAX-02 | 06 §9 |
 | UAT-TAX-012 | Tax-invoice numbering | TAX-03 | 06 §9 |
 | UAT-TAX-013 | WHT on payroll | PAY-02 | 05 §7, 06 §7 |
+| UAT-TAX-017 | Deferred tax run → DTA from AR allowance (×CIT) | TAX-06 | 06 §9a, 04 §3.2 |
+| UAT-TAX-018 | Deferred tax post maker-checker + idempotent (Dr 1700/Cr 5950) | TAX-06, R05 | 06 §9a, 04 §3.2 |
 
 ## 07 — Payroll → `05-payroll.md`
 

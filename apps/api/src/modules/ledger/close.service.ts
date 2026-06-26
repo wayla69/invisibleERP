@@ -16,6 +16,7 @@ const CHECKLIST: { stepKey: string; title: string; required: boolean }[] = [
   { stepKey: 'depreciation', title: 'Depreciation posted for the period', required: true },
   { stepKey: 'recurring', title: 'Recurring / prepaid journals run', required: true },
   { stepKey: 'fx_reval', title: 'FX revaluation posted', required: false },
+  { stepKey: 'deferred_tax', title: 'Deferred tax computed & posted', required: false },
   { stepKey: 'trial_balance_review', title: 'Trial-balance review & sign-off', required: true },
 ];
 

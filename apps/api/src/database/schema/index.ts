@@ -100,3 +100,4 @@ export * from './departments';
 export * from './subledger-tieout';
 export * from './close-runs';
 export * from './gl-audit';
+export * from './deferred-tax-fx';

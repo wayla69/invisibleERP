@@ -553,5 +553,47 @@ view gives the failure-rate and lifetime-cost inputs for maintenance budgeting a
 
 ---
 
+## FX revaluation (period-end) — control GL-18
+
+**Who:** Financial Controller (`gl_close`/`gl_post`); a *different* user posts.
+
+At period-end, open invoices/bills in a **foreign currency** must be restated to the
+**closing exchange rate** so the unrealized FX gain/loss is in the books.
+
+1. **Run** — `POST /api/ledger/fx-reval/run` with the period (`YYYY-MM`). Supply the
+   closing `rates` (e.g. `{ "USD": 36 }`) or rely on the latest **approved** FX rate.
+   You get the per-document gain/loss and the **net**, staged as **Open**.
+2. **Review** the detail (each open AR/AP doc: booked rate → closing rate → delta).
+3. **Post** — a **different** user calls `POST /api/ledger/fx-reval/{id}/post`. A net
+   gain credits **5400 FX Gain/Loss**, a net loss debits it; the AR/AP control accounts
+   (1100/2000) are restated. You **cannot post a run you ran** (segregation of duties).
+
+**Expected result:** the FX line (5400) carries the net unrealized gain/loss and AR/AP
+reflect the closing rate. Re-running or re-posting a posted period is blocked.
+
+**Errors:** `MISSING_RATE` (no rate for a currency — pass it in `rates` or approve an FX
+rate first), `SELF_POST` (you ran it — ask a colleague to post), `ALREADY_POSTED`.
+
+## Deferred tax (TAS 12) — control TAX-06
+
+**Who:** Tax / Financial Controller (`gl_close`/`gl_post`); a *different* user posts.
+
+Recognise **deferred tax** on book-vs-tax **temporary** differences (the AR allowance
+and accelerated depreciation) at the Thai CIT rate (20%).
+
+1. **Run** — `POST /api/ledger/deferred-tax/run` with the period. It computes a deferred
+   tax **asset** from the posted AR allowance and a deferred tax **liability** from
+   accelerated depreciation, nets them, and shows the **delta** vs the last posted run.
+2. **Post** — a **different** user calls `POST /api/ledger/deferred-tax/{id}/post`. An
+   increase in the net asset posts **Dr 1700 Deferred Tax Asset / Cr 5950 Deferred Tax
+   Expense** (a deferred tax benefit). You **cannot post a run you ran**.
+
+**Expected result:** 1700 (and 5950) move by the period delta; income tax expense
+reflects the deferred portion. Re-posting a posted period is blocked (`ALREADY_POSTED`).
+
+**Errors:** `SELF_POST`, `ALREADY_POSTED`, `DT_RUN_NOT_FOUND`.
+
+---
+
 **Next:** [Tax](./07-tax.md) · [Finance — AR & AP](./05-finance-ar-ap.md) ·
 [Approvals](./10-approvals.md)
