@@ -993,7 +993,21 @@
       "idx": 141,
       "version": "7",
       "when": 2023590000004,
-      "tag": "0141_petty_cash_expense",
+      "tag": "0141_fx_rate_maker_checker",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 2023600000004,
+      "tag": "0142_budget_maker_checker",
+      "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 2023610000004,
+      "tag": "0143_petty_cash_expense",
       "breakpoints": true
     }
   ]

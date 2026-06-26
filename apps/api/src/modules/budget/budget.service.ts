@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { budgets, journalLines, journalEntries, accounts } from '../../database/schema';
 import { n, fx } from '../../database/queries';
+import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -22,6 +23,8 @@ export interface UpsertBudgetDto { fiscal_year: number; account_code: string; co
 export class BudgetService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
+  // BUD-01 maker-checker: an upserted budget lands as PendingApproval and is EXCLUDED from budget-vs-actual until
+  // a DIFFERENT user approves it (a wrong budget can no longer silently drive the variance/performance report).
   async upsertBudget(dto: UpsertBudgetDto) {
     const db = this.db as any;
     const cc = dto.cost_center_code ?? null;
@@ -34,20 +37,41 @@ export class BudgetService {
     await db.transaction(async (tx: any) => {
       for (const r of rows) {
         await tx.delete(budgets).where(and(tCond, eq(budgets.fiscalYear, dto.fiscal_year), eq(budgets.accountCode, dto.account_code), ccCond, eq(budgets.period, r.period)));
-        await tx.insert(budgets).values({ tenantId, fiscalYear: dto.fiscal_year, accountCode: dto.account_code, costCenterCode: cc, period: r.period, amount: fx(r.amount, 4), notes: dto.notes ?? null, createdBy: dto.createdBy });
+        await tx.insert(budgets).values({ tenantId, fiscalYear: dto.fiscal_year, accountCode: dto.account_code, costCenterCode: cc, period: r.period, amount: fx(r.amount, 4), notes: dto.notes ?? null, status: 'PendingApproval', requestedBy: dto.createdBy, createdBy: dto.createdBy });
       }
     });
-    return { fiscal_year: dto.fiscal_year, account_code: dto.account_code, cost_center_code: cc, lines: rows.length, total: round4(rows.reduce((a, x) => a + x.amount, 0)) };
+    return { fiscal_year: dto.fiscal_year, account_code: dto.account_code, cost_center_code: cc, lines: rows.length, total: round4(rows.reduce((a, x) => a + x.amount, 0)), status: 'PendingApproval' };
   }
 
-  async listBudgets(q: { fiscal_year?: number; account_code?: string; cost_center_code?: string }) {
+  // Approve (or reject) a pending budget for (fiscal_year, account_code, [cost_center], [period]). Approver ≠
+  // requester, binds even Admin. Approval makes it count in budget-vs-actual; reject marks it Rejected (excluded).
+  private async decideBudget(decision: 'Approved' | 'Rejected', q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser) {
+    const db = this.db as any;
+    const tenantId = q.tenantId ?? null;
+    const conds: any[] = [eq(budgets.fiscalYear, q.fiscal_year), eq(budgets.accountCode, q.account_code), eq(budgets.status, 'PendingApproval')];
+    conds.push(tenantId != null ? eq(budgets.tenantId, tenantId) : isNull(budgets.tenantId));
+    conds.push(q.cost_center_code != null ? eq(budgets.costCenterCode, q.cost_center_code) : isNull(budgets.costCenterCode));
+    if (q.period) conds.push(eq(budgets.period, q.period));
+    const pending = await db.select().from(budgets).where(and(...conds));
+    if (!pending.length) throw new BadRequestException({ code: 'NO_PENDING_BUDGET', message: 'No budget pending approval for this selection', messageTh: 'ไม่พบงบประมาณที่รออนุมัติ' });
+    if (decision === 'Approved' && pending.some((r: any) => r.requestedBy && r.requestedBy === user.username)) {
+      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a budget you prepared', messageTh: 'ผู้บันทึกอนุมัติงบประมาณของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    }
+    await db.update(budgets).set({ status: decision, approvedBy: user.username, approvedAt: new Date() }).where(and(...conds));
+    return { fiscal_year: q.fiscal_year, account_code: q.account_code, cost_center_code: q.cost_center_code ?? null, period: q.period ?? null, lines: pending.length, status: decision, approved_by: user.username, requested_by: pending[0]?.requestedBy ?? null };
+  }
+  async approveBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser) { return this.decideBudget('Approved', q, user); }
+  async rejectBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser) { return this.decideBudget('Rejected', q, user); }
+
+  async listBudgets(q: { fiscal_year?: number; account_code?: string; cost_center_code?: string; status?: string }) {
     const db = this.db as any;
     const conds: any[] = [];
     if (q.fiscal_year) conds.push(eq(budgets.fiscalYear, q.fiscal_year));
     if (q.account_code) conds.push(eq(budgets.accountCode, q.account_code));
     if (q.cost_center_code) conds.push(eq(budgets.costCenterCode, q.cost_center_code));
+    if (q.status) conds.push(eq(budgets.status, q.status));
     const rows = await db.select().from(budgets).where(conds.length ? and(...conds) : undefined).orderBy(budgets.accountCode, budgets.period);
-    return { budgets: rows.map((r: any) => ({ fiscal_year: r.fiscalYear, account_code: r.accountCode, cost_center_code: r.costCenterCode, period: r.period, amount: n(r.amount) })), count: rows.length, total: round4(rows.reduce((a: number, r: any) => a + n(r.amount), 0)) };
+    return { budgets: rows.map((r: any) => ({ fiscal_year: r.fiscalYear, account_code: r.accountCode, cost_center_code: r.costCenterCode, period: r.period, amount: n(r.amount), status: r.status, requested_by: r.requestedBy, approved_by: r.approvedBy })), count: rows.length, total: round4(rows.reduce((a: number, r: any) => a + n(r.amount), 0)) };
   }
 
   async deleteBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string }) {
@@ -71,7 +95,8 @@ export class BudgetService {
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
       .where(and(...actConds)).groupBy(journalLines.accountCode, accounts.name, accounts.type);
 
-    const budConds = [eq(budgets.fiscalYear, q.fiscal_year)];
+    // BUD-01: only APPROVED budgets count toward the variance report (PendingApproval/Rejected excluded).
+    const budConds = [eq(budgets.fiscalYear, q.fiscal_year), eq(budgets.status, 'Approved')];
     if (q.period) budConds.push(eq(budgets.period, q.period));
     if (q.cost_center) budConds.push(eq(budgets.costCenterCode, q.cost_center));
     const budgetRows = await db.select({ account_code: budgets.accountCode, amount: sql<string>`coalesce(sum(${budgets.amount}),0)` }).from(budgets).where(and(...budConds)).groupBy(budgets.accountCode);

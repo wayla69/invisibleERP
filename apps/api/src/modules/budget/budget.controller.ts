@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Query, Body, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -16,6 +16,14 @@ const BudgetBody = z.object({
 }).refine((b) => b.mode !== 'monthly' || !!b.period, { message: 'period required for monthly mode' });
 type BudgetBodyT = z.infer<typeof BudgetBody>;
 
+const ApproveBudgetBody = z.object({
+  fiscal_year: z.number().int(),
+  account_code: z.string().min(1),
+  cost_center_code: z.string().optional(),
+  period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+});
+type ApproveBudgetBodyT = z.infer<typeof ApproveBudgetBody>;
+
 // งบประมาณเทียบจริง — budgets (reference data, no GL) + budget-vs-actual variance report.
 @Controller('api/ledger')
 @Permissions('exec', 'planner')
@@ -28,9 +36,18 @@ export class BudgetController {
   }
 
   @Get('budgets')
-  list(@Query('fiscal_year') fy?: string, @Query('account_code') account?: string, @Query('cost_center_code') cc?: string) {
-    return this.svc.listBudgets({ fiscal_year: qintOpt('fiscal_year', fy), account_code: account, cost_center_code: cc });
+  list(@Query('fiscal_year') fy?: string, @Query('account_code') account?: string, @Query('cost_center_code') cc?: string, @Query('status') status?: string) {
+    return this.svc.listBudgets({ fiscal_year: qintOpt('fiscal_year', fy), account_code: account, cost_center_code: cc, status });
   }
+
+  // BUD-01 maker-checker. upsert (above) requests a budget (PendingApproval, excluded from budget-vs-actual);
+  // a DIFFERENT user with approval authority approves/rejects it (approver ≠ requester enforced, binds Admin).
+  @Get('budgets/pending') @Permissions('approvals', 'gl_close', 'exec')
+  pendingBudgets(@Query('fiscal_year') fy?: string) { return this.svc.listBudgets({ fiscal_year: qintOpt('fiscal_year', fy), status: 'PendingApproval' }); }
+  @Post('budgets/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  approveBudget(@Body(new ZodValidationPipe(ApproveBudgetBody)) b: ApproveBudgetBodyT, @CurrentUser() u: JwtUser) { return this.svc.approveBudget({ ...b, tenantId: u.tenantId ?? null }, u); }
+  @Post('budgets/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
+  rejectBudget(@Body(new ZodValidationPipe(ApproveBudgetBody)) b: ApproveBudgetBodyT, @CurrentUser() u: JwtUser) { return this.svc.rejectBudget({ ...b, tenantId: u.tenantId ?? null }, u); }
 
   @Delete('budgets')
   remove(@Query('fiscal_year') fy: string, @Query('account_code') account: string, @Query('cost_center_code') cc?: string, @Query('period') period?: string) {

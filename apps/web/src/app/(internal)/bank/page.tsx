@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Landmark, Scale, Wallet, RefreshCw, X, CheckCircle2, FileText } from 'lucide-react';
+import { Landmark, Scale, Wallet, RefreshCw, X, CheckCircle2, FileText, Clock, Check, Ban } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
 import { notifyError, notifySuccess } from '@/lib/notify';
@@ -66,12 +66,22 @@ function Reconciliation({ bankAccountId, onClose }: { bankAccountId: number; onC
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['bank-recon', bankAccountId], queryFn: () => api(`/api/bank/accounts/${bankAccountId}/reconciliation`) });
 
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['bank-recon', bankAccountId] });
+    qc.invalidateQueries({ queryKey: ['bank-pending-adj'] });
+  };
   const autoMatch = useMutation({
     mutationFn: () => api<any>(`/api/bank/accounts/${bankAccountId}/auto-match`, { method: 'POST' }),
     onSuccess: (r) => {
       notifySuccess(`จับคู่อัตโนมัติ ${num(r.matched)} รายการ`);
-      qc.invalidateQueries({ queryKey: ['bank-recon', bankAccountId] });
+      refresh();
     },
+    onError: (e: any) => notifyError(e.message),
+  });
+  // BANK-02: request a fee/interest adjustment on an unmatched statement line (posts a Draft JE — needs approval).
+  const requestAdj = useMutation({
+    mutationFn: ({ lineId, kind }: { lineId: number; kind: 'fee' | 'interest' }) => api<any>(`/api/bank/lines/${lineId}/adjustment`, { method: 'POST', body: JSON.stringify({ kind }) }),
+    onSuccess: () => { notifySuccess('ส่งคำขอปรับปรุง — รออนุมัติจากผู้มีสิทธิ์ (คนละคนกับผู้ขอ)'); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -115,6 +125,12 @@ function Reconciliation({ bankAccountId, onClose }: { bankAccountId: number; onC
                     { key: 'date', label: 'วันที่', render: (r: any) => thaiDate(r.date) },
                     { key: 'description', label: 'รายละเอียด', render: (r: any) => r.description ?? '—' },
                     { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+                    { key: 'adj', label: 'ปรับปรุง', align: 'right', render: (r: any) => (
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="outline" disabled={requestAdj.isPending} onClick={() => requestAdj.mutate({ lineId: r.statement_line_id, kind: 'fee' })}>ค่าธรรมเนียม</Button>
+                        <Button size="sm" variant="outline" disabled={requestAdj.isPending} onClick={() => requestAdj.mutate({ lineId: r.statement_line_id, kind: 'interest' })}>ดอกเบี้ย</Button>
+                      </div>
+                    ) },
                   ]}
                   emptyState={{
                     icon: CheckCircle2,
@@ -142,9 +158,46 @@ function Reconciliation({ bankAccountId, onClose }: { bankAccountId: number; onC
                 />
               </div>
             </div>
+
+            <PendingAdjustments onChanged={refresh} />
           </div>
         )}
       </StateView>
     </Card>
+  );
+}
+
+// ───────── BANK-02 pending bank adjustments (Draft JE awaiting an independent approver) ─────────
+function PendingAdjustments({ onChanged }: { onChanged: () => void }) {
+  const q = useQuery<any>({ queryKey: ['bank-pending-adj'], queryFn: () => api('/api/bank/adjustments/pending') });
+  const decide = useMutation({
+    mutationFn: ({ lineId, action }: { lineId: number; action: 'approve' | 'reject' }) => api<any>(`/api/bank/lines/${lineId}/adjustment/${action}`, { method: 'POST', body: action === 'reject' ? JSON.stringify({}) : undefined }),
+    onSuccess: (_r, v) => { notifySuccess(v.action === 'approve' ? 'อนุมัติการปรับปรุงแล้ว' : 'ปฏิเสธการปรับปรุงแล้ว'); q.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const rows = q.data?.pending ?? [];
+  if (!rows.length) return null;
+  return (
+    <div>
+      <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-muted-foreground"><Clock className="size-4" /> การปรับปรุงรออนุมัติ (BANK-02 — ผู้อนุมัติต้องคนละคนกับผู้ขอ)</h4>
+      <DataTable
+        rows={rows}
+        rowKey={(r: any) => r.statement_line_id}
+        columns={[
+          { key: 'date', label: 'วันที่', render: (r: any) => thaiDate(r.date) },
+          { key: 'description', label: 'รายละเอียด', render: (r: any) => r.description ?? '—' },
+          { key: 'journal_no', label: 'เลขที่บัญชี (Draft)', render: (r: any) => <span className="font-mono text-sm">{r.journal_no}</span> },
+          { key: 'amount', label: 'จำนวน', align: 'right', render: (r: any) => <span className="tabular">{baht(r.amount)}</span> },
+          { key: 'act', label: '', align: 'right', render: (r: any) => (
+            <div className="flex justify-end gap-1">
+              <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate({ lineId: r.statement_line_id, action: 'approve' })}><Check className="size-4" /> อนุมัติ</Button>
+              <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ lineId: r.statement_line_id, action: 'reject' })}><Ban className="size-4" /> ปฏิเสธ</Button>
+            </div>
+          ) },
+        ]}
+        emptyState={{ title: 'ไม่มีรายการรออนุมัติ' }}
+        dense
+      />
+    </div>
   );
 }

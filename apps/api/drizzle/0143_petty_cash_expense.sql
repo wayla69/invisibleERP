@@ -1,4 +1,4 @@
--- 0141 — Petty cash imprest float + direct-expense / advance maker-checker with document tracking (EXP-08).
+-- 0143 — Petty cash imprest float + direct-expense / advance maker-checker with document tracking (EXP-08).
 -- A petty_cash_fund holds an imprest float capped at a credit limit (วงเงิน); its balance is the cash on hand.
 -- An expense_request draws against a fund as either a direct EXPENSE or an ADVANCE: it is a maker-checker
 -- REQUEST that posts NOTHING and reserves nothing until a DIFFERENT user approves. On approval the GL posts

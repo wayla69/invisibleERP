@@ -97,20 +97,35 @@ async function main() {
   ok('Reconciliation before fee: gl 800, stmt 765, difference 35', near(r1.json.gl_balance, 800) && near(r1.json.statement_balance, 765) && near(r1.json.difference, 35), JSON.stringify({ gl: r1.json.gl_balance, st: r1.json.statement_balance, d: r1.json.difference }));
   const feeLineId = r1.json.unmatched_statement.find((l: any) => near(l.amount, -35)).statement_line_id;
 
-  // post the fee adjustment → Dr 5100 / Cr 1010 = 35
+  // BANK-02 maker-checker: the fee adjustment is a REQUEST that posts a DRAFT JE (Dr 5100 / Cr 1010 = 35) with
+  // NO balance effect — the line stays unreconciled — until a DIFFERENT user approves it.
   const adj = await inj('POST', `/api/bank/lines/${feeLineId}/adjustment`, admin, { kind: 'fee' });
-  ok('Fee adjustment posts JE- (Dr5100/Cr1010 = 35)', /^JE-/.test(adj.json.journal_no ?? '') && near(adj.json.amount, 35), `${adj.status} ${JSON.stringify(adj.json).slice(0, 70)}`);
-  const jAdj = (await inj('GET', '/api/ledger/journal?limit=5', admin)).json.entries.find((e: any) => e.source === 'BANKADJ');
+  ok('BANK-02: fee adjustment requested → Draft JE, PendingApproval (no balance effect yet)', /^JE-/.test(adj.json.journal_no ?? '') && near(adj.json.amount, 35) && adj.json.status === 'PendingApproval', `${adj.status} ${JSON.stringify(adj.json).slice(0, 80)}`);
+  const jAdj = (await inj('GET', '/api/ledger/journal?limit=10', admin)).json.entries.find((e: any) => e.source === 'BANKADJ');
   const leg = (j: any, c: string, side: string) => (j?.lines ?? []).filter((l: any) => l.account_code === c).reduce((a: number, l: any) => a + Number(l[side]), 0);
-  ok('Fee GL legs correct (Dr5100=35, Cr1010=35)', near(leg(jAdj, '5100', 'debit'), 35) && near(leg(jAdj, '1010', 'credit'), 35));
+  ok('BANK-02: requested fee GL legs correct on the Draft JE (Dr5100=35, Cr1010=35)', near(leg(jAdj, '5100', 'debit'), 35) && near(leg(jAdj, '1010', 'credit'), 35));
 
-  // reconciliation AFTER: difference closes to 0, nothing outstanding
+  // Draft excluded from balances → reconciliation difference still 35; the request shows in the checker queue.
+  const rPending = await inj('GET', `/api/bank/accounts/${bankId}/reconciliation?as_of=2028-03-31`, admin);
+  ok('BANK-02: Draft adjustment excluded from GL — reconciliation difference still 35 until approved', near(rPending.json.difference, 35), JSON.stringify({ d: rPending.json.difference }));
+  const pendList = await inj('GET', '/api/bank/adjustments/pending', admin);
+  ok('BANK-02: pending bank adjustment appears in the checker queue', (pendList.json.pending ?? []).some((p: any) => p.statement_line_id === feeLineId) && pendList.json.count >= 1, `count=${pendList.json.count}`);
+
+  // requester cannot self-approve → 403 SOD_VIOLATION (binds even Admin).
+  const selfAppr = await inj('POST', `/api/bank/lines/${feeLineId}/adjustment/approve`, admin);
+  ok('BANK-02: requester self-approval blocked → 403 SOD_VIOLATION (binds even Admin)', selfAppr.status === 403 && selfAppr.json.error?.code === 'SOD_VIOLATION', `${selfAppr.status} ${selfAppr.json.error?.code}`);
+
+  // a DIFFERENT user approves → JE Posted, line reconciled.
+  const appr = await inj('POST', `/api/bank/lines/${feeLineId}/adjustment/approve`, approver);
+  ok('BANK-02: independent approver posts the adjustment → Posted', appr.status === 200 && appr.json.status === 'Posted' && appr.json.approved_by === 'approver', `${appr.status} ${JSON.stringify(appr.json).slice(0, 70)}`);
+
+  // reconciliation AFTER approval: difference closes to 0, nothing outstanding.
   const r2 = await inj('GET', `/api/bank/accounts/${bankId}/reconciliation?as_of=2028-03-31`, admin);
-  ok('Reconciliation after fee: difference 0, nothing outstanding', near(r2.json.difference, 0) && (r2.json.unmatched_statement ?? []).length === 0 && (r2.json.unmatched_book ?? []).length === 0, JSON.stringify({ d: r2.json.difference, us: r2.json.unmatched_statement?.length, ub: r2.json.unmatched_book?.length }));
+  ok('Reconciliation after approved fee: difference 0, nothing outstanding', near(r2.json.difference, 0) && (r2.json.unmatched_statement ?? []).length === 0 && (r2.json.unmatched_book ?? []).length === 0, JSON.stringify({ d: r2.json.difference, us: r2.json.unmatched_statement?.length, ub: r2.json.unmatched_book?.length }));
 
-  // idempotent adjustment
+  // re-request on an already-reconciled line → rejected (400).
   const adj2 = await inj('POST', `/api/bank/lines/${feeLineId}/adjustment`, admin, { kind: 'fee' });
-  ok('Fee adjustment idempotent (already reconciled / no dup JE)', adj2.status === 400 || adj2.json.already === true, `${adj2.status} ${JSON.stringify(adj2.json).slice(0, 50)}`);
+  ok('Fee adjustment idempotent (already reconciled → 400)', adj2.status === 400, `${adj2.status} ${JSON.stringify(adj2.json).slice(0, 50)}`);
 
   // trial balance still balances
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
