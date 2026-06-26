@@ -35,6 +35,8 @@ View the full list on the **Trial Balance** / accounts view.
 
 ### Your industry chart
 
+**Screen:** บัญชีแยกประเภท (`/accounting`) → **ผังบัญชี** tab.
+
 When your company was created you picked a **business type** (restaurant, retail,
 distribution, services, or general — see *Getting started*). Your chart is tailored to
 that industry: the relevant accounts are switched on and given industry-friendly names —
@@ -44,12 +46,15 @@ Ingredient COGS*; a retailer instead sees *Merchandise Inventory* and *Loyalty P
 accounts. Accounts that don't apply to your industry are hidden from the picker to keep
 data entry clean.
 
+The **ผังบัญชี** tab shows your chart with a *ผังบัญชีตามประเภทธุรกิจ* badge and the
+account count. Each journal-entry account picker uses this same curated list.
+
 > **Nothing is ever removed.** The accounting engine always has the full set of accounts
-> available, so a posting is never blocked. To see **every** account (for an unusual
-> entry), open the accounts list with **Show all accounts** (the `?all=true` view) — and
-> any account that has activity always appears on your reports even if it's hidden from
-> the picker. You can switch or extend your industry chart later from
-> **Onboarding → Industry packs**.
+> available, so a posting is never blocked. Press **แสดงบัญชีทั้งหมด** on the ผังบัญชี tab
+> to reveal **every** account (for an unusual entry); the badge switches to *ผังบัญชีเต็ม*.
+> Any account that has activity always appears on your reports even if it's hidden from the
+> picker. You can switch or extend your industry chart later from **Onboarding → Industry
+> packs**.
 
 ---
 

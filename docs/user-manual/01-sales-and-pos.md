@@ -666,7 +666,33 @@ accurately from the scale.
 
 ---
 
-## 10. Deposits, house accounts & card surcharge
+## 10. Tips — pooling & paying out staff
+
+**Screen:** `/tips` (**ทิปพนักงาน**) · **Required permission:** `pos` /
+`order_mgt` to view; **only a manager** (`order_mgt` / `exec`) can pay tips out.
+
+Tips a guest adds at checkout are **kept aside for staff** (they're not the
+shop's income). They build up as **ทิปค้างจ่าย** (a balance the shop owes staff);
+the top card shows how much is currently held.
+
+To **pay tips out**:
+
+1. Pick the **period** (ตั้งแต่ / ถึง) — the screen shows the **ยอดแบ่งได้**
+   (how much is available to share for that period).
+2. Choose how to split: **เท่ากันทุกคน** (equal), **ตามชั่วโมงทำงาน** (by hours),
+   or **ตามน้ำหนัก** (by weight).
+3. List the staff — one per line; for hours/weight add the number after the
+   name (e.g. *สมชาย 6*). Tap **แบ่งจ่ายทิป**.
+
+The system records who got how much, **pays it from the cash drawer**, and clears
+that much from the held balance. You **can't pay out more than was collected**,
+so the held figure always matches what's still owed.
+
+> **Why only a manager?** The person who rings sales can't also pay out the tips
+> (so they can't quietly pay tips to themselves). That separation is a control
+> (**TIP-01**).
+
+## 11. Deposits, house accounts & card surcharge
 
 **Screen:** `/payments/accounts` (**มัดจำ & บัญชีเครดิต**) · **Required
 permission:** `pos` / `order_mgt` (opening a credit account needs a
@@ -697,7 +723,7 @@ converted and any FX difference is recorded.
 
 ---
 
-## 11. Language (Thai / English)
+## 12. Language (Thai / English)
 
 The system can present customer-facing output in **Thai or English**.
 

@@ -11,6 +11,7 @@ import { PrintService } from '../printing/print.service';
 import { PeripheralsService } from '../peripherals/peripherals.service';
 import { RestaurantOfflineSyncService, type RegisterOfflineSyncBatchDto } from './offline-sync.service';
 import { ReservationService, type CreateReservationDto, type ListReservationsDto } from './reservation.service';
+import { TipService, type DistributeTipsDto } from './tip.service';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
   TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody,
@@ -28,6 +29,13 @@ const OfflineLineBody = z.object({ sku: z.string().optional(), menu_item_id: z.n
 const OfflineSaleBody = z.object({ client_uuid: z.string().min(1).max(200), device_id: z.string().max(120).optional(), client_seq: z.number().int().optional(), captured_at: z.string().min(1), lines: z.array(OfflineLineBody).min(1).max(100), method: z.string().optional(), discount_pct: z.number().min(0).max(100).optional() });
 const OfflineSyncBody = z.object({ sales: z.array(OfflineSaleBody).min(1).max(200) });
 // Reservations + walk-in waitlist
+const DistributeTipsBody = z.object({
+  from: z.string().min(8), to: z.string().min(8),
+  method: z.enum(['equal', 'hours', 'weight']).optional(),
+  amount: z.number().positive().optional(),
+  pay_account: z.string().max(20).optional(),
+  staff: z.array(z.object({ staff: z.string().min(1).max(120), hours: z.number().nonnegative().optional(), weight: z.number().nonnegative().optional() })).min(1).max(200),
+});
 const CreateReservationBody = z.object({
   kind: z.enum(['reservation', 'waitlist']).optional(),
   table_id: z.number().int().optional(),
@@ -53,7 +61,17 @@ export class RestaurantController {
     private readonly peripherals: PeripheralsService,
     private readonly offlineSync: RestaurantOfflineSyncService,
     private readonly reservations: ReservationService,
+    private readonly tips: TipService,
   ) {}
+
+  // ── Tip pooling / distribution (TIP-01). SoD: distributing tips is a manager/finance duty (order_mgt /
+  //    exec / hr), separate from the cashier who rings sales (pos_sell) — a cashier can't pay tips to self. ──
+  @Get('tips/pool') @Permissions('order_mgt', 'exec', 'pos')
+  tipPool(@Query('from') from: string, @Query('to') to: string, @CurrentUser() u: JwtUser) { return this.tips.pool(from, to, u); }
+  @Get('tips') @Permissions('order_mgt', 'exec', 'pos')
+  tipList(@CurrentUser() u: JwtUser) { return this.tips.list(u); }
+  @Post('tips/distribute') @Permissions('order_mgt', 'exec')
+  tipDistribute(@Body(new ZodValidationPipe(DistributeTipsBody)) b: DistributeTipsDto, @CurrentUser() u: JwtUser) { return this.tips.distribute(b, u); }
 
   // ── Reservations + walk-in waitlist ──
   @Post('reservations')

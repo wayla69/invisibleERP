@@ -197,8 +197,36 @@ export const tableReservations = pgTable('table_reservations', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
+// ── Tip pooling / distribution (B3) ──
+// Tips ride into 2300 Tips Payable on checkout (a staff pass-through liability). A distribution pays the
+// pooled tips out to staff for a period — Dr 2300 / Cr 1000 — clearing the liability. Header + per-staff
+// lines; tenant_id → RLS.
+export const tipDistributions = pgTable('tip_distributions', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  distNo: text('dist_no').notNull(),               // TIP-YYYYMMDD-NNN
+  periodFrom: text('period_from').notNull(),         // YYYY-MM-DD (inclusive)
+  periodTo: text('period_to').notNull(),             // YYYY-MM-DD (inclusive)
+  method: text('method').notNull().default('equal'), // 'equal' | 'hours' | 'weight'
+  poolAmount: numeric('pool_amount', { precision: 18, scale: 4 }).notNull(),
+  payAccount: text('pay_account').notNull().default('1000'), // GL credited (cash paid out)
+  journalNo: text('journal_no'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+export const tipDistributionLines = pgTable('tip_distribution_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  distId: bigint('dist_id', { mode: 'number' }).notNull().references(() => tipDistributions.id),
+  staff: text('staff').notNull(),                    // username / staff code
+  basis: numeric('basis', { precision: 18, scale: 4 }).notNull().default('0'), // hours or weight used
+  share: numeric('share', { precision: 9, scale: 6 }).notNull().default('0'),  // fraction of the pool
+  amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
+});
+
 export type DiningTable = typeof diningTables.$inferSelect;
 export type TableReservation = typeof tableReservations.$inferSelect;
+export type TipDistribution = typeof tipDistributions.$inferSelect;
 export type TableSession = typeof tableSessions.$inferSelect;
 export type DineInOrder = typeof dineInOrders.$inferSelect;
 export type DineInOrderItem = typeof dineInOrderItems.$inferSelect;

@@ -35,6 +35,7 @@ export default function AccountingPage() {
       <Tabs
         tabs={[
           { key: 'tb', label: 'งบทดลอง', content: <TrialBalance /> },
+          { key: 'coa', label: 'ผังบัญชี', content: <ChartOfAccounts /> },
           { key: 'journal', label: 'สมุดรายวัน', content: <Journal /> },
           { key: 'approve', label: 'รออนุมัติ (JE)', content: <PendingJournal /> },
           { key: 'pl', label: 'งบกำไรขาดทุน', content: <IncomeStatement /> },
@@ -44,6 +45,49 @@ export default function AccountingPage() {
         ]}
       />
     </div>
+  );
+}
+
+// ───────────────────────── ผังบัญชี (Chart of Accounts) ─────────────────────────
+// Shows the tenant's industry-curated chart by default; the toggle reveals the full canonical universe
+// (?all=true) for unusual postings. Account names follow the industry template set at company creation.
+type CoaAccount = Account & { name_th?: string | null; group_label?: string | null };
+function ChartOfAccounts() {
+  const [showAll, setShowAll] = useState(false);
+  const q = useQuery<{ accounts: CoaAccount[]; count: number; source?: string; industry_scoped?: boolean }>({
+    queryKey: ['coa', showAll],
+    queryFn: () => api(`/api/ledger/accounts${showAll ? '?all=true' : ''}`),
+  });
+  return (
+    <StateView q={q}>
+      {q.data && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              {q.data.industry_scoped && !showAll ? (
+                <Badge variant="success">ผังบัญชีตามประเภทธุรกิจ</Badge>
+              ) : (
+                <Badge variant="secondary">ผังบัญชีเต็ม (ทุกบัญชี)</Badge>
+              )}
+              <span>{q.data.count} บัญชี</span>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowAll((v) => !v)}>
+              {showAll ? 'แสดงเฉพาะบัญชีของธุรกิจ' : 'แสดงบัญชีทั้งหมด'}
+            </Button>
+          </div>
+          <DataTable
+            rows={q.data.accounts}
+            emptyState={{ icon: Scale, title: 'ยังไม่มีผังบัญชี', description: 'ผังบัญชีจะถูกตั้งค่าตามประเภทธุรกิจที่เลือกตอนเปิดบริษัท' }}
+            columns={[
+              { key: 'code', label: 'รหัส' },
+              { key: 'name', label: 'ชื่อบัญชี' },
+              { key: 'name_th', label: 'ชื่อ (ไทย)', render: (r: CoaAccount) => r.name_th || <span className="text-muted-foreground">—</span> },
+              { key: 'type', label: 'ประเภท' },
+            ]}
+          />
+        </div>
+      )}
+    </StateView>
   );
 }
 

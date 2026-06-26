@@ -13,10 +13,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function SignupPage() {
   const router = useRouter();
-  const [f, setF] = useState({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '' });
+  const [f, setF] = useState({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '', industry: 'restaurant' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -55,6 +55,22 @@ export default function SignupPage() {
           <div className="grid gap-2">
             <Label htmlFor="company_name">ชื่อกิจการ</Label>
             <Input id="company_name" value={f.company_name} onChange={set('company_name')} placeholder="ร้านโอชิเนอิ" required />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="industry">ประเภทธุรกิจ</Label>
+            <select
+              id="industry"
+              value={f.industry}
+              onChange={set('industry')}
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <option value="restaurant">ร้านอาหาร</option>
+              <option value="retail">ค้าปลีก</option>
+              <option value="distribution">ค้าส่ง / กระจายสินค้า</option>
+              <option value="services">ธุรกิจบริการ</option>
+              <option value="general">ทั่วไป (ผังบัญชีเต็ม)</option>
+            </select>
+            <p className="text-xs text-muted-foreground">เราจะตั้งผังบัญชีให้เหมาะกับธุรกิจของคุณโดยอัตโนมัติ (เปลี่ยนภายหลังได้)</p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="tenant_code">รหัสองค์กร (ภาษาอังกฤษ)</Label>

@@ -1,4 +1,4 @@
--- 0146 — Session revocation (ITGC-AC-15).
+-- 0147 — Session revocation (ITGC-AC-15).
 -- revoked_tokens: a JWT denylist by jti for explicit single-session logout (a stolen/forwarded token can be
 --   killed before its 8h expiry).
 -- users.tokens_valid_from: a "revoke ALL sessions" watermark — the guard rejects any JWT issued (iat) before
