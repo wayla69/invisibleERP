@@ -20,6 +20,7 @@ import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/datab
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
+import { BillingService } from '../../../apps/api/dist/modules/billing/billing.service';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -520,7 +521,39 @@ async function main() {
   const conflictRcv = await inj('POST', '/api/inventory/receipts', invmgr, { item_id: 'COSTITEM', qty: 5, unit_cost: 10 });
   ok('Inventory: receipt of a costing-module-managed item rejected (CONFLICTING_COSTING)', conflictRcv.status === 400 && conflictRcv.json?.error?.code === 'CONFLICTING_COSTING', `st=${conflictRcv.status} code=${conflictRcv.json?.error?.code}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO ──');
+  // ───────────────────── Industry Chart-of-Accounts templates (GL-10) ─────────────────────
+  // A new company picks its industry at signup → gets a curated, industry-named chart over the canonical
+  // codes. The overlay NEVER gates postings (?all=true still exposes the full canonical universe).
+  await app.get(BillingService).seedPlans();
+
+  const sgRest = await inj('POST', '/api/auth/signup', undefined, {
+    company_name: 'Resto Co', tenant_code: 'RESTO', admin_username: 'resto_admin', admin_password: 'resto12345', email: 'a@resto.example', industry: 'restaurant',
+  });
+  ok('CoA: signup with industry=restaurant succeeds + echoes industry', (sgRest.status === 200 || sgRest.status === 201) && sgRest.json?.industry === 'restaurant', `st=${sgRest.status} ind=${sgRest.json?.industry}`);
+  const restoTok = (await inj('POST', '/api/login', undefined, { username: 'resto_admin', password: 'resto12345' })).json.token;
+  const restoAcc = (await inj('GET', '/api/ledger/accounts', restoTok)).json;
+  ok('CoA: restaurant chart is overlay-scoped + industry-named (4000 = Food & Beverage Sales)',
+    restoAcc.source === 'overlay' && restoAcc.accounts?.find((a: any) => a.code === '4000')?.name === 'Food & Beverage Sales',
+    `src=${restoAcc.source} n4000=${restoAcc.accounts?.find((a: any) => a.code === '4000')?.name}`);
+  ok('CoA: restaurant chart curates out non-F&B accounts (no 4300 Service / 4200 Project revenue)',
+    !restoAcc.accounts?.some((a: any) => a.code === '4300' || a.code === '4200') && restoAcc.accounts?.some((a: any) => a.code === '5300'),
+    `n=${restoAcc.count}`);
+  const restoAll = (await inj('GET', '/api/ledger/accounts?all=true', restoTok)).json;
+  ok('CoA: ?all=true exposes the full canonical universe (overlay never gates posting; 4300 present)',
+    restoAll.source === 'canonical' && restoAll.accounts?.some((a: any) => a.code === '4300') && restoAll.count > restoAcc.count,
+    `all=${restoAll.count} overlay=${restoAcc.count}`);
+
+  const sgGen = await inj('POST', '/api/auth/signup', undefined, {
+    company_name: 'Gen Co', tenant_code: 'GENCO', admin_username: 'gen_admin', admin_password: 'gen1234567', email: 'a@gen.example',
+  });
+  ok('CoA: signup without industry defaults to general (full chart)', sgGen.json?.industry === 'general', `ind=${sgGen.json?.industry}`);
+  const genTok = (await inj('POST', '/api/login', undefined, { username: 'gen_admin', password: 'gen1234567' })).json.token;
+  const genAcc = (await inj('GET', '/api/ledger/accounts', genTok)).json;
+  ok('CoA: general tenant overlay = full canonical chart (incl. 4300 + 5300)',
+    genAcc.accounts?.some((a: any) => a.code === '4300') && genAcc.accounts?.some((a: any) => a.code === '5300') && genAcc.count === restoAll.count,
+    `n=${genAcc.count} src=${genAcc.source}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

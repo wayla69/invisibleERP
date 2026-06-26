@@ -299,6 +299,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-016 | Sub-ledger reconciliation | REC-01 | 04 §9 |
 | UAT-GL-045 | Control-account reconciliation pack (period-end) | REC-04 | 04 §7 |
 | UAT-GL-046 | Pending-approvals monitor (maker-checker backlog) | GOV-01 | 04 §7 |
+| UAT-GL-047 | Signup with industry provisions a curated chart | GL-10 | 04 §7 (step 14) |
+| UAT-GL-048 | Overlay curates the picker but never gates postings | GL-10 | 04 §7 (step 14), §9 |
+| UAT-GL-049 | Signup without industry defaults to the full chart | GL-10 | 04 §7 (step 14) |
+| UAT-GL-050 | Industry template can't drift from the engine's codes | GL-10 | 04 §7 (step 14) |
 | UAT-GL-017 | Reconciliation prepare→certify | REC-02/03 | 04 §9 |
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
