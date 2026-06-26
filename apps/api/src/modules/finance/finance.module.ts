@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { FinanceController } from './finance.controller';
 import { FinanceService } from './finance.service';
 import { FinancialHealthService } from './financial-health.service';
+import { ArAllowanceService } from './ar-allowance.service';
 import { CollectionsController } from './collections.controller';
 import { CollectionsService } from './collections.service';
 import { LedgerModule } from '../ledger/ledger.module';
@@ -12,7 +13,7 @@ import { MessagingModule } from '../messaging/messaging.module';
 @Module({
   imports: [LedgerModule, TaxModule, MatchModule, MessagingModule],
   controllers: [FinanceController, CollectionsController],
-  providers: [FinanceService, FinancialHealthService, CollectionsService],
-  exports: [FinanceService, FinancialHealthService, CollectionsService],
+  providers: [FinanceService, FinancialHealthService, ArAllowanceService, CollectionsService],
+  exports: [FinanceService, FinancialHealthService, ArAllowanceService, CollectionsService],
 })
 export class FinanceModule {}
