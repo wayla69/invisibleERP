@@ -4,6 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceService, type ReceiptDto, type ApTxnDto, type AdvanceDto, type SettleAdvanceDto } from './finance.service';
 import { FinancialHealthService } from './financial-health.service';
+import { ArAllowanceService, type ComputeAllowanceDto } from './ar-allowance.service';
 import { qint, qintOpt } from '../../common/query';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
@@ -13,10 +14,28 @@ const RejectBody = z.object({ reason: z.string().optional() });
 const AdvanceBody = z.object({ payee: z.string().min(1), amount: z.number().positive(), purpose: z.string().optional(), expense_account: z.string().optional(), tenant_id: z.number().optional() });
 const SettleBody = z.object({ settled_expense: z.number().nonnegative(), returned_cash: z.number().nonnegative().optional(), expense_account: z.string().optional() });
 const WriteOffBody = z.object({ tenant_id: z.number().optional(), customer_name: z.string().optional(), amount: z.number().positive(), reason: z.string().min(1) });
+const AllowanceComputeBody = z.object({
+  as_of_date: z.string().optional(),
+  method: z.enum(['aging', 'percentage']).optional(),
+  flat_rate: z.number().min(0).max(1).optional(),
+  bucket_rates: z.object({ current: z.number().min(0).max(1).optional(), d1_30: z.number().min(0).max(1).optional(), d31_60: z.number().min(0).max(1).optional(), d61_90: z.number().min(0).max(1).optional(), d91_120: z.number().min(0).max(1).optional(), d120_plus: z.number().min(0).max(1).optional() }).optional(),
+  tenant_id: z.number().nullable().optional(),
+});
 
 @Controller('api/finance')
 export class FinanceController {
-  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService) {}
+  constructor(private readonly svc: FinanceService, private readonly health: FinancialHealthService, private readonly allowance: ArAllowanceService) {}
+
+  // REV-18 — AR Allowance for Doubtful Accounts (ECL). Compute an aging-driven provision (maker), then a
+  // DIFFERENT user posts the delta to GL (Dr 5720 / Cr 1190).
+  @Post('ar-allowance/compute') @HttpCode(200) @Permissions('creditors', 'ar', 'gl_post', 'exec')
+  computeAllowance(@Body(new ZodValidationPipe(AllowanceComputeBody)) b: ComputeAllowanceDto, @CurrentUser() u: JwtUser) { return this.allowance.computeAllowance(b, u); }
+
+  @Post('ar-allowance/:id/post') @HttpCode(200) @Permissions('gl_post', 'exec')
+  postAllowance(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.allowance.postAllowance(Number(id), u); }
+
+  @Get('ar-allowance') @Permissions('creditors', 'ar', 'gl_post', 'exec')
+  listAllowance(@Query('tenant_id') tenantId?: string, @CurrentUser() u?: JwtUser) { return this.allowance.list(tenantId ? Number(tenantId) : (u?.tenantId ?? undefined)); }
 
   // Working-capital health score (0–100, A–E) from cash on hand + AR/AP + overdue + POS run-rate.
   // Complements the GL module's cash-flow projection (/api/ledger/cash-flow-forecast).

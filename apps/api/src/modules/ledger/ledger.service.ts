@@ -79,6 +79,7 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '5710', name: 'Repairs & Maintenance', type: 'Expense' },           // ค่าซ่อมแซมและบำรุงรักษา — EAM maintenance work-order cost
   { code: '5720', name: 'Bad Debt Expense', type: 'Expense' },                // หนี้สูญ — uncollectible AR written off (Dr 5720 / Cr 1100, REV-14 maker-checker)
   { code: '1180', name: 'Employee Advances', type: 'Asset' },                  // เงินทดรองจ่ายพนักงาน — petty-cash / cash advances outstanding
+  { code: '1190', name: 'Allowance for Doubtful Accounts', type: 'Asset' },    // ค่าเผื่อหนี้สงสัยจะสูญ — contra-asset (normal credit bal); Cr from ECL provision (REV-18)
   { code: '1280', name: 'Prepaid Expenses', type: 'Asset' },                   // ค่าใช้จ่ายจ่ายล่วงหน้า — prepaid asset (amortized over its term)
   { code: '1600', name: 'Right-of-Use Asset', type: 'Asset' },                 // สินทรัพย์สิทธิการใช้ (IFRS 16/TFRS 16)
   { code: '1690', name: 'Accumulated Depreciation — ROU', type: 'Asset' },     // ค่าเสื่อมสะสม–สินทรัพย์สิทธิการใช้ (contra-asset)
