@@ -115,7 +115,8 @@ read across **every** maker-checker queue at once:
   payroll runs (PAY-03), asset revaluations (FA-08) and disposals (FA-09), and
   bank adjustments (BANK-02);
 - **inventory write-off** requests (INV-07), **vendor payment** requests
-  (AP-PAY), and **manual FX rate** changes (FX-04) — which post nothing until approved.
+  (AP-PAY), **manual FX rate** changes (FX-04), and **budgets** (BUD-01) — which
+  post nothing (and don't count) until approved.
 
 Each item is **control-tagged**, attributed to **who requested it**, valued, and
 **aged** into buckets (0–3, 4–7, 8–14, 15+ days). Anything older than the **SLA**

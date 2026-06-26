@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, invWriteoffRequests, fxRates } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, invWriteoffRequests, fxRates, budgets } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -533,6 +533,16 @@ export class FinanceService {
     for (const r of fxr) {
       const age = ageDays(r.createdAt);
       items.push({ type: 'fx_rate', control: 'FX-04', label: 'อัตราแลกเปลี่ยน (FX rate change)', ref: `${r.currency}@${r.rateDate}`, source: 'FX-RATE', requested_by: r.requestedBy, requested_at: r.createdAt, amount: 0, memo: `${r.currency} = ${n(r.rate)} THB (${r.rateDate})`, age_days: age, bucket: bucket(age), stale: age > staleDays });
+    }
+    // 5) Budgets — an upserted budget is PendingApproval (excluded from budget-vs-actual) until a different user
+    // approves; grouped per (fiscal_year, account, cost center) line, not per split month.
+    const bud = await db.select({
+      fiscalYear: budgets.fiscalYear, accountCode: budgets.accountCode, costCenterCode: budgets.costCenterCode,
+      requestedBy: sql<string>`max(${budgets.requestedBy})`, total: sql<string>`coalesce(sum(${budgets.amount}),0)`, oldest: sql<string>`min(${budgets.updatedAt})`,
+    }).from(budgets).where(eq(budgets.status, 'PendingApproval')).groupBy(budgets.fiscalYear, budgets.accountCode, budgets.costCenterCode);
+    for (const b of bud) {
+      const age = ageDays(b.oldest);
+      items.push({ type: 'budget', control: 'BUD-01', label: 'งบประมาณ (Budget)', ref: `FY${b.fiscalYear}/${b.accountCode}${b.costCenterCode ? '/' + b.costCenterCode : ''}`, source: 'BUDGET', requested_by: b.requestedBy, requested_at: b.oldest, amount: round2(n(b.total)), memo: `FY${b.fiscalYear} ${b.accountCode}${b.costCenterCode ? ' @ ' + b.costCenterCode : ''}`, age_days: age, bucket: bucket(age), stale: age > staleDays });
     }
     items.sort((a, b) => b.age_days - a.age_days);
     const byType = Object.values(items.reduce((acc: any, it) => {

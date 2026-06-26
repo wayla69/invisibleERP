@@ -12,7 +12,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Annual + on significant change |
-| Related RCM controls | EPM-01, EPM-02, EPM-03, EPM-04, GL-05 |
+| Related RCM controls | EPM-01, EPM-02, EPM-03, EPM-04, BUD-01, GL-05, MON-01 |
 | Related policy | `compliance/policies/budgeting-and-planning-policy.md` |
 
 ## 2. Purpose
@@ -61,7 +61,7 @@ Segregation of duties is enforced per **R07** — the user who creates/submits a
 
 ## 7. Process narrative
 
-1. **Upsert budget.** Planner calls `POST /api/ledger/budgets`. Records are upserted by `fiscal_year + account_code + period + cost_center`. In `annual` mode the amount is split into 12 monthly lines with the rounding remainder applied to December; in `monthly` mode a single line is written. Cost center is optional (`null` = corporate). No GL impact. Control: **EPM-01**.
+1. **Upsert budget (maker-checker).** Planner calls `POST /api/ledger/budgets`. Records are upserted by `fiscal_year + account_code + period + cost_center`. In `annual` mode the amount is split into 12 monthly lines with the rounding remainder applied to December; in `monthly` mode a single line is written. Cost center is optional (`null` = corporate). No GL impact. An upserted budget lands as **PendingApproval** and is **EXCLUDED from budget-vs-actual** until a **different** user with approval authority approves it (`POST /api/ledger/budgets/approve` for the `fiscal_year`/`account_code`/`cost_center`[/`period`]); self-approval is rejected **`403 SOD_VIOLATION`** (binds even Admin), `reject` marks it Rejected (excluded). An external/direct planning seed (DEFAULT `Approved`) stays usable. This stops one person from entering a self-serving budget that makes overspending look 'on budget'. Pending budgets are also surfaced, aged, by the pending-approvals monitor (**MON-01**). Control: **EPM-01**, **BUD-01**.
 2. **Query / maintain budget.** `GET /api/ledger/budgets` filters by `fiscal_year`, `account_code`, `cost_center`; `DELETE /api/ledger/budgets` removes lines. Control: Operational.
 3. **Budget-vs-actual reporting.** `GET /api/ledger/budget-vs-actual` reads budget from the budgets table and actual as the net signed GL movement from posted JEs. Variance = actual − budget; variance% = variance / \|budget\| × 100. Favorability: revenue/liability/equity favorable if actual ≥ budget; expense/asset favorable if actual ≤ budget. Status is `On Budget` / `Favorable` / `Unfavorable`. Actuals are IPE derived from the posted ledger. Control: **EPM-03** (detective), **EPM-04** (IPE accuracy).
 4. **Create plan version.** Planner calls `POST /api/planning/versions` (prefix `BV-{fiscal_year}-{nnnn}`, status `Working`). `GET /api/planning/versions` and `GET /api/planning/versions/:id` list/read versions; missing id raises **VERSION_NOT_FOUND (404)**. Control: **EPM-02**.
@@ -98,6 +98,7 @@ The Planner lane creates budgets, versions, scenarios, and forecast lines and su
 | Step | Risk | Control | Type | RCM ID | Evidence / Record |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Budget data inconsistent / duplicated | Upsert keyed on fiscal_year+account+period+cost_center; deterministic 12-way split | Preventive | EPM-01 | Budget table rows |
+| 1 | Budget entered/changed by one person drives variance reporting with no review | **Budget maker-checker** — upsert is PendingApproval & excluded from budget-vs-actual until a different user approves; self-approve → `SOD_VIOLATION` (binds Admin) | **Preventive** | **BUD-01** | `SOD_VIOLATION`; `budget` harness |
 | 4,7 | Unauthorized or out-of-sequence version change | Version status FSM gate (`assertCanTransition`) | Preventive | EPM-02 | Version status history |
 | 8 | Preparer self-approves budget | Maker-checker; `approvals` permission distinct from submitter (R07) | Preventive | GL-05 | Approval record; workflow log |
 | 3,10 | Performance against plan not monitored | Budget-vs-actual and three-way variance reporting | Detective | EPM-03 | Variance report output |
@@ -142,3 +143,4 @@ The Planner lane creates budgets, versions, scenarios, and forecast lines and su
 | --- | --- | --- | --- |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 DRAFT | 2026-06-25 | `<<author>>` | **Budget-vs-actual and Demand-ML UIs surfaced** — new screens `/budget` (account/cost-centre budgets + budget-vs-actual variance, `/api/ledger/budgets` & `/budget-vs-actual`) and `/demand` (multi-algorithm demand forecast/backtest + accuracy history, `/api/demand/*`), both ERP nav → วางแผน & BI. UI-only addition over already-documented endpoints; no process/control change (budgets remain reference data, no GL). See user manual `09-reports-and-analytics.md` and UAT `09-reports-analytics-uat.md`. |
+| 0.3 | 2026-06-26 | Platform | **BUD-01 — budget maker-checker.** Step 1: an upserted budget is now PendingApproval and EXCLUDED from budget-vs-actual until a different user approves it (`POST /api/ledger/budgets/approve`, gated `approvals`/`gl_close`); self-approval → `403 SOD_VIOLATION` (binds Admin); reject excludes it. `budget.service.ts` upsertBudget(→PendingApproval)/approveBudget/rejectBudget/budgetVsActual(Approved-only). New RCM control **BUD-01** (RCM now 88); migration **0138** (`budgets.status`/`requested_by`/`approved_by`/`approved_at`, DEFAULT 'Approved' for backward compat — direct planning seeds stay usable); control matrix gains a step-1 preventive row; also surfaced by the pending-approvals monitor (MON-01). Web `/budget`: status badges + approve/reject on pending budgets. ToE: `budget` harness (upsert PendingApproval → excluded from B/A; self-approve SOD_VIOLATION; independent approve → counts). |

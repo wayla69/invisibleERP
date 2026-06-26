@@ -967,6 +967,13 @@
       "when": 2023540000005,
       "tag": "0137_fx_rate_maker_checker",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 2023540000006,
+      "tag": "0138_budget_maker_checker",
+      "breakpoints": true
     }
   ]
 }

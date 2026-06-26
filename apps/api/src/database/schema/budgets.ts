@@ -12,8 +12,14 @@ export const budgets = pgTable('budgets', {
   period: text('period').notNull(),           // 'YYYY-MM'
   amount: numeric('amount', { precision: 18, scale: 4 }).notNull().default('0'),
   notes: text('notes'),
+  // BUD-01 maker-checker (0138): an upserted budget is PendingApproval and excluded from budget-vs-actual until
+  // a DIFFERENT user approves it. DEFAULT 'Approved' keeps existing rows + direct seeds usable.
+  status: text('status').notNull().default('Approved'), // Approved | PendingApproval | Rejected
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),                       // checker — must differ from requested_by
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
   createdBy: text('created_by'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-}, (t) => ({ byAccount: index('idx_budget_account').on(t.accountCode, t.period) }));
+}, (t) => ({ byAccount: index('idx_budget_account').on(t.accountCode, t.period), byStatus: index('idx_budget_status').on(t.tenantId, t.status) }));
 
 export type Budget = typeof budgets.$inferSelect;
