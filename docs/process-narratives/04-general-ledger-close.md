@@ -190,6 +190,7 @@ flowchart TD
 | 0.9 DRAFT | 2026-06-26 | Platform | §7 step 13 — added the **lease-liability reconciliation** (`GET /api/leases/liability-reconciliation`): ties GL **2600** to the sum of the remaining liability balances on the lease schedule (`gl_liability` vs `schedule_liability`, `difference`, `reconciled`), surfaced as a tie-out banner on `/leases`. Detective tie-out over the existing **LSE-01**; no new control, no migration. Verified by the `basics` harness (after run + remeasurement, GL 2600 = schedule, reconciled, difference 0). |
 | 1.0 DRAFT | 2026-06-26 | WS1.3 | WS1.3 — added **multi-dimensional GL postings**: `branch_id`, `project_id`, `department_id` columns on `journal_lines`; `PostingService` context stamping; `GET /api/ledger/income-statement/by-branch` per-branch P&L endpoint; `departments` master table with RLS. New control **GL-13**. Verified by the `basics` harness (TC-GL-13-01/02/03). Migration 0157. |
 | 1.1 DRAFT | 2026-06-26 | WS1.4 | WS1.4 — added **sub-ledger tie-out / reconciliation**: `POST /api/ledger/tie-out/run` reconciles each GL control account (1100 AR / 2000 AP / 1200 INV / 1500 FA) to the sum of its sub-ledger detail, recording the variance + a Matched/Variance status; `POST /api/ledger/tie-out/:id/certify` is **maker-checker** (certifier ≠ runner → `SELF_CERTIFY`). New `subledger_tieout_runs` table (RLS), new control **GL-14**. Verified by the `basics` harness (TC-GL-14-01/02/03). Migration 0160. |
+| 1.4 DRAFT | 2026-06-26 | WS3.2 | WS3.2 — **FX revaluation + deferred tax** (§3.2): two period-scoped, maker-checker, idempotent-per-(tenant, period) close runs. **FX revaluation (GL-18)** — `POST /api/ledger/fx-reval/run` restates open foreign-currency AR/AP to the closing rate (from the request `rates` map or the latest **approved** `fx_rates`; else `MISSING_RATE`) → unrealized FX to **5400**; `/:id/post` (poster ≠ runner → `SELF_POST`) posts net gain (Cr 5400) / loss (Dr 5400) with the 1100/2000 control restatements through the `PERIOD_LOCKED` gate; `ALREADY_POSTED` on re-post/re-run. **Deferred tax (TAX-06)** — `POST /api/ledger/deferred-tax/run` computes DTA from the posted AR allowance (× CIT 20%) + DTL from accelerated depreciation (book NBV vs an assumed tax NBV — documented 1.5× simplification, no tax-dep ledger yet), nets to `net_deferred` and the **delta vs the prior posted run**; `/:id/post` (poster ≠ runner → `SELF_POST`) posts the delta to **1700/5950** (benefit Dr 1700 / Cr 5950). New COA **1700/2700/5950**; new `fx_reval_runs` + `deferred_tax_runs` tables (RLS); close checklist gains `fx_reval`(advisory) + `deferred_tax`(advisory) steps. New controls **GL-18** + **TAX-06**. Verified by the `basics` harness (TC-GL-18-01/02, TC-TAX-06-01/02). Migration 0168. |
 | 1.3 DRAFT | 2026-06-26 | WS2.2 | WS2.2 — **GL immutability + audit log + reversal** (§2.2): a **Posted** journal entry is immutable — a production DB trigger (`gl_block_posted_mutation`, migration 0164) blocks UPDATE/DELETE of posted `journal_entries` (permitting only the `is_reversed` flag flip), and an app guard (`attemptVoidPosted`) returns `GL_IMMUTABLE` + logs `MUTATE_BLOCKED`. Corrections happen ONLY via **reversal** (`POST /api/ledger/journal/:id/reverse`): a new immediately-posted contra entry (swapped Dr/Cr, `reversal_of`, original flagged `is_reversed`) that respects the period gates; errors `ENTRY_NOT_FOUND`/`NOT_POSTED`/`ALREADY_REVERSED`. New `gl_audit_log` table (RLS) recording POST/APPROVE/REVERSE/MUTATE_BLOCKED (`GET /api/ledger/audit?entryId=`). New control **GL-17**. Verified by the `basics` harness (TC-GL-17-01/02/03). Migration 0164. |
 | 1.2 DRAFT | 2026-06-26 | WS2.1 | WS2.1 — **hard period close + checklist**: `POST /api/ledger/close/start` opens a `close_runs` record (InProgress) per (tenant, period) and seeds a standard checklist (`close_run_steps`); `POST /api/ledger/close/step` marks steps Done → run advances to **ReadyToLock** when all required steps are done; `POST /api/ledger/close/lock` hard-locks the period (requires ReadyToLock else `STEPS_INCOMPLETE`; **maker-checker** locker ≠ starter → `SELF_LOCK`). New `'Locked'` period status; `postEntry` now rejects ALL postings into a Locked period with `PERIOD_LOCKED` regardless of the legacy `allowClosedPeriod` escape (only the system year-end closing entry, `source='CLOSE'`, is exempt). New `close_runs` / `close_run_steps` tables (RLS), new controls **GL-15** (checklist completeness) + **GL-16** (segregated lock). Verified by the `basics` harness (TC-GL-15-01/02/03, TC-GL-16-01/02). Migration 0162. |
 
@@ -409,3 +410,81 @@ detail JSON, and a timestamp.
 | Mitigation | DB trigger (`gl_block_posted_mutation`) blocks UPDATE/DELETE of posted entries; app guard returns `GL_IMMUTABLE`; corrections only via `reverseEntry` (contra entry, `reversal_of`, original `is_reversed`); every POST/APPROVE/REVERSE/MUTATE_BLOCKED logged to `gl_audit_log` |
 | Owner | Financial Controller |
 | Test | TC-GL-17-01/02/03 (basics.ts harness) |
+
+## 3.2 FX Revaluation & Deferred Tax (WS3.2)
+
+Two period-end close runs, each a governed wrapper (compute → maker-checker post) over a balance-sheet
+valuation, one row per `(tenant, period)`, idempotent, posting through the normal `LedgerService.postEntry`
+path so the WS2.1 `PERIOD_LOCKED` gate and the GL-17 audit trail apply.
+
+### FX Revaluation (GL-18) — `fx_reval_runs`
+Restates open foreign-currency monetary balances (AR/AP whose `currency <> 'THB'` and `status <> 'Paid'`,
+dated on/before the as-of) to the period-end **closing rate**.
+
+- **Run** — `POST /api/ledger/fx-reval/run` (`{ period: 'YYYY-MM', as_of_date?, rates?, tenant_id? }`).
+  For each open document: `delta_thb = open_foreign × (closing_rate − booked_rate)`. The closing rate per
+  currency comes from the request `rates` map first, else the latest **Approved** `fx_rates` row (FX-04 —
+  an unapproved manual rate can never drive the reval); a currency with no rate from either → `MISSING_RATE`.
+  Stages an **Open** run with per-document `detail` and the net. Re-running an Open period refreshes it;
+  a Posted period → `ALREADY_POSTED`.
+- **Post** — `POST /api/ledger/fx-reval/:id/post`. Maker-checker: the poster MUST differ from the runner
+  (`SELF_POST`). Posts the GL entry (`source = 'FXREVAL-RUN'`, `viaSubledger: true` for the control legs):
+  - **AR** (asset): `delta > 0` is a **gain** → **Dr 1100**; `delta < 0` → **Cr 1100**.
+  - **AP** (liability): `delta > 0` is a **loss** → **Cr 2000**; `delta < 0` → **Dr 2000**.
+  - **5400** takes the balancing P&L **net = Σ(AR delta) − Σ(AP delta)**: net **gain → Cr 5400** (income),
+    net **loss → Dr 5400**.
+  Marks the run Posted. (This is the governed, period-close counterpart of the ad-hoc `FxService.revalue`.)
+
+### Deferred Tax (TAS 12 / TFRS, TAX-06) — `deferred_tax_runs`
+Recognises deferred tax from book-vs-tax **temporary** differences at the CIT rate (default **0.20**).
+
+- **Run** — `POST /api/ledger/deferred-tax/run` (`{ period, as_of_date?, tax_rate?, tax_dep_factor?, tenant_id? }`).
+  Temporary differences gathered:
+  1. **AR allowance** (deductible temp diff) — the latest **posted** `ar_allowance` (WS2.3/REV-18). Book
+     recognises the allowance now; tax deducts the loss only on write-off ⇒ a deductible temp diff ⇒
+     **DTA = allowance × CIT**.
+  2. **Accelerated depreciation** (taxable temp diff) — book NBV (`fixed_assets.net_book_value`) vs an
+     **assumed** tax NBV. *Simplifying assumption:* the model has no parallel tax-depreciation ledger, so
+     tax depreciation is assumed **faster than book by a documented factor** (default **1.5×**, capped at
+     the depreciable base cost − salvage), overridable per run via `tax_dep_factor`. `bookNBV − taxNBV > 0`
+     ⇒ a taxable temp diff ⇒ **DTL = (bookNBV − taxNBV) × CIT**. A deliberate approximation until a tax-dep
+     ledger is modelled.
+  `net_deferred = DTA − DTL`; the run records the **delta vs the prior posted run**. Stages an **Open** run;
+  a Posted period → `ALREADY_POSTED`.
+- **Post** — `POST /api/ledger/deferred-tax/:id/post`. Maker-checker (`SELF_POST`). Posts the period
+  **delta** (`source = 'DEFTAX'`): an **increase** in the net asset (`delta > 0`) is a deferred tax
+  **benefit** → **Dr 1700 DTA / Cr 5950** (a credit to 5950 reduces tax expense); a **decrease**
+  (`delta < 0`) → **Dr 5950 / Cr 1700**. The net is carried on **1700** for simplicity (account **2700**
+  exists for split DTL presentation/disclosure; the P&L and net effect are identical). Marks the run Posted.
+
+### COA accounts (added WS3.2)
+| Code | Name | Type | Normal balance |
+|------|------|------|----------------|
+| 1700 | Deferred Tax Asset | Asset | D |
+| 2700 | Deferred Tax Liability | Liability | C |
+| 5950 | Deferred Tax Expense | Expense | D |
+| 5400 | FX Gain/Loss (Unrealized) — *pre-existing* | Expense | D (loss) / C (gain) |
+
+### Close-checklist integration
+The WS2.1 close checklist gains two **advisory** steps — `fx_reval` (pre-existing) and `deferred_tax` (new)
+— so the period close surfaces both as expected procedures. Both are advisory (do not gate the lock),
+keeping existing close runs backward-compatible.
+
+### Error codes
+| Code | Meaning |
+|------|---------|
+| `FX_RUN_NOT_FOUND` | No FX revaluation run with that id |
+| `DT_RUN_NOT_FOUND` | No deferred tax run with that id |
+| `MISSING_RATE` | No closing rate for a currency (pass it in `rates` or set an approved `fx_rate`) |
+| `ALREADY_POSTED` | The run (or its period) is already posted |
+| `SELF_POST` | Maker-checker: the poster cannot be the runner |
+
+### Controls
+| Control ID | GL-18 | TAX-06 |
+|------------|-------|--------|
+| Name | Period-end FX revaluation (maker-checker) | Deferred tax recognition (maker-checker) |
+| Type | Application — Automated (Preventive, Monthly/period-end) | Application — Automated (Preventive, Quarterly/year-end) |
+| Risk | Open FX monetary balances not restated, or revalued/posted by one person | Temporary differences not recognised as deferred tax, or posted by one person |
+| Mitigation | Run→post run table; rate from approved `fx_rates`/explicit; `SELF_POST`; 5400/1100/2000 via period-lock gate | Run→post run table; DTA(allowance)+DTL(accel-dep, documented simplification); delta posting; `SELF_POST`; 1700/5950 |
+| Owner | Financial Controller | Tax / Financial Controller |
+| Test | TC-GL-18-01/02 (basics.ts) | TC-TAX-06-01/02 (basics.ts) |

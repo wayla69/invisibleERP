@@ -133,5 +133,16 @@ period totals.
 
 ---
 
+## Deferred tax (TAS 12) — control TAX-06
+
+Beyond current VAT/WHT, the system recognises **deferred tax** on book-vs-tax temporary
+differences (the AR allowance, accelerated depreciation) at the 20% CIT rate. Run it from
+the General Ledger close: `POST /api/ledger/deferred-tax/run` then a **different** user
+posts `POST /api/ledger/deferred-tax/{id}/post` (maker-checker) → **Dr 1700 / Cr 5950**
+for a deferred tax benefit. Full steps: [General Ledger](./06-general-ledger.md) ▸
+*Deferred tax*. Errors: `SELF_POST`, `ALREADY_POSTED`.
+
+---
+
 **Next:** [Payroll](./08-payroll.md) · [General Ledger](./06-general-ledger.md) ·
 [Finance — AR & AP](./05-finance-ar-ap.md)

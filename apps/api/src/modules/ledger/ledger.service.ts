@@ -89,6 +89,9 @@ const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' 
   { code: '5820', name: 'Impairment Loss', type: 'Expense' },                  // ผลขาดทุนจากการด้อยค่าสินทรัพย์
   { code: '5900', name: 'Interest Expense', type: 'Expense' },                 // ดอกเบี้ยจ่าย — incl. lease-liability unwinding
   { code: '5830', name: 'Cash Over/Short', type: 'Expense' },                  // เงินสดขาด/เกินบัญชี — POS-01 till-close variance (short=debit, over=credit)
+  { code: '1700', name: 'Deferred Tax Asset', type: 'Asset' },                 // สินทรัพย์ภาษีเงินได้รอการตัดบัญชี (TAS 12) — deductible temporary differences × CIT (TAX-06)
+  { code: '2700', name: 'Deferred Tax Liability', type: 'Liability' },         // หนี้สินภาษีเงินได้รอการตัดบัญชี (TAS 12) — taxable temporary differences × CIT (TAX-06)
+  { code: '5950', name: 'Deferred Tax Expense', type: 'Expense' },             // ค่าใช้จ่าย(รายได้)ภาษีเงินได้รอการตัดบัญชี — deferred tax expense/benefit (TAX-06)
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────

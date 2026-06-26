@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Each filing period + annual |
-| Related RCM controls | TAX-01, TAX-02, TAX-03, TAX-04, REV-10, PAY-02 |
+| Related RCM controls | TAX-01, TAX-02, TAX-03, TAX-04, TAX-05, TAX-06, REV-10, PAY-02 |
 | Related policy | `compliance/policies/11-financial-close-policy.md` |
 
 ## 2. Purpose
@@ -94,6 +94,37 @@ flowchart TD
 | 6,7 | VAT return (ภ.พ.30) diverges from the GL VAT account | ภ.พ.30 ↔ GL-2100 reconciliation: net VAT (output − input) tied to the 2100 net movement, with a tie verdict, before filing | Det / Auto | TAX-04 | ภ.พ.30 return + GL-2100 reconciliation tie |
 | 7 | WHT remittance diverges from GL | WHT-account-to-GL reconciliation before filing | Det / Hybrid | TAX-03 | Reconciliation evidence |
 
+## 9a. Deferred tax (TAS 12 / TFRS, TAX-06)
+
+Income tax expense must reflect not only current tax but **deferred** tax arising from **temporary**
+differences between the carrying amount of an asset/liability for **book** purposes and its **tax** base.
+WS3.2 adds a governed, maker-checker, idempotent-per-(tenant, period) deferred-tax run (the full workflow,
+alongside FX revaluation GL-18, is in `04-general-ledger-close.md` §3.2).
+
+1. **Run** — `POST /api/ledger/deferred-tax/run` gathers temporary differences:
+   - **AR allowance for doubtful accounts** (a *deductible* temp diff): book recognises the allowance now,
+     tax deducts the loss only on write-off ⇒ **DTA = posted allowance (REV-18) × CIT** (default **20%**).
+   - **Accelerated depreciation** (a *taxable* temp diff): book NBV vs an assumed tax NBV. **Simplification:**
+     no parallel tax-depreciation ledger exists, so tax depreciation is assumed faster than book by a
+     documented factor (default **1.5×**, capped at the depreciable base), overridable per run ⇒
+     **DTL = (bookNBV − taxNBV) × CIT**.
+   It nets to `net_deferred = DTA − DTL` and records the **delta vs the prior posted run**.
+2. **Post** — `POST /api/ledger/deferred-tax/:id/post` (maker-checker, poster ≠ runner → `SELF_POST`) posts
+   the period **delta**: an increase in the net asset (deferred tax **benefit**) → **Dr 1700 / Cr 5950**;
+   a decrease → **Dr 5950 / Cr 1700**. Posting flows through the period-lock gate; `ALREADY_POSTED` on re-post.
+
+New COA accounts: **1700** Deferred Tax Asset, **2700** Deferred Tax Liability, **5950** Deferred Tax Expense.
+
+### Control TAX-06 — Deferred tax recognition (maker-checker)
+| Control ID | TAX-06 |
+|------------|--------|
+| Name | Deferred tax recognised from temporary differences; segregated post |
+| Type | Application — Automated (Preventive, Quarterly / year-end) |
+| Risk | Temporary differences not recognised as deferred tax, or computed and posted by one person — income tax expense + DTA/DTL mis-stated |
+| Mitigation | Run→post `deferred_tax_runs`; DTA (allowance×CIT) + DTL (accel-dep, documented simplification); delta-vs-prior posting to 1700/5950; `SELF_POST`; period-lock gate |
+| Owner | Tax / Financial Controller |
+| Test | TC-TAX-06-01/02 (basics.ts harness) |
+
 ## 10. Inputs & outputs
 
 **Inputs:** sales/purchase transactions, tax-rate config, vendor/customer tax IDs, payment data.
@@ -131,4 +162,5 @@ flowchart TD
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 DRAFT | 2026-06-24 | `<<author>>` | e-Tax invoices: added XAdES digital signing (`etax-sign.ts`, configurable cert) and idempotent provider submission (mock + generic `http` SP). Updated step 4, control TAX-02 matrix, and code refs. New harness `tools/cutover/src/etax-sign.ts`; `etax.ts` extended (submit + signed-fallback). |
 | 0.3 | 2026-06-26 | Platform | **Registered the VAT-return ↔ GL reconciliation as a named control (TAX-04).** The ภ.พ.30 report (`GET /api/tax-reports/pp30`) already computes net VAT (output − input) and ties it to the **GL 2100 (Tax Payable)** net movement for the period with a `reconciliation.tied` verdict — but the §9 control matrix mis-attributed this VAT reconciliation to TAX-03 (WHT). Split step 6/7 into **TAX-04** (VAT ภ.พ.30 ↔ GL-2100, detective, pre-filing) vs TAX-03 (WHT remittance ↔ GL); strengthened §7. No app-code change (capability pre-existed: output VAT posts Cr 2100 on sale, Dr on return; input VAT Dr 2100 on AP). ToE: `taxdocs` harness adds an explicit reconciliation-block assertion. RCM 94 → 95. |
+| 0.5 | 2026-06-26 | WS3.2 | **Deferred tax recognition (TAS 12 / TFRS, new control TAX-06).** New `POST /api/ledger/deferred-tax/run` computes deferred tax from book-vs-tax **temporary** differences — a **DTA** from the latest posted AR allowance (REV-18) × CIT (default 20%), and a **DTL** from accelerated depreciation (book NBV vs an *assumed* tax NBV; documented **1.5× simplification** as the model has no separate tax-depreciation ledger) — nets to `net_deferred` and the **delta vs the prior posted run**. `POST /api/ledger/deferred-tax/:id/post` is **maker-checker** (poster ≠ runner → `SELF_POST`) and posts the period delta to **1700 Deferred Tax Asset / 5950 Deferred Tax Expense** (benefit Dr 1700 / Cr 5950) through the WS2.1 period-lock gate; idempotent per (tenant, period) (`ALREADY_POSTED`). New COA 1700/2700/5950; new `deferred_tax_runs` table (migration **0168**, RLS). See `04-general-ledger-close.md` §3.2 (full workflow incl. FX revaluation GL-18). ToE: `basics` (TC-TAX-06-01/02). New RCM control **TAX-06** (128 controls). UAT `06-tax-uat.md` updated. |
 | 0.4 | 2026-06-26 | Platform | **Thai tax filing register + remittance calendar (Step 7 — operating-spine PR7, new control TAX-05).** The tax-reports module already *computes* ภ.พ.30 / ภ.ง.ด.3/53 with GL reconciliation, deadlines and PDF export, but nothing persisted that a return was *filed*. New `thai_tax_filings` table (migration `0165`) snapshots a computed return into a **DRAFT→SUBMITTED→ACCEPTED** record (one per tenant/type/period) with the figures as filed + the Revenue-Department `submission_ref`. `POST /api/tax-reports/filings` files (idempotent; never overwrites a SUBMITTED/ACCEPTED period), `/:id/submit` requires a reference (`SUBMISSION_REF_REQUIRED`) and stamps SUBMITTED, `/:id/accept` → ACCEPTED; `GET /api/tax-reports/remittance-calendar` lists every monthly obligation (ภ.พ.30 by the 15th, ภ.ง.ด. by the 7th of the next month) with its filing status. New `/tax/reports` "การยื่นแบบ & ปฏิทิน" tab. ToE: `taxdocs` harness (+9). New RCM control **TAX-05** (124 controls). UAT `06-tax-uat.md` updated. |

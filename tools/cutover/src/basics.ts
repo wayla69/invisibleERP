@@ -518,6 +518,64 @@ async function main() {
   const alwList = (await inj('GET', `/api/finance/ar-allowance?tenant_id=${eclTid}`, admin)).json;
   ok('AR allowance register: lists the posted computation', (alwList.allowances ?? []).some((a: any) => a.id === cmpId && a.posted === true && near(a.allowance, 1100)), `n=${alwList.count}`);
 
+  // ───────────────── WS3.2 — FX revaluation (GL-18) + Deferred tax (TAX-06) ─────────────────
+  // FX reval on a dedicated tenant with one open foreign-currency AR + AP, closing rates passed explicitly.
+  await db.insert(s.tenants).values([{ code: 'FXCO', name: 'FX Co', creditLimit: '0' }]).onConflictDoNothing();
+  const fxTid = await tid('FXCO');
+  // AR USD 1,000 booked @ 34 (THB 34,000); AP USD 400 booked @ 34 (THB 13,600). Closing rate 36.
+  //  AR delta = 1000 × (36−34) = +2000 (gain); AP delta = 400 × (36−34) = +800 (loss).
+  //  net P&L = AR gain − AP loss = 2000 − 800 = +1200 (net gain) → Cr 5400 1200; Dr 1100 2000; Cr 2000 800.
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-FX1', invoiceDate: daysAgo(20), dueDate: daysAgo(-10), tenantId: fxTid, amount: '1000', paidAmount: '0', status: 'Unpaid', currency: 'USD', fxRate: '34', createdBy: 'seed' },
+  ]).onConflictDoNothing();
+  await db.insert(s.apTransactions).values([
+    { txnNo: 'AP-FX1', invoiceNo: 'BILL-FX1', invoiceDate: daysAgo(20), dueDate: daysAgo(-10), tenantId: fxTid, amount: '400', paidAmount: '0', status: 'Unpaid', currency: 'USD', fxRate: '34', createdBy: 'seed' },
+  ]).onConflictDoNothing();
+  const fx1100Before = await tbDebit('1100'); const fx2000CrBefore = await tbCredit2('2000'); const fx5400CrBefore = await tbCredit2('5400');
+  const fxRun = await inj('POST', '/api/ledger/fx-reval/run', admin, { period: '2026-12', as_of_date: '2026-12-31', rates: { USD: 36 }, tenant_id: fxTid });
+  ok('FX reval: run computes net unrealized gain 1200 (AR +2000 gain, AP +800 loss)',
+    fxRun.status === 200 && near(fxRun.json?.net, 1200) && near(fxRun.json?.ar_delta, 2000) && near(fxRun.json?.ap_delta, 800) && fxRun.json?.status === 'Open',
+    `st=${fxRun.status} net=${fxRun.json?.net} ar=${fxRun.json?.ar_delta} ap=${fxRun.json?.ap_delta}`);
+  const fxRunId = fxRun.json?.id;
+  const fxSelf = await inj('POST', `/api/ledger/fx-reval/${fxRunId}/post`, admin);
+  ok('FX reval: runner cannot post own run (SELF_POST)',
+    fxSelf.status === 403 && fxSelf.json?.error?.code === 'SELF_POST', `st=${fxSelf.status} code=${fxSelf.json?.error?.code}`);
+  const fxPost = await inj('POST', `/api/ledger/fx-reval/${fxRunId}/post`, mgr);
+  ok('FX reval: a different user posts → JE with net gain 1200',
+    fxPost.status === 200 && near(fxPost.json?.net, 1200) && /^JE-/.test(fxPost.json?.entry_no ?? ''),
+    `st=${fxPost.status} net=${fxPost.json?.net} je=${fxPost.json?.entry_no}`);
+  ok('FX reval: GL reflects the reval (5400 +1200 credit, 1100 +2000 debit, 2000 +800 credit)',
+    near(await tbCredit2('5400'), fx5400CrBefore + 1200) && near(await tbDebit('1100'), fx1100Before + 2000) && near(await tbCredit2('2000'), fx2000CrBefore + 800),
+    JSON.stringify({ c5400: await tbCredit2('5400'), d1100: await tbDebit('1100'), c2000: await tbCredit2('2000') }));
+  const fxRepost = await inj('POST', `/api/ledger/fx-reval/${fxRunId}/post`, mgr);
+  ok('FX reval: a posted run cannot be re-posted (ALREADY_POSTED)',
+    fxRepost.status === 400 && fxRepost.json?.error?.code === 'ALREADY_POSTED', `st=${fxRepost.status} code=${fxRepost.json?.error?.code}`);
+  const fxRerun = await inj('POST', '/api/ledger/fx-reval/run', admin, { period: '2026-12', as_of_date: '2026-12-31', rates: { USD: 36 }, tenant_id: fxTid });
+  ok('FX reval: re-running a posted period is rejected (ALREADY_POSTED)',
+    fxRerun.status === 400 && fxRerun.json?.error?.code === 'ALREADY_POSTED', `st=${fxRerun.status} code=${fxRerun.json?.error?.code}`);
+
+  // Deferred tax on the ECLCUST tenant — it has a posted AR allowance (1100) and no fixed assets, so the
+  // sole temporary difference is the deductible allowance → DTA = 1100 × 0.20 = 220, net deferred asset 220.
+  const dt1700Before = await tbDebit('1700'); const dt5950CrBefore = await tbCredit2('5950');
+  const dtRun = await inj('POST', '/api/ledger/deferred-tax/run', admin, { period: '2026-12', as_of_date: '2026-12-31', tenant_id: eclTid });
+  ok('Deferred tax: run computes DTA 220 from the AR allowance (1100 × 20%)',
+    dtRun.status === 200 && near(dtRun.json?.dta, 220) && near(dtRun.json?.net_deferred, 220) && near(dtRun.json?.delta_posted, 220) && dtRun.json?.status === 'Open',
+    `st=${dtRun.status} dta=${dtRun.json?.dta} net=${dtRun.json?.net_deferred} delta=${dtRun.json?.delta_posted}`);
+  const dtRunId = dtRun.json?.id;
+  const dtSelf = await inj('POST', `/api/ledger/deferred-tax/${dtRunId}/post`, admin);
+  ok('Deferred tax: runner cannot post own run (SELF_POST)',
+    dtSelf.status === 403 && dtSelf.json?.error?.code === 'SELF_POST', `st=${dtSelf.status} code=${dtSelf.json?.error?.code}`);
+  const dtPost = await inj('POST', `/api/ledger/deferred-tax/${dtRunId}/post`, mgr);
+  ok('Deferred tax: a different user posts delta 220 → Dr 1700 / Cr 5950',
+    dtPost.status === 200 && near(dtPost.json?.delta_posted, 220) && /^JE-/.test(dtPost.json?.entry_no ?? ''),
+    `st=${dtPost.status} delta=${dtPost.json?.delta_posted} je=${dtPost.json?.entry_no}`);
+  ok('Deferred tax: GL reflects the deferral (1700 +220 debit, 5950 +220 credit)',
+    near(await tbDebit('1700'), dt1700Before + 220) && near(await tbCredit2('5950'), dt5950CrBefore + 220),
+    JSON.stringify({ d1700: await tbDebit('1700'), c5950: await tbCredit2('5950') }));
+  const dtRepost = await inj('POST', `/api/ledger/deferred-tax/${dtRunId}/post`, mgr);
+  ok('Deferred tax: a posted run cannot be re-posted (ALREADY_POSTED)',
+    dtRepost.status === 400 && dtRepost.json?.error?.code === 'ALREADY_POSTED', `st=${dtRepost.status} code=${dtRepost.json?.error?.code}`);
+
   // ───────────────── Asset revaluation / impairment maker-checker (FA-07 valuation + FA-08 SoD) ─────────────────
   const reg = (await inj('GET', '/api/assets', admin)).json;
   const fa2 = (reg.assets ?? reg.register ?? []).find((a: any) => (a.asset_no ?? a.assetNo) === 'FA-EAM2');
