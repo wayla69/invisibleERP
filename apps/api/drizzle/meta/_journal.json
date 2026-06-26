@@ -1125,8 +1125,15 @@
     {
       "idx": 160,
       "version": "7",
-      "when": 2023740000007,
-      "tag": "0160_subledger_tieout",
+      "when": 2023750000004,
+      "tag": "0160_bom_yield_factors",
+      "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 2023750000005,
+      "tag": "0161_subledger_tieout",
       "breakpoints": true
     }
   ]
