@@ -259,6 +259,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-022 | MRP lot-sizing (min/multiple/EOQ) | Feature (MRP lot-sizing) | 15 §5a |
 | UAT-INV-023 | Rough-cut capacity overload flag | Feature (RCCP) | 15 §5a |
 | UAT-INV-024 | STD GR PPV balanced under rounding | MFG-03 / GL-01 | 15 §9 |
+| UAT-MFG-01 | WO completion full-yield (no variance) | MFG-02, GL-01 | 15 §7 |
+| UAT-MFG-02 | WO completion short-yield → variance to 5810 | MFG-02, GL-01 | 15 §7 |
 | UAT-INV-025 | Food-cost variance valued at ingredient cost | INV-04 (analytics) | 03 §12 |
 | UAT-INV-026 | Variance summary nets fav/unfav + tenant-isolated | INV-04 (analytics) | 03 §12 |
 | UAT-INV-027 | Branch replenishment splits transfer-before-buy | INV-05 | 03 §7, §9 |

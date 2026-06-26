@@ -21,6 +21,7 @@ type Wo = {
   wo_no: string; bom_code: string; product_name: string; uom: string;
   qty_planned: number; qty_produced: number; status: string;
   material_cost: number; labor_cost: number; overhead_cost: number; total_cost: number; unit_cost: number;
+  yield_variance: number | null;
 };
 
 export default function ManufacturingPage() {
@@ -37,7 +38,7 @@ export default function ManufacturingPage() {
   });
   const act = useMutation({
     mutationFn: (p: { woNo: string; action: 'issue' | 'complete' }) => api<any>(`/api/manufacturing/work-orders/${p.woNo}/${p.action}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (r) => { notifySuccess(r.status === 'Released' ? `เบิกวัตถุดิบเข้างาน (WIP ${baht(r.wip_cost)}) — ${r.entry_no}` : `ปิดงานผลิต รับสินค้าสำเร็จรูป (${baht(r.fg_value)}) — ${r.entry_no}`); refresh(); },
+    onSuccess: (r) => { notifySuccess(r.status === 'Released' ? `เบิกวัตถุดิบเข้างาน (WIP ${baht(r.wip_cost)}) — ${r.entry_no}` : `ปิดงานผลิต รับสินค้าสำเร็จรูป (${baht(r.fg_value)})${r.yield_variance ? ` · ส่วนต่างผลผลิต ${baht(r.yield_variance)}` : ''} — ${r.entry_no}`); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -75,6 +76,7 @@ export default function ManufacturingPage() {
               { key: 'material_cost', label: 'วัตถุดิบ', align: 'right', render: (r: Wo) => <span className="tabular">{baht(r.material_cost)}</span> },
               { key: 'total_cost', label: 'ต้นทุนรวม', align: 'right', render: (r: Wo) => <span className="tabular">{baht(r.total_cost)}</span> },
               { key: 'unit_cost', label: 'ต้นทุน/หน่วย', align: 'right', render: (r: Wo) => <span className="tabular">{baht(r.unit_cost)}</span> },
+              { key: 'yield_variance', label: 'ส่วนต่างผลผลิต', align: 'right', render: (r: Wo) => r.yield_variance == null ? '—' : <span className={`tabular ${Math.abs(r.yield_variance) >= 0.01 ? 'font-medium text-destructive' : 'text-muted-foreground'}`} title="ต้นทุนผลผลิตที่หาย/เกิน (ลงบัญชี 5810)">{baht(r.yield_variance)}</span> },
               { key: 'status', label: 'สถานะ', render: (r: Wo) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
               {
                 key: 'action',
