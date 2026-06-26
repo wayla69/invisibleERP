@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Query, Body } from '@nestjs/common';
+import { Controller, Get, Put, Post, Param, Query, Body, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -26,4 +26,11 @@ export class CostingController {
   check(@Body(new ZodValidationPipe(CheckBody)) b: any, @CurrentUser() u: JwtUser) { return this.atp.canPromise(u.tenantId as number, b.item_id, b.qty, b.date); }
   @Post('allocate') @Permissions('cust_pos', 'planner', 'pos')
   allocate(@Body(new ZodValidationPipe(AllocBody)) b: any, @CurrentUser() u: JwtUser) { return this.atp.allocate(u.tenantId as number, b.item_id, b.qty, b.ref_doc, b.need_by, u); }
+  // Reservation lifecycle (INV-09): release (order cancelled) / fulfill (goods shipped) / register.
+  @Post('allocations/:refDoc/release') @HttpCode(200) @Permissions('cust_pos', 'planner', 'pos')
+  release(@Param('refDoc') refDoc: string, @CurrentUser() u: JwtUser) { return this.atp.releaseAllocation(u.tenantId as number, refDoc, u); }
+  @Post('allocations/:refDoc/fulfill') @HttpCode(200) @Permissions('cust_pos', 'planner', 'pos', 'warehouse')
+  fulfill(@Param('refDoc') refDoc: string, @CurrentUser() u: JwtUser) { return this.atp.fulfillAllocation(u.tenantId as number, refDoc, u); }
+  @Get('allocations') @Permissions('cust_inventory', 'planner', 'pos', 'procurement')
+  allocations(@Query('item_id') itemId: string | undefined, @Query('status') status: string | undefined, @Query('ref_doc') refDoc: string | undefined, @CurrentUser() u: JwtUser) { return this.atp.listAllocations(u.tenantId as number, { item_id: itemId, status, ref_doc: refDoc }); }
 }
