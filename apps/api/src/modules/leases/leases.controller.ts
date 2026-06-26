@@ -37,6 +37,11 @@ export class LeasesController {
   @Permissions('gl_post', 'gl_close', 'exec')
   list(@Query('tenant_id') tenantId?: string) { return this.svc.listLeases(tenantId ? Number(tenantId) : undefined); }
 
+  // LSE-01 — lease-liability reconciliation: GL 2600 vs the remaining liability on the schedule.
+  @Get('liability-reconciliation')
+  @Permissions('gl_post', 'gl_close', 'exec')
+  reconcile(@Query('tenant_id') tenantId?: string) { return this.svc.reconcileLiability(tenantId ? Number(tenantId) : undefined); }
+
   // Post every due lease period now (cron-callable; also rides the scheduler as `lease_periodic_run`).
   @Post('run')
   @HttpCode(200)
