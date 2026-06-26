@@ -12,6 +12,7 @@ const PayBody = z.object({ amount: z.number().positive(), idempotency_key: z.str
 const RejectBody = z.object({ reason: z.string().optional() });
 const AdvanceBody = z.object({ payee: z.string().min(1), amount: z.number().positive(), purpose: z.string().optional(), expense_account: z.string().optional(), tenant_id: z.number().optional() });
 const SettleBody = z.object({ settled_expense: z.number().nonnegative(), returned_cash: z.number().nonnegative().optional(), expense_account: z.string().optional() });
+const WriteOffBody = z.object({ tenant_id: z.number().optional(), customer_name: z.string().optional(), amount: z.number().positive(), reason: z.string().min(1) });
 
 @Controller('api/finance')
 export class FinanceController {
@@ -72,6 +73,13 @@ export class FinanceController {
 
   @Get('advances') @Permissions('creditors', 'exec')
   advances(@Query('tenant_id') tenantId?: string, @Query('status') status?: string) { return this.svc.listAdvances(tenantId ? Number(tenantId) : undefined, status || undefined); }
+
+  // AR bad-debt write-off (REV-14): maker requests; a different user approves via POST /api/ledger/journal/:entryNo/approve.
+  @Post('ar/write-off') @Permissions('ar', 'exec')
+  writeOffAr(@Body(new ZodValidationPipe(WriteOffBody)) b: z.infer<typeof WriteOffBody>, @CurrentUser() u: JwtUser) { return this.svc.writeOffAr(b, u); }
+
+  @Get('ar/write-offs') @Permissions('ar', 'exec', 'approvals')
+  writeOffs(@Query('tenant_id') tenantId?: string) { return this.svc.listWriteOffs(tenantId ? Number(tenantId) : undefined); }
 
   // WRITE
   @Post('ar/sync') @Permissions('ar')
