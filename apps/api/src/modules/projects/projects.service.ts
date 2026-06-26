@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { projects, projectEntries } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
@@ -30,31 +30,36 @@ export class ProjectsService {
     return this.get(code);
   }
 
-  // Log a cost (time/expense) → project WIP. GL: Dr 1260 Project WIP / Cr 2390 Project Costs Applied.
+  // Log a cost (time/expense). A BILLABLE cost is a recoverable asset → capitalised in project WIP (Dr 1260
+  // / Cr 2390) and relieved to COGS at billing. A NON-BILLABLE cost is unrecoverable, so it is EXPENSED
+  // immediately to project COGS (Dr 5800 / Cr 2390) and never enters the billable WIP — you can't bill the
+  // customer for it, and conservative accounting must not carry it as a recoverable asset.
   async logCost(code: string, dto: CostDto, user: JwtUser) {
     const db = this.db as any;
     const p = await this.row(code);
     const amount = r2(dto.amount != null ? n(dto.amount) : n(dto.qty) * n(dto.rate));
     if (amount <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Cost amount must be positive', messageTh: 'จำนวนต้นทุนต้องมากกว่าศูนย์' });
     const tenantId = p.tenantId ?? user.tenantId ?? null;
+    const billable = dto.billable !== false; // default true
 
     const [e] = await db.insert(projectEntries).values({
       projectId: Number(p.id), tenantId, entryType: dto.entry_type ?? 'time', description: dto.description ?? null,
-      qty: fx(dto.qty ?? 0, 2), rate: fx(dto.rate ?? 0, 2), amount: fx(amount, 2), billable: dto.billable ?? true,
+      qty: fx(dto.qty ?? 0, 2), rate: fx(dto.rate ?? 0, 2), amount: fx(amount, 2), billable,
       entryDate: dto.entry_date ?? ymd(), createdBy: user.username,
     }).returning({ id: projectEntries.id });
 
+    const conv = dto.entry_type === 'expense' ? 'Project expense' : 'Project labor';
     const je: any = await this.ledger.postEntry({
-      source: 'PRJ-COST', sourceRef: `${code}:${Number(e.id)}`, tenantId, memo: `Project cost ${code}`, createdBy: user.username,
-      lines: [
-        { account_code: '1260', debit: amount, memo: `WIP ${code}` },
-        { account_code: '2390', credit: amount, memo: dto.entry_type === 'expense' ? 'Project expense' : 'Project labor' },
-      ],
+      source: 'PRJ-COST', sourceRef: `${code}:${Number(e.id)}`, tenantId, memo: `Project cost ${code}${billable ? '' : ' (non-billable)'}`, createdBy: user.username,
+      lines: billable
+        ? [{ account_code: '1260', debit: amount, memo: `WIP ${code}` }, { account_code: '2390', credit: amount, memo: conv }]
+        : [{ account_code: '5800', debit: amount, memo: `Non-billable cost ${code}` }, { account_code: '2390', credit: amount, memo: conv }],
     });
     await db.update(projectEntries).set({ entryNo: je.entry_no }).where(eq(projectEntries.id, Number(e.id)));
-    const costToDate = r2(n(p.costToDate) + amount);
+    // Only billable costs accumulate in the recoverable WIP (cost_to_date); non-billable are already expensed.
+    const costToDate = billable ? r2(n(p.costToDate) + amount) : n(p.costToDate);
     await db.update(projects).set({ costToDate: fx(costToDate, 2), status: p.status === 'Open' ? 'Active' : p.status }).where(eq(projects.id, Number(p.id)));
-    return { project_code: code, entry_no: je.entry_no, amount, cost_to_date: costToDate };
+    return { project_code: code, entry_no: je.entry_no, amount, billable, cost_to_date: costToDate };
   }
 
   // Bill the customer → recognize revenue + relieve outstanding WIP to cost of services.
@@ -86,15 +91,20 @@ export class ProjectsService {
   async list(user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select().from(projects).orderBy(desc(projects.id)).limit(100);
-    return { projects: rows.map((r: any) => this.fmt(r)), count: rows.length };
+    // Aggregate the non-billable (already-expensed) cost per project so the register shows total cost + true margin.
+    const nb = await db.select({ pid: projectEntries.projectId, v: sql<string>`coalesce(sum(${projectEntries.amount}),0)` })
+      .from(projectEntries).where(eq(projectEntries.billable, false)).groupBy(projectEntries.projectId);
+    const nbBy = new Map<number, number>(nb.map((x: any) => [Number(x.pid), n(x.v)]));
+    return { projects: rows.map((r: any) => this.fmt(r, nbBy.get(Number(r.id)) ?? 0)), count: rows.length };
   }
 
   async get(code: string) {
     const db = this.db as any;
     const p = await this.row(code);
     const entries = await db.select().from(projectEntries).where(eq(projectEntries.projectId, Number(p.id))).orderBy(desc(projectEntries.id));
+    const nonBillable = r2(entries.filter((e: any) => e.billable === false).reduce((s: number, e: any) => s + n(e.amount), 0));
     return {
-      ...this.fmt(p),
+      ...this.fmt(p, nonBillable),
       entries: entries.map((e: any) => ({ entry_type: e.entryType, description: e.description, qty: n(e.qty), rate: n(e.rate), amount: n(e.amount), billable: e.billable !== false, entry_date: e.entryDate, entry_no: e.entryNo })),
     };
   }
@@ -105,14 +115,16 @@ export class ProjectsService {
     return p;
   }
 
-  private fmt(p: any) {
-    const cost = n(p.costToDate), recognized = n(p.recognizedCost), billed = n(p.billedToDate);
+  private fmt(p: any, nonBillable = 0) {
+    const cost = n(p.costToDate), recognized = n(p.recognizedCost), billed = n(p.billedToDate), nb = r2(nonBillable);
     return {
       project_code: p.projectCode, name: p.name, customer_name: p.customerName, billing_type: p.billingType, status: p.status,
       budget_amount: n(p.budgetAmount), contract_amount: n(p.contractAmount),
       cost_to_date: cost, recognized_cost: recognized, billed_to_date: billed,
-      wip: r2(cost - recognized),                 // unbilled cost sitting in 1260
-      margin: r2(billed - recognized),            // recognized revenue − recognized cost
+      non_billable_cost: nb,                       // expensed straight to 5800 (unrecoverable)
+      total_cost: r2(cost + nb),                   // all costs incurred (recoverable WIP + non-billable)
+      wip: r2(cost - recognized),                  // unbilled BILLABLE cost sitting in 1260
+      margin: r2(billed - recognized - nb),        // recognized revenue − recognized billable cost − absorbed non-billable
       start_date: p.startDate, end_date: p.endDate, created_at: p.createdAt,
     };
   }
