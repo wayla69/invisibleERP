@@ -67,6 +67,7 @@ import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { SavedViewsModule } from './modules/saved-views/saved-views.module';
 import { UserPrefsModule } from './modules/user-prefs/user-prefs.module';
+import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { AuditViewerModule } from './modules/audit-viewer/audit-viewer.module';
 import { PlanningModule } from './modules/planning/planning.module';
 import { ConsolidationModule } from './modules/consolidation/consolidation.module';
@@ -188,6 +189,7 @@ import { OpsModule } from './modules/ops/ops.module';
     AlertsModule,
     SavedViewsModule,
     UserPrefsModule,
+    FeatureFlagsModule,
     AuditViewerModule,
     PlanningModule,
     ConsolidationModule,
