@@ -315,7 +315,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-040 | Asset revaluation: preparer cannot self-approve (SoD) | FA-08, R07 | 09 §7 |
 | UAT-GL-041 | Asset revaluation: independent approver makes it effective | FA-08, GL-01 | 09 §7 |
 | UAT-GL-036 | Lease modification remeasures liability + ROU | LSE-01 | 04 §7 |
-| UAT-GL-037 | Disposal recycles revaluation surplus to RE | FA-07 | 09 §7 |
+| UAT-GL-037 | Disposal (approved) recycles revaluation surplus to RE | FA-07, FA-09 | 09 §7 |
+| UAT-GL-042 | Disposal request → Draft, pending (not yet disposed) | FA-09 | 09 §7 |
+| UAT-GL-043 | Disposal: requester cannot self-approve (SoD) | FA-09, R07 | 09 §7 |
+| UAT-GL-044 | Disposal: independent approver makes it effective | FA-09, GL-01 | 09 §7 |
 | UAT-GL-038 | Working-capital health score | Feature (financial-health score) | 07 §7.10 |
 | UAT-UI-LSE-01 | Lease screen reachable + create + run + modify (UI) | LSE-01 | 04 §7 |
 | UAT-UI-EAM-01 | EAM screen reachable + WO lifecycle / PM sweep / reliability (UI) | FA-06 | 09 §7 |

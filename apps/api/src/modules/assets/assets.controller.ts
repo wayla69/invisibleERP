@@ -35,7 +35,10 @@ export class AssetsController {
   @Post() acquire(@Body(new ZodValidationPipe(AcquireAssetBody)) b: AcquireAssetDto, @CurrentUser() u: JwtUser) { return this.svc.acquire(b, u); }
   @Get() register(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.assetRegister(u, status); }
   @Get(':assetNo/schedule') schedule(@Param('assetNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.depreciationSchedule(u, no); }
+  // Disposal (FA-03) + FA-09 maker-checker: a dispose request posts a Draft JE + flags disposal_pending; a DIFFERENT user must approve before it is effective.
   @Patch(':assetNo/dispose') dispose(@Param('assetNo') no: string, @Body(new ZodValidationPipe(DisposeAssetBody)) b: DisposeAssetDto, @CurrentUser() u: JwtUser) { return this.svc.dispose(no, b, u); }
+  @Post(':assetNo/dispose/approve') approveDispose(@Param('assetNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveDisposal(no, u); }
+  @Post(':assetNo/dispose/reject') rejectDispose(@Param('assetNo') no: string, @Body(new ZodValidationPipe(RevalRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectDisposal(no, u, b?.reason); }
 
   // Revaluation / impairment (FA-07 valuation): adjust carrying amount; upward → revaluation surplus, downward → impairment loss.
   // FA-08 maker-checker: a revalue request posts a Draft JE + 'PendingApproval'; a DIFFERENT user must approve before it is effective.

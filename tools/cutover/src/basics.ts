@@ -408,10 +408,15 @@ async function main() {
   ok('Asset revaluation: no-change rejected (NO_CHANGE)', noChange.status === 400 && noChange.json?.error?.code === 'NO_CHANGE', `st=${noChange.status} code=${noChange.json?.error?.code}`);
   const revList = (await inj('GET', '/api/assets/FA-EAM2/revaluations', admin)).json;
   ok('Asset revaluation: audit trail lists both events, both Posted', (revList.revaluations ?? []).length === 2 && (revList.revaluations ?? []).every((r: any) => r.status === 'Posted'), `n=${revList.revaluations?.length}`);
-  // Revaluation-reserve recycling on disposal: FA-EAM2 holds a 10000 surplus in 3200 → transfers to 3100.
+  // Disposal maker-checker (FA-09): request → Draft (not effective); a different user approves → disposed +
+  // revaluation surplus recycled to retained earnings (FA-EAM2 holds a 10000 surplus in 3200 → 3100).
   const surplus3200Before = await tbBalance('3200');
   const disp2 = await inj('PATCH', '/api/assets/FA-EAM2/dispose', admin, { proceeds: 50000 });
-  ok('Asset disposal recycles revaluation surplus to retained earnings (Dr 3200 / Cr 3100)', disp2.json?.revaluation_surplus_recycled === 10000 && near(await tbBalance('3200'), surplus3200Before + 10000), `recycled=${disp2.json?.revaluation_surplus_recycled} 3200bal=${await tbBalance('3200')}`);
+  ok('Asset disposal request: pending_disposal, Draft JE — not yet effective (FA-09)', disp2.json?.status === 'pending_disposal' && /^JE-/.test(disp2.json?.journal_no ?? '') && near(await tbBalance('3200'), surplus3200Before), `st=${disp2.json?.status} 3200=${await tbBalance('3200')}`);
+  const dispSelf = await inj('POST', '/api/assets/FA-EAM2/dispose/approve', admin);
+  ok('Asset disposal: requester self-approval blocked → 403 SOD_VIOLATION (FA-09)', dispSelf.status === 403 && dispSelf.json?.error?.code === 'SOD_VIOLATION', `${dispSelf.status} ${dispSelf.json?.error?.code}`);
+  const dispAppr = await inj('POST', '/api/assets/FA-EAM2/dispose/approve', mgr);
+  ok('Asset disposal approved by a different user → disposed + recycles surplus to RE (Dr 3200 / Cr 3100)', dispAppr.json?.status === 'disposed' && dispAppr.json?.revaluation_surplus_recycled === 10000 && near(await tbBalance('3200'), surplus3200Before + 10000), `recycled=${dispAppr.json?.revaluation_surplus_recycled} 3200bal=${await tbBalance('3200')}`);
 
   // ───────────────────── Perpetual inventory valuation sub-ledger (INV-01..04) ─────────────────────
   // Run in a dedicated tenant so the inventory control account (1200) is isolated from the cash-flow seed.

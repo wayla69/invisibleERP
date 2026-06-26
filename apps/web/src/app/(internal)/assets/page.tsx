@@ -108,7 +108,61 @@ function Register() {
 
       {selected && <ScheduleDrill assetNo={selected} onClose={() => setSelected(null)} />}
       {selected && <RevaluationPanel assetNo={selected} onChange={() => qc.invalidateQueries({ queryKey: ['assets'] })} />}
+      {selected && q.data && <DisposalPanel asset={(q.data.assets ?? []).find((a: any) => a.asset_no === selected)} onChange={() => qc.invalidateQueries({ queryKey: ['assets'] })} />}
     </div>
+  );
+}
+
+// Disposal with maker-checker (FA-09): a request posts a Draft JE + flags the asset disposal_pending; a
+// DIFFERENT user must approve before it is effective (status → disposed). Requester self-approval → SOD.
+function DisposalPanel({ asset, onChange }: { asset: any; onChange: () => void }) {
+  const [proceeds, setProceeds] = useState('');
+  const refresh = () => onChange();
+  if (!asset) return null;
+
+  const request = useMutation({
+    mutationFn: () => api<any>(`/api/assets/${asset.asset_no}/dispose`, { method: 'PATCH', body: JSON.stringify({ proceeds: Number(proceeds) || 0 }) }),
+    onSuccess: (r: any) => { notifySuccess(`ส่งคำขอจำหน่าย (${r.gain_loss >= 0 ? 'กำไร' : 'ขาดทุน'} ${baht(Math.abs(r.gain_loss))}) — รอผู้อื่นอนุมัติ`); setProceeds(''); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const approve = useMutation({
+    mutationFn: () => api<any>(`/api/assets/${asset.asset_no}/dispose/approve`, { method: 'POST' }),
+    onSuccess: () => { notifySuccess('อนุมัติการจำหน่าย — สินทรัพย์ถูกจำหน่ายและลงบัญชีแล้ว'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: () => api<any>(`/api/assets/${asset.asset_no}/dispose/reject`, { method: 'POST', body: JSON.stringify({ reason: window.prompt('เหตุผลที่ปฏิเสธ (ไม่บังคับ)') || undefined }) }),
+    onSuccess: () => { notifySuccess('ปฏิเสธการจำหน่าย — สินทรัพย์ยังใช้งานอยู่'); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const busy = approve.isPending || reject.isPending;
+
+  return (
+    <Card className="gap-4 p-5">
+      <h3 className="text-base font-semibold">จำหน่ายสินทรัพย์ · {asset.asset_no}</h3>
+      {asset.status === 'disposed' ? (
+        <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
+          <Badge variant="secondary">จำหน่ายแล้ว</Badge> รับเงิน {baht(asset.disposal_proceeds)} · {asset.disposal_gain_loss >= 0 ? 'กำไร' : 'ขาดทุน'} {baht(Math.abs(asset.disposal_gain_loss))}
+          {asset.disposal_approved_by && <span className="text-muted-foreground"> · อนุมัติโดย {asset.disposal_approved_by}</span>}
+        </div>
+      ) : asset.disposal_pending ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+          <Badge variant="warning">รออนุมัติจำหน่าย</Badge>
+          <span>รับเงิน {baht(asset.disposal_proceeds)} · {asset.disposal_gain_loss >= 0 ? 'กำไร' : 'ขาดทุน'} {baht(Math.abs(asset.disposal_gain_loss))} · ผู้ขอ {asset.disposal_requested_by}</span>
+          <div className="ml-auto flex gap-1.5">
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => approve.mutate()}>อนุมัติ</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate()}>ปฏิเสธ</Button>
+          </div>
+          <p className="w-full text-xs text-muted-foreground">ต้องเป็นคนละคนกับผู้ขอ (แบ่งแยกหน้าที่) — สินทรัพย์ถูกจำหน่ายและลงบัญชีเมื่ออนุมัติเท่านั้น</p>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5"><Label>เงินที่ได้รับ (Proceeds)</Label><Input type="number" min="0" value={proceeds} onChange={(e) => setProceeds(e.target.value)} className="w-44" /></div>
+          <span className="text-xs text-muted-foreground">NBV ปัจจุบัน {baht(asset.net_book_value)}</span>
+          <Button disabled={!proceeds || request.isPending} onClick={() => request.mutate()}>ส่งคำขอจำหน่าย</Button>
+        </div>
+      )}
+    </Card>
   );
 }
 
