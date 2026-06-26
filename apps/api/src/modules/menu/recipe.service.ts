@@ -7,6 +7,12 @@ import type { JwtUser } from '../../common/decorators';
 import type { UpsertRecipeDto } from './recipe.dto';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
+// Step 3 — effective yield divisor. gross_qty = qty_per / (yield_factor − waste_factor). E1 guard: a
+// non-positive (or missing) divisor falls back to 1.0 (treat as 100% yield) so we never divide by zero/NaN.
+const grossDiv = (yieldFactor: any, wasteFactor: any) => {
+  const ef = (Number(yieldFactor ?? 1) || 1) - (Number(wasteFactor ?? 0) || 0);
+  return ef > 0 ? ef : 1;
+};
 
 @Injectable()
 export class RecipeService {
@@ -44,7 +50,7 @@ export class RecipeService {
     }
     for (const l of dto.lines) {
       const uc = await this.unitCostFor(l.ingredient_item_id, l.unit_cost);
-      await db.insert(menuRecipeLines).values({ tenantId, recipeId, ingredientItemId: l.ingredient_item_id, ingredientDescription: l.ingredient_description ?? null, qtyPer: String(l.qty_per), uom: l.uom ?? null, unitCost: fx(uc, 4) });
+      await db.insert(menuRecipeLines).values({ tenantId, recipeId, ingredientItemId: l.ingredient_item_id, ingredientDescription: l.ingredient_description ?? null, qtyPer: String(l.qty_per), uom: l.uom ?? null, unitCost: fx(uc, 4), yieldFactor: fx(l.yield_factor ?? 1, 4), wasteFactor: fx(l.waste_factor ?? 0, 4) });
     }
     return this.getRecipe(sku, _user);
   }
@@ -56,8 +62,10 @@ export class RecipeService {
     if (!rec) throw new NotFoundException({ code: 'NO_RECIPE', message: 'No recipe for this item', messageTh: 'ยังไม่มีสูตรสำหรับเมนูนี้' });
     const lines = await db.select().from(menuRecipeLines).where(eq(menuRecipeLines.recipeId, Number(rec.id)));
     const yld = Math.max(n(rec.yieldQty), 1);
-    const recipeCost = round4(lines.reduce((a: number, l: any) => a + (n(l.qtyPer) / yld) * n(l.unitCost), 0));
-    return { sku, yield_qty: n(rec.yieldQty), post_cogs: rec.postCogs, recipe_cost: recipeCost, lines: lines.map((l: any) => ({ ingredient_item_id: l.ingredientItemId, description: l.ingredientDescription, qty_per: n(l.qtyPer), uom: l.uom, unit_cost: n(l.unitCost) })) };
+    // recipe cost is on the GROSS (raw) consumption — qty_per inflated for trim/cook loss — so the costed
+    // COGS matches what the kitchen actually issues from stock (Step 3).
+    const recipeCost = round4(lines.reduce((a: number, l: any) => a + (n(l.qtyPer) / grossDiv(l.yieldFactor, l.wasteFactor) / yld) * n(l.unitCost), 0));
+    return { sku, yield_qty: n(rec.yieldQty), post_cogs: rec.postCogs, recipe_cost: recipeCost, lines: lines.map((l: any) => ({ ingredient_item_id: l.ingredientItemId, description: l.ingredientDescription, qty_per: n(l.qtyPer), gross_qty: round4(n(l.qtyPer) / grossDiv(l.yieldFactor, l.wasteFactor)), yield_factor: n(l.yieldFactor), waste_factor: n(l.wasteFactor), uom: l.uom, unit_cost: n(l.unitCost) })) };
   }
 
   async deleteRecipe(sku: string, _user: JwtUser) {
@@ -104,7 +112,7 @@ export class RecipeService {
       let servingsLeft = Infinity;
       let limiting: any = null;
       for (const l of lines) {
-        const perServing = n(l.qtyPer) / yld;
+        const perServing = n(l.qtyPer) / grossDiv(l.yieldFactor, l.wasteFactor) / yld; // gross raw consumption (Step 3)
         if (perServing <= 0) continue;
         const stock = stockByItem.get(String(l.ingredientItemId))?.stock ?? 0;
         const canMake = Math.floor(stock / perServing);
@@ -144,7 +152,9 @@ export class RecipeService {
     if (!rec) return null;
     const lines = await db.select().from(menuRecipeLines).where(eq(menuRecipeLines.recipeId, Number(rec.id)));
     const yld = Math.max(n(rec.yieldQty), 1);
-    return { recipeId: Number(rec.id), postCogs: rec.postCogs, lines: lines.map((l: any) => ({ itemId: l.ingredientItemId, desc: l.ingredientDescription, qtyPerServing: n(l.qtyPer) / yld, uom: l.uom, unitCost: n(l.unitCost) })) };
+    // gross consumption per serving = (edible qty_per ÷ yield factor) ÷ batch yield (Step 3) — the kitchen
+    // issues raw stock inflated for trim/cook loss, so deduction + COGS reflect true consumption.
+    return { recipeId: Number(rec.id), postCogs: rec.postCogs, lines: lines.map((l: any) => ({ itemId: l.ingredientItemId, desc: l.ingredientDescription, qtyPerServing: n(l.qtyPer) / grossDiv(l.yieldFactor, l.wasteFactor) / yld, uom: l.uom, unitCost: n(l.unitCost) })) };
   }
 
   // deduct ingredients for one sold dish line. Allows negative stock (flags OVERSOLD). Returns COGS cost if post_cogs.

@@ -111,6 +111,17 @@ async function main() {
   await inj('POST', '/api/portal/pos/sales', cust1, { items: [{ item_id: 'KP01', qty: 1, unit_price: 60 }] });
   ok('Portal sale 1×KP01 → PORK drops by 0.15', near3(await stockOf('PORK'), porkBefore - 0.15), `before=${porkBefore} after=${await stockOf('PORK')}`);
 
+  // ── Step 3: BOM yield/waste factors — gross consumption inflates over the edible qty_per ──
+  // YP01 needs 0.10kg edible PORK at 50% yield (yield_factor 0.5) → gross 0.20kg raw per serving; unit_cost 50.
+  await inj('POST', '/api/menu/items', sales1, { sku: 'YP01', name: 'หมูยอ', price: 40, station_code: 'hot' });
+  const yrcp = await inj('POST', '/api/menu/items/YP01/recipe', sales1, { post_cogs: true, lines: [{ ingredient_item_id: 'PORK', qty_per: 0.10, unit_cost: 50, yield_factor: 0.5 }] });
+  ok('Yield: recipe cost on GROSS (0.10/0.5×50 = 10.00, not 5.00)', near(yrcp.json.recipe_cost, 10) && near(yrcp.json.lines?.[0]?.gross_qty, 0.20) && near(yrcp.json.lines?.[0]?.yield_factor, 0.5), JSON.stringify(yrcp.json.lines?.[0]));
+  const porkB4 = await stockOf('PORK');
+  const ysale = await inj('POST', '/api/portal/pos/sales', cust1, { items: [{ item_id: 'YP01', qty: 1, unit_price: 40 }] });
+  ok('Yield: sale of 1×YP01 deducts GROSS 0.20kg PORK (not 0.10)', near3(await stockOf('PORK'), porkB4 - 0.20), `before=${porkB4} after=${await stockOf('PORK')}`);
+  const ycogs = (await pg.query(`SELECT coalesce(sum(jl.debit),0) d FROM journal_lines jl JOIN journal_entries je ON je.id=jl.entry_id WHERE je.source='POS-COGS' AND je.source_ref='${ysale.json.sale_no}' AND jl.account_code='5300'`)).rows as any[];
+  ok('Yield: COGS booked on gross (Dr5300 = 10.00)', near(ycogs[0]?.d, 10), `d=${ycogs[0]?.d}`);
+
   // ── Step 1: modifier COGS delta — "extra pork" (+฿20 price, +฿12 COGS) folds into the sold line's COGS ──
   const grp = await inj('POST', '/api/menu/modifier-groups', sales1, { code: 'ADDS', name: 'เพิ่มเติม', min_select: 0, max_select: 2, options: [{ name: 'หมูเพิ่ม', price_delta: 20, cogs_delta: 12 }, { name: 'ไข่ดาว', price_delta: 10, cogs_delta: 4 }] });
   const extraPorkId = grp.json.options?.[0]?.option_id;

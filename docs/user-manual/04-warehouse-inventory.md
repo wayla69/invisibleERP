@@ -269,6 +269,14 @@ approvals — see below), **ชั้นต้นทุน (Layers)** (open FIFO
 > **Note:** This sub-ledger does **not** re-book COGS on the POS sale path — restaurant
 > sales already relieve recipe COGS — so consumption is never costed twice.
 
+> **Yield/waste factors on recipes.** A recipe (BoM) line records the **edible** quantity per
+> serving plus a **yield factor** (usable portion after trimming, e.g. 0.85 for onion) and an
+> optional **waste factor** (expected extra shrink). When a dish sells, the system issues the
+> **gross** raw quantity — `edible ÷ (yield − waste)` — from stock and costs the COGS on that
+> gross amount, so trim/cook loss is reflected in food cost instead of being silently absorbed.
+> Set these on the recipe (menu API); leaving them at the defaults (yield 1.0, waste 0.0) keeps a
+> recipe at the historic 100%-yield behaviour.
+
 **Bridge with everyday warehouse moves.** Once an item is **perpetual-tracked** (it has had a
 valued receipt), the ordinary operations above are automatically costed too: a **goods issue**
 (§6) relieves valued stock and books COGS, a **transfer** (§6) moves value between locations, and
