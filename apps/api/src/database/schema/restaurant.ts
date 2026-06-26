@@ -3,7 +3,8 @@
 // tenant_id so the 0002 RLS loop (re-run in 0006) scopes them automatically.
 import { pgTable, bigserial, bigint, text, numeric, integer, timestamp, boolean, jsonb } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
-import { dineInOrderStatusEnum, kdsItemStatusEnum, tableStatusEnum, tableSessionStatusEnum, orderChannelEnum, fulfillmentTypeEnum, fulfillmentStatusEnum, orderModeEnum } from './enums';
+import { dineInOrderStatusEnum, kdsItemStatusEnum, tableStatusEnum, tableSessionStatusEnum, orderChannelEnum, fulfillmentTypeEnum, fulfillmentStatusEnum, orderModeEnum, reservationStatusEnum } from './enums';
+import { posMembers } from './loyalty-members';
 import { buffetPackages } from './menu';
 
 // ── Kitchen stations (ครัวร้อน / ครัวเย็น / เครื่องดื่ม) ──
@@ -172,7 +173,32 @@ export const channelWebhookEvents = pgTable('channel_webhook_events', {
   receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow(),
 });
 
+// ── Reservations + walk-in waitlist (B1) ──
+// One table covers both: a future booking (kind='reservation', reserved_for set) and a walk-in queue
+// entry (kind='waitlist', reserved_for null). Both notify the guest (LINE/SMS) when ready and seat to a
+// table. tenant_id → the RLS loop scopes it.
+export const tableReservations = pgTable('table_reservations', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  kind: text('kind').notNull().default('reservation'),    // 'reservation' | 'waitlist'
+  tableId: bigint('table_id', { mode: 'number' }).references(() => diningTables.id), // optional assigned table
+  reservedFor: timestamp('reserved_for', { withTimezone: true }), // booking time (null for walk-in waitlist)
+  partySize: integer('party_size').notNull().default(2),
+  customerName: text('customer_name'),
+  customerPhone: text('customer_phone'),
+  memberId: bigint('member_id', { mode: 'number' }).references(() => posMembers.id), // optional loyalty link
+  status: reservationStatusEnum('status').notNull().default('booked'),
+  quotedWaitMin: integer('quoted_wait_min'),              // waitlist: estimated wait at quote time
+  notes: text('notes'),
+  notifiedAt: timestamp('notified_at', { withTimezone: true }), // when the "table ready" message was sent
+  seatedAt: timestamp('seated_at', { withTimezone: true }),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
 export type DiningTable = typeof diningTables.$inferSelect;
+export type TableReservation = typeof tableReservations.$inferSelect;
 export type TableSession = typeof tableSessions.$inferSelect;
 export type DineInOrder = typeof dineInOrders.$inferSelect;
 export type DineInOrderItem = typeof dineInOrderItems.$inferSelect;

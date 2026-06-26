@@ -1,12 +1,16 @@
 import { Inject, Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, sql, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { budgets, journalLines, journalEntries, accounts } from '../../database/schema';
+import { budgets, budgetReviews, journalLines, journalEntries, accounts } from '../../database/schema';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+// ELC-06 materiality: a variance is material if it is ≥ MATERIAL_PCT of budget AND at least MATERIAL_ABS in
+// absolute THB (so a large % on a tiny account isn't noise); unbudgeted actual spend ≥ MATERIAL_ABS is material.
+const MATERIAL_PCT = 10;
+const MATERIAL_ABS = 1000;
 // split an annual amount into 12 monthly amounts; December absorbs the remainder so the 12 sum back exactly.
 function splitAnnual(annual: number): number[] {
   const per = Math.floor((annual / 12) * 10000) / 10000;
@@ -114,19 +118,62 @@ export class BudgetService {
       const variancePct = budget !== 0 ? round2((variance / Math.abs(budget)) * 100) : null;
       const isRevenueLike = type === 'Revenue' || type === 'Equity' || type === 'Liability';
       const favorable = isRevenueLike ? actual >= budget : actual <= budget;
-      rows.push({ account_code: code, account_name: a?.account_name ?? null, account_type: type, budget, actual, variance, variance_pct: variancePct, favorable, status: variance === 0 ? 'On Budget' : favorable ? 'Favorable' : 'Unfavorable' });
+      // ELC-06: flag material variances that management must review/follow up.
+      const material = Math.abs(variance) >= MATERIAL_ABS && (variancePct == null ? Math.abs(actual) > 0 : Math.abs(variancePct) >= MATERIAL_PCT);
+      rows.push({ account_code: code, account_name: a?.account_name ?? null, account_type: type, budget, actual, variance, variance_pct: variancePct, favorable, material, requires_review: material && !favorable, status: variance === 0 ? 'On Budget' : favorable ? 'Favorable' : 'Unfavorable' });
     }
     const sumBy = (pred: (r: any) => boolean, k: string) => round4(rows.filter(pred).reduce((s, r) => s + r[k], 0));
     const rev = { budget: sumBy((r) => r.account_type === 'Revenue', 'budget'), actual: sumBy((r) => r.account_type === 'Revenue', 'actual') };
     const exp = { budget: sumBy((r) => r.account_type === 'Expense', 'budget'), actual: sumBy((r) => r.account_type === 'Expense', 'actual') };
     const net = { budget: round4(rev.budget - exp.budget), actual: round4(rev.actual - exp.actual) };
+    // ELC-06 review summary: material variance count + unfavourable total, and the latest management sign-off
+    // for this (year, period, cost-centre) so the report shows whether the review has been done.
+    const materialRows = rows.filter((r) => r.material);
+    const review = {
+      material_count: materialRows.length,
+      requires_review_count: rows.filter((r) => r.requires_review).length,
+      unfavorable_total: round4(rows.filter((r) => !r.favorable).reduce((s, r) => s + Math.abs(r.variance), 0)),
+      material_threshold_pct: MATERIAL_PCT, material_threshold_abs: MATERIAL_ABS,
+      last_signoff: await this.lastReview(q.fiscal_year, q.period ?? null, q.cost_center ?? null),
+    };
     return {
-      fiscal_year: q.fiscal_year, period: q.period ?? null, cost_center: q.cost_center ?? null, rows,
+      fiscal_year: q.fiscal_year, period: q.period ?? null, cost_center: q.cost_center ?? null, rows, review,
       rollup: {
         revenue: { ...rev, variance: round4(rev.actual - rev.budget), favorable: rev.actual >= rev.budget },
         expense: { ...exp, variance: round4(exp.actual - exp.budget), favorable: exp.actual <= exp.budget },
         net: { ...net, variance: round4(net.actual - net.budget), favorable: net.actual >= net.budget },
       },
     };
+  }
+
+  // ── ELC-06 management budget-variance review sign-off ──
+  private fmtReview(r: any) {
+    return { id: Number(r.id), fiscal_year: Number(r.fiscalYear), period: r.period, cost_center: r.costCenterCode, material_count: Number(r.materialCount), unfavorable_total: n(r.unfavorableTotal), notes: r.notes, reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt };
+  }
+
+  private async lastReview(fiscalYear: number, period: string | null, costCenter: string | null) {
+    const db = this.db as any;
+    const conds = [eq(budgetReviews.fiscalYear, fiscalYear), period ? eq(budgetReviews.period, period) : isNull(budgetReviews.period), costCenter ? eq(budgetReviews.costCenterCode, costCenter) : isNull(budgetReviews.costCenterCode)];
+    const [r] = await db.select().from(budgetReviews).where(and(...conds)).orderBy(desc(budgetReviews.id)).limit(1);
+    return r ? this.fmtReview(r) : null;
+  }
+
+  // Record a management review sign-off — captures the material-variance count + unfavourable total AT review
+  // time (computed from the live variance report) so the evidence is self-contained.
+  async signOffReview(dto: { fiscal_year: number; period?: string | null; cost_center?: string | null; notes?: string }, user: JwtUser) {
+    if (!dto.notes || !dto.notes.trim()) throw new BadRequestException({ code: 'NOTES_REQUIRED', message: 'A review note is required', messageTh: 'ต้องระบุบันทึกการสอบทาน' });
+    const va = await this.budgetVsActual({ fiscal_year: dto.fiscal_year, period: dto.period ?? undefined, cost_center: dto.cost_center ?? undefined });
+    const db = this.db as any;
+    const [row] = await db.insert(budgetReviews).values({
+      tenantId: user.tenantId ?? null, fiscalYear: dto.fiscal_year, period: dto.period ?? null, costCenterCode: dto.cost_center ?? null,
+      materialCount: va.review.material_count, unfavorableTotal: fx(va.review.unfavorable_total, 4), notes: dto.notes.trim(), reviewedBy: user.username, reviewedAt: new Date(),
+    }).returning();
+    return this.fmtReview(row);
+  }
+
+  async listReviews(fiscalYear?: number) {
+    const db = this.db as any;
+    const rows = await db.select().from(budgetReviews).where(fiscalYear != null ? eq(budgetReviews.fiscalYear, fiscalYear) : undefined).orderBy(desc(budgetReviews.id)).limit(100);
+    return { reviews: rows.map((r: any) => this.fmtReview(r)), count: rows.length };
   }
 }

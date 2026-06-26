@@ -44,6 +44,7 @@
     "taxdocs": "tsx src/taxdocs.ts",
     "restaurant": "tsx src/restaurant.ts",
     "restaurant-offline": "tsx src/restaurant-offline.ts",
+    "reservations": "tsx src/reservations.ts",
     "menu": "tsx src/menu.ts",
     "splitbill": "tsx src/splitbill.ts",
     "cashreport": "tsx src/cashreport.ts",

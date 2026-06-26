@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Goal, Scale, TrendingUp, Search } from 'lucide-react';
+import { Plus, Goal, Scale, TrendingUp, Search, ClipboardCheck } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -19,9 +19,11 @@ import { Label } from '@/components/ui/label';
 
 // ── API contract (apps/api/src/modules/budget — mounted at /api/ledger) ────────
 interface BudgetRow { fiscal_year: number; account_code: string; cost_center_code: string | null; period: string; amount: number; status?: string; requested_by?: string | null }
-interface BvaRow { account_code: string; account_name: string | null; account_type: string | null; budget: number; actual: number; variance: number; variance_pct: number | null; favorable: boolean; status: string }
+interface BvaRow { account_code: string; account_name: string | null; account_type: string | null; budget: number; actual: number; variance: number; variance_pct: number | null; favorable: boolean; material: boolean; requires_review: boolean; status: string }
+interface Signoff { id: number; fiscal_year: number; period: string | null; material_count: number; unfavorable_total: number; notes: string; reviewed_by: string; reviewed_at: string }
 interface BvaResp {
   fiscal_year: number; period: string | null; cost_center: string | null; rows: BvaRow[];
+  review: { material_count: number; requires_review_count: number; unfavorable_total: number; material_threshold_pct: number; material_threshold_abs: number; last_signoff: Signoff | null };
   rollup: { revenue: Roll; expense: Roll; net: Roll };
 }
 interface Roll { budget: number; actual: number; variance: number; favorable: boolean }
@@ -52,10 +54,18 @@ function BvaTab() {
   const [period, setPeriod] = useState('');
   const [query, setQuery] = useState<{ fy: string; period: string } | null>({ fy: String(thisYear), period: '' });
 
+  const qc = useQueryClient();
   const q = useQuery<BvaResp>({
     queryKey: ['bva', query?.fy, query?.period],
     queryFn: () => api(`/api/ledger/budget-vs-actual?fiscal_year=${query!.fy}${query!.period ? `&period=${query!.period}` : ''}`),
     enabled: !!query,
+  });
+
+  // ELC-06 management review sign-off (records evidence + follow-up note for the selected period).
+  const signOff = useMutation({
+    mutationFn: (notes: string) => api('/api/ledger/budget-review/sign-off', { method: 'POST', body: JSON.stringify({ fiscal_year: Number(query!.fy), period: query!.period || undefined, notes }) }),
+    onSuccess: (r: any) => { notifySuccess(`บันทึกการสอบทานงบประมาณแล้ว (${r.material_count} รายการมีสาระสำคัญ)`); qc.invalidateQueries({ queryKey: ['bva'] }); },
+    onError: (e: any) => notifyError(e.message),
   });
 
   const tone = (favorable: boolean, variance: number) => (variance === 0 ? 'secondary' : favorable ? 'success' : 'destructive');
@@ -107,17 +117,36 @@ function BvaTab() {
               />
             </div>
 
+            {/* ELC-06 management variance-review banner: material-variance flag + sign-off evidence */}
+            <Card className={`flex flex-col gap-2 px-5 py-3 ${q.data.review.material_count > 0 ? (q.data.review.last_signoff ? 'border-success/40 bg-success/5' : 'border-warning/40 bg-warning/5') : ''}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant={q.data.review.material_count === 0 ? 'secondary' : q.data.review.last_signoff ? 'success' : 'warning'}>
+                    {q.data.review.material_count === 0 ? 'ไม่มีผลต่างที่มีสาระสำคัญ' : `${q.data.review.material_count} รายการมีสาระสำคัญ`}
+                  </Badge>
+                  {q.data.review.requires_review_count > 0 && <span className="text-muted-foreground">ต้องสอบทาน/ติดตาม <span className="font-medium text-foreground">{q.data.review.requires_review_count}</span> รายการ · ผลต่างไม่พึงประสงค์รวม <span className="tabular font-medium text-foreground">{baht(q.data.review.unfavorable_total)}</span></span>}
+                  <span className="text-xs text-muted-foreground">(เกณฑ์สาระสำคัญ ≥ {q.data.review.material_threshold_pct}% และ ≥ {baht(q.data.review.material_threshold_abs)})</span>
+                </div>
+                <Button variant="outline" size="sm" disabled={signOff.isPending} onClick={() => { const note = window.prompt('บันทึกการสอบทาน + การติดตามผลต่าง (เป็นหลักฐานการสอบทานของผู้บริหาร)'); if (note && note.trim()) signOff.mutate(note.trim()); }}>
+                  <ClipboardCheck className="size-4" /> บันทึกการสอบทาน
+                </Button>
+              </div>
+              {q.data.review.last_signoff
+                ? <p className="text-xs text-muted-foreground">สอบทานล่าสุดโดย <span className="font-medium text-foreground">{q.data.review.last_signoff.reviewed_by}</span> — {q.data.review.last_signoff.notes}</p>
+                : q.data.review.material_count > 0 && <p className="text-xs text-warning-foreground dark:text-warning">ยังไม่มีการสอบทาน — ผู้บริหารควรสอบทานผลต่างที่มีสาระสำคัญและบันทึกการติดตาม</p>}
+            </Card>
+
             <DataTable
               rows={q.data.rows}
               rowKey={(r) => r.account_code}
               emptyState={{ icon: Goal, title: 'ไม่มีข้อมูลงบ/ยอดจริงในงวดนี้', description: 'ตั้งงบประมาณในแท็บ "ตั้งงบประมาณ" หรือเลือกงวดที่มีการลงบัญชีแล้ว' }}
               columns={[
-                { key: 'account_code', label: 'รหัสบัญชี', render: (r) => <span className="font-medium">{r.account_code}</span> },
+                { key: 'account_code', label: 'รหัสบัญชี', render: (r) => <span className="font-medium">{r.account_code}{r.material ? <span title="ผลต่างมีสาระสำคัญ — ต้องสอบทาน" className="ml-1 text-warning-foreground dark:text-warning">⚠</span> : null}</span> },
                 { key: 'account_name', label: 'ชื่อบัญชี', render: (r) => r.account_name ?? '—' },
                 { key: 'account_type', label: 'ประเภท', render: (r) => (r.account_type ? <Badge variant="info">{r.account_type}</Badge> : '—') },
                 { key: 'budget', label: 'งบประมาณ', align: 'right', render: (r) => <span className="tabular">{baht(r.budget)}</span> },
                 { key: 'actual', label: 'จริง', align: 'right', render: (r) => <span className="tabular">{baht(r.actual)}</span> },
-                { key: 'variance', label: 'ผลต่าง', align: 'right', render: (r) => <span className="tabular">{baht(r.variance)}</span> },
+                { key: 'variance', label: 'ผลต่าง', align: 'right', render: (r) => <span className={`tabular ${r.material && !r.favorable ? 'font-medium text-destructive' : ''}`}>{baht(r.variance)}</span> },
                 { key: 'variance_pct', label: '%', align: 'right', render: (r) => <span className="tabular">{r.variance_pct == null ? '—' : `${r.variance_pct}%`}</span> },
                 { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={tone(r.favorable, r.variance)}>{r.status}</Badge> },
               ]}

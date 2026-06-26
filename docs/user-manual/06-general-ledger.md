@@ -33,6 +33,24 @@ The chart of accounts (COA) is the list of all ledger accounts, for example:
 
 View the full list on the **Trial Balance** / accounts view.
 
+### Your industry chart
+
+When your company was created you picked a **business type** (restaurant, retail,
+distribution, services, or general — see *Getting started*). Your chart is tailored to
+that industry: the relevant accounts are switched on and given industry-friendly names —
+for a restaurant, **4000** reads *Food & Beverage Sales*, **1200** *Food & Beverage
+Inventory*, and you also get *Tips Payable*, *Service Charge Income* and *Recipe
+Ingredient COGS*; a retailer instead sees *Merchandise Inventory* and *Loyalty Points*
+accounts. Accounts that don't apply to your industry are hidden from the picker to keep
+data entry clean.
+
+> **Nothing is ever removed.** The accounting engine always has the full set of accounts
+> available, so a posting is never blocked. To see **every** account (for an unusual
+> entry), open the accounts list with **Show all accounts** (the `?all=true` view) — and
+> any account that has activity always appears on your reports even if it's hidden from
+> the picker. You can switch or extend your industry chart later from
+> **Onboarding → Industry packs**.
+
 ---
 
 ## 2. Manual journal entries with maker-checker approval

@@ -23,3 +23,20 @@ export const budgets = pgTable('budgets', {
 }, (t) => ({ byAccount: index('idx_budget_account').on(t.accountCode, t.period), byStatus: index('idx_budget_status').on(t.tenantId, t.status) }));
 
 export type Budget = typeof budgets.$inferSelect;
+
+// ELC-06 — management budget-variance review sign-off. Recorded evidence that material budget-vs-actual
+// variances were reviewed by management with a follow-up note. One row per recorded review (append-only).
+export const budgetReviews = pgTable('budget_reviews', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  fiscalYear: integer('fiscal_year').notNull(),
+  period: text('period'),                      // 'YYYY-MM' or null = full year
+  costCenterCode: text('cost_center_code'),
+  materialCount: integer('material_count').notNull().default(0),       // # material variance lines at review time
+  unfavorableTotal: numeric('unfavorable_total', { precision: 18, scale: 4 }).notNull().default('0'),
+  notes: text('notes'),                        // management's review conclusion + variance follow-up
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byPeriod: index('idx_budget_review_period').on(t.tenantId, t.fiscalYear, t.period) }));
+
+export type BudgetReview = typeof budgetReviews.$inferSelect;

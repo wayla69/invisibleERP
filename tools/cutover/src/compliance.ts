@@ -29,6 +29,7 @@ import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/datab
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
+import { BillingService } from '../../../apps/api/dist/modules/billing/billing.service';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 import { authenticator } from 'otplib';
 
@@ -68,6 +69,7 @@ async function main() {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
   await app.get(LedgerService).seedChartOfAccounts();
+  await app.get(BillingService).seedPlans();
 
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
@@ -759,7 +761,25 @@ async function main() {
     govItem?.type === 'journal' && govItem?.control === 'GL-05' && invNear(govItem?.amount, 321) && typeof govItem?.age_days === 'number' && govPend.json.count >= 1 && typeof govPend.json.overdue === 'number',
     JSON.stringify({ n: govPend.json.count, oldest: govPend.json.oldest_age_days, ctrl: govItem?.control, amt: govItem?.amount }));
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
+  // ════════════════════════ GL-10 — Industry Chart-of-Accounts templates ════════════════════════
+  // A new company picks its industry at signup → a curated, industry-named chart over the canonical codes.
+  // The boot subset-assertion (this app started ⇒ it passed) keeps templates from drifting from the engine's
+  // fixed posting codes; the overlay scopes presentation only (?all=true still exposes the full universe).
+  const sgC = await inj('POST', '/api/auth/signup', undefined, {
+    company_name: 'Resto ICFR', tenant_code: 'RESTC', admin_username: 'restc_admin', admin_password: 'restc12345', email: 'a@restc.example', industry: 'restaurant',
+  });
+  ok('GL-10: signup provisions the chosen industry CoA template (industry echoed)', (sgC.status === 200 || sgC.status === 201) && sgC.json?.industry === 'restaurant', `st=${sgC.status} ind=${sgC.json?.industry}`);
+  const restcTok = await login('restc_admin', 'restc12345');
+  const restcAcc = (await inj('GET', '/api/ledger/accounts', restcTok)).json;
+  const restcAll = (await inj('GET', '/api/ledger/accounts?all=true', restcTok)).json;
+  ok('GL-10: chart is overlay-scoped + industry-named, curating out non-industry accounts (no 4300 Service)',
+    restcAcc.source === 'overlay' && restcAcc.accounts?.find((a: any) => a.code === '4000')?.name === 'Food & Beverage Sales' && !restcAcc.accounts?.some((a: any) => a.code === '4300'),
+    `src=${restcAcc.source} n=${restcAcc.count}`);
+  ok('GL-10: overlay never gates posting — ?all=true still exposes the full canonical universe (4300 present)',
+    restcAll.source === 'canonical' && restcAll.accounts?.some((a: any) => a.code === '4300') && restcAll.count > restcAcc.count,
+    `all=${restcAll.count} overlay=${restcAcc.count}`);
+
+  console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} compliance checks failed` : `\n✅ All ${checks.length} compliance control checks passed`);
