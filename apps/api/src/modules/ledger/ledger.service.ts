@@ -136,7 +136,7 @@ const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = {
   '3200': { bucket: 'financing', label: 'ส่วนเกินทุนจากการตีราคา (Revaluation surplus)' },
 };
 
-export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null }
+export interface JournalLineDto { account_code: string; debit?: number; credit?: number; memo?: string; cost_center?: string | null; branch_id?: number | null; project_id?: number | null; dept_id?: number | null }
 export interface PostEntryDto {
   date?: string;
   source: string;
@@ -367,6 +367,7 @@ export class LedgerService {
         entryId: Number(h.id), accountCode: l.account_code,
         debit: fx(l.debit, 4), credit: fx(l.credit, 4),
         currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: entryTenantId,
+        branchId: l.branch_id ?? null, projectId: l.project_id ?? null, departmentId: l.dept_id ?? null,
       })));
       return nzLines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
     };
@@ -605,6 +606,51 @@ export class LedgerService {
       revenue, expense, net_income: netIncome,
       lines: rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense'),
     };
+  }
+
+  async incomeStatementByBranch(opts: { from: string; to: string }) {
+    const db = this.db as any;
+    const { from, to } = opts;
+    const tenantId = currentTenantStore()?.tenantId ?? null;
+
+    const conds: any[] = [
+      eq(journalEntries.status, 'Posted'),
+      sql`${journalEntries.entryDate} >= ${from}`,
+      sql`${journalEntries.entryDate} <= ${to}`,
+      inArray(accounts.type, ['Revenue', 'Expense']),
+    ];
+    if (tenantId !== null) conds.push(eq(journalEntries.tenantId, tenantId));
+
+    const rows = await db
+      .select({
+        branch_id: journalLines.branchId,
+        account_code: journalLines.accountCode,
+        type: accounts.type,
+        name: accounts.name,
+        net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}), 0)`,
+      })
+      .from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
+      .where(and(...conds))
+      .groupBy(journalLines.branchId, journalLines.accountCode, accounts.type, accounts.name)
+      .orderBy(journalLines.accountCode);
+
+    const byBranch: Record<string, { revenue: number; expense: number; net: number; lines: any[] }> = {};
+    for (const r of rows as any[]) {
+      const key = r.branch_id?.toString() ?? 'unassigned';
+      if (!byBranch[key]) byBranch[key] = { revenue: 0, expense: 0, net: 0, lines: [] };
+      const net = Number(r.net ?? 0);
+      if (r.type === 'Revenue') byBranch[key].revenue += -net;
+      else byBranch[key].expense += net;
+      byBranch[key].lines.push({ account: r.account_code, name: r.name, type: r.type, net });
+    }
+
+    for (const b of Object.values(byBranch)) {
+      b.net = b.revenue - b.expense;
+    }
+
+    return { period: { from, to }, branches: byBranch };
   }
 
   // ───────────────────── Balance Sheet ─────────────────────

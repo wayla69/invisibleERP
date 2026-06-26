@@ -95,6 +95,9 @@ export class PostingService {
         credit: r.side === 'CR' ? amount : 0,
         memo: r.role,
         cost_center: undefined as string | undefined,
+        branch_id: ctx.branchId ?? null,
+        project_id: ctx.projectId ?? null,
+        dept_id: ctx.departmentId ?? null,
       };
     }).filter(l => l.debit > 0 || l.credit > 0);
 
