@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, tillSessions } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, payruns, assetRevaluations, fixedAssets, invWriteoffRequests, tillSessions, fxRates, budgets } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -479,9 +479,10 @@ export class FinanceService {
 
   // GOV-01 — pending-approvals monitor. One worklist of EVERY item awaiting independent (maker-checker)
   // approval across the system, with its age — so the controller can see what is stuck and catch a stale
-  // approval (a control breakdown / bottleneck) before close. Spans the manual-JE (GL-05), AP-disbursement
-  // (EXP-06), payroll (PAY-03), asset-revaluation (FA-08), asset-disposal (FA-09) and inventory-write-off
-  // (INV-07) maker-checkers. Read-only; tenant-scoped via the caller's RLS (HQ/Admin sees every tenant).
+  // approval (a control breakdown / bottleneck) before close. Spans the manual-JE (GL-05), bank-adjustment
+  // (BANK-02), AP-disbursement (EXP-06), payroll (PAY-03), asset-revaluation (FA-08), asset-disposal (FA-09),
+  // inventory-write-off (INV-07), FX-rate (FX-04) and budget (BUD-01) maker-checkers. Read-only; tenant-scoped
+  // via the caller's RLS (HQ/Admin sees every tenant).
   async pendingApprovals(opts?: { overdue_days?: number }) {
     const db = this.db as any;
     const overdueDays = opts?.overdue_days ?? 3;
@@ -489,12 +490,18 @@ export class FinanceService {
     const items: any[] = [];
 
     // 1. GL-05 — manual journals posted as Draft, awaiting approval. Amount = Σ debit of the entry's lines.
+    // A Draft JE from another maker-checker that posts via ledger.postEntry (e.g. a bank fee/interest
+    // adjustment, source BANKADJ → BANK-02) is tagged to its own control here.
+    const JE_CONTROL: Record<string, { control: string; type: string }> = { BANKADJ: { control: 'BANK-02', type: 'bank_adjustment' } };
     const drafts = await db.select().from(journalEntries).where(eq(journalEntries.status, 'Draft'));
     if (drafts.length) {
       const ids = drafts.map((e: any) => Number(e.id));
       const sums = await db.select({ entryId: journalLines.entryId, dr: sql<string>`coalesce(sum(${journalLines.debit}),0)` }).from(journalLines).where(inArray(journalLines.entryId, ids)).groupBy(journalLines.entryId);
       const byId = new Map<number, number>(sums.map((s: any) => [Number(s.entryId), n(s.dr)]));
-      for (const e of drafts) items.push({ type: 'journal', control: 'GL-05', ref: e.entryNo, label: e.memo ?? 'Manual journal', amount: byId.get(Number(e.id)) ?? 0, requested_by: e.createdBy ?? null, requested_at: e.createdAt ?? null, age_days: ageDays(e.createdAt) });
+      for (const e of drafts) {
+        const meta = JE_CONTROL[String(e.source ?? '')] ?? { control: 'GL-05', type: 'journal' };
+        items.push({ type: meta.type, control: meta.control, ref: e.entryNo, label: e.memo ?? 'Manual journal', amount: byId.get(Number(e.id)) ?? 0, requested_by: e.createdBy ?? null, requested_at: e.createdAt ?? null, age_days: ageDays(e.createdAt) });
+      }
     }
     // 2. EXP-06 — AP disbursements awaiting approval.
     for (const p of await db.select().from(apPayments).where(eq(apPayments.status, 'PendingApproval')))
@@ -514,6 +521,12 @@ export class FinanceService {
     // 7. REV-13 — material till-close cash over/short awaiting a manager's approval.
     for (const t of await db.select().from(tillSessions).where(eq(tillSessions.varianceStatus, 'PendingApproval')))
       items.push({ type: 'till_variance', control: 'REV-13', ref: t.sessionNo, label: `เงินสด${n(t.variance) < 0 ? 'ขาด' : 'เกิน'} ${t.sessionNo}`, amount: Math.abs(n(t.variance)), requested_by: t.closedBy ?? null, requested_at: t.closedAt ?? null, age_days: ageDays(t.closedAt) });
+    // 8. FX-04 — manual FX rates awaiting approval (PendingApproval, unusable until approved; not a JE).
+    for (const r of await db.select().from(fxRates).where(eq(fxRates.status, 'PendingApproval')))
+      items.push({ type: 'fx_rate', control: 'FX-04', ref: `${r.currency}@${r.rateDate}`, label: `อัตรา ${r.currency} = ${n(r.rate)} (${r.rateDate})`, amount: 0, requested_by: r.requestedBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
+    // 9. BUD-01 — budgets awaiting approval (excluded from budget-vs-actual); grouped per fiscal-year/account/cost-centre.
+    for (const b of await db.select({ fiscalYear: budgets.fiscalYear, accountCode: budgets.accountCode, costCenterCode: budgets.costCenterCode, requestedBy: sql<string>`max(${budgets.requestedBy})`, total: sql<string>`coalesce(sum(${budgets.amount}),0)`, oldest: sql<string>`min(${budgets.updatedAt})` }).from(budgets).where(eq(budgets.status, 'PendingApproval')).groupBy(budgets.fiscalYear, budgets.accountCode, budgets.costCenterCode))
+      items.push({ type: 'budget', control: 'BUD-01', ref: `FY${b.fiscalYear}/${b.accountCode}${b.costCenterCode ? '/' + b.costCenterCode : ''}`, label: `งบประมาณ FY${b.fiscalYear} ${b.accountCode}${b.costCenterCode ? ' @ ' + b.costCenterCode : ''}`, amount: round2(n(b.total)), requested_by: b.requestedBy ?? null, requested_at: b.oldest ?? null, age_days: ageDays(b.oldest) });
 
     items.sort((a, b) => (b.age_days ?? -1) - (a.age_days ?? -1));
     const byType: Record<string, number> = {};
