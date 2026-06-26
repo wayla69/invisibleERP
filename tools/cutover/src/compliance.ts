@@ -682,6 +682,21 @@ async function main() {
     (recPack.json.lines ?? []).length === 5 && ['1100', '2000', '1200', '2200', '2400'].every((a) => (recPack.json.lines ?? []).some((l: any) => l.account === a)) && inv1200?.reconciled === true && invNear(inv1200.sub_ledger, 1540) && typeof recPack.json.exceptions === 'number',
     JSON.stringify({ n: recPack.json.lines?.length, inv: inv1200?.sub_ledger, rec: inv1200?.reconciled, exc: recPack.json.exceptions }));
 
+  // MON-01 — pending-approvals aging monitor: a Draft maker-checker item surfaces in the queue, aged, and is
+  // flagged an exception once it breaches the SLA. Post a fresh Draft manual JE (GL-05), then read the monitor.
+  const monJe = await inj('POST', '/api/ledger/journal', glacct, { date: today, memo: 'MON-01 aging probe', source: 'Manual', lines: [{ account_code: '1000', debit: 777 }, { account_code: '4000', credit: 777 }] });
+  const monRef = monJe.json.entry_no as string;
+  const aging = await inj('GET', '/api/finance/approvals/aging', admin);
+  const monItem = (aging.json.items ?? []).find((i: any) => i.ref === monRef);
+  ok('MON-01: a Draft maker-checker item appears in the pending-approvals monitor (aged, control-tagged GL-05, fresh = not stale)',
+    aging.status === 200 && !!monItem && monItem.control === 'GL-05' && monItem.requested_by === 'glacct' && monItem.amount === 777 && monItem.age_days === 0 && monItem.stale === false && aging.json.total_pending >= 1,
+    JSON.stringify({ found: !!monItem, ctl: monItem?.control, by: monItem?.requested_by, amt: monItem?.amount, age: monItem?.age_days, stale: monItem?.stale, total: aging.json.total_pending }));
+  const agingStale = await inj('GET', '/api/finance/approvals/aging?stale_days=-1', admin);
+  const monStale = (agingStale.json.exceptions ?? []).find((i: any) => i.ref === monRef);
+  ok('MON-01: tightening the SLA flags the pending item as a control exception (all_clear=false, surfaced in exceptions)',
+    agingStale.status === 200 && !!monStale && monStale.stale === true && agingStale.json.all_clear === false && agingStale.json.stale_count >= 1,
+    JSON.stringify({ flagged: !!monStale, clear: agingStale.json.all_clear, stale: agingStale.json.stale_count }));
+
   console.log('\n── COSO / ICFR control tests (GL-05 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

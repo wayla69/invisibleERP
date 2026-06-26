@@ -286,6 +286,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-015 | Year-end close idempotency | GL-06 | 04 §9 |
 | UAT-GL-016 | Sub-ledger reconciliation | REC-01 | 04 §9 |
 | UAT-GL-045 | Control-account reconciliation pack (period-end) | REC-04 | 04 §7 |
+| UAT-GL-046 | Pending-approvals aging monitor (fresh) | MON-01 | 04 §7 |
+| UAT-GL-047 | Pending-approvals aging — SLA breach exception | MON-01 | 04 §7 |
 | UAT-GL-017 | Reconciliation prepare→certify | REC-02/03 | 04 §9 |
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |

@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, lte, asc, desc, inArray, notInArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, orders, orderLines, tenants, employeeAdvances, invBalances, giftCards, revRecLines, journalEntries, journalLines, invWriteoffRequests } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -475,6 +475,81 @@ export class FinanceService {
       mk('2400', 'รายได้รอตัดบัญชี (Deferred revenue)', n(drSub?.v), -glBal('2400')),
     ];
     return { as_of: ymd(), lines, all_reconciled: lines.every((l) => l.reconciled), exceptions: lines.filter((l) => !l.reconciled).length };
+  }
+
+  // MON-01 — pending-approvals aging monitor (DETECTIVE). One read across every maker-checker queue, aged by
+  // how long each item has waited for its second signature. A stale pending item is itself a control finding:
+  // a maker-checker only works if the checker actually acts — an item sitting in the queue for weeks means the
+  // segregation is operating slowly or not at all (and ties up cash / mis-states the books until cleared).
+  // Scans EVERY Draft journal entry, so it AUTO-COVERS any control that posts a Draft JE via
+  // ledger.postEntry({pendingApproval:true}) — GL-05 manual JE, PAY-03 payroll, FA-08 revaluation, FA-09
+  // disposal, BANK-02 bank adjustment, FX-02 rate change — PLUS the two queues that deliberately post NOTHING
+  // until approval (INV-07 inventory write-offs, AP-PAY vendor payments). Read-only; tenant-scoped by the
+  // caller's RLS (HQ/Admin aggregates all tenants). `stale_days` is the SLA after which a pending item is an
+  // exception (default 7 calendar days).
+  async pendingApprovalsAging(staleDays = 7) {
+    const db = this.db as any;
+    const today = ymd();
+    const ageDays = (ts: any): number => (ts ? Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 86400000)) : 0);
+    const bucket = (d: number) => (d <= 3 ? '0-3' : d <= 7 ? '4-7' : d <= 14 ? '8-14' : '15+');
+    // Map a Draft JE's source → the maker-checker control it belongs to.
+    const JE_META: Record<string, { control: string; label: string }> = {
+      Manual: { control: 'GL-05', label: 'รายการบัญชีปรับปรุง (Manual JE)' },
+      PAYROLL: { control: 'PAY-03', label: 'เงินเดือน (Payroll run)' },
+      REVAL: { control: 'FA-08', label: 'ตีราคา/ด้อยค่าสินทรัพย์ (Revaluation/Impairment)' },
+      DISP: { control: 'FA-09', label: 'จำหน่ายสินทรัพย์ (Disposal)' },
+      BANKADJ: { control: 'BANK-02', label: 'ปรับปรุงรายการธนาคาร (Bank adjustment)' },
+      FXRATE: { control: 'FX-02', label: 'อัตราแลกเปลี่ยน (FX rate change)' },
+    };
+    const items: any[] = [];
+    // 1) Every Draft journal entry (Draft = pending approval, excluded from balances until approved). Sum the
+    // debits per Draft entry separately and map by id (a correlated sub-select mis-aliases under Drizzle).
+    const drafts = await db.select({
+      id: journalEntries.id, entryNo: journalEntries.entryNo, source: journalEntries.source, sourceRef: journalEntries.sourceRef,
+      memo: journalEntries.memo, createdBy: journalEntries.createdBy, createdAt: journalEntries.createdAt,
+    }).from(journalEntries).where(eq(journalEntries.status, 'Draft')).orderBy(asc(journalEntries.createdAt));
+    const draftSums = await db.select({ entryId: journalLines.entryId, total: sql<string>`coalesce(sum(${journalLines.debit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(eq(journalEntries.status, 'Draft')).groupBy(journalLines.entryId);
+    const sumByEntry = new Map<number, number>(draftSums.map((r: any) => [Number(r.entryId), n(r.total)]));
+    for (const d of drafts) {
+      const meta = JE_META[String(d.source ?? '')] ?? { control: '—', label: d.source ?? 'Journal entry' };
+      const age = ageDays(d.createdAt);
+      items.push({ type: 'journal_entry', control: meta.control, label: meta.label, ref: d.entryNo, source: d.source, requested_by: d.createdBy, requested_at: d.createdAt, amount: round2(sumByEntry.get(Number(d.id)) ?? 0), memo: d.memo, age_days: age, bucket: bucket(age), stale: age > staleDays });
+    }
+    // 2) Inventory write-off requests — post nothing (no Draft JE) until a different wh_adjust holder approves.
+    const wrq = await db.select().from(invWriteoffRequests).where(eq(invWriteoffRequests.status, 'PendingApproval')).orderBy(asc(invWriteoffRequests.createdAt));
+    for (const w of wrq) {
+      const age = ageDays(w.createdAt);
+      items.push({ type: 'inventory_writeoff', control: 'INV-07', label: 'ตัดสต๊อก (Inventory write-off)', ref: `WOFF-${w.id}`, source: 'INV-WRITEOFF', requested_by: w.requestedBy, requested_at: w.createdAt, amount: round2(n(w.estValue)), memo: `${w.itemId} ${n(w.qtyDelta)} @ ${w.locationId} — ${w.reason}`, age_days: age, bucket: bucket(age), stale: age > staleDays });
+    }
+    // 3) AP vendor payments — request posts nothing (no Draft JE) until a different approver approves.
+    const aps = await db.select().from(apPayments).where(eq(apPayments.status, 'PendingApproval')).orderBy(asc(apPayments.requestedAt));
+    for (const p of aps) {
+      const age = ageDays(p.requestedAt);
+      items.push({ type: 'ap_payment', control: 'AP-PAY', label: 'จ่ายเจ้าหนี้ (AP disbursement)', ref: p.paymentNo, source: 'AP-PAY', requested_by: p.requestedBy, requested_at: p.requestedAt, amount: round2(n(p.amount)), memo: `→ ${p.txnNo}`, age_days: age, bucket: bucket(age), stale: age > staleDays });
+    }
+    items.sort((a, b) => b.age_days - a.age_days);
+    const byType = Object.values(items.reduce((acc: any, it) => {
+      (acc[it.control] ??= { control: it.control, label: it.label, count: 0, value: 0, oldest_age_days: 0, stale_count: 0 });
+      acc[it.control].count++; acc[it.control].value = round2(acc[it.control].value + it.amount);
+      acc[it.control].oldest_age_days = Math.max(acc[it.control].oldest_age_days, it.age_days);
+      if (it.stale) acc[it.control].stale_count++;
+      return acc;
+    }, {}));
+    const stale = items.filter((it) => it.stale);
+    return {
+      as_of: today,
+      stale_threshold_days: staleDays,
+      total_pending: items.length,
+      total_value: round2(items.reduce((a, it) => a + it.amount, 0)),
+      oldest_age_days: items.length ? items[0].age_days : 0,
+      stale_count: stale.length,
+      all_clear: stale.length === 0,
+      by_type: byType,
+      items,
+      exceptions: stale,
+    };
   }
 }
 
