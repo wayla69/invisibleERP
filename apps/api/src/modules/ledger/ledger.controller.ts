@@ -82,8 +82,9 @@ type PrepaidBodyT = z.infer<typeof PrepaidBody>;
 export class LedgerController {
   constructor(private readonly svc: LedgerService) {}
 
+  // Tenant's curated industry chart by default; `?all=true` returns the full canonical universe.
   @Get('accounts')
-  accounts() { return this.svc.listAccounts(); }
+  accounts(@Query('all') all?: string) { return this.svc.listAccounts({ all: all === 'true' || all === '1' }); }
 
   // ── multi-ledger / multi-GAAP ──
   @Get('ledgers')

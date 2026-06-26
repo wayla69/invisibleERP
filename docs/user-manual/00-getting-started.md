@@ -27,6 +27,13 @@ finding your way around, and logging out.
 
 [screenshot: login page with username and password fields]
 
+> **Creating a brand-new company?** On the self-serve **Sign up** page you choose your
+> **business type** (restaurant, retail, distribution, services, or general). Your
+> company starts with a **chart of accounts tailored to that industry** — the right
+> accounts switched on and named in your industry's language — so your books are
+> meaningful from day one. You can change or extend it later under **Onboarding →
+> Industry packs**. See *General Ledger → Your industry chart* for details.
+
 ---
 
 ## 2. Forced password change (first login)

@@ -1,8 +1,10 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, Optional } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { onboardingProgress, packInstalls, customObjects } from '../../database/schema';
+import { onboardingProgress, packInstalls, customObjects, tenants } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
+import { LedgerService } from '../ledger/ledger.service';
+import { isIndustryKey } from '../ledger/coa-templates';
 
 // E1 (Platform Phase 26) — guided onboarding + industry template packs. A curated setup checklist (per-tenant
 // completion) + one-click industry packs that seed a working set of custom objects (reusing the A1 store).
@@ -33,7 +35,10 @@ const PACKS = [
 
 @Injectable()
 export class OnboardingService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly ledger?: LedgerService, // optional so hand-constructed test instances still work
+  ) {}
 
   packs() { return { packs: PACKS.map((p) => ({ key: p.key, label: p.label, label_en: p.label_en, objects: p.objects.length })) }; }
 
@@ -71,6 +76,15 @@ export class OnboardingService {
     }
     const [already] = await db.select({ id: packInstalls.id }).from(packInstalls).where(eq(packInstalls.packKey, packKey)).limit(1);
     if (!already) await db.insert(packInstalls).values({ tenantId: user.tenantId ?? null, packKey, installedBy: user.username });
-    return { pack: packKey, objects_created: created };
+
+    // Adopting an industry pack also records the tenant's industry and provisions that industry's
+    // Chart-of-Accounts overlay (GL-10). Idempotent + additive, so re-applying only adds missing accounts.
+    let coa_accounts = 0;
+    if (isIndustryKey(packKey) && user.tenantId != null && this.ledger) {
+      await db.update(tenants).set({ industry: packKey }).where(eq(tenants.id, user.tenantId));
+      const res = await this.ledger.provisionTenantCoA(user.tenantId, packKey);
+      coa_accounts = res.accounts;
+    }
+    return { pack: packKey, objects_created: created, coa_accounts };
   }
 }

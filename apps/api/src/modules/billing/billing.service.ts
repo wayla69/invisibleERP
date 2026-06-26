@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { plans, subscriptions, tenants, users } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { isIndustryKey } from '../ledger/coa-templates';
 import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
 
@@ -14,6 +15,9 @@ export interface SignupDto {
   admin_password: string;
   email: string;
   plan_code?: string;
+  // industry CoA template the company picks at signup (GL-10): restaurant|retail|distribution|services|
+  // general. Falls back to 'general' (full canonical chart) when omitted/unknown.
+  industry?: string;
   // optional tax identity (the setup wizard can fill these later via PATCH /api/tenant/profile)
   legal_name?: string;
   tax_id?: string;
@@ -95,10 +99,11 @@ export class BillingService {
 
     const passwordHash = await this.password.hash(dto.admin_password);
     const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+    const industry = isIndustryKey(dto.industry) ? dto.industry : 'general';
 
     const tenant = await db.transaction(async (tx: any) => {
       const [t] = await tx.insert(tenants).values({
-        code, name: dto.company_name, contactName: username, email: dto.email,
+        code, name: dto.company_name, contactName: username, email: dto.email, industry,
         // tax identity — legalName defaults to the company name; the rest the setup wizard completes
         legalName: dto.legal_name ?? dto.company_name,
         taxId: dto.tax_id ?? null,
@@ -117,8 +122,12 @@ export class BillingService {
       return t;
     });
 
-    // provision the current fiscal year's periods so the new tenant can post immediately (A4)
-    if (this.ledger) await this.ledger.provisionFiscalYear(Number(ymd().slice(0, 4)), Number(tenant.id));
+    // provision the current fiscal year's periods so the new tenant can post immediately (A4),
+    // then materialise the chosen industry Chart-of-Accounts template into the tenant's overlay (GL-10).
+    if (this.ledger) {
+      await this.ledger.provisionFiscalYear(Number(ymd().slice(0, 4)), Number(tenant.id));
+      await this.ledger.provisionTenantCoA(Number(tenant.id), industry);
+    }
 
     return {
       tenant_id: Number(tenant.id),
@@ -126,6 +135,7 @@ export class BillingService {
       tenant_name: tenant.name,
       admin_username: username,
       plan: planCode,
+      industry,
       trial_ends_at: trialEndsAt.toISOString(),
       fiscal_year_provisioned: Number(ymd().slice(0, 4)),
     };
