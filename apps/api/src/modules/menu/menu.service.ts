@@ -127,14 +127,14 @@ export class MenuService {
     if (dto.min_select > dto.max_select) throw new BadRequestException({ code: 'BAD_RANGE', message: 'min_select > max_select', messageTh: 'ขั้นต่ำมากกว่าขั้นสูง' });
     const [g] = await db.insert(modifierGroups).values({ tenantId: user.tenantId ?? null, code: dto.code, name: dto.name, minSelect: dto.min_select, maxSelect: dto.max_select, required: dto.required ?? dto.min_select > 0 }).onConflictDoNothing().returning();
     if (!g) throw new BadRequestException({ code: 'GROUP_EXISTS', message: 'Group code exists', messageTh: 'รหัสกลุ่มตัวเลือกซ้ำ' });
-    if (dto.options?.length) await db.insert(modifierOptions).values(dto.options.map((o, i) => ({ tenantId: user.tenantId ?? null, groupId: Number(g.id), name: o.name, priceDelta: fx(o.price_delta, 2), isDefault: o.is_default ?? false, sort: o.sort ?? i })));
+    if (dto.options?.length) await db.insert(modifierOptions).values(dto.options.map((o, i) => ({ tenantId: user.tenantId ?? null, groupId: Number(g.id), name: o.name, priceDelta: fx(o.price_delta, 2), cogsDelta: fx(o.cogs_delta ?? 0, 2), recipeRefId: o.recipe_ref_id ?? null, isDefault: o.is_default ?? false, sort: o.sort ?? i })));
     return this.getGroup(Number(g.id));
   }
-  async addOption(groupId: number, opt: { name: string; price_delta: number; is_default?: boolean; sort?: number }, user: JwtUser) {
+  async addOption(groupId: number, opt: { name: string; price_delta: number; cogs_delta?: number; recipe_ref_id?: number; is_default?: boolean; sort?: number }, user: JwtUser) {
     const db = this.db as any;
     const [g] = await db.select().from(modifierGroups).where(eq(modifierGroups.id, groupId)).limit(1);
     if (!g) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Group not found', messageTh: 'ไม่พบกลุ่มตัวเลือก' });
-    await db.insert(modifierOptions).values({ tenantId: user.tenantId ?? null, groupId, name: opt.name, priceDelta: fx(opt.price_delta, 2), isDefault: opt.is_default ?? false, sort: opt.sort ?? 0 });
+    await db.insert(modifierOptions).values({ tenantId: user.tenantId ?? null, groupId, name: opt.name, priceDelta: fx(opt.price_delta, 2), cogsDelta: fx(opt.cogs_delta ?? 0, 2), recipeRefId: opt.recipe_ref_id ?? null, isDefault: opt.is_default ?? false, sort: opt.sort ?? 0 });
     return this.getGroup(groupId);
   }
   async listGroups(_user: JwtUser) {
@@ -185,10 +185,15 @@ export class MenuService {
     const unitPrice = round2(n(it.price) + chosen.reduce((a, c) => a + n(c.price_delta), 0));
     const qty = n(dto.qty) || 1;
     const amount = round2(unitPrice * qty);
+    // modifier_cogs: standard COGS added by the chosen options for one unit — surfaced so the caller/UI
+    // can show menu-engineering margin; the authoritative posting happens at checkout (portal.pos).
+    const modifierUnitCogs = round2(chosen.reduce((a, c) => a + n(c.cogs_delta), 0));
     return {
       item_id: Number(it.id), sku: it.sku, name: it.name, qty, unit_price: unitPrice, amount,
       station_code: it.stationCode, prep_minutes: it.prepMinutes, tax_type: it.taxType, notes: dto.notes ?? null,
-      modifiers: chosen.map((c) => ({ group_id: c.group_id, group_name: c.group_name, option_id: c.option_id, option_name: c.name, price_delta: n(c.price_delta) })),
+      modifier_option_ids: chosen.map((c) => c.option_id),
+      modifier_cogs: modifierUnitCogs,
+      modifiers: chosen.map((c) => ({ group_id: c.group_id, group_name: c.group_name, option_id: c.option_id, option_name: c.name, price_delta: n(c.price_delta), cogs_delta: n(c.cogs_delta) })),
     };
   }
 
@@ -208,7 +213,7 @@ export class MenuService {
     const opts = await db.select().from(modifierOptions).where(and(inArray(modifierOptions.groupId, ids), eq(modifierOptions.active, true))).orderBy(asc(modifierOptions.sort));
     return groups.map((g: any) => ({
       group_id: Number(g.id), code: g.code, name: g.name, min_select: g.minSelect, max_select: g.maxSelect, required: g.required,
-      options: opts.filter((o: any) => Number(o.groupId) === Number(g.id)).map((o: any) => ({ option_id: Number(o.id), name: o.name, price_delta: n(o.priceDelta), is_default: o.isDefault })),
+      options: opts.filter((o: any) => Number(o.groupId) === Number(g.id)).map((o: any) => ({ option_id: Number(o.id), name: o.name, price_delta: n(o.priceDelta), cogs_delta: n(o.cogsDelta), recipe_ref_id: o.recipeRefId ?? null, is_default: o.isDefault })),
     }));
   }
   private async getGroup(groupId: number) {
@@ -216,7 +221,7 @@ export class MenuService {
     const [g] = await db.select().from(modifierGroups).where(eq(modifierGroups.id, groupId)).limit(1);
     if (!g) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Modifier group not found', messageTh: 'ไม่พบกลุ่มตัวเลือก' });
     const opts = await db.select().from(modifierOptions).where(and(eq(modifierOptions.groupId, groupId), eq(modifierOptions.active, true))).orderBy(asc(modifierOptions.sort));
-    return { group_id: Number(g.id), code: g.code, name: g.name, min_select: g.minSelect, max_select: g.maxSelect, required: g.required, options: opts.map((o: any) => ({ option_id: Number(o.id), name: o.name, price_delta: n(o.priceDelta), is_default: o.isDefault })) };
+    return { group_id: Number(g.id), code: g.code, name: g.name, min_select: g.minSelect, max_select: g.maxSelect, required: g.required, options: opts.map((o: any) => ({ option_id: Number(o.id), name: o.name, price_delta: n(o.priceDelta), cogs_delta: n(o.cogsDelta), recipe_ref_id: o.recipeRefId ?? null, is_default: o.isDefault })) };
   }
 }
 

@@ -47,7 +47,10 @@ old keyed "create order" form for day-to-day selling):
 2. **Options (modifiers).** Items that carry choices (size, spice, add-ons) show a
    **ตัวเลือก** badge; tapping one opens a picker — choose options, the live price
    updates, then **เพิ่มลงตะกร้า**. Prices (incl. option add-ons) are always taken
-   from the catalog, so a cashier can't change a price.
+   from the catalog, so a cashier can't change a price. Each option can also carry a
+   **standard COGS delta** (set on the modifier via the menu API, e.g. "extra patty" =
+   ฿12) so choosing it raises the sold line's cost of goods at checkout — keeping
+   food-cost reporting honest. This is back-office only; cashiers and diners never see it.
 3. **The cart.** Adjust quantity with **− / +**, remove a line with the bin icon,
    and read **ยอดรวม / VAT / สุทธิ** at the bottom. **พักบิล** parks the cart and
    **ล้างตะกร้า** clears it.

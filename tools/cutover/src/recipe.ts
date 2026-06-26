@@ -111,6 +111,25 @@ async function main() {
   await inj('POST', '/api/portal/pos/sales', cust1, { items: [{ item_id: 'KP01', qty: 1, unit_price: 60 }] });
   ok('Portal sale 1×KP01 → PORK drops by 0.15', near3(await stockOf('PORK'), porkBefore - 0.15), `before=${porkBefore} after=${await stockOf('PORK')}`);
 
+  // ── Step 1: modifier COGS delta — "extra pork" (+฿20 price, +฿12 COGS) folds into the sold line's COGS ──
+  const grp = await inj('POST', '/api/menu/modifier-groups', sales1, { code: 'ADDS', name: 'เพิ่มเติม', min_select: 0, max_select: 2, options: [{ name: 'หมูเพิ่ม', price_delta: 20, cogs_delta: 12 }, { name: 'ไข่ดาว', price_delta: 10, cogs_delta: 4 }] });
+  const extraPorkId = grp.json.options?.[0]?.option_id;
+  ok('Create modifier group with cogs_delta (extra pork 12, egg 4)', grp.json.options?.length === 2 && near(grp.json.options[0].cogs_delta, 12), JSON.stringify(grp.json.options));
+  await inj('POST', '/api/menu/items/KP01/modifier-groups', sales1, { group_id: grp.json.group_id });
+  // resolve surfaces unit modifier_cogs for menu-engineering margin
+  const rl = await inj('POST', '/api/menu/resolve', sales1, { sku: 'KP01', qty: 1, modifier_option_ids: [extraPorkId] });
+  ok('resolveLine returns unit_price 80, modifier_cogs 12', near(rl.json.unit_price, 80) && near(rl.json.modifier_cogs, 12), JSON.stringify({ p: rl.json.unit_price, c: rl.json.modifier_cogs }));
+  // sale of 2×KP01 + extra pork → recipe COGS 8.95×2 + modifier 12×2 = 17.90 + 24.00 = 41.90
+  const sm = await inj('POST', '/api/portal/pos/sales', cust1, { items: [{ item_id: 'KP01', qty: 2, unit_price: 80, modifier_option_ids: [extraPorkId] }] });
+  ok('Portal sale 2×KP01+extra-pork → SALE-', /^SALE-/.test(sm.json.sale_no ?? ''), `${sm.status}`);
+  const mcogs = (await pg.query(`SELECT account_code, debit, credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source='POS-COGS' AND je.source_ref='${sm.json.sale_no}'`)).rows as any[];
+  const mleg = (c: string, side: string) => Number(mcogs.filter((l) => l.account_code === c).reduce((a, l) => a + Number(l[side] || 0), 0));
+  ok('Modifier COGS folded into GL: Dr5300=41.90 / Cr1200=41.90 (8.95×2 + 12×2)', near(mleg('5300', 'debit'), 41.90) && near(mleg('1200', 'credit'), 41.90), JSON.stringify(mcogs));
+  // zero-cogs modifier (egg has cogs 4 but COLA is non-recipe) → only the modifier cost posts
+  const sm2 = await inj('POST', '/api/portal/pos/sales', cust1, { items: [{ item_id: 'COLA', qty: 1, unit_price: 30, modifier_option_ids: [grp.json.options[1].option_id] }] });
+  const m2 = (await pg.query(`SELECT account_code, debit, credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source='POS-COGS' AND je.source_ref='${sm2.json.sale_no}'`)).rows as any[];
+  ok('Non-recipe COLA + egg modifier → COGS just the modifier (Dr5300=4 / Cr1200=4)', near(Number(m2.filter((l) => l.account_code === '5300').reduce((a, l) => a + Number(l.debit || 0), 0)), 4), JSON.stringify(m2));
+
   // ── negative stock (allow + flag) ──
   await db.update(s.customerInventory).set({ currentStock: '0.10' }).where(and(eq(s.customerInventory.tenantId, t1), eq(s.customerInventory.itemId, 'PORK')));
   const o3 = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tbl.json.id, items: [{ sku: 'KP01', qty: 1 }] });

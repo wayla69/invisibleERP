@@ -20,7 +20,7 @@ import { JournalService } from '../pos-fiscal/journal.service';
 import { LockingService } from '../pos-scale/locking.service';
 
 export interface PortalSaleDto {
-  items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number }[];
+  items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number; modifier_option_ids?: number[] }[];
   discount?: number;
   payment_method?: string;
   notes?: string;
@@ -137,6 +137,10 @@ export class PortalPosService {
         const ded = await this.recipe.applyDeduction(tx, t.id, String(l.item_id), n(l.qty), saleNo, user, branchId);
         recipeCogs = roundCurrency(recipeCogs + ded.cost, 'THB');
         if (!ded.deducted) nonRecipeLines.push({ itemId: String(l.item_id), qty: n(l.qty) }); // non-recipe → costed COGS
+        // Step 1 — modifier COGS: chosen options ("extra patty") add their standard cost to the line's COGS
+        // (Dr 5300 / Cr 1200), so menu modifiers no longer move price without moving cost of goods.
+        const modCogs = await this.recipe.modifierCogs(tx, t.id, (l as any).modifier_option_ids ?? [], n(l.qty));
+        recipeCogs = roundCurrency(recipeCogs + modCogs, 'THB');
       }
 
       // loyalty accrual
