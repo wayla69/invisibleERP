@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.4 · 2026-06-28** · *v0.4: added UAT-ADM-089..093 (SoD R10 — pricing nav/API re-gate).*
+**Status: DRAFT v0.5 · 2026-06-28** · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -548,6 +548,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-091 | R10 — PricingManager can access /pricing and create rule | SoD R10, MKT-01 | 19 §3 |
 | UAT-ADM-092 | R10 — API: pos-only token blocked from pricing mutations | SoD R10, MKT-01 | 19 §3 |
 | UAT-ADM-093 | R10 — API: pos token can still call pricing quote | SoD R10 (positive) | 19 §3 |
+| UAT-ADM-094 | R12 — AR Clerk can see /returns in nav | SoD R12, ITGC-AC-09 | 01 §7 |
+| UAT-ADM-095 | R12 — AR Clerk sees "บันทึกคืนสินค้า" button on /returns | SoD R12, REV-16 | 01 §7 |
+| UAT-ADM-096 | R12 — POS Supervisor (pos_refund only) can reach /returns | SoD R12, POS-01 | 21 §6 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
