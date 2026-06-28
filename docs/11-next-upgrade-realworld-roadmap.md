@@ -208,14 +208,23 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   **Done so far:** rules + service charge + rounding priced & GL-correct at the till (verified);
   cashier quick-tender/hotkeys (build-verified); offline + peripheral clients scaffolded.
 
-### Phase C — Globalize & certify · ~8–12 weeks · **IN PROGRESS (C1 ✅, C2 ✅, C3 ✅, C5 ✅ 2026-06-28)**
+### Phase C — Globalize & certify · ~8–12 weeks · **IN PROGRESS (C1 ✅, C2 ✅, C3 ✅, C4 ✅, C5 ✅ 2026-06-28)**
 *Goal: legally and operationally sellable beyond Thailand; passes enterprise security review.*
 
 - **C1 — Multi-currency depth.** ✅ **Delivered.** `tenants.functional_currency` (ISO-4217, default THB, migration 0175); `currency`+`fx_rate` on `purchase_orders` and `goods_receipts` (GR inherits PO rate); `buildStatement` now uses `roundCurrency(amount, currency)` instead of the THB-hardcoded `round2()` for all AR/AP statement arithmetic — correct 0dp for JPY, 2dp for THB/USD/EUR/GBP/SGD. `CreatePoDto` accepts optional `currency`+`fx_rate`. Basics harness extended with a JPY-0dp rounding assertion (C1 gate).
 - **C2 — Pluggable tax + e-invoicing.** ✅ **Delivered.** `SgTaxProvider` (GST 9%), `MyTaxProvider` (SST 6%, food-exempt category), `EuTaxProvider` (20% generic EU placeholder) added to `tax-providers.ts` and registered in `TaxService`. `MYR` (Malaysian Ringgit, 2dp) added to ISO-4217 catalogue. `EInvoiceService` gains `buildMyInvoisXml` (LHDN MyInvois UBL 2.1) and `buildSgPeppolXml` (Peppol BIS3 InvoiceNow) document-builder stubs; `submit` routes to the appropriate builder per active provider. Basics harness: 8 new C2 gates (TC-C2-01..08: SG/MY/EU tax calc, food-exempt, providers list, MYR currency, MY/SG e-invoice submission).
 - **C3 — Real i18n framework.** ✅ **Delivered (nav i18n wiring — roadmap C3, 2026-06-28).** Per-locale message catalog (`apps/web/src/lib/messages.ts`) expanded from 8 to ~170 entries covering all nav group/subgroup/item labels in th+en (ms/vi/id for chrome). All `INTERNAL_NAV` and `PORTAL_NAV` `title`/`label` strings replaced with `messages.ts` i18n keys. `AppShell` and `CommandPalette` now call `t()` for all rendered nav text and sidebar chrome (favourites, recent, search, logout). `portal/layout.tsx` wrapped in `LanguageProvider`. No API, DB, or permission changes; no GL. UI now switches language correctly when a user selects a non-Thai locale.
-- **C4 — Certifications.** SOC 2 Type II + ISO 27001 readiness (leverage existing RCM/policies);
-  PCI-DSS scope design (SAQ-A via tokenized PSPs); third-party pen test.
+- **C4 — Certifications.** ✅ **Delivered.** Three compliance artefacts authored against existing 66-control RCM:
+  (a) `compliance/soc2-readiness.md` — full TSC CC1–CC9 mapping (53 ✅, 11 🟡, 2 ❌); Type I/II gap analysis
+  and engagement timeline (Type I target M+4, Type II M+10); 6 Priority-1 blockers identified (8 DRAFT
+  policies, Terms of Service, OTel dashboards, GitHub prod environment reviewers, RACI/SOX PMO staffing).
+  (b) `compliance/iso27001-gap-analysis.md` — Annex A gap assessment (93 controls: 53 ✅, 24 🟡, 3 ❌,
+  13 N/A); SOA skeleton; risk register excerpt (R-ISO-01..06); remediation roadmap (18 actions, Phase 1–3);
+  certification timeline targeting Stage 2 audit at M+6.
+  (c) `compliance/pci-dss-scope-design.md` — SAQ-A qualification confirmed (tokenization-only: no PAN/CVV/
+  track data in Invisible ERP systems); per-PSP CDE carve-out; 5 architecture invariants that must not be
+  violated; SAQ-A control gap assessment; pen test scope; annual AoC submission checklist.
+  Third-party pen test remains a scheduled external deliverable (see Priority 2 / Phase 2 of each document).
 - **C5 — Entity-level policies finalized (ELC-01..05).** ✅ **Delivered.** ELC-POL-01..05 adopted at
   v1.0 (effective 2026-07-01): Code of Conduct + acknowledgement-register template, Whistleblower
   (`compliance@invisible-erp.co.th` + `/compliance-reports`), DoA (PO > 50k / AP > 100k / credit > 500k),
@@ -302,3 +311,4 @@ and DB-enforced isolation; deepen MRP/HR/portals where the target market demands
 | 0.4 | 2026-06-26 | Platform | **Phase B complete** (B2 favourites grid + POS returns ✅ PR #181; B4 retail portal pricing + service charge + satang rounding ✅ PR #182; B1 offline client outbox + B3 peripheral bridge as typecheck-only scaffolds). **Phase C C5 delivered**: ELC-POL-01..05 adopted at v1.0 (Code of Conduct, Whistleblower, DoA, Audit Committee Charter, Fraud Risk Assessment); COSO plan §6 updated. |
 | 0.5 | 2026-06-26 | Platform | **Phase C C1 delivered**: multi-currency depth — `tenants.functional_currency`, `currency`+`fx_rate` on PO+GR (migration 0175), `buildStatement` ISO-4217-aware rounding via `roundCurrency`, basics harness JPY-0dp gate. |
 | 0.6 | 2026-06-28 | Platform | **Phase C C2 delivered**: pluggable tax + e-invoicing — `SgTaxProvider` (GST 9%), `MyTaxProvider` (SST 6%, food-exempt), `EuTaxProvider` (20%), MYR added to currency catalogue, MY/SG e-invoice UBL 2.1/Peppol BIS3 builders, 8 new C2 basics harness gates. |
+| 0.7 | 2026-06-28 | Platform | **Phase C C3 delivered**: nav i18n wiring — all `INTERNAL_NAV`/`PORTAL_NAV` strings replaced with `messages.ts` i18n keys (~170 entries); `AppShell`/`CommandPalette` call `t()` for all rendered nav text; `portal/layout.tsx` wrapped in `LanguageProvider`; E2E `navFold` stub key updated to i18n key. **Phase C C4 delivered**: three certification readiness artefacts — `compliance/soc2-readiness.md` (CC1–CC9 TSC mapping), `compliance/iso27001-gap-analysis.md` (93 Annex A controls, SOA skeleton, risk register), `compliance/pci-dss-scope-design.md` (SAQ-A qualification, architecture invariants, pen test scope). |
