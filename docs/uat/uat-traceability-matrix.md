@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.3 · 2026-06-25** · *v0.3: mapped the POS touch-register cases UAT-O2C-151..155.*
+**Status: DRAFT v0.4 · 2026-06-28** · *v0.4: added UAT-ADM-089..093 (SoD R10 — pricing nav/API re-gate).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -394,6 +394,14 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | TC-CON-02-02 | Consolidation run→post maker-checker (SELF_POST/ALREADY_POSTED) | CON-03, R07 | 11 §7.9 |
 | TC-CON-02-03 | Unbalanced eliminations → CONSOL_UNBALANCED (rolled back) | CON-03 | 11 §7.8 |
 | TC-CON-03-01 | Segment report (IFRS 8) groups P&L by dimension | CON-04 | 11 §7.10 |
+| UAT-GL-101 | GlAccountant cannot see "รออนุมัติ (JE)" tab | R05, GL-05 | 04 §9 |
+| UAT-GL-102 | FinancialController sees "รออนุมัติ (JE)" tab | R05, GL-05 | 04 §9 |
+| UAT-GL-103 | GlAccountant can reach /accounting in nav (gl_post perm) | R05 | 04 §3 |
+| UAT-GL-104 | GlAccountant cannot see /finance/period-close in nav | R05, GL-15 | 04 §7 |
+| UAT-GL-105 | GlAccountant can reach /reconciliation in nav (recon_prep perm) | R06, REC-01 | 04 §7 |
+| UAT-GL-106 | GlAccountant cannot see certify button on /reconciliation | R06, REC-03 | 04 §7 |
+| UAT-GL-107 | FinancialController can certify a recon period | R06, REC-03 | 04 §7 |
+| UAT-GL-108 | API certify blocked for recon_prep-only token | R06, REC-03 | 04 §9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -535,6 +543,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-086 | R12 — POS Supervisor can authorize pending refunds | SoD R12, ITGC-AC-09 | 21 §7 |
 | UAT-ADM-087 | R12 — Self-approve refund request blocked | SoD R12, REV-16 | 21 §7 |
 | UAT-ADM-088 | R08 — POS Supervisor can manage till + approve variance | SoD R08, POS-01 | 20 §6 |
+| UAT-ADM-089 | R10 — Cashier cannot see pricing screen in nav | SoD R10, ITGC-AC-09 | 19 §4 |
+| UAT-ADM-090 | R10 — Sales role cannot reach /pricing via direct URL | SoD R10, ITGC-AC-09 | 19 §4 |
+| UAT-ADM-091 | R10 — PricingManager can access /pricing and create rule | SoD R10, MKT-01 | 19 §3 |
+| UAT-ADM-092 | R10 — API: pos-only token blocked from pricing mutations | SoD R10, MKT-01 | 19 §3 |
+| UAT-ADM-093 | R10 — API: pos token can still call pricing quote | SoD R10 (positive) | 19 §3 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
@@ -641,11 +654,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 02 Order-to-Cash | 55 | 25 |
 | 03 Procure-to-Pay | 27 | 12 |
 | 04 Inventory & WMS | 29 | 12 |
-| 05 GL & Close (incl. fixed assets / EAM) | 47 | 29 |
+| 05 GL & Close (incl. fixed assets / EAM) | 55 | 37 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 22 | 9 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **358** | **183** |
+| **Total** | **366** | **191** |

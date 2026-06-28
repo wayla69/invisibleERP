@@ -1,14 +1,15 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.3 · 2026-06-28**
 
 This chapter is for **accountants** — *GlAccountant*, *FinancialController* and
 *Admin*. It covers the chart of accounts, manual journal entries with
 **maker-checker approval**, the trial balance and financial statements, period and
 year-end close, multi-ledger reporting, and fixed assets.
 
-**Main screen:** `/accounting` — tabs include Trial Balance, Journal, Pending
-journal entries, Income Statement, Balance Sheet, Cash Flow and Opening Balances.
+**Main screen:** `/accounting` (perm: `gl_post`, `gl_close`, `approvals`, `exec`, `creditors`, `ar`) — tabs include Trial Balance, Journal, Pending journal entries (visible to `approvals`/`gl_close`/`exec` only — SoD R05), Income Statement, Balance Sheet, Cash Flow and Opening Balances.
+
+> **SoD R05 — posting vs. JE approval:** The "รออนุมัติ (JE)" tab on `/accounting` is only visible to users who hold the **approval** duty (`approvals`, `gl_close`, or `exec`). A *GlAccountant* (`gl_post` only) sees the journal/posting tabs but not the approval queue, preventing a preparer from approving their own entries. The **period close** screen (`/finance/period-close`, perm: `gl_close`) is a separate screen — a GL Accountant cannot access it.
 
 ---
 
@@ -285,7 +286,9 @@ collections prioritisation.
 ### Check the books reconcile first (control-account overview)
 
 **Screen:** `/reconciliation` (**กระทบยอด**) → the **ภาพรวมบัญชีคุมยอด (Control
-accounts)** card at the top · **Required permission:** `exec` / `ar` / `creditors`.
+accounts)** card at the top · **Required permission:** `recon_prep`, `approvals`, `gl_close`, `exec`, `ar`, or `creditors`.
+
+> **SoD R06 — preparer ≠ certifier:** The "รับรองงวด" (certify) button on `/reconciliation` is visible only to users who hold `approvals`, `gl_close`, or `exec`. A *GlAccountant* (`recon_prep` only) can open/import/auto-match a period but cannot certify it — a FinancialController or Admin must certify. The API already enforces this (`POST /api/recon/periods/:id/certify` requires `approvals`); the UI now matches.
 
 Before you close a period, confirm every sub-ledger still agrees with its general-ledger
 control account. The **control-account overview** ties them all in one view —

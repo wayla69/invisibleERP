@@ -242,7 +242,9 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'nav.group.pricing',
     workspace: BOTH,
     items: [
-      { label: 'nav.pricing', href: '/pricing', icon: Coins, perms: ['pos', 'order_mgt', 'exec'] },
+      // SoD R10: price/promo maintenance is a separate duty from selling (pos/order_mgt).
+      // Only PricingManager (pricelist, promos) or exec/admin may reach this screen.
+      { label: 'nav.pricing', href: '/pricing', icon: Coins, perms: ['pricelist', 'promos', 'exec'] },
       { label: 'nav.branches', href: '/branches', icon: Store, perms: ['branch', 'exec'] },
     ],
   },
@@ -322,7 +324,9 @@ export const INTERNAL_NAV: NavGroup[] = [
       {
         title: 'nav.sub.ledger',
         items: [
-          { label: 'nav.accounting', href: '/accounting', icon: BookText, perms: ['exec', 'creditors', 'ar'] },
+          // SoD R05: gl_post (GlAccountant) can reach the journal/posting tabs;
+          // gl_close (FinancialController) also reaches the JE-approval tab (guarded in-page).
+          { label: 'nav.accounting', href: '/accounting', icon: BookText, perms: ['gl_post', 'gl_close', 'approvals', 'exec', 'creditors', 'ar'] },
           { label: 'nav.revenue', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'nav.assets', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
           { label: 'nav.leases', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
@@ -334,7 +338,9 @@ export const INTERNAL_NAV: NavGroup[] = [
         items: [
           { label: 'nav.bank', href: '/bank', icon: Landmark, perms: ['exec', 'creditors', 'ar'] },
           { label: 'nav.cash_banking', href: '/cash-banking', icon: Vault, perms: ['exec', 'ar'] },
-          { label: 'nav.reconciliation', href: '/reconciliation', icon: Scale, perms: ['exec', 'creditors', 'ar'] },
+          // SoD R06: recon_prep (GlAccountant) prepares; approvals/gl_close (FinancialController) certifies.
+          // The certify button is hidden in-page for recon_prep-only users.
+          { label: 'nav.reconciliation', href: '/reconciliation', icon: Scale, perms: ['recon_prep', 'approvals', 'gl_close', 'exec', 'creditors', 'ar'] },
           { label: 'nav.approvals', href: '/approvals', icon: ClipboardCheck, perms: ['exec', 'approvals', 'creditors'] },
         ],
       },
