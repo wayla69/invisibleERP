@@ -1,6 +1,6 @@
 # UAT — Cycle 08: Admin / Segregation of Duties / Access Governance / Audit
 
-**Status: DRAFT v0.6 · 2026-06-28** · Cross-ref: process narrative `08-itgc.md` (ITGC-AC-01/08/09/10, SoD R01–R16) + `27-platform-customization.md` §7 (platform features, incl. public API + SSO/SCIM), harness `tools/cutover/src/compliance.ts` + `ext.ts`.
+**Status: DRAFT v0.7 · 2026-06-28** · Cross-ref: process narrative `08-itgc.md` (ITGC-AC-01/08/09/10, SoD R01–R16) + `27-platform-customization.md` §7 (platform features, incl. public API + SSO/SCIM), harness `tools/cutover/src/compliance.ts` + `ext.ts`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are exact.
 
@@ -99,3 +99,6 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. Error codes/amounts are ex
 | UAT-ADM-091 | R10 — PricingManager can access /pricing and create a rule | PricingManager (`pricelist`, `promos`) | PricingManager user | 1. Login as PricingManager. 2. Navigate to `/pricing`. 3. `POST /api/pricing/rules` with rule body. | — | (2) Screen loads. (3) 201; rule created. | High | Control | R10, SoD | Not Run | UI manual |
 | UAT-ADM-092 | R10 — API: pos-only token blocked from creating pricing rules | Sales (`pos`, `order_mgt`) | — | 1. `POST /api/pricing/rules` with `pos`-only JWT. | valid rule body | 403 FORBIDDEN — `pricelist` required. | High | Control | R10, SoD | Not Run | pricing.controller.ts |
 | UAT-ADM-093 | R10 — API: pos token can still call /pricing/quote | Sales (`pos`) | — | 1. `POST /api/pricing/quote` with `pos` JWT. | valid quote body | 200 — quote returned normally. | High | Positive | R10, SoD | Not Run | pricing.controller.ts |
+| UAT-ADM-094 | R12 — AR Clerk can see /returns in nav | AR Clerk (`ar`) | AR user | 1. Login as AR Clerk. 2. Check ERP/POS nav under POS workspace. | — | "คืนสินค้า & คืนเงิน" item is present in nav; `/returns` loads. | High | Control | R12, SoD | Not Run | UI manual |
+| UAT-ADM-095 | R12 — AR Clerk sees "บันทึกคืนสินค้า" button | AR Clerk (`ar`) | AR user on /returns | 1. Navigate to `/returns`. 2. Inspect action area. | — | "บันทึกคืนสินค้า" button is visible (`ar` passes `canRefund`). | High | Control | R12, SoD | Not Run | UI manual |
+| UAT-ADM-096 | R12 — POS Supervisor can reach /returns | PosSupervisor (`pos_refund`, no `pos`) | Supervisor without broad `pos` | 1. Login as POS Supervisor (`pos_refund` only). 2. Navigate to `/returns`. | — | Page loads; nav item visible. | High | Control | R12, SoD | Not Run | UI manual |

@@ -160,7 +160,10 @@ export const INTERNAL_NAV: NavGroup[] = [
       // pos_sell = primary sell perm; coarse 'pos' holders (e.g. Sales role) still pass via implication.
       { label: 'ขายหน้าร้าน (Register)', href: '/pos/register', icon: ShoppingCart, perms: ['pos_sell', 'pos', 'order_mgt'] },
       { label: 'รายการออเดอร์', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
-      { label: 'คืนสินค้า & คืนเงิน', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt'] },
+      // SoD R12 complement: AR staff (ar) and refund supervisors (pos_refund) must also reach /returns
+      // to view the return record before acting. The "บันทึกคืนสินค้า" record button inside the page
+      // is further gated on canRefund (pos_refund|pos|ar) — the nav perm only controls visibility.
+      { label: 'คืนสินค้า & คืนเงิน', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt', 'ar', 'pos_refund'] },
       // SoD R08/R12: refund authorization is a supervisor duty (pos_refund), not a cashier duty (pos_sell).
       { label: 'อนุมัติการคืนเงิน (Refund Auth)', href: '/pos/refunds', icon: Banknote, perms: ['pos_refund', 'pos'] },
       { label: 'บัตรของขวัญ / เครดิตร้าน', href: '/giftcards', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
