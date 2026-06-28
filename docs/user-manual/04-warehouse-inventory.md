@@ -133,35 +133,42 @@ logged.
 
 ## 7. Cycle counts & stocktake
 
-**Screen:** `/stocktake` · **Required permission:** `wh_count` to enter counts;
-`wh_adjust` to post the variance.
+**Screen:** `/stocktake` · **Required permission:** `wh_count` (StockCounter), `warehouse`, or `mobile`
 
-> **Note — separation of duties:** The person who **counts** stock
-> (`wh_count`, *StockCounter*) is deliberately different from the person who
-> **posts the adjustment** (`wh_adjust`, *InventoryController*). This prevents
-> someone hiding shrinkage by adjusting their own count (rule R11).
+> **SoD rule R11 — two-screen design:** The `/stocktake` screen is for
+> **counting only** (`wh_count`). The **Inventory Controller** (`wh_adjust`)
+> posts variance adjustments and approves write-offs on a *separate* screen:
+> **อนุมัติปรับสต๊อก** at `/stock-adjustment`. This prevents a counter from
+> adjusting their own count to conceal shrinkage.
 
-### To run a cycle count
+### To run a cycle count (StockCounter — `wh_count`)
 
-1. Go to **Stocktake** (`/stocktake`).
-2. Create a new count and select the items / location to count.
-3. Enter the **counted quantity** for each line (you can scan via
-   `/mobile-scan`).
-4. Save the count.
+1. Go to **ตรวจนับสต๊อก** (`/stocktake`).
+2. Select the items / location to count. Scan items via QR if available.
+3. Enter the **counted quantity** for each line.
+4. Click **บันทึกใบนับ** (Save count).
 
-**Expected result:** A stocktake document is created showing system vs counted
-quantities and the variance.
+**Expected result:** A stocktake document is saved with status "Counted" and the
+counter sees a note directing an Inventory Controller to post the variance at
+`/stock-adjustment`.
 
-### To post the variance (InventoryController)
+### To post the variance (InventoryController — `wh_adjust`)
 
-1. Open the completed count.
-2. Review the variances.
-3. Click **Post** to write the adjustment to inventory and the general ledger.
+1. Go to **อนุมัติปรับสต๊อก** (`/stock-adjustment`).
+2. The "ใบนับรอลงบัญชี" tab shows all counts with status "Counted".
+3. Review the variance lines and click **ลงบัญชีผลต่าง** for the relevant count.
 
-**Expected result:** Stock is corrected and the variance is recorded in the
-accounts.
+**Expected result:** Stock is corrected and the variance JE is posted to the
+general ledger (Dr 5810 / Cr 1200 for shrinkage, reversed for a gain).
 
-[screenshot: stocktake variance review before posting]
+### Direct adjustment and write-off approval (InventoryController — `wh_adjust`)
+
+- **Direct adjustment:** click "ปรับสต๊อกโดยตรง" on `/stock-adjustment` to post an
+  immediate ±adjustment (must provide reason).
+- **Write-off approval:** the "ตัดสต๊อกรออนุมัติ" tab shows pending write-off
+  requests from warehouse staff. The controller approves or rejects each one.
+  A write-off request posts **nothing** until approved by a *different* `wh_adjust`
+  user; self-approval returns `SOD_VIOLATION` (control INV-07).
 
 ---
 

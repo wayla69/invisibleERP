@@ -252,7 +252,10 @@ export const INTERNAL_NAV: NavGroup[] = [
     workspace: ['erp'],
     items: [
       { label: 'สินค้าคงคลัง', href: '/inventory', icon: Package, perms: ['warehouse', 'dashboard', 'planner'] },
-      { label: 'ตรวจนับสต๊อก', href: '/stocktake', icon: ClipboardCheck, perms: ['warehouse', 'mobile'] },
+      // SoD R11: counting (wh_count) is separated from posting adjustments (wh_adjust).
+      { label: 'ตรวจนับสต๊อก', href: '/stocktake', icon: ClipboardCheck, perms: ['wh_count', 'warehouse', 'mobile'] },
+      // SoD R11: wh_adjust (Inventory Controller) posts variance from counts and approves write-offs.
+      { label: 'อนุมัติปรับสต๊อก', href: '/stock-adjustment', icon: SlidersHorizontal, perms: ['wh_adjust', 'warehouse'] },
       { label: 'ของเสีย / ทิ้ง', href: '/waste', icon: Trash2, perms: ['warehouse', 'pos', 'order_mgt'] },
       { label: 'รับสินค้า (GR)', href: '/receiving', icon: PackageCheck, perms: ['wh_receive', 'warehouse'] },
       { label: 'เบิก / โอนสินค้า', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
