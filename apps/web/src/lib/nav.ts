@@ -241,7 +241,9 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'ราคา & สาขา',
     workspace: BOTH,
     items: [
-      { label: 'กฎราคา & โปรโมชั่น', href: '/pricing', icon: Coins, perms: ['pos', 'order_mgt', 'exec'] },
+      // SoD R10: price/promo maintenance is a separate duty from selling (pos/order_mgt).
+      // Only PricingManager (pricelist, promos) or exec/admin may reach this screen.
+      { label: 'กฎราคา & โปรโมชั่น', href: '/pricing', icon: Coins, perms: ['pricelist', 'promos', 'exec'] },
       { label: 'สาขา & ยอดขายรวม (Branches)', href: '/branches', icon: Store, perms: ['branch', 'exec'] },
     ],
   },
