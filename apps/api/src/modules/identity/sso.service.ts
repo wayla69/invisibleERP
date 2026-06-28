@@ -59,6 +59,9 @@ export class SsoService {
     const found = await this.configForCode(tenantCode);
     if (!found || !found.cfg.ssoEnabled) throw new ServiceUnavailableException({ code: 'SSO_NOT_CONFIGURED', message: 'SSO is not configured', messageTh: 'ยังไม่ได้ตั้งค่า SSO' });
     const secret = found.cfg.oidcClientSecretEnc ? decrypt(found.cfg.oidcClientSecretEnc) : '';
+    // Fail closed on an empty secret: verifyHs256 would otherwise HMAC with an empty key, which any
+    // attacker can also compute — i.e. self-signed id_token forgery. Require a configured client secret.
+    if (!secret) throw new ServiceUnavailableException({ code: 'SSO_SECRET_MISSING', message: 'SSO client secret not configured — refusing to verify an id_token with an empty key', messageTh: 'ยังไม่ได้ตั้งค่า client secret ของ SSO' });
 
     let idToken = params.id_token;
     if (!idToken && params.code) idToken = await this.exchangeCode(found.cfg, params.code); // network (prod)

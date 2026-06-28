@@ -12,6 +12,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let body: { code: string; message: string; messageTh?: string } = {
       code: 'INTERNAL_ERROR',
       message: 'Unexpected error',
+      messageTh: 'เกิดข้อผิดพลาด',
     };
 
     if (exception instanceof HttpException) {
@@ -34,8 +35,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // 23505/23503 etc. are expected contention/integrity outcomes, not bugs — warn, no stack spam.
       this.logger.warn(`db ${exception.code}: ${exception.message}`);
     } else if (exception instanceof Error) {
+      // Log the real message + stack server-side, but DO NOT echo exception.message to the client:
+      // raw internal messages can leak infra detail (internal hosts/IPs, file paths, library text).
+      // The generic `body` ('Unexpected error') is returned instead.
       this.logger.error(exception.message, exception.stack);
-      body.message = exception.message;
     }
 
     res.status(status).send({ error: body });

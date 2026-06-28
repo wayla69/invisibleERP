@@ -20,7 +20,10 @@ import { PasswordService } from './password.service';
         }
         return {
           secret: secret ?? 'dev-only-insecure-secret-change-me',
-          signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '8h' },
+          signOptions: { algorithm: 'HS256', expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '8h' },
+          // Pin the accepted algorithm so verification can never be coerced into `alg:none` or an
+          // asymmetric-key confusion attack if an RS/ES public key is ever introduced to this module.
+          verifyOptions: { algorithms: ['HS256'] },
         };
       },
     }),

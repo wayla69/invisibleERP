@@ -31,8 +31,8 @@ export class AdminUsersController {
     reply.header('Content-Type', 'text/csv; charset=utf-8').header('Content-Disposition', 'attachment; filename="access-review.csv"').send(csv);
   }
   @Post('access-review/certify') certifyReview(@Body(new ZodValidationPipe(CertifyBody)) b: z.infer<typeof CertifyBody>, @CurrentUser() u: JwtUser) { return this.svc.certifyReview(b, u); }
-  @Post() create(@Body(new ZodValidationPipe(CreateBody)) b: z.infer<typeof CreateBody>) { return this.svc.create(b); }
-  @Patch(':username') update(@Param('username') u: string, @Body(new ZodValidationPipe(UpdateBody)) b: z.infer<typeof UpdateBody>) { return this.svc.update(u, b); }
+  @Post() create(@Body(new ZodValidationPipe(CreateBody)) b: z.infer<typeof CreateBody>, @CurrentUser() actor: JwtUser) { return this.svc.create(b, actor); }
+  @Patch(':username') update(@Param('username') u: string, @Body(new ZodValidationPipe(UpdateBody)) b: z.infer<typeof UpdateBody>, @CurrentUser() actor: JwtUser) { return this.svc.update(u, b, actor); }
   @Post(':username/reset-password') reset(@Param('username') u: string, @Body(new ZodValidationPipe(ResetBody)) b: z.infer<typeof ResetBody>) { return this.svc.resetPassword(u, b.password); }
   @Delete(':username') remove(@Param('username') u: string, @CurrentUser() actor: JwtUser) { return this.svc.remove(u, actor); }
 }

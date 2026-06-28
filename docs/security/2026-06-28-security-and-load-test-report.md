@@ -245,4 +245,29 @@ workstreams; each clears a large block of accepted advisories at once. Re-review
 > Per the repo documentation-sync policy: remediations touching controls map to `ITGC-AC-06` (MFA),
 > `ITGC-AC-07` (login lockout) and the SoD rules in `packages/shared/src/permissions.ts`; update the
 > affected process narratives, the RCM (`build_rcm.py`), and `tools/cutover/src/compliance.ts` alongside
-> the code. This report itself changes no application code.
+> the code.
+
+---
+
+## 7. Remediation applied in this change
+
+A first batch of contained, no-migration fixes was implemented and **verified live** on the same booted
+instance; typecheck clean, `compliance` (106) and `restaurant` (162) harnesses green.
+
+| # | Finding | Fix | Verification |
+|---|---------|-----|--------------|
+| **H2** | Non-Admin (`AccessAdmin`/SCIM) could mint an `Admin` → cross-tenant bypass | `AdminUsersService.create/update` now enforce an **Admin-grant guard**: only an `Admin` actor may grant the `Admin` role (`ADMIN_GRANT_DENIED`, 403). Controller passes `@CurrentUser()`; SCIM passes its principal. | Live: `AccessAdmin` create-Admin → **403**; promote-to-Admin → **403**; create-Sales → 201; real Admin create-Admin → 201. |
+| **M1** | SSO accepts an empty client secret → empty-key HS256 forgery | SSO callback **fails closed** on empty secret (`SSO_SECRET_MISSING`). | Code path; HS256 verify never runs with `''`. |
+| **M2** | Session JWT verify didn't pin the algorithm | `JwtModule` sets `verifyOptions.algorithms: ['HS256']` (+ `signOptions.algorithm`). | Live: normal login still 200 (HS256 unaffected). |
+| **H5** | Aggregator/channel webhooks compared the shared secret with timing-unsafe `!==` | New `safeEqualStr` (SHA-256 then `timingSafeEqual` — constant-time, length-independent) used in both `channel-adapter` and `channel-order` ingest. | Typecheck + `restaurant` harness green. |
+| **M4** | `AllExceptionsFilter` echoed raw `exception.message` to clients | Generic `Unexpected error` returned; real message/stack logged server-side only. | Code path; default body unchanged for mapped errors. |
+
+**Deliberately deferred** (each needs its own migration + tests + control-doc update, so out of scope for
+this contained batch): **C1** SSO `state`/nonce/PKCE store, **H1** per-account login lockout (`ITGC-AC-07`),
+**H3** member-token revocation (`jti` + watermark), **H4** argon2id + legacy-hash migration, **H6** refund
+row-lock, **M3** webhook-URL SSRF deny-list, and the **performance** items (cluster the API process, raise
+`DB_POOL_MAX`, batch the per-request RLS round-trips).
+
+Docs updated alongside the code: SSO/SCIM control-matrix row + revision history in
+`docs/process-narratives/27-platform-customization.md` (rev 1.1). No schema change, no new RCM control
+(the RCM xlsx is therefore not regenerated).

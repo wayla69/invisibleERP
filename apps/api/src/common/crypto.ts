@@ -48,6 +48,15 @@ export function safeEqualHex(a: string, b: string): boolean {
   return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
+// Constant-time, length-independent compare of two arbitrary secret strings. Both sides are SHA-256'd
+// first so the comparison is always over equal-length digests — this avoids the early-exit timing oracle
+// of `a !== b` AND avoids leaking the secret length. Use for bare shared-secret header auth (webhooks).
+export function safeEqualStr(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a ?? '').digest();
+  const hb = createHash('sha256').update(b ?? '').digest();
+  return timingSafeEqual(ha, hb);
+}
+
 // HMAC-SHA256 of a payload as lowercase hex — for verifying signed inbound webhooks (PSP callbacks).
 export function hmacSha256Hex(secret: string, payload: string | Buffer): string {
   return createHmac('sha256', secret).update(payload).digest('hex');

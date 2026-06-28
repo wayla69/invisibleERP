@@ -8,6 +8,7 @@ import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { normalizeAggregatorPayload } from './mappers';
 import { getPlatformProvider } from './providers';
+import { safeEqualStr } from '../../common/crypto';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const PLATFORMS = ['grab', 'lineman', 'foodpanda', 'robinhood'];
@@ -56,7 +57,7 @@ export class ChannelAdapterService {
     // Authenticate: per-platform shared secret, fail-CLOSED in production (a missing config rejects);
     // lenient only in dev/test so mock/local flows work — mirrors the restaurant aggregator webhook.
     const expected = process.env[`WEBHOOK_SECRET_${platform.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_SECRET;
-    if (expected) { if (secret !== expected) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
+    if (expected) { if (!secret || !safeEqualStr(secret, expected)) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
     else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
 
     const norm = normalizeAggregatorPayload(platform, payload);

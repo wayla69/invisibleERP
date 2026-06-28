@@ -9,6 +9,7 @@ import { MemberService } from '../loyalty/member.service';
 import { roundCurrency } from '../tax/money';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { safeEqualStr } from '../../common/crypto';
 import { RealtimeScope } from './realtime.scope';
 import { DineInService } from './dine-in.service';
 import { mintChannelToken, verifyChannelToken } from './channel-token.util';
@@ -220,7 +221,7 @@ export class ChannelOrderService {
   async ingestThirdParty(source: string, body: any, secret?: string) {
     if (!['grab', 'lineman'].includes(source)) throw new BadRequestException({ code: 'BAD_SOURCE', message: 'Unknown channel source', messageTh: 'ช่องทางไม่ถูกต้อง' });
     const expected = process.env[`WEBHOOK_SECRET_${source.toUpperCase()}`] || process.env.CHANNEL_WEBHOOK_SECRET;
-    if (expected) { if (secret !== expected) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
+    if (expected) { if (!secret || !safeEqualStr(secret, expected)) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
     else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
     if (!body?.ext_event_id || !body?.ext_order_id || !body?.store_ref) throw new BadRequestException({ code: 'BAD_PAYLOAD', message: 'ext_event_id, ext_order_id, store_ref required', messageTh: 'ข้อมูล webhook ไม่ครบ' });
     const { tenantId } = await this.resolveStore(body.store_ref);

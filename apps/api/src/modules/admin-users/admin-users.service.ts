@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, UnprocessableEntityException, Logger } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, UnprocessableEntityException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users, userPermissions, tenants, accessReviews } from '../../database/schema';
@@ -34,6 +34,21 @@ export class AdminUsersService {
     this.logger.warn(`SoD override for "${username}" by reason="${reason}" — conflicts: ${conflicts.map((c) => c.ruleId).join(',')}`);
   }
 
+  // Preventive privilege-escalation guard (ITGC-AC-02 authorization / ITGC-AC-09 SoD-on-provisioning):
+  // only an Admin may grant the Admin role. The RLS
+  // bypass (HQ "sees all") is keyed on role==='Admin', so without this a tenant-scoped AccessAdmin (which
+  // holds the `users` permission) could mint an Admin inside its own tenant — passing the RLS WITH CHECK —
+  // and then log in with full cross-tenant bypass. Applies equally to the SCIM provisioning principal.
+  private assertCanGrantRole(role: string | undefined, actor: JwtUser | undefined) {
+    if (role === 'Admin' && actor?.role !== 'Admin') {
+      throw new ForbiddenException({
+        code: 'ADMIN_GRANT_DENIED',
+        message: 'Only an Admin may grant the Admin role',
+        messageTh: 'เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถให้สิทธิ์ Admin ได้',
+      });
+    }
+  }
+
   private async tenantIdFor(code?: string): Promise<number | null> {
     if (!code) return null;
     const db = this.db as any;
@@ -50,11 +65,12 @@ export class AdminUsersService {
     return { users: rows.map((r: any) => ({ username: r.username, role: r.role, customer_name: r.code ?? null, must_change_password: !!r.mustChange })), count: rows.length };
   }
 
-  async create(dto: CreateUserDto) {
+  async create(dto: CreateUserDto, actor: JwtUser) {
     const db = this.db as any;
     if (!dto.password || dto.password.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException({ code: 'BAD_USERNAME', message: 'Username is required', messageTh: 'ต้องระบุชื่อผู้ใช้' });
+    this.assertCanGrantRole(dto.role, actor);
     const [exists] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
     if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
     this.assertNoSodConflict(username, dto.permissions, dto.allow_sod_override, dto.sod_reason);
@@ -67,11 +83,12 @@ export class AdminUsersService {
     return { username, role: dto.role, created: true };
   }
 
-  async update(username: string, dto: UpdateUserDto) {
+  async update(username: string, dto: UpdateUserDto, actor: JwtUser) {
     username = normalizeUsername(username);
     const db = this.db as any;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
+    this.assertCanGrantRole(dto.role, actor);
     this.assertNoSodConflict(username, dto.permissions, dto.allow_sod_override, dto.sod_reason);
     const set: any = {};
     if (dto.role) set.role = dto.role;
