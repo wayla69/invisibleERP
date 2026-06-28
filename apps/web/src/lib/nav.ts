@@ -321,7 +321,9 @@ export const INTERNAL_NAV: NavGroup[] = [
       {
         title: 'สมุดบัญชี & แยกประเภท',
         items: [
-          { label: 'บัญชีแยกประเภท', href: '/accounting', icon: BookText, perms: ['exec', 'creditors', 'ar'] },
+          // SoD R05: gl_post (GlAccountant) can reach the journal/posting tabs;
+          // gl_close (FinancialController) also reaches the JE-approval tab (guarded in-page).
+          { label: 'บัญชีแยกประเภท', href: '/accounting', icon: BookText, perms: ['gl_post', 'gl_close', 'approvals', 'exec', 'creditors', 'ar'] },
           { label: 'รับรู้รายได้', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'สินทรัพย์ถาวร', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
           { label: 'สัญญาเช่า (IFRS 16)', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
