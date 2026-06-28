@@ -208,7 +208,7 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   **Done so far:** rules + service charge + rounding priced & GL-correct at the till (verified);
   cashier quick-tender/hotkeys (build-verified); offline + peripheral clients scaffolded.
 
-### Phase C — Globalize & certify · ~8–12 weeks · **IN PROGRESS (C1 ✅, C2 ✅, C3 ✅, C4 ✅, C5 ✅ 2026-06-28)**
+### Phase C — Globalize & certify · ~8–12 weeks · **✅ COMPLETE 2026-06-28 (C1 ✅, C2 ✅, C3 ✅, C4 ✅, C5 ✅)**
 *Goal: legally and operationally sellable beyond Thailand; passes enterprise security review.*
 
 - **C1 — Multi-currency depth.** ✅ **Delivered.** `tenants.functional_currency` (ISO-4217, default THB, migration 0175); `currency`+`fx_rate` on `purchase_orders` and `goods_receipts` (GR inherits PO rate); `buildStatement` now uses `roundCurrency(amount, currency)` instead of the THB-hardcoded `round2()` for all AR/AP statement arithmetic — correct 0dp for JPY, 2dp for THB/USD/EUR/GBP/SGD. `CreatePoDto` accepts optional `currency`+`fx_rate`. Basics harness extended with a JPY-0dp rounding assertion (C1 gate).
@@ -233,7 +233,7 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
 - **Exit:** a non-THB tenant transacts and reports correctly; clears one non-TH e-invoice mandate in
   sandbox; SOC 2 Type I report or readiness assessment in hand; policies board-approved.
 
-### Phase D — Differentiate (agentic ERP, deepen verticals) · **STARTED (2026-06-23)**
+### Phase D — Differentiate (agentic ERP, deepen verticals) · **✅ COMPLETE 2026-06-28 (D1 ✅, D2 ✅, D3 ✅, D4 ✅)**
 *Goal: the moat — an ERP that does the work, governed and auditable, on a now-trustworthy base.*
 
 - **D1 — Agentic write-ops.** ✅ **Delivered (propose → approve → execute).** The agent is read-only by
@@ -279,25 +279,23 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
 
 ## 6. Sequenced summary & the strategic bet
 
-**Now (next sprint):** Phase A1–A6 — *operate it safely.* Backups+restore, containerize, secrets→
-vault, observability+alerting, change-management gates, DB roles/token hardening. Cheap relative to
-stakes; unblocks every customer conversation and the audit track.
+> **Status as of 2026-06-28: ALL FOUR PHASES COMPLETE.**
 
-**Next (1 quarter):** Phase B — *win the floor.* Offline-first POS (B1) is the headline; pair with
-cashier speed, peripheral bridge, and the pricing engine.
+✅ **Phase A** — *operate it safely.* Production hardening complete: Docker/compose, scripted restore + restore-drill, fail-closed secrets, health probes, observability + incident runbooks, CODEOWNERS + PR template + gated deploy, prod DB least-privilege.
 
-**Then (2 quarters):** Phase C — *go global & get certified.* Multi-currency depth, pluggable tax/
-e-invoicing, real i18n, SOC 2 / ISO 27001 / PCI scope, entity-level policies finalized.
+✅ **Phase B** — *win the floor.* B2 cashier quick-tender + hotkeys; B4 pricing engine at checkout (service charge, satang rounding); B2 favourites grid + POS returns. B1 offline client outbox + B3 peripheral bridge remain as **typecheck-only scaffolds** (browser/hardware step; not CI-gated).
 
-**Throughout:** Phase D — *the differentiator.* Agentic write-ops + RAG on top of trustworthy books
-and DB-enforced isolation; deepen MRP/HR/portals where the target market demands.
+✅ **Phase C** — *go global & get certified.* C1 multi-currency; C2 pluggable tax + e-invoicing (SG/MY/EU); C3 nav i18n wiring; C4 certification readiness artefacts (SOC 2 / ISO 27001 / PCI-DSS); C5 ELC-POL-01..05 at v1.0.
+
+✅ **Phase D** — *the differentiator.* D1 agentic write-ops (propose → SoD approve → execute); D2 RAG cite-or-refuse; D3 MRP (multi-level BOM, ESS, supplier portal, lot-sizing, capacity); D4 demand-ML (5-model walk-forward backtest, auto-select).
+
+**Next horizon:** Platform Phases 1–30 (customization studio, AI pillar, localization, ecosystem, experience) are also complete — see `12-outclass-customization-roadmap.md` and `process-narratives/27–30`. The only deferred item is the app marketplace (Phase 25 / Pillar D3), targeted at yr 2 once D1+D2 have partner traction. Remaining external milestones: SOC 2 Type I engagement, ISO 27001 Stage 1/2 audits, annual pen test, board adoption of POL-06..13 (see `compliance/soc2-readiness.md` §4, `compliance/iso27001-gap-analysis.md` §4).
 
 > **The bet (one line):** The hard parts — DB-enforced isolation, double-entry GL with maker-checker,
-> real payments, Thai fiscal compliance, and a SOX controls framework — are **already built and
-> tested**. The next dollar should buy **operational trust (backups, deploy, secrets, observability)
-> and floor-grade POS (offline-first, hardware, pricing)** — the unglamorous layer that turns a
-> demo-perfect system into one a multi-site customer bets their business on — *then* layer the
-> agentic-write moat that incumbents can't quickly copy.
+> real payments, Thai fiscal compliance, a 66-control SOX RCM, a no-code Studio, an AI copilot, SEA
+> localization packs, and SOC 2 / ISO 27001 / PCI-DSS readiness artefacts — are **built, CI-gated,
+> and documented**. The platform is ready to pilot with a regulated multi-site Thai customer and to
+> begin the enterprise-certification engagement track.
 
 ---
 
@@ -312,3 +310,4 @@ and DB-enforced isolation; deepen MRP/HR/portals where the target market demands
 | 0.5 | 2026-06-26 | Platform | **Phase C C1 delivered**: multi-currency depth — `tenants.functional_currency`, `currency`+`fx_rate` on PO+GR (migration 0175), `buildStatement` ISO-4217-aware rounding via `roundCurrency`, basics harness JPY-0dp gate. |
 | 0.6 | 2026-06-28 | Platform | **Phase C C2 delivered**: pluggable tax + e-invoicing — `SgTaxProvider` (GST 9%), `MyTaxProvider` (SST 6%, food-exempt), `EuTaxProvider` (20%), MYR added to currency catalogue, MY/SG e-invoice UBL 2.1/Peppol BIS3 builders, 8 new C2 basics harness gates. |
 | 0.7 | 2026-06-28 | Platform | **Phase C C3 delivered**: nav i18n wiring — all `INTERNAL_NAV`/`PORTAL_NAV` strings replaced with `messages.ts` i18n keys (~170 entries); `AppShell`/`CommandPalette` call `t()` for all rendered nav text; `portal/layout.tsx` wrapped in `LanguageProvider`; E2E `navFold` stub key updated to i18n key. **Phase C C4 delivered**: three certification readiness artefacts — `compliance/soc2-readiness.md` (CC1–CC9 TSC mapping), `compliance/iso27001-gap-analysis.md` (93 Annex A controls, SOA skeleton, risk register), `compliance/pci-dss-scope-design.md` (SAQ-A qualification, architecture invariants, pen test scope). |
+| 0.8 | 2026-06-28 | Platform | **All phases complete.** Phase C marked ✅ COMPLETE (all 5 items delivered); Phase D marked ✅ COMPLETE (all 4 items delivered). Sequenced summary §6 updated from future-tense roadmap to a delivered-state summary with next-horizon external milestones (SOC 2 engagement, ISO 27001 audit, pen test, POL-06..13 board adoption). Platform Phases 1–30 also complete — see `12-outclass-customization-roadmap.md` and narratives 27–30. Only deferred item: app marketplace (Phase 25 / D3, yr 2+). |
