@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Scale, ListChecks, ShieldCheck, X, Download, Link2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { useMe, hasPerm } from '@/lib/auth';
 import { ModulePage } from '@/components/module-page';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -19,6 +20,10 @@ import { statusVariant } from '@/components/ui';
 
 export default function ReconciliationPage() {
   const qc = useQueryClient();
+  const me = useMe();
+  // SoD R06: reconciliation preparer (recon_prep) ≠ certifier (approvals/gl_close).
+  // The certify button is hidden from recon_prep-only users to prevent self-certification.
+  const canCertify = hasPerm(me.data, 'approvals', 'gl_close', 'exec');
   const [selected, setSelected] = useState<number | null>(null);
   const q = useQuery<any>({ queryKey: ['recon-periods'], queryFn: () => api('/api/recon/periods') });
 
@@ -57,7 +62,7 @@ export default function ReconciliationPage() {
           )}
         </StateView>
 
-        {selected != null && <PeriodDetail id={selected} onClose={() => setSelected(null)} />}
+        {selected != null && <PeriodDetail id={selected} onClose={() => setSelected(null)} canCertify={canCertify} />}
       </div>
     </ModulePage>
   );
@@ -139,7 +144,7 @@ function OpenPeriod({ onDone }: { onDone: () => void }) {
 }
 
 // ───────────────────────── period detail: summary + import GL / auto-match / certify ─────────────────────────
-function PeriodDetail({ id, onClose }: { id: number; onClose: () => void }) {
+function PeriodDetail({ id, onClose, canCertify }: { id: number; onClose: () => void; canCertify: boolean }) {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['recon-summary', id], queryFn: () => api(`/api/recon/periods/${id}/summary`) });
 
@@ -198,9 +203,12 @@ function PeriodDetail({ id, onClose }: { id: number; onClose: () => void }) {
               <Button size="sm" variant="outline" disabled={autoMatch.isPending} onClick={() => autoMatch.mutate()}>
                 <Link2 className="size-4" /> {autoMatch.isPending ? 'กำลังจับคู่…' : 'จับคู่อัตโนมัติ'}
               </Button>
-              <Button size="sm" disabled={certify.isPending} onClick={() => certify.mutate()}>
-                <ShieldCheck className="size-4" /> {certify.isPending ? 'กำลังรับรอง…' : 'รับรองงวด'}
-              </Button>
+              {/* SoD R06: certify is approvals/gl_close only — recon_prep cannot self-certify */}
+              {canCertify && (
+                <Button size="sm" disabled={certify.isPending} onClick={() => certify.mutate()}>
+                  <ShieldCheck className="size-4" /> {certify.isPending ? 'กำลังรับรอง…' : 'รับรองงวด'}
+                </Button>
+              )}
             </div>
           </div>
         )}

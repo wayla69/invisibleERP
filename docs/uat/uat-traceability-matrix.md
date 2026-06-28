@@ -398,6 +398,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-102 | FinancialController sees "รออนุมัติ (JE)" tab | R05, GL-05 | 04 §9 |
 | UAT-GL-103 | GlAccountant can reach /accounting in nav (gl_post perm) | R05 | 04 §3 |
 | UAT-GL-104 | GlAccountant cannot see /finance/period-close in nav | R05, GL-15 | 04 §7 |
+| UAT-GL-105 | GlAccountant can reach /reconciliation in nav (recon_prep perm) | R06, REC-01 | 04 §7 |
+| UAT-GL-106 | GlAccountant cannot see certify button on /reconciliation | R06, REC-03 | 04 §7 |
+| UAT-GL-107 | FinancialController can certify a recon period | R06, REC-03 | 04 §7 |
+| UAT-GL-108 | API certify blocked for recon_prep-only token | R06, REC-03 | 04 §9 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -645,11 +649,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 02 Order-to-Cash | 55 | 25 |
 | 03 Procure-to-Pay | 27 | 12 |
 | 04 Inventory & WMS | 29 | 12 |
-| 05 GL & Close (incl. fixed assets / EAM) | 51 | 33 |
+| 05 GL & Close (incl. fixed assets / EAM) | 55 | 37 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 22 | 9 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **362** | **187** |
+| **Total** | **366** | **191** |
