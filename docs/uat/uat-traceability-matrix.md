@@ -313,6 +313,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-045 | Reserving beyond ATP blocked (INSUFFICIENT_ATP) | INV-09 | 03 §7, §9 |
 | UAT-INV-046 | Release frees a cancelled reservation | INV-09 | 03 §7 |
 | UAT-INV-047 | Fulfil is ATP-neutral vs on-hand drop | INV-09 | 03 §7 |
+| UAT-INV-060 | StockCounter cannot see /stock-adjustment in nav | R11, INV-04 | 03 §7, §11 |
+| UAT-INV-061 | StockCounter saves count — no Post button visible | R11, INV-04 | 03 §7 |
+| UAT-INV-062 | InventoryController posts a counted stocktake from /stock-adjustment | R11, INV-04 | 03 §7 |
+| UAT-INV-063 | POST /api/stocktake/:id/post blocked for wh_count-only token | R11, INV-04 | 03 §9 |
+| UAT-INV-064 | InventoryController approves write-off from /stock-adjustment | R11, INV-07 | 03 §9 |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 
@@ -635,7 +640,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 01 Security & Access | 19 | 13 |
 | 02 Order-to-Cash | 55 | 25 |
 | 03 Procure-to-Pay | 27 | 12 |
-| 04 Inventory & WMS | 24 | 7 |
+| 04 Inventory & WMS | 29 | 12 |
 | 05 GL & Close (incl. fixed assets / EAM) | 47 | 29 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 22 | 9 |
@@ -643,4 +648,4 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **353** | **178** |
+| **Total** | **358** | **183** |

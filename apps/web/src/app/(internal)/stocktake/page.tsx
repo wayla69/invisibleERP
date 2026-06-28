@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardCheck, ClipboardList, FileText, Plus, ScanLine, Trash2 } from 'lucide-react';
+// Note: post.mutate() removed from this page (wh_adjust duty). Posting variance is on /stock-adjustment.
 import { api } from '@/lib/api';
 import { num, thaiDate } from '@/lib/format';
 import { parseQrPayload } from '@/lib/qr';
@@ -61,12 +62,9 @@ function NewCount() {
 
   const save = useMutation({
     mutationFn: () => api<any>('/api/stocktake', { method: 'POST', body: JSON.stringify({ lines }) }),
-    onSuccess: (r) => { setSavedNo(r.st_no); notifySuccess(`บันทึกใบนับ ${r.st_no} (${r.variance_lines} รายการมีผลต่าง)`); setLines([]); qc.invalidateQueries({ queryKey: ['stocktakes'] }); },
-    onError: (e: any) => notifyError(e.message),
-  });
-  const post = useMutation({
-    mutationFn: () => api<any>(`/api/stocktake/${savedNo}/post`, { method: 'POST' }),
-    onSuccess: (r) => { notifySuccess(`ลงบัญชีใบนับ ${savedNo} แล้ว (${r.variance_movements ?? 0} รายการปรับยอด)`); setSavedNo(''); },
+    // SoD R11: count is saved here (wh_count); posting the variance to the GL is a separate
+    // wh_adjust action on /stock-adjustment — the counter cannot also approve their own count.
+    onSuccess: (r) => { setSavedNo(r.st_no); notifySuccess(`บันทึกใบนับ ${r.st_no} (${r.variance_lines} รายการมีผลต่าง) — ส่ง Inventory Controller อนุมัติที่ /stock-adjustment`); setLines([]); qc.invalidateQueries({ queryKey: ['stocktakes'] }); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -91,7 +89,7 @@ function NewCount() {
           </div>
           <Button disabled={!itemId || phys === ''} onClick={add}><Plus className="size-4" /> เพิ่ม</Button>
         </div>
-        {savedNo && <Button variant="outline" disabled={post.isPending} onClick={() => post.mutate()}><ClipboardCheck className="size-4" /> ลงบัญชีผลต่าง (Post {savedNo})</Button>}
+        {savedNo && <p className="text-sm text-muted-foreground"><ClipboardCheck className="mr-1 inline size-4 text-success" />บันทึกใบนับ {savedNo} แล้ว — Inventory Controller ลงบัญชีผลต่างได้ที่ <a href="/stock-adjustment" className="text-primary underline">/stock-adjustment</a></p>}
       </Card>
 
       {lines.length > 0 && (
