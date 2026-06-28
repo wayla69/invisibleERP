@@ -964,7 +964,61 @@ async function main() {
   ok('GL-16b: a different user can re-lock the reopened period → Locked',
     reLock.status === 200 && reLock.json?.status === 'Locked', `st=${reLock.status} status=${reLock.json?.status}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) ──');
+  // ───────────────────── C2 — Pluggable tax + e-invoicing (SG/MY/EU) ─────────────────────
+  // TC-C2-01: SG GST 9% — provider registered, calc correct.
+  const sgTax = (await inj('GET', '/api/tax/calc?country=SG&net=100&currency=SGD', admin)).json;
+  ok('C2: SG GST 9% — rate=0.09, tax=9.00, gross=109.00',
+    sgTax?.rate === 0.09 && sgTax?.tax === 9 && sgTax?.gross === 109,
+    `rate=${sgTax?.rate} tax=${sgTax?.tax} gross=${sgTax?.gross}`);
+
+  // TC-C2-02: MY SST 6% — provider registered, calc correct.
+  const myTax = (await inj('GET', '/api/tax/calc?country=MY&net=100&currency=MYR', admin)).json;
+  ok('C2: MY SST 6% — rate=0.06, tax=6.00, gross=106.00',
+    myTax?.rate === 0.06 && myTax?.tax === 6 && myTax?.gross === 106,
+    `rate=${myTax?.rate} tax=${myTax?.tax} gross=${myTax?.gross}`);
+
+  // TC-C2-03: MY SST exempt — food category → tax=0, label=SST Exempt.
+  const myFood = (await inj('GET', '/api/tax/calc?country=MY&net=200&currency=MYR&category=food', admin)).json;
+  ok('C2: MY food category → SST Exempt (tax=0)',
+    myFood?.rate === 0 && myFood?.tax === 0 && myFood?.label === 'SST Exempt',
+    `rate=${myFood?.rate} tax=${myFood?.tax} label=${myFood?.label}`);
+
+  // TC-C2-04: EU VAT 20% — rate=0.20, tax=20.00, gross=120.00.
+  const euTax = (await inj('GET', '/api/tax/calc?country=EU&net=100&currency=EUR', admin)).json;
+  ok('C2: EU VAT 20% — rate=0.20, tax=20.00, gross=120.00',
+    euTax?.rate === 0.20 && euTax?.tax === 20 && euTax?.gross === 120,
+    `rate=${euTax?.rate} tax=${euTax?.tax} gross=${euTax?.gross}`);
+
+  // TC-C2-05: /api/tax/providers lists SG, MY, EU as supported countries.
+  const provRes = (await inj('GET', '/api/tax/providers', admin)).json;
+  const provCountries: string[] = Array.isArray(provRes?.countries) ? provRes.countries : [];
+  ok('C2: TaxService registers SG, MY, EU providers',
+    provCountries.includes('SG') && provCountries.includes('MY') && provCountries.includes('EU'),
+    `supported=${JSON.stringify(provCountries)}`);
+
+  // TC-C2-06: MYR currency listed in /api/tax/currencies.
+  const curRes = (await inj('GET', '/api/tax/currencies', admin)).json;
+  const curCodes: string[] = Array.isArray(curRes?.currencies) ? curRes.currencies.map((c: any) => c.code) : [];
+  ok('C2: MYR added to currency catalogue',
+    curCodes.includes('MYR'),
+    `currencies=${JSON.stringify(curCodes)}`);
+
+  // TC-C2-07: MY e-invoice stub accepted via einvoice.my.myinvois provider.
+  // Config body uses { provider: '...' }; submit body wraps doc in { doc: { ... } }.
+  const setMy = await inj('PUT', '/api/einvoice/config', admin, { provider: 'einvoice.my.myinvois' });
+  const myInv = await inj('POST', '/api/einvoice/submit', admin, { doc: { doc_ref: 'MY-INV-C2-001', seller: 'Oshinei MY Sdn Bhd', buyer: 'Test Buyer MY', total: 106, currency: 'MYR' } });
+  ok('C2: MY e-invoice (MyInvois UBL 2.1) accepted — status=accepted, ref starts EINV-',
+    setMy.status === 200 && myInv.json?.status === 'accepted' && String(myInv.json?.ref ?? '').startsWith('EINV-'),
+    `set=${setMy.status} status=${myInv.json?.status} ref=${myInv.json?.ref} provider=${myInv.json?.provider}`);
+
+  // TC-C2-08: SG e-invoice stub accepted via einvoice.sg.invoicenow provider.
+  const setSg = await inj('PUT', '/api/einvoice/config', admin, { provider: 'einvoice.sg.invoicenow' });
+  const sgInv = await inj('POST', '/api/einvoice/submit', admin, { doc: { doc_ref: 'SG-INV-C2-001', seller: 'Oshinei SG Pte Ltd', buyer: 'Test Buyer SG', total: 109, currency: 'SGD' } });
+  ok('C2: SG e-invoice (Peppol BIS3) accepted — status=accepted, ref starts EINV-',
+    setSg.status === 200 && sgInv.json?.status === 'accepted' && String(sgInv.json?.ref ?? '').startsWith('EINV-'),
+    `set=${setSg.status} status=${sgInv.json?.status} ref=${sgInv.json?.ref} provider=${sgInv.json?.provider}`);
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

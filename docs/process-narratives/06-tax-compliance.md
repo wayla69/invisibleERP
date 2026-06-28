@@ -19,9 +19,9 @@ To control the computation, documentation, transmission, and reconciliation of T
 
 ## 3. Scope
 
-**In scope:** VAT 7% output/input computation, WHT computation and ภ.ง.ด. reporting, e-Tax invoice generation (ETDA UBL 2.1 XML) and transmission, legal tax-invoice numbering (per ม.86/4(4)), and tax-account-to-GL reconciliation.
+**In scope:** VAT 7% output/input computation, WHT computation and ภ.ง.ด. reporting, e-Tax invoice generation (ETDA UBL 2.1 XML) and transmission, legal tax-invoice numbering (per ม.86/4(4)), and tax-account-to-GL reconciliation. **C2 extension:** pluggable country tax providers (SG GST 9%, MY SST 6% with food-exempt category, EU VAT 20% placeholder); e-invoicing adapters for MY (LHDN MyInvois UBL 2.1) and SG (Peppol BIS3 InvoiceNow) as functional stubs.
 
-**Out of scope:** the underlying sales/purchase transactions (see `01-order-to-cash.md`, `02-procure-to-pay.md`), payroll PIT/PND1 (see `05-payroll.md`).
+**Out of scope:** the underlying sales/purchase transactions (see `01-order-to-cash.md`, `02-procure-to-pay.md`), payroll PIT/PND1 (see `05-payroll.md`). Full production MY/SG e-invoice submission (LHDN API credentials / Peppol AP registration) is a go-live workstream outside this scope.
 
 ## 4. References
 
@@ -57,7 +57,7 @@ To control the computation, documentation, transmission, and reconciliation of T
 
 ## 7. Process narrative
 
-1. **Rate configuration.** VAT is computed via a pluggable provider (TH 7%) with no hard-coded rate; the provider is unit-tested (**TAX-01**). Rate config changes are master-data-controlled and audited.
+1. **Rate configuration.** VAT/GST/SST is computed via a pluggable `TaxProvider` (registered per ISO-3166 country code: TH 7%, SG 9% GST, MY 6% SST, EU 20% VAT) with no hard-coded rate in callers; the provider is unit-tested (**TAX-01**). Rate config changes are master-data-controlled and audited. Unknown countries fall back to a `ZeroTaxProvider` (0%, explicitly labelled "No Tax").
 2. **VAT computation.** On each sale/purchase, output/input VAT is computed by the provider and carried into the revenue/expense journal (sales VAT posts with the automatic revenue JE, **REV-10**). Re-computation on a sample ties to the filed return (**TAX-01**).
 3. **Tax-invoice numbering (decision point).** A legally compliant, monthly per-seller sequential tax-invoice number is allocated atomically (doc numbering), satisfying ม.86/4(4) — gapless and unique.
 4. **e-Tax invoice generation, signing & transmission.** The e-Tax invoice is generated as ETDA UBL 2.1 XML; when a CA-issued certificate is configured (`ETAX_SIGNING_*`) it is sealed with an enveloped **XAdES** digital signature (RSA-SHA256 over the document + XAdES SignedProperties carrying SigningTime and the SigningCertificate digest), making it tamper-evident. The signed document is transmitted either to the customer by *e-Tax by Email* (CC the ETDA timestamp mailbox) or to a service provider (`ETAX_PROVIDER`: `mock` sandbox, or `http` for INET/Frank/Leceipt). Submission is idempotent (an `Accepted` document is never re-sent). XML schema correctness/escaping and signature integrity are tested (**TAX-02**).
@@ -159,6 +159,7 @@ New COA accounts: **1700** Deferred Tax Asset, **2700** Deferred Tax Liability, 
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.6 | 2026-06-28 | Platform | **C2 — Pluggable tax + e-invoicing (SG/MY/EU).** `SgTaxProvider` (GST 9%), `MyTaxProvider` (SST 6%, food exempt), `EuTaxProvider` (20% generic EU placeholder) added to `tax-providers.ts` and registered in `TaxService` constructor. `MYR` (Malaysian Ringgit, 2dp) added to the ISO-4217 currency catalogue (`money.ts`). `EInvoiceService` gains `buildMyInvoisXml` (LHDN MyInvois UBL 2.1) and `buildSgPeppolXml` (Peppol BIS3 InvoiceNow) document-builder stubs — `submit` routes to the appropriate builder when the active provider is MY/SG. Controller Zod schema updated to accept optional `currency` field in the invoice doc. Basics harness extended: 8 new C2 checks (TC-C2-01..08). §3 scope, §7 narrative and §8 flow updated. |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 DRAFT | 2026-06-24 | `<<author>>` | e-Tax invoices: added XAdES digital signing (`etax-sign.ts`, configurable cert) and idempotent provider submission (mock + generic `http` SP). Updated step 4, control TAX-02 matrix, and code refs. New harness `tools/cutover/src/etax-sign.ts`; `etax.ts` extended (submit + signed-fallback). |
 | 0.3 | 2026-06-26 | Platform | **Registered the VAT-return ↔ GL reconciliation as a named control (TAX-04).** The ภ.พ.30 report (`GET /api/tax-reports/pp30`) already computes net VAT (output − input) and ties it to the **GL 2100 (Tax Payable)** net movement for the period with a `reconciliation.tied` verdict — but the §9 control matrix mis-attributed this VAT reconciliation to TAX-03 (WHT). Split step 6/7 into **TAX-04** (VAT ภ.พ.30 ↔ GL-2100, detective, pre-filing) vs TAX-03 (WHT remittance ↔ GL); strengthened §7. No app-code change (capability pre-existed: output VAT posts Cr 2100 on sale, Dr on return; input VAT Dr 2100 on AP). ToE: `taxdocs` harness adds an explicit reconciliation-block assertion. RCM 94 → 95. |

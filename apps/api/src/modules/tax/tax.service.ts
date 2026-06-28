@@ -7,6 +7,9 @@ import {
   type TaxInput,
   type TaxResult,
   ThaiTaxProvider,
+  SgTaxProvider,
+  MyTaxProvider,
+  EuTaxProvider,
   ZeroTaxProvider,
 } from './tax-providers';
 import { CURRENCIES, getCurrency, roundCurrency } from './money';
@@ -38,6 +41,9 @@ export class TaxService {
 
   constructor(@Optional() @Inject(DRIZZLE) private readonly db?: DrizzleDb) {
     this.register(new ThaiTaxProvider());
+    this.register(new SgTaxProvider());
+    this.register(new MyTaxProvider());
+    this.register(new EuTaxProvider('EU', 0.20)); // generic EU — 20% standard rate placeholder
   }
 
   register(provider: TaxProvider): void {

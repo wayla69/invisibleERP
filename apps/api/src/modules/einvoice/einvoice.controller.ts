@@ -4,7 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { EInvoiceService } from './einvoice.service';
 
-const SubmitBody = z.object({ doc: z.object({ doc_ref: z.string().min(1), seller: z.string().optional(), buyer: z.string().optional(), total: z.number().optional(), lines: z.array(z.any()).optional() }) });
+const SubmitBody = z.object({ doc: z.object({ doc_ref: z.string().min(1), seller: z.string().optional(), buyer: z.string().optional(), total: z.number().optional(), currency: z.string().optional(), lines: z.array(z.any()).optional() }) });
 const ConfigBody = z.object({ provider: z.string().min(1) });
 
 // C3 (Phase 22) — pluggable e-invoicing engine. Submit via the configured provider (stub by default); no GL.

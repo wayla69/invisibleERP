@@ -208,13 +208,11 @@ conventions: Drizzle schema + hand-written migration in `meta/_journal.json`; te
   **Done so far:** rules + service charge + rounding priced & GL-correct at the till (verified);
   cashier quick-tender/hotkeys (build-verified); offline + peripheral clients scaffolded.
 
-### Phase C — Globalize & certify · ~8–12 weeks · **IN PROGRESS (C1 ✅, C5 ✅ 2026-06-26)**
+### Phase C — Globalize & certify · ~8–12 weeks · **IN PROGRESS (C1 ✅, C2 ✅, C5 ✅ 2026-06-28)**
 *Goal: legally and operationally sellable beyond Thailand; passes enterprise security review.*
 
 - **C1 — Multi-currency depth.** ✅ **Delivered.** `tenants.functional_currency` (ISO-4217, default THB, migration 0175); `currency`+`fx_rate` on `purchase_orders` and `goods_receipts` (GR inherits PO rate); `buildStatement` now uses `roundCurrency(amount, currency)` instead of the THB-hardcoded `round2()` for all AR/AP statement arithmetic — correct 0dp for JPY, 2dp for THB/USD/EUR/GBP/SGD. `CreatePoDto` accepts optional `currency`+`fx_rate`. Basics harness extended with a JPY-0dp rounding assertion (C1 gate).
-- **C2 — Pluggable tax + e-invoicing.** `TaxProvider` interface (Avalara/Stripe Tax adapter beyond
-  TH 7%); e-invoicing adapters following the proven TH pattern (Peppol / India IRN / Italy SdI /
-  MX CFDI).
+- **C2 — Pluggable tax + e-invoicing.** ✅ **Delivered.** `SgTaxProvider` (GST 9%), `MyTaxProvider` (SST 6%, food-exempt category), `EuTaxProvider` (20% generic EU placeholder) added to `tax-providers.ts` and registered in `TaxService`. `MYR` (Malaysian Ringgit, 2dp) added to ISO-4217 catalogue. `EInvoiceService` gains `buildMyInvoisXml` (LHDN MyInvois UBL 2.1) and `buildSgPeppolXml` (Peppol BIS3 InvoiceNow) document-builder stubs; `submit` routes to the appropriate builder per active provider. Basics harness: 8 new C2 gates (TC-C2-01..08: SG/MY/EU tax calc, food-exempt, providers list, MYR currency, MY/SG e-invoice submission).
 - **C3 — Real i18n framework.** Replace hardcoded TH/EN dicts with ICU/`next-intl`; abstract
   locale/currency/date/number formatting; extract strings.
 - **C4 — Certifications.** SOC 2 Type II + ISO 27001 readiness (leverage existing RCM/policies);
@@ -304,3 +302,4 @@ and DB-enforced isolation; deepen MRP/HR/portals where the target market demands
 | 0.3 | 2026-06-23 | Platform | **Phase B in progress**: B4 pricing rules now apply at dine-in checkout (+ service charge acct 4400, satang rounding acct 4900, `pricing` harness); B2 cashier quick-tender + hotkeys; B1 offline client outbox + B3 peripheral bridge scaffolds (backend offline-sync already existed). Verified pieces CI-gated; browser/hardware pieces are typecheck-only scaffolds. |
 | 0.4 | 2026-06-26 | Platform | **Phase B complete** (B2 favourites grid + POS returns ✅ PR #181; B4 retail portal pricing + service charge + satang rounding ✅ PR #182; B1 offline client outbox + B3 peripheral bridge as typecheck-only scaffolds). **Phase C C5 delivered**: ELC-POL-01..05 adopted at v1.0 (Code of Conduct, Whistleblower, DoA, Audit Committee Charter, Fraud Risk Assessment); COSO plan §6 updated. |
 | 0.5 | 2026-06-26 | Platform | **Phase C C1 delivered**: multi-currency depth — `tenants.functional_currency`, `currency`+`fx_rate` on PO+GR (migration 0175), `buildStatement` ISO-4217-aware rounding via `roundCurrency`, basics harness JPY-0dp gate. |
+| 0.6 | 2026-06-28 | Platform | **Phase C C2 delivered**: pluggable tax + e-invoicing — `SgTaxProvider` (GST 9%), `MyTaxProvider` (SST 6%, food-exempt), `EuTaxProvider` (20%), MYR added to currency catalogue, MY/SG e-invoice UBL 2.1/Peppol BIS3 builders, 8 new C2 basics harness gates. |
