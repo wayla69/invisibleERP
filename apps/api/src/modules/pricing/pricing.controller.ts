@@ -19,8 +19,11 @@ const QuoteBody = z.object({
 });
 const ComboBody = z.object({ components: z.array(z.object({ component_sku: z.string(), qty: z.number().optional(), unit_price_override: z.number().optional() })) });
 
+// SoD R10: price/promo maintenance (pricelist/promos) is segregated from POS selling (pos/order_mgt).
+// Read-only quote is still available to sellers for checkout price resolution;
+// CREATE/UPDATE/DELETE of pricing rules and combos require pricelist or exec.
 @Controller('api/pricing')
-@Permissions('pos', 'order_mgt', 'exec', 'cust_pos')
+@Permissions('pricelist', 'promos', 'pos', 'order_mgt', 'exec', 'cust_pos')
 export class PricingController {
   constructor(private readonly svc: PricingService) {}
 
@@ -28,9 +31,11 @@ export class PricingController {
 
   @Get('rules') list() { return this.svc.listRules(); }
   @Get('rules/:id') get(@Param('id') id: string) { return this.svc.getRule(+id); }
-  @Post('rules') @Permissions('pos', 'order_mgt', 'exec') upsert(@Body(new ZodValidationPipe(RuleBody)) b: z.infer<typeof RuleBody>, @CurrentUser() u: JwtUser) { return this.svc.upsertRule(b, u); }
-  @Delete('rules/:id') @Permissions('pos', 'order_mgt', 'exec') del(@Param('id') id: string) { return this.svc.deleteRule(+id); }
+  // R10: only PricingManager (pricelist) or exec may create/update/delete pricing rules.
+  @Post('rules') @Permissions('pricelist', 'exec') upsert(@Body(new ZodValidationPipe(RuleBody)) b: z.infer<typeof RuleBody>, @CurrentUser() u: JwtUser) { return this.svc.upsertRule(b, u); }
+  @Delete('rules/:id') @Permissions('pricelist', 'exec') del(@Param('id') id: string) { return this.svc.deleteRule(+id); }
 
   @Get('combos/:sku') getCombo(@Param('sku') sku: string) { return this.svc.getCombo(sku); }
-  @Put('combos/:sku') @Permissions('pos', 'order_mgt', 'exec') setCombo(@Param('sku') sku: string, @Body(new ZodValidationPipe(ComboBody)) b: z.infer<typeof ComboBody>, @CurrentUser() u: JwtUser) { return this.svc.setCombo(sku, b.components, u); }
+  // R10: combo maintenance is pricelist/promos only.
+  @Put('combos/:sku') @Permissions('pricelist', 'promos', 'exec') setCombo(@Param('sku') sku: string, @Body(new ZodValidationPipe(ComboBody)) b: z.infer<typeof ComboBody>, @CurrentUser() u: JwtUser) { return this.svc.setCombo(sku, b.components, u); }
 }

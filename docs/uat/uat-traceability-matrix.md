@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.3 · 2026-06-25** · *v0.3: mapped the POS touch-register cases UAT-O2C-151..155.*
+**Status: DRAFT v0.4 · 2026-06-28** · *v0.4: added UAT-ADM-089..093 (SoD R10 — pricing nav/API re-gate).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -543,6 +543,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-086 | R12 — POS Supervisor can authorize pending refunds | SoD R12, ITGC-AC-09 | 21 §7 |
 | UAT-ADM-087 | R12 — Self-approve refund request blocked | SoD R12, REV-16 | 21 §7 |
 | UAT-ADM-088 | R08 — POS Supervisor can manage till + approve variance | SoD R08, POS-01 | 20 §6 |
+| UAT-ADM-089 | R10 — Cashier cannot see pricing screen in nav | SoD R10, ITGC-AC-09 | 19 §4 |
+| UAT-ADM-090 | R10 — Sales role cannot reach /pricing via direct URL | SoD R10, ITGC-AC-09 | 19 §4 |
+| UAT-ADM-091 | R10 — PricingManager can access /pricing and create rule | SoD R10, MKT-01 | 19 §3 |
+| UAT-ADM-092 | R10 — API: pos-only token blocked from pricing mutations | SoD R10, MKT-01 | 19 §3 |
+| UAT-ADM-093 | R10 — API: pos token can still call pricing quote | SoD R10 (positive) | 19 §3 |
 
 ## 09 — Reports & Analytics → `01`/`04` narratives
 
