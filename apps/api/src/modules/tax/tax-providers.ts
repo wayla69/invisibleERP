@@ -38,6 +38,55 @@ export class ThaiTaxProvider implements TaxProvider {
   }
 }
 
+// Singapore — 9% GST (Goods and Services Tax, effective 1 Jan 2024).
+export class SgTaxProvider implements TaxProvider {
+  readonly country = 'SG';
+  private readonly rate = 0.09;
+
+  calc(input: TaxInput): TaxResult {
+    const net = Number(input?.net) || 0;
+    const currency = input?.currency ?? 'SGD';
+    const rate = input?.rate != null && input.rate >= 0 ? input.rate : this.rate;
+    return { rate, tax: roundCurrency(net * rate, currency), label: `GST ${+(rate * 100).toFixed(2)}%` };
+  }
+}
+
+// Malaysia — 6% SST (Sales and Service Tax). Food/beverage category is exempt (0%).
+export class MyTaxProvider implements TaxProvider {
+  readonly country = 'MY';
+  private readonly rate = 0.06;
+
+  calc(input: TaxInput): TaxResult {
+    const net = Number(input?.net) || 0;
+    const currency = input?.currency ?? 'MYR';
+    // Food, basic essentials and certain services are SST-exempt in Malaysia.
+    if (input?.category === 'food' || input?.category === 'basic_essential') {
+      return { rate: 0, tax: 0, label: 'SST Exempt' };
+    }
+    const rate = input?.rate != null && input.rate >= 0 ? input.rate : this.rate;
+    return { rate, tax: roundCurrency(net * rate, currency), label: `SST ${+(rate * 100).toFixed(2)}%` };
+  }
+}
+
+// EU / Generic — 20% VAT (representative standard rate; actual rate varies per member state).
+// Register country-specific providers (e.g. 'DE', 'FR') to override for individual states.
+export class EuTaxProvider implements TaxProvider {
+  readonly country: string;
+  private readonly rate: number;
+
+  constructor(country = 'EU', rate = 0.20) {
+    this.country = country;
+    this.rate = rate;
+  }
+
+  calc(input: TaxInput): TaxResult {
+    const net = Number(input?.net) || 0;
+    const currency = input?.currency ?? 'EUR';
+    const rate = input?.rate != null && input.rate >= 0 ? input.rate : this.rate;
+    return { rate, tax: roundCurrency(net * rate, currency), label: `VAT ${+(rate * 100).toFixed(2)}%` };
+  }
+}
+
 // Fallback — zero-rated / tax-exempt / unsupported country.
 export class ZeroTaxProvider implements TaxProvider {
   readonly country: string;

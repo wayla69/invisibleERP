@@ -21,6 +21,7 @@ export const CURRENCIES: Currency[] = [
   { code: 'JPY', decimals: 0, symbol: '¥', label: 'Japanese Yen' },
   { code: 'GBP', decimals: 2, symbol: '£', label: 'Pound Sterling' },
   { code: 'SGD', decimals: 2, symbol: 'S$', label: 'Singapore Dollar' },
+  { code: 'MYR', decimals: 2, symbol: 'RM', label: 'Malaysian Ringgit' },
 ];
 
 const CURRENCY_BY_CODE = new Map<string, Currency>(CURRENCIES.map((c) => [c.code, c]));
