@@ -202,7 +202,7 @@ test('server-saved favourites hydrate the sidebar and toggles are persisted to /
   await page.route('**/api/user-prefs', async (route) => {
     const req = route.request();
     const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
-    if (req.method() === 'GET') return json({ favorites: ['/procurement'], navFold: { 'ปรับแต่ง': true }, saved: true });
+    if (req.method() === 'GET') return json({ favorites: ['/procurement'], navFold: { 'nav.sub.customise': true }, saved: true });
     if (req.method() === 'PUT') {
       puts.push(JSON.parse(req.postData() || '{}'));
       return json({ favorites: [], navFold: {}, saved: true });
