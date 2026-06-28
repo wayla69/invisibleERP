@@ -262,12 +262,33 @@ instance; typecheck clean, `compliance` (106) and `restaurant` (162) harnesses g
 | **H5** | Aggregator/channel webhooks compared the shared secret with timing-unsafe `!==` | New `safeEqualStr` (SHA-256 then `timingSafeEqual` — constant-time, length-independent) used in both `channel-adapter` and `channel-order` ingest. | Typecheck + `restaurant` harness green. |
 | **M4** | `AllExceptionsFilter` echoed raw `exception.message` to clients | Generic `Unexpected error` returned; real message/stack logged server-side only. | Code path; default body unchanged for mapped errors. |
 
-**Deliberately deferred** (each needs its own migration + tests + control-doc update, so out of scope for
-this contained batch): **C1** SSO `state`/nonce/PKCE store, **H1** per-account login lockout (`ITGC-AC-07`),
-**H3** member-token revocation (`jti` + watermark), **H4** argon2id + legacy-hash migration, **H6** refund
-row-lock, **M3** webhook-URL SSRF deny-list, and the **performance** items (cluster the API process, raise
-`DB_POOL_MAX`, batch the per-request RLS round-trips).
+### 7.1 Second batch — remaining Critical/High/Medium + performance
 
-Docs updated alongside the code: SSO/SCIM control-matrix row + revision history in
-`docs/process-narratives/27-platform-customization.md` (rev 1.1). No schema change, no new RCM control
-(the RCM xlsx is therefore not regenerated).
+The deferred items were subsequently implemented and **verified live** (typecheck clean; `compliance` 106,
+`basics` 210, `restaurant` 162, `ext` 253 — the latter +3 new security checks):
+
+| # | Finding | Fix | Verification |
+|---|---------|-----|--------------|
+| **C1** | SSO callback never validated `state` → login-CSRF / account-fixation | Server-persisted, **single-use `state`** (`sso_login_state`, migration `0177`) minted by `authorize()`; OIDC **`nonce`** bound into the id_token; **PKCE** (S256) on the code exchange. | Live: forged state → **400 BAD_STATE**; valid handshake → 200; consumed state replay → 400. |
+| **H1** | No per-account login lockout | `login_attempts` (migration `0176`) written on an **autocommit** path (raw pg client) so failures survive the 401 rollback; 10 fails → 15-min lockout. | Live: 10 fails → 11th **429 LOGIN_LOCKED**; correct password blocked during lock; other accounts unaffected. |
+| **H3** | Member JWTs non-revocable (30d, no jti) | `jti` added (revocable via the existing denylist) + life cut to 7d; guard re-checks `pos_members.active` each request. | Live: deactivating a member → that token **401 MEMBER_DEACTIVATED** immediately; token now carries a jti. |
+| **H4** | Weak password KDF | Self-describing hardened scrypt `scrypt$N$r$p$salt$hash` (cost ↑, env-tunable); legacy hashes verify + transparently rehash on login. | Typecheck + auth harnesses green. |
+| **H6** | Refund TOCTOU over-refund | `requestRefund` sums settled **and** pending refunds under a `FOR UPDATE` payment-row lock. | `basics`/`restaurant` payment checks green. |
+| **M3** | Webhook-URL SSRF | `assertPublicUrl` (https-only in prod; rejects private/loopback/link-local/metadata) at register **and** re-checked at send (DNS-rebind). | Live: metadata/loopback/RFC1918 → **400 SSRF_BLOCKED**; public https → 201. |
+| **Perf** | 10-conn pool + single Node process | Opt-in clustering (`WEB_CONCURRENCY`); `DB_POOL_MAX` default 10→20; per-request RLS `set_config` collapsed 3→1 round-trip. | Load test below. |
+
+**Performance result (100 sessions):** clustered (4 workers × pool 20, batched RLS) → **946 req/s, p50 93 ms**
+vs the original **410 req/s, p50 242 ms** — **~2.3× throughput, ~2.6× lower p50 latency, 0 errors**. (Single
+process with the same code gains ~5%; the cluster — using the previously-idle cores — is the real win.)
+
+Docs updated: SSO/SCIM control-matrix row + revision history (rev 1.1 & 1.2) in
+`docs/process-narratives/27-platform-customization.md`; RCM readiness item `ITGC-AC-07` updated and the xlsx
+regenerated (`compliance/build_rcm.py`). Two journaled migrations added (`0176`, `0177`); both new tables are
+auth-global (pre-tenant) so no RLS. No new RCM control.
+
+### 7.2 Still open (genuinely out of scope here)
+
+Lower-priority/operational items remain: **M2-residual** RS256/JWKS SSO path (only HS256 implemented),
+server-side **MFA enforcement** (L3), TOTP single-use replay lock (L4), argon2id migration as the eventual
+KDF target (H4 is a strong interim), retiring the legacy SHA-256 verifier once dormant accounts are migrated,
+ops **alerting on repeated lockouts**, and the tracked dependency upgrades (drizzle-0.45, Fastify-5/Nest-11).

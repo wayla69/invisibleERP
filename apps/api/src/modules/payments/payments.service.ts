@@ -212,17 +212,23 @@ export class PaymentService {
   }
 
   // REV-16: park a large refund as a request (light-validate; no money moves until approved).
+  // Runs under a row lock on the payment, and counts BOTH settled refunds AND other still-pending requests,
+  // so two concurrent large requests can't each pass the remaining-amount check and later be approved into an
+  // over-refund (the approval path re-checks under its own lock, but we refuse to even queue an over-commit).
   private async requestRefund(dto: RefundDto, user: JwtUser) {
-    const db = this.db as any;
-    const [pay] = await db.select().from(payments).where(eq(payments.paymentNo, dto.payment_no)).limit(1);
-    if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
-    const status = String(pay.status ?? '');
-    if (status !== 'Captured' && status !== 'Settled' && status !== 'Refunded') throw new BadRequestException({ code: 'NOT_REFUNDABLE', message: `Payment in status ${status} cannot be refunded`, messageTh: 'รายการนี้ยังไม่ได้รับชำระ จึงคืนเงินไม่ได้' });
-    const [prior] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).where(eq(paymentRefunds.paymentNo, dto.payment_no));
-    const remaining = round2(n(pay.amount) - n(prior?.v));
-    if (n(dto.amount) > remaining + 1e-9) throw new BadRequestException({ code: 'OVER_REFUND', message: `Refund ${n(dto.amount)} exceeds remaining refundable ${remaining}`, messageTh: `จำนวนเงินคืนเกินยอดคงเหลือที่คืนได้ (${remaining})` });
-    const [req] = await db.insert(refundRequests).values({ tenantId: pay.tenantId, paymentNo: dto.payment_no, amount: fx(dto.amount, 4), reason: dto.reason ?? null, status: 'PendingApproval', requestedBy: user.username }).returning({ id: refundRequests.id });
-    return { status: 'PendingApproval', request_id: Number(req.id), payment_no: dto.payment_no, amount: n(dto.amount), message: 'Refund needs manager approval', messageTh: 'การคืนเงินต้องรอผู้จัดการอนุมัติ' };
+    return await (this.db as any).transaction(async (tx: any) => {
+      const [pay] = await tx.select().from(payments).where(eq(payments.paymentNo, dto.payment_no)).for('update').limit(1);
+      if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
+      const status = String(pay.status ?? '');
+      if (status !== 'Captured' && status !== 'Settled' && status !== 'Refunded') throw new BadRequestException({ code: 'NOT_REFUNDABLE', message: `Payment in status ${status} cannot be refunded`, messageTh: 'รายการนี้ยังไม่ได้รับชำระ จึงคืนเงินไม่ได้' });
+      const [prior] = await tx.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).where(eq(paymentRefunds.paymentNo, dto.payment_no));
+      const [pending] = await tx.select({ v: sql<string>`coalesce(sum(${refundRequests.amount}),0)` }).from(refundRequests).where(and(eq(refundRequests.paymentNo, dto.payment_no), eq(refundRequests.status, 'PendingApproval')));
+      const committed = n(prior?.v) + n(pending?.v); // settled + already-queued
+      const remaining = round2(n(pay.amount) - committed);
+      if (n(dto.amount) > remaining + 1e-9) throw new BadRequestException({ code: 'OVER_REFUND', message: `Refund ${n(dto.amount)} exceeds remaining refundable ${remaining} (incl. pending requests)`, messageTh: `จำนวนเงินคืนเกินยอดคงเหลือที่คืนได้ (${remaining})` });
+      const [req] = await tx.insert(refundRequests).values({ tenantId: pay.tenantId, paymentNo: dto.payment_no, amount: fx(dto.amount, 4), reason: dto.reason ?? null, status: 'PendingApproval', requestedBy: user.username }).returning({ id: refundRequests.id });
+      return { status: 'PendingApproval', request_id: Number(req.id), payment_no: dto.payment_no, amount: n(dto.amount), message: 'Refund needs manager approval', messageTh: 'การคืนเงินต้องรอผู้จัดการอนุมัติ' };
+    });
   }
 
   // POST /api/payments/refund-requests/:id/approve — a DIFFERENT user approves a parked refund → runs it.

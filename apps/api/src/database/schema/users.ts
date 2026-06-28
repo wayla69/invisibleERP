@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, timestamp, boolean, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, integer, text, timestamp, boolean, primaryKey } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 import { roleEnum } from './enums';
 
@@ -27,6 +27,29 @@ export const revokedTokens = pgTable('revoked_tokens', {
   username: text('username'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }).defaultNow(),
+});
+
+// ITGC-AC-07 — per-account login throttle/lockout. Keyed by normalized (lower) username. Written via an
+// AUTOCOMMIT path (not the per-request tx) so a failed-login increment survives the 401's tx rollback.
+// Auth-global (pre-tenant) → no tenant_id, no RLS.
+export const loginAttempts = pgTable('login_attempts', {
+  username: text('username').primaryKey(),
+  failCount: integer('fail_count').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  lastAttempt: timestamp('last_attempt', { withTimezone: true }).defaultNow(),
+});
+
+// SSO login-flow state (CSRF/replay protection for the OIDC handshake). One row per authorize() call; the
+// callback must present a matching, unconsumed, unexpired `state`. Carries the OIDC `nonce` (bound into the
+// id_token) and the PKCE `code_verifier`. Auth-global (pre-tenant, short-lived) → no tenant_id, no RLS.
+export const ssoLoginState = pgTable('sso_login_state', {
+  state: text('state').primaryKey(),
+  tenantCode: text('tenant_code').notNull(),
+  nonce: text('nonce').notNull(),
+  codeVerifier: text('code_verifier'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
 });
 
 // แทน Permissions CSV (de-serialized)

@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -7,6 +7,7 @@ import { resolvePermissions, requiresMfa, type Role, type Permission, type Login
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users, userPermissions, tenants, revokedTokens } from '../../database/schema';
 import { PasswordService } from './password.service';
+import { LoginAttemptStore } from './login-attempt.store';
 import { encrypt, decrypt } from '../../common/crypto';
 import { normalizeUsername } from '../../common/username';
 
@@ -16,6 +17,7 @@ export class AuthService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly jwt: JwtService,
     private readonly passwords: PasswordService,
+    private readonly attempts: LoginAttemptStore,
   ) {}
 
   async login(username: string, password: string, totp?: string): Promise<LoginResponse> {
@@ -23,9 +25,17 @@ export class AuthService {
     // (trimmed-lowercase), but legacy/seeded rows may still be mixed-case (pre-migration) — comparing on
     // lower() lets either authenticate without depending on the back-fill migration having run.
     const norm = normalizeUsername(username);
+    // ITGC-AC-07 — per-account lockout: refuse before doing any (expensive scrypt) work once the failed-attempt
+    // threshold is hit. The counter is written on the autocommit path so failures actually accumulate.
+    const retry = await this.attempts.retryAfterSeconds(norm);
+    if (retry > 0) {
+      throw new HttpException({ code: 'LOGIN_LOCKED', message: `Too many failed attempts. Try again in ${retry}s.`, messageTh: `พยายามเข้าสู่ระบบผิดหลายครั้ง กรุณาลองใหม่ใน ${retry} วินาที`, retry_after_s: retry }, HttpStatus.TOO_MANY_REQUESTS);
+    }
     const row = (await this.db.select().from(users).where(sql`lower(${users.username}) = ${norm}`).limit(1))[0];
-    const fail = () =>
-      new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or password', messageTh: 'Username หรือ Password ไม่ถูกต้อง' });
+    const fail = () => {
+      void this.attempts.recordFailure(norm); // fire-and-forget autocommit; do not delay the 401
+      return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or password', messageTh: 'Username หรือ Password ไม่ถูกต้อง' });
+    };
     if (!row) throw fail();
 
     const { ok, needsRehash } = await this.passwords.verify(password, row.passwordHash);
@@ -42,9 +52,13 @@ export class AuthService {
     // a valid TOTP code is required every login (verified against the AES-256-GCM-encrypted seed).
     if (row.mfaEnabled) {
       if (!totp) throw new UnauthorizedException({ code: 'MFA_REQUIRED', message: 'TOTP code required', messageTh: 'ต้องใส่รหัสยืนยันสองชั้น (OTP)' });
-      if (!row.totpSecret || !authenticator.verify({ token: totp, secret: decrypt(row.totpSecret) }))
+      if (!row.totpSecret || !authenticator.verify({ token: totp, secret: decrypt(row.totpSecret) })) {
+        void this.attempts.recordFailure(norm); // a wrong second factor counts toward lockout (TOTP brute force)
         throw new UnauthorizedException({ code: 'MFA_INVALID', message: 'Invalid TOTP code', messageTh: 'รหัส OTP ไม่ถูกต้อง' });
+      }
     }
+    // Full success (password + any required second factor) — clear the failed-attempt counter.
+    await this.attempts.clear(norm);
 
     // tenant code (legacy Customer_Name) สำหรับ scoping
     let customerName: string | null = null;

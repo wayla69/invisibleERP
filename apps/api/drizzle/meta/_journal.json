@@ -1233,6 +1233,20 @@
       "when": 2023820000002,
       "tag": "0175_multi_currency_depth",
       "breakpoints": true
+    },
+    {
+      "idx": 176,
+      "version": "7",
+      "when": 2023820000003,
+      "tag": "0176_login_lockout",
+      "breakpoints": true
+    },
+    {
+      "idx": 177,
+      "version": "7",
+      "when": 2023820000004,
+      "tag": "0177_sso_login_state",
+      "breakpoints": true
     }
   ]
 }

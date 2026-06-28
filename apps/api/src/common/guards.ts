@@ -6,7 +6,7 @@ import { eq, and, gt } from 'drizzle-orm';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, type JwtUser } from './decorators';
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
-import { users, revokedTokens } from '../database/schema';
+import { users, revokedTokens, posMembers } from '../database/schema';
 import { resolvePermissions } from '@ierp/shared';
 import { AUTH_COOKIE, CSRF_COOKIE, readCookie } from './cookies';
 
@@ -100,7 +100,15 @@ export class JwtAuthGuard implements CanActivate {
       const [rev] = await db.select({ j: revokedTokens.jti }).from(revokedTokens).where(and(eq(revokedTokens.jti, payload.jti), gt(revokedTokens.expiresAt, new Date()))).limit(1);
       if (rev) throw revoked;
     }
-    if (payload.sub) {
+    if (payload.sub && typeof payload.sub === 'string' && payload.sub.startsWith('member:')) {
+      // Member principal (loyalty self-service). Re-check pos_members.active each request so a
+      // deactivated/deprovisioned member's token stops working at once — not after its 7-day expiry.
+      const memberId = payload.memberId ?? Number(payload.sub.slice('member:'.length));
+      if (Number.isFinite(memberId)) {
+        const [m] = await db.select({ active: posMembers.active }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
+        if (m && m.active === false) throw new UnauthorizedException({ code: 'MEMBER_DEACTIVATED', message: 'This membership is no longer active', messageTh: 'สมาชิกนี้ถูกปิดใช้งาน' });
+      }
+    } else if (payload.sub) {
       const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom }).from(users).where(eq(users.username, payload.sub)).limit(1);
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });

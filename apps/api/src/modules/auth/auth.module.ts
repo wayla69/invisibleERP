@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PasswordService } from './password.service';
+import { LoginAttemptStore } from './login-attempt.store';
 
 @Module({
   imports: [
@@ -29,7 +30,7 @@ import { PasswordService } from './password.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, PasswordService],
+  providers: [AuthService, PasswordService, LoginAttemptStore],
   exports: [PasswordService, JwtModule],
 })
 export class AuthModule {}
