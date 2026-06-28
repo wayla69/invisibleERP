@@ -20,6 +20,7 @@ import {
   type NavItem,
   type Workspace,
 } from '@/lib/nav';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
   Sidebar,
@@ -126,6 +127,7 @@ export function AppShell({
   const pathname = usePathname();
   const me = useMe();
   const moduleFlags = useModuleFlags();
+  const { t } = useLang();
   const [paletteOpen, setPaletteOpen] = React.useState(false);
 
   // Favourites (★ pins) + nav fold-state are synced across devices via /api/user-prefs; auto-tracked
@@ -346,8 +348,7 @@ export function AppShell({
   const isActive = (href: string) =>
     pathname === href || (href !== '/dashboard' && href !== '/portal/dashboard' && pathname.startsWith(href + '/'));
 
-  const activeLabel =
-    groups.flatMap((g) => allGroupItems(g)).find((it) => isActive(it.href))?.label ?? brand;
+  const activeItemLabel = groups.flatMap((g) => allGroupItems(g)).find((it) => isActive(it.href))?.label;
 
   // Resolve pinned hrefs against the items actually visible in the active workspace (perm-filtered), so we
   // never surface a favourite/recent the user can't currently reach. Recents exclude current favourites.
@@ -393,12 +394,13 @@ export function AppShell({
 
   const renderItem = (item: NavItem) => {
     const fav = favSet.has(item.href);
+    const label = t(item.label);
     return (
       <SidebarMenuItem key={item.href}>
-        <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.label}>
+        <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={label}>
           <Link href={item.href}>
             <item.icon />
-            <span>{item.label}</span>
+            <span>{label}</span>
           </Link>
         </SidebarMenuButton>
         {pinsEnabled && (
@@ -411,8 +413,8 @@ export function AppShell({
               toggleFavorite(item.href);
             }}
             aria-pressed={fav}
-            aria-label={fav ? `เอา ${item.label} ออกจากรายการโปรด` : `เพิ่ม ${item.label} ในรายการโปรด`}
-            title={fav ? 'เอาออกจากรายการโปรด' : 'เพิ่มในรายการโปรด'}
+            aria-label={fav ? t('nav.fav_remove', { label }) : t('nav.fav_add', { label })}
+            title={fav ? t('nav.fav_remove_short') : t('nav.fav_add_short')}
             className={cn(
               'absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground/50 outline-none ring-sidebar-ring transition-opacity hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:ring-2 group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 group-data-[collapsible=icon]:hidden',
               fav ? 'text-amber-500 opacity-100' : 'opacity-0',
@@ -433,18 +435,19 @@ export function AppShell({
       e.preventDefault();
       e.stopPropagation();
     };
+    const label = t(item.label);
     const onHover = 'opacity-0 group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100';
     return (
       <SidebarMenuItem key={item.href}>
         <SidebarMenuButton
           asChild
           isActive={isActive(item.href)}
-          tooltip={item.label}
+          tooltip={label}
           className="pr-[4.25rem] group-data-[collapsible=icon]:pr-2"
         >
           <Link href={item.href}>
             <item.icon />
-            <span>{item.label}</span>
+            <span>{label}</span>
           </Link>
         </SidebarMenuButton>
         <div className="absolute right-1 top-1.5 flex items-center gap-0.5 group-data-[collapsible=icon]:hidden">
@@ -452,8 +455,8 @@ export function AppShell({
             type="button"
             className={cn(FAV_BTN, onHover)}
             disabled={index === 0}
-            aria-label={`ย้าย ${item.label} ขึ้น`}
-            title="ย้ายขึ้น"
+            aria-label={t('nav.move_up', { label })}
+            title={t('nav.move_up_short')}
             onClick={(e) => {
               stop(e);
               if (index > 0) swapFavorites(item.href, list[index - 1].href);
@@ -465,8 +468,8 @@ export function AppShell({
             type="button"
             className={cn(FAV_BTN, onHover)}
             disabled={index === list.length - 1}
-            aria-label={`ย้าย ${item.label} ลง`}
-            title="ย้ายลง"
+            aria-label={t('nav.move_down', { label })}
+            title={t('nav.move_down_short')}
             onClick={(e) => {
               stop(e);
               if (index < list.length - 1) swapFavorites(item.href, list[index + 1].href);
@@ -477,8 +480,8 @@ export function AppShell({
           <button
             type="button"
             className={cn(FAV_BTN, 'text-amber-500')}
-            aria-label={`เอา ${item.label} ออกจากรายการโปรด`}
-            title="เอาออกจากรายการโปรด"
+            aria-label={t('nav.fav_remove', { label })}
+            title={t('nav.fav_remove_short')}
             onClick={(e) => {
               stop(e);
               toggleFavorite(item.href);
@@ -537,7 +540,7 @@ export function AppShell({
         <SidebarContent>
           {pinsEnabled && favItems.length > 0 && (
             <SidebarGroup>
-              <SidebarGroupLabel>รายการโปรด</SidebarGroupLabel>
+              <SidebarGroupLabel>{t('nav.favorites')}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>{favItems.map((it, i) => renderFavoriteItem(it, i, favItems))}</SidebarMenu>
               </SidebarGroupContent>
@@ -545,7 +548,7 @@ export function AppShell({
           )}
           {pinsEnabled && recentItems.length > 0 && (
             <SidebarGroup>
-              <SidebarGroupLabel>ล่าสุด</SidebarGroupLabel>
+              <SidebarGroupLabel>{t('nav.recents')}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>{recentItems.map(renderItem)}</SidebarMenu>
               </SidebarGroupContent>
@@ -553,7 +556,7 @@ export function AppShell({
           )}
           {groups.map((group) => (
             <SidebarGroup key={group.title}>
-              <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
+              <SidebarGroupLabel>{t(group.title)}</SidebarGroupLabel>
               <SidebarGroupContent>
                 {group.items && group.items.length > 0 && (
                   <SidebarMenu>{group.items.map(renderItem)}</SidebarMenu>
@@ -563,7 +566,7 @@ export function AppShell({
                   return (
                     <NavSubSection
                       key={sub.title}
-                      title={sub.title}
+                      title={t(sub.title)}
                       open={open}
                       onToggle={() => toggleFold(sub.title, sub.defaultOpen ?? true)}
                     >
@@ -598,7 +601,7 @@ export function AppShell({
         <header className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center gap-2 border-b bg-background/95 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] safe-pt backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-1 h-5" />
-          <h2 className="text-sm font-medium">{activeLabel}</h2>
+          <h2 className="text-sm font-medium">{activeItemLabel ? t(activeItemLabel) : brand}</h2>
 
           <div className="ml-auto flex items-center gap-1.5">
             <Button
@@ -608,12 +611,12 @@ export function AppShell({
               onClick={() => setPaletteOpen(true)}
             >
               <Search className="size-4" />
-              <span>ค้นหา…</span>
+              <span>{t('common.search')}</span>
               <kbd className="pointer-events-none ml-2 hidden h-5 items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium md:inline-flex">
                 ⌘K
               </kbd>
             </Button>
-            <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => setPaletteOpen(true)} aria-label="ค้นหา">
+            <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => setPaletteOpen(true)} aria-label={t('common.search')}>
               <Search className="size-4" />
             </Button>
             <NotificationBell />
@@ -621,7 +624,7 @@ export function AppShell({
             <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full" aria-label="บัญชีผู้ใช้">
+                <Button variant="ghost" size="icon" className="rounded-full" aria-label={t('common.user_account')}>
                   <Avatar className="size-8">
                     <AvatarFallback className="bg-primary/10 text-primary text-xs">
                       {initials(me.data?.username)}
@@ -642,7 +645,7 @@ export function AppShell({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={logout}>
                   <LogOut />
-                  ออกจากระบบ
+                  {t('common.logout')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
