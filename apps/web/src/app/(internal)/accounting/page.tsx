@@ -6,6 +6,7 @@ import { Check, Plus, Save, Scale, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
+import { useMe, hasPerm } from '@/lib/auth';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -26,24 +27,29 @@ const selectCls =
   'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function AccountingPage() {
+  const me = useMe();
+  // SoD R05/GL-05: JE preparer (gl_post) ≠ JE approver (approvals/gl_close).
+  // The "รออนุมัติ (JE)" tab is only shown to users who hold the approval duty.
+  const canApproveJE = hasPerm(me.data, 'approvals', 'gl_close', 'exec');
+
+  const tabs = [
+    { key: 'tb', label: 'งบทดลอง', content: <TrialBalance /> },
+    { key: 'coa', label: 'ผังบัญชี', content: <ChartOfAccounts /> },
+    { key: 'journal', label: 'สมุดรายวัน', content: <Journal /> },
+    ...(canApproveJE ? [{ key: 'approve', label: 'รออนุมัติ (JE)', content: <PendingJournal /> }] : []),
+    { key: 'pl', label: 'งบกำไรขาดทุน', content: <IncomeStatement /> },
+    { key: 'bs', label: 'งบดุล', content: <BalanceSheet /> },
+    { key: 'cf', label: 'งบกระแสเงินสด', content: <CashFlow /> },
+    { key: 'opening', label: 'ยอดยกมา', content: <OpeningBalances /> },
+  ];
+
   return (
     <div>
       <PageHeader
         title="บัญชีแยกประเภท"
         description="บัญชีคู่ (double-entry) — ทุกการขายลงบัญชีอัตโนมัติ เดบิตต้องเท่าเครดิตเสมอ"
       />
-      <Tabs
-        tabs={[
-          { key: 'tb', label: 'งบทดลอง', content: <TrialBalance /> },
-          { key: 'coa', label: 'ผังบัญชี', content: <ChartOfAccounts /> },
-          { key: 'journal', label: 'สมุดรายวัน', content: <Journal /> },
-          { key: 'approve', label: 'รออนุมัติ (JE)', content: <PendingJournal /> },
-          { key: 'pl', label: 'งบกำไรขาดทุน', content: <IncomeStatement /> },
-          { key: 'bs', label: 'งบดุล', content: <BalanceSheet /> },
-          { key: 'cf', label: 'งบกระแสเงินสด', content: <CashFlow /> },
-          { key: 'opening', label: 'ยอดยกมา', content: <OpeningBalances /> },
-        ]}
-      />
+      <Tabs tabs={tabs} />
     </div>
   );
 }

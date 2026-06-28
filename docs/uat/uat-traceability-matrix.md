@@ -394,6 +394,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | TC-CON-02-02 | Consolidation run→post maker-checker (SELF_POST/ALREADY_POSTED) | CON-03, R07 | 11 §7.9 |
 | TC-CON-02-03 | Unbalanced eliminations → CONSOL_UNBALANCED (rolled back) | CON-03 | 11 §7.8 |
 | TC-CON-03-01 | Segment report (IFRS 8) groups P&L by dimension | CON-04 | 11 §7.10 |
+| UAT-GL-101 | GlAccountant cannot see "รออนุมัติ (JE)" tab | R05, GL-05 | 04 §9 |
+| UAT-GL-102 | FinancialController sees "รออนุมัติ (JE)" tab | R05, GL-05 | 04 §9 |
+| UAT-GL-103 | GlAccountant can reach /accounting in nav (gl_post perm) | R05 | 04 §3 |
+| UAT-GL-104 | GlAccountant cannot see /finance/period-close in nav | R05, GL-15 | 04 §7 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -641,11 +645,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 02 Order-to-Cash | 55 | 25 |
 | 03 Procure-to-Pay | 27 | 12 |
 | 04 Inventory & WMS | 29 | 12 |
-| 05 GL & Close (incl. fixed assets / EAM) | 47 | 29 |
+| 05 GL & Close (incl. fixed assets / EAM) | 51 | 33 |
 | 06 Tax | 13 | 4 |
 | 07 Payroll | 22 | 9 |
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **358** | **183** |
+| **Total** | **362** | **187** |
