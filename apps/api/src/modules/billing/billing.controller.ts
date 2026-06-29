@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Public, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BillingService, type SignupDto } from './billing.service';
+import { SaasMetricsService } from './saas-metrics.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -23,7 +24,15 @@ const ChangePlanBody = z.object({ plan_code: z.string().min(1) });
 
 @Controller('api')
 export class BillingController {
-  constructor(private readonly svc: BillingService) {}
+  constructor(
+    private readonly svc: BillingService,
+    private readonly metrics: SaasMetricsService,
+  ) {}
+
+  // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
+  // gated by `exec`; an HQ/Admin caller (RLS bypass) sees the whole book, a tenant-scoped exec only its own.
+  @Get('billing/saas-metrics') @Permissions('exec')
+  saasMetrics(@CurrentUser() u: JwtUser) { return this.metrics.overview(u); }
 
   // PUBLIC self-serve signup — provisions tenant + admin user + trialing subscription
   @Post('auth/signup') @Public()

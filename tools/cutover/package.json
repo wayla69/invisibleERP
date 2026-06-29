@@ -77,6 +77,7 @@
     "bi-cache": "tsx src/bi-cache.ts",
     "pdf-render": "tsx src/pdf-render.ts",
     "pdpa": "tsx src/pdpa.ts",
+    "saas-metrics": "tsx src/saas-metrics.ts",
     "match": "tsx src/match.ts",
     "costing": "tsx src/costing.ts",
     "wms": "tsx src/wms.ts",

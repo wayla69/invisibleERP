@@ -4,6 +4,7 @@ import { LedgerModule } from '../ledger/ledger.module';
 import { TaxModule } from '../tax/tax.module';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
+import { SaasMetricsService } from './saas-metrics.service';
 import { TenantController } from './tenant.controller';
 import { PlanGuard } from './plan.guard';
 
@@ -14,7 +15,7 @@ import { PlanGuard } from './plan.guard';
 @Module({
   imports: [AuthModule, LedgerModule, TaxModule],
   controllers: [BillingController, TenantController],
-  providers: [BillingService, PlanGuard],
+  providers: [BillingService, SaasMetricsService, PlanGuard],
   exports: [BillingService, PlanGuard],
 })
 export class BillingModule {}
