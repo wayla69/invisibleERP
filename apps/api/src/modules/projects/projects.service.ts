@@ -7,14 +7,16 @@ import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
+const r4 = (x: unknown) => Math.round((Number(x) || 0) * 10000) / 10000;
 const clampPct = (x: unknown) => Math.max(0, Math.min(100, r2(x)));
+const depsCsv = (ids?: number[]) => (ids && ids.length ? ids.map((i) => Number(i)).filter((i) => Number.isFinite(i)).join(',') : null);
 
 export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string }
 export interface CostDto { entry_type?: 'time' | 'expense'; description?: string; qty?: number; rate?: number; amount?: number; billable?: boolean; entry_date?: string }
 export interface BillDto { amount?: number; percent?: number }
 export interface FromOpportunityDto { project_code?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; start_date?: string; end_date?: string }
-export interface TaskDto { name: string; parent_id?: number; wbs_code?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string }
-export interface TaskPatchDto { name?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string }
+export interface TaskDto { name: string; parent_id?: number; wbs_code?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[] }
+export interface TaskPatchDto { name?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[] }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
@@ -172,7 +174,7 @@ export class ProjectsService {
       projectId: Number(p.id), tenantId, parentId: dto.parent_id ?? null, wbsCode: dto.wbs_code ?? null, name: dto.name,
       status: dto.status ?? 'open', plannedStart: dto.planned_start ?? null, plannedEnd: dto.planned_end ?? null,
       plannedHours: fx(dto.planned_hours ?? 0, 2), plannedCost: fx(dto.planned_cost ?? 0, 2),
-      pctComplete: fx(clampPct(dto.pct_complete ?? 0), 2), assignee: dto.assignee ?? null, createdBy: user.username,
+      pctComplete: fx(clampPct(dto.pct_complete ?? 0), 2), dependsOn: depsCsv(dto.depends_on), assignee: dto.assignee ?? null, createdBy: user.username,
     }).returning({ id: projectTasks.id });
     return this.listTasks(code);
   }
@@ -196,6 +198,10 @@ export class ProjectsService {
     if (dto.planned_hours != null) set.plannedHours = fx(dto.planned_hours, 2);
     if (dto.planned_cost != null) set.plannedCost = fx(dto.planned_cost, 2);
     if (dto.assignee != null) set.assignee = dto.assignee;
+    if (dto.depends_on != null) {
+      if (dto.depends_on.some((d) => Number(d) === Number(taskId))) throw new BadRequestException({ code: 'BAD_DEPENDENCY', message: 'A task cannot depend on itself', messageTh: 'งานขึ้นกับตัวเองไม่ได้' });
+      set.dependsOn = depsCsv(dto.depends_on);
+    }
     // Marking a task done implies 100% complete unless an explicit pct is given.
     if (dto.pct_complete != null) set.pctComplete = fx(clampPct(dto.pct_complete), 2);
     else if (dto.status === 'done') set.pctComplete = fx(100, 2);
@@ -316,6 +322,39 @@ export class ProjectsService {
     return { utilization, over_allocated_count: utilization.filter((u) => u.over_allocated).length };
   }
 
+  // ── Earned-value management (P4, PROJ-06) ────────────────────────────────
+  // Computes BAC / PV / EV / AC → CPI / SPI + cost & schedule variance + EAC/ETC from the project's WBS tasks
+  // (planned cost, % complete, planned_end schedule) and its actual cost incurred, and reconciles EV/AC against
+  // the project's WIP actuals. `as_of` defaults to the business day; PV counts tasks scheduled to finish by then.
+  async evm(code: string, asOf?: string) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
+    const today = asOf ?? ymd();
+    let bac = 0, ev = 0, pv = 0;
+    for (const t of tasks) {
+      const pc = n(t.plannedCost);
+      bac = r2(bac + pc);
+      ev = r2(ev + pc * clampPct(t.pctComplete) / 100);
+      // Planned value = budgeted cost of work scheduled by `as_of` (a task with no planned_end counts as scheduled).
+      if (!t.plannedEnd || t.plannedEnd <= today) pv = r2(pv + pc);
+    }
+    // Fall back to the project budget as the baseline when no task planned cost is set.
+    if (bac === 0) { bac = n(p.budgetAmount); pv = bac; }
+    // Actual cost incurred = recoverable WIP cost (cost_to_date) + non-billable (the project's total actual cost).
+    const nbRows = await db.select({ v: sql<string>`coalesce(sum(${projectEntries.amount}),0)` }).from(projectEntries)
+      .where(and(eq(projectEntries.projectId, Number(p.id)), eq(projectEntries.billable, false)));
+    const ac = r2(n(p.costToDate) + n(nbRows[0]?.v));
+    const cpi = ac > 0 ? r4(ev / ac) : null;        // >1 under cost, <1 over cost
+    const spi = pv > 0 ? r4(ev / pv) : null;        // >1 ahead of schedule, <1 behind
+    const eac = cpi && cpi > 0 ? r2(ac + (bac - ev) / cpi) : r2(ac + (bac - ev)); // estimate at completion
+    return {
+      project_code: code, as_of: today, bac, pv, ev, ac,
+      cost_variance: r2(ev - ac), schedule_variance: r2(ev - pv),
+      cpi, spi, eac, etc: r2(eac - ac), task_count: tasks.length,
+    };
+  }
+
   private async row(code: string) {
     const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
@@ -347,7 +386,7 @@ export class ProjectsService {
 }
 
 function shapeTask(t: any) {
-  return { id: Number(t.id), project_id: Number(t.projectId), parent_id: t.parentId != null ? Number(t.parentId) : null, wbs_code: t.wbsCode, name: t.name, status: t.status, planned_start: t.plannedStart, planned_end: t.plannedEnd, planned_hours: n(t.plannedHours), planned_cost: n(t.plannedCost), pct_complete: n(t.pctComplete), assignee: t.assignee, created_at: t.createdAt };
+  return { id: Number(t.id), project_id: Number(t.projectId), parent_id: t.parentId != null ? Number(t.parentId) : null, wbs_code: t.wbsCode, name: t.name, status: t.status, planned_start: t.plannedStart, planned_end: t.plannedEnd, planned_hours: n(t.plannedHours), planned_cost: n(t.plannedCost), pct_complete: n(t.pctComplete), depends_on: t.dependsOn ? String(t.dependsOn).split(',').map((x: string) => Number(x)).filter((x: number) => Number.isFinite(x)) : [], assignee: t.assignee, created_at: t.createdAt };
 }
 function shapeMilestone(m: any) {
   return { id: Number(m.id), project_id: Number(m.projectId), name: m.name, due_date: m.dueDate, owner: m.owner, status: m.status, billing_percent: m.billingPercent != null ? n(m.billingPercent) : null, reached_at: m.reachedAt, created_at: m.createdAt };

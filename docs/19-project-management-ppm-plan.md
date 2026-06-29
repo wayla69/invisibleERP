@@ -1,6 +1,6 @@
 # 19 — Project Management (PPM) — In-Depth Design & Roadmap
 
-> **Date:** 2026-06-29 · **Status:** v0.1 DRAFT — PLANNING (no code yet) · **Owner:** ERP / Product
+> **Date:** 2026-06-29 · **Status:** v1.0 — **P0–P4 DELIVERED** (backend + docs; see §11 status) · **Owner:** ERP / Product
 > **Scope:** Take the ERP's project capability from *project accounting* to a full **operational
 > Project & Portfolio Management (PPM)** experience — work breakdown, milestones, resourcing,
 > timesheet-driven labor, schedule/Gantt/EVM — and a **Salesforce-style opportunity pipeline with
@@ -186,6 +186,21 @@ journal entry, and appends the RLS loop for new tenant tables.
 ### P4 — Schedule, Gantt & EVM
 - Task dependencies / critical path; PV/EV/AC → CPI/SPI; S-curve; Gantt UI; BI report types
   (`project_evm`, `crm_win_loss`) + idempotent scheduler job. Control **PROJ-06** EVM/WIP recon.
+
+### Delivery status (as built)
+| Phase | Status | PR | Migration | Control(s) | Harness ToE |
+|---|---|---|---|---|---|
+| **P0** Connective tissue | ✅ Delivered | #227 | 0183 | CRM-WL | `projects` (conversion: won-only, idempotent) |
+| **P1** WBS & milestones | ✅ Delivered | #228 | 0184 | PROJ-02 (milestone billing) | `projects` (% roll-up, milestone bill) |
+| **P2** Resourcing & rate cards | ✅ Delivered | #229 | 0185 | PROJ-05 | `projects` (rate snapshot, utilization) |
+| **P3** Timesheet → project labor | ✅ Delivered | #230 | 0186 | PROJ-04 | `projects` (maker-checker → WIP) |
+| **P4** Dependencies & EVM | ✅ Delivered | this PR | 0187 | PROJ-06 | `projects` (CPI/SPI/EAC, dep guard) |
+
+**Backend + docs delivered for all five phases** (each its own PR, CI-green, doc-synced — RCM now **140
+controls**). **Deferred to follow-up (front-end / advanced):** the web **Gantt/timeline** and win/loss
+**dashboard** pages, critical-path computation from `depends_on`, S-curve charts, and the BI report types
+(`project_evm`, `crm_win_loss`) + scheduler job. The API + controls underpinning these all exist now;
+what remains is UI and reporting surfacing.
 
 ---
 
