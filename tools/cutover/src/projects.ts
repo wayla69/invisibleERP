@@ -137,6 +137,36 @@ async function main() {
   const conv4 = await inj('POST', '/api/projects/from-opportunity/OPP-NOPE', admin, {});
   ok('Unknown opportunity → 404 OPP_NOT_FOUND', conv4.status === 404 && conv4.json.error?.code === 'OPP_NOT_FOUND', `${conv4.status} ${conv4.json.error?.code}`);
 
+  // ── 11. WBS tasks: planned-hours-weighted % complete roll-up (P1) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-WBS', name: 'งานแบ่ง WBS', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-WBS/tasks', admin, { name: 'ออกแบบ', planned_hours: 10, pct_complete: 50 });
+  const tList = await inj('POST', '/api/projects/PRJ-WBS/tasks', admin, { name: 'พัฒนา', planned_hours: 30, pct_complete: 0 });
+  ok('WBS roll-up: tasks 10h@50% + 30h@0% → project 12.5% complete', near(tList.json.pct_complete, 12.5) && tList.json.count === 2, JSON.stringify({ p: tList.json.pct_complete, c: tList.json.count }));
+  // Mark the 30h task done → 100%; roll-up = (10×50 + 30×100)/40 = 87.5
+  const taskB = (tList.json.tasks ?? []).find((t: any) => t.name === 'พัฒนา');
+  const pt = await inj('PATCH', `/api/projects/tasks/${taskB.id}`, admin, { status: 'done' });
+  ok('Mark 30h task done → 100%; project roll-up 87.5%', near(pt.json.pct_complete, 87.5), JSON.stringify({ p: pt.json.pct_complete }));
+  const wbsGet = await inj('GET', '/api/projects/PRJ-WBS', admin);
+  ok('Project detail exposes pct_complete 87.5 + task_count 2', near(wbsGet.json.pct_complete, 87.5) && wbsGet.json.task_count === 2, JSON.stringify({ p: wbsGet.json.pct_complete, tc: wbsGet.json.task_count }));
+  const ptBad = await inj('PATCH', '/api/projects/tasks/999999', admin, { status: 'done' });
+  ok('Patch unknown task → 404 TASK_NOT_FOUND', ptBad.status === 404 && ptBad.json.error?.code === 'TASK_NOT_FOUND', `${ptBad.status} ${ptBad.json.error?.code}`);
+
+  // ── 12. Milestones: completion of a billing milestone raises the Fixed-price progress bill (PROJ-02) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-MS', name: 'งานมีหมุดหมาย', billing_type: 'Fixed', contract_amount: 100000 });
+  const ms1 = await inj('POST', '/api/projects/PRJ-MS/milestones', admin, { name: 'เฟส 1 ส่งมอบ', billing_percent: 40 });
+  const mId = ms1.json.milestones[0].id;
+  const reach = await inj('POST', `/api/projects/milestones/${mId}/reach`, admin, {});
+  ok('Reach a 40%-billing milestone → Fixed bill 40000 via PRJ-BILL (PROJ-02)',
+    reach.json.status === 'reached' && near(reach.json.billing?.revenue, 40000) && /^JE-/.test(reach.json.billing?.entry_no ?? ''), JSON.stringify({ s: reach.json.status, r: reach.json.billing?.revenue }));
+  const reach2 = await inj('POST', `/api/projects/milestones/${mId}/reach`, admin, {});
+  ok('Re-reach the same milestone → 400 MILESTONE_REACHED (no double bill)', reach2.status === 400 && reach2.json.error?.code === 'MILESTONE_REACHED', `${reach2.status} ${reach2.json.error?.code}`);
+  // A non-billing milestone reaches without raising a bill.
+  const ms2 = await inj('POST', '/api/projects/PRJ-MS/milestones', admin, { name: 'kickoff' });
+  const reach3 = await inj('POST', `/api/projects/milestones/${ms2.json.milestones.find((m: any) => m.name === 'kickoff').id}/reach`, admin, {});
+  ok('Reach a non-billing milestone → reached, no billing', reach3.json.status === 'reached' && reach3.json.billing == null, JSON.stringify({ s: reach3.json.status, b: reach3.json.billing }));
+  const reachBad = await inj('POST', '/api/projects/milestones/999999/reach', admin, {});
+  ok('Reach unknown milestone → 404 MILESTONE_NOT_FOUND', reachBad.status === 404 && reachBad.json.error?.code === 'MILESTONE_NOT_FOUND', `${reachBad.status} ${reachBad.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
