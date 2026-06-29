@@ -83,6 +83,15 @@ async function main() {
   ok('DAU ≥ 3 (u1/u2/u3 active today), MAU > DAU (u4 only in 30d)', m.engagement?.dau >= 3 && m.engagement?.mau >= 4 && m.engagement?.mau >= m.engagement?.dau, JSON.stringify(m.engagement));
   ok('stickiness DAU/MAU is a 0–100 %', m.engagement?.stickiness_pct >= 0 && m.engagement?.stickiness_pct <= 100, `stick=${m.engagement?.stickiness_pct}`);
 
+  // ── AI token cost visibility: GET /api/billing/ai-usage reads ai_token_usage (the daily budget itself is
+  //    enforced in AgentService via the autocommit client). HQ admin has no subscription → default 50k limit. ──
+  const bizDate = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10); // Asia/Bangkok date
+  await db.insert(s.aiTokenUsage).values({ tenantId: hq, usageDate: bizDate, inputTokens: 12000, outputTokens: 3000 });
+  const au = await inj('GET', '/api/billing/ai-usage', token);
+  ok('AI usage: today total 15,000 = input+output; default 50k limit; remaining 35k; not over budget',
+    au.status === 200 && au.json.today?.total_tokens === 15000 && au.json.daily_limit === 50000 && au.json.today?.remaining === 35000 && au.json.today?.over_budget === false,
+    JSON.stringify(au.json).slice(0, 170));
+
   await app.close();
   console.log('\n── Step 9 — SaaS metrics (MRR / churn / DAU-MAU) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

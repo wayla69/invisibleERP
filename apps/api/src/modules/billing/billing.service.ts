@@ -1,7 +1,7 @@
 import { Inject, Injectable, ConflictException, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { eq, sql, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { plans, subscriptions, tenants, users } from '../../database/schema';
+import { plans, subscriptions, tenants, users, aiTokenUsage } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
@@ -177,6 +177,43 @@ export class BillingService {
       .limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for tenant', messageTh: 'ไม่พบการสมัครสมาชิกของร้าน' });
     return { ...row, price_monthly: Number(row.price_monthly ?? 0) };
+  }
+
+  // Per-tenant AI token consumption (cost attribution / COGS visibility). The enforcement side — the daily
+  // budget gate (AI_BUDGET_EXCEEDED) and the autocommit usage writes — lives in AgentService; this is the
+  // read-only view of the same `ai_token_usage` rows, plus the plan's daily limit so the UI can show
+  // "X of Y tokens used today". Read through the normal (tenant-scoped) connection.
+  async aiUsage(tenantId: number) {
+    const db = this.db as any;
+    const [planRow] = await db.select({ features: plans.features })
+      .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
+      .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
+      .orderBy(desc(subscriptions.createdAt)).limit(1);
+    const features: any = planRow?.features ?? {};
+    const dailyLimit = features.ai_tokens_daily != null ? Number(features.ai_tokens_daily) : 50000; // default Pro-tier
+    const [today] = await db.select({ input: aiTokenUsage.inputTokens, output: aiTokenUsage.outputTokens })
+      .from(aiTokenUsage)
+      .where(and(eq(aiTokenUsage.tenantId, tenantId), sql`${aiTokenUsage.usageDate} = (now() AT TIME ZONE 'Asia/Bangkok')::date`))
+      .limit(1);
+    const tIn = today ? Number(today.input) : 0;
+    const tOut = today ? Number(today.output) : 0;
+    const tTotal = tIn + tOut;
+    const [m] = await db.select({
+      input: sql<number>`coalesce(sum(${aiTokenUsage.inputTokens}),0)`,
+      output: sql<number>`coalesce(sum(${aiTokenUsage.outputTokens}),0)`,
+    }).from(aiTokenUsage)
+      .where(and(eq(aiTokenUsage.tenantId, tenantId), sql`${aiTokenUsage.usageDate} >= (now() AT TIME ZONE 'Asia/Bangkok')::date - INTERVAL '30 days'`));
+    const mIn = Number(m?.input ?? 0);
+    const mOut = Number(m?.output ?? 0);
+    return {
+      daily_limit: dailyLimit, // -1 = unlimited (Enterprise)
+      today: {
+        input_tokens: tIn, output_tokens: tOut, total_tokens: tTotal,
+        remaining: dailyLimit === -1 ? null : Math.max(0, dailyLimit - tTotal),
+        over_budget: dailyLimit !== -1 && tTotal >= dailyLimit,
+      },
+      last_30_days: { input_tokens: mIn, output_tokens: mOut, total_tokens: mIn + mOut },
+    };
   }
 
   async changePlan(tenantId: number, planCode: string) {
