@@ -90,6 +90,20 @@ async function main() {
   const coFree = await inj('POST', '/api/billing/checkout', owner, { plan_code: 'free' });
   ok('Billing checkout (free) → 400 PLAN_NOT_PURCHASABLE (no monthly price)', coFree.status === 400 && coFree.json.error?.code === 'PLAN_NOT_PURCHASABLE', `${coFree.status} ${coFree.json.error?.code}`);
 
+  // ── 3c. Stripe webhook → subscription state machine. No STRIPE_WEBHOOK_SECRET in test ⇒ the parsed
+  //        event body is accepted. checkout.completed activates; payment_failed → PastDue; deleted → Canceled. ──
+  const tId = su.json.tenant_id;
+  const hook = (evt: any) => inj('POST', '/api/billing/stripe/webhook', undefined, evt);
+  const whA = await hook({ type: 'checkout.session.completed', data: { object: { client_reference_id: String(tId), metadata: { tenant_id: String(tId), plan_code: 'pro' }, customer: 'cus_onb', subscription: 'sub_onb' } } });
+  const subA = await inj('GET', '/api/billing/subscription', owner);
+  ok('Stripe webhook: checkout.completed → subscription Active on pro', whA.json.handled === true && subA.json.status === 'Active' && subA.json.plan_code === 'pro', JSON.stringify({ handled: whA.json.handled, st: subA.json.status, plan: subA.json.plan_code }));
+  await hook({ type: 'invoice.payment_failed', data: { object: { customer: 'cus_onb' } } });
+  const subP = await inj('GET', '/api/billing/subscription', owner);
+  ok('Stripe webhook: invoice.payment_failed → PastDue', subP.json.status === 'PastDue', `st=${subP.json.status}`);
+  await hook({ type: 'customer.subscription.deleted', data: { object: { customer: 'cus_onb' } } });
+  const subC = await inj('GET', '/api/billing/subscription', owner);
+  ok('Stripe webhook: subscription.deleted → Canceled', subC.json.status === 'Canceled', `st=${subC.json.status}`);
+
   // ── 4. A5 — seeded admin forced to change password ──
   const a1 = await login('admin', 'admin123');
   ok('Seeded admin login → must_change_password=true', a1.json.must_change_password === true, JSON.stringify({ mcp: a1.json.must_change_password }));
