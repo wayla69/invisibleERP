@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { eq, and, desc, gt, isNull, sql } from 'drizzle-orm';
 import { randomInt, randomUUID } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenants, posMembers, memberOtps, messageLog } from '../../database/schema';
+import { tenants, posMembers, memberOtps, messageLog, revokedTokens } from '../../database/schema';
 import { n } from '../../database/queries';
 import { PasswordService } from '../auth/password.service';
 import { resolveMessageGateway } from '../messaging/gateways';
@@ -87,6 +87,20 @@ export class MemberAuthService {
     // revocable (logout/incident denylist) and the guard re-checks pos_members.active each request; 7-day life.
     const token = await this.jwt.signAsync({ sub: `member:${member.id}`, kind: 'member', role: 'Member', tenantId, memberId: Number(member.id), permissions: [], customerName: null, jti: randomUUID() }, { expiresIn: '7d' });
     return { token, member: { id: Number(member.id), member_code: member.memberCode, name: member.name, tier: member.tier, balance: n(member.balance) } };
+  }
+
+  // ── ITGC-AC-15: member session revocation ────────────────────────────────────
+  // Revoke a single member session: add the presented token's jti to the denylist so the global
+  // JwtAuthGuard rejects it thereafter (mirrors AuthService.revokeToken for the staff flow). Used by
+  // member logout so a token cleared from the browser cookie can't be replayed before its 7-day expiry.
+  async revokeToken(token: string | undefined) {
+    if (!token) return { revoked: false };
+    let payload: any;
+    try { payload = await this.jwt.verifyAsync(token); } catch { return { revoked: false }; }
+    if (!payload?.jti) return { revoked: false };
+    const expiresAt = payload.exp ? new Date(payload.exp * 1000) : new Date(Date.now() + 7 * 24 * 3600_000);
+    await (this.db as any).insert(revokedTokens).values({ jti: payload.jti, username: payload.sub ?? null, expiresAt }).onConflictDoNothing();
+    return { revoked: true };
   }
 
   // ── LINE LIFF (member self-service) ──────────────────────────────────────────

@@ -1,7 +1,9 @@
-import { Controller, Get, Post, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, UseGuards, HttpCode, Res, Req } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { Public, NoTx, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { setAuthCookies, clearAuthCookies, readCookie, AUTH_COOKIE } from '../../common/cookies';
 import { MemberGuard } from './member.guard';
 import { MemberAuthService } from './member-auth.service';
 import { MemberService } from '../loyalty/member.service';
@@ -41,10 +43,32 @@ export class MemberController {
   // path throws 401 (a per-request tx would roll the increment back). Concurrency safety comes from atomic
   // guarded UPDATEs in the service, not a row lock. Tenant isolation is by explicit filter (resolved from code).
   @Public() @NoTx() @Post('auth/verify-otp')
-  verifyOtp(@Body(new ZodValidationPipe(VerifyOtpBody)) b: any) { return this.auth.verifyOtp(b); }
+  async verifyOtp(@Body(new ZodValidationPipe(VerifyOtpBody)) b: any, @Res({ passthrough: true }) reply: FastifyReply) {
+    const res = await this.auth.verifyOtp(b);
+    // Deliver the member JWT as an httpOnly cookie (+ readable CSRF) so it is unreachable from JS — XSS on the
+    // consumer /m surface can't exfiltrate it. The token is ALSO returned in the body for non-browser clients
+    // (LINE LIFF native / scripts) — backward compatible.
+    setAuthCookies(reply, res.token);
+    return res;
+  }
   // LINE LIFF login — verify the LIFF idToken (prod) → mint a member token for the linked member.
   @Public() @NoTx() @Post('auth/line')
-  loginLine(@Body(new ZodValidationPipe(LineLoginBody)) b: any) { return this.auth.loginWithLine(b); }
+  async loginLine(@Body(new ZodValidationPipe(LineLoginBody)) b: any, @Res({ passthrough: true }) reply: FastifyReply) {
+    const res = await this.auth.loginWithLine(b);
+    setAuthCookies(reply, res.token);
+    return res;
+  }
+  // Clear the member session cookie. @Public so it always succeeds (even with an expired/absent token); it
+  // only ever clears the caller's own cookies. Revokes the presented token (jti denylist) so it can't be
+  // replayed before its 7-day expiry. @NoTx → the denylist insert auto-commits outside any tenant tx.
+  @Public() @NoTx() @Post('auth/logout') @HttpCode(200)
+  async logout(@Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<{ ok: true }> {
+    const authz = req.headers['authorization'];
+    const bearer = typeof authz === 'string' && authz.startsWith('Bearer ') ? authz.slice(7) : undefined;
+    await this.auth.revokeToken(bearer ?? readCookie(req, AUTH_COOKIE));
+    clearAuthCookies(reply);
+    return { ok: true };
+  }
 
   // ── Self-service (member token only; self-scoped) ──
   @Get('me') @UseGuards(MemberGuard)

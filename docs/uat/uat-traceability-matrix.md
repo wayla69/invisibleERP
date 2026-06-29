@@ -36,6 +36,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-024 | Revoke-all-sessions invalidates pre-existing tokens | ITGC-AC-15 | 08 §7, §9 |
 | UAT-SEC-025 | Audit hash chain verifies intact | ITGC-AC-16 | 08 §7, §9 |
 | UAT-SEC-026 | Tampering a past audit row is detected (hash mismatch) | ITGC-AC-16 | 08 §7, §9 |
+| UAT-SEC-027 | Member OTP login sets httpOnly cookie (no JS-readable token) | ITGC-AC-07 | 08 §7, 19 §7 |
+| UAT-SEC-028 | Member cookie session authenticates self-scoped read | ITGC-AC-07 | 08 §7, 19 §7 |
+| UAT-SEC-029 | Member cookie mutation requires CSRF double-submit | ITGC-AC-07 | 08 §7, 19 §7 |
+| UAT-SEC-030 | Member logout clears + revokes the session | ITGC-AC-07 / ITGC-AC-15 | 08 §7, 19 §7 |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 
