@@ -1303,6 +1303,13 @@
       "when": 2023820000012,
       "tag": "0185_project_resources",
       "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 2023820000013,
+      "tag": "0186_timesheet_project_labor",
+      "breakpoints": true
     }
   ]
 }
