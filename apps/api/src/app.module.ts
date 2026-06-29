@@ -125,6 +125,7 @@ import { MigrationModule } from './modules/migration/migration.module';
 import { LocalizationModule } from './modules/localization/localization.module';
 import { EInvoiceModule } from './modules/einvoice/einvoice.module';
 import { OpsModule } from './modules/ops/ops.module';
+import { PdpaModule } from './modules/pdpa/pdpa.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { PdfModule } from './modules/pdf/pdf.module';
 
@@ -251,6 +252,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     LocalizationModule,
     EInvoiceModule,
     OpsModule,
+    PdpaModule,
   ],
   providers: [
     // Guard order: auth → permission → module-enabled → plan-feature.
