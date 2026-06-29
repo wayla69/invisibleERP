@@ -229,6 +229,35 @@ async function main() {
   const badDep = await inj('PATCH', `/api/projects/tasks/${t1.id}`, admin, { depends_on: [t1.id] });
   ok('Task depends on itself → 400 BAD_DEPENDENCY', badDep.status === 400 && badDep.json.error?.code === 'BAD_DEPENDENCY', `${badDep.status} ${badDep.json.error?.code}`);
 
+  // ── 16. critical-path schedule, EVM S-curve series, and win/loss analytics (PPM web backend) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CPM', name: 'งานหา critical path', billing_type: 'TM' });
+  const cA = await inj('POST', '/api/projects/PRJ-CPM/tasks', admin, { name: 'CP-A', planned_hours: 16 }); // 2d
+  const cAid = cA.json.tasks[0].id;
+  await inj('POST', '/api/projects/PRJ-CPM/tasks', admin, { name: 'CP-B', planned_hours: 24, depends_on: [cAid] }); // 3d
+  const cC = await inj('POST', '/api/projects/PRJ-CPM/tasks', admin, { name: 'CP-C', planned_hours: 8, depends_on: [cAid] }); // 1d
+  const cBid = cC.json.tasks.find((t: any) => t.name === 'CP-B').id, cCid = cC.json.tasks.find((t: any) => t.name === 'CP-C').id;
+  await inj('POST', '/api/projects/PRJ-CPM/tasks', admin, { name: 'CP-D', planned_hours: 16, depends_on: [cBid, cCid] }); // 2d
+  const sched = await inj('GET', '/api/projects/PRJ-CPM/schedule', admin);
+  const onCP = (name: string) => (sched.json.tasks ?? []).find((t: any) => t.name === name)?.on_critical_path;
+  ok('Critical path: A→B→D (slack 0) on path, C (slack 2) off; project duration 7 days',
+    sched.json.project_duration_days === 7 && onCP('CP-A') && onCP('CP-B') && onCP('CP-D') && onCP('CP-C') === false,
+    JSON.stringify({ dur: sched.json.project_duration_days, cp: sched.json.critical_path }));
+
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-SC', name: 'งาน S-curve', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-SC/tasks', admin, { name: 'SC-1', planned_cost: 1000, planned_end: '2026-01-31', pct_complete: 100 });
+  await inj('POST', '/api/projects/PRJ-SC/tasks', admin, { name: 'SC-2', planned_cost: 1000, planned_end: '2026-02-28', pct_complete: 0 });
+  const series = await inj('GET', '/api/projects/PRJ-SC/evm/series', admin);
+  ok('EVM S-curve: cumulative planned 1000→2000 across 2 months; current BAC 2000',
+    series.json.series?.length === 2 && near(series.json.series[1].cumulative_planned, 2000) && near(series.json.bac, 2000),
+    JSON.stringify({ n: series.json.series?.length, cum: series.json.series?.[1]?.cumulative_planned }));
+
+  const oppLost = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลที่เสีย', amount: 50000, owner: 'sales1' });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${oppLost.json.opp_no}/stage`, admin, { stage: 'lost', lost_reason: 'ราคาสูงเกินไป (price)' });
+  const wl = await inj('GET', '/api/crm/pipeline/win-loss', admin);
+  ok('Win/loss analytics: loss reason captured (50000), by-owner + summary win_rate present',
+    (wl.json.loss_reasons ?? []).some((r: any) => near(r.amount, 50000)) && Array.isArray(wl.json.by_owner) && wl.json.summary?.win_rate != null,
+    JSON.stringify({ lr: wl.json.loss_reasons?.length, ow: wl.json.by_owner?.length }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

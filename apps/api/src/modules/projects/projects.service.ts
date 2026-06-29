@@ -355,6 +355,76 @@ export class ProjectsService {
     };
   }
 
+  // Critical-path schedule (CPM) over the WBS: a forward pass (early start/finish) + backward pass (late
+  // start/finish) on the finish-to-start `depends_on` graph, with each task's duration in days (explicit
+  // planned_start→planned_end span, else planned_hours/8, min 1). Tasks with zero slack are on the critical
+  // path. Cancelled tasks are excluded; a dependency cycle degrades gracefully (the back-edge is ignored).
+  async schedule(code: string) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const rows = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
+    const tasks = rows.map(shapeTask);
+    const byId = new Map<number, any>(tasks.map((t: any) => [t.id, t]));
+    const dur = (t: any) => {
+      if (t.planned_start && t.planned_end) return Math.max(1, Math.round((Date.parse(t.planned_end) - Date.parse(t.planned_start)) / 86400000) + 1);
+      return Math.max(1, Math.ceil(n(t.planned_hours) / 8) || 1);
+    };
+    // Predecessors restricted to known tasks; build successor adjacency.
+    const preds = new Map<number, number[]>(tasks.map((t: any) => [t.id, (t.depends_on || []).filter((d: number) => byId.has(d) && d !== t.id)]));
+    const succ = new Map<number, number[]>(tasks.map((t: any) => [t.id, []]));
+    for (const t of tasks) for (const d of preds.get(t.id)!) succ.get(d)!.push(t.id);
+    // Topological order (Kahn); any nodes left in a cycle are appended so the passes still terminate.
+    const indeg = new Map<number, number>(tasks.map((t: any) => [t.id, preds.get(t.id)!.length]));
+    const queue = tasks.filter((t: any) => indeg.get(t.id) === 0).map((t: any) => t.id);
+    const topo: number[] = [];
+    while (queue.length) {
+      const id = queue.shift()!; topo.push(id);
+      for (const s of succ.get(id)!) { indeg.set(s, indeg.get(s)! - 1); if (indeg.get(s) === 0) queue.push(s); }
+    }
+    for (const t of tasks) if (!topo.includes(t.id)) topo.push(t.id);
+    const es = new Map<number, number>(), ef = new Map<number, number>();
+    for (const id of topo) {
+      const start = Math.max(0, ...preds.get(id)!.map((d) => ef.get(d) ?? 0));
+      es.set(id, start); ef.set(id, start + dur(byId.get(id)));
+    }
+    const projectDuration = Math.max(0, ...tasks.map((t: any) => ef.get(t.id) ?? 0));
+    const lf = new Map<number, number>(), ls = new Map<number, number>();
+    for (const id of [...topo].reverse()) {
+      const succs = succ.get(id)!;
+      const finish = succs.length ? Math.min(...succs.map((s) => ls.get(s)!)) : projectDuration;
+      lf.set(id, finish); ls.set(id, finish - dur(byId.get(id)));
+    }
+    const out = tasks.map((t: any) => {
+      const slack = r2((ls.get(t.id) ?? 0) - (es.get(t.id) ?? 0));
+      return { ...t, duration_days: dur(t), es: es.get(t.id) ?? 0, ef: ef.get(t.id) ?? 0, ls: ls.get(t.id) ?? 0, lf: lf.get(t.id) ?? 0, slack, on_critical_path: slack <= 0.0001 };
+    });
+    return {
+      project_code: code, project_duration_days: projectDuration,
+      critical_path: out.filter((t: any) => t.on_critical_path).map((t: any) => t.id),
+      tasks: out, count: out.length,
+    };
+  }
+
+  // EVM S-curve: the planned-cost baseline accumulated by month (each task's planned cost lands in its
+  // planned_end month), with the current EV/AC/PV snapshot overlaid — the classic planned-vs-actual S-curve.
+  async evmSeries(code: string, dto?: { months?: number }) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
+    const buckets = new Map<string, number>();
+    for (const t of tasks) {
+      const m = t.plannedEnd ? String(t.plannedEnd).slice(0, 7) : (p.startDate ? String(p.startDate).slice(0, 7) : ymd().slice(0, 7));
+      buckets.set(m, r2((buckets.get(m) ?? 0) + n(t.plannedCost)));
+    }
+    let cumulative = 0;
+    const series = [...buckets.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([month, planned]) => {
+      cumulative = r2(cumulative + planned);
+      return { month, planned_cost: planned, cumulative_planned: cumulative };
+    });
+    const current = await this.evm(code, dto && (dto as any).as_of);
+    return { project_code: code, series, current, bac: current.bac };
+  }
+
   private async row(code: string) {
     const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
