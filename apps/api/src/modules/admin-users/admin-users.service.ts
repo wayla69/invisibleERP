@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users, userPermissions, tenants, accessReviews } from '../../database/schema';
 import { desc } from 'drizzle-orm';
 import { PasswordService } from '../auth/password.service';
+import { BillingService } from '../billing/billing.service';
 import { resolvePermissions, detectSodConflicts, type Role, type Permission } from '@ierp/shared';
 import type { JwtUser } from '../../common/decorators';
 import { normalizeUsername } from '../../common/username';
@@ -14,7 +15,11 @@ export interface UpdateUserDto { role?: string; customer_name?: string; permissi
 @Injectable()
 export class AdminUsersService {
   private readonly logger = new Logger('AdminUsers');
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly passwords: PasswordService) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly passwords: PasswordService,
+    private readonly billing: BillingService,
+  ) {}
 
   // Preventive SoD guard (ITGC-AC-09): block assigning a per-user permission OVERRIDE that holds duties on
   // both sides of a conflict rule, unless the admin explicitly overrides WITH a reason (which is logged).
@@ -75,6 +80,9 @@ export class AdminUsersService {
     if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
     this.assertNoSodConflict(username, dto.permissions, dto.allow_sod_override, dto.sod_reason);
     const tenantId = await this.tenantIdFor(dto.customer_name);
+    // Enforce the plan's maxUsers ceiling before inserting (PLAN_USER_LIMIT).
+    // Admin principal (tenantId=null) is cross-tenant HQ — no limit applies.
+    if (tenantId != null) await this.billing.checkUserLimit(tenantId);
     const hash = await this.passwords.hash(dto.password);
     const [u] = await db.insert(users).values({ username, passwordHash: hash, role: dto.role as any, tenantId, mustChangePassword: true }).returning({ id: users.id });
     if (dto.permissions?.length) {

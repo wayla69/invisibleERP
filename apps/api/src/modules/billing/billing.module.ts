@@ -5,13 +5,16 @@ import { TaxModule } from '../tax/tax.module';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 import { TenantController } from './tenant.controller';
+import { PlanGuard } from './plan.guard';
 
 // AuthModule exports PasswordService (signup hashes the admin password); LedgerModule exports
 // LedgerService (signup provisions the new tenant's fiscal periods); TaxModule for cache invalidation.
+// PlanGuard is exported so AppModule can register it as APP_GUARD and so AdminUsersModule can
+// inject BillingService for the user-limit check.
 @Module({
   imports: [AuthModule, LedgerModule, TaxModule],
   controllers: [BillingController, TenantController],
-  providers: [BillingService],
-  exports: [BillingService],
+  providers: [BillingService, PlanGuard],
+  exports: [BillingService, PlanGuard],
 })
 export class BillingModule {}
