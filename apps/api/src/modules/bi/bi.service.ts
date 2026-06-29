@@ -9,6 +9,7 @@ import { arInvoices } from '../../database/schema/finance';
 import { apTransactions } from '../../database/schema/finance';
 import { opportunities, pipelineStages } from '../../database/schema/pipeline';
 import { n, fx } from '../../database/queries';
+import { TtlCache } from '../../common/ttl-cache';
 import { MessagingService } from '../messaging/messaging.service';
 import { CollectionsService } from '../finance/collections.service';
 import { EamService } from '../eam/eam.service';
@@ -53,10 +54,27 @@ export class BiService {
     @Optional() private readonly leases?: LeasesService,
   ) {}
 
+  // ── Read-through cache for the dashboard aggregates ─────────────────────────
+  // The KPI board / sales cube / finance & pipeline trends are read-only roll-ups hit on every dashboard
+  // load; they re-scan sales/AR/AP/GL/pipeline each time. Cache them for a short TTL (default 30s) so a
+  // burst of dashboard polls collapses to one query set per tenant per window. TTL is read per-call from
+  // BI_CACHE_TTL_MS (0 disables) so it can be tuned per deploy without a redeploy. The key ALWAYS includes
+  // the tenant id → no cross-tenant leakage.
+  private readonly cache = new TtlCache();
+  private get cacheTtlMs(): number { return Number(process.env.BI_CACHE_TTL_MS ?? 30000); }
+  private cacheKey(method: string, tid: number, dto: unknown): string {
+    return `bi:${tid}:${method}:${JSON.stringify(dto ?? {})}`;
+  }
+  // Invalidate every cached board for a tenant (called when a snapshot refresh changes the underlying data).
+  private bustTenant(tid: number): void { this.cache.deletePrefix(`bi:${tid}:`); }
+
   // ── KPI Board ─────────────────────────────────────────────────────────────
   // Real-time cross-domain aggregation for the AI copilot dashboard
 
-  async kpiBoard(user: JwtUser) {
+  kpiBoard(user: JwtUser) {
+    return this.cache.wrap(this.cacheKey('kpiBoard', user.tenantId!, null), this.cacheTtlMs, () => this.kpiBoardUncached(user));
+  }
+  private async kpiBoardUncached(user: JwtUser) {
     const db = this.db as any;
     const tid = user.tenantId!;
     const today = new Date().toISOString().slice(0, 10);
@@ -123,7 +141,10 @@ export class BiService {
   // ── Sales Cube ─────────────────────────────────────────────────────────────
   // Breakdown by period (day | week | month) with optional group_by (channel | none)
 
-  async salesCube(dto: { period?: 'day' | 'week' | 'month'; start_date?: string; end_date?: string; months?: number }, user: JwtUser) {
+  salesCube(dto: { period?: 'day' | 'week' | 'month'; start_date?: string; end_date?: string; months?: number }, user: JwtUser) {
+    return this.cache.wrap(this.cacheKey('salesCube', user.tenantId!, dto), this.cacheTtlMs, () => this.salesCubeUncached(dto, user));
+  }
+  private async salesCubeUncached(dto: { period?: 'day' | 'week' | 'month'; start_date?: string; end_date?: string; months?: number }, user: JwtUser) {
     const db = this.db as any;
     const tid = user.tenantId!;
     const months = dto.months ?? 3;
@@ -162,7 +183,10 @@ export class BiService {
   // ── Finance Trend ──────────────────────────────────────────────────────────
   // Monthly P&L trend from GL journal lines
 
-  async financeTrend(dto: { months?: number; ledger_code?: string }, user: JwtUser) {
+  financeTrend(dto: { months?: number; ledger_code?: string }, user: JwtUser) {
+    return this.cache.wrap(this.cacheKey('financeTrend', user.tenantId!, dto), this.cacheTtlMs, () => this.financeTrendUncached(dto, user));
+  }
+  private async financeTrendUncached(dto: { months?: number; ledger_code?: string }, user: JwtUser) {
     const db = this.db as any;
     const tid = user.tenantId!;
     const months = dto.months ?? 6;
@@ -210,7 +234,10 @@ export class BiService {
   // ── Pipeline Trend ─────────────────────────────────────────────────────────
   // Open pipeline + Win/Lost breakdown by month created
 
-  async pipelineTrend(dto: { months?: number }, user: JwtUser) {
+  pipelineTrend(dto: { months?: number }, user: JwtUser) {
+    return this.cache.wrap(this.cacheKey('pipelineTrend', user.tenantId!, dto), this.cacheTtlMs, () => this.pipelineTrendUncached(dto, user));
+  }
+  private async pipelineTrendUncached(dto: { months?: number }, user: JwtUser) {
     const db = this.db as any;
     const tid = user.tenantId!;
     const months = dto.months ?? 6;
@@ -288,6 +315,9 @@ export class BiService {
     const tid = user.tenantId!;
     const date = dto.date ?? new Date().toISOString().slice(0, 10);
 
+    // A manual snapshot refresh is an explicit "recompute now" — drop any cached boards for this tenant so
+    // the snapshot (and the next dashboard read) reflect the latest data, not a value up to 30s stale.
+    this.bustTenant(tid);
     const kpi = await this.kpiBoard(user);
 
     const row = {

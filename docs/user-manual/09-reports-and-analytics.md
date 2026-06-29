@@ -28,6 +28,11 @@ phones/tablets.
 
 **Expected result:** A live summary of business performance.
 
+> **Note on freshness:** to keep the dashboards fast, the KPI/sales/finance/pipeline
+> figures are cached briefly on the server (about 30 seconds) and shared across users
+> of the same company, so a number may lag a brand-new transaction by up to that
+> window. Use **รีเฟรช Snapshot** (BI screen) when you need an immediate recompute.
+
 [screenshot: operational dashboard with KPIs, 14-day trend and refresh]
 
 ---
