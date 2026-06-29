@@ -1,10 +1,10 @@
 import { Inject, Injectable, BadRequestException, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { randomBytes } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
+import { randomBytes, createHash } from 'node:crypto';
+import { and, eq, sql, gt, isNull } from 'drizzle-orm';
 import { resolvePermissions, type Role } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenants, tenantIdentity, users } from '../../database/schema';
+import { tenants, tenantIdentity, users, ssoLoginState } from '../../database/schema';
 import { decrypt } from '../../common/crypto';
 import { normalizeUsername } from '../../common/username';
 import { PasswordService } from '../auth/password.service';
@@ -39,13 +39,26 @@ export class SsoService {
     if (!found || !found.cfg.ssoEnabled || !found.cfg.oidcIssuer || !found.cfg.oidcClientId) {
       throw new ServiceUnavailableException({ code: 'SSO_NOT_CONFIGURED', message: 'SSO is not configured for this tenant', messageTh: 'ผู้เช่านี้ยังไม่ได้ตั้งค่า SSO' });
     }
-    const state = `${code}.${randomBytes(12).toString('hex')}`;
+    // Single-use, server-persisted login state. `state` carries the tenant code (so the callback can resolve
+    // config) plus a random nonce; `nonce` is bound into the id_token; PKCE `code_verifier`/`code_challenge`
+    // protect the auth-code exchange. The callback must present a state that matches a stored, unconsumed,
+    // unexpired row — without this, the callback was a login-CSRF / account-fixation vector (ITGC-AC-02).
+    const state = `${code}.${randomBytes(16).toString('hex')}`;
+    const nonce = randomBytes(16).toString('hex');
+    const codeVerifier = randomBytes(32).toString('base64url');
+    const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+    await (this.db as any).insert(ssoLoginState).values({
+      state, tenantCode: code, nonce, codeVerifier, expiresAt: new Date(Date.now() + 10 * 60_000),
+    });
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: found.cfg.oidcClientId,
       redirect_uri: found.cfg.oidcRedirectUri ?? '',
       scope: 'openid email profile',
       state,
+      nonce,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
     });
     return { authorization_url: `${String(found.cfg.oidcIssuer).replace(/\/$/, '')}/authorize?${params.toString()}`, state };
   }
@@ -54,14 +67,27 @@ export class SsoService {
   // `state` (set by authorize). An id_token may arrive directly (implicit/hybrid) or be obtained by
   // exchanging `code` at the token endpoint (auth-code; network, production path).
   async callback(params: { state?: string; code?: string; id_token?: string }): Promise<{ token: string; username: string; role: string }> {
-    const tenantCode = (params.state ?? '').split('.')[0];
+    const stateStr = params.state ?? '';
+    const tenantCode = stateStr.split('.')[0];
     if (!tenantCode) throw new BadRequestException({ code: 'BAD_STATE', message: 'Missing/invalid state', messageTh: 'state ไม่ถูกต้อง' });
+    // Single-use consume of the server-stored state: atomically mark it consumed only if it exists, is
+    // unconsumed, and is unexpired. A replayed/forged/expired state returns no row → reject (CSRF/replay).
+    const [st] = await (this.db as any)
+      .update(ssoLoginState)
+      .set({ consumedAt: new Date() })
+      .where(and(eq(ssoLoginState.state, stateStr), isNull(ssoLoginState.consumedAt), gt(ssoLoginState.expiresAt, new Date())))
+      .returning({ nonce: ssoLoginState.nonce, codeVerifier: ssoLoginState.codeVerifier, tenantCode: ssoLoginState.tenantCode });
+    if (!st || st.tenantCode !== tenantCode) throw new BadRequestException({ code: 'BAD_STATE', message: 'Unknown, expired, or already-used login state', messageTh: 'state ไม่ถูกต้อง หมดอายุ หรือถูกใช้ไปแล้ว' });
+
     const found = await this.configForCode(tenantCode);
     if (!found || !found.cfg.ssoEnabled) throw new ServiceUnavailableException({ code: 'SSO_NOT_CONFIGURED', message: 'SSO is not configured', messageTh: 'ยังไม่ได้ตั้งค่า SSO' });
     const secret = found.cfg.oidcClientSecretEnc ? decrypt(found.cfg.oidcClientSecretEnc) : '';
+    // Fail closed on an empty secret: verifyHs256 would otherwise HMAC with an empty key, which any
+    // attacker can also compute — i.e. self-signed id_token forgery. Require a configured client secret.
+    if (!secret) throw new ServiceUnavailableException({ code: 'SSO_SECRET_MISSING', message: 'SSO client secret not configured — refusing to verify an id_token with an empty key', messageTh: 'ยังไม่ได้ตั้งค่า client secret ของ SSO' });
 
     let idToken = params.id_token;
-    if (!idToken && params.code) idToken = await this.exchangeCode(found.cfg, params.code); // network (prod)
+    if (!idToken && params.code) idToken = await this.exchangeCode(found.cfg, params.code, st.codeVerifier ?? undefined); // network (prod), PKCE
     if (!idToken) throw new BadRequestException({ code: 'NO_ASSERTION', message: 'No id_token or code supplied', messageTh: 'ไม่พบ id_token หรือ code' });
 
     let claims: IdTokenClaims;
@@ -70,6 +96,9 @@ export class SsoService {
     } catch (e: any) {
       throw new UnauthorizedException({ code: 'BAD_ID_TOKEN', message: `id_token verification failed: ${e?.message ?? 'invalid'}`, messageTh: 'ตรวจสอบ id_token ไม่ผ่าน' });
     }
+    // Bind the id_token to THIS login: its nonce must equal the one we issued at authorize() (replay defence).
+    if ((claims as any).nonce !== undefined && (claims as any).nonce !== st.nonce)
+      throw new UnauthorizedException({ code: 'BAD_NONCE', message: 'id_token nonce mismatch', messageTh: 'nonce ของ id_token ไม่ตรง' });
     // Claim checks: issuer, audience, expiry.
     if (found.cfg.oidcIssuer && claims.iss && String(claims.iss).replace(/\/$/, '') !== String(found.cfg.oidcIssuer).replace(/\/$/, ''))
       throw new UnauthorizedException({ code: 'BAD_ISSUER', message: 'id_token issuer mismatch', messageTh: 'ผู้ออก token ไม่ตรง' });
@@ -116,11 +145,12 @@ export class SsoService {
   }
 
   // Authorization-code → token-endpoint exchange (production path; requires outbound network to the IdP).
-  private async exchangeCode(cfg: any, code: string): Promise<string> {
+  private async exchangeCode(cfg: any, code: string, codeVerifier?: string): Promise<string> {
     const secret = cfg.oidcClientSecretEnc ? decrypt(cfg.oidcClientSecretEnc) : '';
     const body = new URLSearchParams({
       grant_type: 'authorization_code', code, redirect_uri: cfg.oidcRedirectUri ?? '',
       client_id: cfg.oidcClientId ?? '', client_secret: secret,
+      ...(codeVerifier ? { code_verifier: codeVerifier } : {}), // PKCE
     });
     let res: Response;
     try {

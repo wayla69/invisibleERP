@@ -4,7 +4,11 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { webhooks, webhookDeliveries, users } from '../../database/schema';
 import { encrypt, decrypt } from '../../common/crypto';
+import { assertPublicUrl, isPublicUrl } from '../../common/net-guard';
 import type { JwtUser } from '../../common/decorators';
+
+// Allow plain http webhook targets only in dev/test (local receivers); production is https-only.
+const ALLOW_HTTP = process.env.NODE_ENV !== 'production';
 import { AutomationService } from '../automation/automation.service';
 
 export interface RegisterWebhookDto { url: string; events?: string[] }
@@ -36,6 +40,7 @@ export class WebhookService {
   }
 
   async register(dto: RegisterWebhookDto, user: JwtUser) {
+    await assertPublicUrl(dto.url, { allowHttp: ALLOW_HTTP }); // SSRF: reject internal/metadata/loopback targets
     const db = this.db as any;
     const tenantId = await this.tenantOf(user);
     const secret = randomBytes(24).toString('hex');
@@ -85,6 +90,15 @@ export class WebhookService {
     // X-IERP-Signature header, reject if |now - timestamp| > 300s, and dedupe on X-IERP-Delivery.
     const signature = 'sha256=' + createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
     const attempts = (Number(delivery.attempts) || 0) + 1;
+    // Re-validate the target right before sending — defeats DNS-rebinding (a host that was public at register
+    // time may now resolve to an internal IP). On block, record a failed delivery rather than firing the request.
+    if (!(await isPublicUrl(hook.url, { allowHttp: ALLOW_HTTP }))) {
+      this.logger.warn(`webhook ${hook.id} blocked: target is not a public address (${hook.url})`);
+      await db.update(webhookDeliveries).set({
+        status: 'failed', attempts, error: 'blocked: target is not a public address', nextRetryAt: null,
+      }).where(eq(webhookDeliveries.id, delivery.id));
+      return false;
+    }
     try {
       const res = await fetch(hook.url, {
         method: 'POST',

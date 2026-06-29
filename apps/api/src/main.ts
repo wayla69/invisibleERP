@@ -1,4 +1,7 @@
 import 'reflect-metadata';
+import cluster from 'node:cluster';
+import { cpus } from 'node:os';
+
 // OTel must patch http/pg BEFORE they are required → keep telemetry first (no-op unless env set).
 import { startTelemetry, initSentry } from './observability/instrumentation';
 startTelemetry();
@@ -38,7 +41,28 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 8000);
   await app.listen({ port, host: '0.0.0.0' });
-  new Logger('Bootstrap').log(`Invisible ERP V2 API listening on http://0.0.0.0:${port}`);
+  new Logger('Bootstrap').log(`Invisible ERP V2 API listening on http://0.0.0.0:${port} (pid ${process.pid})`);
 }
 
-void bootstrap();
+// Opt-in multi-process clustering. A single Node process is single-threaded for JS and saturates ~1 core
+// (the load test showed throughput capped there while other cores sat idle). Set WEB_CONCURRENCY>1 (or 'auto'
+// for one worker per core) to fork N workers sharing the listen socket — ~N× throughput. Default 1 = current
+// single-process behaviour (no change). Each worker opens its own DB pool, so keep WEB_CONCURRENCY×DB_POOL_MAX
+// under Postgres max_connections. Migrations/seeds are idempotent, so worker overlap on boot is safe.
+function resolveConcurrency(): number {
+  const v = process.env.WEB_CONCURRENCY;
+  if (!v || v === '1') return 1;
+  if (v === 'auto') return Math.max(1, cpus().length);
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+}
+
+const concurrency = resolveConcurrency();
+if (concurrency > 1 && cluster.isPrimary) {
+  const log = new Logger('Cluster');
+  log.log(`Primary ${process.pid} forking ${concurrency} workers`);
+  for (let i = 0; i < concurrency; i++) cluster.fork();
+  cluster.on('exit', (worker) => { log.warn(`worker ${worker.process.pid} died — reforking`); cluster.fork(); });
+} else {
+  void bootstrap();
+}

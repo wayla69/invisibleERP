@@ -343,7 +343,12 @@ async function main() {
   // URL, so they're logged 'failed' — that still exercises registration, signed delivery, retry and isolation.
   const wEvents = await inj('GET', '/api/platform/webhooks/events', cf2aa);
   ok('Webhooks: event catalog exposes subscribable events', (wEvents.json.events ?? []).some((e: any) => e.key === 'alert.fired') && (wEvents.json.events ?? []).some((e: any) => e.key === 'po.approved'), `${(wEvents.json.events ?? []).length}`);
-  const reg = await inj('POST', '/api/platform/webhooks', cf2aa, { url: 'http://127.0.0.1:9/ierp-hook', events: [] });
+  // SSRF guard (M3): a loopback / cloud-metadata / RFC1918 target is rejected at registration (can't be used
+  // to reach internal services). Use a public-but-unreachable TEST-NET-2 (RFC5737) address for the
+  // delivery-failure path below so it passes the guard yet still fails to connect.
+  const ssrfBlock = await inj('POST', '/api/platform/webhooks', cf2aa, { url: 'http://169.254.169.254/latest/meta-data/', events: [] });
+  ok('Webhooks: SSRF guard blocks an internal/metadata URL at registration (SSRF_BLOCKED)', ssrfBlock.status === 400 && ssrfBlock.json?.error?.code === 'SSRF_BLOCKED', `${ssrfBlock.status} ${ssrfBlock.json?.error?.code}`);
+  const reg = await inj('POST', '/api/platform/webhooks', cf2aa, { url: 'http://198.51.100.9:9/ierp-hook', events: [] });
   ok('Webhooks: register returns id + a one-time plaintext secret', (reg.status === 200 || reg.status === 201) && !!reg.json.id && /^[0-9a-f]{48}$/.test(reg.json.secret ?? ''), `${reg.status} secretLen=${(reg.json.secret ?? '').length}`);
   const wlist = await inj('GET', '/api/platform/webhooks', cf2aa);
   ok('Webhooks: list shows the endpoint without leaking the secret', (wlist.json ?? []).some((w: any) => w.id === reg.json.id) && (wlist.json ?? []).every((w: any) => w.secret === undefined), `n=${(wlist.json ?? []).length}`);
@@ -567,16 +572,24 @@ async function main() {
   ok('SSO: authorize is 503 for a tenant without SSO configured', authzHq.status === 503 && authzHq.json.error?.code === 'SSO_NOT_CONFIGURED', `${authzHq.status} ${authzHq.json.error?.code}`);
 
   // Mint an HS256 id_token (signed with the client secret) and complete the callback → JIT provision + JWT.
+  // C1: `state` is now single-use and server-persisted, so each callback must present a FRESH state minted by
+  // authorize() (a forged/replayed/expired state is rejected — see the BAD_STATE check below).
   const mkIdToken = (over: any = {}) => signHs256({ iss: ISSUER, aud: CLIENT, sub: 'idp-user-1', email: 'alice@cf2.example', exp: Math.floor(Date.now() / 1000) + 3600, ...over }, SECRET);
-  const cb1 = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.nonce1', id_token: mkIdToken() });
+  const freshState = async (): Promise<string> => (await inj('GET', '/api/auth/sso/authorize?tenant=CF2', undefined)).json.state as string;
+  const cbForged = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.forged-never-issued', id_token: mkIdToken() });
+  ok('SSO: a forged/unknown state is rejected (BAD_STATE — login-CSRF defence)', cbForged.status === 400 && cbForged.json.error?.code === 'BAD_STATE', `${cbForged.status} ${cbForged.json.error?.code}`);
+  const reuseState = await freshState();
+  const cb1 = await inj('POST', '/api/auth/sso/callback', undefined, { state: reuseState, id_token: mkIdToken() });
   ok('SSO: callback verifies the id_token and mints a session (JIT-provisioned user)', cb1.status === 200 && !!cb1.json.token && cb1.json.role === 'Customer', `${cb1.status} ${JSON.stringify(cb1.json).slice(0,100)}`);
+  const cbReplay = await inj('POST', '/api/auth/sso/callback', undefined, { state: reuseState, id_token: mkIdToken() });
+  ok('SSO: a consumed state cannot be replayed (single-use — BAD_STATE)', cbReplay.status === 400 && cbReplay.json.error?.code === 'BAD_STATE', `${cbReplay.status} ${cbReplay.json.error?.code}`);
   const ssoMe = await inj('GET', '/api/auth/me', cb1.json.token);
   ok('SSO: the minted session works (auth/me) and is scoped to the SSO user', ssoMe.status === 200 && ssoMe.json.username === cb1.json.username, `${ssoMe.status} ${ssoMe.json.username}`);
-  const cb2 = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.nonce2', id_token: mkIdToken() });
+  const cb2 = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), id_token: mkIdToken() });
   ok('SSO: a repeat login reuses the same user (idempotent JIT by sso_subject)', cb2.status === 200 && cb2.json.username === cb1.json.username, `${cb1.json.username} vs ${cb2.json.username}`);
-  const cbBadSig = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.n', id_token: mkIdToken() + 'x' });
+  const cbBadSig = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), id_token: mkIdToken() + 'x' });
   ok('SSO: a tampered id_token is rejected (401 BAD_ID_TOKEN)', cbBadSig.status === 401 && cbBadSig.json.error?.code === 'BAD_ID_TOKEN', `${cbBadSig.status} ${cbBadSig.json.error?.code}`);
-  const cbBadAud = await inj('POST', '/api/auth/sso/callback', undefined, { state: 'CF2.n', id_token: mkIdToken({ aud: 'someone-else' }) });
+  const cbBadAud = await inj('POST', '/api/auth/sso/callback', undefined, { state: await freshState(), id_token: mkIdToken({ aud: 'someone-else' }) });
   ok('SSO: a wrong-audience id_token is rejected (401 BAD_AUDIENCE)', cbBadAud.status === 401 && cbBadAud.json.error?.code === 'BAD_AUDIENCE', `${cbBadAud.status} ${cbBadAud.json.error?.code}`);
 
   // SCIM: rotate a token, then provision/list/deactivate.

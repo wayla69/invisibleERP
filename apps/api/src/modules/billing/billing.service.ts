@@ -1,5 +1,5 @@
-import { Inject, Injectable, ConflictException, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { Inject, Injectable, ConflictException, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { eq, sql, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { plans, subscriptions, tenants, users } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
@@ -190,6 +190,47 @@ export class BillingService {
 
     await db.update(subscriptions).set({ planCode: target, status: 'Active' }).where(eq(subscriptions.id, sub.id));
     return { tenant_id: tenantId, plan: target, status: 'Active' };
+  }
+
+  // ───────────────────── Plan limit enforcement ─────────────────────
+  // Called by AdminUsersService.create() before inserting a new user.
+  // Reads the tenant's active subscription + plan features and throws PLAN_USER_LIMIT when
+  // the tenant has reached the maxUsers ceiling for their plan (-1 = unlimited).
+  async checkUserLimit(tenantId: number): Promise<void> {
+    const db = this.db as any;
+    const [row] = await db
+      .select({ features: plans.features, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt })
+      .from(subscriptions)
+      .leftJoin(plans, eq(subscriptions.planCode, plans.code))
+      .where(eq(subscriptions.tenantId, tenantId))
+      .orderBy(desc(subscriptions.createdAt))
+      .limit(1);
+
+    if (!row) return; // no subscription yet (e.g. during provisioning) — fail-open
+
+    // Active trials have full feature access until the trial window closes.
+    if (row.status === 'Trialing') {
+      if (row.trialEndsAt && Date.now() > new Date(row.trialEndsAt).getTime()) return; // expired trial blocks via PlanGuard, not here
+      return;
+    }
+
+    const features: Record<string, unknown> = (row.features as any) ?? {};
+    const maxUsers = typeof features.users === 'number' ? features.users : -1;
+    if (maxUsers < 0) return; // -1 = unlimited (enterprise)
+
+    const [{ count }] = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(users)
+      .where(and(eq(users.tenantId, tenantId)));
+
+    const current = Number(count ?? 0);
+    if (current >= maxUsers) {
+      throw new ForbiddenException({
+        code: 'PLAN_USER_LIMIT',
+        message: `Your plan allows a maximum of ${maxUsers} user(s). You currently have ${current}. Please upgrade to add more users.`,
+        messageTh: `แพ็กเกจของคุณรองรับผู้ใช้สูงสุด ${maxUsers} คน (ปัจจุบัน: ${current} คน) กรุณาอัปเกรดแพ็กเกจ`,
+      });
+    }
   }
 
   // ───────────────────── Stripe checkout (stub) ─────────────────────

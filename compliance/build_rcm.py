@@ -543,7 +543,7 @@ GAP = [
  ("EXP-03","Expenditure","PR/PO approval workflow partial.","Finalize PR/PO maker-checker against DoA thresholds.","Procurement Mgr","Phase 2","Month 3-4","Medium"),
  ("INV-04","Inventory & COGS","Stocktake variance review informal.","Formalize count cadence + variance review/approval sign-off.","Warehouse Mgr","Phase 2","Month 4","Medium"),
  ("REC-03","Reconciliation","Intercompany recon partial.","Formalize IC matching + elimination sign-off each period.","Group Controller","Phase 2-3","Month 4-6","Medium"),
- ("ITGC-AC-07","ITGC · Access","Login brute-force lockout + JWT revocation outstanding.","DONE: token → httpOnly cookie + CSRF + web CSP. Remaining: per-account login lockout/throttle + JWT jti revocation list.","IT Security / Eng","Phase 2","Month 2-3","Low"),
+ ("ITGC-AC-07","ITGC · Access","Login brute-force lockout + JWT revocation (now implemented; monitoring/alerting on lockouts to formalize).","DONE: token → httpOnly cookie + CSRF + web CSP; JWT jti revocation list + revoke-all watermark (0147); per-account login lockout/throttle with exponential window (0176, login_attempts). Remaining: ops alerting on repeated lockouts.","IT Security / Eng","Phase 2","Month 2-3","Low"),
  ("TAX-03","Tax","WHT reporting partial.","Complete WHT calc coverage + monthly ภ.ง.ด. tie-out.","Tax","Phase 2-3","Month 4-6","Medium"),
  ("PAY-02","Payroll","Statutory payroll items partial.","Complete PF/OT/leave + ภ.ง.ด.1ก reconciliation to filings.","HR / Payroll","Phase 2-3","Month 4-6","Medium"),
  ("ELC-01","Entity-Level","No ethics policy / acknowledgements.","Issue code of conduct; annual acknowledgement register.","CEO / HR","Phase 1","Month 1-2","High"),

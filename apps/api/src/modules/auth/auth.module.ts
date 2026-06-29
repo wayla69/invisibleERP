@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PasswordService } from './password.service';
+import { LoginAttemptStore } from './login-attempt.store';
 
 @Module({
   imports: [
@@ -20,13 +21,16 @@ import { PasswordService } from './password.service';
         }
         return {
           secret: secret ?? 'dev-only-insecure-secret-change-me',
-          signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '8h' },
+          signOptions: { algorithm: 'HS256', expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '8h' },
+          // Pin the accepted algorithm so verification can never be coerced into `alg:none` or an
+          // asymmetric-key confusion attack if an RS/ES public key is ever introduced to this module.
+          verifyOptions: { algorithms: ['HS256'] },
         };
       },
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, PasswordService],
+  providers: [AuthService, PasswordService, LoginAttemptStore],
   exports: [PasswordService, JwtModule],
 })
 export class AuthModule {}

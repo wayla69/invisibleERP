@@ -3,6 +3,7 @@ import { Observable } from 'rxjs';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { RequiresPlanFeature } from '../billing/plan-feature.decorator';
 import { AgentService } from './agent.service';
 import { AiActionService } from './ai-action.service';
 import { EmbedderService } from './embedder';
@@ -26,6 +27,7 @@ const ProposeBody = z.object({ kind: z.enum(['journal_entry', 'purchase_order'])
 const RejectBody = z.object({ reason: z.string().optional() });
 const IngestBody = z.object({ title: z.string().min(1), source: z.string().optional(), content: z.string().min(1) });
 
+@RequiresPlanFeature('ai_chat')
 @Controller('api')
 export class AiController {
   constructor(private readonly agent: AgentService) {}
@@ -77,6 +79,7 @@ export class AiController {
 
 // Phase D1 — agentic write-ops queue. Propose (anyone with ai_chat) → list/approve/reject (approvals).
 // The service enforces SoD (approver ≠ proposer) + the kind-specific permission (e.g. gl_post) on approve.
+@RequiresPlanFeature('ai_chat')
 @Controller('api/ai/actions')
 export class AiActionController {
   constructor(private readonly actions: AiActionService) {}
@@ -108,10 +111,10 @@ export class KnowledgeController {
   @Post('documents') @Permissions('masterdata', 'ai_chat')
   ingest(@Body(new ZodValidationPipe(IngestBody)) b: z.infer<typeof IngestBody>, @CurrentUser() u: JwtUser) { return this.kb.ingest(b, u); }
 
-  @Get('search') @Permissions('ai_chat', 'dashboard')
+  @Get('search') @Permissions('ai_chat', 'dashboard') @RequiresPlanFeature('ai_chat')
   search(@Query('q') q: string, @Query('k') k: string | undefined, @CurrentUser() u: JwtUser) { return this.kb.search(q ?? '', k ? +k : 5, u); }
 
-  @Get('ask') @Permissions('ai_chat', 'dashboard')
+  @Get('ask') @Permissions('ai_chat', 'dashboard') @RequiresPlanFeature('ai_chat')
   ask(@Query('q') q: string, @CurrentUser() u: JwtUser) { return this.kb.ask(q ?? '', u); }
 }
 

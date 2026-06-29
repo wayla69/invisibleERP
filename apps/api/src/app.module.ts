@@ -6,6 +6,7 @@ import { DatabaseModule } from './database/database.module';
 import { CommonModule } from './common/common.module';
 import { JwtAuthGuard, PermissionsGuard } from './common/guards';
 import { ModuleEnabledGuard } from './modules/admin-config/module.guard';
+import { PlanGuard } from './modules/billing/plan.guard';
 import { TenantTxInterceptor } from './common/tenant-tx.interceptor';
 import { AuditInterceptor } from './common/audit.interceptor';
 import { HealthModule } from './modules/health/health.module';
@@ -248,10 +249,12 @@ import { OpsModule } from './modules/ops/ops.module';
     OpsModule,
   ],
   providers: [
-    // ทุก endpoint ต้อง auth (ยกเว้น @Public) แล้วจึงตรวจ @Permissions แล้วจึงตรวจ module on/off
+    // Guard order: auth → permission → module-enabled → plan-feature.
+    // Each layer is narrower: PlanGuard only fires when the route carries @RequiresPlanFeature.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: ModuleEnabledGuard },
+    { provide: APP_GUARD, useClass: PlanGuard },
     // Audit (outermost — writes outside the tenant tx so failures are still recorded),
     // then TenantTx (inner — wraps the handler in an RLS-scoped transaction).
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },

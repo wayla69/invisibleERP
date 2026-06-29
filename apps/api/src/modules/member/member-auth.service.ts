@@ -1,7 +1,7 @@
 import { Inject, Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq, and, desc, gt, isNull, sql } from 'drizzle-orm';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { tenants, posMembers, memberOtps, messageLog } from '../../database/schema';
 import { n } from '../../database/queries';
@@ -83,8 +83,9 @@ export class MemberAuthService {
     // empty for any racing loser, which then fails).
     const consumed = await db.update(memberOtps).set({ consumedAt: new Date() }).where(and(eq(memberOtps.id, otp.id), isNull(memberOtps.consumedAt))).returning({ id: memberOtps.id });
     if (!consumed.length) throw fail();
-    // Mint a MEMBER JWT — role 'Member', permissions [] (no staff access), tenant-scoped, 30-day life.
-    const token = await this.jwt.signAsync({ sub: `member:${member.id}`, kind: 'member', role: 'Member', tenantId, memberId: Number(member.id), permissions: [], customerName: null }, { expiresIn: '30d' });
+    // Mint a MEMBER JWT — role 'Member', permissions [] (no staff access), tenant-scoped. A jti makes it
+    // revocable (logout/incident denylist) and the guard re-checks pos_members.active each request; 7-day life.
+    const token = await this.jwt.signAsync({ sub: `member:${member.id}`, kind: 'member', role: 'Member', tenantId, memberId: Number(member.id), permissions: [], customerName: null, jti: randomUUID() }, { expiresIn: '7d' });
     return { token, member: { id: Number(member.id), member_code: member.memberCode, name: member.name, tier: member.tier, balance: n(member.balance) } };
   }
 
@@ -116,7 +117,7 @@ export class MemberAuthService {
     const tenantId = Number(t.id);
     const [m] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.lineUserId, lineUserId), eq(posMembers.active, true))).limit(1);
     if (!m) throw notLinked();
-    const token = await this.jwt.signAsync({ sub: `member:${m.id}`, kind: 'member', role: 'Member', tenantId, memberId: Number(m.id), permissions: [], customerName: null }, { expiresIn: '30d' });
+    const token = await this.jwt.signAsync({ sub: `member:${m.id}`, kind: 'member', role: 'Member', tenantId, memberId: Number(m.id), permissions: [], customerName: null, jti: randomUUID() }, { expiresIn: '7d' });
     return { token, member: { id: Number(m.id), member_code: m.memberCode, name: m.name, tier: m.tier, balance: n(m.balance) } };
   }
 }

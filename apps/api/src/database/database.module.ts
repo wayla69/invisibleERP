@@ -23,13 +23,19 @@ export function tenantAwareProxy(base: DrizzleDb): DrizzleDb {
   }) as DrizzleDb;
 }
 
+// The raw postgres-js client (the tagged-template fn). Exposed so auth-infra code can run AUTOCOMMIT
+// statements OUTSIDE the per-request tenant transaction (e.g. the login-lockout counter, which must persist
+// even when the request itself rolls back on a 401). Shares the one pool with DRIZZLE.
+export const PG_CLIENT = Symbol('PG_CLIENT');
+export type PgClient = ReturnType<typeof postgres>;
+
 @Global()
 @Module({
   providers: [
     {
-      provide: DRIZZLE,
+      provide: PG_CLIENT,
       inject: [ConfigService],
-      useFactory: (config: ConfigService): DrizzleDb => {
+      useFactory: (config: ConfigService): PgClient => {
         const logger = new Logger('Database');
         const url = config.get<string>('DATABASE_URL');
         // postgres-js connect แบบ lazy (ไม่ต่อจน query แรก) → server boot ได้แม้ยังไม่ตั้ง DB.
@@ -39,15 +45,22 @@ export function tenantAwareProxy(base: DrizzleDb): DrizzleDb {
         } else if (url.startsWith('postgres://')) {
           logger.warn('DATABASE_URL uses postgres:// — ควรใช้ postgresql:// (parity note from V1 user_store)');
         }
-        const max = Number(process.env.DB_POOL_MAX ?? 10);
+        // Pool size per process. Default 20 (was 10 — too low for a single Node process: the load test showed
+        // throughput pinned at ~400 rps with the pool saturated). Size so that (replicas × DB_POOL_MAX) stays
+        // under Postgres max_connections; with WEB_CONCURRENCY workers each worker opens its own pool.
+        const max = Number(process.env.DB_POOL_MAX ?? 20);
         const opts: Record<string, unknown> = { max };
         // simple-protocol mode (เช่น ต่อ PGlite-wire/บาง pooler ที่ไม่รองรับ extended protocol/type-fetch)
         if (process.env.DB_SIMPLE === '1') { opts.prepare = false; opts.fetch_types = false; }
-        const client = postgres(url ?? 'postgresql://localhost:5432/_unconfigured', opts);
-        return tenantAwareProxy(drizzle(client, { schema }));
+        return postgres(url ?? 'postgresql://localhost:5432/_unconfigured', opts);
       },
     },
+    {
+      provide: DRIZZLE,
+      inject: [PG_CLIENT],
+      useFactory: (client: PgClient): DrizzleDb => tenantAwareProxy(drizzle(client, { schema })),
+    },
   ],
-  exports: [DRIZZLE],
+  exports: [DRIZZLE, PG_CLIENT],
 })
 export class DatabaseModule {}
