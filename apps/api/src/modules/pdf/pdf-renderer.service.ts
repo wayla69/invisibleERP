@@ -83,8 +83,8 @@ export class PdfRenderer implements OnModuleDestroy {
       page = await browser.newPage();
       // Bound each render: a hung networkidle wait or page.pdf throws → caught below → browser reset →
       // null returned → caller serves raw HTML (graceful degrade), instead of blocking the request forever.
-      await withTimeout(page.setContent(html, { waitUntil: 'networkidle' }), timeoutMs, 'PDF setContent');
-      const pdf = await withTimeout(page.pdf(this.toPlaywrightOpts(opts)), timeoutMs, 'PDF render');
+      await withTimeout<unknown>(page.setContent(html, { waitUntil: 'networkidle' }), timeoutMs, 'PDF setContent');
+      const pdf = await withTimeout<Uint8Array>(page.pdf(this.toPlaywrightOpts(opts)), timeoutMs, 'PDF render');
       return Buffer.from(pdf);
     } catch (err) {
       this.log.warn(`Chromium unavailable, falling back to HTML: ${(err as Error)?.message ?? err}`);
