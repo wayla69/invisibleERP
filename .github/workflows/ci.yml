@@ -74,6 +74,7 @@ jobs:
           - { pkg: cutover, script: compliance }
           - { pkg: cutover, script: cookie-auth }
           - { pkg: cutover, script: async-jobs }
+          - { pkg: cutover, script: bi-cache }
           # ── POS ──
           - { pkg: cutover, script: pos-p0 }
           - { pkg: cutover, script: pos-p1 }
