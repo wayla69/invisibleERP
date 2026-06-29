@@ -15,6 +15,7 @@ import { CollectionsService } from '../finance/collections.service';
 import { EamService } from '../eam/eam.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
+import { RevRecService } from '../revenue/revrec.service';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -38,6 +39,8 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
+  // Likewise: each run recognizes every due TFRS-15 revenue schedule through the current period (idempotent).
+  rev_rec_recognize: { label: 'รับรู้รายได้ตามสัญญา (TFRS 15)', labelEn: 'Recognize due revenue schedules' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -52,6 +55,7 @@ export class BiService {
     @Optional() private readonly eam?: EamService,
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly leases?: LeasesService,
+    @Optional() private readonly revrec?: RevRecService,
   ) {}
 
   // ── Read-through cache for the dashboard aggregates ─────────────────────────
@@ -452,6 +456,14 @@ export class BiService {
       if (!this.leases) throw new BadRequestException({ code: 'LEASES_UNAVAILABLE', message: 'Lease service not available', messageTh: 'ระบบสัญญาเช่าไม่พร้อมใช้งาน' });
       const r = await this.leases.runDueLeases(user); // idempotent per (lease, period)
       return { data: r, summary: `Lease run: posted ${r.posted} of ${r.scanned} due leases`, summaryTh: `ลงรายการสัญญาเช่า: ${r.posted} จาก ${r.scanned} สัญญา` };
+    }
+    if (reportType === 'rev_rec_recognize') {
+      if (!this.revrec) throw new BadRequestException({ code: 'REVREC_UNAVAILABLE', message: 'Revenue recognition service not available', messageTh: 'ระบบรับรู้รายได้ไม่พร้อมใช้งาน' });
+      // Recognize every TFRS-15 schedule due through the current period for the caller's tenant. Idempotent:
+      // an already-recognized schedule is skipped (the REVREC JE is alreadyPosted-guarded).
+      const period = new Date().toISOString().slice(0, 7); // YYYY-MM
+      const r = await this.revrec.recognize({ period }, user, user.tenantId ?? null);
+      return { data: r, summary: `Revenue recognition ${period}: recognized ${r.recognized_count} schedule(s), total ${r.total_recognized}`, summaryTh: `รับรู้รายได้งวด ${period}: ${r.recognized_count} รายการ รวม ${r.total_recognized}` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }

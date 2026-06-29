@@ -176,6 +176,20 @@ async function main() {
   const jRef = await jBy('REVREC-REF', `REVREC-REF:${c1.json.contract_no}:2040-01-31`);
   ok('REV-19: refund GL Dr4300=50 (contra) / Cr2420=50', near(leg(jRef, '4300', 'debit'), 50) && near(leg(jRef, '2420', 'credit'), 50), JSON.stringify({ d: leg(jRef, '4300', 'debit'), c: leg(jRef, '2420', 'credit') }));
 
+  // ── Scheduled recognition: the `rev_rec_recognize` BI report type runs RevRecService.recognize for the
+  //    current period, so due TFRS-15 schedules recognize automatically (no manual API call). A past-dated
+  //    over-time contract makes all 12 monthly schedules due. ──
+  const rrCon = await inj('POST', '/api/revenue/contracts', admin, { total_price: 1200, contract_date: '2020-01-01', obligations: [{ name: 'Annual support', ssp: 1200, method: 'over_time', start_date: '2020-01-01', end_date: '2020-12-31' }] });
+  const rrCid = rrCon.json.id;
+  await inj('POST', `/api/revenue/contracts/${rrCid}/allocate`, admin, {});
+  await inj('POST', `/api/revenue/contracts/${rrCid}/activate`, admin, {});
+  await inj('POST', `/api/revenue/contracts/${rrCid}/schedule`, admin, {});
+  const rrSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'RevRec monthly', report_type: 'rev_rec_recognize', frequency: 'monthly' });
+  const rrRun = await inj('POST', `/api/bi/subscriptions/${rrSub.json.id}/run`, admin, {});
+  ok('Scheduled rev_rec_recognize runs the recognition job (status success, count≥1)', rrRun.json.status === 'success' && /recognized\s+[1-9]/.test(rrRun.json.summary ?? ''), JSON.stringify({ st: rrRun.json.status, sum: rrRun.json.summary }).slice(0, 140));
+  const rrAfter = await inj('GET', `/api/revenue/contracts/${rrCid}`, admin);
+  ok('Scheduled job recognized all 12 due monthly schedules', (rrAfter.json.schedule ?? []).filter((s: any) => s.recognized).length === 12, `recognized=${(rrAfter.json.schedule ?? []).filter((s: any) => s.recognized).length}`);
+
   const tbFinal = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
   ok('REV-19: trial balance still balanced after TFRS15 postings', near(tbFinal.debit ?? tbFinal.total_debit, tbFinal.credit ?? tbFinal.total_credit), JSON.stringify(tbFinal).slice(0, 60));
 
