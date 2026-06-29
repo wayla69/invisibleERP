@@ -86,6 +86,12 @@ your code below.
 | `ALREADY_POSTED` | You re-ran or re-posted a period that's already **Posted**. | The group result for that period is frozen — no action needed. |
 | `CONSOL_RUN_NOT_FOUND` | The run id passed to post doesn't exist. | Verify the run id (`GET /api/consolidation/groups/{id}/runs`). |
 
+### Reports & Analytics
+
+| Code | Meaning | What to do |
+|------|---------|-----------|
+| `BI_BAD_PERIOD` (ช่วงเวลาไม่ถูกต้อง) | The sales-cube report was asked to group by a period grain other than `day`, `week`, or `month`. | Use one of `day`, `week`, or `month` for the period. Previously an unrecognised value silently returned monthly buckets; it is now rejected so the result always matches what you asked for. See [Reports & Analytics](./09-reports-and-analytics.md). |
+
 ### Administration
 
 | Code | Meaning | What to do |

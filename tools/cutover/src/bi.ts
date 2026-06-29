@@ -160,6 +160,10 @@ async function main() {
   const cubeHttp = await inj('GET', '/api/bi/sales-cube?period=month&months=1', mgr1);
   ok('GET /api/bi/sales-cube → 200 + period_type', cubeHttp.status === 200 && cubeHttp.json.period_type === 'month', `status=${cubeHttp.status}`);
 
+  // ── 16. invalid period is rejected (BI_BAD_PERIOD), not silently coerced to month ──
+  const badPeriod = await inj('GET', `/api/bi/sales-cube?period=${encodeURIComponent("year))--")}&months=1`, mgr1);
+  ok('GET /api/bi/sales-cube?period=year))-- → 400 BI_BAD_PERIOD', badPeriod.status === 400 && badPeriod.json.error?.code === 'BI_BAD_PERIOD', `status=${badPeriod.status} code=${badPeriod.json.error?.code}`);
+
   await app.close();
 }
 

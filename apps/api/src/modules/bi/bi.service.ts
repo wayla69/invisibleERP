@@ -153,7 +153,13 @@ export class BiService {
     const end = dto.end_date ?? today;
     const period = dto.period ?? 'month';
 
-    const truncFn = period === 'day' ? 'day' : period === 'week' ? 'week' : 'month';
+    // Validate the period explicitly: an unknown value used to silently coerce to 'month' (a
+    // silent-wrong-result — the caller asked for one grain and got another). Reject it instead.
+    // This also keeps the `sql.raw(truncFn)` sites below provably injection-safe by construction:
+    // truncFn can only ever be one of the three hardcoded date_trunc field literals.
+    const TRUNC: Record<string, 'day' | 'week' | 'month'> = { day: 'day', week: 'week', month: 'month' };
+    const truncFn = TRUNC[period];
+    if (!truncFn) throw new BadRequestException({ code: 'BI_BAD_PERIOD', message: `Invalid period '${period}' — expected day, week, or month`, messageTh: "ช่วงเวลาไม่ถูกต้อง — รองรับเฉพาะ day, week หรือ month" });
 
     const rows = await db.select({
       period: sql<string>`to_char(date_trunc('${sql.raw(truncFn)}', ${custPosSales.saleDate}::date), 'YYYY-MM-DD')`,
