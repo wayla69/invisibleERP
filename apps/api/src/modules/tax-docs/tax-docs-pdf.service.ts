@@ -1,31 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { bahtText } from '../../common/bahttext.util';
 import { formatTaxId } from './tax-docs.snapshot';
 import { PND_LABELS, WHT_CONDITION_LABELS, incomeType, type PndType } from './wht-rates';
+import { PdfRenderer } from '../pdf/pdf-renderer.service';
 
-// HTML → PDF templates for the three Thai tax documents. Chromium (playwright-core) renders; if it's
-// unavailable the caller falls back to sending the HTML. Thai font: Sarabun (Google Fonts).
+// HTML → PDF templates for the three Thai tax documents. Rendering is delegated to the shared PdfRenderer
+// (external-service offload or pooled Chromium); if unavailable it returns null → caller sends the HTML.
 @Injectable()
 export class TaxDocsPdfService {
-  private readonly logger = new Logger(TaxDocsPdfService.name);
+  constructor(private readonly pdf: PdfRenderer) {}
 
-  async renderToPdf(html: string, slip = false): Promise<Buffer | null> {
-    let browser: any = null;
-    try {
-      const { chromium } = await import('playwright-core');
-      browser = await chromium.launch({ headless: true });
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle' });
-      const pdf = slip
-        ? await page.pdf({ width: '80mm', printBackground: true, margin: { top: '4mm', bottom: '4mm', left: '3mm', right: '3mm' } })
-        : await page.pdf({ format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
-      return Buffer.from(pdf);
-    } catch (err) {
-      this.logger.warn(`Chromium unavailable, falling back to HTML: ${(err as Error)?.message ?? err}`);
-      return null;
-    } finally {
-      if (browser) { try { await browser.close(); } catch { /* ignore */ } }
-    }
+  renderToPdf(html: string, slip = false): Promise<Buffer | null> {
+    return slip
+      ? this.pdf.render(html, { width: '80mm', printBackground: true, margin: { top: '4mm', bottom: '4mm', left: '3mm', right: '3mm' } })
+      : this.pdf.render(html, { format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' } });
   }
 
   // ── ใบกำกับภาษีเต็มรูป (ม.86/4) — A4 ──

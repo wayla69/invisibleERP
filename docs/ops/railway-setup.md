@@ -40,6 +40,15 @@ the web origin via `CORS_ORIGINS`.
 
    Recommended (warned-if-missing): `SENTRY_DSN`, `OTEL_EXPORTER_OTLP_ENDPOINT`. Optional:
    `ANTHROPIC_API_KEY` (AI falls back to rule-based if unset). Full matrix: `secrets.md`.
+
+   **PDF rendering (optional, recommended for prod).** HTML→PDF (tax invoices/receipts/statements, tax
+   reports, QR labels) is centralised in one renderer. By default it launches a **pooled in-process
+   Chromium** (one browser reused across requests). To keep Chromium **out of the API process** entirely,
+   run a small PDF microservice (accepts `POST { html, options }` → `application/pdf`) and set
+   `PDF_SERVICE_URL` to it — the API then offloads every render and never spawns a browser. Tuning:
+   `PDF_MAX_CONCURRENCY` (default 2, bounds in-process pages), `PDF_SERVICE_TIMEOUT_MS` (default 30000).
+   If neither a service nor Chromium is available the API returns the document as **HTML** (graceful
+   fallback) rather than failing.
 3. **Settings → Networking → Generate Domain.** Note the api URL (e.g. `https://api-xxxx.up.railway.app`).
    Migrations run automatically on each deploy via the railway.json `preDeployCommand` (`db:migrate`).
    Health checks hit `/` (also `/healthz` liveness, `/readyz` DB-readiness).
