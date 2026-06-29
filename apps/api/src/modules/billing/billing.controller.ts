@@ -52,6 +52,14 @@ export class BillingController {
     return this.svc.getSubscription(tenantId);
   }
 
+  // Per-tenant AI token consumption (cost visibility): today's usage vs the plan's daily limit + a 30-day
+  // total. The daily budget itself is enforced in AgentService (AI_BUDGET_EXCEEDED); this is the read view.
+  @Get('billing/ai-usage') @Permissions('users', 'exec')
+  async aiUsage(@CurrentUser() u: JwtUser) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    return this.svc.aiUsage(tenantId);
+  }
+
   @Post('billing/checkout') @Permissions('users')
   async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string }, @CurrentUser() u: JwtUser) {
     const tenantId = await this.svc.resolveTenantId(u);
