@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MenuGrid } from '@/components/pos/menu-grid';
-import { CartPanel } from '@/components/pos/cart-panel';
+import { CartPanel, type OrderType } from '@/components/pos/cart-panel';
 import { CheckoutPanel, type SettleResult } from '@/components/pos/checkout-panel';
 import { ModifierDialog } from '@/components/pos/modifier-dialog';
 import { TerminalBar } from '@/components/pos/terminal-bar';
@@ -58,6 +58,10 @@ export default function RegisterPage() {
   const [tableId, setTableId] = useState<number | null>(null);
   const [tableNo, setTableNo] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState('');
+  // order options (#3): fulfillment type, guest count, manual service charge %
+  const [orderType, setOrderType] = useState<OrderType>('dine_in');
+  const [pax, setPax] = useState(1);
+  const [serviceChargePct, setServiceChargePct] = useState(0);
 
   const [modSku, setModSku] = useState<string | null>(null);
   const [checkout, setCheckout] = useState(false);
@@ -80,8 +84,13 @@ export default function RegisterPage() {
     return qty <= 0 ? [] : [{ ...l, qty }];
   }));
   const removeLine = (key: string) => setLines((ls) => ls.filter((l) => l.key !== key));
-  const clearCart = () => { setLines([]); setCustomerName(''); };
-  const resetSale = () => { setLines([]); setCustomerName(''); setMode('quick'); setTableId(null); setTableNo(null); };
+  const clearCart = () => { setLines([]); setCustomerName(''); setServiceChargePct(0); };
+  const resetSale = () => { setLines([]); setCustomerName(''); setMode('quick'); setTableId(null); setTableNo(null); setOrderType('dine_in'); setPax(1); setServiceChargePct(0); };
+  // switching to a to-go type drops any attached table (takeaway/delivery have no table/dine-in mode)
+  const changeOrderType = (ot: OrderType) => {
+    setOrderType(ot);
+    if (ot !== 'dine_in') { setMode('quick'); setTableId(null); setTableNo(null); }
+  };
 
   // ── customer-facing display: mirror the cart (debounced) ──
   useEffect(() => {
@@ -116,15 +125,18 @@ export default function RegisterPage() {
 
     const created = await api<{ order_no: string }>('/api/restaurant/orders', {
       method: 'POST',
-      body: JSON.stringify({ table_id: tableId ?? undefined, items }),
+      body: JSON.stringify({ table_id: tableId ?? undefined, items, guest_count: pax, fulfillment_type: orderType }),
     });
     const orderNo = created.order_no;
-    if (mode === 'dinein') {
+    // fire to kitchen for table service AND for to-go cooked orders (takeaway/delivery)
+    if (mode === 'dinein' || orderType !== 'dine_in') {
       await api(`/api/restaurant/orders/${orderNo}/fire`, { method: 'POST', body: '{}' }).catch(() => { /* kitchen fire best-effort */ });
     }
+    // manual service charge: force-apply at the entered % regardless of party size (service_min_party=1).
+    const sc = serviceChargePct > 0 ? { apply_pricing_rules: true, service_charge_pct: serviceChargePct, party_size: pax, service_min_party: 1, channel: orderType } : {};
     const sale = await api<{ sale_no: string; total: number; total_with_tip?: number }>(`/api/restaurant/orders/${orderNo}/checkout`, {
       method: 'POST',
-      body: JSON.stringify({ method, discount_pct: discountPct || undefined }),
+      body: JSON.stringify({ method, discount_pct: discountPct || undefined, ...sc }),
     });
     const total = Number(sale.total ?? sale.total_with_tip ?? t.total);
     const change = cashReceived != null ? Math.round((cashReceived - total) * 100) / 100 : undefined;
@@ -138,7 +150,7 @@ export default function RegisterPage() {
     qc.invalidateQueries({ queryKey: ['orders'] });
     qc.invalidateQueries({ queryKey: ['pos-summary'] });
     return { sale_no: sale.sale_no, total, change };
-  }, [lines, tableId, mode, t.total, tm, qc, online, outbox]);
+  }, [lines, tableId, mode, orderType, pax, serviceChargePct, t.total, tm, qc, online, outbox]);
 
   const finishSale = () => { setCheckout(false); resetSale(); tm.pushDisplay({ message: 'ยินดีต้อนรับ / Welcome' }); };
 
@@ -210,6 +222,12 @@ export default function RegisterPage() {
               onClear={clearCart}
               onHold={hold}
               onCheckout={() => setCheckout(true)}
+              orderType={orderType}
+              onOrderType={changeOrderType}
+              pax={pax}
+              onPax={(delta) => setPax((p) => Math.max(1, p + delta))}
+              serviceChargePct={serviceChargePct}
+              onServiceCharge={setServiceChargePct}
             />
           </div>
         )}
@@ -226,6 +244,7 @@ export default function RegisterPage() {
       {checkout && lines.length > 0 && (
         <CheckoutPanel
           lines={lines}
+          serviceChargePct={serviceChargePct}
           onSettle={settle}
           onReprint={(saleNo) => tm.printReceipt(saleNo)}
           onSendReceipt={(saleNo, channel, to) => api(`/api/pos/sales/${encodeURIComponent(saleNo)}/receipt/send`, { method: 'POST', body: JSON.stringify({ channel, to }) }).then(() => undefined)}
@@ -237,7 +256,7 @@ export default function RegisterPage() {
       {tablePicker && (
         <TableDialog
           onClose={() => setTablePicker(false)}
-          onPick={(id, no) => { setTableId(id); setTableNo(no); setMode('dinein'); setTablePicker(false); }}
+          onPick={(id, no) => { setTableId(id); setTableNo(no); setMode('dinein'); setOrderType('dine_in'); setTablePicker(false); }}
         />
       )}
 

@@ -84,6 +84,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.pos_control': { th: 'ควบคุม POS (พักบิล/อนุมัติ)', en: 'POS Control (Hold/Approve)' },
   'nav.till': { th: 'จัดการลิ้นชัก (Till)', en: 'Till Management' },
   'nav.close_of_day': { th: 'ปิดกะ (Z-Report)', en: 'Close of Day (Z-Report)' },
+  'nav.pos_pin': { th: 'ตั้ง PIN หน้าร้าน', en: 'My POS PIN' },
   'nav.print': { th: 'ใบเสร็จ & งานพิมพ์', en: 'Receipts & Printing' },
 
   // ── Store & Delivery ──────────────────────────────────────────────────────

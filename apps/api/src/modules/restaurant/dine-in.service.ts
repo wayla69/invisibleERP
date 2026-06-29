@@ -104,7 +104,8 @@ export class DineInService {
     const orderNo = await this.docNo.nextDaily('DIN');
     const [h] = await db.insert(dineInOrders).values({
       orderNo, tenantId: user.tenantId, tableId: dto.table_id ?? null, sessionId: dto.session_id ?? null,
-      status: 'open', guestCount: dto.guest_count ?? 1, server: user.username, notes: dto.notes ?? null, createdBy: user.username,
+      status: 'open', guestCount: dto.guest_count ?? 1, fulfillmentType: dto.fulfillment_type ?? 'dine_in',
+      server: user.username, notes: dto.notes ?? null, createdBy: user.username,
     }).returning({ id: dineInOrders.id });
     await this.insertItems(Number(h.id), user.tenantId, dto.items, user, opts);
     await this.refreshTotals(Number(h.id));

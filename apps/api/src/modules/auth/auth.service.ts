@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { authenticator } from 'otplib';
-import { resolvePermissions, requiresMfa, type Role, type Permission, type LoginResponse, type AuthUser } from '@ierp/shared';
+import { resolvePermissions, requiresMfa, type Role, type Permission, type LoginResponse, type PinLoginResponse, type AuthUser } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { users, userPermissions, tenants, revokedTokens } from '../../database/schema';
 import { PasswordService } from './password.service';
@@ -59,26 +59,117 @@ export class AuthService {
     }
     // Full success (password + any required second factor) — clear the failed-attempt counter.
     await this.attempts.clear(norm);
+    return (await this.issueSession(row)).res;
+  }
 
+  // POS-PIN quick-login (ITGC-AC-17) — username + 4–6 digit PIN, for front-of-house staff. Mirrors the
+  // password path's lockout (ITGC-AC-07, same per-account counter ⇒ a PIN brute-force trips it too) and the
+  // deactivated-account guard, but: (a) authenticates against `pin_hash`, and (b) HARD-BLOCKS any role whose
+  // effective permissions require MFA (Admin/finance/access-admin) — those must use password + TOTP. The PIN
+  // is a convenience for low-privilege tills, never a back door around the second factor.
+  async loginWithPin(username: string, pin: string): Promise<PinLoginResponse> {
+    const norm = normalizeUsername(username);
+    const retry = await this.attempts.retryAfterSeconds(norm);
+    if (retry > 0) {
+      throw new HttpException({ code: 'LOGIN_LOCKED', message: `Too many failed attempts. Try again in ${retry}s.`, messageTh: `พยายามเข้าสู่ระบบผิดหลายครั้ง กรุณาลองใหม่ใน ${retry} วินาที`, retry_after_s: retry }, HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const row = (await this.db.select().from(users).where(sql`lower(${users.username}) = ${norm}`).limit(1))[0];
+    const fail = () => {
+      void this.attempts.recordFailure(norm);
+      // Generic message (don't reveal whether the username exists or merely lacks a PIN) — anti-enumeration.
+      return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or PIN', messageTh: 'Username หรือ PIN ไม่ถูกต้อง' });
+    };
+    if (!row || !row.pinHash) throw fail();
+    const { ok, needsRehash } = await this.passwords.verify(pin, row.pinHash);
+    if (!ok) throw fail();
+    if (row.isActive === false)
+      throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
+    // Privileged roles may NOT authenticate with a PIN even if one was somehow set (e.g. role escalated after
+    // the PIN was assigned). Fail closed: the second factor cannot be bypassed by a 4–6 digit code.
+    const overrides = await this.userOverrides(row.id);
+    if (requiresMfa(row.role as Role, overrides.length ? overrides : null))
+      throw new UnauthorizedException({ code: 'PIN_NOT_ALLOWED', message: 'This account must sign in with a password', messageTh: 'บัญชีนี้ต้องเข้าสู่ระบบด้วยรหัสผ่าน (PIN ใช้ได้เฉพาะพนักงานหน้าร้านเท่านั้น)' });
+    if (needsRehash) {
+      const fresh = await this.passwords.hash(pin);
+      await this.db.update(users).set({ pinHash: fresh }).where(eq(users.id, row.id));
+    }
+    await this.attempts.clear(norm);
+    const { res, perms } = await this.issueSession(row);
+    return { ...res, permissions: perms };
+  }
+
+  // Resolve a user's per-user permission overrides (empty array if none).
+  private async userOverrides(userId: number): Promise<Permission[]> {
+    return (await this.db.select({ perm: userPermissions.perm }).from(userPermissions).where(eq(userPermissions.userId, userId))).map((r) => r.perm as Permission);
+  }
+
+  // Shared session-issuance tail for password + PIN login: resolve tenant code, permissions, the
+  // must-setup-MFA nudge, and sign the JWT. Returns the LoginResponse plus the resolved permissions.
+  private async issueSession(row: typeof users.$inferSelect): Promise<{ res: LoginResponse; perms: Permission[] }> {
     // tenant code (legacy Customer_Name) สำหรับ scoping
     let customerName: string | null = null;
     if (row.tenantId != null) {
       const t = (await this.db.select({ code: tenants.code }).from(tenants).where(eq(tenants.id, row.tenantId)).limit(1))[0];
       customerName = t?.code ?? null;
     }
-
     const role = row.role as Role;
-    const overrides = (await this.db.select({ perm: userPermissions.perm }).from(userPermissions).where(eq(userPermissions.userId, row.id))).map((r) => r.perm as never);
+    const overrides = await this.userOverrides(row.id);
     const perms = resolvePermissions(role, overrides.length ? overrides : null);
     // Policy nudge: a privileged/finance user who has not yet enrolled MFA is flagged so the client forces
     // setup (mirrors must_change_password). Enrolment must remain reachable, so this is a flag, not a block.
-    const mustSetupMfa = !row.mfaEnabled && requiresMfa(role, overrides.length ? (overrides as Permission[]) : null);
-
+    const mustSetupMfa = !row.mfaEnabled && requiresMfa(role, overrides.length ? overrides : null);
     // Carry the STORED username (not the typed input) so later exact-match lookups by JWT sub resolve the
     // same row — important for legacy mixed-case accounts authenticated via the case-insensitive match above.
     // jti gives each token an identity so it can be revoked (logout) before its expiry (ITGC-AC-15).
     const token = await this.jwt.signAsync({ sub: row.username, role, customerName, tenantId: row.tenantId ?? null, permissions: perms, jti: randomUUID() });
-    return { token, username: row.username, role, customer_name: customerName, must_change_password: !!row.mustChangePassword, must_setup_mfa: mustSetupMfa };
+    return { res: { token, username: row.username, role, customer_name: customerName, must_change_password: !!row.mustChangePassword, must_setup_mfa: mustSetupMfa }, perms };
+  }
+
+  // PIN format: exactly 4–6 digits (defence-in-depth; the Zod DTO enforces this too).
+  private assertPinFormat(pin: string) {
+    if (!/^\d{4,6}$/.test(pin))
+      throw new BadRequestException({ code: 'WEAK_PIN', message: 'PIN must be 4–6 digits', messageTh: 'PIN ต้องเป็นตัวเลข 4–6 หลัก' });
+  }
+
+  // A PIN may only be assigned to a non-privileged role (one that does NOT require MFA). Keeps the second
+  // factor un-bypassable: we never even store a PIN for a privileged account.
+  private async assertPinAllowed(row: typeof users.$inferSelect) {
+    const overrides = await this.userOverrides(row.id);
+    if (requiresMfa(row.role as Role, overrides.length ? overrides : null))
+      throw new BadRequestException({ code: 'PIN_NOT_ALLOWED', message: 'PIN login is not permitted for this (privileged) role', messageTh: 'ตั้ง PIN ไม่ได้ — บัญชีสิทธิ์สูงต้องใช้รหัสผ่าน + OTP' });
+  }
+
+  // Self-service: set/rotate your own PIN. Step-up with the current password so a hijacked session can't
+  // silently mint a quick-login PIN.
+  async setOwnPin(username: string, currentPassword: string, pin: string): Promise<{ ok: true }> {
+    this.assertPinFormat(pin);
+    const [row] = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
+    if (!row) throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'User not found' });
+    const { ok } = await this.passwords.verify(currentPassword, row.passwordHash);
+    if (!ok) throw new BadRequestException({ code: 'BAD_CURRENT_PASSWORD', message: 'Current password is incorrect', messageTh: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' });
+    await this.assertPinAllowed(row);
+    await this.db.update(users).set({ pinHash: await this.passwords.hash(pin), pinSetAt: new Date() }).where(eq(users.id, row.id));
+    return { ok: true };
+  }
+
+  // Admin (access-admin / 'users' permission): set a staff member's PIN.
+  async setPinFor(targetUsername: string, pin: string): Promise<{ ok: true; username: string }> {
+    this.assertPinFormat(pin);
+    const norm = normalizeUsername(targetUsername);
+    const [row] = await this.db.select().from(users).where(sql`lower(${users.username}) = ${norm}`).limit(1);
+    if (!row) throw new BadRequestException({ code: 'USER_NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
+    await this.assertPinAllowed(row);
+    await this.db.update(users).set({ pinHash: await this.passwords.hash(pin), pinSetAt: new Date() }).where(eq(users.id, row.id));
+    return { ok: true, username: row.username };
+  }
+
+  // Admin: clear a staff member's PIN (disables PIN quick-login until a new one is set).
+  async clearPinFor(targetUsername: string): Promise<{ ok: true; username: string }> {
+    const norm = normalizeUsername(targetUsername);
+    const [row] = await this.db.select().from(users).where(sql`lower(${users.username}) = ${norm}`).limit(1);
+    if (!row) throw new BadRequestException({ code: 'USER_NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
+    await this.db.update(users).set({ pinHash: null, pinSetAt: null }).where(eq(users.id, row.id));
+    return { ok: true, username: row.username };
   }
 
   // ── ITGC-AC-15: session revocation ───────────────────────────────────────────

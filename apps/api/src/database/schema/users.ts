@@ -12,6 +12,8 @@ export const users = pgTable('users', {
   role: roleEnum('role').notNull().default('Sales'), // เดิม PG default 'Staff' (bug) → แก้เป็น Sales
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   mustChangePassword: boolean('must_change_password').default(false), // A5 — force rotate default/weak password
+  pinHash: text('pin_hash'), // POS-PIN — scrypt-hashed 4–6 digit quick-login PIN (opt-in; non-privileged front-of-house roles only). Privileged/MFA roles are blocked from PIN auth.
+  pinSetAt: timestamp('pin_set_at', { withTimezone: true }), // when the PIN was last set/rotated (audit)
   mfaEnabled: boolean('mfa_enabled').default(false), // move #7 — TOTP
   totpSecret: text('totp_secret'),
   ssoSubject: text('sso_subject'), // OIDC/SAML subject for SSO users

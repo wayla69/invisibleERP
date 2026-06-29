@@ -1,6 +1,6 @@
 # 01 · Sales & Point of Sale (POS)
 
-**Status: DRAFT v0.5** · *v0.5 (2026-06-27): SoD screen split — new dedicated screens `/pos/refunds` (refund authorization queue, `pos_refund`) and `/pos/till` (till management, `pos_till`); `/pos/register` now shows as `pos_sell` primary perm; "บันทึกคืนสินค้า" button on `/returns` hidden from `pos_sell`-only cashiers (requires `pos_refund`). Controls R08/R12.* · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
+**Status: DRAFT v0.6** · *v0.6 (2026-06-29): added **PIN quick-login at the till** (numeric keypad on `/login`), the combined **"เข้าสู่ระบบ / เปิดกะ"** (login + open shift) action, the self-service **ตั้ง PIN หน้าร้าน** page (`/pos-pin`), and the **ตั้ง PIN** action on the admin Users page; privileged/finance accounts must still use password + MFA (cannot use a PIN). Control ITGC-AC-17.* · *v0.5 (2026-06-27): SoD screen split — new dedicated screens `/pos/refunds` (refund authorization queue, `pos_refund`) and `/pos/till` (till management, `pos_till`); `/pos/register` now shows as `pos_sell` primary perm; "บันทึกคืนสินค้า" button on `/returns` hidden from `pos_sell`-only cashiers (requires `pos_refund`). Controls R08/R12.* · *v0.4 (2026-06-26): B4 — pricing engine wired into the **retail portal POS** (`POST /api/portal/pos/sales`): `apply_pricing` now also triggers **auto service charge** (→ acct 4400, VATable) and **satang rounding** (→ acct 4900); three new optional fields `service_charge_pct`, `service_min_party`, `rounding`; response includes `service_charge` and `rounding_adjustment`.* · *v0.3 (2026-06-26): added **POS Favourites quick-access grid** (★ star-toggle + "รายการโปรด" chip tab, persisted per user) and the **"บันทึกคืนสินค้า" create-return flow** on the Returns Register (sale search → qty picker → refund method → `RTN-` confirmation).* · *v0.2 (2026-06-25): added the touch **register** (`/pos/register`) — menu-grid selling, modifier picker, keypad/quick-tender checkout, hold/recall — and connecting the **receipt printer / cash drawer / customer display** from the register's **⚙ ตั้งค่าเครื่อง**.*
 
 This chapter is for **Cashiers, Sales staff, POS Supervisors and Returns Clerks**.
 It covers ringing up sales, taking orders, credit checks, returns and refunds,
@@ -48,9 +48,15 @@ old keyed "create order" form for day-to-day selling):
    **standard COGS delta** (set on the modifier via the menu API, e.g. "extra patty" =
    ฿12) so choosing it raises the sold line's cost of goods at checkout — keeping
    food-cost reporting honest. This is back-office only; cashiers and diners never see it.
-3. **The cart.** Adjust quantity with **− / +**, remove a line with the bin icon,
-   and read **ยอดรวม / VAT / สุทธิ** at the bottom. **พักบิล** parks the cart and
-   **ล้างตะกร้า** clears it.
+3. **The cart & order options.** Adjust quantity with **− / +** and remove a line
+   with the bin icon. At the top of the cart pick the **order type** —
+   **ทานที่ร้าน / กลับบ้าน / เดลิเวอรี** (choosing *takeaway* or *delivery* drops any
+   attached table and still fires the order to the kitchen at checkout), and set the
+   **จำนวนลูกค้า (guest count)** for dine-in. Tick **ค่าบริการ** to add a manual
+   **service charge** (default 10%, editable) — it shows live on the cart and the
+   receipt, is **VATable** (posts to service income), and is force-applied at the
+   entered rate regardless of party size. Read **ยอดรวม / ค่าบริการ / VAT / สุทธิ** at
+   the bottom. **พักบิล** parks the cart and **ล้างตะกร้า** clears it.
 4. **Attach a table / buffet (optional).** Tap **แนบโต๊ะ** to tag the sale to a
    table — the order is then **fired to the kitchen (KDS)** at checkout and counts
    toward that table's room revenue. For full table-by-table service and buffet
@@ -580,6 +586,58 @@ The **Till Management** screen is the POS Supervisor's central view for live cas
 > **นำฝากทั้งหมด** to record the deposit (the books move the cash from on-hand to the
 > bank), then **กระทบยอด** once it shows on the bank statement. The person who drops the
 > cash **can't** bank it — that's a separate finance role (control **REC-05**).
+
+### Signing in at the till — PIN quick-login & "เข้าสู่ระบบ / เปิดกะ"
+
+**Screen:** `/login` (tab **"PIN หน้าร้าน"**)
+
+On a shared front-of-house terminal you don't have to type a full password each
+time. The login page has a **"PIN หน้าร้าน"** tab with a **numeric keypad**:
+
+1. Enter your **username** and tap your **4–6 digit PIN** on the keypad.
+2. To open your drawer in the same step, tick **"เปิดกะเมื่อเข้าสู่ระบบ"** and enter
+   the **opening float**.
+3. Tap **"เข้าสู่ระบบ / เปิดกะ"** — you're signed in, and (if you ticked the box and
+   you hold the till right) a new till session opens.
+
+> **Note — opening the shift needs the till right (R08).** A plain cashier
+> (`pos_sell`) is **signed in** but the drawer is **not** opened — a **POS Supervisor**
+> (`pos_till`) is the one who opens the shift. If a shift is already open for your
+> shop, signing in with the box ticked **won't open a second one** — you join the
+> existing till.
+
+> **Note — privileged & finance accounts can't use a PIN.** For security, anyone
+> whose role needs **MFA** (Admin and finance/access-admin roles) must sign in with
+> their **password + MFA** and cannot set or use a PIN. The PIN is only for
+> front-of-house roles (Cashier, POS Supervisor).
+
+#### Setting your own PIN — "ตั้ง PIN หน้าร้าน"
+
+**Screen:** `/pos-pin` (**ตั้ง PIN หน้าร้าน**, under **POS** in the menu).
+
+Set or change your own till PIN at any time:
+
+1. Open **ตั้ง PIN หน้าร้าน**.
+2. Enter your **current password** (to prove it's you), then your new **4–6 digit PIN**.
+3. Save — the PIN is stored securely (scrambled, never in plain text) and works at the
+   next sign-in.
+
+> Managers and admins can also set or clear a staff member's PIN from the **Users**
+> page (`/admin/users`) using the **"ตั้ง PIN"** action next to each user (requires
+> the `users` permission). Clearing a PIN turns off PIN sign-in for that person until
+> a new one is set.
+
+> **Troubleshooting — PIN sign-in:**
+> - **"PIN ไม่ถูกต้อง" (wrong PIN)** — the username/PIN didn't match. The message is
+>   deliberately generic; check the PIN and try again.
+> - **"บัญชีถูกล็อกชั่วคราว" (account locked)** — too many wrong PINs in a row locked the
+>   account for a short while (the **same** lockout as wrong-password login). Wait and
+>   retry, or have a manager reset the password/PIN.
+> - **"บัญชีนี้ต้องเข้าสู่ระบบด้วยรหัสผ่าน" (`PIN_NOT_ALLOWED`)** — this is a
+>   privileged/finance account; it can't use a PIN. Sign in with **password + MFA** on
+>   the normal login tab instead.
+> - **Setting your PIN fails with a current-password error (`BAD_CURRENT_PASSWORD`)** —
+>   the current password you typed on **ตั้ง PIN หน้าร้าน** is wrong; re-enter it.
 
 ### Open the till at the start of a shift
 

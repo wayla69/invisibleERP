@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Post, Param, HttpCode, Res, Req } from '@nestjs/common';
+import { Body, Controller, Get, Post, Delete, Param, HttpCode, Res, Req } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { LoginRequest, type LoginResponse, type AuthUser } from '@ierp/shared';
+import { LoginRequest, PinLoginRequest, SetOwnPinRequest, SetPinRequest, type LoginResponse, type PinLoginResponse, type AuthUser } from '@ierp/shared';
 import { Public, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { setAuthCookies, clearAuthCookies, readCookie, AUTH_COOKIE } from '../../common/cookies';
@@ -55,6 +55,40 @@ export class AuthController {
     // for non-browser clients (mobile / scripts) — backward compatible.
     setAuthCookies(reply, res.token);
     return res;
+  }
+
+  // ITGC-AC-17: POS-PIN quick-login (username + 4–6 digit PIN). @Public (pre-auth); sets the same cookies as
+  // password login. Front-of-house only — the service rejects any role that requires MFA.
+  @Public()
+  @Post('login/pin')
+  @HttpCode(200)
+  async loginPin(@Body(new ZodValidationPipe(PinLoginRequest)) body: PinLoginRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<PinLoginResponse> {
+    const res = await this.auth.loginWithPin(body.username, body.pin);
+    setAuthCookies(reply, res.token);
+    return res;
+  }
+
+  // Self-service: set/rotate your own POS PIN (step-up with current password).
+  @Post('auth/me/pin')
+  @HttpCode(200)
+  setOwnPin(@Body(new ZodValidationPipe(SetOwnPinRequest)) b: SetOwnPinRequest, @CurrentUser() user: JwtUser) {
+    return this.auth.setOwnPin(user.username, b.current_password, b.pin);
+  }
+
+  // Access-admin: set a staff member's POS PIN (e.g. onboarding a cashier). Blocked for privileged roles.
+  @Post('auth/users/:username/pin')
+  @Permissions('users')
+  @HttpCode(200)
+  setPin(@Param('username') username: string, @Body(new ZodValidationPipe(SetPinRequest)) b: SetPinRequest) {
+    return this.auth.setPinFor(username, b.pin);
+  }
+
+  // Access-admin: clear a staff member's POS PIN (disables PIN quick-login for them).
+  @Delete('auth/users/:username/pin')
+  @Permissions('users')
+  @HttpCode(200)
+  clearPin(@Param('username') username: string) {
+    return this.auth.clearPinFor(username);
   }
 
   // Clear the session cookies. @Public so it always succeeds (even with an expired/absent token); it only

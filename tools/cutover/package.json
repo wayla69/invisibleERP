@@ -73,6 +73,7 @@
     "workflow": "tsx src/workflow.ts",
     "compliance": "tsx src/compliance.ts",
     "cookie-auth": "tsx src/cookie-auth.ts",
+    "pos-pin": "tsx src/pos-pin.ts",
     "async-jobs": "tsx src/async-jobs.ts",
     "bi-cache": "tsx src/bi-cache.ts",
     "pdf-render": "tsx src/pdf-render.ts",

@@ -1,6 +1,6 @@
 'use client';
 
-import { Flame, Minus, Pause, Plus, ShoppingCart, Trash2, Utensils, User, Wallet } from 'lucide-react';
+import { Bike, Flame, Minus, Pause, Plus, ShoppingBag, ShoppingCart, Trash2, Utensils, User, Wallet } from 'lucide-react';
 import { baht } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -9,9 +9,17 @@ import type { CartLine } from './types';
 import { lineAmount } from './types';
 import { cartTotals } from './cart';
 
+export type OrderType = 'dine_in' | 'takeaway' | 'delivery';
+const ORDER_TYPES: { id: OrderType; label: string; icon: typeof Utensils }[] = [
+  { id: 'dine_in', label: 'ทานที่ร้าน', icon: Utensils },
+  { id: 'takeaway', label: 'กลับบ้าน', icon: ShoppingBag },
+  { id: 'delivery', label: 'เดลิเวอรี', icon: Bike },
+];
+
 export function CartPanel({
   lines, mode, tableNo, customerName,
   onQty, onRemove, onClear, onHold, onCheckout, onFire, firePending,
+  orderType, onOrderType, pax, onPax, serviceChargePct, onServiceCharge,
 }: {
   lines: CartLine[];
   mode: 'quick' | 'dinein';
@@ -24,8 +32,16 @@ export function CartPanel({
   onCheckout: () => void;
   onFire?: () => void;
   firePending?: boolean;
+  // Order options (optional — when provided, the panel renders the order-type/pax/service-charge controls).
+  orderType?: OrderType;
+  onOrderType?: (t: OrderType) => void;
+  pax?: number;
+  onPax?: (delta: number) => void;
+  serviceChargePct?: number;
+  onServiceCharge?: (pct: number) => void;
 }) {
-  const t = cartTotals(lines);
+  const scPct = serviceChargePct ?? 0;
+  const t = cartTotals(lines, 0, scPct);
   const count = lines.reduce((a, l) => a + l.qty, 0);
   const empty = lines.length === 0;
 
@@ -48,6 +64,38 @@ export function CartPanel({
       {customerName && (
         <div className="flex items-center gap-1.5 border-b px-3 py-1.5 text-xs text-muted-foreground">
           <User className="size-3.5" /> {customerName}
+        </div>
+      )}
+
+      {/* order options: type (dine-in/takeaway/delivery) + guest count */}
+      {onOrderType && (
+        <div className="space-y-2 border-b px-3 py-2.5">
+          <div className="grid grid-cols-3 gap-1.5">
+            {ORDER_TYPES.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => onOrderType(o.id)}
+                className={cn(
+                  'flex flex-col items-center gap-1 rounded-lg border py-2 text-xs font-medium transition-colors',
+                  (orderType ?? 'dine_in') === o.id ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent',
+                )}
+                aria-pressed={(orderType ?? 'dine_in') === o.id}
+              >
+                <o.icon className="size-4" /> {o.label}
+              </button>
+            ))}
+          </div>
+          {(orderType ?? 'dine_in') === 'dine_in' && onPax && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">จำนวนลูกค้า</span>
+              <div className="flex items-center rounded-md border">
+                <button type="button" aria-label="ลดจำนวนลูกค้า" className="grid size-7 place-items-center text-muted-foreground hover:text-foreground" onClick={() => onPax(-1)}><Minus className="size-3.5" /></button>
+                <span className="tabular w-8 text-center text-sm font-medium">{pax ?? 1}</span>
+                <button type="button" aria-label="เพิ่มจำนวนลูกค้า" className="grid size-7 place-items-center text-muted-foreground hover:text-foreground" onClick={() => onPax(1)}><Plus className="size-3.5" /></button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -100,6 +148,25 @@ export function CartPanel({
       <div className="space-y-2.5 border-t p-3">
         <div className="space-y-1 text-sm">
           <Row label="ยอดรวม" value={baht(t.net)} muted />
+          {onServiceCharge && (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" className="size-3.5 accent-primary" checked={scPct > 0} onChange={(e) => onServiceCharge(e.target.checked ? 10 : 0)} />
+                ค่าบริการ
+                {scPct > 0 && (
+                  <span className="inline-flex items-center gap-0.5">
+                    <input
+                      type="number" min={0} max={100} inputMode="numeric" aria-label="เปอร์เซ็นต์ค่าบริการ"
+                      className="h-6 w-11 rounded border bg-transparent px-1 text-right tabular outline-none focus-visible:border-ring"
+                      value={scPct}
+                      onChange={(e) => onServiceCharge(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                    />%
+                  </span>
+                )}
+              </label>
+              <span className="tabular">{baht(t.serviceCharge)}</span>
+            </div>
+          )}
           <Row label="ภาษีมูลค่าเพิ่ม 7%" value={baht(t.vat)} muted />
           <Row label="สุทธิ" value={baht(t.total)} big />
         </div>

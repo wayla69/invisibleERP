@@ -25,6 +25,7 @@ import {
   CheckCheck,
   ChefHat,
   CircleDollarSign,
+  KeyRound,
   ClipboardCheck,
   ClipboardList,
   Code,
@@ -178,6 +179,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       // SoD R08: till management (open/close/variance) is pos_till — segregated from pos_sell cashier.
       { label: 'nav.till', href: '/pos/till', icon: CircleDollarSign, perms: ['pos_till', 'pos'] },
       { label: 'nav.close_of_day', href: '/pos/close-of-day', icon: ReceiptText, perms: ['pos', 'pos_till', 'pos_close'] },
+      // Self-service: any POS staffer sets their own quick-login PIN (ITGC-AC-17).
+      { label: 'nav.pos_pin', href: '/pos-pin', icon: KeyRound, perms: ['pos_sell', 'pos', 'pos_till', 'order_mgt'] },
       { label: 'nav.print', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
     ],
   },

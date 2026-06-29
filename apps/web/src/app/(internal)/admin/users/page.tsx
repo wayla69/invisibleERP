@@ -43,6 +43,13 @@ export default function AdminUsersPage() {
     onSuccess: (r) => { if (r) notifySuccess('รีเซ็ตรหัสผ่านแล้ว'); },
     onError: (e: any) => notifyError(e.message),
   });
+  // ITGC-AC-17: set a staff member's POS quick-login PIN (front-of-house roles only — the API rejects
+  // privileged accounts). Cancelling the prompt is a no-op.
+  const setPin = useMutation({
+    mutationFn: (u: string) => { const pin = prompt(`ตั้ง PIN หน้าร้านสำหรับ ${u} (ตัวเลข 4–6 หลัก)`); if (pin == null) return Promise.resolve(null); if (!/^\d{4,6}$/.test(pin)) { notifyError('PIN ต้องเป็นตัวเลข 4–6 หลัก'); return Promise.resolve(null); } return api(`/api/auth/users/${u}/pin`, { method: 'POST', body: JSON.stringify({ pin }) }); },
+    onSuccess: (r) => { if (r) notifySuccess('ตั้ง PIN แล้ว'); },
+    onError: (e: any) => notifyError(e.message),
+  });
   const del = useMutation({
     mutationFn: (u: string) => api(`/api/admin/users/${u}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
@@ -121,6 +128,7 @@ export default function AdminUsersPage() {
               { key: 'customer_name', label: 'บริษัท', render: (r: any) => r.customer_name ?? '—' },
               { key: 'must_change_password', label: 'ต้องเปลี่ยนรหัส', render: (r: any) => r.must_change_password ? <Badge variant="warning">ใช่</Badge> : '—' },
               { key: 'reset', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={reset.isPending} onClick={() => reset.mutate(r.username)}>รีเซ็ตรหัส</Button> },
+              { key: 'pin', label: '', render: (r: any) => <Button size="sm" variant="outline" disabled={setPin.isPending} onClick={() => setPin.mutate(r.username)}>ตั้ง PIN</Button> },
               { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.username)}>ลบ</Button> },
             ]}
           />
