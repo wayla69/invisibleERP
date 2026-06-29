@@ -76,6 +76,7 @@ jobs:
           - { pkg: cutover, script: async-jobs }
           - { pkg: cutover, script: bi-cache }
           - { pkg: cutover, script: pdf-render }
+          - { pkg: cutover, script: saas-metrics }
           # ── POS ──
           - { pkg: cutover, script: pos-p0 }
           - { pkg: cutover, script: pos-p1 }

@@ -76,6 +76,7 @@
     "async-jobs": "tsx src/async-jobs.ts",
     "bi-cache": "tsx src/bi-cache.ts",
     "pdf-render": "tsx src/pdf-render.ts",
+    "saas-metrics": "tsx src/saas-metrics.ts",
     "match": "tsx src/match.ts",
     "costing": "tsx src/costing.ts",
     "wms": "tsx src/wms.ts",
