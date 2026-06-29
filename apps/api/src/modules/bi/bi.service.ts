@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { eq, and, sql, gte, lt, desc, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { biDailySnapshots, reportSubscriptions, reportRuns } from '../../database/schema/bi';
@@ -16,6 +16,11 @@ import { EamService } from '../eam/eam.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
 import { RevRecService } from '../revenue/revrec.service';
+import { JobQueueService } from '../jobs/job-queue.service';
+import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
+
+// Job type for offloading a due report/action subscription to the background worker.
+export const REPORT_SUBSCRIPTION_JOB = 'report_subscription';
 import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -47,7 +52,7 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
 @Injectable()
-export class BiService {
+export class BiService implements OnModuleInit {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly messaging: MessagingService,
@@ -58,7 +63,40 @@ export class BiService {
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly leases?: LeasesService,
     @Optional() private readonly revrec?: RevRecService,
+    @Optional() private readonly jobs?: JobQueueService,
+    @Optional() private readonly worker?: JobWorkerService,
   ) {}
+
+  // Register the background handler that runs one due subscription (report or heavy action job) off the
+  // request path. The worker claims jobs with FOR UPDATE SKIP LOCKED + retry/backoff; runInTenantContext
+  // (set by the worker) scopes the handler to the job's tenant, so we reconstruct a minimal principal here.
+  onModuleInit(): void {
+    this.worker?.register(REPORT_SUBSCRIPTION_JOB, async (payload: { subscriptionId: number }, ctx: JobContext) => {
+      const db = this.db as any;
+      const [sub] = await db.select().from(reportSubscriptions).where(eq(reportSubscriptions.id, Number(payload.subscriptionId))).limit(1);
+      if (!sub) return { skipped: 'subscription not found' };
+      const user = { username: ctx.actor ?? 'system:scheduler', role: ctx.bypass ? 'Admin' : 'Sales', tenantId: ctx.tenantId ?? sub.tenantId, permissions: [], customerName: null } as unknown as JwtUser;
+      return this.executeSubscription(sub, user);
+    });
+  }
+
+  // Async scheduler: enqueue each DUE subscription as a background job (returns immediately) instead of
+  // running them inline. Heavy action jobs (dunning, recurring GL, lease/rev-rec runs) then execute on the
+  // worker with retry/backoff, off the cron request path. Falls back to inline runDue if the queue is absent.
+  async runDueAsync(user: JwtUser) {
+    if (!this.jobs) return { ...(await this.runDue(user)), mode: 'inline (queue unavailable)' };
+    const db = this.db as any;
+    const now = Date.now();
+    const subs = await db.select().from(reportSubscriptions)
+      .where(and(eq(reportSubscriptions.tenantId, user.tenantId!), eq(reportSubscriptions.isActive, true)));
+    const due = subs.filter((s: any) => !s.lastRunAt || (s.nextRunAt && new Date(s.nextRunAt).getTime() <= now));
+    const enqueued: number[] = [];
+    for (const sub of due) {
+      const jobId = await this.jobs.enqueue({ jobType: REPORT_SUBSCRIPTION_JOB, payload: { subscriptionId: Number(sub.id) }, tenantId: user.tenantId ?? null, actor: user.username, bypass: user.role === 'Admin' });
+      enqueued.push(jobId);
+    }
+    return { due: due.length, enqueued: enqueued.length, job_ids: enqueued, mode: 'queued' };
+  }
 
   // ── Read-through cache for the dashboard aggregates ─────────────────────────
   // The KPI board / sales cube / finance & pipeline trends are read-only roll-ups hit on every dashboard

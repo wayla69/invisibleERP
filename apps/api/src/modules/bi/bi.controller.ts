@@ -69,6 +69,13 @@ export class BiController {
   @HttpCode(200)
   runDue(@CurrentUser() user: JwtUser) { return this.svc.runDue(user); }
 
+  // Async variant: enqueue due subscriptions to the background worker (returns immediately). Preferred for
+  // the nightly cron so heavy action jobs run off the request path with retry/backoff.
+  @Post('subscriptions/run-async')
+  @Permissions('exec')
+  @HttpCode(202)
+  runDueAsync(@CurrentUser() user: JwtUser) { return this.svc.runDueAsync(user); }
+
   @Post('subscriptions/:id/run')
   @Permissions('exec')
   @HttpCode(200)
