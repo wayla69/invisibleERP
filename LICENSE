@@ -1,0 +1,28 @@
+Copyright (c) 2026 Invisible Consulting Co., Ltd. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL
+
+This software and its source code (the "Software") are the proprietary and
+confidential property of Invisible Consulting Co., Ltd. ("the Company"). The
+Software is licensed, not sold, and is made available solely to authorized
+parties under a separate written agreement (e.g. the customer Terms of Service
+and Data Processing Agreement in docs/legal/).
+
+No part of the Software may be copied, modified, distributed, sublicensed,
+publicly displayed, reverse-engineered, or used to create derivative works,
+in whole or in part, without the prior written consent of the Company, except
+as expressly permitted by an applicable written agreement or by mandatory law.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COMPANY BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Third-party open-source components included with the Software remain under their
+respective licenses; see the dependency manifests (package.json / pnpm-lock.yaml)
+and the CI license-compliance gate (tools/ci/check-licenses.mjs), which screens
+production dependencies for incompatible copyleft / non-commercial terms.
+
+Contact: <<legal@invisible-consulting.example>>
