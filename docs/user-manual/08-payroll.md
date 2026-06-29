@@ -64,6 +64,13 @@ and its accounting entry is held out of the books until **a different person app
 > **Note:** Each period's run is recorded in the run history with its status
 > (รออนุมัติ / ผ่านแล้ว / ปฏิเสธ), who ran it, and who approved it.
 
+> **Large runs (optional):** for a company with many employees the run can be processed
+> **in the background** so the page doesn't wait. The system accepts the request
+> immediately and returns a **job** you can check under *Jobs* (or by its id); when it
+> finishes, the run appears in the history exactly as a normal run — still posted as a
+> Draft that a different person must approve. Running the same period twice is safe (it
+> won't pay anyone twice). Nothing changes for a normal-sized run.
+
 ---
 
 ## 3. Payslips

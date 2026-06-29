@@ -454,6 +454,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-021 | Preparer cannot approve own run (SoD) | PAY-03, R07 | 05 §7 |
 | UAT-PAY-022 | Independent approver posts the run | PAY-03, GL-01 | 05 §7 |
 | UAT-PAY-023 | Reject a pending run, then re-run | PAY-03 | 05 §7 |
+| UAT-PAY-035 | Async payroll run executes off-thread via the job queue | PAY-03, availability | 05 §7 |
+| UAT-PAY-036 | Async run idempotent + job status tenant-isolated | ITGC-AC-03 | 05 §7 |
 | UAT-UI-ESS-01 | ESS self-service screen reachable + own data + submit-only (UI) | Feature (ESS UI) | 25 §7 |
 | UAT-PAY-024 | Approver inbox lists pending expense claims (tenant-scoped) | Feature (ESS), ITGC-AC-03 | 25 §7 |
 | UAT-UI-ESS-02 | Expense approval screen — approve/reject + self-block (UI) | Feature (ESS UI), ITGC-AC-09 | 25 §7 |

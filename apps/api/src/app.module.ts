@@ -125,12 +125,14 @@ import { MigrationModule } from './modules/migration/migration.module';
 import { LocalizationModule } from './modules/localization/localization.module';
 import { EInvoiceModule } from './modules/einvoice/einvoice.module';
 import { OpsModule } from './modules/ops/ops.module';
+import { JobsModule } from './modules/jobs/jobs.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     DatabaseModule,
     CommonModule,
+    JobsModule, // @Global async job queue + in-process worker (enqueue from any module)
     AuthModule, // exports JwtModule → JwtAuthGuard can inject JwtService
     HealthModule,
     InventoryModule,
