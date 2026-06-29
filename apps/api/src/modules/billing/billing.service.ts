@@ -259,6 +259,73 @@ export class BillingService {
     }
     return { url: result.url, mock: result.mock };
   }
+
+  // ───────────────────── Stripe webhook → subscription state machine ─────────────────────
+  // Maps a verified Stripe event to our subscription lifecycle. This is the source of truth for
+  // Active/PastDue/Canceled (checkout creates the intent; Stripe confirms payment + renewals here).
+  // Idempotent: re-delivering the same event converges to the same end state. All updates are scoped to a
+  // single tenant by tenant_id / stripe_customer_id.
+  async applyStripeEvent(event: { type?: string; data?: { object?: any } }): Promise<{ handled: boolean; tenant_id?: number; status?: string }> {
+    const db = this.db as any;
+    const obj = event?.data?.object ?? {};
+    const setByTenant = (tenantId: number, patch: Record<string, unknown>) =>
+      db.update(subscriptions).set(patch).where(eq(subscriptions.tenantId, tenantId));
+    const tenantByCustomer = async (customerId: unknown): Promise<number | null> => {
+      if (!customerId) return null;
+      const [row] = await db.select({ t: subscriptions.tenantId }).from(subscriptions)
+        .where(eq(subscriptions.stripeCustomerId, String(customerId))).orderBy(desc(subscriptions.createdAt)).limit(1);
+      return row ? Number(row.t) : null;
+    };
+    const periodEnd = (unixSecs: unknown): Date | null => (unixSecs ? new Date(Number(unixSecs) * 1000) : null);
+
+    switch (event?.type) {
+      case 'checkout.session.completed': {
+        const tenantId = Number(obj.metadata?.tenant_id ?? obj.client_reference_id);
+        if (!Number.isFinite(tenantId)) return { handled: false };
+        const patch: Record<string, unknown> = { status: 'Active' };
+        if (obj.metadata?.plan_code) patch.planCode = String(obj.metadata.plan_code);
+        if (obj.customer) patch.stripeCustomerId = String(obj.customer);
+        if (obj.subscription) patch.stripeSubscriptionId = String(obj.subscription);
+        await setByTenant(tenantId, patch);
+        return { handled: true, tenant_id: tenantId, status: 'Active' };
+      }
+      case 'customer.subscription.updated': {
+        const tenantId = (await tenantByCustomer(obj.customer)) ?? Number(obj.metadata?.tenant_id);
+        if (!Number.isFinite(tenantId)) return { handled: false };
+        const status = mapStripeStatus(String(obj.status ?? ''));
+        const patch: Record<string, unknown> = { status, currentPeriodEnd: periodEnd(obj.current_period_end) };
+        if (obj.id) patch.stripeSubscriptionId = String(obj.id);
+        await setByTenant(tenantId as number, patch);
+        return { handled: true, tenant_id: tenantId as number, status };
+      }
+      case 'customer.subscription.deleted': {
+        const tenantId = await tenantByCustomer(obj.customer);
+        if (tenantId == null) return { handled: false };
+        await setByTenant(tenantId, { status: 'Canceled' });
+        return { handled: true, tenant_id: tenantId, status: 'Canceled' };
+      }
+      case 'invoice.payment_failed': {
+        const tenantId = await tenantByCustomer(obj.customer);
+        if (tenantId == null) return { handled: false };
+        await setByTenant(tenantId, { status: 'PastDue' });
+        return { handled: true, tenant_id: tenantId, status: 'PastDue' };
+      }
+      default:
+        return { handled: false };
+    }
+  }
+}
+
+// Map a Stripe subscription status to our 4-state lifecycle (fail-safe: anything not clearly active/trial
+// restricts access rather than silently granting it).
+function mapStripeStatus(s: string): 'Trialing' | 'Active' | 'PastDue' | 'Canceled' {
+  switch (s) {
+    case 'trialing': return 'Trialing';
+    case 'active': return 'Active';
+    case 'canceled':
+    case 'incomplete_expired': return 'Canceled';
+    default: return 'PastDue'; // past_due / unpaid / incomplete / paused → restrict until resolved
+  }
 }
 
 /**
