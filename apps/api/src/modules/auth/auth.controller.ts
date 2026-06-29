@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { LoginRequest, PinLoginRequest, SetOwnPinRequest, SetPinRequest, type LoginResponse, type PinLoginResponse, type AuthUser } from '@ierp/shared';
 import { Public, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { setAuthCookies, clearAuthCookies, readCookie, AUTH_COOKIE } from '../../common/cookies';
+import { setAuthCookies, clearAuthCookies, readCookie, AUTH_COOKIE, REFRESH_COOKIE } from '../../common/cookies';
 import { AuthService } from './auth.service';
 
 const ChangePasswordBody = z.object({
@@ -51,9 +51,11 @@ export class AuthController {
   @HttpCode(200) // parity: V1 FastAPI คืน 200 (ไม่ใช่ 201 default ของ Nest POST)
   async login(@Body(new ZodValidationPipe(LoginRequest)) body: LoginRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<LoginResponse> {
     const res = await this.auth.login(body.username, body.password, body.totp);
-    // Set the httpOnly auth cookie (+ readable CSRF) for the browser. The token is ALSO returned in the body
-    // for non-browser clients (mobile / scripts) — backward compatible.
-    setAuthCookies(reply, res.token);
+    // Set the httpOnly auth cookie (+ readable CSRF) and the httpOnly refresh cookie for the browser. The
+    // access token is ALSO returned in the body for non-browser clients (mobile / scripts) — backward
+    // compatible. The refresh token is cookie-only (never in the body).
+    const refresh = await this.auth.issueRefreshToken(res.username);
+    setAuthCookies(reply, res.token, refresh);
     return res;
   }
 
@@ -64,8 +66,22 @@ export class AuthController {
   @HttpCode(200)
   async loginPin(@Body(new ZodValidationPipe(PinLoginRequest)) body: PinLoginRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<PinLoginResponse> {
     const res = await this.auth.loginWithPin(body.username, body.pin);
-    setAuthCookies(reply, res.token);
+    const refresh = await this.auth.issueRefreshToken(res.username);
+    setAuthCookies(reply, res.token, refresh);
     return res;
+  }
+
+  // ITGC-AC-07: silently mint a fresh access token from the httpOnly refresh cookie (rotated each call), so
+  // the short-lived (1h) access token can be renewed without re-login. @Public — it authenticates via the
+  // refresh cookie, not the (likely expired) access token. Sets new auth+refresh cookies; the access token
+  // is returned in the body for non-browser clients.
+  @Public()
+  @Post('auth/refresh')
+  @HttpCode(200)
+  async refresh(@Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<{ token: string }> {
+    const { token, refresh } = await this.auth.refresh(readCookie(req, REFRESH_COOKIE));
+    setAuthCookies(reply, token, refresh);
+    return { token };
   }
 
   // Self-service: set/rotate your own POS PIN (step-up with current password).
@@ -102,6 +118,7 @@ export class AuthController {
     const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : undefined;
     const token = bearer ?? readCookie(req, AUTH_COOKIE);
     await this.auth.revokeToken(token);
+    await this.auth.revokeRefreshToken(readCookie(req, REFRESH_COOKIE)); // kill the refresh token too
     clearAuthCookies(reply);
     return { ok: true };
   }

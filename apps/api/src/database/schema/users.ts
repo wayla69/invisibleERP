@@ -31,6 +31,21 @@ export const revokedTokens = pgTable('revoked_tokens', {
   revokedAt: timestamp('revoked_at', { withTimezone: true }).defaultNow(),
 });
 
+// ITGC-AC-07 — refresh-token rotation. Access JWTs are now short-lived (1h); a long-lived (default 7d)
+// opaque refresh token lets the client mint a fresh access token without re-login. Only the sha256 HASH of
+// the opaque token is stored (never the token). One-time use: each refresh ROTATES (marks rotated_at and
+// issues a new token); presenting an already-rotated/revoked token is treated as theft → all the user's
+// refresh tokens are revoked. Auth-global (pre-tenant) → no tenant_id, no RLS.
+export const refreshTokens = pgTable('refresh_tokens', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tokenHash: text('token_hash').notNull().unique(), // sha256(opaque token)
+  username: text('username').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  rotatedAt: timestamp('rotated_at', { withTimezone: true }), // set when consumed (one-time use)
+  revokedAt: timestamp('revoked_at', { withTimezone: true }), // set on logout / reuse-detection
+});
+
 // ITGC-AC-07 — per-account login throttle/lockout. Keyed by normalized (lower) username. Written via an
 // AUTOCOMMIT path (not the per-request tx) so a failed-login increment survives the 401's tx rollback.
 // Auth-global (pre-tenant) → no tenant_id, no RLS.

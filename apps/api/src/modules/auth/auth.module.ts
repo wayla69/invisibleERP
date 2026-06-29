@@ -36,7 +36,9 @@ import { LoginAttemptStore } from './login-attempt.store';
           secret: effectiveSecret,
           // @nestjs/jwt@11 types expiresIn via ms's StringValue union; our value is a runtime string
           // ('8h' / a seconds count) — cast to satisfy the stricter type without changing behaviour.
-          signOptions: { algorithm: 'HS256', expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '8h') as any },
+          // Short-lived access token (default 1h) — the refresh-token rotation flow (POST /api/auth/refresh,
+          // httpOnly refresh cookie) silently renews it, so a stolen access token is only useful for ~1h.
+          signOptions: { algorithm: 'HS256', expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '1h') as any },
           // Pin the accepted algorithm so verification can never be coerced into `alg:none` or an
           // asymmetric-key confusion attack if an RS/ES public key is ever introduced to this module.
           verifyOptions: { algorithms: ['HS256'] },

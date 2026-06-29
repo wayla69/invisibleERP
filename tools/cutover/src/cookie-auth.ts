@@ -86,6 +86,19 @@ async function main() {
   const defCookie = String((Array.isArray(login.headers['set-cookie']) ? login.headers['set-cookie'] : [login.headers['set-cookie']]).find((c) => typeof c === 'string' && c.startsWith('ierp_token=')));
   ok('AC-07: default cookie is SameSite=Lax with no Domain (single-origin)', /SameSite=Lax/i.test(defCookie) && !/Domain=/i.test(defCookie), defCookie);
 
+  // 8b. ITGC-AC-07 refresh-token rotation: login set an httpOnly refresh cookie scoped to /api/auth; POST
+  //     /api/auth/refresh mints a fresh access token AND rotates the refresh token (one-time use); replaying
+  //     the consumed refresh token is rejected (reuse-detection).
+  const refresh0 = getCookie(login.headers['set-cookie'], 'ierp_refresh');
+  const refreshRaw = String((Array.isArray(login.headers['set-cookie']) ? login.headers['set-cookie'] : [login.headers['set-cookie']]).find((c) => typeof c === 'string' && c.startsWith('ierp_refresh=')));
+  ok('AC-07: login sets httpOnly refresh cookie scoped to /api/auth', !!refresh0?.httpOnly && /Path=\/api\/auth/i.test(refreshRaw), `httpOnly=${refresh0?.httpOnly} ${refreshRaw}`);
+  const r1 = await app.inject({ method: 'POST', url: '/api/auth/refresh', headers: { cookie: `ierp_refresh=${refresh0?.value}` } });
+  const r1Tok = getCookie(r1.headers['set-cookie'], 'ierp_token');
+  const r1Refresh = getCookie(r1.headers['set-cookie'], 'ierp_refresh');
+  ok('AC-07: /api/auth/refresh mints a new access token + rotates the refresh token', r1.statusCode === 200 && !!r1.json()?.token && !!r1Tok?.httpOnly && !!r1Refresh && r1Refresh.value !== refresh0?.value, `status=${r1.statusCode} rotated=${r1Refresh?.value !== refresh0?.value}`);
+  const r2 = await app.inject({ method: 'POST', url: '/api/auth/refresh', headers: { cookie: `ierp_refresh=${refresh0?.value}` } });
+  ok('AC-07: replaying a consumed refresh token → 401 REFRESH_INVALID (one-time use)', r2.statusCode === 401 && r2.json()?.error?.code === 'REFRESH_INVALID', `status=${r2.statusCode} code=${r2.json()?.error?.code}`);
+
   // 9. cross-origin deploy config (AUTH_COOKIE_DOMAIN + SameSite=None) is honoured so web/API on different
   //    hosts can share the session — None must force Secure. Config is read per-request, so set → login → restore.
   process.env.AUTH_COOKIE_DOMAIN = '.example.test';
