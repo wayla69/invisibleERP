@@ -104,6 +104,21 @@ async function main() {
   const subC = await inj('GET', '/api/billing/subscription', owner);
   ok('Stripe webhook: subscription.deleted → Canceled', subC.json.status === 'Canceled', `st=${subC.json.status}`);
 
+  // ── 3d. PlanGuard (already wired as APP_GUARD) gates an ai_chat route on subscription status. A non-Admin
+  //        tenant user (Sales carries `dashboard`; Admin would bypass PlanGuard) hitting GET /api/ai/kb/search:
+  //        Canceled → SUBSCRIPTION_INACTIVE; expired trial → TRIAL_EXPIRED; Active pro (ai_chat=true) → allowed. ──
+  await db.insert(s.users).values([{ username: 'planuser', passwordHash: await pw.hash('planpass1'), role: 'Sales', tenantId: Number(tId) }]).onConflictDoNothing();
+  const puTok = (await login('planuser', 'planpass1')).json.token;
+  const gated = () => inj('GET', '/api/ai/kb/search?q=hours', puTok);
+  const gCanceled = await gated(); // owner-tenant sub is Canceled from the webhook test above
+  ok('PlanGuard: Canceled subscription blocks ai_chat route (403 SUBSCRIPTION_INACTIVE)', gCanceled.status === 403 && gCanceled.json.error?.code === 'SUBSCRIPTION_INACTIVE', `${gCanceled.status} ${gCanceled.json.error?.code}`);
+  await db.update(s.subscriptions).set({ status: 'Trialing', trialEndsAt: new Date(Date.now() - 86400000) }).where(eq(s.subscriptions.tenantId, Number(tId)));
+  const gExpired = await gated();
+  ok('PlanGuard: expired trial blocks ai_chat route (403 TRIAL_EXPIRED)', gExpired.status === 403 && gExpired.json.error?.code === 'TRIAL_EXPIRED', `${gExpired.status} ${gExpired.json.error?.code}`);
+  await db.update(s.subscriptions).set({ status: 'Active' }).where(eq(s.subscriptions.tenantId, Number(tId)));
+  const gActive = await gated();
+  ok('PlanGuard: Active pro plan (ai_chat=true) allows the route (not 403)', gActive.status !== 403, `${gActive.status}`);
+
   // ── 4. A5 — seeded admin forced to change password ──
   const a1 = await login('admin', 'admin123');
   ok('Seeded admin login → must_change_password=true', a1.json.must_change_password === true, JSON.stringify({ mcp: a1.json.must_change_password }));
