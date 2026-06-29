@@ -49,9 +49,19 @@ export type PgClient = ReturnType<typeof postgres>;
         // throughput pinned at ~400 rps with the pool saturated). Size so that (replicas × DB_POOL_MAX) stays
         // under Postgres max_connections; with WEB_CONCURRENCY workers each worker opens its own pool.
         const max = Number(process.env.DB_POOL_MAX ?? 20);
-        const opts: Record<string, unknown> = { max };
+        // Connection hygiene (postgres-js, seconds): close idle conns so a burst doesn't leave the pool
+        // pinned; fail fast when the DB is unreachable instead of hanging the request; recycle conns
+        // periodically so a leaked/half-dead socket can't sit in the pool forever (the audit flagged "a
+        // hung query idles until timeout, no recycling"). All env-tunable.
+        const idleTimeout = Number(process.env.DB_IDLE_TIMEOUT ?? 30);
+        const connectTimeout = Number(process.env.DB_CONNECT_TIMEOUT ?? 10);
+        const maxLifetime = Number(process.env.DB_MAX_LIFETIME ?? 1800);
+        const opts: Record<string, unknown> = { max, idle_timeout: idleTimeout, connect_timeout: connectTimeout, max_lifetime: maxLifetime };
         // simple-protocol mode (เช่น ต่อ PGlite-wire/บาง pooler ที่ไม่รองรับ extended protocol/type-fetch)
         if (process.env.DB_SIMPLE === '1') { opts.prepare = false; opts.fetch_types = false; }
+        // Boot-time visibility of the effective pool config (deeper utilization / wait-queue-depth metrics
+        // need an external pooler + exporter — pgbouncer + Prometheus — tracked as an ops follow-up).
+        if (url) logger.log(`PG pool: max=${max}, idle_timeout=${idleTimeout}s, connect_timeout=${connectTimeout}s, max_lifetime=${maxLifetime}s`);
         return postgres(url ?? 'postgresql://localhost:5432/_unconfigured', opts);
       },
     },
