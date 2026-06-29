@@ -15,6 +15,11 @@ allowBuilds:
 overrides:
   "lodash@<4.17.24": ">=4.17.24"
   "tmp@<0.2.6": ">=0.2.6"
+  # Step 7 (fastify-5 / Nest-11): clear the remaining transitive runtime advisories the major bump alone
+  # doesn't — a stale fast-uri@2.x copy lingers, and @nestjs/platform-fastify still pulls @fastify/middie@8.
+  # middie 9 peers fastify 5 (now satisfied) and we use Nest guards (not middie middleware), so forcing it is safe.
+  "fast-uri@<3.1.2": ">=3.1.2"
+  "@fastify/middie@<9.3.2": ">=9.3.2"
 
 # Known, triaged advisories accepted under documented remediation (see compliance/vulnerability-triage.md).
 # Each is either a dev/build-only dependency or gated behind a major upgrade (fastify-5 / Nest-11 / drizzle-0.45).
@@ -27,17 +32,11 @@ auditConfig:
     - GHSA-fx2h-pf6j-xcff # vite — dev server (build/test only)
     - GHSA-5j98-mcp5-4vw2 # glob CLI command injection (via @nestjs/cli; build tool)
     - GHSA-c2c7-rcm5-vvqj # picomatch ReDoS (via @angular-devkit/@nestjs/cli; build tool)
-    # --- runtime: fastify-5 / Nest-11 ecosystem upgrade (tracked) ---
-    - GHSA-72c6-fx6q-fr5w # @fastify/middie middleware bypass
-    - GHSA-cxrg-g7r8-w69p # @fastify/middie path bypass
-    - GHSA-8p85-9qpw-fwgw # @fastify/middie improper path normalization
-    - GHSA-v9ww-2j6r-98q6 # @fastify/middie middleware bypass
-    - GHSA-r4wm-x892-vjmx # @nestjs/platform-fastify URL-encoding bypass
-    - GHSA-wf42-42fg-fg84 # @nestjs/platform-fastify HEAD request bypass
-    - GHSA-6v32-fjc9-9qf6 # @nestjs/platform-fastify middleware bypass
-    - GHSA-jx2c-rxcm-jvmq # fastify Content-Type tab parsing
-    - GHSA-q3j6-qgpj-74h6 # fast-uri path traversal
-    - GHSA-v39h-62p7-jpjc # fast-uri host confusion
-    - GHSA-q7rr-3cgh-j5r3 # @opentelemetry/sdk-node Prometheus exporter crash (metrics endpoint not public)
-    # --- runtime: drizzle upgrade (prioritized — SQLi) ---
+    # --- runtime: REMEDIATED by Step 7 (fastify-5 / Nest-11 + fast-uri/middie overrides) — entries removed:
+    #     middie (GHSA-72c6/cxrg/8p85/v9ww — no longer a dependency under platform-fastify 11),
+    #     @nestjs/platform-fastify (GHSA-r4wm/wf42/6v32 — now 11.1.27),
+    #     fastify (GHSA-jx2c — now 5.x), fast-uri (GHSA-q3j6/v39h — override ≥3.1.2).
+    # --- runtime: still accepted under documented remediation ---
+    - GHSA-q7rr-3cgh-j5r3 # @opentelemetry/sdk-node Prometheus exporter crash (metrics endpoint not public; OTel optional)
+    # --- runtime: drizzle upgrade (own workstream — assessed NOT exploitable, see vulnerability-triage.md) ---
     - GHSA-gpj5-g38j-94v9 # drizzle-orm SQL injection via improperly escaped values
