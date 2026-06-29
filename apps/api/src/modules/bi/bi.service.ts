@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { biDailySnapshots, reportSubscriptions, reportRuns } from '../../database/schema/bi';
 import { notifications } from '../../database/schema/system';
 import { custPosSales, custPosItems } from '../../database/schema/sales';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
+import { journalEntries, journalLines, accounts } from '../../database/schema/ledger';
 import { arInvoices } from '../../database/schema/finance';
 import { apTransactions } from '../../database/schema/finance';
 import { opportunities, pipelineStages } from '../../database/schema/pipeline';
@@ -246,37 +246,39 @@ export class BiService implements OnModuleInit {
       ? sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${dto.ledger_code})`
       : sql`${journalEntries.ledgerCode} IS NULL`;
 
+    // Revenue/expense per period in ONE grouped query: JOIN accounts (typed) + CASE-WHEN SUM, instead of a
+    // correlated `(SELECT type FROM accounts WHERE code = …)` subquery fired per GROUP BY bucket plus an
+    // in-memory roll-up loop (the old N+1 re-scanned `accounts` for every period × account-type bucket and
+    // marshalled all rows to the app). Revenue = Σ(credit − debit) on Revenue accounts; expense =
+    // Σ(debit − credit) on Expense accounts — identical to the previous net-then-negate maths. The INNER
+    // JOIN drops lines whose account isn't in the COA, exactly as the old NULL account_type did.
     const rows = await db.select({
       period: journalEntries.period,
-      account_type: sql<string>`(SELECT type FROM accounts WHERE code = ${journalLines.accountCode} LIMIT 1)`,
-      net: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}),0)`,
+      revenue: sql<string>`coalesce(sum(case when ${accounts.type} = 'Revenue' then ${journalLines.credit} - ${journalLines.debit} else 0 end),0)`,
+      expense: sql<string>`coalesce(sum(case when ${accounts.type} = 'Expense' then ${journalLines.debit} - ${journalLines.credit} else 0 end),0)`,
     }).from(journalLines)
       .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .innerJoin(accounts, eq(journalLines.accountCode, accounts.code))
       .where(and(
         eq(journalEntries.tenantId, tid),
         eq(journalEntries.status, 'Posted'),
         gte(journalEntries.entryDate, start),
         ledgerFilter,
       ))
-      .groupBy(journalEntries.period, sql`(SELECT type FROM accounts WHERE code = ${journalLines.accountCode} LIMIT 1)`)
+      .groupBy(journalEntries.period)
       .orderBy(journalEntries.period);
 
-    // Aggregate by period: revenue (negative net = credit > debit), expense (positive net)
-    const byPeriod: Record<string, { revenue: number; expense: number }> = {};
-    for (const r of rows) {
-      const p = r.period ?? 'unknown';
-      if (!byPeriod[p]) byPeriod[p] = { revenue: 0, expense: 0 };
-      if (r.account_type === 'Revenue') byPeriod[p].revenue += -n(r.net);  // negate → positive
-      if (r.account_type === 'Expense') byPeriod[p].expense += n(r.net);
-    }
-
-    const trend = Object.entries(byPeriod).sort(([a], [b]) => a.localeCompare(b)).map(([period, v]) => ({
-      period,
-      revenue: round2(v.revenue),
-      expense: round2(v.expense),
-      gross_profit: round2(v.revenue - v.expense),
-      margin_pct: v.revenue > 0 ? round2((v.revenue - v.expense) / v.revenue * 100) : 0,
-    }));
+    const trend = rows.map((r: any) => {
+      const revenue = round2(n(r.revenue));
+      const expense = round2(n(r.expense));
+      return {
+        period: r.period ?? 'unknown',
+        revenue,
+        expense,
+        gross_profit: round2(revenue - expense),
+        margin_pct: revenue > 0 ? round2((revenue - expense) / revenue * 100) : 0,
+      };
+    });
 
     return { months, trend };
   }
