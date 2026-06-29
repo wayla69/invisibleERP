@@ -142,6 +142,10 @@ For every such change, review and update as needed:
 - Per-user UI prefs (sidebar favourites + nav fold-state) sync across devices via `GET/PUT /api/user-prefs`
   (`UserPrefsModule`, table `user_prefs`, RLS + owner-scoped, no `@Permissions`); recents stay per-device
   (localStorage). See `docs/15-ui-ux-menu-restructure-plan.md`.
+- **Project Management (PPM) in-depth design & phased roadmap:** `docs/19-project-management-ppm-plan.md` —
+  operational PPM (WBS/tasks, milestones, resourcing, timesheet→labor, schedule/Gantt/EVM) + Salesforce-style
+  opportunity win/loss → project conversion, layered on the existing `modules/projects` (PN-16, PROJ-01/02/03)
+  and `modules/crm-pipeline` spine. Planning stage; P0→P4 phases each ship code + docs together.
 - **Finance/GL feature map (controls + where the logic lives):**
   - GL maker-checker / recurring / prepaid: `modules/ledger/ledger.service.ts` — `postEntry` (Draft+approve, **GL-05**),
     `createRecurring`/`runDueRecurring` (**GL-08**), `createPrepaid`/`runDuePrepaid` (**GL-09**); cash flow
