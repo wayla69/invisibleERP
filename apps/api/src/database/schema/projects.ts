@@ -11,6 +11,8 @@ export const projects = pgTable(
     projectCode: text('project_code').notNull(),
     name: text('name').notNull(),
     customerName: text('customer_name'),
+    customerNo: text('customer_no'),                          // → customer_master (customer-of-record)
+    crmOppNo: text('crm_opp_no'),                             // → crm_opportunities.opp_no (won deal it came from)
     billingType: text('billing_type').notNull().default('TM'), // TM | Fixed
     budgetAmount: numeric('budget_amount', { precision: 16, scale: 2 }).default('0'),
     contractAmount: numeric('contract_amount', { precision: 16, scale: 2 }).default('0'),
@@ -23,7 +25,7 @@ export const projects = pgTable(
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ byTenant: index('idx_project_tenant').on(t.tenantId) }),
+  (t) => ({ byTenant: index('idx_project_tenant').on(t.tenantId), byCrmOpp: index('idx_project_crm_opp').on(t.crmOppNo) }),
 );
 
 // A logged cost (time or expense) against a project.

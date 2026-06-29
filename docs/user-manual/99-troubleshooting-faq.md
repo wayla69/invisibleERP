@@ -32,6 +32,8 @@ your code below.
 | `CREDIT_LIMIT` (เกินวงเงินเครดิต) | The order would exceed the customer's credit limit. | Reduce the order, collect payment on overdue invoices, or have a credit manager raise the limit. |
 | `CREDIT_OVERDUE` (ลูกค้ามีหนี้ค้างชำระเกินกำหนด) | The customer has an invoice **90+ days past due** (in default), so new credit orders are blocked even within their limit. | Collect/settle the overdue invoice (or arrange a promise-to-pay) before placing new credit orders; take payment now for a cash sale. |
 | `OVER_RETURN` | Returning more than was originally sold. | Check the original sale quantities; return only up to what was bought. |
+| `OPP_NOT_WON` | You tried to turn a sales opportunity into a project before it was **won** (it's still open, or it was lost). | Move the opportunity to **won** in the CRM pipeline first (`PATCH /api/crm/pipeline/opportunities/{no}/stage {stage:"won"}`), then convert it via **Convert to project**. |
+| `OPP_NOT_FOUND` | The opportunity number given to *Convert to project* doesn't exist (in your tenant). | Check the `OPP-…` number; create/locate the opportunity in the CRM pipeline first. (Re-converting a deal that already became a project simply returns the existing project — no duplicate is created.) |
 | `SOD_SELF_POST` | The same person who **computed** an AR allowance (provision for doubtful accounts) tried to **post** it. | A different reviewer (`gl_post` / `exec`) posts the allowance — the computer can't post their own. See [Finance — AR & AP → Allowance](./05-finance-ar-ap.md). |
 | `ALLOWANCE_POSTED` / `ALREADY_POSTED` | You tried to (re)post an AR allowance that is already posted. | A given allowance posts once; to revise, **compute a fresh allowance** for a later `as_of_date`. |
 

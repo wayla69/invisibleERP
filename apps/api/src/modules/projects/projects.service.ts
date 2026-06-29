@@ -1,16 +1,17 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries } from '../../database/schema';
+import { projects, projectEntries, crmOpportunities, customerMaster } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 
-export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string }
+export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string }
 export interface CostDto { entry_type?: 'time' | 'expense'; description?: string; qty?: number; rate?: number; amount?: number; billable?: boolean; entry_date?: string }
 export interface BillDto { amount?: number; percent?: number }
+export interface FromOpportunityDto { project_code?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; start_date?: string; end_date?: string }
 
 @Injectable()
 export class ProjectsService {
@@ -23,8 +24,40 @@ export class ProjectsService {
     const db = this.db as any;
     const code = dto.project_code?.trim() || `PRJ${String(Date.now()).slice(-6)}`;
     await db.insert(projects).values({
-      tenantId: user.tenantId ?? null, projectCode: code, name: dto.name, customerName: dto.customer_name ?? null,
+      tenantId: user.tenantId ?? null, projectCode: code, name: dto.name, customerName: dto.customer_name ?? null, customerNo: dto.customer_no ?? null,
       billingType: dto.billing_type ?? 'TM', budgetAmount: fx(dto.budget_amount ?? 0, 2), contractAmount: fx(dto.contract_amount ?? 0, 2),
+      status: 'Open', startDate: dto.start_date ?? null, endDate: dto.end_date ?? null, createdBy: user.username,
+    });
+    return this.get(code);
+  }
+
+  // Convert a WON CRM opportunity (crm_opportunities) into a project (CRM-WL). The deal's value seeds the
+  // project contract; we stamp customer_no + crm_opp_no so margin traces back to the deal it came from.
+  // Guards: only a won opportunity converts (an open/lost deal is rejected), and a given opportunity converts
+  // to at most ONE project (idempotent on crm_opp_no) so a re-submit can't spawn duplicate projects.
+  async createFromOpportunity(oppNo: string, dto: FromOpportunityDto, user: JwtUser) {
+    const db = this.db as any;
+    const oc = [eq(crmOpportunities.oppNo, oppNo)];
+    if (user.tenantId != null) oc.push(eq(crmOpportunities.tenantId, user.tenantId));
+    const [opp] = await db.select().from(crmOpportunities).where(and(...oc)).limit(1);
+    if (!opp) throw new NotFoundException({ code: 'OPP_NOT_FOUND', message: `Opportunity ${oppNo} not found`, messageTh: 'ไม่พบโอกาสการขาย' });
+    if (opp.stage !== 'won') throw new BadRequestException({ code: 'OPP_NOT_WON', message: `Only a won opportunity converts to a project (stage=${opp.stage})`, messageTh: 'แปลงเป็นโครงการได้เฉพาะโอกาสที่ชนะแล้ว' });
+    const [existing] = await db.select().from(projects).where(eq(projects.crmOppNo, oppNo)).limit(1);
+    if (existing) return { already: true, ...(await this.get(existing.projectCode)) };
+    // Customer-of-record name (falls back to the opportunity name if the deal has no customer_master link).
+    let customerName: string | null = null;
+    if (opp.customerNo) {
+      const cc = [eq(customerMaster.customerNo, opp.customerNo)];
+      if (user.tenantId != null) cc.push(eq(customerMaster.tenantId, user.tenantId));
+      const [c] = await db.select().from(customerMaster).where(and(...cc)).limit(1);
+      customerName = c?.name ?? null;
+    }
+    const code = dto.project_code?.trim() || `PRJ${String(Date.now()).slice(-6)}`;
+    const contract = r2(n(opp.amount));
+    await db.insert(projects).values({
+      tenantId: user.tenantId ?? null, projectCode: code, name: opp.name, customerName,
+      customerNo: opp.customerNo ?? null, crmOppNo: oppNo,
+      billingType: dto.billing_type ?? 'Fixed', budgetAmount: fx(dto.budget_amount ?? 0, 2), contractAmount: fx(contract, 2),
       status: 'Open', startDate: dto.start_date ?? null, endDate: dto.end_date ?? null, createdBy: user.username,
     });
     return this.get(code);
@@ -130,7 +163,7 @@ export class ProjectsService {
     const cost = n(p.costToDate), recognized = n(p.recognizedCost), billed = n(p.billedToDate), nb = r2(nonBillable);
     const budget = n(p.budgetAmount), totalCost = r2(cost + nb);
     return {
-      project_code: p.projectCode, name: p.name, customer_name: p.customerName, billing_type: p.billingType, status: p.status,
+      project_code: p.projectCode, name: p.name, customer_name: p.customerName, customer_no: p.customerNo, crm_opp_no: p.crmOppNo, billing_type: p.billingType, status: p.status,
       budget_amount: budget, contract_amount: n(p.contractAmount),
       cost_to_date: cost, recognized_cost: recognized, billed_to_date: billed,
       non_billable_cost: nb,                       // expensed straight to 5800 (unrecoverable)
