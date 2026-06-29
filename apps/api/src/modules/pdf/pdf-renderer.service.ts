@@ -1,5 +1,20 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 
+// Reject if `p` doesn't settle within `ms`. Used to bound the in-process Chromium render so a hung
+// page.setContent/page.pdf can't pin a request (and a worker slot) indefinitely — the remote-offload path
+// already has its own fetch timeout. Exported for unit testing.
+export async function withTimeout<T>(p: Promise<T>, ms: number, label = 'operation'): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export interface PdfOptions {
   format?: 'A4';
   width?: string;            // e.g. '80mm' for a receipt slip (mutually exclusive with format)
@@ -62,11 +77,14 @@ export class PdfRenderer implements OnModuleDestroy {
   private async renderLocal(html: string, opts: PdfOptions): Promise<Buffer | null> {
     await this.acquire();
     let page: any = null;
+    const timeoutMs = Number(process.env.PDF_RENDER_TIMEOUT_MS ?? 30000);
     try {
       const browser = await this.getBrowser();
       page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle' });
-      const pdf = await page.pdf(this.toPlaywrightOpts(opts));
+      // Bound each render: a hung networkidle wait or page.pdf throws → caught below → browser reset →
+      // null returned → caller serves raw HTML (graceful degrade), instead of blocking the request forever.
+      await withTimeout(page.setContent(html, { waitUntil: 'networkidle' }), timeoutMs, 'PDF setContent');
+      const pdf = await withTimeout(page.pdf(this.toPlaywrightOpts(opts)), timeoutMs, 'PDF render');
       return Buffer.from(pdf);
     } catch (err) {
       this.log.warn(`Chromium unavailable, falling back to HTML: ${(err as Error)?.message ?? err}`);
