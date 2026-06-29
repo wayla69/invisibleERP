@@ -233,36 +233,75 @@ export class BillingService {
     }
   }
 
-  // ───────────────────── Stripe checkout (stub) ─────────────────────
-  // Mock unless STRIPE_SECRET_KEY is set; real SDK wired here later (not hard-required).
+  // ───────────────────── Stripe checkout ─────────────────────
+  // Creates a Stripe Checkout session for the selected plan. Without STRIPE_SECRET_KEY it returns a mock
+  // URL so the SaaS flow is fully testable offline (CI/dev). With a key, it creates (or reuses) the tenant's
+  // Stripe customer and a real subscription Checkout session; activation happens via the webhook (see
+  // BillingWebhookService) when Stripe confirms payment.
   async createCheckoutSession(tenantId: number, planCode: string) {
     const db = this.db as any;
     const target = planCode.trim();
     const [plan] = await db.select().from(plans).where(eq(plans.code, target)).limit(1);
     if (!plan) throw new BadRequestException({ code: 'BAD_REQUEST', message: `Unknown plan: ${target}`, messageTh: 'ไม่พบแพ็กเกจที่เลือก' });
+    if (Number(plan.priceMonthly ?? 0) <= 0) throw new BadRequestException({ code: 'PLAN_NOT_PURCHASABLE', message: `Plan '${target}' has no monthly price to charge`, messageTh: 'แพ็กเกจนี้ไม่มีค่าบริการรายเดือนให้ชำระ' });
     const [tenant] = await db.select({ id: tenants.id, code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!tenant) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tenant not found', messageTh: 'ไม่พบร้าน' });
-    return new StripeBilling().createCheckoutSession(target, { id: Number(tenant.id), code: tenant.code });
+    // Reuse the tenant's existing Stripe customer (from a prior checkout) if we have one.
+    const [sub] = await db.select({ cust: subscriptions.stripeCustomerId }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
+    const result = await new StripeBilling().createCheckoutSession(
+      { code: plan.code, name: plan.name, priceMonthly: String(plan.priceMonthly ?? '0'), currency: plan.currency ?? 'THB' },
+      { id: Number(tenant.id), code: tenant.code, existingCustomerId: sub?.cust ?? null },
+    );
+    // Persist a freshly-created Stripe customer id so subsequent checkouts reuse it (best-effort; the
+    // webhook is the source of truth for subscription state).
+    if (result.customerId && sub && !sub.cust) {
+      await db.update(subscriptions).set({ stripeCustomerId: result.customerId }).where(eq(subscriptions.tenantId, tenantId));
+    }
+    return { url: result.url, mock: result.mock };
   }
 }
 
 /**
- * Stripe billing adapter. Without STRIPE_SECRET_KEY it returns a mock checkout URL
- * so the SaaS flow is fully testable offline. With a key set, wire the real Stripe
- * SDK here (dynamic import — do not hard-require 'stripe' at module load).
+ * Stripe billing adapter. Without STRIPE_SECRET_KEY it returns a mock checkout URL so the SaaS flow is
+ * fully testable offline. With a key set, it calls the real Stripe SDK (dynamic import — never hard-require
+ * 'stripe' at module load, so a deploy without billing configured still boots).
  */
 export class StripeBilling {
   private readonly secret = process.env.STRIPE_SECRET_KEY;
+  get enabled(): boolean { return !!this.secret; }
 
-  async createCheckoutSession(planCode: string, tenant: { id: number; code: string }): Promise<{ url: string; mock: boolean }> {
+  async createCheckoutSession(
+    plan: { code: string; name: string; priceMonthly: string; currency: string },
+    tenant: { id: number; code: string; existingCustomerId?: string | null },
+  ): Promise<{ url: string; mock: boolean; customerId?: string; sessionId?: string }> {
     if (!this.secret) {
-      return { url: `https://billing.example/checkout/${planCode}`, mock: true };
+      return { url: `https://billing.example/checkout/${plan.code}`, mock: true };
     }
-    // Real Stripe (interface for future wiring):
-    //   const Stripe = (await import('stripe')).default;
-    //   const stripe = new Stripe(this.secret);
-    //   const session = await stripe.checkout.sessions.create({ ... });
-    //   return { url: session.url!, mock: false };
-    return { url: `https://billing.example/checkout/${planCode}`, mock: true };
+    const Stripe = (await import('stripe')).default;
+    const stripe = new Stripe(this.secret);
+    const customerId =
+      tenant.existingCustomerId ??
+      (await stripe.customers.create({ name: tenant.code, metadata: { tenant_id: String(tenant.id), tenant_code: tenant.code } })).id;
+    const appBase = process.env.APP_BASE_URL ?? 'http://localhost:3000';
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      customer: customerId,
+      client_reference_id: String(tenant.id),
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: (plan.currency ?? 'THB').toLowerCase(),
+            recurring: { interval: 'month' },
+            unit_amount: Math.round(Number(plan.priceMonthly) * 100), // smallest currency unit
+            product_data: { name: `Oshinei ERP — ${plan.name}` },
+          },
+        },
+      ],
+      metadata: { tenant_id: String(tenant.id), plan_code: plan.code },
+      success_url: process.env.STRIPE_SUCCESS_URL ?? `${appBase}/settings/billing?status=success`,
+      cancel_url: process.env.STRIPE_CANCEL_URL ?? `${appBase}/settings/billing?status=cancel`,
+    });
+    return { url: session.url ?? `${appBase}/settings/billing`, mock: false, customerId, sessionId: session.id };
   }
 }

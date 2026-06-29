@@ -83,6 +83,13 @@ async function main() {
   const patch = await inj('PATCH', '/api/tenant/profile', owner, { address_line1: '1 ถนนหลัก', province: 'กรุงเทพมหานคร', postal_code: '10110', vat_rate: 0.07 });
   ok('Profile PATCH → setup_complete=true after address', patch.status === 200 && patch.json.setup_complete === true && patch.json.province === 'กรุงเทพมหานคร', JSON.stringify({ st: patch.status, c: patch.json.setup_complete }));
 
+  // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;
+  //        a free plan is rejected (nothing to charge). Real Stripe is exercised only with a key set. ──
+  const coPro = await inj('POST', '/api/billing/checkout', owner, { plan_code: 'pro' });
+  ok('Billing checkout (pro) → checkout URL (mock without STRIPE key)', (coPro.status === 200 || coPro.status === 201) && typeof coPro.json.url === 'string' && coPro.json.mock === true, JSON.stringify({ st: coPro.status, mock: coPro.json.mock }));
+  const coFree = await inj('POST', '/api/billing/checkout', owner, { plan_code: 'free' });
+  ok('Billing checkout (free) → 400 PLAN_NOT_PURCHASABLE (no monthly price)', coFree.status === 400 && coFree.json.error?.code === 'PLAN_NOT_PURCHASABLE', `${coFree.status} ${coFree.json.error?.code}`);
+
   // ── 4. A5 — seeded admin forced to change password ──
   const a1 = await login('admin', 'admin123');
   ok('Seeded admin login → must_change_password=true', a1.json.must_change_password === true, JSON.stringify({ mcp: a1.json.must_change_password }));
