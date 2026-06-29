@@ -134,6 +134,45 @@ export class CrmPipelineService {
     return { by_stage: byStage, open_amount: openAmount, weighted_forecast: weightedForecast, won_amount: wonAmount, lost_amount: lostAmount, win_rate: closed > 0 ? round2(wonAmount / closed) : 0 };
   }
 
+  // Win/loss analytics for the dashboard: the headline summary plus breakdowns by loss reason, by owner (with
+  // each owner's win rate), and a monthly won/lost/win-rate trend — everything a sales leader needs to see why
+  // deals are won or lost. Tenant-scoped by RLS.
+  async winLoss(user: JwtUser, dto?: { months?: number }) {
+    const db = this.db as any;
+    const rows = await db.select().from(crmOpportunities);
+    const months = Math.max(1, Math.min(24, dto?.months ?? 6));
+    const lossReasons: Record<string, { count: number; amount: number }> = {};
+    const byOwner: Record<string, { won: number; lost: number; open: number; won_amount: number; lost_amount: number }> = {};
+    const byMonth: Record<string, { month: string; won: number; lost: number; created: number; won_amount: number }> = {};
+    for (const o of rows) {
+      const amt = n(o.amount), s = o.stage, owner = o.owner || 'unassigned';
+      byOwner[owner] = byOwner[owner] ?? { won: 0, lost: 0, open: 0, won_amount: 0, lost_amount: 0 };
+      if (s === 'won') { byOwner[owner].won++; byOwner[owner].won_amount = round2(byOwner[owner].won_amount + amt); }
+      else if (s === 'lost') {
+        byOwner[owner].lost++; byOwner[owner].lost_amount = round2(byOwner[owner].lost_amount + amt);
+        const reason = o.lostReason || 'ไม่ระบุ (unspecified)';
+        lossReasons[reason] = lossReasons[reason] ?? { count: 0, amount: 0 };
+        lossReasons[reason].count++; lossReasons[reason].amount = round2(lossReasons[reason].amount + amt);
+      } else byOwner[owner].open++;
+      // Monthly velocity, keyed on the creation month (YYYY-MM).
+      const m = o.createdAt ? new Date(o.createdAt).toISOString().slice(0, 7) : null;
+      if (m) {
+        byMonth[m] = byMonth[m] ?? { month: m, won: 0, lost: 0, created: 0, won_amount: 0 };
+        byMonth[m].created++;
+        if (s === 'won') { byMonth[m].won++; byMonth[m].won_amount = round2(byMonth[m].won_amount + amt); }
+        else if (s === 'lost') byMonth[m].lost++;
+      }
+    }
+    const loss_reasons = Object.entries(lossReasons).map(([reason, v]) => ({ reason, ...v })).sort((a, b) => b.amount - a.amount);
+    const by_owner = Object.entries(byOwner).map(([owner, v]) => {
+      const decided = v.won + v.lost;
+      return { owner, ...v, win_rate: decided > 0 ? round2((v.won / decided) * 100) : 0 };
+    }).sort((a, b) => b.won_amount - a.won_amount);
+    const monthly = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month)).slice(-months)
+      .map((m) => ({ ...m, win_rate_pct: (m.won + m.lost) > 0 ? round2((m.won / (m.won + m.lost)) * 100) : 0 }));
+    return { summary: await this.pipelineSummary(user), loss_reasons, by_owner, monthly };
+  }
+
   // ── Activities ─────────────────────────────────────────────────────────
   async logActivity(dto: { entity_type: 'lead' | 'opportunity'; entity_no: string; type: string; subject?: string; notes?: string; due_date?: string; done?: boolean }, user: JwtUser) {
     const db = this.db as any;

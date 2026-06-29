@@ -111,6 +111,18 @@ export class ProjectsController {
     return this.svc.evm(code, asOf);
   }
 
+  // EVM S-curve series (planned cumulative cost by month + current EV/AC/PV overlay).
+  @Get(':code/evm/series')
+  evmSeries(@Param('code') code: string, @Query('months') months: string | undefined) {
+    return this.svc.evmSeries(code, { months: months ? Number(months) : undefined });
+  }
+
+  // Critical-path schedule (CPM): per-task ES/EF/LS/LF, slack, and on_critical_path for the Gantt.
+  @Get(':code/schedule')
+  schedule(@Param('code') code: string) {
+    return this.svc.schedule(code);
+  }
+
   @Post(':code/cost')
   cost(@Param('code') code: string, @Body(new ZodValidationPipe(CostBody)) b: CostDto, @CurrentUser() u: JwtUser) {
     return this.svc.logCost(code, b, u);

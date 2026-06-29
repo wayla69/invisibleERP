@@ -32,6 +32,9 @@ export class CrmPipelineController {
   // Pipeline forecast
   @Get('summary') summary(@CurrentUser() u: JwtUser) { return this.svc.pipelineSummary(u); }
 
+  // Win/loss analytics (loss reasons, by owner, monthly trend) for the pipeline dashboard.
+  @Get('win-loss') winLoss(@Query('months') months: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.winLoss(u, { months: months ? Number(months) : undefined }); }
+
   // Activities
   @Post('activities') logActivity(@Body(new ZodValidationPipe(ActivityBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.logActivity(b, u); }
   @Get('activities') listActivities(@Query('entity_type') et: string | undefined, @Query('entity_no') en: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listActivities(et, en, u); }
