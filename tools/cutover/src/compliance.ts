@@ -61,6 +61,7 @@ async function main() {
     { username: 'payprep', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },            // PAY-03 payroll preparer (t1)
     { username: 'paychk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },             // PAY-03 payroll approver (t1, ≠ preparer)
     { username: 'whchk', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq },              // INV-07 write-off approver (hq, ≠ admin)
+    { username: 'staleadmin', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: hq },         // AC-02/03 live-role probe: Admin (HQ) later downgraded mid-token to verify RLS bypass follows the DB
   ]).onConflictDoNothing();
   // The Procurement role default is now SoD-clean (procurement/pr_raise only). These residual-risk
   // fixtures deliberately hold conflicting duties, granted via an explicit per-user override (overrides
@@ -345,6 +346,17 @@ async function main() {
   const t2tb = await inj('GET', `/api/ledger/trial-balance?period=${period}`, finT2);
   const t2SeesT1Credit = (t2tb.json.rows ?? []).some((r: any) => r.account_code === '4000' && Number(r.credit) > 0);
   ok('ITGC RLS: tenant-2 finance user cannot see tenant-1 journal entries or balances', !leak && !t2SeesT1Credit, `leak=${leak} sees4000=${t2SeesT1Credit}`);
+
+  // ── ITGC-AC-02/03: the RLS bypass follows the LIVE DB role, not the token's role claim ──
+  // An HQ Admin's token bypasses RLS (sees every tenant). If that account is later downgraded to a
+  // tenant-scoped role, the SAME (still-valid) token must immediately lose HQ bypass — the guard reads the
+  // live `users.role`, not the (now stale) role baked into the JWT. Permissions in the token stay (so the
+  // read still passes the permission guard); only the role-driven bypass flips, isolating this control.
+  const staleTok = (await inj('POST', '/api/login', undefined, { username: 'staleadmin', password: 'pw' })).json.token as string;
+  const beforeSeesT1 = ((await inj('GET', '/api/ledger/journal?limit=100', staleTok)).json.entries ?? []).some((e: any) => e.entry_no === entryNo);
+  await db.update(s.users).set({ role: 'Procurement' }).where(eq(s.users.username, 'staleadmin')); // downgrade in DB, token unchanged
+  const afterSeesT1 = ((await inj('GET', '/api/ledger/journal?limit=100', staleTok)).json.entries ?? []).some((e: any) => e.entry_no === entryNo);
+  ok('ITGC-AC-03: RLS bypass follows live DB role — downgraded Admin token loses HQ cross-tenant visibility', beforeSeesT1 && !afterSeesT1, `beforeSeesT1=${beforeSeesT1} afterSeesT1=${afterSeesT1}`);
 
   // ════════════════════ REV-08 — credit-limit / credit-hold enforcement on order entry ════════════════════
   // A customer's OUTSTANDING AR + the new order may not exceed its credit limit; a customer on credit hold

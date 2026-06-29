@@ -95,6 +95,7 @@ export class JwtAuthGuard implements CanActivate {
     // ITGC-AC-15 — session revocation: a logged-out token (jti denylist), a deactivated account, or a token
     // issued before a "revoke all sessions" watermark is rejected even though the signature is still valid.
     const db = this.db as any;
+    let dbRole: string | undefined; // live role from the users table (staff); overrides the token's role claim
     const revoked = new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Session has been revoked — please sign in again', messageTh: 'เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบใหม่' });
     if (payload.jti) {
       const [rev] = await db.select({ j: revokedTokens.jti }).from(revokedTokens).where(and(eq(revokedTokens.jti, payload.jti), gt(revokedTokens.expiresAt, new Date()))).limit(1);
@@ -109,15 +110,21 @@ export class JwtAuthGuard implements CanActivate {
         if (m && m.active === false) throw new UnauthorizedException({ code: 'MEMBER_DEACTIVATED', message: 'This membership is no longer active', messageTh: 'สมาชิกนี้ถูกปิดใช้งาน' });
       }
     } else if (payload.sub) {
-      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom }).from(users).where(eq(users.username, payload.sub)).limit(1);
+      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role }).from(users).where(eq(users.username, payload.sub)).limit(1);
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
         if (u.tvf && payload.iat && payload.iat * 1000 < new Date(u.tvf).getTime()) throw revoked;
+        // ITGC-AC-02/03 — trust the LIVE DB role, not the role baked into the (possibly stale or forged)
+        // token. The RLS bypass decision (TenantTxInterceptor) and PermissionsGuard both read req.user.role;
+        // sourcing it from the DB here means a role downgraded after the token was issued (e.g. Admin→Sales)
+        // immediately loses HQ bypass, and a forged role claim for a non-privileged username can't grant it.
+        // This rides the existing AC-15 per-request user read — no extra round-trip.
+        dbRole = u.role as string;
       }
     }
     req.user = {
       username: payload.sub,
-      role: payload.role,
+      role: (dbRole ?? payload.role) as JwtUser['role'],
       customerName: payload.customerName ?? null,
       tenantId: payload.tenantId ?? null,
       permissions: payload.permissions ?? [],
