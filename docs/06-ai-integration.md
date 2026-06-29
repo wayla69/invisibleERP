@@ -68,6 +68,8 @@ export class AgentService {
 
 **RBAC tool gating** — `void_order`/`adjust_stock` ต้อง **ไม่** อยู่ใน toolset ของ general assistant (เดิมตั้งใจกัน privilege escalation) → กรอง `toolSchemas(user)` ตาม permission
 
+**PDPA data-minimization (PII redaction)** — ผลลัพธ์ของ tool ถูกส่งให้โมเดลภายนอก (Anthropic) ดังนั้นก่อนส่งจะ **กรอง PII ที่เป็นตัวระบุติดต่อโดยตรง** (อีเมล/เบอร์โทร/เลขประจำตัว 13 หลัก/ที่อยู่/LINE id และฟิลด์ที่ชื่อบ่งชี้) ผ่าน `common/pii-redact.ts` — **คงชื่อกิจการ/ลูกค้าไว้** (ผู้ช่วยต้องใช้เพื่อให้คำตอบมีประโยชน์) และตัวเลขยอดเงินผ่านได้ตามปกติ ปิดได้ด้วย `AI_PII_REDACTION=off` (ค่าเริ่มต้น on) การทำ pseudonymization เต็มรูปแบบ + DPA กับ Anthropic เป็นมาตรการสมบูรณ์ (อยู่ใน workstream กฎหมาย) — `doc-ai` (สกัดข้อมูลใบแจ้งหนี้ที่ผู้ใช้วางเอง) **ไม่** ถูกกรองเพราะเป็นวัตถุประสงค์โดยตรง ใช้ opt-out ต่อ tenant + DPA กำกับแทน
+
 ---
 
 ## 3. Analytics (พอร์ต `analytics/` — ค่าคงที่เป๊ะ)
