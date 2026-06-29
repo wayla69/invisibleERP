@@ -114,7 +114,8 @@ async function main() {
 
   // ── 7. financeTrend returns months + trend array ──
   const ft = await biSvc.financeTrend({ months: 3 }, mgrUser);
-  ok('financeTrend returns months=3 + trend array', ft.months === 3 && Array.isArray(ft.trend), JSON.stringify({ months: ft.months, rows: ft.trend.length }));
+  const ftConsistent = ft.trend.every((r: any) => Math.abs(r.gross_profit - (r.revenue - r.expense)) < 0.01 && typeof r.revenue === 'number' && typeof r.expense === 'number');
+  ok('financeTrend returns months=3 + trend array (JOIN+CASE aggregation: gross_profit = revenue − expense)', ft.months === 3 && Array.isArray(ft.trend) && ftConsistent, JSON.stringify({ months: ft.months, rows: ft.trend.length, consistent: ftConsistent }));
 
   // ── 8. pipelineTrend returns months + trend array ──
   const pt = await biSvc.pipelineTrend({ months: 3 }, mgrUser);
