@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, desc, asc, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts, cashMovements, bankDeposits } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -49,7 +49,9 @@ export class BankService {
     return await db.transaction(async (tx: any) => {
       const je: any = await this.ledger.postEntry({ source: 'BDEP', sourceRef: depositNo, tenantId: user.tenantId ?? null, memo: `Bank deposit ${depositNo} → ${bank.bankName} ${bank.accountNo}`, createdBy: user.username, lines: [{ account_code: bank.glAccountCode, debit: amount }, { account_code: '1000', credit: amount }] }, tx);
       const [dep] = await tx.insert(bankDeposits).values({ tenantId: user.tenantId, depositNo, bankAccountId: dto.bank_account_id, amount: fx(amount, 4), status: 'Deposited', depositDate: dto.deposit_date ?? null, journalNo: je?.entry_no ?? null, createdBy: user.username }).returning({ id: bankDeposits.id });
-      await tx.update(cashMovements).set({ depositId: Number(dep.id) }).where(and(eq(cashMovements.tenantId, user.tenantId as number), sql`${cashMovements.movementNo} = ANY(${sql.raw(`ARRAY[${chosen.map((c: any) => `'${c.movementNo}'`).join(',')}]`)})`));
+      // Bind the chosen movement numbers as parameters (inArray) — never interpolate user-supplied
+      // strings into a raw SQL ARRAY literal (was a SQLi sink: a crafted movementNo could break out).
+      await tx.update(cashMovements).set({ depositId: Number(dep.id) }).where(and(eq(cashMovements.tenantId, user.tenantId as number), inArray(cashMovements.movementNo, chosen.map((c: any) => c.movementNo))));
       return { deposit_no: depositNo, bank: `${bank.bankName} ${bank.accountNo}`, amount, drops_banked: chosen.length, journal_no: je?.entry_no ?? null, status: 'Deposited' };
     });
   }
