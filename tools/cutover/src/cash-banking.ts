@@ -107,6 +107,20 @@ async function main() {
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced after banking', tb.totals?.balanced === true, JSON.stringify(tb.totals ?? {}));
 
+  // ── 9. PR0.1 SQLi regression: subset banking via movement_nos binds values (inArray), never a raw ──
+  //      ARRAY literal. A movement_no containing an apostrophe would have broken the old `'${..}'` build.
+  const evilNo = "CASHMOV-EVIL-1' OR '1'='1";
+  await db.insert(s.cashMovements).values([
+    { movementNo: evilNo, tenantId: t1, tillSessionId: tillId, type: 'drop', amount: '111.0000', reason: 'inj', createdBy: 'cash1' },
+    { movementNo: 'CASHMOV-NORMAL-2', tenantId: t1, tillSessionId: tillId, type: 'drop', amount: '222.0000', reason: 'ฝากเซฟ', createdBy: 'cash1' },
+  ]);
+  // bank ONLY the apostrophe-bearing drop by its movement_no — must bank exactly it (111), not all.
+  const subset = await inj('POST', '/api/bank/deposits', fin1, { bank_account_id: bank.json.id, movement_nos: [evilNo] });
+  ok('Subset bank with apostrophe movement_no: only chosen drop banked (111, n=1)', near(subset.json.amount, 111) && subset.json.drops_banked === 1, JSON.stringify({ a: subset.json.amount, n: subset.json.drops_banked }));
+  // no injection: the other drop is untouched and the table is intact (cash-in-safe = 222, 1 drop).
+  const undAfter = (await inj('GET', '/api/bank/deposits/undeposited-drops', fin1)).json;
+  ok('No SQLi: untargeted drop survives, table intact (1 drop, 222 in safe)', undAfter.count === 1 && near(undAfter.total, 222), JSON.stringify({ c: undAfter.count, t: undAfter.total }));
+
   await app.close();
   await pg.close();
   console.log('\n── Bank Cash banking: safe-drop → deposit + reconciliation (นำฝากธนาคาร) ──');
