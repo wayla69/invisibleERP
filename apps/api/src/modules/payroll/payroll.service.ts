@@ -1,14 +1,18 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, type OnModuleInit } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, payruns, payslips, timesheets, leaveRequests } from '../../database/schema';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { LedgerService } from '../ledger/ledger.service';
+import { JobWorkerService } from '../jobs/job-worker.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { computePayslipFull, overtimePay } from './payroll-calc';
 
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+
+// Job type for an async payroll run (off the request thread via the background-job queue).
+export const PAYROLL_RUN_JOB = 'payroll_run';
 
 export interface EmployeeDto {
   emp_code?: string; name: string; national_id?: string; sso_no?: string; position?: string; department?: string;
@@ -16,11 +20,23 @@ export interface EmployeeDto {
 }
 
 @Injectable()
-export class PayrollService {
+export class PayrollService implements OnModuleInit {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly ledger: LedgerService,
+    // @Optional so partial harnesses that construct PayrollService without the (global) JobsModule still work.
+    @Optional() private readonly worker?: JobWorkerService,
   ) {}
+
+  // Register the worker handler for an async payroll run. The worker has already established the job's tenant
+  // transaction (runInTenantContext), so runPayroll's DRIZZLE queries are RLS-scoped exactly as in a request.
+  // runPayroll is idempotent per (tenant, period) → safe under the queue's at-least-once retry semantics.
+  onModuleInit(): void {
+    this.worker?.register(PAYROLL_RUN_JOB, async (payload: any, ctx) => {
+      const user: JwtUser = { username: ctx.actor ?? 'system:payroll', role: ctx.bypass ? 'Admin' : 'Sales', customerName: null, tenantId: ctx.tenantId, permissions: [] };
+      return this.runPayroll(String(payload.period), user, ctx.tenantId);
+    });
+  }
 
   // ── Employees (tenant-scoped via RLS) ──
   async createEmployee(dto: EmployeeDto, user: JwtUser) {

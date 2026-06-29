@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Optional, BadRequestException } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { PayrollService, type EmployeeDto } from './payroll.service';
+import { JobQueueService } from '../jobs/job-queue.service';
+import { PayrollService, type EmployeeDto, PAYROLL_RUN_JOB } from './payroll.service';
 
 const EmployeeBody = z.object({
   name: z.string().min(1),
@@ -26,7 +27,10 @@ const RemitBody = z.object({ account_code: z.string().min(1), amount: z.number()
 @Controller('api/payroll')
 @Permissions('exec', 'users', 'creditors')
 export class PayrollController {
-  constructor(private readonly svc: PayrollService) {}
+  constructor(
+    private readonly svc: PayrollService,
+    @Optional() private readonly jobs?: JobQueueService,
+  ) {}
 
   @Post('employees')
   createEmployee(@Body(new ZodValidationPipe(EmployeeBody)) b: EmployeeDto, @CurrentUser() u: JwtUser) {
@@ -38,9 +42,26 @@ export class PayrollController {
     return this.svc.listEmployees(u);
   }
 
+  // Run payroll for a period. Synchronous by default (backward compatible). With ?async=1 the run is
+  // enqueued as a background job and the request returns 202 immediately with a job_id to poll at
+  // GET /api/jobs/:id — keeps a large run off the request thread (the run is idempotent per tenant+period).
   @Post('runs')
-  runPayroll(@Query('period') period: string, @Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
-    return this.svc.runPayroll(period, u, tenantId != null && tenantId !== '' ? Number(tenantId) : null);
+  async runPayroll(
+    @Query('period') period: string,
+    @Query('tenant_id') tenantId: string | undefined,
+    @Query('async') async_: string | undefined,
+    @CurrentUser() u: JwtUser,
+  ) {
+    const explicit = tenantId != null && tenantId !== '' ? Number(tenantId) : null;
+    const wantAsync = async_ === '1' || async_ === 'true';
+    if (wantAsync && this.jobs) {
+      if (!/^\d{4}-\d{2}$/.test(period ?? '')) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
+      const target = u.tenantId ?? explicit;
+      if (target == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id to run payroll', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id เพื่อรันเงินเดือน' });
+      const jobId = await this.jobs.enqueue({ jobType: PAYROLL_RUN_JOB, payload: { period }, tenantId: target, actor: u.username, bypass: u.role === 'Admin' });
+      return { queued: true, job_id: jobId, status: 'queued', poll: `/api/jobs/${jobId}` };
+    }
+    return this.svc.runPayroll(period, u, explicit);
   }
 
   // PAY-03 maker-checker: a different user approves (SoD-enforced) → the Draft payroll JE becomes effective.
