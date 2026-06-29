@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -44,6 +44,7 @@ const TaskBody = z.object({
   planned_cost: z.number().nonnegative().optional(),
   pct_complete: z.number().min(0).max(100).optional(),
   assignee: z.string().optional(),
+  depends_on: z.array(z.number().int().positive()).optional(),
 });
 const TaskPatchBody = z.object({
   name: z.string().min(1).optional(),
@@ -54,6 +55,7 @@ const TaskPatchBody = z.object({
   planned_cost: z.number().nonnegative().optional(),
   pct_complete: z.number().min(0).max(100).optional(),
   assignee: z.string().optional(),
+  depends_on: z.array(z.number().int().positive()).optional(),
 });
 const MilestoneBody = z.object({
   name: z.string().min(1),
@@ -101,6 +103,12 @@ export class ProjectsController {
   @Get(':code')
   get(@Param('code') code: string) {
     return this.svc.get(code);
+  }
+
+  // Earned-value metrics (P4): BAC/PV/EV/AC → CPI/SPI + variances + EAC. Static 'evm' segment.
+  @Get(':code/evm')
+  evm(@Param('code') code: string, @Query('as_of') asOf: string | undefined) {
+    return this.svc.evm(code, asOf);
   }
 
   @Post(':code/cost')

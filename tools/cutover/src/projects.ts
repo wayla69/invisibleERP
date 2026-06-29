@@ -212,6 +212,23 @@ async function main() {
   const apprBad = await inj('POST', '/api/hcm/timesheets/999999/approve', mgr, {});
   ok('Approve unknown timesheet → 404 TIMESHEET_NOT_FOUND', apprBad.status === 404 && apprBad.json.error?.code === 'TIMESHEET_NOT_FOUND', `${apprBad.status} ${apprBad.json.error?.code}`);
 
+  // ── 15. Earned-value management + task dependencies (PROJ-06, P4) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-EVM', name: 'งานวัด EVM', billing_type: 'TM' });
+  const t1r = await inj('POST', '/api/projects/PRJ-EVM/tasks', admin, { name: 'EV-T1', planned_cost: 1000, planned_end: '2026-01-31', pct_complete: 100 });
+  const t1 = t1r.json.tasks.find((t: any) => t.name === 'EV-T1');
+  const t2r = await inj('POST', '/api/projects/PRJ-EVM/tasks', admin, { name: 'EV-T2', planned_cost: 1000, planned_end: '2099-12-31', pct_complete: 0, depends_on: [t1.id] });
+  const t2 = t2r.json.tasks.find((t: any) => t.name === 'EV-T2');
+  ok('Task dependency stored: EV-T2 depends_on [EV-T1]', Array.isArray(t2.depends_on) && t2.depends_on.includes(t1.id), JSON.stringify({ d: t2.depends_on }));
+  await inj('POST', '/api/projects/PRJ-EVM/cost', admin, { entry_type: 'time', amount: 900, billable: true }); // actual cost
+  const evm = await inj('GET', '/api/projects/PRJ-EVM/evm', admin);
+  ok('EVM: BAC 2000, EV 1000, PV 1000 (T1 past/T2 future), AC 900 → CPI 1.1111, SPI 1.0, CV 100, SV 0, EAC ~1800',
+    near(evm.json.bac, 2000) && near(evm.json.ev, 1000) && near(evm.json.pv, 1000) && near(evm.json.ac, 900) &&
+    near(evm.json.cpi, 1.1111) && near(evm.json.spi, 1.0) && near(evm.json.cost_variance, 100) && near(evm.json.schedule_variance, 0) && Math.abs(evm.json.eac - 1800) < 0.5,
+    JSON.stringify({ cpi: evm.json.cpi, spi: evm.json.spi, ev: evm.json.ev, pv: evm.json.pv, ac: evm.json.ac, eac: evm.json.eac }));
+  // Self-dependency guard.
+  const badDep = await inj('PATCH', `/api/projects/tasks/${t1.id}`, admin, { depends_on: [t1.id] });
+  ok('Task depends on itself → 400 BAD_DEPENDENCY', badDep.status === 400 && badDep.json.error?.code === 'BAD_DEPENDENCY', `${badDep.status} ${badDep.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

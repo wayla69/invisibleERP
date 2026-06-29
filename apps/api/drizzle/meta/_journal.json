@@ -1310,6 +1310,13 @@
       "when": 2023820000013,
       "tag": "0186_timesheet_project_labor",
       "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "7",
+      "when": 2023820000014,
+      "tag": "0187_project_task_dependencies",
+      "breakpoints": true
     }
   ]
 }

@@ -67,6 +67,7 @@ export const projectTasks = pgTable(
     plannedHours: numeric('planned_hours', { precision: 14, scale: 2 }).default('0'),
     plannedCost: numeric('planned_cost', { precision: 16, scale: 2 }).default('0'),
     pctComplete: numeric('pct_complete', { precision: 5, scale: 2 }).default('0'), // 0..100
+    dependsOn: text('depends_on'),                            // P4 — predecessor task ids (CSV) for scheduling
     assignee: text('assignee'),
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
