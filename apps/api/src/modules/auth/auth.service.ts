@@ -80,7 +80,8 @@ export class AuthService {
       return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or PIN', messageTh: 'Username หรือ PIN ไม่ถูกต้อง' });
     };
     if (!row || !row.pinHash) throw fail();
-    const { ok, needsRehash } = await this.passwords.verify(pin, row.pinHash);
+    // verifyPin (scrypt-only) — PINs never use the legacy SHA-256 path, so a PIN never flows into a weak hash.
+    const { ok, needsRehash } = await this.passwords.verifyPin(pin, row.pinHash);
     if (!ok) throw fail();
     if (row.isActive === false)
       throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
