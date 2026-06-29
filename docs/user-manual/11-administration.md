@@ -282,6 +282,34 @@ across the group.
 
 ---
 
+## 11a. PDPA — data-subject requests (privacy)
+
+**API:** `/api/pdpa/dsar` · **Required permission:** `users` (the DPO / access-admin duty).
+
+Under Thailand's PDPA, a person can ask what data you hold about them, ask for a copy,
+or ask you to erase it. Use the DSAR (Data Subject Access Request) register to track and
+fulfil these on time.
+
+1. **Log the request.** Record the subject (e.g. a loyalty member by code/id) and the
+   request type — **access**, **rectification**, **erasure**, **portability**, or
+   **objection**. The system stamps a **due date 30 days out** (the statutory deadline)
+   and tracks status (received → completed/rejected).
+2. **Fulfil access / portability.** **Export** assembles everything held about the subject
+   — profile, the per-purpose consents they granted, and their points history — as a single
+   bundle to hand over.
+3. **Fulfil erasure ("right to be forgotten").** **Erase** removes the person's personal
+   details (name, phone, email, card, LINE) and withdraws their marketing consent. Their
+   transaction history is kept for accounting/legal reasons but their identity is replaced
+   everywhere it would otherwise show — **including in the audit trail**, where their details
+   are automatically masked from then on. (The audit records themselves stay intact for
+   integrity; the personal data is simply never displayed again.)
+4. **Reject** with a reason if the request isn't valid (e.g. the person isn't your customer).
+
+> You only ever see your **own company's** requests (tenant-isolated). Erasure cannot be
+> undone — confirm the subject's identity first.
+
+---
+
 ## 12. Webhooks (push events to other systems)
 
 **Screen:** `/webhooks` (**เว็บฮุค**) · **Required permission:** `users`.
