@@ -164,6 +164,20 @@ async function main() {
   const badPeriod = await inj('GET', `/api/bi/sales-cube?period=${encodeURIComponent("year))--")}&months=1`, mgr1);
   ok('GET /api/bi/sales-cube?period=year))-- → 400 BI_BAD_PERIOD', badPeriod.status === 400 && badPeriod.json.error?.code === 'BI_BAD_PERIOD', `status=${badPeriod.status} code=${badPeriod.json.error?.code}`);
 
+  // ── 17. data_retention_purge: scheduled job deletes only EXPIRED ephemeral security rows (financial/audit
+  //        data is under statutory hold → never touched). Seed an expired + a live revoked-token; only the
+  //        expired one is purged. ──
+  await db.insert(s.revokedTokens).values([
+    { jti: 'ret-expired', username: 'x', expiresAt: new Date(Date.now() - 86400_000) },
+    { jti: 'ret-future', username: 'x', expiresAt: new Date(Date.now() + 86400_000) },
+  ]).onConflictDoNothing();
+  const psub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Retention purge', report_type: 'data_retention_purge', frequency: 'daily' });
+  const prun = await inj('POST', `/api/bi/subscriptions/${psub.json.id}/run`, admin, {});
+  const remaining = (await db.select().from(s.revokedTokens)).map((r: any) => r.jti);
+  ok('data_retention_purge removes expired ephemeral rows, keeps live ones (financial/audit untouched)',
+    prun.json.status === 'success' && !remaining.includes('ret-expired') && remaining.includes('ret-future'),
+    JSON.stringify({ st: prun.json.status, sum: prun.json.summary, remaining }).slice(0, 170));
+
   await app.close();
 }
 

@@ -41,6 +41,8 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
   // Likewise: each run recognizes every due TFRS-15 revenue schedule through the current period (idempotent).
   rev_rec_recognize: { label: 'รับรู้รายได้ตามสัญญา (TFRS 15)', labelEn: 'Recognize due revenue schedules' },
+  // Data-retention purge of DEAD ephemeral security rows only (never financial/audit/PII — statutory hold).
+  data_retention_purge: { label: 'ล้างข้อมูลชั่วคราวที่หมดอายุ (นโยบายเก็บข้อมูล)', labelEn: 'Purge expired ephemeral security rows' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -464,6 +466,21 @@ export class BiService {
       const period = new Date().toISOString().slice(0, 7); // YYYY-MM
       const r = await this.revrec.recognize({ period }, user, user.tenantId ?? null);
       return { data: r, summary: `Revenue recognition ${period}: recognized ${r.recognized_count} schedule(s), total ${r.total_recognized}`, summaryTh: `รับรู้รายได้งวด ${period}: ${r.recognized_count} รายการ รวม ${r.total_recognized}` };
+    }
+    if (reportType === 'data_retention_purge') {
+      // Delete ONLY dead ephemeral security rows (auth-global, no statutory value once expired). This
+      // NEVER touches financial / audit / transactional / PII tables — those are under statutory legal
+      // hold (see docs/ops/data-retention-policy.md). Idempotent. refresh_tokens are kept until EXPIRED
+      // (not merely rotated) so reuse-detection still works within a token's life.
+      const db = this.db as any;
+      const rows = (res: any): number => (res?.rows?.length ?? (Array.isArray(res) ? res.length : 0));
+      const a = await db.execute(sql`DELETE FROM revoked_tokens WHERE expires_at < now() RETURNING 1 AS one`);
+      const b = await db.execute(sql`DELETE FROM refresh_tokens WHERE expires_at < now() RETURNING 1 AS one`);
+      const c = await db.execute(sql`DELETE FROM sso_login_state WHERE expires_at < now() RETURNING 1 AS one`);
+      const d = await db.execute(sql`DELETE FROM member_otps WHERE consumed_at IS NOT NULL OR expires_at < now() RETURNING 1 AS one`);
+      const purged = { revoked_tokens: rows(a), refresh_tokens: rows(b), sso_login_state: rows(c), member_otps: rows(d) };
+      const total = purged.revoked_tokens + purged.refresh_tokens + purged.sso_login_state + purged.member_otps;
+      return { data: purged, summary: `Retention purge: removed ${total} expired ephemeral security rows (financial/audit data untouched)`, summaryTh: `ล้างข้อมูลชั่วคราวที่หมดอายุ ${total} รายการ (ไม่แตะข้อมูลการเงิน/ออดิต)` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }
