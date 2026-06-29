@@ -262,6 +262,17 @@ async function main() {
   const hasHelmet = !!(helmetRes.headers['x-frame-options'] || helmetRes.headers['content-security-policy'] || helmetRes.headers['x-content-type-options']);
   ok('Edge: helmet security headers present', hasHelmet, JSON.stringify(Object.keys(helmetRes.headers)).slice(0, 120));
 
+  // Edge: sensitive-auth endpoints have a stricter per-IP rate bucket (defence-in-depth ON TOP of the
+  // per-account lockout). Distinct usernames each get their own per-account counter (threshold 10, never
+  // reached), so a 429 here is the EDGE per-IP auth limit (default 30/min), not the account lockout.
+  let rl429 = false, rlCode = '', attempts = 0;
+  for (let i = 0; i < 45; i++) {
+    attempts++;
+    const r = await inj('POST', '/api/login', undefined, { username: `rl-probe-${i}`, password: 'x' });
+    if (r.status === 429) { rl429 = true; rlCode = r.json?.error?.code; break; }
+  }
+  ok('Edge: sensitive-auth endpoints hit a stricter per-IP rate limit (429 RATE_LIMITED)', rl429 && rlCode === 'RATE_LIMITED', `429=${rl429} code=${rlCode} after ${attempts} attempts`);
+
   await app.close();
   await pg.close();
 
