@@ -38,8 +38,10 @@ export class PlanGuard implements CanActivate {
     const req = ctx.switchToHttp().getRequest();
     const user: JwtUser | undefined = req.user;
 
-    // HQ Admin principal (role=Admin, no tenantId) has no subscription record — always allow.
-    if (!user || !user.tenantId) return true;
+    // HQ Admin principal (role=Admin) is the cross-tenant super-admin — keyed the same way as the
+    // RLS "sees all" bypass. It has no subscription of its own (it may be stamped with the HQ tenant
+    // id rather than null), so plan gating never applies. Also allow a principal with no tenant at all.
+    if (!user || user.role === 'Admin' || !user.tenantId) return true;
 
     try {
       const db = this.db as any;
@@ -55,13 +57,11 @@ export class PlanGuard implements CanActivate {
         .orderBy(desc(subscriptions.createdAt))
         .limit(1);
 
-      if (!row) {
-        throw new ForbiddenException({
-          code: 'NO_SUBSCRIPTION',
-          message: 'No subscription found. Please complete setup.',
-          messageTh: 'ไม่พบการสมัครสมาชิก กรุณาตั้งค่าให้สมบูรณ์',
-        });
-      }
+      // No subscription row at all → provisioning-in-progress / legacy data. Fail-open, consistent
+      // with BillingService.checkUserLimit and this guard's own "never lock out a tenant over a
+      // billing-data gap" philosophy. A real Free-tier tenant HAS a row (features.ai_chat=false) and
+      // is still correctly blocked below via PLAN_FEATURE_REQUIRED.
+      if (!row) return true;
 
       // Trialing: grant full access while still in the trial window.
       if (row.status === 'Trialing') {
