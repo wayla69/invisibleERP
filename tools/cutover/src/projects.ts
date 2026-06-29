@@ -39,7 +39,10 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'mgr', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // independent approver (P3 maker-checker)
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -53,6 +56,7 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
+  const mgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'admin123' })).json.token;
 
   // ── 1. create project (T&M) ──
   const cr = await inj('POST', '/api/projects', admin, { project_code: 'PRJ-A', name: 'ระบบ ERP ลูกค้า', customer_name: 'ACME', billing_type: 'TM', contract_amount: 10000 });
@@ -186,6 +190,27 @@ async function main() {
   // Allocation guard.
   const asgBad = await inj('POST', '/api/projects/PRJ-RES/resources', admin, { resource_name: 'Carol', alloc_pct: 0 });
   ok('Assign with alloc_pct 0 → 400 BAD_ALLOC', asgBad.status === 400 && asgBad.json.error?.code === 'BAD_ALLOC', `${asgBad.status} ${asgBad.json.error?.code}`);
+
+  // ── 14. Timesheet → project labor: maker-checker approval posts labor to project WIP (PROJ-04, P3) ──
+  const emp = await inj('POST', '/api/payroll/employees', admin, { name: 'Somchai', national_id: '1234567890123', monthly_salary: 30000, hourly_rate: 200, pf_rate: 0.05 });
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-TS', name: 'งานคิดชั่วโมง', billing_type: 'TM' });
+  const ts = await inj('POST', '/api/hcm/timesheets', admin, { emp_code: emp.json.emp_code, work_date: '2026-06-15', regular_hours: 8, project_code: 'PRJ-TS', billable: true });
+  ok('Timesheet logged Pending with submitter', ts.json.status === 'Pending' && ts.json.id > 0, JSON.stringify({ s: ts.json.status, id: ts.json.id }));
+  // SoD: the submitter (admin) cannot approve their own timesheet.
+  const selfApprove = await inj('POST', `/api/hcm/timesheets/${ts.json.id}/approve`, admin, {});
+  ok('Self-approve own timesheet → 403 SOD_SELF_APPROVAL', selfApprove.status === 403 && selfApprove.json.error?.code === 'SOD_SELF_APPROVAL', `${selfApprove.status} ${selfApprove.json.error?.code}`);
+  // Independent approver (mgr) approves → 8h × ฿200 = ฿1600 labor posts to project WIP via PRJ-COST.
+  const appr = await inj('POST', `/api/hcm/timesheets/${ts.json.id}/approve`, mgr, {});
+  ok('Independent approve → labor 1600 posts to project (PRJ-COST), entry JE-…',
+    appr.json.status === 'Approved' && near(appr.json.labor_cost, 1600) && appr.json.project_posted === true && /^JE-/.test(appr.json.entry_no ?? ''), JSON.stringify({ s: appr.json.status, c: appr.json.labor_cost }));
+  const tsProj = await inj('GET', '/api/projects/PRJ-TS', admin);
+  ok('Project WIP reflects approved timesheet labor: cost_to_date 1600', near(tsProj.json.cost_to_date, 1600) && near(tsProj.json.wip, 1600), JSON.stringify({ c: tsProj.json.cost_to_date, w: tsProj.json.wip }));
+  // Idempotent: re-approving an approved timesheet does not double-post.
+  const appr2 = await inj('POST', `/api/hcm/timesheets/${ts.json.id}/approve`, mgr, {});
+  const tsProj2 = await inj('GET', '/api/projects/PRJ-TS', admin);
+  ok('Re-approve → already, no double-post (cost_to_date still 1600)', appr2.json.already === true && near(tsProj2.json.cost_to_date, 1600), JSON.stringify({ a: appr2.json.already, c: tsProj2.json.cost_to_date }));
+  const apprBad = await inj('POST', '/api/hcm/timesheets/999999/approve', mgr, {});
+  ok('Approve unknown timesheet → 404 TIMESHEET_NOT_FOUND', apprBad.status === 404 && apprBad.json.error?.code === 'TIMESHEET_NOT_FOUND', `${apprBad.status} ${apprBad.json.error?.code}`);
 
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

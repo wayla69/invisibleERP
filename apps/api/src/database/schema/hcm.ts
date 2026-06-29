@@ -13,10 +13,20 @@ export const timesheets = pgTable(
     regularHours: numeric('regular_hours', { precision: 6, scale: 2 }).default('0'),
     otHours: numeric('ot_hours', { precision: 6, scale: 2 }).default('0'),
     note: text('note'),
+    // P3 — timesheet → project labor: an optional project/task target, a billable flag, and a maker-checker
+    // approval (submitter ≠ approver) that posts the labor cost into project WIP via PRJ-COST (PROJ-04).
+    projectId: bigint('project_id', { mode: 'number' }),       // optional → target project
+    taskId: bigint('task_id', { mode: 'number' }),             // optional → WBS task
+    billable: boolean('billable').default(true),
+    status: text('status').notNull().default('Pending'),       // Pending | Approved
+    submittedBy: text('submitted_by'),                          // maker
+    approvedBy: text('approved_by'),                            // checker (SoD: ≠ submitted_by)
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    entryNo: text('entry_no'),                                  // PRJ-COST JE posted on approval
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ byEmp: index('idx_ts_emp').on(t.employeeId), byTenant: index('idx_ts_tenant').on(t.tenantId) }),
+  (t) => ({ byEmp: index('idx_ts_emp').on(t.employeeId), byTenant: index('idx_ts_tenant').on(t.tenantId), byProject: index('idx_ts_project').on(t.projectId) }),
 );
 
 // ── Leave (การลา) — requests reduce pay when unpaid; balances track entitlement ──
