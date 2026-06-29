@@ -40,6 +40,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-028 | Member cookie session authenticates self-scoped read | ITGC-AC-07 | 08 §7, 19 §7 |
 | UAT-SEC-029 | Member cookie mutation requires CSRF double-submit | ITGC-AC-07 | 08 §7, 19 §7 |
 | UAT-SEC-030 | Member logout clears + revokes the session | ITGC-AC-07 / ITGC-AC-15 | 08 §7, 19 §7 |
+| UAT-SEC-031 | PDPA DSAR filed with statutory 30-day due date | PDPA-01 | 08 §7, §9 |
+| UAT-SEC-032 | PDPA access/portability export | PDPA-01 | 08 §7, §9 |
+| UAT-SEC-033 | PDPA erasure redacts PII + issues pseudonym | PDPA-02 | 08 §7, §9 |
+| UAT-SEC-034 | PDPA erasure pseudonymises the audit trail at read-time (stored row immutable) | PDPA-02 / ITGC-AC-16 | 08 §7, §9 |
+| UAT-SEC-035 | PDPA DSAR is tenant-isolated | PDPA-01 / ITGC-AC-03 | 08 §7, §9 |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 

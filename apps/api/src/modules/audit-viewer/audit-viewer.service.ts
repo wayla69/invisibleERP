@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, gte, lte, desc, asc, ilike, sql, isNotNull, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { auditLog, dataChangeLog } from '../../database/schema';
 import { auditRowHash } from '../../common/audit.interceptor';
+import { PdpaService } from '../pdpa/pdpa.service';
 
 export interface ChangeFilters { table?: string; row_pk?: string; actor?: string; from?: string; to?: string; tenantId?: number | null }
 
@@ -20,7 +21,12 @@ export interface AuditFilters {
 // guarantees these rows can never be mutated — this module only ever SELECTs.
 @Injectable()
 export class AuditViewerService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // @Optional so a partial harness without the PDPA module still constructs; when present, erased data
+  // subjects (PDPA right-to-be-forgotten) are pseudonymised at read-time over the immutable audit rows.
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly pdpa?: PdpaService,
+  ) {}
 
   private where(f: AuditFilters): SQL | undefined {
     const c: SQL[] = [];
@@ -46,18 +52,21 @@ export class AuditViewerService {
     const w = this.where(f);
     const rows = await db.select().from(auditLog).where(w).orderBy(desc(auditLog.ts)).limit(limit).offset(offset);
     const [c] = await db.select({ c: sql<number>`count(*)` }).from(auditLog).where(w);
-    return { rows: rows.map((r: any) => this.fmt(r)), total: Number(c?.c ?? 0), limit, offset };
+    let mapped = rows.map((r: any) => this.fmt(r));
+    if (this.pdpa) mapped = await this.pdpa.maskAuditRows(mapped); // PDPA: mask erased subjects at read-time
+    return { rows: mapped, total: Number(c?.c ?? 0), limit, offset };
   }
 
   // CSV of the same filtered set (capped) — auditor-friendly export.
   async exportCsv(f: AuditFilters): Promise<string> {
     const db = this.db as any;
     const rows = await db.select().from(auditLog).where(this.where(f)).orderBy(desc(auditLog.ts)).limit(5000);
+    let mapped = rows.map((r: any) => this.fmt(r));
+    if (this.pdpa) mapped = await this.pdpa.maskAuditRows(mapped); // PDPA: mask erased subjects in the export too
     const esc = (v: unknown) => { const s = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const header = ['id', 'ts', 'actor', 'tenant_id', 'action', 'entity', 'entity_id', 'ip', 'request_id', 'status', 'meta'];
     const lines = [header.join(',')];
-    for (const r of rows) {
-      const v = this.fmt(r);
+    for (const v of mapped) {
       lines.push([v.id, v.ts, v.actor, v.tenant_id, v.action, v.entity, v.entity_id, v.ip, v.request_id, v.status, v.meta].map(esc).join(','));
     }
     return lines.join('\n');
