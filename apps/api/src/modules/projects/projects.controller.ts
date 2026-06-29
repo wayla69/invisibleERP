@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -33,6 +33,34 @@ const CostBody = z.object({
 });
 const BillBody = z.object({ amount: z.number().positive().optional(), percent: z.number().positive().max(100).optional() })
   .refine((b) => b.amount != null || b.percent != null, { message: 'amount or percent is required' });
+const TaskBody = z.object({
+  name: z.string().min(1),
+  parent_id: z.number().int().positive().optional(),
+  wbs_code: z.string().optional(),
+  status: z.enum(['open', 'in_progress', 'done', 'cancelled']).optional(),
+  planned_start: z.string().optional(),
+  planned_end: z.string().optional(),
+  planned_hours: z.number().nonnegative().optional(),
+  planned_cost: z.number().nonnegative().optional(),
+  pct_complete: z.number().min(0).max(100).optional(),
+  assignee: z.string().optional(),
+});
+const TaskPatchBody = z.object({
+  name: z.string().min(1).optional(),
+  status: z.enum(['open', 'in_progress', 'done', 'cancelled']).optional(),
+  planned_start: z.string().optional(),
+  planned_end: z.string().optional(),
+  planned_hours: z.number().nonnegative().optional(),
+  planned_cost: z.number().nonnegative().optional(),
+  pct_complete: z.number().min(0).max(100).optional(),
+  assignee: z.string().optional(),
+});
+const MilestoneBody = z.object({
+  name: z.string().min(1),
+  due_date: z.string().optional(),
+  owner: z.string().optional(),
+  billing_percent: z.number().positive().max(100).optional(),
+});
 
 @Controller('api/projects')
 @Permissions('exec', 'planner', 'ar')
@@ -68,5 +96,39 @@ export class ProjectsController {
   @Post(':code/bill')
   bill(@Param('code') code: string, @Body(new ZodValidationPipe(BillBody)) b: BillDto, @CurrentUser() u: JwtUser) {
     return this.svc.bill(code, b, u);
+  }
+
+  // ── WBS tasks (P1) ──
+  @Post(':code/tasks')
+  addTask(@Param('code') code: string, @Body(new ZodValidationPipe(TaskBody)) b: TaskDto, @CurrentUser() u: JwtUser) {
+    return this.svc.addTask(code, b, u);
+  }
+
+  @Get(':code/tasks')
+  listTasks(@Param('code') code: string) {
+    return this.svc.listTasks(code);
+  }
+
+  // Static 'tasks' segment, so it never collides with :code.
+  @Patch('tasks/:taskId')
+  patchTask(@Param('taskId') taskId: string, @Body(new ZodValidationPipe(TaskPatchBody)) b: TaskPatchDto, @CurrentUser() u: JwtUser) {
+    return this.svc.patchTask(Number(taskId), b, u);
+  }
+
+  // ── Milestones (P1) ──
+  @Post(':code/milestones')
+  addMilestone(@Param('code') code: string, @Body(new ZodValidationPipe(MilestoneBody)) b: MilestoneDto, @CurrentUser() u: JwtUser) {
+    return this.svc.addMilestone(code, b, u);
+  }
+
+  @Get(':code/milestones')
+  listMilestones(@Param('code') code: string) {
+    return this.svc.listMilestones(code);
+  }
+
+  // Static 'milestones' segment, so it never collides with :code.
+  @Post('milestones/:milestoneId/reach')
+  reachMilestone(@Param('milestoneId') milestoneId: string, @CurrentUser() u: JwtUser) {
+    return this.svc.reachMilestone(Number(milestoneId), u);
   }
 }

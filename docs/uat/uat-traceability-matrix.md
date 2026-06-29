@@ -223,6 +223,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-188 | Weighted pipeline forecast + win-rate | REV-17 | 01 §7 |
 | UAT-O2C-189 | Log + list a CRM activity | REV-17 | 01 §7 |
 | UAT-O2C-202 | Won opportunity → project (won-only, traceable, idempotent) | CRM-WL | 16 §7 (1a), §9 |
+| UAT-O2C-203 | Project WBS — planned-hours-weighted % complete roll-up | Feature (P1 WBS) | 16 §7 (7) |
+| UAT-O2C-204 | Milestone completion raises the Fixed-price progress bill | PROJ-02 | 16 §7 (8), §9 |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

@@ -49,4 +49,51 @@ export const projectEntries = pgTable(
   (t) => ({ byProject: index('idx_pe_project').on(t.projectId) }),
 );
 
+// WBS / task breakdown for a project (P1). A task can nest under a parent (work-breakdown hierarchy) and
+// carries planned effort/cost + % complete; the project's overall % complete rolls up from its tasks
+// (planned-hours-weighted). Operational (non-financial) — no GL impact on its own.
+export const projectTasks = pgTable(
+  'project_tasks',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    parentId: bigint('parent_id', { mode: 'number' }),        // WBS hierarchy (nullable → top-level)
+    wbsCode: text('wbs_code'),                                 // e.g. "1.2.3"
+    name: text('name').notNull(),
+    status: text('status').notNull().default('open'),         // open | in_progress | done | cancelled
+    plannedStart: date('planned_start'),
+    plannedEnd: date('planned_end'),
+    plannedHours: numeric('planned_hours', { precision: 14, scale: 2 }).default('0'),
+    plannedCost: numeric('planned_cost', { precision: 16, scale: 2 }).default('0'),
+    pctComplete: numeric('pct_complete', { precision: 5, scale: 2 }).default('0'), // 0..100
+    assignee: text('assignee'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_ptask_project').on(t.projectId), byParent: index('idx_ptask_parent').on(t.parentId) }),
+);
+
+// Project milestones (P1). A milestone has a due date/owner/status; an optional billing_percent ties its
+// completion to a Fixed-price progress bill (reuses the authorized PRJ-BILL path → PROJ-02).
+export const projectMilestones = pgTable(
+  'project_milestones',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    name: text('name').notNull(),
+    dueDate: date('due_date'),
+    owner: text('owner'),
+    status: text('status').notNull().default('pending'),      // pending | reached | missed
+    billingPercent: numeric('billing_percent', { precision: 5, scale: 2 }), // optional → % of contract to bill on reach
+    reachedAt: timestamp('reached_at', { withTimezone: true }),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_pmilestone_project').on(t.projectId) }),
+);
+
 export type Project = typeof projects.$inferSelect;
+export type ProjectTask = typeof projectTasks.$inferSelect;
+export type ProjectMilestone = typeof projectMilestones.$inferSelect;
