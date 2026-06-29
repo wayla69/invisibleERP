@@ -144,11 +144,14 @@ consumer page, not the staff app; LINE LIFF is a future wrapper on the same logi
 
 1. **Log in** — enter the **shop code** (e.g. `T1`) and the **phone number** registered with the shop, press
    **ขอรหัส OTP**. A 6-digit code is sent by SMS (valid **5 minutes**, single use). Enter it → **เข้าสู่ระบบ**.
-   The login stays valid for 30 days on that device.
+   The login stays valid for 7 days on that device. The session is held in a secure browser cookie (the
+   sign-in token is **not** readable by page scripts), so leave cookies enabled for `/m`.
 2. **What the member sees** — a digital **card** (name, code, tier, points balance), **ของรางวัล** (browse and
    **แลก/redeem** rewards with points → the code lands in *คูปองของฉัน*), **ภารกิจ** (mission progress + **รับรางวัล**),
    **ชวนเพื่อน** (refer a friend by phone), and their referral history.
-3. **Safety** — a member can only ever see and act on **their own** account; the app cannot reach any
+3. **Log out** — press **ออกจากระบบ** on the card. This ends the session on the server and clears the
+   secure cookie, so the device can't be reused without logging in again.
+4. **Safety** — a member can only ever see and act on **their own** account; the app cannot reach any
    staff/back-office screen. If a wrong code is entered too many times, the code is locked — request a new one.
 
 > Staff note: the member app reuses the same rewards/missions/referrals engine as the back-office, so a reward
@@ -236,3 +239,4 @@ a shop.
 | 0.9 | 2026-06-24 | Platform | Added §10 **Spin-the-wheel / lucky draw** (`/loyalty/wheels` + `/m`) — weighted prize segments, points-cost or daily free spins, provably-fair server-side draw, per-prize stock. New error codes `PRIZE_OUT_OF_STOCK`, `NO_PRIZES`. |
 | 1.0 | 2026-06-24 | Platform | Added §11 **Campaigns** (`/loyalty/campaigns`) — segmented (all/RFM/tier/birthday) + scheduled broadcasts; PDPA opt-out auto-skipped, idempotent send, per-recipient audit. |
 | 1.1 | 2026-06-24 | Platform | Added §12 **Partner privileges** (`/loyalty/partners`) — tier-gated single-use member perks at partner merchants; §13 **Loyalty analytics** (`/loyalty/analytics`) — liability, redemption funnel, breakage, churn/win-back; **LINE login** in the member app. New error codes `TIER_TOO_LOW`/`OUT_OF_STOCK`/`LIMIT_REACHED`, `LINE_NOT_LINKED`/`LINE_ALREADY_LINKED`. |
+| 1.2 | 2026-06-29 | Security hardening | §9 **Member app — secure session.** The `/m` sign-in token now lives in a secure browser cookie (not readable by page scripts; session 7 days), and a new **ออกจากระบบ / Log out** ends the session server-side and clears the cookie. No change to how a member logs in (shop code + phone OTP). (ITGC-AC-07.) |

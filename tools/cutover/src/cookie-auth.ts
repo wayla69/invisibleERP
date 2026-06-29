@@ -39,8 +39,10 @@ async function main() {
   const pw = new PasswordService();
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'Shop One' }]).onConflictDoNothing();
   await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: 1 }]).onConflictDoNothing();
+  // A loyalty member (tenant T1) for the consumer /m phone-OTP cookie flow.
+  await db.insert(s.posMembers).values([{ tenantId: 2, memberCode: 'M-0001', name: 'Somchai', phone: '0810000001', tier: 'Standard', balance: '100', active: true }]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -93,6 +95,29 @@ async function main() {
   ok('AC-07: cross-origin env sets Domain + SameSite=None; Secure', /Domain=\.example\.test/i.test(xoCookie) && /SameSite=None/i.test(xoCookie) && /Secure/i.test(xoCookie), xoCookie);
   delete process.env.AUTH_COOKIE_DOMAIN;
   delete process.env.AUTH_COOKIE_SAMESITE;
+
+  // ── Member self-service (/m) phone-OTP cookie flow ─────────────────────────────
+  // 10. request-otp returns the dev OTP (NODE_ENV=test), then verify-otp sets the httpOnly member cookie.
+  const reqOtp = await app.inject({ method: 'POST', url: '/api/member/auth/request-otp', payload: { phone: '0810000001', tenant_code: 'T1' } });
+  const devOtp = reqOtp.json()?.dev_otp;
+  const verify = await app.inject({ method: 'POST', url: '/api/member/auth/verify-otp', payload: { phone: '0810000001', tenant_code: 'T1', code: String(devOtp ?? '') } });
+  const mTok = getCookie(verify.headers['set-cookie'], 'ierp_token');
+  const mCsrf = getCookie(verify.headers['set-cookie'], 'ierp_csrf');
+  ok('AC-07(member): verify-otp sets httpOnly ierp_token + readable ierp_csrf', (verify.statusCode === 200 || verify.statusCode === 201) && !!mTok?.httpOnly && !!mCsrf && !mCsrf.httpOnly, `status=${verify.statusCode} otp=${devOtp} tokHttpOnly=${mTok?.httpOnly}`);
+  const mCookieHdr = `ierp_token=${mTok?.value}; ierp_csrf=${mCsrf?.value}`;
+
+  // 11. cookie alone authenticates a member route (no Authorization header)
+  const mMe = await app.inject({ method: 'GET', url: '/api/member/me', headers: { cookie: mCookieHdr } });
+  ok('AC-07(member): cookie-only GET /api/member/me → 200', mMe.statusCode === 200 && mMe.json()?.member_code === 'M-0001', `status=${mMe.statusCode} code=${mMe.json()?.member_code}`);
+
+  // 12. cookie-auth member mutation WITHOUT X-CSRF-Token → 403 CSRF (double-submit enforced by the global guard)
+  const mNoCsrf = await app.inject({ method: 'POST', url: '/api/member/refer', headers: { cookie: mCookieHdr }, payload: { referred_phone: '0899999999' } });
+  ok('AC-07(member): cookie mutation without X-CSRF-Token → 403 CSRF', mNoCsrf.statusCode === 403 && mNoCsrf.json()?.error?.code === 'CSRF', `status=${mNoCsrf.statusCode} code=${mNoCsrf.json()?.error?.code}`);
+
+  // 13. member logout clears the cookie (Max-Age=0)
+  const mLo = await app.inject({ method: 'POST', url: '/api/member/auth/logout', headers: { cookie: mCookieHdr } });
+  const mLoSc = (Array.isArray(mLo.headers['set-cookie']) ? mLo.headers['set-cookie'] : [String(mLo.headers['set-cookie'])]).join('|');
+  ok('AC-07(member): logout clears cookie (Max-Age=0)', mLo.statusCode === 200 && /ierp_token=;.*Max-Age=0/i.test(mLoSc), `status=${mLo.statusCode}`);
 
   await app.close();
   console.log('\n── ITGC-AC-07 — cookie-based web session auth + CSRF ──');

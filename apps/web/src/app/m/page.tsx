@@ -1,9 +1,10 @@
 'use client';
 
 // Loyalty MEMBER self-service app (consumer-facing, mobile-first). Standalone surface at /m — NOT the staff
-// shell. Auth is phone-OTP (POST /api/member/auth/*) which mints a member token kept in localStorage under a
-// SEPARATE key from the staff token; every other call carries that token. The member only ever sees/acts on
-// themselves (the API derives the member from the token — there is no member_id input).
+// shell. Auth is phone-OTP (POST /api/member/auth/*) which mints a member token delivered as a server-set
+// httpOnly cookie (the JWT is NOT readable from JS — XSS can't steal it), paired with a readable double-submit
+// CSRF token (`ierp_csrf`) echoed in X-CSRF-Token on mutations. The member only ever sees/acts on themselves
+// (the API derives the member from the cookie token — there is no member_id input).
 import { useState, useEffect, useCallback } from 'react';
 import { Gift, Trophy, Users, Star, LogOut, Sparkles, Ticket, Loader2, Disc3, Handshake } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -13,10 +14,33 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-const MTOK = 'ierp_member_token';
+const CSRF_COOKIE = 'ierp_csrf';
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-async function mapi<T = any>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.headers ?? {}) } });
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  for (const part of document.cookie.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return null;
+}
+
+// CSRF double-submit header on mutating requests — mirrors the staff lib/api.ts client.
+function csrfHeader(method?: string): Record<string, string> {
+  if (!MUTATING.has((method ?? 'GET').toUpperCase())) return {};
+  const t = readCookie(CSRF_COOKIE);
+  return t ? { 'X-CSRF-Token': t } : {};
+}
+
+// All member calls ride the httpOnly auth cookie (credentials: 'include'); no token is held in JS.
+async function mapi<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...csrfHeader(init.method), ...(init.headers ?? {}) },
+  });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body?.error?.messageTh ?? body?.error?.message ?? `HTTP ${res.status}`);
   return body as T;
@@ -25,22 +49,34 @@ async function mapi<T = any>(path: string, init: RequestInit = {}, token?: strin
 const TIER_TONE: Record<string, string> = { Bronze: 'from-amber-700 to-amber-500', Silver: 'from-slate-400 to-slate-300', Gold: 'from-yellow-500 to-amber-400', Platinum: 'from-indigo-500 to-violet-400' };
 
 export default function MemberApp() {
-  const [token, setTok] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
-  useEffect(() => { const t = window.localStorage.getItem(MTOK); setTok(t); setReady(true); }, []);
-  const onAuthed = (t: string) => { window.localStorage.setItem(MTOK, t); setTok(t); };
-  const logout = () => { window.localStorage.removeItem(MTOK); setTok(null); };
+  // null = still probing the session; true/false once known. The auth JWT is httpOnly and unreadable, so we
+  // confirm a live member session by probing /api/member/me rather than reading a token from localStorage.
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!readCookie(CSRF_COOKIE)) { if (!cancelled) setAuthed(false); return; } // no session cookie at all
+      try { await mapi('/api/member/me'); if (!cancelled) setAuthed(true); }
+      catch { if (!cancelled) setAuthed(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-  if (!ready) return null;
+  const onLogout = useCallback(async () => {
+    try { await mapi('/api/member/auth/logout', { method: 'POST' }); } catch { /* clear regardless */ }
+    setAuthed(false);
+  }, []);
+
+  if (authed === null) return null;
   return (
     <div className="mx-auto min-h-screen max-w-md bg-muted/30 px-4 py-6">
-      {token ? <Home token={token} onLogout={logout} on401={logout} /> : <Login onAuthed={onAuthed} />}
+      {authed ? <Home onLogout={onLogout} on401={() => setAuthed(false)} /> : <Login onAuthed={() => setAuthed(true)} />}
     </div>
   );
 }
 
 // ── Phone-OTP login ──────────────────────────────────────────────────────────
-function Login({ onAuthed }: { onAuthed: (t: string) => void }) {
+function Login({ onAuthed }: { onAuthed: () => void }) {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [shop, setShop] = useState('');
   const [phone, setPhone] = useState('');
@@ -59,8 +95,9 @@ function Login({ onAuthed }: { onAuthed: (t: string) => void }) {
   const verify = async () => {
     setBusy(true); setErr('');
     try {
-      const r = await mapi<{ token: string }>('/api/member/auth/verify-otp', { method: 'POST', body: JSON.stringify({ phone, tenant_code: shop, code }) });
-      onAuthed(r.token);
+      // verify-otp sets the httpOnly auth cookie + CSRF cookie on success; nothing to store client-side.
+      await mapi<{ token: string }>('/api/member/auth/verify-otp', { method: 'POST', body: JSON.stringify({ phone, tenant_code: shop, code }) });
+      onAuthed();
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
 
@@ -96,7 +133,7 @@ function Login({ onAuthed }: { onAuthed: (t: string) => void }) {
 }
 
 // ── Member home ──────────────────────────────────────────────────────────────
-function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void; on401: () => void }) {
+function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) {
   const [me, setMe] = useState<any>(null);
   const [rewards, setRewards] = useState<any[]>([]);
   const [missions, setMissions] = useState<any[]>([]);
@@ -110,17 +147,17 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
   const reload = useCallback(async () => {
     try {
       const [m, r, ms, rf, w, wh, pv] = await Promise.all([
-        mapi('/api/member/me', {}, token),
-        mapi<{ rewards: any[] }>('/api/member/rewards', {}, token),
-        mapi<{ missions: any[] }>('/api/member/missions', {}, token),
-        mapi<{ referrals: any[] }>('/api/member/referrals', {}, token),
-        mapi<{ coupons: any[] }>('/api/member/wallet', {}, token),
-        mapi<{ wheels: any[] }>('/api/member/wheels', {}, token),
-        mapi<{ privileges: any[] }>('/api/member/privileges', {}, token),
+        mapi('/api/member/me'),
+        mapi<{ rewards: any[] }>('/api/member/rewards'),
+        mapi<{ missions: any[] }>('/api/member/missions'),
+        mapi<{ referrals: any[] }>('/api/member/referrals'),
+        mapi<{ coupons: any[] }>('/api/member/wallet'),
+        mapi<{ wheels: any[] }>('/api/member/wheels'),
+        mapi<{ privileges: any[] }>('/api/member/privileges'),
       ]);
       setMe(m); setRewards(r.rewards ?? []); setMissions(ms.missions ?? []); setRefs(rf.referrals ?? []); setWallet(w.coupons ?? []); setWheels(wh.wheels ?? []); setPrivileges(pv.privileges ?? []);
     } catch (e: any) { if (/เซสชัน|401|token/i.test(e.message)) on401(); else setErr(e.message); }
-  }, [token, on401]);
+  }, [on401]);
   useEffect(() => { reload(); }, [reload]);
 
   // `busy` gates every point-spending / coupon-issuing action so a mobile double-tap can't fire a duplicate
@@ -135,7 +172,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
     if (busy) return;
     setBusy(true); setFlash(''); setErr('');
     try {
-      const res: any = await mapi(`/api/member/wheels/${w.id}/spin`, { method: 'POST' }, token);
+      const res: any = await mapi(`/api/member/wheels/${w.id}/spin`, { method: 'POST' });
       const p = res.prize;
       setFlash(p?.kind === 'points' ? `🎉 ได้รับ ${p.points} แต้ม!` : p?.kind === 'coupon' ? `🎟️ ได้คูปอง “${p.label}” — ดูในคูปองของฉัน` : `🎡 ${p?.label ?? 'รอบนี้ยังไม่ได้รางวัล ลองใหม่!'}`);
       await reload();
@@ -144,7 +181,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
   const claimPriv = async (v: any) => {
     if (busy) return;
     setBusy(true); setFlash(''); setErr('');
-    try { const res: any = await mapi(`/api/member/privileges/${v.id}/claim`, { method: 'POST' }, token); setFlash(`🎫 รับสิทธิ์แล้ว! รหัส ${res.claim_code} — แสดงที่ร้านพันธมิตร`); await reload(); }
+    try { const res: any = await mapi(`/api/member/privileges/${v.id}/claim`, { method: 'POST' }); setFlash(`🎫 รับสิทธิ์แล้ว! รหัส ${res.claim_code} — แสดงที่ร้านพันธมิตร`); await reload(); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
 
@@ -181,7 +218,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
       <Section icon={<Gift className="size-4" />} title="ของรางวัล — ใช้แต้มแลก">
         {rewards.length === 0 ? <Empty>ยังไม่มีของรางวัล</Empty> : rewards.map((r) => (
           <Row key={r.id} title={r.name} sub={`${Number(r.point_cost).toLocaleString()} แต้ม${r.tier_min ? ` · ขั้นต่ำ ${r.tier_min}` : ''}`}>
-            <Button size="sm" variant="outline" disabled={busy || Number(me.balance) < Number(r.point_cost)} onClick={() => act(() => mapi(`/api/member/rewards/${r.id}/redeem`, { method: 'POST' }, token), '🎁 แลกสำเร็จ! ดูโค้ดในคูปองของฉัน')}>แลก</Button>
+            <Button size="sm" variant="outline" disabled={busy || Number(me.balance) < Number(r.point_cost)} onClick={() => act(() => mapi(`/api/member/rewards/${r.id}/redeem`, { method: 'POST' }), '🎁 แลกสำเร็จ! ดูโค้ดในคูปองของฉัน')}>แลก</Button>
           </Row>
         ))}
       </Section>
@@ -224,7 +261,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
         {missions.length === 0 ? <Empty>ยังไม่มีภารกิจ</Empty> : missions.map((m) => (
           <Row key={m.id} title={m.name} sub={`${Number(m.progress ?? 0)}/${Number(m.goal ?? 0)} · +${Number(m.reward_points ?? 0)} แต้ม`}>
             {m.claimed ? <Badge variant="muted">รับแล้ว</Badge>
-              : m.completed ? <Button size="sm" disabled={busy} onClick={() => act(() => mapi(`/api/member/missions/${m.id}/claim`, { method: 'POST' }, token), '🏆 รับรางวัลภารกิจแล้ว')}>รับรางวัล</Button>
+              : m.completed ? <Button size="sm" disabled={busy} onClick={() => act(() => mapi(`/api/member/missions/${m.id}/claim`, { method: 'POST' }), '🏆 รับรางวัลภารกิจแล้ว')}>รับรางวัล</Button>
               : <Badge variant="info">{Math.round((Number(m.progress ?? 0) / Math.max(1, Number(m.goal ?? 1))) * 100)}%</Badge>}
           </Row>
         ))}
@@ -232,7 +269,7 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
 
       {/* Refer a friend */}
       <Section icon={<Users className="size-4" />} title="ชวนเพื่อน รับแต้ม">
-        <ReferForm token={token} onDone={(msg) => act(async () => {}, msg)} />
+        <ReferForm onDone={(msg) => act(async () => {}, msg)} />
         {refs.map((r) => (
           <Row key={r.id} title={r.code} sub={r.referred_phone ?? r.referred_name ?? '—'}>
             <Badge variant={r.status === 'rewarded' ? 'success' : 'muted'}>{r.status === 'rewarded' ? 'ได้แต้มแล้ว' : 'รอเพื่อนสมัคร'}</Badge>
@@ -243,13 +280,13 @@ function Home({ token, onLogout, on401 }: { token: string; onLogout: () => void;
   );
 }
 
-function ReferForm({ token, onDone }: { token: string; onDone: (msg: string) => void }) {
+function ReferForm({ onDone }: { onDone: (msg: string) => void }) {
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const submit = async () => {
     setBusy(true); setErr('');
-    try { await mapi('/api/member/refer', { method: 'POST', body: JSON.stringify({ referred_phone: phone }) }, token); setPhone(''); onDone('📨 ส่งคำชวนแล้ว — เพื่อนสมัครและซื้อครบ คุณทั้งคู่ได้แต้ม'); }
+    try { await mapi('/api/member/refer', { method: 'POST', body: JSON.stringify({ referred_phone: phone }) }); setPhone(''); onDone('📨 ส่งคำชวนแล้ว — เพื่อนสมัครและซื้อครบ คุณทั้งคู่ได้แต้ม'); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   return (
