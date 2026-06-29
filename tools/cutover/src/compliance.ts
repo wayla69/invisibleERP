@@ -618,6 +618,14 @@ async function main() {
   ok('LYL-10: phone-OTP login mints a member token; self-service works; staff routes blocked; wrong code rejected',
     otpReq.json.sent === true && /^[0-9]{6}$/.test(String(otpReq.json.dev_otp ?? '')) && badVerify.status === 401 && !!memberTok && meResp.json.member_code === 'M-APP' && Number(appMem.id) === meResp.json.id && Array.isArray(rewardsResp.json.rewards) && staffAttempt.status === 403,
     `otp=${otpReq.json.dev_otp} bad=${badVerify.status} me=${meResp.json.member_code} rewards=${rewardsResp.json.rewards?.length} staff=${staffAttempt.status}`);
+  // LYL-10c — PDPA data-subject self-service: a member manages their OWN consent (withdraw 'marketing'),
+  // recorded with source='self' and self-scoped (the endpoint uses the token's memberId).
+  const cPut = await inj('PUT', '/api/member/consents', memberTok, { purpose: 'marketing', granted: false });
+  const cGet = await inj('GET', '/api/member/consents', memberTok);
+  const mkt = (cGet.json.consents ?? []).find((x: any) => x.purpose === 'marketing');
+  ok('LYL-10c: member self-manages PDPA consent (withdraw marketing; source=self; self-scoped)',
+    cPut.status < 300 && !!mkt && mkt.granted === false && mkt.source === 'self' && cGet.json.member_id === Number(appMem.id),
+    JSON.stringify({ put: cPut.status, mkt }).slice(0, 140));
   // LYL-10b — OTP brute-force cap: 5 wrong guesses lock the code; even the CORRECT code is then rejected
   // (the >=5-attempt bound + invalidation; the row is locked FOR UPDATE so concurrent guesses can't bypass it).
   const otpReq2 = await inj('POST', '/api/member/auth/request-otp', undefined, { phone: '0890000001', tenant_code: 'T1' });

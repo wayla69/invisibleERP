@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, UseGuards, HttpCode, Res, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Body, UseGuards, HttpCode, Res, Req } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { Public, NoTx, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -20,6 +20,8 @@ const ReferBody = z.object({ referred_member_id: z.number().int().positive().opt
   .refine((d) => d.referred_member_id != null || d.referred_phone, { message: 'referred_member_id or referred_phone required' });
 const LineLoginBody = z.object({ tenant_code: z.string().min(1), id_token: z.string().min(1) });
 const LinkLineBody = z.object({ id_token: z.string().min(1) });
+// PDPA: a member managing their OWN consent. `purpose` e.g. 'marketing' | 'analytics' | 'transactional'.
+const MemberConsentBody = z.object({ purpose: z.string().min(1), granted: z.boolean(), channel: z.string().optional() });
 
 // Member self-service app (phone-OTP). Auth routes are @Public; everything else needs a member token. The
 // member can only ever act on THEMSELVES — every call passes req.user.memberId (the authenticated member),
@@ -80,6 +82,16 @@ export class MemberController {
   tier(@CurrentUser() u: JwtUser) { return this.member.tierJourney(u, u.memberId!); }
   @Get('history') @UseGuards(MemberGuard)
   history(@CurrentUser() u: JwtUser) { return this.member.history(u.memberId!, u); }
+
+  // PDPA data-subject self-service: a member views and updates their OWN consents (scoped to u.memberId — a
+  // member can never read/alter another member's). Delegates to the same getConsents/setConsent the staff
+  // CRM uses; source='self' distinguishes a self-managed change from a staff/admin one in the audit trail.
+  @Get('consents') @UseGuards(MemberGuard)
+  myConsents(@CurrentUser() u: JwtUser) { return this.member.getConsents(u.memberId!, u); }
+  @Put('consents') @UseGuards(MemberGuard)
+  setMyConsent(@Body(new ZodValidationPipe(MemberConsentBody)) b: z.infer<typeof MemberConsentBody>, @CurrentUser() u: JwtUser) {
+    return this.member.setConsent(u.memberId!, { purpose: b.purpose, granted: b.granted, channel: b.channel, source: 'self' }, u);
+  }
 
   @Get('rewards') @UseGuards(MemberGuard)
   rewardsList(@CurrentUser() u: JwtUser) { return this.rewards.listRewards(u, { active: true }); }
