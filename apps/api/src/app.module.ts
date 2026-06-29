@@ -126,6 +126,7 @@ import { LocalizationModule } from './modules/localization/localization.module';
 import { EInvoiceModule } from './modules/einvoice/einvoice.module';
 import { OpsModule } from './modules/ops/ops.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { PdfModule } from './modules/pdf/pdf.module';
 
 @Module({
   imports: [
@@ -133,6 +134,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
     DatabaseModule,
     CommonModule,
     JobsModule, // @Global async job queue + in-process worker (enqueue from any module)
+    PdfModule, // @Global HTML→PDF renderer (external-service offload or pooled Chromium)
     AuthModule, // exports JwtModule → JwtAuthGuard can inject JwtService
     HealthModule,
     InventoryModule,

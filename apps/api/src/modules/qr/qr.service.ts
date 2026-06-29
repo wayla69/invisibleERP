@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as QRCode from 'qrcode';
+import { PdfRenderer } from '../pdf/pdf-renderer.service';
 
 export interface QrLabel {
   payload: string;
@@ -17,6 +18,7 @@ const ESC = (s: string) =>
 @Injectable()
 export class QrService {
   private readonly logger = new Logger(QrService.name);
+  constructor(private readonly pdf: PdfRenderer) {}
 
   async dataUrl(payload: string, width = 220): Promise<string> {
     return QRCode.toDataURL(payload, { margin: 1, width, errorCorrectionLevel: 'M' });
@@ -59,21 +61,8 @@ export class QrService {
 
   async labelsPdf(labels: QrLabel[], cols = 2, rows = 4): Promise<{ pdf: Buffer | null; html: string }> {
     const html = await this.labelsHtml(labels, cols, rows);
-    let browser: any = null;
-    try {
-      const { chromium } = await import('playwright-core');
-      browser = await chromium.launch({ headless: true });
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle' });
-      const pdf = await page.pdf({ format: 'A4', printBackground: true });
-      return { pdf: Buffer.from(pdf), html };
-    } catch (err) {
-      this.logger.warn(`Chromium unavailable, returning HTML labels: ${(err as Error)?.message ?? err}`);
-      return { pdf: null, html };
-    } finally {
-      if (browser) {
-        try { await browser.close(); } catch { /* ignore */ }
-      }
-    }
+    // Delegate to the shared renderer (offload or pooled Chromium); null → caller serves the HTML labels.
+    const pdf = await this.pdf.render(html, { format: 'A4', printBackground: true });
+    return { pdf, html };
   }
 }

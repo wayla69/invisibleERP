@@ -1,26 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { PdfRenderer } from '../pdf/pdf-renderer.service';
 
 const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const money = (v: any) => Number(v ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// รายงานภาษี / แบบยื่นสรรพากร → HTML (Sarabun) → PDF ผ่าน playwright-core; Chromium ไม่พร้อม → คืน null ให้ fallback HTML
+// รายงานภาษี / แบบยื่นสรรพากร → HTML (Sarabun) → PDF via the shared PdfRenderer (offload or pooled Chromium);
+// unavailable → null → caller falls back to HTML.
 @Injectable()
 export class TaxReportsPdfService {
-  private readonly logger = new Logger(TaxReportsPdfService.name);
+  constructor(private readonly pdf: PdfRenderer) {}
 
-  async renderHtmlToPdf(html: string): Promise<Buffer | null> {
-    let browser: any = null;
-    try {
-      const { chromium } = await import('playwright-core');
-      browser = await chromium.launch({ headless: true });
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle' });
-      const pdf = await page.pdf({ format: 'A4', landscape: true, printBackground: true, margin: { top: '14mm', bottom: '14mm', left: '10mm', right: '10mm' } });
-      return Buffer.from(pdf);
-    } catch (err) {
-      this.logger.warn(`Chromium unavailable, falling back to HTML: ${(err as Error)?.message ?? err}`);
-      return null;
-    } finally { if (browser) { try { await browser.close(); } catch { /* ignore */ } } }
+  renderHtmlToPdf(html: string): Promise<Buffer | null> {
+    return this.pdf.render(html, { format: 'A4', landscape: true, printBackground: true, margin: { top: '14mm', bottom: '14mm', left: '10mm', right: '10mm' } });
   }
 
   private wrap(title: string, body: string, sub = ''): string {

@@ -1,40 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { n } from '../../database/queries';
+import { PdfRenderer } from '../pdf/pdf-renderer.service';
 
 const VAT_RATE = 0.07;
 
-// แปลง HTML → PDF (Sarabun สำหรับภาษาไทย) ผ่าน playwright-core
-// ถ้า Chromium ไม่พร้อม → คืน null ให้ caller fallback ส่ง HTML แทน
+// แปลง HTML → PDF (Sarabun สำหรับภาษาไทย). Rendering is delegated to the shared PdfRenderer (external-service
+// offload or pooled Chromium); if PDF rendering is unavailable it returns null → caller falls back to HTML.
 @Injectable()
 export class ReportPdfService {
-  private readonly logger = new Logger(ReportPdfService.name);
+  constructor(private readonly pdf: PdfRenderer) {}
 
-  async renderHtmlToPdf(html: string): Promise<Buffer | null> {
-    let browser: any = null;
-    try {
-      // lazy import — ไม่บังคับโหลด playwright จน request แรกที่ต้องใช้ PDF
-      const { chromium } = await import('playwright-core');
-      browser = await chromium.launch({ headless: true });
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle' });
-      const pdf = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '16mm', bottom: '16mm', left: '14mm', right: '14mm' },
-      });
-      return Buffer.from(pdf);
-    } catch (err) {
-      this.logger.warn(`Chromium unavailable, falling back to HTML: ${(err as Error)?.message ?? err}`);
-      return null;
-    } finally {
-      if (browser) {
-        try {
-          await browser.close();
-        } catch {
-          /* ignore */
-        }
-      }
-    }
+  renderHtmlToPdf(html: string): Promise<Buffer | null> {
+    return this.pdf.render(html, { format: 'A4', printBackground: true, margin: { top: '16mm', bottom: '16mm', left: '14mm', right: '14mm' } });
   }
 
   // ── HTML template builders ──────────────────────────────────────────

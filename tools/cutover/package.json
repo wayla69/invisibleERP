@@ -75,6 +75,7 @@
     "cookie-auth": "tsx src/cookie-auth.ts",
     "async-jobs": "tsx src/async-jobs.ts",
     "bi-cache": "tsx src/bi-cache.ts",
+    "pdf-render": "tsx src/pdf-render.ts",
     "match": "tsx src/match.ts",
     "costing": "tsx src/costing.ts",
     "wms": "tsx src/wms.ts",
