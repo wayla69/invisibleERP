@@ -183,6 +183,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Dependency audit (fails on new high/critical; triaged items in vulnerability-triage.md)
         run: pnpm audit --audit-level high
+      - name: License compliance (no GPL/AGPL/SSPL/non-commercial in prod deps; SPDX-aware)
+        run: node tools/ci/check-licenses.mjs
       - name: Secret scanning (gitleaks)
         uses: gitleaks/gitleaks-action@v2
         env:
