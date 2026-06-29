@@ -94,6 +94,49 @@ export const projectMilestones = pgTable(
   (t) => ({ byProject: index('idx_pmilestone_project').on(t.projectId) }),
 );
 
+// Resource rate card (P2) — effective-dated cost/bill rate per role. A project resource assignment resolves
+// its rate from here, so labor cost/bill estimates are governed by an authorized rate card (PROJ-05).
+export const resourceRates = pgTable(
+  'resource_rates',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    role: text('role').notNull(),                             // e.g. "Senior Dev"
+    costRate: numeric('cost_rate', { precision: 14, scale: 2 }).default('0'), // internal cost / hour
+    billRate: numeric('bill_rate', { precision: 14, scale: 2 }).default('0'), // billable rate / hour
+    effectiveFrom: date('effective_from'),
+    effectiveTo: date('effective_to'),                        // nullable → open-ended
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byRole: index('idx_rate_role').on(t.tenantId, t.role) }),
+);
+
+// Project resource assignment (P2) — a named resource (role) allocated to a project (optionally a task) for a
+// period at an allocation %. The applicable rate-card rates are snapshotted at assignment. Capacity/utilization
+// rolls up allocation per resource across projects; >100% flags over-allocation (PROJ-05).
+export const projectResources = pgTable(
+  'project_resources',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    taskId: bigint('task_id', { mode: 'number' }),            // optional → assignment to a specific WBS task
+    resourceName: text('resource_name').notNull(),           // the person / team
+    role: text('role'),                                       // → resolves rate card
+    allocPct: numeric('alloc_pct', { precision: 5, scale: 2 }).default('100'), // 0..100
+    periodStart: date('period_start'),
+    periodEnd: date('period_end'),
+    costRate: numeric('cost_rate', { precision: 14, scale: 2 }).default('0'),  // snapshot from rate card
+    billRate: numeric('bill_rate', { precision: 14, scale: 2 }).default('0'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_presource_project').on(t.projectId), byResource: index('idx_presource_name').on(t.tenantId, t.resourceName) }),
+);
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectTask = typeof projectTasks.$inferSelect;
 export type ProjectMilestone = typeof projectMilestones.$inferSelect;
+export type ResourceRate = typeof resourceRates.$inferSelect;
+export type ProjectResource = typeof projectResources.$inferSelect;

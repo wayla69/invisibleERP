@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -60,6 +60,21 @@ const MilestoneBody = z.object({
   due_date: z.string().optional(),
   owner: z.string().optional(),
   billing_percent: z.number().positive().max(100).optional(),
+});
+const RateCardBody = z.object({
+  role: z.string().min(1),
+  cost_rate: z.number().nonnegative().optional(),
+  bill_rate: z.number().nonnegative().optional(),
+  effective_from: z.string().optional(),
+  effective_to: z.string().optional(),
+});
+const ResourceBody = z.object({
+  resource_name: z.string().min(1),
+  role: z.string().optional(),
+  task_id: z.number().int().positive().optional(),
+  alloc_pct: z.number().min(0).max(100).optional(),
+  period_start: z.string().optional(),
+  period_end: z.string().optional(),
 });
 
 @Controller('api/projects')
@@ -130,5 +145,31 @@ export class ProjectsController {
   @Post('milestones/:milestoneId/reach')
   reachMilestone(@Param('milestoneId') milestoneId: string, @CurrentUser() u: JwtUser) {
     return this.svc.reachMilestone(Number(milestoneId), u);
+  }
+
+  // ── Resource rate card + assignments (P2) ── static 'rate-cards'/'resources' segments don't collide with :code.
+  @Post('rate-cards')
+  addRateCard(@Body(new ZodValidationPipe(RateCardBody)) b: RateCardDto, @CurrentUser() u: JwtUser) {
+    return this.svc.addRateCard(b, u);
+  }
+
+  @Get('rate-cards')
+  listRateCards(@CurrentUser() u: JwtUser) {
+    return this.svc.listRateCards(u);
+  }
+
+  @Get('resources/utilization')
+  utilization(@CurrentUser() u: JwtUser) {
+    return this.svc.resourceUtilization(u);
+  }
+
+  @Post(':code/resources')
+  assignResource(@Param('code') code: string, @Body(new ZodValidationPipe(ResourceBody)) b: ResourceDto, @CurrentUser() u: JwtUser) {
+    return this.svc.assignResource(code, b, u);
+  }
+
+  @Get(':code/resources')
+  listResources(@Param('code') code: string) {
+    return this.svc.listResources(code);
   }
 }

@@ -1296,6 +1296,13 @@
       "when": 2023820000011,
       "tag": "0184_project_wbs",
       "breakpoints": true
+    },
+    {
+      "idx": 185,
+      "version": "7",
+      "when": 2023820000012,
+      "tag": "0185_project_resources",
+      "breakpoints": true
     }
   ]
 }

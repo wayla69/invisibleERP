@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, crmOpportunities, customerMaster } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, crmOpportunities, customerMaster } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -16,6 +16,8 @@ export interface FromOpportunityDto { project_code?: string; billing_type?: 'TM'
 export interface TaskDto { name: string; parent_id?: number; wbs_code?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string }
 export interface TaskPatchDto { name?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
+export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
+export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
 
 @Injectable()
 export class ProjectsService {
@@ -247,6 +249,73 @@ export class ProjectsService {
     return { milestone_id: Number(milestoneId), project_code: proj.projectCode, status: 'reached', billing };
   }
 
+  // ── Resource rate card (P2) ──────────────────────────────────────────────
+  async addRateCard(dto: RateCardDto, user: JwtUser) {
+    const db = this.db as any;
+    await db.insert(resourceRates).values({
+      tenantId: user.tenantId ?? null, role: dto.role, costRate: fx(dto.cost_rate ?? 0, 2), billRate: fx(dto.bill_rate ?? 0, 2),
+      effectiveFrom: dto.effective_from ?? ymd(), effectiveTo: dto.effective_to ?? null, createdBy: user.username,
+    });
+    return this.listRateCards(user);
+  }
+
+  async listRateCards(_user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select().from(resourceRates).orderBy(desc(resourceRates.id)).limit(300);
+    return { rate_cards: rows.map((r: any) => ({ id: Number(r.id), role: r.role, cost_rate: n(r.costRate), bill_rate: n(r.billRate), effective_from: r.effectiveFrom, effective_to: r.effectiveTo })), count: rows.length };
+  }
+
+  // Resolve the rate-card rates applicable to a role on a date: the latest effective_from that is on/before the
+  // date and whose effective_to is empty or on/after it. Returns zeros if the role has no rate card.
+  private async resolveRate(role: string | undefined, onDate: string, user: JwtUser) {
+    if (!role) return { costRate: 0, billRate: 0 };
+    const db = this.db as any;
+    const conds = [eq(resourceRates.role, role)];
+    if (user.tenantId != null) conds.push(eq(resourceRates.tenantId, user.tenantId));
+    const rows = await db.select().from(resourceRates).where(and(...conds));
+    const applicable = rows
+      .filter((r: any) => (!r.effectiveFrom || r.effectiveFrom <= onDate) && (!r.effectiveTo || r.effectiveTo >= onDate))
+      .sort((a: any, b: any) => String(b.effectiveFrom ?? '').localeCompare(String(a.effectiveFrom ?? '')));
+    const r = applicable[0];
+    return { costRate: r ? n(r.costRate) : 0, billRate: r ? n(r.billRate) : 0 };
+  }
+
+  // ── Project resource assignment + capacity (P2) ──────────────────────────
+  async assignResource(code: string, dto: ResourceDto, user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const alloc = r2(dto.alloc_pct ?? 100);
+    if (alloc <= 0 || alloc > 100) throw new BadRequestException({ code: 'BAD_ALLOC', message: 'alloc_pct must be within (0,100]', messageTh: 'สัดส่วนการจัดสรรต้องอยู่ระหว่าง 0-100' });
+    const start = dto.period_start ?? ymd();
+    const rate = await this.resolveRate(dto.role, start, user);
+    await db.insert(projectResources).values({
+      projectId: Number(p.id), tenantId: p.tenantId ?? user.tenantId ?? null, taskId: dto.task_id ?? null,
+      resourceName: dto.resource_name, role: dto.role ?? null, allocPct: fx(alloc, 2), periodStart: start, periodEnd: dto.period_end ?? null,
+      costRate: fx(rate.costRate, 2), billRate: fx(rate.billRate, 2), createdBy: user.username,
+    });
+    return this.listResources(code);
+  }
+
+  async listResources(code: string) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const rows = await db.select().from(projectResources).where(eq(projectResources.projectId, Number(p.id))).orderBy(projectResources.id);
+    return { project_code: code, resources: rows.map(shapeResource), count: rows.length };
+  }
+
+  // Capacity/utilization (PROJ-05): total allocation per named resource across all of the caller's projects;
+  // >100% flags over-allocation (a resource booked beyond capacity).
+  async resourceUtilization(_user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select().from(projectResources);
+    const by = new Map<string, number>();
+    for (const r of rows) by.set(r.resourceName, r2((by.get(r.resourceName) ?? 0) + n(r.allocPct)));
+    const utilization = [...by.entries()]
+      .map(([resource_name, total]) => ({ resource_name, allocated_pct: r2(total), over_allocated: total > 100 }))
+      .sort((a, b) => b.allocated_pct - a.allocated_pct);
+    return { utilization, over_allocated_count: utilization.filter((u) => u.over_allocated).length };
+  }
+
   private async row(code: string) {
     const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
@@ -282,4 +351,7 @@ function shapeTask(t: any) {
 }
 function shapeMilestone(m: any) {
   return { id: Number(m.id), project_id: Number(m.projectId), name: m.name, due_date: m.dueDate, owner: m.owner, status: m.status, billing_percent: m.billingPercent != null ? n(m.billingPercent) : null, reached_at: m.reachedAt, created_at: m.createdAt };
+}
+function shapeResource(r: any) {
+  return { id: Number(r.id), project_id: Number(r.projectId), task_id: r.taskId != null ? Number(r.taskId) : null, resource_name: r.resourceName, role: r.role, alloc_pct: n(r.allocPct), period_start: r.periodStart, period_end: r.periodEnd, cost_rate: n(r.costRate), bill_rate: n(r.billRate), created_at: r.createdAt };
 }
