@@ -67,25 +67,27 @@ export class PasswordService {
   }
 
   /**
-   * Verify a PIN against a stored hash. PINs are ALWAYS issued in the parameterized scrypt format
-   * (hash()), so — unlike verify() — this path deliberately has NO legacy unsalted-SHA-256 branch: a PIN
-   * never needs the one-time legacy-upgrade escape hatch, and routing a PIN through a weak-hash comparison
-   * would be both pointless and a needless sink. Only the (legacy-params and current) scrypt formats verify.
+   * Verify a secret against a stored hash WITHOUT the legacy unsalted-SHA-256 escape hatch — only the
+   * (current and legacy-param) scrypt formats are accepted. Use this for secrets that are guaranteed to be
+   * in the scrypt format: PINs (always issued via hash()), and step-up re-checks for an ALREADY-AUTHENTICATED
+   * user (a successful login transparently rehashes any legacy password to scrypt, so an authenticated
+   * caller's stored hash is scrypt by then). Keeping these flows out of the SHA-256 branch means a PIN /
+   * step-up secret never reaches a weak-hash comparison (no js/insufficient-password-hash sink).
    */
-  async verifyPin(pin: string, stored: string): Promise<{ ok: boolean; needsRehash: boolean }> {
+  async verifyScrypt(secret: string, stored: string): Promise<{ ok: boolean; needsRehash: boolean }> {
     const parts = stored.split('$');
     // current: scrypt$N$r$p$salt$hash
     if (parts[0] === 'scrypt' && parts.length === 6) {
       const [, nStr, rStr, pStr, salt, hashHex] = parts;
       const n = Number(nStr), r = Number(rStr), p = Number(pStr);
-      const derived = (await scryptAsync(pin, salt, KEYLEN, { N: n, r, p, maxmem: MAXMEM })) as Buffer;
+      const derived = (await scryptAsync(secret, salt, KEYLEN, { N: n, r, p, maxmem: MAXMEM })) as Buffer;
       const expected = Buffer.from(hashHex, 'hex');
       const ok = derived.length === expected.length && timingSafeEqual(derived, expected);
       return { ok, needsRehash: ok && (n < N || r < R || p < P) };
     }
     // legacy: scrypt$salt$hash (no embedded params → Node-default N=16384) — upgrade on success
     if (parts[0] === 'scrypt' && parts.length === 3 && parts[1] && parts[2]) {
-      const derived = (await scryptAsync(pin, parts[1], KEYLEN, { N: LEGACY_N, r: 8, p: 1, maxmem: MAXMEM })) as Buffer;
+      const derived = (await scryptAsync(secret, parts[1], KEYLEN, { N: LEGACY_N, r: 8, p: 1, maxmem: MAXMEM })) as Buffer;
       const expected = Buffer.from(parts[2], 'hex');
       const ok = derived.length === expected.length && timingSafeEqual(derived, expected);
       return { ok, needsRehash: ok };

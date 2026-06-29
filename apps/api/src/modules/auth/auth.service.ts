@@ -80,8 +80,8 @@ export class AuthService {
       return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or PIN', messageTh: 'Username หรือ PIN ไม่ถูกต้อง' });
     };
     if (!row || !row.pinHash) throw fail();
-    // verifyPin (scrypt-only) — PINs never use the legacy SHA-256 path, so a PIN never flows into a weak hash.
-    const { ok, needsRehash } = await this.passwords.verifyPin(pin, row.pinHash);
+    // verifyScrypt (no legacy SHA-256 branch) — a PIN is always scrypt, so it never flows into a weak hash.
+    const { ok, needsRehash } = await this.passwords.verifyScrypt(pin, row.pinHash);
     if (!ok) throw fail();
     if (row.isActive === false)
       throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
@@ -146,7 +146,9 @@ export class AuthService {
     this.assertPinFormat(pin);
     const [row] = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!row) throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'User not found' });
-    const { ok } = await this.passwords.verify(currentPassword, row.passwordHash);
+    // Step-up re-check for an authenticated caller — their password hash is already scrypt (login rehashes
+    // any legacy hash on success), so verifyScrypt suffices and keeps this step-up out of the SHA-256 path.
+    const { ok } = await this.passwords.verifyScrypt(currentPassword, row.passwordHash);
     if (!ok) throw new BadRequestException({ code: 'BAD_CURRENT_PASSWORD', message: 'Current password is incorrect', messageTh: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' });
     await this.assertPinAllowed(row);
     await this.db.update(users).set({ pinHash: await this.passwords.hash(pin), pinSetAt: new Date() }).where(eq(users.id, row.id));
