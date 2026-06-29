@@ -18,13 +18,19 @@ export function cartSubtotal(lines: CartLine[]): number {
   return round2(lines.reduce((a, l) => a + lineAmount(l), 0));
 }
 
-/** Net / VAT / gross totals for the cart, after an optional order-level percentage discount. */
-export function cartTotals(lines: CartLine[], discountPct = 0): { sub: number; discount: number; net: number; vat: number; total: number } {
+/**
+ * Net / service-charge / VAT / gross totals for the cart, after an optional order-level percentage discount
+ * and an optional service-charge percentage. Mirrors the server's buildSale order of operations: service
+ * charge is applied to the discounted net and is itself VATable (VAT on net + service charge). The cart
+ * figures are an on-screen estimate; the settled amount returned by checkout is authoritative.
+ */
+export function cartTotals(lines: CartLine[], discountPct = 0, serviceChargePct = 0): { sub: number; discount: number; net: number; serviceCharge: number; vat: number; total: number } {
   const sub = cartSubtotal(lines);
   const discount = round2(sub * (discountPct || 0) / 100);
   const net = round2(sub - discount);
-  const vat = round2(net * VAT_RATE);
-  return { sub, discount, net, vat, total: round2(net + vat) };
+  const serviceCharge = round2(net * (serviceChargePct || 0) / 100);
+  const vat = round2((net + serviceCharge) * VAT_RATE);
+  return { sub, discount, net, serviceCharge, vat, total: round2(net + serviceCharge + vat) };
 }
 
 /** Merge an added item into the cart: bump qty if the same sku+modifiers row exists, else append. */

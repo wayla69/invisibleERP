@@ -24,7 +24,7 @@ const METHODS: { id: Method; label: string; icon: typeof Banknote }[] = [
 export interface SettleResult { sale_no: string; total: number; change?: number; offline?: boolean }
 
 export function CheckoutPanel({
-  lines, onSettle, onReprint, onSendReceipt, onClose, onFinish,
+  lines, onSettle, onReprint, onSendReceipt, onClose, onFinish, serviceChargePct = 0,
 }: {
   lines: CartLine[];
   onSettle: (p: { method: Method; discountPct: number; cashReceived?: number }) => Promise<SettleResult>;
@@ -32,6 +32,7 @@ export function CheckoutPanel({
   onSendReceipt: (saleNo: string, channel: 'email' | 'line', to: string) => Promise<void>;
   onClose: () => void;
   onFinish: () => void;
+  serviceChargePct?: number; // mirrors the register's service-charge so the tendered total matches the cart
 }) {
   const [discountPct, setDiscountPct] = useState(0);
   const [method, setMethod] = useState<Method>('Cash');
@@ -40,7 +41,7 @@ export function CheckoutPanel({
   const [result, setResult] = useState<SettleResult | null>(null);
   const [sendTo, setSendTo] = useState('');
 
-  const t = useMemo(() => cartTotals(lines, discountPct), [lines, discountPct]);
+  const t = useMemo(() => cartTotals(lines, discountPct, serviceChargePct), [lines, discountPct, serviceChargePct]);
   const cashNum = cash === '' ? null : Number(cash);
   const change = method === 'Cash' && cashNum != null ? Math.round((cashNum - t.total) * 100) / 100 : null;
   const cashShort = method === 'Cash' && cashNum != null && cashNum < t.total;
@@ -158,6 +159,11 @@ export function CheckoutPanel({
             {t.discount > 0 && (
               <div className="flex items-center justify-between px-1 text-sm text-muted-foreground">
                 <span>ส่วนลด</span><span className="tabular text-destructive">−{baht(t.discount)}</span>
+              </div>
+            )}
+            {t.serviceCharge > 0 && (
+              <div className="flex items-center justify-between px-1 text-sm text-muted-foreground">
+                <span>ค่าบริการ {serviceChargePct}%</span><span className="tabular">+{baht(t.serviceCharge)}</span>
               </div>
             )}
           </div>

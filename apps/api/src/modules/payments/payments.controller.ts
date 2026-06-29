@@ -81,6 +81,13 @@ export class PaymentsController {
     return this.svc.openTill(b, u);
   }
 
+  // Read the caller's tenant's current open till (or null) — used by the POS login/register flow to avoid
+  // opening a duplicate shift. Readable by any POS principal (selling or till duty).
+  @Get('till/current') @Permissions('pos_till', 'pos_sell', 'cust_pos', 'ar')
+  currentTill(@CurrentUser() u: JwtUser) {
+    return this.svc.currentTill(u);
+  }
+
   @Post('till/close') @Permissions('pos_till', 'ar')
   closeTill(@Body(new ZodValidationPipe(CloseTillBody)) b: CloseTillDto, @CurrentUser() u: JwtUser) {
     return this.svc.closeTill(b, u);

@@ -1268,6 +1268,13 @@
       "when": 2023820000007,
       "tag": "0180_pdpa",
       "breakpoints": true
+    },
+    {
+      "idx": 181,
+      "version": "7",
+      "when": 2023820000008,
+      "tag": "0181_user_pin",
+      "breakpoints": true
     }
   ]
 }

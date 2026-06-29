@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.5 · 2026-06-28** · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
+**Status: DRAFT v0.6 · 2026-06-29** · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -45,6 +45,16 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-033 | PDPA erasure redacts PII + issues pseudonym | PDPA-02 | 08 §7, §9 |
 | UAT-SEC-034 | PDPA erasure pseudonymises the audit trail at read-time (stored row immutable) | PDPA-02 / ITGC-AC-16 | 08 §7, §9 |
 | UAT-SEC-035 | PDPA DSAR is tenant-isolated | PDPA-01 / ITGC-AC-03 | 08 §7, §9 |
+| UAT-SEC-036 | Cashier PIN quick-login succeeds | ITGC-AC-17 | 08 §7, §9 |
+| UAT-SEC-037 | PosSupervisor PIN login + open shift (no duplicate) | ITGC-AC-17 / R08 | 08 §7, §9 |
+| UAT-SEC-038 | Self set/rotate own PIN (current-password step-up) | ITGC-AC-17 | 08 §7 |
+| UAT-SEC-039 | Admin sets a staff PIN | ITGC-AC-17 | 08 §7 |
+| UAT-SEC-040 | Wrong PIN rejected (generic UNAUTHORIZED) | ITGC-AC-17 | 08 §7, §9 |
+| UAT-SEC-041 | Privileged account blocked from PIN (PIN_NOT_ALLOWED) | ITGC-AC-17 | 08 §7, §9 |
+| UAT-SEC-042 | Malformed PIN rejected (DTO) | ITGC-AC-17 | 08 §7, §9 |
+| UAT-SEC-043 | Repeated wrong PIN trips the lockout (LOGIN_LOCKED) | ITGC-AC-17 / ITGC-AC-07 | 08 §7, §9 |
+| UAT-SEC-044 | Self set-PIN with wrong current password (BAD_CURRENT_PASSWORD) | ITGC-AC-17 | 08 §7, §9 |
+| UAT-SEC-045 | Clear-PIN disables PIN login | ITGC-AC-17 | 08 §7, §9 |
 
 ## 02 — Order-to-Cash → `01-order-to-cash.md`
 
@@ -664,7 +674,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 
 | Cycle | Cases | Control-type cases |
 |---|---|---|
-| 01 Security & Access | 19 | 13 |
+| 01 Security & Access | 45 | 33 |
 | 02 Order-to-Cash | 55 | 25 |
 | 03 Procure-to-Pay | 27 | 12 |
 | 04 Inventory & WMS | 29 | 12 |
@@ -675,4 +685,6 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
 | 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **366** | **191** |
+| **Total** | **392** | **211** |
+
+> Note (2026-06-29): the "01 Security & Access" counts were reconciled to the actual case rows in `01-security-access-uat.md` (45 cases / 33 control, incl. the new UAT-SEC-036…045 for ITGC-AC-17). The other cycles' counts predate recent additions and may be understated — a separate full recount/reconciliation is pending and out of scope for this change.

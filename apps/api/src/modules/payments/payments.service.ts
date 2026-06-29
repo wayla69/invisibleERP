@@ -317,6 +317,14 @@ export class PaymentService {
     return s ? { id: Number(s.id), sessionNo: s.sessionNo } : null;
   }
 
+  // GET /api/payments/till/current — the caller's tenant's current open till (or null). Lets the POS
+  // login flow decide whether to open a shift, so "เข้าสู่ระบบ / เปิดกะ" never opens a duplicate.
+  async currentTill(user: JwtUser): Promise<{ open: { id: number; session_no: string } | null }> {
+    if (user.tenantId == null) return { open: null };
+    const t = await this.currentOpenTill(Number(user.tenantId));
+    return { open: t ? { id: t.id, session_no: t.sessionNo } : null };
+  }
+
   // POST /api/payments/till/close — reconcile cash: expected = float + Σ cash captured; variance = counted − expected.
   async closeTill(dto: CloseTillDto, user: JwtUser) {
     const db = this.db as any;

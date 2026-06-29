@@ -24,6 +24,7 @@ export const CreateOrderBody = z.object({
   table_id: z.number().int().optional(),
   session_id: z.number().int().optional(),
   guest_count: z.number().int().positive().optional(),
+  fulfillment_type: z.enum(['dine_in', 'takeaway', 'delivery', 'pickup']).optional(), // order type at the till (default dine_in)
   notes: z.string().optional(),
   items: z.array(ItemInput).min(1),
 });
