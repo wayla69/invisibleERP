@@ -17,6 +17,7 @@ import { RecipeService } from '../menu/recipe.service';
 import { MarketingAutomationService } from '../marketing/marketing-automation.service';
 import { PG_CLIENT, type PgClient } from '../../database/database.module';
 import type { JwtUser } from '../../common/decorators';
+import { redactPii, PII_REDACTION_ENABLED } from '../../common/pii-redact';
 
 // port จาก agents/base_agent.py + erp_agent.py
 const MAX_LOOP_TURNS = 15;
@@ -192,7 +193,10 @@ export class AgentService {
         for (const block of res.content as any[]) {
           if (block.type === 'tool_use') {
             const out = await this.exec(block.name, block.input, _user);
-            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(out) });
+            // PDPA data-minimization: strip direct contact identifiers from the tool result before it is
+            // sent to the third-party model (names kept for utility). Toggle: AI_PII_REDACTION=off.
+            const safe = PII_REDACTION_ENABLED() ? redactPii(out) : out;
+            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(safe) });
           }
         }
         if (toolResults.length) messages.push({ role: 'user', content: toolResults });
@@ -275,7 +279,10 @@ export class AgentService {
         for (const block of final.content as any[]) {
           if (block.type === 'tool_use') {
             const out = await this.exec(block.name, block.input, _user);
-            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(out) });
+            // PDPA data-minimization: strip direct contact identifiers from the tool result before it is
+            // sent to the third-party model (names kept for utility). Toggle: AI_PII_REDACTION=off.
+            const safe = PII_REDACTION_ENABLED() ? redactPii(out) : out;
+            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(safe) });
           }
         }
         if (toolResults.length) messages.push({ role: 'user', content: toolResults });
