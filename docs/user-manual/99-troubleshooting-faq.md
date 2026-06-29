@@ -38,6 +38,7 @@ your code below.
 | `MILESTONE_NOT_FOUND` | You tried to mark a project **milestone** reached that doesn't exist. | Check the milestone id; add the milestone to the project first. |
 | `MILESTONE_REACHED` | The milestone was already marked reached. | No action — it's already reached. A billing milestone bills once; it can't be re-reached (that would double-bill). |
 | `BAD_PERCENT` | A milestone `billing_percent` was outside the 0–100 range. | Enter a billing percent within (0, 100]. |
+| `BAD_ALLOC` | A project resource `alloc_pct` (allocation %) was outside the 0–100 range. | Enter an allocation within (0, 100]. To split a person across projects, give each assignment its share. |
 | `SOD_SELF_POST` | The same person who **computed** an AR allowance (provision for doubtful accounts) tried to **post** it. | A different reviewer (`gl_post` / `exec`) posts the allowance — the computer can't post their own. See [Finance — AR & AP → Allowance](./05-finance-ar-ap.md). |
 | `ALLOWANCE_POSTED` / `ALREADY_POSTED` | You tried to (re)post an AR allowance that is already posted. | A given allowance posts once; to revise, **compute a fresh allowance** for a later `as_of_date`. |
 

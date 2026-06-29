@@ -167,6 +167,26 @@ async function main() {
   const reachBad = await inj('POST', '/api/projects/milestones/999999/reach', admin, {});
   ok('Reach unknown milestone → 404 MILESTONE_NOT_FOUND', reachBad.status === 404 && reachBad.json.error?.code === 'MILESTONE_NOT_FOUND', `${reachBad.status} ${reachBad.json.error?.code}`);
 
+  // ── 13. Resourcing: rate card governs the snapshot rate; utilization flags over-allocation (PROJ-05, P2) ──
+  await inj('POST', '/api/projects/rate-cards', admin, { role: 'Senior Dev', cost_rate: 1000, bill_rate: 2000, effective_from: '2026-01-01' });
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-RES', name: 'งานจัดสรรคน', billing_type: 'TM' });
+  const asg = await inj('POST', '/api/projects/PRJ-RES/resources', admin, { resource_name: 'Alice', role: 'Senior Dev', alloc_pct: 60, period_start: '2026-02-01' });
+  const alice = (asg.json.resources ?? []).find((r: any) => r.resource_name === 'Alice');
+  ok('Assign resource → rate-card rates snapshotted (cost 1000, bill 2000)', near(alice?.cost_rate, 1000) && near(alice?.bill_rate, 2000) && near(alice?.alloc_pct, 60), JSON.stringify({ c: alice?.cost_rate, b: alice?.bill_rate }));
+  // Same resource booked 60% on a second project → 120% total → over-allocated.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-RES2', name: 'งานคู่ขนาน', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-RES2/resources', admin, { resource_name: 'Alice', role: 'Senior Dev', alloc_pct: 60, period_start: '2026-02-01' });
+  const util = await inj('GET', '/api/projects/resources/utilization', admin);
+  const au = (util.json.utilization ?? []).find((u: any) => u.resource_name === 'Alice');
+  ok('Utilization: Alice 60%+60% = 120% → over_allocated', near(au?.allocated_pct, 120) && au?.over_allocated === true && util.json.over_allocated_count >= 1, JSON.stringify({ a: au?.allocated_pct, o: au?.over_allocated }));
+  // A role with no rate card → zero snapshot rates (no guessed rate).
+  const asgBob = await inj('POST', '/api/projects/PRJ-RES/resources', admin, { resource_name: 'Bob', role: 'Unknown' });
+  const bob = (asgBob.json.resources ?? []).find((r: any) => r.resource_name === 'Bob');
+  ok('Assign with no rate card → cost/bill rate 0 (not guessed)', near(bob?.cost_rate, 0) && near(bob?.bill_rate, 0), JSON.stringify({ c: bob?.cost_rate }));
+  // Allocation guard.
+  const asgBad = await inj('POST', '/api/projects/PRJ-RES/resources', admin, { resource_name: 'Carol', alloc_pct: 0 });
+  ok('Assign with alloc_pct 0 → 400 BAD_ALLOC', asgBad.status === 400 && asgBad.json.error?.code === 'BAD_ALLOC', `${asgBad.status} ${asgBad.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
