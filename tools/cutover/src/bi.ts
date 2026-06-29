@@ -178,6 +178,15 @@ async function main() {
     prun.json.status === 'success' && !remaining.includes('ret-expired') && remaining.includes('ret-future'),
     JSON.stringify({ st: prun.json.status, sum: prun.json.summary, remaining }).slice(0, 170));
 
+  // ── 18. async scheduler: run-async ENQUEUES due subscriptions to the background job queue (returns 202)
+  //        instead of running them inline — heavy action jobs then execute on the worker off the request path. ──
+  const asub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Async purge', report_type: 'data_retention_purge', frequency: 'daily' });
+  const ra = await inj('POST', '/api/bi/subscriptions/run-async', admin, {});
+  const jobRows = (await db.select().from(s.backgroundJobs)).filter((j: any) => j.jobType === 'report_subscription');
+  ok('run-async enqueues due subscriptions as background jobs (202, queued to the worker)',
+    ra.status === 202 && (ra.json.enqueued ?? 0) >= 1 && jobRows.length >= 1 && jobRows.some((j: any) => Number(j.payload?.subscriptionId) === Number(asub.json.id)),
+    JSON.stringify({ st: ra.status, enq: ra.json.enqueued, jobs: jobRows.length }).slice(0, 150));
+
   await app.close();
 }
 
