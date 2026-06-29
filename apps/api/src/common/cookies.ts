@@ -4,10 +4,16 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 
-export const AUTH_COOKIE = 'ierp_token'; // httpOnly — the JWT
+export const AUTH_COOKIE = 'ierp_token'; // httpOnly — the JWT (short-lived access token)
 export const CSRF_COOKIE = 'ierp_csrf';  // readable — double-submit CSRF token (also the client's "session exists" flag)
+export const REFRESH_COOKIE = 'ierp_refresh'; // httpOnly — opaque refresh token, scoped to /api/auth
 
 const MAX_AGE = Number(process.env.AUTH_COOKIE_MAX_AGE ?? 43200); // seconds (default 12h)
+// Refresh-cookie lifetime — the long session window over which an access token can be silently renewed.
+const REFRESH_MAX_AGE = Number(process.env.REFRESH_COOKIE_MAX_AGE ?? 604800); // seconds (default 7d)
+// The refresh token is only ever sent to the auth endpoints (refresh + logout), not every request, to
+// limit its exposure. Kept overridable for cross-origin deploys that must widen it.
+const REFRESH_PATH = (process.env.REFRESH_COOKIE_PATH ?? '/api/auth').trim() || '/api/auth';
 const isProd = () => process.env.NODE_ENV === 'production';
 
 // Cross-origin deploys (web and API on different hosts) need the session cookie scoped so the browser can
@@ -40,10 +46,10 @@ export function readCookie(req: { headers?: Record<string, any> }, name: string)
   return undefined;
 }
 
-function serialize(name: string, value: string, opts: { httpOnly?: boolean; maxAge?: number }): string {
+function serialize(name: string, value: string, opts: { httpOnly?: boolean; maxAge?: number; path?: string }): string {
   const sameSite = cookieSameSite();
   const domain = cookieDomain();
-  const p = [`${name}=${encodeURIComponent(value)}`, 'Path=/', `SameSite=${sameSite}`];
+  const p = [`${name}=${encodeURIComponent(value)}`, `Path=${opts.path ?? '/'}`, `SameSite=${sameSite}`];
   if (domain) p.push(`Domain=${domain}`);
   if (opts.httpOnly) p.push('HttpOnly');
   // Secure in prod, and ALWAYS with SameSite=None (browsers reject a None cookie without Secure).
@@ -52,20 +58,26 @@ function serialize(name: string, value: string, opts: { httpOnly?: boolean; maxA
   return p.join('; ');
 }
 
-// Set the auth (httpOnly JWT) + CSRF (readable) cookies on login/refresh. Returns the CSRF token minted.
-export function setAuthCookies(reply: FastifyReply, token: string): string {
+// Set the auth (httpOnly JWT) + CSRF (readable) cookies on login/refresh, plus the httpOnly refresh cookie
+// when a refresh token is supplied (scoped to /api/auth so it isn't sent on every request). Returns the
+// CSRF token minted. All cookies are written in ONE set-cookie array — a second reply.header('set-cookie')
+// call would clobber the first.
+export function setAuthCookies(reply: FastifyReply, token: string, refreshToken?: string): string {
   const csrf = randomBytes(24).toString('hex');
-  reply.header('set-cookie', [
+  const cookies = [
     serialize(AUTH_COOKIE, token, { httpOnly: true, maxAge: MAX_AGE }),
     serialize(CSRF_COOKIE, csrf, { httpOnly: false, maxAge: MAX_AGE }),
-  ]);
+  ];
+  if (refreshToken) cookies.push(serialize(REFRESH_COOKIE, refreshToken, { httpOnly: true, maxAge: REFRESH_MAX_AGE, path: REFRESH_PATH }));
+  reply.header('set-cookie', cookies);
   return csrf;
 }
 
-// Expire both cookies on logout.
+// Expire all session cookies on logout (the refresh cookie must be cleared on its own Path to match).
 export function clearAuthCookies(reply: FastifyReply): void {
   reply.header('set-cookie', [
     serialize(AUTH_COOKIE, '', { httpOnly: true, maxAge: 0 }),
     serialize(CSRF_COOKIE, '', { httpOnly: false, maxAge: 0 }),
+    serialize(REFRESH_COOKIE, '', { httpOnly: true, maxAge: 0, path: REFRESH_PATH }),
   ]);
 }

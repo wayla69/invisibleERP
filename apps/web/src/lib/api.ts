@@ -55,6 +55,27 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFA
   }
 }
 
+// Refresh-on-401: the access token (now short-lived, ~1h) expires while the refresh cookie (7d) is still
+// valid. On a 401 we POST /api/auth/refresh once (httpOnly refresh cookie → new access cookie), then retry
+// the original request. Concurrent 401s share ONE in-flight refresh so we don't stampede the endpoint.
+let refreshInFlight: Promise<boolean> | null = null;
+async function tryRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const res = await fetch(`${BASE}/api/auth/refresh`, { method: 'POST', credentials: 'include' });
+        return res.ok;
+      } catch {
+        return false;
+      } finally {
+        // Clear after this microtask so simultaneous callers reuse this result, then it resets.
+        setTimeout(() => { refreshInFlight = null; }, 0);
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
 // On 401 the session is stale/expired: bounce to /login (once — never from /login itself, to avoid a
 // redirect loop). The httpOnly cookie can't be cleared from JS; the server expires it on next login/logout.
 function handleUnauthorized(status: number): boolean {
@@ -78,10 +99,13 @@ function buildHeaders(init: RequestInit): Record<string, string> {
 }
 
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetchWithTimeout(`${BASE}${path}`, {
-    ...init,
-    headers: buildHeaders(init),
-  });
+  let res = await fetchWithTimeout(`${BASE}${path}`, { ...init, headers: buildHeaders(init) });
+  // Access token likely just expired — try a one-shot silent refresh, then replay the request once.
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+    if (await tryRefresh()) {
+      res = await fetchWithTimeout(`${BASE}${path}`, { ...init, headers: buildHeaders(init) });
+    }
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (handleUnauthorized(res.status)) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');

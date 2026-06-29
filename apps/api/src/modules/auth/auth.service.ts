@@ -1,11 +1,11 @@
 import { Inject, Injectable, UnauthorizedException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { eq, sql } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
+import { eq, and, sql, isNull } from 'drizzle-orm';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { authenticator } from 'otplib';
 import { resolvePermissions, requiresMfa, type Role, type Permission, type LoginResponse, type PinLoginResponse, type AuthUser } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { users, userPermissions, tenants, revokedTokens } from '../../database/schema';
+import { users, userPermissions, tenants, revokedTokens, refreshTokens } from '../../database/schema';
 import { PasswordService } from './password.service';
 import { LoginAttemptStore } from './login-attempt.store';
 import { encrypt, decrypt } from '../../common/crypto';
@@ -124,6 +124,55 @@ export class AuthService {
     // jti gives each token an identity so it can be revoked (logout) before its expiry (ITGC-AC-15).
     const token = await this.jwt.signAsync({ sub: row.username, role, customerName, tenantId: row.tenantId ?? null, permissions: perms, jti: randomUUID() });
     return { res: { token, username: row.username, role, customer_name: customerName, must_change_password: !!row.mustChangePassword, must_setup_mfa: mustSetupMfa }, perms };
+  }
+
+  // ── ITGC-AC-07 — refresh-token rotation ──────────────────────────────────────────────────────────
+  // Access JWTs are short-lived (default 1h). A long-lived opaque refresh token (default 7d) lets the client
+  // mint a fresh access token silently. We store only the sha256 hash (never the token itself).
+  private static readonly REFRESH_TTL_MS = Number(process.env.REFRESH_TOKEN_TTL_DAYS ?? 7) * 86400_000;
+  private hashRefresh(raw: string): string { return createHash('sha256').update(raw).digest('hex'); }
+
+  // Mint + persist a new refresh token for a username; returns the RAW token (only ever sent as a cookie).
+  async issueRefreshToken(username: string): Promise<string> {
+    const raw = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + AuthService.REFRESH_TTL_MS);
+    await (this.db as any).insert(refreshTokens).values({ tokenHash: this.hashRefresh(raw), username, expiresAt }).onConflictDoNothing();
+    return raw;
+  }
+
+  // Rotate: validate the presented refresh token, one-time-consume it, and issue a fresh access + refresh
+  // pair. Reuse of an already-rotated/revoked token is treated as theft → revoke every refresh token for
+  // that user (so a stolen-then-rotated token can't keep minting). Returns the new access + refresh tokens.
+  async refresh(rawRefresh: string | undefined): Promise<{ token: string; refresh: string }> {
+    const invalid = new UnauthorizedException({ code: 'REFRESH_INVALID', message: 'Invalid or expired session', messageTh: 'เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่' });
+    if (!rawRefresh) throw invalid;
+    const db = this.db as any;
+    const hash = this.hashRefresh(rawRefresh);
+    const [tok] = await db.select().from(refreshTokens).where(eq(refreshTokens.tokenHash, hash)).limit(1);
+    if (!tok) throw invalid;
+    // Reuse detection: a token already consumed (rotated) or revoked is presented again ⇒ likely theft.
+    if (tok.rotatedAt || tok.revokedAt) {
+      await db.update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.username, tok.username), isNull(refreshTokens.revokedAt)));
+      throw invalid;
+    }
+    if (new Date(tok.expiresAt).getTime() < Date.now()) throw invalid;
+    // Consume this token (one-time use).
+    await db.update(refreshTokens).set({ rotatedAt: new Date() }).where(eq(refreshTokens.id, tok.id));
+    // Re-issue an access token from the user's CURRENT row (role/perms/active re-resolved, not trusted from
+    // the old token) — a deactivated user can't refresh.
+    const row = (await db.select().from(users).where(eq(users.username, tok.username)).limit(1))[0];
+    if (!row || row.isActive === false) throw invalid;
+    const { res } = await this.issueSession(row);
+    const refresh = await this.issueRefreshToken(row.username);
+    return { token: res.token, refresh };
+  }
+
+  // Revoke a presented refresh token on logout (best-effort — never block logout on it).
+  async revokeRefreshToken(rawRefresh: string | undefined): Promise<void> {
+    if (!rawRefresh) return;
+    try {
+      await (this.db as any).update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.tokenHash, this.hashRefresh(rawRefresh)), isNull(refreshTokens.revokedAt)));
+    } catch { /* best-effort */ }
   }
 
   // PIN format: exactly 4–6 digits (defence-in-depth; the Zod DTO enforces this too).
