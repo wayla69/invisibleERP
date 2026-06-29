@@ -2,15 +2,23 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
   project_code: z.string().optional(),
   customer_name: z.string().optional(),
+  customer_no: z.string().optional(),
   billing_type: z.enum(['TM', 'Fixed']).optional(),
   budget_amount: z.number().nonnegative().optional(),
   contract_amount: z.number().nonnegative().optional(),
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+});
+const FromOppBody = z.object({
+  project_code: z.string().optional(),
+  billing_type: z.enum(['TM', 'Fixed']).optional(),
+  budget_amount: z.number().nonnegative().optional(),
   start_date: z.string().optional(),
   end_date: z.string().optional(),
 });
@@ -34,6 +42,12 @@ export class ProjectsController {
   @Post()
   create(@Body(new ZodValidationPipe(CreateBody)) b: CreateProjectDto, @CurrentUser() u: JwtUser) {
     return this.svc.create(b, u);
+  }
+
+  // Convert a won CRM opportunity into a project (CRM-WL). Static segment, so it never collides with :code.
+  @Post('from-opportunity/:oppNo')
+  fromOpportunity(@Param('oppNo') oppNo: string, @Body(new ZodValidationPipe(FromOppBody)) b: FromOpportunityDto, @CurrentUser() u: JwtUser) {
+    return this.svc.createFromOpportunity(oppNo, b, u);
   }
 
   @Get()

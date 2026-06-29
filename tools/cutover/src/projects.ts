@@ -116,6 +116,27 @@ async function main() {
   ok('Budget overrun: total 6000 vs budget 5000 → over_budget, variance −1000, used 120%',
     bg.json.over_budget === true && near(bg.json.budget_variance, -1000) && near(bg.json.budget_used_pct, 120), JSON.stringify({ ob: bg.json.over_budget, v: bg.json.budget_variance, u: bg.json.budget_used_pct }));
 
+  // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
+  const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
+  const oppNo = opp.json.opp_no;
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${oppNo}/stage`, admin, { stage: 'won' });
+  const conv = await inj('POST', `/api/projects/from-opportunity/${oppNo}`, admin, { project_code: 'PRJ-WON', billing_type: 'Fixed' });
+  ok('Won opportunity → project: contract seeded 250000, crm_opp_no linked, status Open',
+    conv.status < 300 && conv.json.project_code === 'PRJ-WON' && near(conv.json.contract_amount, 250000) && conv.json.crm_opp_no === oppNo && conv.json.status === 'Open',
+    JSON.stringify({ s: conv.status, c: conv.json.contract_amount, link: conv.json.crm_opp_no }));
+  // Idempotency: the same opportunity converts to at most one project (re-submit returns the same project).
+  const conv2 = await inj('POST', `/api/projects/from-opportunity/${oppNo}`, admin, {});
+  ok('Re-convert same opportunity → idempotent (already), no duplicate project',
+    conv2.json.already === true && conv2.json.project_code === 'PRJ-WON', JSON.stringify({ a: conv2.json.already }));
+  // Control: an OPEN (not-won) opportunity cannot convert.
+  const oppOpen = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลยังไม่ปิด', amount: 5000 });
+  const conv3 = await inj('POST', `/api/projects/from-opportunity/${oppOpen.json.opp_no}`, admin, {});
+  ok('Open (not-won) opportunity → conversion rejected (400 OPP_NOT_WON)',
+    conv3.status === 400 && conv3.json.error?.code === 'OPP_NOT_WON', `${conv3.status} ${conv3.json.error?.code}`);
+  // Control: an unknown opportunity is rejected.
+  const conv4 = await inj('POST', '/api/projects/from-opportunity/OPP-NOPE', admin, {});
+  ok('Unknown opportunity → 404 OPP_NOT_FOUND', conv4.status === 404 && conv4.json.error?.code === 'OPP_NOT_FOUND', `${conv4.status} ${conv4.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
