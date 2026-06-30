@@ -18,6 +18,10 @@ export class JobWorkerService implements OnApplicationBootstrap, OnModuleDestroy
   private running = false;
   private stopped = false;
   private readonly pollMs = Number(process.env.JOBS_POLL_MS ?? 2000);
+  // ITGC-OP-04 — how often (ms) to reap zombie 'running' jobs left by a crashed worker. Piggybacked on
+  // the poll loop rather than a separate scheduler (the project has no @nestjs/schedule).
+  private readonly reapMs = Number(process.env.JOBS_REAP_EVERY_MS ?? 60_000);
+  private lastReapAt = 0;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
@@ -42,7 +46,20 @@ export class JobWorkerService implements OnApplicationBootstrap, OnModuleDestroy
 
   private schedule(): void {
     if (this.stopped) return;
-    this.timer = setTimeout(() => { void this.drain().finally(() => this.schedule()); }, this.pollMs);
+    this.timer = setTimeout(() => { void this.drain().finally(() => this.maybeReap().finally(() => this.schedule())); }, this.pollMs);
+  }
+
+  // Reap stuck jobs on an interval (throttled across poll cycles). Public + harness-callable via reap().
+  async maybeReap(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastReapAt < this.reapMs) return;
+    this.lastReapAt = now;
+    try { await this.queue.reapStuck(); } catch (e: any) { this.log.error(`reap failed: ${e?.message ?? e}`); }
+  }
+
+  // Deterministic entry point for harnesses (the poll loop is off under tests).
+  async reap(staleMs?: number): Promise<{ requeued: number; deadLettered: number }> {
+    return this.queue.reapStuck(staleMs);
   }
 
   // Run claimed jobs until the queue is empty (or the process is stopping). Returns the number processed.
