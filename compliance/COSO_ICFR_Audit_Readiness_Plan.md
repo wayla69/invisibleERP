@@ -231,6 +231,7 @@ Stand up a single, access-controlled evidence repository, organized by control I
 - **RACI per control** lives in the RCM "Gap Remediation" tab; keep it current.
 - **Re-score the RCM** at the end of each phase (re-run `build_rcm.py` after updating statuses) and track Gap→Partial→Implemented burn-down.
 - **Definition of "audit-ready":** all High-priority gaps Implemented with ≥1 quarter of operating evidence; policies approved; evidence repository populated; one successful mock IT-audit.
+- **Honest current baseline + ID crosswalk:** see [`CONTROL_STATUS_HONEST.md`](CONTROL_STATUS_HONEST.md) — current status is **138 Implemented / 9 Partial / 6 Gap of 153** (the 6 gaps are entity-level governance, not software), and the realistic management-ICFR-assertion (404(a)) target is **Q1 2027 at the earliest**. Until then we say "control environment built and ToE-tested", **not** "audit-ready".
 
 ---
 
