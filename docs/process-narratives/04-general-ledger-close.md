@@ -10,7 +10,7 @@
 | Version | **0.1 DRAFT** |
 | Effective date | `<<effective-date>>` |
 | Review cadence | Each period close + annual |
-| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, GL-07, GL-08, GL-09, GL-10, GL-11, LSE-01, REC-01, REC-02, REC-03, REC-04, GOV-01, CON-01, CON-02; SoD R05, R06 |
+| Related RCM controls | GL-01, GL-02, GL-03, GL-04, GL-05, GL-06, GL-07, GL-08, GL-09, GL-10, GL-11, GL-15, GL-16, GL-19, LSE-01, REC-01, REC-02, REC-03, REC-04, GOV-01, CON-01, CON-02; SoD R05, R06 |
 | Related policy | `compliance/policies/11-financial-close-policy.md`, `compliance/policies/13-segregation-of-duties-policy.md` |
 
 ## 2. Purpose
@@ -173,6 +173,7 @@ flowchart TD
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.6 | 2026-06-30 | Platform | **GL-19 — programmatic pre-lock validation (Track-D RG-4, `docs/21`).** Read-only `GET /api/ledger/close/validate?period=YYYY-MM` (`close.service.ts validate`, perm `gl_close`/`gl_post`/`exec`) asserts the books-are-clean conditions the checklist sign-off can't: no unposted Draft JEs in the period, Posted entries balance in aggregate, every posted entry is individually balanced, and suspense/clearing (2380/2390/1999/9999) net ~zero (advisory) → `ready` + `blockers`/`warnings` + a per-check breakdown, surfaced before the GL-16 lock. Posts nothing; the hard lock still runs GL-15 + GL-16. New **detective** control **GL-19** in `build_rcm.py` → RCM **143**. No migration (read-only; reuses `journal_entries`/`journal_lines`). §2.1 control matrix gains a GL-19 block; Related-RCM list updated. ToE: `basics` harness (TC-GL-19-01 clean period ready; TC-GL-19-02 a Draft JE → `ready=false` + `unposted_drafts` blocker). UAT `05-general-ledger-close-uat.md` (TC-GL-19-01/02). |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-24 | Platform | Steps 8–9: period close and year-end close now auto-accrue the loyalty points liability before locking (year-end `5700` swept to RE). Cross-ref `19-marketing-pricing-loyalty.md` §7 (CRM Phase 1.5). |
 | 0.3 | 2026-06-26 | Platform | WS1.1: Added step 14 — CoA as master data (account_groups table, accounts extended, GL-11 control). Control-account guard for 1100/2000/1200/1500. `gl_coa` permission. Updated control matrix (step 14 GL-11, renumbered former 14→15), error-handling table, and RCM control list. |
@@ -362,6 +363,16 @@ December. (Locked is not exposed as a normal re-open; reversing a hard close is 
 | Mitigation | Locker (`locked_by`) must differ from starter (`started_by`) → `SELF_LOCK`; both identities + `locked_at` retained as evidence |
 | Owner | Financial Controller |
 | Test | TC-GL-16-01/02 (basics.ts harness) |
+
+### Control GL-19 — Programmatic pre-lock validation (detective)
+| Control ID | GL-19 |
+|------------|-------|
+| Name | Close pre-lock validation (books-are-clean) |
+| Type | Application — Automated (Detective, Pre-lock / period-end) |
+| Risk | A period is locked on a manual checklist sign-off while the books are not clean — an unposted draft JE sits in the period, or an entry/batch does not balance — so the statements are produced on an incomplete/inconsistent basis the checklist alone could not catch |
+| Mitigation | Read-only `GET /api/ledger/close/validate?period=YYYY-MM` asserts (1) **no unposted Draft JEs** in the period, (2) Posted entries **balance in aggregate** (Σdebit = Σcredit), (3) **every posted entry is individually balanced**, (4) suspense/clearing (2380/2390/1999/9999) net ~zero (advisory). Returns `ready` + explicit `blockers`/`warnings` + a per-check breakdown, surfaced before the GL-16 lock. Posts nothing; the hard lock still runs GL-15 + GL-16 |
+| Owner | Financial Controller |
+| Test | TC-GL-19-01/02 (basics.ts harness) |
 
 ## 2.2 GL Immutability & Reversal (WS2.2)
 

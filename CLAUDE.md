@@ -157,7 +157,7 @@ For every such change, review and update as needed:
   RFQ (`modules/sourcing`, `api/procurement/rfqs`), three-way AP-payment hold (`modules/match`,
   `api/procurement/match`), budget-vs-actual (`modules/budget` `budgetVsActual`), supplier scorecards. Only
   thin residual gaps remain → BI `exec_scorecard`/`budget_variance`/`supplier_scorecard` report types +
-  optional close pre-lock validation (GL-17). **Do not rebuild the above — extend it.**
+  optional close pre-lock validation (GL-19). **Do not rebuild the above — extend it.**
 - **Finance/GL feature map (controls + where the logic lives):**
   - GL maker-checker / recurring / prepaid: `modules/ledger/ledger.service.ts` — `postEntry` (Draft+approve, **GL-05**),
     `createRecurring`/`runDueRecurring` (**GL-08**), `createPrepaid`/`runDuePrepaid` (**GL-09**); cash flow
