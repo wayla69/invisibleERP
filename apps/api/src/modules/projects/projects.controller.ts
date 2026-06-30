@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -64,6 +64,28 @@ const MilestoneBody = z.object({
   billing_percent: z.number().positive().max(100).optional(),
 });
 const BaselineBody = z.object({ label: z.string().optional(), reason: z.string().optional() });
+const TemplateItemBody = z.object({
+  item_type: z.enum(['task', 'milestone']).optional(),
+  seq: z.number().int().positive().optional(),
+  name: z.string().min(1),
+  parent_seq: z.number().int().positive().optional(),
+  wbs_code: z.string().optional(),
+  planned_hours: z.number().nonnegative().optional(),
+  planned_cost: z.number().nonnegative().optional(),
+  offset_start_days: z.number().int().min(0).optional(),
+  offset_end_days: z.number().int().min(0).optional(),
+  depends_on_seq: z.array(z.number().int().positive()).optional(),
+  billing_percent: z.number().positive().max(100).optional(),
+  owner: z.string().optional(),
+  assignee: z.string().optional(),
+});
+const TemplateBody = z.object({
+  code: z.string().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  items: z.array(TemplateItemBody).optional(),
+});
+const ApplyTemplateBody = z.object({ start_date: z.string().optional() });
 const RateCardBody = z.object({
   role: z.string().min(1),
   cost_rate: z.number().nonnegative().optional(),
@@ -108,9 +130,31 @@ export class ProjectsController {
     return this.svc.portfolioEvm(u);
   }
 
+  // ── Project templates (B2) ── static 'templates' segment, declared before :code so it never collides.
+  @Post('templates')
+  createTemplate(@Body(new ZodValidationPipe(TemplateBody)) b: TemplateDto, @CurrentUser() u: JwtUser) {
+    return this.svc.createTemplate(b, u);
+  }
+
+  @Get('templates')
+  listTemplates(@CurrentUser() u: JwtUser) {
+    return this.svc.listTemplates(u);
+  }
+
+  @Get('templates/:tpl')
+  getTemplate(@Param('tpl') tpl: string) {
+    return this.svc.getTemplate(tpl);
+  }
+
   @Get(':code')
   get(@Param('code') code: string) {
     return this.svc.get(code);
+  }
+
+  // Apply a template to a project → scaffold its standard WBS + milestones in one step.
+  @Post(':code/apply-template/:tpl')
+  applyTemplate(@Param('code') code: string, @Param('tpl') tpl: string, @Body(new ZodValidationPipe(ApplyTemplateBody)) b: ApplyTemplateDto, @CurrentUser() u: JwtUser) {
+    return this.svc.applyTemplate(code, tpl, b, u);
   }
 
   // Earned-value metrics (P4): BAC/PV/EV/AC → CPI/SPI + variances + EAC. Static 'evm' segment.

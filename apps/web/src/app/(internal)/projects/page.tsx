@@ -31,12 +31,19 @@ export default function ProjectsPage() {
   const qc = useQueryClient();
   const router = useRouter();
   const q = useQuery<{ projects: Project[]; count: number }>({ queryKey: ['projects'], queryFn: () => api('/api/projects') });
-  const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '' });
+  const tplQ = useQuery<{ templates: { code: string; name: string; item_count: number }[] }>({ queryKey: ['project-templates'], queryFn: () => api('/api/projects/templates') });
+  const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '' });
   const refresh = () => qc.invalidateQueries({ queryKey: ['projects'] });
 
   const create = useMutation({
-    mutationFn: () => api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name: f.name, project_code: f.project_code || undefined, customer_name: f.customer_name || undefined, billing_type: f.billing_type, contract_amount: Number(f.contract_amount) || 0 }) }),
-    onSuccess: (r) => { notifySuccess(`สร้างโครงการ ${r.project_code}`); setF({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '' }); refresh(); },
+    mutationFn: async () => {
+      const r = await api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name: f.name, project_code: f.project_code || undefined, customer_name: f.customer_name || undefined, billing_type: f.billing_type, contract_amount: Number(f.contract_amount) || 0 }) });
+      // Optional: scaffold a standard WBS + milestones from a template (B2).
+      let scaffold: { tasks_created?: number; milestones_created?: number } | null = null;
+      if (f.template) scaffold = await api(`/api/projects/${encodeURIComponent(r.project_code)}/apply-template/${encodeURIComponent(f.template)}`, { method: 'POST', body: JSON.stringify({}) });
+      return { ...r, scaffold };
+    },
+    onSuccess: (r: any) => { notifySuccess(r.scaffold ? `สร้างโครงการ ${r.project_code} · ${r.scaffold.tasks_created} งาน / ${r.scaffold.milestones_created} หมุดหมายจากแม่แบบ` : `สร้างโครงการ ${r.project_code}`); setF({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '' }); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -91,6 +98,12 @@ export default function ProjectsPage() {
             </select>
           </div>
           <div className="grid gap-1.5"><Label>มูลค่าสัญญา</Label><Input type="number" min="0" value={f.contract_amount} onChange={(e) => setF({ ...f, contract_amount: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>เริ่มจากแม่แบบ (ถ้ามี)</Label>
+            <select className={selectCls} value={f.template} onChange={(e) => setF({ ...f, template: e.target.value })}>
+              <option value="">— ไม่ใช้แม่แบบ —</option>
+              {(tplQ.data?.templates ?? []).map((t) => <option key={t.code} value={t.code}>{t.name} ({t.item_count})</option>)}
+            </select>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> สร้าง</Button>

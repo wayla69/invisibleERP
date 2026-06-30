@@ -29,6 +29,10 @@ An executive cross-project overview for the PMO / leadership:
 The KPI band shows project count, unbilled WIP, cumulative billed, and cumulative margin. The table lists
 every project with cost, budget usage (amber ≥ 85%, red ⚠ over budget), billed %, WIP and margin.
 - **Create a project** — fill the form (name, optional code, customer, T&M or Fixed, contract value) → *สร้าง*.
+- **Start from a template** — pick a scaffold in *เริ่มจากแม่แบบ* on the create form to spin up a standard WBS +
+  milestones in one step (dated from the project start). Templates are reusable; a project that already has
+  tasks can't have a template applied (`PROJECT_HAS_TASKS`). Author templates via the projects API
+  (`POST /api/projects/templates`).
 - **Open a project** — click any row to open its workspace.
 - **Quick actions** — the clock (log cost) and receipt (bill) icons on a row open those dialogs without leaving the list.
 
@@ -61,3 +65,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | Version | Date | Notes |
 |---|---|---|
 | 1.0 | 2026-06-30 | Initial guide — PPM workspace, Gantt/EVM, win/loss dashboard (PPM roadmap `docs/19`). |
+| 1.1 | 2026-06-30 | Project **templates** (`docs/20` B2) — *เริ่มจากแม่แบบ* picker on the create form scaffolds a standard WBS + milestones; `TEMPLATE_EXISTS` / `TEMPLATE_NOT_FOUND` / `PROJECT_HAS_TASKS` added to troubleshooting. |
