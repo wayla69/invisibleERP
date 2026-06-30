@@ -46,7 +46,11 @@ lesson — they run **sequentially**, one merged PR before the next starts.
 
 ---
 
-## Phase PMO-1 — Action center / exception inbox (+ proactive SSE)  ⭐ first
+## Phase PMO-1 — Action center / exception inbox (+ proactive SSE)  ⭐ first — **DELIVERED**
+> Shipped: `GET /api/projects/action-center` (`ProjectsService.actionCenter`), proactive `project_action`
+> SSE via the shared `BiLiveService` (extracted to `bi-live.module.ts`), the `/projects/action-center` web
+> inbox, control **PROJ-11** (RCM 154), PN-16 step 19 / row 16 / rev 0.21, user-manual 14 rev 1.8,
+> UAT-O2C-221. Harness: `projects` 96 checks. No migration.
 *Highest leverage, lowest new surface area. Converts every detective/maker-checker control we already own
 into a single driven worklist.*
 

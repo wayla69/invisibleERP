@@ -241,6 +241,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-218 | Change order — maker-checker contract variation | PROJ-10 | 16 §7 (17) |
 | UAT-O2C-219 | Time-phased resource capacity calendar | PROJ-05 (operational) | 16 §7 (9) |
 | UAT-O2C-220 | Project health history (EVM/RAG trend) | PROJ-06 (operational) | 16 §7 (18) |
+| UAT-O2C-221 | PMO action center / exception inbox | PROJ-11 | 16 §7 (19) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |
