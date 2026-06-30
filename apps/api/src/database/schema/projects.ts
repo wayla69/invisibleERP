@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, date, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, date, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Project accounting / PPM (โครงการ) — tenant-scoped (RLS). Costs accrue to project WIP; billing
@@ -136,7 +136,29 @@ export const projectResources = pgTable(
   (t) => ({ byProject: index('idx_presource_project').on(t.projectId), byResource: index('idx_presource_name').on(t.tenantId, t.resourceName) }),
 );
 
+// Project baseline (B1) — a change-controlled snapshot of the approved plan (BAC + schedule duration) at a
+// point in time. Re-baselining requires a reason and preserves history (status active→superseded); variance
+// of the current plan vs the active baseline surfaces scope/cost creep (PROJ-07).
+export const projectBaselines = pgTable(
+  'project_baselines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    label: text('label'),
+    baselineBac: numeric('baseline_bac', { precision: 16, scale: 2 }).default('0'),  // budget at completion
+    baselineDurationDays: integer('baseline_duration_days').default(0),               // critical-path duration
+    baselineEnd: date('baseline_end'),
+    reason: text('reason'),                                  // required when re-baselining (PROJ-07)
+    status: text('status').notNull().default('active'),      // active | superseded
+    createdBy: text('created_by'),
+    capturedAt: timestamp('captured_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_pbaseline_project').on(t.projectId) }),
+);
+
 export type Project = typeof projects.$inferSelect;
+export type ProjectBaseline = typeof projectBaselines.$inferSelect;
 export type ProjectTask = typeof projectTasks.$inferSelect;
 export type ProjectMilestone = typeof projectMilestones.$inferSelect;
 export type ResourceRate = typeof resourceRates.$inferSelect;

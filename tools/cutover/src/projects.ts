@@ -276,6 +276,22 @@ async function main() {
     pf.json.funnel?.won_count >= 1 && pf.json.funnel?.converted_count >= 1 && Array.isArray(pf.json.at_risk),
     JSON.stringify({ c: pf.json.count, won: pf.json.funnel?.won_count, conv: pf.json.funnel?.converted_count, oa: pf.json.capacity?.over_allocated_count }));
 
+  // ── 19. baselines & variance: change-controlled re-baselining + scope/cost creep (PROJ-07, B1) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-BL', name: 'งานมีเส้นฐาน', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-BL/tasks', admin, { name: 'BL-1', planned_cost: 1000, planned_hours: 8 });
+  await inj('POST', '/api/projects/PRJ-BL/tasks', admin, { name: 'BL-2', planned_cost: 1000, planned_hours: 8 });
+  const bl1 = await inj('POST', '/api/projects/PRJ-BL/baseline', admin, { label: 'v1' });
+  ok('Capture baseline → BAC 2000, active, history 1', near(bl1.json.baseline?.baseline_bac, 2000) && bl1.json.baseline?.status === 'active' && bl1.json.history?.length === 1, JSON.stringify({ b: bl1.json.baseline?.baseline_bac }));
+  // Add scope (another 500) → variance vs baseline shows +500 / +25%.
+  await inj('POST', '/api/projects/PRJ-BL/tasks', admin, { name: 'BL-3', planned_cost: 500, planned_hours: 4 });
+  const blv = await inj('GET', '/api/projects/PRJ-BL/baseline', admin);
+  ok('Plan drift vs baseline → bac_delta 500, bac_pct 25', near(blv.json.variance?.bac_delta, 500) && near(blv.json.variance?.bac_pct, 25), JSON.stringify({ d: blv.json.variance?.bac_delta, p: blv.json.variance?.bac_pct }));
+  // Re-baseline without a reason → blocked (PROJ-07 change governance).
+  const blBad = await inj('POST', '/api/projects/PRJ-BL/baseline', admin, { label: 'v2' });
+  ok('Re-baseline without reason → 400 BASELINE_REASON_REQUIRED', blBad.status === 400 && blBad.json.error?.code === 'BASELINE_REASON_REQUIRED', `${blBad.status} ${blBad.json.error?.code}`);
+  const bl2 = await inj('POST', '/api/projects/PRJ-BL/baseline', admin, { label: 'v2', reason: 'อนุมัติขยายขอบเขต' });
+  ok('Re-baseline with reason → new active BAC 2500, variance 0, history 2', near(bl2.json.baseline?.baseline_bac, 2500) && near(bl2.json.variance?.bac_delta, 0) && bl2.json.history?.length === 2, JSON.stringify({ b: bl2.json.baseline?.baseline_bac, h: bl2.json.history?.length }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
