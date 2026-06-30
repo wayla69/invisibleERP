@@ -23,6 +23,21 @@ import { redactPii, PII_REDACTION_ENABLED } from '../../common/pii-redact';
 const MAX_LOOP_TURNS = 15;
 const MAX_HISTORY = 40;
 const THAI_FALLBACK = 'ขออภัย ไม่สามารถประมวลผลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง';
+// Per-tool execution timeout — a single slow/hung tool query can't stall the whole agent turn.
+const TOOL_TIMEOUT_MS = Number(process.env.AI_TOOL_TIMEOUT_MS ?? 20000);
+
+// Reject if `p` doesn't settle within `ms` (bounds each tool call).
+async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 const SYSTEM_TH = `คุณคือ AI Assistant ของ Invisible ERP สำหรับ Oshinei Enterprise
 - ตอบเป็นภาษาเดียวกับผู้ใช้ (ไทยหรืออังกฤษ)
 - แสดงตัวเลขพร้อมคอมมาคั่นหลักพัน และหน่วยเป็น THB
@@ -189,16 +204,7 @@ export class AgentService {
           reply = (res.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
           break;
         }
-        const toolResults: any[] = [];
-        for (const block of res.content as any[]) {
-          if (block.type === 'tool_use') {
-            const out = await this.exec(block.name, block.input, _user);
-            // PDPA data-minimization: strip direct contact identifiers from the tool result before it is
-            // sent to the third-party model (names kept for utility). Toggle: AI_PII_REDACTION=off.
-            const safe = PII_REDACTION_ENABLED() ? redactPii(out) : out;
-            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(safe) });
-          }
-        }
+        const toolResults = await this.runToolBlocks(res.content as any[], _user);
         if (toolResults.length) messages.push({ role: 'user', content: toolResults });
         else break;
       }
@@ -274,17 +280,8 @@ export class AgentService {
           break;
         }
 
-        // มี tool_use → รัน tool แล้วป้อนผลกลับเข้า loop
-        const toolResults: any[] = [];
-        for (const block of final.content as any[]) {
-          if (block.type === 'tool_use') {
-            const out = await this.exec(block.name, block.input, _user);
-            // PDPA data-minimization: strip direct contact identifiers from the tool result before it is
-            // sent to the third-party model (names kept for utility). Toggle: AI_PII_REDACTION=off.
-            const safe = PII_REDACTION_ENABLED() ? redactPii(out) : out;
-            toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(safe) });
-          }
-        }
+        // มี tool_use → รัน tool (ขนาน + per-tool timeout) แล้วป้อนผลกลับเข้า loop
+        const toolResults = await this.runToolBlocks(final.content as any[], _user);
         if (toolResults.length) messages.push({ role: 'user', content: toolResults });
         else { reply = textOut || reply; break; }
       }
@@ -304,6 +301,24 @@ export class AgentService {
     }
 
     yield { done: true, reply };
+  }
+
+  // Execute all tool_use blocks of a turn CONCURRENTLY (was sequential — N tools × per-tool latency added
+  // up, and one slow query stalled the whole turn). Each call is bounded by a timeout and its failure is
+  // captured as an error tool_result so one bad tool can't abort the turn. PII is redacted before the
+  // result leaves for the model. Promise.all preserves order; tool_result is matched by tool_use_id anyway.
+  private async runToolBlocks(content: any[], user?: JwtUser): Promise<any[]> {
+    const blocks = (content ?? []).filter((b: any) => b.type === 'tool_use');
+    return Promise.all(blocks.map(async (block: any) => {
+      let out: any;
+      try {
+        out = await withTimeout(this.exec(block.name, block.input, user), TOOL_TIMEOUT_MS, `tool ${block.name}`);
+      } catch (e: any) {
+        out = { error: String(e?.message ?? e) };
+      }
+      const safe = PII_REDACTION_ENABLED() ? redactPii(out) : out;
+      return { type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(safe) };
+    }));
   }
 
   private async exec(name: string, input: any, _user?: JwtUser): Promise<any> {
