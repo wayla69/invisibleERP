@@ -45,6 +45,10 @@ const TaskBody = z.object({
   pct_complete: z.number().min(0).max(100).optional(),
   assignee: z.string().optional(),
   depends_on: z.array(z.number().int().positive()).optional(),
+  accountable: z.string().optional(),
+  responsible: z.array(z.string()).optional(),
+  consulted: z.array(z.string()).optional(),
+  informed: z.array(z.string()).optional(),
 });
 const TaskPatchBody = z.object({
   name: z.string().min(1).optional(),
@@ -56,6 +60,10 @@ const TaskPatchBody = z.object({
   pct_complete: z.number().min(0).max(100).optional(),
   assignee: z.string().optional(),
   depends_on: z.array(z.number().int().positive()).optional(),
+  accountable: z.string().optional(),
+  responsible: z.array(z.string()).optional(),
+  consulted: z.array(z.string()).optional(),
+  informed: z.array(z.string()).optional(),
 });
 const MilestoneBody = z.object({
   name: z.string().min(1),
@@ -146,9 +154,21 @@ export class ProjectsController {
     return this.svc.getTemplate(tpl);
   }
 
+  // "My tasks" (B3): the caller's open tasks across projects (accountable/responsible). Static segment.
+  @Get('my-tasks')
+  myTasks(@CurrentUser() u: JwtUser) {
+    return this.svc.myTasks(u);
+  }
+
   @Get(':code')
   get(@Param('code') code: string) {
     return this.svc.get(code);
+  }
+
+  // RACI accountability matrix (B3): per-task A/R/C/I + per-person rollup + accountability gaps.
+  @Get(':code/raci')
+  raci(@Param('code') code: string) {
+    return this.svc.raci(code);
   }
 
   // Apply a template to a project → scaffold its standard WBS + milestones in one step.

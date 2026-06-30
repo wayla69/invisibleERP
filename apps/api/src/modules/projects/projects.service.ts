@@ -10,13 +10,20 @@ const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const r4 = (x: unknown) => Math.round((Number(x) || 0) * 10000) / 10000;
 const clampPct = (x: unknown) => Math.max(0, Math.min(100, r2(x)));
 const depsCsv = (ids?: number[]) => (ids && ids.length ? ids.map((i) => Number(i)).filter((i) => Number.isFinite(i)).join(',') : null);
+// People CSV (RACI lists) — trim, drop blanks/dupes; null when empty so an omitted field clears nothing.
+const peopleCsv = (xs?: string[]) => {
+  if (xs == null) return undefined; // not provided → leave column untouched
+  const u = [...new Set(xs.map((x) => String(x).trim()).filter(Boolean))];
+  return u.length ? u.join(',') : null;
+};
+const csvToList = (s: unknown) => (s ? String(s).split(',').map((x) => x.trim()).filter(Boolean) : []);
 
 export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string }
 export interface CostDto { entry_type?: 'time' | 'expense'; description?: string; qty?: number; rate?: number; amount?: number; billable?: boolean; entry_date?: string }
 export interface BillDto { amount?: number; percent?: number }
 export interface FromOpportunityDto { project_code?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; start_date?: string; end_date?: string }
-export interface TaskDto { name: string; parent_id?: number; wbs_code?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[] }
-export interface TaskPatchDto { name?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[] }
+export interface TaskDto { name: string; parent_id?: number; wbs_code?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[]; accountable?: string; responsible?: string[]; consulted?: string[]; informed?: string[] }
+export interface TaskPatchDto { name?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[]; accountable?: string; responsible?: string[]; consulted?: string[]; informed?: string[] }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
@@ -185,7 +192,9 @@ export class ProjectsService {
       projectId: Number(p.id), tenantId, parentId: dto.parent_id ?? null, wbsCode: dto.wbs_code ?? null, name: dto.name,
       status: dto.status ?? 'open', plannedStart: dto.planned_start ?? null, plannedEnd: dto.planned_end ?? null,
       plannedHours: fx(dto.planned_hours ?? 0, 2), plannedCost: fx(dto.planned_cost ?? 0, 2),
-      pctComplete: fx(clampPct(dto.pct_complete ?? 0), 2), dependsOn: depsCsv(dto.depends_on), assignee: dto.assignee ?? null, createdBy: user.username,
+      pctComplete: fx(clampPct(dto.pct_complete ?? 0), 2), dependsOn: depsCsv(dto.depends_on), assignee: dto.assignee ?? null,
+      accountable: dto.accountable ?? null, responsible: peopleCsv(dto.responsible) ?? null, consulted: peopleCsv(dto.consulted) ?? null, informed: peopleCsv(dto.informed) ?? null,
+      createdBy: user.username,
     }).returning({ id: projectTasks.id });
     return this.listTasks(code);
   }
@@ -209,6 +218,10 @@ export class ProjectsService {
     if (dto.planned_hours != null) set.plannedHours = fx(dto.planned_hours, 2);
     if (dto.planned_cost != null) set.plannedCost = fx(dto.planned_cost, 2);
     if (dto.assignee != null) set.assignee = dto.assignee;
+    if (dto.accountable != null) set.accountable = dto.accountable || null;
+    if (dto.responsible != null) set.responsible = peopleCsv(dto.responsible);
+    if (dto.consulted != null) set.consulted = peopleCsv(dto.consulted);
+    if (dto.informed != null) set.informed = peopleCsv(dto.informed);
     if (dto.depends_on != null) {
       if (dto.depends_on.some((d) => Number(d) === Number(taskId))) throw new BadRequestException({ code: 'BAD_DEPENDENCY', message: 'A task cannot depend on itself', messageTh: 'งานขึ้นกับตัวเองไม่ได้' });
       set.dependsOn = depsCsv(dto.depends_on);
@@ -229,6 +242,54 @@ export class ProjectsService {
     const totalH = active.reduce((s, t) => s + n(t.plannedHours), 0);
     if (totalH > 0) return clampPct(active.reduce((s, t) => s + n(t.plannedHours) * n(t.pctComplete), 0) / totalH);
     return clampPct(active.reduce((s, t) => s + n(t.pctComplete), 0) / active.length);
+  }
+
+  // ── RACI accountability (B3) ─────────────────────────────────────────────
+  // "My tasks": the caller's still-open tasks across every project where they are the accountable owner or a
+  // responsible doer (matched on username). The personal work-queue that the RACI roles drive.
+  async myTasks(user: JwtUser) {
+    const db = this.db as any;
+    const me = String(user.username ?? '').trim();
+    const rows = (await db.select().from(projectTasks).where(sql`${projectTasks.status} not in ('done','cancelled')`)).map(shapeTask);
+    const projRows = await db.select().from(projects);
+    const pById = new Map<number, any>(projRows.map((p: any) => [Number(p.id), p]));
+    const mine = rows
+      .filter((t: any) => me && (String(t.accountable ?? '').trim() === me || t.responsible.includes(me)))
+      .map((t: any) => {
+        const p = pById.get(t.project_id);
+        return { ...t, project_code: p?.projectCode ?? null, project_name: p?.name ?? null, my_role: String(t.accountable ?? '').trim() === me ? 'accountable' : 'responsible' };
+      })
+      .sort((a: any, b: any) => String(a.planned_end ?? '9999-12-31').localeCompare(String(b.planned_end ?? '9999-12-31')));
+    return { user: me, tasks: mine, count: mine.length };
+  }
+
+  // The project's RACI accountability matrix: per-task A/R/C/I, a per-person role rollup, and the tasks that
+  // lack a single accountable owner (an accountability gap). SoD note: the accountable owner should not be the
+  // same person who later approves the task's cost/timesheet — surfaced here, enforced by the cost maker-checker.
+  async raci(code: string) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const rows = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id))).orderBy(projectTasks.id)).map(shapeTask);
+    const active = rows.filter((t: any) => t.status !== 'cancelled');
+    const people = new Map<string, { accountable: number; responsible: number; consulted: number; informed: number }>();
+    const bump = (name: string, key: 'accountable' | 'responsible' | 'consulted' | 'informed') => {
+      const k = String(name).trim(); if (!k) return;
+      const e = people.get(k) ?? { accountable: 0, responsible: 0, consulted: 0, informed: 0 };
+      e[key]++; people.set(k, e);
+    };
+    for (const t of active) {
+      if (t.accountable) bump(t.accountable, 'accountable');
+      for (const r of t.responsible) bump(r, 'responsible');
+      for (const c of t.consulted) bump(c, 'consulted');
+      for (const i of t.informed) bump(i, 'informed');
+    }
+    const missing_accountable = active.filter((t: any) => !t.accountable).map((t: any) => t.id);
+    return {
+      project_code: code,
+      tasks: active.map((t: any) => ({ id: t.id, name: t.name, accountable: t.accountable, responsible: t.responsible, consulted: t.consulted, informed: t.informed })),
+      people: [...people.entries()].map(([name, c]) => ({ name, ...c })).sort((a, b) => (b.accountable + b.responsible) - (a.accountable + a.responsible)),
+      missing_accountable, complete: missing_accountable.length === 0, count: active.length,
+    };
   }
 
   // ── Milestones (P1) ──────────────────────────────────────────────────────
@@ -655,7 +716,7 @@ export class ProjectsService {
 }
 
 function shapeTask(t: any) {
-  return { id: Number(t.id), project_id: Number(t.projectId), parent_id: t.parentId != null ? Number(t.parentId) : null, wbs_code: t.wbsCode, name: t.name, status: t.status, planned_start: t.plannedStart, planned_end: t.plannedEnd, planned_hours: n(t.plannedHours), planned_cost: n(t.plannedCost), pct_complete: n(t.pctComplete), depends_on: t.dependsOn ? String(t.dependsOn).split(',').map((x: string) => Number(x)).filter((x: number) => Number.isFinite(x)) : [], assignee: t.assignee, created_at: t.createdAt };
+  return { id: Number(t.id), project_id: Number(t.projectId), parent_id: t.parentId != null ? Number(t.parentId) : null, wbs_code: t.wbsCode, name: t.name, status: t.status, planned_start: t.plannedStart, planned_end: t.plannedEnd, planned_hours: n(t.plannedHours), planned_cost: n(t.plannedCost), pct_complete: n(t.pctComplete), depends_on: t.dependsOn ? String(t.dependsOn).split(',').map((x: string) => Number(x)).filter((x: number) => Number.isFinite(x)) : [], assignee: t.assignee, accountable: t.accountable ?? null, responsible: csvToList(t.responsible), consulted: csvToList(t.consulted), informed: csvToList(t.informed), created_at: t.createdAt };
 }
 function shapeMilestone(m: any) {
   return { id: Number(m.id), project_id: Number(m.projectId), name: m.name, due_date: m.dueDate, owner: m.owner, status: m.status, billing_percent: m.billingPercent != null ? n(m.billingPercent) : null, reached_at: m.reachedAt, created_at: m.createdAt };

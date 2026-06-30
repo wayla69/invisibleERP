@@ -69,6 +69,12 @@ export const projectTasks = pgTable(
     pctComplete: numeric('pct_complete', { precision: 5, scale: 2 }).default('0'), // 0..100
     dependsOn: text('depends_on'),                            // P4 — predecessor task ids (CSV) for scheduling
     assignee: text('assignee'),
+    // RACI accountability (B3) — accountable is the single answerable owner; responsible/consulted/informed
+    // are CSV lists of people. `assignee` stays for back-compat (a convenience for the primary doer).
+    accountable: text('accountable'),
+    responsible: text('responsible'),
+    consulted: text('consulted'),
+    informed: text('informed'),
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },

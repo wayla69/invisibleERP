@@ -52,10 +52,11 @@ export default function ProjectDetailPage() {
 
   // ── dialogs ──
   const [taskDlg, setTaskDlg] = useState(false);
-  const [tf, setTf] = useState({ name: '', planned_hours: '', planned_cost: '', planned_start: '', planned_end: '', pct_complete: '' });
+  const [tf, setTf] = useState({ name: '', planned_hours: '', planned_cost: '', planned_start: '', planned_end: '', pct_complete: '', accountable: '', responsible: '' });
+  const splitPeople = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
   const addTask = useMutation({
-    mutationFn: () => api(`/api/projects/${code}/tasks`, { method: 'POST', body: JSON.stringify({ name: tf.name, planned_hours: Number(tf.planned_hours) || 0, planned_cost: Number(tf.planned_cost) || 0, planned_start: tf.planned_start || undefined, planned_end: tf.planned_end || undefined, pct_complete: Number(tf.pct_complete) || 0 }) }),
-    onSuccess: () => { notifySuccess('เพิ่มงานแล้ว'); setTaskDlg(false); setTf({ name: '', planned_hours: '', planned_cost: '', planned_start: '', planned_end: '', pct_complete: '' }); refresh(); },
+    mutationFn: () => api(`/api/projects/${code}/tasks`, { method: 'POST', body: JSON.stringify({ name: tf.name, planned_hours: Number(tf.planned_hours) || 0, planned_cost: Number(tf.planned_cost) || 0, planned_start: tf.planned_start || undefined, planned_end: tf.planned_end || undefined, pct_complete: Number(tf.pct_complete) || 0, accountable: tf.accountable || undefined, responsible: tf.responsible ? splitPeople(tf.responsible) : undefined }) }),
+    onSuccess: () => { notifySuccess('เพิ่มงานแล้ว'); setTaskDlg(false); setTf({ name: '', planned_hours: '', planned_cost: '', planned_start: '', planned_end: '', pct_complete: '', accountable: '', responsible: '' }); refresh(); },
     onError: (err: any) => notifyError(err.message),
   });
   const markDone = useMutation({
@@ -175,6 +176,12 @@ export default function ProjectDetailPage() {
             { key: 'planned_hours', label: 'ชม.', align: 'right', render: (r: any) => <span className="tabular">{r.planned_hours}</span> },
             { key: 'planned_cost', label: 'งบ', align: 'right', render: (r: any) => <span className="tabular">{baht(r.planned_cost)}</span> },
             { key: 'depends_on', label: 'ขึ้นกับ', render: (r: any) => r.depends_on?.length ? `#${r.depends_on.join(', #')}` : '—' },
+            { key: 'accountable', label: 'ผู้รับผิดชอบ (RACI)', sortable: false, render: (r: any) => (
+              <div className="flex flex-wrap items-center gap-1">
+                {r.accountable ? <Badge variant="default" title="Accountable — ผู้รับผิดชอบหลัก (1 คน)">A: {r.accountable}</Badge> : <span className="text-xs text-muted-foreground" title="ยังไม่มีผู้รับผิดชอบหลัก">— ไม่มี A</span>}
+                {r.responsible?.length ? <span className="text-xs text-muted-foreground" title="Responsible — ผู้ลงมือทำ">R: {r.responsible.join(', ')}</span> : null}
+              </div>
+            ) },
             { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
             { key: 'act', label: '', sortable: false, render: (r: any) => r.status !== 'done' && r.status !== 'cancelled'
               ? <Button variant="ghost" size="sm" title="ทำเครื่องหมายเสร็จ" onClick={() => markDone.mutate(r.id)}><CheckCircle2 className="size-4" /></Button> : null },
@@ -279,6 +286,10 @@ export default function ProjectDetailPage() {
               <div className="grid gap-1.5"><Label>เริ่ม</Label><Input type="date" value={tf.planned_start} onChange={(ev) => setTf({ ...tf, planned_start: ev.target.value })} /></div>
               <div className="grid gap-1.5"><Label>เสร็จ</Label><Input type="date" value={tf.planned_end} onChange={(ev) => setTf({ ...tf, planned_end: ev.target.value })} /></div>
               <div className="grid gap-1.5"><Label>% เสร็จ</Label><Input type="number" min="0" max="100" value={tf.pct_complete} onChange={(ev) => setTf({ ...tf, pct_complete: ev.target.value })} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5"><Label>ผู้รับผิดชอบหลัก (Accountable)</Label><Input value={tf.accountable} onChange={(ev) => setTf({ ...tf, accountable: ev.target.value })} placeholder="ชื่อผู้ใช้ 1 คน" /></div>
+              <div className="grid gap-1.5"><Label>ผู้ลงมือทำ (Responsible)</Label><Input value={tf.responsible} onChange={(ev) => setTf({ ...tf, responsible: ev.target.value })} placeholder="คั่นด้วย ," /></div>
             </div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setTaskDlg(false)}>ปิด</Button><Button onClick={() => addTask.mutate()} disabled={!tf.name || addTask.isPending}>เพิ่ม</Button></DialogFooter>

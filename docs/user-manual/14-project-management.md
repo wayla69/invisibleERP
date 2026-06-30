@@ -27,7 +27,9 @@ An executive cross-project overview for the PMO / leadership:
 
 ## Projects register (`/projects`)
 The KPI band shows project count, unbilled WIP, cumulative billed, and cumulative margin. The table lists
-every project with cost, budget usage (amber ≥ 85%, red ⚠ over budget), billed %, WIP and margin.
+every project with cost, budget usage (amber ≥ 85%, red ⚠ over budget), billed %, WIP and margin. A
+**งานของฉัน (My tasks)** panel lists your still-open tasks across all projects where you are *Accountable* (A)
+or *Responsible* (R) — click one to jump to its schedule.
 - **Create a project** — fill the form (name, optional code, customer, T&M or Fixed, contract value) → *สร้าง*.
 - **Start from a template** — pick a scaffold in *เริ่มจากแม่แบบ* on the create form to spin up a standard WBS +
   milestones in one step (dated from the project start). Templates are reusable; a project that already has
@@ -43,7 +45,9 @@ Tabbed, deep-linkable (`?tab=`):
   full earned-value breakdown (BAC/PV/EV/AC/CV/SV/EAC).
 - **กำหนดการ & Gantt (Schedule)** — a dependency-aware **Gantt** with the **critical path** highlighted in
   the primary colour and an inner fill for % complete, plus the WBS table. **เพิ่มงาน** adds a task (hours,
-  budget, dates, % and you may set predecessors); the check icon marks a task done (→ 100%).
+  budget, dates, %, predecessors, and **RACI** — an *Accountable* owner + *Responsible* doers); the check
+  icon marks a task done (→ 100%). The **ผู้รับผิดชอบ (RACI)** column shows the accountable owner (an *A* badge,
+  or *— ไม่มี A* when the task has no single owner) and the responsible doers.
 - **หมุดหมาย (Milestones)** — add milestones; the flag icon marks one **reached**. A milestone with a
   *วางบิล %* raises that Fixed-price progress bill automatically when reached.
 - **ทรัพยากร (Resources)** — assign people (the cost/bill rate is pulled from the rate card by role);
@@ -66,3 +70,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 |---|---|---|
 | 1.0 | 2026-06-30 | Initial guide — PPM workspace, Gantt/EVM, win/loss dashboard (PPM roadmap `docs/19`). |
 | 1.1 | 2026-06-30 | Project **templates** (`docs/20` B2) — *เริ่มจากแม่แบบ* picker on the create form scaffolds a standard WBS + milestones; `TEMPLATE_EXISTS` / `TEMPLATE_NOT_FOUND` / `PROJECT_HAS_TASKS` added to troubleshooting. |
+| 1.2 | 2026-06-30 | **RACI** on tasks (`docs/20` B3) — Accountable/Responsible inputs + RACI column on the schedule; *งานของฉัน (My tasks)* panel on `/projects`. |
