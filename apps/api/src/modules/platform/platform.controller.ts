@@ -6,7 +6,7 @@ import { ApiKeyService, type IssueKeyDto } from './api-key.service';
 import { WebhookService, type RegisterWebhookDto } from './webhook.service';
 import { MfaService } from './mfa.service';
 
-const IssueKeyBody = z.object({ name: z.string().min(1), scopes: z.array(z.string()).optional() });
+const IssueKeyBody = z.object({ name: z.string().min(1), scopes: z.array(z.string()).optional(), ttl_days: z.number().int().positive().max(3650).optional() });
 const RegisterWebhookBody = z.object({ url: z.string().url(), events: z.array(z.string()).optional() });
 const MfaVerifyBody = z.object({ token: z.string().min(1) });
 

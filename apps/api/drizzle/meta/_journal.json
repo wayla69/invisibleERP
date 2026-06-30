@@ -1373,6 +1373,20 @@
       "when": 2023820000022,
       "tag": "0195_project_change_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 2023820000023,
+      "tag": "0196_hybrid_org_tenancy",
+      "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "7",
+      "when": 2023820000024,
+      "tag": "0197_ai_token_overage",
+      "breakpoints": true
     }
   ]
 }

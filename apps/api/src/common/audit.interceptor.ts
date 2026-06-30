@@ -48,13 +48,21 @@ export class AuditInterceptor implements NestInterceptor {
     // Snapshot identity NOW — by the time tap() fires, the request tx/ALS has already exited.
     const actor = req.user?.username ?? null;
     const tenantId = req.user?.tenantId ?? null; // numeric; do NOT derive from customerName (a string code)
+    // Hybrid tenancy (0196) — flag mutations that ran with cross-tenant visibility (HQ global bypass or
+    // org-scoped Admin), set by TenantTxInterceptor. Only attach when present so ordinary tenant-scoped
+    // rows stay lean. This is the audit trail behind "HQ sees all branches".
+    const xtenant: Record<string, unknown> | undefined =
+      (req as any).__rlsBypass ? { rls_bypass: true }
+      : (req as any).__rlsOrgScope != null ? { rls_org_scope: (req as any).__rlsOrgScope }
+      : undefined;
 
     return next.handle().pipe(
       tap({
-        next: () => void this.record(action, actor, tenantId, ip, rid, 'success'),
+        next: () => void this.record(action, actor, tenantId, ip, rid, 'success', xtenant),
         error: (err) =>
           void this.record(action, actor, tenantId, ip, rid, 'fail', {
             error: err?.message ?? String(err),
+            ...(xtenant ?? {}),
           }),
       }),
     );

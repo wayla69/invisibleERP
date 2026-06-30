@@ -33,11 +33,14 @@ interface PlanSeed {
   features: Record<string, unknown>;
 }
 
+// NOTE: prices + ai_tokens_daily caps below are <<PLACEHOLDER>> values pending founder sign-off
+// (see docs/ops/pricing-and-ai-cogs.md). ai_tokens_daily is the FINITE included daily token cap — there is
+// NO unlimited tier (panel #3): Enterprise is a high finite ceiling, overage beyond it is metered & billed.
 const PLAN_SEED: PlanSeed[] = [
-  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { users: 2, locations: 1, ai_chat: false, reports: 'basic' } },
-  { code: 'starter', name: 'Starter', priceMonthly: '990', currency: 'THB', features: { users: 5, locations: 1, ai_chat: false, reports: 'standard' } },
-  { code: 'pro', name: 'Pro', priceMonthly: '2900', currency: 'THB', features: { users: 25, locations: 5, ai_chat: true, reports: 'advanced' } },
-  { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true } },
+  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0 } },
+  { code: 'starter', name: 'Starter', priceMonthly: '990', currency: 'THB', features: { users: 5, locations: 1, ai_chat: false, reports: 'standard', ai_tokens_daily: 0 } },
+  { code: 'pro', name: 'Pro', priceMonthly: '2900', currency: 'THB', features: { users: 25, locations: 5, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000 } },
+  { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000 } },
 ];
 
 const TRIAL_DAYS = 14;

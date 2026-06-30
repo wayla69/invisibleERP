@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import type { JwtUser } from '../../common/decorators';
+import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 
 // AI configuration assistant (Platform Phase 18 — B4). Describe a Studio object in plain language → get a
 // PROPOSED config JSON for a human to review and apply through the normal Studio screen (it never
@@ -17,8 +18,8 @@ const slug = (s: string) => {
 
 @Injectable()
 export class AiConfigService {
-  private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
-  private get model() { return process.env.ANTHROPIC_MODEL || 'claude-opus-4-8'; }
+  private get apiKey() { return aiDpaBlocked() ? '' : (process.env.ANTHROPIC_API_KEY || ''); } // gated → template
+  private get model() { return modelFor('config_suggest'); } // JSON config → REASONING tier (was Opus)
 
   targets() { return { targets: [...TARGETS] }; }
 
@@ -38,7 +39,7 @@ export class AiConfigService {
     if (!this.apiKey) return { target, proposal: this.template(target, description), source: 'template', note: 'ตรวจทานก่อนนำไปใช้งานจริง' };
     try {
       const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-      const client = new Anthropic({ apiKey: this.apiKey });
+      const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 });
       const res: any = await client.messages.create({
         model: this.model, max_tokens: 700,
         system: `You propose a JSON configuration for a "${target}" in an ERP customization studio. Return ONLY JSON, no prose.`,

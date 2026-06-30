@@ -48,6 +48,20 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   if (!has(config.CORS_ORIGINS)) {
     logger.warn('CORS_ORIGINS not set — defaulting to http://localhost:3000, which is wrong for prod.');
   }
+  // Hybrid tenancy (0196) — TENANCY_MODE selects the Admin RLS-bypass scope. Default 'single-company'
+  // (HQ sees ALL tenants — correct for one company with many branches). 'multi-company' scopes an Admin
+  // to its own org's tenants and REQUIRES org_id backfilled on tenants + Admin users.
+  const tmode = (config.TENANCY_MODE as string | undefined) ?? 'single-company';
+  if (tmode !== 'single-company' && tmode !== 'multi-company') {
+    logger.warn(`TENANCY_MODE='${tmode}' is invalid — expected 'single-company' | 'multi-company'. Falling back to single-company.`);
+  } else if (tmode === 'multi-company') {
+    logger.warn('TENANCY_MODE=multi-company — Admin RLS bypass is org-scoped. Ensure tenants.org_id and Admin users.org_id are backfilled, or HQ Admins will see no cross-branch data.');
+  }
+  // AI legal gate (panel #2) — in prod the AI assistant must not transmit tenant data to Anthropic until
+  // the DPA is executed. Warn loudly when a key is present but the DPA has not been acknowledged.
+  if (has(config.ANTHROPIC_API_KEY) && !has(config.AI_DPA_ACKNOWLEDGED)) {
+    logger.warn('ANTHROPIC_API_KEY is set but AI_DPA_ACKNOWLEDGED is not — AI endpoints will fail closed (AI_DPA_REQUIRED) until the signed Anthropic DPA is acknowledged. See docs/legal/data-processing-agreement.md.');
+  }
   const lacking = RECOMMENDED_IN_PROD.filter((k) => !has(config[k]));
   if (lacking.length) {
     logger.warn(

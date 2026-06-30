@@ -23,9 +23,19 @@ export class AdminUsersService {
 
   // Preventive SoD guard (ITGC-AC-09): block assigning a per-user permission OVERRIDE that holds duties on
   // both sides of a conflict rule, unless the admin explicitly overrides WITH a reason (which is logged).
-  // Role-default conflicts are tracked separately by the detective report (legacy roles are in transition).
-  private assertNoSodConflict(username: string, perms: string[] | undefined, allowOverride?: boolean, reason?: string) {
-    if (!perms?.length) return;
+  // A per-user override REPLACES the role default (see resolvePermissions precedence), so the override set
+  // IS the user's effective permission set — checking it here is checking the effective grant.
+  // Role-default conflicts (legacy coarse roles in transition) are GRANDFATHERED: not blocked here, but a
+  // detective warning is emitted so the quarterly UAR (getAccessReview) still surfaces them.
+  private assertNoSodConflict(username: string, role: string | undefined, perms: string[] | undefined, allowOverride?: boolean, reason?: string) {
+    if (!perms?.length) {
+      // No override → the bare role decides. Surface (don't block) any grandfathered role-default conflict.
+      if (role) {
+        const roleConflicts = detectSodConflicts(resolvePermissions(role as Role));
+        if (roleConflicts.length) this.logger.warn(`Grandfathered SoD conflict on role "${role}" for "${username}" — rules ${roleConflicts.map((c) => c.ruleId).join(',')}; tracked by quarterly UAR.`);
+      }
+      return;
+    }
     const conflicts = detectSodConflicts(perms as Permission[]);
     if (!conflicts.length) return;
     if (!allowOverride || !reason?.trim()) {
@@ -78,7 +88,7 @@ export class AdminUsersService {
     this.assertCanGrantRole(dto.role, actor);
     const [exists] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
     if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
-    this.assertNoSodConflict(username, dto.permissions, dto.allow_sod_override, dto.sod_reason);
+    this.assertNoSodConflict(username, dto.role, dto.permissions, dto.allow_sod_override, dto.sod_reason);
     const tenantId = await this.tenantIdFor(dto.customer_name);
     // Enforce the plan's maxUsers ceiling before inserting (PLAN_USER_LIMIT).
     // Admin principal (tenantId=null) is cross-tenant HQ — no limit applies.
@@ -97,7 +107,7 @@ export class AdminUsersService {
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
     this.assertCanGrantRole(dto.role, actor);
-    this.assertNoSodConflict(username, dto.permissions, dto.allow_sod_override, dto.sod_reason);
+    this.assertNoSodConflict(username, dto.role ?? (u.role as string), dto.permissions, dto.allow_sod_override, dto.sod_reason);
     const set: any = {};
     if (dto.role) set.role = dto.role;
     if (dto.customer_name !== undefined) set.tenantId = await this.tenantIdFor(dto.customer_name || undefined);

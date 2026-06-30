@@ -1,7 +1,20 @@
 # Data Processing Agreement (DPA) — Oshinei Enterprise ERP
 
-> **Status: DRAFT v0.1 — requires review and execution by qualified legal counsel before use.**
+> **Status: DRAFT v0.2 — requires review and execution by qualified legal counsel before use.**
 > Complete `<<…>>` placeholders. Not legal advice; not in force until executed by both parties.
+>
+> **Counsel TODO (must close before production AI is enabled):**
+> - [ ] Fill all `<<…>>` placeholders (effective date, legal entity, jurisdiction, notice periods, deadlines).
+> - [ ] **Execute the Anthropic data addendum** for the AI sub-processor (the precondition gated in code —
+>       see note below) and confirm the model-provider's data-handling/retention terms.
+> - [ ] Confirm the sub-processor list (Alibaba Cloud, Stripe, Anthropic, Sentry/OTel) and notice mechanism.
+> - [ ] Counsel review of cross-border transfer basis (PDPA s.28–29; GDPR Ch. V where EU subjects served).
+>
+> **Runtime enforcement of this precondition:** the platform fails **closed** — when an Anthropic API key is
+> set in production but `AI_DPA_ACKNOWLEDGED` is not, AI endpoints return `AI_DPA_REQUIRED` and the
+> AI-assisted services degrade to their deterministic (no-transmission) path. Set `AI_DPA_ACKNOWLEDGED=1`
+> only **after** this DPA and the Anthropic addendum are executed (see `apps/api/src/common/ai-models.ts`
+> `aiDpaBlocked()`).
 
 **Processor:** `<<Invisible Consulting Co., Ltd.>>` · **Controller:** the subscribing Customer
 **Effective date:** `<<effective-date>>` · **Framework:** Thailand PDPA B.E. 2562 (and, where the Customer

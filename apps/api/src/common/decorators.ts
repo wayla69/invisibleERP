@@ -17,6 +17,9 @@ export interface JwtUser {
   role: string;
   customerName: string | null;
   tenantId: number | null;
+  // Hybrid tenancy (0196) — the HQ org an Admin belongs to. Only consulted when TENANCY_MODE=multi-company,
+  // where it scopes the Admin's RLS bypass to sibling tenants in the same org. null/undefined elsewhere.
+  orgId?: number | null;
   permissions: string[];
   // Raw API-key scopes (only set for `ierp_` machine principals; undefined for human JWTs).
   // Used by the public API (/api/v1) scope guard; the permission system is unaffected.

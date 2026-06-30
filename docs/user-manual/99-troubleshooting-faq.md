@@ -117,6 +117,15 @@ your code below.
 | Code | Meaning | What to do |
 |------|---------|-----------|
 | `SOD_CONFLICT` | You tried to grant a user two conflicting duties. | Remove one duty or assign it to another person. See the SoD report at `/sod` and [Administration](./11-administration.md). |
+| `ADMIN_GRANT_DENIED` | A non-Admin tried to grant the Admin role. | Only an existing Admin can grant Admin. Ask an administrator. |
+
+### AI assistant
+
+| Code | Meaning | What to do |
+|------|---------|-----------|
+| `AI_DPA_REQUIRED` | AI is turned off because the data-processing agreement with the AI provider has not been acknowledged on this deployment. | An administrator must complete and acknowledge the DPA, then set `AI_DPA_ACKNOWLEDGED`. Until then the assistant and AI-assisted tools fall back to non-AI behaviour. See [Administration](./11-administration.md). |
+| `AI_BUDGET_EXCEEDED` | Your plan's daily AI token allowance is used up. | It resets at midnight (Bangkok time). Heavy users on the Enterprise tier accrue metered overage instead of a hard stop within their ceiling. Upgrade your plan for a higher daily allowance. |
+| `AI_UNAVAILABLE` | The AI assistant is not configured (no API key). | Ask an administrator to configure the AI provider key. |
 
 ---
 

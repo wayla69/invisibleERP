@@ -66,6 +66,7 @@ jobs:
           - { pkg: cutover, script: ext }
           - { pkg: cutover, script: worldclass }
           - { pkg: cutover, script: tenant-isolation }
+          - { pkg: cutover, script: ai-eval }
           - { pkg: cutover, script: module-qr }
           - { pkg: cutover, script: gaps }
           - { pkg: cutover, script: onboarding }
@@ -269,3 +270,32 @@ jobs:
             if (unjournaled.length || orphan.length || dupNum.length || dupTag.length || dupIdx.length) { console.error("::error::drizzle migration journal/numbering problem — hand-write the NEXT FREE 4-digit number and journal it (or run db:generate)"); process.exit(1); }
             console.log("OK: " + sqls.length + " migrations registered (" + GRANDFATHERED.length + " grandfathered), no duplicate numbers/tags/idx.");
           '
+
+  # Real-Postgres smoke (panel #1) — the divergence class PGlite hides: FORCE-RLS under app_user,
+  # the 0193 org-scoped policy, and postgres-js Date round-trips. Report-only for now (continue-on-error)
+  # until proven stable on main, then promote to a required check.
+  pg-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/ierp_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ierp_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Real-Postgres smoke (RLS org-scoping + Date round-trip)
+        run: pnpm --filter @ierp/cutover pg-smoke
