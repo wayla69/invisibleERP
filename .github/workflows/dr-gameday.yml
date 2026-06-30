@@ -1,0 +1,49 @@
+name: DR Game-day
+
+# ITGC-OP-02 — the automatable DR test: execute the recovery end-to-end against a real Postgres and
+# MEASURE the RTO/RPO (backup → simulated disaster → restore → verify → app bring-up). Runs on demand,
+# annually, and once when this branch is pushed (to capture the first measured RTO). Uploads the
+# DR-test report as evidence.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 1 1 *' # annually (Jan 1, 06:00 UTC) — the recurring DR test
+  push:
+    branches: ['**dr-gameday**']
+
+jobs:
+  dr-gameday:
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --experimental-sqlite
+      DR_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
+      JWT_SECRET: dr-ci-secret
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install postgresql-client 16 (pg_dump/pg_restore/psql)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm install --frozen-lockfile
+      - name: Build shared + api
+        run: pnpm --filter @ierp/shared build && pnpm --filter @ierp/api build
+      - name: DR game-day (measured RTO)
+        run: pnpm --filter @ierp/cutover dr-gameday
+      - name: Upload DR-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-gameday-report
+          path: dr-gameday-out/report.md
+          if-no-files-found: warn
