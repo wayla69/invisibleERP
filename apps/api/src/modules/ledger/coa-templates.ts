@@ -106,6 +106,7 @@ const SERVICES: CoaTemplateRow[] = [
   { code: '4200', name: 'Project Revenue', nameTh: 'รายได้งานโครงการ' },
   { code: '2400', name: 'Unearned Revenue', nameTh: 'รายได้รับล่วงหน้า' },
   { code: '1260', name: 'Unbilled Project Cost', nameTh: 'ต้นทุนงานโครงการที่ยังไม่เรียกเก็บ' },
+  { code: '1265', name: 'Contract Asset (Unbilled Receivable)', nameTh: 'สินทรัพย์ตามสัญญา' },
   { code: '2390', name: 'Project Costs Applied', nameTh: 'ต้นทุนโครงการรอปันส่วน' },
   { code: '5800', name: 'Cost of Services', nameTh: 'ต้นทุนงานบริการ' },
   { code: '1180', name: 'Employee Advances', nameTh: 'เงินทดรองจ่ายพนักงาน' },

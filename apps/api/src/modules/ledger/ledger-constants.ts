@@ -46,6 +46,7 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '1210', name: 'Finished Goods', type: 'Asset' },              // สินค้าสำเร็จรูป — จากใบสั่งผลิต
   { code: '2380', name: 'Manufacturing Costs Applied', type: 'Liability' }, // ค่าแรง/โสหุ้ยการผลิตที่คิดเข้างาน (clearing)
   { code: '1260', name: 'Project WIP / Unbilled Cost', type: 'Asset' },  // ต้นทุนงานโครงการที่ยังไม่รับรู้
+  { code: '1265', name: 'Contract Asset (Unbilled Receivable)', type: 'Asset' }, // สินทรัพย์ตามสัญญา — รายได้ที่รับรู้แล้วแต่ยังไม่เรียกเก็บ (POC, PROJ-09)
   { code: '2390', name: 'Project Costs Applied', type: 'Liability' },    // ต้นทุนโครงการคิดเข้างาน (clearing)
   { code: '4200', name: 'Project Revenue', type: 'Revenue' },            // รายได้งานโครงการ
   { code: '5800', name: 'Project Cost of Services', type: 'Expense' },   // ต้นทุนงานบริการโครงการ
@@ -98,6 +99,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '1210': { bucket: 'operating', label: 'สินค้าสำเร็จรูป (Finished goods)' },
   '1250': { bucket: 'operating', label: 'งานระหว่างทำ (Work-in-process)' },
   '1260': { bucket: 'operating', label: 'ต้นทุนโครงการที่ยังไม่เรียกเก็บ (Unbilled project cost)' },
+  '1265': { bucket: 'operating', label: 'สินทรัพย์ตามสัญญา (Contract asset / unbilled receivable)' },
   // Operating — current liabilities (an increase releases cash)
   '2000': { bucket: 'operating', label: 'เจ้าหนี้การค้า (Accounts payable)' },
   '2100': { bucket: 'operating', label: 'ภาษีค้างจ่าย (Tax payable)' },

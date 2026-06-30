@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -12,9 +12,12 @@ const CreateBody = z.object({
   billing_type: z.enum(['TM', 'Fixed']).optional(),
   budget_amount: z.number().nonnegative().optional(),
   contract_amount: z.number().nonnegative().optional(),
+  rev_method: z.enum(['billing', 'poc']).optional(),
+  estimated_cost: z.number().nonnegative().optional(),
   start_date: z.string().optional(),
   end_date: z.string().optional(),
 });
+const RecognizeBody = z.object({ as_of: z.string().optional(), estimated_cost: z.number().positive().optional() });
 const FromOppBody = z.object({
   project_code: z.string().optional(),
   billing_type: z.enum(['TM', 'Fixed']).optional(),
@@ -255,6 +258,13 @@ export class ProjectsController {
   @Post(':code/bill')
   bill(@Param('code') code: string, @Body(new ZodValidationPipe(BillBody)) b: BillDto, @CurrentUser() u: JwtUser) {
     return this.svc.bill(code, b, u);
+  }
+
+  // Over-time (percentage-of-completion) revenue recognition for a POC project (PROJ-09). Authorized.
+  @Post(':code/recognize')
+  @Permissions('gl_post', 'exec')
+  recognize(@Param('code') code: string, @Body(new ZodValidationPipe(RecognizeBody)) b: RecognizeDto, @CurrentUser() u: JwtUser) {
+    return this.svc.recognizePoc(code, b, u);
   }
 
   // ── WBS tasks (P1) ──

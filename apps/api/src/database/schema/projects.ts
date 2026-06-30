@@ -14,6 +14,11 @@ export const projects = pgTable(
     customerNo: text('customer_no'),                          // → customer_master (customer-of-record)
     crmOppNo: text('crm_opp_no'),                             // → crm_opportunities.opp_no (won deal it came from)
     billingType: text('billing_type').notNull().default('TM'), // TM | Fixed
+    // Revenue recognition basis (PROJ-09): 'billing' = point-in-time at billing (default, legacy);
+    // 'poc' = over-time cost-to-cost (estimated_cost drives the recognised %, accruing 1265/2410).
+    revMethod: text('rev_method').notNull().default('billing'),
+    estimatedCost: numeric('estimated_cost', { precision: 16, scale: 2 }).default('0'), // total estimated cost (EAC) for POC
+    recognizedRevenue: numeric('recognized_revenue', { precision: 16, scale: 2 }).default('0'), // revenue recognised to date (POC)
     budgetAmount: numeric('budget_amount', { precision: 16, scale: 2 }).default('0'),
     contractAmount: numeric('contract_amount', { precision: 16, scale: 2 }).default('0'),
     status: text('status').notNull().default('Open'),         // Open | Active | Closed
