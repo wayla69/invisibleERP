@@ -205,6 +205,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.budget': { th: 'งบประมาณเทียบจริง (Budget vs Actual)', en: 'Budget vs Actual' },
   'nav.demand': { th: 'พยากรณ์ความต้องการ (Demand ML)', en: 'Demand Forecast (ML)' },
   'nav.projects': { th: 'โครงการ (Projects)', en: 'Projects' },
+  'nav.pm_pipeline': { th: 'ไปป์ไลน์ Win/Loss', en: 'Win/Loss Pipeline' },
   'nav.profitability': { th: 'กำไรตามมิติ', en: 'Profitability by Dimension' },
   'nav.insights': { th: 'ข้อมูลเชิงลึก (Insights)', en: 'Insights' },
   'nav.bi': { th: 'BI Analytics', en: 'BI Analytics' },
