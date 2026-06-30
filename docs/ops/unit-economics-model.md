@@ -88,8 +88,10 @@ falls as tenants grow — infra is largely fixed, so margin improves with scale)
 ## 6. The margin guardrail (what the model enforces)
 
 1. **No unlimited AI tier** — every plan has a finite hard ceiling (`ai_tokens_daily_max`).
-2. **Overage is priced** — tokens above the included cap bill at `ai_overage_rate_thb_per_1k`, so a heavy
-   tenant is revenue-positive on AI, not a loss.
+2. **Overage is priced *and collected*** — tokens above the included cap bill at `ai_overage_rate_thb_per_1k`,
+   and the monthly `ai_overage_billing` job appends a Stripe invoice item per tenant (idempotent per
+   tenant+month), so a heavy tenant is revenue-positive on AI, not a loss. See
+   [`pricing-and-ai-cogs.md`](pricing-and-ai-cogs.md).
 3. **Off-Opus tiering** — mechanical AI tasks run on Haiku/Sonnet (regression-tested), keeping blended token
    COGS at the assumed ~0.14 THB/1k rather than ~10× that on Opus.
 4. **Watch Starter at low scale** — margin-negative on infra allocation until tenant count amortizes the base;
