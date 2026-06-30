@@ -1,4 +1,6 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, Query, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, Query, HttpCode, Sse } from '@nestjs/common';
+import { map, filter } from 'rxjs/operators';
+import { of } from 'rxjs';
 import { z } from 'zod';
 import { BiService } from './bi.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -55,6 +57,23 @@ export class BiController {
   @Get('report-types')
   @Permissions('exec')
   reportTypes() { return this.svc.reportTypes(); }
+
+  // ── Real-time streaming analytics (docs/22 Phase B) ──
+  // Live KPI/event SSE stream, filtered to the caller's tenant. A snapshot refresh pushes a kpi_refresh event.
+  @Sse('live/stream')
+  @Permissions('exec')
+  liveStream(@CurrentUser() user: JwtUser) {
+    const src = this.svc.liveStream();
+    if (!src) return of({ data: { type: 'unavailable' } });
+    return src.pipe(filter((e: any) => e.tenant_id == null || e.tenant_id === user.tenantId), map((data) => ({ data })));
+  }
+
+  // Buffered recent live feed (HTTP-testable companion to the SSE stream).
+  @Get('live/recent')
+  @Permissions('exec')
+  liveRecent(@Query('limit') limit?: string, @CurrentUser() user?: JwtUser) {
+    return this.svc.liveRecent(user!, qintOpt('limit', limit));
+  }
 
   @Get('subscriptions')
   @Permissions('exec')

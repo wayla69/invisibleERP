@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Banknote, Gauge, Package, Receipt, RefreshCw, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useRealtime } from '@/hooks/use-realtime';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -46,6 +47,9 @@ export default function DashboardPage() {
 
   const refreshing = q.isFetching || t.isFetching || mine.isFetching;
   const refresh = () => { for (const k of ['dashboard', 'dashboard-trend', 'dashboard-mine']) qc.invalidateQueries({ queryKey: [k] }); };
+  // Streaming analytics (docs/22 Phase B): live-refresh the headline figures the instant a KPI snapshot is
+  // pushed, instead of waiting for the 60s poll. `connected` drives a live/offline badge.
+  const { connected } = useRealtime((e) => { if (e.type === 'kpi_refresh') refresh(); }, { path: '/api/bi/live/stream' });
 
   const trendData = (t.data?.trend ?? []).map((r) => ({ ...r, label: thaiDate(r.date) }));
   const topItems = (d?.top_items_today ?? []).slice(0, 6).map((r) => ({ name: r.Item_Description, revenue: r.revenue }));
@@ -57,9 +61,14 @@ export default function DashboardPage() {
         title="แดชบอร์ด"
         description="ภาพรวมธุรกิจแบบเรียลไทม์"
         actions={
-          <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} aria-label="รีเฟรชข้อมูล">
-            <RefreshCw className={`size-4 ${refreshing ? 'animate-spin' : ''}`} /> รีเฟรช
-          </Button>
+          <div className="flex items-center gap-2">
+            <Badge variant={connected ? 'success' : 'muted'} className="gap-1" title={connected ? 'รับข้อมูลสดแบบเรียลไทม์' : 'ออฟไลน์ — รีเฟรชทุก 60 วินาที'}>
+              <span className={`inline-block size-1.5 rounded-full ${connected ? 'bg-success animate-pulse' : 'bg-muted-foreground'}`} /> {connected ? 'สด' : 'ออฟไลน์'}
+            </Badge>
+            <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} aria-label="รีเฟรชข้อมูล">
+              <RefreshCw className={`size-4 ${refreshing ? 'animate-spin' : ''}`} /> รีเฟรช
+            </Button>
+          </div>
         }
       />
 
