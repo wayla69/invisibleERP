@@ -425,19 +425,51 @@ export class ProjectsService {
     return { project_code: code, series, current, bac: current.bac };
   }
 
-  // Portfolio EVM (for the schedulable BI report): the earned-value snapshot of every project, with totals
-  // and the at-risk list (CPI or SPI below 0.9). Read-only — rides the existing evm() per project.
+  // Portfolio command center (A1): an executive cross-project rollup — EVM totals, project-health buckets,
+  // status + financial totals, the at-risk list, resource capacity, and the pipeline→delivery funnel. Also
+  // backs the schedulable `project_evm` BI report. Read-only — rides evm() / resourceUtilization() / crm.
   async portfolioEvm(user: JwtUser) {
+    const db = this.db as any;
     const list = await this.list(user);
     const rows: any[] = [];
-    let bac = 0, ev = 0, ac = 0, eac = 0;
+    let bac = 0, ev = 0, ac = 0, eac = 0, contract = 0, billed = 0, wip = 0, margin = 0, costToDate = 0;
+    const status_counts: Record<string, number> = {};
+    const health = { on_track: 0, at_risk: 0, no_data: 0 };
     for (const p of list.projects) {
       const e = await this.evm(p.project_code);
-      rows.push({ project_code: p.project_code, name: p.name, status: p.status, bac: e.bac, ev: e.ev, ac: e.ac, eac: e.eac, cpi: e.cpi, spi: e.spi });
+      const hasData = e.cpi != null || e.spi != null;
+      const risky = (e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9);
+      if (!hasData) health.no_data++; else if (risky) health.at_risk++; else health.on_track++;
+      rows.push({ project_code: p.project_code, name: p.name, status: p.status, customer_name: p.customer_name, billing_type: p.billing_type, cpi: e.cpi, spi: e.spi, bac: e.bac, ev: e.ev, ac: e.ac, eac: e.eac, wip: p.wip, margin: p.margin, on_track: hasData && !risky });
       bac = r2(bac + e.bac); ev = r2(ev + e.ev); ac = r2(ac + e.ac); eac = r2(eac + e.eac);
+      contract = r2(contract + n(p.contract_amount)); billed = r2(billed + n(p.billed_to_date)); wip = r2(wip + n(p.wip)); margin = r2(margin + n(p.margin)); costToDate = r2(costToDate + n(p.cost_to_date));
+      status_counts[p.status] = (status_counts[p.status] ?? 0) + 1;
     }
-    const at_risk = rows.filter((r) => (r.cpi != null && r.cpi < 0.9) || (r.spi != null && r.spi < 0.9)).map((r) => r.project_code);
-    return { as_of: ymd(), count: rows.length, totals: { bac, ev, ac, eac, cpi: ac > 0 ? r4(ev / ac) : null }, at_risk, projects: rows };
+    const at_risk = rows
+      .filter((r) => (r.cpi != null && r.cpi < 0.9) || (r.spi != null && r.spi < 0.9))
+      .map((r) => ({ project_code: r.project_code, name: r.name, cpi: r.cpi, spi: r.spi }))
+      .sort((a, b) => (a.cpi ?? 9) - (b.cpi ?? 9));
+    const cap = await this.resourceUtilization(user);
+    // Pipeline → delivery funnel: open + won opportunities (crm), and projects originated from a won deal.
+    const OPEN = ['prospecting', 'qualification', 'proposal', 'negotiation'];
+    const opps = await db.select().from(crmOpportunities);
+    let open_count = 0, open_amount = 0, won_count = 0, won_amount = 0;
+    for (const o of opps) {
+      const amt = n(o.amount);
+      if (OPEN.includes(o.stage)) { open_count++; open_amount = r2(open_amount + amt); }
+      else if (o.stage === 'won') { won_count++; won_amount = r2(won_amount + amt); }
+    }
+    const converted_count = list.projects.filter((p: any) => p.crm_opp_no).length;
+    return {
+      as_of: ymd(), count: rows.length,
+      status_counts,
+      financials: { contract, billed, wip, margin, cost_to_date: costToDate },
+      totals: { bac, ev, ac, eac, cpi: ac > 0 ? r4(ev / ac) : null },
+      health,
+      capacity: { over_allocated_count: cap.over_allocated_count, top: cap.utilization.slice(0, 5) },
+      funnel: { open_count, open_amount, won_count, won_amount, converted_count },
+      at_risk, projects: rows,
+    };
   }
 
   private async row(code: string) {
