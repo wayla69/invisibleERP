@@ -68,13 +68,12 @@ function applyMigrations(url: string): void {
 // Re-establish the cluster-level app_user role + its table/sequence GRANTs after a --no-privileges
 // restore (the dump carries schema + RLS policies but not roles/privileges). Light locks (GRANT, not DDL).
 function reestablishAppUser(url: string): void {
-  const sqlText = [
-    `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='app_user') THEN CREATE ROLE app_user NOLOGIN; END IF; END $$;`,
-    `GRANT USAGE ON SCHEMA public TO app_user;`,
-    `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;`,
-    `GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO app_user;`,
-  ].join(' ');
-  sh(`psql "${url}" -v ON_ERROR_STOP=1 -c "${sqlText.replace(/"/g, '\\"')}"`);
+  // Create the role if absent, tolerating "already exists" (roles are cluster-level and persist across the
+  // dropped primary db). Deliberately NO `DO $$…$$` block: passed through a shell -c string, `$$` expands
+  // to the shell's PID → "syntax error near <pid>".
+  try { sh(`psql "${url}" -c "CREATE ROLE app_user NOLOGIN"`); } catch { /* already exists — fine */ }
+  const grants = `GRANT USAGE ON SCHEMA public TO app_user; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO app_user;`;
+  sh(`psql "${url}" -v ON_ERROR_STOP=1 -c "${grants}"`);
 }
 
 async function main() {
