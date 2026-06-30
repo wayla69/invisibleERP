@@ -46,6 +46,7 @@ your code below.
 | `TEMPLATE_EXISTS` | You tried to create a **project template** with a `code` that's already taken. | Choose a different template code (or leave it blank to auto-generate). |
 | `TEMPLATE_NOT_FOUND` | The template code given to read/apply doesn't exist. | Check the code against **Templates**; create the template first. |
 | `PROJECT_HAS_TASKS` | You tried to **apply a template** to a project that already has tasks. | A template scaffolds a fresh WBS, so it only applies to a project with no tasks yet. Apply it right after creating the project (the create form's *เริ่มจากแม่แบบ* picker does this), or start a new project. |
+| `RISK_NOT_FOUND` | The risk/issue id given to update (re-score or close) doesn't exist. | Check the id against the project's **ความเสี่ยง & ปัญหา** register; log the risk first. |
 | `SOD_SELF_POST` | The same person who **computed** an AR allowance (provision for doubtful accounts) tried to **post** it. | A different reviewer (`gl_post` / `exec`) posts the allowance — the computer can't post their own. See [Finance — AR & AP → Allowance](./05-finance-ar-ap.md). |
 | `ALLOWANCE_POSTED` / `ALREADY_POSTED` | You tried to (re)post an AR allowance that is already posted. | A given allowance posts once; to revise, **compute a fresh allowance** for a later `as_of_date`. |
 

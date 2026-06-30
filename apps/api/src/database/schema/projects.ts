@@ -207,10 +207,37 @@ export const projectTemplateItems = pgTable(
   (t) => ({ byTemplate: index('idx_ptemplate_item_template').on(t.templateId) }),
 );
 
+// Project risk & issue register (B4, PROJ-08) — a risk (future threat, scored probability × impact) or an
+// issue (materialised problem, scored by impact). RAG + owner + mitigation + due date drive governance: an
+// open HIGH risk that is unmitigated is surfaced for review (detective control), never silently buried.
+export const projectRisks = pgTable(
+  'project_risks',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    kind: text('kind').notNull().default('risk'),             // risk | issue
+    title: text('title').notNull(),
+    status: text('status').notNull().default('open'),         // open | mitigating | closed
+    probability: integer('probability'),                      // 1..5 (risks; null for issues)
+    impact: integer('impact').notNull().default(1),           // 1..5
+    score: integer('score').notNull().default(1),             // 1..25
+    rag: text('rag').notNull().default('green'),              // red | amber | green
+    owner: text('owner'),
+    mitigation: text('mitigation'),
+    dueDate: date('due_date'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+  },
+  (t) => ({ byProject: index('idx_prisk_project').on(t.projectId) }),
+);
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectBaseline = typeof projectBaselines.$inferSelect;
 export type ProjectTemplate = typeof projectTemplates.$inferSelect;
 export type ProjectTemplateItem = typeof projectTemplateItems.$inferSelect;
+export type ProjectRisk = typeof projectRisks.$inferSelect;
 export type ProjectTask = typeof projectTasks.$inferSelect;
 export type ProjectMilestone = typeof projectMilestones.$inferSelect;
 export type ResourceRate = typeof resourceRates.$inferSelect;

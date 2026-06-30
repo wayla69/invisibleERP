@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -94,6 +94,24 @@ const TemplateBody = z.object({
   items: z.array(TemplateItemBody).optional(),
 });
 const ApplyTemplateBody = z.object({ start_date: z.string().optional() });
+const RiskBody = z.object({
+  kind: z.enum(['risk', 'issue']).optional(),
+  title: z.string().min(1),
+  probability: z.number().int().min(1).max(5).optional(),
+  impact: z.number().int().min(1).max(5).optional(),
+  owner: z.string().optional(),
+  mitigation: z.string().optional(),
+  due_date: z.string().optional(),
+});
+const RiskPatchBody = z.object({
+  status: z.enum(['open', 'mitigating', 'closed']).optional(),
+  probability: z.number().int().min(1).max(5).optional(),
+  impact: z.number().int().min(1).max(5).optional(),
+  owner: z.string().optional(),
+  mitigation: z.string().optional(),
+  due_date: z.string().optional(),
+  title: z.string().min(1).optional(),
+});
 const RateCardBody = z.object({
   role: z.string().min(1),
   cost_rate: z.number().nonnegative().optional(),
@@ -160,6 +178,18 @@ export class ProjectsController {
     return this.svc.myTasks(u);
   }
 
+  // Portfolio top-risks roll-up (B4, PROJ-08): open risks/issues across projects, ranked. Static segment.
+  @Get('risks/top')
+  topRisks(@CurrentUser() u: JwtUser) {
+    return this.svc.topRisks(u);
+  }
+
+  // Update a risk/issue (status/score/mitigation). Static 'risks' segment, so it never collides with :code.
+  @Patch('risks/:riskId')
+  patchRisk(@Param('riskId') riskId: string, @Body(new ZodValidationPipe(RiskPatchBody)) b: RiskPatchDto, @CurrentUser() u: JwtUser) {
+    return this.svc.patchRisk(Number(riskId), b, u);
+  }
+
   @Get(':code')
   get(@Param('code') code: string) {
     return this.svc.get(code);
@@ -204,6 +234,17 @@ export class ProjectsController {
   @Get(':code/baseline')
   getBaseline(@Param('code') code: string, @CurrentUser() u: JwtUser) {
     return this.svc.getBaseline(code, u);
+  }
+
+  // ── Risk & issue register (B4, PROJ-08) ──
+  @Post(':code/risks')
+  addRisk(@Param('code') code: string, @Body(new ZodValidationPipe(RiskBody)) b: RiskDto, @CurrentUser() u: JwtUser) {
+    return this.svc.addRisk(code, b, u);
+  }
+
+  @Get(':code/risks')
+  listRisks(@Param('code') code: string) {
+    return this.svc.listRisks(code);
   }
 
   @Post(':code/cost')

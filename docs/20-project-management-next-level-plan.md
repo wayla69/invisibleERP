@@ -74,12 +74,13 @@ at **rev 0.11**; UAT through **UAT-O2C-211**.
   PROJ-04). Web: RACI column + Accountable/Responsible inputs on the task form, *งานของฉัน* panel on
   `/projects`. Narrative PN-16 step 14; UAT-O2C-215; harness `tools/cutover/src/projects.ts`.
 
-### B4 — Risk & issue log (control **PROJ-08**)
-- `project_risks` / `project_issues` (RAG status, owner, probability·impact score, mitigation, due date,
-  open/closed) with CRUD + a project **risk register** tab and a portfolio **top-risks** roll-up (Track A).
-  Detective governance control **PROJ-08** (open high risks reviewed at close; an unmitigated high risk is
-  surfaced, not buried).
-- Migration; RCM PROJ-08 + regenerate; narrative + UAT + harness; web (Risks/Issues tab).
+### B4 — Risk & issue log (control **PROJ-08**) — DELIVERED
+- `project_risks` (migration 0192) — one table covers both a **risk** (prob×impact) and an **issue** (5×impact),
+  scored 1–25 with a derived RAG, owner, mitigation and due date; `status` open/mitigating/closed. CRUD via
+  `POST/GET /api/projects/:code/risks`, `PATCH /api/projects/risks/:id`; portfolio **top-risks** roll-up at
+  `GET /api/projects/risks/top` (Track A tie-in). Detective control **PROJ-08** — the register summary +
+  top-risks surface the **unmitigated-high** subset for review, not buried. Web: a *ความเสี่ยง & ปัญหา*
+  workspace tab. RCM 142. Narrative PN-16 step 15 / matrix row 13; UAT-O2C-216; harness `tools/cutover/src/projects.ts`.
 
 ---
 

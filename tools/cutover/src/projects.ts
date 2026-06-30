@@ -354,6 +354,32 @@ async function main() {
     !(mineMgr.json.tasks ?? []).some((t: any) => t.name === 'RACI-C'),
     JSON.stringify({ n: (mineMgr.json.tasks ?? []).map((t: any) => t.name) }));
 
+  // ── 22. risk & issue register + portfolio top-risks (PROJ-08, B4) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-RISK', name: 'งานมีความเสี่ยง', billing_type: 'TM' });
+  const rk1 = await inj('POST', '/api/projects/PRJ-RISK/risks', admin, { title: 'Key vendor may slip', probability: 5, impact: 5, owner: 'pm1' }); // 25 red, no mitigation
+  ok('Add HIGH risk (5×5=25, red), no mitigation → summary high_open 1, unmitigated_high 1',
+    rk1.json.summary?.high_open === 1 && rk1.json.summary?.unmitigated_high === 1 && rk1.json.risks?.[0]?.score === 25 && rk1.json.risks?.[0]?.rag === 'red',
+    JSON.stringify({ h: rk1.json.summary?.high_open, u: rk1.json.summary?.unmitigated_high, s: rk1.json.risks?.[0]?.score }));
+  const highId = rk1.json.risks.find((r: any) => r.title === 'Key vendor may slip').id;
+  await inj('POST', '/api/projects/PRJ-RISK/risks', admin, { kind: 'issue', title: 'Env outage', impact: 4, mitigation: 'Failover to DR', owner: 'ops' }); // issue 5×4=20 red, mitigated
+  const rk3 = await inj('POST', '/api/projects/PRJ-RISK/risks', admin, { title: 'Minor doc gap', probability: 1, impact: 2 }); // 2 green
+  ok('Issue scored 5×impact (20, red); low risk green; register summary risks 2 / issues 1',
+    rk3.json.summary?.risks === 2 && rk3.json.summary?.issues === 1 && rk3.json.risks?.some((r: any) => r.kind === 'issue' && r.score === 20 && r.rag === 'red') && rk3.json.risks?.some((r: any) => r.rag === 'green'),
+    JSON.stringify({ r: rk3.json.summary?.risks, i: rk3.json.summary?.issues }));
+  const mit = await inj('PATCH', `/api/projects/risks/${highId}`, admin, { mitigation: 'Dual-source the vendor', status: 'mitigating' });
+  ok('Mitigate the HIGH risk → unmitigated_high falls to 0 (still high_open 2)',
+    mit.json.summary?.unmitigated_high === 0 && mit.json.summary?.high_open === 2, JSON.stringify({ u: mit.json.summary?.unmitigated_high, h: mit.json.summary?.high_open }));
+  const top = await inj('GET', '/api/projects/risks/top', admin);
+  ok('Portfolio top-risks: open red item ranked first, high_count 2, unmitigated_high_count 0',
+    top.json.top?.[0]?.score === 25 && top.json.high_count === 2 && top.json.unmitigated_high_count === 0 && top.json.top?.every((r: any) => r.project_code),
+    JSON.stringify({ first: top.json.top?.[0]?.score, hc: top.json.high_count, uh: top.json.unmitigated_high_count }));
+  const closeIssue = rk3.json.risks.find((r: any) => r.kind === 'issue').id;
+  const closed = await inj('PATCH', `/api/projects/risks/${closeIssue}`, admin, { status: 'closed' });
+  ok('Close the issue → open count drops, closed 1, closed_at stamped',
+    closed.json.summary?.closed === 1 && closed.json.risks?.find((r: any) => r.id === closeIssue)?.closed_at != null, JSON.stringify({ c: closed.json.summary?.closed }));
+  const rkBad = await inj('PATCH', '/api/projects/risks/999999', admin, { status: 'closed' });
+  ok('Patch unknown risk → 404 RISK_NOT_FOUND', rkBad.status === 404 && rkBad.json.error?.code === 'RISK_NOT_FOUND', `${rkBad.status} ${rkBad.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

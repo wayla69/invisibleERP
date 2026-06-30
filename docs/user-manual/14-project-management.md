@@ -52,6 +52,11 @@ Tabbed, deep-linkable (`?tab=`):
   *วางบิล %* raises that Fixed-price progress bill automatically when reached.
 - **ทรัพยากร (Resources)** — assign people (the cost/bill rate is pulled from the rate card by role);
   over-allocation across projects is flagged in the capacity report.
+- **ความเสี่ยง & ปัญหา (Risks & issues)** — log a **risk** (scored *probability × impact*) or an **issue**
+  (scored by impact) with an owner, mitigation plan and due date. Each gets a RAG level (สูง/กลาง/ต่ำ). The KPI
+  band highlights **open high risks** and — critically — those that are **high with no mitigation plan**
+  (`สูง·ยังไม่มีแผนรับมือ`); the check icon closes an item. Governance control **PROJ-08** surfaces an
+  unmitigated high risk for review rather than letting it be buried.
 - **ต้นทุน & บิล (Costs & bill)** — the cost-entry ledger with the posting JE, plus *ลงต้นทุน* / *วางบิล* dialogs.
 
 ## Win/Loss pipeline dashboard (`/projects/pipeline`)
@@ -71,3 +76,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.0 | 2026-06-30 | Initial guide — PPM workspace, Gantt/EVM, win/loss dashboard (PPM roadmap `docs/19`). |
 | 1.1 | 2026-06-30 | Project **templates** (`docs/20` B2) — *เริ่มจากแม่แบบ* picker on the create form scaffolds a standard WBS + milestones; `TEMPLATE_EXISTS` / `TEMPLATE_NOT_FOUND` / `PROJECT_HAS_TASKS` added to troubleshooting. |
 | 1.2 | 2026-06-30 | **RACI** on tasks (`docs/20` B3) — Accountable/Responsible inputs + RACI column on the schedule; *งานของฉัน (My tasks)* panel on `/projects`. |
+| 1.3 | 2026-06-30 | **Risk & issue register** (`docs/20` B4, PROJ-08) — *ความเสี่ยง & ปัญหา* workspace tab with RAG scoring, open-high / unmitigated-high KPIs and close action; `RISK_NOT_FOUND` added to troubleshooting. |
