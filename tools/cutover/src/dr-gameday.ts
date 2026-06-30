@@ -95,20 +95,11 @@ async function main() {
   log('- setup: created primary db; applying migrations (file-by-file)…');
   applyMigrations(PRIMARY);
 
-  // Seed representative rows (as the connecting superuser → bypasses RLS). Real password hash so the
-  // app-readiness phase can actually log in against the recovered db.
-  const pw = new PasswordService();
-  const hash = await pw.hash('admin123');
-  // Role 'ExecutiveViewer' — read-only (fin_report/dashboard), and crucially NOT MFA-required (an Admin/
-  // finance role would gate login on TOTP enrolment → no token), so the app-readiness phase can log in.
-  const seedSql = `
-    INSERT INTO tenants (code,name) VALUES ('DR-HQ','DR HQ') ON CONFLICT DO NOTHING;
-    INSERT INTO users (username,password_hash,role,tenant_id)
-      SELECT 'druser','${hash}','ExecutiveViewer', t.id FROM tenants t WHERE t.code='DR-HQ' ON CONFLICT DO NOTHING;`;
-  sh(`psql "${PRIMARY}" -v ON_ERROR_STOP=1 -c "${seedSql.replace(/"/g, '\\"')}"`);
-  // Seed chart-of-accounts + a balanced journal via the app's LedgerService would be ideal; for the drill
-  // we just need the key tables non-empty. accounts/journal_entries are seeded by booting the app once.
-  await seedLedger(PRIMARY);
+  // Seed tenant + user + chart-of-accounts via DRIZZLE inside one app boot (NOT psql -c): a scrypt hash
+  // contains `$` delimiters which a shell would expand inside a -c string, corrupting the stored hash →
+  // login fails. Bound drizzle params avoid all shell escaping. Role 'ExecutiveViewer' is read-only and
+  // NOT MFA-required, so the app-readiness phase can log in (an Admin/finance role gates login on TOTP).
+  await seedPrimary(PRIMARY);
 
   const snapshot = counts(PRIMARY); // RPO evidence — the state captured at backup time
   log(`- setup: seeded; row snapshot = ${JSON.stringify(snapshot)}`);
@@ -202,27 +193,27 @@ async function main() {
   process.exit(pass ? 0 : 1);
 }
 
-// Boot the app once against `url` to seed the chart-of-accounts + a balanced journal entry, so the
-// VERIFY phase's key tables (accounts, journal_entries) are non-empty.
-async function seedLedger(url: string): Promise<void> {
+// Boot the app once against `url` and seed tenant + login user + chart-of-accounts — all via DRIZZLE
+// (bound params, no shell/psql), so the scrypt password hash (which contains `$`) is stored intact.
+async function seedPrimary(url: string): Promise<void> {
   const client = postgres(url, { max: 2, onnotice: () => {} });
   const db = tenantAwareProxy(drizzle(client, { schema: s }) as any);
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(db).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
+  const hash = await new PasswordService().hash('admin123');
+  const { LedgerService } = await import('../../../apps/api/dist/modules/ledger/ledger.service');
+  const { runInTenantContext } = await import('../../../apps/api/dist/common/tenant-run');
+  const ledger = app.get(LedgerService);
   try {
-    const { LedgerService } = await import('../../../apps/api/dist/modules/ledger/ledger.service');
-    const ledger = app.get(LedgerService);
-    const [hq] = await (db as any).select().from(s.tenants).where(eq(s.tenants.code, 'DR-HQ'));
-    const { runInTenantContext } = await import('../../../apps/api/dist/common/tenant-run');
-    // Populate `accounts` (chart of accounts) so the VERIFY key-table set is non-empty. journal_entries
-    // only needs to EXIST (migrations create it) — verify-restore passes on count 0 and RPO reconciles 0===0.
-    await runInTenantContext(db, { tenantId: Number(hq.id), bypass: true, actor: 'dr-seed' }, async () => {
-      await ledger.seedChartOfAccounts();
+    await runInTenantContext(db, { tenantId: null, bypass: true, actor: 'dr-seed' }, async () => {
+      await db.insert(s.tenants).values({ code: 'DR-HQ', name: 'DR HQ' }).onConflictDoNothing();
+      const [hq] = await db.select().from(s.tenants).where(eq(s.tenants.code, 'DR-HQ'));
+      // ExecutiveViewer = read-only, NOT MFA-required → the readiness phase can log in.
+      await db.insert(s.users).values({ username: 'druser', passwordHash: hash, role: 'ExecutiveViewer' as any, tenantId: Number(hq.id) }).onConflictDoNothing();
+      await ledger.seedChartOfAccounts(); // populate `accounts` so the VERIFY key-table set is non-empty
     });
-  } catch (e: any) {
-    console.log(`  (seedLedger note: ${e?.message ?? e})`);
   } finally {
     await app.close();
     await client.end({ timeout: 5 });
