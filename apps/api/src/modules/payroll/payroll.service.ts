@@ -220,7 +220,13 @@ export class PayrollService implements OnModuleInit {
       sso: sql<string>`coalesce(sum(${payruns.ssoEeTotal} + ${payruns.ssoErTotal}),0)`,
       wht: sql<string>`coalesce(sum(${payruns.whtTotal}),0)`,
     }).from(payruns).where(and(eq(payruns.tenantId, tenantId), eq(payruns.status, 'Posted')));
-    const expected: Record<string, number | null> = { '2350': r2(n(pr?.sso ?? 0)), '2360': r2(n(pr?.wht ?? 0)), '2370': null };
+    // PAY-02 — PF (2370) expected accrual from the payslip detail (payruns carries no PF total column), so all
+    // three statutory liabilities (SSO/WHT/PF) tie to an independent payroll aggregate, not just the GL.
+    const [pf] = await db.select({
+      pf: sql<string>`coalesce(sum(${payslips.pfEmployee} + ${payslips.pfEmployer}),0)`,
+    }).from(payslips).innerJoin(payruns, eq(payslips.payrunId, payruns.id))
+      .where(and(eq(payruns.tenantId, tenantId), eq(payruns.status, 'Posted')));
+    const expected: Record<string, number | null> = { '2350': r2(n(pr?.sso ?? 0)), '2360': r2(n(pr?.wht ?? 0)), '2370': r2(n(pf?.pf ?? 0)) };
     const lines = [] as any[];
     for (const L of this.LIAB) {
       const g = await this.glAcct(L.code, tenantId);
