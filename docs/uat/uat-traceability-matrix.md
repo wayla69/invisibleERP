@@ -424,6 +424,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-UI-EAM-01 | EAM screen reachable + WO lifecycle / PM sweep / reliability (UI) | FA-06 | 09 §7 |
 | TC-GL-18-01 | FX revaluation run computes unrealized gain/loss | GL-18 | 04 §3.2 |
 | TC-GL-18-02 | FX revaluation post maker-checker + idempotent (5400/1100/2000) | GL-18, R05 | 04 §3.2 |
+| TC-GL-19-01 | Pre-lock validation of a clean period → ready | GL-19 | 04 §2.1 |
+| TC-GL-19-02 | Unposted Draft JE blocks pre-lock readiness | GL-19 | 04 §2.1 |
 | TC-CON-02-01 | Consolidation eliminates IC + keeps group TB balanced | CON-03 | 11 §7.8 |
 | TC-CON-02-02 | Consolidation run→post maker-checker (SELF_POST/ALREADY_POSTED) | CON-03, R07 | 11 §7.9 |
 | TC-CON-02-03 | Unbalanced eliminations → CONSOL_UNBALANCED (rolled back) | CON-03 | 11 §7.8 |

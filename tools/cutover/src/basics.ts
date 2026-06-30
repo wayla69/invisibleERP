@@ -914,6 +914,23 @@ async function main() {
     (startClose.status === 200 || startClose.status === 201) && startClose.json?.status === 'InProgress' && Array.isArray(startClose.json?.steps) && startClose.json.steps.length >= 4,
     `st=${startClose.status} status=${startClose.json?.status} steps=${startClose.json?.steps?.length}`);
 
+  // TC-GL-19-CLOSE-01: pre-lock validation of a clean past period → ready, every hard check ok, no blockers.
+  const valClean = await inj('GET', `/api/ledger/close/validate?period=${closePeriod}`, admin);
+  ok('GL-19: validate a clean period → ready=true, no blockers, drafts/balance checks ok',
+    valClean.status === 200 && valClean.json?.ready === true && (valClean.json?.blockers ?? []).length === 0 &&
+    valClean.json?.checks?.find((c: any) => c.key === 'unposted_drafts')?.ok === true &&
+    valClean.json?.checks?.find((c: any) => c.key === 'period_balanced')?.ok === true,
+    `st=${valClean.status} ready=${valClean.json?.ready} blockers=${JSON.stringify(valClean.json?.blockers)}`);
+
+  // TC-GL-19-CLOSE-02: a manual JE posts as Draft (GL-05). Validate that period → unposted_drafts blocks readiness.
+  const draftPeriod = '2019-06';
+  await inj('POST', '/api/ledger/journal', admin, { date: `${draftPeriod}-10`, source: 'Manual', memo: 'pre-close draft', lines: [{ account_code: '1000', debit: 25 }, { account_code: '4000', credit: 25 }] });
+  const valDraft = await inj('GET', `/api/ledger/close/validate?period=${draftPeriod}`, admin);
+  ok('GL-19: a Draft JE in the period → ready=false, unposted_drafts blocker (count ≥ 1)',
+    valDraft.json?.ready === false && (valDraft.json?.blockers ?? []).includes('unposted_drafts') &&
+    valDraft.json?.checks?.find((c: any) => c.key === 'unposted_drafts')?.count >= 1,
+    `ready=${valDraft.json?.ready} blockers=${JSON.stringify(valDraft.json?.blockers)}`);
+
   // TC-GL-15-02: lock before steps are done → STEPS_INCOMPLETE.
   const lockEarly = await inj('POST', '/api/ledger/close/lock', admin, { close_run_id: closeRunId });
   ok('GL-15: lock before steps complete → STEPS_INCOMPLETE',

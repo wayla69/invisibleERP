@@ -64,12 +64,12 @@ control, no migration. Harness: extend `bi.ts`.
 Surface the existing scorecard compute as a schedulable `supplier_scorecard` `REPORT_TYPE` (avg score +
 underperformer count). No new control, no migration. Harness: extend `bi.ts`.
 
-### RG-4 — Close pre-lock programmatic validation (candidate control GL-17) — *optional*
-The close checklist is sign-off-driven; there is no *programmatic* assertion that the books are clean before
-`lockPeriod`. Add a read-only `GET /api/ledger/close/validate` that checks: no unposted draft JEs in the
-period, suspense/clearing accounts (2380/2390) net ~zero, and no unbalanced batch — surfaced in the
-period-close UI as advisory blockers (lock not hard-gated unless signed off). Candidate control **GL-17**;
-migration only if a results table is wanted. Harness: extend `tools/cutover/src/close.ts`.
+### RG-4 — Close pre-lock programmatic validation (control GL-19) — DELIVERED
+> **DELIVERED** — read-only `GET /api/ledger/close/validate?period=YYYY-MM` asserts: no unposted Draft JEs in
+> the period, the period's Posted entries balance in aggregate, every posted entry is individually balanced,
+> and suspense/clearing (2380/2390/1999/9999) net ~zero (advisory) → `ready` + `blockers`/`warnings` + a
+> per-check breakdown, surfaced before the GL-16 lock. New **detective** control **GL-19** (RCM → 143). No
+> migration (read-only). Harness `tools/cutover/src/basics.ts` (clean period ready; a Draft JE blocks).
 
 ## 3. Recommendation & order
 RG-1 → RG-2 → RG-3 are pure BI-spine additions (share `bi.service.ts`/`bi.ts`, so sequence them, don't
@@ -86,4 +86,4 @@ RFQ/match/budget functionality.
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-30 | ERP / Product | Initial Track-D gap-closure roadmap (MRP flagship). **Over-scoped — see v0.2.** |
-| 0.2 RECONCILED | 2026-06-30 | ERP / Product | Corrected after a deeper audit: MRP/RCCP/plan-to-PR, QC disposition/scrap, shop-floor ops, RFQ, three-way AP hold, budget-vs-actual, and supplier scorecards are **already implemented + harness-tested**. Narrowed to genuine residual gaps RG-1..4 (exec scorecard, budget-variance + supplier-scorecard BI types, optional close pre-lock validation GL-17). No duplicate builds. |
+| 0.2 RECONCILED | 2026-06-30 | ERP / Product | Corrected after a deeper audit: MRP/RCCP/plan-to-PR, QC disposition/scrap, shop-floor ops, RFQ, three-way AP hold, budget-vs-actual, and supplier scorecards are **already implemented + harness-tested**. Narrowed to genuine residual gaps RG-1..4 (exec scorecard, budget-variance + supplier-scorecard BI types, optional close pre-lock validation GL-19). No duplicate builds. |

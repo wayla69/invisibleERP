@@ -116,6 +116,14 @@ export default function PeriodClosePage() {
     onError: (e: any) => notifyError(e?.message ?? 'เปิดอีกครั้งไม่สำเร็จ — ตรวจสอบ SoD และเหตุผล'),
   });
 
+  // GL-19: programmatic pre-lock validation (read-only) — advisory readiness blockers before the lock.
+  const [validation, setValidation] = useState<any>(null);
+  const validate = useMutation<any, Error, void>({
+    mutationFn: () => api(`/api/ledger/close/validate?period=${run!.period}`),
+    onSuccess: (r) => { setValidation(r); r.ready ? notifySuccess('ตรวจสอบแล้ว: พร้อมล็อก') : notifyError(`ยังไม่พร้อม: ${(r.blockers ?? []).join(', ')}`); },
+    onError: (e: any) => notifyError(e?.message ?? 'ตรวจสอบความพร้อมไม่สำเร็จ'),
+  });
+
   const requiredDone = run?.steps?.filter((s) => s.required).every((s) => s.status === 'Done') ?? false;
 
   return (
@@ -241,6 +249,37 @@ export default function PeriodClosePage() {
                   ))}
                 </CardContent>
               </Card>
+
+              {/* Pre-lock validation (GL-19) — advisory readiness checks */}
+              {run.status !== 'Locked' && (
+                <Card>
+                  <CardHeader><CardTitle className="text-sm">ตรวจสอบความพร้อมก่อนล็อก (GL-19)</CardTitle></CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm text-muted-foreground">ตรวจว่าไม่มีร่างรายการค้าง รายการสมดุล และบัญชีพักเป็นศูนย์</p>
+                      <Button size="sm" variant="outline" disabled={validate.isPending} onClick={() => validate.mutate()}>ตรวจสอบ</Button>
+                    </div>
+                    {validation && validation.period === run.period && (
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center gap-2">
+                          {validation.ready
+                            ? <Badge variant="success">พร้อมล็อก</Badge>
+                            : <Badge variant="destructive">ยังไม่พร้อม — {(validation.blockers ?? []).length} รายการต้องแก้</Badge>}
+                          {(validation.warnings ?? []).length > 0 && <Badge variant="muted">คำเตือน {(validation.warnings).length}</Badge>}
+                        </div>
+                        {(validation.checks ?? []).map((c: any) => (
+                          <div key={c.key} className="flex items-center gap-2 text-xs">
+                            {c.ok
+                              ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+                              : <Circle className={`h-3.5 w-3.5 shrink-0 ${c.advisory ? 'text-orange-500' : 'text-destructive'}`} />}
+                            <span className={c.ok ? 'text-muted-foreground' : ''}>{c.title}{!c.ok && c.count != null ? ` (${c.count})` : ''}{!c.ok && c.diff != null ? ` (Δ ${c.diff})` : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Lock / Reopen actions */}
               {run.status !== 'Locked' && (

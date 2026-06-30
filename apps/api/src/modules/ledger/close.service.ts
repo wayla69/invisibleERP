@@ -1,8 +1,14 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { closeRuns, closeRunSteps, fiscalPeriods } from '../../database/schema';
+import { closeRuns, closeRunSteps, fiscalPeriods, journalEntries, journalLines } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
+
+const num = (x: unknown) => Number(x) || 0;
+const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
+// Suspense / clearing accounts whose balance should normally be ~zero at close (advisory): the WIP "applied"
+// contra accounts (2380 mfg labor+OH, 2390 project applied) and conventional suspense codes.
+const SUSPENSE_ACCOUNTS = ['2380', '2390', '1999', '9999'];
 
 // WS2.1 (GL-15/GL-16) — Hard period close + close checklist.
 // Lifecycle: Open → InProgress (startClose seeds the checklist) → ReadyToLock (all required steps Done)
@@ -176,6 +182,61 @@ export class CloseService {
       .where(tenantId == null ? undefined : eq(closeRuns.tenantId, tenantId))
       .orderBy(desc(closeRuns.id));
     return { runs: rows.map((r: any) => this.shape(r, [])), count: rows.length };
+  }
+
+  // ───────────────────── Pre-lock validation (GL-19) ─────────────────────
+  // Read-only programmatic readiness for the period — the books-are-clean checks the checklist sign-off can't
+  // assert by itself: (1) no unposted Draft JEs in the period, (2) posted entries balance in aggregate, (3)
+  // every posted entry is individually balanced, and (4) suspense/clearing accounts net to ~zero (advisory).
+  // `ready` is false only when a HARD blocker fails (advisory checks raise warnings, not blockers). Posts
+  // nothing — a detective gate surfaced in the period-close UI before the maker-checker lock.
+  async validate(period: string) {
+    if (!/^\d{4}-\d{2}$/.test(period ?? '')) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
+    const db = this.db as any;
+    const tenantId = this.tenantId();
+    const start = `${period}-01`;
+    const end = this.periodEndDate(period);
+    const inPeriod = (extra: any[]) => {
+      const c = [gte(journalEntries.entryDate, start), lte(journalEntries.entryDate, end), ...extra];
+      if (tenantId != null) c.push(eq(journalEntries.tenantId, tenantId));
+      return and(...c);
+    };
+
+    // 1. Unposted draft JEs dated in the period.
+    const draftRows = await db.select({ entry_no: journalEntries.entryNo, entry_date: journalEntries.entryDate })
+      .from(journalEntries).where(inPeriod([eq(journalEntries.status, 'Draft')])).limit(50);
+    const drafts = { key: 'unposted_drafts', title: 'No unposted draft journal entries in the period', ok: draftRows.length === 0, count: draftRows.length, entries: draftRows.map((r: any) => r.entry_no) };
+
+    // 2 + 3. Aggregate + per-entry balance of POSTED entries in the period.
+    const lineRows = await db.select({ entryId: journalLines.entryId, entryNo: journalEntries.entryNo, debit: journalLines.debit, credit: journalLines.credit })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(inPeriod([eq(journalEntries.status, 'Posted')]));
+    let totDr = 0, totCr = 0;
+    const byEntry = new Map<string, { dr: number; cr: number; no: string }>();
+    for (const l of lineRows) {
+      const dr = num(l.debit), cr = num(l.credit);
+      totDr += dr; totCr += cr;
+      const k = String(l.entryId);
+      const e = byEntry.get(k) ?? { dr: 0, cr: 0, no: l.entryNo };
+      e.dr += dr; e.cr += cr; byEntry.set(k, e);
+    }
+    const aggDiff = r2(totDr - totCr);
+    const periodBalanced = { key: 'period_balanced', title: 'Posted entries balance in aggregate (Σdebit = Σcredit)', ok: Math.abs(aggDiff) < 0.01, debit: r2(totDr), credit: r2(totCr), diff: aggDiff };
+    const unbalanced = [...byEntry.values()].filter((e) => Math.abs(e.dr - e.cr) > 0.01).map((e) => ({ entry_no: e.no, debit: r2(e.dr), credit: r2(e.cr), diff: r2(e.dr - e.cr) }));
+    const entriesBalanced = { key: 'unbalanced_entries', title: 'Every posted entry is individually balanced', ok: unbalanced.length === 0, count: unbalanced.length, entries: unbalanced.slice(0, 20) };
+
+    // 4. Suspense/clearing balance through period end (advisory — these accounts may legitimately carry WIP).
+    const susConds: any[] = [lte(journalEntries.entryDate, end), eq(journalEntries.status, 'Posted'), inArray(journalLines.accountCode, SUSPENSE_ACCOUNTS)];
+    if (tenantId != null) susConds.push(eq(journalEntries.tenantId, tenantId));
+    const susRows = await db.select({ account: journalLines.accountCode, dr: sql<string>`coalesce(sum(${journalLines.debit}),0)`, cr: sql<string>`coalesce(sum(${journalLines.credit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...susConds)).groupBy(journalLines.accountCode);
+    const susAccts = susRows.map((r: any) => ({ account: r.account, balance: r2(num(r.dr) - num(r.cr)) })).filter((a: any) => Math.abs(a.balance) > 0.01);
+    const suspense = { key: 'suspense_clearing', title: 'Suspense/clearing accounts net to zero (advisory)', ok: susAccts.length === 0, advisory: true, accounts: susAccts };
+
+    const checks = [drafts, periodBalanced, entriesBalanced, suspense];
+    const blockers = checks.filter((c: any) => !c.ok && !c.advisory).map((c) => c.key);
+    const warnings = checks.filter((c: any) => !c.ok && c.advisory).map((c) => c.key);
+    return { period, ready: blockers.length === 0, blockers, warnings, checks };
   }
 
   // ───────────────────── helpers ─────────────────────

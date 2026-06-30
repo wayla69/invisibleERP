@@ -38,6 +38,14 @@ export class CloseController {
     return this.svc.status(period);
   }
 
+  // GL-19 — programmatic pre-lock validation: read-only readiness checks (no unposted drafts, balanced
+  // entries, suspense/clearing near-zero) surfaced as advisory blockers before the maker-checker lock.
+  @Get('validate')
+  @Permissions('gl_close', 'gl_post', 'exec')
+  validate(@Query('period') period: string) {
+    return this.svc.validate(period);
+  }
+
   @Post('start')
   @HttpCode(201)
   @Permissions('gl_close')
