@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CircleDollarSign, Package, ShieldCheck } from 'lucide-react';
+import { CalendarClock, CircleDollarSign, Package, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ export default function BillingPage() {
   const qc = useQueryClient();
   const sub = useQuery<any>({ queryKey: ['subscription'], queryFn: () => api('/api/billing/subscription') });
   const plans = useQuery<{ plans: Plan[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
+  const aiUsage = useQuery<any>({ queryKey: ['ai-usage'], queryFn: () => api('/api/billing/ai-usage') });
   const [msg, setMsg] = useState('');
 
   const change = useMutation({
@@ -30,7 +31,26 @@ export default function BillingPage() {
   });
 
   const currentCode = sub.data?.plan_code ?? sub.data?.plan?.code;
-  const featureList = (f: any): string[] => (Array.isArray(f) ? f : f && typeof f === 'object' ? Object.values(f).map(String) : []);
+  // Render readable plan features. Internal AI-pricing keys (ceiling/overage rate) are surfaced in the
+  // dedicated AI-usage card below, not dumped as raw numbers here.
+  const HIDDEN = new Set(['ai_tokens_daily_max', 'ai_overage_rate_thb_per_1k', 'custom']);
+  const featureList = (f: any): string[] => {
+    if (Array.isArray(f)) return f.map(String);
+    if (!f || typeof f !== 'object') return [];
+    const labels: string[] = [];
+    for (const [k, v] of Object.entries(f)) {
+      if (HIDDEN.has(k)) continue;
+      if (k === 'users') labels.push(Number(v) < 0 ? 'ผู้ใช้ไม่จำกัด' : `ผู้ใช้สูงสุด ${v} คน`);
+      else if (k === 'locations') labels.push(Number(v) < 0 ? 'สาขาไม่จำกัด' : `${v} สาขา`);
+      else if (k === 'ai_chat') labels.push(v ? 'ผู้ช่วย AI ในตัว' : 'ไม่รวมผู้ช่วย AI');
+      else if (k === 'ai_tokens_daily') { if (Number(v) > 0) labels.push(`AI ${(Number(v) / 1000).toLocaleString()}k โทเคน/วัน`); }
+      else if (k === 'reports') labels.push(`รายงาน: ${v}`);
+      else labels.push(String(v));
+    }
+    return labels;
+  };
+  const ai = aiUsage.data;
+  const overageCharge = Number(ai?.today?.projected_overage_thb ?? 0);
 
   return (
     <div>
@@ -46,6 +66,34 @@ export default function BillingPage() {
             </div>
           )}
         </StateView>
+
+        {/* AI usage — today's consumption vs the plan's included cap + hard ceiling, plus the metered overage
+            charge so the AI cost is visible (PwC follow-up: connect the COGS meter to a price). */}
+        {ai && Number(ai.daily_max) > 0 && (
+          <Card className="gap-4 p-5">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary" />
+              <strong className="text-sm">การใช้งาน AI วันนี้</strong>
+              <span className="ml-auto text-xs text-muted-foreground">รีเซ็ตเที่ยงคืน (เวลาไทย)</span>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="ใช้ไปวันนี้" value={`${Number(ai.today?.total_tokens ?? 0).toLocaleString()} โทเคน`} icon={Gauge} tone={ai.today?.over_budget ? 'warning' : 'primary'} />
+              <StatCard label="รวมในแพ็กเกจ" value={`${Number(ai.daily_limit).toLocaleString()} /วัน`} icon={Package} />
+              <StatCard label="เพดานสูงสุด" value={`${Number(ai.daily_max).toLocaleString()} /วัน`} icon={ShieldCheck} />
+              <StatCard
+                label={`ค่าใช้เกิน (${Number(ai.overage_rate_thb_per_1k)} ฿/1k)`}
+                value={baht(overageCharge)}
+                icon={CircleDollarSign}
+                tone={overageCharge > 0 ? 'warning' : undefined}
+              />
+            </div>
+            {Number(ai.today?.overage_tokens ?? 0) > 0 && (
+              <p className="text-xs text-muted-foreground">
+                ใช้เกินโควต้าในแพ็กเกจ {Number(ai.today.overage_tokens).toLocaleString()} โทเคน — คิดค่าบริการส่วนเกินตามอัตรา {Number(ai.overage_rate_thb_per_1k)} ฿ ต่อ 1,000 โทเคน
+              </p>
+            )}
+          </Card>
+        )}
 
         <div>
           <h3 className="mb-3 text-sm font-semibold text-muted-foreground">เลือกแพ็กเกจ</h3>

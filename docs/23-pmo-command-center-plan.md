@@ -101,7 +101,12 @@ live "connected" dot from `useRealtime`. Surface the same `summary` badge on the
 
 ---
 
-## Phase PMO-2 — Pipeline-weighted forward resource & cash forecast
+## Phase PMO-2 — Pipeline-weighted forward resource & cash forecast — **DELIVERED**
+> Shipped: `GET /api/projects/forecast?months=&from=` (`ProjectsService.forecast`) — committed milestone/POC
+> billing + probability-weighted pipeline (`amount × probability%` at expected close) per month + committed
+> capacity demand; a billings-forecast band on `/projects/portfolio`. No control, no migration. PN-16 step 20
+> / rev 0.22, user-manual 14 rev 1.9, UAT-O2C-222. Harness: `projects` 100 checks. (Pipeline→resource-demand
+> effort model deferred — see §out-of-scope.)
 *Makes the capacity calendar **forward-looking**: not just committed work, but "if we win the pipeline,
 where do we break — and when does the cash land?" Uniquely ties pipeline × capacity × milestone/POC billing.*
 

@@ -8,6 +8,10 @@
  * Controls covered (see compliance/Oshinei_ERP_SOX_RCM_v1.xlsx):
  *   GL-05  — Manual journal-entry maker-checker: a manual JE posts as Draft (excluded from balances)
  *            and only a DIFFERENT user may approve it; preparer self-approval is blocked even for Admin.
+ *   EXP-01/EXP-09 — 3-way match HARD-GATES AP payment: a PO-based invoice failing match (price/qty variance)
+ *            is blocked from payment (MATCH_BLOCKED) until a DIFFERENT user overrides the variance (SoD).
+ *            (PwC panel called this "EXP-03"; see compliance/CONTROL_STATUS_HONEST.md for the ID crosswalk.)
+ *   PAY-03 — Payroll run maker-checker: a run posts a Draft JE excluded from balances until a different user approves.
  *   ITGC-AC-09 — SoD preventive block: assigning a permission set that holds both sides of a conflict
  *            rule is blocked unless an explicit override-with-reason is supplied (and logged).
  *   ITGC-AC-08 — User Access Review: effective-permission recertification report, CSV export, sign-off.
@@ -817,6 +821,46 @@ async function main() {
   ok('GL-10: overlay never gates posting — ?all=true still exposes the full canonical universe (4300 present)',
     restcAll.source === 'canonical' && restcAll.accounts?.some((a: any) => a.code === '4300') && restcAll.count > restcAcc.count,
     `all=${restcAll.count} overlay=${restcAcc.count}`);
+
+  // ════════════════════════ EXP-01/EXP-09 — 3-way match HARD-GATES AP payment (PO↔GR↔Invoice) ════════════════════════
+  // (The PwC panel referenced this as "EXP-03"; in the RCM the 3-way-match gate is EXP-01 and the AP-pay-
+  //  consults-match control is EXP-09 — RCM EXP-03 is a different control, PR/PO authorization. See
+  //  compliance/CONTROL_STATUS_HONEST.md for the panel↔RCM ID crosswalk.)
+  // A PO-based supplier invoice that fails 3-way match (price/qty variance beyond tolerance) is BLOCKED from
+  // payment until a DIFFERENT user (≠ the matcher) overrides the variance with a reason. This surfaces the
+  // control in the formal ICFR ToE harness (the enforcement + variance cases also live in `match`).
+  // Run LAST: the goods-receipt + unpaid bill perturb the inventory(1200)/AP(2000) control accounts, so this
+  // must follow the REC-04 control-account reconciliation assertion. Run as HQ admins (matcher = admin,
+  // overrider = whchk) so the match row stays RLS-consistent.
+  const exOverrider = await login('whchk', 'pw'); // independent overrider (HQ Admin, ≠ admin)
+  const [vExp] = await db.insert(s.vendors).values({ name: 'ผู้ขาย EXP-03', isSupplier: true, approvalStatus: 'approved', blocklisted: false }).returning({ id: s.vendors.id });
+  const VEXP = Number(vExp.id);
+  await db.insert(s.items).values({ itemId: 'EXP3X', itemDescription: 'วัตถุดิบ EXP-03', uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
+  // setup: PO 100@10 → approve → GR 100 (the "received/ordered" sides of the match)
+  const exPo = await inj('POST', '/api/procurement/pos', admin, { vendor_id: VEXP, items: [{ item_id: 'EXP3X', order_qty: 100, unit_price: 10 }] });
+  const exPoNo = exPo.json.po_no as string;
+  await inj('PATCH', `/api/procurement/pos/${exPoNo}/approve`, admin, { approve: true });
+  await inj('POST', '/api/procurement/grs', admin, { po_no: exPoNo, items: [{ item_id: 'EXP3X', received_qty: 100 }] });
+  // invoice the PO at 100@12 (+20% price variance) → match fails, not payable
+  const exBill = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: VEXP, txn_type: 'Goods', amount: 1200 });
+  const exTxn = exBill.json.txn_no as string;
+  const exMatch = await inj('POST', '/api/procurement/match/run', admin, { txn_no: exTxn, po_no: exPoNo, lines: [{ item_id: 'EXP3X', qty: 100, unit_price: 12 }] });
+  ok('EXP-01/EXP-09: PO-based invoice with +20% price variance → match price_variance, not payable',
+    exMatch.json.match_status === 'price_variance' && exMatch.json.payable === false, JSON.stringify({ st: exMatch.json.match_status, pay: exMatch.json.payable }));
+  // HARD GATE: requesting payment on the failed-match invoice is blocked (no disbursement, no pending request).
+  const exPayBlocked = await inj('PATCH', `/api/finance/ap/transactions/${exTxn}/pay`, admin, { amount: 1200 });
+  ok('EXP-01/EXP-09: AP payment request on the unmatched invoice is BLOCKED → 409 MATCH_BLOCKED',
+    exPayBlocked.status === 409 && exPayBlocked.json.error?.code === 'MATCH_BLOCKED', `${exPayBlocked.status} ${exPayBlocked.json.error?.code}`);
+  // SoD: the user who RAN the match cannot override it (binds even Admin) — mirrors GL-05.
+  const exSelfOvr = await inj('POST', `/api/procurement/match/${exTxn}/override`, admin, { reason: 'self-override attempt' });
+  ok('EXP-01/EXP-09: matcher cannot override their own 3-way match → 403 SOD_VIOLATION (binds even Admin)',
+    exSelfOvr.status === 403 && exSelfOvr.json.error?.code === 'SOD_VIOLATION', `${exSelfOvr.status} ${exSelfOvr.json.error?.code}`);
+  // a DIFFERENT authorized user overrides the variance → the gate now passes; payment can be requested.
+  const exOvr = await inj('POST', `/api/procurement/match/${exTxn}/override`, exOverrider, { reason: 'manager-approved price variance' });
+  const exPayOk = await inj('PATCH', `/api/finance/ap/transactions/${exTxn}/pay`, admin, { amount: 1200 });
+  ok('EXP-01/EXP-09: independent override (≠ matcher) unblocks → payment request now accepted (PendingApproval)',
+    exOvr.json.override === true && exOvr.json.override_by !== 'admin' && (exPayOk.status === 200 || exPayOk.status === 201) && exPayOk.json.status === 'PendingApproval',
+    JSON.stringify({ ovr: exOvr.json.override, by: exOvr.json.override_by, pay: exPayOk.json.status }));
 
   console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

@@ -27,6 +27,11 @@ An executive cross-project overview for the PMO / leadership:
 - **Capacity calendar** — a time-phased heatmap of each resource's demand by month vs 100%/month capacity;
   a month over 100% (double-booked across projects) shows red, so an over-allocation in a *specific window*
   is visible even when the lifetime average looks fine.
+- **Billings/cash forecast** — a forward, month-by-month *พยากรณ์การวางบิล/กระแสเงินสด*: a **มั่นใจ (committed)** band
+  (Fixed-price milestone billing on its due date + each POC project's earned-but-unbilled contract asset) overlaid
+  with the **ไปป์ไลน์ถ่วงน้ำหนัก (weighted pipeline)** (each open opportunity's value × win probability, at its expected
+  close month), with the committed capacity demand % shown alongside — so you can see *"if we win the pipeline,
+  when does the cash land, and where are we already over-allocated?"*.
 
 The project workspace **Overview** also carries a **แนวโน้มสุขภาพโครงการ (Health trend)** — capture a dated
 CPI/SPI/RAG snapshot with *บันทึกสุขภาพ*, and the chart plots the trajectory over time. Schedule the
@@ -116,3 +121,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.6 | 2026-06-30 | **Resource capacity calendar** — a time-phased *ปฏิทินกำลังคน* heatmap on the Portfolio command center: per-resource demand vs 100%/month capacity, with over-booked months in red. |
 | 1.7 | 2026-06-30 | **Project health history** — a CPI/SPI *แนวโน้มสุขภาพโครงการ* trend on the workspace Overview (*บันทึกสุขภาพ* to capture a dated RAG/EVM snapshot); schedulable via the `project_health_capture` report. |
 | 1.8 | 2026-06-30 | **Action Center** (PROJ-11) — a new *ศูนย์งานที่ต้องทำ* PMO inbox (`/projects/action-center`): one severity-ranked worklist of pending approvals, red/over-budget projects, slipping milestones, unmitigated-high risks and governance gaps across the whole portfolio, each deep-linked, with a live (SSE) update when a project goes red or a high risk is logged. Linked from the Portfolio header. |
+| 1.9 | 2026-06-30 | **Forward billings/cash forecast** (PMO-2) — a *พยากรณ์การวางบิล/กระแสเงินสด* band on the Portfolio command center: committed milestone/POC billing overlaid with the probability-weighted pipeline (value × win %, at expected close) per month, alongside committed capacity demand — the "if we win the pipeline, when does cash land / where are we over-allocated?" view. |

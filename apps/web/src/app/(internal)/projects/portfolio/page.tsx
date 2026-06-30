@@ -21,7 +21,10 @@ export default function PortfolioPage() {
   const router = useRouter();
   const q = useQuery<any>({ queryKey: ['projects', 'portfolio'], queryFn: () => api('/api/projects/portfolio') });
   const capQ = useQuery<any>({ queryKey: ['projects', 'capacity'], queryFn: () => api('/api/projects/resources/capacity?months=6') });
+  const fcQ = useQuery<any>({ queryKey: ['projects', 'forecast'], queryFn: () => api('/api/projects/forecast?months=6') });
   const d = q.data;
+  const fc = fcQ.data;
+  const fcMax = Math.max(1, ...((fc?.billing?.monthly ?? []).map((m: any) => m.total_expected)));
   // Time-phased capacity heatmap: green ≤ 80, amber ≤ 100, red > 100 (over-booked in that month).
   const heatTone = (pct: number) => pct > 100 ? 'bg-destructive/80 text-destructive-foreground' : pct >= 80 ? 'bg-warning/70 text-warning-foreground dark:text-warning' : pct > 0 ? 'bg-success/40' : 'bg-muted/40 text-muted-foreground';
   const f = d?.funnel;
@@ -151,6 +154,36 @@ export default function PortfolioPage() {
                   </tbody>
                 </table>
               </div>
+            </Card>
+          )}
+
+          {/* forward billings/cash forecast (PMO-2): committed contractual billing + probability-weighted pipeline */}
+          {!!fc?.billing?.monthly?.length && (
+            <Card className="gap-3 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">พยากรณ์การวางบิล/กระแสเงินสด (Billings forecast) — มั่นใจ + ไปป์ไลน์ถ่วงน้ำหนัก</h3>
+                <div className="flex gap-2 text-xs">
+                  <Badge variant="info">มั่นใจ {baht(fc.billing.committed_total)}</Badge>
+                  <Badge variant="muted">ไปป์ไลน์ (ถ่วง) {baht(fc.billing.weighted_pipeline_total)}</Badge>
+                  <Badge variant="success">รวมคาดการณ์ {baht(fc.billing.expected_total)}</Badge>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {fc.billing.monthly.map((m: any) => (
+                  <div key={m.month}>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">{m.month}{(fc.resourcing?.monthly ?? []).find((r: any) => r.month === m.month)?.committed_demand_pct ? <span className="ml-2 text-muted-foreground/70">· กำลังคน {(fc.resourcing.monthly.find((r: any) => r.month === m.month)?.committed_demand_pct)}%</span> : null}</span>
+                      <span className="tabular font-medium">{baht(m.total_expected)}</span>
+                    </div>
+                    {/* committed (solid) + weighted pipeline (lighter) stacked bar */}
+                    <div className="flex h-2.5 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full" style={{ width: `${(m.committed_billing / fcMax) * 100}%`, background: 'var(--info)' }} title={`มั่นใจ ${baht(m.committed_billing)}`} />
+                      <div className="h-full opacity-50" style={{ width: `${(m.weighted_pipeline / fcMax) * 100}%`, background: 'var(--chart-3)' }} title={`ไปป์ไลน์ถ่วงน้ำหนัก ${baht(m.weighted_pipeline)}`} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">มั่นใจ = หมุดหมายวางบิล (Fixed) + สินทรัพย์ตามสัญญา POC ที่ยังไม่วางบิล · ไปป์ไลน์ = มูลค่าโอกาส × ความน่าจะเป็น ณ เดือนที่คาดปิด</p>
             </Card>
           )}
         </div>

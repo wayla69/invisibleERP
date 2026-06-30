@@ -174,6 +174,13 @@ export class ProjectsController {
     return this.svc.actionCenter(u, { stale_days: staleDays != null ? Number(staleDays) : undefined });
   }
 
+  // Forward resource & cash forecast (PMO-2): committed capacity demand + a billings/cash forecast overlaying
+  // committed contractual billing with the probability-weighted pipeline. Static segment, before :code.
+  @Get('forecast')
+  forecast(@Query('months') months: string | undefined, @Query('from') from: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.forecast(u, { months: months != null ? Number(months) : undefined, from });
+  }
+
   // ── Project templates (B2) ── static 'templates' segment, declared before :code so it never collides.
   @Post('templates')
   createTemplate(@Body(new ZodValidationPipe(TemplateBody)) b: TemplateDto, @CurrentUser() u: JwtUser) {
