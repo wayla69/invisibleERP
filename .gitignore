@@ -2,6 +2,12 @@
 node_modules/
 .pnpm-store/
 
+# local IDE / Claude Code config (per-machine; may hold local DB creds/tokens — keep out of git)
+.claude/
+
+# marketing/pitch deck build output (scripts + generated binary pptx/pdf — not part of the app)
+deck-build/
+
 # build
 dist/
 .next/
