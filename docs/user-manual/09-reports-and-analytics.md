@@ -236,7 +236,7 @@ without anyone running it by hand.
    *Sales cube*, *Finance (P&L) trend*, *Pipeline trend*, *Portfolio EVM*,
    *CRM win/loss*, **Executive cross-module scorecard**, **Budget vs actual**,
    **Supplier performance scorecard**) or a scheduled **action job** (e.g. AR
-   dunning, recurring journals). The *Executive scorecard* rolls finance, CRM,
+   dunning, recurring journals, **project health snapshots**). The *Executive scorecard* rolls finance, CRM,
    project-portfolio and supply-chain health into one board; *Budget vs actual*
    and *Supplier scorecard* deliver the existing variance/scorecard figures on a
    schedule.

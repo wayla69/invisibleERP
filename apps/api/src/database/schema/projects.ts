@@ -262,8 +262,34 @@ export const projectChangeOrders = pgTable(
   (t) => ({ byProject: index('idx_pco_project').on(t.projectId) }),
 );
 
+// Periodic project-health snapshot (PPM upgrade) — a dated EVM/RAG point so the portfolio/status report can
+// show a trajectory (the live EVM is point-in-time). Captured on demand or by the scheduled BI action job.
+export const projectHealthSnapshots = pgTable(
+  'project_health_snapshots',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    snapshotDate: date('snapshot_date').notNull(),
+    rag: text('rag').notNull().default('no_data'),       // green | amber | red | no_data
+    cpi: numeric('cpi', { precision: 10, scale: 4 }),
+    spi: numeric('spi', { precision: 10, scale: 4 }),
+    pctComplete: numeric('pct_complete', { precision: 5, scale: 2 }),
+    bac: numeric('bac', { precision: 16, scale: 2 }).default('0'),
+    ev: numeric('ev', { precision: 16, scale: 2 }).default('0'),
+    ac: numeric('ac', { precision: 16, scale: 2 }).default('0'),
+    eac: numeric('eac', { precision: 16, scale: 2 }).default('0'),
+    margin: numeric('margin', { precision: 16, scale: 2 }).default('0'),
+    wip: numeric('wip', { precision: 16, scale: 2 }).default('0'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_phs_project').on(t.projectId) }),
+);
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
+export type ProjectHealthSnapshot = typeof projectHealthSnapshots.$inferSelect;
 export type ProjectBaseline = typeof projectBaselines.$inferSelect;
 export type ProjectTemplate = typeof projectTemplates.$inferSelect;
 export type ProjectTemplateItem = typeof projectTemplateItems.$inferSelect;

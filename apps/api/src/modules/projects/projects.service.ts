@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, crmOpportunities, customerMaster } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, crmOpportunities, customerMaster } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -945,6 +945,55 @@ export class ProjectsService {
     };
   }
 
+  // ── Project health history (PPM upgrade) ─────────────────────────────────
+  // Capture a dated EVM/RAG snapshot for ONE project, so the live point-in-time EVM gains a trajectory. RAG:
+  // red if CPI or SPI < 0.9, amber if either < 1, green if both ≥ 1, no_data if neither is computable.
+  // Idempotent per (project, date) — re-capturing the same day refreshes the row.
+  async captureHealth(code: string, dto: { as_of?: string }, user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    return this.snapProject(p, dto?.as_of ?? ymd(), user);
+  }
+
+  // Capture a snapshot for EVERY project for the caller's tenant — the scheduled (BI action job) path.
+  async captureAllHealth(user: JwtUser) {
+    const db = this.db as any;
+    const date = ymd();
+    const rows = await db.select().from(projects).orderBy(desc(projects.id)).limit(500);
+    let captured = 0;
+    for (const p of rows) { await this.snapProject(p, date, user); captured++; }
+    return { as_of: date, scanned: rows.length, captured };
+  }
+
+  // Compute + upsert one project's health snapshot for a date.
+  private async snapProject(p: any, date: string, user: JwtUser) {
+    const db = this.db as any;
+    const e = await this.evm(p.projectCode, date);
+    const f = this.fmt(p);
+    const tasks = await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)));
+    const pct = this.taskRollup(tasks);
+    const rag = (e.cpi == null && e.spi == null) ? 'no_data'
+      : ((e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9)) ? 'red'
+      : ((e.cpi != null && e.cpi < 1) || (e.spi != null && e.spi < 1)) ? 'amber' : 'green';
+    const row = {
+      tenantId: p.tenantId ?? user.tenantId ?? null, snapshotDate: date, rag,
+      cpi: e.cpi != null ? fx(e.cpi, 4) : null, spi: e.spi != null ? fx(e.spi, 4) : null,
+      pctComplete: fx(pct, 2), bac: fx(e.bac, 2), ev: fx(e.ev, 2), ac: fx(e.ac, 2), eac: fx(e.eac, 2),
+      margin: fx(f.margin, 2), wip: fx(f.wip, 2), createdBy: user.username,
+    };
+    await db.insert(projectHealthSnapshots).values({ projectId: Number(p.id), ...row })
+      .onConflictDoUpdate({ target: [projectHealthSnapshots.projectId, projectHealthSnapshots.snapshotDate], set: { ...row, createdAt: new Date() } });
+    return { project_code: p.projectCode, snapshot_date: date, rag, cpi: e.cpi, spi: e.spi, margin: f.margin };
+  }
+
+  // The dated health trajectory for a project (ascending) — feeds a CPI/SPI/RAG trend chart.
+  async healthHistory(code: string) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const rows = await db.select().from(projectHealthSnapshots).where(eq(projectHealthSnapshots.projectId, Number(p.id))).orderBy(projectHealthSnapshots.snapshotDate);
+    return { project_code: code, history: rows.map(shapeHealth), count: rows.length };
+  }
+
   private async row(code: string) {
     const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
@@ -999,6 +1048,9 @@ function shapeTemplateItem(it: any) {
 }
 function shapeRisk(r: any) {
   return { id: Number(r.id), project_id: Number(r.projectId), kind: r.kind, title: r.title, status: r.status, probability: r.probability != null ? Number(r.probability) : null, impact: Number(r.impact), score: Number(r.score), rag: r.rag, owner: r.owner, mitigation: r.mitigation, due_date: r.dueDate, created_by: r.createdBy, created_at: r.createdAt, closed_at: r.closedAt };
+}
+function shapeHealth(h: any) {
+  return { snapshot_date: h.snapshotDate, rag: h.rag, cpi: h.cpi != null ? n(h.cpi) : null, spi: h.spi != null ? n(h.spi) : null, pct_complete: n(h.pctComplete), bac: n(h.bac), ev: n(h.ev), ac: n(h.ac), eac: n(h.eac), margin: n(h.margin), wip: n(h.wip), created_at: h.createdAt };
 }
 function shapeChangeOrder(c: any) {
   return { id: Number(c.id), co_no: c.coNo, description: c.description, contract_delta: n(c.contractDelta), budget_delta: n(c.budgetDelta), estimated_cost_delta: n(c.estimatedCostDelta), reason: c.reason, status: c.status, requested_by: c.requestedBy, approved_by: c.approvedBy, created_at: c.createdAt, approved_at: c.approvedAt };
