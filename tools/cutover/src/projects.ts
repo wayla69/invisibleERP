@@ -454,6 +454,21 @@ async function main() {
   const augRow = (cap.json.monthly ?? []).find((m: any) => m.month === '2026-08');
   ok('Capacity calendar monthly rollup: August flags ≥1 over-allocated resource', augRow && augRow.resources_over >= 1 && augRow.total_demand_pct >= 120, JSON.stringify({ over: augRow?.resources_over, demand: augRow?.total_demand_pct }));
 
+  // ── 26. project health history (EVM/RAG snapshots over time, PPM upgrade) ──
+  // PRJ-EVM has CPI 1.1111 / SPI 1.0 → both ≥ 1 → green.
+  const h1 = await inj('POST', '/api/projects/PRJ-EVM/health', admin, { as_of: '2026-02-15' });
+  ok('Capture health snapshot → rag green (CPI 1.11 / SPI 1.0)', h1.json.rag === 'green' && near(h1.json.cpi, 1.1111), JSON.stringify({ rag: h1.json.rag, cpi: h1.json.cpi }));
+  await inj('POST', '/api/projects/PRJ-EVM/health', admin, { as_of: '2026-03-15' });
+  await inj('POST', '/api/projects/PRJ-EVM/health', admin, { as_of: '2026-03-15' }); // idempotent per (project, date)
+  const hist = await inj('GET', '/api/projects/PRJ-EVM/health', admin);
+  ok('Health history: 2 dated snapshots (ascending), same-day re-capture is idempotent',
+    hist.json.count === 2 && hist.json.history?.[0]?.snapshot_date === '2026-02-15' && hist.json.history?.[1]?.snapshot_date === '2026-03-15' && hist.json.history.every((s: any) => s.rag === 'green'),
+    JSON.stringify({ n: hist.json.count, dates: (hist.json.history ?? []).map((s: any) => s.snapshot_date) }));
+  // Scheduled action job: project_health_capture snapshots every project.
+  const phSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Project health', report_type: 'project_health_capture', frequency: 'weekly' });
+  const phRun = await inj('POST', `/api/bi/subscriptions/${phSub.json.id}/run`, admin, {});
+  ok('BI project_health_capture runs success (snapshots all projects)', phRun.json.status === 'success' && /captured/.test(phRun.json.summary ?? ''), JSON.stringify({ s: phRun.json.status, sum: (phRun.json.summary ?? '').slice(0, 40) }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

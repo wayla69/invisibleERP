@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ResponsiveContainer, ComposedChart, Area, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts';
+import { ResponsiveContainer, ComposedChart, Area, Line, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
 import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
@@ -37,7 +37,7 @@ export default function ProjectDetailPage() {
   const code = decodeURIComponent(String(useParams().code ?? ''));
   const router = useRouter();
   const qc = useQueryClient();
-  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
+  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders', 'health']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
 
   const detail = useQuery<any>({ queryKey: ['proj', code, 'detail'], queryFn: () => api(`/api/projects/${code}`) });
   const evm = useQuery<any>({ queryKey: ['proj', code, 'evm'], queryFn: () => api(`/api/projects/${code}/evm`) });
@@ -115,6 +115,12 @@ export default function ProjectDetailPage() {
   const decideCo = useMutation({
     mutationFn: (v: { id: number; action: 'approve' | 'reject' }) => api(`/api/projects/change-orders/${v.id}/${v.action}`, { method: 'POST', body: '{}' }),
     onSuccess: () => { notifySuccess('อัปเดตคำขอเปลี่ยนแปลงแล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  // Project health history (PPM upgrade) — dated EVM/RAG trend.
+  const health = useQuery<any>({ queryKey: ['proj', code, 'health'], queryFn: () => api(`/api/projects/${code}/health`) });
+  const captureHealth = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/health`, { method: 'POST', body: '{}' }),
+    onSuccess: (r: any) => { notifySuccess(`บันทึกสุขภาพโครงการ (${r.rag})`); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
   const scurve = (series.data?.series ?? []).map((s: any) => ({ month: s.month, planned: s.cumulative_planned }));
@@ -209,6 +215,32 @@ export default function ProjectDetailPage() {
           ))}
           {!cos.data?.count && <p className="py-2 text-sm text-muted-foreground">ยังไม่มีใบสั่งเปลี่ยนแปลง — การเปลี่ยนมูลค่าสัญญาต้องผ่านการอนุมัติ (ผู้อนุมัติ ≠ ผู้ขอ) และจะตั้งเส้นฐานใหม่</p>}
         </div>
+      </Card>
+
+      {/* Project health history (PPM upgrade) — CPI/SPI trend over snapshots */}
+      <Card className="gap-3 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">แนวโน้มสุขภาพโครงการ (Health trend)</h3>
+          <Button size="sm" variant="outline" onClick={() => captureHealth.mutate()} disabled={captureHealth.isPending}><Activity className="size-4" /> บันทึกสุขภาพ</Button>
+        </div>
+        {(health.data?.count ?? 0) >= 2 ? (
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={(health.data.history ?? []).map((s: any) => ({ date: s.snapshot_date, CPI: s.cpi, SPI: s.spi }))} margin={{ left: -20, right: 8, top: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} domain={[0, 'auto']} />
+                <Tooltip />
+                <Legend />
+                <ReferenceLine y={1} stroke="var(--muted-foreground)" strokeDasharray="4 4" />
+                <Line type="monotone" dataKey="CPI" stroke="var(--chart-1)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="SPI" stroke="var(--chart-2)" strokeWidth={2} dot={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p className="py-6 text-center text-sm text-muted-foreground">บันทึกสุขภาพอย่างน้อย 2 ครั้งเพื่อดูแนวโน้ม CPI/SPI (หรือใช้รายงานตั้งเวลา <span className="font-medium">project_health_capture</span> บันทึกอัตโนมัติ)</p>
+        )}
       </Card>
     </div>
   );

@@ -28,6 +28,10 @@ An executive cross-project overview for the PMO / leadership:
   a month over 100% (double-booked across projects) shows red, so an over-allocation in a *specific window*
   is visible even when the lifetime average looks fine.
 
+The project workspace **Overview** also carries a **แนวโน้มสุขภาพโครงการ (Health trend)** — capture a dated
+CPI/SPI/RAG snapshot with *บันทึกสุขภาพ*, and the chart plots the trajectory over time. Schedule the
+*project_health_capture* report (Scheduled reports) to snapshot every project automatically.
+
 ## Projects register (`/projects`)
 The KPI band shows project count, unbilled WIP, cumulative billed, and cumulative margin. The table lists
 every project with cost, budget usage (amber ≥ 85%, red ⚠ over budget), billed %, WIP and margin. A
@@ -93,3 +97,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.4 | 2026-06-30 | **POC revenue recognition** (PROJ-09) — *การรับรู้รายได้* picker on create (Billing / POC); Costs tab shows POC %, recognised revenue, contract asset/liability + a *รับรู้รายได้* action; `NOT_POC` / `NO_ESTIMATE` added to troubleshooting. |
 | 1.5 | 2026-06-30 | **Change orders** (PROJ-10) — *ใบสั่งเปลี่ยนแปลง* panel on the project Overview: request a contract/budget variation; a different user approves (maker-checker), applying the change + re-baselining; `EMPTY_CHANGE_ORDER` / `SOD_SELF_APPROVAL` / `CHANGE_ORDER_DECIDED` added to troubleshooting. |
 | 1.6 | 2026-06-30 | **Resource capacity calendar** — a time-phased *ปฏิทินกำลังคน* heatmap on the Portfolio command center: per-resource demand vs 100%/month capacity, with over-booked months in red. |
+| 1.7 | 2026-06-30 | **Project health history** — a CPI/SPI *แนวโน้มสุขภาพโครงการ* trend on the workspace Overview (*บันทึกสุขภาพ* to capture a dated RAG/EVM snapshot); schedulable via the `project_health_capture` report. |

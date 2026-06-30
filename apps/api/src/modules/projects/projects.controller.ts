@@ -229,6 +229,17 @@ export class ProjectsController {
     return this.svc.evmSeries(code, { months: months ? Number(months) : undefined });
   }
 
+  // Project health history (PPM upgrade): capture a dated EVM/RAG snapshot; read the trajectory.
+  @Post(':code/health')
+  captureHealth(@Param('code') code: string, @Body() b: { as_of?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.captureHealth(code, b ?? {}, u);
+  }
+
+  @Get(':code/health')
+  healthHistory(@Param('code') code: string) {
+    return this.svc.healthHistory(code);
+  }
+
   // Critical-path schedule (CPM): per-task ES/EF/LS/LF, slack, and on_critical_path for the Gantt.
   @Get(':code/schedule')
   schedule(@Param('code') code: string) {
