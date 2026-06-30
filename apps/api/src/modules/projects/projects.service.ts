@@ -8,6 +8,9 @@ import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
+// Default value→FTE rate (PMO-5): the revenue one full-time-equivalent delivers per month. Used to convert
+// the probability-weighted pipeline VALUE into projected resourcing DEMAND (FTE). Overridable per request.
+const DEFAULT_REV_PER_FTE_MONTH = 200000;
 const r4 = (x: unknown) => Math.round((Number(x) || 0) * 10000) / 10000;
 const clampPct = (x: unknown) => Math.max(0, Math.min(100, r2(x)));
 const depsCsv = (ids?: number[]) => (ids && ids.length ? ids.map((i) => Number(i)).filter((i) => Number.isFinite(i)).join(',') : null);
@@ -846,10 +849,14 @@ export class ProjectsService {
   //    plus each POC project's earned-but-unbilled contract asset (expected to invoice in the first month);
   //  • weighted pipeline = each OPEN opportunity's amount × probability%, placed at its expected close month;
   //  • committed demand = the resource capacity calendar's per-month allocation roll-up.
-  async forecast(user: JwtUser, dto?: { months?: number; from?: string }) {
+  async forecast(user: JwtUser, dto?: { months?: number; from?: string; rev_per_fte_month?: number }) {
     const db = this.db as any;
     const months = Math.max(1, Math.min(24, Math.round(dto?.months ?? 6)));
     const start = (dto?.from && /^\d{4}-\d{2}$/.test(dto.from)) ? dto.from : ymd().slice(0, 7);
+    // Configurable value→FTE rate: the revenue one full-time-equivalent delivers per month — used to turn the
+    // probability-weighted pipeline VALUE into projected resourcing DEMAND (FTE) so the forecast shows not just
+    // "when does cash land" but "how many people would winning the pipeline need". Default if unset/invalid.
+    const revPerFte = dto?.rev_per_fte_month != null && Number(dto.rev_per_fte_month) > 0 ? r2(dto.rev_per_fte_month) : DEFAULT_REV_PER_FTE_MONTH;
     const cap = await this.resourceCapacity(user, { months, from: start });
     const horizon: string[] = cap.horizon;
     const hset = new Set(horizon);
@@ -894,12 +901,20 @@ export class ProjectsService {
     });
     const committedTotal = r2(billingMonthly.reduce((s, m) => s + m.committed_billing, 0));
     const weightedTotal = r2(billingMonthly.reduce((s, m) => s + m.weighted_pipeline, 0));
-    const resourcingMonthly = cap.monthly.map((m: any) => ({ month: m.month, committed_demand_pct: m.total_demand_pct, resources_over: m.resources_over }));
+    // Resourcing demand per month: committed (today's allocation, % → FTE) + the pipeline's projected FTE draw
+    // (weighted pipeline value that month / rev_per_fte_month). total = committed + pipeline.
+    const resourcingMonthly = cap.monthly.map((m: any) => {
+      const committedFte = r2(m.total_demand_pct / 100);
+      const pipelineFte = r2((weightedPipe.get(m.month) ?? 0) / revPerFte);
+      return { month: m.month, committed_demand_pct: m.total_demand_pct, resources_over: m.resources_over, committed_demand_fte: committedFte, pipeline_demand_fte: pipelineFte, total_demand_fte: r2(committedFte + pipelineFte) };
+    });
     const peakDemand = resourcingMonthly.reduce((mx: number, m: any) => Math.max(mx, m.committed_demand_pct), 0);
+    const peakTotalFte = resourcingMonthly.reduce((mx: number, m: any) => Math.max(mx, m.total_demand_fte), 0);
+    const pipelineFteTotal = r2(resourcingMonthly.reduce((s: number, m: any) => s + m.pipeline_demand_fte, 0));
 
     return {
-      from: start, months, horizon,
-      resourcing: { monthly: resourcingMonthly, over_allocated_count: cap.over_allocated_count, peak_demand_pct: r2(peakDemand) },
+      from: start, months, horizon, rev_per_fte_month: revPerFte,
+      resourcing: { monthly: resourcingMonthly, over_allocated_count: cap.over_allocated_count, peak_demand_pct: r2(peakDemand), peak_total_demand_fte: r2(peakTotalFte), pipeline_demand_fte_total: pipelineFteTotal },
       billing: { monthly: billingMonthly, committed_total: committedTotal, weighted_pipeline_total: weightedTotal, expected_total: r2(committedTotal + weightedTotal) },
       pipeline: { open_count: openCount, open_amount: openAmount, weighted_forecast: weightedForecast },
     };
