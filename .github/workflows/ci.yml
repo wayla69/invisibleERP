@@ -79,6 +79,7 @@ jobs:
           - { pkg: cutover, script: pdf-render }
           - { pkg: cutover, script: pdpa }
           - { pkg: cutover, script: saas-metrics }
+          - { pkg: cutover, script: governance }
           # ── POS ──
           - { pkg: cutover, script: pos-p0 }
           - { pkg: cutover, script: pos-p1 }

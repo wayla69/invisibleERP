@@ -74,8 +74,8 @@ def add(*cols): R.append(list(cols))
 
 # ---- Entity-Level Controls ----
 add("ELC-01","Entity-Level","Entity","All","Tone-at-the-top / ethics breaches enable override of controls and fraud.","—",
-    "Code of conduct & ethics policy issued, acknowledged annually by all staff; conflict-of-interest declarations.","Prev","Manual","Annual","CEO / HR","P1",
-    "Policy (non-system)","Inspect signed policy + acknowledgement register.","Re-perform: sample staff have current signed acknowledgement.","Signed policy register","Gap")
+    "Code of conduct & ethics policy issued, acknowledged annually by all staff; conflict-of-interest declarations. An in-app acknowledgement register (governance module) captures each staff member's acknowledgement of the code-of-conduct version (idempotent per version) as sample-able, tenant-isolated evidence; policy issuance + the annual campaign remain an HR/PMO process.","Prev","Hybrid","Annual","CEO / HR","P1",
+    "modules/governance (ethics_acknowledgements; POST /api/governance/ethics/acknowledge, GET /api/governance/ethics/register — register gated 'users'); schema/governance.ts; drizzle/0202_governance.sql; cutover/governance.ts (ToE); policy issuance = HR process","Inspect signed policy + the acknowledgement register.","Re-perform: a staff acknowledgement is recorded (idempotent per version) and appears in the permission-gated, tenant-isolated register (governance harness); sample staff have a current acknowledgement.","Acknowledgement register","Partial")
 add("ELC-02","Entity-Level","Entity","All","No independent oversight of financial reporting / ICFR.","—",
     "Audit committee charter; quarterly review of financial reporting, ICFR status and audit findings.","Det","Manual","Quarterly","Board / Audit Cttee","P2",
     "Governance (non-system)","Inspect charter + minutes.","Inspect minutes evidencing ICFR oversight each quarter.","AC minutes","Gap")
@@ -83,8 +83,8 @@ add("ELC-03","Entity-Level","Entity","All","Transactions executed without proper
     "Documented delegation-of-authority / approval matrix mapped to system roles & limits.","Prev","Manual","Annual","CFO","P3",
     "DoA matrix ↔ permissions.ts","Inspect DoA matrix; reconcile to RBAC roles.","Sample approvals respect DoA thresholds.","Approval matrix","Gap")
 add("ELC-04","Entity-Level","Entity","All","Misconduct undetected; no safe reporting channel.","—",
-    "Anonymous whistleblower / ethics hotline with non-retaliation policy and case tracking.","Det","Manual","Continuous","Audit Cttee","P1",
-    "External hotline","Inspect hotline setup + policy.","Inspect case log + resolution evidence.","Hotline log","Gap")
+    "Anonymous whistleblower / ethics hotline with non-retaliation policy and case tracking. An in-app intake + case log (governance module) captures reports (anonymous-capable — the reporter is recorded only if they opt out of anonymity) with a status lifecycle (received→investigating→resolved/dismissed) handled by the audit committee/compliance; the hotline operation + non-retaliation policy remain a governance process.","Det","Hybrid","Continuous","Audit Cttee","P1",
+    "modules/governance (whistleblower_cases; POST /api/governance/hotline/cases anonymous-capable, GET /api/governance/hotline/cases + PATCH .../:ref — gated 'users'); schema/governance.ts; drizzle/0202_governance.sql; cutover/governance.ts (ToE); hotline operation = audit-committee process","Inspect hotline setup + the case-log + resolution evidence.","Re-perform: an (anonymous) report is captured with a case_ref (reporter hidden when anonymous), the audit committee reviews the tenant-isolated case log and advances a case (received→investigating) with a handler recorded; views are permission-gated (governance harness).","Hotline case log","Partial")
 add("ELC-05","Entity-Level","Entity","All","Fraud risks not identified / mitigated.","—",
     "Annual fraud risk assessment covering revenue, cash, JE override, related parties.","Det","Manual","Annual","CFO / IA","P8",
     "Fraud risk register","Inspect risk assessment.","Inspect that identified risks map to controls in this RCM.","Fraud matrix","Gap")
