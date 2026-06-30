@@ -68,7 +68,10 @@ or *Responsible* (R) — click one to jump to its schedule.
 - **Quick actions** — the clock (log cost) and receipt (bill) icons on a row open those dialogs without leaving the list.
 
 ## Project workspace (`/projects/{code}`)
-Tabbed, deep-linkable (`?tab=`):
+Tabbed, deep-linkable (`?tab=`). The header carries a **รายงานสถานะ (Status report)** button that opens a
+print-friendly **period governance pack** (`/projects/{code}/status`): the project's RAG, EVM, the CPI/SPI
+**health trend**, baseline variance, open high risks, milestone status, and the change-order log — the status
+deck assembled for you. (It can also be scheduled portfolio-wide via the `project_governance_pack` report.)
 - **ภาพรวม (Overview)** — % complete, **CPI** (cost) and **SPI** (schedule) health tiles (green ≥ 1, amber
   ≥ 0.9, red below), cumulative margin/WIP; an **S-curve** of planned cost vs the current EV/AC; the
   full earned-value breakdown (BAC/PV/EV/AC/CV/SV/EAC); and a **ใบสั่งเปลี่ยนแปลง (Change orders)** panel —
@@ -122,3 +125,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.7 | 2026-06-30 | **Project health history** — a CPI/SPI *แนวโน้มสุขภาพโครงการ* trend on the workspace Overview (*บันทึกสุขภาพ* to capture a dated RAG/EVM snapshot); schedulable via the `project_health_capture` report. |
 | 1.8 | 2026-06-30 | **Action Center** (PROJ-11) — a new *ศูนย์งานที่ต้องทำ* PMO inbox (`/projects/action-center`): one severity-ranked worklist of pending approvals, red/over-budget projects, slipping milestones, unmitigated-high risks and governance gaps across the whole portfolio, each deep-linked, with a live (SSE) update when a project goes red or a high risk is logged. Linked from the Portfolio header. |
 | 1.9 | 2026-06-30 | **Forward billings/cash forecast** (PMO-2) — a *พยากรณ์การวางบิล/กระแสเงินสด* band on the Portfolio command center: committed milestone/POC billing overlaid with the probability-weighted pipeline (value × win %, at expected close) per month, alongside committed capacity demand — the "if we win the pipeline, when does cash land / where are we over-allocated?" view. |
+| 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |

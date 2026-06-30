@@ -537,6 +537,23 @@ async function main() {
     (fc.json.resourcing?.monthly ?? []).length === 6 && fc.json.resourcing?.monthly?.every((m: any) => typeof m.committed_demand_pct === 'number') && typeof fc.json.resourcing?.over_allocated_count === 'number',
     JSON.stringify({ n: (fc.json.resourcing?.monthly ?? []).length, over: fc.json.resourcing?.over_allocated_count }));
 
+  // ── 29. period governance / status pack (PMO-3) ──
+  // Single-project pack on PRJ-EVM (green, CPI 1.11; 2+ health snapshots captured in §26).
+  const gp = await inj('GET', '/api/projects/PRJ-EVM/governance-pack', admin);
+  const pk = gp.json.project;
+  ok('Governance pack (project): EVM + health trend + baseline/risks/milestones/change-order sections assembled',
+    gp.json.scope === 'project' && pk?.project_code === 'PRJ-EVM' && pk?.rag === 'green' && near(pk?.evm?.cpi, 1.1111) && Array.isArray(pk?.health_trend) && pk.health_trend.length >= 2 && !!pk?.risks?.summary && !!pk?.milestones && !!pk?.change_orders && 'baseline' in pk,
+    JSON.stringify({ scope: gp.json.scope, rag: pk?.rag, cpi: pk?.evm?.cpi, trend: pk?.health_trend?.length }));
+  // Portfolio pack: a RAG-ranked status row per project + a roll-up; PRJ-ACT (red, unmitigated-high, overdue ms) is present.
+  const gpp = await inj('GET', '/api/projects/governance-pack', admin);
+  ok('Governance pack (portfolio): RAG-ranked rows + roll-up (≥1 red, unmitigated-high & overdue-milestone surfaced); red sorts first',
+    gpp.json.scope === 'portfolio' && gpp.json.count > 0 && gpp.json.summary?.red >= 1 && gpp.json.summary?.unmitigated_high >= 1 && gpp.json.summary?.overdue_milestones >= 1 && gpp.json.projects?.[0]?.rag === 'red',
+    JSON.stringify({ count: gpp.json.count, red: gpp.json.summary?.red, uh: gpp.json.summary?.unmitigated_high, first: gpp.json.projects?.[0]?.rag }));
+  // Schedulable BI action job: project_governance_pack.
+  const gpSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Governance pack', report_type: 'project_governance_pack', frequency: 'monthly' });
+  const gpRun = await inj('POST', `/api/bi/subscriptions/${gpSub.json.id}/run`, admin, {});
+  ok('BI project_governance_pack runs success (portfolio status summary)', gpRun.json.status === 'success' && /Governance pack/.test(gpRun.json.summary ?? ''), JSON.stringify({ s: gpRun.json.status, sum: (gpRun.json.summary ?? '').slice(0, 48) }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

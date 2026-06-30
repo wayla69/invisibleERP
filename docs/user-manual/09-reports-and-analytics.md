@@ -235,11 +235,13 @@ without anyone running it by hand.
 1. **Name the report** and pick a **type** — analytics summaries (*KPI board*,
    *Sales cube*, *Finance (P&L) trend*, *Pipeline trend*, *Portfolio EVM*,
    *CRM win/loss*, **Executive cross-module scorecard**, **Budget vs actual**,
-   **Supplier performance scorecard**) or a scheduled **action job** (e.g. AR
-   dunning, recurring journals, **project health snapshots**). The *Executive scorecard* rolls finance, CRM,
-   project-portfolio and supply-chain health into one board; *Budget vs actual*
-   and *Supplier scorecard* deliver the existing variance/scorecard figures on a
-   schedule.
+   **Supplier performance scorecard**, **Project governance / status pack**) or a
+   scheduled **action job** (e.g. AR dunning, recurring journals, **project health
+   snapshots**). The *Executive scorecard* rolls finance, CRM, project-portfolio and
+   supply-chain health into one board; *Budget vs actual* and *Supplier scorecard*
+   deliver the existing variance/scorecard figures on a schedule; the *Project
+   governance / status pack* delivers the RAG-ranked portfolio status roll-up (red
+   projects, unmitigated-high risks, overdue milestones, pending change orders).
 2. **Choose a frequency** — daily, weekly or monthly — and optionally an **email
    recipient**.
 3. Save. The report then runs on its schedule: each run posts an **in-app
