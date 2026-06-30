@@ -29,9 +29,11 @@ async function main() {
     }
     ok('migrations apply on real Postgres', true);
 
-    // Two orgs, two tenants each. org 10 → {t1}, org 20 → {t2}.
-    const [t1] = await sql`INSERT INTO tenants (code,name,org_id) VALUES ('PGS-A','Org A Shop',10) RETURNING id`;
-    const [t2] = await sql`INSERT INTO tenants (code,name,org_id) VALUES ('PGS-B','Org B Shop',20) RETURNING id`;
+    // Two orgs, one tenant each (org 10 → t1, org 20 → t2). Unique codes per run so a reused local DB
+    // doesn't collide on tenants.code — we can't clean up (audit_log rows are immutable, see below).
+    const sfx = Math.floor(Math.random() * 1e9);
+    const [t1] = await sql`INSERT INTO tenants (code,name,org_id) VALUES (${'PGS-A-' + sfx},'Org A Shop',10) RETURNING id`;
+    const [t2] = await sql`INSERT INTO tenants (code,name,org_id) VALUES (${'PGS-B-' + sfx},'Org B Shop',20) RETURNING id`;
     const a = Number(t1.id), b = Number(t2.id);
     // A tenant-scoped row in each (audit_log carries tenant_id and is FORCE-RLS).
     await sql`INSERT INTO audit_log (tenant_id,actor,action,status,seq,hash) VALUES (${a},'sys','seed','success',1,'h1'),(${b},'sys','seed','success',1,'h2')`;
@@ -66,9 +68,15 @@ async function main() {
     const [dr] = await sql`SELECT ${d}::timestamptz AS ts`;
     ok('postgres-js Date param round-trips', !!dr?.ts);
 
-    // cleanup
-    await sql`DELETE FROM audit_log WHERE tenant_id IN (${a},${b})`;
-    await sql`DELETE FROM tenants WHERE id IN (${a},${b})`;
+    // ── Bonus: audit_log immutability (ITGC-AC-10) is enforced by a DB trigger on REAL Postgres — a
+    // PGlite harness does not reproduce this, so it belongs here. A DELETE must be rejected (P0001).
+    let immutable = false;
+    try { await sql`DELETE FROM audit_log WHERE tenant_id = ${a}`; }
+    catch (e: any) { immutable = e?.code === 'P0001' || /append-only/i.test(String(e?.message)); }
+    ok('audit_log is append-only (DELETE rejected on real Postgres)', immutable);
+
+    // No teardown: audit_log rows are immutable by design (above), so we leave the seed rows. The CI
+    // Postgres is an ephemeral service container; local reuse is collision-safe via the per-run code suffix.
   } finally {
     await sql.end({ timeout: 5 });
   }
