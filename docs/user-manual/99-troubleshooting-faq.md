@@ -124,7 +124,7 @@ your code below.
 | Code | Meaning | What to do |
 |------|---------|-----------|
 | `AI_DPA_REQUIRED` | AI is turned off because the data-processing agreement with the AI provider has not been acknowledged on this deployment. | An administrator must complete and acknowledge the DPA, then set `AI_DPA_ACKNOWLEDGED`. Until then the assistant and AI-assisted tools fall back to non-AI behaviour. See [Administration](./11-administration.md). |
-| `AI_BUDGET_EXCEEDED` | Your plan's daily AI token allowance is used up. | It resets at midnight (Bangkok time). Heavy users on the Enterprise tier accrue metered overage instead of a hard stop within their ceiling. Upgrade your plan for a higher daily allowance. |
+| `AI_BUDGET_EXCEEDED` | You reached your plan's **daily AI token ceiling** (the hard cut-off, not the included allowance). | It resets at midnight (Bangkok time). On Pro/Enterprise, usage between the included daily allowance and the ceiling is allowed and billed as **metered overage** (see the AI-usage card on the Billing page for tokens used and the projected overage charge); the ceiling is the absolute stop. Upgrade for a higher allowance/ceiling. |
 | `AI_UNAVAILABLE` | The AI assistant is not configured (no API key). | Ask an administrator to configure the AI provider key. |
 
 ---

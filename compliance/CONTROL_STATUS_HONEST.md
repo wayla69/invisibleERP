@@ -1,0 +1,89 @@
+# Internal-control status — honest baseline & ID crosswalk
+
+> **Purpose.** A plain, defensible statement of where ICFR actually stands, written in response to the PwC
+> Capital Markets Advisory review. It (a) corrects the "audit-ready" overclaim, (b) gives the real
+> Implemented/Partial/Gap counts, (c) reconciles the panel's control IDs to the RCM (several didn't match,
+> which is why built controls read as "missing"), and (d) states a realistic ICFR-attestable timeline.
+>
+> Source of truth: `compliance/build_rcm.py` → `Oshinei_ERP_SOX_RCM_v1.xlsx` (regenerate, never hand-edit).
+> Last reconciled: 2026-06-30.
+
+## 1. We are NOT "audit-ready" — and we should stop saying it
+
+"Audit-ready" implies controls are designed, operating, evidenced over time, and externally testable today.
+That is not true and should not be claimed. The accurate statement is:
+
+> The control **environment is real and largely built** — most key controls exist in code with an automated
+> Test-of-Effectiveness (ToE) harness re-performing them on every CI run. What remains is (a) a small set of
+> partial/gap controls, (b) **time** — an external auditor needs each key control *operating for ≥1 quarter*
+> before they can sample it, and (c) the entity-level governance scaffolding (audit committee, ethics policy,
+> fraud-risk assessment) that is organizational, not software.
+
+### "Implemented" in the RCM ≠ "attestable"
+`Implemented` means: the control exists in the system today and an automated ToE harness proves it *prevents
+the risk* (not merely that the code compiles). It does **not** mean operating-effectiveness has been
+evidenced over an audit period or tested by an independent firm. Those are separate, later gates.
+
+## 2. Real status (current RCM)
+
+| Status | Count | Share | Meaning |
+|--------|-------|-------|---------|
+| Implemented | **138** | 90% | Exists + automated ToE harness re-performs it |
+| Partial | **9** | 6% | Capability present; must be formalized/extended |
+| Gap | **6** | 4% | Not yet built — on the remediation plan |
+| **Total** | **153** | | |
+
+> Note on the panel's "49/77": that snapshot is **stale**. The control set has roughly doubled (77 → 153)
+> and implemented coverage has risen as the deepening programs landed. The figures above are generated from
+> `build_rcm.py`, not asserted.
+
+## 3. Panel ID crosswalk — why "gaps" were actually built
+
+The panel's three headline findings used control IDs that **do not match this RCM's numbering**. Each named
+control is in fact built, enforced as a hard gate, and ToE-tested. The mismatch itself is the root cause of
+the "missing control" reading.
+
+| Panel said | Panel's claim | Actual RCM control(s) | Real status | Enforcement / evidence |
+|------------|---------------|------------------------|-------------|------------------------|
+| **EXP-03** — 3-way match "optional, not a hard gate" | Optional | **EXP-01** (3-way match gates AP pay) + **EXP-09** (AP-pay consults match) | Implemented | `assertPayable()` throws `MATCH_BLOCKED` *before* any payment row is created; override is maker-checked (overrider ≠ matcher). ToE in `cutover/match.ts` **and now** `cutover/compliance.ts`. *(RCM's actual EXP-03 = "PR/PO raised without authorization", a different control.)* |
+| **GL-06** — period-close "isn't enforced" | Not enforced | **GL-02** (no posting to closed period) + **GL-15** (hard close) + **GL-16** (close/lock SoD) + **GL-19** (pre-lock validation) | Implemented | `postEntry()` rejects a posting into a `Locked` period (`PERIOD_LOCKED`) / `Closed` period (`PERIOD_CLOSED`); locker ≠ starter. ToE in `cutover/compliance.ts`. *(RCM's actual GL-06 = "operator mis-posts to another tenant's books", a tenancy control.)* |
+| **PAY-02** — payroll pre-disbursement review "doesn't exist" | Missing | **PAY-03** (payroll run maker-checker) | Implemented | Payroll run posts a **Draft** JE excluded from balances; a different user must approve (reuses GL-05 SoD). ToE in `cutover/compliance.ts`. *(RCM's actual PAY-02 = "statutory withholdings mis-stated", a different control.)* |
+
+**Action taken:** the formal ICFR ToE harness (`cutover/compliance.ts`) now carries an explicitly-labeled
+EXP-01/EXP-09 three-way-match test (previously the gate was proven only in `cutover/match.ts`). GL period
+gating (GL-02/15/16) and payroll maker-checker (PAY-03) were already in the compliance harness.
+
+## 4. The real remaining work (Partial + Gap)
+
+### Partial (9) — present but to be formalized/extended
+`ITGC-SD-02` opening-balance migration · `ITGC-SD-03` regression-coverage gate · `ITGC-OP-02` DR/continuity
+plan · `ITGC-OP-04` scheduled-job failure alerting · `EXP-03` PR/PO authorization workflow · `INV-04`
+physical-count/cycle-count control · `PROJ-03` WIP/clearing review at close · `REC-03` intercompany
+elimination · `TAX-03` withholding-tax computation/reporting.
+
+### Gap (6) — not yet built; mostly **entity-level governance, not software**
+`ELC-01` code of conduct/ethics acknowledgement · `ELC-02` audit-committee oversight · `ELC-03`
+delegation-of-authority matrix · `ELC-04` whistleblower hotline · `ELC-05` annual fraud-risk assessment ·
+`ITGC-SD-01` SDLC design/test sign-off.
+
+> Five of six gaps are **organizational** — they require the company to stand up governance bodies and
+> policies, not to ship code. None are transaction-level application controls. This is the work a SOX PMO
+> owns, not engineering.
+
+## 5. Realistic ICFR-attestable timeline
+
+- **EGC posture (JOBS Act).** SOX **404(b)** external-auditor attestation on ICFR is **deferred** (up to 5
+  fiscal years post-IPO, or until EGC status is lost). SOX **302** certifications and **404(a)** management
+  ICFR assessment still apply from the first/second annual report.
+- **What gates "attestable".** An external auditor samples a key control only after it has **operated for
+  ≥1 quarter** with retained evidence. So even a fully-built control cannot be attested the day it ships.
+- **Honest earliest date.** Management ICFR assertion (404(a)) is realistically **Q1 2027 at the earliest**,
+  and only if a dedicated SOX PMO runs the remediation without slipping: close the 6 entity-level gaps,
+  formalize the 9 partials, then accumulate ≥1 (preferably 2–3) quarters of operating evidence. Six-month
+  plans rarely land; plan for the controls *and* the evidence period.
+
+## 6. Revision history
+
+| Date | Change |
+|------|--------|
+| 2026-06-30 | Initial — honest baseline (138/9/6 of 153), panel↔RCM ID crosswalk, "audit-ready" correction, EGC/404(b) timeline. PwC Capital Markets follow-up. |

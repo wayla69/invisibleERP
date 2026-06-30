@@ -33,14 +33,21 @@ interface PlanSeed {
   features: Record<string, unknown>;
 }
 
-// NOTE: prices + ai_tokens_daily caps below are <<PLACEHOLDER>> values pending founder sign-off
-// (see docs/ops/pricing-and-ai-cogs.md). ai_tokens_daily is the FINITE included daily token cap — there is
-// NO unlimited tier (panel #3): Enterprise is a high finite ceiling, overage beyond it is metered & billed.
+// PRICING — illustrative values (PwC Capital Markets follow-up). Subscription prices and the AI-token
+// economics are finalized in docs/ops/pricing-and-ai-cogs.md + docs/ops/unit-economics-model.md; the
+// figures here are the agreed illustrative defaults the founder can overwrite. AI is priced on a
+// **ceiling + metered-overage** model (no unlimited tier — panel #3):
+//   • ai_tokens_daily          — FINITE included daily tokens (free for the tenant within this band).
+//   • ai_tokens_daily_max      — hard ceiling: the absolute daily cutoff; usage in (included, max] is
+//                                metered as overage, and the next request past max is AI_BUDGET_EXCEEDED.
+//   • ai_overage_rate_thb_per_1k — THB billed per 1,000 overage tokens (the band between included and max).
+// This connects the COGS meter (ai_token_usage.overage_tokens) to a price so a heavy tenant is charged for
+// the upstream Anthropic spend rather than served at negative gross margin.
 const PLAN_SEED: PlanSeed[] = [
-  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0 } },
-  { code: 'starter', name: 'Starter', priceMonthly: '990', currency: 'THB', features: { users: 5, locations: 1, ai_chat: false, reports: 'standard', ai_tokens_daily: 0 } },
-  { code: 'pro', name: 'Pro', priceMonthly: '2900', currency: 'THB', features: { users: 25, locations: 5, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000 } },
-  { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000 } },
+  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0 } },
+  { code: 'starter', name: 'Starter', priceMonthly: '990', currency: 'THB', features: { users: 5, locations: 1, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0 } },
+  { code: 'pro', name: 'Pro', priceMonthly: '2900', currency: 'THB', features: { users: 25, locations: 5, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000, ai_tokens_daily_max: 500_000, ai_overage_rate_thb_per_1k: 12 } },
+  { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000, ai_tokens_daily_max: 5_000_000, ai_overage_rate_thb_per_1k: 8 } },
 ];
 
 const TRIAL_DAYS = 14;
@@ -193,29 +200,80 @@ export class BillingService {
       .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
       .orderBy(desc(subscriptions.createdAt)).limit(1);
     const features: any = planRow?.features ?? {};
-    const dailyLimit = features.ai_tokens_daily != null ? Number(features.ai_tokens_daily) : 50000; // default Pro-tier
-    const [today] = await db.select({ input: aiTokenUsage.inputTokens, output: aiTokenUsage.outputTokens })
+    const dailyLimit = features.ai_tokens_daily != null ? Number(features.ai_tokens_daily) : 50000; // included daily cap (default Pro-tier)
+    // Hard ceiling + overage economics (ceiling + metered-overage model). A plan that omits the max has no
+    // overage band → the included cap IS the ceiling. The rate prices the (included, max] band.
+    const dailyMax = features.ai_tokens_daily_max != null ? Number(features.ai_tokens_daily_max) : dailyLimit;
+    const overageRate = Number(features.ai_overage_rate_thb_per_1k ?? 0); // THB per 1,000 overage tokens
+    const [today] = await db.select({ input: aiTokenUsage.inputTokens, output: aiTokenUsage.outputTokens, overage: aiTokenUsage.overageTokens })
       .from(aiTokenUsage)
       .where(and(eq(aiTokenUsage.tenantId, tenantId), sql`${aiTokenUsage.usageDate} = (now() AT TIME ZONE 'Asia/Bangkok')::date`))
       .limit(1);
     const tIn = today ? Number(today.input) : 0;
     const tOut = today ? Number(today.output) : 0;
     const tTotal = tIn + tOut;
+    const tOverage = today ? Number(today.overage) : 0;
+    // 30-day usage + overage (the billable accumulation the overage invoice line draws from).
     const [m] = await db.select({
       input: sql<number>`coalesce(sum(${aiTokenUsage.inputTokens}),0)`,
       output: sql<number>`coalesce(sum(${aiTokenUsage.outputTokens}),0)`,
+      overage: sql<number>`coalesce(sum(${aiTokenUsage.overageTokens}),0)`,
     }).from(aiTokenUsage)
       .where(and(eq(aiTokenUsage.tenantId, tenantId), sql`${aiTokenUsage.usageDate} >= (now() AT TIME ZONE 'Asia/Bangkok')::date - INTERVAL '30 days'`));
     const mIn = Number(m?.input ?? 0);
     const mOut = Number(m?.output ?? 0);
+    const mOverage = Number(m?.overage ?? 0);
+    const round2 = (x: number) => Math.round(x * 100) / 100;
     return {
-      daily_limit: dailyLimit, // -1 = unlimited (Enterprise)
+      daily_limit: dailyLimit,          // included finite cap (free band)
+      daily_max: dailyMax,              // hard ceiling (absolute cutoff)
+      overage_rate_thb_per_1k: overageRate,
       today: {
         input_tokens: tIn, output_tokens: tOut, total_tokens: tTotal,
-        remaining: dailyLimit === -1 ? null : Math.max(0, dailyLimit - tTotal),
-        over_budget: dailyLimit !== -1 && tTotal >= dailyLimit,
+        remaining: Math.max(0, dailyMax - tTotal),     // tokens left before the hard ceiling
+        over_budget: tTotal >= dailyMax,               // hit the hard ceiling (blocked)
+        overage_tokens: tOverage,                      // metered beyond the included cap
+        projected_overage_thb: round2((tOverage / 1000) * overageRate),
       },
-      last_30_days: { input_tokens: mIn, output_tokens: mOut, total_tokens: mIn + mOut },
+      last_30_days: {
+        input_tokens: mIn, output_tokens: mOut, total_tokens: mIn + mOut,
+        overage_tokens: mOverage,
+        overage_charge_thb: round2((mOverage / 1000) * overageRate),
+      },
+    };
+  }
+
+  // AI overage invoice line for a billing month (YYYY-MM, Asia/Bangkok). Sums the metered overage tokens —
+  // the band consumed ABOVE each day's included cap — and prices them at the plan's overage rate. This is the
+  // line a monthly invoice run appends so heavy AI usage is billed (panel #3: connect the COGS meter to a
+  // price). Returns a zero line when the plan has no overage rate or the tenant stayed within its cap.
+  async aiOverageInvoice(tenantId: number, month?: string) {
+    const db = this.db as any;
+    const ym = (month && /^\d{4}-\d{2}$/.test(month)) ? month : null;
+    const [planRow] = await db.select({ features: plans.features, plan_code: subscriptions.planCode })
+      .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
+      .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
+      .orderBy(desc(subscriptions.createdAt)).limit(1);
+    const features: any = planRow?.features ?? {};
+    const overageRate = Number(features.ai_overage_rate_thb_per_1k ?? 0); // THB / 1,000 overage tokens
+    // Scope to the requested month (default: current Bangkok month). usage_date is already a Bangkok business date.
+    const monthFilter = ym
+      ? sql`to_char(${aiTokenUsage.usageDate}, 'YYYY-MM') = ${ym}`
+      : sql`to_char(${aiTokenUsage.usageDate}, 'YYYY-MM') = to_char((now() AT TIME ZONE 'Asia/Bangkok')::date, 'YYYY-MM')`;
+    const [agg] = await db.select({ overage: sql<number>`coalesce(sum(${aiTokenUsage.overageTokens}),0)` })
+      .from(aiTokenUsage)
+      .where(and(eq(aiTokenUsage.tenantId, tenantId), monthFilter));
+    const overageTokens = Number(agg?.overage ?? 0);
+    const amount = Math.round((overageTokens / 1000) * overageRate * 100) / 100;
+    return {
+      tenant_id: tenantId,
+      month: ym ?? new Date().toISOString().slice(0, 7),
+      plan_code: planRow?.plan_code ?? null,
+      overage_tokens: overageTokens,
+      overage_rate_thb_per_1k: overageRate,
+      currency: 'THB',
+      amount, // billable overage charge for the month
+      line_description: `AI usage overage — ${overageTokens.toLocaleString()} tokens @ ${overageRate} THB/1k`,
     };
   }
 

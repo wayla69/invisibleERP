@@ -1,52 +1,68 @@
-# Pricing & AI COGS — tier caps and overage (DRAFT)
+# Pricing & AI COGS — tier caps, metered overage, and gross margin
 
-> **Status: DRAFT v0.1 (2026-06-30).** All prices and token caps below are **`<<PLACEHOLDER>>`** values
-> pending **founder sign-off**. This document exists to make the *mechanism* explicit (finite caps, metered
-> overage, AI cost-of-goods visibility) so the numbers can be set deliberately rather than left implicit.
-> Code source of truth for the caps: `apps/api/src/modules/billing/billing.service.ts` (`PLAN_SEED`).
+> **Status: v1.0 (2026-06-30) — illustrative.** The subscription prices and AI-token economics below are the
+> agreed **illustrative defaults** (PwC Capital Markets follow-up). They are real, deployable numbers — the
+> founder can overwrite any figure, but there are no longer `<<PLACEHOLDER>>` blanks: the meter is connected
+> to a price. Code source of truth: `apps/api/src/modules/billing/billing.service.ts` (`PLAN_SEED`) +
+> migration `0198_ai_overage_pricing.sql`. Unit economics: [`unit-economics-model.md`](unit-economics-model.md).
 
-## Why this exists (panel Round-2, condition #3)
+## Why this exists (panel Round-2 #3 + PwC Capital Markets)
 
-The platform meters AI tokens per tenant (`ai_token_usage`) but previously priced AI as an unlimited bucket
-on the Enterprise tier (`ai_tokens_daily: -1`). On a usage-priced upstream (Anthropic) under a flat
-subscription, **one heavy Enterprise tenant could burn more in API spend than their seat costs** — negative
-gross margin that worsens as the best customers scale. This change makes **every tier finite** and **meters
-overage** so over-limit usage is billed, not given away.
+The platform meters AI tokens per tenant (`ai_token_usage`) but previously (a) priced AI as an unlimited
+Enterprise bucket and (b) left prices as placeholders. On a usage-priced upstream (Anthropic) under a flat
+subscription, **one heavy tenant could burn more in API spend than their seat costs** — negative gross margin
+that worsens as the best customers scale. This is now a **ceiling + metered-overage** model: every tier is
+finite, and usage above the included cap is **billed**, not given away.
 
-## Tier caps (FINITE — no unlimited tier)
+## Price list (illustrative)
 
-| Plan | Price/mo (THB) | `ai_chat` | `ai_tokens_daily` (included) | Notes |
-|------|----------------|-----------|------------------------------|-------|
-| Free | `<<0>>` | off | 0 | AI disabled |
-| Starter | `<<990>>` | off | 0 | AI disabled |
-| Pro | `<<2,900>>` | on | `<<200,000>>` | included daily tokens |
-| Enterprise | `<<custom>>` | on | `<<2,000,000>>` | high **finite** ceiling, not unlimited |
+| Plan | Price/mo (THB) | `ai_chat` | Included AI tokens/day | Hard ceiling/day | Overage rate |
+|------|----------------|-----------|------------------------|------------------|--------------|
+| Free | 0 | off | 0 | 0 | — |
+| Starter | 990 | off | 0 | 0 | — |
+| Pro | 2,900 | on | 200,000 | 500,000 | 12 THB / 1k overage tokens |
+| Enterprise | custom (contact sales) | on | 2,000,000 | 5,000,000 | 8 THB / 1k overage tokens |
 
-- The legacy `-1` ("unlimited") is no longer honored: `checkBudget` maps any negative cap to
-  `AI_ENTERPRISE_DAILY_CAP` (env, default **2,000,000**), a finite ceiling.
-- A plan that omits `ai_tokens_daily` falls back to a conservative finite default
-  (`DEFAULT_AI_DAILY = 50,000`) — never unlimited.
+Feature keys in `PLAN_SEED.features`: `ai_tokens_daily` (included, free band), `ai_tokens_daily_max` (hard
+ceiling), `ai_overage_rate_thb_per_1k` (price of the band between them).
 
-## Overage metering
+## How the three thresholds behave
 
-- Tokens consumed beyond a tenant's included cap are recorded in `ai_token_usage.overage_tokens` (migration
-  `0194`). The current turn that crosses the cap is allowed to complete and its over-portion is recorded; the
-  next request is blocked with `AI_BUDGET_EXCEEDED` until midnight Bangkok time.
-- **`<<Overage rate>>`**: THB per 1,000 overage tokens — **TBD by founder**. Billing integration to invoice
-  `overage_tokens` is a follow-on (out of scope here).
+1. **Included cap (`ai_tokens_daily`)** — free tokens within the subscription. Usage here is not billed.
+2. **Overage band (included → max)** — metered: every token above the included cap accrues to
+   `ai_token_usage.overage_tokens` and is billed at the plan's overage rate. The user keeps working.
+3. **Hard ceiling (`ai_tokens_daily_max`)** — the absolute daily cutoff. At the ceiling the next request is
+   blocked with `AI_BUDGET_EXCEEDED` (resets at midnight Asia/Bangkok). This bounds the blast radius of a
+   prompt-injection loop or a runaway integration.
 
-## AI cost-of-goods (COGS) note
+Enforcement: `AgentService.checkBudget()` resolves both thresholds, blocks at the ceiling, and returns the
+included cap so `recordUsage()` meters the overage. Legacy `-1` ("unlimited") still maps to a finite ceiling
+(`AI_ENTERPRISE_DAILY_CAP`); a plan that omits the cap falls back to `DEFAULT_AI_DAILY = 50,000`.
 
-- Model tiering (`apps/api/src/common/ai-models.ts`) routes mechanical tasks (extraction, NL→query,
-  tool-relay) to the **Haiku** tier and reserves **Sonnet** for reasoning/synthesis — no task defaults to
-  Opus. This is the primary COGS lever; the eval harness (`tools/cutover/src/ai-eval.ts`) guards against
-  regression to Opus.
-- Prompt caching (system prompt + tool manifest) further cuts input-token cost per turn.
-- **`<<Target gross margin>>`**, **`<<blended COGS per tenant>>`**, **`<<CAC payback>>`** — to be filled by
-  Finance for the funding model.
+## Billing the overage
+
+- **Read view:** `GET /api/billing/ai-usage` returns today's `overage_tokens`, the rate, and
+  `projected_overage_thb`; the web billing screen surfaces it (`apps/web/.../billing/page.tsx`).
+- **Invoice line:** `GET /api/billing/ai-overage?month=YYYY-MM` → `BillingService.aiOverageInvoice()` sums the
+  month's metered overage tokens and prices them (`overage_tokens / 1000 × rate`), returning the billable
+  line a monthly invoice run appends. Wiring this line into the Stripe invoice run is the remaining
+  integration step (the amount is now computed, not a placeholder).
+
+## AI cost-of-goods (COGS) — the margin lever
+
+- **Model tiering** (`apps/api/src/common/ai-models.ts`) routes mechanical tasks (doc extraction, NL→query,
+  tool-relay) to **Haiku** and reserves **Sonnet** for reasoning/synthesis — **no task defaults to Opus**.
+  Regression-guarded by `apps/api/test/ai-cost.test.ts` (a test fails if any task resolves to Opus). This is
+  the primary COGS lever and was the PwC AI-desk ask; it is already in `main`.
+- **Prompt caching** (system prompt + tool manifest `cache_control`) cuts input-token cost per turn.
+- **Loop bound:** 15-turn agent loop × 4,096 max output tokens per turn caps a single conversation.
+
+See [`unit-economics-model.md`](unit-economics-model.md) for blended COGS per tenant, gross margin, and the
+CAC/ARPU/payback model that consume these numbers.
 
 ## Revision history
 
 | Date | Version | Change |
 |------|---------|--------|
-| 2026-06-30 | v0.1 (DRAFT) | Initial — finite tier caps, overage metering, AI-COGS note. Placeholders pending founder sign-off. |
+| 2026-06-30 | v1.0 | Connected meter→price: ceiling + metered-overage model, illustrative prices + overage rates filled (no placeholders), overage invoice line + UI, links to unit-economics model. PwC Capital Markets follow-up. |
+| 2026-06-30 | v0.1 (DRAFT) | Initial — finite tier caps, overage metering, AI-COGS note (placeholders pending sign-off). |

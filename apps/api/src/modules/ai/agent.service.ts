@@ -141,37 +141,46 @@ export class AgentService {
     return pickModel(messages, process.env.ANTHROPIC_MODEL);
   }
 
-  // ITGC-SEC-AI-01 — per-tenant daily token budget (panel #3 — no unlimited tier).
-  // Resolves the plan's ai_tokens_daily to a FINITE included cap: a missing value → DEFAULT_AI_DAILY,
-  // and the legacy -1 ("unlimited") → a finite ENTERPRISE ceiling (AI_ENTERPRISE_DAILY_CAP). Returns the
-  // resolved cap so recordUsage can meter overage; null = exempt (HQ operator, no billable tenant).
+  // ITGC-SEC-AI-01 — per-tenant daily token budget (panel #3 — no unlimited tier; ceiling + metered overage).
+  // Resolves the plan to two FINITE thresholds:
+  //   • included cap (ai_tokens_daily)      — the free band; missing → DEFAULT_AI_DAILY, legacy -1 → finite ceiling.
+  //   • hard max (ai_tokens_daily_max)      — the absolute daily cutoff; missing/≤included → no overage band
+  //                                           (the included cap IS the ceiling). Usage in (included, max] is
+  //                                           metered as billable overage; past max → AI_BUDGET_EXCEEDED.
+  // Returns the INCLUDED cap so recordUsage meters tokens above it as overage; null = exempt (HQ operator).
   // Fail-open on DB errors (a tracking outage must not block the AI feature).
   private static readonly DEFAULT_AI_DAILY = 50_000;
   private async checkBudget(tenantId: number | null): Promise<number | null> {
     if (tenantId == null || !this.sql) return null; // HQ Admin / no sql — exempt, unmetered
     try {
       const enterpriseCap = Number(process.env.AI_ENTERPRISE_DAILY_CAP ?? 2_000_000);
-      const [plan] = await this.sql<{ limit: number | null }[]>`
-        SELECT (p.features->>'ai_tokens_daily')::int AS limit
+      const [plan] = await this.sql<{ included: number | null; hardmax: number | null }[]>`
+        SELECT (p.features->>'ai_tokens_daily')::int AS included,
+               (p.features->>'ai_tokens_daily_max')::int AS hardmax
         FROM subscriptions s JOIN plans p ON p.code = s.plan_code
         WHERE s.tenant_id = ${tenantId} AND s.status IN ('Active', 'Trialing')
         LIMIT 1`;
       // No active sub OR plan omits the cap → conservative finite default (never unlimited).
-      let limit = plan && plan.limit != null ? Number(plan.limit) : AgentService.DEFAULT_AI_DAILY;
-      if (limit < 0) limit = enterpriseCap; // kill the "unlimited" bucket → finite ceiling
+      let included = plan && plan.included != null ? Number(plan.included) : AgentService.DEFAULT_AI_DAILY;
+      if (included < 0) included = enterpriseCap; // kill the legacy "unlimited" bucket → finite ceiling
+      // Hard ceiling: absolute cutoff incl. the metered overage band. Falls back to the included cap (no
+      // overage band) when the plan omits a max or sets it below the included cap.
+      let hardMax = plan && plan.hardmax != null ? Number(plan.hardmax) : included;
+      if (hardMax < 0) hardMax = enterpriseCap;
+      if (hardMax < included) hardMax = included;
       const [usage] = await this.sql<{ total: number }[]>`
         SELECT COALESCE(input_tokens + output_tokens, 0) AS total
         FROM ai_token_usage
         WHERE tenant_id = ${tenantId} AND usage_date = (now() AT TIME ZONE 'Asia/Bangkok')::date`;
       const used = usage ? Number(usage.total) : 0;
-      if (used >= limit) {
+      if (used >= hardMax) {
         throw new ForbiddenException({
           code: 'AI_BUDGET_EXCEEDED',
-          message: `Daily AI token budget (${limit.toLocaleString()}) reached. Resets at midnight Bangkok time.`,
-          messageTh: `เกินโควต้า AI Token รายวัน (${limit.toLocaleString()}) — จะรีเซ็ตเที่ยงคืนเวลาไทย`,
+          message: `Daily AI token ceiling (${hardMax.toLocaleString()}) reached. Resets at midnight Bangkok time.`,
+          messageTh: `เกินเพดาน AI Token รายวัน (${hardMax.toLocaleString()}) — จะรีเซ็ตเที่ยงคืนเวลาไทย`,
         });
       }
-      return limit;
+      return included; // overage basis: recordUsage meters tokens above the included cap
     } catch (e: any) {
       if (e?.status === 403) throw e; // re-raise budget-exceeded
       return null; // DB error → fail open (unmetered for this turn)

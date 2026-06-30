@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Public, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -58,6 +58,14 @@ export class BillingController {
   async aiUsage(@CurrentUser() u: JwtUser) {
     const tenantId = await this.svc.resolveTenantId(u);
     return this.svc.aiUsage(tenantId);
+  }
+
+  // AI overage invoice line for a month (YYYY-MM, default current). Prices the metered overage tokens at
+  // the plan's overage rate — the billable line a monthly invoice run appends (panel #3: meter → price).
+  @Get('billing/ai-overage') @Permissions('users', 'exec')
+  async aiOverage(@CurrentUser() u: JwtUser, @Query('month') month?: string) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    return this.svc.aiOverageInvoice(tenantId, month);
   }
 
   @Post('billing/checkout') @Permissions('users')
