@@ -23,7 +23,8 @@
     "db:seed:demo:branch": "tsx src/database/seed-demo-branch.ts",
     "db:seed:demo:feedback": "tsx src/database/seed-demo-feedback.ts",
     "db:seed:demo:docsync": "tsx src/database/seed-demo-docsync.ts",
-    "db:seed:demo:all": "tsx src/database/seed-demo.ts && tsx src/database/seed-demo-sales.ts && tsx src/database/seed-demo-branch.ts && tsx src/database/seed-demo-loyalty.ts && tsx src/database/seed-demo-procurement.ts && tsx src/database/seed-demo-finance.ts && tsx src/database/seed-demo-pos.ts && tsx src/database/seed-demo-hr.ts && tsx src/database/seed-demo-feedback.ts && tsx src/database/seed-demo-docsync.ts",
+    "db:seed:demo:governance": "tsx src/database/seed-demo-governance.ts",
+    "db:seed:demo:all": "tsx src/database/seed-demo.ts && tsx src/database/seed-demo-sales.ts && tsx src/database/seed-demo-branch.ts && tsx src/database/seed-demo-loyalty.ts && tsx src/database/seed-demo-procurement.ts && tsx src/database/seed-demo-finance.ts && tsx src/database/seed-demo-pos.ts && tsx src/database/seed-demo-hr.ts && tsx src/database/seed-demo-feedback.ts && tsx src/database/seed-demo-docsync.ts && tsx src/database/seed-demo-governance.ts",
     "lint": "echo \"(lint placeholder — add eslint)\"",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"

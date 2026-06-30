@@ -1,14 +1,21 @@
 import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, ne, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { ethicsAcknowledgements, whistleblowerCases, delegationOfAuthority, fraudRisks, governanceOversight } from '../../database/schema';
+import { ethicsAcknowledgements, whistleblowerCases, delegationOfAuthority, fraudRisks, governanceOversight, users } from '../../database/schema';
+import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
 const STATUSES = ['received', 'investigating', 'resolved', 'dismissed'] as const;
 const RISK_STATUSES = ['open', 'mitigated', 'accepted', 'closed'] as const;
 const LEVELS = ['low', 'medium', 'high'] as const;
+const OPEN_CASE = ['received', 'investigating'] as const;
+const OVERSIGHT_CADENCE_DAYS = 92;   // quarterly audit-committee cadence (≈ one quarter)
+const HOTLINE_SLA_DAYS = 30;          // a whistleblower case open beyond this is overdue
 const n2 = (v: any) => (v == null ? null : Number(v));
+const addDays = (ymdStr: string, days: number) => { const d = new Date(`${ymdStr}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+const toYmd = (ts: any) => { const d = ts instanceof Date ? ts : new Date(ts); return d.toISOString().slice(0, 10); };
 
 // Entity-level governance evidence capture (ELC-01 ethics-acknowledgement register, ELC-04 whistleblower
 // case log). Tenant-scoped by RLS; the policy + governance bodies remain an org/PMO process.
@@ -145,5 +152,51 @@ export class GovernanceService {
     const db = this.db as any;
     const rows = await db.select().from(governanceOversight).orderBy(desc(governanceOversight.meetingDate)).limit(200);
     return { meetings: rows.map((m: any) => ({ id: Number(m.id), meeting_date: m.meetingDate, kind: m.kind, topics: m.topics, icfr_reviewed: m.icfrReviewed, findings_reviewed: m.findingsReviewed, attendees: m.attendees, minutes_ref: m.minutesRef, signed_off_by: m.signedOffBy })), count: rows.length };
+  }
+
+  // ───────────────── Governance readiness (operating signals across ELC-01/02/04) ─────────────────
+  // The operating dashboard the audit committee / compliance lead watches: code-of-conduct acknowledgement
+  // COVERAGE (ELC-01), audit-committee oversight CADENCE / overdue (ELC-02), and whistleblower case AGEING
+  // vs SLA (ELC-04). `ready` is true only when none of the three has an outstanding signal. Tenant-scoped by
+  // RLS (HQ/bypass sees the aggregate). Exposed at GET /api/governance/readiness AND as the schedulable BI
+  // report type `governance_readiness`, so the existing scheduler + notifications give the cadence reminders.
+  async readiness(_user: JwtUser, policyVersion = '1.0') {
+    const db = this.db as any;
+    const today = ymd(); // business date (Asia/Bangkok)
+
+    // ELC-01 — acknowledgement coverage (active staff, excluding customer/portal accounts).
+    const staffRows = await db.select({ u: users.username }).from(users).where(and(eq(users.isActive, true), ne(users.role, 'Customer')));
+    const ackRows = await db.select({ u: ethicsAcknowledgements.username }).from(ethicsAcknowledgements).where(eq(ethicsAcknowledgements.policyVersion, policyVersion));
+    const acked = new Set(ackRows.map((r: any) => r.u));
+    const staff = staffRows.map((r: any) => r.u);
+    const outstanding = staff.filter((u: string) => !acked.has(u));
+    const total = staff.length;
+    const coveragePct = total > 0 ? Math.round((total - outstanding.length) / total * 1000) / 10 : 0;
+
+    // ELC-02 — audit-committee oversight cadence (quarterly). Track last meeting + last ICFR review + next due.
+    const [lastMeeting] = await db.select().from(governanceOversight).orderBy(desc(governanceOversight.meetingDate)).limit(1);
+    const [lastIcfr] = await db.select().from(governanceOversight).where(eq(governanceOversight.icfrReviewed, true)).orderBy(desc(governanceOversight.meetingDate)).limit(1);
+    const lastDate: string | null = lastMeeting?.meetingDate ?? null;
+    const lastIcfrDate: string | null = lastIcfr?.meetingDate ?? null;
+    const nextDue = lastDate ? addDays(lastDate, OVERSIGHT_CADENCE_DAYS) : null;
+    const oversightOverdue = !lastDate || (nextDue != null && today > nextDue);
+
+    // ELC-04 — open whistleblower cases + ageing vs the SLA.
+    const openCases = await db.select({ ref: whistleblowerCases.caseRef, submittedAt: whistleblowerCases.submittedAt }).from(whistleblowerCases).where(inArray(whistleblowerCases.status, OPEN_CASE as any));
+    const ages = openCases.map((c: any) => daysBetween(toYmd(c.submittedAt), today));
+    const oldestOpen = ages.length ? Math.max(...ages) : 0;
+    const overdueCases = ages.filter((d: number) => d > HOTLINE_SLA_DAYS).length;
+
+    const alerts: string[] = [];
+    if (outstanding.length) alerts.push(`ELC-01: ${outstanding.length} of ${total} staff have not acknowledged code-of-conduct v${policyVersion} (coverage ${coveragePct}%)`);
+    if (oversightOverdue) alerts.push(`ELC-02: audit-committee ICFR oversight is overdue (last meeting ${lastDate ?? 'never'})`);
+    if (overdueCases) alerts.push(`ELC-04: ${overdueCases} whistleblower case(s) open beyond the ${HOTLINE_SLA_DAYS}-day SLA (oldest ${oldestOpen}d)`);
+
+    return {
+      as_of: today, policy_version: policyVersion, ready: alerts.length === 0, alerts,
+      ethics: { coverage_pct: coveragePct, acknowledged: total - outstanding.length, total_active_staff: total, outstanding },
+      oversight: { last_meeting: lastDate, last_icfr_review: lastIcfrDate, next_due: nextDue, overdue: oversightOverdue, cadence_days: OVERSIGHT_CADENCE_DAYS },
+      hotline: { open_cases: openCases.length, oldest_open_age_days: oldestOpen, overdue_cases: overdueCases, sla_days: HOTLINE_SLA_DAYS },
+    };
   }
 }
