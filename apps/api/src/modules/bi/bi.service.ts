@@ -23,6 +23,7 @@ import { ProcurementService } from '../procurement/procurement.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { JobQueueService } from '../jobs/job-queue.service';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
+import { BiLiveService } from './bi-live.service';
 
 // Job type for offloading a due report/action subscription to the background worker.
 export const REPORT_SUBSCRIPTION_JOB = 'report_subscription';
@@ -89,6 +90,8 @@ export class BiService implements OnModuleInit {
     @Optional() private readonly match?: ThreeWayMatchService,
     @Optional() private readonly jobs?: JobQueueService,
     @Optional() private readonly worker?: JobWorkerService,
+    // Real-time streaming analytics (docs/22 Phase B) — live KPI/event fan-out bus.
+    @Optional() private readonly live?: BiLiveService,
   ) {}
 
   // Register the background handler that runs one due subscription (report or heavy action job) off the
@@ -416,7 +419,22 @@ export class BiService implements OnModuleInit {
         set: { ...row, createdAt: new Date() },
       });
 
+    // Streaming analytics (Phase B): push the refreshed KPI snapshot live to any subscribed dashboard.
+    this.publishLive({ type: 'kpi_refresh', tenant_id: tid, date, kpi: { sales_mtd: kpi.sales.mtd, open_ar: kpi.receivables.open_ar, open_ap: kpi.payables.open_ap, pipeline_open: kpi.pipeline.open_value } });
     return { date, snapshot: row };
+  }
+
+  // Publish a live analytics event to the SSE bus (no-op if the bus isn't wired, e.g. a partial harness).
+  publishLive(event: { type: string; tenant_id?: number | null; [k: string]: any }): void {
+    this.live?.publish(event);
+  }
+  // Buffered recent feed for a tenant — the HTTP-testable read behind the SSE stream.
+  liveRecent(user: JwtUser, limit?: number) {
+    return { events: this.live?.recent(user.tenantId ?? null, limit) ?? [], available: !!this.live };
+  }
+  // The raw event stream (per-tenant filtered) for the @Sse controller.
+  liveStream() {
+    return this.live?.stream();
   }
 
   async getSnapshots(dto: { start_date?: string; end_date?: string; days?: number }, user: JwtUser) {

@@ -58,7 +58,14 @@ and lateness signal. Extends `mfg-depth`; reuses `routings`/`routing_operations`
 - **Docs/harness:** PN-?? (manufacturing) note or `docs/21` cross-ref; UAT case; harness `tools/cutover/src/aps.ts`
   (sequence two WOs over a shared work centre → ordered dispatch, makespan, a late flag).
 
-## 3. Phase B — Real-time streaming analytics (live KPI feed)
+## 3. Phase B — Real-time streaming analytics (live KPI feed) — DELIVERED
+> **DELIVERED** — `BiLiveService` (in-process rxjs `Subject` + per-tenant ring buffer, mirroring the
+> `RealtimeService` pattern). `refreshSnapshot()` publishes a `kpi_refresh` event; exposed via
+> `@Sse('api/bi/live/stream')` (tenant-filtered) + `GET api/bi/live/recent` (testable). The dashboard
+> subscribes through the existing `useRealtime` hook (cookie-auth SSE) and live-refreshes its KPIs with a
+> live/offline badge. No migration, no control. Harness `tools/cutover/src/bi.ts` (publish → `recent()`
+> returns the event; tenant-isolated). 28/28.
+
 
 **Goal:** push live KPI/business-event updates to the dashboard instead of polling. Reuses the proven SSE bus.
 
