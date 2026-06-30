@@ -158,6 +158,9 @@ For every such change, review and update as needed:
   `api/procurement/match`), budget-vs-actual (`modules/budget` `budgetVsActual`), supplier scorecards. Only
   thin residual gaps remain → BI `exec_scorecard`/`budget_variance`/`supplier_scorecard` report types +
   optional close pre-lock validation (GL-19). **Do not rebuild the above — extend it.**
+- **APS scheduling + streaming analytics — plan:** `docs/22-aps-streaming-analytics-plan.md` (PLANNING) —
+  finite-capacity production scheduler (extends `mfg-depth` routings/RCCP; new `work_centers` master) +
+  a live KPI SSE feed (reuses the `@Sse` `RealtimeService` bus; BI is poll-based today). Build on, don't duplicate.
 - **Finance/GL feature map (controls + where the logic lives):**
   - GL maker-checker / recurring / prepaid: `modules/ledger/ledger.service.ts` — `postEntry` (Draft+approve, **GL-05**),
     `createRecurring`/`runDueRecurring` (**GL-08**), `createPrepaid`/`runDuePrepaid` (**GL-09**); cash flow
