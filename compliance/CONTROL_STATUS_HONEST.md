@@ -28,14 +28,21 @@ evidenced over an audit period or tested by an independent firm. Those are separ
 
 | Status | Count | Share | Meaning |
 |--------|-------|-------|---------|
-| Implemented | **138** | 90% | Exists + automated ToE harness re-performs it |
-| Partial | **9** | 6% | Capability present; must be formalized/extended |
-| Gap | **6** | 4% | Not yet built — on the remediation plan |
-| **Total** | **153** | | |
+| Implemented | **144** | 94% | Exists + automated ToE harness re-performs it |
+| Partial | **10** | 6% | Capability present; must be formalized/extended |
+| Gap | **0** | 0% | — every control now has at least system scaffolding |
+| **Total** | **154** | | |
 
-> Note on the panel's "49/77": that snapshot is **stale**. The control set has roughly doubled (77 → 153)
+> Note on the panel's "49/77": that snapshot is **stale**. The control set has roughly doubled (77 → 154)
 > and implemented coverage has risen as the deepening programs landed. The figures above are generated from
 > `build_rcm.py`, not asserted.
+>
+> **As of 2026-06-30 there are no Gap controls** — the last four (ITGC-SD-01, ELC-02, ELC-03, ELC-05) were
+> closed: ITGC-SD-01 by the SDLC sign-off work, and the three entity-level governance controls by the W5
+> governance-evidence module (DoA matrix, fraud-risk register, audit-committee oversight log). They are
+> **Partial, not Implemented** — the *system* captures the evidence; the *human* governance (holding the
+> meetings, running the fraud-risk workshop, signing the DoA policy) is the org/PMO process that earns the
+> upgrade to Implemented. "No gaps" ≠ "done": the Partials still need formalization + operating evidence.
 
 ## 3. Panel ID crosswalk — why "gaps" were actually built
 
@@ -61,21 +68,23 @@ gating (GL-02/15/16) and payroll maker-checker (PAY-03) were already in the comp
 > scheduler-swallow gap (a failed BI report/action subscription was recorded but never alerted) was then
 > closed with an ops alert + operator notification at `executeSubscription`, ToE in `cutover/bi.ts`.
 
-### Partial — present but to be formalized/extended
-`ITGC-SD-02` opening-balance migration · `ITGC-SD-03` regression-coverage gate · `ITGC-OP-02` DR/continuity
-plan · `EXP-03` PR/PO authorization workflow · `INV-04` physical-count/cycle-count control · `PROJ-03`
-WIP/clearing review at close · `REC-03` intercompany elimination · `TAX-03` withholding-tax computation/reporting ·
-`ELC-01` ethics acknowledgement *(W3: in-app register shipped; annual campaign = HR process)* · `ELC-04`
-whistleblower hotline *(W3: in-app intake + case log shipped; hotline operation = audit-committee process)*.
+### Partial (10) — present but to be formalized/extended
+**Process/financial:** `ITGC-SD-02` opening-balance migration · `ITGC-SD-03` regression-coverage gate ·
+`ITGC-OP-02` DR/continuity plan · `EXP-03` PR/PO authorization workflow · `INV-04` physical-count/cycle-count
+control · `PROJ-03` WIP/clearing review at close · `REC-03` intercompany elimination · `TAX-03`
+withholding-tax computation/reporting.
+**Entity-level governance — system scaffolding shipped (W3/W5), human process pending:** `ELC-01` ethics
+acknowledgement register · `ELC-02` audit-committee oversight log · `ELC-03` delegation-of-authority matrix ·
+`ELC-04` whistleblower case log · `ELC-05` fraud-risk register.
 
-### Gap — not yet built; **entity-level governance, not software**
-`ELC-02` audit-committee oversight · `ELC-03` delegation-of-authority matrix · `ELC-05` annual fraud-risk
-assessment · `ITGC-SD-01` SDLC design/test sign-off.
-
-> The remaining gaps are **organizational** — they require the company to stand up governance bodies and
-> policies, not to ship code. None are transaction-level application controls. This is the work a SOX PMO
-> owns, not engineering. (W3 shipped the evidence-capture system for ELC-01 ethics acknowledgement + ELC-04
-> whistleblower case log, moving both Gap → Partial — the system side is built; the human process is not.)
+### Gap — none
+There are **no Gap controls**. The entity-level governance controls (ELC-01..05) each have an in-app
+evidence-capture register/log (the `governance` module — ethics acknowledgement, whistleblower case log, DoA
+matrix, fraud-risk register, audit-committee oversight) with permission gating + RLS tenant isolation and a
+ToE in `cutover/governance.ts`. They sit at **Partial**, not Implemented: the *system* side is built, but the
+*human* governance — actually holding audit-committee meetings, running the annual fraud-risk workshop,
+signing the DoA policy, running the ethics campaign + operating the hotline — is the org/PMO process that
+earns Implemented. **"No gaps" is not "done."**
 
 ## 5. Realistic ICFR-attestable timeline
 
