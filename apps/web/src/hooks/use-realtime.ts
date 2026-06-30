@@ -18,8 +18,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Subscribe to the POS realtime SSE stream (`/api/pos/scale/events/stream`) so a second terminal reflects
  * KDS/table changes the instant they happen, instead of waiting for its poll.
  *
- * The browser EventSource API can't send an Authorization header, so we stream via fetch + ReadableStream
- * (mirrors the assistant page) with the Bearer token. Auto-reconnects with capped backoff; `onEvent` is
+ * The browser EventSource API can't send custom headers, so we stream via fetch + ReadableStream
+ * (mirrors the assistant page) authenticated by the httpOnly auth cookie (credentials:'include') — no
+ * token is held in JS (ITGC-AC-07). Auto-reconnects with capped backoff; `onEvent` is
  * called per event. Returns `{ connected }` for a live/offline badge. No-op during SSR or when logged out.
  */
 export function useRealtime(onEvent: (e: RealtimeEvent) => void, opts?: { path?: string }): { connected: boolean } {
