@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FolderKanban, Plus, Clock, Receipt } from 'lucide-react';
+import { FolderKanban, Plus, Clock, Receipt, Target, Wallet, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -28,6 +29,7 @@ const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3
 
 export default function ProjectsPage() {
   const qc = useQueryClient();
+  const router = useRouter();
   const q = useQuery<{ projects: Project[]; count: number }>({ queryKey: ['projects'], queryFn: () => api('/api/projects') });
   const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '' });
   const refresh = () => qc.invalidateQueries({ queryKey: ['projects'] });
@@ -56,15 +58,21 @@ export default function ProjectsPage() {
   const projects = q.data?.projects ?? [];
   const wip = projects.reduce((a, p) => a + p.wip, 0);
   const margin = projects.reduce((a, p) => a + p.margin, 0);
+  const billed = projects.reduce((a, p) => a + p.billed_to_date, 0);
 
   return (
     <div>
-      <PageHeader title="โครงการ (Projects)" description="บัญชีโครงการ · ลงต้นทุน→งานระหว่างทำ (WIP) · วางบิล→รับรู้รายได้+ตัดต้นทุน · ลงบัญชีอัตโนมัติ" />
+      <PageHeader
+        title="โครงการ (Projects)"
+        description="บัญชีโครงการ · ลงต้นทุน→งานระหว่างทำ (WIP) · วางบิล→รับรู้รายได้+ตัดต้นทุน · WBS/Gantt · EVM"
+        actions={<Button variant="outline" onClick={() => router.push('/projects/pipeline')}><Target className="size-4" /> Win/Loss</Button>}
+      />
 
-      <div className="mb-5 grid gap-4 sm:grid-cols-3">
+      <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="โครงการ" value={q.data?.count ?? 0} icon={FolderKanban} tone="primary" />
-        <StatCard label="ต้นทุนค้างรับรู้ (WIP)" value={baht(wip)} tone="primary" />
-        <StatCard label="กำไรสะสม" value={baht(margin)} tone="primary" />
+        <StatCard label="ต้นทุนค้างรับรู้ (WIP)" value={baht(wip)} icon={Clock} tone="info" />
+        <StatCard label="วางบิลสะสม" value={baht(billed)} icon={Wallet} tone="default" />
+        <StatCard label="กำไรสะสม" value={baht(margin)} icon={TrendingUp} tone={margin < 0 ? 'danger' : 'success'} />
       </div>
 
       <Card className="mb-5 gap-3 p-5">
@@ -90,6 +98,8 @@ export default function ProjectsPage() {
         {q.data && (
           <DataTable
             rows={projects}
+            rowKey={(r: Project) => r.project_code}
+            onRowClick={(r: Project) => router.push(`/projects/${encodeURIComponent(r.project_code)}`)}
             columns={[
               { key: 'project_code', label: 'รหัส' },
               { key: 'name', label: 'โครงการ', render: (r: Project) => `${r.name}${r.customer_name ? ` · ${r.customer_name}` : ''}` },
@@ -105,8 +115,8 @@ export default function ProjectsPage() {
                 key: 'action', label: 'ดำเนินการ', sortable: false,
                 render: (r: Project) => (
                   <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" title="ลงต้นทุน" onClick={() => openDlg('cost', r.project_code)}><Clock className="size-4" /></Button>
-                    <Button variant="ghost" size="sm" title="วางบิล" onClick={() => openDlg('bill', r.project_code)}><Receipt className="size-4" /></Button>
+                    <Button variant="ghost" size="sm" title="ลงต้นทุน" onClick={(ev) => { ev.stopPropagation(); openDlg('cost', r.project_code); }}><Clock className="size-4" /></Button>
+                    <Button variant="ghost" size="sm" title="วางบิล" onClick={(ev) => { ev.stopPropagation(); openDlg('bill', r.project_code); }}><Receipt className="size-4" /></Button>
                   </div>
                 ),
               },

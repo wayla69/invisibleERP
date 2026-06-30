@@ -197,10 +197,21 @@ journal entry, and appends the RLS loop for new tenant tables.
 | **P4** Dependencies & EVM | ✅ Delivered | this PR | 0187 | PROJ-06 | `projects` (CPI/SPI/EAC, dep guard) |
 
 **Backend + docs delivered for all five phases** (each its own PR, CI-green, doc-synced — RCM now **140
-controls**). **Deferred to follow-up (front-end / advanced):** the web **Gantt/timeline** and win/loss
-**dashboard** pages, critical-path computation from `depends_on`, S-curve charts, and the BI report types
-(`project_evm`, `crm_win_loss`) + scheduler job. The API + controls underpinning these all exist now;
-what remains is UI and reporting surfacing.
+controls**).
+
+**Front-end + analytics follow-up — ✅ delivered:**
+- **Analytics backend** (PR #232): `GET /api/projects/:code/schedule` (CPM **critical path** from
+  `depends_on`), `GET /api/projects/:code/evm/series` (**S-curve** baseline), `GET /api/crm/pipeline/win-loss`
+  (loss reasons, by-owner win rate, monthly trend).
+- **Sleek PPM web UI** (this PR): a `/projects` portfolio with clickable rows + KPI band; a `/projects/[code]`
+  workspace with tabs — **Overview** (EVM cards + CPI/SPI health + S-curve), **Schedule & Gantt** (custom
+  dependency-aware Gantt with critical-path highlight + WBS table + add-task/mark-done), **Milestones**
+  (add/reach), **Resources** (assign), **Costs & bill**; and a `/projects/pipeline` **win/loss dashboard**
+  (stage funnel, loss reasons, monthly win-rate, by-owner). Built on the existing design system
+  (shadcn/Tailwind + recharts) — no new dependency. Nav item added under Planning.
+
+**Still optional (not blocking):** wiring `project_evm` / `crm_win_loss` as schedulable **BI report types**
+(emailed subscriptions) — the data endpoints exist; only the BI-subscription registration remains.
 
 ---
 
