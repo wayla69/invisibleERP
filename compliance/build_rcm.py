@@ -197,12 +197,12 @@ add("ITGC-CM-05","ITGC · Change","ITGC","All","Emergency fixes bypass controls 
     "docs/ops/change-management.md (emergency-change procedure)","Inspect emergency procedure.","Sample emergency changes had expedited review + 1-day retro.","Emergency log","Implemented")
 
 # ---- ITGC: SDLC / Development ----
-add("ITGC-SD-01","ITGC · SDLC","ITGC","All","New functionality goes live without design/test sign-off.","—",
-    "SDLC policy: requirements, design, test and UAT sign-off prior to go-live.","Prev","Manual","Per project","Head of Eng / Product","P11",
-    "SDLC policy (to author)","Inspect SDLC policy + a project's artefacts.","Sample releases: UAT + go-live sign-off present.","SDLC artefacts","Gap")
+add("ITGC-SD-01","ITGC · SDLC","ITGC","All","New functionality goes live without design / test / UAT sign-off.","—",
+    "Formal SDLC policy with gated stages: ticketed request, design + reviewer sign-off, branch-only build (no direct main), independent review (author ≠ merger), CI test gates (build/typecheck/unit + ratchet coverage + control harnesses), UAT sign-off (docs/uat positive+negative cases + traceability matrix) and a go-live sign-off via the deploy-approval gate (deployer ≠ author). Docs updated in the same change (doc-sync).","Prev","Manual","Per project","Head of Eng / Product","P11",
+    "compliance/policies/08-change-management-sdlc-policy.md; docs/uat/; .github (branch protection + deploy-approval environment); .github/workflows/ci.yml (gates)","Inspect the SDLC policy + a project's artefacts (design, UAT sign-off, deploy approval).","Sample releases: design + UAT sign-off + go-live (deploy) approval present.","SDLC policy + release artefacts","Implemented")
 add("ITGC-SD-02","ITGC · SDLC","ITGC","All","Migrated opening balances incomplete/inaccurate.","Completeness/Accuracy",
-    "Cutover data-migration controls: source→target balance reconciliation + sign-off; opening balances idempotent.","Prev/Det","Auto+Manual","At cutover","Controller / Eng","P11/P13",
-    "tools/etl; tools/cutover; ledger opening-balances (idempotent on batch_ref)","Inspect migration reconciliation + sign-off.","Re-perform migrated trial-balance tie-out.","Migration recon","Partial")
+    "Documented cutover reconciliation: source→target balance tie-out (GL trial balance balances Dr=Cr; AR/AP/INV/FA sub-ledgers tie to their GL control accounts), zero unexplained variance, and an independent Controller sign-off (≠ preparer) BEFORE go-live — over the idempotent opening-balance load (re-runnable on batch_ref) + the close-control tie-out steps.","Prev/Det","Auto+Manual","At cutover","Controller / Eng","P11/P13",
+    "docs/ops/cutover-reconciliation.md; ledger opening-balances (idempotent on batch_ref) + close.service.ts (subledger_tieout / trial_balance_review); tools/etl; cutover/opening-balances.ts (ToE)","Inspect the reconciliation procedure + sign-off; re-perform a migrated trial-balance tie-out.","Re-perform: load opening balances (idempotent), trial balance ties to source, sub-ledgers tie to control accounts, sign-off retained.","Cutover reconciliation procedure + tie-out","Implemented")
 add("ITGC-SD-03","ITGC · SDLC","ITGC","All","Control logic regresses unnoticed — tests exist but coverage can silently erode with no floor.","—",
     "Automated test suite is control evidence; CI archives dated results. A RATCHET coverage gate now enforces a locked floor on a curated set of pure/critical modules (vitest v8 thresholds) so coverage on them cannot regress; the set + floor ratchet up over time. Real-Postgres (pg-core) + 95 PGlite harnesses gate control behaviour.","Det","Automated","Per change","Head of Eng","P11/P16",
     "apps/api/vitest.config.ts (coverage thresholds: stmts 60/branch 75/funcs 62/lines 60); apps/api/package.json (test:coverage); .github/workflows/ci.yml (gate in build job); apps/api/test/*.test.ts","Inspect the coverage thresholds + the CI gate; map tests to key controls.","Re-perform: the coverage gate fails CI when coverage on the curated set drops below the floor; review archived CI runs all green.","Coverage ratchet gate + CI reports","Implemented")
@@ -602,8 +602,6 @@ gw = [11,17,34,46,16,10,16,11]
 # removed from this remediation backlog (now Implemented in the Controls tab; one-time console [setup]
 # steps tracked in docs/11-next-upgrade-realworld-roadmap.md and the audit-readiness plan).
 GAP = [
- ("ITGC-SD-01","ITGC · SDLC","No formal SDLC policy.","Author SDLC policy with design/test/UAT/go-live sign-offs.","Head of Eng / Product","Phase 2","Month 3-4","Medium"),
- ("ITGC-SD-02","ITGC · SDLC","Cutover reconciliation not documented.","Document source→target balance tie-out + sign-off for any migration.","Controller / Eng","Phase 2","Month 4","Medium"),
  ("EXP-03","Expenditure","PR/PO approval workflow partial.","Finalize PR/PO maker-checker against DoA thresholds.","Procurement Mgr","Phase 2","Month 3-4","Medium"),
  ("INV-04","Inventory & COGS","Stocktake variance review informal.","Formalize count cadence + variance review/approval sign-off.","Warehouse Mgr","Phase 2","Month 4","Medium"),
  ("REC-03","Reconciliation","Intercompany recon partial.","Formalize IC matching + elimination sign-off each period.","Group Controller","Phase 2-3","Month 4-6","Medium"),
