@@ -59,11 +59,12 @@ at **rev 0.11**; UAT through **UAT-O2C-211**.
   **PROJ-07** (baseline change governance).
 - Migration (next free 4-digit); RCM PROJ-07 + regenerate xlsx; narrative + UAT + harness.
 
-### B2 — Project templates (WBS/milestone scaffolds)
-- `project_templates` (+ template tasks/milestones) and `POST /api/projects/:code/apply-template/:tpl`
-  (and optional auto-apply on `from-opportunity` conversion) to spin a **standard WBS + milestones** in one
-  step. Operational; no new control. Web: a "from template" picker on create/convert.
-- Migration; narrative + UAT + harness; user-manual.
+### B2 — Project templates (WBS/milestone scaffolds) — DELIVERED
+- `project_templates` (+ `project_template_items`, migration 0189) and `POST /api/projects/:code/apply-template/:tpl`
+  (+ `POST/GET /api/projects/templates[/:tpl]`) to spin a **standard WBS + milestones** in one step. Items
+  carry relative date offsets, planned effort/cost, WBS nesting (`parent_seq`) and dependencies
+  (`depends_on_seq`) keyed by in-template `seq`. Operational; no new control. Web: a "from template" picker
+  on the create form. Narrative PN-16 step 13; UAT-O2C-214; harness `tools/cutover/src/projects.ts`.
 
 ### B3 — RACI & people assignment on tasks
 - Extend `project_tasks` with **RACI** roles (responsible/accountable/consulted/informed) and link

@@ -157,8 +157,54 @@ export const projectBaselines = pgTable(
   (t) => ({ byProject: index('idx_pbaseline_project').on(t.projectId) }),
 );
 
+// Project template (B2) — a reusable WBS/milestone scaffold. Applying a template to a project spins up its
+// standard task + milestone set in one step, dated relative to the project start. Operational — no GL impact.
+export const projectTemplates = pgTable(
+  'project_templates',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    code: text('code').notNull(),                             // business key (e.g. "IMPL-STD")
+    name: text('name').notNull(),
+    description: text('description'),
+    status: text('status').notNull().default('active'),       // active | archived
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTenant: index('idx_ptemplate_tenant').on(t.tenantId) }),
+);
+
+// A template item scaffolds either a task or a milestone. `seq` is the in-template ordinal that parent_seq /
+// depends_on_seq reference (resolved to real ids at apply time); dates are RELATIVE day-offsets from the
+// project start so one template fits any start date.
+export const projectTemplateItems = pgTable(
+  'project_template_items',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    templateId: bigint('template_id', { mode: 'number' }).notNull().references(() => projectTemplates.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    itemType: text('item_type').notNull().default('task'),    // task | milestone
+    seq: integer('seq').notNull().default(0),
+    name: text('name').notNull(),
+    parentSeq: integer('parent_seq'),                         // WBS nesting (references another item's seq)
+    wbsCode: text('wbs_code'),
+    plannedHours: numeric('planned_hours', { precision: 14, scale: 2 }).default('0'),
+    plannedCost: numeric('planned_cost', { precision: 16, scale: 2 }).default('0'),
+    offsetStartDays: integer('offset_start_days').default(0), // days after project start
+    offsetEndDays: integer('offset_end_days').default(0),
+    dependsOnSeq: text('depends_on_seq'),                     // CSV of predecessor seqs (finish-to-start)
+    billingPercent: numeric('billing_percent', { precision: 5, scale: 2 }), // milestone billing trigger
+    owner: text('owner'),                                     // milestone owner
+    assignee: text('assignee'),                               // task assignee
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTemplate: index('idx_ptemplate_item_template').on(t.templateId) }),
+);
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectBaseline = typeof projectBaselines.$inferSelect;
+export type ProjectTemplate = typeof projectTemplates.$inferSelect;
+export type ProjectTemplateItem = typeof projectTemplateItems.$inferSelect;
 export type ProjectTask = typeof projectTasks.$inferSelect;
 export type ProjectMilestone = typeof projectMilestones.$inferSelect;
 export type ResourceRate = typeof resourceRates.$inferSelect;

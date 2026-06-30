@@ -292,6 +292,37 @@ async function main() {
   const bl2 = await inj('POST', '/api/projects/PRJ-BL/baseline', admin, { label: 'v2', reason: 'อนุมัติขยายขอบเขต' });
   ok('Re-baseline with reason → new active BAC 2500, variance 0, history 2', near(bl2.json.baseline?.baseline_bac, 2500) && near(bl2.json.variance?.bac_delta, 0) && bl2.json.history?.length === 2, JSON.stringify({ b: bl2.json.baseline?.baseline_bac, h: bl2.json.history?.length }));
 
+  // ── 20. project templates: reusable WBS/milestone scaffold → one-step apply (B2) ──
+  const tpl = await inj('POST', '/api/projects/templates', admin, {
+    code: 'IMPL-STD', name: 'แม่แบบติดตั้งมาตรฐาน', description: 'Kickoff → Build → Go-live',
+    items: [
+      { seq: 1, name: 'Kickoff', planned_hours: 8, planned_cost: 1000, offset_start_days: 0, offset_end_days: 1 },
+      { seq: 2, name: 'Build', planned_hours: 40, planned_cost: 5000, offset_start_days: 1, offset_end_days: 10, depends_on_seq: [1] },
+      { seq: 3, name: 'Build — config', parent_seq: 2, planned_hours: 16, planned_cost: 2000, offset_start_days: 1, offset_end_days: 5 },
+      { item_type: 'milestone', seq: 4, name: 'Go-live', offset_end_days: 12, billing_percent: 50, owner: 'pm1' },
+    ],
+  });
+  ok('Create template IMPL-STD → 4 items (3 task + 1 milestone)', tpl.json.count === 4 && tpl.json.items?.filter((i: any) => i.item_type === 'milestone').length === 1, JSON.stringify({ c: tpl.json.count }));
+  const tdup = await inj('POST', '/api/projects/templates', admin, { code: 'IMPL-STD', name: 'ซ้ำ' });
+  ok('Duplicate template code → 400 TEMPLATE_EXISTS', tdup.status === 400 && tdup.json.error?.code === 'TEMPLATE_EXISTS', `${tdup.status} ${tdup.json.error?.code}`);
+  const tlist = await inj('GET', '/api/projects/templates', admin);
+  ok('List templates → IMPL-STD present with item_count 4', (tlist.json.templates ?? []).some((t: any) => t.code === 'IMPL-STD' && t.item_count === 4), '');
+
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-TPL', name: 'งานใช้แม่แบบ', billing_type: 'Fixed', contract_amount: 100000, start_date: '2026-03-01' });
+  const applied = await inj('POST', '/api/projects/PRJ-TPL/apply-template/IMPL-STD', admin, {});
+  ok('Apply template → 3 tasks + 1 milestone scaffolded', applied.json.tasks_created === 3 && applied.json.milestones_created === 1 && applied.json.tasks?.length === 3, JSON.stringify({ t: applied.json.tasks_created, m: applied.json.milestones_created }));
+  const buildTask = (applied.json.tasks ?? []).find((t: any) => t.name === 'Build');
+  const configTask = (applied.json.tasks ?? []).find((t: any) => t.name === 'Build — config');
+  const kickoffTask = (applied.json.tasks ?? []).find((t: any) => t.name === 'Kickoff');
+  ok('Applied tasks: relative dates off start 2026-03-01 (Kickoff ends 2026-03-02)', kickoffTask?.planned_start === '2026-03-01' && kickoffTask?.planned_end === '2026-03-02', JSON.stringify({ s: kickoffTask?.planned_start, e: kickoffTask?.planned_end }));
+  ok('Applied tasks: depends_on + parent wired by seq (Build←Kickoff, config parent=Build)',
+    (buildTask?.depends_on ?? []).includes(kickoffTask?.id) && configTask?.parent_id === buildTask?.id,
+    JSON.stringify({ dep: buildTask?.depends_on, par: configTask?.parent_id, bid: buildTask?.id }));
+  const tplMs = await inj('GET', '/api/projects/PRJ-TPL/milestones', admin);
+  ok('Applied milestone: Go-live due 2026-03-13, billing 50%', (tplMs.json.milestones ?? []).some((m: any) => m.name === 'Go-live' && m.due_date === '2026-03-13' && near(m.billing_percent, 50)), JSON.stringify({ ms: (tplMs.json.milestones ?? []).map((m: any) => m.due_date) }));
+  const reapply = await inj('POST', '/api/projects/PRJ-TPL/apply-template/IMPL-STD', admin, {});
+  ok('Re-apply to a project with tasks → 400 PROJECT_HAS_TASKS', reapply.status === 400 && reapply.json.error?.code === 'PROJECT_HAS_TASKS', `${reapply.status} ${reapply.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
