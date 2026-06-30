@@ -323,6 +323,37 @@ async function main() {
   const reapply = await inj('POST', '/api/projects/PRJ-TPL/apply-template/IMPL-STD', admin, {});
   ok('Re-apply to a project with tasks → 400 PROJECT_HAS_TASKS', reapply.status === 400 && reapply.json.error?.code === 'PROJECT_HAS_TASKS', `${reapply.status} ${reapply.json.error?.code}`);
 
+  // ── 21. RACI accountability + "my tasks" (B3) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-RACI', name: 'งาน RACI', billing_type: 'TM' });
+  const rt1 = await inj('POST', '/api/projects/PRJ-RACI/tasks', admin, { name: 'RACI-A', planned_hours: 8, accountable: 'admin', responsible: ['mgr', 'dev1'], consulted: ['arch'], informed: ['exec'] });
+  const rTaskA = rt1.json.tasks.find((t: any) => t.name === 'RACI-A');
+  ok('Task RACI stored: A=admin, R=[mgr,dev1], C=[arch], I=[exec]',
+    rTaskA?.accountable === 'admin' && JSON.stringify(rTaskA?.responsible) === JSON.stringify(['mgr', 'dev1']) && JSON.stringify(rTaskA?.consulted) === JSON.stringify(['arch']),
+    JSON.stringify({ a: rTaskA?.accountable, r: rTaskA?.responsible }));
+  // A second task with mgr accountable and no consulted; one task left without an accountable owner.
+  await inj('POST', '/api/projects/PRJ-RACI/tasks', admin, { name: 'RACI-B', planned_hours: 4, accountable: 'mgr', responsible: ['admin'] });
+  await inj('POST', '/api/projects/PRJ-RACI/tasks', admin, { name: 'RACI-C', planned_hours: 2, responsible: ['dev1'] }); // no accountable → gap
+  const patchR = await inj('PATCH', `/api/projects/tasks/${rTaskA.id}`, admin, { consulted: ['arch', 'qa'] });
+  const rTaskA2 = patchR.json.tasks.find((t: any) => t.id === rTaskA.id);
+  ok('Patch RACI: consulted updated to [arch,qa] (dedup/trim)', JSON.stringify(rTaskA2?.consulted) === JSON.stringify(['arch', 'qa']), JSON.stringify({ c: rTaskA2?.consulted }));
+  const raci = await inj('GET', '/api/projects/PRJ-RACI/raci', admin);
+  ok('RACI matrix: 3 tasks, admin accountable on 1 + responsible on 1, gap flagged (RACI-C)',
+    raci.json.count === 3 && raci.json.missing_accountable?.length === 1 && raci.json.complete === false &&
+    raci.json.people?.find((p: any) => p.name === 'admin')?.accountable === 1 && raci.json.people?.find((p: any) => p.name === 'admin')?.responsible === 1,
+    JSON.stringify({ c: raci.json.count, gap: raci.json.missing_accountable }));
+  const mine = await inj('GET', '/api/projects/my-tasks', admin);
+  // admin: accountable on RACI-A, responsible on RACI-B → 2 of their open tasks (plus any from earlier projects where admin is A/R — none set elsewhere).
+  ok('My tasks (admin): RACI-A (accountable) + RACI-B (responsible) present with my_role',
+    (mine.json.tasks ?? []).some((t: any) => t.name === 'RACI-A' && t.my_role === 'accountable') &&
+    (mine.json.tasks ?? []).some((t: any) => t.name === 'RACI-B' && t.my_role === 'responsible'),
+    JSON.stringify({ n: (mine.json.tasks ?? []).map((t: any) => `${t.name}:${t.my_role}`) }));
+  const mineMgr = await inj('GET', '/api/projects/my-tasks', mgr);
+  ok('My tasks (mgr): RACI-A (responsible) + RACI-B (accountable); excludes RACI-C',
+    (mineMgr.json.tasks ?? []).some((t: any) => t.name === 'RACI-A' && t.my_role === 'responsible') &&
+    (mineMgr.json.tasks ?? []).some((t: any) => t.name === 'RACI-B' && t.my_role === 'accountable') &&
+    !(mineMgr.json.tasks ?? []).some((t: any) => t.name === 'RACI-C'),
+    JSON.stringify({ n: (mineMgr.json.tasks ?? []).map((t: any) => t.name) }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

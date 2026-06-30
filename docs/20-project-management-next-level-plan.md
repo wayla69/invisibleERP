@@ -66,11 +66,13 @@ at **rev 0.11**; UAT through **UAT-O2C-211**.
   (`depends_on_seq`) keyed by in-template `seq`. Operational; no new control. Web: a "from template" picker
   on the create form. Narrative PN-16 step 13; UAT-O2C-214; harness `tools/cutover/src/projects.ts`.
 
-### B3 — RACI & people assignment on tasks
-- Extend `project_tasks` with **RACI** roles (responsible/accountable/consulted/informed) and link
-  assignees to real employees/users (today `assignee` is free text). Surfaces "my tasks" + an accountability
-  matrix. Ties into the resource plan (Track A capacity). Operational; SoD note (accountable ≠ approver).
-- Migration; narrative + UAT + harness; web (assignee picker, RACI column, "my tasks").
+### B3 — RACI & people assignment on tasks — DELIVERED
+- `project_tasks` extended (migration 0190) with the four **RACI** roles — `accountable` (single owner),
+  `responsible`/`consulted`/`informed` (CSV). `GET /api/projects/:code/raci` is the accountability matrix
+  (per-task A/R/C/I, per-person rollup, `missing_accountable` gaps); `GET /api/projects/my-tasks` is each
+  user's open A/R queue across projects. Operational; SoD note (accountable ≠ cost/timesheet approver → rides
+  PROJ-04). Web: RACI column + Accountable/Responsible inputs on the task form, *งานของฉัน* panel on
+  `/projects`. Narrative PN-16 step 14; UAT-O2C-215; harness `tools/cutover/src/projects.ts`.
 
 ### B4 — Risk & issue log (control **PROJ-08**)
 - `project_risks` / `project_issues` (RAG status, owner, probability·impact score, mitigation, due date,
