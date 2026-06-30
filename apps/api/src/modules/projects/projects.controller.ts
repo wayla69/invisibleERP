@@ -181,8 +181,8 @@ export class ProjectsController {
   // Forward resource & cash forecast (PMO-2): committed capacity demand + a billings/cash forecast overlaying
   // committed contractual billing with the probability-weighted pipeline. Static segment, before :code.
   @Get('forecast')
-  forecast(@Query('months') months: string | undefined, @Query('from') from: string | undefined, @CurrentUser() u: JwtUser) {
-    return this.svc.forecast(u, { months: months != null ? Number(months) : undefined, from });
+  forecast(@Query('months') months: string | undefined, @Query('from') from: string | undefined, @Query('rev_per_fte_month') revPerFte: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.forecast(u, { months: months != null ? Number(months) : undefined, from, rev_per_fte_month: revPerFte != null ? Number(revPerFte) : undefined });
   }
 
   // Period governance / status pack (PMO-3): the portfolio status roll-up. Static segment, before :code.

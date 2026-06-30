@@ -188,8 +188,12 @@ A "สร้างรายงานสถานะ (Status report)" action on t
   `PATCH :code/program`; a CPM over the program graph (nodes = whole projects) → program duration, critical
   chain, per-project slack. Web `/projects/program/:code` + a Programs card on the portfolio. Rides PROJ-06
   (no new control). PN-16 step 22 / rev 0.24, user-manual 14 rev 2.1, UAT-O2C-224. Harness: `projects` 108.
-- **PMO-5 — configurable value→FTE forecast extension — PLANNED.** Extend PMO-2's forecast so the weighted
-  pipeline also projects *resource* demand (FTE) via a configurable revenue-per-FTE-month rate.
+- **PMO-5 — configurable value→FTE forecast extension — DELIVERED.** `GET /api/projects/forecast` now also
+  projects resourcing demand: a configurable `rev_per_fte_month` (default ฿200k, overridable per request)
+  converts the weighted-pipeline value into an FTE draw → per-month `committed_demand_fte` /
+  `pipeline_demand_fte` / `total_demand_fte` + `peak_total_demand_fte`. Web: per-month FTE + a peak badge on
+  the portfolio forecast band. Rides PROJ-05/PROJ-06 (no control, no migration). PN-16 step 20 / rev 0.25,
+  user-manual 14 rev 2.2, UAT-O2C-225. Harness: `projects` 110.
 
 ## Out of scope / parked (unless requested)
 - Document/deliverable management, external PM-tool sync.

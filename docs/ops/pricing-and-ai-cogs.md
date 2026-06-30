@@ -39,14 +39,21 @@ Enforcement: `AgentService.checkBudget()` resolves both thresholds, blocks at th
 included cap so `recordUsage()` meters the overage. Legacy `-1` ("unlimited") still maps to a finite ceiling
 (`AI_ENTERPRISE_DAILY_CAP`); a plan that omits the cap falls back to `DEFAULT_AI_DAILY = 50,000`.
 
-## Billing the overage
+## Billing the overage (collected, not just shown)
 
 - **Read view:** `GET /api/billing/ai-usage` returns today's `overage_tokens`, the rate, and
   `projected_overage_thb`; the web billing screen surfaces it (`apps/web/.../billing/page.tsx`).
 - **Invoice line:** `GET /api/billing/ai-overage?month=YYYY-MM` → `BillingService.aiOverageInvoice()` sums the
-  month's metered overage tokens and prices them (`overage_tokens / 1000 × rate`), returning the billable
-  line a monthly invoice run appends. Wiring this line into the Stripe invoice run is the remaining
-  integration step (the amount is now computed, not a placeholder).
+  month's metered overage tokens and prices them (`overage_tokens / 1000 × rate`).
+- **Collection (Wave 1):** the **`ai_overage_billing`** monthly action job (`BillingService.runAiOverageBilling`,
+  rides the BI scheduler — see `bi.service.ts`) appends a **Stripe invoice item** per tenant for the
+  just-closed month's overage, which Stripe attaches to the tenant's next subscription invoice. It is
+  **idempotent per (tenant, month)** via `ai_overage_billing_runs` (migration `0201`, UNIQUE guard) plus a
+  Stripe idempotency key — a re-run never double-charges. Without `STRIPE_SECRET_KEY` it records a mock line
+  (status `recorded`) so the flow is testable offline. Trigger: schedule a `monthly` BI subscription of type
+  `ai_overage_billing`, or `POST /api/billing/ai-overage/run` (exec); history at `GET /api/billing/ai-overage/runs`.
+- **Re-pricing without a deploy:** the rate is data-driven — per-plan `ai_overage_rate_thb_per_1k`, with an
+  optional global env override `AI_OVERAGE_RATE_THB_PER_1K`. ToE: `tools/cutover/src/saas-metrics.ts`.
 
 ## AI cost-of-goods (COGS) — the margin lever
 

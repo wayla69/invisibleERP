@@ -1,12 +1,13 @@
 import { Inject, Injectable, ConflictException, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { eq, sql, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { plans, subscriptions, tenants, users, aiTokenUsage } from '../../database/schema';
+import { plans, subscriptions, tenants, users, aiTokenUsage, aiOverageBillingRuns } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
 import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
+import type { JwtUser } from '../../common/decorators';
 
 export interface SignupDto {
   company_name: string;
@@ -255,7 +256,10 @@ export class BillingService {
       .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
       .orderBy(desc(subscriptions.createdAt)).limit(1);
     const features: any = planRow?.features ?? {};
-    const overageRate = Number(features.ai_overage_rate_thb_per_1k ?? 0); // THB / 1,000 overage tokens
+    // Rate is data-driven: per-plan feature is the source of truth; an optional global env override
+    // (AI_OVERAGE_RATE_THB_PER_1K) lets ops re-price overage without a deploy. Real numbers drop in here.
+    const envRate = process.env.AI_OVERAGE_RATE_THB_PER_1K;
+    const overageRate = envRate && envRate.trim() ? Number(envRate) : Number(features.ai_overage_rate_thb_per_1k ?? 0); // THB / 1,000 overage tokens
     // Scope to the requested month (default: current Bangkok month). usage_date is already a Bangkok business date.
     const monthFilter = ym
       ? sql`to_char(${aiTokenUsage.usageDate}, 'YYYY-MM') = ${ym}`
@@ -274,6 +278,64 @@ export class BillingService {
       currency: 'THB',
       amount, // billable overage charge for the month
       line_description: `AI usage overage — ${overageTokens.toLocaleString()} tokens @ ${overageRate} THB/1k`,
+    };
+  }
+
+  // ───────────────────── Monthly AI overage billing (scheduled action job — Wave 1) ─────────────────────
+  // Charges each tenant's metered AI overage for a billing month as a Stripe invoice item, IDEMPOTENT per
+  // (tenant, month) via the ai_overage_billing_runs UNIQUE. Runs from the BI scheduler (report type
+  // 'ai_overage_billing') or POST /api/billing/ai-overage/run. Default month = the just-closed Bangkok month.
+  // Operator scope: iterates the active/trialing subscriptions VISIBLE to the caller (RLS — the HQ scheduler
+  // bypasses RLS and bills every tenant; a tenant-scoped caller bills only itself, harmless).
+  // Idempotency ordering: we INSERT the run row FIRST (ON CONFLICT DO NOTHING); only the winner calls Stripe,
+  // so a concurrent/retried run can never double-charge. The Stripe idempotencyKey is a second guard.
+  async runAiOverageBilling(user: JwtUser, month?: string): Promise<{ month: string; processed_count: number; total_amount: number; processed: any[] }> {
+    const db = this.db as any;
+    const round2 = (x: number) => Math.round(x * 100) / 100;
+    let billingMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : '';
+    if (!billingMonth) {
+      const res: any = await db.execute(sql`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok')::date - INTERVAL '1 month', 'YYYY-MM') AS m`);
+      const rows = (res.rows ?? res) as any[];
+      billingMonth = String(rows[0]?.m ?? new Date().toISOString().slice(0, 7));
+    }
+    const subs = await db.select({ tenantId: subscriptions.tenantId, cust: subscriptions.stripeCustomerId, createdAt: subscriptions.createdAt })
+      .from(subscriptions).where(sql`${subscriptions.status} in ('Active','Trialing')`).orderBy(desc(subscriptions.createdAt));
+    const seen = new Set<number>();
+    const processed: any[] = [];
+    let total = 0;
+    for (const s of subs) {
+      const tenantId = Number(s.tenantId);
+      if (seen.has(tenantId)) continue; // one (latest) subscription per tenant
+      seen.add(tenantId);
+      const inv = await this.aiOverageInvoice(tenantId, billingMonth);
+      if (inv.amount <= 0) continue; // nothing metered above the included cap this month
+      // Reserve the (tenant, month) slot before charging — the UNIQUE makes this the idempotency gate.
+      const ins = await db.insert(aiOverageBillingRuns).values({
+        tenantId, billingMonth, overageTokens: inv.overage_tokens, rateThbPer1k: String(inv.overage_rate_thb_per_1k),
+        amount: String(inv.amount), currency: inv.currency, status: 'pending', processedBy: user?.username ?? 'system:scheduler',
+      }).onConflictDoNothing({ target: [aiOverageBillingRuns.tenantId, aiOverageBillingRuns.billingMonth] }).returning({ id: aiOverageBillingRuns.id });
+      if (!ins.length) continue; // already billed this (tenant, month) → idempotent skip
+      const runId = Number(ins[0].id);
+      const charge = await new StripeBilling().createOverageInvoiceItem(s.cust ?? null, inv.amount, inv.line_description, `ai-overage:${tenantId}:${billingMonth}`);
+      const status = charge.mock ? 'recorded' : 'invoiced';
+      await db.update(aiOverageBillingRuns).set({ stripeInvoiceItemId: charge.id, status }).where(eq(aiOverageBillingRuns.id, runId));
+      total += inv.amount;
+      processed.push({ tenant_id: tenantId, month: billingMonth, overage_tokens: inv.overage_tokens, amount: inv.amount, currency: inv.currency, stripe_invoice_item_id: charge.id, status });
+    }
+    return { month: billingMonth, processed_count: processed.length, total_amount: round2(total), processed };
+  }
+
+  // History of AI-overage charges for a tenant (most recent first) — the read view of ai_overage_billing_runs.
+  async listOverageRuns(tenantId: number, month?: string) {
+    const db = this.db as any;
+    const conds: any[] = [eq(aiOverageBillingRuns.tenantId, tenantId)];
+    if (month && /^\d{4}-\d{2}$/.test(month)) conds.push(eq(aiOverageBillingRuns.billingMonth, month));
+    const rows = await db.select().from(aiOverageBillingRuns).where(and(...conds)).orderBy(desc(aiOverageBillingRuns.billingMonth)).limit(36);
+    return {
+      runs: rows.map((r: any) => ({
+        month: r.billingMonth, overage_tokens: Number(r.overageTokens), rate_thb_per_1k: Number(r.rateThbPer1k),
+        amount: Number(r.amount), currency: r.currency, status: r.status, stripe_invoice_item_id: r.stripeInvoiceItemId, processed_at: r.processedAt,
+      })),
     };
   }
 
@@ -468,5 +530,25 @@ export class StripeBilling {
       cancel_url: process.env.STRIPE_CANCEL_URL ?? `${appBase}/settings/billing?status=cancel`,
     });
     return { url: session.url ?? `${appBase}/settings/billing`, mock: false, customerId, sessionId: session.id };
+  }
+
+  // Append a one-off invoice ITEM for metered AI overage to the customer's next subscription invoice. Stripe
+  // attaches a pending invoice item to the customer's upcoming invoice automatically. Without a key (or with
+  // no customer) it's a no-op mock so the monthly job is fully testable offline. The idempotencyKey is a
+  // second guard (alongside the DB UNIQUE(tenant, month)) so a retried run never double-charges.
+  async createOverageInvoiceItem(
+    customerId: string | null,
+    amountTHB: number,
+    description: string,
+    idempotencyKey: string,
+  ): Promise<{ id: string | null; mock: boolean }> {
+    if (!this.secret || !customerId || amountTHB <= 0) return { id: null, mock: true };
+    const Stripe = (await import('stripe')).default;
+    const stripe = new Stripe(this.secret);
+    const item = await stripe.invoiceItems.create(
+      { customer: customerId, amount: Math.round(amountTHB * 100), currency: 'thb', description },
+      { idempotencyKey },
+    );
+    return { id: item.id, mock: false };
   }
 }
