@@ -100,6 +100,13 @@ export class ProjectsController {
     return this.svc.list(u);
   }
 
+  // Portfolio command center (A1): cross-project EVM rollup, health, financials, capacity, pipeline funnel.
+  // Static 'portfolio' segment, so it never collides with :code.
+  @Get('portfolio')
+  portfolio(@CurrentUser() u: JwtUser) {
+    return this.svc.portfolioEvm(u);
+  }
+
   @Get(':code')
   get(@Param('code') code: string) {
     return this.svc.get(code);

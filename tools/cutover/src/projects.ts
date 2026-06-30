@@ -268,6 +268,14 @@ async function main() {
   const rtypes = await inj('GET', '/api/bi/report-types', admin);
   ok('report-types catalog exposes project_evm + crm_win_loss', JSON.stringify(rtypes.json).includes('project_evm') && JSON.stringify(rtypes.json).includes('crm_win_loss'), '');
 
+  // ── 18. portfolio command center: cross-project rollup (A1) ──
+  const pf = await inj('GET', '/api/projects/portfolio', admin);
+  ok('Portfolio: count + EVM totals + health buckets + financials + capacity + pipeline funnel',
+    pf.status < 300 && pf.json.count > 0 && !!pf.json.totals && typeof pf.json.health?.on_track === 'number' &&
+    !!pf.json.financials && typeof pf.json.capacity?.over_allocated_count === 'number' &&
+    pf.json.funnel?.won_count >= 1 && pf.json.funnel?.converted_count >= 1 && Array.isArray(pf.json.at_risk),
+    JSON.stringify({ c: pf.json.count, won: pf.json.funnel?.won_count, conv: pf.json.funnel?.converted_count, oa: pf.json.capacity?.over_allocated_count }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
