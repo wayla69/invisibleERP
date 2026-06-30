@@ -303,6 +303,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.bom', href: '/bom', icon: FlaskConical, perms: ['bom_master'] },
       { label: 'nav.manufacturing', href: '/manufacturing', icon: Factory, perms: ['bom_master', 'warehouse'] },
       { label: 'nav.production', href: '/production', icon: Network, perms: ['bom_master', 'warehouse', 'planner'] },
+      { label: 'nav.aps_schedule', href: '/production/schedule', icon: CalendarRange, perms: ['bom_master', 'warehouse', 'planner'] },
       { label: 'nav.eam', href: '/eam', icon: Wrench, perms: ['exec', 'warehouse', 'creditors'] },
     ],
   },

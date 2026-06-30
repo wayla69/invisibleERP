@@ -27,7 +27,15 @@
   **poll-based** (30 s read-through cache, daily snapshots); there is no **live KPI/event push**, so a
   dashboard can't update without re-polling.
 
-## 2. Phase A — Finite-capacity scheduler (APS)
+## 2. Phase A — Finite-capacity scheduler (APS) — DELIVERED
+> **DELIVERED** — `work_centers` master (migration 0193, RLS) + a single-shift finite-capacity list
+> scheduler in `modules/mfg-depth/aps.service.ts`. `POST /api/aps/schedule` sequences each WO's routing
+> operations onto work centres (predecessor + per-centre capacity gating, EDD dispatch) → per-operation
+> start/finish, per-centre dispatch queue + utilisation, makespan, and late flags; `POST/GET /api/work-centers`
+> maintains the master. Web `/production/schedule` (nav: Production ▸ จัดตารางการผลิต). Operational — no new
+> control. Harness `tools/cutover/src/mfg-depth.ts` (two WOs over a shared centre → sequenced dispatch
+> [0,50], makespan 210, late flag). 11/11.
+
 
 **Goal:** turn released work orders (and their routings) into a **finite-capacity schedule** — each operation
 sequenced onto its work centre respecting capacity, predecessors, and competing WOs — with a dispatch list

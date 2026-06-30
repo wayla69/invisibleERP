@@ -352,6 +352,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-062 | InventoryController posts a counted stocktake from /stock-adjustment | R11, INV-04 | 03 §7 |
 | UAT-INV-063 | POST /api/stocktake/:id/post blocked for wh_count-only token | R11, INV-04 | 03 §9 |
 | UAT-INV-064 | InventoryController approves write-off from /stock-adjustment | R11, INV-07 | 03 §9 |
+| UAT-INV-065 | APS finite-capacity scheduling | (operational) | 15 §7 (5b) |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 
