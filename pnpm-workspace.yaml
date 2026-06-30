@@ -38,5 +38,4 @@ auditConfig:
     #     fastify (GHSA-jx2c — now 5.x), fast-uri (GHSA-q3j6/v39h — override ≥3.1.2).
     # --- runtime: still accepted under documented remediation ---
     - GHSA-q7rr-3cgh-j5r3 # @opentelemetry/sdk-node Prometheus exporter crash (metrics endpoint not public; OTel optional)
-    # --- runtime: drizzle upgrade (own workstream — assessed NOT exploitable, see vulnerability-triage.md) ---
-    - GHSA-gpj5-g38j-94v9 # drizzle-orm SQL injection via improperly escaped values
+    # (GHSA-gpj5-g38j-94v9 drizzle-orm — REMEDIATED: upgraded to 0.45.2; removed from ignore-list. See vulnerability-triage.md.)

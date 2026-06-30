@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { branches, custPosSales, customerItems, priceList, promotions } from '../../database/schema';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { isUniqueViolation } from '../../common/db-error';
 
 export interface CreateBranchDto { code: string; name: string; is_hq?: boolean; address?: string; phone?: string }
 export interface UpdateBranchDto { name?: string; active?: boolean; is_hq?: boolean; address?: string; phone?: string }
@@ -43,7 +44,7 @@ export class BranchService {
       }).returning();
       return this.fmt(b);
     } catch (e: any) {
-      if (e?.code === '23505' || /unique/i.test(String(e?.message))) {
+      if (isUniqueViolation(e)) {
         throw new ConflictException({ code: 'BRANCH_EXISTS', message: `Branch code '${code}' already exists`, messageTh: `รหัสสาขา '${code}' มีอยู่แล้ว` });
       }
       throw e;

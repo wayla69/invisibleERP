@@ -7,6 +7,7 @@ import {
 } from '../../database/schema';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { isUniqueViolation } from '../../common/db-error';
 
 export interface CreateCampaignDto {
   campaign_name: string; campaign_type?: string; content_text?: string; image_key?: string;
@@ -222,7 +223,7 @@ export class MarketingService {
       } catch (e: any) {
         // 23505 = unique_violation; only promo_id can clash here (itemIds are de-duped). Bump the
         // second and retry, with a bounded cap so a genuinely stuck collision still surfaces.
-        if (e?.code === '23505' && attempt < 12) continue;
+        if (isUniqueViolation(e) && attempt < 12) continue; // drizzle 0.45 nests SQLSTATE under .cause
         throw e;
       }
     }
