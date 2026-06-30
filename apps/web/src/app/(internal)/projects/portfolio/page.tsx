@@ -22,6 +22,7 @@ export default function PortfolioPage() {
   const q = useQuery<any>({ queryKey: ['projects', 'portfolio'], queryFn: () => api('/api/projects/portfolio') });
   const capQ = useQuery<any>({ queryKey: ['projects', 'capacity'], queryFn: () => api('/api/projects/resources/capacity?months=6') });
   const fcQ = useQuery<any>({ queryKey: ['projects', 'forecast'], queryFn: () => api('/api/projects/forecast?months=6') });
+  const progQ = useQuery<any>({ queryKey: ['projects', 'programs'], queryFn: () => api('/api/projects/programs') });
   const d = q.data;
   const fc = fcQ.data;
   const fcMax = Math.max(1, ...((fc?.billing?.monthly ?? []).map((m: any) => m.total_expected)));
@@ -157,22 +158,44 @@ export default function PortfolioPage() {
             </Card>
           )}
 
+          {/* programs (cross-project critical path, PMO-4) */}
+          {!!progQ.data?.programs?.length && (
+            <Card className="gap-3 p-5">
+              <h3 className="text-sm font-semibold">โปรแกรม (Programs) — เส้นทางวิกฤตข้ามโครงการ</h3>
+              <ul className="divide-y divide-border/50">
+                {progQ.data.programs.map((pr: any) => (
+                  <li key={pr.program_code}>
+                    <button onClick={() => router.push(`/projects/program/${encodeURIComponent(pr.program_code)}`)} className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm hover:opacity-80">
+                      <span className="font-medium">{pr.program_code}</span>
+                      <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span>{pr.member_count} โครงการ</span>
+                        <span>{pr.program_duration_days} วัน</span>
+                        <Badge variant="destructive">{pr.critical_path?.length ?? 0} วิกฤต</Badge>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           {/* forward billings/cash forecast (PMO-2): committed contractual billing + probability-weighted pipeline */}
           {!!fc?.billing?.monthly?.length && (
             <Card className="gap-3 p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">พยากรณ์การวางบิล/กระแสเงินสด (Billings forecast) — มั่นใจ + ไปป์ไลน์ถ่วงน้ำหนัก</h3>
-                <div className="flex gap-2 text-xs">
+                <div className="flex flex-wrap gap-2 text-xs">
                   <Badge variant="info">มั่นใจ {baht(fc.billing.committed_total)}</Badge>
                   <Badge variant="muted">ไปป์ไลน์ (ถ่วง) {baht(fc.billing.weighted_pipeline_total)}</Badge>
                   <Badge variant="success">รวมคาดการณ์ {baht(fc.billing.expected_total)}</Badge>
+                  {fc.resourcing?.peak_total_demand_fte != null && <Badge variant="warning">กำลังคนสูงสุด {fc.resourcing.peak_total_demand_fte} FTE</Badge>}
                 </div>
               </div>
               <div className="space-y-2">
                 {fc.billing.monthly.map((m: any) => (
                   <div key={m.month}>
                     <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">{m.month}{(fc.resourcing?.monthly ?? []).find((r: any) => r.month === m.month)?.committed_demand_pct ? <span className="ml-2 text-muted-foreground/70">· กำลังคน {(fc.resourcing.monthly.find((r: any) => r.month === m.month)?.committed_demand_pct)}%</span> : null}</span>
+                      <span className="text-muted-foreground">{m.month}{(() => { const r = (fc.resourcing?.monthly ?? []).find((x: any) => x.month === m.month); return r?.total_demand_fte ? <span className="ml-2 text-muted-foreground/70">· กำลังคน {r.total_demand_fte} FTE{r.pipeline_demand_fte > 0 ? ` (มั่นใจ ${r.committed_demand_fte} + ไปป์ไลน์ ${r.pipeline_demand_fte})` : ''}</span> : null; })()}</span>
                       <span className="tabular font-medium">{baht(m.total_expected)}</span>
                     </div>
                     {/* committed (solid) + weighted pipeline (lighter) stacked bar */}
@@ -183,7 +206,7 @@ export default function PortfolioPage() {
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">มั่นใจ = หมุดหมายวางบิล (Fixed) + สินทรัพย์ตามสัญญา POC ที่ยังไม่วางบิล · ไปป์ไลน์ = มูลค่าโอกาส × ความน่าจะเป็น ณ เดือนที่คาดปิด</p>
+              <p className="text-xs text-muted-foreground">มั่นใจ = หมุดหมายวางบิล (Fixed) + สินทรัพย์ตามสัญญา POC ที่ยังไม่วางบิล · ไปป์ไลน์ = มูลค่าโอกาส × ความน่าจะเป็น ณ เดือนที่คาดปิด · กำลังคน (FTE) = ความต้องการปัจจุบัน + ไปป์ไลน์ถ่วงน้ำหนัก ÷ {baht(fc.rev_per_fte_month)}/คน/เดือน</p>
             </Card>
           )}
         </div>

@@ -92,6 +92,40 @@ async function main() {
     au.status === 200 && au.json.today?.total_tokens === 15000 && au.json.daily_limit === 50000 && au.json.today?.remaining === 35000 && au.json.today?.over_budget === false,
     JSON.stringify(au.json).slice(0, 170));
 
+  // ── AI overage BILLING (Wave 1): the monthly job appends a Stripe invoice item per tenant for the month's
+  //    metered overage, idempotent per (tenant, month). No STRIPE_SECRET_KEY in test → mock path (status
+  //    'recorded', null invoice-item id). Connects the AI-COGS meter to actual collection. ──
+  const ovMonth = '2026-05';
+  // t1 (Active Pro — included 200k/day, overage rate 12 THB/1k) consumed 10,000 overage tokens in May.
+  await db.insert(s.aiTokenUsage).values({ tenantId: t1, usageDate: `${ovMonth}-15`, inputTokens: 300000, outputTokens: 0, overageTokens: 10000 });
+  const billing = app.get(BillingService);
+  const inv = await billing.aiOverageInvoice(t1, ovMonth);
+  ok('Overage invoice line: 10,000 tokens × 12 THB/1k = 120 THB (Pro rate)',
+    near(inv.amount, 120) && inv.overage_tokens === 10000 && near(inv.overage_rate_thb_per_1k, 12), JSON.stringify(inv));
+
+  const run1 = await inj('POST', `/api/billing/ai-overage/run?month=${ovMonth}`, token);
+  ok('Overage billing run: charges t1 once, total 120 THB (mock invoice item — no Stripe key)',
+    run1.status === 200 && run1.json.processed_count === 1 && near(run1.json.total_amount, 120) &&
+    run1.json.processed?.[0]?.tenant_id === t1 && run1.json.processed?.[0]?.status === 'recorded' && run1.json.processed?.[0]?.stripe_invoice_item_id === null,
+    JSON.stringify(run1.json).slice(0, 220));
+
+  // Idempotency: a second run for the same month bills nothing (UNIQUE(tenant, month) guard → no double-bill).
+  const run2 = await inj('POST', `/api/billing/ai-overage/run?month=${ovMonth}`, token);
+  ok('Overage billing idempotent: re-run same month charges 0 tenant(s)', run2.status === 200 && run2.json.processed_count === 0, JSON.stringify(run2.json));
+
+  const ovRows = (await pg.query(`SELECT amount, status, stripe_invoice_item_id FROM ai_overage_billing_runs WHERE tenant_id=${t1} AND billing_month='${ovMonth}'`)).rows as any[];
+  ok('Overage ledger: exactly one row for (t1, 2026-05), amount 120, status recorded',
+    ovRows.length === 1 && near(ovRows[0].amount, 120) && ovRows[0].status === 'recorded' && ovRows[0].stripe_invoice_item_id == null, JSON.stringify(ovRows));
+
+  const hist = await billing.listOverageRuns(t1, ovMonth);
+  ok('Overage history: listOverageRuns returns the (t1, 2026-05) charge', (hist.runs ?? []).length === 1 && near(hist.runs[0].amount, 120) && hist.runs[0].month === ovMonth, JSON.stringify(hist));
+
+  // Env-rate override: AI_OVERAGE_RATE_THB_PER_1K re-prices overage with no plan/code change (ops knob).
+  process.env.AI_OVERAGE_RATE_THB_PER_1K = '20';
+  const invEnv = await billing.aiOverageInvoice(t1, ovMonth);
+  delete process.env.AI_OVERAGE_RATE_THB_PER_1K;
+  ok('Env rate override: AI_OVERAGE_RATE_THB_PER_1K=20 → 10,000 tokens = 200 THB', near(invEnv.amount, 200) && near(invEnv.overage_rate_thb_per_1k, 20), JSON.stringify(invEnv));
+
   await app.close();
   console.log('\n── Step 9 — SaaS metrics (MRR / churn / DAU-MAU) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

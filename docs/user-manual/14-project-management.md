@@ -30,8 +30,18 @@ An executive cross-project overview for the PMO / leadership:
 - **Billings/cash forecast** — a forward, month-by-month *พยากรณ์การวางบิล/กระแสเงินสด*: a **มั่นใจ (committed)** band
   (Fixed-price milestone billing on its due date + each POC project's earned-but-unbilled contract asset) overlaid
   with the **ไปป์ไลน์ถ่วงน้ำหนัก (weighted pipeline)** (each open opportunity's value × win probability, at its expected
-  close month), with the committed capacity demand % shown alongside — so you can see *"if we win the pipeline,
-  when does the cash land, and where are we already over-allocated?"*.
+  close month). Each month also shows the projected **กำลังคน (FTE)** demand — your *committed* allocation plus the
+  pipeline's projected staffing draw (the weighted pipeline value ÷ a configurable *revenue-per-FTE-month* rate,
+  default ฿200,000) — with a peak-FTE badge, so you can see *"if we win the pipeline, when does cash land, and how
+  many people would each month need?"*.
+
+- **Programs** — when projects are grouped into a **program** (cross-project delivery), a *โปรแกรม (Programs)*
+  card lists each program with its member count, total duration, and how many projects sit on the **program
+  critical path**. Click one to open its **cross-project critical-path** view (`/projects/program/{code}`) —
+  a timeline of the member projects (each row is a whole project, sized by its own critical-path duration) with
+  the program critical chain highlighted and per-project slack, so a slip that ripples *across* projects is
+  visible. Program membership + dependencies are set via the projects API
+  (`PATCH /api/projects/{code}/program` with `program_code` / `depends_on_projects`).
 
 The project workspace **Overview** also carries a **แนวโน้มสุขภาพโครงการ (Health trend)** — capture a dated
 CPI/SPI/RAG snapshot with *บันทึกสุขภาพ*, and the chart plots the trajectory over time. Schedule the
@@ -126,3 +136,5 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.8 | 2026-06-30 | **Action Center** (PROJ-11) — a new *ศูนย์งานที่ต้องทำ* PMO inbox (`/projects/action-center`): one severity-ranked worklist of pending approvals, red/over-budget projects, slipping milestones, unmitigated-high risks and governance gaps across the whole portfolio, each deep-linked, with a live (SSE) update when a project goes red or a high risk is logged. Linked from the Portfolio header. |
 | 1.9 | 2026-06-30 | **Forward billings/cash forecast** (PMO-2) — a *พยากรณ์การวางบิล/กระแสเงินสด* band on the Portfolio command center: committed milestone/POC billing overlaid with the probability-weighted pipeline (value × win %, at expected close) per month, alongside committed capacity demand — the "if we win the pipeline, when does cash land / where are we over-allocated?" view. |
 | 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |
+| 2.1 | 2026-06-30 | **Program (cross-project) critical path** (PMO-4) — group projects into a *program* (`program_code`) with cross-project finish-to-start dependencies; the new `/projects/program/{code}` view runs a CPM over the program (each row a whole project) and highlights the program critical chain + per-project slack. A *โปรแกรม (Programs)* card on the Portfolio command center lists them. |
+| 2.2 | 2026-06-30 | **Pipeline → FTE forecast** (PMO-5) — the Portfolio billings forecast now also projects **กำลังคน (FTE)** demand per month: committed allocation + the pipeline's projected staffing draw (weighted value ÷ a configurable revenue-per-FTE-month rate), with a peak-FTE badge — "if we win the pipeline, how many people would each month need?". |

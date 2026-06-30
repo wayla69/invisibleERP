@@ -182,9 +182,21 @@ A "สร้างรายงานสถานะ (Status report)" action on t
   before squash-merge. RCM regenerated via `python3 compliance/build_rcm.py` whenever a control is added
   (PMO-1 adds PROJ-11; PMO-2/PMO-3 add none unless sign-off decides otherwise).
 
+## Follow-on (post-PMO-3, now in flight)
+- **PMO-4 — Program (cross-project) critical path — DELIVERED.** `program_code` + `depends_on_projects` on
+  `projects` (migration 0200) + `GET /api/projects/program-critical-path?program=` / `programs` /
+  `PATCH :code/program`; a CPM over the program graph (nodes = whole projects) → program duration, critical
+  chain, per-project slack. Web `/projects/program/:code` + a Programs card on the portfolio. Rides PROJ-06
+  (no new control). PN-16 step 22 / rev 0.24, user-manual 14 rev 2.1, UAT-O2C-224. Harness: `projects` 108.
+- **PMO-5 — configurable value→FTE forecast extension — DELIVERED.** `GET /api/projects/forecast` now also
+  projects resourcing demand: a configurable `rev_per_fte_month` (default ฿200k, overridable per request)
+  converts the weighted-pipeline value into an FTE draw → per-month `committed_demand_fte` /
+  `pipeline_demand_fte` / `total_demand_fte` + `peak_total_demand_fte`. Web: per-month FTE + a peak badge on
+  the portfolio forecast band. Rides PROJ-05/PROJ-06 (no control, no migration). PN-16 step 20 / rev 0.25,
+  user-manual 14 rev 2.2, UAT-O2C-225. Harness: `projects` 110.
+
 ## Out of scope / parked (unless requested)
-- Document/deliverable management, external PM-tool sync, cross-project (program) critical path, and a
-  configurable forecast effort-model (value→FTE) beyond the simple heuristic in PMO-2.
+- Document/deliverable management, external PM-tool sync.
 
 ## Revision history
 | Version | Date | Notes |

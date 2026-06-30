@@ -41,7 +41,9 @@ your code below.
 | `BAD_ALLOC` | A project resource `alloc_pct` (allocation %) was outside the 0–100 range. | Enter an allocation within (0, 100]. To split a person across projects, give each assignment its share. |
 | `SOD_SELF_APPROVAL` (timesheet) | You tried to **approve a timesheet you submitted**. | A different person approves it (maker-checker / segregation of duties — applies even to Admin). Approving posts the labor cost to the project. |
 | `TIMESHEET_NOT_FOUND` | The timesheet id given to *approve* doesn't exist. | Check the timesheet id; submit the timesheet first. |
-| `BAD_DEPENDENCY` | A project **task** was set to depend on itself. | Remove the self-reference; a task's predecessors (`depends_on`) must be *other* tasks. |
+| `BAD_DEPENDENCY` | A project **task** — or a **project** in a program — was set to depend on itself. | Remove the self-reference; a task's predecessors (`depends_on`), or a project's `depends_on_projects`, must be *other* tasks/projects. |
+| `DEP_PROJECT_NOT_FOUND` | A program dependency (`depends_on_projects`) referenced a **project code that doesn't exist**. | Use existing project codes; create the predecessor project first, or correct the code. |
+| `PROGRAM_NOT_FOUND` | The program critical-path view was opened for a `program_code` **no project belongs to**. | Assign at least one project to the program via `PATCH /api/projects/{code}/program` (`program_code`). |
 | `BASELINE_REASON_REQUIRED` | You tried to **re-baseline** a project that already has an active baseline without giving a `reason`. | Re-baselining is change-controlled (PROJ-07): supply a `reason` so the variance trail records *why* the plan moved. The first baseline needs no reason. |
 | `TEMPLATE_EXISTS` | You tried to create a **project template** with a `code` that's already taken. | Choose a different template code (or leave it blank to auto-generate). |
 | `TEMPLATE_NOT_FOUND` | The template code given to read/apply doesn't exist. | Check the code against **Templates**; create the template first. |
