@@ -157,6 +157,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.bom': { th: 'สูตรการผลิต (BoM)', en: 'Bill of Materials (BoM)' },
   'nav.manufacturing': { th: 'ใบสั่งผลิต (Manufacturing)', en: 'Manufacturing Orders' },
   'nav.production': { th: 'การผลิตขั้นสูง (Routing/QA/MRP)', en: 'Advanced Production (Routing/QA/MRP)' },
+  'nav.aps_schedule': { th: 'จัดตารางการผลิต (APS)', en: 'Production Schedule (APS)' },
   'nav.eam': { th: 'ซ่อมบำรุงสินทรัพย์ (EAM)', en: 'Asset Maintenance (EAM)' },
 
   // ── Finance / AR-AP ───────────────────────────────────────────────────────

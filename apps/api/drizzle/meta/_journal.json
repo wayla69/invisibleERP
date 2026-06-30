@@ -1352,6 +1352,13 @@
       "when": 2023820000019,
       "tag": "0192_project_risks",
       "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 2023820000020,
+      "tag": "0193_work_centers",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import { RoutingService, type CreateRoutingDto } from './routing.service';
 import { ShopFloorService, type ReportOpDto } from './shopfloor.service';
 import { QualityService, type InspectDto } from './quality.service';
 import { MrpService, type MrpRunDto, type MrpCapacityDto } from './mrp.service';
+import { ApsService, type WorkCenterDto, type ScheduleDto } from './aps.service';
 
 const PERMS = ['bom_master', 'warehouse', 'exec'] as const;
 
@@ -59,4 +60,28 @@ export class MrpController {
   @Post('plan-to-pr') @Permissions('procurement', 'planner') planToPr(@Body(new ZodValidationPipe(MrpBody)) b: MrpRunDto, @CurrentUser() u: JwtUser) { return this.svc.planToPr(b, u); }
   // Rough-cut capacity: load each work centre from routings vs available minutes.
   @Post('capacity') capacity(@Body(new ZodValidationPipe(CapacityBody)) b: MrpCapacityDto, @CurrentUser() u: JwtUser) { return this.svc.capacity(b, u); }
+}
+
+// ── APS — work-centre master + finite-capacity scheduling (docs/22 Phase A) ──
+const WorkCenterBody = z.object({ code: z.string().min(1), name: z.string().optional(), minutes_per_day: z.number().positive().optional(), active: z.boolean().optional() });
+const ScheduleBody = z.object({
+  work_orders: z.array(z.object({ wo_no: z.string().min(1), due_by: z.string().optional() })).optional(),
+  horizon_start: z.string().optional(),
+  minutes_per_day: z.number().positive().optional(),
+});
+
+@Controller('api/work-centers')
+@Permissions('bom_master', 'warehouse', 'planner', 'exec')
+export class WorkCenterController {
+  constructor(private readonly svc: ApsService) {}
+  @Post() upsert(@Body(new ZodValidationPipe(WorkCenterBody)) b: WorkCenterDto, @CurrentUser() u: JwtUser) { return this.svc.upsertWorkCenter(b, u); }
+  @Get() list(@CurrentUser() u: JwtUser) { return this.svc.listWorkCenters(u); }
+}
+
+@Controller('api/aps')
+@Permissions('bom_master', 'warehouse', 'planner', 'exec')
+export class ApsController {
+  constructor(private readonly svc: ApsService) {}
+  // Finite-capacity schedule: sequence routing operations onto work centres (per-op start/finish, dispatch, makespan, late).
+  @Post('schedule') schedule(@Body(new ZodValidationPipe(ScheduleBody)) b: ScheduleDto, @CurrentUser() u: JwtUser) { return this.svc.schedule(b, u); }
 }
