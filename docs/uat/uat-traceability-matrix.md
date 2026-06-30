@@ -222,6 +222,19 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-187 | Marking lost requires a reason | REV-17 | 01 §7, §9 |
 | UAT-O2C-188 | Weighted pipeline forecast + win-rate | REV-17 | 01 §7 |
 | UAT-O2C-189 | Log + list a CRM activity | REV-17 | 01 §7 |
+| UAT-O2C-202 | Won opportunity → project (won-only, traceable, idempotent) | CRM-WL | 16 §7 (1a), §9 |
+| UAT-O2C-203 | Project WBS — planned-hours-weighted % complete roll-up | Feature (P1 WBS) | 16 §7 (7) |
+| UAT-O2C-204 | Milestone completion raises the Fixed-price progress bill | PROJ-02 | 16 §7 (8), §9 |
+| UAT-O2C-205 | Resource assignment snapshots the authorized rate card | PROJ-05 | 16 §7 (9), §9 |
+| UAT-O2C-206 | Capacity utilization flags over-allocation | PROJ-05 | 16 §7 (9), §9 |
+| UAT-O2C-207 | Timesheet → project labor maker-checker posts to WIP | PROJ-04 | 16 §7 (10), §9 |
+| UAT-O2C-208 | Earned-value metrics + task dependency guard | PROJ-06 | 16 §7 (11), §9 |
+| UAT-O2C-209 | Critical-path schedule (CPM) + EVM S-curve | PROJ-06 | 16 §7 (11) |
+| UAT-O2C-210 | Win/loss analytics for the pipeline dashboard | REV-17 | 16 §7 (11) |
+| UAT-O2C-211 | Schedulable BI report types (project_evm, crm_win_loss) | PROJ-06 / REV-17 | 16 §7 (11) |
+| UAT-O2C-212 | Portfolio command center rollup | PROJ-06 | 16 §7 (11) |
+| UAT-O2C-213 | Change-controlled baselines + variance | PROJ-07 | 16 §7 (12) |
+| UAT-O2C-214 | Project templates: author + one-step apply | (operational) | 16 §7 (13) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

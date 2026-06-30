@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FolderKanban, Plus, Clock, Receipt } from 'lucide-react';
+import { FolderKanban, Plus, Clock, Receipt, Target, Wallet, TrendingUp, LayoutDashboard } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -28,13 +29,21 @@ const selectCls = 'h-9 w-full rounded-md border border-input bg-transparent px-3
 
 export default function ProjectsPage() {
   const qc = useQueryClient();
+  const router = useRouter();
   const q = useQuery<{ projects: Project[]; count: number }>({ queryKey: ['projects'], queryFn: () => api('/api/projects') });
-  const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '' });
+  const tplQ = useQuery<{ templates: { code: string; name: string; item_count: number }[] }>({ queryKey: ['project-templates'], queryFn: () => api('/api/projects/templates') });
+  const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '' });
   const refresh = () => qc.invalidateQueries({ queryKey: ['projects'] });
 
   const create = useMutation({
-    mutationFn: () => api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name: f.name, project_code: f.project_code || undefined, customer_name: f.customer_name || undefined, billing_type: f.billing_type, contract_amount: Number(f.contract_amount) || 0 }) }),
-    onSuccess: (r) => { notifySuccess(`สร้างโครงการ ${r.project_code}`); setF({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '' }); refresh(); },
+    mutationFn: async () => {
+      const r = await api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name: f.name, project_code: f.project_code || undefined, customer_name: f.customer_name || undefined, billing_type: f.billing_type, contract_amount: Number(f.contract_amount) || 0 }) });
+      // Optional: scaffold a standard WBS + milestones from a template (B2).
+      let scaffold: { tasks_created?: number; milestones_created?: number } | null = null;
+      if (f.template) scaffold = await api(`/api/projects/${encodeURIComponent(r.project_code)}/apply-template/${encodeURIComponent(f.template)}`, { method: 'POST', body: JSON.stringify({}) });
+      return { ...r, scaffold };
+    },
+    onSuccess: (r: any) => { notifySuccess(r.scaffold ? `สร้างโครงการ ${r.project_code} · ${r.scaffold.tasks_created} งาน / ${r.scaffold.milestones_created} หมุดหมายจากแม่แบบ` : `สร้างโครงการ ${r.project_code}`); setF({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '' }); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -56,15 +65,24 @@ export default function ProjectsPage() {
   const projects = q.data?.projects ?? [];
   const wip = projects.reduce((a, p) => a + p.wip, 0);
   const margin = projects.reduce((a, p) => a + p.margin, 0);
+  const billed = projects.reduce((a, p) => a + p.billed_to_date, 0);
 
   return (
     <div>
-      <PageHeader title="โครงการ (Projects)" description="บัญชีโครงการ · ลงต้นทุน→งานระหว่างทำ (WIP) · วางบิล→รับรู้รายได้+ตัดต้นทุน · ลงบัญชีอัตโนมัติ" />
+      <PageHeader
+        title="โครงการ (Projects)"
+        description="บัญชีโครงการ · ลงต้นทุน→งานระหว่างทำ (WIP) · วางบิล→รับรู้รายได้+ตัดต้นทุน · WBS/Gantt · EVM"
+        actions={<div className="flex gap-2">
+          <Button variant="outline" onClick={() => router.push('/projects/portfolio')}><LayoutDashboard className="size-4" /> Portfolio</Button>
+          <Button variant="outline" onClick={() => router.push('/projects/pipeline')}><Target className="size-4" /> Win/Loss</Button>
+        </div>}
+      />
 
-      <div className="mb-5 grid gap-4 sm:grid-cols-3">
+      <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="โครงการ" value={q.data?.count ?? 0} icon={FolderKanban} tone="primary" />
-        <StatCard label="ต้นทุนค้างรับรู้ (WIP)" value={baht(wip)} tone="primary" />
-        <StatCard label="กำไรสะสม" value={baht(margin)} tone="primary" />
+        <StatCard label="ต้นทุนค้างรับรู้ (WIP)" value={baht(wip)} icon={Clock} tone="info" />
+        <StatCard label="วางบิลสะสม" value={baht(billed)} icon={Wallet} tone="default" />
+        <StatCard label="กำไรสะสม" value={baht(margin)} icon={TrendingUp} tone={margin < 0 ? 'danger' : 'success'} />
       </div>
 
       <Card className="mb-5 gap-3 p-5">
@@ -80,6 +98,12 @@ export default function ProjectsPage() {
             </select>
           </div>
           <div className="grid gap-1.5"><Label>มูลค่าสัญญา</Label><Input type="number" min="0" value={f.contract_amount} onChange={(e) => setF({ ...f, contract_amount: e.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>เริ่มจากแม่แบบ (ถ้ามี)</Label>
+            <select className={selectCls} value={f.template} onChange={(e) => setF({ ...f, template: e.target.value })}>
+              <option value="">— ไม่ใช้แม่แบบ —</option>
+              {(tplQ.data?.templates ?? []).map((t) => <option key={t.code} value={t.code}>{t.name} ({t.item_count})</option>)}
+            </select>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> สร้าง</Button>
@@ -90,6 +114,8 @@ export default function ProjectsPage() {
         {q.data && (
           <DataTable
             rows={projects}
+            rowKey={(r: Project) => r.project_code}
+            onRowClick={(r: Project) => router.push(`/projects/${encodeURIComponent(r.project_code)}`)}
             columns={[
               { key: 'project_code', label: 'รหัส' },
               { key: 'name', label: 'โครงการ', render: (r: Project) => `${r.name}${r.customer_name ? ` · ${r.customer_name}` : ''}` },
@@ -105,8 +131,8 @@ export default function ProjectsPage() {
                 key: 'action', label: 'ดำเนินการ', sortable: false,
                 render: (r: Project) => (
                   <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" title="ลงต้นทุน" onClick={() => openDlg('cost', r.project_code)}><Clock className="size-4" /></Button>
-                    <Button variant="ghost" size="sm" title="วางบิล" onClick={() => openDlg('bill', r.project_code)}><Receipt className="size-4" /></Button>
+                    <Button variant="ghost" size="sm" title="ลงต้นทุน" onClick={(ev) => { ev.stopPropagation(); openDlg('cost', r.project_code); }}><Clock className="size-4" /></Button>
+                    <Button variant="ghost" size="sm" title="วางบิล" onClick={(ev) => { ev.stopPropagation(); openDlg('bill', r.project_code); }}><Receipt className="size-4" /></Button>
                   </div>
                 ),
               },

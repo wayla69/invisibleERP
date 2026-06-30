@@ -1287,7 +1287,56 @@
       "idx": 183,
       "version": "7",
       "when": 2023820000010,
-      "tag": "0183_perf_indexes2",
+      "tag": "0183_project_customer_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 184,
+      "version": "7",
+      "when": 2023820000011,
+      "tag": "0184_project_wbs",
+      "breakpoints": true
+    },
+    {
+      "idx": 185,
+      "version": "7",
+      "when": 2023820000012,
+      "tag": "0185_project_resources",
+      "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 2023820000013,
+      "tag": "0186_timesheet_project_labor",
+      "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "7",
+      "when": 2023820000014,
+      "tag": "0187_project_task_dependencies",
+      "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "7",
+      "when": 2023820000015,
+      "tag": "0188_project_baselines",
+      "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "7",
+      "when": 2023820000016,
+      "tag": "0189_project_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 190,
+      "version": "7",
+      "when": 2023820000017,
+      "tag": "0190_perf_indexes2",
       "breakpoints": true
     }
   ]

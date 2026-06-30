@@ -39,7 +39,10 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'mgr', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // independent approver (P3 maker-checker)
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -53,6 +56,7 @@ async function main() {
     return { status: res.statusCode, json };
   };
   const admin = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
+  const mgr = (await inj('POST', '/api/login', undefined, { username: 'mgr', password: 'admin123' })).json.token;
 
   // ── 1. create project (T&M) ──
   const cr = await inj('POST', '/api/projects', admin, { project_code: 'PRJ-A', name: 'ระบบ ERP ลูกค้า', customer_name: 'ACME', billing_type: 'TM', contract_amount: 10000 });
@@ -115,6 +119,209 @@ async function main() {
   const bg = await inj('GET', '/api/projects/PRJ-G', admin);
   ok('Budget overrun: total 6000 vs budget 5000 → over_budget, variance −1000, used 120%',
     bg.json.over_budget === true && near(bg.json.budget_variance, -1000) && near(bg.json.budget_used_pct, 120), JSON.stringify({ ob: bg.json.over_budget, v: bg.json.budget_variance, u: bg.json.budget_used_pct }));
+
+  // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
+  const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
+  const oppNo = opp.json.opp_no;
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${oppNo}/stage`, admin, { stage: 'won' });
+  const conv = await inj('POST', `/api/projects/from-opportunity/${oppNo}`, admin, { project_code: 'PRJ-WON', billing_type: 'Fixed' });
+  ok('Won opportunity → project: contract seeded 250000, crm_opp_no linked, status Open',
+    conv.status < 300 && conv.json.project_code === 'PRJ-WON' && near(conv.json.contract_amount, 250000) && conv.json.crm_opp_no === oppNo && conv.json.status === 'Open',
+    JSON.stringify({ s: conv.status, c: conv.json.contract_amount, link: conv.json.crm_opp_no }));
+  // Idempotency: the same opportunity converts to at most one project (re-submit returns the same project).
+  const conv2 = await inj('POST', `/api/projects/from-opportunity/${oppNo}`, admin, {});
+  ok('Re-convert same opportunity → idempotent (already), no duplicate project',
+    conv2.json.already === true && conv2.json.project_code === 'PRJ-WON', JSON.stringify({ a: conv2.json.already }));
+  // Control: an OPEN (not-won) opportunity cannot convert.
+  const oppOpen = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลยังไม่ปิด', amount: 5000 });
+  const conv3 = await inj('POST', `/api/projects/from-opportunity/${oppOpen.json.opp_no}`, admin, {});
+  ok('Open (not-won) opportunity → conversion rejected (400 OPP_NOT_WON)',
+    conv3.status === 400 && conv3.json.error?.code === 'OPP_NOT_WON', `${conv3.status} ${conv3.json.error?.code}`);
+  // Control: an unknown opportunity is rejected.
+  const conv4 = await inj('POST', '/api/projects/from-opportunity/OPP-NOPE', admin, {});
+  ok('Unknown opportunity → 404 OPP_NOT_FOUND', conv4.status === 404 && conv4.json.error?.code === 'OPP_NOT_FOUND', `${conv4.status} ${conv4.json.error?.code}`);
+
+  // ── 11. WBS tasks: planned-hours-weighted % complete roll-up (P1) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-WBS', name: 'งานแบ่ง WBS', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-WBS/tasks', admin, { name: 'ออกแบบ', planned_hours: 10, pct_complete: 50 });
+  const tList = await inj('POST', '/api/projects/PRJ-WBS/tasks', admin, { name: 'พัฒนา', planned_hours: 30, pct_complete: 0 });
+  ok('WBS roll-up: tasks 10h@50% + 30h@0% → project 12.5% complete', near(tList.json.pct_complete, 12.5) && tList.json.count === 2, JSON.stringify({ p: tList.json.pct_complete, c: tList.json.count }));
+  // Mark the 30h task done → 100%; roll-up = (10×50 + 30×100)/40 = 87.5
+  const taskB = (tList.json.tasks ?? []).find((t: any) => t.name === 'พัฒนา');
+  const pt = await inj('PATCH', `/api/projects/tasks/${taskB.id}`, admin, { status: 'done' });
+  ok('Mark 30h task done → 100%; project roll-up 87.5%', near(pt.json.pct_complete, 87.5), JSON.stringify({ p: pt.json.pct_complete }));
+  const wbsGet = await inj('GET', '/api/projects/PRJ-WBS', admin);
+  ok('Project detail exposes pct_complete 87.5 + task_count 2', near(wbsGet.json.pct_complete, 87.5) && wbsGet.json.task_count === 2, JSON.stringify({ p: wbsGet.json.pct_complete, tc: wbsGet.json.task_count }));
+  const ptBad = await inj('PATCH', '/api/projects/tasks/999999', admin, { status: 'done' });
+  ok('Patch unknown task → 404 TASK_NOT_FOUND', ptBad.status === 404 && ptBad.json.error?.code === 'TASK_NOT_FOUND', `${ptBad.status} ${ptBad.json.error?.code}`);
+
+  // ── 12. Milestones: completion of a billing milestone raises the Fixed-price progress bill (PROJ-02) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-MS', name: 'งานมีหมุดหมาย', billing_type: 'Fixed', contract_amount: 100000 });
+  const ms1 = await inj('POST', '/api/projects/PRJ-MS/milestones', admin, { name: 'เฟส 1 ส่งมอบ', billing_percent: 40 });
+  const mId = ms1.json.milestones[0].id;
+  const reach = await inj('POST', `/api/projects/milestones/${mId}/reach`, admin, {});
+  ok('Reach a 40%-billing milestone → Fixed bill 40000 via PRJ-BILL (PROJ-02)',
+    reach.json.status === 'reached' && near(reach.json.billing?.revenue, 40000) && /^JE-/.test(reach.json.billing?.entry_no ?? ''), JSON.stringify({ s: reach.json.status, r: reach.json.billing?.revenue }));
+  const reach2 = await inj('POST', `/api/projects/milestones/${mId}/reach`, admin, {});
+  ok('Re-reach the same milestone → 400 MILESTONE_REACHED (no double bill)', reach2.status === 400 && reach2.json.error?.code === 'MILESTONE_REACHED', `${reach2.status} ${reach2.json.error?.code}`);
+  // A non-billing milestone reaches without raising a bill.
+  const ms2 = await inj('POST', '/api/projects/PRJ-MS/milestones', admin, { name: 'kickoff' });
+  const reach3 = await inj('POST', `/api/projects/milestones/${ms2.json.milestones.find((m: any) => m.name === 'kickoff').id}/reach`, admin, {});
+  ok('Reach a non-billing milestone → reached, no billing', reach3.json.status === 'reached' && reach3.json.billing == null, JSON.stringify({ s: reach3.json.status, b: reach3.json.billing }));
+  const reachBad = await inj('POST', '/api/projects/milestones/999999/reach', admin, {});
+  ok('Reach unknown milestone → 404 MILESTONE_NOT_FOUND', reachBad.status === 404 && reachBad.json.error?.code === 'MILESTONE_NOT_FOUND', `${reachBad.status} ${reachBad.json.error?.code}`);
+
+  // ── 13. Resourcing: rate card governs the snapshot rate; utilization flags over-allocation (PROJ-05, P2) ──
+  await inj('POST', '/api/projects/rate-cards', admin, { role: 'Senior Dev', cost_rate: 1000, bill_rate: 2000, effective_from: '2026-01-01' });
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-RES', name: 'งานจัดสรรคน', billing_type: 'TM' });
+  const asg = await inj('POST', '/api/projects/PRJ-RES/resources', admin, { resource_name: 'Alice', role: 'Senior Dev', alloc_pct: 60, period_start: '2026-02-01' });
+  const alice = (asg.json.resources ?? []).find((r: any) => r.resource_name === 'Alice');
+  ok('Assign resource → rate-card rates snapshotted (cost 1000, bill 2000)', near(alice?.cost_rate, 1000) && near(alice?.bill_rate, 2000) && near(alice?.alloc_pct, 60), JSON.stringify({ c: alice?.cost_rate, b: alice?.bill_rate }));
+  // Same resource booked 60% on a second project → 120% total → over-allocated.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-RES2', name: 'งานคู่ขนาน', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-RES2/resources', admin, { resource_name: 'Alice', role: 'Senior Dev', alloc_pct: 60, period_start: '2026-02-01' });
+  const util = await inj('GET', '/api/projects/resources/utilization', admin);
+  const au = (util.json.utilization ?? []).find((u: any) => u.resource_name === 'Alice');
+  ok('Utilization: Alice 60%+60% = 120% → over_allocated', near(au?.allocated_pct, 120) && au?.over_allocated === true && util.json.over_allocated_count >= 1, JSON.stringify({ a: au?.allocated_pct, o: au?.over_allocated }));
+  // A role with no rate card → zero snapshot rates (no guessed rate).
+  const asgBob = await inj('POST', '/api/projects/PRJ-RES/resources', admin, { resource_name: 'Bob', role: 'Unknown' });
+  const bob = (asgBob.json.resources ?? []).find((r: any) => r.resource_name === 'Bob');
+  ok('Assign with no rate card → cost/bill rate 0 (not guessed)', near(bob?.cost_rate, 0) && near(bob?.bill_rate, 0), JSON.stringify({ c: bob?.cost_rate }));
+  // Allocation guard.
+  const asgBad = await inj('POST', '/api/projects/PRJ-RES/resources', admin, { resource_name: 'Carol', alloc_pct: 0 });
+  ok('Assign with alloc_pct 0 → 400 BAD_ALLOC', asgBad.status === 400 && asgBad.json.error?.code === 'BAD_ALLOC', `${asgBad.status} ${asgBad.json.error?.code}`);
+
+  // ── 14. Timesheet → project labor: maker-checker approval posts labor to project WIP (PROJ-04, P3) ──
+  const emp = await inj('POST', '/api/payroll/employees', admin, { name: 'Somchai', national_id: '1234567890123', monthly_salary: 30000, hourly_rate: 200, pf_rate: 0.05 });
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-TS', name: 'งานคิดชั่วโมง', billing_type: 'TM' });
+  const ts = await inj('POST', '/api/hcm/timesheets', admin, { emp_code: emp.json.emp_code, work_date: '2026-06-15', regular_hours: 8, project_code: 'PRJ-TS', billable: true });
+  ok('Timesheet logged Pending with submitter', ts.json.status === 'Pending' && ts.json.id > 0, JSON.stringify({ s: ts.json.status, id: ts.json.id }));
+  // SoD: the submitter (admin) cannot approve their own timesheet.
+  const selfApprove = await inj('POST', `/api/hcm/timesheets/${ts.json.id}/approve`, admin, {});
+  ok('Self-approve own timesheet → 403 SOD_SELF_APPROVAL', selfApprove.status === 403 && selfApprove.json.error?.code === 'SOD_SELF_APPROVAL', `${selfApprove.status} ${selfApprove.json.error?.code}`);
+  // Independent approver (mgr) approves → 8h × ฿200 = ฿1600 labor posts to project WIP via PRJ-COST.
+  const appr = await inj('POST', `/api/hcm/timesheets/${ts.json.id}/approve`, mgr, {});
+  ok('Independent approve → labor 1600 posts to project (PRJ-COST), entry JE-…',
+    appr.json.status === 'Approved' && near(appr.json.labor_cost, 1600) && appr.json.project_posted === true && /^JE-/.test(appr.json.entry_no ?? ''), JSON.stringify({ s: appr.json.status, c: appr.json.labor_cost }));
+  const tsProj = await inj('GET', '/api/projects/PRJ-TS', admin);
+  ok('Project WIP reflects approved timesheet labor: cost_to_date 1600', near(tsProj.json.cost_to_date, 1600) && near(tsProj.json.wip, 1600), JSON.stringify({ c: tsProj.json.cost_to_date, w: tsProj.json.wip }));
+  // Idempotent: re-approving an approved timesheet does not double-post.
+  const appr2 = await inj('POST', `/api/hcm/timesheets/${ts.json.id}/approve`, mgr, {});
+  const tsProj2 = await inj('GET', '/api/projects/PRJ-TS', admin);
+  ok('Re-approve → already, no double-post (cost_to_date still 1600)', appr2.json.already === true && near(tsProj2.json.cost_to_date, 1600), JSON.stringify({ a: appr2.json.already, c: tsProj2.json.cost_to_date }));
+  const apprBad = await inj('POST', '/api/hcm/timesheets/999999/approve', mgr, {});
+  ok('Approve unknown timesheet → 404 TIMESHEET_NOT_FOUND', apprBad.status === 404 && apprBad.json.error?.code === 'TIMESHEET_NOT_FOUND', `${apprBad.status} ${apprBad.json.error?.code}`);
+
+  // ── 15. Earned-value management + task dependencies (PROJ-06, P4) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-EVM', name: 'งานวัด EVM', billing_type: 'TM' });
+  const t1r = await inj('POST', '/api/projects/PRJ-EVM/tasks', admin, { name: 'EV-T1', planned_cost: 1000, planned_end: '2026-01-31', pct_complete: 100 });
+  const t1 = t1r.json.tasks.find((t: any) => t.name === 'EV-T1');
+  const t2r = await inj('POST', '/api/projects/PRJ-EVM/tasks', admin, { name: 'EV-T2', planned_cost: 1000, planned_end: '2099-12-31', pct_complete: 0, depends_on: [t1.id] });
+  const t2 = t2r.json.tasks.find((t: any) => t.name === 'EV-T2');
+  ok('Task dependency stored: EV-T2 depends_on [EV-T1]', Array.isArray(t2.depends_on) && t2.depends_on.includes(t1.id), JSON.stringify({ d: t2.depends_on }));
+  await inj('POST', '/api/projects/PRJ-EVM/cost', admin, { entry_type: 'time', amount: 900, billable: true }); // actual cost
+  const evm = await inj('GET', '/api/projects/PRJ-EVM/evm', admin);
+  ok('EVM: BAC 2000, EV 1000, PV 1000 (T1 past/T2 future), AC 900 → CPI 1.1111, SPI 1.0, CV 100, SV 0, EAC ~1800',
+    near(evm.json.bac, 2000) && near(evm.json.ev, 1000) && near(evm.json.pv, 1000) && near(evm.json.ac, 900) &&
+    near(evm.json.cpi, 1.1111) && near(evm.json.spi, 1.0) && near(evm.json.cost_variance, 100) && near(evm.json.schedule_variance, 0) && Math.abs(evm.json.eac - 1800) < 0.5,
+    JSON.stringify({ cpi: evm.json.cpi, spi: evm.json.spi, ev: evm.json.ev, pv: evm.json.pv, ac: evm.json.ac, eac: evm.json.eac }));
+  // Self-dependency guard.
+  const badDep = await inj('PATCH', `/api/projects/tasks/${t1.id}`, admin, { depends_on: [t1.id] });
+  ok('Task depends on itself → 400 BAD_DEPENDENCY', badDep.status === 400 && badDep.json.error?.code === 'BAD_DEPENDENCY', `${badDep.status} ${badDep.json.error?.code}`);
+
+  // ── 16. critical-path schedule, EVM S-curve series, and win/loss analytics (PPM web backend) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CPM', name: 'งานหา critical path', billing_type: 'TM' });
+  const cA = await inj('POST', '/api/projects/PRJ-CPM/tasks', admin, { name: 'CP-A', planned_hours: 16 }); // 2d
+  const cAid = cA.json.tasks[0].id;
+  await inj('POST', '/api/projects/PRJ-CPM/tasks', admin, { name: 'CP-B', planned_hours: 24, depends_on: [cAid] }); // 3d
+  const cC = await inj('POST', '/api/projects/PRJ-CPM/tasks', admin, { name: 'CP-C', planned_hours: 8, depends_on: [cAid] }); // 1d
+  const cBid = cC.json.tasks.find((t: any) => t.name === 'CP-B').id, cCid = cC.json.tasks.find((t: any) => t.name === 'CP-C').id;
+  await inj('POST', '/api/projects/PRJ-CPM/tasks', admin, { name: 'CP-D', planned_hours: 16, depends_on: [cBid, cCid] }); // 2d
+  const sched = await inj('GET', '/api/projects/PRJ-CPM/schedule', admin);
+  const onCP = (name: string) => (sched.json.tasks ?? []).find((t: any) => t.name === name)?.on_critical_path;
+  ok('Critical path: A→B→D (slack 0) on path, C (slack 2) off; project duration 7 days',
+    sched.json.project_duration_days === 7 && onCP('CP-A') && onCP('CP-B') && onCP('CP-D') && onCP('CP-C') === false,
+    JSON.stringify({ dur: sched.json.project_duration_days, cp: sched.json.critical_path }));
+
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-SC', name: 'งาน S-curve', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-SC/tasks', admin, { name: 'SC-1', planned_cost: 1000, planned_end: '2026-01-31', pct_complete: 100 });
+  await inj('POST', '/api/projects/PRJ-SC/tasks', admin, { name: 'SC-2', planned_cost: 1000, planned_end: '2026-02-28', pct_complete: 0 });
+  const series = await inj('GET', '/api/projects/PRJ-SC/evm/series', admin);
+  ok('EVM S-curve: cumulative planned 1000→2000 across 2 months; current BAC 2000',
+    series.json.series?.length === 2 && near(series.json.series[1].cumulative_planned, 2000) && near(series.json.bac, 2000),
+    JSON.stringify({ n: series.json.series?.length, cum: series.json.series?.[1]?.cumulative_planned }));
+
+  const oppLost = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลที่เสีย', amount: 50000, owner: 'sales1' });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${oppLost.json.opp_no}/stage`, admin, { stage: 'lost', lost_reason: 'ราคาสูงเกินไป (price)' });
+  const wl = await inj('GET', '/api/crm/pipeline/win-loss', admin);
+  ok('Win/loss analytics: loss reason captured (50000), by-owner + summary win_rate present',
+    (wl.json.loss_reasons ?? []).some((r: any) => near(r.amount, 50000)) && Array.isArray(wl.json.by_owner) && wl.json.summary?.win_rate != null,
+    JSON.stringify({ lr: wl.json.loss_reasons?.length, ow: wl.json.by_owner?.length }));
+
+  // ── 17. schedulable BI report types: project_evm + crm_win_loss generate successfully ──
+  const evmSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Portfolio EVM', report_type: 'project_evm', frequency: 'weekly' });
+  const evmRun = await inj('POST', `/api/bi/subscriptions/${evmSub.json.id}/run`, admin, {});
+  ok('BI report project_evm runs success (portfolio EVM)', evmRun.json.status === 'success' && /Portfolio EVM/.test(evmRun.json.summary ?? ''), JSON.stringify({ s: evmRun.json.status, sum: (evmRun.json.summary ?? '').slice(0, 40) }));
+  const wlSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Win/Loss', report_type: 'crm_win_loss', frequency: 'weekly' });
+  const wlRun = await inj('POST', `/api/bi/subscriptions/${wlSub.json.id}/run`, admin, {});
+  ok('BI report crm_win_loss runs success (win/loss analytics)', wlRun.json.status === 'success' && /[Ww]in\/loss/.test(wlRun.json.summary ?? ''), JSON.stringify({ s: wlRun.json.status }));
+  const rtypes = await inj('GET', '/api/bi/report-types', admin);
+  ok('report-types catalog exposes project_evm + crm_win_loss', JSON.stringify(rtypes.json).includes('project_evm') && JSON.stringify(rtypes.json).includes('crm_win_loss'), '');
+
+  // ── 18. portfolio command center: cross-project rollup (A1) ──
+  const pf = await inj('GET', '/api/projects/portfolio', admin);
+  ok('Portfolio: count + EVM totals + health buckets + financials + capacity + pipeline funnel',
+    pf.status < 300 && pf.json.count > 0 && !!pf.json.totals && typeof pf.json.health?.on_track === 'number' &&
+    !!pf.json.financials && typeof pf.json.capacity?.over_allocated_count === 'number' &&
+    pf.json.funnel?.won_count >= 1 && pf.json.funnel?.converted_count >= 1 && Array.isArray(pf.json.at_risk),
+    JSON.stringify({ c: pf.json.count, won: pf.json.funnel?.won_count, conv: pf.json.funnel?.converted_count, oa: pf.json.capacity?.over_allocated_count }));
+
+  // ── 19. baselines & variance: change-controlled re-baselining + scope/cost creep (PROJ-07, B1) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-BL', name: 'งานมีเส้นฐาน', billing_type: 'TM' });
+  await inj('POST', '/api/projects/PRJ-BL/tasks', admin, { name: 'BL-1', planned_cost: 1000, planned_hours: 8 });
+  await inj('POST', '/api/projects/PRJ-BL/tasks', admin, { name: 'BL-2', planned_cost: 1000, planned_hours: 8 });
+  const bl1 = await inj('POST', '/api/projects/PRJ-BL/baseline', admin, { label: 'v1' });
+  ok('Capture baseline → BAC 2000, active, history 1', near(bl1.json.baseline?.baseline_bac, 2000) && bl1.json.baseline?.status === 'active' && bl1.json.history?.length === 1, JSON.stringify({ b: bl1.json.baseline?.baseline_bac }));
+  // Add scope (another 500) → variance vs baseline shows +500 / +25%.
+  await inj('POST', '/api/projects/PRJ-BL/tasks', admin, { name: 'BL-3', planned_cost: 500, planned_hours: 4 });
+  const blv = await inj('GET', '/api/projects/PRJ-BL/baseline', admin);
+  ok('Plan drift vs baseline → bac_delta 500, bac_pct 25', near(blv.json.variance?.bac_delta, 500) && near(blv.json.variance?.bac_pct, 25), JSON.stringify({ d: blv.json.variance?.bac_delta, p: blv.json.variance?.bac_pct }));
+  // Re-baseline without a reason → blocked (PROJ-07 change governance).
+  const blBad = await inj('POST', '/api/projects/PRJ-BL/baseline', admin, { label: 'v2' });
+  ok('Re-baseline without reason → 400 BASELINE_REASON_REQUIRED', blBad.status === 400 && blBad.json.error?.code === 'BASELINE_REASON_REQUIRED', `${blBad.status} ${blBad.json.error?.code}`);
+  const bl2 = await inj('POST', '/api/projects/PRJ-BL/baseline', admin, { label: 'v2', reason: 'อนุมัติขยายขอบเขต' });
+  ok('Re-baseline with reason → new active BAC 2500, variance 0, history 2', near(bl2.json.baseline?.baseline_bac, 2500) && near(bl2.json.variance?.bac_delta, 0) && bl2.json.history?.length === 2, JSON.stringify({ b: bl2.json.baseline?.baseline_bac, h: bl2.json.history?.length }));
+
+  // ── 20. project templates: reusable WBS/milestone scaffold → one-step apply (B2) ──
+  const tpl = await inj('POST', '/api/projects/templates', admin, {
+    code: 'IMPL-STD', name: 'แม่แบบติดตั้งมาตรฐาน', description: 'Kickoff → Build → Go-live',
+    items: [
+      { seq: 1, name: 'Kickoff', planned_hours: 8, planned_cost: 1000, offset_start_days: 0, offset_end_days: 1 },
+      { seq: 2, name: 'Build', planned_hours: 40, planned_cost: 5000, offset_start_days: 1, offset_end_days: 10, depends_on_seq: [1] },
+      { seq: 3, name: 'Build — config', parent_seq: 2, planned_hours: 16, planned_cost: 2000, offset_start_days: 1, offset_end_days: 5 },
+      { item_type: 'milestone', seq: 4, name: 'Go-live', offset_end_days: 12, billing_percent: 50, owner: 'pm1' },
+    ],
+  });
+  ok('Create template IMPL-STD → 4 items (3 task + 1 milestone)', tpl.json.count === 4 && tpl.json.items?.filter((i: any) => i.item_type === 'milestone').length === 1, JSON.stringify({ c: tpl.json.count }));
+  const tdup = await inj('POST', '/api/projects/templates', admin, { code: 'IMPL-STD', name: 'ซ้ำ' });
+  ok('Duplicate template code → 400 TEMPLATE_EXISTS', tdup.status === 400 && tdup.json.error?.code === 'TEMPLATE_EXISTS', `${tdup.status} ${tdup.json.error?.code}`);
+  const tlist = await inj('GET', '/api/projects/templates', admin);
+  ok('List templates → IMPL-STD present with item_count 4', (tlist.json.templates ?? []).some((t: any) => t.code === 'IMPL-STD' && t.item_count === 4), '');
+
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-TPL', name: 'งานใช้แม่แบบ', billing_type: 'Fixed', contract_amount: 100000, start_date: '2026-03-01' });
+  const applied = await inj('POST', '/api/projects/PRJ-TPL/apply-template/IMPL-STD', admin, {});
+  ok('Apply template → 3 tasks + 1 milestone scaffolded', applied.json.tasks_created === 3 && applied.json.milestones_created === 1 && applied.json.tasks?.length === 3, JSON.stringify({ t: applied.json.tasks_created, m: applied.json.milestones_created }));
+  const buildTask = (applied.json.tasks ?? []).find((t: any) => t.name === 'Build');
+  const configTask = (applied.json.tasks ?? []).find((t: any) => t.name === 'Build — config');
+  const kickoffTask = (applied.json.tasks ?? []).find((t: any) => t.name === 'Kickoff');
+  ok('Applied tasks: relative dates off start 2026-03-01 (Kickoff ends 2026-03-02)', kickoffTask?.planned_start === '2026-03-01' && kickoffTask?.planned_end === '2026-03-02', JSON.stringify({ s: kickoffTask?.planned_start, e: kickoffTask?.planned_end }));
+  ok('Applied tasks: depends_on + parent wired by seq (Build←Kickoff, config parent=Build)',
+    (buildTask?.depends_on ?? []).includes(kickoffTask?.id) && configTask?.parent_id === buildTask?.id,
+    JSON.stringify({ dep: buildTask?.depends_on, par: configTask?.parent_id, bid: buildTask?.id }));
+  const tplMs = await inj('GET', '/api/projects/PRJ-TPL/milestones', admin);
+  ok('Applied milestone: Go-live due 2026-03-13, billing 50%', (tplMs.json.milestones ?? []).some((m: any) => m.name === 'Go-live' && m.due_date === '2026-03-13' && near(m.billing_percent, 50)), JSON.stringify({ ms: (tplMs.json.milestones ?? []).map((m: any) => m.due_date) }));
+  const reapply = await inj('POST', '/api/projects/PRJ-TPL/apply-template/IMPL-STD', admin, {});
+  ok('Re-apply to a project with tasks → 400 PROJECT_HAS_TASKS', reapply.status === 400 && reapply.json.error?.code === 'PROJECT_HAS_TASKS', `${reapply.status} ${reapply.json.error?.code}`);
 
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

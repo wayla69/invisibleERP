@@ -393,6 +393,16 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.expense_approvals', href: '/expense-approvals', icon: ReceiptText, perms: ['approvals'], workspace: BOTH },
     ],
   },
+  // ─── Project Management (PPM) — its own workspace home (docs/20 C1). URL-stable: hrefs unchanged. ───
+  {
+    title: 'nav.group.pm',
+    workspace: ['erp'],
+    items: [
+      { label: 'nav.pm_portfolio', href: '/projects/portfolio', icon: LayoutDashboard, perms: ['exec', 'planner', 'ar'] },
+      { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
+      { label: 'nav.pm_pipeline', href: '/projects/pipeline', icon: Target, perms: ['exec', 'planner', 'ar', 'crm'] },
+    ],
+  },
   {
     title: 'nav.group.planning',
     workspace: ['erp'],
@@ -400,7 +410,6 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.planning', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
       { label: 'nav.budget', href: '/budget', icon: PiggyBank, perms: ['exec', 'planner'] },
       { label: 'nav.demand', href: '/demand', icon: LineChart, perms: ['exec', 'planner', 'warehouse'] },
-      { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.profitability', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'nav.insights', href: '/insights', icon: Lightbulb, perms: ['exec', 'dashboard', 'planner', 'warehouse'] },
       { label: 'nav.bi', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
