@@ -32,6 +32,7 @@ export default function ProjectsPage() {
   const router = useRouter();
   const q = useQuery<{ projects: Project[]; count: number }>({ queryKey: ['projects'], queryFn: () => api('/api/projects') });
   const tplQ = useQuery<{ templates: { code: string; name: string; item_count: number }[] }>({ queryKey: ['project-templates'], queryFn: () => api('/api/projects/templates') });
+  const mineQ = useQuery<{ tasks: { id: number; name: string; project_code: string; project_name: string; my_role: string; planned_end: string | null; pct_complete: number; status: string }[]; count: number }>({ queryKey: ['my-tasks'], queryFn: () => api('/api/projects/my-tasks') });
   const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '' });
   const refresh = () => qc.invalidateQueries({ queryKey: ['projects'] });
 
@@ -109,6 +110,27 @@ export default function ProjectsPage() {
           <Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> สร้าง</Button>
         </div>
       </Card>
+
+      {!!mineQ.data?.count && (
+        <Card className="mb-5 gap-3 p-5">
+          <h3 className="flex items-center gap-2 text-base font-semibold"><Target className="size-4 text-primary" /> งานของฉัน <span className="text-sm font-normal text-muted-foreground">({mineQ.data.count})</span></h3>
+          <div className="flex flex-col divide-y">
+            {mineQ.data.tasks.slice(0, 8).map((t) => (
+              <button key={t.id} onClick={() => router.push(`/projects/${encodeURIComponent(t.project_code)}?tab=schedule`)} className="flex items-center justify-between gap-3 py-2 text-left text-sm hover:bg-muted/40">
+                <span className="flex items-center gap-2">
+                  <Badge variant={t.my_role === 'accountable' ? 'default' : 'secondary'}>{t.my_role === 'accountable' ? 'A' : 'R'}</Badge>
+                  <span className="font-medium">{t.name}</span>
+                  <span className="text-xs text-muted-foreground">{t.project_code} · {t.project_name}</span>
+                </span>
+                <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                  {t.planned_end ? <span className="tabular">{t.planned_end}</span> : null}
+                  <span className="tabular">{t.pct_complete}%</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <StateView q={q}>
         {q.data && (
