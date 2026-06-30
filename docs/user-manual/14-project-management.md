@@ -24,6 +24,9 @@ An executive cross-project overview for the PMO / leadership:
 - **Pipeline → delivery funnel** — open opportunities → won → converted-to-project.
 - **At-risk projects** — a click-through list of the projects dragging the portfolio; **project health
   table** — CPI/SPI per project with an on-track / at-risk / no-data badge. Click any row to open it.
+- **Capacity calendar** — a time-phased heatmap of each resource's demand by month vs 100%/month capacity;
+  a month over 100% (double-booked across projects) shows red, so an over-allocation in a *specific window*
+  is visible even when the lifetime average looks fine.
 
 ## Projects register (`/projects`)
 The KPI band shows project count, unbilled WIP, cumulative billed, and cumulative margin. The table lists
@@ -89,3 +92,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.3 | 2026-06-30 | **Risk & issue register** (`docs/20` B4, PROJ-08) — *ความเสี่ยง & ปัญหา* workspace tab with RAG scoring, open-high / unmitigated-high KPIs and close action; `RISK_NOT_FOUND` added to troubleshooting. |
 | 1.4 | 2026-06-30 | **POC revenue recognition** (PROJ-09) — *การรับรู้รายได้* picker on create (Billing / POC); Costs tab shows POC %, recognised revenue, contract asset/liability + a *รับรู้รายได้* action; `NOT_POC` / `NO_ESTIMATE` added to troubleshooting. |
 | 1.5 | 2026-06-30 | **Change orders** (PROJ-10) — *ใบสั่งเปลี่ยนแปลง* panel on the project Overview: request a contract/budget variation; a different user approves (maker-checker), applying the change + re-baselining; `EMPTY_CHANGE_ORDER` / `SOD_SELF_APPROVAL` / `CHANGE_ORDER_DECIDED` added to troubleshooting. |
+| 1.6 | 2026-06-30 | **Resource capacity calendar** — a time-phased *ปฏิทินกำลังคน* heatmap on the Portfolio command center: per-resource demand vs 100%/month capacity, with over-booked months in red. |

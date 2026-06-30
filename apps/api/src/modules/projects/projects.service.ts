@@ -472,6 +472,43 @@ export class ProjectsService {
     return { utilization, over_allocated_count: utilization.filter((u) => u.over_allocated).length };
   }
 
+  // Time-phased capacity calendar (PPM upgrade): the flat resourceUtilization rolls every assignment into one
+  // number; this buckets each assignment's alloc % into the MONTHS its [period_start, period_end] spans and
+  // compares the per-month demand to capacity (100%/resource/month), so a resource over-booked in a *specific*
+  // window is visible even when the lifetime average looks fine. Read-only; horizon = `months` from `from`.
+  async resourceCapacity(_user: JwtUser, dto?: { months?: number; from?: string }) {
+    const db = this.db as any;
+    const months = Math.max(1, Math.min(24, Math.round(dto?.months ?? 6)));
+    const start = (dto?.from && /^\d{4}-\d{2}$/.test(dto.from)) ? dto.from : ymd().slice(0, 7);
+    const addMonths = (period: string, k: number) => { const [y, m] = period.split('-').map(Number); const idx = y * 12 + (m - 1) + k; return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`; };
+    const horizon = Array.from({ length: months }, (_, i) => addMonths(start, i));
+    const rows = await db.select().from(projectResources);
+    // An assignment is active in month M when period_start ≤ M-end and (period_end is open or ≥ M-start). A
+    // null period_start means "from project inception" (active from the horizon's first month onward).
+    const activeIn = (r: any, month: string) => {
+      const mStart = `${month}-01`, mEnd = `${month}-31`;
+      const ps = r.periodStart ?? null, pe = r.periodEnd ?? null;
+      return (ps == null || ps <= mEnd) && (pe == null || pe >= mStart);
+    };
+    const byRes = new Map<string, Map<string, number>>();
+    for (const r of rows) {
+      const name = r.resourceName;
+      const m = byRes.get(name) ?? new Map<string, number>();
+      for (const month of horizon) if (activeIn(r, month)) m.set(month, r2((m.get(month) ?? 0) + n(r.allocPct)));
+      byRes.set(name, m);
+    }
+    const resources = [...byRes.entries()].map(([resource_name, m]) => {
+      const cells = horizon.map((month) => { const pct = r2(m.get(month) ?? 0); return { month, allocated_pct: pct, over_allocated: pct > 100 }; });
+      const peak = cells.reduce((mx, c) => Math.max(mx, c.allocated_pct), 0);
+      return { resource_name, months: cells, peak_pct: r2(peak), over_months: cells.filter((c) => c.over_allocated).length };
+    }).sort((a, b) => b.peak_pct - a.peak_pct);
+    const monthly = horizon.map((month) => {
+      const cells = resources.map((r) => r.months.find((c) => c.month === month)!);
+      return { month, total_demand_pct: r2(cells.reduce((s, c) => s + c.allocated_pct, 0)), resources_over: cells.filter((c) => c.over_allocated).length };
+    });
+    return { from: start, months, horizon, resources, monthly, over_allocated_count: resources.filter((r) => r.over_months > 0).length };
+  }
+
   // ── Earned-value management (P4, PROJ-06) ────────────────────────────────
   // Computes BAC / PV / EV / AC → CPI / SPI + cost & schedule variance + EAC/ETC from the project's WBS tasks
   // (planned cost, % complete, planned_end schedule) and its actual cost incurred, and reconciles EV/AC against

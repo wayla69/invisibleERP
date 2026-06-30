@@ -20,7 +20,10 @@ const cpiTone = (v: number | null): 'success' | 'warning' | 'danger' | 'default'
 export default function PortfolioPage() {
   const router = useRouter();
   const q = useQuery<any>({ queryKey: ['projects', 'portfolio'], queryFn: () => api('/api/projects/portfolio') });
+  const capQ = useQuery<any>({ queryKey: ['projects', 'capacity'], queryFn: () => api('/api/projects/resources/capacity?months=6') });
   const d = q.data;
+  // Time-phased capacity heatmap: green ≤ 80, amber ≤ 100, red > 100 (over-booked in that month).
+  const heatTone = (pct: number) => pct > 100 ? 'bg-destructive/80 text-destructive-foreground' : pct >= 80 ? 'bg-warning/70 text-warning-foreground dark:text-warning' : pct > 0 ? 'bg-success/40' : 'bg-muted/40 text-muted-foreground';
   const f = d?.funnel;
   const funnelMax = Math.max(1, f?.open_count ?? 0, f?.won_count ?? 0, f?.converted_count ?? 0);
   const funnelRows = [
@@ -120,6 +123,31 @@ export default function PortfolioPage() {
               emptyState={{ icon: FolderKanban, title: 'ยังไม่มีโครงการ', description: 'สร้างโครงการเพื่อดูภาพรวมพอร์ต' }}
             />
           </div>
+
+          {/* time-phased resource capacity heatmap (PPM upgrade) */}
+          {!!capQ.data?.resources?.length && (
+            <Card className="gap-3 p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">ปฏิทินกำลังคน (Capacity calendar) — ความต้องการ vs กำลัง 100%/เดือน</h3>
+                {capQ.data.over_allocated_count > 0 && <Badge variant="destructive">{capQ.data.over_allocated_count} คนเกินกำลัง</Badge>}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full border-separate border-spacing-1 text-xs">
+                  <thead><tr><th className="text-left font-medium text-muted-foreground">ทรัพยากร</th>{(capQ.data.horizon ?? []).map((m: string) => <th key={m} className="px-1 text-center font-medium text-muted-foreground">{m.slice(2)}</th>)}</tr></thead>
+                  <tbody>
+                    {capQ.data.resources.slice(0, 12).map((r: any) => (
+                      <tr key={r.resource_name}>
+                        <td className="whitespace-nowrap pr-2 font-medium">{r.resource_name}</td>
+                        {r.months.map((c: any) => (
+                          <td key={c.month} className={`rounded px-1.5 py-1 text-center tabular ${heatTone(c.allocated_pct)}`} title={`${c.month}: ${c.allocated_pct}%`}>{c.allocated_pct || ''}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
         </div>
       </StateView>
     </div>
