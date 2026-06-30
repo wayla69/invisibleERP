@@ -5,6 +5,7 @@ import { posMembers, posMemberLedger, loyaltyConfig, memberConsents, customerPro
 import { n } from '../../database/queries';
 import { LedgerService } from '../ledger/ledger.service';
 import type { JwtUser } from '../../common/decorators';
+import { isUniqueViolation } from '../../common/db-error';
 import { verifyLineIdToken } from './line-auth';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -32,7 +33,7 @@ export class MemberService {
     try {
       [row] = await db.insert(posMembers).values({ tenantId, memberCode: `M-TMP`, name: dto.name ?? null, phone: dto.phone ?? null, cardNo: dto.card_no ?? null, email: dto.email ?? null, birthday: dto.birthday ?? null, marketingOptIn: dto.marketing_opt_in ?? true, balance: '0', lifetime: '0', createdBy: user.username }).returning();
     } catch (e: any) {
-      if (String(e?.code) === '23505' || /duplicate|unique/i.test(String(e?.message))) throw new ConflictException({ code: 'MEMBER_EXISTS', message: 'Member with this phone/card already exists', messageTh: 'มีสมาชิกที่ใช้เบอร์/บัตรนี้แล้ว' });
+      if (isUniqueViolation(e)) throw new ConflictException({ code: 'MEMBER_EXISTS', message: 'Member with this phone/card already exists', messageTh: 'มีสมาชิกที่ใช้เบอร์/บัตรนี้แล้ว' });
       throw e;
     }
     const memberCode = `M-${String(row.id).padStart(6, '0')}`;
@@ -69,7 +70,7 @@ export class MemberService {
       }).returning();
     } catch (e: any) {
       // lost a race to another concurrent sign-in → return the now-existing member
-      if (String(e?.code) === '23505' || /duplicate|unique/i.test(String(e?.message))) {
+      if (isUniqueViolation(e)) {
         const [m] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.lineUserId, prof.lineUserId))).limit(1);
         if (m) return { ...shape(m), created: false };
       }

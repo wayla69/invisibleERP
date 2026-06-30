@@ -1,5 +1,6 @@
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
+import { pgError, type PgErrorLike } from './db-error';
 
 // Error envelope สม่ำเสมอ: { error: { code, message, messageTh? } }
 @Catch()
@@ -28,12 +29,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
           messageTh: o.messageTh as string | undefined,
         };
       }
-    } else if (isDriverError(exception)) {
-      const mapped = mapDriverError(exception);
+    } else if (pgError(exception)) {
+      // drizzle 0.45 wraps the driver error (SQLSTATE under `.cause`); pgError() unwraps it so the
+      // SQLSTATE→HTTP mapping (23505→409, …) keeps working — otherwise every integrity error became a 500.
+      const drv = pgError(exception)!;
+      const mapped = mapDriverError(drv);
       status = mapped.status;
       body = mapped.body;
       // 23505/23503 etc. are expected contention/integrity outcomes, not bugs — warn, no stack spam.
-      this.logger.warn(`db ${exception.code}: ${exception.message}`);
+      this.logger.warn(`db ${drv.code}: ${drv.message ?? ''}`);
     } else if (exception instanceof Error) {
       // Log the real message + stack server-side, but DO NOT echo exception.message to the client:
       // raw internal messages can leak infra detail (internal hosts/IPs, file paths, library text).
@@ -45,20 +49,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 }
 
-interface DriverError extends Error {
-  code: string; // SQLSTATE, e.g. '23505'
-  constraint_name?: string;
-  detail?: string;
-  table?: string;
-}
-
-// SQLSTATE is always 2 digits + 3 alphanumerics. Node's own error codes (ECONNREFUSED, ERR_*)
-// don't match this shape, so they fall through to the generic Error branch.
-function isDriverError(e: unknown): e is DriverError {
-  return e instanceof Error && typeof (e as any).code === 'string' && /^[0-9]{2}[0-9A-Z]{3}$/.test((e as any).code);
-}
-
-function mapDriverError(e: DriverError): { status: number; body: { code: string; message: string; messageTh?: string } } {
+function mapDriverError(e: PgErrorLike): { status: number; body: { code: string; message: string; messageTh?: string } } {
   switch (e.code) {
     case '23505': // unique_violation
       return { status: HttpStatus.CONFLICT, body: { code: 'CONFLICT', message: 'Resource already exists', messageTh: 'ข้อมูลนี้มีอยู่แล้ว' } };

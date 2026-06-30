@@ -62,9 +62,13 @@ For every such change, review and update as needed:
 - **GL-05:** a manual JE via `POST /api/ledger/journal` posts as **Draft** and is excluded from balances
   until a *different* user approves it; `closeYear`/aggregations scope to the caller's tenant (HQ/Admin
   ⇒ pass an explicit `tenant_id`). These bit the `worldclass` year-end harness when its setup went stale.
-- **drizzle-orm is pinned at `^0.36.4`.** 0.45 fixes a non-exploitable SQLi advisory but **regresses an
-  insert path** (see `compliance/vulnerability-triage.md`) — do not bump casually; it needs its own tested
-  workstream.
+- **drizzle-orm is on `^0.45.2`** (bumped from 0.36.4 in W4, 2026-06-30 — the SQLi advisory is remediated).
+  **0.45 wraps every driver error in a `DrizzleQueryError` with the original pg/PGlite error (SQLSTATE
+  `code`/`constraint`/`detail`) nested under `.cause`** — so never read `e.code`/`e.constraint` directly on a
+  caught DB error; use the `common/db-error.ts` helpers (`pgError`/`pgErrorCode`/`isUniqueViolation`) which
+  walk the `.cause` chain. This was the root cause of the old "0.45 regresses an insert path" (the 23505
+  retry/dedup sites + the global exception filter all silently stopped matching). See
+  `compliance/vulnerability-triage.md`.
 - **Migration numbering — use the NEXT FREE 4-digit number.** Migrations are hand-written or drafted with
   `db:generate` and hand-journaled in `apps/api/drizzle/` (the snapshot baseline was resynced in
   `0129_baseline_resync`, so `db:generate` again emits a minimal diff — but still hand-append the RLS loop

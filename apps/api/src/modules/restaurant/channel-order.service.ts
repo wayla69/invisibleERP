@@ -9,6 +9,7 @@ import { MemberService } from '../loyalty/member.service';
 import { roundCurrency } from '../tax/money';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { isUniqueViolation } from '../../common/db-error';
 import { safeEqualStr } from '../../common/crypto';
 import { RealtimeScope } from './realtime.scope';
 import { DineInService } from './dine-in.service';
@@ -249,7 +250,7 @@ export class ChannelOrderService {
         return { status: 'processed', order_no: view.order_no, channel: source };
       } catch (e: any) {
         // concurrent-replay race: the partial-unique (tenant,ext_source,ext_order_id) lost → resolve to the winner
-        if (String(e?.code) === '23505') { existing = await findExisting(); if (existing) return { status: 'duplicate', order_no: existing.orderNo }; }
+        if (isUniqueViolation(e)) { existing = await findExisting(); if (existing) return { status: 'duplicate', order_no: existing.orderNo }; }
         throw e;
       }
     });

@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { loyaltyReferrals, posMembers, posMemberLedger } from '../../database/schema';
 import { n } from '../../database/queries';
 import { DocNumberService } from '../../common/doc-number.service';
+import { pgError, isUniqueViolation } from '../../common/db-error';
 import type { JwtUser } from '../../common/decorators';
 
 const DEFAULT_POINTS = 50;
@@ -49,9 +50,11 @@ export class ReferralsService {
     } catch (e: any) {
       // Map ONLY the referred-member partial-unique to ALREADY_REFERRED (don't mask a code-unique collision).
       // Real Postgres exposes constraint_name; PGlite may not, so fall back to the generic unique check then.
-      const con = String(e?.constraint_name ?? e?.constraint ?? '');
-      const isUnique = String(e?.code) === '23505' || /duplicate|unique/i.test(String(e?.message));
-      if (con === 'loyalty_referrals_referred_uq' || (!con && isUnique && !/code/i.test(String(e?.message ?? '')))) {
+      const pe = pgError(e); // drizzle 0.45 nests the driver error (constraint/code) under .cause
+      const con = String(pe?.constraint_name ?? pe?.constraint ?? '');
+      const isUnique = isUniqueViolation(e);
+      const msg = String(pe?.message ?? (e as any)?.message ?? '');
+      if (con === 'loyalty_referrals_referred_uq' || (!con && isUnique && !/code/i.test(msg))) {
         throw new ConflictException({ code: 'ALREADY_REFERRED', message: 'This member has already been referred', messageTh: 'สมาชิกนี้ถูกแนะนำไปแล้ว' });
       }
       throw e;
