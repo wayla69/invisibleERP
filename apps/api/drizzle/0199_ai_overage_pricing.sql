@@ -1,4 +1,5 @@
--- 0198 — AI overage pricing: ceiling + metered-overage tiers (PwC Capital Markets follow-up, panel #3).
+-- 0199 — AI overage pricing: ceiling + metered-overage tiers (PwC Capital Markets follow-up, panel #3).
+-- (Renumbered 0198→0199: main merged 0198_project_health_snapshots concurrently.)
 -- Connects the COGS meter (ai_token_usage.overage_tokens) to a price. Adds two plan-feature keys alongside
 -- the existing finite included cap (ai_tokens_daily):
 --   ai_tokens_daily_max         — hard daily ceiling (absolute cutoff; usage in (included, max] is metered).
