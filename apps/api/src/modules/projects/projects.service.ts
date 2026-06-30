@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, crmOpportunities, customerMaster } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, crmOpportunities, customerMaster } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -20,6 +20,7 @@ export interface TaskPatchDto { name?: string; status?: string; planned_start?: 
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
+export interface BaselineDto { label?: string; reason?: string }
 
 @Injectable()
 export class ProjectsService {
@@ -472,6 +473,51 @@ export class ProjectsService {
     };
   }
 
+  // ── Baselines & variance (B1, PROJ-07) ───────────────────────────────────
+  // Current planned BAC (Σ non-cancelled task planned cost; falls back to the project budget) + critical-path
+  // duration — the figures a baseline snapshots and the current plan is compared against.
+  private async currentPlan(code: string, p: any) {
+    const db = this.db as any;
+    const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
+    let bac = r2(tasks.reduce((s: number, t: any) => s + n(t.plannedCost), 0));
+    if (bac === 0) bac = n(p.budgetAmount);
+    const sched = await this.schedule(code);
+    return { bac, duration_days: sched.project_duration_days };
+  }
+
+  // Capture a baseline. The FIRST baseline is free; **re-baselining requires a reason** (BASELINE_REASON_REQUIRED)
+  // and supersedes the prior active baseline (history preserved) — a project can't silently move its goalposts.
+  async captureBaseline(code: string, dto: BaselineDto, user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const tenantId = p.tenantId ?? user.tenantId ?? null;
+    const plan = await this.currentPlan(code, p);
+    const [active] = await db.select().from(projectBaselines).where(and(eq(projectBaselines.projectId, Number(p.id)), eq(projectBaselines.status, 'active'))).limit(1);
+    if (active && !dto.reason) throw new BadRequestException({ code: 'BASELINE_REASON_REQUIRED', message: 'Re-baselining requires a reason', messageTh: 'การตั้งเส้นฐานใหม่ต้องระบุเหตุผล' });
+    if (active) await db.update(projectBaselines).set({ status: 'superseded' }).where(eq(projectBaselines.id, Number(active.id)));
+    await db.insert(projectBaselines).values({
+      projectId: Number(p.id), tenantId, label: dto.label ?? (active ? 'Re-baseline' : 'Baseline'),
+      baselineBac: fx(plan.bac, 2), baselineDurationDays: plan.duration_days, baselineEnd: p.endDate ?? null,
+      reason: dto.reason ?? null, status: 'active', createdBy: user.username,
+    });
+    return this.getBaseline(code, user);
+  }
+
+  // The active baseline + the current plan + variance (scope/cost creep) + the full baseline history.
+  async getBaseline(code: string, _user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const all = await db.select().from(projectBaselines).where(eq(projectBaselines.projectId, Number(p.id))).orderBy(desc(projectBaselines.id));
+    const active = all.find((b: any) => b.status === 'active') ?? null;
+    const plan = await this.currentPlan(code, p);
+    const variance = active ? {
+      bac_delta: r2(plan.bac - n(active.baselineBac)),
+      bac_pct: n(active.baselineBac) > 0 ? r2(((plan.bac - n(active.baselineBac)) / n(active.baselineBac)) * 100) : null,
+      duration_delta: plan.duration_days - Number(active.baselineDurationDays),
+    } : null;
+    return { project_code: code, baseline: active ? shapeBaseline(active) : null, current: plan, variance, history: all.map(shapeBaseline) };
+  }
+
   private async row(code: string) {
     const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
@@ -510,4 +556,7 @@ function shapeMilestone(m: any) {
 }
 function shapeResource(r: any) {
   return { id: Number(r.id), project_id: Number(r.projectId), task_id: r.taskId != null ? Number(r.taskId) : null, resource_name: r.resourceName, role: r.role, alloc_pct: n(r.allocPct), period_start: r.periodStart, period_end: r.periodEnd, cost_rate: n(r.costRate), bill_rate: n(r.billRate), created_at: r.createdAt };
+}
+function shapeBaseline(b: any) {
+  return { id: Number(b.id), label: b.label, baseline_bac: n(b.baselineBac), baseline_duration_days: Number(b.baselineDurationDays), baseline_end: b.baselineEnd, reason: b.reason, status: b.status, created_by: b.createdBy, captured_at: b.capturedAt };
 }

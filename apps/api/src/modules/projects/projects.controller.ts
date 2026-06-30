@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -63,6 +63,7 @@ const MilestoneBody = z.object({
   owner: z.string().optional(),
   billing_percent: z.number().positive().max(100).optional(),
 });
+const BaselineBody = z.object({ label: z.string().optional(), reason: z.string().optional() });
 const RateCardBody = z.object({
   role: z.string().min(1),
   cost_rate: z.number().nonnegative().optional(),
@@ -128,6 +129,17 @@ export class ProjectsController {
   @Get(':code/schedule')
   schedule(@Param('code') code: string) {
     return this.svc.schedule(code);
+  }
+
+  // Baselines (B1, PROJ-07): capture a change-controlled baseline; read the active baseline + variance.
+  @Post(':code/baseline')
+  captureBaseline(@Param('code') code: string, @Body(new ZodValidationPipe(BaselineBody)) b: BaselineDto, @CurrentUser() u: JwtUser) {
+    return this.svc.captureBaseline(code, b, u);
+  }
+
+  @Get(':code/baseline')
+  getBaseline(@Param('code') code: string, @CurrentUser() u: JwtUser) {
+    return this.svc.getBaseline(code, u);
   }
 
   @Post(':code/cost')

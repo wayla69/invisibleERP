@@ -1317,6 +1317,13 @@
       "when": 2023820000014,
       "tag": "0187_project_task_dependencies",
       "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "7",
+      "when": 2023820000015,
+      "tag": "0188_project_baselines",
+      "breakpoints": true
     }
   ]
 }
