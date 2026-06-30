@@ -554,6 +554,32 @@ async function main() {
   const gpRun = await inj('POST', `/api/bi/subscriptions/${gpSub.json.id}/run`, admin, {});
   ok('BI project_governance_pack runs success (portfolio status summary)', gpRun.json.status === 'success' && /Governance pack/.test(gpRun.json.summary ?? ''), JSON.stringify({ s: gpRun.json.status, sum: (gpRun.json.summary ?? '').slice(0, 48) }));
 
+  // ── 30. program (cross-project) critical path (PMO-4) ──
+  // Program PG-1 of 4 projects, each one task giving a duration: A=10d, B=5d, C=3d, D=2d.
+  // Dependencies A→B→C (chain) and A→D. Program critical path = A→B→C (18d); D has slack (off the path).
+  for (const [pc, end] of [['PRG-A', '2026-01-10'], ['PRG-B', '2026-01-05'], ['PRG-C', '2026-01-03'], ['PRG-D', '2026-01-02']] as const) {
+    await inj('POST', '/api/projects', admin, { project_code: pc, name: `โปรแกรม ${pc}`, billing_type: 'TM' });
+    await inj('POST', `/api/projects/${pc}/tasks`, admin, { name: 'work', planned_start: '2026-01-01', planned_end: end });
+    await inj('PATCH', `/api/projects/${pc}/program`, admin, { program_code: 'PG-1' });
+  }
+  await inj('PATCH', '/api/projects/PRG-B/program', admin, { depends_on_projects: ['PRG-A'] });
+  await inj('PATCH', '/api/projects/PRG-C/program', admin, { depends_on_projects: ['PRG-B'] });
+  const setD = await inj('PATCH', '/api/projects/PRG-D/program', admin, { depends_on_projects: ['PRG-A'] });
+  ok('Set program + cross-project dependency (reflected on the project)', setD.json.program_code === 'PG-1' && Array.isArray(setD.json.depends_on_projects) && setD.json.depends_on_projects.includes('PRG-A'), JSON.stringify({ prog: setD.json.program_code, deps: setD.json.depends_on_projects }));
+  const pcp = await inj('GET', '/api/projects/program-critical-path?program=PG-1', admin);
+  const at = (code: string) => (pcp.json.projects ?? []).find((p: any) => p.project_code === code);
+  ok('Program critical path: A→B→C is the path, duration 18d; D is off-path with slack',
+    pcp.json.program_duration_days === 18 && JSON.stringify(pcp.json.critical_path) === JSON.stringify(['PRG-A', 'PRG-B', 'PRG-C']) && at('PRG-A')?.es === 0 && at('PRG-B')?.es === 10 && at('PRG-C')?.es === 15 && at('PRG-D')?.on_critical_path === false && at('PRG-D')?.slack === 6,
+    JSON.stringify({ dur: pcp.json.program_duration_days, cp: pcp.json.critical_path, dSlack: at('PRG-D')?.slack }));
+  const progs = await inj('GET', '/api/projects/programs', admin);
+  ok('Programs list: PG-1 present with 4 members and program duration 18',
+    (progs.json.programs ?? []).some((p: any) => p.program_code === 'PG-1' && p.member_count === 4 && p.program_duration_days === 18),
+    JSON.stringify({ programs: (progs.json.programs ?? []).map((p: any) => [p.program_code, p.member_count, p.program_duration_days]) }));
+  const selfDep = await inj('PATCH', '/api/projects/PRG-A/program', admin, { depends_on_projects: ['PRG-A'] });
+  ok('Self-dependency rejected → 400 BAD_DEPENDENCY', selfDep.status === 400 && selfDep.json.error?.code === 'BAD_DEPENDENCY', `${selfDep.status} ${selfDep.json.error?.code}`);
+  const progBadDep = await inj('PATCH', '/api/projects/PRG-A/program', admin, { depends_on_projects: ['NOPE'] });
+  ok('Unknown dependency project rejected → 400 DEP_PROJECT_NOT_FOUND', progBadDep.status === 400 && progBadDep.json.error?.code === 'DEP_PROJECT_NOT_FOUND', `${progBadDep.status} ${progBadDep.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

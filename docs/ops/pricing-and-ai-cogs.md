@@ -48,7 +48,7 @@ included cap so `recordUsage()` meters the overage. Legacy `-1` ("unlimited") st
 - **Collection (Wave 1):** the **`ai_overage_billing`** monthly action job (`BillingService.runAiOverageBilling`,
   rides the BI scheduler — see `bi.service.ts`) appends a **Stripe invoice item** per tenant for the
   just-closed month's overage, which Stripe attaches to the tenant's next subscription invoice. It is
-  **idempotent per (tenant, month)** via `ai_overage_billing_runs` (migration `0200`, UNIQUE guard) plus a
+  **idempotent per (tenant, month)** via `ai_overage_billing_runs` (migration `0201`, UNIQUE guard) plus a
   Stripe idempotency key — a re-run never double-charges. Without `STRIPE_SECRET_KEY` it records a mock line
   (status `recorded`) so the flow is testable offline. Trigger: schedule a `monthly` BI subscription of type
   `ai_overage_billing`, or `POST /api/billing/ai-overage/run` (exec); history at `GET /api/billing/ai-overage/runs`.
