@@ -60,8 +60,14 @@ Maintain the status-page + paging routing; PDPA breach notification (controller 
 | Test | Frequency | Evidence |
 |---|---|---|
 | **Restore drill** (restore latest dump → scratch DB → `verify-restore.sh`) | **monthly** | drill log / `restore-drill-cron.sh` output (Alibaba Tier-0 automates it) |
+| **Automated DR game-day** (backup → drop → restore → verify → app bring-up, **measured RTO/RPO**) | **annually + on demand** | CI `DR Game-day` workflow report (`docs/ops/dr-test-reports/`) |
 | **Full DR tabletop** (walk a region-loss scenario with roles) | **annually** | tabletop minutes + action items |
 | **Live failover game-day** (restore offsite dump into an alternate region, repoint, measure RTO) | **annually** | game-day report with measured RTO/RPO vs targets |
+
+> **First executed: 2026-06-30 — PASS.** Automated data-tier game-day measured **RTO 2.6 s** (target 30 min)
+> and **RPO 0 loss** (key-table reconciliation), with the app booting + authenticating on the recovered
+> database. Report: [`dr-test-reports/2026-06-30-gameday.md`](dr-test-reports/2026-06-30-gameday.md).
+> (Region/DNS failover remains the annual tabletop + live game-day above.)
 
 ### DR-test checklist (per live test)
 - [ ] Pick the scenario + announce the test window.
@@ -75,3 +81,4 @@ Maintain the status-page + paging routing; PDPA breach notification (controller 
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-06-30 | CTO / Platform-SRE | Initial DR/BCP plan — RTO/RPO tiers, scenario playbooks, BCP degraded-mode, roles/comms, DR test schedule + checklist (OP-02 Gap → Implemented). |
+| 1.1 | 2026-06-30 | Platform / SRE | Added the **automated DR game-day** (CI `DR Game-day` workflow + `cutover/dr-gameday`) and recorded the **first executed test (PASS: RTO 2.6 s, RPO 0)**. |
