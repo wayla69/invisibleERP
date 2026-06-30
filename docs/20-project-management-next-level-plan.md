@@ -96,11 +96,12 @@ at **rev 0.11**; UAT through **UAT-O2C-211**.
 
 ---
 
-## Track D — Adjacent ERP areas *(now planned in `docs/21`)*
+## Track D — Adjacent ERP areas *(reconciled in `docs/21` — mostly already built)*
 Finance **close automation**, **procurement** depth, **manufacturing** (MRP/scheduling), and a cross-module
-**analytics** workspace. **Scoped as its own roadmap:** `docs/21-track-d-adjacent-erp-plan.md` — a
-current-state survey found close/procurement/analytics already substantially built, so docs/21 is a
-**gap-closure** roadmap (flagship: **MRP net-requirements**), not a greenfield rebuild.
+**analytics** workspace. **See `docs/21-track-d-adjacent-erp-plan.md` (v0.2 RECONCILED):** a deeper audit
+found this scope **already implemented + harness-tested** (`mfg-depth` MRP/RCCP/QC/shop-floor, `sourcing`
+RFQ, `match` three-way AP hold, `budget` variance, supplier scorecards). Only thin residual gaps remain
+(exec cross-module scorecard + a couple of BI report-type wrappers + optional close pre-lock validation).
 
 ---
 
