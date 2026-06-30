@@ -142,10 +142,15 @@ For every such change, review and update as needed:
 - Per-user UI prefs (sidebar favourites + nav fold-state) sync across devices via `GET/PUT /api/user-prefs`
   (`UserPrefsModule`, table `user_prefs`, RLS + owner-scoped, no `@Permissions`); recents stay per-device
   (localStorage). See `docs/15-ui-ux-menu-restructure-plan.md`.
-- **Project Management (PPM) in-depth design & phased roadmap:** `docs/19-project-management-ppm-plan.md` —
-  operational PPM (WBS/tasks, milestones, resourcing, timesheet→labor, schedule/Gantt/EVM) + Salesforce-style
-  opportunity win/loss → project conversion, layered on the existing `modules/projects` (PN-16, PROJ-01/02/03)
-  and `modules/crm-pipeline` spine. Planning stage; P0→P4 phases each ship code + docs together.
+- **Project Management (PPM) — `docs/19-project-management-ppm-plan.md` (DELIVERED).** Operational PPM on the
+  `modules/projects` + `modules/crm-pipeline` spine: opportunity win/loss → project conversion (CRM-WL),
+  WBS/tasks/milestones, resourcing & rate cards (PROJ-05), timesheet→labor maker-checker (PROJ-04),
+  dependencies & EVM (PROJ-06), the sleek web workspace (`/projects`, `/projects/[code]` Gantt/EVM,
+  `/projects/pipeline`), and BI report types `project_evm`/`crm_win_loss`. Narrative PN-16; harness
+  `tools/cutover/src/projects.ts` (44 checks).
+- **Project Management — next-level roadmap:** `docs/20-project-management-next-level-plan.md` (PLANNING) —
+  Portfolio command center, delivery depth (baselines/templates/RACI/risk-issue, controls PROJ-07/08),
+  and a dedicated PM workspace IA. Phased, doc-synced PRs like docs/19.
 - **Finance/GL feature map (controls + where the logic lives):**
   - GL maker-checker / recurring / prepaid: `modules/ledger/ledger.service.ts` — `postEntry` (Draft+approve, **GL-05**),
     `createRecurring`/`runDueRecurring` (**GL-08**), `createPrepaid`/`runDuePrepaid` (**GL-09**); cash flow
