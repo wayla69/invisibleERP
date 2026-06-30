@@ -238,7 +238,32 @@ export const projectRisks = pgTable(
   (t) => ({ byProject: index('idx_prisk_project').on(t.projectId) }),
 );
 
+// Project change order (contract/scope variation) — a governed, maker-checker amendment to the contract
+// value / budget / EAC. A request posts nothing; a different user approves it, applying the deltas and
+// auto-capturing a new baseline (PROJ-10, ties to PROJ-07).
+export const projectChangeOrders = pgTable(
+  'project_change_orders',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    coNo: text('co_no').notNull(),
+    description: text('description'),
+    contractDelta: numeric('contract_delta', { precision: 16, scale: 2 }).notNull().default('0'),
+    budgetDelta: numeric('budget_delta', { precision: 16, scale: 2 }).notNull().default('0'),
+    estimatedCostDelta: numeric('estimated_cost_delta', { precision: 16, scale: 2 }).notNull().default('0'),
+    reason: text('reason'),
+    status: text('status').notNull().default('pending'),  // pending | approved | rejected
+    requestedBy: text('requested_by'),
+    approvedBy: text('approved_by'),                       // checker — must differ from requested_by
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+  },
+  (t) => ({ byProject: index('idx_pco_project').on(t.projectId) }),
+);
+
 export type Project = typeof projects.$inferSelect;
+export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
 export type ProjectBaseline = typeof projectBaselines.$inferSelect;
 export type ProjectTemplate = typeof projectTemplates.$inferSelect;
 export type ProjectTemplateItem = typeof projectTemplateItems.$inferSelect;

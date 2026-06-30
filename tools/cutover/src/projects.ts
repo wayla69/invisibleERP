@@ -420,6 +420,26 @@ async function main() {
   const recBad = await inj('POST', '/api/projects/PRJ-TMX/recognize', admin, {});
   ok('Recognise on a billing-method project → 400 NOT_POC', recBad.status === 400 && recBad.json.error?.code === 'NOT_POC', `${recBad.status} ${recBad.json.error?.code}`);
 
+  // ── 24. change orders / contract variations (maker-checker, PROJ-10) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CO', name: 'งานมีการเปลี่ยนแปลง', billing_type: 'Fixed', contract_amount: 100000, budget_amount: 60000 });
+  const coEmpty = await inj('POST', '/api/projects/PRJ-CO/change-orders', admin, { description: 'no-op' });
+  ok('Empty change order (no deltas) → 400 EMPTY_CHANGE_ORDER', coEmpty.status === 400 && coEmpty.json.error?.code === 'EMPTY_CHANGE_ORDER', `${coEmpty.status} ${coEmpty.json.error?.code}`);
+  const coReq = await inj('POST', '/api/projects/PRJ-CO/change-orders', admin, { description: 'ขยายขอบเขต', contract_delta: 20000, budget_delta: 12000, reason: 'ลูกค้าขอเพิ่มงาน' });
+  const coId = coReq.json.change_orders?.find((c: any) => c.status === 'pending')?.id;
+  ok('Request change order → pending, posts nothing (contract still 100000)', coReq.json.summary?.pending === 1 && coId != null, JSON.stringify({ p: coReq.json.summary?.pending }));
+  const coProjBefore = await inj('GET', '/api/projects/PRJ-CO', admin);
+  ok('Change order pending → contract unchanged (still 100000)', near(coProjBefore.json.contract_amount, 100000), JSON.stringify({ c: coProjBefore.json.contract_amount }));
+  const coSelf = await inj('POST', `/api/projects/change-orders/${coId}/approve`, admin, {});
+  ok('Self-approve own change order → 400 SOD_SELF_APPROVAL', coSelf.status === 400 && coSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${coSelf.status} ${coSelf.json.error?.code}`);
+  const coApp = await inj('POST', `/api/projects/change-orders/${coId}/approve`, mgr, {});
+  ok('Independent approve → contract 120000, budget 72000, a baseline captured',
+    coApp.json.status === 'approved' && near(coApp.json.contract_amount, 120000) && near(coApp.json.budget_amount, 72000) && coApp.json.baseline != null,
+    JSON.stringify({ s: coApp.json.status, c: coApp.json.contract_amount, b: !!coApp.json.baseline }));
+  const coList = await inj('GET', '/api/projects/PRJ-CO/change-orders', admin);
+  ok('Change-order register: approved 1, approved_contract_delta 20000', coList.json.summary?.approved === 1 && near(coList.json.summary?.approved_contract_delta, 20000), JSON.stringify({ a: coList.json.summary?.approved }));
+  const coReApp = await inj('POST', `/api/projects/change-orders/${coId}/approve`, mgr, {});
+  ok('Re-approve a decided change order → 400 CHANGE_ORDER_DECIDED', coReApp.status === 400 && coReApp.json.error?.code === 'CHANGE_ORDER_DECIDED', `${coReApp.status} ${coReApp.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

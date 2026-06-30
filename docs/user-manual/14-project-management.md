@@ -41,8 +41,10 @@ or *Responsible* (R) — click one to jump to its schedule.
 ## Project workspace (`/projects/{code}`)
 Tabbed, deep-linkable (`?tab=`):
 - **ภาพรวม (Overview)** — % complete, **CPI** (cost) and **SPI** (schedule) health tiles (green ≥ 1, amber
-  ≥ 0.9, red below), cumulative margin/WIP; an **S-curve** of planned cost vs the current EV/AC; and the
-  full earned-value breakdown (BAC/PV/EV/AC/CV/SV/EAC).
+  ≥ 0.9, red below), cumulative margin/WIP; an **S-curve** of planned cost vs the current EV/AC; the
+  full earned-value breakdown (BAC/PV/EV/AC/CV/SV/EAC); and a **ใบสั่งเปลี่ยนแปลง (Change orders)** panel —
+  request a contract/budget variation; a *different* person approves it (maker-checker), which applies the
+  change and re-baselines the project.
 - **กำหนดการ & Gantt (Schedule)** — a dependency-aware **Gantt** with the **critical path** highlighted in
   the primary colour and an inner fill for % complete, plus the WBS table. **เพิ่มงาน** adds a task (hours,
   budget, dates, %, predecessors, and **RACI** — an *Accountable* owner + *Responsible* doers); the check
@@ -86,3 +88,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.2 | 2026-06-30 | **RACI** on tasks (`docs/20` B3) — Accountable/Responsible inputs + RACI column on the schedule; *งานของฉัน (My tasks)* panel on `/projects`. |
 | 1.3 | 2026-06-30 | **Risk & issue register** (`docs/20` B4, PROJ-08) — *ความเสี่ยง & ปัญหา* workspace tab with RAG scoring, open-high / unmitigated-high KPIs and close action; `RISK_NOT_FOUND` added to troubleshooting. |
 | 1.4 | 2026-06-30 | **POC revenue recognition** (PROJ-09) — *การรับรู้รายได้* picker on create (Billing / POC); Costs tab shows POC %, recognised revenue, contract asset/liability + a *รับรู้รายได้* action; `NOT_POC` / `NO_ESTIMATE` added to troubleshooting. |
+| 1.5 | 2026-06-30 | **Change orders** (PROJ-10) — *ใบสั่งเปลี่ยนแปลง* panel on the project Overview: request a contract/budget variation; a different user approves (maker-checker), applying the change + re-baselining; `EMPTY_CHANGE_ORDER` / `SOD_SELF_APPROVAL` / `CHANGE_ORDER_DECIDED` added to troubleshooting. |
