@@ -54,6 +54,29 @@ function counts(url: string): Record<string, number> {
   return out;
 }
 
+// Apply the drizzle migrations file-by-file via psql (NOT drizzle-kit). Each file is its own
+// autocommit session, so the RLS DO-loops (which take ACCESS EXCLUSIVE on every tenant table) release
+// their locks between files — drizzle-kit batches them into too few transactions and exhausts
+// max_locks_per_transaction ("out of shared memory") on a stock postgres:16. Mirrors how pg-smoke/pg-core
+// apply migrations on real Postgres.
+function applyMigrations(url: string): void {
+  for (const f of readdirSync(MIG_DIR).filter((x) => x.endsWith('.sql')).sort()) {
+    sh(`psql "${url}" -v ON_ERROR_STOP=1 -f "${MIG_DIR}/${f}"`);
+  }
+}
+
+// Re-establish the cluster-level app_user role + its table/sequence GRANTs after a --no-privileges
+// restore (the dump carries schema + RLS policies but not roles/privileges). Light locks (GRANT, not DDL).
+function reestablishAppUser(url: string): void {
+  const sqlText = [
+    `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='app_user') THEN CREATE ROLE app_user NOLOGIN; END IF; END $$;`,
+    `GRANT USAGE ON SCHEMA public TO app_user;`,
+    `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;`,
+    `GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO app_user;`,
+  ].join(' ');
+  sh(`psql "${url}" -v ON_ERROR_STOP=1 -c "${sqlText.replace(/"/g, '\\"')}"`);
+}
+
 async function main() {
   const ADMIN = process.env.DR_ADMIN_URL;
   if (!ADMIN) { console.log('dr-gameday: SKIPPED (set DR_ADMIN_URL to a Postgres server where DBs can be created/dropped)'); return; }
@@ -70,8 +93,8 @@ async function main() {
   log('## DR game-day');
   for (const db of ['ierp_dr_primary', 'ierp_dr_recovery']) adminPsql(ADMIN, `DROP DATABASE IF EXISTS ${db} WITH (FORCE)`);
   adminPsql(ADMIN, `CREATE DATABASE ierp_dr_primary`);
-  log('- setup: created primary db; applying migrations (db:migrate)…');
-  sh(`pnpm --filter @ierp/api db:migrate`, { DATABASE_URL: PRIMARY });
+  log('- setup: created primary db; applying migrations (file-by-file)…');
+  applyMigrations(PRIMARY);
 
   // Seed representative rows (as the connecting superuser → bypasses RLS). Real password hash so the
   // app-readiness phase can actually log in against the recovered db.
@@ -108,12 +131,13 @@ async function main() {
   phase.restore = now() - t;
   log(`- RESTORE: ${secs(phase.restore)}s`);
 
-  // ── MIGRATE (timed) — idempotent; (re)asserts app_user role + RLS on a fresh cluster ─────────────
+  // ── RE-GRANT (timed) — the --no-privileges dump restored schema + RLS policies but NOT the
+  // cluster-level app_user role or its GRANTs; re-establish them so the app (running as app_user) can
+  // query the recovered db. This is the documented post-restore step (restore.sh note).
   t = now();
-  adminPsql(ADMIN, `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='app_user') THEN CREATE ROLE app_user NOLOGIN; END IF; END $$`);
-  sh(`pnpm --filter @ierp/api db:migrate`, { DATABASE_URL: RECOVERY });
+  reestablishAppUser(RECOVERY);
   phase.migrate = now() - t;
-  log(`- MIGRATE (idempotent): ${secs(phase.migrate)}s`);
+  log(`- RE-GRANT app_user role + privileges: ${secs(phase.migrate)}s`);
 
   // ── VERIFY (timed) — key tables restorable + RPO reconciliation ──────────────────────────────────
   t = now();
