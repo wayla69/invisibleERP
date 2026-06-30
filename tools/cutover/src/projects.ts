@@ -440,6 +440,20 @@ async function main() {
   const coReApp = await inj('POST', `/api/projects/change-orders/${coId}/approve`, mgr, {});
   ok('Re-approve a decided change order → 400 CHANGE_ORDER_DECIDED', coReApp.status === 400 && coReApp.json.error?.code === 'CHANGE_ORDER_DECIDED', `${coReApp.status} ${coReApp.json.error?.code}`);
 
+  // ── 25. time-phased resource capacity calendar (PPM upgrade) ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CAP', name: 'งานวางกำลังคน', billing_type: 'TM' });
+  // Bob: 60% Jul–Aug, +60% Aug–Sep → August double-booked to 120%.
+  await inj('POST', '/api/projects/PRJ-CAP/resources', admin, { resource_name: 'CapZed', alloc_pct: 60, period_start: '2026-07-01', period_end: '2026-08-31' });
+  await inj('POST', '/api/projects/PRJ-CAP/resources', admin, { resource_name: 'CapZed', alloc_pct: 60, period_start: '2026-08-01', period_end: '2026-09-30' });
+  const cap = await inj('GET', '/api/projects/resources/capacity?from=2026-07&months=3', admin);
+  const bobCap = (cap.json.resources ?? []).find((r: any) => r.resource_name === 'CapZed');
+  const mAt = (mm: string) => bobCap?.months?.find((c: any) => c.month === mm);
+  ok('Capacity calendar: Bob Jul 60 / Aug 120 (over) / Sep 60 — peak 120, 1 over-month',
+    near(mAt('2026-07')?.allocated_pct, 60) && near(mAt('2026-08')?.allocated_pct, 120) && mAt('2026-08')?.over_allocated === true && near(mAt('2026-09')?.allocated_pct, 60) && near(bobCap?.peak_pct, 120) && bobCap?.over_months === 1,
+    JSON.stringify({ jul: mAt('2026-07')?.allocated_pct, aug: mAt('2026-08')?.allocated_pct, sep: mAt('2026-09')?.allocated_pct, peak: bobCap?.peak_pct }));
+  const augRow = (cap.json.monthly ?? []).find((m: any) => m.month === '2026-08');
+  ok('Capacity calendar monthly rollup: August flags ≥1 over-allocated resource', augRow && augRow.resources_over >= 1 && augRow.total_demand_pct >= 120, JSON.stringify({ over: augRow?.resources_over, demand: augRow?.total_demand_pct }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

@@ -346,6 +346,12 @@ export class ProjectsController {
     return this.svc.resourceUtilization(u);
   }
 
+  // Time-phased capacity calendar (PPM upgrade): per-resource demand-vs-capacity by month. Static segment.
+  @Get('resources/capacity')
+  capacity(@Query('months') months: string | undefined, @Query('from') from: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.resourceCapacity(u, { months: months ? Number(months) : undefined, from });
+  }
+
   @Post(':code/resources')
   assignResource(@Param('code') code: string, @Body(new ZodValidationPipe(ResourceBody)) b: ResourceDto, @CurrentUser() u: JwtUser) {
     return this.svc.assignResource(code, b, u);
