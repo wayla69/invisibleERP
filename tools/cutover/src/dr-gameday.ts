@@ -99,10 +99,12 @@ async function main() {
   // app-readiness phase can actually log in against the recovered db.
   const pw = new PasswordService();
   const hash = await pw.hash('admin123');
+  // Role 'ExecutiveViewer' — read-only (fin_report/dashboard), and crucially NOT MFA-required (an Admin/
+  // finance role would gate login on TOTP enrolment → no token), so the app-readiness phase can log in.
   const seedSql = `
     INSERT INTO tenants (code,name) VALUES ('DR-HQ','DR HQ') ON CONFLICT DO NOTHING;
     INSERT INTO users (username,password_hash,role,tenant_id)
-      SELECT 'dradmin','${hash}','Admin', t.id FROM tenants t WHERE t.code='DR-HQ' ON CONFLICT DO NOTHING;`;
+      SELECT 'druser','${hash}','ExecutiveViewer', t.id FROM tenants t WHERE t.code='DR-HQ' ON CONFLICT DO NOTHING;`;
   sh(`psql "${PRIMARY}" -v ON_ERROR_STOP=1 -c "${seedSql.replace(/"/g, '\\"')}"`);
   // Seed chart-of-accounts + a balanced journal via the app's LedgerService would be ideal; for the drill
   // we just need the key tables non-empty. accounts/journal_entries are seeded by booting the app once.
@@ -155,12 +157,15 @@ async function main() {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
   const ready = await app.inject({ method: 'GET', url: '/readyz' });
-  const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'dradmin', password: 'admin123' } });
+  const login = await app.inject({ method: 'POST', url: '/api/login', payload: { username: 'druser', password: 'admin123' } });
   let token = ''; try { token = login.json().token; } catch { /* */ }
+  // Bonus authenticated read (informational — not part of the verdict, to avoid coupling the DR smoke to a
+  // specific module permission): the session works against the recovered db.
   const kpi = token ? await app.inject({ method: 'GET', url: '/api/finance/kpi', headers: { authorization: `Bearer ${token}` } }) : { statusCode: 0 };
   phase.appReady = now() - t;
-  const appOk = ready.statusCode === 200 && !!token && (kpi as any).statusCode === 200;
-  log(`- APP-READY: /readyz=${ready.statusCode}, login=${token ? 'ok' : 'FAIL'}, kpi=${(kpi as any).statusCode} (${secs(phase.appReady)}s)`);
+  // Verdict gate = the app boots on the recovered db (/readyz) AND the recovered auth data logs in (token).
+  const appOk = ready.statusCode === 200 && !!token;
+  log(`- APP-READY: /readyz=${ready.statusCode}, login=${token ? 'ok' : 'FAIL'}, kpi=${(kpi as any).statusCode} (informational) (${secs(phase.appReady)}s)`);
   await app.close();
   await client.end({ timeout: 5 });
 
