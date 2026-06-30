@@ -148,9 +148,13 @@ For every such change, review and update as needed:
   dependencies & EVM (PROJ-06), the sleek web workspace (`/projects`, `/projects/[code]` Gantt/EVM,
   `/projects/pipeline`), and BI report types `project_evm`/`crm_win_loss`. Narrative PN-16; harness
   `tools/cutover/src/projects.ts` (44 checks).
-- **Project Management — next-level roadmap:** `docs/20-project-management-next-level-plan.md` (PLANNING) —
+- **Project Management — next-level roadmap:** `docs/20-project-management-next-level-plan.md` (DELIVERED) —
   Portfolio command center, delivery depth (baselines/templates/RACI/risk-issue, controls PROJ-07/08),
   and a dedicated PM workspace IA. Phased, doc-synced PRs like docs/19.
+- **Adjacent-ERP depth (Track D) — gap-closure roadmap:** `docs/21-track-d-adjacent-erp-plan.md` (PLANNING) —
+  close automation, procurement depth, manufacturing **MRP** (flagship), cross-module analytics. A
+  current-state survey found close/procurement/analytics already substantially built, so docs/21 targets
+  the *gaps* (candidate controls GL-17, PROC-09/10, MFG-04/05), not greenfield rebuilds.
 - **Finance/GL feature map (controls + where the logic lives):**
   - GL maker-checker / recurring / prepaid: `modules/ledger/ledger.service.ts` — `postEntry` (Draft+approve, **GL-05**),
     `createRecurring`/`runDueRecurring` (**GL-08**), `createPrepaid`/`runDuePrepaid` (**GL-09**); cash flow

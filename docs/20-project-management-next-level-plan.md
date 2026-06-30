@@ -96,11 +96,11 @@ at **rev 0.11**; UAT through **UAT-O2C-211**.
 
 ---
 
-## Track D — Adjacent ERP areas *(parked — plan separately on request)*
-Out of scope here; candidates to scope as their own roadmap when PPM is saturated: finance **close
-automation** (checklist orchestration + the existing scheduler jobs), **procurement** depth,
-**manufacturing** (MRP/scheduling), and a cross-module **analytics** workspace. Listed so the backlog is
-explicit; **not** part of this plan's execution.
+## Track D — Adjacent ERP areas *(now planned in `docs/21`)*
+Finance **close automation**, **procurement** depth, **manufacturing** (MRP/scheduling), and a cross-module
+**analytics** workspace. **Scoped as its own roadmap:** `docs/21-track-d-adjacent-erp-plan.md` — a
+current-state survey found close/procurement/analytics already substantially built, so docs/21 is a
+**gap-closure** roadmap (flagship: **MRP net-requirements**), not a greenfield rebuild.
 
 ---
 
