@@ -11,6 +11,9 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(), // argon2/scrypt; legacy sha256 verified+rehashed on login
   role: roleEnum('role').notNull().default('Sales'), // เดิม PG default 'Staff' (bug) → แก้เป็น Sales
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  // ── Hybrid tenancy (0193) — the HQ "org" an Admin belongs to. Under TENANCY_MODE=multi-company the
+  // Admin's RLS bypass is scoped to tenants sharing this org_id. NULL = legacy global-HQ behavior. ──
+  orgId: bigint('org_id', { mode: 'number' }),
   mustChangePassword: boolean('must_change_password').default(false), // A5 — force rotate default/weak password
   pinHash: text('pin_hash'), // POS-PIN — scrypt-hashed 4–6 digit quick-login PIN (opt-in; non-privileged front-of-house roles only). Privileged/MFA roles are blocked from PIN auth.
   pinSetAt: timestamp('pin_set_at', { withTimezone: true }), // when the PIN was last set/rotated (audit)

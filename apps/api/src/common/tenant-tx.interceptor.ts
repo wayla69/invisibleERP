@@ -33,10 +33,29 @@ export class TenantTxInterceptor implements NestInterceptor {
 
     const req = ctx.switchToHttp().getRequest();
     const user = req?.user;
-    // Only HQ (Admin) and pre-auth requests bypass; all other users — including non-Admin staff —
-    // are scoped to their own tenant. This is an explicit allowlist, not "anything that isn't Customer".
-    const bypass = !user || user.role === 'Admin';
     const tenantId: number | null = user?.tenantId ?? null;
+
+    // Hybrid tenancy (0193). TENANCY_MODE selects the Admin bypass scope:
+    //  - single-company (default): HQ (Admin) and pre-auth requests get a GLOBAL bypass — the legacy
+    //    "HQ sees all branches" model, unchanged. We still flag the bypass on the request so the audit
+    //    interceptor records that the mutation ran with cross-tenant visibility.
+    //  - multi-company: only pre-auth (login/signup) keeps the global bypass; an Admin is instead
+    //    ORG-scoped via app.org_id (sees only tenants sharing its org_id), and a missing org_id means
+    //    the Admin sees nothing beyond its own tenant — fail-closed, not fail-open.
+    const multiCompany = (process.env.TENANCY_MODE ?? 'single-company') === 'multi-company';
+    const isAdmin = user?.role === 'Admin';
+    const preAuth = !user;
+    let bypass: boolean;
+    let orgScope: number | null = null;
+    if (!multiCompany) {
+      bypass = preAuth || isAdmin; // legacy global HQ bypass
+    } else {
+      bypass = preAuth; // login/signup still need it to read users / create tenants
+      if (isAdmin) orgScope = user?.orgId != null ? Number(user.orgId) : null; // org-scoped Admin
+    }
+    // Expose the effective scope to the audit interceptor (records cross-tenant access on mutations).
+    req.__rlsBypass = bypass;
+    req.__rlsOrgScope = orgScope;
 
     const db = this.db as any;
     return from(
@@ -62,6 +81,7 @@ export class TenantTxInterceptor implements NestInterceptor {
         await tx.execute(sql`select
           set_config('app.bypass_rls', ${bypass ? 'on' : 'off'}, true),
           set_config('app.tenant_id', ${tenantId != null ? String(tenantId) : ''}, true),
+          set_config('app.org_id', ${orgScope != null ? String(orgScope) : ''}, true),
           set_config('app.actor', ${user?.username ?? ''}, true)`);
         // NB: we intentionally do NOT force the tx READ ONLY for GETs — several GET handlers perform
         // legitimate writes (dashboard auto-reorder, lazy loyalty-config seed), and Postgres rejects

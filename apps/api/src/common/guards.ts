@@ -96,6 +96,7 @@ export class JwtAuthGuard implements CanActivate {
     // issued before a "revoke all sessions" watermark is rejected even though the signature is still valid.
     const db = this.db as any;
     let dbRole: string | undefined; // live role from the users table (staff); overrides the token's role claim
+    let dbOrgId: number | null = null; // live org_id (staff) for hybrid multi-company bypass scoping
     const revoked = new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Session has been revoked — please sign in again', messageTh: 'เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบใหม่' });
     if (payload.jti) {
       const [rev] = await db.select({ j: revokedTokens.jti }).from(revokedTokens).where(and(eq(revokedTokens.jti, payload.jti), gt(revokedTokens.expiresAt, new Date()))).limit(1);
@@ -110,7 +111,7 @@ export class JwtAuthGuard implements CanActivate {
         if (m && m.active === false) throw new UnauthorizedException({ code: 'MEMBER_DEACTIVATED', message: 'This membership is no longer active', messageTh: 'สมาชิกนี้ถูกปิดใช้งาน' });
       }
     } else if (payload.sub) {
-      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role }).from(users).where(eq(users.username, payload.sub)).limit(1);
+      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId }).from(users).where(eq(users.username, payload.sub)).limit(1);
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
         if (u.tvf && payload.iat && payload.iat * 1000 < new Date(u.tvf).getTime()) throw revoked;
@@ -120,6 +121,9 @@ export class JwtAuthGuard implements CanActivate {
         // immediately loses HQ bypass, and a forged role claim for a non-privileged username can't grant it.
         // This rides the existing AC-15 per-request user read — no extra round-trip.
         dbRole = u.role as string;
+        // Hybrid tenancy (0193) — the org an Admin is scoped to under TENANCY_MODE=multi-company. Sourced
+        // live from the DB (same row) so a forged org claim can't widen an Admin's bypass.
+        dbOrgId = u.orgId != null ? Number(u.orgId) : null;
       }
     }
     req.user = {
@@ -127,6 +131,7 @@ export class JwtAuthGuard implements CanActivate {
       role: (dbRole ?? payload.role) as JwtUser['role'],
       customerName: payload.customerName ?? null,
       tenantId: payload.tenantId ?? null,
+      orgId: dbOrgId,
       permissions: payload.permissions ?? [],
       memberId: payload.memberId ?? null, // loyalty member principal (role==='Member'); null for staff
     } satisfies JwtUser;

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { JwtUser } from '../../common/decorators';
 import { QueryService } from '../query/query.service';
+import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 
 // Natural-language analytics (Platform Phase 17 — B3). Turns a plain question into a governed query over the
 // A5 semantic layer and runs it. With an Anthropic key Claude maps NL → {dimension, date filters}; with NO
@@ -9,8 +10,8 @@ import { QueryService } from '../query/query.service';
 @Injectable()
 export class NlAnalyticsService {
   constructor(private readonly query: QueryService) {}
-  private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
-  private get model() { return process.env.ANTHROPIC_MODEL || 'claude-opus-4-8'; }
+  private get apiKey() { return aiDpaBlocked() ? '' : (process.env.ANTHROPIC_API_KEY || ''); } // gated → keyword map
+  private get model() { return modelFor('nl_query'); } // short NL→query parse → CHEAP tier (was Opus)
 
   private keywordMap(question: string): { dimension: string } {
     const q = question.toLowerCase();
@@ -29,7 +30,7 @@ export class NlAnalyticsService {
       try {
         const dims = this.query.dimensionKeys();
         const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-        const client = new Anthropic({ apiKey: this.apiKey });
+        const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 });
         const res: any = await client.messages.create({
           model: this.model, max_tokens: 300,
           system: `Map the user's question to a JSON query over POS sales. "dimension" must be exactly one of: ${dims.join(', ')}. Return ONLY JSON: {"dimension": "...", "date_from"?: "YYYY-MM-DD", "date_to"?: "YYYY-MM-DD"}.`,

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Prediction } from './forecasting.service';
+import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 
 /**
  * LLM insights — port จาก analytics/llm_insights.py
@@ -7,8 +8,8 @@ import type { Prediction } from './forecasting.service';
  */
 @Injectable()
 export class InsightsService {
-  private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
-  private get model() { return process.env.ANTHROPIC_MODEL || 'claude-opus-4-8'; }
+  private get apiKey() { return aiDpaBlocked() ? '' : (process.env.ANTHROPIC_API_KEY || ''); } // gated → rule-based
+  private get model() { return modelFor('insight'); } // analytics narrative → REASONING tier (was Opus)
 
   async replenishment(pred: Prediction): Promise<string> {
     if (!this.apiKey) return ruleRepl(pred);
@@ -34,7 +35,7 @@ export class InsightsService {
   private async call(prompt: string, maxTokens: number, fallback: () => string): Promise<string> {
     try {
       const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-      const client = new Anthropic({ apiKey: this.apiKey });
+      const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 });
       const msg = await client.messages.create({ model: this.model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] });
       const block = msg.content?.[0];
       return (block?.type === 'text' ? block.text : '').trim() || fallback();

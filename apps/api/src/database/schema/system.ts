@@ -139,6 +139,9 @@ export const apiKeys = pgTable('api_keys', {
   tier: text('tier').default('free'), // D1 (Phase 23) — rate tier: free | standard | partner
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   revoked: boolean('revoked').default(false),
+  // Optional expiry (0193) — a key past expires_at is rejected like a revoked key. NULL = non-expiring
+  // (back-compat). Issuing with a TTL bounds the blast radius of a leaked machine credential.
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

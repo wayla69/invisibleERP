@@ -1352,6 +1352,20 @@
       "when": 2023820000019,
       "tag": "0192_project_risks",
       "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 2023820000020,
+      "tag": "0193_hybrid_org_tenancy",
+      "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "7",
+      "when": 2023820000021,
+      "tag": "0194_ai_token_overage",
+      "breakpoints": true
     }
   ]
 }

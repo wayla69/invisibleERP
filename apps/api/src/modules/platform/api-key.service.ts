@@ -6,7 +6,7 @@ import { apiKeys, users } from '../../database/schema';
 import { safeEqualHex } from '../../common/crypto';
 import type { JwtUser } from '../../common/decorators';
 
-export interface IssueKeyDto { name: string; scopes?: string[] }
+export interface IssueKeyDto { name: string; scopes?: string[]; ttl_days?: number }
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
@@ -29,10 +29,12 @@ export class ApiKeyService {
     const prefix = rawKey.slice(0, 12);
     const hashedKey = sha256(rawKey);
     const scopes = (dto.scopes ?? []).join(',');
+    // Optional TTL (0193) — bound a leaked key's lifetime. Omitted/≤0 → non-expiring (back-compat).
+    const expiresAt = dto.ttl_days && dto.ttl_days > 0 ? new Date(Date.now() + dto.ttl_days * 86_400_000) : null;
     const [row] = await db.insert(apiKeys).values({
-      tenantId, name: dto.name, prefix, hashedKey, scopes, revoked: false,
+      tenantId, name: dto.name, prefix, hashedKey, scopes, revoked: false, expiresAt,
     }).returning({ id: apiKeys.id, prefix: apiKeys.prefix, name: apiKeys.name });
-    return { id: Number(row.id), name: row.name, prefix: row.prefix, scopes: dto.scopes ?? [], key: rawKey };
+    return { id: Number(row.id), name: row.name, prefix: row.prefix, scopes: dto.scopes ?? [], expires_at: expiresAt, key: rawKey };
   }
 
   // ตรวจคีย์ดิบ → คืน row หรือ null. Lookup by indexed prefix, then constant-time hash compare.
@@ -53,6 +55,8 @@ export class ApiKeyService {
       const rows = await tx.select().from(apiKeys).where(and(eq(apiKeys.prefix, prefix), eq(apiKeys.revoked, false)));
       const row = rows.find((r: any) => safeEqualHex(hashed, String(r.hashedKey)));
       if (!row) return null;
+      // Expiry (0193): an expired key is rejected exactly like a revoked one.
+      if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return null;
       // lastUsedAt bump is best-effort — must never fail authentication.
       try { await tx.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, row.id)); } catch { /* ignore */ }
       return row;

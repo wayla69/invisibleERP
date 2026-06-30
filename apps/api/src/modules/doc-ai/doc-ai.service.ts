@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { JwtUser } from '../../common/decorators';
+import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 
 // Document-AI intake (Platform Phase 16 — B2). Extracts a structured AP-invoice draft from pasted text.
 // With an Anthropic key it uses Claude; with NO key it falls back to deterministic regex heuristics (so CI
@@ -7,8 +8,8 @@ import type { JwtUser } from '../../common/decorators';
 // never creates an AP bill or touches the GL itself.
 @Injectable()
 export class DocAiService {
-  private get apiKey() { return process.env.ANTHROPIC_API_KEY || ''; }
-  private get model() { return process.env.ANTHROPIC_MODEL || 'claude-opus-4-8'; }
+  private get apiKey() { return aiDpaBlocked() ? '' : (process.env.ANTHROPIC_API_KEY || ''); } // gated → deterministic
+  private get model() { return modelFor('doc_extract'); } // structured extraction → CHEAP tier (was Opus)
 
   private ruleExtract(text: string) {
     const invoice_no = text.match(/(?:invoice|inv|ใบกำกับ(?:ภาษี)?|เลขที่)[\s#:.\-]*([A-Za-z0-9][A-Za-z0-9/\-]{2,})/i)?.[1] ?? null;
@@ -32,7 +33,7 @@ export class DocAiService {
     if (!this.apiKey) return { fields: this.ruleExtract(t), source: 'rules' };
     try {
       const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-      const client = new Anthropic({ apiKey: this.apiKey });
+      const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 });
       const res: any = await client.messages.create({
         model: this.model, max_tokens: 1024,
         system: 'You extract vendor-invoice fields. Return ONLY JSON: {vendor_name, vendor_tax_id, invoice_no, invoice_date (YYYY-MM-DD), amount (number), currency}. No prose.',
