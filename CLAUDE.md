@@ -151,6 +151,12 @@ For every such change, review and update as needed:
 - **Project Management — next-level roadmap:** `docs/20-project-management-next-level-plan.md` (DELIVERED) —
   Portfolio command center, delivery depth (baselines/templates/RACI/risk-issue, controls PROJ-07/08),
   and a dedicated PM workspace IA. Phased, doc-synced PRs like docs/19.
+- **PMO command center — plan:** `docs/23-pmo-command-center-plan.md` (PLANNING) — turn the PPM signals into
+  a PMO operating loop: a single *what-needs-me-now* **action center** (`GET /api/projects/action-center`,
+  proactive via the `BiLiveService` SSE bus; new detective control **PROJ-11**), a **pipeline-weighted
+  forward** resource/cash forecast (`pipelineSummary` × `resourceCapacity` × milestone/POC billing), and a
+  schedulable **period governance pack** (`project_governance_pack` BI report). Read-only aggregators on the
+  existing spine — build on, don't duplicate. Three sequential doc-synced PRs.
 - **Adjacent-ERP depth (Track D) — reconciled:** `docs/21-track-d-adjacent-erp-plan.md` (v0.2 RECONCILED) —
   an audit found Track D **already built + harness-tested**: MRP/RCCP/plan-to-PR (`modules/mfg-depth/mrp.service.ts`,
   `api/mrp`), QC disposition/scrap (`mfg-depth/quality.service.ts`, `api/quality`), shop-floor ops + routings,
