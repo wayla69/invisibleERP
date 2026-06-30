@@ -24,6 +24,7 @@ import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { JobQueueService } from '../jobs/job-queue.service';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
 import { BiLiveService } from './bi-live.service';
+import { BillingService } from '../billing/billing.service';
 
 // Job type for offloading a due report/action subscription to the background worker.
 export const REPORT_SUBSCRIPTION_JOB = 'report_subscription';
@@ -66,6 +67,9 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   supplier_scorecard: { label: 'คะแนนผลงานผู้ขาย', labelEn: 'Supplier performance scorecard' },
   // Action job: each run captures a dated EVM/RAG health snapshot for every project (idempotent per day).
   project_health_capture: { label: 'บันทึกสุขภาพโครงการ', labelEn: 'Capture project health snapshots' },
+  // Action job (monthly): each run bills every tenant's metered AI overage for the just-closed month as a
+  // Stripe invoice item (idempotent per tenant+month). Connects the AI-COGS meter to actual collection.
+  ai_overage_billing: { label: 'เรียกเก็บค่า AI ส่วนเกิน (รายเดือน)', labelEn: 'Bill AI usage overage (monthly)' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -94,6 +98,9 @@ export class BiService implements OnModuleInit {
     @Optional() private readonly worker?: JobWorkerService,
     // Real-time streaming analytics (docs/22 Phase B) — live KPI/event fan-out bus.
     @Optional() private readonly live?: BiLiveService,
+    // Monthly AI-overage billing action job (Wave 1). Optional so a partial harness still constructs; the
+    // full app provides BillingModule, enabling the scheduled ai_overage_billing job.
+    @Optional() private readonly billing?: BillingService,
   ) {}
 
   // Register the background handler that runs one due subscription (report or heavy action job) off the
@@ -595,6 +602,11 @@ export class BiService implements OnModuleInit {
     if (reportType === 'exec_scorecard') {
       const r = await this.execScorecard(user);
       return { data: r, summary: `Exec: sales(MTD) ${r.finance.sales_mtd}, margin ${r.finance.margin_pct ?? '—'}%, win rate ${r.crm.win_rate_pct ?? '—'}%, portfolio CPI ${r.projects.cpi ?? '—'}, ${r.supply_chain.blocked_invoices} held invoice(s)`, summaryTh: `ผู้บริหาร: ยอดขายเดือนนี้ ${r.finance.sales_mtd} · มาร์จิน ${r.finance.margin_pct ?? '—'}% · อัตราชนะ ${r.crm.win_rate_pct ?? '—'}% · CPI ${r.projects.cpi ?? '—'}` };
+    }
+    if (reportType === 'ai_overage_billing') {
+      if (!this.billing) throw new BadRequestException({ code: 'BILLING_UNAVAILABLE', message: 'Billing service not available', messageTh: 'ระบบเรียกเก็บเงินไม่พร้อมใช้งาน' });
+      const r = await this.billing.runAiOverageBilling(user, filters?.month); // idempotent per (tenant, month)
+      return { data: r, summary: `AI overage billing ${r.month}: charged ${r.processed_count} tenant(s), total ${r.total_amount} THB`, summaryTh: `เรียกเก็บค่า AI ส่วนเกิน ${r.month}: ${r.processed_count} ร้าน รวม ${r.total_amount} บาท` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }

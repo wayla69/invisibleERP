@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Public, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -66,6 +66,21 @@ export class BillingController {
   async aiOverage(@CurrentUser() u: JwtUser, @Query('month') month?: string) {
     const tenantId = await this.svc.resolveTenantId(u);
     return this.svc.aiOverageInvoice(tenantId, month);
+  }
+
+  // AI-overage charge history for the tenant (read view of ai_overage_billing_runs).
+  @Get('billing/ai-overage/runs') @Permissions('users', 'exec')
+  async aiOverageRuns(@CurrentUser() u: JwtUser, @Query('month') month?: string) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    return this.svc.listOverageRuns(tenantId, month);
+  }
+
+  // Run the monthly AI-overage billing job (operator/HQ): append a Stripe invoice item per tenant for the
+  // month's metered overage, idempotent per (tenant, month). Also runs unattended via the BI scheduler
+  // (report type 'ai_overage_billing'). Default month = the just-closed Bangkok month.
+  @Post('billing/ai-overage/run') @Permissions('exec') @HttpCode(200)
+  async runAiOverage(@CurrentUser() u: JwtUser, @Query('month') month?: string) {
+    return this.svc.runAiOverageBilling(u, month);
   }
 
   @Post('billing/checkout') @Permissions('users')
