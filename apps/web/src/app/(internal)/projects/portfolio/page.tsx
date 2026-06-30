@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, ShieldAlert, ShieldCheck, Users, Wallet, Receipt, Clock, TrendingUp, FolderKanban } from 'lucide-react';
+import { Activity, ShieldAlert, ShieldCheck, Users, Wallet, Receipt, Clock, TrendingUp, FolderKanban, BellRing } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -37,7 +37,12 @@ export default function PortfolioPage() {
       <PageHeader
         title="พอร์ตโครงการ (Portfolio)"
         description="ภาพรวมผู้บริหารทุกโครงการ · มูลค่าที่ได้รับ (EVM) · สุขภาพโครงการ · กำลังคน · ช่องทางจากดีลสู่โครงการ"
-        actions={<Button variant="outline" onClick={() => router.push('/projects')}><FolderKanban className="size-4" /> ทะเบียนโครงการ</Button>}
+        actions={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => router.push('/projects/action-center')}><BellRing className="size-4" /> ศูนย์งานที่ต้องทำ</Button>
+            <Button variant="outline" onClick={() => router.push('/projects')}><FolderKanban className="size-4" /> ทะเบียนโครงการ</Button>
+          </div>
+        }
       />
 
       <StateView q={q}>
