@@ -27,10 +27,15 @@ export const projects = pgTable(
     billedToDate: numeric('billed_to_date', { precision: 16, scale: 2 }).default('0'),
     startDate: date('start_date'),
     endDate: date('end_date'),
+    // Program (cross-project) scheduling (PMO-4): program_code groups projects into a program;
+    // depends_on_projects is a CSV of project_codes this project must follow (finish-to-start) for the
+    // program critical path. Operational/detective (rides PROJ-06) — non-posting.
+    programCode: text('program_code'),
+    dependsOnProjects: text('depends_on_projects'),
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ byTenant: index('idx_project_tenant').on(t.tenantId), byCrmOpp: index('idx_project_crm_opp').on(t.crmOppNo) }),
+  (t) => ({ byTenant: index('idx_project_tenant').on(t.tenantId), byCrmOpp: index('idx_project_crm_opp').on(t.crmOppNo), byProgram: index('idx_project_program').on(t.programCode) }),
 );
 
 // A logged cost (time or expense) against a project.

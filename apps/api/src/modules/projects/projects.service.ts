@@ -31,6 +31,7 @@ export interface MilestoneDto { name: string; due_date?: string; owner?: string;
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
 export interface BaselineDto { label?: string; reason?: string }
+export interface ProgramDto { program_code?: string | null; depends_on_projects?: string[] }
 export interface TemplateItemDto { item_type?: 'task' | 'milestone'; seq?: number; name: string; parent_seq?: number; wbs_code?: string; planned_hours?: number; planned_cost?: number; offset_start_days?: number; offset_end_days?: number; depends_on_seq?: number[]; billing_percent?: number; owner?: string; assignee?: string }
 export interface TemplateDto { code?: string; name: string; description?: string; items?: TemplateItemDto[] }
 export interface ApplyTemplateDto { start_date?: string }
@@ -600,6 +601,79 @@ export class ProjectsService {
       critical_path: out.filter((t: any) => t.on_critical_path).map((t: any) => t.id),
       tasks: out, count: out.length,
     };
+  }
+
+  // ── Program (cross-project) critical path (PMO-4) ────────────────────────
+  // Group a project into a program + declare which OTHER projects it must follow (finish-to-start). The
+  // member projects + those dependencies form a higher-level graph whose nodes are whole projects (node
+  // duration = each project's OWN critical-path duration from schedule()); a forward/backward CPM pass over
+  // it gives the PROGRAM critical path, end date, and per-project slack — so a delay that ripples ACROSS
+  // projects is visible, not just within one. Detective/non-posting (rides PROJ-06).
+  async setProgram(code: string, dto: ProgramDto, user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const set: any = {};
+    if (dto.program_code !== undefined) set.programCode = (dto.program_code ?? '').toString().trim() || null;
+    if (dto.depends_on_projects !== undefined) {
+      const deps = peopleCsv(dto.depends_on_projects); // trim + dedupe project codes (null when empty)
+      if (deps) {
+        const list = csvToList(deps);
+        if (list.includes(code)) throw new BadRequestException({ code: 'BAD_DEPENDENCY', message: 'A project cannot depend on itself', messageTh: 'โครงการขึ้นกับตัวเองไม่ได้' });
+        for (const c of list) {
+          const [exists] = await db.select().from(projects).where(eq(projects.projectCode, c)).limit(1);
+          if (!exists) throw new BadRequestException({ code: 'DEP_PROJECT_NOT_FOUND', message: `Dependency project ${c} not found`, messageTh: `ไม่พบโครงการที่อ้างอิง (${c})` });
+        }
+      }
+      set.dependsOnProjects = deps;
+    }
+    await db.update(projects).set(set).where(eq(projects.id, Number(p.id)));
+    return this.get(code);
+  }
+
+  async programCriticalPath(programCode: string, _user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select().from(projects).where(eq(projects.programCode, programCode));
+    if (!rows.length) throw new NotFoundException({ code: 'PROGRAM_NOT_FOUND', message: `No projects in program ${programCode}`, messageTh: 'ไม่พบโปรแกรม' });
+    const members = new Set<string>(rows.map((p: any) => p.projectCode));
+    // node duration = each project's own critical-path duration (≥1 so a plan-less project still occupies a day).
+    const nodes: { code: string; name: string; status: string; duration: number; preds: string[] }[] = [];
+    for (const p of rows) {
+      const sched = await this.schedule(p.projectCode);
+      const preds = csvToList(p.dependsOnProjects).filter((c) => members.has(c) && c !== p.projectCode);
+      nodes.push({ code: p.projectCode, name: p.name, status: p.status, duration: Math.max(1, sched.project_duration_days || 0), preds });
+    }
+    const byCode = new Map(nodes.map((n) => [n.code, n]));
+    const succ = new Map<string, string[]>(nodes.map((n) => [n.code, []]));
+    for (const n of nodes) for (const d of n.preds) succ.get(d)!.push(n.code);
+    // Topological order (Kahn); cycle-trapped nodes are appended so the passes still terminate.
+    const indeg = new Map<string, number>(nodes.map((n) => [n.code, n.preds.length]));
+    const queue = nodes.filter((n) => indeg.get(n.code) === 0).map((n) => n.code);
+    const topo: string[] = [];
+    while (queue.length) { const c = queue.shift()!; topo.push(c); for (const s of succ.get(c)!) { indeg.set(s, indeg.get(s)! - 1); if (indeg.get(s) === 0) queue.push(s); } }
+    for (const n of nodes) if (!topo.includes(n.code)) topo.push(n.code);
+    const es = new Map<string, number>(), ef = new Map<string, number>();
+    for (const c of topo) { const start = Math.max(0, ...byCode.get(c)!.preds.map((d) => ef.get(d) ?? 0)); es.set(c, start); ef.set(c, start + byCode.get(c)!.duration); }
+    const programDuration = Math.max(0, ...nodes.map((n) => ef.get(n.code) ?? 0));
+    const lf = new Map<string, number>(), ls = new Map<string, number>();
+    for (const c of [...topo].reverse()) { const ss = succ.get(c)!; const finish = ss.length ? Math.min(...ss.map((s) => ls.get(s)!)) : programDuration; lf.set(c, finish); ls.set(c, finish - byCode.get(c)!.duration); }
+    const out = nodes.map((n) => {
+      const slack = r2((ls.get(n.code) ?? 0) - (es.get(n.code) ?? 0));
+      return { project_code: n.code, name: n.name, status: n.status, duration_days: n.duration, depends_on: n.preds, es: es.get(n.code) ?? 0, ef: ef.get(n.code) ?? 0, ls: ls.get(n.code) ?? 0, lf: lf.get(n.code) ?? 0, slack, on_critical_path: slack <= 0.0001 };
+    }).sort((a, b) => a.es - b.es || a.project_code.localeCompare(b.project_code));
+    return { program_code: programCode, project_count: out.length, program_duration_days: programDuration, critical_path: out.filter((p) => p.on_critical_path).map((p) => p.project_code), projects: out };
+  }
+
+  async programs(user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select().from(projects).where(sql`${projects.programCode} is not null`);
+    const byProg = new Map<string, number>();
+    for (const p of rows) { const k = p.programCode as string; if (!k) continue; byProg.set(k, (byProg.get(k) ?? 0) + 1); }
+    const out: any[] = [];
+    for (const program_code of [...byProg.keys()].sort()) {
+      const cp = await this.programCriticalPath(program_code, user);
+      out.push({ program_code, member_count: byProg.get(program_code), program_duration_days: cp.program_duration_days, critical_path: cp.critical_path });
+    }
+    return { programs: out, count: out.length };
   }
 
   // EVM S-curve: the planned-cost baseline accumulated by month (each task's planned cost lands in its
@@ -1272,6 +1346,8 @@ export class ProjectsService {
       billed_pct: p.billingType === 'Fixed' && n(p.contractAmount) > 0 ? r2((billed / n(p.contractAmount)) * 100) : null,
       remaining_to_bill: p.billingType === 'Fixed' && n(p.contractAmount) > 0 ? r2(Math.max(0, n(p.contractAmount) - billed)) : null,
       start_date: p.startDate, end_date: p.endDate, created_at: p.createdAt,
+      // Program (cross-project) scheduling (PMO-4).
+      program_code: p.programCode ?? null, depends_on_projects: csvToList(p.dependsOnProjects),
     };
   }
 }

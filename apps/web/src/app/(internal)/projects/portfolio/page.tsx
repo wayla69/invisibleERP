@@ -22,6 +22,7 @@ export default function PortfolioPage() {
   const q = useQuery<any>({ queryKey: ['projects', 'portfolio'], queryFn: () => api('/api/projects/portfolio') });
   const capQ = useQuery<any>({ queryKey: ['projects', 'capacity'], queryFn: () => api('/api/projects/resources/capacity?months=6') });
   const fcQ = useQuery<any>({ queryKey: ['projects', 'forecast'], queryFn: () => api('/api/projects/forecast?months=6') });
+  const progQ = useQuery<any>({ queryKey: ['projects', 'programs'], queryFn: () => api('/api/projects/programs') });
   const d = q.data;
   const fc = fcQ.data;
   const fcMax = Math.max(1, ...((fc?.billing?.monthly ?? []).map((m: any) => m.total_expected)));
@@ -154,6 +155,27 @@ export default function PortfolioPage() {
                   </tbody>
                 </table>
               </div>
+            </Card>
+          )}
+
+          {/* programs (cross-project critical path, PMO-4) */}
+          {!!progQ.data?.programs?.length && (
+            <Card className="gap-3 p-5">
+              <h3 className="text-sm font-semibold">โปรแกรม (Programs) — เส้นทางวิกฤตข้ามโครงการ</h3>
+              <ul className="divide-y divide-border/50">
+                {progQ.data.programs.map((pr: any) => (
+                  <li key={pr.program_code}>
+                    <button onClick={() => router.push(`/projects/program/${encodeURIComponent(pr.program_code)}`)} className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm hover:opacity-80">
+                      <span className="font-medium">{pr.program_code}</span>
+                      <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span>{pr.member_count} โครงการ</span>
+                        <span>{pr.program_duration_days} วัน</span>
+                        <Badge variant="destructive">{pr.critical_path?.length ?? 0} วิกฤต</Badge>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </Card>
           )}
 
