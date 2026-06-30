@@ -17,6 +17,7 @@
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "pg-smoke": "tsx src/pg-smoke.ts",
     "pg-core": "tsx src/pg-core.ts",
+    "loadtest": "tsx src/loadtest.ts",
     "ai-eval": "tsx src/ai-eval.ts",
     "onboarding": "tsx src/onboarding.ts",
     "opening-balances": "tsx src/opening-balances.ts",
