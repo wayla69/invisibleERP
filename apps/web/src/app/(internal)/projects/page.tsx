@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FolderKanban, Plus, Clock, Receipt, Target, Wallet, TrendingUp } from 'lucide-react';
+import { FolderKanban, Plus, Clock, Receipt, Target, Wallet, TrendingUp, LayoutDashboard } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -65,7 +65,10 @@ export default function ProjectsPage() {
       <PageHeader
         title="โครงการ (Projects)"
         description="บัญชีโครงการ · ลงต้นทุน→งานระหว่างทำ (WIP) · วางบิล→รับรู้รายได้+ตัดต้นทุน · WBS/Gantt · EVM"
-        actions={<Button variant="outline" onClick={() => router.push('/projects/pipeline')}><Target className="size-4" /> Win/Loss</Button>}
+        actions={<div className="flex gap-2">
+          <Button variant="outline" onClick={() => router.push('/projects/portfolio')}><LayoutDashboard className="size-4" /> Portfolio</Button>
+          <Button variant="outline" onClick={() => router.push('/projects/pipeline')}><Target className="size-4" /> Win/Loss</Button>
+        </div>}
       />
 
       <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
