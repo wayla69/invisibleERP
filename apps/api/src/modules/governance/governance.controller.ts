@@ -68,4 +68,9 @@ export class GovernanceController {
   recordOversight(@Body(new ZodValidationPipe(OversightBody)) b: z.infer<typeof OversightBody>, @CurrentUser() u: JwtUser) { return this.svc.recordOversight(u, b); }
   @Get('oversight') @Permissions('users')
   oversight() { return this.svc.listOversight(); }
+
+  // Governance readiness — operating signals across ELC-01 (acknowledgement coverage), ELC-02 (oversight
+  // cadence) and ELC-04 (case ageing). The compliance/admin dashboard; also schedulable as `governance_readiness`.
+  @Get('readiness') @Permissions('users')
+  readiness(@Query('policy_version') pv: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.readiness(u, pv || '1.0'); }
 }

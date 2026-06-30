@@ -106,6 +106,19 @@ async function main() {
   const ovList = await inj('GET', '/api/governance/oversight', audit1);
   ok('ELC-02: the oversight log shows the meeting with ICFR reviewed + sign-off', ovList.status === 200 && (ovList.json.meetings ?? []).some((m: any) => m.icfr_reviewed === true && m.signed_off_by === 'AC Chair'), `n=${ovList.json.count}`);
 
+  // ── Governance readiness — operating signals across ELC-01/02/04 (coverage / cadence / ageing) ──
+  const rdy = await inj('GET', '/api/governance/readiness?policy_version=2026-CoC', audit1);
+  ok('Readiness: ELC-01 acknowledgement coverage is partial (staff1 acknowledged, others outstanding)',
+    rdy.status === 200 && rdy.json.ethics.acknowledged >= 1 && rdy.json.ethics.coverage_pct > 0 && rdy.json.ethics.coverage_pct < 100 && rdy.json.ethics.outstanding.length > 0, JSON.stringify(rdy.json.ethics));
+  ok('Readiness: ELC-02 oversight cadence — last meeting + next due (+92d quarterly) computed',
+    rdy.json.oversight.last_meeting === '2026-06-30' && rdy.json.oversight.next_due === '2026-09-30', JSON.stringify(rdy.json.oversight));
+  ok('Readiness: ELC-04 surfaces open whistleblower cases (ageing vs SLA)',
+    rdy.json.hotline.open_cases >= 1 && typeof rdy.json.hotline.oldest_open_age_days === 'number', JSON.stringify(rdy.json.hotline));
+  ok('Readiness: not "ready" while acknowledgements are outstanding (ELC-01 alert raised)',
+    rdy.json.ready === false && (rdy.json.alerts ?? []).some((a: string) => a.includes('ELC-01')), JSON.stringify(rdy.json.alerts));
+  const rdyForbidden = await inj('GET', '/api/governance/readiness', staff1);
+  ok('Readiness: a non-compliance staff cannot view readiness → 403', rdyForbidden.status === 403, `${rdyForbidden.status}`);
+
   // ── RLS: tenant isolation at the DB layer. (The admin API viewer bypasses RLS in single-company mode by
   //    design — ITGC-AC-18 — so isolation is asserted on a tenant-scoped app_user connection, not via admin.)
   const t2case = await inj('POST', '/api/governance/hotline/cases', staff2, { allegation: 'T2-only matter', anonymous: true });

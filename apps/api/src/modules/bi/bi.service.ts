@@ -25,6 +25,7 @@ import { JobQueueService } from '../jobs/job-queue.service';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
 import { BiLiveService } from './bi-live.service';
 import { BillingService } from '../billing/billing.service';
+import { GovernanceService } from '../governance/governance.service';
 import { captureOpsAlert } from '../../observability/instrumentation';
 
 // Job type for offloading a due report/action subscription to the background worker.
@@ -58,6 +59,9 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
   // Likewise: each run recognizes every due TFRS-15 revenue schedule through the current period (idempotent).
   rev_rec_recognize: { label: 'รับรู้รายได้ตามสัญญา (TFRS 15)', labelEn: 'Recognize due revenue schedules' },
+  // Governance readiness (ELC-01/02/04): each run snapshots acknowledgement coverage, oversight cadence and
+  // open-case ageing; the run summary surfaces any breach. Schedule it `weekly` to drive the cadence reminders.
+  governance_readiness: { label: 'ความพร้อมธรรมาภิบาล (ELC)', labelEn: 'Governance readiness (ELC)' },
   // Data-retention purge of DEAD ephemeral security rows only (never financial/audit/PII — statutory hold).
   data_retention_purge: { label: 'ล้างข้อมูลชั่วคราวที่หมดอายุ (นโยบายเก็บข้อมูล)', labelEn: 'Purge expired ephemeral security rows' },
   // Executive cross-module scorecard (RG-1): composes finance/CRM/projects/supply-chain health into one board.
@@ -103,6 +107,8 @@ export class BiService implements OnModuleInit {
     // Monthly AI-overage billing action job (Wave 1). Optional so a partial harness still constructs; the
     // full app provides BillingModule, enabling the scheduled ai_overage_billing job.
     @Optional() private readonly billing?: BillingService,
+    // full app provides GovernanceModule, enabling the scheduled governance_readiness reminder job.
+    @Optional() private readonly governance?: GovernanceService,
   ) {}
 
   // Register the background handler that runs one due subscription (report or heavy action job) off the
@@ -551,6 +557,14 @@ export class BiService implements OnModuleInit {
       if (!this.leases) throw new BadRequestException({ code: 'LEASES_UNAVAILABLE', message: 'Lease service not available', messageTh: 'ระบบสัญญาเช่าไม่พร้อมใช้งาน' });
       const r = await this.leases.runDueLeases(user); // idempotent per (lease, period)
       return { data: r, summary: `Lease run: posted ${r.posted} of ${r.scanned} due leases`, summaryTh: `ลงรายการสัญญาเช่า: ${r.posted} จาก ${r.scanned} สัญญา` };
+    }
+    if (reportType === 'governance_readiness') {
+      if (!this.governance) throw new BadRequestException({ code: 'GOVERNANCE_UNAVAILABLE', message: 'Governance service not available', messageTh: 'ระบบธรรมาภิบาลไม่พร้อมใช้งาน' });
+      const r = await this.governance.readiness(user, f.policy_version || '1.0'); // read-only snapshot
+      const summary = r.ready
+        ? `Governance ready: acknowledgement ${r.ethics.coverage_pct}%, oversight current, ${r.hotline.open_cases} open case(s)`
+        : `Governance attention: ${r.alerts.join(' · ')}`;
+      return { data: r, summary, summaryTh: r.ready ? `ธรรมาภิบาลพร้อม: ยอมรับจรรยาบรรณ ${r.ethics.coverage_pct}%` : `ต้องดำเนินการ: ${r.alerts.length} รายการ` };
     }
     if (reportType === 'rev_rec_recognize') {
       if (!this.revrec) throw new BadRequestException({ code: 'REVREC_UNAVAILABLE', message: 'Revenue recognition service not available', messageTh: 'ระบบรับรู้รายได้ไม่พร้อมใช้งาน' });
