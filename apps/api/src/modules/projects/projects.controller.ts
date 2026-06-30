@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -18,6 +18,13 @@ const CreateBody = z.object({
   end_date: z.string().optional(),
 });
 const RecognizeBody = z.object({ as_of: z.string().optional(), estimated_cost: z.number().positive().optional() });
+const ChangeOrderBody = z.object({
+  description: z.string().optional(),
+  contract_delta: z.number().optional(),
+  budget_delta: z.number().optional(),
+  estimated_cost_delta: z.number().optional(),
+  reason: z.string().optional(),
+});
 const FromOppBody = z.object({
   project_code: z.string().optional(),
   billing_type: z.enum(['TM', 'Fixed']).optional(),
@@ -237,6 +244,28 @@ export class ProjectsController {
   @Get(':code/baseline')
   getBaseline(@Param('code') code: string, @CurrentUser() u: JwtUser) {
     return this.svc.getBaseline(code, u);
+  }
+
+  // ── Change orders / contract variations (PROJ-10) ── maker-checker amendment to contract/budget/EAC.
+  @Post(':code/change-orders')
+  createChangeOrder(@Param('code') code: string, @Body(new ZodValidationPipe(ChangeOrderBody)) b: ChangeOrderDto, @CurrentUser() u: JwtUser) {
+    return this.svc.createChangeOrder(code, b, u);
+  }
+
+  @Get(':code/change-orders')
+  listChangeOrders(@Param('code') code: string) {
+    return this.svc.listChangeOrders(code);
+  }
+
+  // Approve / reject — static 'change-orders' segment, so it never collides with :code. Approver ≠ requester.
+  @Post('change-orders/:coId/approve')
+  approveChangeOrder(@Param('coId') coId: string, @CurrentUser() u: JwtUser) {
+    return this.svc.approveChangeOrder(Number(coId), u);
+  }
+
+  @Post('change-orders/:coId/reject')
+  rejectChangeOrder(@Param('coId') coId: string, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectChangeOrder(Number(coId), u);
   }
 
   // ── Risk & issue register (B4, PROJ-08) ──

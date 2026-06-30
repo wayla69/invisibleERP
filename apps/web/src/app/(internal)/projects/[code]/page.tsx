@@ -37,7 +37,7 @@ export default function ProjectDetailPage() {
   const code = decodeURIComponent(String(useParams().code ?? ''));
   const router = useRouter();
   const qc = useQueryClient();
-  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
+  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
 
   const detail = useQuery<any>({ queryKey: ['proj', code, 'detail'], queryFn: () => api(`/api/projects/${code}`) });
   const evm = useQuery<any>({ queryKey: ['proj', code, 'evm'], queryFn: () => api(`/api/projects/${code}/evm`) });
@@ -105,6 +105,17 @@ export default function ProjectDetailPage() {
     mutationFn: () => api<any>(`/api/projects/${code}/recognize`, { method: 'POST', body: '{}' }),
     onSuccess: (r: any) => { notifySuccess(r?.already ? 'ไม่มีรายได้ใหม่ให้รับรู้' : `รับรู้รายได้ ${baht(r.revenue_recognized)} (สำเร็จ ${r.poc_pct}%)`); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
+  // Change orders / contract variations (PROJ-10) — maker-checker amendment to contract/budget.
+  const cos = useQuery<any>({ queryKey: ['proj', code, 'change-orders'], queryFn: () => api(`/api/projects/${code}/change-orders`) });
+  const [cf, setCf] = useState({ contract_delta: '', budget_delta: '', reason: '' });
+  const requestCo = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/change-orders`, { method: 'POST', body: JSON.stringify({ contract_delta: Number(cf.contract_delta) || 0, budget_delta: Number(cf.budget_delta) || 0, reason: cf.reason || undefined }) }),
+    onSuccess: () => { notifySuccess('ส่งคำขอเปลี่ยนแปลงแล้ว — รออนุมัติ'); setCf({ contract_delta: '', budget_delta: '', reason: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  const decideCo = useMutation({
+    mutationFn: (v: { id: number; action: 'approve' | 'reject' }) => api(`/api/projects/change-orders/${v.id}/${v.action}`, { method: 'POST', body: '{}' }),
+    onSuccess: () => { notifySuccess('อัปเดตคำขอเปลี่ยนแปลงแล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
 
   const scurve = (series.data?.series ?? []).map((s: any) => ({ month: s.month, planned: s.cumulative_planned }));
   const ganttTasks: GanttTask[] = (schedule.data?.tasks ?? []);
@@ -166,6 +177,39 @@ export default function ProjectDetailPage() {
           </dl>
         </Card>
       </div>
+
+      {/* Change orders (PROJ-10) — maker-checker contract/scope variations */}
+      <Card className="gap-3 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">ใบสั่งเปลี่ยนแปลง (Change orders)</h3>
+          {cos.data?.summary?.approved > 0 && <Badge variant="secondary">สัญญาเปลี่ยนสุทธิ {baht(cos.data.summary.approved_contract_delta)}</Badge>}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid gap-1.5"><Label>มูลค่าสัญญา (+/−)</Label><Input type="number" value={cf.contract_delta} onChange={(ev) => setCf({ ...cf, contract_delta: ev.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>งบประมาณ (+/−)</Label><Input type="number" value={cf.budget_delta} onChange={(ev) => setCf({ ...cf, budget_delta: ev.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>เหตุผล</Label><Input value={cf.reason} onChange={(ev) => setCf({ ...cf, reason: ev.target.value })} /></div>
+          <div className="flex items-end"><Button size="sm" variant="outline" onClick={() => requestCo.mutate()} disabled={requestCo.isPending || (!cf.contract_delta && !cf.budget_delta)}><Plus className="size-4" /> ขอเปลี่ยนแปลง</Button></div>
+        </div>
+        <div className="flex flex-col divide-y">
+          {(cos.data?.change_orders ?? []).map((c: any) => (
+            <div key={c.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span className="flex flex-wrap items-center gap-2">
+                <Badge variant={c.status === 'approved' ? 'success' : c.status === 'rejected' ? 'muted' : 'warning'}>{c.status === 'approved' ? 'อนุมัติ' : c.status === 'rejected' ? 'ปฏิเสธ' : 'รออนุมัติ'}</Badge>
+                <span className="font-medium">{c.co_no}</span>
+                <span className="tabular text-muted-foreground">สัญญา {c.contract_delta >= 0 ? '+' : ''}{baht(c.contract_delta)}</span>
+                {c.reason && <span className="text-xs text-muted-foreground">· {c.reason}</span>}
+                <span className="text-xs text-muted-foreground">ขอโดย {c.requested_by}</span>
+              </span>
+              {c.status === 'pending' && (
+                <span className="flex gap-1">
+                  <Button size="sm" variant="ghost" title="อนุมัติ (ต้องไม่ใช่ผู้ขอ)" onClick={() => decideCo.mutate({ id: c.id, action: 'approve' })}><CheckCircle2 className="size-4" /></Button>
+                </span>
+              )}
+            </div>
+          ))}
+          {!cos.data?.count && <p className="py-2 text-sm text-muted-foreground">ยังไม่มีใบสั่งเปลี่ยนแปลง — การเปลี่ยนมูลค่าสัญญาต้องผ่านการอนุมัติ (ผู้อนุมัติ ≠ ผู้ขอ) และจะตั้งเส้นฐานใหม่</p>}
+        </div>
+      </Card>
     </div>
   );
 
