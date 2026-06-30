@@ -22,6 +22,7 @@ import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exception
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
 import { JobWorkerService } from '../../../apps/api/dist/modules/jobs/job-worker.service';
+import { JobQueueService } from '../../../apps/api/dist/modules/jobs/job-queue.service';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIG = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -96,6 +97,46 @@ async function main() {
   // 7. empty queue → worker tick is a no-op
   const none = await worker.tick();
   ok('empty queue → tick() returns false', none === false, `tick=${none}`);
+
+  // ── ITGC-OP-04: dead-letter + stuck-job reaper ──────────────────────────────────────────────────
+  const queue = app.get(JobQueueService);
+
+  // 8. dead-letter — a job whose type has NO handler fails; with maxAttempts=1 it exhausts on the first
+  // tick and lands in 'failed' (the dead-letter state that raises an ops alert).
+  const dlId = await queue.enqueue({ jobType: 'no_such_handler', tenantId: hq, bypass: true, maxAttempts: 1 });
+  await worker.tick();
+  const dl = await inj('GET', `/api/jobs/${dlId}`, admin);
+  ok('retry-exhausted job → dead-letter (status failed)', dl.json.status === 'failed', JSON.stringify({ st: dl.json.status, err: dl.json.error }).slice(0, 120));
+
+  // 9. stuck-job reaper — two jobs left 'running' with a STALE lock (their worker "died"). One has retries
+  // left → requeued; one is exhausted → dead-lettered. (claimNext only picks 'queued', so without the
+  // reaper these sit forever.)
+  const old = new Date(Date.now() - 10 * 60_000); // 10 min ago > default 5-min stale threshold
+  const [stuckRetry] = await db.insert(s.backgroundJobs).values({ tenantId: hq, jobType: 'zombie', status: 'running', attempts: 1, maxAttempts: 3, lockedAt: old, payload: {} }).returning({ id: s.backgroundJobs.id });
+  const [stuckDead]  = await db.insert(s.backgroundJobs).values({ tenantId: hq, jobType: 'zombie', status: 'running', attempts: 3, maxAttempts: 3, lockedAt: old, payload: {} }).returning({ id: s.backgroundJobs.id });
+  const reaped = await worker.reap();
+  ok('reaper requeues 1 + dead-letters 1 stuck job', reaped.requeued === 1 && reaped.deadLettered === 1, JSON.stringify(reaped));
+  const sr = await inj('GET', `/api/jobs/${Number(stuckRetry.id)}`, admin);
+  const sd = await inj('GET', `/api/jobs/${Number(stuckDead.id)}`, admin);
+  ok('reaped-with-retries → requeued (status queued)', sr.json.status === 'queued', `st=${sr.json.status}`);
+  ok('reaped-exhausted → dead-letter (status failed)', sd.json.status === 'failed', `st=${sd.json.status}`);
+
+  // 10. a fresh 'running' job (lock NOT stale) is left alone by the reaper
+  const [fresh] = await db.insert(s.backgroundJobs).values({ tenantId: hq, jobType: 'zombie', status: 'running', attempts: 1, maxAttempts: 3, lockedAt: new Date(), payload: {} }).returning({ id: s.backgroundJobs.id });
+  const reaped2 = await worker.reap();
+  const fr = await inj('GET', `/api/jobs/${Number(fresh.id)}`, admin);
+  ok('fresh running job is NOT reaped', reaped2.requeued === 0 && reaped2.deadLettered === 0 && fr.json.status === 'running', JSON.stringify({ ...reaped2, st: fr.json.status }));
+
+  // 11. opsCounts surfaces dead-letters + stuck for the metrics/health endpoint
+  const counts = await queue.opsCounts();
+  ok('opsCounts reports failed ≥ 2 and a fresh running job', counts.failed >= 2 && counts.running >= 1, JSON.stringify(counts));
+
+  // 12. ops-metrics endpoint — admin-gated, surfaces pool + jobs backlog (Step 2 observability)
+  const metrics = await inj('GET', '/api/jobs/ops-metrics', admin);
+  ok('GET /api/jobs/ops-metrics → pool + requests + jobs backlog', metrics.status === 200 && typeof metrics.json?.pool?.max === 'number' && metrics.json?.jobs?.failed >= 2, JSON.stringify(metrics.json).slice(0, 160));
+  // 13. ops-metrics is NOT a per-tenant endpoint — a scoped non-'users' principal is denied
+  const metricsCross = await inj('GET', '/api/jobs/ops-metrics', t2sales);
+  ok('ops-metrics gated to admin/ops (403 for scoped sales user)', metricsCross.status === 403, `status=${metricsCross.status}`);
 
   await app.close();
   console.log('\n── Step 4 — async background-job queue ──');

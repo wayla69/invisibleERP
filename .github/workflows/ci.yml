@@ -299,3 +299,38 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Real-Postgres smoke (RLS org-scoping + Date round-trip)
         run: pnpm --filter @ierp/cutover pg-smoke
+
+  # Real-Postgres CORE gate (operational maturity — Step 3). Boots the actual Nest app over a real
+  # postgres:16 and drives auth + RLS isolation + the job round-trip + audit immutability + ops-metrics —
+  # the FORCE-RLS / postgres-js / trigger behaviours PGlite can't reproduce. A required gate (the
+  # "green-on-PGlite / broken-on-prod" class is the recurring root cause this closes).
+  pg-core:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --experimental-sqlite
+      HARNESS_PG_URL: postgres://postgres:postgres@localhost:5432/ierp_core
+      JWT_SECRET: pgcore-ci-secret
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ierp_core
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Restore dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+      - name: Real-Postgres core (auth + RLS + jobs + audit immutability)
+        run: pnpm --filter @ierp/cutover pg-core

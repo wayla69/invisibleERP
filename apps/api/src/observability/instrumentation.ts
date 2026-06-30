@@ -7,8 +7,30 @@ import { PgInstrumentation } from '@opentelemetry/instrumentation-pg';
 import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import * as Sentry from '@sentry/node';
+import { logger } from './logger';
 
 let sdk: NodeSDK | null = null;
+
+// Operational alert sink (ITGC-OP-04 — batch-job/operational monitoring). Emits a single structured
+// error-level log line (alertable via the log pipeline: a rule on `alert:"ops"` / `event` routes to
+// on-call) AND, when Sentry is configured, captures it there for triage. Use for operator-facing
+// conditions that need attention but aren't tied to one tenant — e.g. a dead-lettered background job or a
+// reaped zombie. Never throws: alerting must not break the path that raised the alert.
+export function captureOpsAlert(event: string, detail: Record<string, unknown> = {}, err?: unknown): void {
+  try {
+    logger.error({ alert: 'ops', event, ...detail, err: err instanceof Error ? err.message : err }, `OPS ALERT: ${event}`);
+  } catch { /* logging must never throw */ }
+  try {
+    if (!process.env.SENTRY_DSN) return;
+    Sentry.withScope((scope) => {
+      scope.setTag('ops_event', event);
+      scope.setLevel('error');
+      scope.setExtras(detail as Record<string, unknown>);
+      if (err instanceof Error) Sentry.captureException(err);
+      else Sentry.captureMessage(`ops:${event}`);
+    });
+  } catch { /* Sentry must never block the caller */ }
+}
 
 // Init OTel NodeSDK with OTLP/HTTP exporter + HTTP/PG instrumentations.
 // No-op (and never throws) if OTEL_EXPORTER_OTLP_ENDPOINT is unset.

@@ -62,12 +62,24 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   if (has(config.ANTHROPIC_API_KEY) && !has(config.AI_DPA_ACKNOWLEDGED)) {
     logger.warn('ANTHROPIC_API_KEY is set but AI_DPA_ACKNOWLEDGED is not — AI endpoints will fail closed (AI_DPA_REQUIRED) until the signed Anthropic DPA is acknowledged. See docs/legal/data-processing-agreement.md.');
   }
+  // Observability is now FAIL-CLOSED in production (operational maturity): you cannot operate what you
+  // cannot see, so a prod deploy must wire error reporting (Sentry) + tracing (OTel) — OR consciously opt
+  // out with ALLOW_NO_OBSERVABILITY=1 (which downgrades to a loud warning). This turns "silently blind in
+  // prod" into an explicit, auditable decision rather than an accident.
   const lacking = RECOMMENDED_IN_PROD.filter((k) => !has(config[k]));
   if (lacking.length) {
-    logger.warn(
-      `Observability not fully configured in production (${lacking.join(', ')} unset) — ` +
-        `running with reduced visibility. See docs/ops/observability-incident.md.`,
-    );
+    if (has(config.ALLOW_NO_OBSERVABILITY)) {
+      logger.warn(
+        `Observability not fully configured in production (${lacking.join(', ')} unset) and explicitly ` +
+          `allowed via ALLOW_NO_OBSERVABILITY — running with reduced visibility. See docs/ops/observability-incident.md.`,
+      );
+    } else {
+      throw new Error(
+        `Refusing to boot: observability not configured in production (${lacking.join(', ')} unset). ` +
+          `Wire Sentry + OpenTelemetry, or set ALLOW_NO_OBSERVABILITY=1 to opt out consciously. ` +
+          `See docs/ops/observability-incident.md.`,
+      );
+    }
   }
 
   return config;

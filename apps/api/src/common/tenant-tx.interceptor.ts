@@ -1,10 +1,16 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Inject, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { from, firstValueFrom } from 'rxjs';
+import { from, firstValueFrom, finalize } from 'rxjs';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { tenantALS } from './tenant-context';
 import { NO_TX_KEY } from './decorators';
+import { txStart, txEnd } from '../observability/runtime-metrics';
+import { logger as pino } from '../observability/logger';
+
+// A request whose tenant DB transaction is held longer than this is logged as a slow path (operational
+// visibility — a p95 regression or a missing index surfaces here without an external APM). Env-tunable.
+const SLOW_TX_MS = Number(process.env.SLOW_TX_MS ?? 1000);
 
 // Wraps each (non-SSE) request in a tenant-scoped transaction:
 //   SET LOCAL ROLE app_user  +  set_config('app.tenant_id'|'app.bypass_rls')
@@ -57,6 +63,9 @@ export class TenantTxInterceptor implements NestInterceptor {
     req.__rlsBypass = bypass;
     req.__rlsOrgScope = orgScope;
 
+    // Bracket the request's DB transaction for ops metrics + slow-path logging (operational visibility).
+    const started = Date.now();
+    txStart();
     const db = this.db as any;
     return from(
       db.transaction(async (tx: any) => {
@@ -88,6 +97,14 @@ export class TenantTxInterceptor implements NestInterceptor {
         // changing access mode after the first query anyway (25001). @NoTx is the opt-out for non-tenant
         // handlers. defaultValue guards handlers that complete without emitting (would throw EmptyError).
         return tenantALS.run({ tx, tenantId, bypass }, () => firstValueFrom(next.handle(), { defaultValue: undefined }));
+      }),
+    ).pipe(
+      finalize(() => {
+        const dur = Date.now() - started;
+        txEnd(dur, SLOW_TX_MS);
+        if (dur >= SLOW_TX_MS) {
+          pino.warn({ event: 'slow_request', method: req?.method, route: (req as any)?.url, duration_ms: dur }, 'slow DB transaction');
+        }
       }),
     );
   }
