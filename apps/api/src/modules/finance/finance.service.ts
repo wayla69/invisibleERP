@@ -397,7 +397,7 @@ export class FinanceService {
   // ───────────────────── AP disbursement maker-checker (AP-PAY) ─────────────────────
   // Step 1 (MAKER, `creditors`) — REQUEST a vendor payment. No cash moves and NO GL posts here: the bill's
   // paid_amount is untouched and a PendingApproval row is recorded. PATCH /api/finance/ap/transactions/{no}/pay
-  async requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string) {
+  async requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string, wht?: { income_type?: string; rate?: number }) {
     const db = this.db as any;
     const [t] = await db.select().from(apTransactions).where(eq(apTransactions.txnNo, txnNo)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
@@ -418,13 +418,23 @@ export class FinanceService {
     if (n(amount) > outstanding + 0.001) {
       throw new BadRequestException({ code: 'AP_OVERPAY', message: `Amount ${amount} exceeds payable balance ${outstanding}`, messageTh: 'ยอดจ่ายเกินยอดคงค้าง (รวมรายการที่รออนุมัติ)' });
     }
+    // TAX-03 — optional withholding tax (ภ.ง.ด.3/53). The rate is captured here; the amount is computed on the
+    // pre-VAT base and posted to GL 2361 at approval (the actual cash/GL event). Bounded to a sane 0–30%.
+    let whtRate: number | null = null;
+    if (wht?.rate != null) {
+      whtRate = wht.rate;
+      if (!(whtRate > 0 && whtRate <= 0.30)) {
+        throw new BadRequestException({ code: 'INVALID_WHT_RATE', message: 'WHT rate must be between 0 and 0.30', messageTh: 'อัตราภาษีหัก ณ ที่จ่ายต้องอยู่ระหว่าง 0 ถึง 0.30' });
+      }
+    }
     const paymentNo = await this.docNo.nextDaily('APP');
     await db.insert(apPayments).values({
       paymentNo, txnNo, tenantId: apTenant, amount: String(n(amount)), status: 'PendingApproval',
       requestedBy: user.username, glRef: `${txnNo}:p:${paymentNo}`, idempotencyKey: idempotencyKey ?? null,
+      whtIncomeType: whtRate != null ? (wht?.income_type ?? null) : null, whtRate: whtRate != null ? String(whtRate) : null,
     });
-    await this.statusLog.log('APP', paymentNo, '', 'PendingApproval', user.username, `Payment request ${n(amount)} for ${txnNo}`);
-    return { payment_no: paymentNo, txn_no: txnNo, amount: n(amount), status: 'PendingApproval' };
+    await this.statusLog.log('APP', paymentNo, '', 'PendingApproval', user.username, `Payment request ${n(amount)} for ${txnNo}${whtRate != null ? ` (WHT ${whtRate * 100}%)` : ''}`);
+    return { payment_no: paymentNo, txn_no: txnNo, amount: n(amount), status: 'PendingApproval', wht_rate: whtRate };
   }
 
   // Step 2 (CHECKER, approval authority) — APPROVE a pending payment. The approver MUST differ from the
@@ -440,25 +450,40 @@ export class FinanceService {
     }
     const apTenant = p.tenantId ?? approver.tenantId ?? null;
     let newPaid = 0; let billStatus = '';
+    let billGross = 0, billVat = 0;
     await db.transaction(async (tx: any) => {
       // Lock the bill row and recompute from the LOCKED paid total → no lost update vs a concurrent approval.
       const [t] = await tx.select().from(apTransactions).where(eq(apTransactions.txnNo, p.txnNo)).for('update').limit(1);
       if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
+      billGross = n(t.amount); billVat = n(t.vatAmount);
       newPaid = round2(n(t.paidAmount) + n(p.amount));
       billStatus = newPaid >= n(t.amount) ? 'Paid' : newPaid > 0 ? 'Partial' : 'Unpaid';
       await tx.update(apTransactions).set({ paidAmount: String(newPaid), status: billStatus }).where(eq(apTransactions.id, t.id));
       await tx.update(apPayments).set({ status: 'Approved', approvedBy: approver.username, approvedAt: new Date() }).where(eq(apPayments.id, p.id));
     });
-    // GL: disburse (Dr 2000 AP / Cr 1000 Cash). The per-request glRef is stable + unique → idempotent post.
+    // TAX-03 — withholding tax on this payment, computed on the PRE-VAT base (Thai WHT is on the fee, not VAT).
+    // Prorate the base by the bill's net/gross ratio so partial payments withhold proportionally.
+    const whtRate = n(p.whtRate);
+    let whtAmount = 0;
+    if (whtRate > 0) {
+      const baseRatio = billGross > 0 ? (billGross - billVat) / billGross : 1;
+      whtAmount = round2(round2(n(p.amount) * baseRatio) * whtRate);
+    }
+    // GL: clear the full payable (Dr 2000), hold the WHT (Cr 2361), pay the vendor net (Cr 1000). With no WHT
+    // this is the original Dr 2000 / Cr 1000. The per-request glRef is stable + unique → idempotent post.
     if (this.ledger && n(p.amount) > 0 && !(await this.ledger.alreadyPosted('PAY-AP', p.glRef, apTenant))) {
+      const lines: any[] = [{ account_code: '2000', debit: n(p.amount) }];
+      if (whtAmount > 0) lines.push({ account_code: '2361', credit: whtAmount });
+      lines.push({ account_code: '1000', credit: round2(n(p.amount) - whtAmount) });
       await this.ledger.postEntry({
         date: ymd(), source: 'PAY-AP', sourceRef: p.glRef, tenantId: apTenant,
-        memo: `AP payment ${p.txnNo} (${paymentNo})`, createdBy: approver.username,
-        lines: [{ account_code: '2000', debit: n(p.amount) }, { account_code: '1000', credit: n(p.amount) }],
+        memo: `AP payment ${p.txnNo} (${paymentNo})${whtAmount > 0 ? ` — WHT ฿${whtAmount}` : ''}`, createdBy: approver.username,
+        lines,
       });
+      if (whtAmount > 0) await db.update(apPayments).set({ whtAmount: String(whtAmount) }).where(eq(apPayments.id, p.id));
     }
     await this.statusLog.log('APP', paymentNo, 'PendingApproval', 'Approved', approver.username);
-    return { payment_no: paymentNo, txn_no: p.txnNo, status: 'Approved', approved_by: approver.username, requested_by: p.requestedBy, paid_amount: newPaid, bill_status: billStatus };
+    return { payment_no: paymentNo, txn_no: p.txnNo, status: 'Approved', approved_by: approver.username, requested_by: p.requestedBy, paid_amount: newPaid, bill_status: billStatus, wht_amount: whtAmount, net_paid: round2(n(p.amount) - whtAmount) };
   }
 
   // Step 2 (alt) — REJECT a pending payment (no cash/GL effect; recorded for the audit trail).

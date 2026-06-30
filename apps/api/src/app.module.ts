@@ -72,6 +72,7 @@ import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module
 import { AuditViewerModule } from './modules/audit-viewer/audit-viewer.module';
 import { PlanningModule } from './modules/planning/planning.module';
 import { ConsolidationModule } from './modules/consolidation/consolidation.module';
+import { IcReconModule } from './modules/ic-reconciliation/ic-recon.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { ProfitabilityModule } from './modules/profitability/profitability.module';
 import { PipelineModule } from './modules/pipeline/pipeline.module';
@@ -200,6 +201,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     AuditViewerModule,
     PlanningModule,
     ConsolidationModule,
+    IcReconModule,
     ReconciliationModule,
     ProfitabilityModule,
     PipelineModule,

@@ -32,6 +32,10 @@ export class TaxReportsController {
   @Get('pnd') @Permissions('exec', 'creditors')
   pnd(@Query('type') type: string, @Query('month') month: string, @Query('year') year: string) { const { m, y } = parseMY(month, year); return this.svc.pnd(type, m, y); }
 
+  // TAX-03 — ภ.ง.ด.3/53 → GL 2361 tie-out (vendor WHT held vs withheld vs certificated).
+  @Get('pnd-tieout') @Permissions('exec', 'creditors')
+  pndTieOut(@Query('month') month: string, @Query('year') year: string) { const { m, y } = parseMY(month, year); return this.svc.pndTieOut(m, y); }
+
   // ── exports (PDF; HTML fallback when Chromium absent) ──
   @Get('output-vat/export') @Permissions('exec', 'ar')
   async outputVatExport(@Query('month') month: string, @Query('year') year: string, @Res() reply: FastifyReply) {

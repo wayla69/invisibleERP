@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { and, eq, gte, lt, asc, desc, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, gte, lt, asc, desc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { taxInvoices, apTransactions, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings } from '../../database/schema';
+import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings } from '../../database/schema';
 import { n } from '../../database/queries';
 import { PND_LABELS } from '../tax-docs/wht-rates';
 import { currentTenantStore } from '../../common/tenant-context';
@@ -84,6 +84,36 @@ export class TaxReportsService {
       totals: { amount_paid: round2(out.reduce((a: number, r: any) => a + r.amount_paid, 0)), tax_withheld: round2(out.reduce((a: number, r: any) => a + r.tax_withheld, 0)), count: out.length },
       deadline: nextMonthDay(month, year, 7),
       deadline_note: 'ยื่นแบบ ภ.ง.ด. ภายในวันที่ 7 ของเดือนถัดไป',
+    };
+  }
+
+  // ภ.ง.ด.3/53 → GL tie-out (TAX-03). The vendor WHT held in GL 2361 (posted at AP payment) is reconciled
+  // three ways: (1) against the operational withholding recorded on approved AP payments — a mismatch flags a
+  // manual JE that touched 2361 outside the AP process; (2) against the 50-ทวิ certificates issued for the
+  // period — any gap is un-certificated WHT (a control: every withholding owes the payee a certificate).
+  async pndTieOut(month: number, year: number) {
+    const db = this.db as any; const { start, end, period } = this.win(month, year);
+    // (1) GL 2361 net credit movement (Posted) in the period.
+    const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalLines.accountCode, '2361'), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
+    const gl2361 = round2(n(g?.v));
+    // (2) WHT withheld on AP payments approved in the period (the operational record).
+    const [a] = await db.select({ v: sql<string>`coalesce(sum(${apPayments.whtAmount}),0)` })
+      .from(apPayments).where(and(eq(apPayments.status, 'Approved'), sql`${apPayments.approvedAt} >= ${start} AND ${apPayments.approvedAt} < ${end}`));
+    const apWht = round2(n(a?.v));
+    // (3) WHT certificated (50-ทวิ, PND3+PND53, Issued) in the period.
+    const [c] = await db.select({ v: sql<string>`coalesce(sum(${whtCertificates.totalWht}),0)` })
+      .from(whtCertificates).where(and(inArray(whtCertificates.pndType, ['PND3', 'PND53'] as any), eq(whtCertificates.status, 'Issued'), gte(whtCertificates.datePaid, start), lt(whtCertificates.datePaid, end)));
+    const certWht = round2(n(c?.v));
+    return {
+      report: 'pnd_tieout', month, year, period, gl_account: '2361',
+      gl_net_movement: gl2361, ap_wht_withheld: apWht, cert_wht_issued: certWht,
+      tied_gl_ap: Math.abs(gl2361 - apWht) < 0.01,
+      uncertificated_wht: round2(apWht - certWht),
+      fully_certificated: Math.abs(apWht - certWht) < 0.01,
+      deadline: nextMonthDay(month, year, 7),
+      scope_note: 'GL 2361 holds vendor WHT (ภ.ง.ด.3/53) withheld at AP payment; tie to the operational withholding (ap_payments) and to issued 50-ทวิ certificates. Payroll PND1 WHT is a separate account (2360).',
     };
   }
 

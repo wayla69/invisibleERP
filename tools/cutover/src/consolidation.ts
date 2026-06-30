@@ -129,7 +129,23 @@ async function main() {
   const unauth = await inj('POST', '/api/consolidation/groups', undefined, { name: 'X', fiscal_year: 2026 });
   ok('Unauthenticated request → 401', unauth.status === 401, `status=${unauth.status}`);
 
-  // 6. Run consolidation for 2026-01
+  // ── REC-03 — IC reconciliation sign-off gates consolidation elimination ──
+  await db.insert(s.users).values([{ username: 'admin2', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  const admin2 = await login('admin2', 'admin123');
+  // The consolidation run is BLOCKED until the period's IC reconciliation is reviewed + approved.
+  const blockedRun = await inj('POST', `/api/consolidation/groups/${groupId}/run`, admin, { period: '2026-01' });
+  ok('REC-03: consolidation BLOCKED until IC reconciliation is approved → 400 IC_RECON_NOT_APPROVED', blockedRun.status === 400 && blockedRun.json.error?.code === 'IC_RECON_NOT_APPROVED', `${blockedRun.status} ${blockedRun.json.error?.code}`);
+  // Preparer reconciles + signs (IC Due-From 1150 == Due-To 2150 == 1000 → eliminates).
+  const icPrep = await inj('POST', `/api/ic-reconciliation/groups/${groupId}/prepare`, admin, { period: '2026-01' });
+  ok('REC-03: prepare → Prepared, due-from 1000 = due-to 1000, eliminates true', icPrep.status === 200 && icPrep.json.status === 'Prepared' && near(icPrep.json.total_due_from, 1000) && near(icPrep.json.total_due_to, 1000) && icPrep.json.eliminates === true, JSON.stringify(icPrep.json).slice(0, 150));
+  // The preparer cannot approve their own reconciliation (SoD R-consol).
+  const icSelf = await inj('POST', `/api/ic-reconciliation/groups/${groupId}/approve`, admin, { period: '2026-01' });
+  ok('REC-03: preparer cannot approve their own reconciliation → 403 SOD_VIOLATION', icSelf.status === 403 && icSelf.json.error?.code === 'SOD_VIOLATION', `${icSelf.status} ${icSelf.json.error?.code}`);
+  // An independent approver (≠ preparer) signs off → Approved.
+  const icAppr = await inj('POST', `/api/ic-reconciliation/groups/${groupId}/approve`, admin2, { period: '2026-01' });
+  ok('REC-03: independent approver signs off → Approved', icAppr.status === 200 && icAppr.json.status === 'Approved' && icAppr.json.approved_by === 'admin2', JSON.stringify(icAppr.json).slice(0, 150));
+
+  // 6. Run consolidation for 2026-01 (now that the IC reconciliation is approved)
   const run = await inj('POST', `/api/consolidation/groups/${groupId}/run`, admin, { period: '2026-01' });
   ok('Run consolidation → status Final', run.status === 200 && run.json.status === 'Final', JSON.stringify(run.json));
   const runId = run.json.run_id;
@@ -186,9 +202,7 @@ async function main() {
   const selfPost = await inj('POST', `/api/consolidation/runs/${runId}/post`, admin);
   ok('CON-03 self-post → SELF_POST', selfPost.status === 403 && selfPost.json.error?.code === 'SELF_POST', JSON.stringify(selfPost.json));
 
-  // 18. Post by a DIFFERENT admin user → Posted
-  await db.insert(s.users).values([{ username: 'admin2', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
-  const admin2 = await login('admin2', 'admin123');
+  // 18. Post by a DIFFERENT admin user → Posted (admin2 created earlier for the REC-03 sign-off)
   const posted = await inj('POST', `/api/consolidation/runs/${runId}/post`, admin2);
   ok('CON-03 post by other user → Posted', posted.status === 200 && posted.json.status === 'Posted', JSON.stringify(posted.json));
 

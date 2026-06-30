@@ -5,6 +5,7 @@ import { consolidationGroups, consolidationEntities, consolidationRuns, consolid
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { accounts } from '../../database/schema/ledger';
 import { icTransactions } from '../../database/schema/intercompany';
+import { icReconPeriods } from '../../database/schema/ic-recon';
 import { fxRates } from '../../database/schema/fx';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -81,6 +82,15 @@ export class ConsolidationService {
     const db = this.db as any;
     await this.assertGroup(groupId);
     const period = dto.period; // 'YYYY-MM'
+
+    // REC-03 — intercompany reconciliation sign-off gate: the period's IC balances (Due-From 1150 vs Due-To
+    // 2150) must be reconciled and independently APPROVED before consolidation eliminates them. A re-run of an
+    // existing (Draft/Final, not Posted) consolidation is allowed once the period's sign-off is Approved.
+    const [icr] = await db.select().from(icReconPeriods)
+      .where(and(eq(icReconPeriods.groupId, groupId), eq(icReconPeriods.period, period))).limit(1);
+    if (!icr || icr.status !== 'Approved') {
+      throw new BadRequestException({ code: 'IC_RECON_NOT_APPROVED', message: `Intercompany reconciliation for ${period} must be reviewed and approved before consolidation elimination`, messageTh: `ต้องกระทบยอดและอนุมัติรายการระหว่างกันงวด ${period} ก่อนการรวมงบ` });
+    }
 
     const entities = await db.select().from(consolidationEntities)
       .where(and(eq(consolidationEntities.groupId, groupId), eq(consolidationEntities.isActive, true)));
