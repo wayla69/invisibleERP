@@ -37,7 +37,7 @@ export default function ProjectDetailPage() {
   const code = decodeURIComponent(String(useParams().code ?? ''));
   const router = useRouter();
   const qc = useQueryClient();
-  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
+  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
 
   const detail = useQuery<any>({ queryKey: ['proj', code, 'detail'], queryFn: () => api(`/api/projects/${code}`) });
   const evm = useQuery<any>({ queryKey: ['proj', code, 'evm'], queryFn: () => api(`/api/projects/${code}/evm`) });
@@ -46,6 +46,7 @@ export default function ProjectDetailPage() {
   const tasks = useQuery<any>({ queryKey: ['proj', code, 'tasks'], queryFn: () => api(`/api/projects/${code}/tasks`) });
   const milestones = useQuery<any>({ queryKey: ['proj', code, 'milestones'], queryFn: () => api(`/api/projects/${code}/milestones`) });
   const resources = useQuery<any>({ queryKey: ['proj', code, 'resources'], queryFn: () => api(`/api/projects/${code}/resources`) });
+  const risks = useQuery<any>({ queryKey: ['proj', code, 'risks'], queryFn: () => api(`/api/projects/${code}/risks`) });
 
   const p = detail.data;
   const e = evm.data;
@@ -80,6 +81,17 @@ export default function ProjectDetailPage() {
   const addRes = useMutation({
     mutationFn: () => api(`/api/projects/${code}/resources`, { method: 'POST', body: JSON.stringify({ resource_name: rf.resource_name, role: rf.role || undefined, alloc_pct: Number(rf.alloc_pct) || 100 }) }),
     onSuccess: () => { notifySuccess('จัดสรรทรัพยากรแล้ว'); setResDlg(false); setRf({ resource_name: '', role: '', alloc_pct: '100' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+
+  const [riskDlg, setRiskDlg] = useState(false);
+  const [kf, setKf] = useState({ kind: 'risk', title: '', probability: '3', impact: '3', owner: '', mitigation: '', due_date: '' });
+  const addRisk = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/risks`, { method: 'POST', body: JSON.stringify({ kind: kf.kind, title: kf.title, probability: kf.kind === 'risk' ? Number(kf.probability) || 1 : undefined, impact: Number(kf.impact) || 1, owner: kf.owner || undefined, mitigation: kf.mitigation || undefined, due_date: kf.due_date || undefined }) }),
+    onSuccess: () => { notifySuccess('บันทึกความเสี่ยง/ปัญหาแล้ว'); setRiskDlg(false); setKf({ kind: 'risk', title: '', probability: '3', impact: '3', owner: '', mitigation: '', due_date: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  const patchRisk = useMutation({
+    mutationFn: (v: { id: number; body: any }) => api(`/api/projects/risks/${v.id}`, { method: 'PATCH', body: JSON.stringify(v.body) }),
+    onSuccess: () => { notifySuccess('อัปเดตแล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
   const [costDlg, setCostDlg] = useState<null | 'cost' | 'bill'>(null);
@@ -254,6 +266,40 @@ export default function ProjectDetailPage() {
     </div>
   );
 
+  const ragBadge = (rag: string) => <Badge variant={rag === 'red' ? 'destructive' : rag === 'amber' ? 'warning' : 'success'}>{rag === 'red' ? 'สูง' : rag === 'amber' ? 'กลาง' : 'ต่ำ'}</Badge>;
+  const rs = risks.data?.summary;
+  const risksTab = (
+    <div className="space-y-4">
+      {rs && (
+        <div className="grid gap-3 sm:grid-cols-4">
+          <StatCard label="เปิดอยู่" value={String(rs.open)} icon={Activity} />
+          <StatCard label="ความเสี่ยงสูง (เปิด)" value={String(rs.high_open)} icon={Activity} tone={rs.high_open > 0 ? 'warning' : 'default'} />
+          <StatCard label="สูง·ยังไม่มีแผนรับมือ" value={String(rs.unmitigated_high)} icon={Activity} tone={rs.unmitigated_high > 0 ? 'danger' : 'success'} />
+          <StatCard label="ปิดแล้ว" value={String(rs.closed)} icon={CheckCircle2} />
+        </div>
+      )}
+      <div className="flex justify-end"><Button size="sm" onClick={() => setRiskDlg(true)}><Plus className="size-4" /> เพิ่มความเสี่ยง/ปัญหา</Button></div>
+      {risks.data && (
+        <DataTable
+          rows={risks.data.risks ?? []}
+          columns={[
+            { key: 'rag', label: 'ระดับ', sortable: false, render: (r: any) => ragBadge(r.rag) },
+            { key: 'kind', label: 'ประเภท', render: (r: any) => r.kind === 'issue' ? 'ปัญหา' : 'ความเสี่ยง' },
+            { key: 'title', label: 'หัวข้อ' },
+            { key: 'score', label: 'คะแนน', align: 'right', render: (r: any) => <span className="tabular" title={r.kind === 'issue' ? `ผลกระทบ ${r.impact}` : `โอกาส ${r.probability} × ผลกระทบ ${r.impact}`}>{r.score}</span> },
+            { key: 'owner', label: 'ผู้รับผิดชอบ', render: (r: any) => r.owner ?? '—' },
+            { key: 'mitigation', label: 'แผนรับมือ', render: (r: any) => r.mitigation ? <span className="text-xs">{r.mitigation}</span> : <span className="text-xs text-destructive">— ยังไม่มี</span> },
+            { key: 'due_date', label: 'กำหนด', render: (r: any) => r.due_date ?? '—' },
+            { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+            { key: 'act', label: '', sortable: false, render: (r: any) => r.status !== 'closed'
+              ? <Button variant="ghost" size="sm" title="ปิด" onClick={() => patchRisk.mutate({ id: r.id, body: { status: 'closed' } })}><CheckCircle2 className="size-4" /></Button> : null },
+          ]}
+          emptyState={{ icon: Activity, title: 'ยังไม่มีความเสี่ยง/ปัญหา', description: 'บันทึกความเสี่ยงและปัญหาเพื่อกำกับดูแล (PROJ-08)' }}
+        />
+      )}
+    </div>
+  );
+
   return (
     <div>
       <button onClick={() => router.push('/projects')} className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /> โครงการทั้งหมด</button>
@@ -269,6 +315,7 @@ export default function ProjectDetailPage() {
             { key: 'schedule', label: 'กำหนดการ & Gantt', content: scheduleTab },
             { key: 'milestones', label: 'หมุดหมาย', content: milestonesTab },
             { key: 'resources', label: 'ทรัพยากร', content: resourcesTab },
+            { key: 'risks', label: 'ความเสี่ยง & ปัญหา', content: risksTab },
             { key: 'costs', label: 'ต้นทุน & บิล', content: costsTab },
           ]}
         />
@@ -323,6 +370,31 @@ export default function ProjectDetailPage() {
             </div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setResDlg(false)}>ปิด</Button><Button onClick={() => addRes.mutate()} disabled={!rf.resource_name || addRes.isPending}>จัดสรร</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add risk / issue */}
+      <Dialog open={riskDlg} onOpenChange={setRiskDlg}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>เพิ่มความเสี่ยง / ปัญหา</DialogTitle></DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5"><Label>ประเภท</Label>
+                <select className={selectCls} value={kf.kind} onChange={(ev) => setKf({ ...kf, kind: ev.target.value })}>
+                  <option value="risk">ความเสี่ยง (risk)</option><option value="issue">ปัญหา (issue)</option>
+                </select>
+              </div>
+              <div className="grid gap-1.5"><Label>ผู้รับผิดชอบ</Label><Input value={kf.owner} onChange={(ev) => setKf({ ...kf, owner: ev.target.value })} /></div>
+            </div>
+            <div className="grid gap-1.5"><Label>หัวข้อ</Label><Input value={kf.title} onChange={(ev) => setKf({ ...kf, title: ev.target.value })} /></div>
+            <div className="grid grid-cols-3 gap-3">
+              {kf.kind === 'risk' && <div className="grid gap-1.5"><Label>โอกาส (1-5)</Label><Input type="number" min="1" max="5" value={kf.probability} onChange={(ev) => setKf({ ...kf, probability: ev.target.value })} /></div>}
+              <div className="grid gap-1.5"><Label>ผลกระทบ (1-5)</Label><Input type="number" min="1" max="5" value={kf.impact} onChange={(ev) => setKf({ ...kf, impact: ev.target.value })} /></div>
+              <div className="grid gap-1.5"><Label>กำหนด</Label><Input type="date" value={kf.due_date} onChange={(ev) => setKf({ ...kf, due_date: ev.target.value })} /></div>
+            </div>
+            <div className="grid gap-1.5"><Label>แผนรับมือ / แก้ไข</Label><Input value={kf.mitigation} onChange={(ev) => setKf({ ...kf, mitigation: ev.target.value })} /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setRiskDlg(false)}>ปิด</Button><Button onClick={() => addRisk.mutate()} disabled={!kf.title || addRisk.isPending}>เพิ่ม</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, crmOpportunities, customerMaster } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, crmOpportunities, customerMaster } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -31,6 +31,14 @@ export interface BaselineDto { label?: string; reason?: string }
 export interface TemplateItemDto { item_type?: 'task' | 'milestone'; seq?: number; name: string; parent_seq?: number; wbs_code?: string; planned_hours?: number; planned_cost?: number; offset_start_days?: number; offset_end_days?: number; depends_on_seq?: number[]; billing_percent?: number; owner?: string; assignee?: string }
 export interface TemplateDto { code?: string; name: string; description?: string; items?: TemplateItemDto[] }
 export interface ApplyTemplateDto { start_date?: string }
+export interface RiskDto { kind?: 'risk' | 'issue'; title: string; probability?: number; impact?: number; owner?: string; mitigation?: string; due_date?: string }
+export interface RiskPatchDto { status?: 'open' | 'mitigating' | 'closed'; probability?: number; impact?: number; owner?: string; mitigation?: string; due_date?: string; title?: string }
+
+// Risk scoring (1..25): a risk is probability × impact; an issue has already occurred (probability = 5/certain)
+// so it scores 5 × impact. RAG follows the score band — red ≥ 12 (HIGH), amber ≥ 6, else green.
+const clamp15 = (x: unknown) => Math.max(1, Math.min(5, Math.round(Number(x) || 1)));
+const riskScore = (kind: string, prob: number | null, impact: number) => (kind === 'issue' ? 5 : (prob ?? 1)) * impact;
+const ragFor = (score: number) => (score >= 12 ? 'red' : score >= 6 ? 'amber' : 'green');
 
 // Add whole days to a yyyy-mm-dd date string (UTC date arithmetic — date-only, no TZ drift).
 const addDays = (ymdStr: string, days: number) => {
@@ -685,6 +693,87 @@ export class ProjectsService {
     return { ...(await this.listTasks(code)), template: tplCode, tasks_created: taskItems.length, milestones_created: msItems.length, start_date: start };
   }
 
+  // ── Risk & issue register (B4, PROJ-08) ──────────────────────────────────
+  // Log a risk (future threat) or issue (materialised problem). Score = prob×impact (risk) / 5×impact (issue);
+  // RAG is derived from the score band. A HIGH (red) risk with no mitigation is the governance signal.
+  async addRisk(code: string, dto: RiskDto, user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const tenantId = p.tenantId ?? user.tenantId ?? null;
+    const kind = dto.kind === 'issue' ? 'issue' : 'risk';
+    const impact = clamp15(dto.impact ?? 1);
+    const probability = kind === 'issue' ? null : clamp15(dto.probability ?? 1);
+    const score = riskScore(kind, probability, impact);
+    await db.insert(projectRisks).values({
+      projectId: Number(p.id), tenantId, kind, title: dto.title, status: 'open',
+      probability, impact, score, rag: ragFor(score), owner: dto.owner ?? null,
+      mitigation: dto.mitigation ?? null, dueDate: dto.due_date ?? null, createdBy: user.username,
+    });
+    return this.listRisks(code);
+  }
+
+  async listRisks(code: string) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const rows = (await db.select().from(projectRisks).where(eq(projectRisks.projectId, Number(p.id))).orderBy(desc(projectRisks.score), desc(projectRisks.id))).map(shapeRisk);
+    const open = rows.filter((r: any) => r.status !== 'closed');
+    const high_open = open.filter((r: any) => r.rag === 'red');
+    return {
+      project_code: code, risks: rows, count: rows.length,
+      summary: {
+        open: open.length, closed: rows.length - open.length,
+        risks: rows.filter((r: any) => r.kind === 'risk').length, issues: rows.filter((r: any) => r.kind === 'issue').length,
+        high_open: high_open.length,
+        // PROJ-08: open HIGH items with no mitigation plan — the unmitigated exposure that must be surfaced.
+        unmitigated_high: high_open.filter((r: any) => !r.mitigation).length,
+      },
+    };
+  }
+
+  // Update a risk/issue: status (closing stamps closed_at), mitigation, owner, due, or a re-score (prob/impact →
+  // score + rag recomputed). Returns the refreshed register.
+  async patchRisk(riskId: number, dto: RiskPatchDto, user: JwtUser) {
+    const db = this.db as any;
+    const [r] = await db.select().from(projectRisks).where(eq(projectRisks.id, Number(riskId))).limit(1);
+    if (!r) throw new NotFoundException({ code: 'RISK_NOT_FOUND', message: `Risk ${riskId} not found`, messageTh: 'ไม่พบความเสี่ยง' });
+    const set: any = {};
+    if (dto.title != null) set.title = dto.title;
+    if (dto.owner != null) set.owner = dto.owner;
+    if (dto.mitigation != null) set.mitigation = dto.mitigation;
+    if (dto.due_date != null) set.dueDate = dto.due_date;
+    if (dto.status != null) {
+      set.status = dto.status;
+      set.closedAt = dto.status === 'closed' ? new Date() : null;
+    }
+    if (dto.probability != null || dto.impact != null) {
+      const impact = clamp15(dto.impact ?? r.impact);
+      const probability = r.kind === 'issue' ? null : clamp15(dto.probability ?? r.probability ?? 1);
+      const score = riskScore(r.kind, probability, impact);
+      set.impact = impact; set.probability = probability; set.score = score; set.rag = ragFor(score);
+    }
+    await db.update(projectRisks).set(set).where(eq(projectRisks.id, Number(riskId)));
+    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(r.projectId))).limit(1);
+    return this.listRisks(proj.projectCode);
+  }
+
+  // Portfolio top-risks roll-up (Track A tie-in): every open risk/issue across the caller's projects, ranked by
+  // score; `high` are the red (HIGH) ones and `unmitigated_high` the subset with no mitigation plan (PROJ-08).
+  async topRisks(user: JwtUser) {
+    const db = this.db as any;
+    const rows = (await db.select().from(projectRisks).where(sql`${projectRisks.status} <> 'closed'`)).map(shapeRisk);
+    const projRows = await db.select().from(projects);
+    const pById = new Map<number, any>(projRows.map((p: any) => [Number(p.id), p]));
+    const enriched = rows
+      .map((r: any) => ({ ...r, project_code: pById.get(r.project_id)?.projectCode ?? null, project_name: pById.get(r.project_id)?.name ?? null }))
+      .sort((a: any, b: any) => b.score - a.score);
+    const high = enriched.filter((r: any) => r.rag === 'red');
+    return {
+      as_of: ymd(), open_count: enriched.length, high_count: high.length,
+      unmitigated_high_count: high.filter((r: any) => !r.mitigation).length,
+      top: enriched.slice(0, 20),
+    };
+  }
+
   private async row(code: string) {
     const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
@@ -726,6 +815,9 @@ function shapeResource(r: any) {
 }
 function shapeTemplateItem(it: any) {
   return { id: Number(it.id), item_type: it.itemType, seq: Number(it.seq), name: it.name, parent_seq: it.parentSeq != null ? Number(it.parentSeq) : null, wbs_code: it.wbsCode, planned_hours: n(it.plannedHours), planned_cost: n(it.plannedCost), offset_start_days: Number(it.offsetStartDays ?? 0), offset_end_days: Number(it.offsetEndDays ?? 0), depends_on_seq: it.dependsOnSeq ? String(it.dependsOnSeq).split(',').map((x: string) => Number(x)).filter((x: number) => Number.isFinite(x)) : [], billing_percent: it.billingPercent != null ? n(it.billingPercent) : null, owner: it.owner, assignee: it.assignee };
+}
+function shapeRisk(r: any) {
+  return { id: Number(r.id), project_id: Number(r.projectId), kind: r.kind, title: r.title, status: r.status, probability: r.probability != null ? Number(r.probability) : null, impact: Number(r.impact), score: Number(r.score), rag: r.rag, owner: r.owner, mitigation: r.mitigation, due_date: r.dueDate, created_by: r.createdBy, created_at: r.createdAt, closed_at: r.closedAt };
 }
 function shapeBaseline(b: any) {
   return { id: Number(b.id), label: b.label, baseline_bac: n(b.baselineBac), baseline_duration_days: Number(b.baselineDurationDays), baseline_end: b.baselineEnd, reason: b.reason, status: b.status, created_by: b.createdBy, captured_at: b.capturedAt };

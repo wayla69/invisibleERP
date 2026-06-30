@@ -236,6 +236,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-213 | Change-controlled baselines + variance | PROJ-07 | 16 §7 (12) |
 | UAT-O2C-214 | Project templates: author + one-step apply | (operational) | 16 §7 (13) |
 | UAT-O2C-215 | RACI accountability + "my tasks" | PROJ-04 (SoD note) | 16 §7 (14) |
+| UAT-O2C-216 | Risk & issue register + portfolio top-risks | PROJ-08 | 16 §7 (15) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |
