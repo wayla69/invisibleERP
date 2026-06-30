@@ -18,6 +18,9 @@ import { LeasesService } from '../leases/leases.service';
 import { RevRecService } from '../revenue/revrec.service';
 import { ProjectsService } from '../projects/projects.service';
 import { CrmPipelineService } from '../crm-pipeline/crm-pipeline.service';
+import { BudgetService } from '../budget/budget.service';
+import { ProcurementService } from '../procurement/procurement.service';
+import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { JobQueueService } from '../jobs/job-queue.service';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
 
@@ -54,6 +57,12 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   rev_rec_recognize: { label: 'รับรู้รายได้ตามสัญญา (TFRS 15)', labelEn: 'Recognize due revenue schedules' },
   // Data-retention purge of DEAD ephemeral security rows only (never financial/audit/PII — statutory hold).
   data_retention_purge: { label: 'ล้างข้อมูลชั่วคราวที่หมดอายุ (นโยบายเก็บข้อมูล)', labelEn: 'Purge expired ephemeral security rows' },
+  // Executive cross-module scorecard (RG-1): composes finance/CRM/projects/supply-chain health into one board.
+  exec_scorecard: { label: 'สรุปผู้บริหารข้ามโมดูล', labelEn: 'Executive cross-module scorecard' },
+  // Budget-vs-actual variance (RG-2): wraps BudgetService.budgetVsActual (ELC-06) for the scheduler.
+  budget_variance: { label: 'งบประมาณเทียบกับจริง', labelEn: 'Budget vs actual variance' },
+  // Supplier performance (RG-3): wraps the supplier scorecard compute (avg score + underperformers).
+  supplier_scorecard: { label: 'คะแนนผลงานผู้ขาย', labelEn: 'Supplier performance scorecard' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -73,6 +82,11 @@ export class BiService implements OnModuleInit {
     // still constructs BiService; the full app provides them (ProjectsModule / CrmPipelineModule).
     @Optional() private readonly projects?: ProjectsService,
     @Optional() private readonly crm?: CrmPipelineService,
+    // Residual-gap report types (RG-1/2/3): exec scorecard composition + budget-variance + supplier scorecard.
+    // Optional so a partial harness still constructs; the full app provides BudgetModule/ProcurementModule/MatchModule.
+    @Optional() private readonly budget?: BudgetService,
+    @Optional() private readonly procurement?: ProcurementService,
+    @Optional() private readonly match?: ThreeWayMatchService,
     @Optional() private readonly jobs?: JobQueueService,
     @Optional() private readonly worker?: JobWorkerService,
   ) {}
@@ -542,7 +556,63 @@ export class BiService implements OnModuleInit {
       const r = await this.crm.winLoss(user);
       return { data: r, summary: `Win/loss: win rate ${r.summary.win_rate}, won ${r.summary.won_amount}, lost ${r.summary.lost_amount}, ${r.loss_reasons.length} loss reason(s)`, summaryTh: `Win/Loss: อัตราชนะ ${r.summary.win_rate} · ชนะ ${r.summary.won_amount} · แพ้ ${r.summary.lost_amount}` };
     }
+    if (reportType === 'budget_variance') {
+      if (!this.budget) throw new BadRequestException({ code: 'BUDGET_UNAVAILABLE', message: 'Budget service not available', messageTh: 'ระบบงบประมาณไม่พร้อมใช้งาน' });
+      const fy = Number(f.fiscal_year) || new Date().getFullYear();
+      const r = await this.budget.budgetVsActual({ fiscal_year: fy, period: f.period, cost_center: f.cost_center });
+      return { data: r, summary: `Budget ${fy}: net variance ${r.rollup.net.variance} (${r.rollup.net.favorable ? 'favorable' : 'unfavorable'}); ${r.review.requires_review_count} item(s) need review`, summaryTh: `งบประมาณ ${fy}: ผลต่างสุทธิ ${r.rollup.net.variance} · ต้องทบทวน ${r.review.requires_review_count} รายการ` };
+    }
+    if (reportType === 'supplier_scorecard') {
+      if (!this.procurement) throw new BadRequestException({ code: 'PROCUREMENT_UNAVAILABLE', message: 'Procurement service not available', messageTh: 'ระบบจัดซื้อไม่พร้อมใช้งาน' });
+      const r = await this.procurement.listScorecards({ period: f.period, limit: f.limit }, user);
+      return { data: r, summary: `Suppliers: ${r.count} scored, avg ${r.avg_score}, ${r.underperformers} underperformer(s) (<70)`, summaryTh: `ผู้ขาย: ให้คะแนน ${r.count} ราย · เฉลี่ย ${r.avg_score} · ต่ำกว่าเกณฑ์ ${r.underperformers} ราย` };
+    }
+    if (reportType === 'exec_scorecard') {
+      const r = await this.execScorecard(user);
+      return { data: r, summary: `Exec: sales(MTD) ${r.finance.sales_mtd}, margin ${r.finance.margin_pct ?? '—'}%, win rate ${r.crm.win_rate_pct ?? '—'}%, portfolio CPI ${r.projects.cpi ?? '—'}, ${r.supply_chain.blocked_invoices} held invoice(s)`, summaryTh: `ผู้บริหาร: ยอดขายเดือนนี้ ${r.finance.sales_mtd} · มาร์จิน ${r.finance.margin_pct ?? '—'}% · อัตราชนะ ${r.crm.win_rate_pct ?? '—'}% · CPI ${r.projects.cpi ?? '—'}` };
+    }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
+  }
+
+  // Executive cross-module scorecard (RG-1): a read-only composition of signals that already exist across
+  // finance / CRM / projects / supply-chain into one health board. Every leg is guarded — a module the harness
+  // didn't wire degrades to nulls rather than throwing, so a partial deployment still renders the board.
+  private async execScorecard(user: JwtUser) {
+    const kpi: any = await this.kpiBoard(user).catch(() => null);
+    const fin: any = await this.financeTrend({ months: 6 }, user).catch(() => null);
+    const finLast = fin?.trend?.[fin.trend.length - 1] ?? null;
+    const pipe: any = await this.pipelineTrend({ months: 6 }, user).catch(() => null);
+    const pipeLast = pipe?.trend?.[pipe.trend.length - 1] ?? null;
+    const portfolio: any = this.projects ? await this.projects.portfolioEvm(user).catch(() => null) : null;
+    const scorecards: any = this.procurement ? await this.procurement.listScorecards({}, user).catch(() => null) : null;
+    const holds: any = this.match ? await this.match.listResults({ blocked: true }, user).catch(() => null) : null;
+    return {
+      as_of: new Date().toISOString().slice(0, 10),
+      finance: {
+        sales_mtd: n(kpi?.sales?.mtd), sales_ytd: n(kpi?.sales?.ytd),
+        open_ar: n(kpi?.receivables?.open_ar), open_ap: n(kpi?.payables?.open_ap),
+        margin_pct: finLast ? n(finLast.margin_pct) : null, gross_profit: finLast ? n(finLast.gross_profit) : null,
+      },
+      crm: {
+        open_value: n(kpi?.pipeline?.open_value),
+        win_rate_pct: pipeLast ? n(pipeLast.win_rate_pct) : null, open_count: pipeLast ? n(pipeLast.open) : null,
+      },
+      projects: {
+        count: portfolio?.count ?? null, cpi: portfolio?.totals?.cpi ?? null,
+        at_risk: portfolio?.at_risk?.length ?? null, over_allocated: portfolio?.capacity?.over_allocated_count ?? null,
+      },
+      supply_chain: {
+        blocked_invoices: n(holds?.blocked), suppliers_scored: scorecards?.count ?? 0,
+        supplier_avg_score: scorecards?.avg_score ?? null, underperformers: scorecards?.underperformers ?? 0,
+      },
+      // The single "what needs attention" rollup — non-zero items the exec should act on.
+      attention: {
+        held_invoices: n(holds?.blocked),
+        at_risk_projects: portfolio?.at_risk?.length ?? 0,
+        budget_unfavorable: finLast && n(finLast.margin_pct) < 0,
+        supplier_underperformers: scorecards?.underperformers ?? 0,
+      },
+    };
   }
 
   // Execute one subscription: generate → deliver (email recipients + in-app notification) → log a run →

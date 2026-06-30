@@ -188,6 +188,25 @@ async function main() {
     ra.status === 202 && (ra.json.enqueued ?? 0) >= 1 && jobRows.length >= 1 && jobRows.some((j: any) => Number(j.payload?.subscriptionId) === Number(asub.json.id)),
     JSON.stringify({ st: ra.status, enq: ra.json.enqueued, jobs: jobRows.length }).slice(0, 150));
 
+  // ── 19. residual-gap report types (RG-1/2/3): exec_scorecard + budget_variance + supplier_scorecard ──
+  const rtypes = await inj('GET', '/api/bi/report-types', admin);
+  ok('report-types catalog exposes exec_scorecard + budget_variance + supplier_scorecard',
+    ['exec_scorecard', 'budget_variance', 'supplier_scorecard'].every((k) => JSON.stringify(rtypes.json).includes(k)), '');
+  const runType = async (report_type: string) => {
+    const sub = await inj('POST', '/api/bi/subscriptions', admin, { name: report_type, report_type, frequency: 'weekly' });
+    return inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, admin, {});
+  };
+  const execRun = await runType('exec_scorecard');
+  ok('exec_scorecard runs success + composed summary (finance/crm/projects/supply-chain)',
+    execRun.json.status === 'success' && /Exec:/.test(execRun.json.summary ?? '') && /win rate/.test(execRun.json.summary ?? ''),
+    JSON.stringify({ s: execRun.json.status, sum: (execRun.json.summary ?? '').slice(0, 60) }));
+  const budRun = await runType('budget_variance');
+  ok('budget_variance runs success + net-variance / review summary',
+    budRun.json.status === 'success' && /net variance/.test(budRun.json.summary ?? '') && /review/.test(budRun.json.summary ?? ''), JSON.stringify({ s: budRun.json.status, sum: (budRun.json.summary ?? '').slice(0, 60) }));
+  const supRun = await runType('supplier_scorecard');
+  ok('supplier_scorecard runs success + avg / underperformer summary',
+    supRun.json.status === 'success' && /avg/.test(supRun.json.summary ?? '') && /underperformer/.test(supRun.json.summary ?? ''), JSON.stringify({ s: supRun.json.status, sum: (supRun.json.summary ?? '').slice(0, 60) }));
+
   await app.close();
 }
 

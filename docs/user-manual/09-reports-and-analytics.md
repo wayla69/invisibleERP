@@ -227,8 +227,14 @@ sales, finance and other modules.
 Set a report to be built and delivered on a schedule, so the right people get it
 without anyone running it by hand.
 
-1. **Name the report** and pick a **type** — *KPI board*, *Sales cube*, *Finance
-   (P&L) trend*, or *Pipeline trend*.
+1. **Name the report** and pick a **type** — analytics summaries (*KPI board*,
+   *Sales cube*, *Finance (P&L) trend*, *Pipeline trend*, *Portfolio EVM*,
+   *CRM win/loss*, **Executive cross-module scorecard**, **Budget vs actual**,
+   **Supplier performance scorecard**) or a scheduled **action job** (e.g. AR
+   dunning, recurring journals). The *Executive scorecard* rolls finance, CRM,
+   project-portfolio and supply-chain health into one board; *Budget vs actual*
+   and *Supplier scorecard* deliver the existing variance/scorecard figures on a
+   schedule.
 2. **Choose a frequency** — daily, weekly or monthly — and optionally an **email
    recipient**.
 3. Save. The report then runs on its schedule: each run posts an **in-app
@@ -241,7 +247,7 @@ without anyone running it by hand.
 their own cadence — same figures as the on-screen views, delivered to inbox and
 notification feed.
 
-> **Troubleshooting:** “BAD_REPORT_TYPE” — the report type isn't one of the four
+> **Troubleshooting:** “BAD_REPORT_TYPE” — the report type isn't one of the
 > built-ins; “BAD_FREQUENCY” — the frequency must be daily, weekly or monthly.
 
 ---
