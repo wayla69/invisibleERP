@@ -401,6 +401,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.budget', href: '/budget', icon: PiggyBank, perms: ['exec', 'planner'] },
       { label: 'nav.demand', href: '/demand', icon: LineChart, perms: ['exec', 'planner', 'warehouse'] },
       { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
+      { label: 'nav.pm_portfolio', href: '/projects/portfolio', icon: LayoutDashboard, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.pm_pipeline', href: '/projects/pipeline', icon: Target, perms: ['exec', 'planner', 'ar', 'crm'] },
       { label: 'nav.profitability', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'nav.insights', href: '/insights', icon: Lightbulb, perms: ['exec', 'dashboard', 'planner', 'warehouse'] },

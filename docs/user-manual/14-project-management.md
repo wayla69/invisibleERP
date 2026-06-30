@@ -9,9 +9,20 @@ work breakdown, schedule/Gantt, resourcing, earned value, and a sales win/loss d
 deals convert into projects.
 
 ## Where to find it
+- **Portfolio** — sidebar **วางแผน & BI → พอร์ตโครงการ (Portfolio)** (`/projects/portfolio`), or the
+  **Portfolio** button on the Projects page.
 - **Projects** — sidebar **วางแผน & BI → โครงการ (Projects)** (`/projects`).
 - **Win/Loss Pipeline** — sidebar **วางแผน & BI → ไปป์ไลน์ Win/Loss** (`/projects/pipeline`), or the
   **Win/Loss** button on the Projects page.
+
+## Portfolio command center (`/projects/portfolio`)
+An executive cross-project overview for the PMO / leadership:
+- **Health band** — portfolio **CPI** (green ≥ 1, amber ≥ 0.9, red below), **on-track** vs **at-risk**
+  project counts (at risk = CPI or SPI < 0.9), and **resources over capacity** (> 100% allocation).
+- **Financial band** — total contract, billed, WIP and margin across all projects.
+- **Pipeline → delivery funnel** — open opportunities → won → converted-to-project.
+- **At-risk projects** — a click-through list of the projects dragging the portfolio; **project health
+  table** — CPI/SPI per project with an on-track / at-risk / no-data badge. Click any row to open it.
 
 ## Projects register (`/projects`)
 The KPI band shows project count, unbilled WIP, cumulative billed, and cumulative margin. The table lists
