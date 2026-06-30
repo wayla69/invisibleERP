@@ -16,6 +16,8 @@ import { EamService } from '../eam/eam.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
 import { RevRecService } from '../revenue/revrec.service';
+import { ProjectsService } from '../projects/projects.service';
+import { CrmPipelineService } from '../crm-pipeline/crm-pipeline.service';
 import { JobQueueService } from '../jobs/job-queue.service';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
 
@@ -33,6 +35,10 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   sales_cube:     { label: 'ยอดขายตามช่วงเวลา', labelEn: 'Sales cube' },
   finance_trend:  { label: 'แนวโน้มกำไร-ขาดทุน', labelEn: 'Finance (P&L) trend' },
   pipeline_trend: { label: 'แนวโน้มไปป์ไลน์', labelEn: 'Pipeline trend' },
+  // Portfolio earned-value: every project's CPI/SPI + totals + the at-risk list. Read-only (rides evm()).
+  project_evm: { label: 'มูลค่าที่ได้รับของพอร์ตโครงการ (EVM)', labelEn: 'Portfolio earned value (EVM)' },
+  // CRM win/loss: win rate, loss reasons, by-owner, monthly trend. Read-only.
+  crm_win_loss: { label: 'วิเคราะห์ Win/Loss', labelEn: 'CRM win/loss analytics' },
   // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.
   // Create a `daily` subscription of this type to dun overdue customers automatically (idempotent per run).
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
@@ -63,6 +69,10 @@ export class BiService implements OnModuleInit {
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly leases?: LeasesService,
     @Optional() private readonly revrec?: RevRecService,
+    // PPM analytics report types (project_evm portfolio EVM, crm_win_loss). Optional so a partial harness
+    // still constructs BiService; the full app provides them (ProjectsModule / CrmPipelineModule).
+    @Optional() private readonly projects?: ProjectsService,
+    @Optional() private readonly crm?: CrmPipelineService,
     @Optional() private readonly jobs?: JobQueueService,
     @Optional() private readonly worker?: JobWorkerService,
   ) {}
@@ -521,6 +531,16 @@ export class BiService implements OnModuleInit {
       const purged = { revoked_tokens: rows(a), refresh_tokens: rows(b), sso_login_state: rows(c), member_otps: rows(d) };
       const total = purged.revoked_tokens + purged.refresh_tokens + purged.sso_login_state + purged.member_otps;
       return { data: purged, summary: `Retention purge: removed ${total} expired ephemeral security rows (financial/audit data untouched)`, summaryTh: `ล้างข้อมูลชั่วคราวที่หมดอายุ ${total} รายการ (ไม่แตะข้อมูลการเงิน/ออดิต)` };
+    }
+    if (reportType === 'project_evm') {
+      if (!this.projects) throw new BadRequestException({ code: 'PROJECTS_UNAVAILABLE', message: 'Projects service not available', messageTh: 'ระบบโครงการไม่พร้อมใช้งาน' });
+      const r = await this.projects.portfolioEvm(user);
+      return { data: r, summary: `Portfolio EVM: ${r.count} project(s), CPI ${r.totals.cpi ?? '—'}, ${r.at_risk.length} at risk`, summaryTh: `EVM พอร์ตโครงการ: ${r.count} โครงการ · CPI ${r.totals.cpi ?? '—'} · เสี่ยง ${r.at_risk.length}` };
+    }
+    if (reportType === 'crm_win_loss') {
+      if (!this.crm) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM pipeline service not available', messageTh: 'ระบบไปป์ไลน์ไม่พร้อมใช้งาน' });
+      const r = await this.crm.winLoss(user);
+      return { data: r, summary: `Win/loss: win rate ${r.summary.win_rate}, won ${r.summary.won_amount}, lost ${r.summary.lost_amount}, ${r.loss_reasons.length} loss reason(s)`, summaryTh: `Win/Loss: อัตราชนะ ${r.summary.win_rate} · ชนะ ${r.summary.won_amount} · แพ้ ${r.summary.lost_amount}` };
     }
     throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${reportType}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
   }
