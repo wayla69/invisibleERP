@@ -43,4 +43,21 @@ describe('runtime-metrics — in-flight gauge + slow-tx counter', () => {
     expect(m.slow_tx_count).toBe(1);
     expect(m.total_tx).toBe(2);
   });
+
+  it('raises a saturation event when in-flight crosses the pool threshold (debounced)', () => {
+    const saved = process.env.DB_POOL_MAX;
+    process.env.DB_POOL_MAX = '4'; // threshold 80% → fires at 4 in-flight
+    try {
+      __resetRuntimeMetrics();
+      for (let i = 0; i < 3; i++) txStart();
+      expect(runtimeMetrics().saturation_events).toBe(0); // 3/4 = 75% < 80%
+      txStart(); // 4/4 = 100% → crosses
+      expect(runtimeMetrics().saturation_events).toBe(1);
+      txStart(); // still saturated → debounced, no new event
+      expect(runtimeMetrics().saturation_events).toBe(1);
+    } finally {
+      if (saved === undefined) delete process.env.DB_POOL_MAX; else process.env.DB_POOL_MAX = saved;
+      __resetRuntimeMetrics();
+    }
+  });
 });

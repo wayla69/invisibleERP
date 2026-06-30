@@ -831,6 +831,72 @@ export class ProjectsService {
     };
   }
 
+  // ── Period governance / status pack (PMO-3) ──────────────────────────────
+  // Assembles the recurring PMO status report so it isn't hand-built each period. For ONE project it returns
+  // the full pack — header + EVM + the health-snapshot **trend** (PPM-4) + baseline variance (PROJ-07) +
+  // open-HIGH risks (PROJ-08) + milestone status + the change-order log (PROJ-10); for the PORTFOLIO it
+  // returns a RAG-ranked status row per project plus a roll-up. Read-only/detective — rides PROJ-06; also a
+  // schedulable BI report type (`project_governance_pack`).
+  async governancePack(user: JwtUser, opts?: { code?: string; period?: string }) {
+    const period = opts?.period && /^\d{4}-\d{2}$/.test(opts.period) ? opts.period : ymd().slice(0, 7);
+    if (opts?.code) return { scope: 'project', as_of: ymd(), period, project: await this.projectPack(opts.code, period, user) };
+    const today = ymd();
+    const ragRank: Record<string, number> = { red: 0, amber: 1, no_data: 2, green: 3 };
+    const list = await this.list(user);
+    const rows: any[] = [];
+    const sum = { red: 0, amber: 0, green: 0, no_data: 0, unmitigated_high: 0, open_high_risks: 0, overdue_milestones: 0, pending_change_orders: 0 };
+    for (const f of list.projects) {
+      const code = f.project_code;
+      const e = await this.evm(code);
+      const rag = this.ragOf(e.cpi, e.spi);
+      sum[rag as 'red' | 'amber' | 'green' | 'no_data']++;
+      const risks = await this.listRisks(code);
+      const ms = await this.listMilestones(code);
+      const overdue = ms.milestones.filter((m: any) => m.status === 'pending' && m.due_date && String(m.due_date) < today).length;
+      const co = await this.listChangeOrders(code);
+      sum.unmitigated_high += risks.summary.unmitigated_high; sum.open_high_risks += risks.summary.high_open;
+      sum.overdue_milestones += overdue; sum.pending_change_orders += co.summary.pending;
+      rows.push({ project_code: code, name: f.name, status: f.status, rag, cpi: e.cpi, spi: e.spi, margin: f.margin, wip: f.wip,
+        open_high_risks: risks.summary.high_open, unmitigated_high: risks.summary.unmitigated_high, overdue_milestones: overdue, pending_change_orders: co.summary.pending });
+    }
+    rows.sort((a, b) => (ragRank[a.rag] - ragRank[b.rag]) || String(a.project_code).localeCompare(String(b.project_code)));
+    return { scope: 'portfolio', as_of: today, period, count: rows.length, summary: sum, projects: rows };
+  }
+
+  private ragOf(cpi: number | null, spi: number | null): string {
+    if (cpi == null && spi == null) return 'no_data';
+    if ((cpi != null && cpi < 0.9) || (spi != null && spi < 0.9)) return 'red';
+    if ((cpi != null && cpi < 1) || (spi != null && spi < 1)) return 'amber';
+    return 'green';
+  }
+
+  private async projectPack(code: string, period: string, user: JwtUser) {
+    const today = ymd();
+    const detail = await this.get(code);
+    const e = await this.evm(code);
+    const health = (await this.healthHistory(code)).history;
+    const baseline = await this.getBaseline(code, user);
+    const risks = await this.listRisks(code);
+    const ms = await this.listMilestones(code);
+    const co = await this.listChangeOrders(code);
+    return {
+      project_code: code, name: detail.name, status: detail.status, customer_name: detail.customer_name, period,
+      rag: this.ragOf(e.cpi, e.spi), pct_complete: detail.pct_complete,
+      contract_amount: detail.contract_amount, billed_to_date: detail.billed_to_date, wip: detail.wip, margin: detail.margin,
+      evm: { cpi: e.cpi, spi: e.spi, bac: e.bac, ev: e.ev, ac: e.ac, eac: e.eac, cost_variance: e.cost_variance, schedule_variance: e.schedule_variance },
+      health_trend: health,
+      baseline: { active: baseline.baseline, variance: baseline.variance },
+      risks: { summary: risks.summary, open_high: risks.risks.filter((r: any) => r.rag === 'red' && r.status !== 'closed') },
+      milestones: {
+        count: ms.count,
+        overdue: ms.milestones.filter((m: any) => m.status === 'pending' && m.due_date && String(m.due_date) < today),
+        reached: ms.milestones.filter((m: any) => m.status === 'reached').length,
+        list: ms.milestones,
+      },
+      change_orders: { summary: co.summary, list: co.change_orders },
+    };
+  }
+
   // ── Baselines & variance (B1, PROJ-07) ───────────────────────────────────
   // Current planned BAC (Σ non-cancelled task planned cost; falls back to the project budget) + critical-path
   // duration — the figures a baseline snapshots and the current plan is compared against.

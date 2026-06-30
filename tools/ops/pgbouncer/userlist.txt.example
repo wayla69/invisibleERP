@@ -1,0 +1,5 @@
+; PgBouncer userlist — SCRAM-SHA-256 verifiers (NOT plaintext passwords). One line per role.
+; Generate a verifier from Postgres: SELECT rolname, rolpassword FROM pg_authid WHERE rolname='ierp_app';
+; (rolpassword is already the SCRAM-SHA-256 string when the role was created with a password.)
+; Copy this to /etc/pgbouncer/userlist.txt (chmod 600) — do NOT commit the real file.
+"<<PG_APP_USER>>" "SCRAM-SHA-256$<<iterations>>:<<salt>>$<<StoredKey>>:<<ServerKey>>"

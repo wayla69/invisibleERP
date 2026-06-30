@@ -67,6 +67,7 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   supplier_scorecard: { label: 'คะแนนผลงานผู้ขาย', labelEn: 'Supplier performance scorecard' },
   // Action job: each run captures a dated EVM/RAG health snapshot for every project (idempotent per day).
   project_health_capture: { label: 'บันทึกสุขภาพโครงการ', labelEn: 'Capture project health snapshots' },
+  project_governance_pack: { label: 'รายงานสถานะโครงการ (ธรรมาภิบาล)', labelEn: 'Project governance / status pack' },
   // Action job (monthly): each run bills every tenant's metered AI overage for the just-closed month as a
   // Stripe invoice item (idempotent per tenant+month). Connects the AI-COGS meter to actual collection.
   ai_overage_billing: { label: 'เรียกเก็บค่า AI ส่วนเกิน (รายเดือน)', labelEn: 'Bill AI usage overage (monthly)' },
@@ -598,6 +599,11 @@ export class BiService implements OnModuleInit {
       if (!this.projects) throw new BadRequestException({ code: 'PROJECTS_UNAVAILABLE', message: 'Projects service not available', messageTh: 'ระบบโครงการไม่พร้อมใช้งาน' });
       const r = await this.projects.captureAllHealth(user); // idempotent per (project, date)
       return { data: r, summary: `Project health: captured ${r.captured} of ${r.scanned} project(s) for ${r.as_of}`, summaryTh: `บันทึกสุขภาพโครงการ: ${r.captured} จาก ${r.scanned} โครงการ` };
+    }
+    if (reportType === 'project_governance_pack') {
+      if (!this.projects) throw new BadRequestException({ code: 'PROJECTS_UNAVAILABLE', message: 'Projects service not available', messageTh: 'ระบบโครงการไม่พร้อมใช้งาน' });
+      const r: any = await this.projects.governancePack(user, { period: filters?.period }); // portfolio scope
+      return { data: r, summary: `Governance pack ${r.period}: ${r.count} project(s) — ${r.summary.red} red, ${r.summary.unmitigated_high} unmitigated-high risk(s), ${r.summary.overdue_milestones} overdue milestone(s), ${r.summary.pending_change_orders} pending change order(s)`, summaryTh: `รายงานสถานะ ${r.period}: ${r.count} โครงการ · แดง ${r.summary.red} · เสี่ยงสูงยังไม่รับมือ ${r.summary.unmitigated_high} · หมุดหมายเลยกำหนด ${r.summary.overdue_milestones} · ใบเปลี่ยนแปลงรออนุมัติ ${r.summary.pending_change_orders}` };
     }
     if (reportType === 'exec_scorecard') {
       const r = await this.execScorecard(user);

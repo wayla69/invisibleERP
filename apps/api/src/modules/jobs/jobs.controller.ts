@@ -25,6 +25,7 @@ export class JobsController {
         in_flight_tx: rt.in_flight_tx,
         peak_in_flight_tx: rt.peak_in_flight_tx,
         saturation_pct: poolMax > 0 ? Math.round((rt.in_flight_tx / poolMax) * 100) : 0,
+        saturation_events: rt.saturation_events, // times in-flight crossed POOL_SATURATION_WARN_PCT since boot
       },
       requests: { total_tx: rt.total_tx, slow_tx_count: rt.slow_tx_count, slow_threshold_ms: Number(process.env.SLOW_TX_MS ?? 1000) },
       jobs, // { queued, running, failed, stuck } — failed = dead-letters; stuck = zombie 'running' past threshold

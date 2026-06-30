@@ -40,3 +40,7 @@ tools/etl/.cache/
 # stray compiled outputs next to TS sources
 /apps/api/drizzle.config.js
 /packages/shared/src/*.js
+
+# Coverage reports (vitest v8)
+coverage/
+**/coverage/

@@ -181,6 +181,12 @@ export class ProjectsController {
     return this.svc.forecast(u, { months: months != null ? Number(months) : undefined, from });
   }
 
+  // Period governance / status pack (PMO-3): the portfolio status roll-up. Static segment, before :code.
+  @Get('governance-pack')
+  governancePack(@Query('period') period: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.governancePack(u, { period });
+  }
+
   // ── Project templates (B2) ── static 'templates' segment, declared before :code so it never collides.
   @Post('templates')
   createTemplate(@Body(new ZodValidationPipe(TemplateBody)) b: TemplateDto, @CurrentUser() u: JwtUser) {
@@ -253,6 +259,13 @@ export class ProjectsController {
   @Get(':code/health')
   healthHistory(@Param('code') code: string) {
     return this.svc.healthHistory(code);
+  }
+
+  // Period governance / status pack (PMO-3): the full per-project status report (EVM + health trend +
+  // baseline variance + open-high risks + milestones + change-order log).
+  @Get(':code/governance-pack')
+  projectGovernancePack(@Param('code') code: string, @Query('period') period: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.governancePack(u, { code, period });
   }
 
   // Critical-path schedule (CPM): per-task ES/EF/LS/LF, slack, and on_critical_path for the Gantt.

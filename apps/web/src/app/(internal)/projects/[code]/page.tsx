@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Area, Line, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
-import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -401,6 +401,7 @@ export default function ProjectDetailPage() {
       <PageHeader
         title={<span className="flex items-center gap-2">{p?.name ?? code} {p && <Badge variant={statusVariant(p.status)}>{p.status}</Badge>}</span>}
         description={<span>{code}{p?.customer_name ? ` · ${p.customer_name}` : ''} · {p?.billing_type === 'Fixed' ? 'เหมารวม (Fixed)' : 'ตามเวลา/วัสดุ (T&M)'}{p?.contract_amount ? ` · สัญญา ${baht(p.contract_amount)}` : ''}</span>}
+        actions={<Button variant="outline" onClick={() => router.push(`/projects/${encodeURIComponent(code)}/status`)}><FileText className="size-4" /> รายงานสถานะ</Button>}
       />
       <StateView q={detail}>
         <Tabs
