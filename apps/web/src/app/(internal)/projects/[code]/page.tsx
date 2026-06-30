@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Area, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts';
-import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -99,6 +99,11 @@ export default function ProjectDetailPage() {
   const submitCost = useMutation({
     mutationFn: () => api(`/api/projects/${code}/${costDlg}`, { method: 'POST', body: JSON.stringify(costDlg === 'cost' ? { entry_type: ctype, amount: Number(amount) || 0, billable } : byPct ? { percent: Number(amount) || 0 } : { amount: Number(amount) || 0 }) }),
     onSuccess: () => { notifySuccess(costDlg === 'cost' ? 'บันทึกต้นทุน' : 'วางบิลแล้ว'); setCostDlg(null); setAmount(''); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  // POC over-time revenue recognition (PROJ-09) — recognise earned revenue cost-to-cost.
+  const recognize = useMutation({
+    mutationFn: () => api<any>(`/api/projects/${code}/recognize`, { method: 'POST', body: '{}' }),
+    onSuccess: (r: any) => { notifySuccess(r?.already ? 'ไม่มีรายได้ใหม่ให้รับรู้' : `รับรู้รายได้ ${baht(r.revenue_recognized)} (สำเร็จ ${r.poc_pct}%)`); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
   const scurve = (series.data?.series ?? []).map((s: any) => ({ month: s.month, planned: s.cumulative_planned }));
@@ -245,9 +250,23 @@ export default function ProjectDetailPage() {
 
   const costsTab = (
     <div className="space-y-4">
+      {p?.rev_method === 'poc' && (
+        <Card className="gap-2 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <Badge variant="secondary">รับรู้รายได้ตามความคืบหน้า (POC)</Badge>
+              <span className="text-muted-foreground">สำเร็จ <span className="tabular font-medium text-foreground">{p.poc_pct ?? 0}%</span></span>
+              <span className="text-muted-foreground">รับรู้แล้ว <span className="tabular font-medium text-foreground">{baht(p.recognized_revenue ?? 0)}</span></span>
+              {p.contract_asset > 0 && <span className="text-muted-foreground">สินทรัพย์ตามสัญญา <span className="tabular text-primary">{baht(p.contract_asset)}</span></span>}
+              {p.billings_in_excess > 0 && <span className="text-muted-foreground">วางบิลล่วงหน้า <span className="tabular text-warning-foreground dark:text-warning">{baht(p.billings_in_excess)}</span></span>}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => recognize.mutate()} disabled={recognize.isPending}><TrendingUp className="size-4" /> รับรู้รายได้</Button>
+          </div>
+        </Card>
+      )}
       <div className="flex justify-end gap-2">
         <Button size="sm" variant="outline" onClick={() => { setCostDlg('cost'); setAmount(''); setCtype('time'); setBillable(true); }}><Clock className="size-4" /> ลงต้นทุน</Button>
-        <Button size="sm" onClick={() => { setCostDlg('bill'); setAmount(''); setByPct(false); }}><Receipt className="size-4" /> วางบิล</Button>
+        <Button size="sm" onClick={() => { setCostDlg('bill'); setAmount(''); setByPct(false); }}><Receipt className="size-4" /> {p?.rev_method === 'poc' ? 'ออกใบแจ้งหนี้' : 'วางบิล'}</Button>
       </div>
       {detail.data && (
         <DataTable

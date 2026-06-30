@@ -380,6 +380,46 @@ async function main() {
   const rkBad = await inj('PATCH', '/api/projects/risks/999999', admin, { status: 'closed' });
   ok('Patch unknown risk → 404 RISK_NOT_FOUND', rkBad.status === 404 && rkBad.json.error?.code === 'RISK_NOT_FOUND', `${rkBad.status} ${rkBad.json.error?.code}`);
 
+  // ── 23. POC over-time revenue recognition (PROJ-09) ──
+  // Fixed-price POC project: contract 100000, estimated total cost 60000.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-POC', name: 'งานรับรู้รายได้ตามความคืบหน้า', billing_type: 'Fixed', contract_amount: 100000, rev_method: 'poc', estimated_cost: 60000 });
+  await inj('POST', '/api/projects/PRJ-POC/cost', admin, { amount: 30000, billable: true });
+  const rec1 = await inj('POST', '/api/projects/PRJ-POC/recognize', admin, {});
+  ok('POC recognize @ 50% (cost 30000 / est 60000) → revenue 50000, cost 30000, margin 20000',
+    near(rec1.json.poc_pct, 50) && near(rec1.json.revenue_recognized, 50000) && near(rec1.json.cost_recognized, 30000) && near(rec1.json.margin, 20000),
+    JSON.stringify({ p: rec1.json.poc_pct, r: rec1.json.revenue_recognized, c: rec1.json.cost_recognized }));
+  const pPoc = await inj('GET', '/api/projects/PRJ-POC', admin);
+  ok('POC project: recognized_revenue 50000, contract_asset 50000 (earned, unbilled), margin 20000',
+    near(pPoc.json.recognized_revenue, 50000) && near(pPoc.json.contract_asset, 50000) && near(pPoc.json.margin, 20000), JSON.stringify({ rr: pPoc.json.recognized_revenue, ca: pPoc.json.contract_asset }));
+  const recIdem = await inj('POST', '/api/projects/PRJ-POC/recognize', admin, {});
+  ok('POC re-recognize with no new progress → already (no double revenue)', recIdem.json.already === true, JSON.stringify({ a: recIdem.json.already }));
+  const billPoc = await inj('POST', '/api/projects/PRJ-POC/bill', admin, { amount: 40000 });
+  ok('POC bill 40000 → invoice clears contract asset (revenue 0, asset cleared 40000)',
+    near(billPoc.json.billed, 40000) && near(billPoc.json.revenue, 0) && near(billPoc.json.contract_asset_cleared, 40000), JSON.stringify({ b: billPoc.json.billed, c: billPoc.json.contract_asset_cleared }));
+  await inj('POST', '/api/projects/PRJ-POC/cost', admin, { amount: 30000, billable: true });
+  const rec2 = await inj('POST', '/api/projects/PRJ-POC/recognize', admin, {});
+  ok('POC recognize @ 100% → remaining revenue 50000, recognized-to-date 100000',
+    near(rec2.json.poc_pct, 100) && near(rec2.json.revenue_recognized, 50000) && near(rec2.json.recognized_revenue_to_date, 100000), JSON.stringify({ p: rec2.json.poc_pct, r: rec2.json.revenue_recognized }));
+  await inj('POST', '/api/projects/PRJ-POC/bill', admin, { amount: 60000 });
+  const pDone = await inj('GET', '/api/projects/PRJ-POC', admin);
+  ok('POC complete: recognized_revenue 100000 = billed 100000, contract_asset 0, WIP 0',
+    near(pDone.json.recognized_revenue, 100000) && near(pDone.json.billed_to_date, 100000) && near(pDone.json.contract_asset, 0) && near(pDone.json.wip, 0), JSON.stringify({ rr: pDone.json.recognized_revenue, ca: pDone.json.contract_asset, wip: pDone.json.wip }));
+  const tbPoc = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('POC postings keep the GL balanced (Σdr = Σcr)', tbPoc.json.totals?.balanced === true, JSON.stringify({ bal: tbPoc.json.totals?.balanced }));
+  // Billings-in-excess path: bill BEFORE recognising → contract liability (2410); later recognition releases it.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-POC2', name: 'งานวางบิลล่วงหน้า', billing_type: 'Fixed', contract_amount: 100000, rev_method: 'poc', estimated_cost: 50000 });
+  const billAhead = await inj('POST', '/api/projects/PRJ-POC2/bill', admin, { amount: 30000 });
+  ok('POC bill ahead of work → billings in excess 30000 (no revenue)', near(billAhead.json.billings_in_excess, 30000) && near(billAhead.json.revenue, 0), JSON.stringify({ e: billAhead.json.billings_in_excess }));
+  await inj('POST', '/api/projects/PRJ-POC2/cost', admin, { amount: 10000, billable: true });
+  const recRel = await inj('POST', '/api/projects/PRJ-POC2/recognize', admin, {});
+  const pPoc2 = await inj('GET', '/api/projects/PRJ-POC2', admin);
+  ok('POC2 recognize @ 20% → revenue 20000 releases the liability; billings_in_excess falls to 10000',
+    near(recRel.json.revenue_recognized, 20000) && near(pPoc2.json.billings_in_excess, 10000) && near(pPoc2.json.contract_asset, 0), JSON.stringify({ r: recRel.json.revenue_recognized, e: pPoc2.json.billings_in_excess }));
+  // Guard: a billing-method project cannot recognise over-time.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-TMX', name: 'งานตามเวลา', billing_type: 'TM' });
+  const recBad = await inj('POST', '/api/projects/PRJ-TMX/recognize', admin, {});
+  ok('Recognise on a billing-method project → 400 NOT_POC', recBad.status === 400 && recBad.json.error?.code === 'NOT_POC', `${recBad.status} ${recBad.json.error?.code}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

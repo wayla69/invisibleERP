@@ -58,6 +58,14 @@ Tabbed, deep-linkable (`?tab=`):
   (`สูง·ยังไม่มีแผนรับมือ`); the check icon closes an item. Governance control **PROJ-08** surfaces an
   unmitigated high risk for review rather than letting it be buried.
 - **ต้นทุน & บิล (Costs & bill)** — the cost-entry ledger with the posting JE, plus *ลงต้นทุน* / *วางบิล* dialogs.
+  For a project set to **over-time (POC) revenue recognition**, this tab also shows the % complete (cost-to-cost),
+  recognised revenue, and the contract-asset / billings-in-excess position, with a **รับรู้รายได้ (Recognise)**
+  button — revenue is earned as work progresses, and *ออกใบแจ้งหนี้ (invoice)* is separate from recognition.
+
+**Revenue recognition (create form).** On *สร้างโครงการ* pick **การรับรู้รายได้**: *เมื่อวางบิล (Billing)* recognises
+revenue point-in-time when you bill (default), or *ตามความคืบหน้า (POC)* recognises it over time on a
+cost-to-cost basis — POC needs an **estimated total cost (EAC)**, and earned revenue accrues a contract asset
+until billed (control PROJ-09).
 
 ## Win/Loss pipeline dashboard (`/projects/pipeline`)
 Win rate, weighted forecast, won and lost value; a **pipeline-by-stage** funnel; **loss reasons**; a
@@ -77,3 +85,4 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.1 | 2026-06-30 | Project **templates** (`docs/20` B2) — *เริ่มจากแม่แบบ* picker on the create form scaffolds a standard WBS + milestones; `TEMPLATE_EXISTS` / `TEMPLATE_NOT_FOUND` / `PROJECT_HAS_TASKS` added to troubleshooting. |
 | 1.2 | 2026-06-30 | **RACI** on tasks (`docs/20` B3) — Accountable/Responsible inputs + RACI column on the schedule; *งานของฉัน (My tasks)* panel on `/projects`. |
 | 1.3 | 2026-06-30 | **Risk & issue register** (`docs/20` B4, PROJ-08) — *ความเสี่ยง & ปัญหา* workspace tab with RAG scoring, open-high / unmitigated-high KPIs and close action; `RISK_NOT_FOUND` added to troubleshooting. |
+| 1.4 | 2026-06-30 | **POC revenue recognition** (PROJ-09) — *การรับรู้รายได้* picker on create (Billing / POC); Costs tab shows POC %, recognised revenue, contract asset/liability + a *รับรู้รายได้* action; `NOT_POC` / `NO_ESTIMATE` added to troubleshooting. |
