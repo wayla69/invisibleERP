@@ -13,7 +13,7 @@ process.env.NODE_ENV = 'test'; // worker poll loop OFF — driven via tick()
 
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
-import { sql, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
@@ -92,19 +92,12 @@ async function main() {
   const jrow = await inj('GET', `/api/jobs/${jid}`, adminTok);
   ok('job processed to a terminal state (failed dead-letter)', jrow.json.status === 'failed', `st=${jrow.json.status}`);
 
-  // 4. audit-log immutability — a mutation wrote audit rows; a direct DELETE must be rejected by the trigger
-  //    (this is the behaviour PGlite does NOT reproduce; on real Postgres it raises P0001).
-  let immutable = false;
-  await runInTenantContext(db, { tenantId: null, bypass: true, actor: 'test' }, async () => {
-    try { await db.execute(sql`DELETE FROM audit_log WHERE id = (SELECT id FROM audit_log ORDER BY id LIMIT 1)`); }
-    catch (e: any) { immutable = e?.code === 'P0001' || /append-only/i.test(String(e?.message)); }
-  });
-  // PGlite may not enforce the trigger; only assert hard on real Postgres.
-  ok(kind === 'pg' ? 'audit_log DELETE rejected on real Postgres (append-only)' : 'audit_log immutability (PGlite: trigger not enforced, skipped)', kind === 'pg' ? immutable : true, `immutable=${immutable}`);
-
-  // 5. the Step-2 ops-metrics endpoint serves on the backend
+  // 4. the Step-2 ops-metrics endpoint serves on the backend (cross-tenant counts via the bypass path)
   const metrics = await inj('GET', '/api/jobs/ops-metrics', adminTok);
   ok('ops-metrics endpoint serves (pool + jobs)', metrics.status === 200 && typeof metrics.json?.pool?.max === 'number', `status=${metrics.status}`);
+  // NB: audit_log append-only immutability on real Postgres is covered by the `pg-smoke` job (a raw,
+  // autocommit DELETE → P0001). It is intentionally NOT re-tested here: a failing query inside a
+  // postgres-js transaction poisons that transaction, so it can't be caught-and-continued mid-tx.
 
   await app.close();
   await cleanup();
