@@ -425,6 +425,21 @@ export class ProjectsService {
     return { project_code: code, series, current, bac: current.bac };
   }
 
+  // Portfolio EVM (for the schedulable BI report): the earned-value snapshot of every project, with totals
+  // and the at-risk list (CPI or SPI below 0.9). Read-only — rides the existing evm() per project.
+  async portfolioEvm(user: JwtUser) {
+    const list = await this.list(user);
+    const rows: any[] = [];
+    let bac = 0, ev = 0, ac = 0, eac = 0;
+    for (const p of list.projects) {
+      const e = await this.evm(p.project_code);
+      rows.push({ project_code: p.project_code, name: p.name, status: p.status, bac: e.bac, ev: e.ev, ac: e.ac, eac: e.eac, cpi: e.cpi, spi: e.spi });
+      bac = r2(bac + e.bac); ev = r2(ev + e.ev); ac = r2(ac + e.ac); eac = r2(eac + e.eac);
+    }
+    const at_risk = rows.filter((r) => (r.cpi != null && r.cpi < 0.9) || (r.spi != null && r.spi < 0.9)).map((r) => r.project_code);
+    return { as_of: ymd(), count: rows.length, totals: { bac, ev, ac, eac, cpi: ac > 0 ? r4(ev / ac) : null }, at_risk, projects: rows };
+  }
+
   private async row(code: string) {
     const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });

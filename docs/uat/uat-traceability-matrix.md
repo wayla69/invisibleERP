@@ -231,6 +231,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-208 | Earned-value metrics + task dependency guard | PROJ-06 | 16 §7 (11), §9 |
 | UAT-O2C-209 | Critical-path schedule (CPM) + EVM S-curve | PROJ-06 | 16 §7 (11) |
 | UAT-O2C-210 | Win/loss analytics for the pipeline dashboard | REV-17 | 16 §7 (11) |
+| UAT-O2C-211 | Schedulable BI report types (project_evm, crm_win_loss) | PROJ-06 / REV-17 | 16 §7 (11) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

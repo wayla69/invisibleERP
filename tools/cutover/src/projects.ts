@@ -258,6 +258,16 @@ async function main() {
     (wl.json.loss_reasons ?? []).some((r: any) => near(r.amount, 50000)) && Array.isArray(wl.json.by_owner) && wl.json.summary?.win_rate != null,
     JSON.stringify({ lr: wl.json.loss_reasons?.length, ow: wl.json.by_owner?.length }));
 
+  // ── 17. schedulable BI report types: project_evm + crm_win_loss generate successfully ──
+  const evmSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Portfolio EVM', report_type: 'project_evm', frequency: 'weekly' });
+  const evmRun = await inj('POST', `/api/bi/subscriptions/${evmSub.json.id}/run`, admin, {});
+  ok('BI report project_evm runs success (portfolio EVM)', evmRun.json.status === 'success' && /Portfolio EVM/.test(evmRun.json.summary ?? ''), JSON.stringify({ s: evmRun.json.status, sum: (evmRun.json.summary ?? '').slice(0, 40) }));
+  const wlSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Win/Loss', report_type: 'crm_win_loss', frequency: 'weekly' });
+  const wlRun = await inj('POST', `/api/bi/subscriptions/${wlSub.json.id}/run`, admin, {});
+  ok('BI report crm_win_loss runs success (win/loss analytics)', wlRun.json.status === 'success' && /[Ww]in\/loss/.test(wlRun.json.summary ?? ''), JSON.stringify({ s: wlRun.json.status }));
+  const rtypes = await inj('GET', '/api/bi/report-types', admin);
+  ok('report-types catalog exposes project_evm + crm_win_loss', JSON.stringify(rtypes.json).includes('project_evm') && JSON.stringify(rtypes.json).includes('crm_win_loss'), '');
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

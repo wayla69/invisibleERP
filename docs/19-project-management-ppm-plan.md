@@ -210,8 +210,12 @@ controls**).
   (stage funnel, loss reasons, monthly win-rate, by-owner). Built on the existing design system
   (shadcn/Tailwind + recharts) — no new dependency. Nav item added under Planning.
 
-**Still optional (not blocking):** wiring `project_evm` / `crm_win_loss` as schedulable **BI report types**
-(emailed subscriptions) — the data endpoints exist; only the BI-subscription registration remains.
+**Schedulable BI report types — ✅ delivered** (PR #234): `project_evm` (portfolio earned value — every
+project's CPI/SPI + totals + at-risk list) and `crm_win_loss` are registered in `modules/bi` `REPORT_TYPES`,
+so finance can subscribe to them as periodic emailed reports. Read-only, idempotent.
+
+**Roadmap complete** — every P0–P4 phase plus the analytics backend, the sleek web UI, and the BI report
+types are delivered, each as its own CI-green, doc-synced PR.
 
 ---
 
