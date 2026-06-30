@@ -244,6 +244,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-221 | PMO action center / exception inbox | PROJ-11 | 16 §7 (19) |
 | UAT-O2C-222 | Pipeline-weighted forward resource & cash forecast | PROJ-05/PROJ-06 (operational) | 16 §7 (20) |
 | UAT-O2C-223 | Period governance / status pack | PROJ-06 (operational) | 16 §7 (21) |
+| UAT-O2C-224 | Program (cross-project) critical path | PROJ-06 (operational) | 16 §7 (22) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

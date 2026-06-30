@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type MilestoneDto, type RateCardDto, type ResourceDto, type BaselineDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto } from './projects.service';
 
 const CreateBody = z.object({
   name: z.string().min(1),
@@ -31,6 +31,10 @@ const FromOppBody = z.object({
   budget_amount: z.number().nonnegative().optional(),
   start_date: z.string().optional(),
   end_date: z.string().optional(),
+});
+const ProgramBody = z.object({
+  program_code: z.string().nullable().optional(),
+  depends_on_projects: z.array(z.string()).optional(),
 });
 const CostBody = z.object({
   entry_type: z.enum(['time', 'expense']).optional(),
@@ -187,6 +191,17 @@ export class ProjectsController {
     return this.svc.governancePack(u, { period });
   }
 
+  // Program (cross-project) critical path (PMO-4). Static segments, declared before :code so they never collide.
+  @Get('programs')
+  programs(@CurrentUser() u: JwtUser) {
+    return this.svc.programs(u);
+  }
+
+  @Get('program-critical-path')
+  programCriticalPath(@Query('program') program: string, @CurrentUser() u: JwtUser) {
+    return this.svc.programCriticalPath(program, u);
+  }
+
   // ── Project templates (B2) ── static 'templates' segment, declared before :code so it never collides.
   @Post('templates')
   createTemplate(@Body(new ZodValidationPipe(TemplateBody)) b: TemplateDto, @CurrentUser() u: JwtUser) {
@@ -266,6 +281,13 @@ export class ProjectsController {
   @Get(':code/governance-pack')
   projectGovernancePack(@Param('code') code: string, @Query('period') period: string | undefined, @CurrentUser() u: JwtUser) {
     return this.svc.governancePack(u, { code, period });
+  }
+
+  // Program grouping + cross-project dependencies (PMO-4): set this project's program and the projects it
+  // must follow (finish-to-start) for the program critical path.
+  @Patch(':code/program')
+  setProgram(@Param('code') code: string, @Body(new ZodValidationPipe(ProgramBody)) b: ProgramDto, @CurrentUser() u: JwtUser) {
+    return this.svc.setProgram(code, b, u);
   }
 
   // Critical-path schedule (CPM): per-task ES/EF/LS/LF, slack, and on_critical_path for the Gantt.
