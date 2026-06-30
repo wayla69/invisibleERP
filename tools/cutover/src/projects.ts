@@ -536,6 +536,16 @@ async function main() {
   ok('Forecast: resourcing band carries committed_demand_pct per month + over-allocated count',
     (fc.json.resourcing?.monthly ?? []).length === 6 && fc.json.resourcing?.monthly?.every((m: any) => typeof m.committed_demand_pct === 'number') && typeof fc.json.resourcing?.over_allocated_count === 'number',
     JSON.stringify({ n: (fc.json.resourcing?.monthly ?? []).length, over: fc.json.resourcing?.over_allocated_count }));
+  // PMO-5: the weighted pipeline projects FTE demand at the default value→FTE rate (200000/FTE-month).
+  const rcAt = (mm: string) => (fc.json.resourcing?.monthly ?? []).find((m: any) => m.month === mm);
+  ok('Forecast (PMO-5): default rev_per_fte_month 200000 → Sep pipeline_demand_fte 0.5 (100000 weighted / 200000)',
+    fc.json.rev_per_fte_month === 200000 && near(rcAt('2026-09')?.pipeline_demand_fte, 0.5) && near(rcAt('2026-09')?.total_demand_fte, (rcAt('2026-09')?.committed_demand_fte ?? 0) + 0.5),
+    JSON.stringify({ rate: fc.json.rev_per_fte_month, sep: rcAt('2026-09') }));
+  const fcRate = await inj('GET', '/api/projects/forecast?from=2026-07&months=6&rev_per_fte_month=100000', admin);
+  const sepRate = (fcRate.json.resourcing?.monthly ?? []).find((m: any) => m.month === '2026-09');
+  ok('Forecast (PMO-5): configurable rate honoured → at 100000/FTE the Sep pipeline demand doubles to 1.0 FTE',
+    fcRate.json.rev_per_fte_month === 100000 && near(sepRate?.pipeline_demand_fte, 1.0) && typeof fcRate.json.resourcing?.peak_total_demand_fte === 'number',
+    JSON.stringify({ rate: fcRate.json.rev_per_fte_month, sepFte: sepRate?.pipeline_demand_fte, peak: fcRate.json.resourcing?.peak_total_demand_fte }));
 
   // ── 29. period governance / status pack (PMO-3) ──
   // Single-project pack on PRJ-EVM (green, CPI 1.11; 2+ health snapshots captured in §26).

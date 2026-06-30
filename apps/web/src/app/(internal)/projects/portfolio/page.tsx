@@ -184,17 +184,18 @@ export default function PortfolioPage() {
             <Card className="gap-3 p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">พยากรณ์การวางบิล/กระแสเงินสด (Billings forecast) — มั่นใจ + ไปป์ไลน์ถ่วงน้ำหนัก</h3>
-                <div className="flex gap-2 text-xs">
+                <div className="flex flex-wrap gap-2 text-xs">
                   <Badge variant="info">มั่นใจ {baht(fc.billing.committed_total)}</Badge>
                   <Badge variant="muted">ไปป์ไลน์ (ถ่วง) {baht(fc.billing.weighted_pipeline_total)}</Badge>
                   <Badge variant="success">รวมคาดการณ์ {baht(fc.billing.expected_total)}</Badge>
+                  {fc.resourcing?.peak_total_demand_fte != null && <Badge variant="warning">กำลังคนสูงสุด {fc.resourcing.peak_total_demand_fte} FTE</Badge>}
                 </div>
               </div>
               <div className="space-y-2">
                 {fc.billing.monthly.map((m: any) => (
                   <div key={m.month}>
                     <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">{m.month}{(fc.resourcing?.monthly ?? []).find((r: any) => r.month === m.month)?.committed_demand_pct ? <span className="ml-2 text-muted-foreground/70">· กำลังคน {(fc.resourcing.monthly.find((r: any) => r.month === m.month)?.committed_demand_pct)}%</span> : null}</span>
+                      <span className="text-muted-foreground">{m.month}{(() => { const r = (fc.resourcing?.monthly ?? []).find((x: any) => x.month === m.month); return r?.total_demand_fte ? <span className="ml-2 text-muted-foreground/70">· กำลังคน {r.total_demand_fte} FTE{r.pipeline_demand_fte > 0 ? ` (มั่นใจ ${r.committed_demand_fte} + ไปป์ไลน์ ${r.pipeline_demand_fte})` : ''}</span> : null; })()}</span>
                       <span className="tabular font-medium">{baht(m.total_expected)}</span>
                     </div>
                     {/* committed (solid) + weighted pipeline (lighter) stacked bar */}
@@ -205,7 +206,7 @@ export default function PortfolioPage() {
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">มั่นใจ = หมุดหมายวางบิล (Fixed) + สินทรัพย์ตามสัญญา POC ที่ยังไม่วางบิล · ไปป์ไลน์ = มูลค่าโอกาส × ความน่าจะเป็น ณ เดือนที่คาดปิด</p>
+              <p className="text-xs text-muted-foreground">มั่นใจ = หมุดหมายวางบิล (Fixed) + สินทรัพย์ตามสัญญา POC ที่ยังไม่วางบิล · ไปป์ไลน์ = มูลค่าโอกาส × ความน่าจะเป็น ณ เดือนที่คาดปิด · กำลังคน (FTE) = ความต้องการปัจจุบัน + ไปป์ไลน์ถ่วงน้ำหนัก ÷ {baht(fc.rev_per_fte_month)}/คน/เดือน</p>
             </Card>
           )}
         </div>
