@@ -1,6 +1,6 @@
 # 23 — PMO Command Center: Action, Forecast & Governance — Design & Roadmap
 
-> **Date:** 2026-06-30 · **Status:** v0.1 DRAFT — PLANNING (no code yet) · **Owner:** ERP / Product
+> **Date:** 2026-06-30 · **Status:** v1.0 — **DELIVERED** (PMO-1, PMO-2, PMO-3 all shipped & merged) · **Owner:** ERP / Product
 > **Scope:** Turn the now-complete PPM suite (`docs/19`/`20` + the four `docs/22`-era PPM upgrades —
 > POC rev-rec, change orders, capacity calendar, health history) from a set of **pull** signals into a
 > **PMO operating loop**: a single *what-needs-me-now* action center (proactively pushed), a
@@ -139,7 +139,12 @@ billings/cash forecast line. No new page, no new dependency.
 
 ---
 
-## Phase PMO-3 — Period governance / status pack
+## Phase PMO-3 — Period governance / status pack — **DELIVERED**
+> Shipped: `GET /api/projects/:code/governance-pack` (full per-project pack) + `GET /api/projects/governance-pack`
+> (RAG-ranked portfolio roll-up) via `ProjectsService.governancePack`; schedulable BI report type
+> `project_governance_pack`; a print-friendly `/projects/:code/status` report page + a Status-report button on
+> the workspace. No control, no migration. PN-16 step 21 / rev 0.23, user-manual 14 rev 2.0 + 09, UAT-O2C-223.
+> Harness: `projects` 103 checks.
 *Kills the recurring PMO time-sink: assembling the status deck. The health snapshots we just shipped are
 the raw material for the trend.*
 
