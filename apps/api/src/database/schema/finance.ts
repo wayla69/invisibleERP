@@ -129,6 +129,11 @@ export const apPayments = pgTable('ap_payments', {
   rejectReason: text('reject_reason'),
   glRef: text('gl_ref'), // PAY-AP source_ref used at approval (idempotent GL post)
   idempotencyKey: text('idempotency_key'),
+  // TAX-03 — withholding tax taken at payment time (ภ.ง.ด.3/53). Captured at request, computed + posted to
+  // GL 2361 at approval. The vendor is paid net (amount − wht_amount); wht_amount is held to remit to the RD.
+  whtIncomeType: text('wht_income_type'),                         // label, e.g. '3tre-service' (services 3%)
+  whtRate: numeric('wht_rate', { precision: 6, scale: 4 }),       // 0.0300 = 3%
+  whtAmount: numeric('wht_amount', { precision: 14, scale: 2 }),  // computed at approval on the pre-VAT base
 }, (t) => ({
   byTxn: index('idx_ap_payments_txn').on(t.txnNo),
   byStatus: index('idx_ap_payments_status').on(t.tenantId, t.status),

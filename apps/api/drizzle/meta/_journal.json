@@ -1429,6 +1429,20 @@
       "when": 2023820000030,
       "tag": "0203_governance_round2",
       "breakpoints": true
+    },
+    {
+      "idx": 204,
+      "version": "7",
+      "when": 2023820000031,
+      "tag": "0204_ap_wht",
+      "breakpoints": true
+    },
+    {
+      "idx": 205,
+      "version": "7",
+      "when": 2023820000032,
+      "tag": "0205_ic_recon_periods",
+      "breakpoints": true
     }
   ]
 }

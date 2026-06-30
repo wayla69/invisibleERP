@@ -42,6 +42,7 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '5610', name: 'Social Security (Employer)', type: 'Expense' }, // เงินสมทบประกันสังคมส่วนนายจ้าง
   { code: '2350', name: 'Social Security Payable', type: 'Liability' }, // ประกันสังคมค้างจ่าย (ลูกจ้าง+นายจ้าง)
   { code: '2360', name: 'Payroll WHT Payable (PND1)', type: 'Liability' }, // ภาษีหัก ณ ที่จ่ายเงินเดือน (ภ.ง.ด.1) ค้างจ่าย
+  { code: '2361', name: 'Vendor WHT Payable (PND3/53)', type: 'Liability' }, // ภาษีหัก ณ ที่จ่ายผู้ขาย (ภ.ง.ด.3/53) ค้างจ่าย — withheld at AP payment, remitted to RD (TAX-03)
   { code: '1250', name: 'Work-in-Process', type: 'Asset' },             // งานระหว่างทำ (WIP) — manufacturing
   { code: '1210', name: 'Finished Goods', type: 'Asset' },              // สินค้าสำเร็จรูป — จากใบสั่งผลิต
   { code: '2380', name: 'Manufacturing Costs Applied', type: 'Liability' }, // ค่าแรง/โสหุ้ยการผลิตที่คิดเข้างาน (clearing)
@@ -109,6 +110,7 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   '2300': { bucket: 'operating', label: 'ทิปค้างจ่าย (Tips payable)' },
   '2350': { bucket: 'operating', label: 'ประกันสังคมค้างจ่าย (Social security payable)' },
   '2360': { bucket: 'operating', label: 'ภาษีหัก ณ ที่จ่ายเงินเดือนค้างจ่าย (Payroll WHT payable)' },
+  '2361': { bucket: 'operating', label: 'ภาษีหัก ณ ที่จ่ายผู้ขายค้างจ่าย (Vendor WHT payable)' },
   '2370': { bucket: 'operating', label: 'กองทุนสำรองเลี้ยงชีพค้างจ่าย (Provident fund payable)' },
   '2380': { bucket: 'operating', label: 'ค่าใช้จ่ายการผลิตรอปันส่วน (Manufacturing costs applied)' },
   '2390': { bucket: 'operating', label: 'ต้นทุนโครงการรอปันส่วน (Project costs applied)' },

@@ -19,6 +19,7 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
+import { ymd } from '../../../apps/api/dist/database/queries';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -215,6 +216,23 @@ async function main() {
   const ivAll = await inj('GET', '/api/tax-reports/input-vat?month=6&year=2026', admin);
   ok('Fix#1: HQ/bypass sees all tenants (70 + 140 + 0 = 210)', near(ivAll.json.totals?.vat, 210), JSON.stringify(ivAll.json.totals));
   ok('Fix#6: exempt AP bill carries 0 input VAT', ivAll.json.rows?.some((r: any) => r.invoice_no === 'PV-EX' && near(r.vat, 0) && near(r.base, 1000)), JSON.stringify(ivAll.json.rows?.find((r: any) => r.invoice_no === 'PV-EX') ?? {}));
+
+  // ── TAX-03: WHT withheld at AP payment → posted to GL 2361 → PND→GL tie-out ──
+  // proc2 (creditors) books a T2 service bill ฿1070 (1000 + 70 VAT) and requests payment WITH 3% WHT; admin
+  // (≠ requester, SoD) approves → the vendor is paid net ฿1040 and ฿30 is held in GL 2361 to remit to the RD.
+  const whtBill = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้รับเหมา T2', txn_type: 'Service', invoice_no: 'PV-WHT-1', invoice_date: '2026-06-22', amount: 1070 });
+  const whtReq = await inj('PATCH', `/api/finance/ap/transactions/${whtBill.json.txn_no}/pay`, proc2, { amount: 1070, wht_income_type: '3tre-service', wht_rate: 0.03 });
+  ok('TAX-03: AP payment request captures a WHT rate (3%)', whtReq.status === 200 && near(whtReq.json.wht_rate, 0.03), `${whtReq.status} ${JSON.stringify(whtReq.json).slice(0, 90)}`);
+  const whtAppr = await inj('POST', `/api/finance/ap/payments/${whtReq.json.payment_no}/approve`, admin, {});
+  ok('TAX-03: approval withholds 3% on the ฿1000 pre-VAT base → WHT ฿30, vendor paid net ฿1040', whtAppr.status === 200 && near(whtAppr.json.wht_amount, 30) && near(whtAppr.json.net_paid, 1040), `${whtAppr.status} ${JSON.stringify(whtAppr.json).slice(0, 120)}`);
+  // an out-of-range rate is rejected (fresh bill so the over-pay guard doesn't pre-empt the WHT check).
+  const whtBill2 = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'x', txn_type: 'Service', invoice_no: 'PV-WHT-2', invoice_date: '2026-06-22', amount: 100 });
+  const whtBad = await inj('PATCH', `/api/finance/ap/transactions/${whtBill2.json.txn_no}/pay`, proc2, { amount: 100, wht_rate: 0.5 });
+  ok('TAX-03: AP payment rejects an out-of-range WHT rate (>30%) → 400', whtBad.status === 400 && ['VALIDATION_ERROR', 'INVALID_WHT_RATE'].includes(whtBad.json.error?.code), `${whtBad.status} ${whtBad.json.error?.code}`);
+  // PND→GL tie-out for the business month the WHT posted in: GL 2361 net (฿30) ties to the WHT withheld (฿30).
+  const [tieY, tieM] = ymd().split('-');
+  const tie = await inj('GET', `/api/tax-reports/pnd-tieout?month=${Number(tieM)}&year=${tieY}`, admin);
+  ok('TAX-03: PND→GL tie-out — GL 2361 net (฿30) ties to AP-payment WHT withheld (฿30)', tie.status === 200 && near(tie.json.gl_net_movement, 30) && near(tie.json.ap_wht_withheld, 30) && tie.json.tied_gl_ap === true, `${tie.status} ${JSON.stringify(tie.json).slice(0, 170)}`);
 
   await app.close();
   await pg.close();
