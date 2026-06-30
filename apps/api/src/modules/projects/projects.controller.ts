@@ -166,6 +166,14 @@ export class ProjectsController {
     return this.svc.portfolioEvm(u);
   }
 
+  // Action center / exception inbox (PMO-1, PROJ-11): the single "what needs me now" worklist across all the
+  // caller's projects. Static segment, declared before :code so it never collides. ?stale_days overrides the
+  // health-staleness window (default 14).
+  @Get('action-center')
+  actionCenter(@Query('stale_days') staleDays: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.actionCenter(u, { stale_days: staleDays != null ? Number(staleDays) : undefined });
+  }
+
   // ── Project templates (B2) ── static 'templates' segment, declared before :code so it never collides.
   @Post('templates')
   createTemplate(@Body(new ZodValidationPipe(TemplateBody)) b: TemplateDto, @CurrentUser() u: JwtUser) {
