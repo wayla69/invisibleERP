@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PG_CLIENT, type PgClient } from '../../database/database.module';
+import { captureOpsAlert } from '../../observability/instrumentation';
 
 // ITGC-AC-07 — per-account login throttle/lockout.
 // All statements run on the RAW pg client (AUTOCOMMIT), NOT the per-request tenant transaction: a failed
@@ -29,7 +30,7 @@ export class LoginAttemptStore {
   // once the running count reaches THRESHOLD. The increment + lock decision happen in one atomic UPSERT.
   async recordFailure(username: string): Promise<void> {
     try {
-      await this.sql`
+      const rows = await this.sql<{ fail_count: number; locked_until: Date | null }[]>`
         INSERT INTO login_attempts (username, fail_count, last_attempt)
         VALUES (${username}, 1, now())
         ON CONFLICT (username) DO UPDATE SET
@@ -39,7 +40,15 @@ export class LoginAttemptStore {
           locked_until = CASE WHEN (CASE WHEN login_attempts.last_attempt < now() - (${WINDOW_MINUTES} || ' minutes')::interval
                                          THEN 1 ELSE login_attempts.fail_count + 1 END) >= ${THRESHOLD}
                               THEN now() + (${LOCK_MINUTES} || ' minutes')::interval
-                              ELSE login_attempts.locked_until END`;
+                              ELSE login_attempts.locked_until END
+        RETURNING fail_count, locked_until`;
+      // ITGC-AC-07 — alert ops when an account LOCKS. recordFailure runs only when the account is NOT
+      // already locked (the auth path checks retryAfterSeconds first), so a result at/over THRESHOLD with a
+      // future lock IS the lock transition — a brute-force / credential-stuffing signal worth paging on.
+      const r = rows[0];
+      if (r && Number(r.fail_count) >= THRESHOLD && r.locked_until) {
+        captureOpsAlert('login_lockout', { username, fail_count: Number(r.fail_count), lock_minutes: LOCK_MINUTES });
+      }
     } catch { /* best-effort: a counter write failure must not break the auth path */ }
   }
 

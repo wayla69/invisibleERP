@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { stocktakes, stockMovements } from '../../database/schema';
@@ -58,6 +58,13 @@ export class StockOpsService {
       const lines = await tx.select().from(stocktakes).where(eq(stocktakes.stNo, stNo));
       if (!lines.length) throw new NotFoundException({ code: 'NOT_FOUND', message: `Stocktake ${stNo} not found`, messageTh: 'ไม่พบใบนับสต๊อก' });
       if (lines.every((l: any) => l.status === 'Posted')) return { already: true, lines, movements: 0 };
+      // INV-04 — variance review maker-checker (SoD R11): the person who COUNTED may not post/approve their
+      // own count, so the variance is independently reviewed before it adjusts stock + GL. The poster IS the
+      // approver; the audit_log records them. (Posting is permission-gated at the controller.)
+      const counter = lines[0]?.countedBy;
+      if (counter && counter === user.username) {
+        throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The counter cannot approve/post their own stocktake — an independent reviewer must post the variance', messageTh: 'ผู้นับสต๊อกไม่สามารถอนุมัติ/โพสต์ใบนับของตนเองได้ (ต้องมีผู้ตรวจทานอิสระ)' });
+      }
       const now = new Date();
       let movements = 0;
       for (const l of lines) {
