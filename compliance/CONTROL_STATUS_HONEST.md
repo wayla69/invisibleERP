@@ -55,11 +55,16 @@ gating (GL-02/15/16) and payroll maker-checker (PAY-03) were already in the comp
 
 ## 4. The real remaining work (Partial + Gap)
 
-### Partial (9) — present but to be formalized/extended
+> This section is a 2026-06-30 snapshot; the **live RCM** (`build_rcm.py` → xlsx) is the source of truth for
+> current counts as controls are closed. Since the snapshot, **`ITGC-OP-04` (scheduled-job failure alerting)
+> moved to Implemented** — `#264` added job-queue dead-letter alerting + reaper + ops-metrics, and the
+> scheduler-swallow gap (a failed BI report/action subscription was recorded but never alerted) was then
+> closed with an ops alert + operator notification at `executeSubscription`, ToE in `cutover/bi.ts`.
+
+### Partial — present but to be formalized/extended
 `ITGC-SD-02` opening-balance migration · `ITGC-SD-03` regression-coverage gate · `ITGC-OP-02` DR/continuity
-plan · `ITGC-OP-04` scheduled-job failure alerting · `EXP-03` PR/PO authorization workflow · `INV-04`
-physical-count/cycle-count control · `PROJ-03` WIP/clearing review at close · `REC-03` intercompany
-elimination · `TAX-03` withholding-tax computation/reporting.
+plan · `EXP-03` PR/PO authorization workflow · `INV-04` physical-count/cycle-count control · `PROJ-03`
+WIP/clearing review at close · `REC-03` intercompany elimination · `TAX-03` withholding-tax computation/reporting.
 
 ### Gap (6) — not yet built; mostly **entity-level governance, not software**
 `ELC-01` code of conduct/ethics acknowledgement · `ELC-02` audit-committee oversight · `ELC-03`
