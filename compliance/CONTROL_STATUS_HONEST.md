@@ -28,8 +28,8 @@ evidenced over an audit period or tested by an independent firm. Those are separ
 
 | Status | Count | Share | Meaning |
 |--------|-------|-------|---------|
-| Implemented | **148** | 96% | Exists + automated ToE harness re-performs it |
-| Partial | **6** | 4% | Capability present; must be formalized/extended |
+| Implemented | **151** | 98% | Exists + automated ToE harness re-performs it |
+| Partial | **3** | 2% | Capability present; must be formalized/extended |
 | Gap | **0** | 0% | — every control now has at least system scaffolding |
 | **Total** | **154** | | |
 
@@ -71,12 +71,16 @@ gating (GL-02/15/16) and payroll maker-checker (PAY-03) were already in the comp
 > scheduler-swallow gap (a failed BI report/action subscription was recorded but never alerted) was then
 > closed with an ops alert + operator notification at `executeSubscription`, ToE in `cutover/bi.ts`.
 
-### Partial (6) — present but to be formalized/extended
-**Financial/process:** `PROJ-03` WIP/clearing review at close · `REC-03` intercompany elimination · `TAX-03`
-withholding-tax computation/reporting.
-**Entity-level governance — system scaffolding shipped (W3/W5), human process pending:** `ELC-01` ethics
-acknowledgement register (annual campaign = HR process) · `ELC-02` audit-committee oversight log (holding the
-meetings = board process) · `ELC-04` whistleblower case log (operating the hotline = governance process).
+### Partial (3) — all entity-level governance; **system shipped, human process pending**
+`ELC-01` ethics-acknowledgement register (annual campaign = HR process) · `ELC-02` audit-committee oversight
+log (holding the meetings = board process) · `ELC-04` whistleblower case log (operating the hotline =
+governance process).
+
+> The financial Partials are now closed: `PROJ-03` (WIP/2390 close-review sign-off, maker-checker), `REC-03`
+> (per-period intercompany reconciliation sign-off gating consolidation), and `TAX-03` (WHT at AP payment +
+> ภ.ง.ด. reporting) all reached **Implemented**. **Every remaining Partial is human-governance, not code** —
+> the systems capture the evidence; the company running the ethics campaign, holding the audit-committee
+> meetings, and operating the hotline is what earns Implemented.
 
 ### Gap — none
 There are **no Gap controls**. Each entity-level governance control has an in-app evidence-capture register/log

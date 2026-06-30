@@ -590,6 +590,20 @@ async function main() {
   const progBadDep = await inj('PATCH', '/api/projects/PRG-A/program', admin, { depends_on_projects: ['NOPE'] });
   ok('Unknown dependency project rejected → 400 DEP_PROJECT_NOT_FOUND', progBadDep.status === 400 && progBadDep.json.error?.code === 'DEP_PROJECT_NOT_FOUND', `${progBadDep.status} ${progBadDep.json.error?.code}`);
 
+  // ── PROJ-03: period-end WIP(1260)/clearing(2390) close review + maker-checker sign-off ──
+  // Billable costs logged above have posted Dr 1260 WIP / Cr 2390, so there's unbilled WIP to review.
+  const ccPrep = await inj('POST', '/api/projects/close-review?period=2026-06', admin);
+  ok('PROJ-03: close review prepared → captures WIP(1260) total + clearing(2390) + open projects',
+    (ccPrep.status === 200 || ccPrep.status === 201) && ccPrep.json.status === 'Prepared' && ccPrep.json.wip_total > 0 && ccPrep.json.open_projects > 0 && ccPrep.json.prepared_by === 'admin',
+    JSON.stringify({ st: ccPrep.json.status, wip: ccPrep.json.wip_total, clr: ccPrep.json.clearing_balance, op: ccPrep.json.open_projects }));
+  const ccSelf = await inj('POST', '/api/projects/close-review/2026-06/approve', admin);
+  ok('PROJ-03: preparer self-approval blocked → 403 SOD_VIOLATION (maker-checker)', ccSelf.status === 403 && ccSelf.json.error?.code === 'SOD_VIOLATION', `${ccSelf.status} ${ccSelf.json.error?.code}`);
+  const ccAppr = await inj('POST', '/api/projects/close-review/2026-06/approve', mgr);
+  ok('PROJ-03: independent approver signs off → Approved + approved_by recorded',
+    (ccAppr.status === 200 || ccAppr.status === 201) && ccAppr.json.status === 'Approved' && ccAppr.json.approved_by === 'mgr', JSON.stringify({ st: ccAppr.json.status, by: ccAppr.json.approved_by }));
+  const ccList = await inj('GET', '/api/projects/close-reviews', admin);
+  ok('PROJ-03: the close review is recorded in the register (Approved)', (ccList.json.reviews ?? []).some((r: any) => r.period === '2026-06' && r.status === 'Approved'), `n=${ccList.json.count}`);
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
