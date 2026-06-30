@@ -44,3 +44,7 @@ tools/etl/.cache/
 # Coverage reports (vitest v8)
 coverage/
 **/coverage/
+
+# DR game-day throwaway output
+dr-backups/
+dr-gameday-out/
