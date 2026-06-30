@@ -355,7 +355,7 @@ export class BillingService {
 
 // Map a Stripe subscription status to our 4-state lifecycle (fail-safe: anything not clearly active/trial
 // restricts access rather than silently granting it).
-function mapStripeStatus(s: string): 'Trialing' | 'Active' | 'PastDue' | 'Canceled' {
+export function mapStripeStatus(s: string): 'Trialing' | 'Active' | 'PastDue' | 'Canceled' {
   switch (s) {
     case 'trialing': return 'Trialing';
     case 'active': return 'Active';
