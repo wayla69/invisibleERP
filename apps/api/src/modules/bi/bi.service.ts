@@ -25,6 +25,7 @@ import { JobQueueService } from '../jobs/job-queue.service';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
 import { BiLiveService } from './bi-live.service';
 import { BillingService } from '../billing/billing.service';
+import { captureOpsAlert } from '../../observability/instrumentation';
 
 // Job type for offloading a due report/action subscription to the background worker.
 export const REPORT_SUBSCRIPTION_JOB = 'report_subscription';
@@ -680,12 +681,27 @@ export class BiService implements OnModuleInit {
       await db.update(reportSubscriptions).set({ lastRunAt: new Date(), nextRunAt: this.nextRunDate(sub.frequency) }).where(eq(reportSubscriptions.id, sub.id));
       return { run_id: Number(run.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'success', delivered, summary: report.summary };
     } catch (e: any) {
+      const errMsg = String(e?.message ?? e);
+      // ITGC-OP-04 — a scheduled (often FINANCIAL) job that fails must never be SILENT. executeSubscription
+      // swallows the error (returns status:'failed' instead of throwing) so the failure would otherwise be
+      // invisible at the alerting layer — and when run async via the worker, the swallowed error would mark
+      // the background job 'done'. So we (a) emit an ops alert (structured log + Sentry — routes to on-call,
+      // reusing the #264 sink) and (b) raise an operator-facing in-app notification, in addition to recording
+      // the failed run for review (GET /api/bi/runs). Both are best-effort and never mask the original failure.
+      captureOpsAlert('scheduled_job_failed', { subscriptionId: Number(sub.id), reportType: sub.reportType, tenantId: sub.tenantId, name: sub.name }, e);
+      try {
+        await db.insert(notifications).values({
+          targetTenantId: sub.tenantId, targetRole: 'Admin',
+          message: `งานตั้งเวลาล้มเหลว: ${sub.name} (${sub.reportType}) — ${errMsg}`,
+          messageEn: `Scheduled job failed: ${sub.name} (${sub.reportType}) — ${errMsg}`,
+        });
+      } catch { /* operator alert is best-effort — never mask the original failure */ }
       const [run] = await db.insert(reportRuns).values({
         tenantId: sub.tenantId, subscriptionId: Number(sub.id), name: sub.name, reportType: sub.reportType,
-        frequency: sub.frequency, status: 'failed', recipientsCount: 0, summary: {}, error: String(e?.message ?? e),
+        frequency: sub.frequency, status: 'failed', recipientsCount: 0, summary: {}, error: errMsg,
       }).returning({ id: reportRuns.id });
       await db.update(reportSubscriptions).set({ lastRunAt: new Date(), nextRunAt: this.nextRunDate(sub.frequency) }).where(eq(reportSubscriptions.id, sub.id));
-      return { run_id: Number(run.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'failed', delivered: 0, error: String(e?.message ?? e) };
+      return { run_id: Number(run.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'failed', delivered: 0, error: errMsg };
     }
   }
 
