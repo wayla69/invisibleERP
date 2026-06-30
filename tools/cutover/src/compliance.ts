@@ -841,6 +841,12 @@ async function main() {
   const exPoNo = exPo.json.po_no as string;
   await inj('PATCH', `/api/procurement/pos/${exPoNo}/approve`, admin, { approve: true });
   await inj('POST', '/api/procurement/grs', admin, { po_no: exPoNo, items: [{ item_id: 'EXP3X', received_qty: 100 }] });
+  // EXP-03: a GR against an UNAPPROVED (Pending) PO is BLOCKED — receiving must wait for the maker-checker
+  // approval, so an unapproved PO can't trigger a GR + AP liability (defeating the 3-way match).
+  const exPoPend = await inj('POST', '/api/procurement/pos', admin, { vendor_id: VEXP, items: [{ item_id: 'EXP3X', order_qty: 5, unit_price: 10 }] });
+  const exGrBlocked = await inj('POST', '/api/procurement/grs', admin, { po_no: exPoPend.json.po_no, items: [{ item_id: 'EXP3X', received_qty: 5 }] });
+  ok('EXP-03: GR against an unapproved (Pending) PO is BLOCKED → 403 PO_NOT_APPROVED',
+    exGrBlocked.status === 403 && exGrBlocked.json.error?.code === 'PO_NOT_APPROVED', `${exGrBlocked.status} ${exGrBlocked.json.error?.code}`);
   // invoice the PO at 100@12 (+20% price variance) → match fails, not payable
   const exBill = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_id: VEXP, txn_type: 'Goods', amount: 1200 });
   const exTxn = exBill.json.txn_no as string;

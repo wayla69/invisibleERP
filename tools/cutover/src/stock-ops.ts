@@ -61,8 +61,8 @@ async function main() {
   const token = (await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' })).json.token;
   ok('login', !!token);
 
-  // ── Stocktake ──
-  const st = await inj('POST', '/api/stocktake', token, { remarks: 'cycle', lines: [{ item_id: 'A', item_description: 'Apple', uom: 'EA', system_qty: 100, physical_qty: 95 }] });
+  // ── Stocktake ── (INV-04 maker-checker: counted_by='floorstaff' so admin = the independent reviewer who posts)
+  const st = await inj('POST', '/api/stocktake', token, { remarks: 'cycle', counted_by: 'floorstaff', lines: [{ item_id: 'A', item_description: 'Apple', uom: 'EA', system_qty: 100, physical_qty: 95 }] });
   ok('create stocktake → ST- + 1 variance line', (st.status === 200 || st.status === 201) && /^ST-\d{8}-\d{3}$/.test(st.json.st_no) && st.json.variance_lines === 1, `status=${st.status} no=${st.json.st_no}`);
   const stNo = st.json.st_no;
 
@@ -76,6 +76,11 @@ async function main() {
   ok('post stocktake → Posted + 1 variance movement', (post1.status === 200 || post1.status === 201) && post1.json.status === 'Posted' && post1.json.variance_movements === 1, JSON.stringify(post1.json));
   const post2 = await inj('POST', `/api/stocktake/${stNo}/post`, token);
   ok('re-post is idempotent (already)', post2.json.already === true);
+
+  // INV-04 — variance review maker-checker (SoD R11): the COUNTER may not post/approve their own count.
+  const stSelf = await inj('POST', '/api/stocktake', token, { remarks: 'self', counted_by: 'admin', lines: [{ item_id: 'A', uom: 'EA', system_qty: 100, physical_qty: 90 }] });
+  const stSelfPost = await inj('POST', `/api/stocktake/${stSelf.json.st_no}/post`, token);
+  ok('INV-04: the counter cannot post their own stocktake → 403 SOD_SELF_APPROVAL', stSelfPost.status === 403 && stSelfPost.json.error?.code === 'SOD_SELF_APPROVAL', `${stSelfPost.status} ${stSelfPost.json.error?.code}`);
 
   const so = await db.select().from(s.stockMovements).where(and(eq(s.stockMovements.refDoc, stNo), eq(s.stockMovements.moveType, 'Stock Out')));
   ok('variance movement Stock Out qty=5', so.length === 1 && Number(so[0].qty) === 5, `n=${so.length} qty=${so[0]?.qty}`);
@@ -106,7 +111,7 @@ async function main() {
   ok('tracked item B established by valued receipt (100 @ 10 = 1000)', valB0.json.items?.some((i: any) => i.item_id === 'B' && Number(i.on_hand_qty) === 100 && Number(i.total_value) === 1000));
 
   // Stocktake B counted 95 → the stock-ops POST also books the valued variance (−5 @ 10 = −50) to GL.
-  const stB = await inj('POST', '/api/stocktake', token, { remarks: 'cycle B', lines: [{ item_id: 'B', uom: 'EA', system_qty: 100, physical_qty: 95 }] });
+  const stB = await inj('POST', '/api/stocktake', token, { remarks: 'cycle B', counted_by: 'floorstaff', lines: [{ item_id: 'B', uom: 'EA', system_qty: 100, physical_qty: 95 }] });
   const postB = await inj('POST', `/api/stocktake/${stB.json.st_no}/post`, token);
   ok('stocktake post values the variance for the tracked item (valued_lines=1)', postB.json.status === 'Posted' && postB.json.valued_lines === 1, JSON.stringify(postB.json));
   const bRow = (await inj('GET', '/api/inventory/valuation', token)).json.items?.find((i: any) => i.item_id === 'B');

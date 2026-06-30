@@ -333,6 +333,13 @@ export class ProcurementService {
     const db = this.db as any;
     const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, dto.po_no)).limit(1);
     if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบ PO' });
+    // EXP-03 — a PO must clear its approval (maker-checker + DoA thresholds, enforced by the workflow engine)
+    // BEFORE goods can be received against it; otherwise an unapproved/cancelled PO could trigger a GR and an
+    // AP liability, defeating the 3-way match. Receivable = past approval (Approved or a part-received/closed
+    // state); block the not-yet-approved / dead states.
+    if (['Pending', 'Draft', 'Rejected', 'Cancelled'].includes(String(po.status))) {
+      throw new ForbiddenException({ code: 'PO_NOT_APPROVED', message: `Cannot receive against a '${po.status}' PO — it must be approved first`, messageTh: `รับสินค้าไม่ได้: PO สถานะ '${po.status}' ต้องได้รับอนุมัติก่อน` });
+    }
     const lines = (dto.items ?? []).filter((it) => n(it.received_qty) > 0);
     if (!lines.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No received qty', messageTh: 'ไม่มีจำนวนรับ' });
 

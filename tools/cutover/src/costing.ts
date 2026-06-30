@@ -78,6 +78,8 @@ async function main() {
   // receive: create a PO then GR it (the GR capitalizes configured items)
   const receive = async (item: string, qty: number, cost: number) => {
     const po = await inj('POST', '/api/procurement/pos', plan1, { vendor_id: V1, items: [{ item_id: item, order_qty: qty, unit_price: cost }] });
+    // EXP-03: a GR is now hard-gated on PO approval — approve before receiving (mirrors the ATP setup below).
+    await db.update(s.purchaseOrders).set({ status: 'Approved' }).where(eq(s.purchaseOrders.poNo, po.json.po_no));
     return inj('POST', '/api/procurement/grs', plan1, { po_no: po.json.po_no, items: [{ item_id: item, received_qty: qty, unit_cost: cost }] });
   };
   const sell = (item: string, qty: number) => inj('POST', '/api/portal/pos/sales', shop1, { items: [{ item_id: item, qty, unit_price: 30 }] });
