@@ -422,4 +422,20 @@ export class ProjectsController {
   listResources(@Param('code') code: string) {
     return this.svc.listResources(code);
   }
+
+  // PROJ-03 — period-end WIP/clearing close review + maker-checker sign-off (controller/finance: 'exec').
+  @Post('close-review') @Permissions('exec')
+  prepareCloseReview(@Query('period') period: string, @CurrentUser() u: JwtUser) { return this.svc.prepareCloseReview(period, u); }
+
+  @Post('close-review/:period/approve') @Permissions('exec')
+  approveCloseReview(@Param('period') period: string, @CurrentUser() u: JwtUser) { return this.svc.approveCloseReview(period, u); }
+
+  @Post('close-review/:period/reject') @Permissions('exec')
+  rejectCloseReview(@Param('period') period: string, @Body(new ZodValidationPipe(z.object({ reason: z.string().optional() }))) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectCloseReview(period, b.reason ?? '', u); }
+
+  @Get('close-review/:period') @Permissions('exec')
+  getCloseReview(@Param('period') period: string, @CurrentUser() u: JwtUser) { return this.svc.getCloseReview(period, u); }
+
+  @Get('close-reviews') @Permissions('exec')
+  listCloseReviews(@CurrentUser() u: JwtUser) { return this.svc.listCloseReviews(u); }
 }

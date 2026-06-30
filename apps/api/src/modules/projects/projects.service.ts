@@ -1,7 +1,7 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, crmOpportunities, customerMaster, timesheets } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
 import { ymd, n, fx } from '../../database/queries';
@@ -1363,6 +1363,79 @@ export class ProjectsService {
       start_date: p.startDate, end_date: p.endDate, created_at: p.createdAt,
       // Program (cross-project) scheduling (PMO-4).
       program_code: p.programCode ?? null, depends_on_projects: csvToList(p.dependsOnProjects),
+    };
+  }
+
+  // ───────────────── PROJ-03 — period-end project-close WIP/clearing review + sign-off ─────────────────
+  // Snapshot unbilled-WIP (GL 1260) + the applied-costs clearing balance (GL 2390) + open-project count.
+  private async closeSnapshot() {
+    const db = this.db as any;
+    const [wip] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalLines.accountCode, '1260'), eq(journalEntries.status, 'Posted')));
+    const [clr] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalLines.accountCode, '2390'), eq(journalEntries.status, 'Posted')));
+    const [op] = await db.select({ c: sql<string>`count(*)` }).from(projects).where(sql`${projects.status} not in ('Closed','Completed','Cancelled')`);
+    return { wipTotal: r2(n(wip?.v)), clearingBalance: r2(n(clr?.v)), openProjects: Number(op?.c ?? 0) };
+  }
+
+  // Preparer: snapshot + sign the period's WIP/clearing review (upsert per tenant/period; a prior
+  // Rejected/Prepared is refreshed). A control account that gets reviewed at close (PROJ-03, detective).
+  async prepareCloseReview(period: string, user: JwtUser) {
+    if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
+    const db = this.db as any;
+    const snap = await this.closeSnapshot();
+    const [existing] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
+    if (existing?.status === 'Approved') throw new BadRequestException({ code: 'ALREADY_APPROVED', message: `Project close review for ${period} is already approved`, messageTh: 'งวดนี้อนุมัติแล้ว' });
+    const values: any = {
+      tenantId: user.tenantId ?? null, period, status: 'Prepared',
+      wipTotal: String(snap.wipTotal), clearingBalance: String(snap.clearingBalance), openProjects: snap.openProjects,
+      preparedBy: user.username, preparedAt: new Date(), approvedBy: null, approvedAt: null, rejectionReason: null,
+    };
+    if (existing) await db.update(projectCloseReviews).set(values).where(eq(projectCloseReviews.id, existing.id));
+    else await db.insert(projectCloseReviews).values(values);
+    return this.getCloseReview(period, user);
+  }
+
+  // Checker: sign off (SoD — approver ≠ preparer). Detective review, so no hard numeric gate; the independent
+  // sign-off IS the control.
+  async approveCloseReview(period: string, user: JwtUser) {
+    const db = this.db as any;
+    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
+    if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `Project close review for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการสอบทาน' });
+    if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
+    if (rp.preparedBy && rp.preparedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
+    await db.update(projectCloseReviews).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectCloseReviews.id, rp.id));
+    return this.getCloseReview(period, user);
+  }
+
+  async rejectCloseReview(period: string, reason: string, user: JwtUser) {
+    const db = this.db as any;
+    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
+    if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: 'Project close review has not been prepared', messageTh: 'ยังไม่ได้จัดทำ' });
+    if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
+    await db.update(projectCloseReviews).set({ status: 'Rejected', rejectionReason: reason ?? null }).where(eq(projectCloseReviews.id, rp.id));
+    return this.getCloseReview(period, user);
+  }
+
+  async getCloseReview(period: string, user: JwtUser) {
+    const db = this.db as any;
+    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
+    if (!rp) return { period, status: 'None' };
+    return this.shapeCloseReview(rp);
+  }
+
+  async listCloseReviews(user: JwtUser) {
+    const db = this.db as any;
+    const rows = await db.select().from(projectCloseReviews).where(user.tenantId != null ? eq(projectCloseReviews.tenantId, user.tenantId) : undefined).orderBy(desc(projectCloseReviews.period)).limit(60);
+    return { reviews: rows.map((r: any) => this.shapeCloseReview(r)), count: rows.length };
+  }
+
+  private shapeCloseReview(r: any) {
+    return {
+      period: r.period, status: r.status, wip_total: n(r.wipTotal), clearing_balance: n(r.clearingBalance), open_projects: Number(r.openProjects ?? 0),
+      prepared_by: r.preparedBy, prepared_at: r.preparedAt, approved_by: r.approvedBy, approved_at: r.approvedAt, rejection_reason: r.rejectionReason,
     };
   }
 }

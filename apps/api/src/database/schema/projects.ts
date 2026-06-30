@@ -1,5 +1,25 @@
-import { pgTable, bigserial, bigint, text, numeric, integer, date, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, date, boolean, timestamp, index, unique } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
+
+// PROJ-03 — period-end project-close WIP/clearing review + sign-off. A preparer snapshots unbilled-WIP (GL
+// 1260) + the applied-costs clearing balance (GL 2390) + the count of open projects under review and signs
+// (Prepared); an independent approver (SoD: approver ≠ preparer) signs off (Approved). One row per (tenant,
+// period). Detective control — the auditable record that WIP + clearing were reviewed at close.
+export const projectCloseReviews = pgTable('project_close_reviews', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  period: text('period').notNull(), // YYYY-MM
+  status: text('status').notNull().default('Prepared'), // Prepared | Approved | Rejected
+  wipTotal: numeric('wip_total', { precision: 16, scale: 2 }).notNull().default('0'),            // GL 1260 net
+  clearingBalance: numeric('clearing_balance', { precision: 16, scale: 2 }).notNull().default('0'), // GL 2390 net
+  openProjects: integer('open_projects').notNull().default(0),
+  preparedBy: text('prepared_by'),
+  preparedAt: timestamp('prepared_at', { withTimezone: true }),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectionReason: text('rejection_reason'),
+}, (t) => ({ uq: unique('project_close_review_tenant_period_uq').on(t.tenantId, t.period) }));
+export type ProjectCloseReview = typeof projectCloseReviews.$inferSelect;
 
 // Project accounting / PPM (โครงการ) — tenant-scoped (RLS). Costs accrue to project WIP; billing
 // recognizes revenue + relieves WIP to cost of services. T&M or Fixed-price.
