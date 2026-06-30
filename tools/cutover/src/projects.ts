@@ -454,6 +454,68 @@ async function main() {
   const augRow = (cap.json.monthly ?? []).find((m: any) => m.month === '2026-08');
   ok('Capacity calendar monthly rollup: August flags ≥1 over-allocated resource', augRow && augRow.resources_over >= 1 && augRow.total_demand_pct >= 120, JSON.stringify({ over: augRow?.resources_over, demand: augRow?.total_demand_pct }));
 
+  // ── 26. project health history (EVM/RAG snapshots over time, PPM upgrade) ──
+  // PRJ-EVM has CPI 1.1111 / SPI 1.0 → both ≥ 1 → green.
+  const h1 = await inj('POST', '/api/projects/PRJ-EVM/health', admin, { as_of: '2026-02-15' });
+  ok('Capture health snapshot → rag green (CPI 1.11 / SPI 1.0)', h1.json.rag === 'green' && near(h1.json.cpi, 1.1111), JSON.stringify({ rag: h1.json.rag, cpi: h1.json.cpi }));
+  await inj('POST', '/api/projects/PRJ-EVM/health', admin, { as_of: '2026-03-15' });
+  await inj('POST', '/api/projects/PRJ-EVM/health', admin, { as_of: '2026-03-15' }); // idempotent per (project, date)
+  const hist = await inj('GET', '/api/projects/PRJ-EVM/health', admin);
+  ok('Health history: 2 dated snapshots (ascending), same-day re-capture is idempotent',
+    hist.json.count === 2 && hist.json.history?.[0]?.snapshot_date === '2026-02-15' && hist.json.history?.[1]?.snapshot_date === '2026-03-15' && hist.json.history.every((s: any) => s.rag === 'green'),
+    JSON.stringify({ n: hist.json.count, dates: (hist.json.history ?? []).map((s: any) => s.snapshot_date) }));
+  // Scheduled action job: project_health_capture snapshots every project.
+  const phSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'Project health', report_type: 'project_health_capture', frequency: 'weekly' });
+  const phRun = await inj('POST', `/api/bi/subscriptions/${phSub.json.id}/run`, admin, {});
+  ok('BI project_health_capture runs success (snapshots all projects)', phRun.json.status === 'success' && /captured/.test(phRun.json.summary ?? ''), JSON.stringify({ s: phRun.json.status, sum: (phRun.json.summary ?? '').slice(0, 40) }));
+
+  // ── 27. action center / exception inbox (PMO-1, PROJ-11) ──
+  // Seed PRJ-ACT with one of every exception kind, then assert the worklist surfaces them with the right
+  // severity, that the highest-severity items sort first, that resolving an exception clears it, and that the
+  // proactive SSE bus carries a project_action event for the red snapshot + the unmitigated-high risk.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-ACT', name: 'งานศูนย์รวมงานค้าง', billing_type: 'TM', budget_amount: 1000 });
+  await inj('POST', '/api/projects/PRJ-ACT/tasks', admin, { name: 'Build', planned_cost: 1000, pct_complete: 0 });
+  await inj('POST', '/api/projects/PRJ-ACT/cost', admin, { entry_type: 'expense', description: 'overrun', amount: 5000, billable: true }); // AC 5000 vs BAC 1000 → CPI 0 (red) + over budget
+  await inj('POST', '/api/projects/PRJ-ACT/milestones', admin, { name: 'Kickoff', due_date: '2020-01-01' }); // past due, not reached → slipping
+  const actCo = await inj('POST', '/api/projects/PRJ-ACT/change-orders', admin, { description: 'scope+', contract_delta: 100 }); // pending → awaiting approval
+  const actCoId = actCo.json.change_orders?.[0]?.id;
+  await inj('POST', '/api/hcm/timesheets', admin, { emp_code: emp.json.emp_code, work_date: '2026-06-20', regular_hours: 8, project_code: 'PRJ-ACT', billable: true }); // Pending → awaiting approval
+  await inj('POST', '/api/projects/PRJ-ACT/risks', admin, { title: 'Unmitigated showstopper', probability: 5, impact: 5 }); // 25 red, no mitigation → SSE emit
+  await inj('POST', '/api/projects/PRJ-ACT/health', admin, {}); // today's snapshot → rag red → SSE emit + not stale
+
+  const ac = await inj('GET', '/api/projects/action-center', admin);
+  const acMine = (ac.json.items ?? []).filter((i: any) => i.project_code === 'PRJ-ACT');
+  const acKinds = new Set<string>(acMine.map((i: any) => i.kind));
+  ok('Action center surfaces every seeded exception kind for PRJ-ACT (7 kinds, stale_health absent — just snapshotted)',
+    acKinds.has('over_budget') && acKinds.has('project_red') && acKinds.has('no_baseline') && acKinds.has('change_order_pending') && acKinds.has('milestone_slipping') && acKinds.has('timesheet_pending') && acKinds.has('risk_unmitigated_high') && !acKinds.has('stale_health'),
+    JSON.stringify({ kinds: [...acKinds] }));
+  ok('Action center severity: over_budget / project_red / risk_unmitigated_high are HIGH; first item overall is high',
+    acMine.filter((i: any) => i.severity === 'high').map((i: any) => i.kind).sort().join(',') === 'over_budget,project_red,risk_unmitigated_high' && ac.json.items?.[0]?.severity === 'high',
+    JSON.stringify({ high: acMine.filter((i: any) => i.severity === 'high').map((i: any) => i.kind) }));
+  ok('Action center items deep-link to the offending project tab + summary counts reconcile',
+    acMine.every((i: any) => typeof i.href === 'string' && i.href.startsWith('/projects/PRJ-ACT?tab=')) && ac.json.summary?.total === (ac.json.items ?? []).length && ac.json.summary?.high >= 3,
+    JSON.stringify({ total: ac.json.summary?.total, high: ac.json.summary?.high }));
+
+  // Proactive SSE: the red health snapshot and the unmitigated-high risk pushed project_action events.
+  const live = await inj('GET', '/api/bi/live/recent?limit=100', admin);
+  const evs = (live.json.events ?? []).filter((e: any) => e.type === 'project_action' && e.project_code === 'PRJ-ACT');
+  ok('SSE bus carries a project_red + a risk_unmitigated_high project_action event for PRJ-ACT',
+    evs.some((e: any) => e.kind === 'project_red') && evs.some((e: any) => e.kind === 'risk_unmitigated_high'),
+    JSON.stringify({ kinds: evs.map((e: any) => e.kind) }));
+
+  // Resolve an exception → it clears (PROJ-11 ToE). Independent approval of the change order removes the
+  // change_order_pending item (and auto-captures a baseline, so no_baseline clears too).
+  await inj('POST', `/api/projects/change-orders/${actCoId}/approve`, mgr, {});
+  const ac2 = await inj('GET', '/api/projects/action-center', admin);
+  const acMine2 = (ac2.json.items ?? []).filter((i: any) => i.project_code === 'PRJ-ACT');
+  const acKinds2 = new Set<string>(acMine2.map((i: any) => i.kind));
+  ok('Resolving the change order clears change_order_pending + no_baseline from the worklist',
+    !acKinds2.has('change_order_pending') && !acKinds2.has('no_baseline'),
+    JSON.stringify({ kinds: [...acKinds2] }));
+  // stale_days override is honoured (a 0-tolerance window would flag today's snapshot — but >0 only).
+  const acStale = await inj('GET', '/api/projects/action-center?stale_days=1', admin);
+  ok('Action center accepts ?stale_days override (echoed in payload)', acStale.json.stale_days === 1, JSON.stringify({ s: acStale.json.stale_days }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

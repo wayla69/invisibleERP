@@ -64,6 +64,8 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   budget_variance: { label: 'งบประมาณเทียบกับจริง', labelEn: 'Budget vs actual variance' },
   // Supplier performance (RG-3): wraps the supplier scorecard compute (avg score + underperformers).
   supplier_scorecard: { label: 'คะแนนผลงานผู้ขาย', labelEn: 'Supplier performance scorecard' },
+  // Action job: each run captures a dated EVM/RAG health snapshot for every project (idempotent per day).
+  project_health_capture: { label: 'บันทึกสุขภาพโครงการ', labelEn: 'Capture project health snapshots' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -584,6 +586,11 @@ export class BiService implements OnModuleInit {
       if (!this.procurement) throw new BadRequestException({ code: 'PROCUREMENT_UNAVAILABLE', message: 'Procurement service not available', messageTh: 'ระบบจัดซื้อไม่พร้อมใช้งาน' });
       const r = await this.procurement.listScorecards({ period: f.period, limit: f.limit }, user);
       return { data: r, summary: `Suppliers: ${r.count} scored, avg ${r.avg_score}, ${r.underperformers} underperformer(s) (<70)`, summaryTh: `ผู้ขาย: ให้คะแนน ${r.count} ราย · เฉลี่ย ${r.avg_score} · ต่ำกว่าเกณฑ์ ${r.underperformers} ราย` };
+    }
+    if (reportType === 'project_health_capture') {
+      if (!this.projects) throw new BadRequestException({ code: 'PROJECTS_UNAVAILABLE', message: 'Projects service not available', messageTh: 'ระบบโครงการไม่พร้อมใช้งาน' });
+      const r = await this.projects.captureAllHealth(user); // idempotent per (project, date)
+      return { data: r, summary: `Project health: captured ${r.captured} of ${r.scanned} project(s) for ${r.as_of}`, summaryTh: `บันทึกสุขภาพโครงการ: ${r.captured} จาก ${r.scanned} โครงการ` };
     }
     if (reportType === 'exec_scorecard') {
       const r = await this.execScorecard(user);

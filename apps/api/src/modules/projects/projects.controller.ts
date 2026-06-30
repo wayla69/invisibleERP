@@ -166,6 +166,14 @@ export class ProjectsController {
     return this.svc.portfolioEvm(u);
   }
 
+  // Action center / exception inbox (PMO-1, PROJ-11): the single "what needs me now" worklist across all the
+  // caller's projects. Static segment, declared before :code so it never collides. ?stale_days overrides the
+  // health-staleness window (default 14).
+  @Get('action-center')
+  actionCenter(@Query('stale_days') staleDays: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.actionCenter(u, { stale_days: staleDays != null ? Number(staleDays) : undefined });
+  }
+
   // ── Project templates (B2) ── static 'templates' segment, declared before :code so it never collides.
   @Post('templates')
   createTemplate(@Body(new ZodValidationPipe(TemplateBody)) b: TemplateDto, @CurrentUser() u: JwtUser) {
@@ -227,6 +235,17 @@ export class ProjectsController {
   @Get(':code/evm/series')
   evmSeries(@Param('code') code: string, @Query('months') months: string | undefined) {
     return this.svc.evmSeries(code, { months: months ? Number(months) : undefined });
+  }
+
+  // Project health history (PPM upgrade): capture a dated EVM/RAG snapshot; read the trajectory.
+  @Post(':code/health')
+  captureHealth(@Param('code') code: string, @Body() b: { as_of?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.captureHealth(code, b ?? {}, u);
+  }
+
+  @Get(':code/health')
+  healthHistory(@Param('code') code: string) {
+    return this.svc.healthHistory(code);
   }
 
   // Critical-path schedule (CPM): per-task ES/EF/LS/LF, slack, and on_critical_path for the Gantt.

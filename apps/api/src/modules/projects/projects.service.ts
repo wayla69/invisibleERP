@@ -1,8 +1,9 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, crmOpportunities, customerMaster } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, crmOpportunities, customerMaster, timesheets } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { BiLiveService } from '../bi/bi-live.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -54,7 +55,16 @@ export class ProjectsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly ledger: LedgerService,
+    // Optional so partial harnesses (and any consumer that constructs the service without the bus) still
+    // build; when present, the action center pushes a `project_action` SSE event on red/unmitigated-high.
+    @Optional() private readonly live?: BiLiveService,
   ) {}
+
+  // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
+  // the underlying capture/log; the action-center page also polls, so a dropped event self-heals.
+  private emitAction(tenantId: number | null | undefined, kind: string, severity: string, projectCode: string, extra: Record<string, any> = {}) {
+    try { this.live?.publish({ type: 'project_action', tenant_id: tenantId ?? null, kind, severity, project_code: projectCode, ...extra }); } catch { /* bus optional */ }
+  }
 
   async create(dto: CreateProjectDto, user: JwtUser) {
     const db = this.db as any;
@@ -659,6 +669,100 @@ export class ProjectsService {
     };
   }
 
+  // ── Action center / exception inbox (PMO-1, PROJ-11) ─────────────────────
+  // One severity-ranked "what needs me now" worklist across all the caller's projects, assembled from the
+  // signals the modules already produce — pure aggregation, posts nothing (detective control PROJ-11):
+  //  • maker-checker queues awaiting a *different* approver: pending change orders, pending project timesheets;
+  //  • risk governance: open HIGH risks with no mitigation plan (PROJ-08);
+  //  • performance: red projects (CPI/SPI < 0.9) and over-budget projects;
+  //  • schedule: milestones past their due date and not yet reached;
+  //  • governance gaps: an Open project with no change-controlled baseline (PROJ-07) or a stale health
+  //    snapshot (none in `stale_days`, default 14). Each item deep-links to the offending project tab.
+  async actionCenter(user: JwtUser, dto?: { stale_days?: number }) {
+    const db = this.db as any;
+    const today = ymd();
+    const staleDays = dto?.stale_days != null && Number(dto.stale_days) > 0 ? Math.floor(Number(dto.stale_days)) : 14;
+    const staleCutoff = addDays(today, -staleDays);
+    // Project universe the caller can see (RLS-scoped); everything below is bounded to this id set so the
+    // cross-project queries never leak another tenant's rows.
+    const pRows = await db.select().from(projects).orderBy(desc(projects.id)).limit(100);
+    const codeById = new Map<number, string>(pRows.map((p: any) => [Number(p.id), p.projectCode]));
+    const ids = new Set<number>(pRows.map((p: any) => Number(p.id)));
+    const fmtByCode = new Map<string, any>((await this.list(user)).projects.map((p: any) => [p.project_code, p]));
+
+    const items: any[] = [];
+    const SEV_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    const push = (kind: string, severity: 'high' | 'medium' | 'low', projectId: number | null, code: string | null, titleTh: string, titleEn: string, ref: string | null, tab: string, meta: Record<string, any> = {}) => {
+      items.push({ kind, severity, project_id: projectId, project_code: code, title_th: titleTh, title_en: titleEn, ref, href: code ? `/projects/${code}?tab=${tab}` : '/projects', as_of: today, meta });
+    };
+
+    // Per-project performance + governance signals.
+    const baseRows = await db.select({ pid: projectBaselines.projectId }).from(projectBaselines).where(eq(projectBaselines.status, 'active'));
+    const hasBaseline = new Set<number>(baseRows.map((b: any) => Number(b.pid)));
+    const snapRows = await db.select({ pid: projectHealthSnapshots.projectId, last: sql<string>`max(${projectHealthSnapshots.snapshotDate})` }).from(projectHealthSnapshots).groupBy(projectHealthSnapshots.projectId);
+    const lastSnap = new Map<number, string>(snapRows.map((s: any) => [Number(s.pid), s.last]));
+    for (const p of pRows) {
+      const pid = Number(p.id); const code = p.projectCode;
+      const f = fmtByCode.get(code);
+      if (f?.over_budget) push('over_budget', 'high', pid, code, `เกินงบประมาณ (${f.budget_used_pct}%)`, `Over budget (${f.budget_used_pct}%)`, `${f.budget_used_pct}%`, 'costs', { budget_used_pct: f.budget_used_pct, budget_variance: f.budget_variance });
+      const e = await this.evm(code);
+      if ((e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9)) push('project_red', 'high', pid, code, `สุขภาพโครงการแดง (CPI ${e.cpi ?? '—'} / SPI ${e.spi ?? '—'})`, `Project health red (CPI ${e.cpi ?? '—'} / SPI ${e.spi ?? '—'})`, `CPI ${e.cpi ?? '—'}`, 'overview', { cpi: e.cpi, spi: e.spi });
+      const inFlight = p.status !== 'Closed'; // an in-flight (Open/Active) project should be baselined + tracked
+      if (inFlight && !hasBaseline.has(pid)) push('no_baseline', 'medium', pid, code, 'ยังไม่มีเส้นฐาน (baseline)', 'No change-controlled baseline', null, 'overview', {});
+      const ls = lastSnap.get(pid);
+      if (inFlight && (!ls || ls < staleCutoff)) push('stale_health', 'low', pid, code, ls ? `สุขภาพล่าสุด ${ls} (เก่ากว่า ${staleDays} วัน)` : 'ยังไม่เคยบันทึกสุขภาพ', ls ? `Last health ${ls} (older than ${staleDays}d)` : 'No health snapshot captured', ls ?? null, 'overview', { last_snapshot: ls ?? null, stale_days: staleDays });
+    }
+
+    // Pending change orders awaiting a different approver (maker-checker, PROJ-10).
+    const coRows = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.status, 'pending'));
+    for (const c of coRows) {
+      const pid = Number(c.projectId); if (!ids.has(pid)) continue;
+      const code = codeById.get(pid) ?? null;
+      push('change_order_pending', 'medium', pid, code, `ใบสั่งเปลี่ยนแปลงรออนุมัติ (${c.coNo})`, `Change order awaiting approval (${c.coNo})`, c.coNo, 'overview', { co_no: c.coNo, requested_by: c.requestedBy, contract_delta: n(c.contractDelta) });
+    }
+
+    // Pending project timesheets awaiting independent approval (maker-checker labor, PROJ-04).
+    const tsRows = await db.select().from(timesheets).where(eq(timesheets.status, 'Pending'));
+    const tsByProject = new Map<number, number>();
+    for (const t of tsRows) {
+      const pid = t.projectId != null ? Number(t.projectId) : null;
+      if (pid == null || !ids.has(pid)) continue;
+      tsByProject.set(pid, (tsByProject.get(pid) ?? 0) + 1);
+    }
+    for (const [pid, count] of tsByProject) {
+      const code = codeById.get(pid) ?? null;
+      push('timesheet_pending', 'medium', pid, code, `ใบลงเวลารออนุมัติ (${count})`, `Project timesheets awaiting approval (${count})`, String(count), 'costs', { count });
+    }
+
+    // Milestones past due and not yet reached (schedule slip).
+    const msRows = await db.select().from(projectMilestones).where(eq(projectMilestones.status, 'pending'));
+    for (const m of msRows) {
+      const pid = Number(m.projectId); if (!ids.has(pid)) continue;
+      if (!m.dueDate || String(m.dueDate) >= today) continue;
+      const code = codeById.get(pid) ?? null;
+      push('milestone_slipping', 'medium', pid, code, `หมุดหมายเลยกำหนด: ${m.name} (${m.dueDate})`, `Milestone overdue: ${m.name} (${m.dueDate})`, m.dueDate, 'milestones', { milestone: m.name, due_date: m.dueDate });
+    }
+
+    // Open HIGH risks with no mitigation plan (PROJ-08) — reuse the portfolio top-risk roll-up.
+    const risks = await this.topRisks(user);
+    for (const r of risks.top) {
+      if (r.rag !== 'red' || r.mitigation) continue;
+      push('risk_unmitigated_high', 'high', r.project_id ?? null, r.project_code ?? null, `ความเสี่ยงสูงยังไม่มีแผนรับมือ: ${r.title}`, `Unmitigated high risk: ${r.title}`, r.title, 'risks', { risk_id: r.id, score: r.score });
+    }
+
+    items.sort((a, b) => (SEV_RANK[a.severity] - SEV_RANK[b.severity]) || String(a.project_code ?? '').localeCompare(String(b.project_code ?? '')) || a.kind.localeCompare(b.kind));
+    const by_kind: Record<string, number> = {};
+    for (const it of items) by_kind[it.kind] = (by_kind[it.kind] ?? 0) + 1;
+    const summary = {
+      total: items.length,
+      high: items.filter((i) => i.severity === 'high').length,
+      medium: items.filter((i) => i.severity === 'medium').length,
+      low: items.filter((i) => i.severity === 'low').length,
+      by_kind,
+    };
+    return { as_of: today, stale_days: staleDays, summary, items };
+  }
+
   // ── Baselines & variance (B1, PROJ-07) ───────────────────────────────────
   // Current planned BAC (Σ non-cancelled task planned cost; falls back to the project budget) + critical-path
   // duration — the figures a baseline snapshots and the current plan is compared against.
@@ -880,6 +984,8 @@ export class ProjectsService {
       probability, impact, score, rag: ragFor(score), owner: dto.owner ?? null,
       mitigation: dto.mitigation ?? null, dueDate: dto.due_date ?? null, createdBy: user.username,
     });
+    // PMO-1: an open HIGH risk with no mitigation plan (PROJ-08 exposure) pushes to the action center.
+    if (ragFor(score) === 'red' && !dto.mitigation) this.emitAction(tenantId, 'risk_unmitigated_high', 'high', code, { title: dto.title, score });
     return this.listRisks(code);
   }
 
@@ -945,6 +1051,57 @@ export class ProjectsService {
     };
   }
 
+  // ── Project health history (PPM upgrade) ─────────────────────────────────
+  // Capture a dated EVM/RAG snapshot for ONE project, so the live point-in-time EVM gains a trajectory. RAG:
+  // red if CPI or SPI < 0.9, amber if either < 1, green if both ≥ 1, no_data if neither is computable.
+  // Idempotent per (project, date) — re-capturing the same day refreshes the row.
+  async captureHealth(code: string, dto: { as_of?: string }, user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    return this.snapProject(p, dto?.as_of ?? ymd(), user);
+  }
+
+  // Capture a snapshot for EVERY project for the caller's tenant — the scheduled (BI action job) path.
+  async captureAllHealth(user: JwtUser) {
+    const db = this.db as any;
+    const date = ymd();
+    const rows = await db.select().from(projects).orderBy(desc(projects.id)).limit(500);
+    let captured = 0;
+    for (const p of rows) { await this.snapProject(p, date, user); captured++; }
+    return { as_of: date, scanned: rows.length, captured };
+  }
+
+  // Compute + upsert one project's health snapshot for a date.
+  private async snapProject(p: any, date: string, user: JwtUser) {
+    const db = this.db as any;
+    const e = await this.evm(p.projectCode, date);
+    const f = this.fmt(p);
+    const tasks = await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)));
+    const pct = this.taskRollup(tasks);
+    const rag = (e.cpi == null && e.spi == null) ? 'no_data'
+      : ((e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9)) ? 'red'
+      : ((e.cpi != null && e.cpi < 1) || (e.spi != null && e.spi < 1)) ? 'amber' : 'green';
+    const row = {
+      tenantId: p.tenantId ?? user.tenantId ?? null, snapshotDate: date, rag,
+      cpi: e.cpi != null ? fx(e.cpi, 4) : null, spi: e.spi != null ? fx(e.spi, 4) : null,
+      pctComplete: fx(pct, 2), bac: fx(e.bac, 2), ev: fx(e.ev, 2), ac: fx(e.ac, 2), eac: fx(e.eac, 2),
+      margin: fx(f.margin, 2), wip: fx(f.wip, 2), createdBy: user.username,
+    };
+    await db.insert(projectHealthSnapshots).values({ projectId: Number(p.id), ...row })
+      .onConflictDoUpdate({ target: [projectHealthSnapshots.projectId, projectHealthSnapshots.snapshotDate], set: { ...row, createdAt: new Date() } });
+    // PMO-1: a red snapshot proactively wakes the action center rather than waiting for someone to look.
+    if (rag === 'red') this.emitAction(p.tenantId ?? user.tenantId ?? null, 'project_red', 'high', p.projectCode, { cpi: e.cpi, spi: e.spi, snapshot_date: date });
+    return { project_code: p.projectCode, snapshot_date: date, rag, cpi: e.cpi, spi: e.spi, margin: f.margin };
+  }
+
+  // The dated health trajectory for a project (ascending) — feeds a CPI/SPI/RAG trend chart.
+  async healthHistory(code: string) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const rows = await db.select().from(projectHealthSnapshots).where(eq(projectHealthSnapshots.projectId, Number(p.id))).orderBy(projectHealthSnapshots.snapshotDate);
+    return { project_code: code, history: rows.map(shapeHealth), count: rows.length };
+  }
+
   private async row(code: string) {
     const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
@@ -999,6 +1156,9 @@ function shapeTemplateItem(it: any) {
 }
 function shapeRisk(r: any) {
   return { id: Number(r.id), project_id: Number(r.projectId), kind: r.kind, title: r.title, status: r.status, probability: r.probability != null ? Number(r.probability) : null, impact: Number(r.impact), score: Number(r.score), rag: r.rag, owner: r.owner, mitigation: r.mitigation, due_date: r.dueDate, created_by: r.createdBy, created_at: r.createdAt, closed_at: r.closedAt };
+}
+function shapeHealth(h: any) {
+  return { snapshot_date: h.snapshotDate, rag: h.rag, cpi: h.cpi != null ? n(h.cpi) : null, spi: h.spi != null ? n(h.spi) : null, pct_complete: n(h.pctComplete), bac: n(h.bac), ev: n(h.ev), ac: n(h.ac), eac: n(h.eac), margin: n(h.margin), wip: n(h.wip), created_at: h.createdAt };
 }
 function shapeChangeOrder(c: any) {
   return { id: Number(c.id), co_no: c.coNo, description: c.description, contract_delta: n(c.contractDelta), budget_delta: n(c.budgetDelta), estimated_cost_delta: n(c.estimatedCostDelta), reason: c.reason, status: c.status, requested_by: c.requestedBy, approved_by: c.approvedBy, created_at: c.createdAt, approved_at: c.approvedAt };

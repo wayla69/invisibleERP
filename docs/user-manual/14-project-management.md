@@ -28,6 +28,27 @@ An executive cross-project overview for the PMO / leadership:
   a month over 100% (double-booked across projects) shows red, so an over-allocation in a *specific window*
   is visible even when the lifetime average looks fine.
 
+The project workspace **Overview** also carries a **แนวโน้มสุขภาพโครงการ (Health trend)** — capture a dated
+CPI/SPI/RAG snapshot with *บันทึกสุขภาพ*, and the chart plots the trajectory over time. Schedule the
+*project_health_capture* report (Scheduled reports) to snapshot every project automatically.
+
+## Action Center (`/projects/action-center`)
+The PMO **"what needs me now"** inbox — a single, severity-ranked worklist of everything that needs an
+approval, a decision, or a fix across **all** your projects, so you don't have to open each project to find
+trouble. Reach it from **จัดการโครงการ → ศูนย์งานที่ต้องทำ (Action Center)** or the **ศูนย์งานที่ต้องทำ** button on the
+Portfolio page. It surfaces:
+- **ด่วน (High)** — projects gone **red** (CPI or SPI < 0.9), **over budget**, and **open high risks with no
+  mitigation plan**.
+- **ปานกลาง (Medium)** — **change orders** and **project timesheets awaiting approval** (a *different* person
+  must approve — maker-checker), **overdue milestones**, and in-flight projects with **no baseline**.
+- **ทั่วไป (Low)** — projects whose **health snapshot is stale** (none captured within the window, default 14 days).
+
+Each row deep-links to the offending project tab — click **เปิด** to go straight there and resolve it; once
+you do (e.g. a different user approves the change order) the item drops off the list. A **เรียลไทม์ / ออฟไลน์**
+badge shows the live connection: when a project drifts red or a high risk is logged with no mitigation, the
+inbox updates **instantly** (no refresh needed). Governance control **PROJ-11** — the inbox posts nothing; it
+makes the detective signals impossible to miss.
+
 ## Projects register (`/projects`)
 The KPI band shows project count, unbilled WIP, cumulative billed, and cumulative margin. The table lists
 every project with cost, budget usage (amber ≥ 85%, red ⚠ over budget), billed %, WIP and margin. A
@@ -93,3 +114,5 @@ be converted into a project from the CRM pipeline (control **CRM-WL**).
 | 1.4 | 2026-06-30 | **POC revenue recognition** (PROJ-09) — *การรับรู้รายได้* picker on create (Billing / POC); Costs tab shows POC %, recognised revenue, contract asset/liability + a *รับรู้รายได้* action; `NOT_POC` / `NO_ESTIMATE` added to troubleshooting. |
 | 1.5 | 2026-06-30 | **Change orders** (PROJ-10) — *ใบสั่งเปลี่ยนแปลง* panel on the project Overview: request a contract/budget variation; a different user approves (maker-checker), applying the change + re-baselining; `EMPTY_CHANGE_ORDER` / `SOD_SELF_APPROVAL` / `CHANGE_ORDER_DECIDED` added to troubleshooting. |
 | 1.6 | 2026-06-30 | **Resource capacity calendar** — a time-phased *ปฏิทินกำลังคน* heatmap on the Portfolio command center: per-resource demand vs 100%/month capacity, with over-booked months in red. |
+| 1.7 | 2026-06-30 | **Project health history** — a CPI/SPI *แนวโน้มสุขภาพโครงการ* trend on the workspace Overview (*บันทึกสุขภาพ* to capture a dated RAG/EVM snapshot); schedulable via the `project_health_capture` report. |
+| 1.8 | 2026-06-30 | **Action Center** (PROJ-11) — a new *ศูนย์งานที่ต้องทำ* PMO inbox (`/projects/action-center`): one severity-ranked worklist of pending approvals, red/over-budget projects, slipping milestones, unmitigated-high risks and governance gaps across the whole portfolio, each deep-linked, with a live (SSE) update when a project goes red or a high risk is logged. Linked from the Portfolio header. |
