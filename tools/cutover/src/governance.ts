@@ -83,6 +83,29 @@ async function main() {
   const fileForbidden = await inj('PATCH', `/api/governance/hotline/cases/${anon.json.case_ref}`, staff1, { status: 'resolved' });
   ok('ELC-04: a non-compliance staff cannot manage cases → 403', fileForbidden.status === 403, `${fileForbidden.status}`);
 
+  // ── ELC-03: Delegation-of-Authority matrix ──
+  const doa1 = await inj('POST', '/api/governance/doa', audit1, { authority_area: 'AP payment', role: 'FinancialController', approval_limit: 500000, notes: 'per DoA policy v1' });
+  ok('ELC-03: an authority line is defined (area/role/limit)', (doa1.status === 200 || doa1.status === 201) && doa1.json.authority_area === 'AP payment' && doa1.json.approval_limit === 500000, JSON.stringify(doa1.json));
+  const doaList = await inj('GET', '/api/governance/doa', audit1);
+  ok('ELC-03: the DoA matrix lists the authority line', doaList.status === 200 && (doaList.json.matrix ?? []).some((m: any) => m.authority_area === 'AP payment' && m.role === 'FinancialController' && m.approval_limit === 500000), `n=${doaList.json.count}`);
+  const doaForbidden = await inj('GET', '/api/governance/doa', staff1);
+  ok('ELC-03: non-compliance staff cannot view the DoA matrix → 403', doaForbidden.status === 403, `${doaForbidden.status}`);
+
+  // ── ELC-05: Fraud-risk register ──
+  const fr1 = await inj('POST', '/api/governance/fraud-risks', audit1, { area: 'JE override', description: 'Manual JE bypasses maker-checker', likelihood: 'high', impact: 'high', mitigating_controls: 'GL-05 maker-checker' });
+  ok('ELC-05: a fraud risk is registered (risk_ref, status open)', (fr1.status === 200 || fr1.status === 201) && /^FR-/.test(fr1.json.risk_ref ?? '') && fr1.json.status === 'open', JSON.stringify(fr1.json));
+  const frReview = await inj('PATCH', `/api/governance/fraud-risks/${fr1.json.risk_ref}`, audit1, { status: 'mitigated' });
+  ok('ELC-05: a fraud risk is reviewed → status advances + reviewer recorded', (frReview.status === 200 || frReview.status === 201) && frReview.json.status === 'mitigated' && frReview.json.reviewed_by === 'audit1', JSON.stringify(frReview.json));
+  const frList = await inj('GET', '/api/governance/fraud-risks', audit1);
+  const frRow = (frList.json.risks ?? []).find((r: any) => r.risk_ref === fr1.json.risk_ref);
+  ok('ELC-05: the register shows the risk as reviewed (mitigated + last_reviewed_at stamped)', frRow?.status === 'mitigated' && !!frRow?.last_reviewed_at, JSON.stringify({ s: frRow?.status, rev: frRow?.last_reviewed_at }));
+
+  // ── ELC-02: Audit-committee oversight log ──
+  const ov1 = await inj('POST', '/api/governance/oversight', audit1, { meeting_date: '2026-06-30', kind: 'audit_committee', topics: 'Q2 ICFR review', icfr_reviewed: true, signed_off_by: 'AC Chair' });
+  ok('ELC-02: an audit-committee meeting + ICFR review is recorded', (ov1.status === 200 || ov1.status === 201) && ov1.json.icfr_reviewed === true && ov1.json.kind === 'audit_committee', JSON.stringify(ov1.json));
+  const ovList = await inj('GET', '/api/governance/oversight', audit1);
+  ok('ELC-02: the oversight log shows the meeting with ICFR reviewed + sign-off', ovList.status === 200 && (ovList.json.meetings ?? []).some((m: any) => m.icfr_reviewed === true && m.signed_off_by === 'AC Chair'), `n=${ovList.json.count}`);
+
   // ── RLS: tenant isolation at the DB layer. (The admin API viewer bypasses RLS in single-company mode by
   //    design — ITGC-AC-18 — so isolation is asserted on a tenant-scoped app_user connection, not via admin.)
   const t2case = await inj('POST', '/api/governance/hotline/cases', staff2, { allegation: 'T2-only matter', anonymous: true });
