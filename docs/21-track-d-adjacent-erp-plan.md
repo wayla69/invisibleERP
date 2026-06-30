@@ -79,8 +79,9 @@ one PR under the same discipline (local validate → push → CI 88-green → sq
 marked so here and in `docs/20`.
 
 ## 4. Out of scope (unchanged)
-Finite-capacity scheduling (APS), real-time streaming analytics, and any rebuild of already-shipped MRP/QC/
-RFQ/match/budget functionality.
+Any rebuild of already-shipped MRP/QC/RFQ/match/budget functionality. **Finite-capacity scheduling (APS)** and
+**real-time streaming analytics** are now planned in `docs/22-aps-streaming-analytics-plan.md` (they extend
+the mfg-depth routings/RCCP and the existing `@Sse` realtime bus respectively — not greenfield).
 
 ## 5. Revision history
 | Version | Date | Author | Notes |
