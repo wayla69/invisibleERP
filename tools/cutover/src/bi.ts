@@ -215,6 +215,26 @@ async function main() {
   ok('supplier_scorecard runs success + avg / underperformer summary',
     supRun.json.status === 'success' && /avg/.test(supRun.json.summary ?? '') && /underperformer/.test(supRun.json.summary ?? ''), JSON.stringify({ s: supRun.json.status, sum: (supRun.json.summary ?? '').slice(0, 60) }));
 
+  // ── 20. ITGC-OP-04: a scheduled (financial) job that FAILS is captured + alerted + reviewable, not silent ──
+  // Force a deterministic failure: insert a subscription whose report type generateReport rejects (bypassing
+  // create-time validation via a direct insert), then run it. executeSubscription must record the failure,
+  // raise an operator ops-notification, and surface it for review — never swallow it silently.
+  // (the bi schema isn't re-exported from the schema barrel, so insert the row via raw SQL)
+  const brkIns = (await pg.query(`INSERT INTO report_subscriptions (tenant_id, name, report_type, frequency, is_active) VALUES (${hq}, 'Broken nightly job', 'definitely_unknown_type', 'daily', true) RETURNING id`)).rows as any[];
+  const brkId = Number(brkIns[0].id);
+  const brkRun = await inj('POST', `/api/bi/subscriptions/${brkId}/run`, admin, {});
+  ok('ITGC-OP-04: a failing scheduled job is recorded as failed (not lost)',
+    brkRun.json.status === 'failed' && !!brkRun.json.error, JSON.stringify({ s: brkRun.json.status, e: (brkRun.json.error ?? '').slice(0, 40) }));
+  const failedRuns = (await pg.query(`SELECT status, error FROM report_runs WHERE subscription_id=${brkId} AND status='failed'`)).rows as any[];
+  ok('ITGC-OP-04: failure captured in report_runs with the error message',
+    failedRuns.length === 1 && /BAD_REPORT_TYPE|Unknown report type/.test(failedRuns[0]?.error ?? ''), JSON.stringify(failedRuns[0] ?? {}));
+  const opsNote = (await pg.query(`SELECT message_en FROM notifications WHERE message_en LIKE 'Scheduled job failed%' AND target_role='Admin'`)).rows as any[];
+  ok('ITGC-OP-04: an operator ops-notification is raised on failure (alerting, not silent)',
+    opsNote.length >= 1 && /definitely_unknown_type/.test(opsNote[0]?.message_en ?? ''), JSON.stringify(opsNote[0] ?? {}));
+  const runsList = await inj('GET', '/api/bi/runs', admin);
+  ok('ITGC-OP-04: the failed run is reviewable in GET /api/bi/runs',
+    (runsList.json.runs ?? []).some((r: any) => Number(r.subscription_id) === brkId && r.status === 'failed'), `n=${(runsList.json.runs ?? []).length}`);
+
   await app.close();
 }
 
