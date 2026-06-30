@@ -42,6 +42,11 @@ GL-15/16). Building the v0.1 phases would duplicate working, tested code.
 These are the items the audit could **not** find anywhere — small, non-duplicative, and each independently
 shippable as a CI-green, doc-synced PR:
 
+> **RG-1/2/3 DELIVERED** — three additive BI `REPORT_TYPES` (`exec_scorecard`, `budget_variance`,
+> `supplier_scorecard`) on the existing scheduler spine (`bi.service.ts`; BiModule now imports
+> Budget/Procurement/Match). No new control, no migration. Harness `tools/cutover/src/bi.ts` (26/26).
+> RG-4 remains optional/open.
+
 ### RG-1 — Executive cross-module scorecard (BI `exec_scorecard`)
 A single read-only health board uniting signals that already exist but are **not composed** in one place:
 finance (margin/cash via `finance_trend`/kpiBoard), CRM (win rate/pipeline via `crm_win_loss`/

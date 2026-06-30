@@ -633,6 +633,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-039 | BOM availability forecast (servings-remaining) | Feature (BOM availability) | 20 §rev2.9 |
 | UAT-RPT-040 | Production plan — demand-ML forecast | Feature (production plan, demand-ML) | 20 §rev3.3 |
 | UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
+| UAT-RPT-042 | Residual-gap BI report types (exec / budget / supplier) | RG-1/2/3 (docs/21); ELC-06 | docs/21 §2 |
 | UAT-UI-DEM-01 | Demand forecasting screen (forecast / backtest / accuracy) (UI) | Feature (demand ML UI) | 13 §7 |
 | UAT-UI-BUD-01 | Budget vs Actual screen (set budget + variance) (UI) | Feature (budget-vs-actual UI) | 13 §7 |
 | UAT-BUD-02 | Budget maker-checker — pending excluded until approved | BUD-01 | 13 §7 |
