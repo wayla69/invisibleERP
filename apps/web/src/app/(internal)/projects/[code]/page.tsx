@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Area, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts';
-import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -37,7 +37,7 @@ export default function ProjectDetailPage() {
   const code = decodeURIComponent(String(useParams().code ?? ''));
   const router = useRouter();
   const qc = useQueryClient();
-  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
+  const refresh = () => { for (const k of ['detail', 'evm', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
 
   const detail = useQuery<any>({ queryKey: ['proj', code, 'detail'], queryFn: () => api(`/api/projects/${code}`) });
   const evm = useQuery<any>({ queryKey: ['proj', code, 'evm'], queryFn: () => api(`/api/projects/${code}/evm`) });
@@ -100,6 +100,22 @@ export default function ProjectDetailPage() {
     mutationFn: () => api(`/api/projects/${code}/${costDlg}`, { method: 'POST', body: JSON.stringify(costDlg === 'cost' ? { entry_type: ctype, amount: Number(amount) || 0, billable } : byPct ? { percent: Number(amount) || 0 } : { amount: Number(amount) || 0 }) }),
     onSuccess: () => { notifySuccess(costDlg === 'cost' ? 'บันทึกต้นทุน' : 'วางบิลแล้ว'); setCostDlg(null); setAmount(''); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
+  // POC over-time revenue recognition (PROJ-09) — recognise earned revenue cost-to-cost.
+  const recognize = useMutation({
+    mutationFn: () => api<any>(`/api/projects/${code}/recognize`, { method: 'POST', body: '{}' }),
+    onSuccess: (r: any) => { notifySuccess(r?.already ? 'ไม่มีรายได้ใหม่ให้รับรู้' : `รับรู้รายได้ ${baht(r.revenue_recognized)} (สำเร็จ ${r.poc_pct}%)`); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  // Change orders / contract variations (PROJ-10) — maker-checker amendment to contract/budget.
+  const cos = useQuery<any>({ queryKey: ['proj', code, 'change-orders'], queryFn: () => api(`/api/projects/${code}/change-orders`) });
+  const [cf, setCf] = useState({ contract_delta: '', budget_delta: '', reason: '' });
+  const requestCo = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/change-orders`, { method: 'POST', body: JSON.stringify({ contract_delta: Number(cf.contract_delta) || 0, budget_delta: Number(cf.budget_delta) || 0, reason: cf.reason || undefined }) }),
+    onSuccess: () => { notifySuccess('ส่งคำขอเปลี่ยนแปลงแล้ว — รออนุมัติ'); setCf({ contract_delta: '', budget_delta: '', reason: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  const decideCo = useMutation({
+    mutationFn: (v: { id: number; action: 'approve' | 'reject' }) => api(`/api/projects/change-orders/${v.id}/${v.action}`, { method: 'POST', body: '{}' }),
+    onSuccess: () => { notifySuccess('อัปเดตคำขอเปลี่ยนแปลงแล้ว'); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
 
   const scurve = (series.data?.series ?? []).map((s: any) => ({ month: s.month, planned: s.cumulative_planned }));
   const ganttTasks: GanttTask[] = (schedule.data?.tasks ?? []);
@@ -161,6 +177,39 @@ export default function ProjectDetailPage() {
           </dl>
         </Card>
       </div>
+
+      {/* Change orders (PROJ-10) — maker-checker contract/scope variations */}
+      <Card className="gap-3 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">ใบสั่งเปลี่ยนแปลง (Change orders)</h3>
+          {cos.data?.summary?.approved > 0 && <Badge variant="secondary">สัญญาเปลี่ยนสุทธิ {baht(cos.data.summary.approved_contract_delta)}</Badge>}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid gap-1.5"><Label>มูลค่าสัญญา (+/−)</Label><Input type="number" value={cf.contract_delta} onChange={(ev) => setCf({ ...cf, contract_delta: ev.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>งบประมาณ (+/−)</Label><Input type="number" value={cf.budget_delta} onChange={(ev) => setCf({ ...cf, budget_delta: ev.target.value })} /></div>
+          <div className="grid gap-1.5"><Label>เหตุผล</Label><Input value={cf.reason} onChange={(ev) => setCf({ ...cf, reason: ev.target.value })} /></div>
+          <div className="flex items-end"><Button size="sm" variant="outline" onClick={() => requestCo.mutate()} disabled={requestCo.isPending || (!cf.contract_delta && !cf.budget_delta)}><Plus className="size-4" /> ขอเปลี่ยนแปลง</Button></div>
+        </div>
+        <div className="flex flex-col divide-y">
+          {(cos.data?.change_orders ?? []).map((c: any) => (
+            <div key={c.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span className="flex flex-wrap items-center gap-2">
+                <Badge variant={c.status === 'approved' ? 'success' : c.status === 'rejected' ? 'muted' : 'warning'}>{c.status === 'approved' ? 'อนุมัติ' : c.status === 'rejected' ? 'ปฏิเสธ' : 'รออนุมัติ'}</Badge>
+                <span className="font-medium">{c.co_no}</span>
+                <span className="tabular text-muted-foreground">สัญญา {c.contract_delta >= 0 ? '+' : ''}{baht(c.contract_delta)}</span>
+                {c.reason && <span className="text-xs text-muted-foreground">· {c.reason}</span>}
+                <span className="text-xs text-muted-foreground">ขอโดย {c.requested_by}</span>
+              </span>
+              {c.status === 'pending' && (
+                <span className="flex gap-1">
+                  <Button size="sm" variant="ghost" title="อนุมัติ (ต้องไม่ใช่ผู้ขอ)" onClick={() => decideCo.mutate({ id: c.id, action: 'approve' })}><CheckCircle2 className="size-4" /></Button>
+                </span>
+              )}
+            </div>
+          ))}
+          {!cos.data?.count && <p className="py-2 text-sm text-muted-foreground">ยังไม่มีใบสั่งเปลี่ยนแปลง — การเปลี่ยนมูลค่าสัญญาต้องผ่านการอนุมัติ (ผู้อนุมัติ ≠ ผู้ขอ) และจะตั้งเส้นฐานใหม่</p>}
+        </div>
+      </Card>
     </div>
   );
 
@@ -245,9 +294,23 @@ export default function ProjectDetailPage() {
 
   const costsTab = (
     <div className="space-y-4">
+      {p?.rev_method === 'poc' && (
+        <Card className="gap-2 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <Badge variant="secondary">รับรู้รายได้ตามความคืบหน้า (POC)</Badge>
+              <span className="text-muted-foreground">สำเร็จ <span className="tabular font-medium text-foreground">{p.poc_pct ?? 0}%</span></span>
+              <span className="text-muted-foreground">รับรู้แล้ว <span className="tabular font-medium text-foreground">{baht(p.recognized_revenue ?? 0)}</span></span>
+              {p.contract_asset > 0 && <span className="text-muted-foreground">สินทรัพย์ตามสัญญา <span className="tabular text-primary">{baht(p.contract_asset)}</span></span>}
+              {p.billings_in_excess > 0 && <span className="text-muted-foreground">วางบิลล่วงหน้า <span className="tabular text-warning-foreground dark:text-warning">{baht(p.billings_in_excess)}</span></span>}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => recognize.mutate()} disabled={recognize.isPending}><TrendingUp className="size-4" /> รับรู้รายได้</Button>
+          </div>
+        </Card>
+      )}
       <div className="flex justify-end gap-2">
         <Button size="sm" variant="outline" onClick={() => { setCostDlg('cost'); setAmount(''); setCtype('time'); setBillable(true); }}><Clock className="size-4" /> ลงต้นทุน</Button>
-        <Button size="sm" onClick={() => { setCostDlg('bill'); setAmount(''); setByPct(false); }}><Receipt className="size-4" /> วางบิล</Button>
+        <Button size="sm" onClick={() => { setCostDlg('bill'); setAmount(''); setByPct(false); }}><Receipt className="size-4" /> {p?.rev_method === 'poc' ? 'ออกใบแจ้งหนี้' : 'วางบิล'}</Button>
       </div>
       {detail.data && (
         <DataTable

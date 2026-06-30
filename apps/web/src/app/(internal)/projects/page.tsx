@@ -33,18 +33,18 @@ export default function ProjectsPage() {
   const q = useQuery<{ projects: Project[]; count: number }>({ queryKey: ['projects'], queryFn: () => api('/api/projects') });
   const tplQ = useQuery<{ templates: { code: string; name: string; item_count: number }[] }>({ queryKey: ['project-templates'], queryFn: () => api('/api/projects/templates') });
   const mineQ = useQuery<{ tasks: { id: number; name: string; project_code: string; project_name: string; my_role: string; planned_end: string | null; pct_complete: number; status: string }[]; count: number }>({ queryKey: ['my-tasks'], queryFn: () => api('/api/projects/my-tasks') });
-  const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '' });
+  const [f, setF] = useState({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '', rev_method: 'billing', estimated_cost: '' });
   const refresh = () => qc.invalidateQueries({ queryKey: ['projects'] });
 
   const create = useMutation({
     mutationFn: async () => {
-      const r = await api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name: f.name, project_code: f.project_code || undefined, customer_name: f.customer_name || undefined, billing_type: f.billing_type, contract_amount: Number(f.contract_amount) || 0 }) });
+      const r = await api<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name: f.name, project_code: f.project_code || undefined, customer_name: f.customer_name || undefined, billing_type: f.billing_type, contract_amount: Number(f.contract_amount) || 0, rev_method: f.rev_method, estimated_cost: f.rev_method === 'poc' ? Number(f.estimated_cost) || 0 : undefined }) });
       // Optional: scaffold a standard WBS + milestones from a template (B2).
       let scaffold: { tasks_created?: number; milestones_created?: number } | null = null;
       if (f.template) scaffold = await api(`/api/projects/${encodeURIComponent(r.project_code)}/apply-template/${encodeURIComponent(f.template)}`, { method: 'POST', body: JSON.stringify({}) });
       return { ...r, scaffold };
     },
-    onSuccess: (r: any) => { notifySuccess(r.scaffold ? `สร้างโครงการ ${r.project_code} · ${r.scaffold.tasks_created} งาน / ${r.scaffold.milestones_created} หมุดหมายจากแม่แบบ` : `สร้างโครงการ ${r.project_code}`); setF({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '' }); refresh(); },
+    onSuccess: (r: any) => { notifySuccess(r.scaffold ? `สร้างโครงการ ${r.project_code} · ${r.scaffold.tasks_created} งาน / ${r.scaffold.milestones_created} หมุดหมายจากแม่แบบ` : `สร้างโครงการ ${r.project_code}`); setF({ project_code: '', name: '', customer_name: '', billing_type: 'TM', contract_amount: '', template: '', rev_method: 'billing', estimated_cost: '' }); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -105,6 +105,13 @@ export default function ProjectsPage() {
               {(tplQ.data?.templates ?? []).map((t) => <option key={t.code} value={t.code}>{t.name} ({t.item_count})</option>)}
             </select>
           </div>
+          <div className="grid gap-1.5"><Label>การรับรู้รายได้</Label>
+            <select className={selectCls} value={f.rev_method} onChange={(e) => setF({ ...f, rev_method: e.target.value })}>
+              <option value="billing">เมื่อวางบิล (Billing)</option>
+              <option value="poc">ตามความคืบหน้า (POC / over-time)</option>
+            </select>
+          </div>
+          {f.rev_method === 'poc' && <div className="grid gap-1.5"><Label>ประมาณการต้นทุนรวม (EAC)</Label><Input type="number" min="0" value={f.estimated_cost} onChange={(e) => setF({ ...f, estimated_cost: e.target.value })} /></div>}
         </div>
         <div className="flex items-center gap-3">
           <Button onClick={() => create.mutate()} disabled={!f.name || create.isPending}><Plus className="size-4" /> สร้าง</Button>

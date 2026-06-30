@@ -17,7 +17,7 @@ export interface JwtUser {
   role: string;
   customerName: string | null;
   tenantId: number | null;
-  // Hybrid tenancy (0193) — the HQ org an Admin belongs to. Only consulted when TENANCY_MODE=multi-company,
+  // Hybrid tenancy (0196) — the HQ org an Admin belongs to. Only consulted when TENANCY_MODE=multi-company,
   // where it scopes the Admin's RLS bypass to sibling tenants in the same org. null/undefined elsewhere.
   orgId?: number | null;
   permissions: string[];

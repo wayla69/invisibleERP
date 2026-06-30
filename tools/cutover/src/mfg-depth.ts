@@ -104,6 +104,26 @@ async function main() {
     mrp.json.planned_make?.length === 1 && near(mrp.json.planned_make[0].qty, 10) && near(flour?.qty, 5) && near(sugar?.qty, 2),
     JSON.stringify({ make: mrp.json.planned_make?.length, flour: flour?.qty, sugar: sugar?.qty }));
 
+  // ── 7. APS: work-centre master + finite-capacity scheduling (docs/22 Phase A) ──
+  await inj('POST', '/api/work-centers', admin, { code: 'MIXER', name: 'เครื่องผสม', minutes_per_day: 480 });
+  const wcList = await inj('POST', '/api/work-centers', admin, { code: 'OVEN', name: 'เตาอบ', minutes_per_day: 480 });
+  ok('Work-centre master: MIXER + OVEN created (480 min/day)', (wcList.json.work_centers ?? []).length === 2 && wcList.json.work_centers.every((w: any) => near(w.minutes_per_day, 480)), JSON.stringify({ n: wcList.json.count }));
+  // Two WOs (qty 20, product CAKE → RT-CAKE): op10 MIXER 10+2·20=50, op20 OVEN 20+3·20=80.
+  const woA = (await inj('POST', '/api/manufacturing/work-orders', admin, { bom_code: 'BOM-CAKE', qty_planned: 20, product_item_id: 'CAKE', product_name: 'เค้ก A' })).json.wo_no;
+  const woB = (await inj('POST', '/api/manufacturing/work-orders', admin, { bom_code: 'BOM-CAKE', qty_planned: 20, product_item_id: 'CAKE', product_name: 'เค้ก B' })).json.wo_no;
+  // B is past-due → EDD dispatches B before A. horizon 2026-07-01.
+  const sch = await inj('POST', '/api/aps/schedule', admin, { horizon_start: '2026-07-01', work_orders: [{ wo_no: woA, due_by: '2026-12-31' }, { wo_no: woB, due_by: '2026-06-30' }] });
+  ok('APS schedule: 4 ops scheduled, no missing routings, makespan 210 min (1 day)',
+    sch.json.summary?.scheduled === 4 && sch.json.summary?.unscheduled_no_routing === 0 && near(sch.json.makespan_minutes, 210) && sch.json.makespan_days === 1,
+    JSON.stringify({ sc: sch.json.summary?.scheduled, ms: sch.json.makespan_minutes }));
+  const mixer = (sch.json.work_centers ?? []).find((w: any) => w.work_center === 'MIXER');
+  ok('APS finite capacity: MIXER runs one op at a time → dispatch starts [0, 50] (second op waits), load 100',
+    mixer && near(mixer.load_minutes, 100) && (mixer.dispatch ?? []).length === 2 && near(mixer.dispatch[0].start_min, 0) && near(mixer.dispatch[1].start_min, 50),
+    JSON.stringify({ load: mixer?.load_minutes, starts: (mixer?.dispatch ?? []).map((d: any) => d.start_min) }));
+  ok('APS lateness: past-due WO flagged late, the far-due WO is not',
+    sch.json.summary?.late === 1 && (sch.json.late ?? []).some((l: any) => l.wo_no === woB) && !(sch.json.late ?? []).some((l: any) => l.wo_no === woA),
+    JSON.stringify({ late: (sch.json.late ?? []).map((l: any) => l.wo_no) }));
+
   console.log('\n── Phase 18 depth — routings/shop-floor/QA/MRP (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

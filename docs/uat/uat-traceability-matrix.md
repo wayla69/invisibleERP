@@ -237,6 +237,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-214 | Project templates: author + one-step apply | (operational) | 16 §7 (13) |
 | UAT-O2C-215 | RACI accountability + "my tasks" | PROJ-04 (SoD note) | 16 §7 (14) |
 | UAT-O2C-216 | Risk & issue register + portfolio top-risks | PROJ-08 | 16 §7 (15) |
+| UAT-O2C-217 | POC over-time revenue recognition | PROJ-09 | 16 §7 (16) |
+| UAT-O2C-218 | Change order — maker-checker contract variation | PROJ-10 | 16 §7 (17) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |
@@ -352,6 +354,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-062 | InventoryController posts a counted stocktake from /stock-adjustment | R11, INV-04 | 03 §7 |
 | UAT-INV-063 | POST /api/stocktake/:id/post blocked for wh_count-only token | R11, INV-04 | 03 §9 |
 | UAT-INV-064 | InventoryController approves write-off from /stock-adjustment | R11, INV-07 | 03 §9 |
+| UAT-INV-065 | APS finite-capacity scheduling | (operational) | 15 §7 (5b) |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 
@@ -636,6 +639,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-040 | Production plan — demand-ML forecast | Feature (production plan, demand-ML) | 20 §rev3.3 |
 | UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
 | UAT-RPT-042 | Residual-gap BI report types (exec / budget / supplier) | RG-1/2/3 (docs/21); ELC-06 | docs/21 §2 |
+| UAT-RPT-043 | Streaming analytics — live KPI feed | (operational) | docs/22 Phase B |
 | UAT-UI-DEM-01 | Demand forecasting screen (forecast / backtest / accuracy) (UI) | Feature (demand ML UI) | 13 §7 |
 | UAT-UI-BUD-01 | Budget vs Actual screen (set budget + variance) (UI) | Feature (budget-vs-actual UI) | 13 §7 |
 | UAT-BUD-02 | Budget maker-checker — pending excluded until approved | BUD-01 | 13 §7 |

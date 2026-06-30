@@ -5,7 +5,7 @@ export const tenants = pgTable('tenants', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   code: text('code').notNull().unique(), // legacy Customer_Name / Owner_Customer
   name: text('name').notNull(),
-  // ── Hybrid tenancy (0193) — groups tenants under one HQ "org". NULL until multi-company is enabled.
+  // ── Hybrid tenancy (0196) — groups tenants under one HQ "org". NULL until multi-company is enabled.
   // Under TENANCY_MODE=multi-company an Admin's RLS bypass is scoped to tenants sharing its org_id
   // (instead of seeing ALL tenants). Single-company deployments leave this NULL → global HQ bypass. ──
   orgId: bigint('org_id', { mode: 'number' }),

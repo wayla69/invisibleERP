@@ -18,6 +18,11 @@ replenishment, anomaly detection, and the AI assistant.
 1. Go to the dashboard for your role.
 2. Review the KPI cards and charts; drill into a figure for detail.
 
+**Live updates (streaming analytics).** The operational dashboard streams updates in real time — when the KPI
+snapshot is refreshed, the headline figures update on their own without waiting for the periodic poll. A
+**สด / ออฟไลน์ (Live / Offline)** badge by the *รีเฟรช* button shows whether the live feed is connected; if it
+drops, the dashboard falls back to refreshing every 60 seconds and reconnects automatically.
+
 The operational dashboard (`/dashboard`) shows headline KPIs (sales today / this
 month, low stock, AP outstanding), a **14-day sales trend**, **top sellers today**,
 and **recent orders**. It **auto-refreshes every 60 seconds** so the figures stay

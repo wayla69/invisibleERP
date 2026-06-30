@@ -29,7 +29,7 @@ export class ApiKeyService {
     const prefix = rawKey.slice(0, 12);
     const hashedKey = sha256(rawKey);
     const scopes = (dto.scopes ?? []).join(',');
-    // Optional TTL (0193) — bound a leaked key's lifetime. Omitted/≤0 → non-expiring (back-compat).
+    // Optional TTL (0196) — bound a leaked key's lifetime. Omitted/≤0 → non-expiring (back-compat).
     const expiresAt = dto.ttl_days && dto.ttl_days > 0 ? new Date(Date.now() + dto.ttl_days * 86_400_000) : null;
     const [row] = await db.insert(apiKeys).values({
       tenantId, name: dto.name, prefix, hashedKey, scopes, revoked: false, expiresAt,
@@ -55,7 +55,7 @@ export class ApiKeyService {
       const rows = await tx.select().from(apiKeys).where(and(eq(apiKeys.prefix, prefix), eq(apiKeys.revoked, false)));
       const row = rows.find((r: any) => safeEqualHex(hashed, String(r.hashedKey)));
       if (!row) return null;
-      // Expiry (0193): an expired key is rejected exactly like a revoked one.
+      // Expiry (0196): an expired key is rejected exactly like a revoked one.
       if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return null;
       // lastUsedAt bump is best-effort — must never fail authentication.
       try { await tx.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, row.id)); } catch { /* ignore */ }

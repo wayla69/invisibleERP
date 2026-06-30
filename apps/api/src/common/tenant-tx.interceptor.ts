@@ -35,7 +35,7 @@ export class TenantTxInterceptor implements NestInterceptor {
     const user = req?.user;
     const tenantId: number | null = user?.tenantId ?? null;
 
-    // Hybrid tenancy (0193). TENANCY_MODE selects the Admin bypass scope:
+    // Hybrid tenancy (0196). TENANCY_MODE selects the Admin bypass scope:
     //  - single-company (default): HQ (Admin) and pre-auth requests get a GLOBAL bypass — the legacy
     //    "HQ sees all branches" model, unchanged. We still flag the bypass on the request so the audit
     //    interceptor records that the mutation ran with cross-tenant visibility.

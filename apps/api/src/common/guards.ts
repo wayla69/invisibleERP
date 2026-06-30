@@ -121,7 +121,7 @@ export class JwtAuthGuard implements CanActivate {
         // immediately loses HQ bypass, and a forged role claim for a non-privileged username can't grant it.
         // This rides the existing AC-15 per-request user read — no extra round-trip.
         dbRole = u.role as string;
-        // Hybrid tenancy (0193) — the org an Admin is scoped to under TENANCY_MODE=multi-company. Sourced
+        // Hybrid tenancy (0196) — the org an Admin is scoped to under TENANCY_MODE=multi-company. Sourced
         // live from the DB (same row) so a forged org claim can't widen an Admin's bypass.
         dbOrgId = u.orgId != null ? Number(u.orgId) : null;
       }

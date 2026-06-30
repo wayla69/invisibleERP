@@ -130,6 +130,14 @@ async function main() {
   const snap = await biSvc.refreshSnapshot({}, mgrUser);
   ok('refreshSnapshot returns date + snapshot', !!snap.date && !!snap.snapshot, JSON.stringify(snap));
 
+  // ── 10b. streaming analytics (docs/22 Phase B): refreshSnapshot published a live kpi_refresh event ──
+  const liveT1 = biSvc.liveRecent(mgrUser);
+  ok('live feed: refreshSnapshot pushed a kpi_refresh event (tenant t1)',
+    liveT1.available === true && (liveT1.events ?? []).some((e: any) => e.type === 'kpi_refresh' && near(e.kpi?.pipeline_open, 100000)),
+    JSON.stringify({ avail: liveT1.available, types: (liveT1.events ?? []).map((e: any) => e.type) }));
+  const liveHq = biSvc.liveRecent(adminUser);
+  ok('live feed: tenant isolation — HQ does not see t1\'s kpi_refresh', !(liveHq.events ?? []).some((e: any) => e.type === 'kpi_refresh' && e.tenant_id === mgrUser.tenantId), `hq_events=${(liveHq.events ?? []).length}`);
+
   // ── 11. getSnapshots retrieves the refreshed row ──
   const snaps = await biSvc.getSnapshots({ days: 1 }, mgrUser);
   ok('getSnapshots count ≥ 1 after refresh', snaps.count >= 1, `count=${snaps.count}`);

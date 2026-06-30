@@ -48,7 +48,7 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   if (!has(config.CORS_ORIGINS)) {
     logger.warn('CORS_ORIGINS not set — defaulting to http://localhost:3000, which is wrong for prod.');
   }
-  // Hybrid tenancy (0193) — TENANCY_MODE selects the Admin RLS-bypass scope. Default 'single-company'
+  // Hybrid tenancy (0196) — TENANCY_MODE selects the Admin RLS-bypass scope. Default 'single-company'
   // (HQ sees ALL tenants — correct for one company with many branches). 'multi-company' scopes an Admin
   // to its own org's tenants and REQUIRES org_id backfilled on tenants + Admin users.
   const tmode = (config.TENANCY_MODE as string | undefined) ?? 'single-company';

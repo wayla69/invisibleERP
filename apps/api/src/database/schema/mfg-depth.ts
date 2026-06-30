@@ -78,4 +78,22 @@ export const qualityInspections = pgTable(
   (t) => ({ byTenant: index('idx_qi_tenant').on(t.tenantId) }),
 );
 
+// ── Work-centre master (APS, docs/22 Phase A) — a single production resource with a daily capacity. The
+// finite-capacity scheduler sequences routing operations onto centres respecting minutes_per_day. ──
+export const workCenters = pgTable(
+  'work_centers',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    code: text('code').notNull(),
+    name: text('name'),
+    minutesPerDay: numeric('minutes_per_day', { precision: 10, scale: 2 }).notNull().default('480'),
+    active: boolean('active').notNull().default(true),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTenant: index('idx_work_centers_tenant').on(t.tenantId) }),
+);
+
 export type Routing = typeof routings.$inferSelect;
+export type WorkCenter = typeof workCenters.$inferSelect;

@@ -14,6 +14,11 @@ export const projects = pgTable(
     customerNo: text('customer_no'),                          // → customer_master (customer-of-record)
     crmOppNo: text('crm_opp_no'),                             // → crm_opportunities.opp_no (won deal it came from)
     billingType: text('billing_type').notNull().default('TM'), // TM | Fixed
+    // Revenue recognition basis (PROJ-09): 'billing' = point-in-time at billing (default, legacy);
+    // 'poc' = over-time cost-to-cost (estimated_cost drives the recognised %, accruing 1265/2410).
+    revMethod: text('rev_method').notNull().default('billing'),
+    estimatedCost: numeric('estimated_cost', { precision: 16, scale: 2 }).default('0'), // total estimated cost (EAC) for POC
+    recognizedRevenue: numeric('recognized_revenue', { precision: 16, scale: 2 }).default('0'), // revenue recognised to date (POC)
     budgetAmount: numeric('budget_amount', { precision: 16, scale: 2 }).default('0'),
     contractAmount: numeric('contract_amount', { precision: 16, scale: 2 }).default('0'),
     status: text('status').notNull().default('Open'),         // Open | Active | Closed
@@ -233,7 +238,32 @@ export const projectRisks = pgTable(
   (t) => ({ byProject: index('idx_prisk_project').on(t.projectId) }),
 );
 
+// Project change order (contract/scope variation) — a governed, maker-checker amendment to the contract
+// value / budget / EAC. A request posts nothing; a different user approves it, applying the deltas and
+// auto-capturing a new baseline (PROJ-10, ties to PROJ-07).
+export const projectChangeOrders = pgTable(
+  'project_change_orders',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    coNo: text('co_no').notNull(),
+    description: text('description'),
+    contractDelta: numeric('contract_delta', { precision: 16, scale: 2 }).notNull().default('0'),
+    budgetDelta: numeric('budget_delta', { precision: 16, scale: 2 }).notNull().default('0'),
+    estimatedCostDelta: numeric('estimated_cost_delta', { precision: 16, scale: 2 }).notNull().default('0'),
+    reason: text('reason'),
+    status: text('status').notNull().default('pending'),  // pending | approved | rejected
+    requestedBy: text('requested_by'),
+    approvedBy: text('approved_by'),                       // checker — must differ from requested_by
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+  },
+  (t) => ({ byProject: index('idx_pco_project').on(t.projectId) }),
+);
+
 export type Project = typeof projects.$inferSelect;
+export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
 export type ProjectBaseline = typeof projectBaselines.$inferSelect;
 export type ProjectTemplate = typeof projectTemplates.$inferSelect;
 export type ProjectTemplateItem = typeof projectTemplateItems.$inferSelect;

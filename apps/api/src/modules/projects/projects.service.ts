@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, crmOpportunities, customerMaster } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, crmOpportunities, customerMaster } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -18,7 +18,9 @@ const peopleCsv = (xs?: string[]) => {
 };
 const csvToList = (s: unknown) => (s ? String(s).split(',').map((x) => x.trim()).filter(Boolean) : []);
 
-export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string }
+export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string; rev_method?: 'billing' | 'poc'; estimated_cost?: number }
+export interface RecognizeDto { as_of?: string; estimated_cost?: number }
+export interface ChangeOrderDto { description?: string; contract_delta?: number; budget_delta?: number; estimated_cost_delta?: number; reason?: string }
 export interface CostDto { entry_type?: 'time' | 'expense'; description?: string; qty?: number; rate?: number; amount?: number; billable?: boolean; entry_date?: string }
 export interface BillDto { amount?: number; percent?: number }
 export interface FromOpportunityDto { project_code?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; start_date?: string; end_date?: string }
@@ -57,9 +59,11 @@ export class ProjectsService {
   async create(dto: CreateProjectDto, user: JwtUser) {
     const db = this.db as any;
     const code = dto.project_code?.trim() || `PRJ${String(Date.now()).slice(-6)}`;
+    const revMethod = dto.rev_method === 'poc' ? 'poc' : 'billing';
     await db.insert(projects).values({
       tenantId: user.tenantId ?? null, projectCode: code, name: dto.name, customerName: dto.customer_name ?? null, customerNo: dto.customer_no ?? null,
       billingType: dto.billing_type ?? 'TM', budgetAmount: fx(dto.budget_amount ?? 0, 2), contractAmount: fx(dto.contract_amount ?? 0, 2),
+      revMethod, estimatedCost: fx(dto.estimated_cost ?? 0, 2),
       status: 'Open', startDate: dto.start_date ?? null, endDate: dto.end_date ?? null, createdBy: user.username,
     });
     return this.get(code);
@@ -151,6 +155,21 @@ export class ProjectsService {
       throw new BadRequestException({ code: 'BILL_EXCEEDS_CONTRACT', message: `Billing ${bill} would exceed the contract ${n(p.contractAmount)} (already billed ${n(p.billedToDate)})`, messageTh: 'วางบิลเกินมูลค่าสัญญา' });
     if (await this.ledger.alreadyPosted('PRJ-BILL', `${code}:${newBilled}`, tenantId)) return { already: true, project_code: code };
 
+    // POC project (PROJ-09): revenue + cost are recognised over time (recognizePoc), NOT at billing — so a
+    // bill is just an INVOICE: Dr 1100 AR, clearing the contract asset (1265) already earned, with any excess
+    // over earned revenue parked as a contract liability (2410, billings in excess of recognised revenue).
+    if (p.revMethod === 'poc') {
+      const contractAsset = r2(Math.max(0, n(p.recognizedRevenue) - n(p.billedToDate)));
+      const clearAsset = r2(Math.min(bill, contractAsset));
+      const toLiability = r2(bill - clearAsset);
+      const lines: any[] = [{ account_code: '1100', debit: bill, memo: `AR ${code}` }];
+      if (clearAsset > 0) lines.push({ account_code: '1265', credit: clearAsset, memo: `Contract asset billed ${code}` });
+      if (toLiability > 0) lines.push({ account_code: '2410', credit: toLiability, memo: `Billings in excess ${code}` });
+      const jeP: any = await this.ledger.postEntry({ source: 'PRJ-BILL', sourceRef: `${code}:${newBilled}`, tenantId, memo: `Project invoice ${code} (POC)`, createdBy: user.username, lines });
+      await db.update(projects).set({ billedToDate: fx(newBilled, 2) }).where(eq(projects.id, Number(p.id)));
+      return { project_code: code, entry_no: jeP.entry_no, billed: bill, revenue: 0, contract_asset_cleared: clearAsset, billings_in_excess: toLiability, rev_method: 'poc' };
+    }
+
     const relieve = r2(Math.max(0, n(p.costToDate) - n(p.recognizedCost)));
     const lines = [
       { account_code: '1100', debit: bill, memo: `AR ${code}` },
@@ -164,6 +183,57 @@ export class ProjectsService {
 
     await db.update(projects).set({ billedToDate: fx(newBilled, 2), recognizedCost: fx(n(p.recognizedCost) + relieve, 2) }).where(eq(projects.id, Number(p.id)));
     return { project_code: code, entry_no: je.entry_no, billed: bill, revenue: bill, cost_recognized: relieve, margin: r2(bill - relieve) };
+  }
+
+  // ── Over-time (percentage-of-completion) revenue recognition (PROJ-09) ────
+  // Recognise earned revenue on a cost-to-cost basis: POC% = cost_to_date / estimated_total_cost (EAC),
+  // capped at 100%. The PERIOD revenue = contract × POC% − revenue already recognised; the cost incurred but
+  // not yet expensed is relieved from WIP to COGS in the same step. GL (period revenue): Dr 2410 then Dr 1265
+  // / Cr 4200 (consume any billings-in-excess first, the rest a contract asset); (period cost): Dr 5800 / Cr
+  // 1260. Only a Fixed-price `poc` project recognises this way; idempotent per (project, recognised total) so
+  // a re-run posts nothing. Authorised (gl_post/exec); posts through the PERIOD_LOCKED + GL-audit gates.
+  async recognizePoc(code: string, dto: RecognizeDto, user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    if (p.revMethod !== 'poc') throw new BadRequestException({ code: 'NOT_POC', message: 'Project is not on over-time (POC) revenue recognition', messageTh: 'โครงการนี้ไม่ได้ใช้การรับรู้รายได้ตามความสำเร็จของงาน' });
+    const contract = n(p.contractAmount);
+    if (contract <= 0) throw new BadRequestException({ code: 'NO_CONTRACT', message: 'POC recognition requires a contract amount', messageTh: 'การรับรู้รายได้ตามความสำเร็จต้องมีมูลค่าสัญญา' });
+    const tenantId = p.tenantId ?? user.tenantId ?? null;
+    // EAC: an explicit estimate (this run or stored), else the project budget. Must be positive to form a ratio.
+    if (dto.estimated_cost != null && n(dto.estimated_cost) > 0) await db.update(projects).set({ estimatedCost: fx(n(dto.estimated_cost), 2) }).where(eq(projects.id, Number(p.id)));
+    const estCost = n(dto.estimated_cost ?? p.estimatedCost) > 0 ? n(dto.estimated_cost ?? p.estimatedCost) : n(p.budgetAmount);
+    if (estCost <= 0) throw new BadRequestException({ code: 'NO_ESTIMATE', message: 'POC needs an estimated total cost (estimated_cost or budget)', messageTh: 'ต้องระบุประมาณการต้นทุนรวม' });
+
+    const cost = n(p.costToDate);
+    const pocPct = Math.min(100, r2((cost / estCost) * 100));
+    const earnedToDate = r2(Math.min(contract, contract * pocPct / 100));
+    const periodRevenue = r2(earnedToDate - n(p.recognizedRevenue));
+    const periodCost = r2(Math.max(0, cost - n(p.recognizedCost)));
+    if (periodRevenue <= 0.005 && periodCost <= 0.005) return { already: true, project_code: code, poc_pct: pocPct, recognized_revenue: n(p.recognizedRevenue) };
+    const ref = `${code}:${earnedToDate}:${cost}`;
+    if (await this.ledger.alreadyPosted('PRJ-REVREC', ref, tenantId)) return { already: true, project_code: code };
+
+    const lines: any[] = [];
+    if (periodRevenue > 0.005) {
+      // Recognise revenue: first reverse any billings-in-excess (2410), the remainder builds the contract asset (1265).
+      const liability = r2(Math.max(0, n(p.billedToDate) - n(p.recognizedRevenue)));
+      const fromLiability = r2(Math.min(periodRevenue, liability));
+      const toAsset = r2(periodRevenue - fromLiability);
+      if (fromLiability > 0) lines.push({ account_code: '2410', debit: fromLiability, memo: `Release billings in excess ${code}` });
+      if (toAsset > 0) lines.push({ account_code: '1265', debit: toAsset, memo: `Contract asset ${code}` });
+      lines.push({ account_code: '4200', credit: periodRevenue, memo: `Project revenue (POC ${pocPct}%)` });
+    }
+    if (periodCost > 0.005) {
+      lines.push({ account_code: '5800', debit: periodCost, memo: 'Project cost of services' });
+      lines.push({ account_code: '1260', credit: periodCost, memo: `WIP relieved ${code}` });
+    }
+    const je: any = await this.ledger.postEntry({ source: 'PRJ-REVREC', sourceRef: ref, tenantId, date: dto.as_of, memo: `Project POC revenue recognition ${code} (${pocPct}%)`, createdBy: user.username, lines });
+    await db.update(projects).set({ recognizedRevenue: fx(n(p.recognizedRevenue) + periodRevenue, 2), recognizedCost: fx(n(p.recognizedCost) + periodCost, 2), status: p.status === 'Open' ? 'Active' : p.status }).where(eq(projects.id, Number(p.id)));
+    return {
+      project_code: code, entry_no: je.entry_no, poc_pct: pocPct, estimated_cost: estCost,
+      revenue_recognized: periodRevenue, cost_recognized: periodCost,
+      recognized_revenue_to_date: r2(n(p.recognizedRevenue) + periodRevenue), earned_to_date: earnedToDate, margin: r2(periodRevenue - periodCost),
+    };
   }
 
   async list(user: JwtUser) {
@@ -597,6 +667,70 @@ export class ProjectsService {
     return { project_code: code, baseline: active ? shapeBaseline(active) : null, current: plan, variance, history: all.map(shapeBaseline) };
   }
 
+  // ── Change orders / contract variations (PROJ-10) ────────────────────────
+  // Request a change order — a governed amendment to the contract value / budget / EAC. Posts/applies NOTHING;
+  // it stays `pending` until a DIFFERENT user approves it (maker-checker), so a project can't move its
+  // contract goalposts unilaterally.
+  async createChangeOrder(code: string, dto: ChangeOrderDto, user: JwtUser) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const contractDelta = r2(dto.contract_delta ?? 0), budgetDelta = r2(dto.budget_delta ?? 0), estDelta = r2(dto.estimated_cost_delta ?? 0);
+    if (contractDelta === 0 && budgetDelta === 0 && estDelta === 0) throw new BadRequestException({ code: 'EMPTY_CHANGE_ORDER', message: 'A change order must change the contract, budget, or estimated cost', messageTh: 'ใบเปลี่ยนแปลงต้องเปลี่ยนมูลค่าสัญญา งบประมาณ หรือประมาณการต้นทุน' });
+    const coNo = `CO${String(Date.now()).slice(-8)}`;
+    await db.insert(projectChangeOrders).values({
+      projectId: Number(p.id), tenantId: p.tenantId ?? user.tenantId ?? null, coNo, description: dto.description ?? null,
+      contractDelta: fx(contractDelta, 2), budgetDelta: fx(budgetDelta, 2), estimatedCostDelta: fx(estDelta, 2),
+      reason: dto.reason ?? null, status: 'pending', requestedBy: user.username,
+    });
+    return this.listChangeOrders(code);
+  }
+
+  // Approve a change order (maker-checker): the approver MUST differ from the requester (SOD_SELF_APPROVAL).
+  // On approval the contract/budget/EAC deltas are applied to the project AND a new baseline is auto-captured
+  // (reason = the CO), so the scope/contract change is authorised, segregated, and re-baselined (ties to PROJ-07).
+  async approveChangeOrder(coId: number, user: JwtUser) {
+    const db = this.db as any;
+    const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
+    if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
+    if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
+    if (co.requestedBy && co.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a change order you requested', messageTh: 'ผู้ขอเปลี่ยนแปลงอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
+    const newContract = r2(Math.max(0, n(proj.contractAmount) + n(co.contractDelta)));
+    const newBudget = r2(Math.max(0, n(proj.budgetAmount) + n(co.budgetDelta)));
+    const newEst = r2(Math.max(0, n(proj.estimatedCost) + n(co.estimatedCostDelta)));
+    await db.update(projects).set({ contractAmount: fx(newContract, 2), budgetAmount: fx(newBudget, 2), estimatedCost: fx(newEst, 2) }).where(eq(projects.id, Number(proj.id)));
+    await db.update(projectChangeOrders).set({ status: 'approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectChangeOrders.id, Number(coId)));
+    // Re-baseline so the variance trail records the authorised change (PROJ-07). Best-effort.
+    let baseline: any = null;
+    try { baseline = await this.captureBaseline(proj.projectCode, { label: `Change order ${co.coNo}`, reason: `Change order ${co.coNo}` }, user); } catch { /* baseline optional */ }
+    return { change_order: co.coNo, project_code: proj.projectCode, status: 'approved', contract_amount: newContract, budget_amount: newBudget, estimated_cost: newEst, baseline: baseline?.baseline ?? null };
+  }
+
+  async rejectChangeOrder(coId: number, user: JwtUser) {
+    const db = this.db as any;
+    const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
+    if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
+    if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
+    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
+    await db.update(projectChangeOrders).set({ status: 'rejected', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectChangeOrders.id, Number(coId)));
+    return this.listChangeOrders(proj.projectCode);
+  }
+
+  async listChangeOrders(code: string) {
+    const db = this.db as any;
+    const p = await this.row(code);
+    const rows = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.projectId, Number(p.id))).orderBy(desc(projectChangeOrders.id));
+    const approved = rows.filter((r: any) => r.status === 'approved');
+    return {
+      project_code: code, change_orders: rows.map(shapeChangeOrder), count: rows.length,
+      summary: {
+        pending: rows.filter((r: any) => r.status === 'pending').length,
+        approved: approved.length,
+        approved_contract_delta: r2(approved.reduce((s: number, r: any) => s + n(r.contractDelta), 0)),
+      },
+    };
+  }
+
   // ── Project templates (B2) ───────────────────────────────────────────────
   // Create a reusable WBS/milestone scaffold. Items default their seq to declaration order (1-based) so a
   // template can omit explicit seqs; parent_seq / depends_on_seq reference those ordinals.
@@ -783,10 +917,16 @@ export class ProjectsService {
   private fmt(p: any, nonBillable = 0) {
     const cost = n(p.costToDate), recognized = n(p.recognizedCost), billed = n(p.billedToDate), nb = r2(nonBillable);
     const budget = n(p.budgetAmount), totalCost = r2(cost + nb);
+    // POC (PROJ-09): revenue is recognised over time → margin/recognised-revenue come from recognized_revenue,
+    // and the unbilled-vs-overbilled position surfaces as contract asset (1265) / liability (2410).
+    const isPoc = p.revMethod === 'poc';
+    const recognizedRevenue = n(p.recognizedRevenue);
+    const recognizedRev = isPoc ? recognizedRevenue : billed; // billing-method recognises revenue at billing
     return {
       project_code: p.projectCode, name: p.name, customer_name: p.customerName, customer_no: p.customerNo, crm_opp_no: p.crmOppNo, billing_type: p.billingType, status: p.status,
+      rev_method: p.revMethod, estimated_cost: n(p.estimatedCost),
       budget_amount: budget, contract_amount: n(p.contractAmount),
-      cost_to_date: cost, recognized_cost: recognized, billed_to_date: billed,
+      cost_to_date: cost, recognized_cost: recognized, recognized_revenue: recognizedRevenue, billed_to_date: billed,
       non_billable_cost: nb,                       // expensed straight to 5800 (unrecoverable)
       total_cost: totalCost,                       // all costs incurred (recoverable WIP + non-billable)
       // Budget control: variance = budget − total cost incurred (negative = OVER budget); budget_used_pct +
@@ -795,7 +935,11 @@ export class ProjectsService {
       budget_used_pct: budget > 0 ? r2((totalCost / budget) * 100) : null,
       over_budget: budget > 0 && totalCost > budget,
       wip: r2(cost - recognized),                  // unbilled BILLABLE cost sitting in 1260
-      margin: r2(billed - recognized - nb),        // recognized revenue − recognized billable cost − absorbed non-billable
+      margin: r2(recognizedRev - recognized - nb), // recognised revenue − recognised billable cost − absorbed non-billable
+      // POC over-time position: cost-to-cost %, the contract asset (earned but unbilled) / liability (billed in excess).
+      poc_pct: isPoc ? (n(p.estimatedCost) > 0 || budget > 0 ? r2(Math.min(100, (cost / (n(p.estimatedCost) > 0 ? n(p.estimatedCost) : budget)) * 100)) : null) : null,
+      contract_asset: isPoc ? r2(Math.max(0, recognizedRevenue - billed)) : null,
+      billings_in_excess: isPoc ? r2(Math.max(0, billed - recognizedRevenue)) : null,
       // Fixed-price progress: how much of the contract is billed + what's left to bill (null for T&M).
       billed_pct: p.billingType === 'Fixed' && n(p.contractAmount) > 0 ? r2((billed / n(p.contractAmount)) * 100) : null,
       remaining_to_bill: p.billingType === 'Fixed' && n(p.contractAmount) > 0 ? r2(Math.max(0, n(p.contractAmount) - billed)) : null,
@@ -818,6 +962,9 @@ function shapeTemplateItem(it: any) {
 }
 function shapeRisk(r: any) {
   return { id: Number(r.id), project_id: Number(r.projectId), kind: r.kind, title: r.title, status: r.status, probability: r.probability != null ? Number(r.probability) : null, impact: Number(r.impact), score: Number(r.score), rag: r.rag, owner: r.owner, mitigation: r.mitigation, due_date: r.dueDate, created_by: r.createdBy, created_at: r.createdAt, closed_at: r.closedAt };
+}
+function shapeChangeOrder(c: any) {
+  return { id: Number(c.id), co_no: c.coNo, description: c.description, contract_delta: n(c.contractDelta), budget_delta: n(c.budgetDelta), estimated_cost_delta: n(c.estimatedCostDelta), reason: c.reason, status: c.status, requested_by: c.requestedBy, approved_by: c.approvedBy, created_at: c.createdAt, approved_at: c.approvedAt };
 }
 function shapeBaseline(b: any) {
   return { id: Number(b.id), label: b.label, baseline_bac: n(b.baselineBac), baseline_duration_days: Number(b.baselineDurationDays), baseline_end: b.baselineEnd, reason: b.reason, status: b.status, created_by: b.createdBy, captured_at: b.capturedAt };
