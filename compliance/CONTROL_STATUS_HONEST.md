@@ -64,16 +64,18 @@ gating (GL-02/15/16) and payroll maker-checker (PAY-03) were already in the comp
 ### Partial — present but to be formalized/extended
 `ITGC-SD-02` opening-balance migration · `ITGC-SD-03` regression-coverage gate · `ITGC-OP-02` DR/continuity
 plan · `EXP-03` PR/PO authorization workflow · `INV-04` physical-count/cycle-count control · `PROJ-03`
-WIP/clearing review at close · `REC-03` intercompany elimination · `TAX-03` withholding-tax computation/reporting.
+WIP/clearing review at close · `REC-03` intercompany elimination · `TAX-03` withholding-tax computation/reporting ·
+`ELC-01` ethics acknowledgement *(W3: in-app register shipped; annual campaign = HR process)* · `ELC-04`
+whistleblower hotline *(W3: in-app intake + case log shipped; hotline operation = audit-committee process)*.
 
-### Gap (6) — not yet built; mostly **entity-level governance, not software**
-`ELC-01` code of conduct/ethics acknowledgement · `ELC-02` audit-committee oversight · `ELC-03`
-delegation-of-authority matrix · `ELC-04` whistleblower hotline · `ELC-05` annual fraud-risk assessment ·
-`ITGC-SD-01` SDLC design/test sign-off.
+### Gap — not yet built; **entity-level governance, not software**
+`ELC-02` audit-committee oversight · `ELC-03` delegation-of-authority matrix · `ELC-05` annual fraud-risk
+assessment · `ITGC-SD-01` SDLC design/test sign-off.
 
-> Five of six gaps are **organizational** — they require the company to stand up governance bodies and
+> The remaining gaps are **organizational** — they require the company to stand up governance bodies and
 > policies, not to ship code. None are transaction-level application controls. This is the work a SOX PMO
-> owns, not engineering.
+> owns, not engineering. (W3 shipped the evidence-capture system for ELC-01 ethics acknowledgement + ELC-04
+> whistleblower case log, moving both Gap → Partial — the system side is built; the human process is not.)
 
 ## 5. Realistic ICFR-attestable timeline
 
