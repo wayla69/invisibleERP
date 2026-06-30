@@ -763,6 +763,74 @@ export class ProjectsService {
     return { as_of: today, stale_days: staleDays, summary, items };
   }
 
+  // ── Forward resource & cash forecast (PMO-2) ─────────────────────────────
+  // Makes the capacity calendar forward-looking: committed capacity demand per month, alongside a
+  // BILLINGS/CASH forecast that overlays committed contractual billing with the probability-weighted pipeline —
+  // "if we win the deals in the pipeline, when does the cash land (and where are we already over-allocated)?".
+  // Read-only — rides PROJ-05 (resource governance) / PROJ-06 (EVM). Sources, all already in the system:
+  //  • committed billing = Fixed-price pending MILESTONES with a billing_percent, dated in-horizon (× contract),
+  //    plus each POC project's earned-but-unbilled contract asset (expected to invoice in the first month);
+  //  • weighted pipeline = each OPEN opportunity's amount × probability%, placed at its expected close month;
+  //  • committed demand = the resource capacity calendar's per-month allocation roll-up.
+  async forecast(user: JwtUser, dto?: { months?: number; from?: string }) {
+    const db = this.db as any;
+    const months = Math.max(1, Math.min(24, Math.round(dto?.months ?? 6)));
+    const start = (dto?.from && /^\d{4}-\d{2}$/.test(dto.from)) ? dto.from : ymd().slice(0, 7);
+    const cap = await this.resourceCapacity(user, { months, from: start });
+    const horizon: string[] = cap.horizon;
+    const hset = new Set(horizon);
+    const firstMonth = horizon[0];
+
+    // Committed contractual billing per month.
+    const committedBill = new Map<string, number>(horizon.map((m) => [m, 0]));
+    const projRows = await db.select().from(projects).orderBy(desc(projects.id)).limit(200);
+    const pById = new Map<number, any>(projRows.map((p: any) => [Number(p.id), p]));
+    const ms = await db.select().from(projectMilestones).where(eq(projectMilestones.status, 'pending'));
+    for (const m of ms) {
+      if (m.billingPercent == null || !m.dueDate) continue;
+      const mo = String(m.dueDate).slice(0, 7);
+      if (!hset.has(mo)) continue;
+      const proj = pById.get(Number(m.projectId)); if (!proj) continue;
+      const bill = r2(n(proj.contractAmount) * n(m.billingPercent) / 100);
+      if (bill > 0) committedBill.set(mo, r2((committedBill.get(mo) ?? 0) + bill));
+    }
+    // POC earned-but-unbilled (contract asset) is billable now → place in the first horizon month.
+    let pocAsset = 0;
+    for (const f of (await this.list(user)).projects) if (f.rev_method === 'poc' && (f.contract_asset ?? 0) > 0) pocAsset = r2(pocAsset + (f.contract_asset ?? 0));
+    if (pocAsset > 0) committedBill.set(firstMonth, r2((committedBill.get(firstMonth) ?? 0) + pocAsset));
+
+    // Probability-weighted pipeline per month (expected close).
+    const weightedPipe = new Map<string, number>(horizon.map((m) => [m, 0]));
+    const OPEN = ['prospecting', 'qualification', 'proposal', 'negotiation'];
+    const opps = await db.select().from(crmOpportunities);
+    let openCount = 0, openAmount = 0, weightedForecast = 0;
+    for (const o of opps) {
+      if (!OPEN.includes(o.stage)) continue;
+      openCount++; openAmount = r2(openAmount + n(o.amount));
+      const w = r2(n(o.amount) * Number(o.probability ?? 0) / 100);
+      weightedForecast = r2(weightedForecast + w);
+      const mo = o.expectedCloseDate ? String(o.expectedCloseDate).slice(0, 7) : null;
+      if (mo && hset.has(mo)) weightedPipe.set(mo, r2((weightedPipe.get(mo) ?? 0) + w));
+    }
+
+    const billingMonthly = horizon.map((month) => {
+      const committed = r2(committedBill.get(month) ?? 0);
+      const weighted = r2(weightedPipe.get(month) ?? 0);
+      return { month, committed_billing: committed, weighted_pipeline: weighted, total_expected: r2(committed + weighted) };
+    });
+    const committedTotal = r2(billingMonthly.reduce((s, m) => s + m.committed_billing, 0));
+    const weightedTotal = r2(billingMonthly.reduce((s, m) => s + m.weighted_pipeline, 0));
+    const resourcingMonthly = cap.monthly.map((m: any) => ({ month: m.month, committed_demand_pct: m.total_demand_pct, resources_over: m.resources_over }));
+    const peakDemand = resourcingMonthly.reduce((mx: number, m: any) => Math.max(mx, m.committed_demand_pct), 0);
+
+    return {
+      from: start, months, horizon,
+      resourcing: { monthly: resourcingMonthly, over_allocated_count: cap.over_allocated_count, peak_demand_pct: r2(peakDemand) },
+      billing: { monthly: billingMonthly, committed_total: committedTotal, weighted_pipeline_total: weightedTotal, expected_total: r2(committedTotal + weightedTotal) },
+      pipeline: { open_count: openCount, open_amount: openAmount, weighted_forecast: weightedForecast },
+    };
+  }
+
   // ── Baselines & variance (B1, PROJ-07) ───────────────────────────────────
   // Current planned BAC (Σ non-cancelled task planned cost; falls back to the project budget) + critical-path
   // duration — the figures a baseline snapshots and the current plan is compared against.

@@ -516,6 +516,27 @@ async function main() {
   const acStale = await inj('GET', '/api/projects/action-center?stale_days=1', admin);
   ok('Action center accepts ?stale_days override (echoed in payload)', acStale.json.stale_days === 1, JSON.stringify({ s: acStale.json.stale_days }));
 
+  // ── 28. pipeline-weighted forward resource & cash forecast (PMO-2) ──
+  // PRJ-FC (Fixed, contract 100000) with a pending 25%-billing milestone due 2026-08-15 → 25000 committed in Aug.
+  // An OPEN opportunity 200000 @ 50% expected-close 2026-09-10 → 100000 weighted pipeline in Sep.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-FC', name: 'งานพยากรณ์', billing_type: 'Fixed', contract_amount: 100000 });
+  await inj('POST', '/api/projects/PRJ-FC/milestones', admin, { name: 'Phase gate', due_date: '2026-08-15', billing_percent: 25 });
+  await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลพยากรณ์', amount: 200000, probability: 50, expected_close_date: '2026-09-10' });
+  const fc = await inj('GET', '/api/projects/forecast?from=2026-07&months=6', admin);
+  const fcAt = (mm: string) => (fc.json.billing?.monthly ?? []).find((m: any) => m.month === mm);
+  ok('Forecast: committed milestone billing 25000 in 2026-08 (25% of 100000 contract)',
+    near(fcAt('2026-08')?.committed_billing, 25000) && near(fcAt('2026-08')?.total_expected, 25000),
+    JSON.stringify({ aug: fcAt('2026-08') }));
+  ok('Forecast: probability-weighted pipeline 100000 in 2026-09 (200000 × 50%) + headline weighted_forecast ≥ that',
+    near(fcAt('2026-09')?.weighted_pipeline, 100000) && fc.json.pipeline?.weighted_forecast >= 100000 && fc.json.pipeline?.open_count >= 1,
+    JSON.stringify({ sep: fcAt('2026-09'), wf: fc.json.pipeline?.weighted_forecast }));
+  ok('Forecast: billing totals reconcile (committed 25000 + weighted 100000 = expected 125000) + horizon length',
+    near(fc.json.billing?.committed_total, 25000) && near(fc.json.billing?.weighted_pipeline_total, 100000) && near(fc.json.billing?.expected_total, 125000) && fc.json.horizon?.length === 6,
+    JSON.stringify({ c: fc.json.billing?.committed_total, w: fc.json.billing?.weighted_pipeline_total, e: fc.json.billing?.expected_total }));
+  ok('Forecast: resourcing band carries committed_demand_pct per month + over-allocated count',
+    (fc.json.resourcing?.monthly ?? []).length === 6 && fc.json.resourcing?.monthly?.every((m: any) => typeof m.committed_demand_pct === 'number') && typeof fc.json.resourcing?.over_allocated_count === 'number',
+    JSON.stringify({ n: (fc.json.resourcing?.monthly ?? []).length, over: fc.json.resourcing?.over_allocated_count }));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
