@@ -105,3 +105,4 @@ export * from './revrec-contracts';
 export * from './ai-usage';
 export * from './background-jobs';
 export * from './pdpa';
+export * from './governance';
