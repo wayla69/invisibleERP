@@ -9,10 +9,11 @@ work breakdown, schedule/Gantt, resourcing, earned value, and a sales win/loss d
 deals convert into projects.
 
 ## Where to find it
-- **Portfolio** — sidebar **วางแผน & BI → พอร์ตโครงการ (Portfolio)** (`/projects/portfolio`), or the
-  **Portfolio** button on the Projects page.
-- **Projects** — sidebar **วางแผน & BI → โครงการ (Projects)** (`/projects`).
-- **Win/Loss Pipeline** — sidebar **วางแผน & BI → ไปป์ไลน์ Win/Loss** (`/projects/pipeline`), or the
+Project Management has its own sidebar group — **จัดการโครงการ (Project Management)** (ERP workspace):
+- **Portfolio** — **จัดการโครงการ → พอร์ตโครงการ (Portfolio)** (`/projects/portfolio`) — the PM landing,
+  or the **Portfolio** button on the Projects page.
+- **Projects** — **จัดการโครงการ → โครงการ (Projects)** (`/projects`).
+- **Win/Loss Pipeline** — **จัดการโครงการ → ไปป์ไลน์ Win/Loss** (`/projects/pipeline`), or the
   **Win/Loss** button on the Projects page.
 
 ## Portfolio command center (`/projects/portfolio`)

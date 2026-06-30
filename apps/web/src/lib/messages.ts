@@ -48,6 +48,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.group.finance': { th: 'การเงิน', en: 'Finance' },
   'nav.group.tax': { th: 'ภาษี', en: 'Tax' },
   'nav.group.hr': { th: 'บุคลากร & เงินเดือน', en: 'HR & Payroll' },
+  'nav.group.pm': { th: 'จัดการโครงการ', en: 'Project Management' },
   'nav.group.planning': { th: 'วางแผน & BI', en: 'Planning & BI' },
   'nav.group.controls': { th: 'การควบคุม', en: 'Controls' },
   'nav.group.ai': { th: 'ผู้ช่วย AI', en: 'AI Assistant' },
