@@ -127,6 +127,22 @@ async function main() {
     (logRows.json.messages ?? []).some((m: any) => m.recipient === 'oa:broadcast' && m.campaign === 'grand_open' && m.status === 'sent'),
     JSON.stringify({ n: (logRows.json.messages ?? []).length }));
 
+  // ── 10. Per-tenant messaging provider: the tenant's own LINE token overrides the platform env token ──
+  const setProv = await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999' }, enabled: true });
+  ok('set per-tenant LINE provider → configured', setProv.status === 200 && setProv.json.configured === true, JSON.stringify({ s: setProv.status }));
+  const provs = await inj('GET', '/api/messaging/providers', token);
+  const lineProv = (provs.json.channels ?? []).find((c: any) => c.channel === 'line');
+  ok('GET providers → line configured+enabled, secret never returned',
+    lineProv?.configured === true && lineProv?.enabled === true && !JSON.stringify(provs.json).includes('tenant-line-tok-999'),
+    JSON.stringify({ configured: lineProv?.configured, leaked: JSON.stringify(provs.json).includes('tenant-line-tok-999') }));
+  // Bob is LINE-linked and not opted out — his push must now carry the TENANT token, not the env token.
+  const pushBefore = linePushes.length;
+  const sendBob = await inj('POST', '/api/messaging/send', token, { member_id: bob.json.id, channel: 'line', body: 'ทดสอบ per-tenant' });
+  const lastPush = linePushes.at(-1);
+  ok('per-tenant LINE token overrides env: Bob push used the tenant token (not test-line-push-token)',
+    sendBob.json.status === 'sent' && linePushes.length === pushBefore + 1 && lastPush!.auth.includes('tenant-line-tok-999') && !lastPush!.auth.includes('test-line-push-token'),
+    JSON.stringify({ status: sendBob.json.status, usedTenant: lastPush?.auth.includes('tenant-line-tok-999') }));
+
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, messageLog, customerProfiles } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
-import { resolveMessageGateway, broadcastLine, lineConfigured, type MessageChannel } from './gateways';
+import { resolveMessageGateway, broadcastLine, type ChannelCreds, type MessageChannel } from './gateways';
+import { TenantMessagingService } from './tenant-messaging.service';
 
 type SendDto = { member_id?: number; to?: string; channel: MessageChannel; body: string; campaign?: string };
 type BlastDto = { audience: 'all' | 'birthdays_today' | 'segment'; segment?: string; channel: MessageChannel; body: string; campaign?: string };
@@ -11,10 +12,19 @@ type BroadcastDto = { body: string; campaign?: string };
 
 @Injectable()
 export class MessagingService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    // Optional so partial harnesses still construct; when present a tenant's own provider creds override env.
+    @Optional() private readonly tenantMsg?: TenantMessagingService,
+  ) {}
+
+  // Per-tenant provider creds for a channel (null ⇒ gateway uses the platform env default).
+  private creds(user: JwtUser, channel: MessageChannel): Promise<ChannelCreds | null> {
+    return this.tenantMsg?.resolveCreds(user.tenantId, channel) ?? Promise.resolve(null);
+  }
 
   // Send one message. Respects marketing consent for member-addressed messages (logs 'skipped').
-  async send(dto: SendDto, user: JwtUser) {
+  async send(dto: SendDto, user: JwtUser, creds?: ChannelCreds | null) {
     const db = this.db as any;
     let member: any = null;
     let recipient = dto.to ?? null;
@@ -26,7 +36,9 @@ export class MessagingService {
       recipient = recipient ?? (dto.channel === 'email' ? member.email : dto.channel === 'line' ? member.lineUserId : member.phone);
     }
     if (!recipient) return this.record(user, { memberId: dto.member_id ?? null, channel: dto.channel, recipient: null, body: dto.body, campaign: dto.campaign, status: 'failed', provider: null, error: 'no recipient contact' });
-    const gw = resolveMessageGateway(dto.channel);
+    // creds passed in (blast resolves once) or resolved here for a single send; null ⇒ env default.
+    const resolved = creds !== undefined ? creds : await this.creds(user, dto.channel);
+    const gw = resolveMessageGateway(dto.channel, resolved ?? undefined);
     const res = await gw.send(recipient, dto.body);
     return this.record(user, { memberId: dto.member_id ?? null, channel: dto.channel, recipient, body: dto.body, campaign: dto.campaign, status: res.status, provider: res.provider, error: res.error ?? null });
   }
@@ -48,9 +60,11 @@ export class MessagingService {
         members = members.filter((m: any) => { if (!m.birthday) return false; const d = new Date(m.birthday + 'T00:00:00Z'); return d.getUTCMonth() + 1 === mo && d.getUTCDate() === day; });
       }
     }
+    // Resolve the tenant's provider creds ONCE for the whole blast (not per member).
+    const creds = await this.creds(user, dto.channel);
     let sent = 0, skipped = 0, failed = 0;
     for (const m of members) {
-      const r: any = await this.send({ member_id: Number(m.id), channel: dto.channel, body: dto.body, campaign: dto.campaign ?? `blast:${dto.audience}` }, user);
+      const r: any = await this.send({ member_id: Number(m.id), channel: dto.channel, body: dto.body, campaign: dto.campaign ?? `blast:${dto.audience}` }, user, creds);
       if (r.status === 'sent') sent++; else if (r.status === 'skipped') skipped++; else failed++;
     }
     return { audience: dto.audience, segment: dto.segment ?? null, targeted: members.length, sent, skipped, failed };
@@ -62,9 +76,11 @@ export class MessagingService {
   // a synthetic recipient 'oa:broadcast' so the send is reviewable. Falls through to the mock when no
   // LINE_CHANNEL_TOKEN is configured (logged as sent, provider 'mock').
   async broadcastOA(dto: BroadcastDto, user: JwtUser) {
-    const configured = lineConfigured();
-    const res = configured
-      ? await broadcastLine(process.env.LINE_CHANNEL_TOKEN!, dto.body)
+    // Prefer the tenant's own OA token, else the platform env default; unset ⇒ mock.
+    const creds = await this.creds(user, 'line');
+    const token = creds?.token ?? process.env.LINE_CHANNEL_TOKEN;
+    const res = token
+      ? await broadcastLine(token, dto.body)
       : { status: 'sent' as const, provider: 'mock', ref: 'mock_broadcast' };
     return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: dto.body, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, error: res.error ?? null });
   }

@@ -46,6 +46,8 @@ points-liability tie-out (control account 2250). Result legend: `Pass` / `Fail` 
 
 | UAT-LOY-031 | CDP export — bulk member snapshot with consent, tenant-scoped | Marketing / Exec | ≥1 active member with a refreshed profile on T1; a member base on T2 | 1. `GET /api/crm/export?limit=100` as a T1 marketer 2. the same as a T2 marketer 3. as HQ/Admin with no `tenant_id` | — | (1) `total ≥ 1`; each row carries `member_code`, `rfm_segment`, and a `consent` object (`marketing`/`line`/`sms`/`email` booleans); (2) `total = 0` (never T1's members); (3) `TENANT_REQUIRED` error (HQ must scope) | Medium | Control | 19 §7 rev 1.10 | Not Run | read-only PII egress; consent ships with each row; explicit tenant scope; DSAR is separate (PDPA); audit-logging noted as a follow-up |
 
+| UAT-LOY-032 | Per-tenant messaging provider — own token overrides platform env; secret never returned | Admin (`users`/`exec`) | Platform `LINE_CHANNEL_TOKEN` set; a LINE-linked, opted-in member | 1. `PUT /api/messaging/providers/line` `{creds:{token:'X'}, enabled:true}` 2. `GET /api/messaging/providers` 3. send a LINE message to the member | — | (1) `configured:true`; (2) the `line` channel shows `configured:true`/`enabled:true` and the response body does **not** contain the token `X` (write-only); (3) the outbound push carries the **tenant** token `X`, not the platform env token | High | Control | 19 §7 rev 1.11 | Not Run | secret AES-256-GCM encrypted at rest (`config_enc`); resolver order per-tenant → env → mock; RLS tenant-scoped |
+
 ## Revision history
 
 | Version | Date | Author | Summary |
@@ -67,3 +69,4 @@ points-liability tie-out (control account 2250). Result legend: `Pass` / `Fail` 
 | 1.5 | 2026-07-01 | Platform | **Loyalty real-time signal:** added UAT-LOY-029 (earn publishes a `loyalty_points` tick to the BiLive live feed; T2 tenant-filtered) — now 30 cases. Verified by the `crm` harness (2 new checks). |
 | 1.6 | 2026-07-01 | Platform | **LINE OA broadcast:** added UAT-LOY-030 (broadcast to all OA followers — no consent filter by design, audit-logged, operator-gated) — now 31 cases. Verified by the `line-crm` harness (2 new checks). |
 | 1.7 | 2026-07-01 | Platform | **CDP export:** added UAT-LOY-031 (bulk member export with identity + RFM + consent flags; tenant-scoped; HQ must pass tenant_id) — now 32 cases. Verified by the `crm` harness (2 new checks). |
+| 1.8 | 2026-07-01 | Platform | **Per-tenant messaging providers:** added UAT-LOY-032 (tenant's own LINE/SMS/SMTP creds override env; encrypted + write-only; tenant token used on a real push) covering `tenant_messaging_config` (migration 0208) + `GET`/`PUT /api/messaging/providers/:channel` — now 33 cases. Verified by the `line-crm` harness (3 new checks). |

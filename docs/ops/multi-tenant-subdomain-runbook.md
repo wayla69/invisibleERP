@@ -76,12 +76,14 @@ visibility (Labs, module toggles) is covered by `feature_flags` (per-tenant) and
 (system-wide) — see `permissions.ts` and `docs/process-narratives/27-platform-customization.md`.
 
 ## 6. Messaging providers per customer
-Loyalty/CRM outbound (LINE / SMS / email) is env-driven and **shared at the deployment level**
-(`messaging/gateways.ts`, `secrets.md`): `LINE_CHANNEL_TOKEN`, `SMS_API_KEY`+`SMS_API_URL`, `SMTP_*`. On a
-shared deployment all tenants use the platform's configured providers (the shop's identity rides in the
-message body / LINE OA). **If a customer needs their own LINE OA / SMS sender**, that is per-tenant provider
-credentials — a follow-up (store provider keys per tenant and resolve them in the gateway) or a reason to
-choose Model B for that customer.
+Loyalty/CRM outbound (LINE / SMS / email) resolves **per-tenant credentials first, then the platform env
+default, then a logged mock** (`messaging/gateways.ts` + `TenantMessagingService`). So on a shared
+deployment a customer can use **their own LINE OA token / SMS sender / SMTP mailbox**: an admin sets them via
+`PUT /api/messaging/providers/:channel` (`{creds, enabled}`, perms `users`/`exec`) — stored **AES-256-GCM
+encrypted at rest** (`tenant_messaging_config.config_enc`, write-only, never returned; `GET
+/api/messaging/providers` shows only which channels are configured/enabled). A tenant that sets nothing falls
+back to the platform env creds (`LINE_CHANNEL_TOKEN`, `SMS_API_KEY`+`SMS_API_URL`, `SMTP_*` — see
+`secrets.md`); unset there too ⇒ mock. This removes the main reason to pick Model B for a "my own OA" customer.
 
 ## 7. Cost model (per customer, indicative — THB/month)
 

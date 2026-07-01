@@ -197,6 +197,11 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > administrator; see `docs/ops/secrets.md`). Until a channel is configured it runs in **demo mode**: the send
 > is logged as *sent* but no message actually leaves — check the message log's **provider** column (`mock` =
 > demo, the channel name = live).
+>
+> **Use your own provider.** An admin can connect this shop's **own** LINE Official Account / SMS sender /
+> email mailbox (`GET`/`PUT /api/messaging/providers/:channel`, permission `users`/`exec`) so messages go out
+> under your brand. Credentials are stored encrypted and are write-only — the screen shows only which channels
+> are connected, never the keys. If you set nothing, the platform's shared provider (or demo mode) is used.
 
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
@@ -299,3 +304,4 @@ claim points by uploading a photo of the receipt.
 | 1.6 | 2026-07-01 | Platform | §13 **Live points feed** — earn/redeem now push a real-time `loyalty_points` signal to the exec live dashboard (`/bi`); monitoring only, ledger remains authoritative. |
 | 1.7 | 2026-07-01 | Platform | §11 **LINE OA broadcast** — announce to all OA followers via `POST /api/messaging/broadcast-oa` (`marketing`/`exec`); targets the OA follower set (opt-out = unfollow), audit-logged in the message log. |
 | 1.8 | 2026-07-01 | Platform | §13 **CDP data export** — bulk member export (`GET /api/crm/export`, `marketing`/`exec`) with identity + RFM + consent flags for external CDP integration; paginated, tenant-scoped, read-only. DSAR stays separate. |
+| 1.9 | 2026-07-01 | Platform | §11 **Own messaging provider** — admins can connect the shop's own LINE OA / SMS sender / SMTP mailbox (`GET`/`PUT /api/messaging/providers/:channel`, `users`/`exec`); credentials encrypted + write-only, overriding the shared platform provider. |
