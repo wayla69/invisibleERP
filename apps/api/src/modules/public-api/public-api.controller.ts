@@ -1,8 +1,16 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards, HttpCode } from '@nestjs/common';
+import { z } from 'zod';
 import { Public, CurrentUser, NoTx, type JwtUser } from '../../common/decorators';
+import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { PublicApiGuard, Scopes } from './public-api.guard';
 import { PublicApiService } from './public-api.service';
+import { PublicLoyaltyService } from './public-loyalty.service';
 import { buildOpenApi } from './openapi';
+
+const EnrollBody = z.object({ name: z.string().optional(), phone: z.string().optional(), card_no: z.string().optional(), email: z.string().optional(), birthday: z.string().optional(), marketing_opt_in: z.boolean().optional() })
+  .refine((d) => d.phone != null || d.card_no != null || d.email != null || d.name != null, { message: 'at least one identifier required' });
+const EarnBody = z.object({ member_id: z.number().int().positive(), net_spend: z.number().positive(), ref_doc: z.string().optional() });
+const RedeemBody = z.object({ member_id: z.number().int().positive(), points: z.number().int().positive(), ref_doc: z.string().optional() });
 
 // Public REST API, v1. API-key authenticated (Bearer ierp_…), scope-gated, per-key rate-limited.
 // The global JwtAuthGuard authenticates the key; PublicApiGuard (below) enforces key-only access,
@@ -10,7 +18,10 @@ import { buildOpenApi } from './openapi';
 @Controller('api/v1')
 @UseGuards(PublicApiGuard)
 export class PublicApiController {
-  constructor(private readonly svc: PublicApiService) {}
+  constructor(
+    private readonly svc: PublicApiService,
+    private readonly loyalty: PublicLoyaltyService,
+  ) {}
 
   // ── Discovery (open) ────────────────────────────────────────────────
   @Get()
@@ -22,7 +33,7 @@ export class PublicApiController {
       version: 'v1',
       documentation: '/api/v1/openapi.json',
       authentication: 'Bearer ierp_… (API key)',
-      endpoints: ['/api/v1/me', '/api/v1/items', '/api/v1/inventory', '/api/v1/orders', '/api/v1/invoices'],
+      endpoints: ['/api/v1/me', '/api/v1/items', '/api/v1/inventory', '/api/v1/orders', '/api/v1/invoices', '/api/v1/loyalty/member', '/api/v1/loyalty/enroll', '/api/v1/loyalty/earn', '/api/v1/loyalty/redeem'],
     };
   }
 
@@ -64,4 +75,25 @@ export class PublicApiController {
   invoices(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('status') status?: string) {
     return this.svc.invoices({ limit, offset, status });
   }
+
+  // ── Loyalty write API (Phase C2) — enrol / earn / redeem + read a member. Fires loyalty.* webhooks. ──
+  @Get('loyalty/member')
+  @Scopes('loyalty:read')
+  loyaltyMember(@Query('code') code: string | undefined, @Query('phone') phone: string | undefined, @Query('card') card: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.loyalty.member({ code, phone, card }, u);
+  }
+
+  @Post('loyalty/enroll')
+  @Scopes('loyalty:write')
+  loyaltyEnroll(@Body(new ZodValidationPipe(EnrollBody)) b: any, @CurrentUser() u: JwtUser) { return this.loyalty.enroll(b, u); }
+
+  @Post('loyalty/earn')
+  @Scopes('loyalty:write')
+  @HttpCode(200)
+  loyaltyEarn(@Body(new ZodValidationPipe(EarnBody)) b: any, @CurrentUser() u: JwtUser) { return this.loyalty.earn(b, u); }
+
+  @Post('loyalty/redeem')
+  @Scopes('loyalty:write')
+  @HttpCode(200)
+  loyaltyRedeem(@Body(new ZodValidationPipe(RedeemBody)) b: any, @CurrentUser() u: JwtUser) { return this.loyalty.redeem(b, u); }
 }

@@ -19,6 +19,9 @@ export const WEBHOOK_EVENTS = [
   { key: 'po.approved', label: 'ใบสั่งซื้อได้รับอนุมัติ', label_en: 'Purchase order approved' },
   { key: 'po.rejected', label: 'ใบสั่งซื้อถูกปฏิเสธ', label_en: 'Purchase order rejected' },
   { key: 'alert.fired', label: 'กฎแจ้งเตือนทำงาน', label_en: 'Alert rule fired' },
+  { key: 'loyalty.enrolled', label: 'สมัครสมาชิกใหม่', label_en: 'Loyalty member enrolled' },
+  { key: 'loyalty.earned', label: 'สะสมแต้ม', label_en: 'Loyalty points earned' },
+  { key: 'loyalty.redeemed', label: 'แลกแต้ม', label_en: 'Loyalty points redeemed' },
 ] as const;
 
 const MAX_ATTEMPTS = 3;

@@ -539,6 +539,24 @@ async function main() {
   const theInv = cf2Inv2.find((i: any) => i.invoice_no === 'INV-PUB-CF2');
   ok('Public API: /invoices returns typed amounts + computed outstanding', !!theInv && theInv.amount === 100 && theInv.outstanding === 70, `${JSON.stringify(theInv ?? {})}`);
 
+  // ── Loyalty write API (Phase C2): enrol / earn / redeem via API key + loyalty webhooks ──
+  await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1', bahtPerPoint: '0.1', minRedeem: '0' })
+    .onConflictDoUpdate({ target: s.loyaltyConfig.id, set: { enabled: true, pointsPerBaht: '1', bahtPerPoint: '0.1', minRedeem: '0' } });
+  await db.insert(s.webhooks).values({ tenantId: hq.id, url: 'https://example.invalid/hook', events: 'loyalty.earned,loyalty.enrolled', secret: 'whsec', active: true, createdBy: 'test' });
+
+  const enr = await inj('POST', '/api/v1/loyalty/enroll', hqKey, { phone: '0899990000', name: 'API Member' });
+  ok('Public API loyalty: enroll returns a member (scope loyalty:write)', enr.status === 201 && enr.json.id > 0 && /^M-/.test(enr.json.member_code ?? ''), `${enr.status} ${enr.json.member_code}`);
+  const earn = await inj('POST', '/api/v1/loyalty/earn', hqKey, { member_id: enr.json.id, net_spend: 100 });
+  ok('Public API loyalty: earn credits points + returns balance', earn.status === 200 && earn.json.points_earned === 100 && earn.json.balance === 100, JSON.stringify(earn.json));
+  const rdm = await inj('POST', '/api/v1/loyalty/redeem', hqKey, { member_id: enr.json.id, points: 40 });
+  ok('Public API loyalty: redeem debits points (balance 100→60)', rdm.status === 200 && rdm.json.points_redeemed === 40 && rdm.json.balance === 60, JSON.stringify(rdm.json));
+  const memRead = await inj('GET', '/api/v1/loyalty/member?phone=0899990000', hqKey);
+  ok('Public API loyalty: member read returns the balance (scope loyalty:read)', memRead.status === 200 && memRead.json.balance === 60, `bal=${memRead.json.balance}`);
+  const noScope = await inj('POST', '/api/v1/loyalty/earn', catKey, { member_id: enr.json.id, net_spend: 10 });
+  ok('Public API loyalty: earn requires loyalty:write scope (catalog-only key → 403)', noScope.status === 403, `${noScope.status}`);
+  const whDeliveries = await db.select().from(s.webhookDeliveries).where(eq(s.webhookDeliveries.event, 'loyalty.earned'));
+  ok('Public API loyalty: earn fired a loyalty.earned webhook delivery', whDeliveries.length >= 1, `n=${whDeliveries.length}`);
+
   // Scope enforcement: a catalog-only key reads /items but is denied /orders.
   const catItems = await inj('GET', '/api/v1/items', catKey);
   ok('Public API: a catalog:read key may read /items', catItems.status === 200, `${catItems.status}`);
