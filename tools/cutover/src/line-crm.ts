@@ -27,19 +27,21 @@ const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 
-const linePushes: { to: string; auth: string; text: string }[] = [];
-const lineBroadcasts: { auth: string; text: string }[] = [];
+const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string }[] = [];
+const lineBroadcasts: { auth: string; text: string; type?: string; altText?: string }[] = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
   const url = String(input);
   if (url.includes('api.line.me/v2/bot/message/push')) {
     const body = JSON.parse(init?.body ?? '{}');
-    linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: body.messages?.[0]?.text ?? '' });
+    const m = body.messages?.[0] ?? {};
+    linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '', type: m.type, altText: m.altText });
     return { ok: true, status: 200, headers: { get: () => 'req-1' }, text: async () => '' } as any;
   }
   if (url.includes('api.line.me/v2/bot/message/broadcast')) {
     const body = JSON.parse(init?.body ?? '{}');
-    lineBroadcasts.push({ auth: String(init?.headers?.Authorization ?? ''), text: body.messages?.[0]?.text ?? '' });
+    const m = body.messages?.[0] ?? {};
+    lineBroadcasts.push({ auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '', type: m.type, altText: m.altText });
     return { ok: true, status: 200, headers: { get: () => 'req-b' }, text: async () => '' } as any;
   }
   return realFetch(input, init);
@@ -149,6 +151,19 @@ async function main() {
   ok('provider test-send → sent via the tenant provider (captured push to the given recipient)',
     testRes.json.status === 'sent' && linePushes.length === testBefore + 1 && linePushes.at(-1)!.to === 'Utest-recipient' && linePushes.at(-1)!.auth.includes('tenant-line-tok-999'),
     JSON.stringify({ status: testRes.json.status, to: linePushes.at(-1)?.to }));
+
+  // ── 12. LINE flex (rich) messages — broadcast + targeted push ──
+  const flexContents = { type: 'bubble', body: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text: 'โปรใหม่!' }] } };
+  const bcFlexBefore = lineBroadcasts.length;
+  const bcFlex = await inj('POST', '/api/messaging/broadcast-oa', token, { flex: flexContents, alt_text: 'โปรโมชั่นใหม่', campaign: 'flex_promo' });
+  ok('LINE OA broadcast (flex) → sent as a flex message with altText',
+    bcFlex.json.status === 'sent' && lineBroadcasts.length === bcFlexBefore + 1 && lineBroadcasts.at(-1)!.type === 'flex' && lineBroadcasts.at(-1)!.altText === 'โปรโมชั่นใหม่',
+    JSON.stringify({ status: bcFlex.json.status, type: lineBroadcasts.at(-1)?.type }));
+  const pushFlexBefore = linePushes.length;
+  const pushFlex = await inj('POST', '/api/messaging/line/flex', token, { member_id: bob.json.id, alt_text: 'การ์ดสมาชิก', flex: flexContents });
+  ok('LINE flex push to a member → sent as flex to their LINE userId',
+    pushFlex.json.status === 'sent' && linePushes.length === pushFlexBefore + 1 && linePushes.at(-1)!.type === 'flex' && linePushes.at(-1)!.to === 'Ubob',
+    JSON.stringify({ status: pushFlex.json.status, type: linePushes.at(-1)?.type, to: linePushes.at(-1)?.to }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
