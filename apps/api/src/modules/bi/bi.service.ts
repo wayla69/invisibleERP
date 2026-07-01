@@ -18,6 +18,8 @@ import { LeasesService } from '../leases/leases.service';
 import { RevRecService } from '../revenue/revrec.service';
 import { ProjectsService } from '../projects/projects.service';
 import { CrmPipelineService } from '../crm-pipeline/crm-pipeline.service';
+import { CrmService } from '../crm/crm.service';
+import { cdpConfigured, pushToCdp } from '../../common/cdp-sync';
 import { BudgetService } from '../budget/budget.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
@@ -76,6 +78,9 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   // Action job (monthly): each run bills every tenant's metered AI overage for the just-closed month as a
   // Stripe invoice item (idempotent per tenant+month). Connects the AI-COGS meter to actual collection.
   ai_overage_billing: { label: 'เรียกเก็บค่า AI ส่วนเกิน (รายเดือน)', labelEn: 'Bill AI usage overage (monthly)' },
+  // Action job (daily/weekly): each run pushes the tenant's member snapshot (identity + RFM + consent) to an
+  // external CDP webhook in batches — idempotent (a full snapshot keyed by member_code) and consent-aware.
+  cdp_export_sync: { label: 'ซิงก์ข้อมูลลูกค้าไป CDP', labelEn: 'Sync customer data to CDP' },
 };
 const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
@@ -95,6 +100,8 @@ export class BiService implements OnModuleInit {
     // still constructs BiService; the full app provides them (ProjectsModule / CrmPipelineModule).
     @Optional() private readonly projects?: ProjectsService,
     @Optional() private readonly crm?: CrmPipelineService,
+    // Member CRM (cdp_export_sync action job) — Optional so a partial harness still constructs.
+    @Optional() private readonly crmMembers?: CrmService,
     // Residual-gap report types (RG-1/2/3): exec scorecard composition + budget-variance + supplier scorecard.
     // Optional so a partial harness still constructs; the full app provides BudgetModule/ProcurementModule/MatchModule.
     @Optional() private readonly budget?: BudgetService,
@@ -537,6 +544,25 @@ export class BiService implements OnModuleInit {
       if (!this.collections) throw new BadRequestException({ code: 'COLLECTIONS_UNAVAILABLE', message: 'Collections service not available', messageTh: 'ระบบติดตามหนี้ไม่พร้อมใช้งาน' });
       const r = await this.collections.runDunningSweep(user); // idempotent: re-runs the same day advance nothing
       return { data: r, summary: `Dunning sweep: advanced ${r.advanced} of ${r.scanned} overdue invoices`, summaryTh: `ทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการค้างชำระ` };
+    }
+    if (reportType === 'cdp_export_sync') {
+      if (!this.crmMembers) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM service not available', messageTh: 'ระบบ CRM ไม่พร้อมใช้งาน' });
+      const target = cdpConfigured() ? 'cdp' : 'mock';
+      // Push the whole member base in batches (idempotent full snapshot on member_code); consent flags ride
+      // each row so the CDP honours opt-outs. A batch failure stops the run and is reported in the summary.
+      const BATCH = 500; let offset = 0, pushed = 0, total = 0, ok = true;
+      for (let i = 0; i < 200; i++) { // safety cap: 200 batches (100k members)
+        const exp: any = await this.crmMembers.exportForCdp(user, { limit: BATCH, offset });
+        if (exp?.error) throw new BadRequestException(exp.error);
+        total = exp.total;
+        if (!exp.members?.length) break;
+        const r = await pushToCdp({ tenant_id: exp.tenant_id, batch: i, offset, count: exp.members.length, total, members: exp.members });
+        if (!r.ok) { ok = false; break; }
+        pushed += exp.members.length;
+        offset += exp.members.length;
+        if (exp.members.length < BATCH) break;
+      }
+      return { data: { pushed, total, target, ok }, summary: `CDP sync: pushed ${pushed}/${total} members to ${target}${ok ? '' : ' (stopped on error)'}`, summaryTh: `ซิงก์ CDP: ส่ง ${pushed}/${total} สมาชิกไปยัง ${target}${ok ? '' : ' (หยุดเพราะข้อผิดพลาด)'}` };
     }
     if (reportType === 'eam_pm_generate') {
       if (!this.eam) throw new BadRequestException({ code: 'EAM_UNAVAILABLE', message: 'EAM service not available', messageTh: 'ระบบบำรุงรักษาไม่พร้อมใช้งาน' });

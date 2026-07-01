@@ -249,6 +249,11 @@ their identity, RFM segment/traits, points, and **consent flags** (marketing/LIN
 export only reads data, it never sends messages. For a single customer's data request or erasure (PDPA/DSAR),
 use the privacy tools instead — this bulk export is for analytics/CDP integration.
 
+To keep a CDP **continuously in sync** (rather than exporting by hand), schedule the **ซิงก์ข้อมูลลูกค้าไป CDP**
+report (`cdp_export_sync`) from Scheduled reports (`/scheduled-reports`): each run pushes the whole member
+snapshot to your CDP endpoint in batches (set `CDP_WEBHOOK_URL` — your administrator). It's safe to run daily
+(a full snapshot, so re-runs just refresh) and carries the same consent flags.
+
 **Customer segments (RFM).** The **กลุ่มลูกค้า RFM** panel shows how your members split across the five RFM
 segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
 without a computed profile yet appear under **Unsegmented**). Click a segment to open it in **CRM 360**
@@ -330,3 +335,4 @@ claim points by uploading a photo of the receipt.
 | 1.12 | 2026-07-01 | Platform | §13 **แต้มสด (Live) card** on Loyalty analytics — real-time earn/redeem feed (polls `GET /api/loyalty/analytics/live` every 5 s), so loyalty managers see activity without the exec dashboard. |
 | 1.13 | 2026-07-01 | Platform | §11 **Rich LINE messages (flex)** — broadcast and targeted sends can carry a card/carousel (image+buttons) via a LINE flex layout + `alt_text` (`POST /api/messaging/line/flex` for a targeted push). |
 | 1.14 | 2026-07-01 | Platform | §11 **LINE follow webhook** — point the OA webhook at `/api/line/webhook/<shop-code>` (+ set the Channel secret) so following the OA auto-enrols a member; unfollow is logged, membership/points kept. Signature-verified. |
+| 1.15 | 2026-07-01 | Platform | §13 **Scheduled CDP sync** — schedule `cdp_export_sync` to push the member snapshot to your CDP endpoint in batches (daily, idempotent, consent-carrying; `CDP_WEBHOOK_URL`). |
