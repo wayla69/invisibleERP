@@ -20,4 +20,8 @@ export class LoyaltyAnalyticsController {
   segments(@Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
     return this.svc.segmentMix(u, tenantId != null ? Number(tenantId) : null);
   }
+  @Get('analytics/live') @Permissions('loyalty', 'marketing', 'exec')
+  live(@Query('tenant_id') tenantId: string | undefined, @Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.liveFeed(u, tenantId != null ? Number(tenantId) : null, limit != null ? Number(limit) : 15);
+  }
 }

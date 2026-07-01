@@ -227,8 +227,9 @@ have been dormant for 90+ days but still hold points, ready for a **win-back** c
 a shop.
 
 **Live points feed.** Every time a member earns or redeems points (at the till, online, or on an approved
-receipt), a real-time signal is pushed to the executive **live dashboard** (`/bi`, the live/offline badge) —
-no refresh needed. It's a monitoring signal only; the authoritative record stays the member's points ledger.
+receipt), it appears in real time — both on the executive **live dashboard** (`/bi`) and in the **แต้มสด
+(Live)** card on this Loyalty analytics page (updates every few seconds, with a live/offline dot). It's a
+monitoring signal only; the authoritative record stays the member's points ledger.
 
 **Export to a CDP (Customer Data Platform).** To load your customer base into an external marketing/CDP tool,
 use the data export (`GET /api/crm/export`, permission `marketing`/`exec`). It returns the active members with
@@ -315,3 +316,4 @@ claim points by uploading a photo of the receipt.
 | 1.9 | 2026-07-01 | Platform | §11 **Own messaging provider** — admins can connect the shop's own LINE OA / SMS sender / SMTP mailbox (`GET`/`PUT /api/messaging/providers/:channel`, `users`/`exec`); credentials encrypted + write-only, overriding the shared platform provider. |
 | 1.10 | 2026-07-01 | Platform | §14 **Receipt photos in object storage** — when an S3-compatible store is configured (`OBJECT_STORE_URL`), receipt photos are offloaded there (a reference is kept in the DB); transparent to member/reviewer; PDPA erasure deletes the object. |
 | 1.11 | 2026-07-01 | Platform | §11 **Messaging providers screen** (`/settings/messaging`) — admin UI to connect the shop's own LINE OA / SMS / SMTP credentials with a **ส่งทดสอบ** (send-test) button; new nav item under Settings → Integrations. |
+| 1.12 | 2026-07-01 | Platform | §13 **แต้มสด (Live) card** on Loyalty analytics — real-time earn/redeem feed (polls `GET /api/loyalty/analytics/live` every 5 s), so loyalty managers see activity without the exec dashboard. |

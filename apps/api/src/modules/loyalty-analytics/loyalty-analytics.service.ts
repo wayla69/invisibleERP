@@ -1,8 +1,9 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/common';
 import { eq, and, sql, gt, lt, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, posMemberLedger, loyaltyConfig, loyaltyRedemptions, memberCoupons, loyaltyPostingRuns, customerProfiles } from '../../database/schema';
 import { n } from '../../database/queries';
+import { BiLiveService } from '../bi/bi-live.service';
 import type { JwtUser } from '../../common/decorators';
 
 // CRM Phase 4 — loyalty analytics (the "liability + redemption funnel + churn" gap). Read-only aggregation
@@ -10,7 +11,18 @@ import type { JwtUser } from '../../common/decorators';
 // Admin/HQ, who must pass an explicit tenant_id — there is no cross-tenant sum).
 @Injectable()
 export class LoyaltyAnalyticsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly live?: BiLiveService,
+  ) {}
+
+  // Recent live points ticks (earn/redeem) for the caller's tenant — powers the analytics screen's live feed
+  // by polling the shared BiLive ring buffer. Filtered to the tenant + `loyalty_points` events only.
+  liveFeed(user: JwtUser, explicitTenant?: number | null, limit = 15) {
+    const tenantId = this.tid(user, explicitTenant);
+    const events = (this.live?.recent(tenantId, 200) ?? []).filter((e) => e.type === 'loyalty_points').slice(0, Math.min(50, Math.max(1, limit)));
+    return { tenant_id: tenantId, available: !!this.live, events };
+  }
 
   private tid(user: JwtUser, explicit?: number | null): number {
     const t = explicit ?? user.tenantId;

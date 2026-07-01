@@ -120,6 +120,13 @@ async function main() {
     liveT2.status === 200 && !(liveT2.json.events ?? []).some((e: any) => e.type === 'loyalty_points' && e.member_id === memberId),
     JSON.stringify({ t2: (liveT2.json.events ?? []).filter((e: any) => e.type === 'loyalty_points').length }));
 
+  // ── 7a3. Loyalty-scoped live feed (analytics tile source) shows the earn tick, tenant-filtered ──
+  const loyLive = await inj('GET', '/api/loyalty/analytics/live?limit=12', mgr1);
+  ok('Loyalty live feed: returns the earn tick (loyalty_points) for the caller tenant',
+    loyLive.status === 200 && (loyLive.json.events ?? []).some((e: any) => e.kind === 'earn' && e.member_id === memberId), JSON.stringify({ n: (loyLive.json.events ?? []).length }));
+  const loyLiveT2 = await inj('GET', '/api/loyalty/analytics/live?limit=12', mgr2);
+  ok('Loyalty live feed: T2 sees none of T1 ticks', loyLiveT2.status === 200 && !(loyLiveT2.json.events ?? []).some((e: any) => e.member_id === memberId), JSON.stringify({ n: (loyLiveT2.json.events ?? []).length }));
+
   // ── 7b. RFM segment distribution (Customer Segmentation / Insights) ──
   const segs = await inj('GET', '/api/loyalty/analytics/segments', mgr1);
   const segList = (segs.json.segments ?? []) as { segment: string; members: number }[];
