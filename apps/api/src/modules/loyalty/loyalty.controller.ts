@@ -4,6 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { LoyaltyService, type LoyaltyConfigDto, type RedeemDto } from './loyalty.service';
 import { MemberService } from './member.service';
+import { ReceiptSubmissionsService } from './receipt-submissions.service';
 
 const ConfigBody = z.object({
   enabled: z.boolean().optional(),
@@ -34,10 +35,12 @@ const ConsentBody = z.object({
 const LiabilityPostBody = z.preprocess((v) => v ?? {}, z.object({ tenant_id: z.coerce.number().int().positive().optional() }));
 const EnrollLineBody = z.object({ id_token: z.string().min(1), name: z.string().optional(), phone: z.string().optional(), marketing_opt_in: z.boolean().optional() });
 const LinkLineBody = z.object({ id_token: z.string().min(1) });
+const ReceiptQueueQuery = z.object({ status: z.string().optional() });
+const RejectReceiptBody = z.preprocess((v) => v ?? {}, z.object({ reason: z.string().optional() }));
 
 @Controller('api/loyalty')
 export class LoyaltyController {
-  constructor(private readonly svc: LoyaltyService, private readonly member: MemberService) {}
+  constructor(private readonly svc: LoyaltyService, private readonly member: MemberService, private readonly receipts: ReceiptSubmissionsService) {}
 
   @Get('config') @Permissions('loyalty', 'marketing')
   getConfig() { return this.svc.getConfig(); }
@@ -96,4 +99,13 @@ export class LoyaltyController {
   getMember(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.member.balance(+id, u); }
   @Get('members/:id/history') @Permissions('loyalty', 'pos')
   history(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.member.history(+id, u); }
+
+  // ── Receipt-upload-for-points review queue (LYL-17). Members submit via /api/member/receipts;
+  // staff review here. Approve grants points through the same earnInTx path POS checkout uses. ──
+  @Get('receipts') @Permissions('loyalty', 'marketing', 'crm')
+  receiptQueue(@Query(new ZodValidationPipe(ReceiptQueueQuery)) q: any, @CurrentUser() u: JwtUser) { return this.receipts.queue(u, q); }
+  @Post('receipts/:id/approve') @Permissions('crm_points_adjust', 'loyalty', 'exec')
+  approveReceipt(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.receipts.approve(+id, u); }
+  @Post('receipts/:id/reject') @Permissions('crm_points_adjust', 'loyalty', 'exec')
+  rejectReceipt(@Param('id') id: string, @Body(new ZodValidationPipe(RejectReceiptBody)) b: any, @CurrentUser() u: JwtUser) { return this.receipts.reject(+id, u, b?.reason); }
 }

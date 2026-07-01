@@ -1450,6 +1450,13 @@
       "when": 2023820000033,
       "tag": "0206_project_close_review",
       "breakpoints": true
+    },
+    {
+      "idx": 207,
+      "version": "7",
+      "when": 2023820000034,
+      "tag": "0207_loyalty_receipt_submissions",
+      "breakpoints": true
     }
   ]
 }

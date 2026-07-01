@@ -207,6 +207,27 @@ For managers — **วิเคราะห์ลอยัลตี้** (`/loya
 have been dormant for 90+ days but still hold points, ready for a **win-back** campaign. Read-only; HQ users pick
 a shop.
 
+## 14. Receipt upload for points (อัปโหลดใบเสร็จ — ขอแต้ม)
+
+For a purchase made **outside our own POS** (e.g. a partner store, a cash sale with no till), a member can still
+claim points by uploading a photo of the receipt.
+
+**Member (app, `/m`):**
+1. Open the **อัปโหลดใบเสร็จ — ขอแต้ม** section, enter the **ยอดซื้อ (purchase amount)** and, optionally, the
+   store name.
+2. Choose a photo of the receipt (from the camera or the photo library) and press **ส่งขอแต้ม**.
+3. The submission shows as **รอตรวจสอบ (Pending)** in the member's own list until staff review it.
+
+**Staff (`/loyalty/receipt-approvals`, requires `crm_points_adjust` — or `loyalty`/`exec`):**
+1. Review the queue of pending submissions — the receipt photo, claimed amount, and an estimated points preview
+   are shown together.
+2. Press **อนุมัติ (Approve)** to grant the points (posted the same way as a POS sale — no separate step needed),
+   or **ปฏิเสธ (Reject)** with an optional reason. Both are final — a reviewed submission cannot be reviewed again.
+
+> Controls: a member can never approve their own submission (the member app token carries no approval
+> permission); the same receipt (same member, date, and amount) cannot be claimed twice while a submission is
+> pending or approved — a rejected one can be resubmitted (e.g. with a clearer photo). *(LYL-17.)*
+
 ## Errors you might see
 
 | Code | Meaning | What to do |
@@ -223,6 +244,9 @@ a shop.
 | `PRIZE_OUT_OF_STOCK` / `NO_PRIZES` (wheel) | A wheel prize just ran out, or no prizes remain | Top up the prize stock, or the member spins again. |
 | `TIER_TOO_LOW` / `OUT_OF_STOCK` / `LIMIT_REACHED` (privilege) | Member's tier too low, privilege sold out, or per-person limit reached | Choose another privilege or raise the limits. |
 | `LINE_NOT_LINKED` / `LINE_ALREADY_LINKED` (member app) | No member linked to that LINE account, or the LINE account is already linked to someone else | Link LINE while signed in via OTP first; one LINE per member. |
+| `BAD_IMAGE` / `IMAGE_TOO_LARGE` (receipt upload) | The photo isn't a valid image, or is too large (~2MB max) | Choose a smaller/clearer photo. |
+| `DUPLICATE_RECEIPT` | The same date + amount was already submitted by this member | Check the member's existing submissions before resubmitting. |
+| `RECEIPT_ALREADY_REVIEWED` | The submission was already approved/rejected | Refresh the queue — nothing more to do on this one. |
 
 ## Revision history
 
@@ -240,3 +264,4 @@ a shop.
 | 1.0 | 2026-06-24 | Platform | Added §11 **Campaigns** (`/loyalty/campaigns`) — segmented (all/RFM/tier/birthday) + scheduled broadcasts; PDPA opt-out auto-skipped, idempotent send, per-recipient audit. |
 | 1.1 | 2026-06-24 | Platform | Added §12 **Partner privileges** (`/loyalty/partners`) — tier-gated single-use member perks at partner merchants; §13 **Loyalty analytics** (`/loyalty/analytics`) — liability, redemption funnel, breakage, churn/win-back; **LINE login** in the member app. New error codes `TIER_TOO_LOW`/`OUT_OF_STOCK`/`LIMIT_REACHED`, `LINE_NOT_LINKED`/`LINE_ALREADY_LINKED`. |
 | 1.2 | 2026-06-29 | Security hardening | §9 **Member app — secure session.** The `/m` sign-in token now lives in a secure browser cookie (not readable by page scripts; session 7 days), and a new **ออกจากระบบ / Log out** ends the session server-side and clears the cookie. No change to how a member logs in (shop code + phone OTP). (ITGC-AC-07.) |
+| 1.3 | 2026-07-01 | Platform | Added §14 **Receipt upload for points** (`/m` upload, `/loyalty/receipt-approvals` staff review) — a member claims points for a purchase made outside our POS by submitting a photo + amount; staff approve (grants points the same way a POS sale does) or reject. New error codes `BAD_IMAGE`/`IMAGE_TOO_LARGE`, `DUPLICATE_RECEIPT`, `RECEIPT_ALREADY_REVIEWED`. (LYL-17.) |

@@ -714,6 +714,26 @@ async function main() {
     !!lineLogin.json.token && lineMe.json.member_code === 'M-LINE' && Number(lm.id) === lineMe.json.id && lineUnlinked.status === 401 && lineUnlinked.json.error?.code === 'LINE_NOT_LINKED' && relink.json.linked === true,
     `tok=${!!lineLogin.json.token} me=${lineMe.json.member_code} unlinked=${lineUnlinked.status}/${lineUnlinked.json.error?.code} link=${relink.json.linked}`);
 
+  // ════════ LYL-17 — Receipt-upload-for-points: staff review gate, points via earnInTx, dup-claim blocked ════════
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const rcSubmit = await inj('POST', '/api/member/receipts', memberTok, { receipt_image: dataUrl, purchase_amount: 200, store_name: 'ร้านทดสอบ', purchase_date: '2026-06-01' });
+  const rcSelfApprove = await inj('POST', `/api/loyalty/receipts/${rcSubmit.json.id}/approve`, memberTok, {});   // member token has no crm_points_adjust/loyalty/exec → 403
+  const rcApprove = await inj('POST', `/api/loyalty/receipts/${rcSubmit.json.id}/approve`, execu, {});
+  const rcMeAfter = await inj('GET', '/api/member/me', memberTok);
+  const rcReapprove = await inj('POST', `/api/loyalty/receipts/${rcSubmit.json.id}/approve`, execu, {});   // already reviewed → 409
+  const rcDup = await inj('POST', '/api/member/receipts', memberTok, { receipt_image: dataUrl, purchase_amount: 200, purchase_date: '2026-06-01' });   // same member/date/amount → blocked
+  const rcSubmit2 = await inj('POST', '/api/member/receipts', memberTok, { receipt_image: dataUrl, purchase_amount: 50, purchase_date: '2026-06-02' });
+  const rcReject = await inj('POST', `/api/loyalty/receipts/${rcSubmit2.json.id}/reject`, execu, { reason: 'ไม่ชัดเจน' });
+  const rcMeAfterReject = await inj('GET', '/api/member/me', memberTok);
+  ok('LYL-17: receipt submission is staff-reviewed (member cannot self-approve), grants points via earnInTx once, blocks duplicate claims, and reject leaves the balance untouched',
+    (rcSubmit.status === 200 || rcSubmit.status === 201) && rcSubmit.json.status === 'Pending'
+      && rcSelfApprove.status === 403
+      && (rcApprove.status === 200 || rcApprove.status === 201) && rcApprove.json.points_granted === 200 && rcMeAfter.json.balance === 300
+      && rcReapprove.status === 409 && rcReapprove.json.error?.code === 'RECEIPT_ALREADY_REVIEWED'
+      && rcDup.status === 409 && rcDup.json.error?.code === 'DUPLICATE_RECEIPT'
+      && (rcReject.status === 200 || rcReject.status === 201) && rcReject.json.status === 'Rejected' && rcMeAfterReject.json.balance === 300,
+    `submit=${rcSubmit.status}/${rcSubmit.json.status} self=${rcSelfApprove.status} approve=${rcApprove.status}/${rcApprove.json.points_granted} bal=${rcMeAfter.json.balance} re-approve=${rcReapprove.status}/${rcReapprove.json.error?.code} dup=${rcDup.status}/${rcDup.json.error?.code} reject=${rcReject.status}/${rcReject.json.status} balAfterReject=${rcMeAfterReject.json.balance}`);
+
   // ════════════════════════ INV-06 — Perpetual inventory sub-ledger ↔ GL reconciliation ════════════════════════
   // Receipts/issues/adjustments post valued moves + balanced JEs; the sub-ledger value ties to the inventory
   // control account (1200). Negative/oversold stock is prevented (INV-01); duplicate receipts idempotent (INV-02);

@@ -698,6 +698,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-LOY-022 | Partner privilege — tier-gated single-use claim, limit, partner redeem | MKT-11 | 19 §7 (24), control 24 |
 | UAT-LOY-023 | Loyalty analytics — tenant-scoped liability + funnel + churn | LYL-15 | 19 §7 (25) |
 | UAT-LOY-024 | LINE login — linked account mints a member token; unlinked rejected | ITGC-AC, LYL-16 | 19 §7 (26), control 26 |
+| UAT-LOY-025 | Receipt upload — submit → staff approve → points granted via earnInTx | LYL-17 | 19 §7 (27), control 27 |
+| UAT-LOY-026 | Receipt upload — reject leaves the balance untouched; re-review blocked | LYL-17 | 19 §7 (27), control 27 |
+| UAT-LOY-027 | Receipt upload — duplicate member/date/amount claim blocked | LYL-17 | 19 §7 (27), control 27 |
 
 ## Coverage summary
 
@@ -713,7 +716,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | 08 Admin / SoD / Audit | 80 | 47 |
 | 09 Reports & Analytics | 29 | 6 |
 | 10 Customer Portal | 12 | 5 |
-| 11 Loyalty & CRM | 25 | 21 |
-| **Total** | **392** | **211** |
+| 11 Loyalty & CRM | 28 | 24 |
+| **Total** | **395** | **214** |
 
 > Note (2026-06-29): the "01 Security & Access" counts were reconciled to the actual case rows in `01-security-access-uat.md` (45 cases / 33 control, incl. the new UAT-SEC-036…045 for ITGC-AC-17). The other cycles' counts predate recent additions and may be understated — a separate full recount/reconciliation is pending and out of scope for this change.

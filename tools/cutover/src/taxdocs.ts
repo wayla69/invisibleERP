@@ -29,6 +29,17 @@ const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
 // valid 13-digit Thai Tax ID from a 12-digit prefix (mod-11 check digit)
 const taxId = (p12: string) => { let sum = 0; for (let i = 0; i < 12; i++) sum += Number(p12[i]) * (13 - i); return p12 + String((11 - (sum % 11)) % 10); };
 
+// Anchor every fixture date + report period to the CURRENT business date (Asia/Bangkok, via ymd()) rather
+// than a hardcoded month — a hardcoded "June 2026" broke this whole harness the instant the wall-clock
+// crossed into July (tax invoices have no date override; they always stamp issueDate: ymd() = today).
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const [curYear, curMonth] = ymd().split('-').map(Number);
+const periodDate = (day: string) => `${curYear}-${pad2(curMonth)}-${day}`;
+const nextMonth = curMonth === 12 ? 1 : curMonth + 1;
+const nextMonthYear = curMonth === 12 ? curYear + 1 : curYear;
+const nextMonthDeadline = `${nextMonthYear}-${pad2(nextMonth)}-15`;
+const periodTag = `${curYear}-${pad2(curMonth)}`;
+
 async function main() {
   const pg = await PGlite.create();
   for (const f of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort())
@@ -68,14 +79,14 @@ async function main() {
 
   // seed POS sales (VAT-separated) directly + items
   const seedSale = async (saleNo: string, tenantId: number, sub: number, vat: number, total: number, itemId: string) => {
-    const [h] = await db.insert(s.custPosSales).values({ saleNo, saleDate: '2026-06-21', tenantId, subtotal: String(sub), discount: '0', taxAmount: String(vat), total: String(total), paymentMethod: 'Cash', pointsUsed: '0', pointsEarned: '0', status: 'Completed', createdBy: 'seed' }).returning({ id: s.custPosSales.id });
+    const [h] = await db.insert(s.custPosSales).values({ saleNo, saleDate: periodDate('21'), tenantId, subtotal: String(sub), discount: '0', taxAmount: String(vat), total: String(total), paymentMethod: 'Cash', pointsUsed: '0', pointsEarned: '0', status: 'Completed', createdBy: 'seed' }).returning({ id: s.custPosSales.id });
     await db.insert(s.custPosItems).values({ saleId: Number(h.id), itemId, itemDescription: `สินค้า ${itemId}`, qty: '1', uom: 'ชิ้น', unitPrice: String(sub), discountPct: '0', amount: String(sub), isCustom: false });
   };
   await seedSale('S-T1-1', t1, 100, 7, 107, 'A');
   await seedSale('S-T1-2', t1, 200, 14, 214, 'B');
   await seedSale('S-T2-1', t2, 50, 3.5, 53.5, 'C');
   // AR invoice for T1 (VAT-inclusive amount 107)
-  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-AR1', invoiceDate: '2026-06-21', tenantId: t1, orderNo: 'SO-1', amount: '107', status: 'Unpaid', currency: 'THB' });
+  await db.insert(s.arInvoices).values({ invoiceNo: 'INV-AR1', invoiceDate: periodDate('21'), tenantId: t1, orderNo: 'SO-1', amount: '107', status: 'Unpaid', currency: 'THB' });
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -117,17 +128,17 @@ async function main() {
   ok('Full from AR: VAT-inclusive 107 → net 100 + vat 7', near(fullAr.json.subtotal, 100) && near(fullAr.json.vat_amount, 7));
 
   // ── WHT 50 ทวิ (ม.50 ทวิ) ──
-  const wht = await inj('POST', '/api/wht/certificates', sales1, { date_paid: '2026-06-21', payee: { name: 'บริษัท ผู้รับเหมา จำกัด', tax_id: PAYEE_TAX, address: 'ที่อยู่ผู้รับเงิน', kind: 'company' }, lines: [{ income_type: '3tre-service', description: 'ค่าบริการ', amount_paid: 10000 }] });
+  const wht = await inj('POST', '/api/wht/certificates', sales1, { date_paid: periodDate('21'), payee: { name: 'บริษัท ผู้รับเหมา จำกัด', tax_id: PAYEE_TAX, address: 'ที่อยู่ผู้รับเงิน', kind: 'company' }, lines: [{ income_type: '3tre-service', description: 'ค่าบริการ', amount_paid: 10000 }] });
   ok('WHT: issued WHT- + PND53 (company) + 3% rate', /^WHT-\d{6}-0001$/.test(wht.json.doc_no ?? '') && wht.json.pnd_type === 'PND53', `${wht.status} ${JSON.stringify(wht.json).slice(0, 90)}`);
   ok('WHT: tax withheld = 10000 × 3% = 300', near(wht.json.total_wht, 300) && near(wht.json.lines?.[0]?.tax_withheld, 300) && near(wht.json.lines?.[0]?.rate, 0.03));
   ok('WHT: payer (T1) + payee Tax IDs present (13-digit)', wht.json.payer?.tax_id === T1_TAX && wht.json.payee?.tax_id === PAYEE_TAX);
   // person → PND3, rate by type
-  const wht2 = await inj('POST', '/api/wht/certificates', sales1, { date_paid: '2026-06-21', payee: { name: 'นายช่าง', tax_id: PAYEE_TAX, address: 'บ้าน', kind: 'person' }, lines: [{ income_type: '40(5)', amount_paid: 5000 }] });
+  const wht2 = await inj('POST', '/api/wht/certificates', sales1, { date_paid: periodDate('21'), payee: { name: 'นายช่าง', tax_id: PAYEE_TAX, address: 'บ้าน', kind: 'person' }, lines: [{ income_type: '40(5)', amount_paid: 5000 }] });
   ok('WHT: person + ค่าเช่า 40(5) 5% → PND3, tax 250', wht2.json.pnd_type === 'PND3' && near(wht2.json.total_wht, 250));
   // gross-up (ผู้จ่ายออกภาษีให้ตลอดไป): net 10000 @3% → base 10309.28, tax 309.28
-  const whtGross = await inj('POST', '/api/wht/certificates', sales1, { date_paid: '2026-06-21', condition: 'absorb_always', payee: { name: 'ผู้รับเหมา', tax_id: PAYEE_TAX, address: 'x', kind: 'company' }, lines: [{ income_type: '3tre-service', description: 'บริการ', amount_paid: 10000 }] });
+  const whtGross = await inj('POST', '/api/wht/certificates', sales1, { date_paid: periodDate('21'), condition: 'absorb_always', payee: { name: 'ผู้รับเหมา', tax_id: PAYEE_TAX, address: 'x', kind: 'company' }, lines: [{ income_type: '3tre-service', description: 'บริการ', amount_paid: 10000 }] });
   ok('WHT: gross-up (absorb) base 10309.28, tax 309.28', near(whtGross.json.lines?.[0]?.amount_paid, 10309.28) && near(whtGross.json.total_wht, 309.28), JSON.stringify(whtGross.json.lines?.[0] ?? {}).slice(0, 70));
-  const whtBadRate = await inj('POST', '/api/wht/certificates', sales1, { date_paid: '2026-06-21', payee: { name: 'x', tax_id: PAYEE_TAX, address: 'x', kind: 'company' }, lines: [{ income_type: '3tre-service', description: 'b', amount_paid: 1000, rate: 0.5 }] });
+  const whtBadRate = await inj('POST', '/api/wht/certificates', sales1, { date_paid: periodDate('21'), payee: { name: 'x', tax_id: PAYEE_TAX, address: 'x', kind: 'company' }, lines: [{ income_type: '3tre-service', description: 'b', amount_paid: 1000, rate: 0.5 }] });
   ok('WHT: rejects invalid rate (>30%)', whtBadRate.status === 400, `${whtBadRate.status}`);
 
   // ── RLS isolation ── (doc_no is unique PER SELLER, so the same number string exists for both
@@ -150,18 +161,18 @@ async function main() {
 
   // ── Tier 2: รายงานภาษีขาย/ซื้อ · ภ.พ.30 · ภ.ง.ด.3/53 (Phase 13) ──
   // AP bill 1,070 (incl) → input VAT 70, base 1000; posts Dr2100 70 to the GL (only 2100 movement here).
-  const apBill = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: 'ผู้ขายก', txn_type: 'Service', invoice_no: 'PV-1', invoice_date: '2026-06-21', amount: 1070 });
+  const apBill = await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: 'ผู้ขายก', txn_type: 'Service', invoice_no: 'PV-1', invoice_date: periodDate('21'), amount: 1070 });
   ok('Tax-report setup: AP bill created (AP-) with stored VAT', /^AP-/.test(apBill.json.txn_no ?? ''), JSON.stringify(apBill.json).slice(0, 70));
-  // รายงานภาษีขาย — admin (HQ/bypass) sees all issued invoices for 2026-06
-  const ov = await inj('GET', '/api/tax-reports/output-vat?month=6&year=2026', admin);
+  // รายงานภาษีขาย — admin (HQ/bypass) sees all issued invoices for the current filing period
+  const ov = await inj('GET', `/api/tax-reports/output-vat?month=${curMonth}&year=${curYear}`, admin);
   ok('Output-VAT: issued full TIV appears in report', ov.json.rows?.some((r: any) => r.doc_no === full.json.doc_no), JSON.stringify(ov.json.totals));
   ok('Output-VAT: total VAT = Σ issued (7+14+3.5+7+7 = 38.5)', near(ov.json.totals?.vat, 38.5), JSON.stringify(ov.json.totals));
   // รายงานภาษีซื้อ
-  const iv = await inj('GET', '/api/tax-reports/input-vat?month=6&year=2026', admin);
+  const iv = await inj('GET', `/api/tax-reports/input-vat?month=${curMonth}&year=${curYear}`, admin);
   ok('Input-VAT: AP bill 1070 → base 1000 / vat 70', iv.json.rows?.some((r: any) => near(r.vat, 70) && near(r.base, 1000)), JSON.stringify(iv.json.totals));
   ok('Input-VAT: total vat = 70', near(iv.json.totals?.vat, 70));
   // ภ.พ.30
-  const pp = await inj('GET', '/api/tax-reports/pp30?month=6&year=2026', admin);
+  const pp = await inj('GET', `/api/tax-reports/pp30?month=${curMonth}&year=${curYear}`, admin);
   ok('PP30: net VAT = output − input (internally consistent)', near(pp.json.form.output_vat - pp.json.form.input_vat, pp.json.reconciliation.report_net_vat));
   ok('PP30: GL 2100 movement reflects AP input VAT (−70)', near(pp.json.reconciliation.gl_net_movement, -70), JSON.stringify(pp.json.reconciliation));
   // TAX-04: the VAT-return ↔ GL-2100 reconciliation block is the detective pre-filing control — it must
@@ -172,66 +183,65 @@ async function main() {
     && near(pp.json.reconciliation.report_net_vat, pp.json.form.output_vat - pp.json.form.input_vat)
     && pp.json.reconciliation.tied === (Math.abs(pp.json.reconciliation.gl_net_movement - pp.json.reconciliation.report_net_vat) < 0.01),
     JSON.stringify(pp.json.reconciliation));
-  ok('PP30: filing deadline = 15th of next month (2026-07-15)', pp.json.deadline === '2026-07-15');
+  ok('PP30: filing deadline = 15th of next month', pp.json.deadline === nextMonthDeadline, `${pp.json.deadline} vs ${nextMonthDeadline}`);
   // ภ.ง.ด.3 / ภ.ง.ด.53
-  const p53 = await inj('GET', '/api/tax-reports/pnd?type=PND53&month=6&year=2026', admin);
+  const p53 = await inj('GET', `/api/tax-reports/pnd?type=PND53&month=${curMonth}&year=${curYear}`, admin);
   ok('PND53: sums company WHT (300 + 309.28 = 609.28)', near(p53.json.totals?.tax_withheld, 609.28), JSON.stringify(p53.json.totals));
-  const p3 = await inj('GET', '/api/tax-reports/pnd?type=PND3&month=6&year=2026', admin);
+  const p3 = await inj('GET', `/api/tax-reports/pnd?type=PND3&month=${curMonth}&year=${curYear}`, admin);
   ok('PND3: sums person WHT (250)', near(p3.json.totals?.tax_withheld, 250), JSON.stringify(p3.json.totals));
-  const badPnd = await inj('GET', '/api/tax-reports/pnd?type=PND99&month=6&year=2026', admin);
+  const badPnd = await inj('GET', `/api/tax-reports/pnd?type=PND99&month=${curMonth}&year=${curYear}`, admin);
   ok('PND: rejects invalid type (400)', badPnd.status === 400, `${badPnd.status}`);
 
   // ── TAX-05: filing register (DRAFT → SUBMITTED → ACCEPTED) + remittance calendar ──
-  const fileP = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: 6, year: 2026 });
+  const fileP = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: curMonth, year: curYear });
   ok('TAX-05: file PP30 → DRAFT snapshot (output 38.5, input 70)', fileP.json.status === 'DRAFT' && near(fileP.json.output_vat, 38.5) && near(fileP.json.input_vat, 70), JSON.stringify(fileP.json).slice(0, 130));
-  const refileP = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: 6, year: 2026 });
+  const refileP = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: curMonth, year: curYear });
   ok('TAX-05: re-file refreshes the same DRAFT (idempotent per period)', refileP.json.id === fileP.json.id && refileP.json.already_filed === false, JSON.stringify({ a: fileP.json.id, b: refileP.json.id }));
   const subNoRef = await inj('POST', `/api/tax-reports/filings/${fileP.json.id}/submit`, admin, {});
   ok('TAX-05: submit without a reference → 400', subNoRef.status === 400, `${subNoRef.status} ${subNoRef.json.error?.code}`);
-  const sub = await inj('POST', `/api/tax-reports/filings/${fileP.json.id}/submit`, admin, { submission_ref: 'RD-2026-06-PP30-001' });
-  ok('TAX-05: submit with ref → SUBMITTED + submitted_at', sub.json.status === 'SUBMITTED' && sub.json.submission_ref === 'RD-2026-06-PP30-001' && !!sub.json.submitted_at, JSON.stringify(sub.json).slice(0, 120));
+  const sub = await inj('POST', `/api/tax-reports/filings/${fileP.json.id}/submit`, admin, { submission_ref: `RD-${periodTag}-PP30-001` });
+  ok('TAX-05: submit with ref → SUBMITTED + submitted_at', sub.json.status === 'SUBMITTED' && sub.json.submission_ref === `RD-${periodTag}-PP30-001` && !!sub.json.submitted_at, JSON.stringify(sub.json).slice(0, 120));
   const acc = await inj('POST', `/api/tax-reports/filings/${fileP.json.id}/accept`, admin, {});
   ok('TAX-05: accept → ACCEPTED', acc.json.status === 'ACCEPTED', `${acc.json.status}`);
-  const refileFiled = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: 6, year: 2026 });
+  const refileFiled = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PP30', month: curMonth, year: curYear });
   ok('TAX-05: re-file an already-filed period returns it (no overwrite)', refileFiled.json.already_filed === true && refileFiled.json.status === 'ACCEPTED', `${refileFiled.json.already_filed} ${refileFiled.json.status}`);
-  const fileW = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PND53', month: 6, year: 2026 });
+  const fileW = await inj('POST', '/api/tax-reports/filings', admin, { filing_type: 'PND53', month: curMonth, year: curYear });
   ok('TAX-05: file PND53 → tax_withheld 609.28', near(fileW.json.tax_withheld, 609.28), JSON.stringify(fileW.json).slice(0, 110));
-  const cal = await inj('GET', '/api/tax-reports/remittance-calendar?year=2026', admin);
-  const junePp = (cal.json.calendar ?? []).find((c: any) => c.filing_type === 'PP30' && c.period_month === 6);
-  ok('TAX-05: remittance calendar shows June PP30 ACCEPTED, deadline 2026-07-15', junePp?.status === 'ACCEPTED' && junePp?.deadline === '2026-07-15', JSON.stringify(junePp ?? {}));
-  const listF = await inj('GET', '/api/tax-reports/filings?year=2026', admin);
+  const cal = await inj('GET', `/api/tax-reports/remittance-calendar?year=${curYear}`, admin);
+  const junePp = (cal.json.calendar ?? []).find((c: any) => c.filing_type === 'PP30' && c.period_month === curMonth);
+  ok('TAX-05: remittance calendar shows the filed PP30 period ACCEPTED, deadline = 15th of next month', junePp?.status === 'ACCEPTED' && junePp?.deadline === nextMonthDeadline, JSON.stringify(junePp ?? {}));
+  const listF = await inj('GET', `/api/tax-reports/filings?year=${curYear}`, admin);
   ok('TAX-05: filings list includes PP30 + PND53', (listF.json.filings ?? []).length >= 2, `n=${listF.json.count}`);
   // exports (PDF → HTML fallback when chromium absent): Thai title present
-  const ovx = await inj('GET', '/api/tax-reports/output-vat/export?month=6&year=2026', admin);
+  const ovx = await inj('GET', `/api/tax-reports/output-vat/export?month=${curMonth}&year=${curYear}`, admin);
   ok('Export รายงานภาษีขาย: title present', ovx.status === 200 && ovx.text.includes('รายงานภาษีขาย'));
-  const ppx = await inj('GET', '/api/tax-reports/pp30/export?month=6&year=2026', admin);
+  const ppx = await inj('GET', `/api/tax-reports/pp30/export?month=${curMonth}&year=${curYear}`, admin);
   ok('Export ภ.พ.30: form present', ppx.status === 200 && ppx.text.includes('ภ.พ.30'));
 
   // ── verify-fix #1 (input VAT tenant-scoped) + #6 (exempt AP = 0 input VAT) ──
   const proc2 = await login('proc2', 'pw4');
-  await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้ขาย T2', txn_type: 'Service', invoice_no: 'PV-T2', invoice_date: '2026-06-21', amount: 2140 }); // T2 AP, input VAT 140
-  await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: 'ยกเว้นภาษี', txn_type: 'Service', invoice_no: 'PV-EX', invoice_date: '2026-06-21', amount: 1000, vat_treatment: 'exempt' }); // exempt → 0 input VAT
-  const ivT2 = await inj('GET', '/api/tax-reports/input-vat?month=6&year=2026', proc2);
+  await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้ขาย T2', txn_type: 'Service', invoice_no: 'PV-T2', invoice_date: periodDate('21'), amount: 2140 }); // T2 AP, input VAT 140
+  await inj('POST', '/api/finance/ap/transactions', admin, { vendor_name: 'ยกเว้นภาษี', txn_type: 'Service', invoice_no: 'PV-EX', invoice_date: periodDate('21'), amount: 1000, vat_treatment: 'exempt' }); // exempt → 0 input VAT
+  const ivT2 = await inj('GET', `/api/tax-reports/input-vat?month=${curMonth}&year=${curYear}`, proc2);
   ok('Fix#1: T2-scoped input VAT sees only T2 bill (vat 140, not T1/HQ)', near(ivT2.json.totals?.vat, 140) && ivT2.json.rows?.every((r: any) => r.doc_no?.startsWith('AP-')) && ivT2.json.rows?.some((r: any) => r.invoice_no === 'PV-T2') && !ivT2.json.rows?.some((r: any) => r.invoice_no === 'PV-1'), JSON.stringify(ivT2.json.totals));
-  const ivAll = await inj('GET', '/api/tax-reports/input-vat?month=6&year=2026', admin);
+  const ivAll = await inj('GET', `/api/tax-reports/input-vat?month=${curMonth}&year=${curYear}`, admin);
   ok('Fix#1: HQ/bypass sees all tenants (70 + 140 + 0 = 210)', near(ivAll.json.totals?.vat, 210), JSON.stringify(ivAll.json.totals));
   ok('Fix#6: exempt AP bill carries 0 input VAT', ivAll.json.rows?.some((r: any) => r.invoice_no === 'PV-EX' && near(r.vat, 0) && near(r.base, 1000)), JSON.stringify(ivAll.json.rows?.find((r: any) => r.invoice_no === 'PV-EX') ?? {}));
 
   // ── TAX-03: WHT withheld at AP payment → posted to GL 2361 → PND→GL tie-out ──
   // proc2 (creditors) books a T2 service bill ฿1070 (1000 + 70 VAT) and requests payment WITH 3% WHT; admin
   // (≠ requester, SoD) approves → the vendor is paid net ฿1040 and ฿30 is held in GL 2361 to remit to the RD.
-  const whtBill = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้รับเหมา T2', txn_type: 'Service', invoice_no: 'PV-WHT-1', invoice_date: '2026-06-22', amount: 1070 });
+  const whtBill = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'ผู้รับเหมา T2', txn_type: 'Service', invoice_no: 'PV-WHT-1', invoice_date: periodDate('22'), amount: 1070 });
   const whtReq = await inj('PATCH', `/api/finance/ap/transactions/${whtBill.json.txn_no}/pay`, proc2, { amount: 1070, wht_income_type: '3tre-service', wht_rate: 0.03 });
   ok('TAX-03: AP payment request captures a WHT rate (3%)', whtReq.status === 200 && near(whtReq.json.wht_rate, 0.03), `${whtReq.status} ${JSON.stringify(whtReq.json).slice(0, 90)}`);
   const whtAppr = await inj('POST', `/api/finance/ap/payments/${whtReq.json.payment_no}/approve`, admin, {});
   ok('TAX-03: approval withholds 3% on the ฿1000 pre-VAT base → WHT ฿30, vendor paid net ฿1040', whtAppr.status === 200 && near(whtAppr.json.wht_amount, 30) && near(whtAppr.json.net_paid, 1040), `${whtAppr.status} ${JSON.stringify(whtAppr.json).slice(0, 120)}`);
   // an out-of-range rate is rejected (fresh bill so the over-pay guard doesn't pre-empt the WHT check).
-  const whtBill2 = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'x', txn_type: 'Service', invoice_no: 'PV-WHT-2', invoice_date: '2026-06-22', amount: 100 });
+  const whtBill2 = await inj('POST', '/api/finance/ap/transactions', proc2, { vendor_name: 'x', txn_type: 'Service', invoice_no: 'PV-WHT-2', invoice_date: periodDate('22'), amount: 100 });
   const whtBad = await inj('PATCH', `/api/finance/ap/transactions/${whtBill2.json.txn_no}/pay`, proc2, { amount: 100, wht_rate: 0.5 });
   ok('TAX-03: AP payment rejects an out-of-range WHT rate (>30%) → 400', whtBad.status === 400 && ['VALIDATION_ERROR', 'INVALID_WHT_RATE'].includes(whtBad.json.error?.code), `${whtBad.status} ${whtBad.json.error?.code}`);
   // PND→GL tie-out for the business month the WHT posted in: GL 2361 net (฿30) ties to the WHT withheld (฿30).
-  const [tieY, tieM] = ymd().split('-');
-  const tie = await inj('GET', `/api/tax-reports/pnd-tieout?month=${Number(tieM)}&year=${tieY}`, admin);
+  const tie = await inj('GET', `/api/tax-reports/pnd-tieout?month=${curMonth}&year=${curYear}`, admin);
   ok('TAX-03: PND→GL tie-out — GL 2361 net (฿30) ties to AP-payment WHT withheld (฿30)', tie.status === 200 && near(tie.json.gl_net_movement, 30) && near(tie.json.ap_wht_withheld, 30) && tie.json.tied_gl_ap === true, `${tie.status} ${JSON.stringify(tie.json).slice(0, 170)}`);
 
   await app.close();

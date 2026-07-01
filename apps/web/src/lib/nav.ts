@@ -238,6 +238,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.loyalty_campaigns', href: '/loyalty/campaigns', icon: Megaphone, perms: ['marketing', 'exec'] },
       { label: 'nav.loyalty_partners', href: '/loyalty/partners', icon: Handshake, perms: ['loyalty', 'marketing'] },
       { label: 'nav.loyalty_analytics', href: '/loyalty/analytics', icon: BarChart3, perms: ['marketing', 'exec'] },
+      // LYL-17 — review queue for member-submitted receipt photos (points post on approval)
+      { label: 'nav.loyalty_receipt_approvals', href: '/loyalty/receipt-approvals', icon: ReceiptText, perms: ['crm_points_adjust', 'loyalty', 'exec'], workspace: ['erp'] },
       // previously unreachable from the sidebar (only typed-URL) — wired in per Phase 0 audit
       { label: 'nav.loyalty_settings', href: '/loyalty', icon: SlidersHorizontal, perms: ['loyalty', 'marketing'], workspace: ['erp'] },
     ],
