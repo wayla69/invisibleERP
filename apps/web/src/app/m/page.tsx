@@ -5,8 +5,8 @@
 // httpOnly cookie (the JWT is NOT readable from JS — XSS can't steal it), paired with a readable double-submit
 // CSRF token (`ierp_csrf`) echoed in X-CSRF-Token on mutations. The member only ever sees/acts on themselves
 // (the API derives the member from the cookie token — there is no member_id input).
-import { useState, useEffect, useCallback } from 'react';
-import { Gift, Trophy, Users, Star, LogOut, Sparkles, Ticket, Loader2, Disc3, Handshake } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Gift, Trophy, Users, Star, LogOut, Sparkles, Ticket, Loader2, Disc3, Handshake, ReceiptText, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -141,12 +141,13 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
   const [wallet, setWallet] = useState<any[]>([]);
   const [wheels, setWheels] = useState<any[]>([]);
   const [privileges, setPrivileges] = useState<any[]>([]);
+  const [receipts, setReceipts] = useState<any[]>([]);
   const [err, setErr] = useState('');
   const [flash, setFlash] = useState('');
 
   const reload = useCallback(async () => {
     try {
-      const [m, r, ms, rf, w, wh, pv] = await Promise.all([
+      const [m, r, ms, rf, w, wh, pv, rc] = await Promise.all([
         mapi('/api/member/me'),
         mapi<{ rewards: any[] }>('/api/member/rewards'),
         mapi<{ missions: any[] }>('/api/member/missions'),
@@ -154,8 +155,9 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
         mapi<{ coupons: any[] }>('/api/member/wallet'),
         mapi<{ wheels: any[] }>('/api/member/wheels'),
         mapi<{ privileges: any[] }>('/api/member/privileges'),
+        mapi<{ submissions: any[] }>('/api/member/receipts'),
       ]);
-      setMe(m); setRewards(r.rewards ?? []); setMissions(ms.missions ?? []); setRefs(rf.referrals ?? []); setWallet(w.coupons ?? []); setWheels(wh.wheels ?? []); setPrivileges(pv.privileges ?? []);
+      setMe(m); setRewards(r.rewards ?? []); setMissions(ms.missions ?? []); setRefs(rf.referrals ?? []); setWallet(w.coupons ?? []); setWheels(wh.wheels ?? []); setPrivileges(pv.privileges ?? []); setReceipts(rc.submissions ?? []);
     } catch (e: any) { if (/เซสชัน|401|token/i.test(e.message)) on401(); else setErr(e.message); }
   }, [on401]);
   useEffect(() => { reload(); }, [reload]);
@@ -276,6 +278,18 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
           </Row>
         ))}
       </Section>
+
+      {/* Receipt upload — ซื้อนอก POS แล้วแนบรูปใบเสร็จเพื่อขอแต้ม (LYL-17); staff ตรวจสอบก่อนบันทึกแต้ม */}
+      <Section icon={<ReceiptText className="size-4" />} title="อัปโหลดใบเสร็จ — ขอแต้ม">
+        <ReceiptUploadForm onDone={(msg) => act(async () => {}, msg)} />
+        {receipts.length === 0 ? <Empty>ยังไม่มีใบเสร็จที่ส่ง</Empty> : receipts.map((r) => (
+          <Row key={r.id} title={`฿${Number(r.purchase_amount).toLocaleString()}${r.store_name ? ` · ${r.store_name}` : ''}`} sub={`ส่งเมื่อ ${new Date(r.submitted_at).toLocaleDateString('th-TH')}`}>
+            <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'Rejected' ? 'destructive' : 'warning'}>
+              {r.status === 'Approved' ? 'อนุมัติแล้ว' : r.status === 'Rejected' ? 'ปฏิเสธ' : 'รอตรวจสอบ'}
+            </Badge>
+          </Row>
+        ))}
+      </Section>
     </div>
   );
 }
@@ -294,6 +308,41 @@ function ReferForm({ onDone }: { onDone: (msg: string) => void }) {
       <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="เบอร์เพื่อน 08xxxxxxxx" inputMode="tel" />
       <Button disabled={busy || phone.trim().length < 4} onClick={submit}>{busy ? <Loader2 className="size-4 animate-spin" /> : 'ชวน'}</Button>
       {err && <p className="text-xs text-destructive">{err}</p>}
+    </div>
+  );
+}
+
+function ReceiptUploadForm({ onDone }: { onDone: (msg: string) => void }) {
+  const [preview, setPreview] = useState('');
+  const [amount, setAmount] = useState('');
+  const [storeName, setStoreName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function onFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => setPreview(String(reader.result));
+    reader.readAsDataURL(file);
+  }
+  const submit = async () => {
+    setBusy(true); setErr('');
+    try {
+      await mapi('/api/member/receipts', { method: 'POST', body: JSON.stringify({ receipt_image: preview, purchase_amount: Number(amount), store_name: storeName || undefined }) });
+      setPreview(''); setAmount(''); setStoreName('');
+      onDone('📸 อัปโหลดใบเสร็จแล้ว — รอเจ้าหน้าที่ตรวจสอบและบันทึกแต้มให้');
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mb-2 space-y-2 rounded-lg border border-border/60 p-3">
+      <div className="grid gap-1.5"><Label>ยอดซื้อ (บาท)</Label><Input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="150" inputMode="decimal" /></div>
+      <div className="grid gap-1.5"><Label>ชื่อร้าน (ถ้ามี)</Label><Input value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="ร้าน..." /></div>
+      <Button variant="outline" className="w-full" onClick={() => fileRef.current?.click()}><Upload className="size-4" /> {preview ? 'เปลี่ยนรูปใบเสร็จ' : 'เลือกรูปใบเสร็จ'}</Button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+      {preview && <img src={preview} alt="ตัวอย่างใบเสร็จ" className="max-h-40 w-full rounded-md object-contain" />}
+      <Button className="w-full" disabled={busy || !preview || !amount} onClick={submit}>{busy ? <Loader2 className="size-4 animate-spin" /> : 'ส่งขอแต้ม'}</Button>
+      {err && <p className="text-center text-xs text-destructive">{err}</p>}
     </div>
   );
 }

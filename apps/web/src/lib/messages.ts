@@ -120,6 +120,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.loyalty_campaigns': { th: 'แคมเปญ', en: 'Campaigns' },
   'nav.loyalty_partners': { th: 'พันธมิตร & สิทธิพิเศษ', en: 'Partners & Privileges' },
   'nav.loyalty_analytics': { th: 'วิเคราะห์ลอยัลตี้', en: 'Loyalty Analytics' },
+  'nav.loyalty_receipt_approvals': { th: 'อนุมัติใบเสร็จ', en: 'Receipt Approvals' },
   'nav.loyalty_settings': { th: 'ตั้งค่าลอยัลตี้', en: 'Loyalty Settings' },
 
   // ── Pricing & Branches ────────────────────────────────────────────────────

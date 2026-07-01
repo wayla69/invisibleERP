@@ -7,6 +7,7 @@ import { setAuthCookies, clearAuthCookies, readCookie, AUTH_COOKIE } from '../..
 import { MemberGuard } from './member.guard';
 import { MemberAuthService } from './member-auth.service';
 import { MemberService } from '../loyalty/member.service';
+import { ReceiptSubmissionsService } from '../loyalty/receipt-submissions.service';
 import { RewardsService } from '../rewards/rewards.service';
 import { GamificationService } from '../gamification/gamification.service';
 import { ReferralsService } from '../referrals/referrals.service';
@@ -22,6 +23,11 @@ const LineLoginBody = z.object({ tenant_code: z.string().min(1), id_token: z.str
 const LinkLineBody = z.object({ id_token: z.string().min(1) });
 // PDPA: a member managing their OWN consent. `purpose` e.g. 'marketing' | 'analytics' | 'transactional'.
 const MemberConsentBody = z.object({ purpose: z.string().min(1), granted: z.boolean(), channel: z.string().optional() });
+// LYL-17: member submits a photo of a receipt from a purchase made outside our POS to claim points.
+const SubmitReceiptBody = z.object({
+  receipt_image: z.string().min(1), purchase_amount: z.number().positive(),
+  store_name: z.string().optional(), purchase_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), note: z.string().optional(),
+});
 
 // Member self-service app (phone-OTP). Auth routes are @Public; everything else needs a member token. The
 // member can only ever act on THEMSELVES — every call passes req.user.memberId (the authenticated member),
@@ -31,6 +37,7 @@ export class MemberController {
   constructor(
     private readonly auth: MemberAuthService,
     private readonly member: MemberService,
+    private readonly receipts: ReceiptSubmissionsService,
     private readonly rewards: RewardsService,
     private readonly missions: GamificationService,
     private readonly referrals: ReferralsService,
@@ -92,6 +99,12 @@ export class MemberController {
   setMyConsent(@Body(new ZodValidationPipe(MemberConsentBody)) b: z.infer<typeof MemberConsentBody>, @CurrentUser() u: JwtUser) {
     return this.member.setConsent(u.memberId!, { purpose: b.purpose, granted: b.granted, channel: b.channel, source: 'self' }, u);
   }
+
+  // Submit a photo of a receipt from a purchase made outside our POS (staff review before points post).
+  @Post('receipts') @UseGuards(MemberGuard)
+  submitReceipt(@Body(new ZodValidationPipe(SubmitReceiptBody)) b: any, @CurrentUser() u: JwtUser) { return this.receipts.submit(b, u); }
+  @Get('receipts') @UseGuards(MemberGuard)
+  myReceipts(@CurrentUser() u: JwtUser) { return this.receipts.myList(u); }
 
   @Get('rewards') @UseGuards(MemberGuard)
   rewardsList(@CurrentUser() u: JwtUser) { return this.rewards.listRewards(u, { active: true }); }
