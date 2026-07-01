@@ -55,6 +55,33 @@ async function sendLinePush(token: string, to: string, text: string): Promise<Se
   }
 }
 
+// LINE OA broadcast (https://api.line.me/v2/bot/message/broadcast) — pushes ONE message to EVERY follower of
+// the shop's Official Account. Unlike a per-member push/blast, there is no recipient list and no per-member
+// consent filter: the audience is LINE's OA follower set (consent = the user followed the OA; they opt out by
+// unfollowing). Use for public announcements. Errors return 'failed' (logged), never throw.
+export async function broadcastLine(token: string, text: string): Promise<SendResult> {
+  try {
+    const res = await fetch('https://api.line.me/v2/bot/message/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messages: [{ type: 'text', text: text.slice(0, 5000) }] }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      return { status: 'failed', provider: 'line', error: `LINE ${res.status} ${detail}`.trim().slice(0, 300) };
+    }
+    return { status: 'sent', provider: 'line', ref: res.headers.get('x-line-request-id') ?? `line_${rnd()}` };
+  } catch (e: any) {
+    return { status: 'failed', provider: 'line', error: String(e?.message ?? e).slice(0, 300) };
+  }
+}
+
+// Is the LINE push/broadcast channel configured (an OA channel token present)? Lets the service decide whether
+// a broadcast will really send or fall through to the mock (logged as sent).
+export function lineConfigured(): boolean {
+  return !!process.env.LINE_CHANNEL_TOKEN;
+}
+
 // SMS via a provider-agnostic HTTP REST call — works with most Thai bulk-SMS gateways (ThaiBulkSMS, Twilio,
 // AWS SNS proxies, …) that accept a JSON POST with a Bearer key. Endpoint + optional sender come from env so
 // no provider is hard-coded. Config: SMS_API_KEY (Bearer), SMS_API_URL (endpoint), SMS_SENDER (optional

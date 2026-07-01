@@ -8,6 +8,7 @@ const channel = z.enum(['line', 'sms', 'email']);
 const SendBody = z.object({ member_id: z.number().int().positive().optional(), to: z.string().optional(), channel, body: z.string().min(1).max(1000), campaign: z.string().optional() })
   .refine((d) => d.member_id != null || d.to != null, { message: 'member_id or to required' });
 const BlastBody = z.object({ audience: z.enum(['all', 'birthdays_today', 'segment']), segment: z.string().optional(), channel, body: z.string().min(1).max(1000), campaign: z.string().optional() });
+const BroadcastBody = z.object({ body: z.string().min(1).max(5000), campaign: z.string().optional() });
 
 @Controller('api/messaging')
 export class MessagingController {
@@ -18,6 +19,10 @@ export class MessagingController {
 
   @Post('blast') @Permissions('marketing')
   blast(@Body(new ZodValidationPipe(BlastBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.blast(b, u); }
+
+  // LINE OA broadcast to all followers — operator action (no per-member consent filter; audit-logged).
+  @Post('broadcast-oa') @Permissions('marketing', 'exec')
+  broadcastOA(@Body(new ZodValidationPipe(BroadcastBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.broadcastOA(b, u); }
 
   @Get('log') @Permissions('marketing', 'crm')
   log(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.log(u, limit ? +limit : 100); }

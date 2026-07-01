@@ -3,10 +3,11 @@ import { eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, messageLog, customerProfiles } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
-import { resolveMessageGateway, type MessageChannel } from './gateways';
+import { resolveMessageGateway, broadcastLine, lineConfigured, type MessageChannel } from './gateways';
 
 type SendDto = { member_id?: number; to?: string; channel: MessageChannel; body: string; campaign?: string };
 type BlastDto = { audience: 'all' | 'birthdays_today' | 'segment'; segment?: string; channel: MessageChannel; body: string; campaign?: string };
+type BroadcastDto = { body: string; campaign?: string };
 
 @Injectable()
 export class MessagingService {
@@ -53,6 +54,19 @@ export class MessagingService {
       if (r.status === 'sent') sent++; else if (r.status === 'skipped') skipped++; else failed++;
     }
     return { audience: dto.audience, segment: dto.segment ?? null, targeted: members.length, sent, skipped, failed };
+  }
+
+  // LINE OA broadcast — one message to every follower of the shop's Official Account. There is no member
+  // list and no per-member consent filter (the OA follow relationship IS the consent; users opt out by
+  // unfollowing) — so this is an operator action (marketing/exec), and it is audit-logged in message_log with
+  // a synthetic recipient 'oa:broadcast' so the send is reviewable. Falls through to the mock when no
+  // LINE_CHANNEL_TOKEN is configured (logged as sent, provider 'mock').
+  async broadcastOA(dto: BroadcastDto, user: JwtUser) {
+    const configured = lineConfigured();
+    const res = configured
+      ? await broadcastLine(process.env.LINE_CHANNEL_TOKEN!, dto.body)
+      : { status: 'sent' as const, provider: 'mock', ref: 'mock_broadcast' };
+    return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: dto.body, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, error: res.error ?? null });
   }
 
   async log(_user: JwtUser, limit = 100) {

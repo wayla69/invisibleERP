@@ -28,6 +28,7 @@ const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 
 const linePushes: { to: string; auth: string; text: string }[] = [];
+const lineBroadcasts: { auth: string; text: string }[] = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
   const url = String(input);
@@ -35,6 +36,11 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
     const body = JSON.parse(init?.body ?? '{}');
     linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: body.messages?.[0]?.text ?? '' });
     return { ok: true, status: 200, headers: { get: () => 'req-1' }, text: async () => '' } as any;
+  }
+  if (url.includes('api.line.me/v2/bot/message/broadcast')) {
+    const body = JSON.parse(init?.body ?? '{}');
+    lineBroadcasts.push({ auth: String(init?.headers?.Authorization ?? ''), text: body.messages?.[0]?.text ?? '' });
+    return { ok: true, status: 200, headers: { get: () => 'req-b' }, text: async () => '' } as any;
   }
   return realFetch(input, init);
 }) as any;
@@ -108,6 +114,18 @@ async function main() {
   const before = linePushes.length;
   const skipped = await inj('POST', '/api/messaging/send', token, { member_id: aliceId, channel: 'line', body: 'promo' });
   ok('opted-out member → skipped, no LINE push sent', skipped.json.status === 'skipped' && linePushes.length === before, JSON.stringify({ status: skipped.json.status }));
+
+  // ── 9. LINE OA broadcast — one message to all followers (no per-member list; audit-logged) ──
+  const bcBefore = lineBroadcasts.length;
+  const bc = await inj('POST', '/api/messaging/broadcast-oa', token, { body: 'ร้านเปิดสาขาใหม่! 🎉', campaign: 'grand_open' });
+  ok('LINE OA broadcast → sent, hit the broadcast endpoint with Bearer token (no recipient list)',
+    bc.json.status === 'sent' && lineBroadcasts.length === bcBefore + 1 && lineBroadcasts.at(-1)!.auth.includes('test-line-push-token') && lineBroadcasts.at(-1)!.text.includes('สาขาใหม่'),
+    JSON.stringify({ status: bc.json.status, provider: bc.json.provider }));
+  // audit: the broadcast is logged in message_log with the synthetic recipient
+  const logRows = await inj('GET', '/api/messaging/log?limit=10', token);
+  ok('LINE OA broadcast is audit-logged (recipient oa:broadcast, campaign grand_open)',
+    (logRows.json.messages ?? []).some((m: any) => m.recipient === 'oa:broadcast' && m.campaign === 'grand_open' && m.status === 'sent'),
+    JSON.stringify({ n: (logRows.json.messages ?? []).length }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

@@ -186,6 +186,12 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > send is **idempotent** (a campaign can't be sent twice — a second send is rejected); and every recipient is
 > recorded in the message log. *(MKT-10.)*
 
+> **LINE OA broadcast (ประกาศถึงผู้ติดตามทั้งหมด).** To announce something to **everyone who follows your LINE
+> Official Account** — not just enrolled members — use the OA broadcast (`POST /api/messaging/broadcast-oa`,
+> permission `marketing`/`exec`). It sends one message to all followers at once. Note: because it targets your
+> OA's followers (not member records), it does **not** apply the per-member marketing opt-out — a follower
+> opts out by unfollowing the OA. Every broadcast is recorded in the message log for audit.
+
 > **Channel delivery:** LINE, SMS, and Email all deliver for real once the workspace has that channel's
 > provider configured (LINE Official Account token, an SMS provider key, or an SMTP mailbox — set by your
 > administrator; see `docs/ops/secrets.md`). Until a channel is configured it runs in **demo mode**: the send
@@ -284,3 +290,4 @@ claim points by uploading a photo of the receipt.
 | 1.4 | 2026-07-01 | Platform | §11 **Campaigns — real SMS/Email delivery.** Documented that LINE/SMS/Email now deliver for real once the workspace has that channel's provider configured (admin sets the LINE token / SMS key / SMTP mailbox); until then a channel runs in **demo mode** (logged as *sent*, provider `mock`). No change to campaign steps or consent controls. |
 | 1.5 | 2026-07-01 | Platform | §13 **Customer segments (RFM) panel** on Loyalty analytics — member count + average spend per RFM segment (Champions/Loyal/New/At Risk/Lost, plus Unsegmented), click-through to a pre-filtered CRM 360 campaign. New read-only endpoint `GET /api/loyalty/analytics/segments` (perms `loyalty`/`marketing`/`exec`, tenant-scoped). |
 | 1.6 | 2026-07-01 | Platform | §13 **Live points feed** — earn/redeem now push a real-time `loyalty_points` signal to the exec live dashboard (`/bi`); monitoring only, ledger remains authoritative. |
+| 1.7 | 2026-07-01 | Platform | §11 **LINE OA broadcast** — announce to all OA followers via `POST /api/messaging/broadcast-oa` (`marketing`/`exec`); targets the OA follower set (opt-out = unfollow), audit-logged in the message log. |

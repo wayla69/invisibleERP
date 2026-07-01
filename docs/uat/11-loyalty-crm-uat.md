@@ -42,6 +42,8 @@ points-liability tie-out (control account 2250). Result legend: `Pass` / `Fail` 
 
 | UAT-LOY-029 | Loyalty real-time tick — earn publishes a tenant-filtered live event | Sales (exec) | A member earns points (POS/online/receipt) on shop T1; an exec on shop T2 | 1. member earns points on T1 2. `GET /api/bi/live/recent` as a T1 exec 3. the same as a T2 exec | — | (2) the feed contains a `loyalty_points` event with `kind='earn'`, the member's `member_id`, and `points>0`; (3) the T2 feed contains **no** such event (tenant-filtered) | Low | Positive | 22 Phase B; 19 §7 rev 1.8 | Not Run | best-effort in-memory bus; advisory only (never a control); ledger stays authoritative |
 
+| UAT-LOY-030 | LINE OA broadcast — sends to all followers, no consent filter, audit-logged | Marketing / Exec | `LINE_CHANNEL_TOKEN` configured (else mock) | 1. `POST /api/messaging/broadcast-oa` `{body, campaign}` 2. `GET /api/messaging/log` 3. attempt as a role without `marketing`/`exec` | — | (1) `status='sent'`, provider `line` (or `mock` if unset) — one call to LINE `/message/broadcast`, **no** recipient list; (2) a `message_log` row with recipient `oa:broadcast` + the campaign; (3) **403** | Medium | Control | 19 §7 rev 1.9 | Not Run | OA-follower audience (opt-out = unfollow); no per-member `marketing_opt_in` filter by design; operator-gated + audited |
+
 ## Revision history
 
 | Version | Date | Author | Summary |
@@ -61,3 +63,4 @@ points-liability tie-out (control account 2250). Result legend: `Pass` / `Fail` 
 | 1.3 | 2026-07-01 | Platform | **CRM Phase 4 — receipt-upload-for-points:** added UAT-LOY-025 (submit → staff approve → points via the shared `earnInTx` path, member cannot self-approve), UAT-LOY-026 (reject leaves the balance untouched; re-review blocked), UAT-LOY-027 (duplicate member/date/amount claim blocked) — now 28 cases, 24 control-type. New control LYL-17. |
 | 1.4 | 2026-07-01 | Platform | **Customer Segmentation view:** added UAT-LOY-028 (RFM segment distribution — canonical segments present, member counts/avg spend, tenant-scoped so T2 sees 0) covering the new `GET /api/loyalty/analytics/segments` endpoint + the analytics-page segments panel — now 29 cases. Verified by the `crm` harness (2 new checks). |
 | 1.5 | 2026-07-01 | Platform | **Loyalty real-time signal:** added UAT-LOY-029 (earn publishes a `loyalty_points` tick to the BiLive live feed; T2 tenant-filtered) — now 30 cases. Verified by the `crm` harness (2 new checks). |
+| 1.6 | 2026-07-01 | Platform | **LINE OA broadcast:** added UAT-LOY-030 (broadcast to all OA followers — no consent filter by design, audit-logged, operator-gated) — now 31 cases. Verified by the `line-crm` harness (2 new checks). |
