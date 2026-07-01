@@ -3,6 +3,7 @@ import { eq, and, isNotNull, desc, sql, gte, lt, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, promoAudienceRules } from '../../database/schema/crm';
 import { posMembers } from '../../database/schema/loyalty-members';
+import { memberConsents } from '../../database/schema/member-consents';
 import { dineInOrders } from '../../database/schema/restaurant';
 import { promotions } from '../../database/schema/marketing';
 import { n } from '../../database/queries';
@@ -95,6 +96,67 @@ export class CrmService {
         preferred_channel: p.preferredChannel, avg_order_value: n(p.avgOrderValue), refreshed_at: p.refreshedAt,
       } : null,
       recent_orders: recent.map((o: any) => ({ order_no: o.orderNo, total: n(o.total), channel: o.channel, opened_at: o.openedAt })),
+    };
+  }
+
+  // CDP / data-integration export — a bulk, tenant-scoped snapshot of the member base (identity + RFM traits
+  // + points + per-purpose consent) for loading into an external Customer Data Platform. Read-only; paginated.
+  // Explicitly tenant-scoped (like loyalty analytics): HQ/Admin must pass tenant_id (no cross-tenant export).
+  // Consent flags ship WITH each row so the downstream CDP can honour opt-outs — the export never itself
+  // sends anything. (For a single data-subject access/erasure request, use the PDPA DSAR endpoints instead.)
+  async exportForCdp(user: JwtUser, opts: { tenantId?: number | null; limit?: number; offset?: number }) {
+    const db = this.db as any;
+    const tenantId = opts.tenantId ?? user.tenantId;
+    if (tenantId == null) return { error: { code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id' } };
+    const limit = Math.min(Math.max(opts.limit ?? 500, 1), 5000);
+    const offset = Math.max(opts.offset ?? 0, 0);
+
+    const rows = await db.select({
+      id: posMembers.id, code: posMembers.memberCode, name: posMembers.name, phone: posMembers.phone,
+      email: posMembers.email, lineUserId: posMembers.lineUserId, tier: posMembers.tier,
+      balance: posMembers.balance, lifetime: posMembers.lifetime, marketingOptIn: posMembers.marketingOptIn,
+      segment: customerProfiles.rfmSegment, totalOrders: customerProfiles.totalOrders, totalSpend: customerProfiles.totalSpend,
+      rfmRecency: customerProfiles.rfmRecency, rfmFrequency: customerProfiles.rfmFrequency, rfmMonetary: customerProfiles.rfmMonetary,
+      preferredChannel: customerProfiles.preferredChannel, avgOrderValue: customerProfiles.avgOrderValue, lastOrderAt: customerProfiles.lastOrderAt,
+    }).from(posMembers).leftJoin(customerProfiles, eq(customerProfiles.memberId, posMembers.id))
+      .where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true)))
+      .orderBy(posMembers.id).limit(limit).offset(offset);
+
+    // Per-purpose consent for exactly the members in this page (granted flag; withdrawn if withdrawnAt set).
+    const ids = rows.map((r: any) => Number(r.id));
+    const consentMap = new Map<number, Record<string, boolean>>();
+    if (ids.length) {
+      const cons = await db.select({ memberId: memberConsents.memberId, purpose: memberConsents.purpose, granted: memberConsents.granted })
+        .from(memberConsents).where(and(eq(memberConsents.tenantId, tenantId), inArray(memberConsents.memberId, ids)));
+      for (const c of cons) {
+        const m = consentMap.get(Number(c.memberId)) ?? {};
+        m[c.purpose] = c.granted === true;
+        consentMap.set(Number(c.memberId), m);
+      }
+    }
+    const [tot] = await db.select({ c: sql<number>`count(*)` }).from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true)));
+
+    return {
+      tenant_id: tenantId, total: Number(tot?.c ?? 0), count: rows.length, limit, offset,
+      members: rows.map((r: any) => {
+        const c = consentMap.get(Number(r.id)) ?? {};
+        return {
+          member_code: r.code, name: r.name, phone: r.phone, email: r.email ?? null, has_line: !!r.lineUserId,
+          tier: r.tier, points_balance: n(r.balance), lifetime_points: n(r.lifetime),
+          rfm_segment: r.segment ?? null, total_orders: r.totalOrders ?? 0, total_spend: n(r.totalSpend),
+          rfm: { recency: r.rfmRecency ?? null, frequency: r.rfmFrequency ?? null, monetary: n(r.rfmMonetary) },
+          preferred_channel: r.preferredChannel ?? null, avg_order_value: n(r.avgOrderValue), last_order_at: r.lastOrderAt ?? null,
+          // marketing opt-out drives the top-level flag; per-purpose consents (line/sms/email/profiling) fall
+          // back to the marketing flag when not explicitly recorded, so the CDP has a safe default.
+          consent: {
+            marketing: c.marketing ?? (r.marketingOptIn === true),
+            line: c.line ?? (r.marketingOptIn === true),
+            sms: c.sms ?? (r.marketingOptIn === true),
+            email: c.email ?? (r.marketingOptIn === true),
+            profiling: c.profiling ?? true,
+          },
+        };
+      }),
     };
   }
 

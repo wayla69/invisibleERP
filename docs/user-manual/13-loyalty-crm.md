@@ -223,6 +223,13 @@ a shop.
 receipt), a real-time signal is pushed to the executive **live dashboard** (`/bi`, the live/offline badge) —
 no refresh needed. It's a monitoring signal only; the authoritative record stays the member's points ledger.
 
+**Export to a CDP (Customer Data Platform).** To load your customer base into an external marketing/CDP tool,
+use the data export (`GET /api/crm/export`, permission `marketing`/`exec`). It returns the active members with
+their identity, RFM segment/traits, points, and **consent flags** (marketing/LINE/SMS/email) — paginated
+(`limit`/`offset`). The consent flags travel with each record so the receiving system can respect opt-outs; the
+export only reads data, it never sends messages. For a single customer's data request or erasure (PDPA/DSAR),
+use the privacy tools instead — this bulk export is for analytics/CDP integration.
+
 **Customer segments (RFM).** The **กลุ่มลูกค้า RFM** panel shows how your members split across the five RFM
 segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
 without a computed profile yet appear under **Unsegmented**). Click a segment to open it in **CRM 360**
@@ -291,3 +298,4 @@ claim points by uploading a photo of the receipt.
 | 1.5 | 2026-07-01 | Platform | §13 **Customer segments (RFM) panel** on Loyalty analytics — member count + average spend per RFM segment (Champions/Loyal/New/At Risk/Lost, plus Unsegmented), click-through to a pre-filtered CRM 360 campaign. New read-only endpoint `GET /api/loyalty/analytics/segments` (perms `loyalty`/`marketing`/`exec`, tenant-scoped). |
 | 1.6 | 2026-07-01 | Platform | §13 **Live points feed** — earn/redeem now push a real-time `loyalty_points` signal to the exec live dashboard (`/bi`); monitoring only, ledger remains authoritative. |
 | 1.7 | 2026-07-01 | Platform | §11 **LINE OA broadcast** — announce to all OA followers via `POST /api/messaging/broadcast-oa` (`marketing`/`exec`); targets the OA follower set (opt-out = unfollow), audit-logged in the message log. |
+| 1.8 | 2026-07-01 | Platform | §13 **CDP data export** — bulk member export (`GET /api/crm/export`, `marketing`/`exec`) with identity + RFM + consent flags for external CDP integration; paginated, tenant-scoped, read-only. DSAR stays separate. |

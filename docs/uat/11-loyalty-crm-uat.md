@@ -44,6 +44,8 @@ points-liability tie-out (control account 2250). Result legend: `Pass` / `Fail` 
 
 | UAT-LOY-030 | LINE OA broadcast — sends to all followers, no consent filter, audit-logged | Marketing / Exec | `LINE_CHANNEL_TOKEN` configured (else mock) | 1. `POST /api/messaging/broadcast-oa` `{body, campaign}` 2. `GET /api/messaging/log` 3. attempt as a role without `marketing`/`exec` | — | (1) `status='sent'`, provider `line` (or `mock` if unset) — one call to LINE `/message/broadcast`, **no** recipient list; (2) a `message_log` row with recipient `oa:broadcast` + the campaign; (3) **403** | Medium | Control | 19 §7 rev 1.9 | Not Run | OA-follower audience (opt-out = unfollow); no per-member `marketing_opt_in` filter by design; operator-gated + audited |
 
+| UAT-LOY-031 | CDP export — bulk member snapshot with consent, tenant-scoped | Marketing / Exec | ≥1 active member with a refreshed profile on T1; a member base on T2 | 1. `GET /api/crm/export?limit=100` as a T1 marketer 2. the same as a T2 marketer 3. as HQ/Admin with no `tenant_id` | — | (1) `total ≥ 1`; each row carries `member_code`, `rfm_segment`, and a `consent` object (`marketing`/`line`/`sms`/`email` booleans); (2) `total = 0` (never T1's members); (3) `TENANT_REQUIRED` error (HQ must scope) | Medium | Control | 19 §7 rev 1.10 | Not Run | read-only PII egress; consent ships with each row; explicit tenant scope; DSAR is separate (PDPA); audit-logging noted as a follow-up |
+
 ## Revision history
 
 | Version | Date | Author | Summary |
@@ -64,3 +66,4 @@ points-liability tie-out (control account 2250). Result legend: `Pass` / `Fail` 
 | 1.4 | 2026-07-01 | Platform | **Customer Segmentation view:** added UAT-LOY-028 (RFM segment distribution — canonical segments present, member counts/avg spend, tenant-scoped so T2 sees 0) covering the new `GET /api/loyalty/analytics/segments` endpoint + the analytics-page segments panel — now 29 cases. Verified by the `crm` harness (2 new checks). |
 | 1.5 | 2026-07-01 | Platform | **Loyalty real-time signal:** added UAT-LOY-029 (earn publishes a `loyalty_points` tick to the BiLive live feed; T2 tenant-filtered) — now 30 cases. Verified by the `crm` harness (2 new checks). |
 | 1.6 | 2026-07-01 | Platform | **LINE OA broadcast:** added UAT-LOY-030 (broadcast to all OA followers — no consent filter by design, audit-logged, operator-gated) — now 31 cases. Verified by the `line-crm` harness (2 new checks). |
+| 1.7 | 2026-07-01 | Platform | **CDP export:** added UAT-LOY-031 (bulk member export with identity + RFM + consent flags; tenant-scoped; HQ must pass tenant_id) — now 32 cases. Verified by the `crm` harness (2 new checks). |

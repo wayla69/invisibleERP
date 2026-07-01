@@ -134,6 +134,16 @@ async function main() {
   const segs2 = await inj('GET', '/api/loyalty/analytics/segments', mgr2);
   ok('RLS: T2 segment mix excludes T1 members (profiled=0)', segs2.status === 200 && segs2.json.profiled_members === 0, JSON.stringify({ profiled: segs2.json.profiled_members }));
 
+  // ── 7d. CDP / data export — bulk member snapshot with RFM + consent, tenant-scoped ──
+  const exp = await inj('GET', '/api/crm/export?limit=100', mgr1);
+  const expRow = (exp.json.members ?? []).find((m: any) => m.rfm_segment === 'New');
+  ok('CDP export: member row carries identity + RFM segment + consent flags; total ≥ 1',
+    exp.status === 200 && exp.json.total >= 1 && !!expRow && expRow.rfm_segment === 'New' && typeof expRow.consent?.marketing === 'boolean' && typeof expRow.consent?.line === 'boolean',
+    JSON.stringify({ total: exp.json.total, seg: expRow?.rfm_segment, consent: expRow?.consent?.marketing }));
+  // RLS: T2 export never includes T1 members (explicit tenant scope).
+  const expT2 = await inj('GET', '/api/crm/export?limit=100', mgr2);
+  ok('CDP export: T2 sees none of T1 members (tenant-scoped, total=0)', expT2.status === 200 && expT2.json.total === 0, JSON.stringify({ total: expT2.json.total }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });
