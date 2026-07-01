@@ -143,6 +143,11 @@ async function main() {
   // RLS: T2 export never includes T1 members (explicit tenant scope).
   const expT2 = await inj('GET', '/api/crm/export?limit=100', mgr2);
   ok('CDP export: T2 sees none of T1 members (tenant-scoped, total=0)', expT2.status === 200 && expT2.json.total === 0, JSON.stringify({ total: expT2.json.total }));
+  // ICFR egress: the export wrote an append-only audit row (actor + row count).
+  const auditRows = await db.select().from(s.auditLog).where(eq(s.auditLog.action, 'CRM.CDP_EXPORT'));
+  ok('CDP export: an audit row was recorded (CRM.CDP_EXPORT with actor + row count)',
+    auditRows.length >= 1 && auditRows.some((r: any) => r.actor === 'mgr1' && (r.meta?.rows ?? -1) >= 1),
+    JSON.stringify({ n: auditRows.length, actor: auditRows.at(-1)?.actor }));
 
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
