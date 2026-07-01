@@ -192,6 +192,11 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > OA's followers (not member records), it does **not** apply the per-member marketing opt-out — a follower
 > opts out by unfollowing the OA. Every broadcast is recorded in the message log for audit.
 
+> **Rich LINE messages (flex).** Both the broadcast and a targeted send can carry a **rich card / carousel**
+> (image + text + buttons) instead of plain text — pass a LINE *flex* layout with an `alt_text` (broadcast:
+> `flex`+`alt_text`; targeted: `POST /api/messaging/line/flex` to a member or LINE userId). Great for promo
+> cards, reward vouchers, and receipts.
+
 > **Channel delivery:** LINE, SMS, and Email all deliver for real once the workspace has that channel's
 > provider configured (LINE Official Account token, an SMS provider key, or an SMTP mailbox — set by your
 > administrator; see `docs/ops/secrets.md`). Until a channel is configured it runs in **demo mode**: the send
@@ -199,9 +204,11 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > demo, the channel name = live).
 >
 > **Use your own provider.** An admin can connect this shop's **own** LINE Official Account / SMS sender /
-> email mailbox (`GET`/`PUT /api/messaging/providers/:channel`, permission `users`/`exec`) so messages go out
-> under your brand. Credentials are stored encrypted and are write-only — the screen shows only which channels
-> are connected, never the keys. If you set nothing, the platform's shared provider (or demo mode) is used.
+> email mailbox on the **ผู้ให้บริการข้อความ** screen (**Settings → Integrations → Messaging providers**,
+> `/settings/messaging`, permission `users`/`exec`) so messages go out under your brand. Enter the credentials,
+> press **บันทึก**, then use **ส่งทดสอบ** to send a test message and confirm delivery. Credentials are stored
+> encrypted and are write-only — the screen shows only which channels are connected, never the keys. If you set
+> nothing, the platform's shared provider (or demo mode) is used.
 
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
@@ -225,8 +232,9 @@ have been dormant for 90+ days but still hold points, ready for a **win-back** c
 a shop.
 
 **Live points feed.** Every time a member earns or redeems points (at the till, online, or on an approved
-receipt), a real-time signal is pushed to the executive **live dashboard** (`/bi`, the live/offline badge) —
-no refresh needed. It's a monitoring signal only; the authoritative record stays the member's points ledger.
+receipt), it appears in real time — both on the executive **live dashboard** (`/bi`) and in the **แต้มสด
+(Live)** card on this Loyalty analytics page (updates every few seconds, with a live/offline dot). It's a
+monitoring signal only; the authoritative record stays the member's points ledger.
 
 **Export to a CDP (Customer Data Platform).** To load your customer base into an external marketing/CDP tool,
 use the data export (`GET /api/crm/export`, permission `marketing`/`exec`). It returns the active members with
@@ -312,3 +320,6 @@ claim points by uploading a photo of the receipt.
 | 1.8 | 2026-07-01 | Platform | §13 **CDP data export** — bulk member export (`GET /api/crm/export`, `marketing`/`exec`) with identity + RFM + consent flags for external CDP integration; paginated, tenant-scoped, read-only. DSAR stays separate. |
 | 1.9 | 2026-07-01 | Platform | §11 **Own messaging provider** — admins can connect the shop's own LINE OA / SMS sender / SMTP mailbox (`GET`/`PUT /api/messaging/providers/:channel`, `users`/`exec`); credentials encrypted + write-only, overriding the shared platform provider. |
 | 1.10 | 2026-07-01 | Platform | §14 **Receipt photos in object storage** — when an S3-compatible store is configured (`OBJECT_STORE_URL`), receipt photos are offloaded there (a reference is kept in the DB); transparent to member/reviewer; PDPA erasure deletes the object. |
+| 1.11 | 2026-07-01 | Platform | §11 **Messaging providers screen** (`/settings/messaging`) — admin UI to connect the shop's own LINE OA / SMS / SMTP credentials with a **ส่งทดสอบ** (send-test) button; new nav item under Settings → Integrations. |
+| 1.12 | 2026-07-01 | Platform | §13 **แต้มสด (Live) card** on Loyalty analytics — real-time earn/redeem feed (polls `GET /api/loyalty/analytics/live` every 5 s), so loyalty managers see activity without the exec dashboard. |
+| 1.13 | 2026-07-01 | Platform | §11 **Rich LINE messages (flex)** — broadcast and targeted sends can carry a card/carousel (image+buttons) via a LINE flex layout + `alt_text` (`POST /api/messaging/line/flex` for a targeted push). |

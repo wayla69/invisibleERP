@@ -3,12 +3,13 @@ import { eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, messageLog, customerProfiles } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
-import { resolveMessageGateway, broadcastLine, type ChannelCreds, type MessageChannel } from './gateways';
+import { resolveMessageGateway, broadcastLine, broadcastLineFlex, pushLineFlex, type ChannelCreds, type MessageChannel } from './gateways';
 import { TenantMessagingService } from './tenant-messaging.service';
 
 type SendDto = { member_id?: number; to?: string; channel: MessageChannel; body: string; campaign?: string };
 type BlastDto = { audience: 'all' | 'birthdays_today' | 'segment'; segment?: string; channel: MessageChannel; body: string; campaign?: string };
-type BroadcastDto = { body: string; campaign?: string };
+type BroadcastDto = { body?: string; flex?: any; alt_text?: string; campaign?: string };
+type FlexDto = { to: string; alt_text: string; flex: any; member_id?: number; campaign?: string };
 
 @Injectable()
 export class MessagingService {
@@ -76,13 +77,43 @@ export class MessagingService {
   // a synthetic recipient 'oa:broadcast' so the send is reviewable. Falls through to the mock when no
   // LINE_CHANNEL_TOKEN is configured (logged as sent, provider 'mock').
   async broadcastOA(dto: BroadcastDto, user: JwtUser) {
-    // Prefer the tenant's own OA token, else the platform env default; unset ⇒ mock.
+    // Prefer the tenant's own OA token, else the platform env default; unset ⇒ mock. A `flex` payload sends a
+    // rich card/carousel (alt_text is the notification text); otherwise the plain `body` text is sent.
     const creds = await this.creds(user, 'line');
     const token = creds?.token ?? process.env.LINE_CHANNEL_TOKEN;
+    const rich = dto.flex != null;
+    const logBody = rich ? (dto.alt_text ?? '[flex]') : (dto.body ?? '');
     const res = token
-      ? await broadcastLine(token, dto.body)
+      ? (rich ? await broadcastLineFlex(token, dto.alt_text ?? logBody, dto.flex) : await broadcastLine(token, dto.body ?? ''))
       : { status: 'sent' as const, provider: 'mock', ref: 'mock_broadcast' };
-    return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: dto.body, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, error: res.error ?? null });
+    return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: logBody, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, error: res.error ?? null });
+  }
+
+  // Push a rich LINE flex message (card/carousel) to one LINE userId — for a member or an ad-hoc recipient.
+  // Respects marketing consent when addressed to a member. Falls back to mock when LINE is unconfigured.
+  async sendFlex(dto: FlexDto, user: JwtUser) {
+    const db = this.db as any;
+    let recipient = dto.to;
+    if (dto.member_id != null) {
+      const [m] = await db.select().from(posMembers).where(eq(posMembers.id, dto.member_id)).limit(1);
+      if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
+      if (m.marketingOptIn === false) return this.record(user, { memberId: dto.member_id, channel: 'line', recipient: null, body: dto.alt_text, campaign: dto.campaign, status: 'skipped', provider: null, error: 'opted out' });
+      recipient = recipient || m.lineUserId;
+    }
+    if (!recipient) return this.record(user, { memberId: dto.member_id ?? null, channel: 'line', recipient: null, body: dto.alt_text, campaign: dto.campaign, status: 'failed', provider: null, error: 'no recipient contact' });
+    const creds = await this.creds(user, 'line');
+    const token = creds?.token ?? process.env.LINE_CHANNEL_TOKEN;
+    const res = token ? await pushLineFlex(token, recipient, dto.alt_text, dto.flex) : { status: 'sent' as const, provider: 'mock', ref: 'mock_flex' };
+    return this.record(user, { memberId: dto.member_id ?? null, channel: 'line', recipient, body: dto.alt_text, campaign: dto.campaign ?? 'flex', status: res.status, provider: res.provider, error: res.error ?? null });
+  }
+
+  // Send a canned test message through the channel's resolved provider (per-tenant creds → env → mock), so an
+  // admin can verify a newly-configured provider actually delivers. Audit-logged like any send.
+  async sendTest(channel: MessageChannel, to: string, user: JwtUser) {
+    const creds = await this.creds(user, channel);
+    const gw = resolveMessageGateway(channel, creds ?? undefined);
+    const res = await gw.send(to, `ทดสอบการส่งข้อความจากระบบ (${channel})`);
+    return this.record(user, { memberId: null, channel, recipient: to, body: '[provider test]', campaign: 'provider_test', status: res.status, provider: res.provider, error: res.error ?? null });
   }
 
   async log(_user: JwtUser, limit = 100) {

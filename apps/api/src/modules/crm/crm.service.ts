@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, promoAudienceRules } from '../../database/schema/crm';
 import { posMembers } from '../../database/schema/loyalty-members';
 import { memberConsents } from '../../database/schema/member-consents';
+import { auditLog } from '../../database/schema';
 import { dineInOrders } from '../../database/schema/restaurant';
 import { promotions } from '../../database/schema/marketing';
 import { n } from '../../database/queries';
@@ -135,6 +136,15 @@ export class CrmService {
       }
     }
     const [tot] = await db.select({ c: sql<number>`count(*)` }).from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true)));
+
+    // ICFR egress trail: a bulk PII export is a sensitive read — record who exported how much, when
+    // (append-only auditLog, ITGC-AC-10). Best-effort: auditing never blocks the export.
+    try {
+      await db.insert(auditLog).values({
+        actor: user?.username ?? null, tenantId, action: 'CRM.CDP_EXPORT', entity: 'member_export',
+        entityId: null, status: 'success', meta: { rows: rows.length, total: Number(tot?.c ?? 0), limit, offset },
+      });
+    } catch { /* never throw from audit */ }
 
     return {
       tenant_id: tenantId, total: Number(tot?.c ?? 0), count: rows.length, limit, offset,

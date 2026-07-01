@@ -251,6 +251,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
 
   // ── Settings / Integrations ───────────────────────────────────────────────
   'nav.connectors': { th: 'ตัวเชื่อมต่อ (Connectors)', en: 'Connectors' },
+  'nav.messaging_providers': { th: 'ผู้ให้บริการข้อความ', en: 'Messaging providers' },
   'nav.webhooks': { th: 'เว็บฮุค (Webhooks)', en: 'Webhooks' },
   'nav.developer': { th: 'พอร์ทัลนักพัฒนา (Developer)', en: 'Developer Portal' },
   'nav.migration': { th: 'ย้ายข้อมูลเข้า (Migration)', en: 'Data Migration' },

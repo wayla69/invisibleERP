@@ -52,12 +52,14 @@ export function resolveMessageGateway(channel: MessageChannel, creds?: ChannelCr
 // LINE Messaging API push (https://api.line.me/v2/bot/message/push). The recipient is a LINE userId the
 // customer obtained by adding the shop's Official Account / via LINE Login. Network or API errors return
 // 'failed' (logged in message_log) rather than throwing, so a receipt send never crashes the POS flow.
-async function sendLinePush(token: string, to: string, text: string): Promise<SendResult> {
+// Shared LINE Messaging API poster — one place to send a `messages` array to a push/broadcast endpoint.
+// Network / non-2xx errors return 'failed' (logged), never throw, so a send never crashes the caller.
+async function postLine(token: string, endpoint: 'push' | 'broadcast', payload: Record<string, any>): Promise<SendResult> {
   try {
-    const res = await fetch('https://api.line.me/v2/bot/message/push', {
+    const res = await fetch(`https://api.line.me/v2/bot/message/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ to, messages: [{ type: 'text', text: text.slice(0, 5000) }] }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
@@ -69,25 +71,32 @@ async function sendLinePush(token: string, to: string, text: string): Promise<Se
   }
 }
 
+// A LINE flex message (altText shown in the chat list / notifications; contents is a LINE flex container —
+// a bubble or carousel of cards/images/buttons). Passed through opaquely so any valid flex JSON works.
+export function flexMessage(altText: string, contents: any) {
+  return { type: 'flex', altText: String(altText || 'ข้อความ').slice(0, 400), contents };
+}
+
+async function sendLinePush(token: string, to: string, text: string): Promise<SendResult> {
+  return postLine(token, 'push', { to, messages: [{ type: 'text', text: text.slice(0, 5000) }] });
+}
+
+// Push a rich flex message to one LINE user (a card/carousel with images + buttons, not just plain text).
+export async function pushLineFlex(token: string, to: string, altText: string, contents: any): Promise<SendResult> {
+  return postLine(token, 'push', { to, messages: [flexMessage(altText, contents)] });
+}
+
+// Broadcast a rich flex message to every OA follower.
+export async function broadcastLineFlex(token: string, altText: string, contents: any): Promise<SendResult> {
+  return postLine(token, 'broadcast', { messages: [flexMessage(altText, contents)] });
+}
+
 // LINE OA broadcast (https://api.line.me/v2/bot/message/broadcast) — pushes ONE message to EVERY follower of
 // the shop's Official Account. Unlike a per-member push/blast, there is no recipient list and no per-member
 // consent filter: the audience is LINE's OA follower set (consent = the user followed the OA; they opt out by
 // unfollowing). Use for public announcements. Errors return 'failed' (logged), never throw.
 export async function broadcastLine(token: string, text: string): Promise<SendResult> {
-  try {
-    const res = await fetch('https://api.line.me/v2/bot/message/broadcast', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ messages: [{ type: 'text', text: text.slice(0, 5000) }] }),
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      return { status: 'failed', provider: 'line', error: `LINE ${res.status} ${detail}`.trim().slice(0, 300) };
-    }
-    return { status: 'sent', provider: 'line', ref: res.headers.get('x-line-request-id') ?? `line_${rnd()}` };
-  } catch (e: any) {
-    return { status: 'failed', provider: 'line', error: String(e?.message ?? e).slice(0, 300) };
-  }
+  return postLine(token, 'broadcast', { messages: [{ type: 'text', text: text.slice(0, 5000) }] });
 }
 
 // Is the LINE push/broadcast channel configured (an OA channel token present)? Lets the service decide whether

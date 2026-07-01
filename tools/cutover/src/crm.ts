@@ -120,6 +120,13 @@ async function main() {
     liveT2.status === 200 && !(liveT2.json.events ?? []).some((e: any) => e.type === 'loyalty_points' && e.member_id === memberId),
     JSON.stringify({ t2: (liveT2.json.events ?? []).filter((e: any) => e.type === 'loyalty_points').length }));
 
+  // ── 7a3. Loyalty-scoped live feed (analytics tile source) shows the earn tick, tenant-filtered ──
+  const loyLive = await inj('GET', '/api/loyalty/analytics/live?limit=12', mgr1);
+  ok('Loyalty live feed: returns the earn tick (loyalty_points) for the caller tenant',
+    loyLive.status === 200 && (loyLive.json.events ?? []).some((e: any) => e.kind === 'earn' && e.member_id === memberId), JSON.stringify({ n: (loyLive.json.events ?? []).length }));
+  const loyLiveT2 = await inj('GET', '/api/loyalty/analytics/live?limit=12', mgr2);
+  ok('Loyalty live feed: T2 sees none of T1 ticks', loyLiveT2.status === 200 && !(loyLiveT2.json.events ?? []).some((e: any) => e.member_id === memberId), JSON.stringify({ n: (loyLiveT2.json.events ?? []).length }));
+
   // ── 7b. RFM segment distribution (Customer Segmentation / Insights) ──
   const segs = await inj('GET', '/api/loyalty/analytics/segments', mgr1);
   const segList = (segs.json.segments ?? []) as { segment: string; members: number }[];
@@ -143,6 +150,11 @@ async function main() {
   // RLS: T2 export never includes T1 members (explicit tenant scope).
   const expT2 = await inj('GET', '/api/crm/export?limit=100', mgr2);
   ok('CDP export: T2 sees none of T1 members (tenant-scoped, total=0)', expT2.status === 200 && expT2.json.total === 0, JSON.stringify({ total: expT2.json.total }));
+  // ICFR egress: the export wrote an append-only audit row (actor + row count).
+  const auditRows = await db.select().from(s.auditLog).where(eq(s.auditLog.action, 'CRM.CDP_EXPORT'));
+  ok('CDP export: an audit row was recorded (CRM.CDP_EXPORT with actor + row count)',
+    auditRows.length >= 1 && auditRows.some((r: any) => r.actor === 'mgr1' && (r.meta?.rows ?? -1) >= 1),
+    JSON.stringify({ n: auditRows.length, actor: auditRows.at(-1)?.actor }));
 
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)

@@ -21,6 +21,7 @@ interface Overview {
 }
 interface Churn { at_risk: { id: number; member_code: string; name: string; tier: string; balance: number; last_activity: string }[] }
 interface Segments { profiled_members: number; total_spend: number; segments: { segment: string; members: number; total_spend: number; total_orders: number; avg_spend: number }[] }
+interface LiveFeed { available: boolean; events: { kind: 'earn' | 'redeem'; member_id: number; points: number; balance_after: number; ref_doc: string; at?: string }[] }
 
 // RFM segment → colour (Champions best → Lost worst; Unsegmented neutral).
 const SEG_TONE: Record<string, string> = { Champions: 'bg-success', Loyal: 'bg-primary', New: 'bg-info', 'At Risk': 'bg-warning', Lost: 'bg-destructive', Unsegmented: 'bg-muted-foreground/40' };
@@ -41,6 +42,7 @@ export default function LoyaltyAnalyticsPage() {
   const ov = useQuery<Overview>({ queryKey: ['loy-analytics'], queryFn: () => api('/api/loyalty/analytics') });
   const churn = useQuery<Churn>({ queryKey: ['loy-churn'], queryFn: () => api('/api/loyalty/analytics/churn?limit=20') });
   const seg = useQuery<Segments>({ queryKey: ['loy-segments'], queryFn: () => api('/api/loyalty/analytics/segments') });
+  const live = useQuery<LiveFeed>({ queryKey: ['loy-live'], queryFn: () => api('/api/loyalty/analytics/live?limit=12'), refetchInterval: 5000 });
   const maxTier = ov.data ? Math.max(1, ...Object.values(ov.data.tier_mix)) : 1;
   const maxSeg = seg.data ? Math.max(1, ...seg.data.segments.map((s) => s.members)) : 1;
 
@@ -60,6 +62,33 @@ export default function LoyaltyAnalyticsPage() {
               <Stat icon={<BarChart3 className="size-4" />} label="อัตราสมาชิกใช้งาน" value={`${ov.data.active_rate_pct}%`} />
               <Stat icon={<Coins className="size-4" />} label="แต้มสะสมรวม" value={num(ov.data.points.open_balance)} sub={`ได้ ${num(ov.data.points.earned)} · แลก ${num(ov.data.points.redeemed)} · ปรับ ${num(ov.data.points.adjusted)}`} />
             </div>
+
+            <Card className="gap-3">
+              <CardHeader className="pb-0">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <span className={`inline-block size-2 rounded-full ${live.data?.available ? 'bg-success animate-pulse' : 'bg-muted-foreground/40'}`} />
+                  แต้มสด (Live) — earn / redeem แบบเรียลไทม์
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(live.data?.events?.length ?? 0) === 0
+                  ? <p className="py-2 text-center text-sm text-muted-foreground">ยังไม่มีกิจกรรมแต้มล่าสุด — จะแสดงทันทีที่มีการสะสม/แลก</p>
+                  : (
+                    <div className="space-y-1">
+                      {live.data!.events.map((e, i) => (
+                        <div key={`${e.ref_doc}-${i}`} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-1.5 text-sm">
+                          <span className="flex items-center gap-2">
+                            <Badge variant="muted" className={e.kind === 'earn' ? 'text-success' : 'text-primary'}>{e.kind === 'earn' ? 'สะสม' : 'แลก'}</Badge>
+                            <span className="text-muted-foreground">สมาชิก #{e.member_id}</span>
+                            <span className="text-xs text-muted-foreground">{e.ref_doc}</span>
+                          </span>
+                          <span className="tabular-nums">{e.kind === 'earn' ? '+' : '−'}{num(e.points)} แต้ม <span className="text-xs text-muted-foreground">(คงเหลือ {num(e.balance_after)})</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+              </CardContent>
+            </Card>
 
             <Card className="gap-3">
               <CardHeader className="pb-0"><CardTitle className="text-base">สัดส่วนระดับสมาชิก (Tier mix)</CardTitle></CardHeader>
