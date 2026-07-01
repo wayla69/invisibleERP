@@ -135,6 +135,31 @@ export function buildOpenApi() {
           responses: listResponse({ $ref: '#/components/schemas/Invoice' }),
         },
       },
+      '/loyalty/member': {
+        get: {
+          summary: 'Read a loyalty member (by code / phone / card)', security: [{ apiKey: ['loyalty:read'] }],
+          parameters: [{ name: 'code', in: 'query', schema: { type: 'string' } }, { name: 'phone', in: 'query', schema: { type: 'string' } }, { name: 'card', in: 'query', schema: { type: 'string' } }],
+          responses: { '200': { description: 'Member (balance, tier, …)' }, '404': { description: 'Not found' } },
+        },
+      },
+      '/loyalty/enroll': {
+        post: {
+          summary: 'Enrol a loyalty member', security: [{ apiKey: ['loyalty:write'] }],
+          responses: { '201': { description: 'The enrolled member' } },
+        },
+      },
+      '/loyalty/earn': {
+        post: {
+          summary: 'Credit loyalty points for a spend (fires loyalty.earned)', security: [{ apiKey: ['loyalty:write'] }],
+          responses: { '200': { description: 'points_earned + new balance' } },
+        },
+      },
+      '/loyalty/redeem': {
+        post: {
+          summary: 'Redeem loyalty points (fires loyalty.redeemed)', security: [{ apiKey: ['loyalty:write'] }],
+          responses: { '200': { description: 'points_redeemed + redeem_value + new balance' } },
+        },
+      },
     },
   };
 }

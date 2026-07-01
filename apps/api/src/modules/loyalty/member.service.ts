@@ -186,6 +186,24 @@ export class MemberService {
     return points;
   }
 
+  // Standalone EARN (own transaction) — for callers that are not already inside a checkout tx (the public
+  // loyalty API, integrations). Delegates to the locked earnInTx; returns the points earned + new balance.
+  async earn(user: JwtUser, memberId: number, netSpend: number, refDoc: string) {
+    const db = this.db as any; const tenantId = this.tid(user);
+    const pts = await db.transaction((tx: any) => this.earnInTx(tx, tenantId, memberId, netSpend, refDoc, user.username));
+    const [m] = await db.select({ balance: posMembers.balance }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
+    return { member_id: memberId, points_earned: pts, balance: n(m?.balance), ref_doc: refDoc };
+  }
+
+  // Standalone REDEEM (own transaction) — validates via quoteRedeem then applies redeemInTx under the lock.
+  async redeem(user: JwtUser, memberId: number, points: number, refDoc: string) {
+    const q = await this.quoteRedeem(memberId, points, user); // throws on disabled/not-found/insufficient
+    const db = this.db as any; const tenantId = this.tid(user);
+    const consumed = await db.transaction((tx: any) => this.redeemInTx(tx, tenantId, memberId, points, q.redeemValue, refDoc, user.username));
+    const [m] = await db.select({ balance: posMembers.balance }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
+    return { member_id: memberId, points_redeemed: consumed, redeem_value: q.redeemValue, balance: n(m?.balance), ref_doc: refDoc };
+  }
+
   // ── CRM Phase 1 ────────────────────────────────────────────────────────────
   // Searchable member directory (left-joined to RFM segment). Read-only, tenant-scoped via RLS.
   async list(q: { q?: string; segment?: string; tier?: string; active?: boolean; limit?: number; offset?: number }, _user: JwtUser) {
