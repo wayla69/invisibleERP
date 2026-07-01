@@ -37,6 +37,8 @@ webhook in the webhook handler).
 | `SMS_API_KEY` + `SMS_API_URL` | if SMS delivery is used | Activate the provider-agnostic SMS gateway (Bearer key + REST endpoint; optional `SMS_SENDER` sender id). Unset ⇒ mock/no-op. | per provider |
 | `SMTP_HOST` (+ `SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`/`SMTP_SECURE`) | if email delivery is used | Activate the SMTP email gateway (nodemailer). `SMTP_HOST` present ⇒ real send; unset ⇒ mock/no-op. Optional `SMTP_SUBJECT` default subject. | per provider |
 
+| `OBJECT_STORE_URL` (+ `OBJECT_STORE_TOKEN`/`OBJECT_STORE_PUBLIC_URL`) | if offloading blobs (receipt photos) | Base URL of an S3-compatible object store (S3/MinIO/R2) written via authorized HTTP PUT; `OBJECT_STORE_TOKEN` is the Bearer/presigned auth, `OBJECT_STORE_PUBLIC_URL` an optional CDN read base. Unset ⇒ blobs stay inline in the DB. | per provider |
+
 > **Per-tenant provider override.** The above LINE/SMS/SMTP env values are the **platform default**. A tenant
 > may register its **own** provider credentials via `PUT /api/messaging/providers/:channel` — stored
 > **AES-256-GCM encrypted at rest** in `tenant_messaging_config.config_enc` (guarded by `APP_ENC_KEY`,

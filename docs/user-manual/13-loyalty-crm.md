@@ -262,6 +262,12 @@ claim points by uploading a photo of the receipt.
 > permission); the same receipt (same member, date, and amount) cannot be claimed twice while a submission is
 > pending or approved — a rejected one can be resubmitted (e.g. with a clearer photo). *(LYL-17.)*
 
+> **Where the photos are stored.** By default receipt photos are kept in the database. For a large programme,
+> your administrator can connect **object storage** (an S3-compatible bucket; `OBJECT_STORE_URL`, see
+> `docs/ops/secrets.md`) — new photos are then stored there and only a reference is kept in the database, which
+> keeps the system fast as volume grows. Nothing changes for the member or reviewer. If a customer exercises
+> their right to be forgotten (PDPA), the stored photo is deleted along with their other personal data.
+
 ## Errors you might see
 
 | Code | Meaning | What to do |
@@ -305,3 +311,4 @@ claim points by uploading a photo of the receipt.
 | 1.7 | 2026-07-01 | Platform | §11 **LINE OA broadcast** — announce to all OA followers via `POST /api/messaging/broadcast-oa` (`marketing`/`exec`); targets the OA follower set (opt-out = unfollow), audit-logged in the message log. |
 | 1.8 | 2026-07-01 | Platform | §13 **CDP data export** — bulk member export (`GET /api/crm/export`, `marketing`/`exec`) with identity + RFM + consent flags for external CDP integration; paginated, tenant-scoped, read-only. DSAR stays separate. |
 | 1.9 | 2026-07-01 | Platform | §11 **Own messaging provider** — admins can connect the shop's own LINE OA / SMS sender / SMTP mailbox (`GET`/`PUT /api/messaging/providers/:channel`, `users`/`exec`); credentials encrypted + write-only, overriding the shared platform provider. |
+| 1.10 | 2026-07-01 | Platform | §14 **Receipt photos in object storage** — when an S3-compatible store is configured (`OBJECT_STORE_URL`), receipt photos are offloaded there (a reference is kept in the DB); transparent to member/reviewer; PDPA erasure deletes the object. |

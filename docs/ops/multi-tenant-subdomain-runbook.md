@@ -99,11 +99,12 @@ Infra is **shared** under Model A; the numbers below are the *dedicated* (Model 
 | Email (SES/SendGrid) | ~$0–20/mo small volume | same |
 | Ops/support labour | the real recurring cost — **not** the server | same |
 
-> ⚠️ **Receipt images scale note.** Receipt-upload photos are stored inline (base64) in Postgres today
-> (`loyalty_receipt_submissions.receipt_image`, ≤~2 MB each). For a large loyalty base (tens of thousands of
-> members submitting receipts), move image bytes to **object storage (S3-compatible)** and keep only a
-> reference in the DB before high-volume go-live — otherwise the DB grows fast and backups bloat. Tracked as
-> a pre-scale follow-up.
+> **Receipt images at scale.** Receipt-upload photos offload to **object storage** when configured: set
+> `OBJECT_STORE_URL` (+ `OBJECT_STORE_TOKEN`, optional `OBJECT_STORE_PUBLIC_URL`) and new submissions store
+> only a compact `objstore:<key>` reference instead of the base64 blob (`common/object-storage.ts`;
+> S3/MinIO/R2 via authorized HTTP PUT). Unset ⇒ images stay inline in Postgres (fine for small deployments).
+> For a large loyalty base (tens of thousands of receipts) configure the store **before** high-volume go-live
+> so the DB and backups don't bloat. Erasure (PDPA) deletes the object too.
 
 ## 8. Per-customer go-live checklist
 - [ ] Tenant provisioned (`code`, Admin user, industry CoA, fiscal year) — §3

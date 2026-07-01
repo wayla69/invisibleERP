@@ -10,7 +10,7 @@ export const loyaltyReceiptSubmissions = pgTable('loyalty_receipt_submissions', 
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   memberId: bigint('member_id', { mode: 'number' }).references(() => posMembers.id),
-  receiptImage: text('receipt_image').notNull(),          // data:image/* URL (mirrors item-images.ts, no S3)
+  receiptImage: text('receipt_image').notNull(),          // inline data:image/* URL, OR an `objstore:<key>` ref when object storage is configured (common/object-storage.ts)
   purchaseAmount: numeric('purchase_amount').notNull(),
   storeName: text('store_name'),
   purchaseDate: date('purchase_date'),
