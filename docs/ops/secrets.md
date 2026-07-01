@@ -38,6 +38,7 @@ webhook in the webhook handler).
 | `SMTP_HOST` (+ `SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`/`SMTP_SECURE`) | if email delivery is used | Activate the SMTP email gateway (nodemailer). `SMTP_HOST` present ⇒ real send; unset ⇒ mock/no-op. Optional `SMTP_SUBJECT` default subject. | per provider |
 
 | `OBJECT_STORE_URL` (+ `OBJECT_STORE_TOKEN`/`OBJECT_STORE_PUBLIC_URL`) | if offloading blobs (receipt photos) | Base URL of an S3-compatible object store (S3/MinIO/R2) written via authorized HTTP PUT; `OBJECT_STORE_TOKEN` is the Bearer/presigned auth, `OBJECT_STORE_PUBLIC_URL` an optional CDN read base. Unset ⇒ blobs stay inline in the DB. | per provider |
+| `CDP_WEBHOOK_URL` (+ `CDP_WEBHOOK_TOKEN`) | if the scheduled `cdp_export_sync` job pushes to a CDP | Ingest endpoint the member-snapshot batches are POSTed to (`common/cdp-sync.ts`); `CDP_WEBHOOK_TOKEN` is the optional Bearer auth. Unset ⇒ the job reports a `mock` push (no-op). | per provider |
 
 > **Per-tenant provider override.** The above LINE/SMS/SMTP env values are the **platform default**. A tenant
 > may register its **own** provider credentials via `PUT /api/messaging/providers/:channel` — stored

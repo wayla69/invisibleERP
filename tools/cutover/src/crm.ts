@@ -156,6 +156,13 @@ async function main() {
     auditRows.length >= 1 && auditRows.some((r: any) => r.actor === 'mgr1' && (r.meta?.rows ?? -1) >= 1),
     JSON.stringify({ n: auditRows.length, actor: auditRows.at(-1)?.actor }));
 
+  // ── 7e. Scheduled CDP sync job — pushes the member snapshot to the CDP (mock when unconfigured) ──
+  const cdpSub = await inj('POST', '/api/bi/subscriptions', mgr1, { name: 'CDP nightly', report_type: 'cdp_export_sync', frequency: 'daily' });
+  const cdpRun = await inj('POST', `/api/bi/subscriptions/${cdpSub.json.id}/run`, mgr1);
+  ok('CDP sync job: runs successfully, pushes the tenant member snapshot (1/1 to mock)',
+    cdpRun.status === 200 && cdpRun.json.status === 'success' && /CDP sync/.test(cdpRun.json.summary ?? '') && /1\/1/.test(cdpRun.json.summary ?? ''),
+    JSON.stringify({ status: cdpRun.json.status, summary: cdpRun.json.summary }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });
