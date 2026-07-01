@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq, and, sql, gt, lt, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { posMembers, posMemberLedger, loyaltyConfig, loyaltyRedemptions, memberCoupons, loyaltyPostingRuns } from '../../database/schema';
+import { posMembers, posMemberLedger, loyaltyConfig, loyaltyRedemptions, memberCoupons, loyaltyPostingRuns, customerProfiles } from '../../database/schema';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -72,6 +72,34 @@ export class LoyaltyAnalyticsService {
       churn_rate_pct: pct(Number(mem.atRisk ?? 0), activeTotal),
       active_rate_pct: pct(activeTotal, Number(mem.total ?? 0)),
     };
+  }
+
+  // RFM segment distribution — the "Customer Segmentation / Insights" view. Aggregates the materialised
+  // customer_profiles (populated by CrmService.refreshProfile) by rfm_segment: member count, total + average
+  // spend, total orders. Tenant-scoped like the rest; canonical five segments always present (0-filled) so
+  // the UI renders a stable set even before profiles are built. Members with no profile row group under
+  // 'Unsegmented' so the counts reconcile against the member base.
+  async segmentMix(user: JwtUser, explicitTenant?: number | null) {
+    const db = this.db as any; const tenantId = this.tid(user, explicitTenant);
+    const rows = await db.select({
+      segment: sql<string>`coalesce(${customerProfiles.rfmSegment}, 'Unsegmented')`,
+      members: sql<number>`count(*)`,
+      totalSpend: sql<string>`coalesce(sum(${customerProfiles.totalSpend}),0)`,
+      totalOrders: sql<string>`coalesce(sum(${customerProfiles.totalOrders}),0)`,
+    }).from(customerProfiles).where(eq(customerProfiles.tenantId, tenantId))
+      .groupBy(sql`coalesce(${customerProfiles.rfmSegment}, 'Unsegmented')`);
+
+    const CANON = ['Champions', 'Loyal', 'At Risk', 'Lost', 'New'];
+    const byKey = new Map<string, { members: number; total_spend: number; total_orders: number }>();
+    for (const r of rows) byKey.set(r.segment, { members: Number(r.members), total_spend: n(r.totalSpend), total_orders: Number(r.totalOrders) });
+    const keys = [...CANON, ...[...byKey.keys()].filter((k) => !CANON.includes(k))]; // canonical order, extras (incl. Unsegmented) after
+    const segments = keys.map((seg) => {
+      const v = byKey.get(seg) ?? { members: 0, total_spend: 0, total_orders: 0 };
+      return { segment: seg, members: v.members, total_spend: round2(v.total_spend), total_orders: v.total_orders, avg_spend: v.members > 0 ? round2(v.total_spend / v.members) : 0 };
+    });
+    const profiled = segments.filter((s) => s.segment !== 'Unsegmented').reduce((a, s) => a + s.members, 0);
+    const totalSpend = segments.reduce((a, s) => a + s.total_spend, 0);
+    return { tenant_id: tenantId, profiled_members: profiled, total_spend: round2(totalSpend), segments };
   }
 
   // At-risk members (dormant ≥90d with points worth retaining) — for win-back campaigns.

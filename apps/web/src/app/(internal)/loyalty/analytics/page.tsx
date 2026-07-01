@@ -20,6 +20,10 @@ interface Overview {
   breakage_rate_pct: number; churn_rate_pct: number; active_rate_pct: number;
 }
 interface Churn { at_risk: { id: number; member_code: string; name: string; tier: string; balance: number; last_activity: string }[] }
+interface Segments { profiled_members: number; total_spend: number; segments: { segment: string; members: number; total_spend: number; total_orders: number; avg_spend: number }[] }
+
+// RFM segment → colour (Champions best → Lost worst; Unsegmented neutral).
+const SEG_TONE: Record<string, string> = { Champions: 'bg-success', Loyal: 'bg-primary', New: 'bg-info', 'At Risk': 'bg-warning', Lost: 'bg-destructive', Unsegmented: 'bg-muted-foreground/40' };
 
 function Stat({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub?: string; tone?: string }) {
   return (
@@ -36,7 +40,9 @@ function Stat({ icon, label, value, sub, tone }: { icon: React.ReactNode; label:
 export default function LoyaltyAnalyticsPage() {
   const ov = useQuery<Overview>({ queryKey: ['loy-analytics'], queryFn: () => api('/api/loyalty/analytics') });
   const churn = useQuery<Churn>({ queryKey: ['loy-churn'], queryFn: () => api('/api/loyalty/analytics/churn?limit=20') });
+  const seg = useQuery<Segments>({ queryKey: ['loy-segments'], queryFn: () => api('/api/loyalty/analytics/segments') });
   const maxTier = ov.data ? Math.max(1, ...Object.values(ov.data.tier_mix)) : 1;
+  const maxSeg = seg.data ? Math.max(1, ...seg.data.segments.map((s) => s.members)) : 1;
 
   return (
     <div>
@@ -65,6 +71,25 @@ export default function LoyaltyAnalyticsPage() {
                     <span className="w-12 shrink-0 text-right text-sm tabular-nums">{num(c)}</span>
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+
+            <Card className="gap-3">
+              <CardHeader className="pb-0">
+                <CardTitle className="flex items-center gap-2 text-base"><BarChart3 className="size-4 text-primary" /> กลุ่มลูกค้า RFM (Customer segments)</CardTitle>
+                {seg.data && <p className="text-xs text-muted-foreground">จัดกลุ่มแล้ว {num(seg.data.profiled_members)} คน · ยอดซื้อรวม {baht(seg.data.total_spend)}</p>}
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <StateView q={seg}>
+                  {seg.data && seg.data.segments.map((s) => (
+                    <Link key={s.segment} href={`/crm?segment=${encodeURIComponent(s.segment)}`} className="flex items-center gap-3 rounded-md px-1 py-0.5 hover:bg-muted/50" title="เปิดใน CRM 360 เพื่อยิงแคมเปญกลุ่มนี้">
+                      <span className="w-20 shrink-0 text-sm">{s.segment}</span>
+                      <div className="h-3 flex-1 rounded-full bg-muted"><div className={`h-3 rounded-full ${SEG_TONE[s.segment] ?? 'bg-primary'}`} style={{ width: `${(s.members / maxSeg) * 100}%` }} /></div>
+                      <span className="w-10 shrink-0 text-right text-sm tabular-nums">{num(s.members)}</span>
+                      <span className="hidden w-28 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:inline">฿เฉลี่ย {num(s.avg_spend)}</span>
+                    </Link>
+                  ))}
+                </StateView>
               </CardContent>
             </Card>
 
