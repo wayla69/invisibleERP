@@ -16,7 +16,10 @@ type Channel = { channel: 'line' | 'sms' | 'email'; configured: boolean; enabled
 
 // The credential fields we collect per channel (write-only — never returned by the API).
 const FIELDS: Record<string, { key: string; label: string; placeholder?: string; type?: string }[]> = {
-  line: [{ key: 'token', label: 'Channel access token (LINE OA)', type: 'password' }],
+  line: [
+    { key: 'token', label: 'Channel access token (LINE OA)', type: 'password' },
+    { key: 'secret', label: 'Channel secret (สำหรับ webhook follow/unfollow) — ถ้ามี', type: 'password' },
+  ],
   sms: [
     { key: 'apiKey', label: 'API key', type: 'password' },
     { key: 'apiUrl', label: 'API endpoint (URL)', placeholder: 'https://…' },

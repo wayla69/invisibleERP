@@ -85,6 +85,11 @@ encrypted at rest** (`tenant_messaging_config.config_enc`, write-only, never ret
 back to the platform env creds (`LINE_CHANNEL_TOKEN`, `SMS_API_KEY`+`SMS_API_URL`, `SMTP_*` — see
 `secrets.md`); unset there too ⇒ mock. This removes the main reason to pick Model B for a "my own OA" customer.
 
+**Inbound LINE webhook (auto-enrol on follow).** Point each tenant's LINE OA webhook at
+`https://<api-host>/api/line/webhook/<tenantCode>` and set that tenant's **Channel Secret** on the Messaging
+providers screen (stored encrypted next to the token). Following the OA then auto-enrols a member; the webhook
+is authenticated per tenant by the Channel Secret (HMAC over the raw body) — one shared URL, no per-customer server.
+
 ## 7. Cost model (per customer, indicative — THB/month)
 
 Infra is **shared** under Model A; the numbers below are the *dedicated* (Model B) figures for comparison.
