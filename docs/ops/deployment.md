@@ -33,6 +33,8 @@ set its **config-as-code path** to its `railway.json` (monorepo: root directory 
 workspace install + lockfile resolve).
 First-deploy walkthrough (project + Postgres + the two services, env matrix, CORS/`NEXT_PUBLIC_API_URL`
 build-order, CI deploy): **`docs/ops/railway-setup.md`**.
+Onboarding **many customers on one shared deployment** — a private link (subdomain) + RLS-isolated data per
+customer, vs a dedicated stack — with a per-customer cost model: **`docs/ops/multi-tenant-subdomain-runbook.md`**.
 
 ### B. Containers (portable / local prod-like) — Dockerfiles + `docker-compose.yml`
 - `apps/api/Dockerfile`, `apps/web/Dockerfile` — multi-stage, non-root `node` user, `HEALTHCHECK`
@@ -94,3 +96,4 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
 | 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
+| 1.3 | 2026-07-01 | Platform | Link the multi-tenant "link-per-customer" onboarding runbook (`multi-tenant-subdomain-runbook.md`) — shared-deployment subdomain model (RLS-isolated) vs dedicated, tenant provisioning, wildcard DNS/TLS + cookie/CORS, and per-customer cost model. |
