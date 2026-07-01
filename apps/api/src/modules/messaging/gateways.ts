@@ -11,25 +11,39 @@ const rnd = () => Math.random().toString(36).slice(2, 12);
 export type MessageChannel = 'line' | 'sms' | 'email';
 export interface SendResult { status: 'sent' | 'failed'; provider: string; ref?: string; error?: string }
 
-// Read credentials at call time (not module-load) so a late-injected secret takes effect without a
-// restart — mirrors the payment-gateway resolver. A channel is "configured" iff its primary token is set:
-//   LINE  → LINE_CHANNEL_TOKEN   SMS → SMS_API_KEY (+ SMS_API_URL)   email → SMTP_HOST
-function channelToken(channel: MessageChannel): string | undefined {
-  return channel === 'line' ? process.env.LINE_CHANNEL_TOKEN : channel === 'sms' ? process.env.SMS_API_KEY : process.env.SMTP_HOST;
+// Optional per-tenant credential override. When a field is present it wins over the platform env default;
+// when absent the env value is used. Shapes: line {token}; sms {apiKey,apiUrl,sender?}; email {host,port?,
+// user?,pass?,from?,secure?,subject?}. Undefined ⇒ pure env behaviour (back-compat).
+export type ChannelCreds = Record<string, any>;
+
+// Merge per-tenant creds over the platform env for a channel. Reading env at call time (not module-load)
+// means a late-injected secret takes effect without a restart — mirrors the payment-gateway resolver.
+function mergeCreds(channel: MessageChannel, creds?: ChannelCreds) {
+  const e = process.env;
+  if (channel === 'line') return { token: creds?.token ?? e.LINE_CHANNEL_TOKEN };
+  if (channel === 'sms') return { apiKey: creds?.apiKey ?? e.SMS_API_KEY, apiUrl: creds?.apiUrl ?? e.SMS_API_URL, sender: creds?.sender ?? e.SMS_SENDER };
+  return {
+    host: creds?.host ?? e.SMTP_HOST, port: Number(creds?.port ?? e.SMTP_PORT ?? 587),
+    user: creds?.user ?? e.SMTP_USER, pass: creds?.pass ?? e.SMTP_PASS, from: creds?.from ?? e.SMTP_FROM,
+    secure: (creds?.secure ?? (e.SMTP_SECURE === 'true')) === true, subject: creds?.subject ?? e.SMTP_SUBJECT,
+  };
 }
 
-export function resolveMessageGateway(channel: MessageChannel) {
-  const token = channelToken(channel);
-  const configured = !!token;
+// A channel is "configured" iff its primary credential is present (from tenant creds or env):
+//   LINE → token   SMS → apiKey   email → host. Otherwise the gateway is a logged dev mock.
+export function resolveMessageGateway(channel: MessageChannel, creds?: ChannelCreds) {
+  const c: any = mergeCreds(channel, creds);
+  const primary = channel === 'line' ? c.token : channel === 'sms' ? c.apiKey : c.host;
+  const configured = !!primary;
   const provider = configured ? channel : 'mock';
   return {
     provider,
     async send(recipient: string, body: string): Promise<SendResult> {
-      // Each channel has a real client that activates once its env is set; until then all fall through to
-      // the dev mock so the delivery log + campaign flows work end-to-end without a provider account.
-      if (configured && channel === 'line') return sendLinePush(token!, recipient, body);
-      if (configured && channel === 'sms') return sendSms(token!, recipient, body);
-      if (configured && channel === 'email') return sendEmail(recipient, body);
+      // Each channel has a real client that activates once its credential is set (tenant override or env);
+      // until then all fall through to the dev mock so the delivery log + campaign flows work end-to-end.
+      if (configured && channel === 'line') return sendLinePush(c.token, recipient, body);
+      if (configured && channel === 'sms') return sendSms(c, recipient, body);
+      if (configured && channel === 'email') return sendEmail(c, recipient, body);
       return { status: 'sent', provider, ref: `${provider}_${rnd()}` };
     },
   };
@@ -55,18 +69,45 @@ async function sendLinePush(token: string, to: string, text: string): Promise<Se
   }
 }
 
+// LINE OA broadcast (https://api.line.me/v2/bot/message/broadcast) — pushes ONE message to EVERY follower of
+// the shop's Official Account. Unlike a per-member push/blast, there is no recipient list and no per-member
+// consent filter: the audience is LINE's OA follower set (consent = the user followed the OA; they opt out by
+// unfollowing). Use for public announcements. Errors return 'failed' (logged), never throw.
+export async function broadcastLine(token: string, text: string): Promise<SendResult> {
+  try {
+    const res = await fetch('https://api.line.me/v2/bot/message/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messages: [{ type: 'text', text: text.slice(0, 5000) }] }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      return { status: 'failed', provider: 'line', error: `LINE ${res.status} ${detail}`.trim().slice(0, 300) };
+    }
+    return { status: 'sent', provider: 'line', ref: res.headers.get('x-line-request-id') ?? `line_${rnd()}` };
+  } catch (e: any) {
+    return { status: 'failed', provider: 'line', error: String(e?.message ?? e).slice(0, 300) };
+  }
+}
+
+// Is the LINE push/broadcast channel configured (an OA channel token present)? Lets the service decide whether
+// a broadcast will really send or fall through to the mock (logged as sent).
+export function lineConfigured(): boolean {
+  return !!process.env.LINE_CHANNEL_TOKEN;
+}
+
 // SMS via a provider-agnostic HTTP REST call — works with most Thai bulk-SMS gateways (ThaiBulkSMS, Twilio,
 // AWS SNS proxies, …) that accept a JSON POST with a Bearer key. Endpoint + optional sender come from env so
 // no provider is hard-coded. Config: SMS_API_KEY (Bearer), SMS_API_URL (endpoint), SMS_SENDER (optional
 // alphanumeric sender id). Non-2xx / network errors return 'failed' (logged), never throw.
-async function sendSms(apiKey: string, to: string, text: string): Promise<SendResult> {
-  const url = process.env.SMS_API_URL;
+async function sendSms(c: { apiKey: string; apiUrl?: string; sender?: string }, to: string, text: string): Promise<SendResult> {
+  const url = c.apiUrl;
   if (!url) return { status: 'failed', provider: 'sms', error: 'SMS_API_URL not set' };
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ to, message: text.slice(0, 1000), ...(process.env.SMS_SENDER ? { sender: process.env.SMS_SENDER } : {}) }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.apiKey}` },
+      body: JSON.stringify({ to, message: text.slice(0, 1000), ...(c.sender ? { sender: c.sender } : {}) }),
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
@@ -82,27 +123,26 @@ async function sendSms(apiKey: string, to: string, text: string): Promise<SendRe
 // SMTP_PASS, SMTP_FROM (envelope from), SMTP_SECURE ('true' ⇒ implicit TLS/465). Convention: if the body has
 // a first line followed by a blank line it is used as the Subject and the remainder as the text body; else a
 // default subject applies. Transport is cached per host:port so a blast reuses one pool. Errors → 'failed'.
+interface EmailCreds { host: string; port: number; user?: string; pass?: string; from?: string; secure: boolean; subject?: string }
 let mailer: { key: string; tx: Transporter } | null = null;
-function transport(): Transporter {
-  const host = process.env.SMTP_HOST!;
-  const port = Number(process.env.SMTP_PORT ?? 587);
-  const key = `${host}:${port}:${process.env.SMTP_USER ?? ''}`;
+function transport(c: EmailCreds): Transporter {
+  const key = `${c.host}:${c.port}:${c.user ?? ''}:${c.secure}`;
   if (mailer?.key === key) return mailer.tx;
   const tx = nodemailer.createTransport({
-    host, port, secure: process.env.SMTP_SECURE === 'true',
-    ...(process.env.SMTP_USER ? { auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS ?? '' } } : {}),
+    host: c.host, port: c.port, secure: c.secure,
+    ...(c.user ? { auth: { user: c.user, pass: c.pass ?? '' } } : {}),
   });
   mailer = { key, tx };
   return tx;
 }
 
-async function sendEmail(to: string, body: string): Promise<SendResult> {
+async function sendEmail(c: EmailCreds, to: string, body: string): Promise<SendResult> {
   const nl = body.indexOf('\n\n');
-  const subject = nl > 0 ? body.slice(0, nl).trim().slice(0, 200) : (process.env.SMTP_SUBJECT ?? 'แจ้งข่าวสาร');
+  const subject = nl > 0 ? body.slice(0, nl).trim().slice(0, 200) : (c.subject ?? 'แจ้งข่าวสาร');
   const text = nl > 0 ? body.slice(nl + 2) : body;
-  const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? 'no-reply@localhost';
+  const from = c.from ?? c.user ?? 'no-reply@localhost';
   try {
-    const info = await transport().sendMail({ from, to, subject, text });
+    const info = await transport(c).sendMail({ from, to, subject, text });
     return { status: 'sent', provider: 'email', ref: info.messageId ?? `email_${rnd()}` };
   } catch (e: any) {
     return { status: 'failed', provider: 'email', error: String(e?.message ?? e).slice(0, 300) };

@@ -210,3 +210,17 @@ export const featureFlags = pgTable('feature_flags', {
   enabled: boolean('enabled').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uq: uniqueIndex('uq_feature_flag').on(t.tenantId, t.flagKey) }));
+
+// Per-tenant messaging provider credentials (LINE OA token / SMS key+url / SMTP mailbox). One row per
+// (tenant, channel). The provider secrets are AES-256-GCM encrypted at rest in `config_enc` (write-only,
+// never returned to the UI) — a tenant that configures its own LINE OA / SMS sender overrides the shared
+// platform env default; unset ⇒ fall back to env ⇒ mock. RLS (tenant_id) via the migration loop.
+export const tenantMessagingConfig = pgTable('tenant_messaging_config', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }),
+  channel: text('channel').notNull(),      // 'line' | 'sms' | 'email'
+  configEnc: text('config_enc'),           // encrypt(JSON.stringify(creds)) — write-only
+  enabled: boolean('enabled').notNull().default(true),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  updatedBy: text('updated_by'),
+}, (t) => ({ uq: uniqueIndex('uq_tenant_messaging_channel').on(t.tenantId, t.channel) }));

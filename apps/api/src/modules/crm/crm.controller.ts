@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, ParseIntPipe, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { CrmService } from './crm.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -39,6 +39,23 @@ export class CrmController {
   @Permissions('crm')
   branchKpi(@CurrentUser() user: JwtUser) {
     return this.crm.branchKpi(user);
+  }
+
+  // GET /api/crm/export — bulk customer-data export for an external CDP (identity + RFM + consent). Paginated,
+  // tenant-scoped (HQ/Admin pass ?tenant_id). Read-only; ships consent flags so the CDP honours opt-outs.
+  @Get('export')
+  @Permissions('marketing', 'exec')
+  exportForCdp(
+    @Query('tenant_id') tenantId: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @Query('offset') offset: string | undefined,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.crm.exportForCdp(user, {
+      tenantId: tenantId != null ? Number(tenantId) : null,
+      limit: limit != null ? Number(limit) : undefined,
+      offset: offset != null ? Number(offset) : undefined,
+    });
   }
 
   // POST /api/crm/audience-rules — create/update targeting rule (AI personalization)

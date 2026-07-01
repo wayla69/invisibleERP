@@ -76,12 +76,14 @@ visibility (Labs, module toggles) is covered by `feature_flags` (per-tenant) and
 (system-wide) — see `permissions.ts` and `docs/process-narratives/27-platform-customization.md`.
 
 ## 6. Messaging providers per customer
-Loyalty/CRM outbound (LINE / SMS / email) is env-driven and **shared at the deployment level**
-(`messaging/gateways.ts`, `secrets.md`): `LINE_CHANNEL_TOKEN`, `SMS_API_KEY`+`SMS_API_URL`, `SMTP_*`. On a
-shared deployment all tenants use the platform's configured providers (the shop's identity rides in the
-message body / LINE OA). **If a customer needs their own LINE OA / SMS sender**, that is per-tenant provider
-credentials — a follow-up (store provider keys per tenant and resolve them in the gateway) or a reason to
-choose Model B for that customer.
+Loyalty/CRM outbound (LINE / SMS / email) resolves **per-tenant credentials first, then the platform env
+default, then a logged mock** (`messaging/gateways.ts` + `TenantMessagingService`). So on a shared
+deployment a customer can use **their own LINE OA token / SMS sender / SMTP mailbox**: an admin sets them via
+`PUT /api/messaging/providers/:channel` (`{creds, enabled}`, perms `users`/`exec`) — stored **AES-256-GCM
+encrypted at rest** (`tenant_messaging_config.config_enc`, write-only, never returned; `GET
+/api/messaging/providers` shows only which channels are configured/enabled). A tenant that sets nothing falls
+back to the platform env creds (`LINE_CHANNEL_TOKEN`, `SMS_API_KEY`+`SMS_API_URL`, `SMTP_*` — see
+`secrets.md`); unset there too ⇒ mock. This removes the main reason to pick Model B for a "my own OA" customer.
 
 ## 7. Cost model (per customer, indicative — THB/month)
 
@@ -97,11 +99,12 @@ Infra is **shared** under Model A; the numbers below are the *dedicated* (Model 
 | Email (SES/SendGrid) | ~$0–20/mo small volume | same |
 | Ops/support labour | the real recurring cost — **not** the server | same |
 
-> ⚠️ **Receipt images scale note.** Receipt-upload photos are stored inline (base64) in Postgres today
-> (`loyalty_receipt_submissions.receipt_image`, ≤~2 MB each). For a large loyalty base (tens of thousands of
-> members submitting receipts), move image bytes to **object storage (S3-compatible)** and keep only a
-> reference in the DB before high-volume go-live — otherwise the DB grows fast and backups bloat. Tracked as
-> a pre-scale follow-up.
+> **Receipt images at scale.** Receipt-upload photos offload to **object storage** when configured: set
+> `OBJECT_STORE_URL` (+ `OBJECT_STORE_TOKEN`, optional `OBJECT_STORE_PUBLIC_URL`) and new submissions store
+> only a compact `objstore:<key>` reference instead of the base64 blob (`common/object-storage.ts`;
+> S3/MinIO/R2 via authorized HTTP PUT). Unset ⇒ images stay inline in Postgres (fine for small deployments).
+> For a large loyalty base (tens of thousands of receipts) configure the store **before** high-volume go-live
+> so the DB and backups don't bloat. Erasure (PDPA) deletes the object too.
 
 ## 8. Per-customer go-live checklist
 - [ ] Tenant provisioned (`code`, Admin user, industry CoA, fiscal year) — §3

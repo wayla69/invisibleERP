@@ -3,6 +3,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { dsarRequests, pdpaErasures, posMembers, memberConsents, loyaltyReceiptSubmissions } from '../../database/schema';
 import { posMemberLedger } from '../../database/schema/loyalty-members';
+import { objectUrl, deleteObject } from '../../common/object-storage';
 import type { JwtUser } from '../../common/decorators';
 
 const REQUEST_TYPES = ['access', 'rectification', 'erasure', 'portability', 'objection'] as const;
@@ -86,7 +87,7 @@ export class PdpaService {
       profile: { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, email: m.email, line_user_id: m.lineUserId, birthday: m.birthday, tier: m.tier, balance: m.balance, marketing_opt_in: m.marketingOptIn, enrolled_at: m.enrolledAt },
       consents: consents.map((c: any) => ({ purpose: c.purpose, granted: c.granted, granted_at: c.grantedAt, withdrawn_at: c.withdrawnAt })),
       points_ledger: ledger.map((l: any) => ({ ts: l.txnDate, type: l.txnType, points: l.points, balance_after: l.balanceAfter })),
-      receipt_submissions: receipts.map((r: any) => ({ id: Number(r.id), status: r.status, receipt_image: r.receiptImage, purchase_amount: r.purchaseAmount, store_name: r.storeName, purchase_date: r.purchaseDate, note: r.note, submitted_at: r.submittedAt, reviewed_at: r.reviewedAt })),
+      receipt_submissions: receipts.map((r: any) => ({ id: Number(r.id), status: r.status, receipt_image: objectUrl(r.receiptImage), purchase_amount: r.purchaseAmount, store_name: r.storeName, purchase_date: r.purchaseDate, note: r.note, submitted_at: r.submittedAt, reviewed_at: r.reviewedAt })),
     };
   }
 
@@ -129,6 +130,10 @@ export class PdpaService {
     // 2b. Redact receipt-upload submissions (LYL-17) — the photo + freeform fields are personal data, redacted
     //    in place (not append-only, unlike audit_log) directly on the row. purchase_amount/status/ref_doc stay
     //    (transactional facts already reflected in the points ledger, not identifiers), same as balance/tier.
+    //    When the photo bytes were offloaded to object storage, also delete the object (best-effort) so erasure
+    //    is complete — not just the DB reference.
+    const imgs = await db.select({ img: loyaltyReceiptSubmissions.receiptImage }).from(loyaltyReceiptSubmissions).where(eq(loyaltyReceiptSubmissions.memberId, Number(m.id)));
+    for (const row of imgs) await deleteObject(row.img);
     await db.update(loyaltyReceiptSubmissions).set({ receiptImage: '[erased]', storeName: null, note: null }).where(eq(loyaltyReceiptSubmissions.memberId, Number(m.id)));
     // 3. Record the erasure ledger row (drives audit pseudonymisation).
     await db.insert(pdpaErasures).values({

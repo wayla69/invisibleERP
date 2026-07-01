@@ -186,11 +186,22 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > send is **idempotent** (a campaign can't be sent twice — a second send is rejected); and every recipient is
 > recorded in the message log. *(MKT-10.)*
 
+> **LINE OA broadcast (ประกาศถึงผู้ติดตามทั้งหมด).** To announce something to **everyone who follows your LINE
+> Official Account** — not just enrolled members — use the OA broadcast (`POST /api/messaging/broadcast-oa`,
+> permission `marketing`/`exec`). It sends one message to all followers at once. Note: because it targets your
+> OA's followers (not member records), it does **not** apply the per-member marketing opt-out — a follower
+> opts out by unfollowing the OA. Every broadcast is recorded in the message log for audit.
+
 > **Channel delivery:** LINE, SMS, and Email all deliver for real once the workspace has that channel's
 > provider configured (LINE Official Account token, an SMS provider key, or an SMTP mailbox — set by your
 > administrator; see `docs/ops/secrets.md`). Until a channel is configured it runs in **demo mode**: the send
 > is logged as *sent* but no message actually leaves — check the message log's **provider** column (`mock` =
 > demo, the channel name = live).
+>
+> **Use your own provider.** An admin can connect this shop's **own** LINE Official Account / SMS sender /
+> email mailbox (`GET`/`PUT /api/messaging/providers/:channel`, permission `users`/`exec`) so messages go out
+> under your brand. Credentials are stored encrypted and are write-only — the screen shows only which channels
+> are connected, never the keys. If you set nothing, the platform's shared provider (or demo mode) is used.
 
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
@@ -212,6 +223,17 @@ For managers — **วิเคราะห์ลอยัลตี้** (`/loya
 **breakage rate** (points that expired), the **tier mix**, the **active rate**, and **churn risk** — members who
 have been dormant for 90+ days but still hold points, ready for a **win-back** campaign. Read-only; HQ users pick
 a shop.
+
+**Live points feed.** Every time a member earns or redeems points (at the till, online, or on an approved
+receipt), a real-time signal is pushed to the executive **live dashboard** (`/bi`, the live/offline badge) —
+no refresh needed. It's a monitoring signal only; the authoritative record stays the member's points ledger.
+
+**Export to a CDP (Customer Data Platform).** To load your customer base into an external marketing/CDP tool,
+use the data export (`GET /api/crm/export`, permission `marketing`/`exec`). It returns the active members with
+their identity, RFM segment/traits, points, and **consent flags** (marketing/LINE/SMS/email) — paginated
+(`limit`/`offset`). The consent flags travel with each record so the receiving system can respect opt-outs; the
+export only reads data, it never sends messages. For a single customer's data request or erasure (PDPA/DSAR),
+use the privacy tools instead — this bulk export is for analytics/CDP integration.
 
 **Customer segments (RFM).** The **กลุ่มลูกค้า RFM** panel shows how your members split across the five RFM
 segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
@@ -239,6 +261,12 @@ claim points by uploading a photo of the receipt.
 > Controls: a member can never approve their own submission (the member app token carries no approval
 > permission); the same receipt (same member, date, and amount) cannot be claimed twice while a submission is
 > pending or approved — a rejected one can be resubmitted (e.g. with a clearer photo). *(LYL-17.)*
+
+> **Where the photos are stored.** By default receipt photos are kept in the database. For a large programme,
+> your administrator can connect **object storage** (an S3-compatible bucket; `OBJECT_STORE_URL`, see
+> `docs/ops/secrets.md`) — new photos are then stored there and only a reference is kept in the database, which
+> keeps the system fast as volume grows. Nothing changes for the member or reviewer. If a customer exercises
+> their right to be forgotten (PDPA), the stored photo is deleted along with their other personal data.
 
 ## Errors you might see
 
@@ -279,3 +307,8 @@ claim points by uploading a photo of the receipt.
 | 1.3 | 2026-07-01 | Platform | Added §14 **Receipt upload for points** (`/m` upload, `/loyalty/receipt-approvals` staff review) — a member claims points for a purchase made outside our POS by submitting a photo + amount; staff approve (grants points the same way a POS sale does) or reject. New error codes `BAD_IMAGE`/`IMAGE_TOO_LARGE`, `DUPLICATE_RECEIPT`, `RECEIPT_ALREADY_REVIEWED`. (LYL-17.) |
 | 1.4 | 2026-07-01 | Platform | §11 **Campaigns — real SMS/Email delivery.** Documented that LINE/SMS/Email now deliver for real once the workspace has that channel's provider configured (admin sets the LINE token / SMS key / SMTP mailbox); until then a channel runs in **demo mode** (logged as *sent*, provider `mock`). No change to campaign steps or consent controls. |
 | 1.5 | 2026-07-01 | Platform | §13 **Customer segments (RFM) panel** on Loyalty analytics — member count + average spend per RFM segment (Champions/Loyal/New/At Risk/Lost, plus Unsegmented), click-through to a pre-filtered CRM 360 campaign. New read-only endpoint `GET /api/loyalty/analytics/segments` (perms `loyalty`/`marketing`/`exec`, tenant-scoped). |
+| 1.6 | 2026-07-01 | Platform | §13 **Live points feed** — earn/redeem now push a real-time `loyalty_points` signal to the exec live dashboard (`/bi`); monitoring only, ledger remains authoritative. |
+| 1.7 | 2026-07-01 | Platform | §11 **LINE OA broadcast** — announce to all OA followers via `POST /api/messaging/broadcast-oa` (`marketing`/`exec`); targets the OA follower set (opt-out = unfollow), audit-logged in the message log. |
+| 1.8 | 2026-07-01 | Platform | §13 **CDP data export** — bulk member export (`GET /api/crm/export`, `marketing`/`exec`) with identity + RFM + consent flags for external CDP integration; paginated, tenant-scoped, read-only. DSAR stays separate. |
+| 1.9 | 2026-07-01 | Platform | §11 **Own messaging provider** — admins can connect the shop's own LINE OA / SMS sender / SMTP mailbox (`GET`/`PUT /api/messaging/providers/:channel`, `users`/`exec`); credentials encrypted + write-only, overriding the shared platform provider. |
+| 1.10 | 2026-07-01 | Platform | §14 **Receipt photos in object storage** — when an S3-compatible store is configured (`OBJECT_STORE_URL`), receipt photos are offloaded there (a reference is kept in the DB); transparent to member/reviewer; PDPA erasure deletes the object. |

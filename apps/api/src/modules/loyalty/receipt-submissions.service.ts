@@ -1,9 +1,11 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { loyaltyReceiptSubmissions, posMembers } from '../../database/schema';
 import { n } from '../../database/queries';
 import { isUniqueViolation } from '../../common/db-error';
+import { objectStoreConfigured, putObject, objectUrl } from '../../common/object-storage';
 import type { JwtUser } from '../../common/decorators';
 import { MemberService } from './member.service';
 
@@ -30,9 +32,18 @@ export class ReceiptSubmissionsService {
     const db = this.db as any;
     const cfg = await this.member.config();
     const claimedPreview = cfg.enabled ? Math.floor(amount * cfg.pointsPerBaht) : 0;
+    // Offload the image bytes to object storage when configured, persisting only a compact `objstore:<key>`
+    // reference (keeps the megabyte blob out of the frequently-queried submissions table). Falls back to the
+    // inline data URL when storage is unset or the upload fails — no behaviour change for existing deploys.
+    let stored = dto.receipt_image;
+    if (objectStoreConfigured()) {
+      const key = `receipts/${user.tenantId}/${user.memberId}/${randomUUID()}`;
+      const ref = await putObject(key, dto.receipt_image);
+      if (ref) stored = ref;
+    }
     try {
       const [row] = await db.insert(loyaltyReceiptSubmissions).values({
-        tenantId: user.tenantId, memberId: user.memberId, receiptImage: dto.receipt_image, purchaseAmount: String(amount),
+        tenantId: user.tenantId, memberId: user.memberId, receiptImage: stored, purchaseAmount: String(amount),
         storeName: dto.store_name ?? null, purchaseDate: dto.purchase_date ?? null, note: dto.note ?? null,
         claimedPointsPreview: String(claimedPreview), status: 'Pending', createdBy: user.username,
       }).returning();
@@ -95,7 +106,8 @@ export class ReceiptSubmissionsService {
 
 function shape(r: any) {
   return {
-    id: Number(r.id), member_id: Number(r.memberId), receipt_image: r.receiptImage, purchase_amount: n(r.purchaseAmount),
+    // Resolve an `objstore:<key>` reference to a retrievable URL; inline data URLs pass through unchanged.
+    id: Number(r.id), member_id: Number(r.memberId), receipt_image: objectUrl(r.receiptImage), purchase_amount: n(r.purchaseAmount),
     store_name: r.storeName, purchase_date: r.purchaseDate, note: r.note, claimed_points_preview: n(r.claimedPointsPreview),
     status: r.status, submitted_at: r.submittedAt, reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt,
     reject_reason: r.rejectReason, ref_doc: r.refDoc,

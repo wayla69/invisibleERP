@@ -1457,6 +1457,13 @@
       "when": 2023820000034,
       "tag": "0207_loyalty_receipt_submissions",
       "breakpoints": true
+    },
+    {
+      "idx": 208,
+      "version": "7",
+      "when": 2023820000035,
+      "tag": "0208_tenant_messaging_config",
+      "breakpoints": true
     }
   ]
 }
