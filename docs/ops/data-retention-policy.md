@@ -14,7 +14,7 @@ and [DPA](../legal/data-processing-agreement.md).
 | **Financial / accounting records** | GL entries, AR/AP, invoices, payments, tax docs | **`<<7 years>>`** (Thai accounting/tax statute) — **LEGAL HOLD, never auto-purged** | Manual, post-statute only, with sign-off |
 | **Audit trail** | `audit_log` (append-only, hash-chained), `data_change_log` | **`<<7 years>>`** — **LEGAL HOLD, immutable, never auto-purged** | Manual archival post-statute only |
 | **Operational transactional** | POS sales, inventory movements, orders | `<<per contract, typically 5–7 years>>` | Manual/archival; not auto-purged |
-| **Member / customer PII** | `pos_members`, contacts, consents | While the relationship is active; on PDPA **erasure** request → redacted + pseudonymised immediately | PDPA DSAR erasure workflow (`/api/pdpa/dsar`) |
+| **Member / customer PII** | `pos_members`, contacts, consents, `loyalty_receipt_submissions` (member-submitted receipt photos, LYL-17) | While the relationship is active; on PDPA **erasure** request → redacted + pseudonymised immediately | PDPA DSAR erasure workflow (`/api/pdpa/dsar`) |
 | **Ephemeral security tokens** | `revoked_tokens`, `refresh_tokens`, `sso_login_state`, `member_otps` | Until expiry/consumption (minutes–days) | **Auto-purged** by the scheduled `data_retention_purge` job once dead |
 | **Backups** | DB snapshots | **`<<90 days>>`** rolling | Automatic backup rotation |
 | **AI token usage** | `ai_token_usage` (daily counters) | `<<13 months>>` (trend/billing) | Auto-purge candidate (future) |
@@ -51,3 +51,4 @@ This policy is reviewed `<<annually>>` and on any change to statutory requiremen
 | Version | Date | Author | Notes |
 | --- | --- | --- | --- |
 | 0.1 DRAFT | 2026-06-29 | Platform | Initial policy (panel/legal remediation): retention schedule by data class, statutory legal hold on financial + audit data (excluded from auto-purge, reconciled with PDPA erasure via read-time masking), and the safe automated `data_retention_purge` of dead ephemeral security tokens. Retention periods `<<…>>` pending statutory/contract confirmation. |
+| 0.2 | 2026-07-01 | Platform | Added `loyalty_receipt_submissions` (member-submitted receipt photos, LYL-17) to the Member/customer PII row — same treatment as other member PII (kept while active; redacted on PDPA erasure via `/api/pdpa/dsar`). |
