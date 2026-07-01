@@ -109,6 +109,17 @@ async function main() {
   const view = await inj('GET', `/api/crm/profile/${memberId}`, mgr1);
   ok('360 view: member + crm profile + recent_orders', view.json.member?.id === memberId && view.json.crm?.rfm_segment === 'New' && Array.isArray(view.json.recent_orders) && view.json.recent_orders.length === 1, JSON.stringify({ seg: view.json.crm?.rfm_segment, orders: view.json.recent_orders?.length }));
 
+  // ── 7a2. Real-time loyalty tick: the earn (channel confirm) published a loyalty_points event to BiLive ──
+  const live1 = await inj('GET', '/api/bi/live/recent?limit=50', mgr1);
+  const earnEv = (live1.json.events ?? []).find((e: any) => e.type === 'loyalty_points' && e.kind === 'earn' && e.member_id === memberId);
+  ok('Real-time: earn published a loyalty_points tick (kind=earn, member_id, points>0) to the live feed',
+    live1.status === 200 && !!earnEv && earnEv.points > 0, JSON.stringify({ found: !!earnEv, points: earnEv?.points }));
+  // RLS: T2 (exec on its own tenant) never sees T1's loyalty tick on the tenant-filtered feed.
+  const liveT2 = await inj('GET', '/api/bi/live/recent?limit=50', mgr2);
+  ok('Real-time: T2 live feed excludes T1 loyalty_points ticks (tenant-filtered)',
+    liveT2.status === 200 && !(liveT2.json.events ?? []).some((e: any) => e.type === 'loyalty_points' && e.member_id === memberId),
+    JSON.stringify({ t2: (liveT2.json.events ?? []).filter((e: any) => e.type === 'loyalty_points').length }));
+
   // ── 7b. RFM segment distribution (Customer Segmentation / Insights) ──
   const segs = await inj('GET', '/api/loyalty/analytics/segments', mgr1);
   const segList = (segs.json.segments ?? []) as { segment: string; members: number }[];

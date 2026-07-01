@@ -65,6 +65,12 @@ and lateness signal. Extends `mfg-depth`; reuses `routings`/`routing_operations`
 > subscribes through the existing `useRealtime` hook (cookie-auth SSE) and live-refreshes its KPIs with a
 > live/offline badge. No migration, no control. Harness `tools/cutover/src/bi.ts` (publish → `recent()`
 > returns the event; tenant-isolated). 28/28.
+>
+> **Publishers (2026-07-01):** besides `kpi_refresh`, the bus now carries `project_action` (PMO action
+> center) and **`loyalty_points`** — `MemberService.earnInTx`/`redeemInTx` publish a best-effort tick
+> (`{ kind:'earn'|'redeem', member_id, points, balance_after, ref_doc }`) so an exec live dashboard sees
+> points movement as it happens. Best-effort + tenant-filtered; never a control (a post-publish rollback is
+> tolerable on the in-memory advisory bus). Harness: `crm.ts` (earn → `recent()` tick; T2 tenant-isolated).
 
 
 **Goal:** push live KPI/business-event updates to the dashboard instead of polling. Reuses the proven SSE bus.

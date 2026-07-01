@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc, or, sql, ilike, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, posMemberLedger, loyaltyConfig, memberConsents, customerProfiles, loyaltyPostingRuns, loyaltyTiers, loyaltyTierHistory } from '../../database/schema';
 import { n } from '../../database/queries';
 import { LedgerService } from '../ledger/ledger.service';
+import { BiLiveService } from '../bi/bi-live.service';
 import type { JwtUser } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
 import { verifyLineIdToken } from './line-auth';
@@ -15,7 +16,15 @@ export class MemberService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly ledger: LedgerService,
+    // Optional so partial harnesses that don't wire BiLiveModule still construct. Real-time ticks are a
+    // best-effort advisory signal (in-memory bus) — never a control; a rollback after publish is tolerable.
+    @Optional() private readonly live?: BiLiveService,
   ) {}
+
+  // Emit a live points-movement tick to the BiLive SSE bus (best-effort; the bus is optional + in-memory).
+  private tick(tenantId: number, kind: 'earn' | 'redeem', memberId: number, points: number, balanceAfter: number, refDoc: string) {
+    try { this.live?.publish({ type: 'loyalty_points', tenant_id: tenantId, kind, member_id: memberId, points, balance_after: balanceAfter, ref_doc: refDoc }); } catch { /* bus optional */ }
+  }
 
   async config() {
     const db = this.db as any;
@@ -150,6 +159,7 @@ export class MemberService {
     const bal = n(m?.balance) + pts; const life = n(m?.lifetime) + pts;
     await tx.update(posMembers).set({ balance: String(bal), lifetime: String(life), lastUpdated: new Date() }).where(eq(posMembers.id, memberId));
     await tx.insert(posMemberLedger).values({ tenantId, memberId, txnType: 'Earn', points: String(pts), balanceAfter: String(bal), refDoc: saleNo, createdBy });
+    this.tick(tenantId, 'earn', memberId, pts, bal, saleNo);
     return pts;
   }
 
@@ -172,6 +182,7 @@ export class MemberService {
     const bal = n(m.balance) - points;
     await tx.update(posMembers).set({ balance: String(bal), lastUpdated: new Date() }).where(eq(posMembers.id, memberId));
     await tx.insert(posMemberLedger).values({ tenantId, memberId, txnType: 'Redeem', points: String(-points), redeemValue: String(round2(redeemValue)), balanceAfter: String(bal), refDoc: saleNo, createdBy });
+    this.tick(tenantId, 'redeem', memberId, points, bal, saleNo);
     return points;
   }
 
