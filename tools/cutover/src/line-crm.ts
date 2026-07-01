@@ -143,6 +143,13 @@ async function main() {
     sendBob.json.status === 'sent' && linePushes.length === pushBefore + 1 && lastPush!.auth.includes('tenant-line-tok-999') && !lastPush!.auth.includes('test-line-push-token'),
     JSON.stringify({ status: sendBob.json.status, usedTenant: lastPush?.auth.includes('tenant-line-tok-999') }));
 
+  // ── 11. Provider "send test" — delivers a canned message via the resolved (tenant) provider ──
+  const testBefore = linePushes.length;
+  const testRes = await inj('POST', '/api/messaging/providers/line/test', token, { to: 'Utest-recipient' });
+  ok('provider test-send → sent via the tenant provider (captured push to the given recipient)',
+    testRes.json.status === 'sent' && linePushes.length === testBefore + 1 && linePushes.at(-1)!.to === 'Utest-recipient' && linePushes.at(-1)!.auth.includes('tenant-line-tok-999'),
+    JSON.stringify({ status: testRes.json.status, to: linePushes.at(-1)?.to }));
+
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

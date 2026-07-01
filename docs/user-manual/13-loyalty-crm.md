@@ -199,9 +199,11 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > demo, the channel name = live).
 >
 > **Use your own provider.** An admin can connect this shop's **own** LINE Official Account / SMS sender /
-> email mailbox (`GET`/`PUT /api/messaging/providers/:channel`, permission `users`/`exec`) so messages go out
-> under your brand. Credentials are stored encrypted and are write-only — the screen shows only which channels
-> are connected, never the keys. If you set nothing, the platform's shared provider (or demo mode) is used.
+> email mailbox on the **ผู้ให้บริการข้อความ** screen (**Settings → Integrations → Messaging providers**,
+> `/settings/messaging`, permission `users`/`exec`) so messages go out under your brand. Enter the credentials,
+> press **บันทึก**, then use **ส่งทดสอบ** to send a test message and confirm delivery. Credentials are stored
+> encrypted and are write-only — the screen shows only which channels are connected, never the keys. If you set
+> nothing, the platform's shared provider (or demo mode) is used.
 
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
@@ -312,3 +314,4 @@ claim points by uploading a photo of the receipt.
 | 1.8 | 2026-07-01 | Platform | §13 **CDP data export** — bulk member export (`GET /api/crm/export`, `marketing`/`exec`) with identity + RFM + consent flags for external CDP integration; paginated, tenant-scoped, read-only. DSAR stays separate. |
 | 1.9 | 2026-07-01 | Platform | §11 **Own messaging provider** — admins can connect the shop's own LINE OA / SMS sender / SMTP mailbox (`GET`/`PUT /api/messaging/providers/:channel`, `users`/`exec`); credentials encrypted + write-only, overriding the shared platform provider. |
 | 1.10 | 2026-07-01 | Platform | §14 **Receipt photos in object storage** — when an S3-compatible store is configured (`OBJECT_STORE_URL`), receipt photos are offloaded there (a reference is kept in the DB); transparent to member/reviewer; PDPA erasure deletes the object. |
+| 1.11 | 2026-07-01 | Platform | §11 **Messaging providers screen** (`/settings/messaging`) — admin UI to connect the shop's own LINE OA / SMS / SMTP credentials with a **ส่งทดสอบ** (send-test) button; new nav item under Settings → Integrations. |

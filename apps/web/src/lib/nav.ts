@@ -482,6 +482,7 @@ export const INTERNAL_NAV: NavGroup[] = [
         defaultOpen: false, // integration/developer tooling — collapsed by default
         items: [
           { label: 'nav.connectors', href: '/connectors', icon: Cable, perms: ['users', 'exec'] },
+          { label: 'nav.messaging_providers', href: '/settings/messaging', icon: MessageSquare, perms: ['users', 'exec'] },
           { label: 'nav.webhooks', href: '/webhooks', icon: Webhook, perms: ['users'] },
           { label: 'nav.developer', href: '/developer', icon: Code, perms: ['users'] },
           { label: 'nav.migration', href: '/migration', icon: Upload, perms: ['masterdata', 'users', 'exec'] },

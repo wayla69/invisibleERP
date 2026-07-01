@@ -85,6 +85,15 @@ export class MessagingService {
     return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: dto.body, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, error: res.error ?? null });
   }
 
+  // Send a canned test message through the channel's resolved provider (per-tenant creds → env → mock), so an
+  // admin can verify a newly-configured provider actually delivers. Audit-logged like any send.
+  async sendTest(channel: MessageChannel, to: string, user: JwtUser) {
+    const creds = await this.creds(user, channel);
+    const gw = resolveMessageGateway(channel, creds ?? undefined);
+    const res = await gw.send(to, `ทดสอบการส่งข้อความจากระบบ (${channel})`);
+    return this.record(user, { memberId: null, channel, recipient: to, body: '[provider test]', campaign: 'provider_test', status: res.status, provider: res.provider, error: res.error ?? null });
+  }
+
   async log(_user: JwtUser, limit = 100) {
     const db = this.db as any;
     const rows = await db.select().from(messageLog).orderBy(desc(messageLog.id)).limit(limit);

@@ -8,6 +8,7 @@ import { TenantMessagingService } from './tenant-messaging.service';
 const channel = z.enum(['line', 'sms', 'email']);
 // Per-tenant provider credentials (write-only). Shapes are loose (per-channel fields validated server-side).
 const ProviderBody = z.object({ creds: z.record(z.any()), enabled: z.boolean().optional() });
+const TestBody = z.object({ to: z.string().min(1).max(200) });
 const SendBody = z.object({ member_id: z.number().int().positive().optional(), to: z.string().optional(), channel, body: z.string().min(1).max(1000), campaign: z.string().optional() })
   .refine((d) => d.member_id != null || d.to != null, { message: 'member_id or to required' });
 const BlastBody = z.object({ audience: z.enum(['all', 'birthdays_today', 'segment']), segment: z.string().optional(), channel, body: z.string().min(1).max(1000), campaign: z.string().optional() });
@@ -40,5 +41,10 @@ export class MessagingController {
   @Put('providers/:channel') @Permissions('users', 'exec')
   setProvider(@Param('channel') ch: string, @Body(new ZodValidationPipe(ProviderBody)) b: any, @CurrentUser() u: JwtUser) {
     return this.tenantMsg.set(ch, b.creds, b.enabled ?? true, u);
+  }
+
+  @Post('providers/:channel/test') @Permissions('users', 'exec')
+  testProvider(@Param('channel') ch: string, @Body(new ZodValidationPipe(TestBody)) b: any, @CurrentUser() u: JwtUser) {
+    return this.svc.sendTest(ch as any, b.to, u);
   }
 }
