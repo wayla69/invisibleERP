@@ -13,7 +13,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
@@ -164,6 +164,20 @@ async function main() {
   ok('LINE flex push to a member → sent as flex to their LINE userId',
     pushFlex.json.status === 'sent' && linePushes.length === pushFlexBefore + 1 && linePushes.at(-1)!.type === 'flex' && linePushes.at(-1)!.to === 'Ubob',
     JSON.stringify({ status: pushFlex.json.status, type: linePushes.at(-1)?.type, to: linePushes.at(-1)?.to }));
+
+  // ── 13. LINE follow/unfollow webhook — auto-enrol on follow, log on unfollow, reject unknown tenant ──
+  const follow = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'follow', source: { userId: 'Ufollower1' } }] });
+  const [enrolled] = await db.select().from(s.posMembers).where(and(eq(s.posMembers.tenantId, t1), eq(s.posMembers.lineUserId, 'Ufollower1')));
+  ok('LINE webhook follow → auto-enrols a member keyed by LINE userId (active, member code)',
+    follow.json.received === true && follow.json.followed === 1 && !!enrolled && enrolled.active === true && String(enrolled.memberCode).startsWith('M-'),
+    JSON.stringify({ followed: follow.json.followed, code: enrolled?.memberCode }));
+  const unfollow = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'unfollow', source: { userId: 'Ufollower1' } }] });
+  const unfollowLog = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.campaign, 'oa_unfollow')));
+  ok('LINE webhook unfollow → logged (member kept, not deactivated)',
+    unfollow.json.unfollowed === 1 && unfollowLog.length >= 1 && enrolled.active === true,
+    JSON.stringify({ unfollowed: unfollow.json.unfollowed, logged: unfollowLog.length }));
+  const badTenant = await inj('POST', '/api/line/webhook/NOPE', undefined, { events: [] });
+  ok('LINE webhook → unknown shop code rejected (401)', badTenant.status === 401, JSON.stringify({ s: badTenant.status, code: badTenant.json?.error?.code ?? badTenant.json?.code }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

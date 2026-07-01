@@ -192,6 +192,12 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > OA's followers (not member records), it does **not** apply the per-member marketing opt-out — a follower
 > opts out by unfollowing the OA. Every broadcast is recorded in the message log for audit.
 
+> **Auto-enrol from LINE (follow webhook).** Point your LINE Official Account's webhook at
+> `…/api/line/webhook/<your-shop-code>` and set the **Channel secret** on the Messaging providers screen. Then
+> when someone **adds your OA**, they are automatically enrolled as a member (reachable over LINE); if they
+> unfollow, it's logged but their membership and points are kept. The webhook is authenticated by your channel
+> secret, so only genuine LINE events are accepted.
+
 > **Rich LINE messages (flex).** Both the broadcast and a targeted send can carry a **rich card / carousel**
 > (image + text + buttons) instead of plain text — pass a LINE *flex* layout with an `alt_text` (broadcast:
 > `flex`+`alt_text`; targeted: `POST /api/messaging/line/flex` to a member or LINE userId). Great for promo
@@ -323,3 +329,4 @@ claim points by uploading a photo of the receipt.
 | 1.11 | 2026-07-01 | Platform | §11 **Messaging providers screen** (`/settings/messaging`) — admin UI to connect the shop's own LINE OA / SMS / SMTP credentials with a **ส่งทดสอบ** (send-test) button; new nav item under Settings → Integrations. |
 | 1.12 | 2026-07-01 | Platform | §13 **แต้มสด (Live) card** on Loyalty analytics — real-time earn/redeem feed (polls `GET /api/loyalty/analytics/live` every 5 s), so loyalty managers see activity without the exec dashboard. |
 | 1.13 | 2026-07-01 | Platform | §11 **Rich LINE messages (flex)** — broadcast and targeted sends can carry a card/carousel (image+buttons) via a LINE flex layout + `alt_text` (`POST /api/messaging/line/flex` for a targeted push). |
+| 1.14 | 2026-07-01 | Platform | §11 **LINE follow webhook** — point the OA webhook at `/api/line/webhook/<shop-code>` (+ set the Channel secret) so following the OA auto-enrols a member; unfollow is logged, membership/points kept. Signature-verified. |
