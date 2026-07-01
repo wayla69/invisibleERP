@@ -23,6 +23,7 @@ export default function PortfolioPage() {
   const capQ = useQuery<any>({ queryKey: ['projects', 'capacity'], queryFn: () => api('/api/projects/resources/capacity?months=6') });
   const fcQ = useQuery<any>({ queryKey: ['projects', 'forecast'], queryFn: () => api('/api/projects/forecast?months=6') });
   const progQ = useQuery<any>({ queryKey: ['projects', 'programs'], queryFn: () => api('/api/projects/programs') });
+  const riskQ = useQuery<any>({ queryKey: ['projects', 'top-risks'], queryFn: () => api('/api/projects/risks/top') });
   const d = q.data;
   const fc = fcQ.data;
   const fcMax = Math.max(1, ...((fc?.billing?.monthly ?? []).map((m: any) => m.total_expected)));
@@ -132,6 +133,35 @@ export default function PortfolioPage() {
               emptyState={{ icon: FolderKanban, title: 'ยังไม่มีโครงการ', description: 'สร้างโครงการเพื่อดูภาพรวมพอร์ต' }}
             />
           </div>
+
+          {/* top risks across the portfolio (B4, PROJ-08) */}
+          {!!riskQ.data?.top?.length && (
+            <Card className="gap-3 p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">ความเสี่ยงสูงสุดทั้งพอร์ต (Top risks)</h3>
+                <div className="flex gap-2 text-xs">
+                  <Badge variant="muted">เปิด {riskQ.data.open_count}</Badge>
+                  {riskQ.data.high_count > 0 && <Badge variant="destructive">สูง {riskQ.data.high_count}</Badge>}
+                  {riskQ.data.unmitigated_high_count > 0 && <Badge variant="warning">สูง·ไม่มีแผน {riskQ.data.unmitigated_high_count}</Badge>}
+                </div>
+              </div>
+              <DataTable
+                rows={riskQ.data.top}
+                rowKey={(r: any) => r.id}
+                onRowClick={(r: any) => r.project_code && router.push(`/projects/${encodeURIComponent(r.project_code)}?tab=risks`)}
+                columns={[
+                  { key: 'rag', label: 'ระดับ', sortable: false, render: (r: any) => <Badge variant={r.rag === 'red' ? 'destructive' : r.rag === 'amber' ? 'warning' : 'success'}>{r.rag}</Badge> },
+                  { key: 'project_code', label: 'โครงการ', render: (r: any) => `${r.project_code ?? '—'}${r.project_name ? ` · ${r.project_name}` : ''}` },
+                  { key: 'kind', label: 'ประเภท', render: (r: any) => r.kind === 'issue' ? 'ปัญหา' : 'ความเสี่ยง' },
+                  { key: 'title', label: 'หัวข้อ' },
+                  { key: 'score', label: 'คะแนน', align: 'right', render: (r: any) => <span className="tabular">{r.score}</span> },
+                  { key: 'owner', label: 'ผู้รับผิดชอบ', render: (r: any) => r.owner ?? '—' },
+                  { key: 'mitigation', label: 'แผนรับมือ', render: (r: any) => r.mitigation ? <span className="text-xs">{r.mitigation}</span> : <span className="text-xs text-destructive">— ยังไม่มี</span> },
+                ]}
+                emptyState={{ icon: ShieldCheck, title: 'ไม่มีความเสี่ยงเปิดอยู่', description: 'ทุกความเสี่ยง/ปัญหาถูกปิดแล้ว' }}
+              />
+            </Card>
+          )}
 
           {/* time-phased resource capacity heatmap (PPM upgrade) */}
           {!!capQ.data?.resources?.length && (

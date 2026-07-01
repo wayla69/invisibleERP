@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Clock, Plane, Check } from 'lucide-react';
 import { api } from '@/lib/api';
+import { baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -34,10 +35,19 @@ export default function HcmPage() {
 function Timesheets() {
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['timesheets'], queryFn: () => api('/api/hcm/timesheets') });
-  const [f, setF] = useState({ emp_code: '', work_date: today(), regular_hours: '', ot_hours: '' });
+  // Project spine (PROJ-04): allocate billable time to a project/task so approval posts project labour → WIP.
+  const projQ = useQuery<any>({ queryKey: ['ts-projects'], queryFn: () => api('/api/projects') });
+  const [f, setF] = useState({ emp_code: '', work_date: today(), regular_hours: '', ot_hours: '', project_code: '', task_id: '', billable: true });
+  const tasksQ = useQuery<any>({ queryKey: ['ts-tasks', f.project_code], queryFn: () => api(`/api/projects/${encodeURIComponent(f.project_code)}/tasks`), enabled: !!f.project_code });
   const add = useMutation({
-    mutationFn: () => api('/api/hcm/timesheets', { method: 'POST', body: JSON.stringify({ emp_code: f.emp_code, work_date: f.work_date, regular_hours: Number(f.regular_hours) || 0, ot_hours: Number(f.ot_hours) || 0 }) }),
+    mutationFn: () => api('/api/hcm/timesheets', { method: 'POST', body: JSON.stringify({ emp_code: f.emp_code, work_date: f.work_date, regular_hours: Number(f.regular_hours) || 0, ot_hours: Number(f.ot_hours) || 0, project_code: f.project_code || undefined, task_id: f.task_id ? Number(f.task_id) : undefined, billable: f.billable }) }),
     onSuccess: () => { notifySuccess('บันทึกเวลาทำงาน'); setF({ ...f, regular_hours: '', ot_hours: '' }); qc.invalidateQueries({ queryKey: ['timesheets'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  // Maker-checker approval (PROJ-04): an approver ≠ submitter signs off; billable project time then posts to WIP.
+  const approve = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/hcm/timesheets/${id}/approve`, { method: 'POST', body: '{}' }),
+    onSuccess: (r: any) => { notifySuccess(r?.project_posted ? `อนุมัติแล้ว — ลงต้นทุนโครงการ ${baht(r.labor_cost)} (${r.entry_no})` : 'อนุมัติแล้ว'); qc.invalidateQueries({ queryKey: ['timesheets'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   return (
@@ -50,10 +60,35 @@ function Timesheets() {
           <div className="grid gap-1.5"><Label>ชม.ปกติ</Label><Input type="number" value={f.regular_hours} onChange={(e) => setF({ ...f, regular_hours: e.target.value })} className="w-24" /></div>
           <div className="grid gap-1.5"><Label>ชม. OT</Label><Input type="number" value={f.ot_hours} onChange={(e) => setF({ ...f, ot_hours: e.target.value })} className="w-24" /></div>
         </div>
+        {/* PROJ-04 — allocate to a project & task (optional). Billable project time posts to WIP on approval. */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5"><Label>โครงการ (ถ้ามี)</Label>
+            <select className={`${selectCls} w-56`} value={f.project_code} onChange={(e) => setF({ ...f, project_code: e.target.value, task_id: '' })}>
+              <option value="">— ไม่ผูกโครงการ —</option>
+              {(projQ.data?.projects ?? []).map((p: any) => <option key={p.project_code} value={p.project_code}>{p.project_code} · {p.name}</option>)}
+            </select>
+          </div>
+          {!!f.project_code && (
+            <div className="grid gap-1.5"><Label>งาน (WBS)</Label>
+              <select className={`${selectCls} w-56`} value={f.task_id} onChange={(e) => setF({ ...f, task_id: e.target.value })}>
+                <option value="">— ทั้งโครงการ —</option>
+                {(tasksQ.data?.tasks ?? []).map((t: any) => <option key={t.id} value={String(t.id)}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
+          {!!f.project_code && (
+            <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={f.billable} onChange={(e) => setF({ ...f, billable: e.target.checked })} /> เบิกลูกค้าได้ (billable)</label>
+          )}
+        </div>
         <div className="flex items-center gap-3"><Button onClick={() => add.mutate()} disabled={!f.emp_code || add.isPending}><Clock className="size-4" /> บันทึก</Button></div>
       </Card>
       <StateView q={q}>{q.data && <DataTable rows={q.data.timesheets} columns={[
-        { key: 'work_date', label: 'วันที่' }, { key: 'regular_hours', label: 'ชม.ปกติ', align: 'right' }, { key: 'ot_hours', label: 'ชม. OT', align: 'right' },
+        { key: 'work_date', label: 'วันที่' },
+        { key: 'project_code', label: 'โครงการ', render: (r: any) => r.project_code ? <Badge variant="secondary">{r.project_code}</Badge> : <span className="text-xs text-muted-foreground">—</span> },
+        { key: 'regular_hours', label: 'ชม.ปกติ', align: 'right' }, { key: 'ot_hours', label: 'ชม. OT', align: 'right' },
+        { key: 'billable', label: 'เบิกได้', render: (r: any) => r.project_code ? (r.billable ? <Badge variant="success">billable</Badge> : <Badge variant="muted">non-billable</Badge>) : '—' },
+        { key: 'status', label: 'สถานะ', render: (r: any) => r.status ? <Badge variant={statusVariant(r.status)}>{r.status}</Badge> : '—' },
+        { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'Pending' ? <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}><Check className="size-4" /> อนุมัติ</Button> : (r.entry_no ? <span className="text-xs text-muted-foreground">{r.entry_no}</span> : <span className="text-xs text-muted-foreground">—</span>) },
       ]} emptyState={{ icon: Clock, title: 'ยังไม่มีบันทึกเวลา', description: 'กรอกแบบฟอร์มด้านบนเพื่อบันทึกเวลาทำงานหรือชั่วโมง OT รายการแรก' }} />}</StateView>
     </div>
   );
