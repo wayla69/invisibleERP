@@ -123,8 +123,94 @@ export default function ProjectDetailPage() {
     onSuccess: (r: any) => { notifySuccess(`บันทึกสุขภาพโครงการ (${r.rag})`); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
 
+  // ── Governance: baselines (PROJ-07), RACI (B3), program membership (PMO-4) ──
+  const baseline = useQuery<any>({ queryKey: ['proj', code, 'baseline'], queryFn: () => api(`/api/projects/${code}/baseline`) });
+  const raci = useQuery<any>({ queryKey: ['proj', code, 'raci'], queryFn: () => api(`/api/projects/${code}/raci`) });
+  const [baselineReason, setBaselineReason] = useState('');
+  const captureBaseline = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/baseline`, { method: 'POST', body: JSON.stringify({ reason: baselineReason || undefined }) }),
+    onSuccess: () => { notifySuccess('ตั้งเส้นฐานแล้ว'); setBaselineReason(''); qc.invalidateQueries({ queryKey: ['proj', code, 'baseline'] }); }, onError: (err: any) => notifyError(err.message),
+  });
+  const [prog, setProg] = useState<{ program_code: string; depends_on: string } | null>(null);
+  const progValue = prog ?? { program_code: p?.program_code ?? '', depends_on: (p?.depends_on_projects ?? []).join(', ') };
+  const setProgram = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/program`, { method: 'PATCH', body: JSON.stringify({ program_code: progValue.program_code || null, depends_on_projects: progValue.depends_on ? String(progValue.depends_on).split(',').map((x: string) => x.trim()).filter(Boolean) : [] }) }),
+    onSuccess: () => { notifySuccess('อัปเดตโปรแกรม/การอ้างอิงแล้ว'); setProg(null); qc.invalidateQueries({ queryKey: ['proj', code, 'detail'] }); }, onError: (err: any) => notifyError(err.message),
+  });
+
   const scurve = (series.data?.series ?? []).map((s: any) => ({ month: s.month, planned: s.cumulative_planned }));
   const ganttTasks: GanttTask[] = (schedule.data?.tasks ?? []);
+
+  const bl = baseline.data;
+  const raciData = raci.data;
+  const governanceTab = (
+    <div className="space-y-4">
+      {/* Baseline (PROJ-07) — capture a change-controlled baseline + scope/cost creep variance */}
+      <Card className="gap-3 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">เส้นฐานโครงการ (Baseline) — ควบคุมการเปลี่ยนขอบเขต</h3>
+          {bl?.baseline && <Badge variant="secondary">{bl.baseline.label} · {bl.baseline.captured_at?.slice?.(0, 10) ?? ''}</Badge>}
+        </div>
+        {bl?.baseline ? (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard label="งบเส้นฐาน (BAC)" value={baht(bl.baseline.baseline_bac)} icon={FileText} hint={`ปัจจุบัน ${baht(bl.current?.bac ?? 0)}`} />
+            <StatCard label="ส่วนต่างงบ (creep)" value={`${(bl.variance?.bac_delta ?? 0) >= 0 ? '+' : ''}${baht(bl.variance?.bac_delta ?? 0)}`} icon={TrendingUp} tone={(bl.variance?.bac_delta ?? 0) > 0 ? 'danger' : 'success'} hint={bl.variance?.bac_pct != null ? `${bl.variance.bac_pct}%` : ''} />
+            <StatCard label="ส่วนต่างระยะเวลา" value={`${(bl.variance?.duration_delta ?? 0) >= 0 ? '+' : ''}${bl.variance?.duration_delta ?? 0} วัน`} icon={Activity} tone={(bl.variance?.duration_delta ?? 0) > 0 ? 'warning' : 'default'} hint={`เส้นฐาน ${bl.baseline.baseline_duration_days} วัน`} />
+          </div>
+        ) : <p className="text-sm text-muted-foreground">ยังไม่มีเส้นฐาน — ตั้งเส้นฐานแรกเพื่อวัดการเปลี่ยนขอบเขต/งบ (scope & cost creep) เทียบกับแผนตั้งต้น</p>}
+        <div className="flex flex-wrap items-end gap-3">
+          {bl?.baseline && <div className="grid flex-1 gap-1.5"><Label>เหตุผล (จำเป็นเมื่อตั้งเส้นฐานใหม่)</Label><Input value={baselineReason} onChange={(e) => setBaselineReason(e.target.value)} placeholder="เช่น อนุมัติ CO ขยายขอบเขต" /></div>}
+          <Button variant="outline" onClick={() => captureBaseline.mutate()} disabled={captureBaseline.isPending || (!!bl?.baseline && !baselineReason)}><Flag className="size-4" /> {bl?.baseline ? 'ตั้งเส้นฐานใหม่' : 'ตั้งเส้นฐาน'}</Button>
+        </div>
+        {(bl?.history?.length ?? 0) > 1 && (
+          <div className="flex flex-col divide-y text-sm">
+            {bl.history.map((h: any) => (
+              <div key={h.id} className="flex items-center justify-between gap-3 py-1.5">
+                <span className="flex items-center gap-2"><Badge variant={h.status === 'active' ? 'success' : 'muted'}>{h.status}</Badge><span className="font-medium">{h.label}</span>{h.reason && <span className="text-xs text-muted-foreground">· {h.reason}</span>}</span>
+                <span className="tabular text-xs text-muted-foreground">{baht(h.baseline_bac)} · {h.baseline_duration_days} วัน · {h.captured_at?.slice?.(0, 10)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* RACI accountability matrix (B3) */}
+      <Card className="gap-3 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">เมทริกซ์ความรับผิดชอบ (RACI)</h3>
+          {raciData && (raciData.complete ? <Badge variant="success">มีผู้รับผิดชอบหลักครบ</Badge> : <Badge variant="destructive">ขาด A {raciData.missing_accountable.length} งาน</Badge>)}
+        </div>
+        {raciData?.people?.length ? (
+          <DataTable
+            rows={raciData.people}
+            rowKey={(r: any) => r.name}
+            columns={[
+              { key: 'name', label: 'บุคคล' },
+              { key: 'accountable', label: 'A (รับผิดชอบหลัก)', align: 'right' },
+              { key: 'responsible', label: 'R (ลงมือทำ)', align: 'right' },
+              { key: 'consulted', label: 'C (ปรึกษา)', align: 'right' },
+              { key: 'informed', label: 'I (รับทราบ)', align: 'right' },
+            ]}
+            emptyState={{ icon: Users, title: 'ยังไม่มีการมอบหมาย', description: 'กำหนด A/R/C/I ในแต่ละงาน' }}
+          />
+        ) : <p className="text-sm text-muted-foreground">ยังไม่มีการมอบหมาย RACI — กำหนดผู้รับผิดชอบหลัก (A) และผู้ลงมือทำ (R) ในแต่ละงานที่แท็บกำหนดการ</p>}
+        {raciData && !raciData.complete && (
+          <p className="text-xs text-destructive">งานที่ยังไม่มีผู้รับผิดชอบหลัก (Accountable): #{raciData.missing_accountable.join(', #')}</p>
+        )}
+      </Card>
+
+      {/* Program membership + cross-project dependencies (PMO-4) */}
+      <Card className="gap-3 p-5">
+        <h3 className="text-base font-semibold">โปรแกรม & การอ้างอิงข้ามโครงการ (Program)</h3>
+        <p className="text-xs text-muted-foreground">จัดกลุ่มโครงการเข้าโปรแกรม และระบุโครงการที่ต้องเสร็จก่อน (finish-to-start) เพื่อคำนวณเส้นทางวิกฤตระดับโปรแกรม</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-1.5"><Label>รหัสโปรแกรม</Label><Input value={progValue.program_code} onChange={(e) => setProg({ ...progValue, program_code: e.target.value })} placeholder="เช่น PROG-A" /></div>
+          <div className="grid gap-1.5"><Label>ขึ้นกับโครงการ (คั่นด้วย ,)</Label><Input value={progValue.depends_on} onChange={(e) => setProg({ ...progValue, depends_on: e.target.value })} placeholder="เช่น PRJ000123, PRJ000124" /></div>
+        </div>
+        <div><Button variant="outline" onClick={() => setProgram.mutate()} disabled={setProgram.isPending}><CheckCircle2 className="size-4" /> บันทึก</Button></div>
+      </Card>
+    </div>
+  );
 
   const overview = (
     <div className="space-y-4">
@@ -412,6 +498,7 @@ export default function ProjectDetailPage() {
             { key: 'milestones', label: 'หมุดหมาย', content: milestonesTab },
             { key: 'resources', label: 'ทรัพยากร', content: resourcesTab },
             { key: 'risks', label: 'ความเสี่ยง & ปัญหา', content: risksTab },
+            { key: 'governance', label: 'กำกับดูแล', content: governanceTab },
             { key: 'costs', label: 'ต้นทุน & บิล', content: costsTab },
           ]}
         />

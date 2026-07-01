@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.6 · 2026-06-29** · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
+**Status: DRAFT v0.7 · 2026-07-01** · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -246,6 +246,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-223 | Period governance / status pack | PROJ-06 (operational) | 16 §7 (21) |
 | UAT-O2C-224 | Program (cross-project) critical path | PROJ-06 (operational) | 16 §7 (22) |
 | UAT-O2C-225 | Pipeline → FTE resourcing forecast | PROJ-05/PROJ-06 (operational) | 16 §7 (20) |
+| UAT-O2C-226 | Project period-end close review — maker-checker (`/projects/close`) | PROJ-03 | 16 §7, §9 |
+| UAT-O2C-227 | Timesheet project allocation + approval surfaced in list (`/hcm`) | PROJ-04 | 16 §7 (10), §9 |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

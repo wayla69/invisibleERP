@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, timesheets, leaveRequests, leaveBalances, projects } from '../../database/schema';
 import { ProjectsService } from '../projects/projects.service';
@@ -72,9 +72,16 @@ export class HcmService {
 
   async listTimesheets(empCode: string | undefined, _user: JwtUser) {
     const db = this.db as any;
-    const q = db.select({ id: timesheets.id, employeeId: timesheets.employeeId, workDate: timesheets.workDate, regularHours: timesheets.regularHours, otHours: timesheets.otHours, note: timesheets.note }).from(timesheets);
+    const q = db.select().from(timesheets);
     const rows = empCode ? await q.where(eq(timesheets.employeeId, Number((await this.emp(empCode)).id))).orderBy(desc(timesheets.workDate)).limit(100) : await q.orderBy(desc(timesheets.id)).limit(100);
-    return { timesheets: rows.map((r: any) => ({ work_date: r.workDate, regular_hours: n(r.regularHours), ot_hours: n(r.otHours), note: r.note })), count: rows.length };
+    // Resolve project ids → codes so the caller sees the PROJ-04 allocation + maker-checker status.
+    const projIds = [...new Set(rows.map((r: any) => r.projectId).filter((x: any) => x != null))];
+    const codeById = new Map<number, string>();
+    if (projIds.length) {
+      const ps = await db.select({ id: projects.id, projectCode: projects.projectCode }).from(projects).where(inArray(projects.id, projIds as number[]));
+      for (const p of ps) codeById.set(Number(p.id), p.projectCode);
+    }
+    return { timesheets: rows.map((r: any) => ({ id: Number(r.id), work_date: r.workDate, regular_hours: n(r.regularHours), ot_hours: n(r.otHours), note: r.note, project_code: r.projectId != null ? (codeById.get(Number(r.projectId)) ?? null) : null, task_id: r.taskId != null ? Number(r.taskId) : null, billable: r.billable !== false, status: r.status ?? 'Pending', entry_no: r.entryNo ?? null })), count: rows.length };
   }
 
   async requestLeave(dto: LeaveDto, user: JwtUser) {

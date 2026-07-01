@@ -51,6 +51,7 @@ import {
   Landmark,
   Layers,
   LayoutDashboard,
+  Lock,
   LayoutTemplate,
   LifeBuoy,
   Megaphone,
@@ -404,7 +405,10 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.pm_portfolio', href: '/projects/portfolio', icon: LayoutDashboard, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.pm_action_center', href: '/projects/action-center', icon: BellRing, perms: ['exec', 'planner', 'ar'] },
       { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
+      { label: 'nav.pm_crm', href: '/projects/crm', icon: Handshake, perms: ['crm', 'exec', 'ar'] },
       { label: 'nav.pm_pipeline', href: '/projects/pipeline', icon: Target, perms: ['exec', 'planner', 'ar', 'crm'] },
+      { label: 'nav.pm_close', href: '/projects/close', icon: Lock, perms: ['exec'] },
+      { label: 'nav.pm_settings', href: '/projects/settings', icon: SlidersHorizontal, perms: ['exec', 'planner'] },
     ],
   },
   {
