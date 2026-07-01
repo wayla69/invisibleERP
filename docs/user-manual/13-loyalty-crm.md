@@ -186,6 +186,12 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > send is **idempotent** (a campaign can't be sent twice — a second send is rejected); and every recipient is
 > recorded in the message log. *(MKT-10.)*
 
+> **Channel delivery:** LINE, SMS, and Email all deliver for real once the workspace has that channel's
+> provider configured (LINE Official Account token, an SMS provider key, or an SMTP mailbox — set by your
+> administrator; see `docs/ops/secrets.md`). Until a channel is configured it runs in **demo mode**: the send
+> is logged as *sent* but no message actually leaves — check the message log's **provider** column (`mock` =
+> demo, the channel name = live).
+
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
 Give members perks at partner shops. On **พันธมิตร & สิทธิพิเศษ** (`/loyalty/partners`):
@@ -206,6 +212,12 @@ For managers — **วิเคราะห์ลอยัลตี้** (`/loya
 **breakage rate** (points that expired), the **tier mix**, the **active rate**, and **churn risk** — members who
 have been dormant for 90+ days but still hold points, ready for a **win-back** campaign. Read-only; HQ users pick
 a shop.
+
+**Customer segments (RFM).** The **กลุ่มลูกค้า RFM** panel shows how your members split across the five RFM
+segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
+without a computed profile yet appear under **Unsegmented**). Click a segment to open it in **CRM 360**
+(`/crm`) pre-filtered, where you can fire a targeted campaign at exactly that group. Segments are computed from
+each member's recency/frequency/monetary behaviour (refreshed as orders post).
 
 ## 14. Receipt upload for points (อัปโหลดใบเสร็จ — ขอแต้ม)
 
@@ -265,3 +277,5 @@ claim points by uploading a photo of the receipt.
 | 1.1 | 2026-06-24 | Platform | Added §12 **Partner privileges** (`/loyalty/partners`) — tier-gated single-use member perks at partner merchants; §13 **Loyalty analytics** (`/loyalty/analytics`) — liability, redemption funnel, breakage, churn/win-back; **LINE login** in the member app. New error codes `TIER_TOO_LOW`/`OUT_OF_STOCK`/`LIMIT_REACHED`, `LINE_NOT_LINKED`/`LINE_ALREADY_LINKED`. |
 | 1.2 | 2026-06-29 | Security hardening | §9 **Member app — secure session.** The `/m` sign-in token now lives in a secure browser cookie (not readable by page scripts; session 7 days), and a new **ออกจากระบบ / Log out** ends the session server-side and clears the cookie. No change to how a member logs in (shop code + phone OTP). (ITGC-AC-07.) |
 | 1.3 | 2026-07-01 | Platform | Added §14 **Receipt upload for points** (`/m` upload, `/loyalty/receipt-approvals` staff review) — a member claims points for a purchase made outside our POS by submitting a photo + amount; staff approve (grants points the same way a POS sale does) or reject. New error codes `BAD_IMAGE`/`IMAGE_TOO_LARGE`, `DUPLICATE_RECEIPT`, `RECEIPT_ALREADY_REVIEWED`. (LYL-17.) |
+| 1.4 | 2026-07-01 | Platform | §11 **Campaigns — real SMS/Email delivery.** Documented that LINE/SMS/Email now deliver for real once the workspace has that channel's provider configured (admin sets the LINE token / SMS key / SMTP mailbox); until then a channel runs in **demo mode** (logged as *sent*, provider `mock`). No change to campaign steps or consent controls. |
+| 1.5 | 2026-07-01 | Platform | §13 **Customer segments (RFM) panel** on Loyalty analytics — member count + average spend per RFM segment (Champions/Loyal/New/At Risk/Lost, plus Unsegmented), click-through to a pre-filtered CRM 360 campaign. New read-only endpoint `GET /api/loyalty/analytics/segments` (perms `loyalty`/`marketing`/`exec`, tenant-scoped). |

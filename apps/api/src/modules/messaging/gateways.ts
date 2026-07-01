@@ -1,15 +1,19 @@
 // Outbound customer-messaging gateways (LINE / SMS / email). Provider-agnostic, mirroring the payment
 // gateway pattern: a channel resolves to a real provider when its credentials are configured, otherwise a
 // Mock that records the message as 'sent' (dev/demo). LINE has a real push implementation (the dominant
-// Thai channel); SMS/email remain stubs pending a provider account. The abstraction + delivery log let
-// the rest of the system work today and a real client drops in here.
+// Thai channel); SMS is a provider-agnostic HTTP client (any bulk-SMS REST API) and email is SMTP via
+// nodemailer — both activate the moment their env is set, else they fall through to the dev mock. The
+// abstraction + delivery log let the rest of the system work today and a real client drops in via env.
+import nodemailer, { type Transporter } from 'nodemailer';
+
 const rnd = () => Math.random().toString(36).slice(2, 12);
 
 export type MessageChannel = 'line' | 'sms' | 'email';
 export interface SendResult { status: 'sent' | 'failed'; provider: string; ref?: string; error?: string }
 
 // Read credentials at call time (not module-load) so a late-injected secret takes effect without a
-// restart — mirrors the payment-gateway resolver.
+// restart — mirrors the payment-gateway resolver. A channel is "configured" iff its primary token is set:
+//   LINE  → LINE_CHANNEL_TOKEN   SMS → SMS_API_KEY (+ SMS_API_URL)   email → SMTP_HOST
 function channelToken(channel: MessageChannel): string | undefined {
   return channel === 'line' ? process.env.LINE_CHANNEL_TOKEN : channel === 'sms' ? process.env.SMS_API_KEY : process.env.SMTP_HOST;
 }
@@ -21,9 +25,11 @@ export function resolveMessageGateway(channel: MessageChannel) {
   return {
     provider,
     async send(recipient: string, body: string): Promise<SendResult> {
-      // LINE: real push when a channel token is configured (recipient = LINE userId). SMS/email real
-      // clients drop in below the same way; until configured they fall through to the dev mock.
-      if (channel === 'line' && configured) return sendLinePush(token!, recipient, body);
+      // Each channel has a real client that activates once its env is set; until then all fall through to
+      // the dev mock so the delivery log + campaign flows work end-to-end without a provider account.
+      if (configured && channel === 'line') return sendLinePush(token!, recipient, body);
+      if (configured && channel === 'sms') return sendSms(token!, recipient, body);
+      if (configured && channel === 'email') return sendEmail(recipient, body);
       return { status: 'sent', provider, ref: `${provider}_${rnd()}` };
     },
   };
@@ -46,5 +52,59 @@ async function sendLinePush(token: string, to: string, text: string): Promise<Se
     return { status: 'sent', provider: 'line', ref: res.headers.get('x-line-request-id') ?? `line_${rnd()}` };
   } catch (e: any) {
     return { status: 'failed', provider: 'line', error: String(e?.message ?? e).slice(0, 300) };
+  }
+}
+
+// SMS via a provider-agnostic HTTP REST call — works with most Thai bulk-SMS gateways (ThaiBulkSMS, Twilio,
+// AWS SNS proxies, …) that accept a JSON POST with a Bearer key. Endpoint + optional sender come from env so
+// no provider is hard-coded. Config: SMS_API_KEY (Bearer), SMS_API_URL (endpoint), SMS_SENDER (optional
+// alphanumeric sender id). Non-2xx / network errors return 'failed' (logged), never throw.
+async function sendSms(apiKey: string, to: string, text: string): Promise<SendResult> {
+  const url = process.env.SMS_API_URL;
+  if (!url) return { status: 'failed', provider: 'sms', error: 'SMS_API_URL not set' };
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ to, message: text.slice(0, 1000), ...(process.env.SMS_SENDER ? { sender: process.env.SMS_SENDER } : {}) }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      return { status: 'failed', provider: 'sms', error: `SMS ${res.status} ${detail}`.trim().slice(0, 300) };
+    }
+    return { status: 'sent', provider: 'sms', ref: `sms_${rnd()}` };
+  } catch (e: any) {
+    return { status: 'failed', provider: 'sms', error: String(e?.message ?? e).slice(0, 300) };
+  }
+}
+
+// Email via SMTP (nodemailer). Config: SMTP_HOST (activates the channel), SMTP_PORT (default 587), SMTP_USER,
+// SMTP_PASS, SMTP_FROM (envelope from), SMTP_SECURE ('true' ⇒ implicit TLS/465). Convention: if the body has
+// a first line followed by a blank line it is used as the Subject and the remainder as the text body; else a
+// default subject applies. Transport is cached per host:port so a blast reuses one pool. Errors → 'failed'.
+let mailer: { key: string; tx: Transporter } | null = null;
+function transport(): Transporter {
+  const host = process.env.SMTP_HOST!;
+  const port = Number(process.env.SMTP_PORT ?? 587);
+  const key = `${host}:${port}:${process.env.SMTP_USER ?? ''}`;
+  if (mailer?.key === key) return mailer.tx;
+  const tx = nodemailer.createTransport({
+    host, port, secure: process.env.SMTP_SECURE === 'true',
+    ...(process.env.SMTP_USER ? { auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS ?? '' } } : {}),
+  });
+  mailer = { key, tx };
+  return tx;
+}
+
+async function sendEmail(to: string, body: string): Promise<SendResult> {
+  const nl = body.indexOf('\n\n');
+  const subject = nl > 0 ? body.slice(0, nl).trim().slice(0, 200) : (process.env.SMTP_SUBJECT ?? 'แจ้งข่าวสาร');
+  const text = nl > 0 ? body.slice(nl + 2) : body;
+  const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? 'no-reply@localhost';
+  try {
+    const info = await transport().sendMail({ from, to, subject, text });
+    return { status: 'sent', provider: 'email', ref: info.messageId ?? `email_${rnd()}` };
+  } catch (e: any) {
+    return { status: 'failed', provider: 'email', error: String(e?.message ?? e).slice(0, 300) };
   }
 }

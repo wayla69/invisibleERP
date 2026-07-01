@@ -109,6 +109,20 @@ async function main() {
   const view = await inj('GET', `/api/crm/profile/${memberId}`, mgr1);
   ok('360 view: member + crm profile + recent_orders', view.json.member?.id === memberId && view.json.crm?.rfm_segment === 'New' && Array.isArray(view.json.recent_orders) && view.json.recent_orders.length === 1, JSON.stringify({ seg: view.json.crm?.rfm_segment, orders: view.json.recent_orders?.length }));
 
+  // ── 7b. RFM segment distribution (Customer Segmentation / Insights) ──
+  const segs = await inj('GET', '/api/loyalty/analytics/segments', mgr1);
+  const segList = (segs.json.segments ?? []) as { segment: string; members: number }[];
+  const canon = ['Champions', 'Loyal', 'At Risk', 'Lost', 'New'];
+  const hasCanon = canon.every((c) => segList.some((s) => s.segment === c));
+  const newSeg = segList.find((s) => s.segment === 'New');
+  ok('Segment mix: 5 canonical segments present, New has ≥1 member, profiled ≥1',
+    segs.status === 200 && hasCanon && (newSeg?.members ?? 0) >= 1 && segs.json.profiled_members >= 1,
+    JSON.stringify({ profiled: segs.json.profiled_members, new: newSeg?.members }));
+
+  // ── 7c. RLS: T2 cannot see T1's segment aggregate ──
+  const segs2 = await inj('GET', '/api/loyalty/analytics/segments', mgr2);
+  ok('RLS: T2 segment mix excludes T1 members (profiled=0)', segs2.status === 200 && segs2.json.profiled_members === 0, JSON.stringify({ profiled: segs2.json.profiled_members }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });

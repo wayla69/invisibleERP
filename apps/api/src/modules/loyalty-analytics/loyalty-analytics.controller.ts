@@ -16,4 +16,8 @@ export class LoyaltyAnalyticsController {
   churn(@Query('tenant_id') tenantId: string | undefined, @Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) {
     return this.svc.churnList(u, tenantId != null ? Number(tenantId) : null, limit != null ? Number(limit) : 100);
   }
+  @Get('analytics/segments') @Permissions('loyalty', 'marketing', 'exec')
+  segments(@Query('tenant_id') tenantId: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.segmentMix(u, tenantId != null ? Number(tenantId) : null);
+  }
 }
