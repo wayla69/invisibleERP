@@ -33,6 +33,9 @@ webhook in the webhook handler).
 | `TABLE_TOKEN_SECRET` | optional (falls back to `APP_ENC_KEY`) | HMAC for QR table-session tokens | with APP_ENC_KEY |
 | `STRIPE_SECRET_KEY` / acquirer keys | if that PSP is enabled | Payment gateway | per PSP policy |
 | `ANTHROPIC_API_KEY` | optional | AI assistant/analytics (rule-based fallback if unset) | per provider |
+| `LINE_CHANNEL_TOKEN` | if LINE push/marketing is used | Activates the real LINE Messaging API push gateway (else mock). Bearer token from the Official Account channel. | per provider |
+| `SMS_API_KEY` + `SMS_API_URL` | if SMS delivery is used | Activate the provider-agnostic SMS gateway (Bearer key + REST endpoint; optional `SMS_SENDER` sender id). Unset ⇒ mock/no-op. | per provider |
+| `SMTP_HOST` (+ `SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`/`SMTP_SECURE`) | if email delivery is used | Activate the SMTP email gateway (nodemailer). `SMTP_HOST` present ⇒ real send; unset ⇒ mock/no-op. Optional `SMTP_SUBJECT` default subject. | per provider |
 
 ## 4. Rotation runbook (summary)
 1. Generate the new secret in the store. 2. Stage it (new env value). 3. Roll the service (api is
@@ -51,3 +54,4 @@ workstream (do **not** rotate it casually; it invalidates stored TOTP/webhook se
 |---|---|---|---|
 | 1.0 | 2026-06-23 | Platform / Security | Initial secrets policy + matrix + rotation; documents boot-time fail-closed validation. |
 | 1.1 | 2026-06-25 | Platform / Security | Added session-cookie scoping env to the matrix — `AUTH_COOKIE_DOMAIN` (required for separate web/api origins), `AUTH_COOKIE_SAMESITE`, `AUTH_COOKIE_MAX_AGE` (non-secret config, documented for completeness). Cross-references `railway-setup.md` §4. |
+| 1.2 | 2026-07-01 | Platform | Documented the customer-messaging gateway credentials — `LINE_CHANNEL_TOKEN`, `SMS_API_KEY`/`SMS_API_URL`/`SMS_SENDER`, `SMTP_*` — that switch the SMS and email channels from dev-mock to real delivery (`messaging/gateways.ts`). |

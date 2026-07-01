@@ -186,6 +186,12 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > send is **idempotent** (a campaign can't be sent twice — a second send is rejected); and every recipient is
 > recorded in the message log. *(MKT-10.)*
 
+> **Channel delivery:** LINE, SMS, and Email all deliver for real once the workspace has that channel's
+> provider configured (LINE Official Account token, an SMS provider key, or an SMTP mailbox — set by your
+> administrator; see `docs/ops/secrets.md`). Until a channel is configured it runs in **demo mode**: the send
+> is logged as *sent* but no message actually leaves — check the message log's **provider** column (`mock` =
+> demo, the channel name = live).
+
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
 Give members perks at partner shops. On **พันธมิตร & สิทธิพิเศษ** (`/loyalty/partners`):
@@ -265,3 +271,4 @@ claim points by uploading a photo of the receipt.
 | 1.1 | 2026-06-24 | Platform | Added §12 **Partner privileges** (`/loyalty/partners`) — tier-gated single-use member perks at partner merchants; §13 **Loyalty analytics** (`/loyalty/analytics`) — liability, redemption funnel, breakage, churn/win-back; **LINE login** in the member app. New error codes `TIER_TOO_LOW`/`OUT_OF_STOCK`/`LIMIT_REACHED`, `LINE_NOT_LINKED`/`LINE_ALREADY_LINKED`. |
 | 1.2 | 2026-06-29 | Security hardening | §9 **Member app — secure session.** The `/m` sign-in token now lives in a secure browser cookie (not readable by page scripts; session 7 days), and a new **ออกจากระบบ / Log out** ends the session server-side and clears the cookie. No change to how a member logs in (shop code + phone OTP). (ITGC-AC-07.) |
 | 1.3 | 2026-07-01 | Platform | Added §14 **Receipt upload for points** (`/m` upload, `/loyalty/receipt-approvals` staff review) — a member claims points for a purchase made outside our POS by submitting a photo + amount; staff approve (grants points the same way a POS sale does) or reject. New error codes `BAD_IMAGE`/`IMAGE_TOO_LARGE`, `DUPLICATE_RECEIPT`, `RECEIPT_ALREADY_REVIEWED`. (LYL-17.) |
+| 1.4 | 2026-07-01 | Platform | §11 **Campaigns — real SMS/Email delivery.** Documented that LINE/SMS/Email now deliver for real once the workspace has that channel's provider configured (admin sets the LINE token / SMS key / SMTP mailbox); until then a channel runs in **demo mode** (logged as *sent*, provider `mock`). No change to campaign steps or consent controls. |
