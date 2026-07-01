@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { dsarRequests, pdpaErasures, posMembers, memberConsents } from '../../database/schema';
+import { dsarRequests, pdpaErasures, posMembers, memberConsents, loyaltyReceiptSubmissions } from '../../database/schema';
 import { posMemberLedger } from '../../database/schema/loyalty-members';
 import type { JwtUser } from '../../common/decorators';
 
@@ -78,11 +78,15 @@ export class PdpaService {
     if (!m) return { subject_type: subjectType, subject_ref: subjectRef, found: false };
     const consents = await db.select().from(memberConsents).where(eq(memberConsents.memberId, Number(m.id)));
     const ledger = await db.select().from(posMemberLedger).where(eq(posMemberLedger.memberId, Number(m.id))).limit(500);
+    // Member-submitted receipt photos (LYL-17) are personal data the subject uploaded themselves — an access
+    // request must return them, same as the points ledger.
+    const receipts = await db.select().from(loyaltyReceiptSubmissions).where(eq(loyaltyReceiptSubmissions.memberId, Number(m.id))).limit(200);
     return {
       subject_type: 'member', found: true,
       profile: { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, email: m.email, line_user_id: m.lineUserId, birthday: m.birthday, tier: m.tier, balance: m.balance, marketing_opt_in: m.marketingOptIn, enrolled_at: m.enrolledAt },
       consents: consents.map((c: any) => ({ purpose: c.purpose, granted: c.granted, granted_at: c.grantedAt, withdrawn_at: c.withdrawnAt })),
       points_ledger: ledger.map((l: any) => ({ ts: l.txnDate, type: l.txnType, points: l.points, balance_after: l.balanceAfter })),
+      receipt_submissions: receipts.map((r: any) => ({ id: Number(r.id), status: r.status, receipt_image: r.receiptImage, purchase_amount: r.purchaseAmount, store_name: r.storeName, purchase_date: r.purchaseDate, note: r.note, submitted_at: r.submittedAt, reviewed_at: r.reviewedAt })),
     };
   }
 
@@ -122,13 +126,17 @@ export class PdpaService {
     }).where(eq(posMembers.id, Number(m.id)));
     // 2. Withdraw all consents.
     await db.update(memberConsents).set({ granted: false, withdrawnAt: new Date() }).where(eq(memberConsents.memberId, Number(m.id)));
+    // 2b. Redact receipt-upload submissions (LYL-17) — the photo + freeform fields are personal data, redacted
+    //    in place (not append-only, unlike audit_log) directly on the row. purchase_amount/status/ref_doc stay
+    //    (transactional facts already reflected in the points ledger, not identifiers), same as balance/tier.
+    await db.update(loyaltyReceiptSubmissions).set({ receiptImage: '[erased]', storeName: null, note: null }).where(eq(loyaltyReceiptSubmissions.memberId, Number(m.id)));
     // 3. Record the erasure ledger row (drives audit pseudonymisation).
     await db.insert(pdpaErasures).values({
       tenantId: user.tenantId ?? null, subjectType: 'member', subjectId: Number(m.id),
       pseudonym, erasedValues, dsarId: id, erasedBy: user.username,
     });
     // 4. Close the DSAR.
-    await db.update(dsarRequests).set({ status: 'completed', handledBy: user.username, completedAt: new Date(), result: { erased: true, pseudonym, fields_redacted: ['name', 'phone', 'email', 'card_no', 'line_user_id', 'line_display_name', 'birthday'] } }).where(eq(dsarRequests.id, id));
+    await db.update(dsarRequests).set({ status: 'completed', handledBy: user.username, completedAt: new Date(), result: { erased: true, pseudonym, fields_redacted: ['name', 'phone', 'email', 'card_no', 'line_user_id', 'line_display_name', 'birthday', 'receipt_image', 'receipt_store_name', 'receipt_note'] } }).where(eq(dsarRequests.id, id));
 
     return { id, status: 'completed', erased: true, pseudonym };
   }
