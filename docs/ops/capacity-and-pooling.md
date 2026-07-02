@@ -54,7 +54,13 @@ run against staging for a real capacity number (`LOAD_N` / `LOAD_C` to tune).
 | `<<date>>` | `<<staging>>` | `/readyz` | `<<rps>>` | `<<p95>>` | real PG + PgBouncer, N=`<<>>` C=`<<>>` |
 
 ## 5. Follow-ups
-- Run the load test against staging and record the baseline above; re-run each release.
+- Run the load test against staging and record the baseline above; re-run each release — now one click:
+  the **`loadtest` manual-dispatch workflow** (docs/24 R1-5) runs `tools/cutover/src/loadtest.ts` with
+  LOAD_N/LOAD_C inputs (optionally against a real Postgres via the `pg_url` input) and retains the result
+  as a build artifact for 90 days. Copy each staging run's numbers into the §4 baseline table — that table
+  is the capacity evidence.
+- **Provisioning (deploy-side, still open):** add PgBouncer (transaction mode, §2 pool math) and the Redis
+  add-on (`REALTIME_REDIS_URL`, deployment.md §4) on Railway — these are console actions, not repo changes.
 - Add a Prometheus exporter for PgBouncer (`SHOW POOLS`/`SHOW STATS`) for historical pool-pressure graphs.
 
 ## 5b. Read-path indexing policy (docs/24 R1-1)
@@ -73,3 +79,4 @@ work when a profiled query needs them; the guard only enforces the leading-colum
 |---|---|---|---|
 | 1.0 | 2026-06-30 | Platform / SRE | Pool model, PgBouncer config (transaction mode + `DB_SIMPLE`), saturation alert, load-test tool. |
 | 1.1 | 2026-07-02 | Platform / SRE | §5b read-path indexing policy: `0211` tenant-index backfill (132 tables) + `tenant-idx` CI guard (docs/24 R1-1 / AUD-ARC-01). |
+| 1.2 | 2026-07-02 | Platform / SRE | `loadtest` manual-dispatch workflow (docs/24 R1-5): one-click capacity run with LOAD_N/LOAD_C/pg_url inputs, 90-day result artifact; §5 provisioning follow-ups called out as console actions. |

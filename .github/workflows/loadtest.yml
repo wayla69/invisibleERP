@@ -1,0 +1,45 @@
+# Manual-dispatch capacity load test (docs/24 R1-5 / AUD-ARC-06).
+# NOT a PR gate — absolute rps/latency depend on the backend, so the number is meaningful only against a
+# deliberately-chosen target: the in-process app over PGlite (relative regression tracking) or a real
+# Postgres/PgBouncer via HARNESS_PG_URL. Results are uploaded as an artifact; record the staging baseline
+# in docs/ops/capacity-and-pooling.md §4 each release (that table is the audit evidence for capacity).
+name: loadtest
+on:
+  workflow_dispatch:
+    inputs:
+      requests:
+        description: total requests per endpoint (LOAD_N)
+        default: '2000'
+      concurrency:
+        description: concurrent in-flight requests (LOAD_C)
+        default: '50'
+      pg_url:
+        description: optional real-Postgres URL (HARNESS_PG_URL) — leave empty for PGlite
+        default: ''
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --experimental-sqlite
+      JWT_SECRET: loadtest-ci-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ierp/shared build && pnpm --filter @ierp/api build
+      - name: Run load test
+        run: |
+          LOAD_N='${{ inputs.requests }}' LOAD_C='${{ inputs.concurrency }}' \
+          HARNESS_PG_URL='${{ inputs.pg_url }}' \
+          pnpm --filter @ierp/cutover loadtest | tee loadtest-result.txt
+      - name: Retain result (capacity evidence — see capacity-and-pooling.md §4)
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-${{ github.run_id }}
+          path: loadtest-result.txt
+          retention-days: 90

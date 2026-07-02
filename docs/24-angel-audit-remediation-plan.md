@@ -285,7 +285,12 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 - **Acceptance:** a unit test (see R2-5) proving the classic failure (`0.1 + 0.2` style imbalance at
   scale 4) is rejected pre-fix and balanced post-fix; `basics` GL harness green unchanged.
 
-### R1-5 · Connection pooling + scheduler trigger (ops) — closes AUD-ARC-06, AUD-ARC-07
+### R1-5 · Connection pooling + scheduler trigger (ops) — closes AUD-ARC-06, AUD-ARC-07 — **REPO HALF DELIVERED 2026-07-02**
+> Shipped (repo side): the **`loadtest` manual-dispatch workflow** — one-click capacity run
+> (`LOAD_N`/`LOAD_C`, optional real-Postgres `pg_url`), result retained 90 days as the §4 baseline-table
+> evidence; capacity doc rev 1.2 records the remaining **console actions** (PgBouncer transaction-mode +
+> the Railway Redis add-on for `REALTIME_REDIS_URL`) — deploy-side provisioning cannot be done from the
+> repo. The BI-scheduler external-cron documentation shipped earlier lives in `docs/ops/deployment.md`.
 - Deploy **pgbouncer** (transaction mode) in front of Postgres on Railway; document pool math
   (replicas × `DB_POOL` ≤ pgbouncer pool) in `docs/deployment/`; re-run
   `tools/cutover/src/loadtest.ts` and update `docs/security/…-load-test-report.md` with the new
@@ -577,3 +582,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.8 | 2026-07-02 | ERP/Product | R4-4 delivered (llm-client seam across 6 services + scored fake-LLM agent benchmark as an ai-eval CI gate) |
 | 2.9 | 2026-07-02 | ERP/Product | R4-1 delivered provider-first (Voyage adapter + embed-space column/filter/reembed; pgvector deferred by recorded decision) |
 | 3.0 | 2026-07-02 | ERP/Product | R5-1 delivered (orphans found already-journaled idx 102/103, dead grandfather list removed; migration-parity harness; dup-number decision recorded) |
+| 3.1 | 2026-07-02 | ERP/Product | R1-5 repo-half delivered (loadtest manual-dispatch workflow + capacity doc rev 1.2; PgBouncer/Redis provisioning = console actions) |
