@@ -13,6 +13,7 @@ import { GamificationService } from '../engagement/gamification.service';
 import { ReferralsService } from '../engagement/referrals.service';
 import { WheelsService } from '../engagement/wheels.service';
 import { PartnersService } from '../../partners/partners.service';
+import { WalletPassService } from '../../wallet-pass/wallet-pass.service';
 
 const RequestOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string().min(1) });
 const VerifyOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string().min(1), code: z.string().min(4) });
@@ -26,6 +27,8 @@ const LineLoginBody = z.object({ tenant_code: z.string().min(1), id_token: z.str
 const LinkLineBody = z.object({ id_token: z.string().min(1) });
 // PDPA: a member managing their OWN consent. `purpose` e.g. 'marketing' | 'analytics' | 'transactional'.
 const MemberConsentBody = z.object({ purpose: z.string().min(1), granted: z.boolean(), channel: z.string().optional() });
+// V5 (docs/29): the member's card in their phone wallet (Apple/Google; mock provider until certs exist).
+const WalletPassBody = z.preprocess((v) => v ?? {}, z.object({ platform: z.enum(['apple', 'google']).optional() }));
 // LYL-17: member submits a photo of a receipt from a purchase made outside our POS to claim points.
 const SubmitReceiptBody = z.object({
   receipt_image: z.string().min(1), purchase_amount: z.number().positive(),
@@ -46,6 +49,7 @@ export class MemberController {
     private readonly referrals: ReferralsService,
     private readonly wheels: WheelsService,
     private readonly partners: PartnersService,
+    private readonly walletPasses: WalletPassService,
   ) {}
 
   // ── Auth (public) ──
@@ -99,6 +103,10 @@ export class MemberController {
   // V1 (docs/29) — the member's own upcoming points expiry (reads the W1 look-ahead register; read-only).
   @Get('points/expiring') @UseGuards(MemberGuard)
   expiring(@CurrentUser() u: JwtUser) { return this.member.expiringForMember(u.memberId!); }
+  // V5 (docs/29) — add THEIR OWN card to Apple/Google Wallet (idempotent per member×platform; PDPA-minimal
+  // pass payload). Mock provider until the signing creds are configured (ops), like SMS/LINE before creds.
+  @Post('wallet-pass') @UseGuards(MemberGuard)
+  walletPass(@Body(new ZodValidationPipe(WalletPassBody)) b: any, @CurrentUser() u: JwtUser) { return this.walletPasses.issueForMember(u, b); }
 
   // PDPA data-subject self-service: a member views and updates their OWN consents (scoped to u.memberId — a
   // member can never read/alter another member's). Delegates to the same getConsents/setConsent the staff

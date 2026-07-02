@@ -249,6 +249,44 @@ async function main() {
       && lapHist.some((h: any) => h.reason === 'vip') && lapHist.some((h: any) => h.reason === 'vip-expired'),
     `before=${lapBefore.json.tier} after=${lapAfter.json.tier} vip_expired=${v4res?.vip_expired} hist=${JSON.stringify(lapHist)}`);
 
+  // ════════ V5 (docs/29) — wallet passes: mock-first issue, idempotent per member×platform, live tick ════════
+  const wpMem = await inj('POST', '/api/loyalty/members', sales1, { name: 'วอลเล็ต', phone: '0810000779' });
+  const wpId = Number(wpMem.json.id);
+  const wpOtp = await inj('POST', '/api/member/auth/request-otp', undefined, { phone: '0810000779', tenant_code: 'T1' });
+  const wpVerify = await inj('POST', '/api/member/auth/verify-otp', undefined, { phone: '0810000779', tenant_code: 'T1', code: String(wpOtp.json.dev_otp) });
+  const wpTok = wpVerify.json.token as string;
+
+  // V5a — issue: mock provider, PDPA-minimal payload (code/tier/points — NEVER the phone).
+  const iss1 = await inj('POST', '/api/member/wallet-pass', wpTok, { platform: 'apple' });
+  const passStr = JSON.stringify(iss1.json.pass ?? {});
+  ok('V5 wallet: issue → mock pass carries the member\'s code/tier/points; payload is PDPA-minimal (no phone)',
+    iss1.json.provider === 'mock' && iss1.json.repeat === false && !!iss1.json.install_url
+      && iss1.json.pass?.member_code === wpMem.json.member_code && iss1.json.pass?.tier === 'Standard'
+      && near(Number(iss1.json.pass?.points ?? -1), 0) && !passStr.includes('0810000779'),
+    `provider=${iss1.json.provider} serial=${iss1.json.serial} url=${String(iss1.json.install_url).slice(0, 50)}`);
+
+  // V5b — idempotent: a second issue returns the SAME registration (same serial; one row on the staff view).
+  const iss2 = await inj('POST', '/api/member/wallet-pass', wpTok, { platform: 'apple' });
+  const staffWp = await inj('GET', `/api/loyalty/members/${wpId}/wallet-pass`, sales1);
+  ok('V5 wallet: repeat issue is idempotent per member×platform (same serial; still one registration)',
+    iss2.json.repeat === true && iss2.json.serial === iss1.json.serial
+      && (staffWp.json.registrations ?? []).length === 1 && staffWp.json.registrations?.[0]?.platform === 'apple',
+    `repeat=${iss2.json.repeat} regs=${(staffWp.json.registrations ?? []).length}`);
+
+  // V5c — live update: an earn fires the BiLive tick → the registered pass records the refresh.
+  const oWp = await makeOrder(one(50));
+  await checkout(oWp.order_no, { member_id: wpId });
+  const wpBal = Number((await inj('GET', `/api/loyalty/members/${wpId}`, sales1)).json.balance);
+  let wpReg: any = null;
+  for (let i = 0; i < 20; i++) { // the subscriber write is async — poll briefly
+    wpReg = (await inj('GET', `/api/loyalty/members/${wpId}/wallet-pass`, sales1)).json.registrations?.[0];
+    if (Number(wpReg?.updates_count ?? 0) >= 1) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  ok('V5 wallet: an earn triggers a pass update (updates_count ≥ 1, last_points = live balance)',
+    Number(wpReg?.updates_count ?? 0) >= 1 && near(Number(wpReg?.last_points ?? -1), wpBal),
+    `updates=${wpReg?.updates_count} last_points=${wpReg?.last_points} bal=${wpBal}`);
+
   // ── 14. trial balance balanced overall ──
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced at end', near(Number(tb.totals?.debit ?? tb.total_debit), Number(tb.totals?.credit ?? tb.total_credit)), JSON.stringify(tb.totals ?? {}).slice(0, 80));

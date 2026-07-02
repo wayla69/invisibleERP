@@ -15,6 +15,7 @@ import { RewardsModule } from './engagement/rewards.module';
 import { ReferralsModule } from './engagement/referrals.module';
 import { WheelsModule } from './engagement/wheels.module';
 import { GamificationModule } from './engagement/gamification.module';
+import { WalletPassModule } from '../wallet-pass/wallet-pass.module';
 
 // PlatformModule/AutomationModule power the W1 loyalty.points_expiring look-ahead event (webhook fan-out +
 // no-code rules). No cycle: platform → automation → messaging/journeys, none of which import LoyaltyModule.
@@ -24,9 +25,9 @@ import { GamificationModule } from './engagement/gamification.module';
 // importing it back would be a cycle; it remains registered in app.module as a downstream consumer.
 // giftcards deliberately stays a separate module (GL 2200 liability + REC-04 — a finance boundary).
 @Module({
-  imports: [LedgerModule, BiLiveModule, PlatformModule, AutomationModule, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule],
+  imports: [LedgerModule, BiLiveModule, PlatformModule, AutomationModule, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule, WalletPassModule],
   controllers: [LoyaltyController, SavedSegmentsController],
   providers: [LoyaltyService, MemberService, MembershipService, ReceiptSubmissionsService, SavedSegmentsService],
-  exports: [LoyaltyService, MemberService, MembershipService, ReceiptSubmissionsService, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule],
+  exports: [LoyaltyService, MemberService, MembershipService, ReceiptSubmissionsService, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule, WalletPassModule],
 })
 export class LoyaltyModule {}
