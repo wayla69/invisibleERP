@@ -1,7 +1,7 @@
 import { Controller, Post, Get, Delete, Param, Req, Headers, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomInt } from 'node:crypto';
 import { eq, and } from 'drizzle-orm';
 import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -125,7 +125,7 @@ export class LineWebhookService {
   // status); any other text is a customer conversation → not our business, no reply, no log.
   private async onChatMessage(tenantId: number, token: string | undefined, ev: any): Promise<boolean> {
     const lineUserId = String(ev?.source?.userId ?? '');
-    const text = String(ev?.message?.text ?? '').trim();
+    const text = String(ev?.message?.text ?? '').slice(0, 2000).trim(); // LINE caps at 5000; bound our parse work
     const msgId = String(ev?.message?.id ?? '');
     if (!lineUserId || !text) return false;
 
@@ -203,9 +203,11 @@ export class LineWebhookService {
     for (const raw of body.split(/[,;\n]+/)) {
       const line = raw.trim();
       if (!line) continue;
-      const m = /^(\S+)\s+(\d+(?:\.\d+)?)(?:\s+(.+))?$/.exec(line);
-      if (!m || !(Number(m[2]) > 0)) return `อ่านรายการนี้ไม่ได้: "${line}"\n${LineWebhookService.CHAT_USAGE}`;
-      items.push({ item_id: m[1]!, request_qty: Number(m[2]), reason: m[3]?.trim() || undefined });
+      // token split (linear) instead of a backtracking regex — the text is uncontrolled chat input
+      const parts = line.split(/\s+/);
+      const qty = Number(parts[1]);
+      if (parts.length < 2 || !Number.isFinite(qty) || qty <= 0) return `อ่านรายการนี้ไม่ได้: "${line}"\n${LineWebhookService.CHAT_USAGE}`;
+      items.push({ item_id: parts[0]!, request_qty: qty, reason: parts.slice(2).join(' ') || undefined });
     }
     if (!items.length) return LineWebhookService.CHAT_USAGE;
 
@@ -255,9 +257,9 @@ export class LineWebhookService {
 
   private static readonly CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L ambiguity
   private genCode(): string {
-    const bytes = randomBytes(6);
     let out = '';
-    for (let i = 0; i < 6; i++) out += LineWebhookService.CODE_ALPHABET[bytes[i]! % LineWebhookService.CODE_ALPHABET.length];
+    // randomInt is CSPRNG-backed and rejection-sampled — no modulo bias over the 31-char alphabet
+    for (let i = 0; i < 6; i++) out += LineWebhookService.CODE_ALPHABET[randomInt(LineWebhookService.CODE_ALPHABET.length)];
     return out;
   }
 
