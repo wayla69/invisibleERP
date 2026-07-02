@@ -49,6 +49,10 @@ export class ProcurementController {
     return this.svc.approvePr(prNo, b.approve, u);
   }
 
+  // Requester withdraws their own still-Pending PR (own-doc only; Admin may cancel any) — 0228.
+  @Patch('prs/:prNo/cancel') @Permissions('pr_raise', 'procurement', 'planner')
+  cancelPr(@Param('prNo') prNo: string, @CurrentUser() u: JwtUser) { return this.svc.cancelPr(prNo, u); }
+
   // ── supplier screening (Phase 16) ── vendor-master duty = md_vendor (segregated from AP payment).
   // Legacy 'masterdata' holders still pass (it implies md_vendor/md_item/md_config).
   @Patch('suppliers/:id/status') @Permissions('md_vendor')

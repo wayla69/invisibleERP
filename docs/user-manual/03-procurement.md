@@ -58,6 +58,20 @@ handy on the floor or in the stockroom. One-time setup first:
 |---|---|
 | `pr <item> <qty> [reason]` — several items separated by `,` (also `ขอซื้อ …`) | Raises a PR, e.g. `pr A4-PAPER 10 กระดาษหมด, TONER-85A 2` |
 | `status <PR no>` (also `สถานะ <PR no>`) | Replies the PR's current approval state |
+| `my prs` (also `รายการของฉัน`) | Lists your 5 most recent PRs with statuses |
+| `find <keyword>` (also `ค้นหา`) | Searches the item master so you can use real item ids |
+| `cancel <PR no>` (also `ยกเลิก`) | Withdraws **your own** still-Pending PR |
+| `stock <item id>` (also `สต็อก`) | Read-only on-hand balance by location |
+| `approve <PR no>` / `reject <PR no> <reason>` (also `อนุมัติ`/`ปฏิเสธ`) | **Procurement only** — decides a pending PR through the normal approval engine |
+
+**LINE notifications:** if you've linked your account, the system messages you
+automatically — approvers get a 🔔 when a PR enters their queue (with the
+`approve <PR no>` hint), and the requester gets ✅/❌ when their PR is decided.
+No setup beyond linking; if you unlink, the messages stop.
+
+> **Approving from chat is exactly as strict as the web:** you need the
+> `procurement` permission, you can never approve a PR you raised yourself
+> (`SOD_VIOLATION`), and multi-level chains still require every step.
 
 **Expected result:** The bot replies the new PR number (e.g. `PR-20260702-001`).
 The PR is **identical** to one raised on the web — same numbering, same status log,
