@@ -1597,6 +1597,13 @@
       "when": 2023820000054,
       "tag": "0227_line_chat_pr",
       "breakpoints": true
+    },
+    {
+      "idx": 228,
+      "version": "7",
+      "when": 2023820000055,
+      "tag": "0228_doc_attachments",
+      "breakpoints": true
     }
   ]
 }

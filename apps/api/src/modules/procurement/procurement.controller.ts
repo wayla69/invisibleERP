@@ -1,8 +1,14 @@
-import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ProcurementService, type CreatePrDto, type CreatePoDto, type CreateGrDto, type UpsertSupplierPriceDto } from './procurement.service';
+import { AttachmentsService, type AddAttachmentDto } from './attachments.service';
+
+const AttachmentBody = z.object({
+  doc_type: z.string().min(1), doc_no: z.string().min(1), data_url: z.string().min(1),
+  kind: z.enum(['invoice', 'receipt', 'other']).optional(), filename: z.string().max(200).optional(), note: z.string().max(500).optional(),
+});
 
 const PrBody = z.object({
   remarks: z.string().optional(), priority: z.string().optional(),
@@ -37,7 +43,19 @@ const SupplierPriceBody = z.object({
 
 @Controller('api/procurement')
 export class ProcurementController {
-  constructor(private readonly svc: ProcurementService) {}
+  constructor(private readonly svc: ProcurementService, private readonly attachments: AttachmentsService) {}
+
+  // ── Document attachments (0228) — invoice/receipt photos on a PO (evidence for the 3-way match). ──
+  // Upload: the people who handle the paper — buyer (procurement), AP clerk (creditors), receiver
+  // (wh_receive). View adds planner/exec. Delete is service-enforced to uploader-or-Admin.
+  @Post('attachments') @Permissions('procurement', 'creditors', 'wh_receive')
+  addAttachment(@Body(new ZodValidationPipe(AttachmentBody)) b: AddAttachmentDto, @CurrentUser() u: JwtUser) { return this.attachments.add(b, u); }
+  @Get('attachments') @Permissions('procurement', 'creditors', 'wh_receive', 'planner', 'exec')
+  listAttachments(@Query('doc_type') docType: string, @Query('doc_no') docNo: string, @CurrentUser() u: JwtUser) { return this.attachments.list(docType ?? 'PO', docNo ?? '', u); }
+  @Get('attachments/:id') @Permissions('procurement', 'creditors', 'wh_receive', 'planner', 'exec')
+  getAttachment(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.attachments.get(+id, u); }
+  @Delete('attachments/:id') @Permissions('procurement', 'creditors', 'wh_receive')
+  removeAttachment(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.attachments.remove(+id, u); }
 
   // PR = a request anyone in the company can raise (pr_raise). It is NOT a commitment — approval + PO
   // remain procurement-only. 'procurement'/'planner' imply pr_raise, so buyers/planners still qualify.

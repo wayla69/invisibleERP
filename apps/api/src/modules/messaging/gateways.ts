@@ -87,6 +87,24 @@ export async function replyLine(token: string, replyToken: string, text: string)
   return postLine(token, 'reply', { replyToken, messages: [{ type: 'text', text: text.slice(0, 5000) }] });
 }
 
+// Download a message's binary content (photo/file the user sent) from the LINE content API. Returns the
+// bytes as a data URL, or a typed error ('too-large' / 'fetch-failed') — never throws. Used by the chat
+// attach flow (invoice/receipt photos onto a PO).
+export async function fetchLineContent(token: string, messageId: string, maxBytes = 2_000_000): Promise<{ dataUrl: string } | { error: 'too-large' | 'fetch-failed' }> {
+  try {
+    const res = await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { error: 'fetch-failed' };
+    const contentType = (res.headers.get('content-type') ?? 'image/jpeg').split(';')[0]!.trim();
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > maxBytes) return { error: 'too-large' };
+    return { dataUrl: `data:${contentType};base64,${buf.toString('base64')}` };
+  } catch {
+    return { error: 'fetch-failed' };
+  }
+}
+
 // Push a rich flex message to one LINE user (a card/carousel with images + buttons, not just plain text).
 export async function pushLineFlex(token: string, to: string, altText: string, contents: any): Promise<SendResult> {
   return postLine(token, 'push', { to, messages: [flexMessage(altText, contents)] });
