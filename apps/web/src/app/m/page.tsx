@@ -142,12 +142,16 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
   const [wheels, setWheels] = useState<any[]>([]);
   const [privileges, setPrivileges] = useState<any[]>([]);
   const [receipts, setReceipts] = useState<any[]>([]);
+  // V1 (docs/29): tier journey (× earn multiplier + progress), points history, upcoming expiry warning.
+  const [tier, setTier] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const [expiring, setExpiring] = useState<any>(null);
   const [err, setErr] = useState('');
   const [flash, setFlash] = useState('');
 
   const reload = useCallback(async () => {
     try {
-      const [m, r, ms, rf, w, wh, pv, rc] = await Promise.all([
+      const [m, r, ms, rf, w, wh, pv, rc, tj, hi, ex] = await Promise.all([
         mapi('/api/member/me'),
         mapi<{ rewards: any[] }>('/api/member/rewards'),
         mapi<{ missions: any[] }>('/api/member/missions'),
@@ -156,8 +160,12 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
         mapi<{ wheels: any[] }>('/api/member/wheels'),
         mapi<{ privileges: any[] }>('/api/member/privileges'),
         mapi<{ submissions: any[] }>('/api/member/receipts'),
+        mapi('/api/member/tier').catch(() => null),
+        mapi<{ history: any[] }>('/api/member/history').catch(() => ({ history: [] })),
+        mapi('/api/member/points/expiring').catch(() => null),
       ]);
       setMe(m); setRewards(r.rewards ?? []); setMissions(ms.missions ?? []); setRefs(rf.referrals ?? []); setWallet(w.coupons ?? []); setWheels(wh.wheels ?? []); setPrivileges(pv.privileges ?? []); setReceipts(rc.submissions ?? []);
+      setTier(tj); setHistory(hi?.history ?? []); setExpiring(ex);
     } catch (e: any) { if (/เซสชัน|401|token/i.test(e.message)) on401(); else setErr(e.message); }
   }, [on401]);
   useEffect(() => { reload(); }, [reload]);
@@ -207,11 +215,32 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
           <p className="text-xs opacity-80">แต้มสะสม</p>
           <p className="text-3xl font-bold tabular-nums">{Number(me.balance ?? 0).toLocaleString()}</p>
         </div>
+        {/* V1 (docs/29): tier ladder strip — the member sees their ×earn and the road to the next rung */}
+        {tier && (
+          <div className="mt-4 rounded-lg bg-white/15 px-3 py-2 text-xs">
+            <div className="flex justify-between">
+              <span>ระดับ {tier.current_tier ?? me.tier}{(() => { const cur = (tier.tiers ?? []).find((t: any) => t.tier === (tier.current_tier ?? me.tier)); return cur && Number(cur.earn_mult) !== 1 ? ` · สะสม ×${Number(cur.earn_mult)}` : ''; })()}</span>
+              {tier.next_tier && <span>อีก {Number(tier.to_next).toLocaleString()} แต้ม → {tier.next_tier}</span>}
+            </div>
+            {tier.next_tier && (
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/25">
+                <div className="h-full rounded-full bg-white" style={{ width: `${Math.min(100, Number(tier.progress_pct ?? 0))}%` }} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div className="flex justify-between px-1">
         <p className="text-xs text-muted-foreground">แต้มสะสมตลอดชีพ {Number(me.lifetime ?? 0).toLocaleString()}</p>
         <button className="flex items-center gap-1 text-xs text-muted-foreground" onClick={onLogout}><LogOut className="size-3" /> ออกจากระบบ</button>
       </div>
+
+      {/* V1 (docs/29): expiring-points warning chip (reads the W1 look-ahead register) */}
+      {expiring && Number(expiring.expiring_points) > 0 && (
+        <p className="rounded-md bg-warning/10 px-3 py-2 text-center text-sm">
+          ⏳ แต้ม {Number(expiring.expiring_points).toLocaleString()} จะหมดอายุใน {expiring.days_left} วัน ({expiring.expire_by}) — ใช้ก่อนหมดนะ!
+        </p>
+      )}
 
       {flash && <p className="rounded-md bg-success/10 px-3 py-2 text-center text-sm text-success">{flash}</p>}
       {err && <p className="rounded-md bg-destructive/10 px-3 py-2 text-center text-sm text-destructive">{err}</p>}
@@ -269,6 +298,24 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
         ))}
       </Section>
 
+      {/* V1 (docs/29): P2P transfer — the W1 API (LYL-18), finally tappable */}
+      <Section icon={<Users className="size-4" />} title="ส่งแต้มให้เพื่อน">
+        <TransferForm busy={busy} balance={Number(me.balance ?? 0)} onDone={(msg) => act(async () => {}, msg)} />
+      </Section>
+
+      {/* V1 (docs/29): points history — Earn / Redeem / Transfer / Expire with running balance */}
+      {history.length > 0 && (
+        <Section icon={<ReceiptText className="size-4" />} title="ประวัติแต้ม">
+          {history.slice(0, 10).map((h: any, i: number) => (
+            <Row key={i}
+              title={`${h.txn_type === 'Earn' ? 'สะสม' : h.txn_type === 'Redeem' ? 'แลก' : h.txn_type === 'Transfer' ? (Number(h.points) < 0 ? 'โอนออก' : 'รับโอน') : h.txn_type === 'Expire' ? 'หมดอายุ' : h.txn_type} ${Number(h.points) > 0 ? '+' : ''}${Number(h.points).toLocaleString()} แต้ม`}
+              sub={`${h.ref_doc ?? ''} · คงเหลือ ${Number(h.balance_after).toLocaleString()}`}>
+              <span className="text-xs text-muted-foreground">{h.txn_date ? new Date(h.txn_date).toLocaleDateString('th-TH') : ''}</span>
+            </Row>
+          ))}
+        </Section>
+      )}
+
       {/* Refer a friend */}
       <Section icon={<Users className="size-4" />} title="ชวนเพื่อน รับแต้ม">
         <ReferForm onDone={(msg) => act(async () => {}, msg)} />
@@ -290,6 +337,41 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
           </Row>
         ))}
       </Section>
+    </div>
+  );
+}
+
+// V1 (docs/29) — P2P transfer form. The API enforces every guard (balance, same shop, no self, day cap);
+// this form just surfaces the messages verbatim. `busy` is shared with the page so a double-tap can't
+// fire a duplicate transfer.
+function TransferForm({ busy, balance, onDone }: { busy: boolean; balance: number; onDone: (msg: string) => void }) {
+  const [phone, setPhone] = useState('');
+  const [points, setPoints] = useState('');
+  const [note, setNote] = useState('');
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState('');
+  const send = async () => {
+    if (busy || sending) return;
+    setSending(true); setErr('');
+    try {
+      const r: any = await mapi('/api/member/points/transfer', { method: 'POST', body: JSON.stringify({ to_phone: phone.trim(), points: Number(points), note: note.trim() || undefined }) });
+      setPhone(''); setPoints(''); setNote('');
+      onDone(`💝 ส่ง ${Number(r.points).toLocaleString()} แต้มแล้ว — คงเหลือ ${Number(r.from_balance).toLocaleString()} แต้ม`);
+    } catch (e: any) { setErr(e.message); } finally { setSending(false); }
+  };
+  const pts = Number(points);
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="เบอร์เพื่อน 08xxxxxxxx" inputMode="tel" />
+        <Input value={points} onChange={(e) => setPoints(e.target.value)} placeholder="จำนวนแต้ม" inputMode="numeric" />
+      </div>
+      <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ข้อความถึงเพื่อน (ไม่บังคับ)" maxLength={200} />
+      <Button className="w-full" size="sm" disabled={busy || sending || !phone.trim() || !Number.isInteger(pts) || pts <= 0 || pts > balance} onClick={send}>
+        {sending ? <Loader2 className="size-4 animate-spin" /> : 'ส่งแต้ม'}
+      </Button>
+      <p className="text-center text-[11px] text-muted-foreground">ส่งได้เฉพาะสมาชิกร้านเดียวกัน · มีเพดานต่อวันตามที่ร้านกำหนด</p>
+      {err && <p className="text-center text-sm text-destructive">{err}</p>}
     </div>
   );
 }
