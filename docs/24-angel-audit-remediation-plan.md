@@ -1,25 +1,19 @@
 # 24 — Angel-Investor / Technical-Audit Remediation Plan
 
-> **Date:** 2026-07-02 · **Status:** v2.7 — **IN PROGRESS (16 pieces delivered)** · **Owner:** ERP / Product + Compliance + Legal
-> **Delivered:** R0-1 (PII encryption) · R0-2 drafts (privacy policy + /legal/privacy) · R0-3 (must-change
-> hard gate + seed hardening) · AUD-LGL-03 (employee DSAR) — **Wave 0 closed** · R1-1 (132 tenant indexes +
-> CI guard) · R1-2 (GL snapshots + GL-20) · R1-3 (Redis SSE fan-out) · R1-4 (bigint money invariants) ·
-> R2-1 (lockout fail-open alert) · R2-2 (authz-change session revocation) · R2-3 (verified pre-existing) ·
-> R2-4 (cookie/TTL coherence) · R3-1+R3-2 (census 170 CI-guarded + stale-doc banners) · R3-3 code
-> (evidence clock from 2026-07-02) · R4-2 (anomaly math corrected) · R4-3 partial (dow_seasonal +
-> croston_sba) · R4-5 (honest labeling).
-> **Open:** R1-5 deploy (pgbouncer/Redis provisioning) · R2-5 + R5-1/2/3 (ratchets & refactors) · R4-1
-> (pgvector RAG) · R4-4 (LLM seam + scored evals) · R4-3 holiday-calendar remainder · R3-4 + Wave 6 (org:
-> counsel execution, Anthropic addendum, SOC 2 engagement, customers).
-> **Scope:** Close **every** finding raised by the 2026-07 five-persona investment audit panel
-> (IT architecture, PwC-style capital-markets/ICFR, legal & compliance, AI/LLM, and the chairman's
-> value-investing synthesis). The audit fanned out over the live tree and produced findings with
-> `file:line` evidence; this plan converts each finding into an independently-shippable, doc-synced
-> PR (same delivery discipline as `docs/19`/`20`/`23`: migration *if any* + module + permissions/SoD +
-> RCM control + narrative + user-manual + UAT + cutover-harness, merged only on a fully green CI matrix).
-> **Decision recorded:** remediation ships in **six waves ordered by risk**, Wave 0 (legal/PDPA) and
-> Wave 1 (read-path scale) before any external-tenant onboarding; organizational items (auditors,
-> customers, PMO) are tracked here but are people-work, not PRs.
+> **Date:** 2026-07-02 · **Status:** v3.5 — **REPO-TRACTABLE SCOPE COMPLETE (23 pieces delivered)** · **Owner:** ERP / Product + Compliance + Legal
+> **Delivered (Waves 0–5, all in-repo items):** R0-1 PII encryption · R0-2 legal drafts + /legal/privacy ·
+> R0-3 must-change hard gate · AUD-LGL-03 employee DSAR — **Wave 0 closed** · R1-1 132 tenant indexes +
+> guard · R1-2 GL snapshots + GL-20 · R1-3 Redis SSE fan-out · R1-4 bigint money invariants · R1-5
+> repo-half (loadtest workflow) · R2-1 lockout fail-open alert · R2-2 authz-change revocation · R2-3
+> verified pre-existing · R2-4 cookie/TTL coherence · R2-5 ts-debt ratchet (as-any 1456 / strict 248
+> baselines) · R3-1+R3-2 census 170 CI-guarded + banners · R3-3 evidence clock (from 2026-07-02) · R4-1
+> semantic RAG (Voyage + space isolation) · R4-2 anomaly math corrected · R4-3 dow/holiday models incl.
+> Songkran · R4-4 LLM seam + scored benchmark · R4-5 honest labeling · R5-1 migration parity + dead
+> grandfather removed · R5-3 consolidation RFC (docs/25).
+> **Open (blocked on people/console, not code):** counsel execution of ToS/DPA/privacy + Anthropic
+> addendum → `AI_DPA_ACKNOWLEDGED` · SOC 2 Type I engagement + quarterly evidence archive · ELC operation
+> (R3-4) · PgBouncer/Redis provisioning on Railway · docs/25 RFC approval → the 5 move-PRs + top-5 RSC
+> conversions · rolling ts-debt paydown · Wave 6 (customers, pricing, PMO).
 
 ---
 
@@ -601,3 +595,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 3.2 | 2026-07-02 | ERP/Product | R2-5 ratchet delivered (ts-debt guard in CI: as-any 1456 + strict-index 248 baselines may only go down) |
 | 3.3 | 2026-07-02 | ERP/Product | R5-3 RFC delivered (docs/25: 5-cluster map + mechanical recipe + sequencing); R5-2 direction set in docs/25 §4 |
 | 3.4 | 2026-07-02 | ERP/Product | R4-3 fully closed (date-aware Forecaster ctx + th_holiday model; deterministic Songkran ToE 40/40/40 vs ~10) |
+| 3.5 | 2026-07-02 | ERP/Product | Repo-tractable scope complete (23 pieces); final sweep green (basics 215 / compliance 114 / ext 262 / worldclass 58 / unit 95 + all guards); open items = people/console work |
