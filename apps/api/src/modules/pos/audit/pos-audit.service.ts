@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq, and, desc, like } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { auditLog, reasonCodes } from '../../database/schema';
-import type { JwtUser } from '../../common/decorators';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { auditLog, reasonCodes } from '../../../database/schema';
+import type { JwtUser } from '../../../common/decorators';
 
 export interface AuditEntry { action: string; entity?: string; entityId?: string; status?: string; meta?: Record<string, any> }
 

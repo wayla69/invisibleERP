@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { type Observable } from 'rxjs';
-import { RealtimeBus } from '../../common/realtime-bus';
+import { RealtimeBus } from '../../../common/realtime-bus';
 
 export interface RealtimeEvent { type: string; tenant_id?: number | null; at?: string; [k: string]: any }
 

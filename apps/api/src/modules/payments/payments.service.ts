@@ -9,8 +9,8 @@ import { n, fx } from '../../database/queries';
 import { round2, roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 import { resolveGateway } from './gateways';
-import { PosAuditService } from '../pos-audit/pos-audit.service';
-import { JournalService } from '../pos-fiscal/journal.service';
+import { PosAuditService } from '../pos/audit/pos-audit.service';
+import { JournalService } from '../pos/fiscal/journal.service';
 import { QrService } from '../qr/qr.service';
 
 // POS-01: cash over/short at/above this absolute THB amount needs manager approval (maker-checker);

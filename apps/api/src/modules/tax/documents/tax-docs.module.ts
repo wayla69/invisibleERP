@@ -7,7 +7,7 @@ import { TaxDocsController } from './tax-docs.controller';
 import { WhtController } from './wht.controller';
 import { EtaxEmailService } from './etax-email.service';
 import { MAILER, NodemailerMailer } from './mailer';
-import { PosFiscalModule } from '../../pos-fiscal/pos-fiscal.module';
+import { PosFiscalModule } from '../../pos/fiscal/pos-fiscal.module';
 
 // Thai Revenue-Dept tax documents: full + abbreviated tax invoice (ม.86/4, 86/6) and WHT 50 ทวิ (ม.50 ทวิ).
 // DocNumberService comes from the global CommonModule; DRIZZLE is global; TaxService from TaxCoreModule

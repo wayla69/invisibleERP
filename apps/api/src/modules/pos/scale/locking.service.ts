@@ -1,8 +1,8 @@
 import { Inject, Injectable, Optional, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, sql } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { diningTables, menuRecipes, menuRecipeLines, menuItems, customerInventory } from '../../database/schema';
-import { n } from '../../database/queries';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { diningTables, menuRecipes, menuRecipeLines, menuItems, customerInventory } from '../../../database/schema';
+import { n } from '../../../database/queries';
 import { RealtimeService } from './realtime.service';
 
 // P2a — optimistic concurrency for multi-terminal: a stale `rev` loses with 409 (two servers can't

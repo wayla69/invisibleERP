@@ -1,8 +1,8 @@
 import { Controller, Get, Post, Param, Body, Sse } from '@nestjs/common';
 import { map, filter } from 'rxjs/operators';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { LockingService } from './locking.service';
 import { RealtimeService, drawerKickEscPos } from './realtime.service';
 

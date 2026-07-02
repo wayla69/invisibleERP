@@ -3,7 +3,7 @@
 
 import { BadRequestException } from '@nestjs/common';
 import { buildPromptPayPayload } from './promptpay-qr';
-import { OmiseProvider } from '../pos-terminal/providers';
+import { OmiseProvider } from '../pos/terminal/providers';
 
 export interface GatewayResult {
   ref: string;

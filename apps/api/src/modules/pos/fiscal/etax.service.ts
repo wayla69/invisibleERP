@@ -1,12 +1,12 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { etaxSubmissions, taxInvoices, taxInvoiceLines } from '../../database/schema';
-import { n } from '../../database/queries';
-import type { JwtUser } from '../../common/decorators';
-import { buildEtaxInvoiceXml, type EtaxInvoice } from '../tax/documents/etax-xml';
-import { getSigningMaterial, signEtaxXml } from '../tax/documents/etax-sign';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { etaxSubmissions, taxInvoices, taxInvoiceLines } from '../../../database/schema';
+import { n } from '../../../database/queries';
+import type { JwtUser } from '../../../common/decorators';
+import { buildEtaxInvoiceXml, type EtaxInvoice } from '../../tax/documents/etax-xml';
+import { getSigningMaterial, signEtaxXml } from '../../tax/documents/etax-sign';
 
 // RD/ETDA e-Tax Invoice & e-Receipt submission via a service provider.
 //   • The UBL 2.1 XML (etax-xml) is built from the stored tax invoice, then XAdES-signed when a

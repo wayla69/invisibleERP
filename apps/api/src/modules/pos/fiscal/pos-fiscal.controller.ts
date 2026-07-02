@@ -1,10 +1,10 @@
 import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { JournalService } from './journal.service';
 import { EtaxService } from './etax.service';
-import { qint, qintOpt } from '../../common/query';
+import { qint, qintOpt } from '../../../common/query';
 
 const AppendBody = z.object({ doc_type: z.string().min(1), doc_no: z.string().optional(), action: z.string().optional(), payload: z.record(z.any()) });
 const SubmitBody = z.object({ provider: z.string().optional() });
