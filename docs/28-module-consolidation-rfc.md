@@ -30,7 +30,7 @@ a route change is out of scope for this RFC.
 | **Loyalty/CRM-B2C** | `loyalty`, `loyalty-analytics`, `member`, `rewards`, `referrals`, `wheels`, `giftcards`, `gamification` (8) | `loyalty/` core (members, ledger, consents) + `loyalty/engagement/` (rewards, referrals, wheels, gamification); **`giftcards` stays separate** | Gift cards carry their own GL liability (2200) + REC-04 reconciliation — a finance instrument, not an engagement toy; keep its boundary. |
 | **CRM-B2B/pipeline** | `crm`, `crm-pipeline`, `pipeline` (3) | `crm/` (accounts + 360) + `crm/pipeline/` (opportunities, win/loss) — fold the older `pipeline` forecaster into `crm/pipeline` | `pipeline` predates `crm-pipeline`; both expose forecast views. Verify no route collision (`/api/pipeline` vs `/api/crm/pipeline`) before folding; keep both routes as aliases for one service. |
 | **Tax** | `tax`, `tax-docs`, `tax-reports` (3) | `tax/` core (VAT/WHT engines) + `tax/documents/` + `tax/reports/` | Statutory-filing snapshots (`tax-docs`) are audit records — folder moves only, never touch their tables. |
-| **Payments** | `payments`, `payments-depth` (2) | merge `payments-depth` into `payments/` | "depth" was a phase name, not a boundary. |
+| **Payments** ✅ | `payments`, `payments-depth` (2) | merge `payments-depth` into `payments/` — **SHIPPED (PR #1, 2026-07-02):** files moved to `payments/depth/`, `PaymentsModule` imports + re-exports `PaymentsDepthModule`, standalone app.module entry removed; routes/permissions/GL unchanged; no facade needed (zero external importers) | "depth" was a phase name, not a boundary. |
 
 Explicitly **NOT** consolidated: `finance` vs `ledger` (sub-ledger vs GL is a real accounting boundary),
 `analytics` vs `bi` vs `demand-ml` (parity-locked files live in `analytics`; keep the lock isolated),
@@ -39,7 +39,7 @@ authority models).
 
 ## 3. Sequencing (five PRs, priority order, each independently green)
 
-1. **payments** (2→1; smallest, proves the recipe) → 2. **tax** → 3. **crm/pipeline** (needs the route-alias
+1. **payments** ✅ (2→1; smallest — SHIPPED, the recipe holds) → 2. **tax** → 3. **crm/pipeline** (needs the route-alias
 check) → 4. **loyalty** → 5. **pos** (largest; last, after the recipe is boring).
 
 **The recipe per PR:** `git mv` folders → update module imports + the Nest `imports:[]` graph → add
@@ -76,3 +76,4 @@ previous one merges (the docs/19 lesson — shared files, sequential PRs).
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 1.0 | 2026-07-02 | Platform | Initial RFC from the 2026-07 investment-audit findings AUD-ARC-10 (module sprawl → 5-cluster ownership map + mechanical recipe + 5-PR sequencing) and AUD-ARC-09 (RSC direction: server-by-default for new pages, top-5 conversion list, /legal/privacy as the shipped pattern). |
+| 1.1 | 2026-07-02 | Platform | **Consolidation PR #1 (payments) shipped** — `payments-depth` folded into `payments/depth/` under the `PaymentsModule` umbrella (import + re-export); app.module registration removed; zero route/permission/GL change. Proof: pos-p2 33 · cash-banking 11 · restaurant 162 · basics 215 · compliance 115 · ts-debt green; typecheck + build green. Module count 122→121. |

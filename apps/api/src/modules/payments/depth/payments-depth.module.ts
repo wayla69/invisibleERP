@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { LedgerModule } from '../ledger/ledger.module';
-import { TaxModule } from '../tax/tax.module';
+import { LedgerModule } from '../../ledger/ledger.module';
+import { TaxModule } from '../../tax/tax.module';
 import { PaymentsDepthService } from './payments-depth.service';
 import { PaymentsDepthController } from './payments-depth.controller';
 
