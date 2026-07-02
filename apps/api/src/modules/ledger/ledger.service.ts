@@ -2,7 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules, tenantAccounts, glAuditLog } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules, tenantAccounts, glAuditLog, glPeriodBalances } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
@@ -164,6 +164,37 @@ export class LedgerService {
     return sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${c})`;
   }
 
+  // ───────────────────── GL period-balance snapshot (docs/24 R1-2 / AUD-ARC-02) ─────────────────────
+  // Apply one posted entry's lines to gl_period_balances INSIDE the same transaction as the posting.
+  // Posting is the only balance-affecting event (Drafts are excluded from balances, Posted entries are
+  // DB-immutable per 0165, corrections are contra reversals that post normally), so the snapshot cannot
+  // drift from a mutation this service can see; GL-20 re-verifies it against the raw ledger at close.
+  private async bumpPeriodBalances(
+    tx: any,
+    hdr: { tenantId: number | null; ledgerCode: string | null; period: string | null },
+    lines: { account_code: string; debit?: unknown; credit?: unknown; cost_center?: string | null }[],
+  ): Promise<void> {
+    // Aggregate per (account, cost-center) first — an entry rarely has more than a handful of rows.
+    const agg = new Map<string, { account: string; cc: string; debit: number; credit: number }>();
+    for (const l of lines) {
+      const cc = (l.cost_center ?? '') as string;
+      const k = `${l.account_code}|${cc}`;
+      const cur = agg.get(k) ?? { account: l.account_code, cc, debit: 0, credit: 0 };
+      cur.debit += n(l.debit); cur.credit += n(l.credit);
+      agg.set(k, cur);
+    }
+    const ledgerCode = hdr.ledgerCode ?? '';
+    const period = hdr.period ?? '';
+    for (const r of agg.values()) {
+      // ON CONFLICT targets the ux_gl_period_balances expression index (0212): atomic accumulate.
+      await tx.execute(sql`
+        INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
+        VALUES (${hdr.tenantId}, ${ledgerCode}, ${period}, ${r.cc}, ${r.account}, ${fx(r.debit, 4)}, ${fx(r.credit, 4)})
+        ON CONFLICT (coalesce(tenant_id, 0), ledger_code, period, cost_center_code, account_code)
+        DO UPDATE SET debit = gl_period_balances.debit + excluded.debit, credit = gl_period_balances.credit + excluded.credit`);
+    }
+  }
+
   // ───────────────────── Post a balanced entry ─────────────────────
   // BALANCED BY CONSTRUCTION — throw UNBALANCED if Σdebit !== Σcredit (round 4) or empty.
   // `outerTx` lets a caller post this entry INSIDE its own transaction (e.g. a return reversing money +
@@ -269,6 +300,8 @@ export class LedgerService {
         currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: entryTenantId,
         branchId: l.branch_id ?? null, projectId: l.project_id ?? null, departmentId: l.dept_id ?? null,
       })));
+      // R1-2: a posting that lands Posted updates the period-balance snapshot in the SAME transaction.
+      if (willPost) await this.bumpPeriodBalances(tx, { tenantId: entryTenantId, ledgerCode: dto.ledgerCode ?? null, period }, nzLines);
       // GL-17: record a POST audit-trail row for entries that land Posted (skip Drafts — APPROVE logs them).
       if (willPost) {
         await tx.insert(glAuditLog).values({
@@ -452,10 +485,16 @@ export class LedgerService {
       : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.code, e.period), eq(fiscalPeriods.tenantId, e.tenantId))).limit(1);
     if (pp && pp.status === 'Closed') throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${e.period} is closed`, messageTh: `งวดบัญชี ${e.period} ถูกปิดแล้ว` });
     // GL-17: a Draft → Posted transition is the moment of posting; stamp postedAt and log the APPROVE.
-    await db.update(journalEntries).set({ status: 'Posted', postedAt: new Date() }).where(eq(journalEntries.id, e.id));
-    await db.insert(glAuditLog).values({
-      tenantId: e.tenantId ?? null, entryId: Number(e.id), action: 'APPROVE', actor: approver.username,
-      detail: { entry_no: entryNo, prepared_by: e.createdBy },
+    // R1-2: the transition + audit row + period-balance snapshot commit ATOMICALLY.
+    await db.transaction(async (tx: any) => {
+      await tx.update(journalEntries).set({ status: 'Posted', postedAt: new Date() }).where(eq(journalEntries.id, e.id));
+      await tx.insert(glAuditLog).values({
+        tenantId: e.tenantId ?? null, entryId: Number(e.id), action: 'APPROVE', actor: approver.username,
+        detail: { entry_no: entryNo, prepared_by: e.createdBy },
+      });
+      const drLines = await tx.select({ account_code: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit, cost_center: journalLines.costCenterCode })
+        .from(journalLines).where(eq(journalLines.entryId, Number(e.id)));
+      await this.bumpPeriodBalances(tx, { tenantId: e.tenantId ?? null, ledgerCode: e.ledgerCode ?? null, period: e.period ?? null }, drLines);
     });
     return { entry_no: entryNo, status: 'Posted', approved_by: approver.username, prepared_by: e.createdBy };
   }
@@ -553,25 +592,27 @@ export class LedgerService {
   // group journal_lines by account_code (joined to accounts) — Σdebit, Σcredit, balance
   async trialBalance(period?: string, costCenter?: string | null, ledgerCode?: string | null) {
     const db = this.db as any;
-    const conds = [eq(journalEntries.status, 'Posted'), this.ledgerCond(ledgerCode)];
-    if (period) conds.push(sql`${journalEntries.period} = ${period}`);
-    if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
-    else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
-    const where = and(...conds);
+    // R1-2 (AUD-ARC-02): read the maintained gl_period_balances snapshot instead of aggregating the full
+    // journal_lines table per request. Same filters/semantics: Posted-only (the snapshot holds nothing
+    // else), ledger NULL-or-code ('' = NULL in the normalized key), per-period, per-cost-center; RLS
+    // scopes tenants exactly as the raw scan did. GL-20 reconciles snapshot↔raw at every close.
+    const conds: any[] = [inArray(glPeriodBalances.ledgerCode, ['', ledgerCode ?? LEADING])];
+    if (period) conds.push(eq(glPeriodBalances.period, period));
+    if (costCenter === '__UNASSIGNED__') conds.push(eq(glPeriodBalances.costCenterCode, ''));
+    else if (costCenter) conds.push(eq(glPeriodBalances.costCenterCode, costCenter));
     const rows = await db
       .select({
-        account_code: journalLines.accountCode,
+        account_code: glPeriodBalances.accountCode,
         account_name: accounts.name,
         account_type: accounts.type,
-        debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
-        credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
+        debit: sql<string>`coalesce(sum(${glPeriodBalances.debit}),0)`,
+        credit: sql<string>`coalesce(sum(${glPeriodBalances.credit}),0)`,
       })
-      .from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(where)
-      .groupBy(journalLines.accountCode, accounts.name, accounts.type)
-      .orderBy(journalLines.accountCode);
+      .from(glPeriodBalances)
+      .leftJoin(accounts, eq(glPeriodBalances.accountCode, accounts.code))
+      .where(and(...conds))
+      .groupBy(glPeriodBalances.accountCode, accounts.name, accounts.type)
+      .orderBy(glPeriodBalances.accountCode);
 
     const out = rows.map((r: any) => {
       const debit = round4(n(r.debit));

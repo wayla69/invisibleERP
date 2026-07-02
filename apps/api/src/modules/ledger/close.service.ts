@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { closeRuns, closeRunSteps, fiscalPeriods, journalEntries, journalLines } from '../../database/schema';
+import { glPeriodBalances, closeRuns, closeRunSteps, fiscalPeriods, journalEntries, journalLines } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 
 const num = (x: unknown) => Number(x) || 0;
@@ -233,7 +233,32 @@ export class CloseService {
     const susAccts = susRows.map((r: any) => ({ account: r.account, balance: r2(num(r.dr) - num(r.cr)) })).filter((a: any) => Math.abs(a.balance) > 0.01);
     const suspense = { key: 'suspense_clearing', title: 'Suspense/clearing accounts net to zero (advisory)', ok: susAccts.length === 0, advisory: true, accounts: susAccts };
 
-    const checks = [drafts, periodBalanced, entriesBalanced, suspense];
+    // 5. GL-20 (docs/24 R1-2) — the gl_period_balances snapshot reconciles to the raw ledger for this
+    // period, per account. The snapshot is maintained transactionally at posting, so ANY mismatch means a
+    // write path bypassed LedgerService (direct SQL/ETL) — a hard blocker until resynced (re-run the 0212
+    // backfill recompute), because the trial balance reads the snapshot.
+    const rawConds: any[] = [sql`${journalEntries.period} = ${period}`, eq(journalEntries.status, 'Posted')];
+    if (tenantId != null) rawConds.push(eq(journalEntries.tenantId, tenantId));
+    const rawAgg = await db.select({ account: journalLines.accountCode, dr: sql<string>`coalesce(sum(${journalLines.debit}),0)`, cr: sql<string>`coalesce(sum(${journalLines.credit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(...rawConds)).groupBy(journalLines.accountCode);
+    const snapConds: any[] = [eq(glPeriodBalances.period, period)];
+    if (tenantId != null) snapConds.push(eq(glPeriodBalances.tenantId, tenantId));
+    const snapAgg = await db.select({ account: glPeriodBalances.accountCode, dr: sql<string>`coalesce(sum(${glPeriodBalances.debit}),0)`, cr: sql<string>`coalesce(sum(${glPeriodBalances.credit}),0)` })
+      .from(glPeriodBalances).where(and(...snapConds)).groupBy(glPeriodBalances.accountCode);
+    const rawBy = new Map<string, { dr: number; cr: number }>(rawAgg.map((r: any) => [r.account, { dr: num(r.dr), cr: num(r.cr) }]));
+    const snapBy = new Map<string, { dr: number; cr: number }>(snapAgg.map((r: any) => [r.account, { dr: num(r.dr), cr: num(r.cr) }]));
+    const driftAccts: { account: string; raw_debit: number; snapshot_debit: number; raw_credit: number; snapshot_credit: number }[] = [];
+    for (const acct of new Set([...rawBy.keys(), ...snapBy.keys()])) {
+      const raw = rawBy.get(acct) ?? { dr: 0, cr: 0 };
+      const snap = snapBy.get(acct) ?? { dr: 0, cr: 0 };
+      if (Math.abs(raw.dr - snap.dr) > 0.005 || Math.abs(raw.cr - snap.cr) > 0.005) {
+        driftAccts.push({ account: acct, raw_debit: r2(raw.dr), snapshot_debit: r2(snap.dr), raw_credit: r2(raw.cr), snapshot_credit: r2(snap.cr) });
+      }
+    }
+    const snapshotRecon = { key: 'gl_snapshot_drift', title: 'Period-balance snapshot reconciles to the raw ledger (GL-20)', ok: driftAccts.length === 0, count: driftAccts.length, accounts: driftAccts.slice(0, 20) };
+
+    const checks = [drafts, periodBalanced, entriesBalanced, suspense, snapshotRecon];
     const blockers = checks.filter((c: any) => !c.ok && !c.advisory).map((c) => c.key);
     const warnings = checks.filter((c: any) => !c.ok && c.advisory).map((c) => c.key);
     return { period, ready: blockers.length === 0, blockers, warnings, checks };

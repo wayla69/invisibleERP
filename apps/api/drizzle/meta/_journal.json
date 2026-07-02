@@ -1485,6 +1485,13 @@
       "when": 2023820000038,
       "tag": "0211_tenant_indexes_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 212,
+      "version": "7",
+      "when": 2023820000039,
+      "tag": "0212_gl_period_balances",
+      "breakpoints": true
     }
   ]
 }

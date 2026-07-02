@@ -452,6 +452,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-106 | GlAccountant cannot see certify button on /reconciliation | R06, REC-03 | 04 §7 |
 | UAT-GL-107 | FinancialController can certify a recon period | R06, REC-03 | 04 §7 |
 | UAT-GL-108 | API certify blocked for recon_prep-only token | R06, REC-03 | 04 §9 |
+| UAT-GL-113 | Snapshot reconciliation blocks a drifted close | GL-20 | 04 §9 |
+| UAT-GL-114 | Trial balance reads the maintained snapshot | GL-01, GL-20 | 04 §7 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 

@@ -192,7 +192,17 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 - Doc-sync: `docs/ops/` note + this plan's checklist; no narrative/UAT impact (no behavior change) —
   state that explicitly in the PR.
 
-### R1-2 · GL period-balance snapshots — closes AUD-ARC-02 (the big one; own PR, heavy harness)
+### R1-2 · GL period-balance snapshots — closes AUD-ARC-02 (the big one; own PR, heavy harness) — **DELIVERED 2026-07-02**
+> Shipped: `gl_period_balances` (migration `0212`: table + expression unique key + tenant index + RLS loop
+> + idempotent backfill from the Posted ledger), transactional maintenance in `bumpPeriodBalances` at the
+> only two balance-affecting transitions (`postEntry`→Posted, `approveEntry` Draft→Posted — now atomic in
+> one tx), `trialBalance` rewritten to read the snapshot (same filters/output; every existing TB harness
+> assertion passed unchanged), and new detective control **GL-20** (`gl_snapshot_drift` hard blocker in the
+> GL-19 pre-lock validator; RCM census 169→170, tags updated, CI guard green). Direct-insert harness seeds
+> (`basics` postJE, `financial-health`) + `seed-demo-finance` now rebuild the snapshot after bypassing the
+> service (debug-mantra #4: fix the seeding, not the product). **Scope decision recorded:** P&L/BS/cash-flow
+> statements still aggregate raw (they are date-ranged; period snapshots serve them only on boundary
+> alignment) — a later date-level optimization if profiling demands; the TB was the hot dashboard path.
 *TB/P&L/BS/SCF must stop scanning all `journal_lines` per request.*
 
 - **New table `gl_period_balances`** (`tenant_id, ledger_id, fiscal_period_id, account_code,
@@ -493,3 +503,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.7 | 2026-07-02 | ERP/Product | R2-2 delivered (authz change bumps tokens_valid_from → immediate revocation instead of per-request re-resolution) |
 | 1.8 | 2026-07-02 | ERP/Product | R2-4 delivered (cookie Max-Age defaults to the JWT TTL; stale 8h/12h comments + .env.example aligned) |
 | 1.9 | 2026-07-02 | ERP/Product | R1-3 delivered (shared realtime-bus with optional Redis pub/sub behind both SSE buses; fake-transport cross-instance ToE) |
+| 2.0 | 2026-07-02 | ERP/Product | R1-2 delivered (gl_period_balances snapshot + transactional maintenance + TB snapshot read + control GL-20; census 170) |
