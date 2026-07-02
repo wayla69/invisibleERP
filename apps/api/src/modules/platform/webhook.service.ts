@@ -23,6 +23,7 @@ export const WEBHOOK_EVENTS = [
   { key: 'loyalty.earned', label: 'สะสมแต้ม', label_en: 'Loyalty points earned' },
   { key: 'loyalty.redeemed', label: 'แลกแต้ม', label_en: 'Loyalty points redeemed' },
   { key: 'loyalty.points_expiring', label: 'แต้มใกล้หมดอายุ', label_en: 'Loyalty points expiring soon' }, // W1 (docs/27)
+  { key: 'loyalty.nps_detractor', label: 'ลูกค้าให้คะแนน NPS ต่ำ', label_en: 'NPS detractor response (≤6)' }, // W3 (docs/27)
 ] as const;
 
 const MAX_ATTEMPTS = 3;

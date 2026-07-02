@@ -17,6 +17,8 @@ const BroadcastBody = z.object({ body: z.string().min(1).max(5000).optional(), f
   .refine((d) => d.body != null || d.flex != null, { message: 'body or flex required' });
 const FlexBody = z.object({ to: z.string().optional(), member_id: z.number().int().positive().optional(), alt_text: z.string().min(1).max(400), flex: z.any(), campaign: z.string().optional() })
   .refine((d) => d.to != null || d.member_id != null, { message: 'to or member_id required' });
+// W3 (docs/27) — tenant-wide messaging governance (quiet hours + global weekly marketing cap).
+const GovernanceBody = z.object({ quiet_start: z.string().regex(/^\d{2}:\d{2}$/).optional(), quiet_end: z.string().regex(/^\d{2}:\d{2}$/).optional(), weekly_cap: z.number().int().nonnegative().optional() });
 
 @Controller('api/messaging')
 export class MessagingController {
@@ -56,4 +58,11 @@ export class MessagingController {
   testProvider(@Param('channel') ch: string, @Body(new ZodValidationPipe(TestBody)) b: any, @CurrentUser() u: JwtUser) {
     return this.svc.sendTest(ch as any, b.to, u);
   }
+
+  // ── W3 (docs/27) — messaging governance: quiet hours + global weekly marketing cap (MKT-04/12) ──
+  @Get('governance') @Permissions('marketing', 'users', 'exec')
+  async getGovernance(@CurrentUser() u: JwtUser) { return { governance: await this.tenantMsg.getGovernance(u.tenantId) }; }
+
+  @Put('governance') @Permissions('marketing', 'users', 'exec')
+  setGovernance(@Body(new ZodValidationPipe(GovernanceBody)) b: any, @CurrentUser() u: JwtUser) { return this.tenantMsg.setGovernance(b, u); }
 }

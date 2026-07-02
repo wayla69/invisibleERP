@@ -1562,6 +1562,13 @@
       "when": 2023820000049,
       "tag": "0222_coalition",
       "breakpoints": true
+    },
+    {
+      "idx": 223,
+      "version": "7",
+      "when": 2023820000050,
+      "tag": "0223_nps",
+      "breakpoints": true
     }
   ]
 }

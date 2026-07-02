@@ -105,6 +105,35 @@ function ChannelCard({ ch, onSaved }: { ch: Channel; onSaved: () => void }) {
   );
 }
 
+type Governance = { quiet_start: string; quiet_end: string; weekly_cap: number };
+
+// W3 (docs/27) — tenant-wide messaging governance: quiet hours + a global weekly marketing cap. Applies to
+// MARKETING sends only (journeys/blasts/automation); OTP, receipts and service notices are exempt.
+function GovernanceCard() {
+  const qc = useQueryClient();
+  const q = useQuery<{ governance: Governance }>({ queryKey: ['messaging-governance'], queryFn: () => api('/api/messaging/governance') });
+  const [draft, setDraft] = useState<Governance | null>(null);
+  const g = draft ?? q.data?.governance ?? null;
+  const save = useMutation({
+    mutationFn: () => api('/api/messaging/governance', { method: 'PUT', body: JSON.stringify(g) }),
+    onSuccess: () => { notifySuccess('บันทึกกติกาการส่งแล้ว'); setDraft(null); qc.invalidateQueries({ queryKey: ['messaging-governance'] }); },
+    onError: (e) => notifyError((e as Error).message),
+  });
+  if (!g) return null;
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="font-semibold">กติกาการส่งข้อความ (Governance)</div>
+      <p className="pb-3 text-sm text-muted-foreground">ใช้กับข้อความการตลาดเท่านั้น (journey/บรอดแคสต์/ออโตเมชัน) — OTP ใบเสร็จ และแจ้งเตือนบริการส่งได้เสมอ · ช่วงเงียบเลื่อนส่ง journey ไปหลังสิ้นสุดช่วง ส่วนบรอดแคสต์จะข้ามพร้อมบันทึกเหตุผล · ค่าแนะนำ: 21:00–09:00 และ 4 ข้อความ/สมาชิก/7วัน (ปิด = 00:00/00:00 และ 0)</p>
+      <div className="grid max-w-lg grid-cols-3 items-end gap-3">
+        <div className="grid gap-1"><Label className="text-xs">ช่วงเงียบเริ่ม (Quiet start)</Label><Input value={g.quiet_start} onChange={(e) => setDraft({ ...g, quiet_start: e.target.value })} placeholder="21:00" /></div>
+        <div className="grid gap-1"><Label className="text-xs">สิ้นสุด (Quiet end)</Label><Input value={g.quiet_end} onChange={(e) => setDraft({ ...g, quiet_end: e.target.value })} placeholder="09:00" /></div>
+        <div className="grid gap-1"><Label className="text-xs">เพดานต่อสมาชิก/7วัน (0 = ไม่จำกัด)</Label><Input type="number" value={g.weekly_cap} onChange={(e) => setDraft({ ...g, weekly_cap: +e.target.value })} /></div>
+      </div>
+      <div className="pt-3"><Button size="sm" disabled={save.isPending || !draft} onClick={() => save.mutate()}>{save.isPending ? 'กำลังบันทึก…' : 'บันทึกกติกา'}</Button></div>
+    </div>
+  );
+}
+
 export default function MessagingProvidersPage() {
   const qc = useQueryClient();
   const q = useQuery<{ channels: Channel[] }>({ queryKey: ['messaging-providers'], queryFn: () => api('/api/messaging/providers') });
@@ -123,6 +152,7 @@ export default function MessagingProvidersPage() {
         {q.data && (
           <div className="space-y-4">
             {q.data.channels.map((ch) => <ChannelCard key={ch.channel} ch={ch} onSaved={refresh} />)}
+            <GovernanceCard />
           </div>
         )}
       </StateView>

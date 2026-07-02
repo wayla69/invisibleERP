@@ -239,6 +239,31 @@ async function main() {
     hSms2?.resolved_provider === 'tenant' && hSms2?.configured === true && !JSON.stringify(health2.json).includes('sms-key-1'),
     JSON.stringify({ sms: hSms2?.resolved_provider, configured: hSms2?.configured }));
 
+  // ── W3 (docs/27): messaging governance — quiet hours + global weekly marketing cap (marketing only) ──
+  const [gmRow] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-GOV1', name: 'กติกา', phone: '0866660001', email: 'gov@example.com', lineUserId: 'U-gov-1', balance: '0', lifetime: '0', active: true }).returning();
+  const gmId = Number(gmRow.id);
+  const bkkNow = new Date(Date.now() + 7 * 3600_000);
+  const hhmm = (d: Date) => `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  // Quiet window spanning "now" (one hour either side) → a MARKETING send defers; a RECEIPT still goes out.
+  await inj('PUT', '/api/messaging/governance', token, { quiet_start: hhmm(new Date(bkkNow.getTime() - 3600_000)), quiet_end: hhmm(new Date(bkkNow.getTime() + 3600_000)), weekly_cap: 4 });
+  const quietMkt = await inj('POST', '/api/messaging/send', token, { member_id: gmId, channel: 'email', body: 'โปรพิเศษ!', campaign: 'blast:all' });
+  const quietTxn = await inj('POST', '/api/messaging/send', token, { member_id: gmId, channel: 'email', body: 'ใบเสร็จของคุณ', campaign: 'receipt' });
+  ok('W3 governance: quiet hours defer a MARKETING send (skipped + retry_at hint) but a transactional receipt still goes out',
+    quietMkt.json.status === 'skipped' && quietMkt.json.error === 'quiet hours' && !!quietMkt.json.retry_at && quietTxn.json.status === 'sent',
+    `mkt=${quietMkt.json.status}/${quietMkt.json.error}/retry=${!!quietMkt.json.retry_at} txn=${quietTxn.json.status}`);
+  // Quiet window off (equal bounds) + cap 1 → first marketing send goes, second audits 'global cap' —
+  // counted ACROSS channels/engines (the cap reads all sent marketing rows in message_log).
+  await inj('PUT', '/api/messaging/governance', token, { quiet_start: '00:00', quiet_end: '00:00', weekly_cap: 1 });
+  const cap1 = await inj('POST', '/api/messaging/send', token, { member_id: gmId, channel: 'email', body: 'โปร 1', campaign: 'blast:all' });
+  const cap2 = await inj('POST', '/api/messaging/send', token, { member_id: gmId, channel: 'line', body: 'โปร 2', campaign: 'automation' });
+  const capLog = (await pg.query(`SELECT status, error FROM message_log WHERE member_id=${gmId} AND error='global cap'`)).rows as any[];
+  ok('W3 governance: global weekly cap 1 — first marketing send delivers, the second (other channel) audits skipped:global cap; transactional stays exempt',
+    cap1.json.status === 'sent' && cap2.json.status === 'skipped' && cap2.json.error === 'global cap' && capLog.length === 1,
+    `1st=${cap1.json.status} 2nd=${cap2.json.status}/${cap2.json.error} audited=${capLog.length}`);
+  const govGet = await inj('GET', '/api/messaging/governance', token);
+  ok('W3 governance: config round-trips on GET /api/messaging/governance', govGet.json.governance?.weekly_cap === 1 && govGet.json.governance?.quiet_start === '00:00', JSON.stringify(govGet.json.governance));
+  await inj('PUT', '/api/messaging/governance', token, { quiet_start: '21:00', quiet_end: '09:00', weekly_cap: 4 }); // restore defaults
+
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

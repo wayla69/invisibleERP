@@ -19,6 +19,7 @@ import { RevRecService } from '../revenue/revrec.service';
 import { ProjectsService } from '../projects/projects.service';
 import { CrmPipelineService } from '../crm-pipeline/crm-pipeline.service';
 import { CrmService } from '../crm/crm.service';
+import { NpsService } from '../nps/nps.service';
 import { JourneysService } from '../journeys/journeys.service';
 import { cdpConfigured, pushToCdp } from '../../common/cdp-sync';
 import { BudgetService } from '../budget/budget.service';
@@ -64,6 +65,7 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
+  nps_post_purchase: { label: 'ส่งแบบสอบถาม NPS หลังการขาย', labelEn: 'Send post-purchase NPS surveys' }, // W3 (docs/27)
   // Likewise: each run recognizes every due TFRS-15 revenue schedule through the current period (idempotent).
   rev_rec_recognize: { label: 'รับรู้รายได้ตามสัญญา (TFRS 15)', labelEn: 'Recognize due revenue schedules' },
   // Governance readiness (ELC-01/02/04): each run snapshots acknowledgement coverage, oversight cadence and
@@ -107,6 +109,7 @@ export class BiService implements OnModuleInit {
     @Optional() private readonly crm?: CrmPipelineService,
     // Member CRM (cdp_export_sync action job) — Optional so a partial harness still constructs.
     @Optional() private readonly crmMembers?: CrmService,
+    @Optional() private readonly nps?: NpsService, // W3 (docs/27) nps_post_purchase job
     @Optional() private readonly journeys?: JourneysService,
     // Residual-gap report types (RG-1/2/3): exec scorecard composition + budget-variance + supplier scorecard.
     // Optional so a partial harness still constructs; the full app provides BudgetModule/ProcurementModule/MatchModule.
@@ -599,6 +602,11 @@ export class BiService implements OnModuleInit {
       if (!this.leases) throw new BadRequestException({ code: 'LEASES_UNAVAILABLE', message: 'Lease service not available', messageTh: 'ระบบสัญญาเช่าไม่พร้อมใช้งาน' });
       const r = await this.leases.runDueLeases(user); // idempotent per (lease, period)
       return { data: r, summary: `Lease run: posted ${r.posted} of ${r.scanned} due leases`, summaryTh: `ลงรายการสัญญาเช่า: ${r.posted} จาก ${r.scanned} สัญญา` };
+    }
+    if (reportType === 'nps_post_purchase') {
+      if (!this.nps) throw new BadRequestException({ code: 'NPS_UNAVAILABLE', message: 'NPS service not available', messageTh: 'ระบบ NPS ไม่พร้อมใช้งาน' });
+      const r = await this.nps.sendDue(user, Number(f.window_days) > 0 ? Number(f.window_days) : 1); // idempotent per member × sale (unique index)
+      return { data: r, summary: `NPS surveys: sent ${r.sent} of ${r.orders} recent paid orders (${r.skipped} skipped/already surveyed)`, summaryTh: `แบบสอบถาม NPS: ส่ง ${r.sent} จาก ${r.orders} บิลล่าสุด` };
     }
     if (reportType === 'governance_readiness') {
       if (!this.governance) throw new BadRequestException({ code: 'GOVERNANCE_UNAVAILABLE', message: 'Governance service not available', messageTh: 'ระบบธรรมาภิบาลไม่พร้อมใช้งาน' });
