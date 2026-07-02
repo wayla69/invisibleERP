@@ -137,6 +137,29 @@ async function main() {
     abRep.json.ab != null && abRep.json.ab.b.redeemed === 1 && abRep.json.ab.a.redeemed === 0 && abRep.json.ab.holdout.count === ab.json.holdout && typeof abRep.json.ab.lift_note === 'string' && abRep.json.ab.b.attributed_revenue === 50,
     JSON.stringify({ b: { sent: abRep.json.ab?.b?.sent, red: abRep.json.ab?.b?.redeemed, rev: abRep.json.ab?.b?.attributed_revenue }, hold: abRep.json.ab?.holdout?.count }));
 
+  // ── 11. Organic-purchase baseline (H2): actual paid orders per group inside the attribution window ──
+  // One HOLDOUT member buys in-window (the organic baseline), one messaged member buys in-window, and one
+  // messaged member bought BEFORE the send (out-of-window ⇒ must not count).
+  const holdMember = Number(holdRows[0].memberId);
+  const sentRows = abSends.filter((r: any) => r.status === 'sent');
+  const msgIn = Number(sentRows[0].memberId), msgOut = Number(sentRows[1].memberId);
+  await db.insert(s.dineInOrders).values([
+    { orderNo: 'DIN-H2-HOLD', tenantId: t1, memberId: holdMember, saleNo: 'SALE-H2-1', total: '300', openedAt: new Date(), channel: 'web' },
+    { orderNo: 'DIN-H2-MSG', tenantId: t1, memberId: msgIn, saleNo: 'SALE-H2-2', total: '500', openedAt: new Date(), channel: 'web' },
+    { orderNo: 'DIN-H2-OLD', tenantId: t1, memberId: msgOut, saleNo: 'SALE-H2-3', total: '999', openedAt: new Date(Date.now() - 5 * 86_400_000), channel: 'web' },
+  ]);
+  const orgRep = await inj('GET', `/api/marketing/automation/campaigns/${abId}`);
+  const org = orgRep.json.organic;
+  ok('organic baseline: holdout member\'s real purchase counted as the do-nothing baseline (window 30d)',
+    org != null && org.window_days === 30 && org.holdout.purchasers === 1 && org.holdout.order_revenue === 300 && org.holdout.members === ab.json.holdout,
+    JSON.stringify({ w: org?.window_days, hp: org?.holdout?.purchasers, hrev: org?.holdout?.order_revenue }));
+  ok('organic baseline: pre-send order excluded — messaged group counts only the in-window purchaser',
+    org?.messaged?.purchasers === 1 && org?.messaged?.order_revenue === 500,
+    JSON.stringify({ mp: org?.messaged?.purchasers, mrev: org?.messaged?.order_revenue }));
+  ok('organic lift: purchase-rate delta (messaged − holdout, pp) + scaled incremental revenue reported with group sizes',
+    org?.organic_lift != null && typeof org.organic_lift.purchase_rate_pp === 'number' && typeof org.organic_lift.incremental_revenue === 'number' && org.messaged.members > 0 && org.holdout.members > 0 && typeof org.note === 'string',
+    JSON.stringify(org?.organic_lift));
+
   console.log('\n── C12 — LINE marketing automation (closed loop) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

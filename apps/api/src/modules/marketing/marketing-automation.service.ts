@@ -1,7 +1,8 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, desc, inArray } from 'drizzle-orm';
+import { eq, and, desc, inArray, gte, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, customerProfiles, automationCampaigns, campaignSends } from '../../database/schema';
+import { dineInOrders } from '../../database/schema/restaurant';
 import { n } from '../../database/queries';
 import { resolveMessageGateway } from '../messaging/gateways';
 import type { JwtUser } from '../../common/decorators';
@@ -65,7 +66,7 @@ export class MarketingAutomationService {
   }
 
   // Run a campaign: create it, generate a per-member coupon, push it (consent-respecting), record each send.
-  async run(dto: { name: string; trigger: Trigger; channel?: string; coupon_prefix?: string; discount_type?: 'amount' | 'percent'; discount_value?: number; lapsed_days?: number; variant_b_body?: string; split_b_pct?: number; holdout_pct?: number }, user: JwtUser) {
+  async run(dto: { name: string; trigger: Trigger; channel?: string; coupon_prefix?: string; discount_type?: 'amount' | 'percent'; discount_value?: number; lapsed_days?: number; variant_b_body?: string; split_b_pct?: number; holdout_pct?: number; window_days?: number }, user: JwtUser) {
     const db = this.db as any;
     const tenantId = this.tid(user);
     const channel = (dto.channel ?? 'line') as 'line' | 'sms' | 'email';
@@ -80,6 +81,7 @@ export class MarketingAutomationService {
       tenantId, name: dto.name, trigger: dto.trigger, channel, couponPrefix: prefix,
       discountType: dto.discount_type ?? 'amount', discountValue: String(dValue),
       variantBBody: dto.variant_b_body ?? null, splitBPct: splitB, holdoutPct: holdout,
+      windowDays: Math.min(365, Math.max(1, Math.floor(dto.window_days ?? 30))),
       status: 'sent', createdBy: user.username,
     }).returning({ id: automationCampaigns.id });
     const campaignId = Number(camp.id);
@@ -151,6 +153,43 @@ export class MarketingAutomationService {
       const gRed = g.filter((s: any) => s.redeemedAt != null).length;
       return { count: g.length, sent: gSent, redeemed: gRed, redemption_rate_pct: gSent > 0 ? r2((gRed / gSent) * 100) : 0, attributed_revenue: r2(g.reduce((a: number, s: any) => a + (s.redeemedAt ? n(s.redeemedValue) : 0), 0)) };
     };
+    // H2 (docs/26) — organic-purchase baseline: join each group's members to their ACTUAL paid orders
+    // (sale_no set) within window_days after THEIR send. The holdout's purchase rate/revenue is what
+    // "doing nothing" earns — organic lift = messaged rate − holdout rate. Group sizes are rendered next to
+    // the rates (small holdouts ⇒ noisy baseline; the reader judges — no p-value pretence).
+    const windowDays = Number(camp.windowDays ?? 30);
+    const withVariant = sends.filter((s: any) => s.variant != null && s.memberId != null);
+    const memberIds = Array.from(new Set<number>(withVariant.map((s: any) => Number(s.memberId))));
+    let organic: any = null;
+    if (withVariant.length && memberIds.length) {
+      const earliest = new Date(Math.min(...withVariant.map((s: any) => new Date(s.sentAt).getTime())));
+      const orders = await db.select({ memberId: dineInOrders.memberId, total: dineInOrders.total, openedAt: dineInOrders.openedAt })
+        .from(dineInOrders).where(and(eq(dineInOrders.tenantId, Number(camp.tenantId)), inArray(dineInOrders.memberId, memberIds),
+          isNotNull(dineInOrders.saleNo), gte(dineInOrders.openedAt, earliest)));
+      const sendAt = new Map<number, number>(withVariant.map((s: any) => [Number(s.memberId), new Date(s.sentAt).getTime()]));
+      const inWindow = (o: any) => {
+        const t0 = sendAt.get(Number(o.memberId));
+        if (t0 == null) return false;
+        const t = new Date(o.openedAt).getTime();
+        return t >= t0 && t <= t0 + windowDays * 86_400_000;
+      };
+      const grpOrganic = (vs: string[]) => {
+        const members = new Set(withVariant.filter((s: any) => vs.includes(s.variant)).map((s: any) => Number(s.memberId)));
+        const gOrders = orders.filter((o: any) => members.has(Number(o.memberId)) && inWindow(o));
+        const purchasers = new Set(gOrders.map((o: any) => Number(o.memberId))).size;
+        return { members: members.size, purchasers, purchase_rate_pct: members.size > 0 ? r2((purchasers / members.size) * 100) : 0, order_revenue: r2(gOrders.reduce((a: number, o: any) => a + n(o.total), 0)) };
+      };
+      const messaged = grpOrganic(['A', 'B']);
+      const holdoutG = grpOrganic(['holdout']);
+      organic = {
+        window_days: windowDays, a: grpOrganic(['A']), b: grpOrganic(['B']), holdout: holdoutG, messaged,
+        organic_lift: holdoutG.members > 0 ? {
+          purchase_rate_pp: r2(messaged.purchase_rate_pct - holdoutG.purchase_rate_pct),
+          incremental_revenue: r2(messaged.order_revenue - (holdoutG.order_revenue * (holdoutG.members > 0 ? messaged.members / holdoutG.members : 0))),
+        } : null,
+        note: 'baseline = ยอดซื้อจริงของกลุ่ม holdout ในหน้าต่างเดียวกัน — กลุ่มเล็กค่าจะแกว่ง ดูขนาดกลุ่มประกอบ',
+      };
+    }
     const hasAb = (Number(camp.splitBPct ?? 0) > 0 || Number(camp.holdoutPct ?? 0) > 0) && sends.some((s: any) => s.variant != null);
     const abReport = hasAb ? (() => {
       const a = group('A'), b = group('B'), h = group('holdout');
@@ -163,7 +202,7 @@ export class MarketingAutomationService {
       sent, skipped: sends.filter((s: any) => s.status === 'skipped').length, failed: sends.filter((s: any) => s.status === 'failed').length,
       holdout: sends.filter((s: any) => s.status === 'holdout').length,
       redeemed, redemption_rate_pct: sent > 0 ? r2((redeemed / sent) * 100) : 0, attributed_revenue: attributed,
-      split_b_pct: Number(camp.splitBPct ?? 0), holdout_pct: Number(camp.holdoutPct ?? 0), ab: abReport,
+      split_b_pct: Number(camp.splitBPct ?? 0), holdout_pct: Number(camp.holdoutPct ?? 0), ab: abReport, organic,
     };
   }
 
