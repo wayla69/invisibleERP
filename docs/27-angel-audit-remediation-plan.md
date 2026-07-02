@@ -521,8 +521,8 @@ credibility in the next diligence pass.
   tracks by full tag, so renumbering applied migrations is the dangerous move; the divergence risk class
   is what the parity harness now guards. Debt doc rev 1.2.
 - **R5-2 (AUD-ARC-09) — DIRECTION SET (docs/28 §4), conversions IN PROGRESS:** server-by-default for new
-  pages (`/legal/privacy` shipped as the pattern); top-5 read-heavy conversions (`accounting` ✅ + `eam` ✅ 2026-07-02
-  — and the `use client` CI ratchet is armed at baseline 232, `projects/[code]` with a Gantt client island, `reports`, `insights`) are the rolling work, each
+  pages (`/legal/privacy` shipped as the pattern); top-5 read-heavy conversions (`accounting` ✅ + `eam` ✅ + `projects/[code]` ✅ 2026-07-02
+  — and the `use client` CI ratchet is armed at baseline 232, with a Gantt client island, `reports`, `insights`) are the rolling work, each
   measured via the Playwright smoke + a bundle note. The `accounting` conversion shipped the reusable
   server-fetch seam: `apps/web/src/lib/server-api.ts` (cookie-forwarded, GET-only, null-on-failure so the
   client island falls back to its own fetch).
@@ -612,3 +612,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 3.6 | 2026-07-02 | ERP/Product | docs/28 consolidation executed (5/5 PRs: payments, tax, crm/pipeline, loyalty, pos — module registrations 122→108, AUD-ARC-10 closed); R5-2 conversions started — `accounting` converted (server-api seam + server shell + client island) |
 | 3.7 | 2026-07-02 | ERP/Product | RSC conversion #1 merged (accounting, PR #318); ts-debt paydown tranche #1 — as-any 1465→1155 via typed DrizzleDb handles in 119 zero-fallout files, strict-index held at 229, baseline ratcheted |
 | 3.8 | 2026-07-02 | ERP/Product | RSC conversion #2 merged (eam) + use-client CI ratchet armed (baseline 232, decrease-only) per docs/28 §4's two-conversion gate |
+| 3.9 | 2026-07-02 | ERP/Product | RSC conversion #3 merged (projects/[code] — dynamic-route server shell, Gantt island); reports + insights remain |
