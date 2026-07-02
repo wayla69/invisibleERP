@@ -15,7 +15,7 @@ export class ReconciliationService {
   // ── Open / find recon period ──
 
   async openPeriod(dto: { account_code: string; period: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
 
     // Compute GL balance for the account + period
@@ -49,7 +49,7 @@ export class ReconciliationService {
   // ── Import GL items into recon workspace ──
 
   async importGlItems(reconPeriodId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rp = await this.assertPeriod(reconPeriodId, user);
 
     const glLines = await db.select({
@@ -59,7 +59,7 @@ export class ReconciliationService {
     }).from(journalLines)
       .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .where(and(
-        eq(journalEntries.tenantId, rp.tenantId),
+        eq(journalEntries.tenantId, rp.tenantId!),
         eq(journalEntries.period, rp.period),
         eq(journalEntries.status, 'Posted'),
         eq(journalLines.accountCode, rp.accountCode),
@@ -84,7 +84,7 @@ export class ReconciliationService {
   // ── Add a manual subledger / adjustment item ──
 
   async addItem(reconPeriodId: number, dto: { source: 'Subledger' | 'Adjustment'; amount: number; ref_doc?: string; notes?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.assertPeriod(reconPeriodId, user);
 
     const [item] = await db.insert(reconItems).values({
@@ -98,13 +98,13 @@ export class ReconciliationService {
     }).from(reconItems).where(and(eq(reconItems.reconPeriodId, reconPeriodId), eq(reconItems.source, 'Subledger')));
     await db.update(reconPeriods).set({ subledgerBalance: fx(n(sbRow?.net ?? 0), 4) }).where(eq(reconPeriods.id, reconPeriodId));
 
-    return { id: Number(item.id), source: item.source, amount: n(item.amount), ref_doc: item.refDoc };
+    return { id: Number(item!.id), source: item!.source, amount: n(item!.amount), ref_doc: item!.refDoc };
   }
 
   // ── Auto-match GL items to Subledger items by amount ──
 
   async autoMatch(reconPeriodId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.assertPeriod(reconPeriodId, user);
 
     const glItems = await db.select().from(reconItems).where(and(eq(reconItems.reconPeriodId, reconPeriodId), eq(reconItems.source, 'GL'), eq(reconItems.isMatched, false)));
@@ -141,7 +141,7 @@ export class ReconciliationService {
   // ── Certify (SoD: certifier ≠ preparer) ──
 
   async certify(reconPeriodId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rp = await this.assertPeriod(reconPeriodId, user);
 
     if (rp.status === 'Open') throw new BadRequestException({ code: 'NOT_RECONCILED', message: 'Period must be reconciled before certification', messageTh: 'ต้องกระทบยอดก่อนรับรอง' });
@@ -160,7 +160,7 @@ export class ReconciliationService {
   // ── Summary ──
 
   async getPeriodSummary(reconPeriodId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rp = await this.assertPeriod(reconPeriodId, user);
 
     const items = await db.select().from(reconItems).where(eq(reconItems.reconPeriodId, reconPeriodId));
@@ -176,7 +176,7 @@ export class ReconciliationService {
   }
 
   async listPeriods(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(reconPeriods).where(eq(reconPeriods.tenantId, user.tenantId!)).orderBy(reconPeriods.period);
     return { periods: rows.map((r: any) => this.fmtPeriod(r)), count: rows.length };
   }
@@ -184,7 +184,7 @@ export class ReconciliationService {
   // ── Helpers ──
 
   private async assertPeriod(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [rp] = await db.select().from(reconPeriods).where(eq(reconPeriods.id, id)).limit(1);
     if (!rp) throw new NotFoundException({ code: 'RECON_NOT_FOUND', message: `Recon period ${id} not found` });
     return rp;

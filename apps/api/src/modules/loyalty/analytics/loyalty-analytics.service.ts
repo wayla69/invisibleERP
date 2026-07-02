@@ -39,7 +39,7 @@ export class LoyaltyAnalyticsService {
   }
 
   async overview(user: JwtUser, explicitTenant?: number | null) {
-    const db = this.db as any; const tenantId = this.tid(user, explicitTenant);
+    const db = this.db; const tenantId = this.tid(user, explicitTenant);
     const cutoff90 = new Date(Date.now() - 90 * 86_400_000); // dormant threshold
 
     // Members + tier mix + balances.
@@ -56,7 +56,7 @@ export class LoyaltyAnalyticsService {
 
     // Points movements by ledger type (Earn +, Redeem/Expire −, Adjust ±).
     const movRows = await db.select({ t: posMemberLedger.txnType, pts: sql<string>`coalesce(sum(${posMemberLedger.points}),0)` }).from(posMemberLedger).where(eq(posMemberLedger.tenantId, tenantId)).groupBy(posMemberLedger.txnType);
-    const mov: Record<string, number> = {}; for (const r of movRows) mov[r.t] = n(r.pts);
+    const mov: Record<string, number> = {}; for (const r of movRows) mov[String(r.t)] = n(r.pts);
     const earned = mov['Earn'] ?? 0, adjusted = mov['Adjust'] ?? 0;
     const redeemed = Math.abs(mov['Redeem'] ?? 0), expired = Math.abs(mov['Expire'] ?? 0);
 
@@ -67,22 +67,22 @@ export class LoyaltyAnalyticsService {
     // Liability (acct 2250) — latest posted run + fair value.
     const [cfg] = await db.select({ bpp: loyaltyConfig.bahtPerPoint }).from(loyaltyConfig).where(eq(loyaltyConfig.id, 1)).limit(1);
     const [run] = await db.select({ posted: loyaltyPostingRuns.targetLiability }).from(loyaltyPostingRuns).where(eq(loyaltyPostingRuns.tenantId, tenantId)).orderBy(desc(loyaltyPostingRuns.id)).limit(1);
-    const bahtPerPoint = n(cfg?.bpp); const openPoints = n(mem.balance);
+    const bahtPerPoint = n(cfg?.bpp); const openPoints = n(mem?.balance);
     const liabilityFairValue = round2(openPoints * bahtPerPoint);
 
     const totalIssued = Number(rdm?.issued ?? 0) + Number(cpn?.issued ?? 0);
     const totalUsed = Number(rdm?.used ?? 0) + Number(cpn?.used ?? 0);
-    const activeTotal = Number(mem.active ?? 0);
+    const activeTotal = Number(mem?.active ?? 0);
     return {
       tenant_id: tenantId,
-      members: { total: Number(mem.total ?? 0), active: activeTotal, opted_in: Number(mem.optedIn ?? 0), at_risk: Number(mem.atRisk ?? 0) },
+      members: { total: Number(mem?.total ?? 0), active: activeTotal, opted_in: Number(mem?.optedIn ?? 0), at_risk: Number(mem?.atRisk ?? 0) },
       tier_mix: tierMix,
-      points: { open_balance: openPoints, lifetime: n(mem.lifetime), earned, adjusted, redeemed, expired },
+      points: { open_balance: openPoints, lifetime: n(mem?.lifetime), earned, adjusted, redeemed, expired },
       redemption: { rewards_issued: Number(rdm?.issued ?? 0), rewards_used: Number(rdm?.used ?? 0), coupons_issued: Number(cpn?.issued ?? 0), coupons_used: Number(cpn?.used ?? 0), redemption_rate_pct: pct(totalUsed, totalIssued) },
       liability: { open_points: openPoints, baht_per_point: bahtPerPoint, fair_value: liabilityFairValue, posted_2250: n(run?.posted) },
       breakage_rate_pct: pct(expired, earned + adjusted),
-      churn_rate_pct: pct(Number(mem.atRisk ?? 0), activeTotal),
-      active_rate_pct: pct(activeTotal, Number(mem.total ?? 0)),
+      churn_rate_pct: pct(Number(mem?.atRisk ?? 0), activeTotal),
+      active_rate_pct: pct(activeTotal, Number(mem?.total ?? 0)),
     };
   }
 
@@ -92,7 +92,7 @@ export class LoyaltyAnalyticsService {
   // the UI renders a stable set even before profiles are built. Members with no profile row group under
   // 'Unsegmented' so the counts reconcile against the member base.
   async segmentMix(user: JwtUser, explicitTenant?: number | null) {
-    const db = this.db as any; const tenantId = this.tid(user, explicitTenant);
+    const db = this.db; const tenantId = this.tid(user, explicitTenant);
     const rows = await db.select({
       segment: sql<string>`coalesce(${customerProfiles.rfmSegment}, 'Unsegmented')`,
       members: sql<number>`count(*)`,
@@ -123,7 +123,7 @@ export class LoyaltyAnalyticsService {
 
   // At-risk members (dormant ≥90d with points worth retaining) — for win-back campaigns.
   async churnList(user: JwtUser, explicitTenant?: number | null, limit = 100) {
-    const db = this.db as any; const tenantId = this.tid(user, explicitTenant);
+    const db = this.db; const tenantId = this.tid(user, explicitTenant);
     const cutoff90 = new Date(Date.now() - 90 * 86_400_000);
     const rows = await db.select({ id: posMembers.id, code: posMembers.memberCode, name: posMembers.name, tier: posMembers.tier, balance: posMembers.balance, lastUpdated: posMembers.lastUpdated })
       .from(posMembers).where(and(eq(posMembers.tenantId, tenantId), this.atRiskWhere(cutoff90)))

@@ -22,21 +22,21 @@ export class TableService {
 
   // ── zones / rooms (floor-plan groupings; a VIP room is just a zone with an accent colour) ──
   async listZones(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(floorZones).where(eq(floorZones.active, true)).orderBy(asc(floorZones.sortOrder));
     return { zones: rows.map(shapeZone) };
   }
   async createZone(dto: ZoneDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [z] = await db.insert(floorZones).values({
-      tenantId: user.tenantId, name: dto.name, sortOrder: dto.sort_order ?? 0,
+      tenantId: user.tenantId!, name: dto.name, sortOrder: dto.sort_order ?? 0,
       posX: String(dto.pos_x ?? 16), posY: String(dto.pos_y ?? 16),
       width: String(dto.width ?? 320), height: String(dto.height ?? 200), color: dto.color ?? null,
     }).returning();
     return shapeZone(z);
   }
   async updateZone(id: number, dto: ZoneUpdateDto, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const set: any = {};
     if (dto.name != null) set.name = dto.name;
     if (dto.sort_order != null) set.sortOrder = dto.sort_order;
@@ -51,7 +51,7 @@ export class TableService {
   }
   // Soft-delete a zone (active=false). Its tables stay on the plan but become un-grouped (zone_id=null).
   async deleteZone(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [z] = await db.select().from(floorZones).where(eq(floorZones.id, id)).limit(1);
     if (!z || !z.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Zone not found', messageTh: 'ไม่พบโซน' });
     await db.update(diningTables).set({ zoneId: null, updatedAt: new Date() }).where(eq(diningTables.zoneId, id));
@@ -64,7 +64,7 @@ export class TableService {
   // (`dine_in_orders.zone_id`, captured at checkout) so a later table move never re-buckets past sales; RLS scopes
   // every row to the tenant. Lists all active rooms (revenue 0 if none) + an "unzoned" bucket + the grand total.
   async zoneRevenue(from: string | undefined, to: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const f = from || ymd();
     const t = to || ymd();
     const rows = await db
@@ -96,16 +96,16 @@ export class TableService {
 
   // ── tables ──
   async listTables(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(diningTables).where(eq(diningTables.active, true)).orderBy(asc(diningTables.tableNo));
     return { tables: rows.map(shapeTable) };
   }
 
   async createTable(dto: CreateTableDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const qrToken = 'rt_' + randomBytes(18).toString('base64url');
     const [t] = await db.insert(diningTables).values({
-      tenantId: user.tenantId, zoneId: dto.zone_id ?? null, tableNo: dto.table_no, seats: dto.seats ?? 4,
+      tenantId: user.tenantId!, zoneId: dto.zone_id ?? null, tableNo: dto.table_no, seats: dto.seats ?? 4,
       shape: dto.shape ?? 'rect', rotation: dto.rotation ?? 0, posX: String(dto.pos_x ?? 0), posY: String(dto.pos_y ?? 0),
       width: String(dto.width ?? 80), height: String(dto.height ?? 80), status: 'available', qrToken,
     }).returning();
@@ -116,7 +116,7 @@ export class TableService {
   // the write is gated on it: a stale `rev` (someone else edited the table meanwhile) → 409 STALE_WRITE.
   // Omitting `rev` keeps the legacy last-write-wins behaviour (e.g. an undo that must always apply).
   async updateTable(id: number, dto: UpdateTableDto, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const set: any = { updatedAt: new Date(), rev: sql`${diningTables.rev} + 1` };
     if (dto.table_no != null) set.tableNo = dto.table_no;
     if (dto.zone_id !== undefined) set.zoneId = dto.zone_id;   // explicit null un-assigns the table from its zone
@@ -142,7 +142,7 @@ export class TableService {
   // Soft-delete a table (active=false) — preserves history + FKs (orders/sessions keep referencing it).
   // A table with a live session cannot be removed; clear/checkout the table first.
   async deleteTable(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
     if (!t || !t.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
@@ -152,20 +152,20 @@ export class TableService {
   }
 
   async setStatus(id: number, status: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     if (status === 'out_of_service') {
       const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
       if (live) throw new BadRequestException({ code: 'TABLE_BUSY', message: 'Table has a live session', messageTh: 'โต๊ะมีลูกค้าอยู่' });
     }
-    await db.update(diningTables).set({ status, updatedAt: new Date() }).where(eq(diningTables.id, id));
+    await db.update(diningTables).set({ status: status as typeof diningTables.$inferInsert.status, updatedAt: new Date() }).where(eq(diningTables.id, id));
     return { id, status };
   }
 
   // open a table → mint a session + diner token (also used when a diner self-opens via QR)
   async openTable(tableId: number, partySize: number | undefined, openedBy: string, user: JwtUser | null) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, tableId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     // reuse an existing live session if present (idempotent for diner re-scan)
@@ -174,16 +174,16 @@ export class TableService {
     const sessionNo = await this.docNo.nextDaily('TS');
     const tenantId = Number(t.tenantId);
     const [s] = await db.insert(tableSessions).values({ tenantId, tableId, sessionNo, publicToken: 'pending', status: 'open', partySize: partySize ?? null, openedBy }).returning({ id: tableSessions.id });
-    const publicToken = mintTableToken({ tenantId, tableId, sessionId: Number(s.id) });
-    await db.update(tableSessions).set({ publicToken }).where(eq(tableSessions.id, s.id));
+    const publicToken = mintTableToken({ tenantId, tableId, sessionId: Number(s!.id) });
+    await db.update(tableSessions).set({ publicToken }).where(eq(tableSessions.id, s!.id));
     await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, tableId), inArray(diningTables.status, ['available', 'reserved'] as any)));
-    return { session_id: Number(s.id), session_no: sessionNo, public_token: publicToken, table_no: t.tableNo, qr_token: t.qrToken, reused: false };
+    return { session_id: Number(s!.id), session_no: sessionNo, public_token: publicToken, table_no: t.tableNo, qr_token: t.qrToken, reused: false };
   }
 
   // Move a live tab to another (free) table: reassign the session + its open orders, then update both
   // tables' status. Moving onto an occupied table is a merge (separate flow) and is rejected here.
   async moveSession(fromTableId: number, toTableId: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (fromTableId === toTableId) throw new BadRequestException({ code: 'SAME_TABLE', message: 'Source and target are the same table', messageTh: 'โต๊ะต้นทางและปลายทางเป็นโต๊ะเดียวกัน' });
     const [from] = await db.select().from(diningTables).where(eq(diningTables.id, fromTableId)).limit(1);
     if (!from) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Source table not found', messageTh: 'ไม่พบโต๊ะต้นทาง' });
@@ -206,7 +206,7 @@ export class TableService {
   // opens/joins the table session and drops the guest on the order page. `base` = the web origin
   // (passed by the admin UI as window.location.origin), else WEB_PUBLIC_URL, else a relative path.
   async qrSticker(tableId: number, base: unknown, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, tableId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     if (!t.qrToken) throw new BadRequestException({ code: 'NO_QR', message: 'Table has no QR token', messageTh: 'โต๊ะนี้ยังไม่มี QR' });
@@ -223,7 +223,7 @@ export class TableService {
 
   // staff status board: table + live session + its open order summary
   async statusBoard(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tables = await db.select().from(diningTables).where(eq(diningTables.active, true)).orderBy(asc(diningTables.tableNo));
     const now = Date.now();
     const out = [];

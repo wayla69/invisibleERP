@@ -71,7 +71,7 @@ export class LedgerService {
   async seedChartOfAccounts() {
     // Fail fast at boot if any industry CoA template drifts from the canonical universe (unknown/dup code).
     assertTemplatesSubsetOf(COA.map((a) => a.code));
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code });
     return { seeded: COA.length };
   }
@@ -81,7 +81,7 @@ export class LedgerService {
   // — adopting a richer pack later only adds the missing accounts. Canonical codes/types are authoritative;
   // the overlay only curates which accounts are visible and how they are named/grouped per tenant.
   async provisionTenantCoA(tenantId: number, industry?: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     const key: IndustryKey = isIndustryKey(industry) ? industry : 'general';
     // Canonical accounts are read from the DB (the authoritative universe — includes any account a
     // migration inserts beyond the COA constant), so 'general' mirrors the live chart exactly.
@@ -108,7 +108,7 @@ export class LedgerService {
   // industry names/order). `all=true` (or a tenant with no overlay, e.g. legacy/HQ) ⇒ the full canonical
   // universe (so a user can still post to any account outside their template). NEVER used to gate postings.
   async listAccounts(opts?: { all?: boolean; tenantId?: number | null }) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = resolveTenantId(opts?.tenantId ?? null);
     const canon = await db.select().from(accounts).orderBy(accounts.code);
     if (opts?.all || tid == null) return { accounts: canon, count: canon.length, source: 'canonical' };
@@ -138,20 +138,20 @@ export class LedgerService {
   // ───────────────────── Ledgers (multi-GAAP) ─────────────────────
   // idempotent seed of the parallel ledgers (TFRS leading + TAX + IFRS).
   async seedLedgers() {
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(ledgers).values(LEDGERS).onConflictDoNothing({ target: ledgers.code });
     return { seeded: LEDGERS.length };
   }
 
   async listLedgers() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(ledgers).orderBy(desc(ledgers.isLeading), ledgers.code);
     return { ledgers: rows.map((l: any) => ({ code: l.code, name: l.name, gaap: l.gaap, is_leading: !!l.isLeading, currency: l.currency, description: l.description, active: l.active })), count: rows.length, leading: LEADING };
   }
 
   // assert a ledger exists + is a real (non-shared) ledger for adjustment postings
   private async assertLedger(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [l] = await db.select().from(ledgers).where(eq(ledgers.code, code)).limit(1);
     if (!l) throw new NotFoundException({ code: 'LEDGER_NOT_FOUND', message: `Ledger ${code} not found`, messageTh: `ไม่พบสมุดบัญชี ${code}` });
     return l;
@@ -325,7 +325,7 @@ export class LedgerService {
   // GL-05) and rolls the schedule forward. Validate the template balances UP FRONT so a malformed template
   // can never be saved and then fail silently every night.
   async createRecurring(dto: RecurringJournalDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const lines = dto.lines ?? [];
     if (!(FREQUENCIES as readonly string[]).includes(dto.frequency)) throw new BadRequestException({ code: 'BAD_FREQUENCY', message: `frequency must be one of ${FREQUENCIES.join('/')}`, messageTh: 'รอบเวลาไม่ถูกต้อง' });
     const nz = lines.filter((l) => !(n(l.debit) === 0 && n(l.credit) === 0));
@@ -340,11 +340,11 @@ export class LedgerService {
       ledgerCode: dto.ledgerCode ?? null, currency: dto.currency ?? 'THB', lines: nz, active: 'true',
       nextRunDate: nextRun, createdBy: user.username,
     }).returning({ id: recurringJournals.id });
-    return { id: Number(r.id), name: dto.name, frequency: dto.frequency, next_run_date: nextRun, lines: nz };
+    return { id: Number(r!.id), name: dto.name, frequency: dto.frequency, next_run_date: nextRun, lines: nz };
   }
 
   async listRecurring(tenantId?: number) {
-    const db = this.db as any;
+    const db = this.db;
     const where = tenantId != null ? eq(recurringJournals.tenantId, tenantId) : undefined;
     const rows = await db.select().from(recurringJournals).where(where).orderBy(desc(recurringJournals.id));
     return { recurring: rows.map((r: any) => ({
@@ -355,7 +355,7 @@ export class LedgerService {
   }
 
   async setRecurringActive(id: number, active: boolean) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select({ id: recurringJournals.id }).from(recurringJournals).where(eq(recurringJournals.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: `Recurring journal ${id} not found`, messageTh: 'ไม่พบรายการตั้งเวลา' });
     await db.update(recurringJournals).set({ active: active ? 'true' : 'false' }).where(eq(recurringJournals.id, id));
@@ -366,7 +366,7 @@ export class LedgerService {
   // roll the schedule forward. source_ref = `REC-<id>-<date>` so the ux_je_idem index dedupes a same-day
   // re-run at the DB layer; next_run_date is also advanced on posting, so a re-run selects nothing new.
   async runDueRecurring(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const due = await db.select().from(recurringJournals)
       .where(and(eq(recurringJournals.active, 'true'), sql`${recurringJournals.nextRunDate} <= ${today}`));
@@ -392,7 +392,7 @@ export class LedgerService {
   // straight-line slice each period (Dr expense / Cr 1280), the last period taking the remainder so it
   // fully clears. Posts directly (systematic, like depreciation) — idempotent per (schedule, period).
   async createPrepaid(dto: PrepaidDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const total = round2(dto.totalAmount);
     if (!(total > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'total_amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     if (!Number.isInteger(dto.months) || dto.months < 1) throw new BadRequestException({ code: 'BAD_MONTHS', message: 'months must be a positive integer', messageTh: 'จำนวนงวดต้องเป็นจำนวนเต็มบวก' });
@@ -408,11 +408,11 @@ export class LedgerService {
       scheduleNo, tenantId, name: dto.name, totalAmount: String(total), months: dto.months, amortizedAmount: '0', periodsPosted: 0,
       expenseAccount: dto.expenseAccount ?? '5100', prepaidAccount: prepaidAcct, startDate: start, nextRunDate: start, status: 'active', createdBy: user.username,
     }).returning({ id: prepaidSchedules.id });
-    return { id: Number(r.id), schedule_no: scheduleNo, name: dto.name, total_amount: total, months: dto.months, monthly_amount: round2(total / dto.months), next_run_date: start };
+    return { id: Number(r!.id), schedule_no: scheduleNo, name: dto.name, total_amount: total, months: dto.months, monthly_amount: round2(total / dto.months), next_run_date: start };
   }
 
   async listPrepaid(tenantId?: number) {
-    const db = this.db as any;
+    const db = this.db;
     const where = tenantId != null ? eq(prepaidSchedules.tenantId, tenantId) : undefined;
     const rows = await db.select().from(prepaidSchedules).where(where).orderBy(desc(prepaidSchedules.id));
     return { schedules: rows.map((r: any) => ({ id: Number(r.id), schedule_no: r.scheduleNo, name: r.name, total_amount: n(r.totalAmount), months: Number(r.months), amortized_amount: n(r.amortizedAmount), remaining: round2(n(r.totalAmount) - n(r.amortizedAmount)), periods_posted: Number(r.periodsPosted), expense_account: r.expenseAccount, next_run_date: r.nextRunDate, status: r.status })), count: rows.length };
@@ -420,7 +420,7 @@ export class LedgerService {
 
   // Idempotent scheduled run: amortize one period of every active schedule whose next_run_date has arrived.
   async runDuePrepaid(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const due = await db.select().from(prepaidSchedules).where(and(eq(prepaidSchedules.status, 'active'), sql`${prepaidSchedules.nextRunDate} <= ${today}`));
     const posted: { entry_no: string | null; schedule_no: string; amount: number }[] = [];
@@ -444,7 +444,7 @@ export class LedgerService {
 
   // ───────────────────── Journal listing ─────────────────────
   private async entriesList(limit: number, status?: 'Draft' | 'Posted' | 'Voided') {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(journalEntries.status, status) : undefined;
     const heads = await db.select().from(journalEntries).where(where).orderBy(desc(journalEntries.id)).limit(limit);
     if (!heads.length) return { entries: [], count: 0 };
@@ -473,7 +473,7 @@ export class LedgerService {
   // GL-05 maker-checker: approve a Draft JE → Posted. The approver MUST differ from the preparer
   // (segregation of duties) regardless of permissions held — even an Admin cannot approve their own.
   async approveEntry(entryNo: string, approver: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [e] = await db.select().from(journalEntries).where(eq(journalEntries.entryNo, entryNo)).limit(1);
     if (!e) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal entry not found', messageTh: 'ไม่พบรายการบัญชี' });
     if (e.status !== 'Draft') throw new BadRequestException({ code: 'NOT_PENDING', message: `Entry ${entryNo} is ${e.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
@@ -482,7 +482,7 @@ export class LedgerService {
     }
     // Re-check the period is still open at approval time (it may have closed since the draft was prepared).
     const [pp] = e.tenantId == null ? [undefined]
-      : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.code, e.period), eq(fiscalPeriods.tenantId, e.tenantId))).limit(1);
+      : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.code, e.period!), eq(fiscalPeriods.tenantId, e.tenantId))).limit(1);
     if (pp && pp.status === 'Closed') throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${e.period} is closed`, messageTh: `งวดบัญชี ${e.period} ถูกปิดแล้ว` });
     // GL-17: a Draft → Posted transition is the moment of posting; stamp postedAt and log the APPROVE.
     // R1-2: the transition + audit row + period-balance snapshot commit ATOMICALLY.
@@ -501,7 +501,7 @@ export class LedgerService {
 
   // GL-05: reject a Draft JE → Voided (with a reason appended to the memo).
   async rejectEntry(entryNo: string, approver: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [e] = await db.select().from(journalEntries).where(eq(journalEntries.entryNo, entryNo)).limit(1);
     if (!e) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal entry not found', messageTh: 'ไม่พบรายการบัญชี' });
     if (e.status !== 'Draft') throw new BadRequestException({ code: 'NOT_PENDING', message: `Entry ${entryNo} is ${e.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
@@ -516,7 +516,7 @@ export class LedgerService {
   // debit/credit so original + reversal net to zero on every affected account. The original is flagged
   // is_reversed (the one column the DB trigger permits changing on a posted entry). Every action is logged.
   async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const [orig] = await db.select().from(journalEntries).where(eq(journalEntries.id, dto.entryId)).limit(1);
     if (!orig) throw new NotFoundException({ code: 'ENTRY_NOT_FOUND', message: `Journal entry ${dto.entryId} not found`, messageTh: `ไม่พบรายการบัญชี ${dto.entryId}` });
     if (orig.status !== 'Posted') throw new BadRequestException({ code: 'NOT_POSTED', message: `Entry ${orig.entryNo} is ${orig.status}; only Posted entries can be reversed`, messageTh: 'กลับรายการได้เฉพาะรายการที่ผ่านรายการแล้ว' });
@@ -565,7 +565,7 @@ export class LedgerService {
   // as HTTP 400 GL_IMMUTABLE. A thrown exception would roll the whole request tx back and discard the audit
   // row, because each request runs in a single tenant-scoped transaction (see TenantTxInterceptor).
   async attemptVoidPosted(entryId: number, actor: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [e] = await db.select().from(journalEntries).where(eq(journalEntries.id, entryId)).limit(1);
     if (!e) throw new NotFoundException({ code: 'ENTRY_NOT_FOUND', message: `Journal entry ${entryId} not found`, messageTh: `ไม่พบรายการบัญชี ${entryId}` });
     if (e.status === 'Posted') {
@@ -582,7 +582,7 @@ export class LedgerService {
 
   // GL-17: the GL audit trail (optionally filtered to one entry), scoped to the caller's tenant by RLS.
   async listGlAudit(entryId?: number, limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const where = entryId != null ? eq(glAuditLog.entryId, entryId) : undefined;
     const rows = await db.select().from(glAuditLog).where(where).orderBy(desc(glAuditLog.id)).limit(limit);
     return { audit: rows.map((r: any) => ({ id: Number(r.id), entry_id: r.entryId != null ? Number(r.entryId) : null, action: r.action, actor: r.actor, detail: r.detail, at: r.at })), count: rows.length };
@@ -591,7 +591,7 @@ export class LedgerService {
   // ───────────────────── Trial Balance ─────────────────────
   // group journal_lines by account_code (joined to accounts) — Σdebit, Σcredit, balance
   async trialBalance(period?: string, costCenter?: string | null, ledgerCode?: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     // R1-2 (AUD-ARC-02): read the maintained gl_period_balances snapshot instead of aggregating the full
     // journal_lines table per request. Same filters/semantics: Posted-only (the snapshot holds nothing
     // else), ledger NULL-or-code ('' = NULL in the normalized key), per-period, per-cost-center; RLS
@@ -628,7 +628,7 @@ export class LedgerService {
   // ───────────────────── Income Statement ─────────────────────
   // Revenue − Expense = net income, over [from,to] (entry_date inclusive)
   async incomeStatement(from: string, to: string, costCenter?: string | null, ledgerCode?: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await this.aggregateByType(db, from, to, costCenter, ledgerCode);
     const revenue = round4(typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit'));
     const expense = round4(typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit'));
@@ -641,7 +641,7 @@ export class LedgerService {
   }
 
   async incomeStatementByBranch(opts: { from: string; to: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const { from, to } = opts;
     const tenantId = currentTenantStore()?.tenantId ?? null;
 
@@ -688,7 +688,7 @@ export class LedgerService {
   // ───────────────────── Balance Sheet ─────────────────────
   // Assets = Liabilities + Equity + retained net income (as of date, inclusive)
   async balanceSheet(asOf: string, ledgerCode?: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
     // Exact minor-unit arithmetic (docs/27 R1-4): the balanced flag compares bigints, not rounded floats.
     const assetsM = typeTotalM(rows, 'Asset', 'debit') - typeTotalM(rows, 'Asset', 'credit');
@@ -718,7 +718,7 @@ export class LedgerService {
   // accounts (1000/1010/1020) by double-entry construction: Σ(every account's debit−credit)=0, so
   // Σ(non-cash credit−debit) ≡ Σ(cash debit−credit) = net change in cash.
   async cashFlowStatement(from: string, to: string, ledgerCode?: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await this.aggregateByType(db, from, to, undefined, ledgerCode, undefined, ['CLOSE']);
     const move = (r: any) => round4(n(r.credit) - n(r.debit)); // cash effect of a balance-sheet account's movement
 
@@ -770,7 +770,7 @@ export class LedgerService {
 
   // Net debit balance of the cash accounts (1000/1010/1020) as of a date, in one ledger.
   private async cashBalanceAsOf(asOf: string, ledgerCode?: string | null): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
     return round4(rows.filter((r: any) => CASH_ACCOUNTS.includes(r.account_code)).reduce((a: number, r: any) => a + (n(r.debit) - n(r.credit)), 0));
   }
@@ -781,7 +781,7 @@ export class LedgerService {
   // attributed once (to its entry's dominant non-cash leg), so the statement reconciles to Δcash. CLOSE
   // entries are excluded (no cash effect).
   async cashFlowDirect(from: string, to: string, ledgerCode?: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     const lines = await db
       .select({
         entry_id: journalLines.entryId, account_code: journalLines.accountCode, account_type: accounts.type,
@@ -805,9 +805,9 @@ export class LedgerService {
       const dominant = nonCash.sort((a, b) => Math.abs(n(b.debit) - n(b.credit)) - Math.abs(n(a.debit) - n(a.credit)))[0];
       buckets[cashContraCategory(dominant?.account_code, dominant?.account_type)] += cashNet;
     }
-    for (const k of Object.keys(buckets)) buckets[k] = round4(buckets[k]);
-    const operatingNet = round4(buckets.receipts_from_customers + buckets.payments_to_suppliers + buckets.tax_and_payroll + buckets.other_operating);
-    const netChange = round4(operatingNet + buckets.investing + buckets.financing);
+    for (const k of Object.keys(buckets)) buckets[k] = round4(buckets[k]!);
+    const operatingNet = round4(buckets.receipts_from_customers! + buckets.payments_to_suppliers! + buckets.tax_and_payroll! + buckets.other_operating!);
+    const netChange = round4(operatingNet + buckets.investing! + buckets.financing!);
     const cashBeginning = await this.cashBalanceAsOf(prevDay(from), ledgerCode);
     const cashEnding = await this.cashBalanceAsOf(to, ledgerCode);
     return {
@@ -831,7 +831,7 @@ export class LedgerService {
   // Projects the cash balance forward from today over N weeks, using open AR (expected inflows by due date)
   // and open AP (expected outflows by due date). Anything already past due lands in week 0 (due now).
   async cashFlowForecast(weeks = 8, ledgerCode?: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const opening = await this.cashBalanceAsOf(today, ledgerCode);
     const ar = await db.select({ due: arInvoices.dueDate, out: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)` })
@@ -915,7 +915,7 @@ export class LedgerService {
   }
 
   private periodBounds(period: string) {
-    const [y, m] = period.split('-').map(Number);
+    const [y, m] = period.split('-').map(Number) as [number, number];
     const start = `${period}-01`;
     const endDate = m < 12 ? `${y}-${String(m + 1).padStart(2, '0')}-01` : `${y}-12-31`;
     return { start, endDate };
@@ -924,7 +924,7 @@ export class LedgerService {
   // All period ops are per-tenant (0043). tenantId defaults to the request's own tenant (ALS),
   // so the existing controller endpoints scope correctly with no signature change.
   async ensurePeriod(period: string, tenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = resolveTenantId(tenantId);
     const { start, endDate } = this.periodBounds(period);
     await db.insert(fiscalPeriods).values({ code: period, startDate: start, endDate, status: 'Open', tenantId: tid })
@@ -932,7 +932,7 @@ export class LedgerService {
   }
 
   async listPeriods(tenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = resolveTenantId(tenantId);
     const rows = await db.select().from(fiscalPeriods)
       .where(tid == null ? undefined : eq(fiscalPeriods.tenantId, tid))
@@ -941,7 +941,7 @@ export class LedgerService {
   }
 
   async setPeriodStatus(period: string, status: 'Open' | 'Closed', tenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = resolveTenantId(tenantId);
     await this.ensurePeriod(period, tid);
     await db.update(fiscalPeriods).set({ status })
@@ -950,7 +950,7 @@ export class LedgerService {
   }
   // Last calendar day of a 'YYYY-MM' period (period close dates the loyalty accrual inside the period).
   private periodEndDate(period: string): string {
-    const [y, m] = period.split('-').map(Number);
+    const [y, m] = period.split('-').map(Number) as [number, number];
     const last = new Date(Date.UTC(y, m, 0)).getUTCDate(); // day 0 of next month = last day of this month
     return `${period}-${String(last).padStart(2, '0')}`;
   }
@@ -962,7 +962,7 @@ export class LedgerService {
   // Lives here (not in the loyalty module) so the GL period-close can call it without a module cycle; it
   // reads the loyalty sub-ledger tables directly and posts via this.postEntry.
   async accrueLiability(ctx: { tenantId: number; createdBy: string; asOfDate?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = ctx.tenantId;
     const [cfg] = await db.select().from(loyaltyConfig).limit(1);
     const fairValue = cfg ? n(cfg.bahtPerPoint) : 0;
@@ -1069,7 +1069,7 @@ export class LedgerService {
   // Year-end close: post a closing journal zeroing Revenue & Expense into 3100 Retained Earnings,
   // then close all 12 months. Idempotent (skips if FY already closed).
   async closeYear(fiscalYear: number, createdBy: string, ledgerCode: string = LEADING, tenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = resolveTenantId(tenantId);
     // per-ledger idempotency: the leading book keeps the legacy 'FY{y}' ref; non-leading books are suffixed.
     // Scoped to THIS tenant so each tenant closes its own FY independently (shared 'FY2026' ref is fine).

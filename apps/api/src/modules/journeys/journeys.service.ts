@@ -29,7 +29,7 @@ export class JourneysService {
   }
 
   async list(user: JwtUser) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const rows = await db.select().from(journeys).where(eq(journeys.tenantId, tenantId)).orderBy(desc(journeys.id));
     const ids = rows.map((r: any) => Number(r.id));
     const steps = ids.length ? await db.select().from(journeySteps).where(and(eq(journeySteps.tenantId, tenantId), inArray(journeySteps.journeyId, ids))) : [];
@@ -48,7 +48,7 @@ export class JourneysService {
 
   // Create/edit a journey + its steps (steps replaced wholesale). Only a draft/paused journey may be edited.
   async upsert(dto: any, user: JwtUser) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const stepsIn: any[] = Array.isArray(dto.steps) ? dto.steps : [];
     if (!stepsIn.length) throw new BadRequestException({ code: 'NO_STEPS', message: 'at least one step required', messageTh: 'ต้องมีอย่างน้อย 1 ขั้นตอน' });
     for (let i = 0; i < stepsIn.length; i++) {
@@ -95,7 +95,7 @@ export class JourneysService {
   }
 
   async setStatus(id: number, status: 'active' | 'paused', user: JwtUser) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [r] = await db.update(journeys).set({ status }).where(and(eq(journeys.id, id), eq(journeys.tenantId, tenantId))).returning();
     if (!r) throw new NotFoundException({ code: 'JOURNEY_NOT_FOUND', message: 'Journey not found', messageTh: 'ไม่พบเจอร์นีย์' });
     return shape(r);
@@ -104,7 +104,7 @@ export class JourneysService {
   // Enrol one member (manual/API/automation `enroll_journey`). Once-per-member: the unique index dedupes —
   // a re-enrol is a silent no-op (returns enrolled:false). Step 1's wait starts from NOW.
   async enroll(journeyId: number, memberId: number, user: JwtUser, tenantIdOverride?: number) {
-    const db = this.db as any; const tenantId = tenantIdOverride ?? this.tid(user);
+    const db = this.db; const tenantId = tenantIdOverride ?? this.tid(user);
     const [j] = await db.select().from(journeys).where(and(eq(journeys.id, journeyId), eq(journeys.tenantId, tenantId))).limit(1);
     if (!j) throw new NotFoundException({ code: 'JOURNEY_NOT_FOUND', message: 'Journey not found', messageTh: 'ไม่พบเจอร์นีย์' });
     if (j.status !== 'active') throw new ConflictException({ code: 'JOURNEY_NOT_ACTIVE', message: 'Journey is not active', messageTh: 'เจอร์นีย์ยังไม่เปิดใช้งาน' });
@@ -124,7 +124,7 @@ export class JourneysService {
   // Cron entry — run every ACTIVE journey for the caller's tenant (Admin/HQ ⇒ all tenants with active
   // journeys). @NoTx route: each claim/send/audit auto-commits (gateway sends are irreversible).
   async runDueAll(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     let tenantIds: number[];
     if (user.role === 'Admin' || user.tenantId == null) {
       const rows = await db.selectDistinct({ tid: journeys.tenantId }).from(journeys).where(eq(journeys.status, 'active'));
@@ -142,7 +142,7 @@ export class JourneysService {
   // One tenant's sweep: (1) segment-triggered journeys enrol newly-matching members (unique key dedupes);
   // (2) due enrollment-steps are CLAIMED then executed. Best-effort per enrollment.
   async runDue(tenantId: number, actor: string) {
-    const db = this.db as any;
+    const db = this.db;
     const act = await db.select().from(journeys).where(and(eq(journeys.tenantId, tenantId), eq(journeys.status, 'active')));
     let enrolled = 0, sent = 0, skipped = 0, completed = 0;
     const sysUser = { tenantId, username: actor, role: 'System' } as any as JwtUser;
@@ -189,7 +189,7 @@ export class JourneysService {
       let nextNo = Number(claimed.currentStep) + 1;
       const [curStep] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(e.journeyId)), eq(journeySteps.stepNo, Number(claimed.currentStep)))).limit(1);
       if (curStep?.branchRule && curStep?.branchToStep != null && Number(curStep.branchToStep) > Number(claimed.currentStep)) {
-        try { if (await this.segments.memberMatchesRule(db, tenantId, Number(claimed.memberId), curStep.branchRule)) nextNo = Number(curStep.branchToStep); } catch { /* bad rule ⇒ linear path */ }
+        try { if (await this.segments.memberMatchesRule(db, tenantId, Number(claimed.memberId), curStep.branchRule as SegmentRule)) nextNo = Number(curStep.branchToStep); } catch { /* bad rule ⇒ linear path */ }
       }
       const [next] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(e.journeyId)), eq(journeySteps.stepNo, nextNo))).limit(1);
       if (next) {

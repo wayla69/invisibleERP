@@ -40,7 +40,7 @@ export class PayrollService implements OnModuleInit {
 
   // ── Employees (tenant-scoped via RLS) ──
   async createEmployee(dto: EmployeeDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const code = (dto.emp_code?.trim()) || `EMP${String(Date.now()).slice(-6)}`;
     const [row] = await db.insert(employees).values({
       tenantId: user.tenantId ?? null, empCode: code, name: dto.name, nationalId: dto.national_id ?? null,
@@ -53,7 +53,7 @@ export class PayrollService implements OnModuleInit {
   }
 
   async listEmployees(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(employees).where(eq(employees.active, true)).orderBy(employees.empCode);
     return { employees: rows.map((r: any) => this.fmtEmp(r)), count: rows.length };
   }
@@ -61,7 +61,7 @@ export class PayrollService implements OnModuleInit {
   // ── Run payroll for a period → balanced GL entry + payslips. Idempotent per (tenant, period). ──
   async runPayroll(period: string, user: JwtUser, explicitTenantId?: number | null) {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
-    const db = this.db as any;
+    const db = this.db;
     // Resolve the tenant to run for. A scoped (non-HQ) user always runs for their own tenant; an HQ/Admin
     // caller (tenantId null, RLS-bypass) MUST name a tenant_id — otherwise the employee query below spans
     // EVERY tenant and posts one cross-tenant JE under tenant_id null (escaping RLS + the close calendar).
@@ -123,7 +123,7 @@ export class PayrollService implements OnModuleInit {
     }).returning({ id: payruns.id });
 
     await db.insert(payslips).values(slips.map((s: any) => ({
-      payrunId: Number(run.id), tenantId, employeeId: Number(s.e.id), empCode: s.e.empCode, empName: s.e.name, nationalId: s.e.nationalId,
+      payrunId: Number(run!.id), tenantId, employeeId: Number(s.e.id), empCode: s.e.empCode, empName: s.e.name, nationalId: s.e.nationalId,
       gross: fx(s.gross, 2), otPay: fx(s.ot_pay, 2), unpaid: fx(s.unpaid, 2), ssoEmployee: fx(s.sso_employee, 2), ssoEmployer: fx(s.sso_employer, 2),
       pfEmployee: fx(s.pf_employee, 2), pfEmployer: fx(s.pf_employer, 2), wht: fx(s.wht, 2), net: fx(s.net, 2),
     })));
@@ -140,25 +140,25 @@ export class PayrollService implements OnModuleInit {
   // Reuses the GL-05 ledger approval, which enforces approver ≠ preparer (SoD) and re-checks the period is
   // open at approval time. Payroll is a top fraud-risk cycle, so the run-er can never post their own pay.
   async approvePayroll(period: string, user: JwtUser, explicitTenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const run = await this.pendingRun(period, user, explicitTenantId);
-    const res: any = await this.ledger.approveEntry(run.entryNo, user);
+    const res: any = await this.ledger.approveEntry(run.entryNo!, user);
     await db.update(payruns).set({ status: 'Posted', approvedBy: user.username, approvedAt: new Date() }).where(eq(payruns.id, Number(run.id)));
     return { period, entry_no: run.entryNo, status: 'Posted', approved_by: user.username, prepared_by: res.prepared_by ?? run.runBy };
   }
 
   // Reject a pending run → voids the Draft JE and marks the run Rejected (a fresh run may then be made).
   async rejectPayroll(period: string, user: JwtUser, reason?: string, explicitTenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const run = await this.pendingRun(period, user, explicitTenantId);
-    await this.ledger.rejectEntry(run.entryNo, user, reason);
+    await this.ledger.rejectEntry(run.entryNo!, user, reason);
     await db.update(payruns).set({ status: 'Rejected' }).where(eq(payruns.id, Number(run.id)));
     return { period, entry_no: run.entryNo, status: 'Rejected', rejected_by: user.username };
   }
 
   // Resolve the single PendingApproval run for (tenant, period) or raise a clean 4xx.
   private async pendingRun(period: string, user: JwtUser, explicitTenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? (explicitTenantId != null ? Number(explicitTenantId) : null);
     if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id' });
     const [run] = await db.select().from(payruns).where(and(eq(payruns.period, period), eq(payruns.tenantId, tenantId), eq(payruns.status, 'PendingApproval'))).orderBy(desc(payruns.id)).limit(1);
@@ -171,7 +171,7 @@ export class PayrollService implements OnModuleInit {
   // employee into one group per ciphertext — aggregate in app code instead, keyed on employee_id/emp_code
   // (the per-year row count is headcount × months, small per tenant).
   async pnd1a(year: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       employeeId: payslips.employeeId, empCode: payslips.empCode, empName: payslips.empName,
       nationalId: payslips.nationalId, gross: payslips.gross, wht: payslips.wht,
@@ -214,7 +214,7 @@ export class PayrollService implements OnModuleInit {
 
   // GL debit/credit totals for one account (Posted entries only — Draft JEs are excluded from balances).
   private async glAcct(accountCode: string, tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select({
       debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
       credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
@@ -225,7 +225,7 @@ export class PayrollService implements OnModuleInit {
 
   async liabilities(user: JwtUser, explicitTenantId?: number | null) {
     const tenantId = this.liabTenant(user, explicitTenantId);
-    const db = this.db as any;
+    const db = this.db;
     // Independent expected accrual from the payrun aggregates (NOT the GL) for SSO + WHT — a divergence from the
     // GL credits means a manual JE touched a payroll-liability account outside the payroll process.
     const [pr] = await db.select({
@@ -270,13 +270,13 @@ export class PayrollService implements OnModuleInit {
   }
 
   async listRuns(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(payruns).orderBy(desc(payruns.period), desc(payruns.id)).limit(36);
     return { runs: rows.map((r: any) => ({ period: r.period, status: r.status, headcount: Number(r.headcount), gross_total: n(r.grossTotal), sso_employee_total: n(r.ssoEeTotal), sso_employer_total: n(r.ssoErTotal), wht_total: n(r.whtTotal), net_total: n(r.netTotal), entry_no: r.entryNo, run_by: r.runBy, approved_by: r.approvedBy, run_at: r.runAt, approved_at: r.approvedAt })), count: rows.length };
   }
 
   async getSlips(period: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [run] = await db.select().from(payruns).where(eq(payruns.period, period)).orderBy(desc(payruns.id)).limit(1);
     if (!run) return { period, slips: [], count: 0 };
     const rows = await db.select().from(payslips).where(eq(payslips.payrunId, Number(run.id))).orderBy(payslips.empCode);
@@ -285,7 +285,7 @@ export class PayrollService implements OnModuleInit {
 
   // ภ.ง.ด.1 — monthly salary WHT remittance: per-employee withheld + total payable to the Revenue Dept.
   async pnd1(period: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [run] = await db.select().from(payruns).where(eq(payruns.period, period)).orderBy(desc(payruns.id)).limit(1);
     if (!run) return { period, form: 'PND1', lines: [], total_income: 0, total_wht: 0, headcount: 0, deadline: `ยื่นแบบ ภ.ง.ด.1 ภายในวันที่ 7 ของเดือนถัดไป` };
     const rows = await db.select().from(payslips).where(eq(payslips.payrunId, Number(run.id)));

@@ -16,7 +16,7 @@ export class SaasMetricsService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async overview(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
 
     // Recurring revenue + status counts + per-plan mix (active subscriptions drive MRR).
     const planRows = await db.execute(sql`
@@ -29,7 +29,7 @@ export class SaasMetricsService {
       FROM plans p LEFT JOIN subscriptions s ON s.plan_code = p.code
       GROUP BY p.code, p.name, p.price_monthly
       ORDER BY p.price_monthly`);
-    const plans = (planRows.rows ?? planRows) as any[];
+    const plans = ((planRows as any).rows ?? planRows) as any[];
 
     let mrr = 0, active = 0, trialing = 0, pastDue = 0, canceled = 0;
     const byPlan = plans.map((r) => {
@@ -40,18 +40,18 @@ export class SaasMetricsService {
 
     // Churn (last 30 days): subscriptions canceled in the window vs the active base at the window start
     // (active now + canceled in window ≈ the base that could have churned).
-    const [churnRow] = ((await db.execute(sql`
+    const [churnRow] = (((await db.execute(sql`
       SELECT count(*) FILTER (WHERE status = 'Canceled' AND created_at >= now() - interval '30 days') AS canceled_30d
-      FROM subscriptions`)).rows ?? []) as any[];
+      FROM subscriptions`)) as any).rows ?? []) as any[];
     const canceled30d = n(churnRow?.canceled_30d);
     const churnBase = active + canceled30d;
     const churnRatePct = churnBase > 0 ? round2((canceled30d / churnBase) * 100) : 0;
 
     // Engagement — distinct actors in audit_log over the trailing day / 30 days (DAU/MAU + stickiness).
-    const [eng] = ((await db.execute(sql`
+    const [eng] = (((await db.execute(sql`
       SELECT count(DISTINCT actor) FILTER (WHERE ts >= now() - interval '1 day')   AS dau,
              count(DISTINCT actor) FILTER (WHERE ts >= now() - interval '30 days') AS mau
-      FROM audit_log WHERE actor IS NOT NULL`)).rows ?? []) as any[];
+      FROM audit_log WHERE actor IS NOT NULL`)) as any).rows ?? []) as any[];
     const dau = n(eng?.dau), mau = n(eng?.mau);
 
     return {

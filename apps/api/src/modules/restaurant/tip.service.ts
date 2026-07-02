@@ -31,7 +31,7 @@ export class TipService {
 
   // tips collected in a window (Σ payments.tip on captured/settled tenders) + already distributed.
   async pool(from: string, to: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     const captured = sql`${payments.status}::text IN ('Captured','Settled','Refunded')`;
     const [coll] = await db.select({ v: sql<string>`coalesce(sum(${payments.tip}),0)` }).from(payments)
@@ -46,7 +46,7 @@ export class TipService {
   }
 
   async distribute(dto: DistributeTipsDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     if (!dto.staff?.length) throw new BadRequestException({ code: 'NO_STAFF', message: 'At least one staff member is required', messageTh: 'ต้องระบุพนักงานอย่างน้อยหนึ่งคน' });
     const p = await this.pool(dto.from, dto.to, user);
@@ -61,9 +61,9 @@ export class TipService {
     const totalW = weights.reduce((a, b) => a + b, 0);
     if (totalW <= 0) throw new BadRequestException({ code: 'BAD_WEIGHTS', message: 'Total hours/weight must be positive', messageTh: 'ชั่วโมง/น้ำหนักรวมต้องมากกว่าศูนย์' });
     // allocate; the last line absorbs the satang rounding remainder so Σ lines = amount exactly.
-    const lines = dto.staff.map((s, i) => ({ staff: s.staff, basis: weights[i], share: weights[i] / totalW, amount: roundCurrency(amount * (weights[i] / totalW), 'THB') }));
+    const lines = dto.staff.map((s, i) => ({ staff: s.staff, basis: weights[i]!, share: weights[i]! / totalW, amount: roundCurrency(amount * (weights[i]! / totalW), 'THB') }));
     const allocated = round2(lines.reduce((a, l) => a + l.amount, 0));
-    if (allocated !== amount && lines.length) lines[lines.length - 1].amount = round2(lines[lines.length - 1].amount + (amount - allocated));
+    if (allocated !== amount && lines.length) lines[lines.length - 1]!.amount = round2(lines[lines.length - 1]!.amount + (amount - allocated));
 
     const distNo = await this.docNo.nextDaily('TIP');
     // GL: Dr 2300 Tips Payable (clear the liability) / Cr pay account (cash paid out).
@@ -74,14 +74,14 @@ export class TipService {
       journalNo = je?.entry_no ?? null;
     }
     const [hdr] = await db.insert(tipDistributions).values({
-      tenantId, distNo, periodFrom: dto.from, periodTo: dto.to, method, poolAmount: fx(amount, 4), payAccount, journalNo, createdBy: user.username,
+      tenantId: tenantId as number, distNo, periodFrom: dto.from, periodTo: dto.to, method, poolAmount: fx(amount, 4), payAccount, journalNo, createdBy: user.username,
     }).returning({ id: tipDistributions.id });
-    await db.insert(tipDistributionLines).values(lines.map((l) => ({ tenantId, distId: Number(hdr.id), staff: l.staff, basis: fx(l.basis, 4), share: fx(l.share, 6), amount: fx(l.amount, 4) })));
+    await db.insert(tipDistributionLines).values(lines.map((l) => ({ tenantId: tenantId as number, distId: Number(hdr!.id), staff: l.staff, basis: fx(l.basis, 4), share: fx(l.share, 6), amount: fx(l.amount, 4) })));
     return { dist_no: distNo, journal_no: journalNo, method, amount, pay_account: payAccount, lines: lines.map((l) => ({ staff: l.staff, amount: l.amount, share: round2(l.share * 100) })) };
   }
 
   async list(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(tipDistributions).where(eq(tipDistributions.tenantId, user.tenantId as number)).orderBy(sql`${tipDistributions.createdAt} desc`).limit(200);
     const out: any[] = [];
     for (const h of rows) {
@@ -94,7 +94,7 @@ export class TipService {
 
   // 2300 Tips Payable outstanding = Σ credit − Σ debit over Posted entries (the tips still owed to staff).
   private async outstanding2300(tenantId: number | null): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(journalLines.accountCode, '2300'), eq(journalEntries.status, 'Posted')];
     if (tenantId != null) conds.push(eq(journalEntries.tenantId, tenantId));
     const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })

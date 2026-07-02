@@ -40,7 +40,7 @@ export class FxRevalService {
     return currentTenantStore()?.tenantId ?? null;
   }
   private periodEndDate(period: string): string {
-    const [y, m] = period.split('-').map(Number);
+    const [y, m] = period.split('-').map(Number) as [number, number];
     const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
     return `${period}-${String(last).padStart(2, '0')}`;
   }
@@ -49,7 +49,7 @@ export class FxRevalService {
   // unapproved manual rate (FX-04 maker-checker) must never drive a revaluation.
   private async rateAsOf(currency: string, asOf: string): Promise<number | null> {
     if (currency === 'THB') return 1;
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(fxRates)
       .where(and(eq(fxRates.currency, currency), eq(fxRates.status, 'Approved'), sql`${fxRates.rateDate} <= ${asOf}`))
       .orderBy(desc(fxRates.rateDate), desc(fxRates.id)).limit(1);
@@ -61,7 +61,7 @@ export class FxRevalService {
   // latest APPROVED fx_rates row (the existing rate source). A currency with no rate from either source
   // throws MISSING_RATE. Idempotent: re-running an Open period updates it; a Posted period throws ALREADY_POSTED.
   async runReval(dto: RunRevalDto) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenant(dto.tenantId);
     const asOf = dto.asOfDate ?? this.periodEndDate(dto.period);
     const explicit = dto.rates ?? {};
@@ -95,7 +95,7 @@ export class FxRevalService {
     for (const i of ar) {
       const openF = round4(n(i.amount) - n(i.paidAmount));
       if (Math.abs(openF) < 1e-9) continue;
-      const closing = await rateFor(i.currency);
+      const closing = await rateFor(i.currency!);
       const d = round4(openF * (closing - n(i.fxRate)));
       arDelta = round4(arDelta + d);
       detail.push({ scope: 'AR', doc_no: i.invoiceNo, currency: i.currency, open_foreign: openF, booked_rate: n(i.fxRate), closing_rate: closing, delta: d });
@@ -103,7 +103,7 @@ export class FxRevalService {
     for (const t of ap) {
       const openF = round4(n(t.amount) - n(t.paidAmount));
       if (Math.abs(openF) < 1e-9) continue;
-      const closing = await rateFor(t.currency);
+      const closing = await rateFor(t.currency!);
       const d = round4(openF * (closing - n(t.fxRate)));
       apDelta = round4(apDelta + d);
       detail.push({ scope: 'AP', doc_no: t.txnNo, currency: t.currency, open_foreign: openF, booked_rate: n(t.fxRate), closing_rate: closing, delta: d });
@@ -124,7 +124,7 @@ export class FxRevalService {
         tenantId, period: dto.period, asOfDate: asOf, status: 'Open', rates: usedRates,
         totalGain: String(totalGain), totalLoss: String(totalLoss), net: String(net), detail, runBy: dto.runBy,
       }).returning({ id: fxRevalRuns.id });
-      id = Number(ins.id);
+      id = Number(ins!.id);
     }
     return { id, period: dto.period, as_of_date: asOf, status: 'Open', tenant_id: tenantId, rates: usedRates, ar_delta: arDelta, ap_delta: apDelta, total_gain: totalGain, total_loss: totalLoss, net, detail };
   }
@@ -132,7 +132,7 @@ export class FxRevalService {
   // postReval — maker-checker post of an Open run (poster ≠ runner ⇒ SELF_POST). Posts the AR/AP control
   // restatements and the net to 5400, then marks the run Posted. Idempotent: a Posted run throws ALREADY_POSTED.
   async postReval(dto: PostRevalDto) {
-    const db = this.db as any;
+    const db = this.db;
     const [run] = await db.select().from(fxRevalRuns).where(eq(fxRevalRuns.id, dto.id)).limit(1);
     if (!run) throw new NotFoundException({ code: 'FX_RUN_NOT_FOUND', message: `FX revaluation run ${dto.id} not found`, messageTh: `ไม่พบการปรับปรุงอัตราแลกเปลี่ยน ${dto.id}` });
     if (run.status === 'Posted') throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This FX revaluation is already posted', messageTh: 'การปรับปรุงนี้โพสต์แล้ว' });
@@ -168,7 +168,7 @@ export class FxRevalService {
   }
 
   async list(tenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = this.tenant(tenantId);
     const rows = await db.select().from(fxRevalRuns)
       .where(tid != null ? eq(fxRevalRuns.tenantId, tid) : undefined)
@@ -176,7 +176,7 @@ export class FxRevalService {
     return { runs: rows.map(shape), count: rows.length };
   }
   async get(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(fxRevalRuns).where(eq(fxRevalRuns.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'FX_RUN_NOT_FOUND', message: `FX revaluation run ${id} not found`, messageTh: `ไม่พบการปรับปรุงอัตราแลกเปลี่ยน ${id}` });
     return shape(r);

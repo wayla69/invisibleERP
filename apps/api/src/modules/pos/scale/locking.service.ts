@@ -13,9 +13,9 @@ export class LockingService {
 
   // Guarded table-status write: only succeeds if the caller's rev matches → otherwise 409 STALE_WRITE.
   async setTableStatus(tableId: number, status: string, expectedRev: number) {
-    const db = this.db as any;
+    const db = this.db;
     const res = await db.update(diningTables)
-      .set({ status, rev: sql`${diningTables.rev} + 1`, updatedAt: new Date() })
+      .set({ status: status as typeof diningTables.$inferInsert.status, rev: sql`${diningTables.rev} + 1`, updatedAt: new Date() })
       .where(and(eq(diningTables.id, tableId), eq(diningTables.rev, expectedRev)))
       .returning({ rev: diningTables.rev, status: diningTables.status, tenantId: diningTables.tenantId });
     if (!res.length) {
@@ -24,13 +24,13 @@ export class LockingService {
       throw new ConflictException({ code: 'STALE_WRITE', message: `Table changed by another terminal (current rev ${cur.rev})`, messageTh: 'โต๊ะถูกแก้ไขโดยเครื่องอื่น', current_rev: cur.rev });
     }
     // realtime: push table state to other terminals (SSE)
-    this.realtime?.publish({ type: 'table', tenant_id: res[0].tenantId, table_id: tableId, status: res[0].status, rev: res[0].rev, at: new Date().toISOString() });
-    return { table_id: tableId, status: res[0].status, rev: res[0].rev };
+    this.realtime?.publish({ type: 'table', tenant_id: res[0]!.tenantId, table_id: tableId, status: res[0]!.status, rev: res[0]!.rev, at: new Date().toISOString() });
+    return { table_id: tableId, status: res[0]!.status, rev: res[0]!.rev };
   }
 
   // Auto-86: a dish is unavailable if any recipe ingredient can't cover one serving.
   async recomputeAvailability() {
-    const db = this.db as any;
+    const db = this.db;
     const recipes = await db.select().from(menuRecipes).where(eq(menuRecipes.active, true));
     const changed: { sku: string; is_available: boolean }[] = [];
     for (const r of recipes) {
@@ -51,7 +51,7 @@ export class LockingService {
   }
 
   async availability() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(menuItems).where(eq(menuItems.trackStock, true));
     return { items: rows.map((r: any) => ({ sku: r.sku, name: r.name, is_available: r.isAvailable })), count: rows.length };
   }

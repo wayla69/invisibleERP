@@ -43,11 +43,11 @@ export class IntercompanyService {
   // authorization is enforced upstream (the coalition service validates active shared membership before
   // every cross-shop movement, control LYL-19). Never expose this on a controller directly.
   async createIcInternal(dto: Omit<CreateIcDto, 'category'> & { category: string }, username: string) {
-    const db = this.db as any;
+    const db = this.db;
     const A = n(dto.amount); const date = dto.date ?? ymd(); const cat = dto.category; const m = MAP[cat];
     if (!m) throw new BadRequestException({ code: 'IC_BAD_CATEGORY', message: `Unknown IC category '${cat}'`, messageTh: 'ประเภทรายการระหว่างกิจการไม่ถูกต้อง' });
     const icNo = await this.docNo.nextDaily('IC');
-    await db.insert(icTransactions).values({ icNo, tenantId: dto.from_tenant_id, fromTenantId: dto.from_tenant_id, toTenantId: dto.to_tenant_id, txnDate: date, amount: fx(A, 4), settledAmount: '0', currency: dto.currency ?? 'THB', category: cat, description: dto.description ?? null, status: 'Open', createdBy: username });
+    await db.insert(icTransactions).values({ icNo, tenantId: dto.from_tenant_id, fromTenantId: dto.from_tenant_id, toTenantId: dto.to_tenant_id, txnDate: date, amount: fx(A, 4), settledAmount: '0', currency: dto.currency ?? 'THB', category: cat as typeof icTransactions.$inferInsert.category, description: dto.description ?? null, status: 'Open', createdBy: username });
     // FROM (creditor): Dr 1150 Due-From / Cr recovery
     let fromJe: string | null = null;
     if (!(await this.ledger.alreadyPosted('IC', icNo))) {
@@ -66,7 +66,7 @@ export class IntercompanyService {
 
   async settleIc(icNo: string, dto: SettleIcDto, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const [ic] = await db.select().from(icTransactions).where(eq(icTransactions.icNo, icNo)).limit(1);
     if (!ic) throw new NotFoundException({ code: 'NOT_FOUND', message: 'IC transaction not found', messageTh: 'ไม่พบรายการระหว่างกิจการ' });
     const S = n(dto.amount); const outstanding = round4(n(ic.amount) - n(ic.settledAmount));
@@ -83,13 +83,13 @@ export class IntercompanyService {
   }
 
   async listIc(_user: JwtUser, status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(icTransactions).where(status ? eq(icTransactions.status, status as any) : undefined).orderBy(icTransactions.id);
     return { ic_transactions: rows.map(shape), count: rows.length };
   }
 
   async getIc(icNo: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [ic] = await db.select().from(icTransactions).where(eq(icTransactions.icNo, icNo)).limit(1);
     if (!ic) throw new NotFoundException({ code: 'NOT_FOUND', message: 'IC transaction not found', messageTh: 'ไม่พบรายการระหว่างกิจการ' });
     const settlements = await db.select().from(icSettlements).where(eq(icSettlements.icNo, icNo));
@@ -98,7 +98,7 @@ export class IntercompanyService {
 
   // elimination report — reads the GL (1150 due-from / 2150 due-to) + ic_transactions for pair detail
   async reconciliation(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const dueFrom = await db.select({ tenant: journalEntries.tenantId, bal: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)` }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(sql`${journalLines.accountCode} = '1150' AND ${journalEntries.status} = 'Posted'`).groupBy(journalEntries.tenantId);
     const dueTo = await db.select({ tenant: journalEntries.tenantId, bal: sql<string>`coalesce(sum(${journalLines.credit} - ${journalLines.debit}),0)` }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(sql`${journalLines.accountCode} = '2150' AND ${journalEntries.status} = 'Posted'`).groupBy(journalEntries.tenantId);
     const totalDueFrom = round4(dueFrom.reduce((a: number, r: any) => a + n(r.bal), 0));

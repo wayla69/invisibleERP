@@ -32,7 +32,7 @@ export class StockOpsService {
   // ── Stocktake ────────────────────────────────────────────────────────────
   async createStocktake(dto: { counted_by?: string; remarks?: string; lines: StocktakeLine[] }, user: JwtUser) {
     if (!dto.lines?.length) throw new BadRequestException({ code: 'NO_LINES', message: 'No count lines', messageTh: 'ไม่มีรายการนับ' });
-    const db = this.db as any;
+    const db = this.db;
     const stNo = await this.docNo.nextDaily('ST');
     const stDate = ymd();
     const counter = dto.counted_by || user.username;
@@ -53,7 +53,7 @@ export class StockOpsService {
   // Post a Draft stocktake → status Posted + an audit movement per non-zero variance line
   // (Stock In if counted high, Stock Out if counted low). Idempotent: re-posting is a no-op.
   async postStocktake(stNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const res = await db.transaction(async (tx: any) => {
       const lines = await tx.select().from(stocktakes).where(eq(stocktakes.stNo, stNo));
       if (!lines.length) throw new NotFoundException({ code: 'NOT_FOUND', message: `Stocktake ${stNo} not found`, messageTh: 'ไม่พบใบนับสต๊อก' });
@@ -94,12 +94,12 @@ export class StockOpsService {
   }
 
   async listStocktakes(limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(stocktakes).orderBy(desc(stocktakes.id)).limit(2000);
     // group by st_no (doc-level summary)
     const byDoc = new Map<string, any>();
     for (const r of rows) {
-      const k = r.stNo;
+      const k = r.stNo!;
       if (!byDoc.has(k)) byDoc.set(k, { st_no: k, st_date: r.stDate, counted_by: r.countedBy, status: r.status, lines: 0, variance_lines: 0 });
       const g = byDoc.get(k);
       g.lines++;
@@ -109,11 +109,11 @@ export class StockOpsService {
   }
 
   async getStocktake(stNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(stocktakes).where(eq(stocktakes.stNo, stNo));
     if (!rows.length) throw new NotFoundException({ code: 'NOT_FOUND', message: `Stocktake ${stNo} not found`, messageTh: 'ไม่พบใบนับสต๊อก' });
     return {
-      st_no: stNo, st_date: rows[0].stDate, counted_by: rows[0].countedBy, status: rows[0].status,
+      st_no: stNo, st_date: rows[0]!.stDate, counted_by: rows[0]!.countedBy, status: rows[0]!.status,
       lines: rows.map((r: any) => ({ item_id: r.itemId, item_description: r.itemDescription, uom: r.uom, system_qty: n(r.systemQty), physical_qty: n(r.physicalQty), difference: n(r.difference) })),
     };
   }
@@ -121,7 +121,7 @@ export class StockOpsService {
   // ── Goods issue / inter-location transfer (audit movements) ───────────────
   async goodsIssue(dto: { ref_doc?: string; from_location?: string; remarks?: string; lines: IssueLine[] }, user: JwtUser) {
     if (!dto.lines?.length) throw new BadRequestException({ code: 'NO_LINES', message: 'No items', messageTh: 'ไม่มีรายการ' });
-    const db = this.db as any;
+    const db = this.db;
     const docNo = await this.docNo.nextDaily('MI');
     const now = new Date();
     for (const l of dto.lines) {
@@ -144,7 +144,7 @@ export class StockOpsService {
   async transfer(dto: { ref_doc?: string; from_location: string; to_location: string; remarks?: string; lines: IssueLine[] }, user: JwtUser) {
     if (!dto.lines?.length) throw new BadRequestException({ code: 'NO_LINES', message: 'No items', messageTh: 'ไม่มีรายการ' });
     if (dto.from_location === dto.to_location) throw new BadRequestException({ code: 'SAME_LOCATION', message: 'From and To must differ', messageTh: 'ต้นทาง/ปลายทางต้องต่างกัน' });
-    const db = this.db as any;
+    const db = this.db;
     const docNo = this.docNo.nextStamped('TRF');
     const now = new Date();
     for (const l of dto.lines) {
@@ -164,7 +164,7 @@ export class StockOpsService {
   }
 
   async listMovements(q: { move_type?: string; limit?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const where = q.move_type ? eq(stockMovements.moveType, q.move_type as any) : undefined;
     const rows = await db.select().from(stockMovements).where(where).orderBy(desc(stockMovements.id)).limit(q.limit ?? 100);
     return {

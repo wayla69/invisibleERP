@@ -13,10 +13,10 @@ export class ModuleConfigService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   private async loadMap(): Promise<Map<string, boolean>> {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(moduleConfigs);
     const m = new Map<string, boolean>();
-    for (const r of rows) m.set(String(r.moduleKey), r.enabled === true || r.enabled === 't');
+    for (const r of rows) m.set(String(r.moduleKey), r.enabled === true || String(r.enabled) === 't');
     return m;
   }
 
@@ -42,7 +42,7 @@ export class ModuleConfigService {
       this.cache = null;
       return { key, enabled: true, note: 'always_on' };
     }
-    const db = this.db as any;
+    const db = this.db;
     const now = new Date();
     await db
       .insert(moduleConfigs)

@@ -48,7 +48,7 @@ export class ChannelOrderService {
   // slug → tenant (controlled bypass: reads only id + name by code)
   private async resolveStore(slug: string): Promise<{ tenantId: number; storeName: string }> {
     const found = await this.scope.bypassQuery(async () => {
-      const db = this.db as any;
+      const db = this.db;
       const [t] = await db.select({ id: tenants.id, name: tenants.name }).from(tenants).where(eq(tenants.code, slug)).limit(1);
       return t ? { tenantId: Number(t.id), storeName: t.name } : null;
     });
@@ -61,21 +61,21 @@ export class ChannelOrderService {
   async createPublicOrder(slug: string, dto: any) {
     const { tenantId } = await this.resolveStore(slug);
     return this.scope.run(tenantId, async () => {
-      const db = this.db as any;
+      const db = this.db;
       const u = diner(tenantId);
       const view: any = await this.dineIn.createOrder({ items: dto.items, notes: dto.notes }, u); // tableId null
       const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
-      const token = mintChannelToken({ tenantId, orderId: Number(o.id) });
+      const token = mintChannelToken({ tenantId, orderId: Number(o!.id) });
       const fee = roundCurrency(n(dto.delivery_fee), 'THB');
       const memberId = dto.member_id ? Number(dto.member_id) : null;
       await db.update(dineInOrders).set({
         channel: dto.channel ?? 'web', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received',
         deliveryFee: fx(fee, 2), scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
         publicToken: token, server: 'channel:web', memberId,
-      }).where(eq(dineInOrders.id, o.id));
+      }).where(eq(dineInOrders.id, o!.id));
       if ((dto.fulfillment_type === 'delivery') && dto.delivery) {
         await db.insert(orderDeliveryDetails).values({
-          tenantId, orderId: Number(o.id), contactName: dto.delivery.contact_name ?? null, contactPhone: dto.delivery.contact_phone ?? null,
+          tenantId, orderId: Number(o!.id), contactName: dto.delivery.contact_name ?? null, contactPhone: dto.delivery.contact_phone ?? null,
           addressLine: dto.delivery.address_line ?? null, addressNote: dto.delivery.address_note ?? null,
           lat: dto.delivery.lat != null ? String(dto.delivery.lat) : null, lng: dto.delivery.lng != null ? String(dto.delivery.lng) : null,
         });
@@ -99,7 +99,7 @@ export class ChannelOrderService {
   async status(token: string) {
     const claim = this.claimOrThrow(token);
     return this.scope.run(claim.tenantId, async () => {
-      const db = this.db as any;
+      const db = this.db;
       const o = await this.loadByToken(db, claim, token);
       const v: any = await this.dineIn.getOrder(o.orderNo, diner(claim.tenantId));
       const fee = n(o.deliveryFee);
@@ -118,7 +118,7 @@ export class ChannelOrderService {
   async pay(token: string) {
     const claim = this.claimOrThrow(token);
     return this.scope.run(claim.tenantId, async () => {
-      const db = this.db as any;
+      const db = this.db;
       const guard = await this.loadByToken(db, claim, token);
       const o = await this.dineIn.loadOrderForUpdate(guard.orderNo); // lock → serialize concurrent pay()
       if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Order already settled', messageTh: 'ออเดอร์ชำระแล้ว' });
@@ -161,7 +161,7 @@ export class ChannelOrderService {
           .where(and(eq(posMemberLedger.refDoc, o.saleNo), eq(posMemberLedger.txnType, 'Earn'))).limit(1);
         if (!ex) {
           await db2.transaction(async (tx: any) => {
-            pointsEarned = await this.member!.earnInTx(tx, claim.tenantId, Number(o.memberId), n(built.total), o.saleNo, 'channel:confirm');
+            pointsEarned = await this.member!.earnInTx(tx, claim.tenantId, Number(o.memberId), n(built.total), o.saleNo!, 'channel:confirm');
           });
         }
       }
@@ -171,13 +171,13 @@ export class ChannelOrderService {
 
   // KIOSK: on-prem self-order that TENDERS AT CREATE (authenticated device) — one call, no public token.
   async kioskCheckout(dto: any, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const view: any = await this.dineIn.createOrder({ items: dto.items, notes: dto.notes }, user);
     const [created] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
     const fee = roundCurrency(n(dto.delivery_fee), 'THB');
     const kioskMemberId = dto.member_id ? Number(dto.member_id) : null;
     // mint a per-order public token so the takeaway customer can track the order (GET /api/order/t/:token).
-    const trackToken = mintChannelToken({ tenantId: user.tenantId ?? 0, orderId: Number(created.id) });
+    const trackToken = mintChannelToken({ tenantId: user.tenantId ?? 0, orderId: Number(created!.id) });
     await db.update(dineInOrders).set({ channel: 'kiosk', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received', deliveryFee: fx(fee, 2), memberId: kioskMemberId, publicToken: trackToken }).where(eq(dineInOrders.id, created.id));
     const o = await this.dineIn.loadOrderForUpdate(view.order_no);
     const saleNo = await this.dineIn.mintSaleNo(user.tenantId ?? null);
@@ -198,12 +198,12 @@ export class ChannelOrderService {
 
   // STAFF: advance the fulfillment/handoff machine (separate from KDS item state)
   async advanceFulfillment(orderNo: string, action: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.dineIn.loadOrder(orderNo);
     const cur = String(o.fulfillmentStatus ?? 'received');
     if (!(FULFILL_NEXT[cur] ?? []).includes(action)) throw new BadRequestException({ code: 'BAD_TRANSITION', message: `Cannot go ${cur} → ${action}`, messageTh: 'เปลี่ยนสถานะการจัดส่งไม่ถูกต้อง' });
     const now = new Date();
-    await db.update(dineInOrders).set({ fulfillmentStatus: action }).where(eq(dineInOrders.id, o.id));
+    await db.update(dineInOrders).set({ fulfillmentStatus: action as typeof dineInOrders.$inferInsert.fulfillmentStatus }).where(eq(dineInOrders.id, o.id));
     if (action === 'out_for_delivery') await db.update(orderDeliveryDetails).set({ dispatchedAt: now }).where(eq(orderDeliveryDetails.orderId, Number(o.id)));
     if (action === 'completed') await db.update(orderDeliveryDetails).set({ deliveredAt: now }).where(eq(orderDeliveryDetails.orderId, Number(o.id)));
     return { order_no: orderNo, fulfillment_status: action };
@@ -211,7 +211,7 @@ export class ChannelOrderService {
 
   // STAFF: active online/delivery orders board
   async fulfillmentBoard(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(dineInOrders).where(isNotNull(dineInOrders.fulfillmentStatus)).limit(200);
     return { orders: rows.filter((o: any) => o.fulfillmentStatus && !['completed', 'rejected'].includes(o.fulfillmentStatus)).map((o: any) => ({ order_no: o.orderNo, channel: o.channel, fulfillment_type: o.fulfillmentType, fulfillment_status: o.fulfillmentStatus, total: n(o.total), delivery_fee: n(o.deliveryFee) })) };
   }
@@ -227,7 +227,7 @@ export class ChannelOrderService {
     if (!body?.ext_event_id || !body?.ext_order_id || !body?.store_ref) throw new BadRequestException({ code: 'BAD_PAYLOAD', message: 'ext_event_id, ext_order_id, store_ref required', messageTh: 'ข้อมูล webhook ไม่ครบ' });
     const { tenantId } = await this.resolveStore(body.store_ref);
     return this.scope.run(tenantId, async () => {
-      const db = this.db as any;
+      const db = this.db;
       // edge idempotency: one processed event per (source, ext_event_id)
       const ins = await db.insert(channelWebhookEvents).values({ tenantId, source, extEventId: body.ext_event_id, extOrderId: body.ext_order_id, payload: body, status: 'processed' }).onConflictDoNothing({ target: [channelWebhookEvents.source, channelWebhookEvents.extEventId] }).returning({ id: channelWebhookEvents.id });
       const findExisting = async () => (await db.select().from(dineInOrders).where(and(eq(dineInOrders.extSource, source), eq(dineInOrders.extOrderId, String(body.ext_order_id)))).limit(1))[0];
@@ -244,7 +244,7 @@ export class ChannelOrderService {
         await db.update(dineInOrders).set({ channel: source as any, fulfillmentType: body.fulfillment_type ?? 'delivery', fulfillmentStatus: 'accepted', extSource: source, extOrderId: String(body.ext_order_id), server: `channel:${source}` }).where(eq(dineInOrders.orderNo, view.order_no));
         if (body.customer) {
           const [oRow] = await db.select({ id: dineInOrders.id }).from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
-          await db.insert(orderDeliveryDetails).values({ tenantId, orderId: Number(oRow.id), contactName: body.customer.name ?? null, contactPhone: body.customer.phone ?? null, addressLine: body.customer.address ?? null });
+          await db.insert(orderDeliveryDetails).values({ tenantId, orderId: Number(oRow!.id), contactName: body.customer.name ?? null, contactPhone: body.customer.phone ?? null, addressLine: body.customer.address ?? null });
         }
         await db.update(channelWebhookEvents).set({ orderNo: view.order_no }).where(and(eq(channelWebhookEvents.source, source), eq(channelWebhookEvents.extEventId, body.ext_event_id)));
         return { status: 'processed', order_no: view.order_no, channel: source };

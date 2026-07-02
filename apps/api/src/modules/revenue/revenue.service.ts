@@ -15,7 +15,7 @@ function splitStraightLine(total: number, months: number): number[] {
   return arr;
 }
 function addMonths(period: string, k: number): string {
-  const [y, m] = period.split('-').map(Number);
+  const [y, m] = period.split('-').map(Number) as [number, number];
   const idx = y * 12 + (m - 1) + k;
   return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
 }
@@ -32,7 +32,7 @@ export class RevenueService {
 
   // create a deferral schedule + book the cash-in-advance to 2400 Unearned Revenue
   async createSchedule(dto: CreateScheduleDto) {
-    const db = this.db as any;
+    const db = this.db;
     if (dto.months < 1 || dto.total_amount <= 0 || !/^\d{4}-\d{2}$/.test(dto.start_period)) throw new BadRequestException({ code: 'INVALID', message: 'months>=1, total>0, start_period YYYY-MM', messageTh: 'ข้อมูลไม่ถูกต้อง' });
     const total = n(dto.total_amount);
     const amounts = splitStraightLine(total, dto.months);
@@ -45,13 +45,13 @@ export class RevenueService {
       deferralJournalNo = je?.entry_no ?? null;
     }
     const [h] = await db.insert(revRecSchedules).values({ scheduleNo, tenantId: dto.tenantId ?? null, sourceRef: dto.source_ref ?? null, totalAmount: fx(total, 4), startPeriod: dto.start_period, endPeriod, months: dto.months, deferredAccount: '2400', revenueAccount: '4000', currency, status: 'active', deferralJournalNo, notes: dto.notes ?? null, createdBy: dto.createdBy }).returning({ id: revRecSchedules.id });
-    await db.insert(revRecLines).values(amounts.map((amt, i) => ({ scheduleId: Number(h.id), tenantId: dto.tenantId ?? null, period: addMonths(dto.start_period, i), amount: fx(amt, 4), recognized: false })));
+    await db.insert(revRecLines).values(amounts.map((amt, i) => ({ scheduleId: Number(h!.id), tenantId: dto.tenantId ?? null, period: addMonths(dto.start_period, i), amount: fx(amt, 4), recognized: false })));
     return { schedule_no: scheduleNo, total_amount: total, months: dto.months, start_period: dto.start_period, end_period: endPeriod, deferral_journal_no: deferralJournalNo, lines: amounts.map((amt, i) => ({ period: addMonths(dto.start_period, i), amount: round4(amt) })) };
   }
 
   // recognize all due (unrecognized) lines for one period: Dr 2400 / Cr 4000
   async runRecognition(period: string, user: JwtUser, explicitTenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     // Scope to one tenant: a tenant-bound user recognizes their own; an HQ/Admin caller (whose request
     // bypasses RLS) MUST name a tenant — otherwise this would recognize EVERY tenant's due lines in one call.
     const tenantId = user.tenantId ?? (explicitTenantId != null ? Number(explicitTenantId) : null);
@@ -64,7 +64,7 @@ export class RevenueService {
       try {
         let journalNo: string | null = null;
         if (!(await this.ledger.alreadyPosted('REVREC', ref))) {
-          const je: any = await this.ledger.postEntry({ date: `${line.period}-01`, source: 'REVREC', sourceRef: ref, tenantId: sched.tenantId, currency: sched.currency, memo: `Revenue recognition ${sched.scheduleNo} ${line.period}`, createdBy: user.username, lines: [{ account_code: sched.deferredAccount, debit: n(line.amount) }, { account_code: sched.revenueAccount, credit: n(line.amount) }] });
+          const je: any = await this.ledger.postEntry({ date: `${line.period}-01`, source: 'REVREC', sourceRef: ref, tenantId: sched.tenantId, currency: sched.currency ?? undefined, memo: `Revenue recognition ${sched.scheduleNo} ${line.period}`, createdBy: user.username, lines: [{ account_code: sched.deferredAccount, debit: n(line.amount) }, { account_code: sched.revenueAccount, credit: n(line.amount) }] });
           journalNo = je?.entry_no ?? null;
         } else {
           // crash-recovery: the JE posted but the line wasn't marked — recover the existing entry_no so the
@@ -86,7 +86,7 @@ export class RevenueService {
   }
 
   async listSchedules(q: { status?: string; source_ref?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (q.status) conds.push(eq(revRecSchedules.status, q.status));
     if (q.source_ref) conds.push(eq(revRecSchedules.sourceRef, q.source_ref));
@@ -102,7 +102,7 @@ export class RevenueService {
 
   // deferred-revenue report: unrecognized lines vs the GL 2400 balance
   async remainingDeferred(asOf?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const scheds = await db.select().from(revRecSchedules);
     let deferredBalance = 0; const bySchedule: any[] = [];
     for (const sc of scheds) {

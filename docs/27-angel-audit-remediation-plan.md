@@ -361,6 +361,14 @@ comment. No behavior change beyond alignment.
 > was hiding) keep the erasure for a later, per-module fix; the parity-locked `forecasting.service.ts` was
 > reverted untouched. Strict-index count intentionally held at 229 — this tranche trades no metric for the
 > other. Baseline ratcheted to {asAny: 1155, strictIndexErrors: 229}.
+> **Paydown tranche #2 (2026-07-02): as-any 1,155 → 821 (−334) AND strict-index 229 → 203 (−26).** The
+> 38 files tranche #1 held back for build fallout are now properly typed: their ~67 real type errors fixed
+> at the source (null-guaranteed keys asserted, null→undefined coercions, `$inferInsert` casts for branded
+> union columns, `[y, m]` period-split tuple casts, driver-shape `.rows` variance localized) and the ~90
+> strict-index accesses those typings exposed fixed too (insert-returning destructures, guarded element
+> arithmetic, cash-flow bucket keys) — no metric traded for the other this time; both went down. The
+> parity-locked `forecasting.service.ts` remains untouched. Remaining as-any (821) concentrates in the
+> 59 strict-trading files from tranche #1 plus non-db patterns — same recipe applies per module.
 - Re-enable `noUncheckedIndexedAccess` in `apps/api/tsconfig.json`; fix fallout module-by-module
   (start with `ledger`, `finance`, `projects` — the money paths), using per-file `// @ts-expect-error`
   only as a tracked, lint-counted escape hatch.
@@ -614,3 +622,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 3.8 | 2026-07-02 | ERP/Product | RSC conversion #2 merged (eam) + use-client CI ratchet armed (baseline 232, decrease-only) per docs/28 §4's two-conversion gate |
 | 3.9 | 2026-07-02 | ERP/Product | RSC conversion #3 merged (projects/[code] — dynamic-route server shell, Gantt island); reports + insights remain |
 | 4.0 | 2026-07-02 | ERP/Product | RSC conversions #4 (tax/reports) + #5 (insights) merged — the R5-2 top-5 conversion list is complete; AUD-ARC-09 remediation now rides the use-client ratchet |
+| 4.1 | 2026-07-02 | ERP/Product | ts-debt tranche #2 — as-any 1155→821 and strict-index 229→203 (both down; 38 held-back files properly typed, ~67 real type errors + ~90 exposed index accesses fixed at source) |

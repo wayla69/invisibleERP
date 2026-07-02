@@ -27,7 +27,7 @@ export class CostingService {
   }
 
   async setMethod(tenantId: number, itemId: string | null, method: Method, standardCost: number | null, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     // Costing-engine boundary: an item already valued by the perpetual sub-ledger (inv_balances, INV-06) must
     // not also be assigned a costing-module method — both capitalize to GL 1200. The two are mutually exclusive
     // per item (see InventoryLedgerService.assertNotCostingManaged for the reverse guard). Tenant-default
@@ -41,7 +41,7 @@ export class CostingService {
     return { tenant_id: tenantId, item_id: itemId, method, standard_cost: standardCost };
   }
   async listConfig(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(itemCosting).orderBy(asc(itemCosting.itemId));
     return { config: rows.map((r: any) => ({ item_id: r.itemId, method: r.method, standard_cost: n(r.standardCost), avg_cost: n(r.avgCost), on_hand: n(r.onHand) })) };
   }
@@ -97,7 +97,7 @@ export class CostingService {
 
   // ── ISSUE/SALE — method-correct COGS for configured items. Dr 5000 / Cr 1200. Idempotent POS-COGS-V/saleNo. ──
   async onIssue(p: { tenantId: number; saleNo: string; date: string; lines: { itemId: string; qty: number }[]; createdBy: string }): Promise<{ cogs: number }> {
-    const db = this.db as any;
+    const db = this.db;
     if (p.tenantId == null) return { cogs: 0 };
     // Resolve costing config for ALL line items up front (was 1–2 config queries per line → N+1). Resolution
     // is unchanged: per-item row → tenant default (item_id NULL) → inactive. The FIFO/AVG/STD reads below stay
@@ -107,7 +107,7 @@ export class CostingService {
       ? await db.select().from(itemCosting).where(and(eq(itemCosting.tenantId, p.tenantId), inArray(itemCosting.itemId, lineItemIds)))
       : [];
     const cfgMap = new Map<string, { method: Method; standardCost: number; rowId: number; itemRow: boolean }>();
-    for (const own of ownRows) cfgMap.set(own.itemId, { method: own.method as Method, standardCost: n(own.standardCost), rowId: Number(own.id), itemRow: true });
+    for (const own of ownRows) cfgMap.set(own.itemId!, { method: own.method as Method, standardCost: n(own.standardCost), rowId: Number(own.id), itemRow: true });
     const [def] = await db.select().from(itemCosting).where(and(eq(itemCosting.tenantId, p.tenantId), isNull(itemCosting.itemId))).limit(1);
     const defaultCfg = def ? { method: def.method as Method, standardCost: n(def.standardCost), rowId: Number(def.id), itemRow: false } : null;
     let cogs = 0;
@@ -148,7 +148,7 @@ export class CostingService {
 
   // ── valuation — qty × cost per item, ties to GL 1200 for the tenant ──
   async valuation(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const configs = await db.select().from(itemCosting).where(eq(itemCosting.tenantId, tenantId));
     const items: any[] = [];
     let total = 0;

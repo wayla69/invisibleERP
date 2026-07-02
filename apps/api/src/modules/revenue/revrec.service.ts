@@ -21,14 +21,14 @@ const REFUND_LIAB = '2420';        // Refund Liability
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 function addMonths(period: string, k: number): string {
-  const [y, m] = period.split('-').map(Number);
+  const [y, m] = period.split('-').map(Number) as [number, number];
   const idx = y * 12 + (m - 1) + k;
   return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
 }
 // inclusive month count between two 'YYYY-MM' periods
 function monthsBetween(startPeriod: string, endPeriod: string): number {
-  const [ys, ms] = startPeriod.split('-').map(Number);
-  const [ye, me] = endPeriod.split('-').map(Number);
+  const [ys, ms] = startPeriod.split('-').map(Number) as [number, number];
+  const [ye, me] = endPeriod.split('-').map(Number) as [number, number];
   return (ye * 12 + (me - 1)) - (ys * 12 + (ms - 1)) + 1;
 }
 function splitStraightLine(total: number, months: number): number[] {
@@ -58,7 +58,7 @@ export class RevRecService {
 
   // Step 1+2 — create the contract with its performance obligations.
   async createContract(dto: CreateContractDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tid(user);
     const total = n(dto.total_price);
     if (!(total > 0)) throw new BadRequestException({ code: 'INVALID_ALLOCATION', message: 'total_price must be > 0', messageTh: 'ราคารวมตามสัญญาต้องมากกว่า 0' });
@@ -78,18 +78,18 @@ export class RevRecService {
         throw new BadRequestException({ code: 'INVALID_ALLOCATION', message: `over_time obligation '${po.name}' needs start_date and end_date`, messageTh: 'ภาระแบบรับรู้ตลอดช่วงต้องมีวันเริ่มและวันสิ้นสุด' });
       }
       await db.insert(performanceObligations).values({
-        tenantId, contractId: Number(c.id), name: po.name, ssp: fx(n(po.ssp), 4),
+        tenantId, contractId: Number(c!.id), name: po.name, ssp: fx(n(po.ssp), 4),
         allocatedPrice: '0', method, startDate: po.start_date ?? contractDate, endDate: po.end_date ?? null,
         satisfiedPct: '0', status: 'Pending',
       });
     }
-    return this.getContract(Number(c.id));
+    return this.getContract(Number(c!.id));
   }
 
   // Step 4 — allocate the transaction price across POs in proportion to SSP. The residual (from rounding)
   // lands on the largest-SSP PO so Σ allocated == total_price EXACTLY.
   async allocateBySSP(contractId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const c = await this.assertContract(contractId);
     const pos = await db.select().from(performanceObligations).where(eq(performanceObligations.contractId, contractId)).orderBy(performanceObligations.id);
     const total = n(c.totalPrice);
@@ -102,18 +102,18 @@ export class RevRecService {
     if (Math.abs(residual) >= 0.00005) {
       // put the residual on the largest-SSP PO
       let maxI = 0;
-      for (let i = 1; i < pos.length; i++) if (n(pos[i].ssp) > n(pos[maxI].ssp)) maxI = i;
-      alloc[maxI] = round4(alloc[maxI] + residual);
+      for (let i = 1; i < pos.length; i++) if (n(pos[i]!.ssp) > n(pos[maxI]!.ssp)) maxI = i;
+      alloc[maxI] = round4(alloc[maxI]! + residual);
     }
     for (let i = 0; i < pos.length; i++) {
-      await db.update(performanceObligations).set({ allocatedPrice: fx(alloc[i], 4) }).where(eq(performanceObligations.id, Number(pos[i].id)));
+      await db.update(performanceObligations).set({ allocatedPrice: fx(alloc[i], 4) }).where(eq(performanceObligations.id, Number(pos[i]!.id)));
     }
     return { contract_id: contractId, total_price: total, sum_ssp: sumSsp, allocation: pos.map((p: any, i: number) => ({ obligation_id: Number(p.id), name: p.name, ssp: n(p.ssp), allocated_price: alloc[i] })), sum_allocated: round4(alloc.reduce((a: number, x: number) => a + x, 0)) };
   }
 
   // Activation/invoice — raise the contract liability for the full price: Dr 1100 AR / Cr 2410.
   async activate(contractId: number, dto: { date?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const c = await this.assertContract(contractId);
     if (c.status === 'Active' || c.status === 'Completed') throw new BadRequestException({ code: 'ALREADY_ACTIVE', message: 'Contract already active', messageTh: 'สัญญาเปิดใช้งานแล้ว' });
     const total = n(c.totalPrice);
@@ -121,7 +121,7 @@ export class RevRecService {
     let entryNo: string | null = null;
     if (this.ledger && !(await this.ledger.alreadyPosted('REVREC-INV', ref, c.tenantId))) {
       const je: any = await this.ledger.postEntry({
-        date: dto.date ?? c.contractDate, source: 'REVREC-INV', sourceRef: ref, tenantId: c.tenantId, currency: c.currency,
+        date: dto.date ?? c.contractDate ?? undefined, source: 'REVREC-INV', sourceRef: ref, tenantId: c.tenantId, currency: c.currency ?? undefined,
         memo: `TFRS15 contract activation ${c.contractNo}`, createdBy: user.username, viaSubledger: true,
         lines: [{ account_code: AR, debit: total, memo: 'AR — contract' }, { account_code: DEFERRED_REVENUE, credit: total, memo: 'Deferred revenue' }],
       });
@@ -135,7 +135,7 @@ export class RevRecService {
   // allocated_price across the months start..end; point_in_time POs get a single row at the satisfaction
   // date. Idempotent: rebuilds only UNRECOGNIZED rows (recognized rows are never touched).
   async buildSchedule(contractId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const c = await this.assertContract(contractId);
     const pos = await db.select().from(performanceObligations).where(eq(performanceObligations.contractId, contractId)).orderBy(performanceObligations.id);
     for (const p of pos) {
@@ -168,7 +168,7 @@ export class RevRecService {
   // Step 5 — recognize all unrecognized schedule rows due in/through the period: Dr 2410 / Cr 4300.
   // Scoped to one tenant (or one contract). Idempotent — an already-recognized row is skipped.
   async recognize(dto: { contractId?: number; period: string }, user: JwtUser, explicitTenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     if (!/^\d{4}-\d{2}$/.test(dto.period)) throw new BadRequestException({ code: 'INVALID', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
     const tenantId = this.tid(user, explicitTenantId);
     const conds = [eq(revrecSchedules.tenantId, tenantId), eq(revrecSchedules.recognized, false), lte(revrecSchedules.period, dto.period)];
@@ -184,7 +184,7 @@ export class RevRecService {
         let entryNo: string | null = null;
         if (this.ledger && !(await this.ledger.alreadyPosted('REVREC', ref, c.tenantId))) {
           const je: any = await this.ledger.postEntry({
-            date: `${row.period}-01`, source: 'REVREC', sourceRef: ref, tenantId: c.tenantId, currency: c.currency,
+            date: `${row.period}-01`, source: 'REVREC', sourceRef: ref, tenantId: c.tenantId, currency: c.currency ?? undefined,
             memo: `TFRS15 revenue recognition ${c.contractNo} ${row.period}`, createdBy: user.username,
             lines: [{ account_code: DEFERRED_REVENUE, debit: amount, memo: 'Release deferred revenue' }, { account_code: REVENUE, credit: amount, memo: 'Recognized revenue' }],
           });
@@ -208,7 +208,7 @@ export class RevRecService {
 
   // Recompute a PO's satisfied_pct + status from its schedule rows.
   private async refreshObligation(obligationId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [po] = await db.select().from(performanceObligations).where(eq(performanceObligations.id, obligationId)).limit(1);
     if (!po) return;
     const rows = await db.select().from(revrecSchedules).where(eq(revrecSchedules.obligationId, obligationId));
@@ -220,7 +220,7 @@ export class RevRecService {
   }
 
   private async refreshContract(contractId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const pos = await db.select().from(performanceObligations).where(eq(performanceObligations.contractId, contractId));
     if (pos.length && pos.every((p: any) => p.status === 'Satisfied')) {
       await db.update(revContracts).set({ status: 'Completed' }).where(and(eq(revContracts.id, contractId), eq(revContracts.status, 'Active')));
@@ -230,7 +230,7 @@ export class RevRecService {
   // Refund liability — provide for expected returns: expected = recognized-or-allocated × rate. Posts the
   // DELTA vs the prior posted provision: Dr 4300 (contra revenue) / Cr 2420 (increase), reversed if it falls.
   async accrueRefundLiability(dto: { contractId: number; expectedRefundRate: number; asOfDate?: string; postedBy?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const c = await this.assertContract(dto.contractId);
     const rate = n(dto.expectedRefundRate);
     const asOf = dto.asOfDate ?? ymd();
@@ -252,7 +252,7 @@ export class RevRecService {
         const lines = delta > 0
           ? [{ account_code: REVENUE, debit: delta, memo: 'Refund provision (contra revenue)' }, { account_code: REFUND_LIAB, credit: delta, memo: 'Refund liability' }]
           : [{ account_code: REFUND_LIAB, debit: -delta, memo: 'Reverse refund liability' }, { account_code: REVENUE, credit: -delta, memo: 'Restore revenue' }];
-        const je: any = await this.ledger.postEntry({ date: asOf, source: 'REVREC-REF', sourceRef: ref, tenantId: c.tenantId, currency: c.currency, memo: `TFRS15 refund liability ${c.contractNo}`, createdBy: user.username, lines });
+        const je: any = await this.ledger.postEntry({ date: asOf, source: 'REVREC-REF', sourceRef: ref, tenantId: c.tenantId, currency: c.currency ?? undefined, memo: `TFRS15 refund liability ${c.contractNo}`, createdBy: user.username, lines });
         entryNo = je?.entry_no ?? null;
       }
     }
@@ -261,7 +261,7 @@ export class RevRecService {
   }
 
   async getContract(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const c = await this.assertContract(id);
     const pos = await db.select().from(performanceObligations).where(eq(performanceObligations.contractId, id)).orderBy(performanceObligations.id);
     const sched = await db.select().from(revrecSchedules).where(eq(revrecSchedules.contractId, id)).orderBy(revrecSchedules.period, revrecSchedules.id);
@@ -274,13 +274,13 @@ export class RevRecService {
   }
 
   async listContracts(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(revContracts).where(user.tenantId != null ? eq(revContracts.tenantId, user.tenantId) : undefined).orderBy(revContracts.id);
     return { contracts: rows.map((c: any) => ({ id: Number(c.id), contract_no: c.contractNo, contract_date: c.contractDate, total_price: n(c.totalPrice), status: c.status, currency: c.currency })), count: rows.length };
   }
 
   private async assertContract(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(revContracts).where(eq(revContracts.id, id)).limit(1);
     if (!c) throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: `Contract ${id} not found`, messageTh: `ไม่พบสัญญา ${id}` });
     return c;

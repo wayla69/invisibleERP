@@ -26,7 +26,7 @@ export class MemberAuthService {
   ) {}
 
   private async resolveMember(tenantCode: string, phone: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, tenantCode)).limit(1);
     if (!t) return null;
     const tenantId = Number(t.id);
@@ -35,7 +35,7 @@ export class MemberAuthService {
   }
 
   async requestOtp(dto: { phone: string; tenant_code: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const resolved = await this.resolveMember(dto.tenant_code, dto.phone);
     // Always 200 (don't leak existence). Only generate/send when a member matches.
     if (resolved) {
@@ -53,7 +53,7 @@ export class MemberAuthService {
         try {
           const creds = await this.tenantMsg.resolveCreds(tenantId, 'sms');
           const gw = resolveMessageGateway('sms', creds ?? undefined);
-          const res = await gw.send(member.phone, `รหัสเข้าสู่ระบบสมาชิก: ${code} (หมดอายุใน 5 นาที)`);
+          const res = await gw.send(member.phone!, `รหัสเข้าสู่ระบบสมาชิก: ${code} (หมดอายุใน 5 นาที)`);
           await db.insert(messageLog).values({ tenantId, memberId: Number(member.id), channel: 'sms', recipient: member.phone, body: 'OTP (login code)', campaign: 'otp', status: res.status, provider: res.provider, createdBy: 'system:otp' });
         } catch { /* delivery best-effort; the OTP row is already persisted */ }
         // dev_otp is returned ONLY outside production (local/test convenience) — never in prod.
@@ -68,7 +68,7 @@ export class MemberAuthService {
   }
 
   async verifyOtp(dto: { phone: string; tenant_code: string; code: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const fail = () => new UnauthorizedException({ code: 'OTP_INVALID', message: 'Invalid or expired code', messageTh: 'รหัสไม่ถูกต้องหรือหมดอายุ' });
     const resolved = await this.resolveMember(dto.tenant_code, dto.phone);
     if (!resolved) throw fail();
@@ -113,7 +113,7 @@ export class MemberAuthService {
   // verifier — same LINE_LOGIN_CHANNEL_ID / mock-token path as the staff enrol/link flow). One LINE ↔ one
   // member per tenant via the partial unique.
   async linkLine(user: JwtUser, idToken: string) {
-    const db = this.db as any;
+    const db = this.db;
     const { lineUserId, displayName } = await verifyLineIdToken(idToken);
     try {
       await db.update(posMembers).set({ lineUserId, lineDisplayName: displayName ?? null }).where(and(eq(posMembers.id, user.memberId!), eq(posMembers.tenantId, user.tenantId!)));
@@ -128,7 +128,7 @@ export class MemberAuthService {
   // token for the member whose line_user_id matches WITHIN the tenant. @Public + @NoTx → RLS bypassed, so we
   // filter by tenant + lineUserId explicitly.
   async loginWithLine(dto: { tenant_code: string; id_token: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const notLinked = () => new UnauthorizedException({ code: 'LINE_NOT_LINKED', message: 'No member linked to this LINE account', messageTh: 'ยังไม่ได้ผูกบัญชี LINE กับสมาชิก' });
     const { lineUserId } = await verifyLineIdToken(dto.id_token); // throws LINE_VERIFY_FAILED / LINE_NOT_CONFIGURED
     const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, dto.tenant_code)).limit(1);

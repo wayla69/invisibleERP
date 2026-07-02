@@ -24,14 +24,14 @@ export class TimeClockService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   private async emp(empCode: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [e] = await db.select().from(employees).where(eq(employees.empCode, empCode)).limit(1);
     if (!e) throw new NotFoundException({ code: 'NOT_FOUND', message: `Employee ${empCode} not found`, messageTh: 'ไม่พบพนักงาน' });
     return e;
   }
 
   async clockIn(empCode: string, user: JwtUser, opts?: { method?: string; lat?: number; lng?: number; branch_id?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const e = await this.emp(empCode);
     const method = opts?.method && CLOCK_METHODS.includes(opts.method) ? opts.method : 'PIN';
     const [open] = await db.select().from(timeClock).where(and(eq(timeClock.employeeId, e.id), eq(timeClock.status, 'Open'))).limit(1);
@@ -61,14 +61,14 @@ export class TimeClockService {
       clockInMethod: method, clockInLat: opts?.lat != null ? String(opts.lat) : null, clockInLng: opts?.lng != null ? String(opts.lng) : null,
       geofencePass, createdBy: user.username,
     }).returning({ id: timeClock.id });
-    return { id: r.id, emp_code: empCode, status: 'Open', clock_in_method: method, geofence_pass: geofencePass };
+    return { id: r!.id, emp_code: empCode, status: 'Open', clock_in_method: method, geofence_pass: geofencePass };
   }
 
   // Supervisor override: a supervisor force-clocks-in an employee (method SUPERVISOR), bypassing the
   // duplicate-punch window. The reason is recorded on the note and the POST is captured by the append-only
   // audit_log, so every override is attributable.
   async supervisorOverride(empCode: string, reason: string, supervisor: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!reason || !reason.trim()) throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A reason is required for a supervisor override', messageTh: 'ต้องระบุเหตุผลในการลงเวลาแทน' });
     const r = await this.clockIn(empCode, supervisor, { method: 'SUPERVISOR' });
     await db.update(timeClock).set({ note: `SUPERVISOR OVERRIDE by ${supervisor.username}: ${reason.trim()}` }).where(eq(timeClock.id, r.id));
@@ -76,32 +76,32 @@ export class TimeClockService {
   }
 
   async setGeofenceZone(dto: { branch_id?: number; lat: number; lng: number; radius_m?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(geofenceZones).values({ tenantId: user.tenantId, branchId: dto.branch_id ?? null, lat: String(dto.lat), lng: String(dto.lng), radiusM: dto.radius_m ?? 150 })
       .onConflictDoUpdate({ target: [geofenceZones.tenantId, geofenceZones.branchId], set: { lat: String(dto.lat), lng: String(dto.lng), radiusM: dto.radius_m ?? 150 } });
     return this.listGeofenceZones(user);
   }
 
   async listGeofenceZones(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(geofenceZones).where(eq(geofenceZones.tenantId, user.tenantId as number));
     return { zones: rows.map((z: any) => ({ id: Number(z.id), branch_id: z.branchId, lat: n(z.lat), lng: n(z.lng), radius_m: z.radiusM })), count: rows.length };
   }
 
   async clockOut(empCode: string, breakMinutes: number | undefined) {
-    const db = this.db as any;
+    const db = this.db;
     const e = await this.emp(empCode);
     const [open] = await db.select().from(timeClock).where(and(eq(timeClock.employeeId, e.id), eq(timeClock.status, 'Open'))).orderBy(desc(timeClock.id)).limit(1);
     if (!open) throw new BadRequestException({ code: 'NOT_IN', message: 'Not clocked in', messageTh: 'ยังไม่ได้ลงเวลาเข้า' });
     const out = new Date();
     const brk = breakMinutes ?? 0;
-    const hours = round2((out.getTime() - new Date(open.clockIn).getTime()) / 3600000 - brk / 60);
+    const hours = round2((out.getTime() - new Date(open.clockIn!).getTime()) / 3600000 - brk / 60);
     await db.update(timeClock).set({ clockOut: out, breakMinutes: brk, hours: String(Math.max(0, hours)), status: 'Closed' }).where(eq(timeClock.id, open.id));
     return { id: open.id, emp_code: empCode, hours: Math.max(0, hours), status: 'Closed' };
   }
 
   async report(limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(timeClock).where(eq(timeClock.status, 'Closed')).orderBy(desc(timeClock.id)).limit(limit);
     const totalHours = round2(rows.reduce((a: number, r: any) => a + n(r.hours), 0));
     const open = await db.select().from(timeClock).where(eq(timeClock.status, 'Open'));
@@ -110,7 +110,7 @@ export class TimeClockService {
 
   // Sales-per-labor-hour for a day = Σ sales total / Σ closed labor hours that day.
   async productivity(date?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const d = date ?? ymd();
     const closed = await db.select().from(timeClock).where(eq(timeClock.status, 'Closed'));
     const hours = round2(closed.filter((r: any) => r.clockIn && ymd(new Date(r.clockIn)) === d).reduce((a: number, r: any) => a + n(r.hours), 0));

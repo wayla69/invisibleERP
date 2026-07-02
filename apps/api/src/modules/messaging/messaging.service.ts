@@ -54,7 +54,7 @@ export class MessagingService {
 
   // Send one message. Respects marketing consent for member-addressed messages (logs 'skipped').
   async send(dto: SendDto, user: JwtUser, creds?: ChannelCreds | null) {
-    const db = this.db as any;
+    const db = this.db;
     let member: any = null;
     let recipient = dto.to ?? null;
     if (dto.member_id != null) {
@@ -99,7 +99,7 @@ export class MessagingService {
   // Blast to an audience (all opted-in / birthdays today / RFM segment / saved custom segment). Sends per
   // member, respecting consent.
   async blast(dto: BlastDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     let members: any[] = [];
     if (dto.audience === 'saved_segment') {
       // Saved custom segment (Phase F1) — resolved through the whitelisted/bound rule engine, tenant-scoped.
@@ -150,13 +150,13 @@ export class MessagingService {
   // Push a rich LINE flex message (card/carousel) to one LINE userId — for a member or an ad-hoc recipient.
   // Respects marketing consent when addressed to a member. Falls back to mock when LINE is unconfigured.
   async sendFlex(dto: FlexDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     let recipient = dto.to;
     if (dto.member_id != null) {
       const [m] = await db.select().from(posMembers).where(eq(posMembers.id, dto.member_id)).limit(1);
       if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
       if (m.marketingOptIn === false) return this.record(user, { memberId: dto.member_id, channel: 'line', recipient: null, body: dto.alt_text, campaign: dto.campaign, status: 'skipped', provider: null, error: 'opted out' });
-      recipient = recipient || m.lineUserId;
+      recipient = recipient || m.lineUserId || '';
     }
     if (!recipient) return this.record(user, { memberId: dto.member_id ?? null, channel: 'line', recipient: null, body: dto.alt_text, campaign: dto.campaign, status: 'failed', provider: null, error: 'no recipient contact' });
     const creds = await this.creds(user, 'line');
@@ -175,22 +175,22 @@ export class MessagingService {
   }
 
   async log(_user: JwtUser, limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(messageLog).orderBy(desc(messageLog.id)).limit(limit);
     return { messages: rows.map((r: any) => ({ id: Number(r.id), member_id: r.memberId != null ? Number(r.memberId) : null, channel: r.channel, recipient: r.recipient, body: r.body, campaign: r.campaign, status: r.status, provider: r.provider, provider_ref: r.providerRef ?? null, error: r.error, created_at: r.createdAt })) };
   }
 
   private async record(user: JwtUser, row: { memberId: number | null; channel: string; recipient: string | null; body: string; campaign?: string | null; status: string; provider: string | null; error: string | null; providerRef?: string | null }) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.insert(messageLog).values({ tenantId: user.tenantId ?? null, memberId: row.memberId, channel: row.channel, recipient: row.recipient, body: row.body, campaign: row.campaign ?? null, status: row.status, provider: row.provider, providerRef: row.providerRef ?? null, error: row.error, createdBy: user.username }).returning({ id: messageLog.id });
-    return { id: Number(r.id), status: row.status, provider: row.provider, provider_ref: row.providerRef ?? null, recipient: row.recipient, error: row.error };
+    return { id: Number(r!.id), status: row.status, provider: row.provider, provider_ref: row.providerRef ?? null, recipient: row.recipient, error: row.error };
   }
 
   // Inbound delivery-status callback (Phase E2). A provider POSTs the final state of a message it previously
   // accepted (identified by the provider_ref we stored on send). Updates that row's status (delivered /
   // undelivered / …). Tenant-scoped by the resolved tenant + the provider_ref; only advances a 'sent' row.
   async applyDeliveryStatus(tenantId: number, channel: string, providerRef: string, status: string, error?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const norm = ['delivered', 'undelivered', 'sent', 'failed'].includes(status) ? status : status === 'success' ? 'delivered' : 'undelivered';
     const res = await db.update(messageLog)
       .set({ status: norm, error: error ?? null })

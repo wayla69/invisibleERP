@@ -28,7 +28,7 @@ export class FxService {
   // An explicit non-manual source (an external feed) is auto-approved. Re-setting a rate for the same
   // (tenant, currency, date) replaces it (and a changed manual rate goes back to PendingApproval).
   async setRate(dto: SetRateDto) {
-    const db = this.db as any;
+    const db = this.db;
     this.assertCcy(dto.currency);
     // upsert by (tenant, currency, rate_date) — delete-then-insert to honor the partial unique indexes
     const tCond = dto.tenantId != null ? eq(fxRates.tenantId, dto.tenantId) : isNull(fxRates.tenantId);
@@ -40,7 +40,7 @@ export class FxService {
   }
 
   async listRates(q: { currency?: string; as_of?: string; status?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (q.currency) conds.push(eq(fxRates.currency, q.currency));
     if (q.as_of) conds.push(sql`${fxRates.rateDate} <= ${q.as_of}`);
@@ -51,7 +51,7 @@ export class FxService {
 
   // Approve a pending manual rate (checker; approver ≠ requester, binds even Admin).
   async approveRate(currency: string, rateDate: string, tenantId: number | null, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tCond = tenantId != null ? eq(fxRates.tenantId, tenantId) : isNull(fxRates.tenantId);
     const [r] = await db.select().from(fxRates).where(and(tCond, eq(fxRates.currency, currency), eq(fxRates.rateDate, rateDate), eq(fxRates.status, 'PendingApproval'))).limit(1);
     if (!r) throw new BadRequestException({ code: 'NO_PENDING_RATE', message: `No FX rate pending approval for ${currency} ${rateDate}`, messageTh: 'ไม่พบอัตราแลกเปลี่ยนที่รออนุมัติ' });
@@ -62,7 +62,7 @@ export class FxService {
 
   // Reject a pending manual rate (checker) — it can never be used for revaluation/reporting.
   async rejectRate(currency: string, rateDate: string, tenantId: number | null, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tCond = tenantId != null ? eq(fxRates.tenantId, tenantId) : isNull(fxRates.tenantId);
     const [r] = await db.select().from(fxRates).where(and(tCond, eq(fxRates.currency, currency), eq(fxRates.rateDate, rateDate), eq(fxRates.status, 'PendingApproval'))).limit(1);
     if (!r) throw new BadRequestException({ code: 'NO_PENDING_RATE', message: `No FX rate pending approval for ${currency} ${rateDate}`, messageTh: 'ไม่พบอัตราแลกเปลี่ยนที่รออนุมัติ' });
@@ -74,13 +74,13 @@ export class FxService {
   // manual rates are deliberately excluded — an unapproved rate must never drive a revaluation or report.
   private async rateAsOf(currency: string, asOf: string): Promise<number | null> {
     if (currency === 'THB') return 1;
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(fxRates).where(and(eq(fxRates.currency, currency), eq(fxRates.status, 'Approved'), sql`${fxRates.rateDate} <= ${asOf}`)).orderBy(desc(fxRates.rateDate), desc(fxRates.id)).limit(1);
     return r ? n(r.rate) : null;
   }
 
   private async openBalances(currency: string | undefined, asOf: string) {
-    const db = this.db as any;
+    const db = this.db;
     const arWhere = [sql`${arInvoices.status}::text <> 'Paid'`, sql`${arInvoices.currency} <> 'THB'`, sql`(${arInvoices.invoiceDate} IS NULL OR ${arInvoices.invoiceDate} <= ${asOf})`];
     if (currency) arWhere.push(eq(arInvoices.currency, currency));
     const ar = await db.select().from(arInvoices).where(and(...arWhere));
@@ -96,11 +96,11 @@ export class FxService {
     const cur = async (ccy: string) => (rateCache[ccy] ??= (await this.rateAsOf(ccy, q.as_of)) ?? 0);
     const arRows: any[] = []; const apRows: any[] = [];
     for (const i of ar) {
-      const openF = n(i.amount) - n(i.paidAmount); const bookedThb = thb(openF * n(i.fxRate)); const cr = await cur(i.currency); const currentThb = thb(openF * cr);
+      const openF = n(i.amount) - n(i.paidAmount); const bookedThb = thb(openF * n(i.fxRate)); const cr = await cur(i.currency!); const currentThb = thb(openF * cr);
       arRows.push({ doc_no: i.invoiceNo, currency: i.currency, open_foreign: openF, booked_rate: n(i.fxRate), booked_thb: bookedThb, current_rate: cr, current_thb: currentThb, delta: thb(currentThb - bookedThb) });
     }
     for (const t of ap) {
-      const openF = n(t.amount) - n(t.paidAmount); const bookedThb = thb(openF * n(t.fxRate)); const cr = await cur(t.currency); const currentThb = thb(openF * cr);
+      const openF = n(t.amount) - n(t.paidAmount); const bookedThb = thb(openF * n(t.fxRate)); const cr = await cur(t.currency!); const currentThb = thb(openF * cr);
       apRows.push({ doc_no: t.txnNo, currency: t.currency, open_foreign: openF, booked_rate: n(t.fxRate), booked_thb: bookedThb, current_rate: cr, current_thb: currentThb, delta: thb(currentThb - bookedThb) });
     }
     const arDelta = thb(arRows.reduce((a, r) => a + r.delta, 0)); const apDelta = thb(apRows.reduce((a, r) => a + r.delta, 0));

@@ -26,7 +26,7 @@ export class PosService {
 
   // ───────────────────────── READ (Phase 2) ─────────────────────────
   async summary(startDate: string, endDate: string) {
-    const db = this.db as any;
+    const db = this.db;
     const inRange = and(ne(custPosSales.status, 'Voided'), gte(custPosSales.saleDate, startDate), lte(custPosSales.saleDate, endDate));
     const [s] = await db.select({
       total_orders: sql<string>`count(*)`,
@@ -57,7 +57,7 @@ export class PosService {
   }
 
   async orders(limit: number, offset: number, status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? sql`${custPosSales.status}::text = ${status}` : undefined;
     const rows = await db.select({
       Sale_No: custPosSales.saleNo, Sale_Date: custPosSales.saleDate, Subtotal: custPosSales.subtotal,
@@ -70,7 +70,7 @@ export class PosService {
   }
 
   async orderDetail(saleNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [order] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
     if (!order) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบรายการ' });
     const items = await db.select().from(custPosItems).where(eq(custPosItems.saleId, order.id));
@@ -78,7 +78,7 @@ export class PosService {
   }
 
   async sessions() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       Cashier: custPosSales.createdBy, Sale_Date: custPosSales.saleDate,
       session_total: sql<string>`coalesce(sum(${custPosSales.total}),0)`, order_count: sql<string>`count(*)`,
@@ -89,7 +89,7 @@ export class PosService {
   // ───────────────────────── WRITE (Phase 3) ─────────────────────────
   // POST /api/pos/orders — สร้าง sales order (SO-) + credit check + loyalty earn
   async createOrder(dto: CreateOrderDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการสินค้า' });
 
     // tenant: Customer locked to own; staff picks dto.customer_name
@@ -168,7 +168,7 @@ export class PosService {
 
   // PATCH /api/orders/{order_no}/status — state machine + est_delivery rule + status log
   async updateOrderStatus(orderNo: string, newStatus: string, estimatedDelivery: string | null, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!ORDER_STATUSES.includes(newStatus))
       throw new BadRequestException({ code: 'BAD_STATUS', message: `Invalid status: ${newStatus}`, messageTh: 'สถานะไม่ถูกต้อง' });
     const [order] = await db.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1);
@@ -176,8 +176,8 @@ export class PosService {
 
     // parity: est_delivery เก็บเฉพาะ Processing/Shipped; สถานะอื่น → ล้าง (คงพฤติกรรม V1)
     const est = newStatus === 'Processing' || newStatus === 'Shipped' ? estimatedDelivery ?? null : null;
-    await db.update(orders).set({ status: newStatus, estimatedDelivery: est }).where(eq(orders.id, order.id));
-    await db.update(orderLines).set({ status: newStatus }).where(eq(orderLines.orderId, order.id));
+    await db.update(orders).set({ status: newStatus as typeof orders.$inferInsert.status, estimatedDelivery: est }).where(eq(orders.id, order.id));
+    await db.update(orderLines).set({ status: newStatus as typeof orderLines.$inferInsert.status }).where(eq(orderLines.orderId, order.id));
     await this.statusLog.log('SO', orderNo, order.status ?? '', newStatus, user.username);
     return { order_no: orderNo, status: newStatus, estimated_delivery: est };
   }
