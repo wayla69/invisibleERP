@@ -2,12 +2,13 @@ import { Module } from '@nestjs/common';
 import { CampaignsController } from './campaigns.controller';
 import { CampaignsService } from './campaigns.service';
 import { DocNumberService } from '../../common/doc-number.service';
+import { SavedSegmentsService } from '../loyalty/saved-segments.service';
 
 // Campaign orchestration. Reuses the messaging gateways + message_log; exported so the loyalty maintenance
 // sweep can fire due scheduled campaigns.
 @Module({
   controllers: [CampaignsController],
-  providers: [CampaignsService, DocNumberService],
+  providers: [CampaignsService, DocNumberService, SavedSegmentsService],
   exports: [CampaignsService],
 })
 export class CampaignsModule {}

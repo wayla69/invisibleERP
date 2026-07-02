@@ -1478,6 +1478,13 @@
       "when": 2023820000037,
       "tag": "0210_message_log_provider_ref",
       "breakpoints": true
+    },
+    {
+      "idx": 211,
+      "version": "7",
+      "when": 2023820000038,
+      "tag": "0211_campaign_saved_segment",
+      "breakpoints": true
     }
   ]
 }

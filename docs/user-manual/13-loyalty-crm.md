@@ -265,10 +265,20 @@ snapshot to your CDP endpoint in batches (set `CDP_WEBHOOK_URL` — your adminis
 **Saved custom segments.** Beyond the fixed RFM buckets you can define your **own** reusable segments — a
 named set of rules over member fields (points balance, lifetime, tier, marketing opt-in) and RFM traits
 (segment, total orders/spend, recency/frequency, preferred channel, …) combined with **all** (AND) or **any**
-(OR). Manage them via `GET`/`POST`/`PUT`/`DELETE /api/loyalty/saved-segments` (create/edit needs
-`marketing`/`exec`); `GET /api/loyalty/saved-segments/:id/members` lists the members who match right now. Only
-whitelisted fields are allowed, so a bad rule is rejected safely. *(A visual rule-builder screen is on the
-way; the API is available today.)*
+(OR). Build them on the **เซกเมนต์ลูกค้า** screen (`/loyalty/segments`, permission `marketing`/`exec`):
+
+1. Press **สร้างเซกเมนต์**, name it, pick **ทุกข้อ (AND)** or **ข้อใดข้อหนึ่ง (OR)**, and add rule rows —
+   choose a field, an operator, and a value (the field list and operators come from the server's whitelist,
+   so only safe rules can be built). Leave the rules empty to mean *all active members*.
+2. Press **ดูสมาชิก** on any saved segment to preview the live member count and a sample of who matches
+   **right now** (membership is evaluated fresh every time — it is a rule, not a frozen list).
+3. Use the segment as a campaign audience: on **แคมเปญ** pick กลุ่มเป้าหมาย → **เซกเมนต์ที่บันทึกไว้** and
+   choose the segment (or send an ad-hoc blast with `audience: saved_segment`). Consent still applies —
+   opted-out members are skipped, never contacted.
+
+The API remains available for integrations: `GET`/`POST`/`PUT`/`DELETE /api/loyalty/saved-segments`,
+`GET /api/loyalty/saved-segments/:id/members`. Only whitelisted fields are allowed, so a bad rule is
+rejected safely.
 
 **Customer segments (RFM).** The **กลุ่มลูกค้า RFM** panel shows how your members split across the five RFM
 segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
@@ -356,3 +366,4 @@ claim points by uploading a photo of the receipt.
 | 1.17 | 2026-07-02 | Platform | §11 **Loyalty automation triggers** — build no-code rules on Automation (`/automation`): *when a member earns/redeems (optionally over a threshold) → send a notification / message / log*. Loyalty events `loyalty.enrolled/earned/redeemed` are in the event catalog. |
 | 1.18 | 2026-07-02 | Platform | §13 **Saved custom segments** — define reusable audiences from rules over member/RFM fields (all/any) via `/api/loyalty/saved-segments`; resolve to matching members. Whitelisted fields only (safe). Rule-builder UI is a follow-up. |
 | 1.19 | 2026-07-02 | Platform | §11 **Own-provider OTP + delivery receipts** — once your **SMS** provider is connected, member-login OTPs go out from your own sender. The message log now keeps each message's provider reference, and a provider can call back `POST /api/messaging/delivery-callback/<shop-code>` (with your per-channel callback token) to mark a message *delivered*/*undelivered*. |
+| 1.20 | 2026-07-02 | Platform | §13 **Segment-builder screen** (`/loyalty/segments`) — visual rule-builder over the saved-segments whitelist with live member preview; saved segments are now selectable as a **campaign / blast audience** (เซกเมนต์ที่บันทึกไว้). Consent unchanged. |

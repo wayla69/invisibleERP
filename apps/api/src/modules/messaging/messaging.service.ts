@@ -5,9 +5,10 @@ import { posMembers, messageLog, customerProfiles } from '../../database/schema'
 import type { JwtUser } from '../../common/decorators';
 import { resolveMessageGateway, broadcastLine, broadcastLineFlex, pushLineFlex, type ChannelCreds, type MessageChannel } from './gateways';
 import { TenantMessagingService } from './tenant-messaging.service';
+import { SavedSegmentsService } from '../loyalty/saved-segments.service';
 
 type SendDto = { member_id?: number; to?: string; channel: MessageChannel; body: string; campaign?: string };
-type BlastDto = { audience: 'all' | 'birthdays_today' | 'segment'; segment?: string; channel: MessageChannel; body: string; campaign?: string };
+type BlastDto = { audience: 'all' | 'birthdays_today' | 'segment' | 'saved_segment'; segment?: string; segment_id?: number; channel: MessageChannel; body: string; campaign?: string };
 type BroadcastDto = { body?: string; flex?: any; alt_text?: string; campaign?: string };
 type FlexDto = { to: string; alt_text: string; flex: any; member_id?: number; campaign?: string };
 
@@ -17,6 +18,8 @@ export class MessagingService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     // Optional so partial harnesses still construct; when present a tenant's own provider creds override env.
     @Optional() private readonly tenantMsg?: TenantMessagingService,
+    // Saved-segment blast audiences (Phase F1); optional for the same reason.
+    @Optional() private readonly savedSegments?: SavedSegmentsService,
   ) {}
 
   // Per-tenant provider creds for a channel (null ⇒ gateway uses the platform env default).
@@ -44,11 +47,17 @@ export class MessagingService {
     return this.record(user, { memberId: dto.member_id ?? null, channel: dto.channel, recipient, body: dto.body, campaign: dto.campaign, status: res.status, provider: res.provider, providerRef: res.ref ?? null, error: res.error ?? null });
   }
 
-  // Blast to an audience (all opted-in / birthdays today / RFM segment). Sends per member, respecting consent.
+  // Blast to an audience (all opted-in / birthdays today / RFM segment / saved custom segment). Sends per
+  // member, respecting consent.
   async blast(dto: BlastDto, user: JwtUser) {
     const db = this.db as any;
     let members: any[] = [];
-    if (dto.audience === 'segment') {
+    if (dto.audience === 'saved_segment') {
+      // Saved custom segment (Phase F1) — resolved through the whitelisted/bound rule engine, tenant-scoped.
+      if (!dto.segment_id) throw new BadRequestException({ code: 'NO_SAVED_SEGMENT', message: 'segment_id required', messageTh: 'ต้องระบุเซกเมนต์ที่บันทึกไว้' });
+      if (!this.savedSegments || user.tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'Saved-segment blast needs a tenant context', messageTh: 'ต้องมีบริบทร้านค้า' });
+      members = await this.savedSegments.membersForSend(db, user.tenantId, Number(dto.segment_id));
+    } else if (dto.audience === 'segment') {
       if (!dto.segment) throw new BadRequestException({ code: 'NO_SEGMENT', message: 'segment required', messageTh: 'ต้องระบุกลุ่มลูกค้า' });
       const profs = await db.select({ memberId: customerProfiles.memberId }).from(customerProfiles).where(eq(customerProfiles.rfmSegment, dto.segment));
       const ids = profs.map((p: any) => Number(p.memberId)).filter(Boolean);
