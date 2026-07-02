@@ -67,6 +67,7 @@ jobs:
           - { pkg: cutover, script: worldclass }
           - { pkg: cutover, script: tenant-isolation }
           - { pkg: cutover, script: tenant-idx }
+          - { pkg: cutover, script: migration-parity }
           - { pkg: cutover, script: ai-eval }
           - { pkg: cutover, script: module-qr }
           - { pkg: cutover, script: gaps }
@@ -261,8 +262,9 @@ jobs:
         run: |
           node -e '
             const fs = require("fs"), dir = "apps/api/drizzle";
-            // pre-existing orphans, prod patched via SQL ALTER ... IF NOT EXISTS; to be journaled when main is quiet.
-            const GRANDFATHERED = ["0085_floor_zone_geometry", "0088_dine_in_order_zone"];
+            // docs/24 R5-1: the two historical orphans were journaled as append-only entries (idx 214/215 —
+            // idempotent IF-NOT-EXISTS, already applied in prod) — NO unjournaled grandfathers remain.
+            const GRANDFATHERED = [];
             const sqls = fs.readdirSync(dir).filter(f => f.endsWith(".sql")).map(f => f.slice(0, -4));
             const journal = JSON.parse(fs.readFileSync(dir + "/meta/_journal.json", "utf8")).entries;
             const tags = new Set(journal.map(e => e.tag));
@@ -270,7 +272,10 @@ jobs:
             const orphan = Array.from(tags).filter(t => sqls.indexOf(t) < 0);
             // Two migrations with the SAME 4-digit number (concurrent PRs both adding e.g. 0119_*) collide:
             // prod drizzle-kit migrate ordering is ambiguous and one silently wins. Renumber the newer one.
-            // Pre-existing historical collisions (already applied in prod) are grandfathered; only NEW ones fail.
+            // Decision (docs/24 R5-1): the four historical collisions STAY grandfathered — they are already
+            // applied in prod and drizzle tracks by full tag, so renumbering applied migrations would be the
+            // dangerous move; full filenames sort deterministically. The migration-parity harness proves
+            // filename-order == journal-order schema equivalence, so the ambiguity class is now guarded.
             const GRANDFATHERED_DUP = ["0085", "0088", "0104", "0105"];
             const byNum = {};
             for (const t of sqls) { const n = t.slice(0, 4); (byNum[n] = byNum[n] || []).push(t); }

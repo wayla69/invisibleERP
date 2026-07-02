@@ -1499,6 +1499,20 @@
       "when": 2023820000040,
       "tag": "0213_kb_embed_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "7",
+      "when": 2023820000041,
+      "tag": "0085_floor_zone_geometry",
+      "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "7",
+      "when": 2023820000042,
+      "tag": "0088_dine_in_order_zone",
+      "breakpoints": true
     }
   ]
 }

@@ -491,10 +491,14 @@ credibility in the next diligence pass.
 
 ## Wave 5 — Architecture hygiene 🧹 (rolling; behind everything above)
 
-- **R5-1 (AUD-ARC-08):** un-grandfather the migration debt — fold `0085/0088` manual patches into a
-  verified idempotent migration, prove fresh-DB == prod schema with a CI job that builds both and
-  diffs `pg_dump --schema-only` (extends `docs/ops/drizzle-migration-debt.md` plan). Then delete the
-  `GRANDFATHERED_DUP` list.
+- **R5-1 (AUD-ARC-08) — DELIVERED 2026-07-02:** orphans `0085_floor_zone_geometry`/`0088_dine_in_order_zone`
+  journaled append-only (idx 214/215 — idempotent, already applied in prod, no intervening column
+  references; verified); the CI gate's unjournaled-`GRANDFATHERED` list is now **empty**. New
+  **`migration-parity` harness** (CI matrix) builds a fresh DB in filename order (harness path) AND
+  journal order (prod path) and fails on any schema divergence — 4,254 columns / 974 indexes identical.
+  **Decision recorded:** `GRANDFATHERED_DUP` stays — the four dup numbers are applied in prod and drizzle
+  tracks by full tag, so renumbering applied migrations is the dangerous move; the divergence risk class
+  is what the parity harness now guards. Debt doc rev 1.2.
 - **R5-2 (AUD-ARC-09):** web perf pass — convert the top-5 heaviest pages' data loading to server
   components/route handlers (start `accounting/page.tsx`, `eam/page.tsx`, split `app-shell.tsx`);
   measure with the existing Playwright e2e + a Lighthouse budget in CI (report-only first).
@@ -572,3 +576,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.7 | 2026-07-02 | ERP/Product | Status header updated: 16 pieces delivered, Wave 0 closed; open items enumerated |
 | 2.8 | 2026-07-02 | ERP/Product | R4-4 delivered (llm-client seam across 6 services + scored fake-LLM agent benchmark as an ai-eval CI gate) |
 | 2.9 | 2026-07-02 | ERP/Product | R4-1 delivered provider-first (Voyage adapter + embed-space column/filter/reembed; pgvector deferred by recorded decision) |
+| 3.0 | 2026-07-02 | ERP/Product | R5-1 delivered (orphans journaled idx 214/215; GRANDFATHERED empty; migration-parity harness; dup-number decision recorded) |
