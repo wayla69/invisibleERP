@@ -45,6 +45,12 @@ async function main() {
   await db.insert(s.stockMovements).values({ moveDate: daysAgo(5), moveType: 'Issue', itemId: 'Y', qty: '100' });
   await db.insert(s.items).values({ itemId: 'Y', itemDescription: 'Item Y' });
 
+  // ── seed item W (docs/24 R4-2): perfectly steady 4/6-alternating daily issues across the FULL 90-day
+  // window — legacy math false-positives it (recent-window SUM vs per-day baseline), corrected math must not.
+  for (let i = 1; i <= 90; i++)
+    await db.insert(s.stockMovements).values({ moveDate: daysAgo(i), moveType: 'Issue', itemId: 'W', qty: String(i % 2 === 0 ? 4 : 6) });
+  await db.insert(s.items).values({ itemId: 'W', itemDescription: 'Item W' });
+
   // ── seed stocktake variance: system 100 vs physical 50 → 50% ──
   await db.insert(s.stocktakes).values({ stNo: 'ST1', stDate: ymd(new Date()), itemId: 'Z', systemQty: '100', physicalQty: '50', difference: '-50' });
 
@@ -70,11 +76,21 @@ async function main() {
   const insight = await ins.replenishment(pred);
   ok('rule-based insight (warning) starts with ⚡', insight.startsWith('⚡'), insight.slice(0, 20));
 
-  // ── anomalies ──
+  // ── anomalies (LEGACY parity mode — the historical unit-mismatch math, pinned; docs/24 R4-2) ──
+  process.env.ANOMALY_PARITY_MODE = 'legacy';
   const anom = await a.detectStockAnomalies(30);
   const y = anom.find((x: any) => x.item_id === 'Y');
   ok('anomaly Y detected', !!y, `z=${y?.z_score}`);
   ok('anomaly Y severity critical (z>3.5)', y?.severity === 'critical', `z=${y?.z_score}`);
+  const wLegacy = anom.find((x: any) => x.item_id === 'W');
+  ok('legacy mode false-positives the steady item W (the preserved unit-mismatch bug)', !!wLegacy, `z=${wLegacy?.z_score}`);
+
+  // ── anomalies (CORRECTED default — peak recent DAY vs pre-window per-day baseline) ──
+  delete process.env.ANOMALY_PARITY_MODE;
+  const anomFixed = await a.detectStockAnomalies(30);
+  const yFixed = anomFixed.find((x: any) => x.item_id === 'Y');
+  ok('corrected mode still detects the real spike Y as critical', yFixed?.severity === 'critical', `z=${yFixed?.z_score}`);
+  ok('corrected mode does NOT flag the steady item W (false positive eliminated)', !anomFixed.some((x: any) => x.item_id === 'W'), JSON.stringify(anomFixed.map((x: any) => x.item_id)));
 
   const variance = await a.detectStocktakeVariance(20);
   const z = variance.find((x: any) => x.item_id === 'Z');

@@ -22,9 +22,11 @@ export class AnomaliesService {
     }).from(stockMovements).where(gte(stockMovements.moveDate, histCutoff))
       .groupBy(stockMovements.itemId, stockMovements.moveType, sql`to_char(${stockMovements.moveDate}, 'YYYY-MM-DD')`);
     const seriesMap = new Map<string, number[]>();
+    const dayMap = new Map<string, string[]>(); // parallel to seriesMap — lets corrected mode split baseline vs recent days
     for (const r of baseRows) {
       const k = `${r.item}|${r.type}`;
       (seriesMap.get(k) ?? seriesMap.set(k, []).get(k)!).push(Number(r.v));
+      (dayMap.get(k) ?? dayMap.set(k, []).get(k)!).push(String(r.day));
     }
 
     // recent aggregate
@@ -41,14 +43,26 @@ export class AnomaliesService {
       : [];
     const nameMap = new Map<string, string>(nameRows.map((x: any) => [x.id, x.name]));
 
+    // docs/24 R4-2 / AUD-AI-02 — the legacy port compared the recent-window SUM against a PER-DAY baseline
+    // (unit mismatch: any item with many active recent days false-positives) and let the baseline include
+    // the recent window itself (the spike contaminates its own reference). The CORRECTED math (default)
+    // compares the recent PEAK DAILY magnitude against the pre-window per-day baseline — same units, clean
+    // reference. The legacy behavior is preserved verbatim behind ANOMALY_PARITY_MODE=legacy for the
+    // analytics parity harness (never silently "fix" parity-locked behavior — CLAUDE.md debug mantra #4).
+    const legacy = (process.env.ANOMALY_PARITY_MODE ?? '').toLowerCase() === 'legacy';
+    const recentYmd = recentCutoff.toISOString().slice(0, 10);
     const anomalies: any[] = [];
     for (const r of recRows) {
-      const series = seriesMap.get(`${r.item}|${r.type}`) ?? [];
-      const z = zscore(Number(r.total), series); // parity: เทียบ recent-sum กับ per-day baseline (คงไว้)
+      const all = seriesMap.get(`${r.item}|${r.type}`) ?? [];
+      const allDays = dayMap.get(`${r.item}|${r.type}`) ?? [];
+      const baseline = legacy ? all : all.filter((_, i) => allDays[i] < recentYmd);
+      const recentDaily = legacy ? [] : all.filter((_, i) => allDays[i] >= recentYmd);
+      const value = legacy ? Number(r.total) : recentDaily.length ? Math.max(...recentDaily) : 0;
+      const z = zscore(value, baseline);
       if (z > Z_THRESHOLD) {
         anomalies.push({
-          item_id: r.item, item_name: nameMap.get(r.item) ?? r.item, movement_type: r.type, recent_qty: round2(Number(r.total)),
-          hist_avg: series.length ? round2(mean(series)) : 0, z_score: round2(z), event_count: Number(r.cnt),
+          item_id: r.item, item_name: nameMap.get(r.item) ?? r.item, movement_type: r.type, recent_qty: round2(value),
+          hist_avg: baseline.length ? round2(mean(baseline)) : 0, z_score: round2(z), event_count: Number(r.cnt),
           severity: z > Z_CRITICAL ? 'critical' : 'warning',
         });
       }

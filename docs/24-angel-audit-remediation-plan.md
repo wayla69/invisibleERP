@@ -400,7 +400,13 @@ campaign evidence pointers; `CONTROL_STATUS_HONEST.md` flips each Partial with d
   embedding API falls under the Anthropic-addendum-style sub-processor review (add the embedding
   vendor to the DPA sub-processor register — ties to R0-2).
 
-### R4-2 · Fix the anomaly detector's dimensional bug behind a flag — closes AUD-AI-02
+### R4-2 · Fix the anomaly detector's dimensional bug behind a flag — closes AUD-AI-02 — **DELIVERED 2026-07-02**
+> Shipped: corrected math is the default — recent **peak daily** magnitude vs the **pre-window** per-day
+> baseline (the legacy port compared the window SUM to a per-day distribution AND contaminated the baseline
+> with the recent window itself). Legacy preserved verbatim behind `ANOMALY_PARITY_MODE=legacy`; the
+> `analytics` parity harness pins it and now ALSO proves the fix: a steady 90-day item scores z=140 under
+> legacy (false positive) and is not flagged under corrected, while the genuine spike stays critical
+> (z=93). Narrative 26 + UAT-RPT-014 updated.
 Add the corrected per-day-baseline math as the default; keep the buggy path only behind
 `ANOMALY_PARITY_MODE=legacy` for the parity harness (never silently "fix" parity-locked behavior —
 CLAUDE.md debug mantra #4). Update the `analytics` parity harness to pin the legacy flag; new
@@ -504,3 +510,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.8 | 2026-07-02 | ERP/Product | R2-4 delivered (cookie Max-Age defaults to the JWT TTL; stale 8h/12h comments + .env.example aligned) |
 | 1.9 | 2026-07-02 | ERP/Product | R1-3 delivered (shared realtime-bus with optional Redis pub/sub behind both SSE buses; fake-transport cross-instance ToE) |
 | 2.0 | 2026-07-02 | ERP/Product | R1-2 delivered (gl_period_balances snapshot + transactional maintenance + TB snapshot read + control GL-20; census 170) |
+| 2.1 | 2026-07-02 | ERP/Product | R4-2 delivered (corrected anomaly math default; legacy behind ANOMALY_PARITY_MODE; parity harness pins + proves both) |
