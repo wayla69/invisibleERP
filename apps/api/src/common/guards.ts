@@ -74,10 +74,10 @@ export class JwtAuthGuard implements CanActivate {
       const role = 'Sales';
       let permissions: string[];
       if (scopes.includes('*') || scopes.includes('admin')) {
-        permissions = resolvePermissions(role as any);
+        permissions = resolvePermissions(role as Parameters<typeof resolvePermissions>[0]);
       } else {
         const expanded = scopes.flatMap((s) => SCOPE_ALIASES[s] ?? [s]);
-        permissions = expanded.length ? expanded : resolvePermissions(role as any);
+        permissions = expanded.length ? expanded : resolvePermissions(role as Parameters<typeof resolvePermissions>[0]);
       }
       // Carry the raw granted scopes alongside the expanded permissions — the public API
       // (/api/v1) gates on these scopes directly (a stable contract independent of internal perms).

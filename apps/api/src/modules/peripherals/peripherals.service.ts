@@ -28,7 +28,7 @@ export class PeripheralsService {
   async registerDevice(dto: { device_code: string; kind: string; terminal?: string; printer_id?: string; config?: any }, user: JwtUser) {
     const db = this.db;
     if (!['printer', 'cash_drawer', 'display', 'scale'].includes(dto.kind)) throw new BadRequestException({ code: 'BAD_KIND', message: 'Unknown device kind', messageTh: 'ชนิดอุปกรณ์ไม่ถูกต้อง' });
-    const [existing] = await db.select().from(posDevices).where(and(eq(posDevices.tenantId, user.tenantId as any), eq(posDevices.deviceCode, dto.device_code))).limit(1);
+    const [existing] = await db.select().from(posDevices).where(and(eq(posDevices.tenantId, user.tenantId!), eq(posDevices.deviceCode, dto.device_code))).limit(1);
     if (existing) {
       await db.update(posDevices).set({ kind: dto.kind, terminal: dto.terminal ?? null, printerId: dto.printer_id ?? null, config: dto.config ?? null, status: 'active' }).where(eq(posDevices.id, existing.id));
       return { id: Number(existing.id), device_code: dto.device_code, kind: dto.kind, updated: true };
@@ -45,7 +45,7 @@ export class PeripheralsService {
 
   async heartbeat(deviceCode: string, user: JwtUser) {
     const db = this.db;
-    const upd = await db.update(posDevices).set({ lastSeenAt: new Date(), status: 'active' }).where(and(eq(posDevices.tenantId, user.tenantId as any), eq(posDevices.deviceCode, deviceCode))).returning({ id: posDevices.id });
+    const upd = await db.update(posDevices).set({ lastSeenAt: new Date(), status: 'active' }).where(and(eq(posDevices.tenantId, user.tenantId!), eq(posDevices.deviceCode, deviceCode))).returning({ id: posDevices.id });
     if (!upd.length) throw new NotFoundException({ code: 'DEVICE_NOT_FOUND', message: 'Device not registered', messageTh: 'ไม่พบอุปกรณ์' });
     return { device_code: deviceCode, ok: true };
   }
@@ -58,7 +58,7 @@ export class PeripheralsService {
     // resolve the kicking printer: explicit > the drawer device attached to this terminal
     let printerId = dto.printer_id ?? null;
     if (!printerId && dto.terminal) {
-      const [drawer] = await db.select().from(posDevices).where(and(eq(posDevices.tenantId, user.tenantId as any), eq(posDevices.kind, 'cash_drawer'), eq(posDevices.terminal, dto.terminal))).limit(1);
+      const [drawer] = await db.select().from(posDevices).where(and(eq(posDevices.tenantId, user.tenantId!), eq(posDevices.kind, 'cash_drawer'), eq(posDevices.terminal, dto.terminal))).limit(1);
       printerId = drawer?.printerId ?? null;
     }
     let printJobId: number | null = null;
@@ -90,7 +90,7 @@ export class PeripheralsService {
   // ── customer-facing display ──
   async setDisplay(terminal: string, state: any, user: JwtUser) {
     const db = this.db;
-    const [existing] = await db.select({ id: customerDisplays.id }).from(customerDisplays).where(and(eq(customerDisplays.tenantId, user.tenantId as any), eq(customerDisplays.terminal, terminal))).limit(1);
+    const [existing] = await db.select({ id: customerDisplays.id }).from(customerDisplays).where(and(eq(customerDisplays.tenantId, user.tenantId!), eq(customerDisplays.terminal, terminal))).limit(1);
     if (existing) await db.update(customerDisplays).set({ state, updatedBy: user.username, updatedAt: new Date() }).where(eq(customerDisplays.id, existing.id));
     else await db.insert(customerDisplays).values({ tenantId: user.tenantId ?? null, terminal, state, updatedBy: user.username });
     return { terminal, ok: true };
@@ -98,7 +98,7 @@ export class PeripheralsService {
 
   async getDisplay(terminal: string, user: JwtUser) {
     const db = this.db;
-    const [row] = await db.select().from(customerDisplays).where(and(eq(customerDisplays.tenantId, user.tenantId as any), eq(customerDisplays.terminal, terminal))).limit(1);
+    const [row] = await db.select().from(customerDisplays).where(and(eq(customerDisplays.tenantId, user.tenantId!), eq(customerDisplays.terminal, terminal))).limit(1);
     return { terminal, state: row?.state ?? { message: 'ยินดีต้อนรับ / Welcome', lines: [], total: 0 }, updated_at: row?.updatedAt ?? null };
   }
 
@@ -107,7 +107,7 @@ export class PeripheralsService {
   // (server-side — staff can't tamper the per-kg price). Returns a ready-to-add priced line + logs the read.
   async readScale(dto: { sku: string; gross_weight: number; tare_weight?: number; terminal?: string; device_code?: string; sale_no?: string; order_no?: string }, user: JwtUser) {
     const db = this.db;
-    const [item] = await db.select().from(menuItems).where(and(eq(menuItems.tenantId, user.tenantId as any), eq(menuItems.sku, dto.sku))).limit(1);
+    const [item] = await db.select().from(menuItems).where(and(eq(menuItems.tenantId, user.tenantId!), eq(menuItems.sku, dto.sku))).limit(1);
     if (!item) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Menu item not found', messageTh: 'ไม่พบสินค้า' });
     if (!item.soldByWeight) throw new BadRequestException({ code: 'NOT_WEIGHED', message: 'Item is not sold by weight', messageTh: 'สินค้านี้ไม่ได้ขายแบบชั่งน้ำหนัก' });
     const gross = n(dto.gross_weight), tare = Math.max(0, n(dto.tare_weight));
@@ -128,7 +128,7 @@ export class PeripheralsService {
   async setWeighed(sku: string, dto: { sold_by_weight: boolean; weight_unit?: string }, user: JwtUser) {
     const db = this.db;
     if (dto.weight_unit && !['kg', 'g'].includes(dto.weight_unit)) throw new BadRequestException({ code: 'BAD_UNIT', message: 'weight_unit must be kg or g', messageTh: 'หน่วยน้ำหนักต้องเป็น kg หรือ g' });
-    const upd = await db.update(menuItems).set({ soldByWeight: dto.sold_by_weight, ...(dto.weight_unit ? { weightUnit: dto.weight_unit } : {}) }).where(and(eq(menuItems.tenantId, user.tenantId as any), eq(menuItems.sku, sku))).returning({ id: menuItems.id });
+    const upd = await db.update(menuItems).set({ soldByWeight: dto.sold_by_weight, ...(dto.weight_unit ? { weightUnit: dto.weight_unit } : {}) }).where(and(eq(menuItems.tenantId, user.tenantId!), eq(menuItems.sku, sku))).returning({ id: menuItems.id });
     if (!upd.length) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Menu item not found', messageTh: 'ไม่พบสินค้า' });
     return { sku, sold_by_weight: dto.sold_by_weight, weight_unit: dto.weight_unit ?? 'kg' };
   }

@@ -33,7 +33,7 @@ export class ReturnsService {
     if (dto.refund_method === 'None') throw new BadRequestException({ code: 'REFUND_METHOD_REQUIRED', message: 'Choose a refund method (Cash/Card/StoreCredit…)', messageTh: 'กรุณาเลือกวิธีคืนเงิน' });
     const isStoreCredit = dto.refund_method === 'StoreCredit';
 
-    return await (this.db as any).transaction(async (tx: any) => {
+    return await this.db.transaction(async (tx: any) => {
       const [sale] = await tx.select().from(custPosSales).where(eq(custPosSales.saleNo, dto.sale_no)).limit(1);
       if (!sale) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sale not found', messageTh: 'ไม่พบรายการขาย' });
       // LOCK the captured payment FIRST → held to commit, so concurrent returns on this sale serialize and

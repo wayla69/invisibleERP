@@ -47,7 +47,7 @@ export class SsoService {
     const nonce = randomBytes(16).toString('hex');
     const codeVerifier = randomBytes(32).toString('base64url');
     const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
-    await (this.db as any).insert(ssoLoginState).values({
+    await this.db.insert(ssoLoginState).values({
       state, tenantCode: code, nonce, codeVerifier, expiresAt: new Date(Date.now() + 10 * 60_000),
     });
     const params = new URLSearchParams({
@@ -72,7 +72,7 @@ export class SsoService {
     if (!tenantCode) throw new BadRequestException({ code: 'BAD_STATE', message: 'Missing/invalid state', messageTh: 'state ไม่ถูกต้อง' });
     // Single-use consume of the server-stored state: atomically mark it consumed only if it exists, is
     // unconsumed, and is unexpired. A replayed/forged/expired state returns no row → reject (CSRF/replay).
-    const [st] = await (this.db as any)
+    const [st] = await this.db
       .update(ssoLoginState)
       .set({ consumedAt: new Date() })
       .where(and(eq(ssoLoginState.state, stateStr), isNull(ssoLoginState.consumedAt), gt(ssoLoginState.expiresAt, new Date())))

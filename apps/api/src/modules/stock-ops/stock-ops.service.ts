@@ -165,7 +165,7 @@ export class StockOpsService {
 
   async listMovements(q: { move_type?: string; limit?: number }) {
     const db = this.db;
-    const where = q.move_type ? eq(stockMovements.moveType, q.move_type as any) : undefined;
+    const where = q.move_type ? eq(stockMovements.moveType, q.move_type as NonNullable<typeof stockMovements.$inferSelect.moveType>) : undefined;
     const rows = await db.select().from(stockMovements).where(where).orderBy(desc(stockMovements.id)).limit(q.limit ?? 100);
     return {
       movements: rows.map((r: any) => ({

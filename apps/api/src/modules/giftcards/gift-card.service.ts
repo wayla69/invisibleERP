@@ -43,7 +43,7 @@ export class GiftCardService {
     const db = this.db;
     const conds: any[] = [];
     if (user.tenantId != null) conds.push(eq(giftCards.tenantId, user.tenantId));
-    if (q.status) conds.push(eq(giftCards.status, q.status as any));
+    if (q.status) conds.push(eq(giftCards.status, q.status as NonNullable<typeof giftCards.$inferSelect.status>));
     if (q.search) conds.push(like(giftCards.cardNo, `%${q.search}%`));
     const where = conds.length ? and(...conds) : undefined;
     const rows = await db.select().from(giftCards).where(where).orderBy(desc(giftCards.id)).limit(q.limit ?? 200);

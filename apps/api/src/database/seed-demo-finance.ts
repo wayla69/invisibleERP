@@ -41,7 +41,7 @@ const ACCOUNTS: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equ
   { code: '5600', name: 'เงินเดือนและค่าจ้าง (Salaries & Wages)', type: 'Expense' },
 ];
 
-const daysInMonth = (period: string) => { const [y, m] = period.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+const daysInMonth = (period: string) => { const [y, m] = period.split('-').map(Number); return new Date(Date.UTC(y!, m, 0)).getUTCDate(); };
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -86,7 +86,7 @@ async function main() {
         tenantId: T, currency: 'THB', status: 'Posted', createdBy: 'finance-demo',
       }).returning({ id: schema.journalEntries.id });
       await tx.insert(schema.journalLines).values(lines.map((l) => ({
-        entryId: je.id, accountCode: l.acct, debit: String(r2(l.dr ?? 0)), credit: String(r2(l.cr ?? 0)),
+        entryId: je!.id, accountCode: l.acct, debit: String(r2(l.dr ?? 0)), credit: String(r2(l.cr ?? 0)),
         currency: 'THB', memo: l.memo ?? memo, tenantId: T,
       })));
     };

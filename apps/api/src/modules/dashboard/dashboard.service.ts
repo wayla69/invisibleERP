@@ -159,7 +159,7 @@ export class DashboardService {
   async getLayout(role: string, _user: JwtUser) {
     this.validRole(role);
     const db = this.db;
-    const [row] = await db.select().from(dashboardLayouts).where(eq(dashboardLayouts.role, role as any));
+    const [row] = await db.select().from(dashboardLayouts).where(eq(dashboardLayouts.role, role as typeof dashboardLayouts.$inferSelect.role));
     const widgets = Array.isArray(row?.widgets) ? row.widgets : [];
     return { role, widgets, configured: !!row };
   }
@@ -170,7 +170,7 @@ export class DashboardService {
     if (!Array.isArray(widgets) || !widgets.every((w) => typeof w === 'string')) throw new BadRequestException({ code: 'BAD_WIDGETS', message: 'widgets must be an array of widget keys', messageTh: 'ต้องเป็นรายการรหัสวิดเจ็ต' });
     for (const k of widgets as string[]) if (!WIDGETS[k]) throw new BadRequestException({ code: 'BAD_WIDGET', message: `Unknown widget '${k}'`, messageTh: `ไม่รู้จักวิดเจ็ต '${k}'` });
     const db = this.db;
-    await db.insert(dashboardLayouts).values({ tenantId: user.tenantId ?? null, role: role as any, widgets, updatedBy: user.username, updatedAt: new Date() })
+    await db.insert(dashboardLayouts).values({ tenantId: user.tenantId ?? null, role: role as typeof dashboardLayouts.$inferInsert.role, widgets, updatedBy: user.username, updatedAt: new Date() })
       .onConflictDoUpdate({ target: [dashboardLayouts.tenantId, dashboardLayouts.role], set: { widgets, updatedBy: user.username, updatedAt: new Date() } });
     return { role, widgets };
   }
@@ -179,7 +179,7 @@ export class DashboardService {
   // their own permissions allow, each with its live value. This is what the role-aware dashboard renders.
   async resolveMine(user: JwtUser) {
     const db = this.db;
-    const [row] = await db.select().from(dashboardLayouts).where(eq(dashboardLayouts.role, user.role as any));
+    const [row] = await db.select().from(dashboardLayouts).where(eq(dashboardLayouts.role, user.role as typeof dashboardLayouts.$inferSelect.role));
     const keys: string[] = Array.isArray(row?.widgets) && row.widgets.length ? row.widgets : DEFAULT_WIDGETS;
     const perms = user.permissions ?? [];
     const allowed = keys.filter((k) => WIDGETS[k] && WIDGETS[k].perms.some((p) => perms.includes(p)));

@@ -84,7 +84,7 @@ export class IntercompanyService {
 
   async listIc(_user: JwtUser, status?: string) {
     const db = this.db;
-    const rows = await db.select().from(icTransactions).where(status ? eq(icTransactions.status, status as any) : undefined).orderBy(icTransactions.id);
+    const rows = await db.select().from(icTransactions).where(status ? eq(icTransactions.status, status as typeof icTransactions.$inferSelect.status) : undefined).orderBy(icTransactions.id);
     return { ic_transactions: rows.map(shape), count: rows.length };
   }
 

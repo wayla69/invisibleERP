@@ -27,7 +27,7 @@ export const CURRENCIES: Currency[] = [
 const CURRENCY_BY_CODE = new Map<string, Currency>(CURRENCIES.map((c) => [c.code, c]));
 
 export function getCurrency(code = 'THB'): Currency {
-  return CURRENCY_BY_CODE.get((code || 'THB').toUpperCase()) ?? CURRENCIES[0];
+  return CURRENCY_BY_CODE.get((code || 'THB').toUpperCase()) ?? CURRENCIES[0]!;
 }
 
 export function isSupportedCurrency(code: string): boolean {

@@ -59,13 +59,13 @@ export class AlertsService {
 
   async setActive(id: number, active: boolean, user: JwtUser) {
     const db = this.db;
-    const upd = await db.update(alertRules).set({ active }).where(and(eq(alertRules.tenantId, user.tenantId as any), eq(alertRules.id, id))).returning({ id: alertRules.id });
+    const upd = await db.update(alertRules).set({ active }).where(and(eq(alertRules.tenantId, user.tenantId!), eq(alertRules.id, id))).returning({ id: alertRules.id });
     if (!upd.length) throw new NotFoundException({ code: 'RULE_NOT_FOUND', message: 'Rule not found', messageTh: 'ไม่พบกฎ' });
     return { id, active };
   }
   async removeRule(id: number, user: JwtUser) {
     const db = this.db;
-    await db.delete(alertRules).where(and(eq(alertRules.tenantId, user.tenantId as any), eq(alertRules.id, id)));
+    await db.delete(alertRules).where(and(eq(alertRules.tenantId, user.tenantId!), eq(alertRules.id, id)));
     return { id, deleted: true };
   }
 

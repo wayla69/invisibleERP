@@ -127,7 +127,7 @@ export class TaxInvoiceService {
 
   async list(user: JwtUser, type?: string, limit = 50) {
     const db = this.db;
-    const where = type ? eq(taxInvoices.type, type as any) : undefined;
+    const where = type ? eq(taxInvoices.type, type as typeof taxInvoices.$inferSelect.type) : undefined;
     const rows = await db.select().from(taxInvoices).where(where).orderBy(desc(taxInvoices.id)).limit(limit);
     return { invoices: rows.map(shape), count: rows.length };
   }

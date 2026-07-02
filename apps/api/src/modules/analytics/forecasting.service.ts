@@ -30,7 +30,7 @@ export class ForecastingService {
     if (!rows.length) return [];
     // dense series จากวันแรกที่มียอดขาย → วันนี้ (เติม 0) — parity: ความยาวขึ้นกับ first-sale
     const byDay = new Map(rows.map((r) => [r.d, Number(r.q)]));
-    const start = new Date(rows[0].d);
+    const start = new Date(rows[0]!.d);
     const today = new Date(ymd());
     const series: number[] = [];
     for (let t = new Date(start); t <= today; t.setUTCDate(t.getUTCDate() + 1)) {

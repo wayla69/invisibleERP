@@ -32,5 +32,5 @@ export async function verifyLineIdToken(idToken: string | undefined): Promise<Li
   if (!m) {
     throw new BadRequestException({ code: 'LINE_NOT_CONFIGURED', message: 'LINE login not configured (set LINE_LOGIN_CHANNEL_ID); in dev use a mock:<userId> token', messageTh: 'ยังไม่ได้ตั้งค่า LINE Login' });
   }
-  return { lineUserId: m[1], displayName: m[2] || undefined };
+  return { lineUserId: m[1]!, displayName: m[2] || undefined };
 }

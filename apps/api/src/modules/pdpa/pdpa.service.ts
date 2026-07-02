@@ -26,8 +26,8 @@ export class PdpaService {
   private ymd(d: Date) { return d.toISOString().slice(0, 10); }
 
   async createDsar(dto: CreateDsarDto, user: JwtUser) {
-    if (!SUBJECT_TYPES.includes(dto.subject_type as any)) throw new BadRequestException({ code: 'BAD_SUBJECT_TYPE', message: `subject_type must be one of ${SUBJECT_TYPES.join('/')}`, messageTh: 'ประเภทเจ้าของข้อมูลไม่ถูกต้อง' });
-    if (!REQUEST_TYPES.includes(dto.request_type as any)) throw new BadRequestException({ code: 'BAD_REQUEST_TYPE', message: `request_type must be one of ${REQUEST_TYPES.join('/')}`, messageTh: 'ประเภทคำขอไม่ถูกต้อง' });
+    if (!(SUBJECT_TYPES as readonly string[]).includes(dto.subject_type)) throw new BadRequestException({ code: 'BAD_SUBJECT_TYPE', message: `subject_type must be one of ${SUBJECT_TYPES.join('/')}`, messageTh: 'ประเภทเจ้าของข้อมูลไม่ถูกต้อง' });
+    if (!(REQUEST_TYPES as readonly string[]).includes(dto.request_type)) throw new BadRequestException({ code: 'BAD_REQUEST_TYPE', message: `request_type must be one of ${REQUEST_TYPES.join('/')}`, messageTh: 'ประเภทคำขอไม่ถูกต้อง' });
     if (!dto.subject_ref?.trim()) throw new BadRequestException({ code: 'SUBJECT_REQUIRED', message: 'subject_ref is required', messageTh: 'ต้องระบุเจ้าของข้อมูล' });
     const db = this.db;
     const due = new Date(Date.now() + DSAR_SLA_DAYS * 86400_000);

@@ -191,7 +191,7 @@ function extractElement(xml: string, tag: string): string | null {
 function extractTag(xml: string, tag: string): string | null {
   const re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`);
   const m = xml.match(re);
-  return m ? m[1] : null;
+  return m ? m[1]! : null;
 }
 function escapeXml(v: string): string {
   return v.replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c] as string));

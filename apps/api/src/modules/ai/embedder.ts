@@ -96,7 +96,7 @@ function localEmbed(text: string): number[] {
     v[h % EMBED_DIM] += w;
   };
   for (let i = 0; i < n; i++) {
-    bump(toks[i], 1);
+    bump(toks[i]!, 1);
     if (i > 0) bump(toks[i - 1] + ' ' + toks[i], 0.5); // bigram for a little phrase sensitivity
   }
   const norm = Math.sqrt(v.reduce((a, x) => a + x * x, 0)) || 1;
@@ -106,6 +106,6 @@ function localEmbed(text: string): number[] {
 export function cosine(a: number[], b: number[]): number {
   const n = Math.min(a.length, b.length);
   let dot = 0;
-  for (let i = 0; i < n; i++) dot += a[i] * b[i];
+  for (let i = 0; i < n; i++) dot += a[i]! * b[i]!;
   return dot; // inputs are L2-normalized ⇒ dot == cosine
 }

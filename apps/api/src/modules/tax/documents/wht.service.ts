@@ -57,7 +57,7 @@ export class WhtService {
 
     const totalPaid = roundCurrency(computed.reduce((a, l) => a + l.amount_paid, 0), 'THB');
     const totalWht = roundCurrency(computed.reduce((a, l) => a + l.tax_withheld, 0), 'THB');
-    const pndType = dto.pnd_type ?? resolvePnd(dto!.lines[0].income_type, kind);
+    const pndType = dto.pnd_type ?? resolvePnd(dto.lines[0]!.income_type, kind);
     const docNo = await this.docNo.nextMonthlyTenant('WHT', tenantId);
 
     const [head] = await db.insert(whtCertificates).values({

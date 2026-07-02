@@ -73,7 +73,7 @@ export class PaymentsDepthService {
   }
 
   private async loadDeposit(depositNo: string, user: JwtUser) {
-    const [d] = await (this.db as any).select().from(customerDeposits).where(and(eq(customerDeposits.tenantId, user.tenantId as any), eq(customerDeposits.depositNo, depositNo))).limit(1);
+    const [d] = await this.db.select().from(customerDeposits).where(and(eq(customerDeposits.tenantId, user.tenantId!), eq(customerDeposits.depositNo, depositNo))).limit(1);
     if (!d) throw new NotFoundException({ code: 'DEPOSIT_NOT_FOUND', message: 'Deposit not found', messageTh: 'ไม่พบมัดจำ' });
     return d;
   }
@@ -148,12 +148,12 @@ export class PaymentsDepthService {
 
   private async appendEntry(acct: any, type: string, amount: number, balanceAfter: number, opts: { saleNo?: string; memo?: string; journalNo?: string | null; currency?: string; fxRate?: number; fxGainLoss?: number; user: JwtUser }) {
     const entryNo = await this.docNo.nextDaily('HAE');
-    await (this.db as any).insert(houseAccountEntries).values({ tenantId: opts.user.tenantId ?? null, accountId: Number(acct.id), entryNo, type, saleNo: opts.saleNo ?? null, amount: String(amount), balanceAfter: String(balanceAfter), currency: opts.currency ?? 'THB', fxRate: String(opts.fxRate ?? 1), fxGainLoss: String(opts.fxGainLoss ?? 0), journalNo: opts.journalNo ?? null, memo: opts.memo ?? null, createdBy: opts.user.username });
+    await this.db.insert(houseAccountEntries).values({ tenantId: opts.user.tenantId ?? null, accountId: Number(acct.id), entryNo, type, saleNo: opts.saleNo ?? null, amount: String(amount), balanceAfter: String(balanceAfter), currency: opts.currency ?? 'THB', fxRate: String(opts.fxRate ?? 1), fxGainLoss: String(opts.fxGainLoss ?? 0), journalNo: opts.journalNo ?? null, memo: opts.memo ?? null, createdBy: opts.user.username });
     return entryNo;
   }
 
   private async loadAccount(accountNo: string, user: JwtUser) {
-    const [a] = await (this.db as any).select().from(houseAccounts).where(and(eq(houseAccounts.tenantId, user.tenantId as any), eq(houseAccounts.accountNo, accountNo))).limit(1);
+    const [a] = await this.db.select().from(houseAccounts).where(and(eq(houseAccounts.tenantId, user.tenantId!), eq(houseAccounts.accountNo, accountNo))).limit(1);
     if (!a) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: 'House account not found', messageTh: 'ไม่พบบัญชีเครดิต' });
     return a;
   }
@@ -162,19 +162,19 @@ export class PaymentsDepthService {
   async setSurcharge(dto: { method: string; pct: number; active?: boolean }, user: JwtUser) {
     const db = this.db;
     if (n(dto.pct) < 0 || n(dto.pct) > 20) throw new BadRequestException({ code: 'BAD_PCT', message: 'Surcharge % must be 0–20', messageTh: 'เปอร์เซ็นต์ค่าธรรมเนียมต้องอยู่ที่ 0–20' });
-    const [existing] = await db.select().from(paymentSurcharges).where(and(eq(paymentSurcharges.tenantId, user.tenantId as any), eq(paymentSurcharges.method, dto.method))).limit(1);
+    const [existing] = await db.select().from(paymentSurcharges).where(and(eq(paymentSurcharges.tenantId, user.tenantId!), eq(paymentSurcharges.method, dto.method))).limit(1);
     if (existing) { await db.update(paymentSurcharges).set({ pct: String(dto.pct), active: dto.active ?? true }).where(eq(paymentSurcharges.id, existing.id)); return { method: dto.method, pct: n(dto.pct), active: dto.active ?? true, updated: true }; }
     await db.insert(paymentSurcharges).values({ tenantId: user.tenantId ?? null, method: dto.method, pct: String(dto.pct), active: dto.active ?? true, createdBy: user.username });
     return { method: dto.method, pct: n(dto.pct), active: dto.active ?? true, updated: false };
   }
 
   async listSurcharges(_user: JwtUser) {
-    const rows = await (this.db as any).select().from(paymentSurcharges).orderBy(paymentSurcharges.method);
+    const rows = await this.db.select().from(paymentSurcharges).orderBy(paymentSurcharges.method);
     return { surcharges: rows.map((s: any) => ({ method: s.method, pct: n(s.pct), active: s.active })) };
   }
 
   async quoteSurcharge(method: string, amount: number, user: JwtUser) {
-    const [s] = await (this.db as any).select().from(paymentSurcharges).where(and(eq(paymentSurcharges.tenantId, user.tenantId as any), eq(paymentSurcharges.method, method), eq(paymentSurcharges.active, true))).limit(1);
+    const [s] = await this.db.select().from(paymentSurcharges).where(and(eq(paymentSurcharges.tenantId, user.tenantId!), eq(paymentSurcharges.method, method), eq(paymentSurcharges.active, true))).limit(1);
     const pct = s ? n(s.pct) : 0;
     const surcharge = r2(n(amount) * pct / 100);
     return { method, pct, base: r2(n(amount)), surcharge, total: r2(n(amount) + surcharge) };

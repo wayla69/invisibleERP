@@ -104,7 +104,7 @@ export class MemberAuthService {
     try { payload = await this.jwt.verifyAsync(token); } catch { return { revoked: false }; }
     if (!payload?.jti) return { revoked: false };
     const expiresAt = payload.exp ? new Date(payload.exp * 1000) : new Date(Date.now() + 7 * 24 * 3600_000);
-    await (this.db as any).insert(revokedTokens).values({ jti: payload.jti, username: payload.sub ?? null, expiresAt }).onConflictDoNothing();
+    await this.db.insert(revokedTokens).values({ jti: payload.jti, username: payload.sub ?? null, expiresAt }).onConflictDoNothing();
     return { revoked: true };
   }
 

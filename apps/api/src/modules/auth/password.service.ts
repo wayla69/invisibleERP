@@ -50,8 +50,8 @@ export class PasswordService {
     if (parts[0] === 'scrypt' && parts.length === 6) {
       const [, nStr, rStr, pStr, salt, hashHex] = parts;
       const n = Number(nStr), r = Number(rStr), p = Number(pStr);
-      const derived = (await scryptAsync(password, salt, KEYLEN, { N: n, r, p, maxmem: MAXMEM })) as Buffer;
-      const expected = Buffer.from(hashHex, 'hex');
+      const derived = (await scryptAsync(password, salt!, KEYLEN, { N: n, r, p, maxmem: MAXMEM })) as Buffer;
+      const expected = Buffer.from(hashHex!, 'hex');
       const ok = derived.length === expected.length && timingSafeEqual(derived, expected);
       // upgrade if the stored parameters are weaker than the current target
       return { ok, needsRehash: ok && (n < N || r < R || p < P) };
@@ -80,8 +80,8 @@ export class PasswordService {
     if (parts[0] === 'scrypt' && parts.length === 6) {
       const [, nStr, rStr, pStr, salt, hashHex] = parts;
       const n = Number(nStr), r = Number(rStr), p = Number(pStr);
-      const derived = (await scryptAsync(secret, salt, KEYLEN, { N: n, r, p, maxmem: MAXMEM })) as Buffer;
-      const expected = Buffer.from(hashHex, 'hex');
+      const derived = (await scryptAsync(secret, salt!, KEYLEN, { N: n, r, p, maxmem: MAXMEM })) as Buffer;
+      const expected = Buffer.from(hashHex!, 'hex');
       const ok = derived.length === expected.length && timingSafeEqual(derived, expected);
       return { ok, needsRehash: ok && (n < N || r < R || p < P) };
     }

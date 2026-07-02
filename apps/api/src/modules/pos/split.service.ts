@@ -44,7 +44,7 @@ export class SplitBillService {
     const paid = captured >= built.total - 0.01;
     let taxInvoiceNo: string | null = null;
     if (paid) { taxInvoiceNo = await this.dineIn.markPaidAndInvoice(o, saleNo, user); }
-    else { await (this.db as any).update(dineInOrders).set({ status: 'partially_paid', saleNo }).where(eq(dineInOrders.id, o.id)); }
+    else { await this.db.update(dineInOrders).set({ status: 'partially_paid', saleNo }).where(eq(dineInOrders.id, o.id)); }
     return { order_no: orderNo, sale_no: saleNo, total: built.total, tenders, captured, paid, payment_state: paid ? 'paid' : 'partially_paid', journal_no: built.journal_no, tax_invoice_no: taxInvoiceNo };
   }
 

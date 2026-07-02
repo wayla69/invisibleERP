@@ -41,7 +41,7 @@ export class WasteService {
     if (!WASTE_REASONS.includes(dto.reason_code)) throw new BadRequestException({ code: 'BAD_REASON', message: 'invalid reason_code', messageTh: 'เหตุผลไม่ถูกต้อง' });
     // Guard: a perpetual-tracked item (valued sub-ledger) must use the INV-07 write-off, never the waste log,
     // so inventory value isn't decremented twice / off-control.
-    const [perp] = await db.select({ id: invBalances.id }).from(invBalances).where(and(eq(invBalances.tenantId, tenantId as any), eq(invBalances.itemId, dto.item_id))).limit(1);
+    const [perp] = await db.select({ id: invBalances.id }).from(invBalances).where(and(eq(invBalances.tenantId, tenantId!), eq(invBalances.itemId, dto.item_id))).limit(1);
     if (perp) throw new BadRequestException({ code: 'USE_WRITEOFF', message: 'This item is perpetual-tracked — record shrinkage via the inventory write-off (INV-07), not the waste log', messageTh: 'สินค้านี้ใช้บัญชีสต๊อกถาวร — ให้ตัดผ่านการตัดสต๊อก (อนุมัติ) แทน' });
 
     const qty = round2(n(dto.qty));
@@ -51,7 +51,7 @@ export class WasteService {
 
     return await db.transaction(async (tx: any) => {
       // decrement the ingredient stock under a row lock (mirrors recipe applyDeduction; allows negative + logs).
-      let [inv] = await tx.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId as any), eq(customerInventory.itemId, dto.item_id))).for('update').limit(1);
+      let [inv] = await tx.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId!), eq(customerInventory.itemId, dto.item_id))).for('update').limit(1);
       if (!inv) [inv] = await tx.insert(customerInventory).values({ tenantId, itemId: dto.item_id, itemDescription: dto.item_id, uom: dto.uom ?? null, currentStock: '0' }).returning();
       const after = round2(n(inv.currentStock) - qty);
       await tx.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));

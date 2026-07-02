@@ -22,7 +22,7 @@ export function toMinor4(v: unknown): bigint {
   const frac = (fracRaw + '0000').slice(0, 4);
   // round half-up (away from zero) at scale 4 — same as pg numeric's round()
   const roundUp = fracRaw.length > 4 && fracRaw.charCodeAt(4) >= 53 /* '5' */ ? 1n : 0n;
-  const minor = BigInt(int) * 10000n + BigInt(frac) + roundUp;
+  const minor = BigInt(int!) * 10000n + BigInt(frac) + roundUp;
   return sign === '-' ? -minor : minor;
 }
 

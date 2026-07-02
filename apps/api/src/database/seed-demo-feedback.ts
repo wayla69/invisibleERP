@@ -69,8 +69,8 @@ async function main() {
       }).returning({ id: schema.surveyResponses.id });
       if (rnd() < 0.6) {
         await tx.insert(schema.surveyAnswers).values([
-          { responseId: resp.id, questionNo: 1, answer: `คุณภาพอาหาร: ${nps >= 8 ? 'ดีมาก' : nps >= 6 ? 'พอใช้' : 'ควรปรับปรุง'}` },
-          { responseId: resp.id, questionNo: 2, answer: `ความเร็วบริการ: ${nps >= 8 ? 'รวดเร็ว' : 'ปานกลาง'}` },
+          { responseId: resp!.id, questionNo: 1, answer: `คุณภาพอาหาร: ${nps >= 8 ? 'ดีมาก' : nps >= 6 ? 'พอใช้' : 'ควรปรับปรุง'}` },
+          { responseId: resp!.id, questionNo: 2, answer: `ความเร็วบริการ: ${nps >= 8 ? 'รวดเร็ว' : 'ปานกลาง'}` },
         ]);
         answers += 2;
       }
@@ -78,10 +78,10 @@ async function main() {
 
     const promoters = await tx.select({ c: sql<number>`count(*)::int` }).from(schema.surveyResponses).where(sql`${schema.surveyResponses.tenantId} = ${T} and ${schema.surveyResponses.npsScore} >= 9`);
     const detractors = await tx.select({ c: sql<number>`count(*)::int` }).from(schema.surveyResponses).where(sql`${schema.surveyResponses.tenantId} = ${T} and ${schema.surveyResponses.npsScore} <= 6`);
-    const nps = Math.round(((Number(promoters[0].c) - Number(detractors[0].c)) / RESPONSES) * 100);
+    const nps = Math.round(((Number(promoters[0]!.c) - Number(detractors[0]!.c)) / RESPONSES) * 100);
     console.log(`✅ Feedback seeded into tenant ${T}:`);
     console.log(`   ${SURVEYS.length} surveys · ${RESPONSES} responses · ${answers} structured answers`);
-    console.log(`   NPS ≈ ${nps} (promoters ${promoters[0].c} − detractors ${detractors[0].c})`);
+    console.log(`   NPS ≈ ${nps} (promoters ${promoters[0]!.c} − detractors ${detractors[0]!.c})`);
   });
   await client.end();
 }

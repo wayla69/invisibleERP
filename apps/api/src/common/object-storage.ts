@@ -30,11 +30,11 @@ export async function putObject(key: string, dataUrl: string): Promise<string | 
   const m = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl ?? '');
   if (!m) return null;
   const contentType = m[1];
-  const bytes = Buffer.from(m[2], 'base64');
+  const bytes = Buffer.from(m[2]!, 'base64');
   try {
     const res = await fetch(`${base()}/${key}`, {
       method: 'PUT',
-      headers: { 'Content-Type': contentType, ...(process.env.OBJECT_STORE_TOKEN ? { Authorization: `Bearer ${process.env.OBJECT_STORE_TOKEN}` } : {}) },
+      headers: { 'Content-Type': contentType, ...(process.env.OBJECT_STORE_TOKEN ? { Authorization: `Bearer ${process.env.OBJECT_STORE_TOKEN}` } : {}) } as Record<string, string>,
       body: bytes,
     });
     return res.ok ? `${PREFIX}${key}` : null;

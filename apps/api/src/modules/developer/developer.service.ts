@@ -33,14 +33,14 @@ export class DeveloperService {
   catalog() { return { scopes: SCOPES, endpoints: ENDPOINTS, tiers: TIERS, openapi_url: '/api/v1/openapi.json' }; }
 
   async portal(_user: JwtUser) {
-    const rows = await (this.db as any).select({ id: apiKeys.id, name: apiKeys.name, prefix: apiKeys.prefix, scopes: apiKeys.scopes, tier: apiKeys.tier, revoked: apiKeys.revoked, lastUsedAt: apiKeys.lastUsedAt }).from(apiKeys);
+    const rows = await this.db.select({ id: apiKeys.id, name: apiKeys.name, prefix: apiKeys.prefix, scopes: apiKeys.scopes, tier: apiKeys.tier, revoked: apiKeys.revoked, lastUsedAt: apiKeys.lastUsedAt }).from(apiKeys);
     const keys = rows.map((k: any) => ({ id: Number(k.id), name: k.name, prefix: k.prefix, scopes: String(k.scopes || '').split(',').filter(Boolean), tier: k.tier || 'free', revoked: !!k.revoked, last_used_at: k.lastUsedAt }));
     return { ...this.catalog(), keys };
   }
 
   async setTier(_user: JwtUser, id: number, tier: string) {
     if (!TIER_KEYS.includes(tier)) throw new BadRequestException({ code: 'BAD_TIER', message: `tier must be one of ${TIER_KEYS.join(', ')}`, messageTh: 'ระดับการใช้งานไม่ถูกต้อง' });
-    const upd = await (this.db as any).update(apiKeys).set({ tier }).where(eq(apiKeys.id, id)).returning({ id: apiKeys.id });
+    const upd = await this.db.update(apiKeys).set({ tier }).where(eq(apiKeys.id, id)).returning({ id: apiKeys.id });
     if (!upd.length) throw new NotFoundException({ code: 'KEY_NOT_FOUND', message: 'API key not found', messageTh: 'ไม่พบ API key' });
     return { id, tier };
   }

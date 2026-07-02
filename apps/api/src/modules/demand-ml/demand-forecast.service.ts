@@ -104,7 +104,7 @@ export class DemandForecastService {
       const m = candidates.find((c) => c.algorithm === dto.algorithm);
       if (!m) throw new BadRequestException({ code: 'UNKNOWN_ALGORITHM', message: `Unknown algorithm '${dto.algorithm}'`, messageTh: 'อัลกอริทึมไม่ถูกต้อง' });
       chosen = m; selectedBy = 'requested';
-    } else { chosen! = candidates[0]; selectedBy = 'lowest_wape'; }
+    } else { chosen = candidates[0]!; selectedBy = 'lowest_wape'; }
 
     // demand can't be negative — clamp (Holt can extrapolate below 0 on a declining trend).
     const forecast = ALGOS[chosen.algorithm]!(series, horizon, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));

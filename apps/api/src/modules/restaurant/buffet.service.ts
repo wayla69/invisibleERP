@@ -98,7 +98,7 @@ export class BuffetService {
     await this.dineIn.refreshOrderTotals(Number(h!.id));
 
     await db.update(tableSessions).set({ orderMode: 'buffet', buffetPackageId: packageId, pax: seats, buffetStartedAt: now, buffetExpiresAt: expires }).where(eq(tableSessions.id, claim.sessionId));
-    await db.update(diningTables).set({ status: 'occupied', updatedAt: now }).where(and(eq(diningTables.id, claim.tableId), inArray(diningTables.status, ['available', 'reserved'] as any)));
+    await db.update(diningTables).set({ status: 'occupied', updatedAt: now }).where(and(eq(diningTables.id, claim.tableId), inArray(diningTables.status, ['available', 'reserved'] as NonNullable<typeof diningTables.$inferSelect.status>[])));
     return { package: shapePkg(pkg), pax: seats, expires_at: expires.toISOString() };
   }
 

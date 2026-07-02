@@ -12,7 +12,7 @@ export class RealtimeScope {
 
   // Run fn under RLS scoped to one tenant (bypass OFF) — a forged token can never read another tenant.
   async run<T>(tenantId: number, fn: () => Promise<T>): Promise<T> {
-    return (this.db as any).transaction(async (tx: any) => {
+    return this.db.transaction(async (tx: any) => {
       try { await tx.execute(sql`SET LOCAL ROLE app_user`); } catch { /* dev base role */ }
       await tx.execute(sql`select set_config('app.bypass_rls','off',true)`);
       await tx.execute(sql`select set_config('app.tenant_id', ${String(tenantId)}, true)`);
@@ -23,7 +23,7 @@ export class RealtimeScope {
   // Controlled bypass: a single indexed lookup that reads NO tenant-private fields (qr_token → tenant),
   // used only to discover which tenant a printed QR belongs to before re-entering run(tenantId).
   async bypassQuery<T>(fn: () => Promise<T>): Promise<T> {
-    return (this.db as any).transaction(async (tx: any) => {
+    return this.db.transaction(async (tx: any) => {
       try { await tx.execute(sql`SET LOCAL ROLE app_user`); } catch { /* dev base role */ }
       await tx.execute(sql`select set_config('app.bypass_rls','on',true)`);
       return tenantALS.run({ tx, tenantId: null, bypass: true }, fn);

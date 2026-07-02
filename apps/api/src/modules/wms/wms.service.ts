@@ -180,7 +180,7 @@ export class WmsService {
     // ONE transaction so the FOR UPDATE locks on the pick list and each bin-stock row are HELD through the
     // decrement. Otherwise (autocommit) the lock released at statement end and two pickers on the last unit
     // could both pass the sufficiency check and drive bin stock negative / overship (H5).
-    return await (this.db as any).transaction(async (tx: any) => {
+    return await this.db.transaction(async (tx: any) => {
       const [p] = await tx.select().from(pickLists).where(eq(pickLists.pickNo, pickNo)).for('update').limit(1);
       if (!p) throw new NotFoundException({ code: 'PICK_NOT_FOUND', message: 'Pick list not found', messageTh: 'ไม่พบใบหยิบ' });
       let picked = 0;

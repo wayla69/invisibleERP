@@ -23,14 +23,14 @@ export class ConnectorsService {
   catalog() { return { connectors: CATALOG.map((c) => ({ ...c })) }; }
 
   async list(_user: JwtUser) {
-    const rows = await (this.db as any).select().from(connectors);
+    const rows = await this.db.select().from(connectors);
     return { connectors: rows.map((c: any) => ({ id: Number(c.id), type: c.type, label: c.label, status: c.status })) };
   }
 
   async register(user: JwtUser, type: string, label?: string, config?: any) {
     if (!TYPES.includes(type)) throw new BadRequestException({ code: 'BAD_CONNECTOR', message: `type must be one of ${TYPES.join(', ')}`, messageTh: 'ประเภทตัวเชื่อมต่อไม่ถูกต้อง' });
-    const [row] = await (this.db as any).insert(connectors).values({ tenantId: user.tenantId ?? null, type, label: label ?? CATALOG.find((c) => c.type === type)!.label, config: config ?? {}, createdBy: user.username }).returning({ id: connectors.id });
-    return { id: Number(row.id), type };
+    const [row] = await this.db.insert(connectors).values({ tenantId: user.tenantId ?? null, type, label: label ?? CATALOG.find((c) => c.type === type)!.label, config: config ?? {}, createdBy: user.username }).returning({ id: connectors.id });
+    return { id: Number(row!.id), type };
   }
 
   // Stub transport: deterministic canonical fixtures per type (bank_csv parses the posted statement text).
@@ -69,7 +69,7 @@ export class ConnectorsService {
   }
 
   async syncs(_user: JwtUser, id: number) {
-    const rows = await (this.db as any).select().from(connectorSyncs).where(eq(connectorSyncs.connectorId, id)).orderBy(desc(connectorSyncs.ranAt));
+    const rows = await this.db.select().from(connectorSyncs).where(eq(connectorSyncs.connectorId, id)).orderBy(desc(connectorSyncs.ranAt));
     return { syncs: rows.map((s: any) => ({ id: Number(s.id), status: s.status, pulled: Number(s.pulled), created: Number(s.createdCount), detail: s.detail, ran_at: s.ranAt })) };
   }
 }

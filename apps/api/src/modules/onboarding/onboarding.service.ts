@@ -60,7 +60,7 @@ export class OnboardingService {
   }
 
   async resetStep(user: JwtUser, key: string) {
-    await (this.db as any).delete(onboardingProgress).where(eq(onboardingProgress.stepKey, key));
+    await this.db.delete(onboardingProgress).where(eq(onboardingProgress.stepKey, key));
     return { key, done: false };
   }
 

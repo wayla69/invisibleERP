@@ -312,7 +312,7 @@ export class LedgerService {
       return nzLines.map((l) => ({ account_code: l.account_code, debit: n(l.debit), credit: n(l.credit), memo: l.memo ?? null }));
     };
     // Reuse the caller's tx when nested; else open our own.
-    const inserted = outerTx ? await doInsert(outerTx) : await (this.db as any).transaction(doInsert);
+    const inserted = outerTx ? await doInsert(outerTx) : await this.db.transaction(doInsert);
 
     // Lost the race to a concurrent identical posting → the entry already exists, do not double-count.
     if (inserted === null) return { entry_no: null, balanced: true, deduped: true, lines: [] };
@@ -669,7 +669,7 @@ export class LedgerService {
       .orderBy(journalLines.accountCode);
 
     const byBranch: Record<string, { revenue: number; expense: number; net: number; lines: any[] }> = {};
-    for (const r of rows as any[]) {
+    for (const r of rows) {
       const key = r.branch_id?.toString() ?? 'unassigned';
       if (!byBranch[key]) byBranch[key] = { revenue: 0, expense: 0, net: 0, lines: [] };
       const net = Number(r.net ?? 0);

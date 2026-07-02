@@ -37,7 +37,7 @@ export class CustomFieldsService {
       dataType, options: dataType === 'select' ? dto.options : null, required: dto.required ?? false,
       defaultValue: dto.default_value ?? null, helpText: dto.help_text ?? null, sort: dto.sort ?? 0, active: dto.active ?? true,
     };
-    const [existing] = await db.select().from(customFieldDefs).where(and(eq(customFieldDefs.tenantId, user.tenantId as any), eq(customFieldDefs.entity, entity), eq(customFieldDefs.fieldKey, fieldKey))).limit(1);
+    const [existing] = await db.select().from(customFieldDefs).where(and(eq(customFieldDefs.tenantId, user.tenantId!), eq(customFieldDefs.entity, entity), eq(customFieldDefs.fieldKey, fieldKey))).limit(1);
     if (existing) {
       await db.update(customFieldDefs).set(row).where(eq(customFieldDefs.id, existing.id));
       return { id: Number(existing.id), entity, field_key: fieldKey, data_type: dataType, updated: true };
@@ -57,7 +57,7 @@ export class CustomFieldsService {
 
   async removeField(id: number, user: JwtUser) {
     const db = this.db;
-    const upd = await db.update(customFieldDefs).set({ active: false }).where(and(eq(customFieldDefs.tenantId, user.tenantId as any), eq(customFieldDefs.id, id))).returning({ id: customFieldDefs.id });
+    const upd = await db.update(customFieldDefs).set({ active: false }).where(and(eq(customFieldDefs.tenantId, user.tenantId!), eq(customFieldDefs.id, id))).returning({ id: customFieldDefs.id });
     if (!upd.length) throw new NotFoundException({ code: 'FIELD_NOT_FOUND', message: 'Field not found', messageTh: 'ไม่พบฟิลด์' });
     return { id, active: false };
   }
@@ -69,7 +69,7 @@ export class CustomFieldsService {
     const db = this.db;
     const ent = slug(entity);
     if (!recordId) throw new BadRequestException({ code: 'NO_RECORD', message: 'record_id required', messageTh: 'ต้องระบุรหัสเรคคอร์ด' });
-    const defs = (await db.select().from(customFieldDefs).where(and(eq(customFieldDefs.tenantId, user.tenantId as any), eq(customFieldDefs.entity, ent), eq(customFieldDefs.active, true))));
+    const defs = (await db.select().from(customFieldDefs).where(and(eq(customFieldDefs.tenantId, user.tenantId!), eq(customFieldDefs.entity, ent), eq(customFieldDefs.active, true))));
     const defByKey = new Map<string, any>(defs.map((d: any) => [d.fieldKey, d]));
     // required-field enforcement across the whole record
     for (const d of defs) {
@@ -121,7 +121,7 @@ export class CustomFieldsService {
   // ── helpers ──
   private async upsertValue(user: JwtUser, entity: string, fieldKey: string, recordId: string, typed: { valueText: any; valueNum: any; valueDate: any; valueBool: any }) {
     const db = this.db;
-    const [existing] = await db.select({ id: customFieldValues.id }).from(customFieldValues).where(and(eq(customFieldValues.tenantId, user.tenantId as any), eq(customFieldValues.entity, entity), eq(customFieldValues.fieldKey, fieldKey), eq(customFieldValues.recordId, recordId))).limit(1);
+    const [existing] = await db.select({ id: customFieldValues.id }).from(customFieldValues).where(and(eq(customFieldValues.tenantId, user.tenantId!), eq(customFieldValues.entity, entity), eq(customFieldValues.fieldKey, fieldKey), eq(customFieldValues.recordId, recordId))).limit(1);
     const cols = { valueText: typed.valueText, valueNum: typed.valueNum, valueDate: typed.valueDate, valueBool: typed.valueBool, updatedBy: user.username, updatedAt: new Date() };
     if (existing) await db.update(customFieldValues).set(cols).where(eq(customFieldValues.id, existing.id));
     else await db.insert(customFieldValues).values({ tenantId: user.tenantId ?? null, entity, fieldKey, recordId, ...cols });

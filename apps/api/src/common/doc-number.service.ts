@@ -46,7 +46,7 @@ export class DocNumberService {
   // doc_counters_tenant (race-safe). Used for tax-doc numbers that must be legally sequential per seller.
   async nextMonthlyTenant(type: MonthlyTenantType, tenantId: number): Promise<string> {
     const period = bizYmdCompact().slice(0, 6); // YYYYMM (business TZ)
-    const r = await (this.db as any)
+    const r = await this.db
       .insert(docCountersTenant)
       .values({ docType: type, tenantId, period, n: 1 })
       .onConflictDoUpdate({
@@ -54,15 +54,15 @@ export class DocNumberService {
         set: { n: sql`${docCountersTenant.n} + 1` },
       })
       .returning({ n: docCountersTenant.n });
-    return `${type}-${period}-${String(Number(r[0].n)).padStart(4, '0')}`;
+    return `${type}-${period}-${String(Number(r[0]!.n)).padStart(4, '0')}`;
   }
 
   private async bump(docType: string, day: string): Promise<number> {
-    const r = await (this.db as any)
+    const r = await this.db
       .insert(docCounters)
       .values({ docType, day, n: 1 })
       .onConflictDoUpdate({ target: [docCounters.docType, docCounters.day], set: { n: sql`${docCounters.n} + 1` } })
       .returning({ n: docCounters.n });
-    return Number(r[0].n);
+    return Number(r[0]!.n);
   }
 }

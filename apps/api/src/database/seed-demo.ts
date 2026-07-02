@@ -84,7 +84,7 @@ const STATIONS = [
 
 // item-master category from the ingredient code prefix
 function ingCategory(code: string): string {
-  const p = code.split('-')[0].toUpperCase();
+  const p = code.split('-')[0]!.toUpperCase();
   if (p === '01') return 'ข้าว (Rice)';
   if (p === '02' || p === '03') return 'เนื้อ/อาหารทะเล (Meat & Seafood)';
   if (p === '11') return 'ซอส/เครื่องปรุง (Sauce & Seasoning)';
@@ -141,7 +141,7 @@ async function main() {
       })
       .onConflictDoUpdate({ target: schema.tenants.code, set: { name: data.tenant.name } });
     const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, data.tenant.code)))[0];
-    const T = tenant.id;
+    const T = tenant!.id;
     console.log(`tenant ${data.tenant.code} → id ${T}`);
 
     // ── 2. demo user (non-Admin, tenant-scoped) + broad permission override ──
@@ -158,10 +158,10 @@ async function main() {
       'returns', 'pricelist', 'promos', 'warehouse', 'lots', 'locations', 'mobile', 'images',
       'masterdata', 'bom_master', 'procurement', 'planner', 'marketing', 'approvals', 'branch', 'ai_chat', 'users',
     ];
-    await tx.delete(schema.userPermissions).where(eq(schema.userPermissions.userId, demoUser.id));
+    await tx.delete(schema.userPermissions).where(eq(schema.userPermissions.userId, demoUser!.id));
     await tx
       .insert(schema.userPermissions)
-      .values(DEMO_PERMS.map((perm) => ({ userId: demoUser.id, perm })))
+      .values(DEMO_PERMS.map((perm) => ({ userId: demoUser!.id, perm })))
       .onConflictDoNothing();
 
     // ── 3. wipe existing demo rows (FK-safe order) so the seed is re-runnable ──
@@ -238,7 +238,7 @@ async function main() {
         .returning({ id: schema.menuRecipes.id });
       await tx.insert(schema.menuRecipeLines).values(
         lines.map((l) => ({
-          tenantId: T, recipeId: rec.id, ingredientItemId: l.code, ingredientDescription: l.name,
+          tenantId: T, recipeId: rec!.id, ingredientItemId: l.code, ingredientDescription: l.name,
           qtyPer: n(l.qtyPer, '0'), uom: l.uom, unitCost: n(l.unitCost, '0'),
         })),
       );
