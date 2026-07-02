@@ -80,6 +80,45 @@ channel over flows the modules already own:
   UAT 01/07 cases + matrix. **Harness:** line-crm — leave raise, force-unlink kills the channel,
   rate-limit negative.
 
+### LC-4 — Ops & insights push: alert / report subscriptions in chat
+- **`subscribe` / `unsubscribe` commands** bind the linked staff user's LINE as a delivery target for
+  surfaces the platform already produces: threshold **alerts** (`modules/alerts` already supports a
+  `line` channel with an explicit `target_to` — this phase resolves the target from the *linked
+  identity* instead of a hand-typed id), and **scheduled BI reports** (`modules/bi` report
+  subscriptions — add `line` beside the existing email delivery: the run pushes a compact summary +
+  a link to the full report, never the raw dataset in chat).
+- **Daily digest** — one opt-in morning push per user (business TZ) bundling: their pending
+  approvals, their PRs that moved, and any subscribed alert breaches since yesterday. Reuses
+  `LineNotifyService`; scheduled via the existing BI scheduler (`REPORT_TYPES` "action" job pattern —
+  idempotent per user+day).
+- Permission: subscriptions are self-service for the *linked user's own* targets only; report
+  subscriptions still require the report's own permission at subscribe time (no data-permission
+  bypass via chat). Likely no migration (alert targets + report subscriptions are existing tables;
+  digest opt-in can ride `user_prefs`).
+- **Docs:** PN-26 (reporting/BI) delivery-channel note + manual 09-reports + UAT 09 cases + matrix.
+  **Harness:** line-crm — subscribe→alert breach pushes to linked LINE, unsubscribe stops it,
+  digest idempotency (one push per day), permission-at-subscribe negative.
+
+### LC-5 — Thai natural-language copilot in chat (confirm-first)
+- **Free-text understanding**: a linked user types natural Thai ("ขอกระดาษ A4 สัก 10 รีม ด่วน ๆ
+  พรุ่งนี้ใช้") and the bot drafts the structured command via the existing AI layer
+  (`modules/ai/agent.service.ts` + `ai-action.service.ts` intent/action pattern — reuse its action
+  schema, don't build a second parser). The draft is **always echoed back as a confirm card**
+  ([ยืนยันสร้าง PR] postback from LC-1) — **the model never executes a write**; the confirmed
+  postback runs the exact same command path with the same permission/SoD checks. No confirm = no
+  action.
+- **`ask <คำถาม>`** — read-only analytics Q&A bridging to `modules/nl-analytics` (NL → governed
+  query), answering in chat with the same tenant scoping + permission gates as the web `/query`
+  screen; refuses rather than guesses when the question needs data the user can't see.
+- Guardrails recorded up front: intent parsing applies ONLY to messages from **linked staff** that
+  the command router did not match AND that start with a wake word (`bot` / `บอท`) — customer chat
+  stays untouched; AI cost is bounded per user/day; every AI-drafted action is flagged
+  `via:'ai-draft'` in the audit trail.
+- **Docs:** PN-26 §AI note + PN-02 §7 step-2 addendum (AI drafts confirm into the same entry
+  controls) + manual 03/09 + UAT cases (draft→confirm happy, no-confirm no-action, wake-word
+  scoping, `ask` permission negative). **Harness:** line-crm with the AI layer mocked
+  (deterministic intent fixtures — mirrors the `ai-eval` harness pattern).
+
 ## 2. Explicitly out of scope (this plan)
 - Chat approval for PO / AP payments / any GL-posting decision (PR approval stays the only chat
   decision until the LC-2 retro reviews the postback-approve evidence).
@@ -95,6 +134,8 @@ channel over flows the modules already own:
 | LC-1 | flex + postback approve (+confirm), carousel | line-crm extended; full CI matrix green |
 | LC-2 | expense/advance raise via chat + EXP-07/08 notifications | line-crm + basics (petty-cash GL untouched by chat) green |
 | LC-3 | leave via chat, admin link registry + force-unlink, rate limit | line-crm + compliance green |
+| LC-4 | alert/report subscriptions to LINE, daily digest | line-crm + bi harness green |
+| LC-5 | Thai NL copilot (confirm-first drafts) + `ask` analytics | line-crm (AI mocked) + ai-eval green |
 
 Each phase lands as its own PR with the narrative/manual/UAT/matrix synced in the same commit series,
 per the repo documentation-sync policy. No phase adds an RCM control unless the LC-2 controls review
@@ -104,4 +145,5 @@ concludes chat money-approval needs one.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.2 | 2026-07-02 | Platform | Added LC-4 (alert/BI-report subscriptions + daily digest over the existing alerts `line` channel and BI scheduler) and LC-5 (confirm-first Thai NL copilot + `ask` analytics over `modules/ai` + `nl-analytics`). |
 | 0.1 | 2026-07-02 | Platform | Initial plan — follows delivered 0227/0228 LINE chat work (#333, #335). |
