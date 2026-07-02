@@ -210,6 +210,62 @@ async function main() {
     rfmRun.status === 200 && rfmRun.json.status === 'success' && /RFM refresh/.test(rfmRun.json.summary ?? '') && /0 segment change/.test(rfmRun.json.summary ?? ''),
     JSON.stringify({ status: rfmRun.json.status, summary: rfmRun.json.summary }));
 
+  // ── 7i. Lifecycle journeys (Phase G1, MKT-12) — claim-first at-most-once steps, consent, frequency cap ──
+  // Journey: step1 send now (wait 0), step2 send after 7 days. Cap: 1 msg / 7 days (step2 would be capped
+  // anyway if it were due — the cap check is exercised separately below).
+  const jny = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'Welcome series', trigger: 'manual', cap_messages: 2, cap_window_days: 7,
+    steps: [
+      { wait_days: 0, channel: 'sms', body: 'ยินดีต้อนรับ! รับส่วนลด 10%' },
+      { wait_days: 7, channel: 'sms', body: 'ครบสัปดาห์แล้ว มาอีกนะ' },
+    ],
+  });
+  await inj('POST', `/api/loyalty/journeys/${jny.json.id}/activate`, mgr1);
+  const jEnroll = await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, mgr1, { member_id: memberId });
+  const jEnrollDup = await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, mgr1, { member_id: memberId });
+  ok('Journey: created + activated; enrol once (re-enrol is a no-op — once-per-member policy)',
+    jny.json.code?.startsWith('JNY-') && jEnroll.json.enrolled === true && jEnrollDup.json.enrolled === false,
+    JSON.stringify({ code: jny.json.code, first: jEnroll.json.enrolled, dup: jEnrollDup.json.enrolled }));
+
+  const jRun1 = await inj('POST', '/api/loyalty/journeys/run-due', mgr1);
+  const jRun2 = await inj('POST', '/api/loyalty/journeys/run-due', mgr1);
+  const jLog1 = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.campaign, `journey:${jny.json.code}:1`)));
+  ok('Journey run: step 1 sends exactly once (claim-first) — a re-run sends nothing and step 2 waits 7 days',
+    jRun1.json.sent === 1 && jRun2.json.sent === 0 && jLog1.length === 1 && jLog1[0].status === 'sent',
+    JSON.stringify({ run1: jRun1.json.sent, run2: jRun2.json.sent, logged: jLog1.length }));
+
+  // Consent: the opted-out (but matching) member from 7g enrols, but the send is skipped + audited.
+  await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, mgr1, { member_id: Number(optout.json.id) });
+  const jRun3 = await inj('POST', '/api/loyalty/journeys/run-due', mgr1);
+  const jLogOptout = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.memberId, Number(optout.json.id)), eq(s.messageLog.campaign, `journey:${jny.json.code}:1`)));
+  ok('Journey consent (MKT-12): opted-out member is skipped at the step, audited in message_log',
+    jRun3.json.sent === 0 && jLogOptout.length === 1 && jLogOptout[0].status === 'skipped',
+    JSON.stringify({ sent: jRun3.json.sent, status: jLogOptout[0]?.status }));
+
+  // Frequency cap: a second journey (cap 1/7d, two zero-wait steps) — step 2 must be capped, audited.
+  const jny2 = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'Burst test', trigger: 'manual', cap_messages: 1, cap_window_days: 7,
+    steps: [
+      { wait_days: 0, channel: 'sms', body: 'ข้อความที่หนึ่ง' },
+      { wait_days: 0, channel: 'sms', body: 'ข้อความที่สอง (ต้องโดน cap)' },
+    ],
+  });
+  await inj('POST', `/api/loyalty/journeys/${jny2.json.id}/activate`, mgr1);
+  await inj('POST', `/api/loyalty/journeys/${jny2.json.id}/enroll`, mgr1, { member_id: memberId });
+  await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // step 1 sends (member's only journey msg in-window... plus jny step1: cap counts ALL journey msgs)
+  const jRunCap = await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // step 2 due (wait 0) → capped
+  const jLogCap = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.memberId, memberId), eq(s.messageLog.campaign, `journey:${jny2.json.code}:2`)));
+  ok('Journey frequency cap (MKT-12): over-cap step is skipped and audited (error: frequency cap)',
+    jRunCap.json.sent === 0 && jLogCap.length === 1 && jLogCap[0].status === 'skipped' && jLogCap[0].error === 'frequency cap',
+    JSON.stringify({ sent: jRunCap.json.sent, status: jLogCap[0]?.status, err: jLogCap[0]?.error }));
+
+  // Tenant isolation: T2 cannot see or enrol into T1 journeys.
+  const jT2List = await inj('GET', '/api/loyalty/journeys', mgr2);
+  const jT2Enroll = await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, mgr2, { member_id: memberId });
+  ok('Journey tenant isolation: T2 sees no T1 journeys and cannot enrol into one (404)',
+    (jT2List.json.journeys ?? []).length === 0 && jT2Enroll.status === 404,
+    JSON.stringify({ t2n: (jT2List.json.journeys ?? []).length, s: jT2Enroll.status }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });

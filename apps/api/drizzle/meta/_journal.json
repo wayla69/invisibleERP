@@ -1485,6 +1485,13 @@
       "when": 2023820000038,
       "tag": "0211_campaign_saved_segment",
       "breakpoints": true
+    },
+    {
+      "idx": 212,
+      "version": "7",
+      "when": 2023820000039,
+      "tag": "0212_journeys",
+      "breakpoints": true
     }
   ]
 }

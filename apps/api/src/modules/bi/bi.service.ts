@@ -19,6 +19,7 @@ import { RevRecService } from '../revenue/revrec.service';
 import { ProjectsService } from '../projects/projects.service';
 import { CrmPipelineService } from '../crm-pipeline/crm-pipeline.service';
 import { CrmService } from '../crm/crm.service';
+import { JourneysService } from '../journeys/journeys.service';
 import { cdpConfigured, pushToCdp } from '../../common/cdp-sync';
 import { BudgetService } from '../budget/budget.service';
 import { ProcurementService } from '../procurement/procurement.service';
@@ -50,6 +51,8 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   crm_win_loss: { label: 'วิเคราะห์ Win/Loss', labelEn: 'CRM win/loss analytics' },
   // Likewise: each run re-profiles the tenant's whole active member base (RFM) so segments stay fresh (F2).
   crm_profile_refresh: { label: 'รีเฟรชโปรไฟล์ลูกค้า (RFM)', labelEn: 'CRM profile refresh (RFM)' },
+  // Likewise: each run advances every ACTIVE lifecycle journey — segment-entry sweeps + due steps (G1).
+  journey_runner: { label: 'รันเจอร์นีย์ลูกค้า (Journeys)', labelEn: 'Run lifecycle journeys' },
   // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.
   // Create a `daily` subscription of this type to dun overdue customers automatically (idempotent per run).
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
@@ -104,6 +107,7 @@ export class BiService implements OnModuleInit {
     @Optional() private readonly crm?: CrmPipelineService,
     // Member CRM (cdp_export_sync action job) — Optional so a partial harness still constructs.
     @Optional() private readonly crmMembers?: CrmService,
+    @Optional() private readonly journeys?: JourneysService,
     // Residual-gap report types (RG-1/2/3): exec scorecard composition + budget-variance + supplier scorecard.
     // Optional so a partial harness still constructs; the full app provides BudgetModule/ProcurementModule/MatchModule.
     @Optional() private readonly budget?: BudgetService,
@@ -546,6 +550,11 @@ export class BiService implements OnModuleInit {
       if (!this.collections) throw new BadRequestException({ code: 'COLLECTIONS_UNAVAILABLE', message: 'Collections service not available', messageTh: 'ระบบติดตามหนี้ไม่พร้อมใช้งาน' });
       const r = await this.collections.runDunningSweep(user); // idempotent: re-runs the same day advance nothing
       return { data: r, summary: `Dunning sweep: advanced ${r.advanced} of ${r.scanned} overdue invoices`, summaryTh: `ทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการค้างชำระ` };
+    }
+    if (reportType === 'journey_runner') {
+      if (!this.journeys) throw new BadRequestException({ code: 'JOURNEYS_UNAVAILABLE', message: 'Journeys service not available', messageTh: 'ระบบเจอร์นีย์ไม่พร้อมใช้งาน' });
+      const r = await this.journeys.runDueAll(user); // at-most-once per step: each enrollment-step is claimed before delivery
+      return { data: r, summary: `Journeys: sent ${r.sent}, skipped ${r.skipped} across ${r.tenants_processed} tenant(s)`, summaryTh: `เจอร์นีย์: ส่ง ${r.sent} ข้าม ${r.skipped} ใน ${r.tenants_processed} ร้าน` };
     }
     if (reportType === 'crm_profile_refresh') {
       if (!this.crmMembers) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM service not available', messageTh: 'ระบบ CRM ไม่พร้อมใช้งาน' });

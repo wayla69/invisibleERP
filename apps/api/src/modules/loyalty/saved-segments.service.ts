@@ -121,6 +121,17 @@ export class SavedSegmentsService {
     return rows.map((r: any) => r.m);
   }
 
+  // Does ONE member match a single rule? (Phase G1 journey skip-rules.) Same whitelist + bound values as
+  // segment resolution — an unknown field/op throws BAD_FIELD/BAD_OP, never reaches SQL. Tenant-scoped.
+  async memberMatchesRule(tx: any, tenantId: number, memberId: number, rule: SegmentRule): Promise<boolean> {
+    this.validate([rule]);
+    const w = this.cond(rule);
+    const cond = and(eq(posMembers.tenantId, tenantId), eq(posMembers.id, memberId), ...(w ? [w] : []));
+    const [row] = await tx.select({ id: posMembers.id }).from(posMembers)
+      .leftJoin(customerProfiles, eq(customerProfiles.memberId, posMembers.id)).where(cond).limit(1);
+    return !!row;
+  }
+
   // Resolve a saved segment to its matching active members (paginated) + a total count.
   async resolve(id: number, opts: { limit?: number; offset?: number }, user: JwtUser) {
     const db = this.db as any;
