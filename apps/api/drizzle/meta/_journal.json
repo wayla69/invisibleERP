@@ -1492,6 +1492,13 @@
       "when": 2023820000039,
       "tag": "0212_gl_period_balances",
       "breakpoints": true
+    },
+    {
+      "idx": 213,
+      "version": "7",
+      "when": 2023820000040,
+      "tag": "0213_kb_embed_provider",
+      "breakpoints": true
     }
   ]
 }

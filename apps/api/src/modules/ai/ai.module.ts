@@ -116,6 +116,11 @@ export class KnowledgeController {
 
   @Get('ask') @Permissions('ai_chat', 'dashboard') @RequiresPlanFeature('ai_chat')
   ask(@Query('q') q: string, @CurrentUser() u: JwtUser) { return this.kb.ask(q ?? '', u); }
+
+  // docs/24 R4-1 — migrate the KB onto the CURRENT embedding provider (after switching EMBED_PROVIDER).
+  // Same authority as ingest; idempotent — already-current chunks are skipped.
+  @Post('reembed') @Permissions('masterdata', 'ai_chat')
+  reembed(@CurrentUser() u: JwtUser) { return this.kb.reembedAll(u); }
 }
 
 @Module({

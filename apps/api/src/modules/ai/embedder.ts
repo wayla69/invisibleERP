@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { aiDpaBlocked } from '../../common/ai-models';
+import { captureOpsAlert } from '../../observability/instrumentation';
 
 // Pluggable text embedder for RAG (Phase D2). The DEFAULT is a deterministic, dependency-free local
 // embedder (hashed bag-of-words → fixed-dim, L2-normalized) so retrieval is testable offline and the
@@ -11,14 +13,63 @@ export const EMBED_DIM = 256;
 // query/document can't drive an unbounded loop). 4000 tokens far exceeds any real chunk/query.
 const MAX_TOKENS = 4000;
 
+// Provider result — the caller MUST key retrieval on `provider`: vectors from different embedding spaces
+// are not comparable (cosine across spaces is noise), so search filters chunks to the space the query was
+// embedded in (docs/24 R4-1).
+export interface Embedded { vector: number[]; provider: string }
+
 @Injectable()
 export class EmbedderService {
   get provider() { return process.env.EMBED_PROVIDER || 'local'; }
 
-  // Returns an L2-normalized vector of length EMBED_DIM. Deterministic for the local provider.
-  async embed(text: string): Promise<number[]> {
-    // Only 'local' is implemented here; a real provider adapter would call its API and return the vector.
-    return localEmbed(text);
+  // Embed one text. SEMANTIC provider (docs/24 R4-1 / AUD-AI-01): EMBED_PROVIDER=voyage calls the Voyage
+  // embeddings API (Anthropic's recommended embedding partner; VOYAGE_API_KEY + optional VOYAGE_MODEL,
+  // default voyage-3-lite). Fail-safe by design: the AI DPA gate (AIG-05) also covers embedding
+  // transmission, and any provider error degrades to the deterministic local embedder with a throttled
+  // ops alert — retrieval keeps working on the locally-embedded corpus (provider-filtered), never breaks.
+  async embed(text: string): Promise<Embedded> {
+    if (this.provider === 'voyage' && !aiDpaBlocked()) {
+      try {
+        return { vector: await voyageEmbed(text), provider: 'voyage' };
+      } catch (e) {
+        alertEmbedDegraded(e);
+        return { vector: localEmbed(text), provider: 'local' };
+      }
+    }
+    return { vector: localEmbed(text), provider: 'local' };
+  }
+}
+
+let lastEmbedAlertAt = 0;
+function alertEmbedDegraded(err: unknown): void {
+  const now = Date.now();
+  if (now - lastEmbedAlertAt < 60_000) return;
+  lastEmbedAlertAt = now;
+  captureOpsAlert('embed_provider_degraded', { provider: 'voyage', degraded: 'falling back to the local lexical embedder — semantic retrieval quality reduced until the provider recovers' }, err);
+}
+
+// Voyage embeddings API adapter — plain fetch (no SDK dep), bounded by a 15s timeout. Vector is
+// L2-normalized so cosine == dot at the call sites, same contract as the local embedder.
+async function voyageEmbed(text: string): Promise<number[]> {
+  const key = (process.env.VOYAGE_API_KEY ?? '').trim();
+  if (!key) throw new Error('VOYAGE_API_KEY not set');
+  const model = (process.env.VOYAGE_MODEL ?? 'voyage-3-lite').trim();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 15_000);
+  try {
+    const res = await fetch('https://api.voyageai.com/v1/embeddings', {
+      method: 'POST', signal: ctl.signal,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, input: text.slice(0, 16_000) }),
+    });
+    if (!res.ok) throw new Error(`voyage embeddings HTTP ${res.status}`);
+    const json: any = await res.json();
+    const v: number[] = json?.data?.[0]?.embedding;
+    if (!Array.isArray(v) || !v.length) throw new Error('voyage embeddings: empty vector');
+    const norm = Math.sqrt(v.reduce((a, x) => a + x * x, 0)) || 1;
+    return v.map((x) => x / norm);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

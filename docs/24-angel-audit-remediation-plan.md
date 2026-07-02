@@ -411,7 +411,16 @@ campaign evidence pointers; `CONTROL_STATUS_HONEST.md` flips each Partial with d
 
 ## Wave 4 — AI differentiation upgrades 🤖 (after Wave 0's addendum unblocks prod AI)
 
-### R4-1 · Semantic RAG: pgvector + real embeddings — closes AUD-AI-01 ⭐ highest-leverage AI item
+### R4-1 · Semantic RAG: pgvector + real embeddings — closes AUD-AI-01 ⭐ highest-leverage AI item — **DELIVERED (provider-first) 2026-07-02**
+> Shipped provider-first, with a recorded scope decision: **pgvector was deliberately NOT introduced** —
+> `CREATE EXTENSION vector` would break all ~90 PGlite harnesses (extension must be loaded at
+> `PGlite.create`), and in-service cosine over the per-tenant corpus is fine at current scale; the stored
+> contract (L2-normalized `number[]`) is unchanged, so the pgvector index remains a drop-in when corpus
+> size demands. Delivered: Voyage adapter in `EmbedderService` (fetch, 15s bound, DPA-gated like all AI
+> transmission, fail-safe local fallback + `embed_provider_degraded` alert), `kb_chunks.embed_provider`
+> space column (migration 0213) with space-filtered search (cross-space cosine never compared), and
+> `POST /api/ai/kb/reembed` migration endpoint. ToE: `rag` 11 + `embedder` unit 2; DPA register + docs/06
+> + narrative 26 rev 1.4 updated.
 - Migration `02xx_kb_pgvector.sql`: `CREATE EXTENSION IF NOT EXISTS vector`, `embedding vector(1024)`
   column + HNSW index on the KB chunks table (RLS already applies).
 - `EMBED_PROVIDER=voyage|hash`: wire a real embedding API behind the existing pluggable seam
@@ -562,3 +571,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.6 | 2026-07-02 | ERP/Product | R4-3 partial (croston_sba + dow_seasonal in ALGOS, measured wins in demand-ml 16; holiday-calendar regressor tracked open) |
 | 2.7 | 2026-07-02 | ERP/Product | Status header updated: 16 pieces delivered, Wave 0 closed; open items enumerated |
 | 2.8 | 2026-07-02 | ERP/Product | R4-4 delivered (llm-client seam across 6 services + scored fake-LLM agent benchmark as an ai-eval CI gate) |
+| 2.9 | 2026-07-02 | ERP/Product | R4-1 delivered provider-first (Voyage adapter + embed-space column/filter/reembed; pgvector deferred by recorded decision) |

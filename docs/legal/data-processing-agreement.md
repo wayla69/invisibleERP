@@ -40,6 +40,7 @@ The Controller authorizes the following sub-processors:
 | Alibaba Cloud | Bangkok, Thailand | Hosting, managed PostgreSQL, object storage, backups | All Service data |
 | Stripe | USA/EU | Subscription payment processing | Billing contact, payment metadata (no card data stored by Provider) |
 | Anthropic | USA | AI-assisted summaries/insights & document field extraction (optional feature) | Business data sent to the model; **direct contact identifiers minimized/redacted before transmission** (`AI_PII_REDACTION`); feature disableable per tenant |
+| Voyage AI (optional, `EMBED_PROVIDER=voyage`) | USA | Semantic text embeddings for knowledge-base retrieval (optional feature) | Knowledge-base document text (tenant policies/SOPs); transmission gated by the same production DPA acknowledgment gate as the AI features; fail-safe local (no-transmission) embedder otherwise |
 | Sentry / OpenTelemetry | USA/EU (SaaS) | Error monitoring / observability (optional) | Diagnostic metadata |
 
 The Processor will give the Controller `<<30 days'>>` notice of any new sub-processor; the Controller may
