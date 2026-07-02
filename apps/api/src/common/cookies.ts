@@ -8,7 +8,18 @@ export const AUTH_COOKIE = 'ierp_token'; // httpOnly — the JWT (short-lived ac
 export const CSRF_COOKIE = 'ierp_csrf';  // readable — double-submit CSRF token (also the client's "session exists" flag)
 export const REFRESH_COOKIE = 'ierp_refresh'; // httpOnly — opaque refresh token, scoped to /api/auth
 
-const MAX_AGE = Number(process.env.AUTH_COOKIE_MAX_AGE ?? 43200); // seconds (default 12h)
+// Access-cookie lifetime — coherent with the ACCESS-TOKEN TTL by default (docs/27 R2-4 / AUD-SEC-05: the
+// signed JWT always governs; a cookie that outlives it only confuses audits). Parses JWT_EXPIRES_IN
+// ('1h' / '30m' / bare seconds); AUTH_COOKIE_MAX_AGE still overrides explicitly.
+function jwtTtlSeconds(): number {
+  const raw = (process.env.JWT_EXPIRES_IN ?? '1h').trim();
+  const m = /^(\d+)([smhd]?)$/.exec(raw);
+  if (!m) return 3600;
+  const nVal = Number(m[1]);
+  const mult = m[2] === 'd' ? 86400 : m[2] === 'h' ? 3600 : m[2] === 'm' ? 60 : 1;
+  return nVal * mult;
+}
+const MAX_AGE = Number(process.env.AUTH_COOKIE_MAX_AGE ?? jwtTtlSeconds()); // seconds (default = access-token TTL; was a hardcoded 12h)
 // Refresh-cookie lifetime — the long session window over which an access token can be silently renewed.
 const REFRESH_MAX_AGE = Number(process.env.REFRESH_COOKIE_MAX_AGE ?? 604800); // seconds (default 7d)
 // The refresh token is only ever sent to the auth endpoints (refresh + logout), not every request, to

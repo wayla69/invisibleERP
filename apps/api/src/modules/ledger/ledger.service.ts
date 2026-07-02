@@ -2,10 +2,11 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { sql, eq, and, desc, notInArray, gt, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules, tenantAccounts, glAuditLog } from '../../database/schema';
+import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMembers, posMemberLedger, loyaltyConfig, loyaltyPostingRuns, arInvoices, apTransactions, recurringJournals, prepaidSchedules, tenantAccounts, glAuditLog, glPeriodBalances } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
+import { toMinor4, minorToNumber4 } from '../../common/money';
 import { assertTemplatesSubsetOf, isIndustryKey, COA_TEMPLATES, type IndustryKey, type CoaTemplateRow } from './coa-templates';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -163,6 +164,37 @@ export class LedgerService {
     return sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${c})`;
   }
 
+  // ───────────────────── GL period-balance snapshot (docs/27 R1-2 / AUD-ARC-02) ─────────────────────
+  // Apply one posted entry's lines to gl_period_balances INSIDE the same transaction as the posting.
+  // Posting is the only balance-affecting event (Drafts are excluded from balances, Posted entries are
+  // DB-immutable per 0165, corrections are contra reversals that post normally), so the snapshot cannot
+  // drift from a mutation this service can see; GL-20 re-verifies it against the raw ledger at close.
+  private async bumpPeriodBalances(
+    tx: any,
+    hdr: { tenantId: number | null; ledgerCode: string | null; period: string | null },
+    lines: { account_code: string; debit?: unknown; credit?: unknown; cost_center?: string | null }[],
+  ): Promise<void> {
+    // Aggregate per (account, cost-center) first — an entry rarely has more than a handful of rows.
+    const agg = new Map<string, { account: string; cc: string; debit: number; credit: number }>();
+    for (const l of lines) {
+      const cc = (l.cost_center ?? '') as string;
+      const k = `${l.account_code}|${cc}`;
+      const cur = agg.get(k) ?? { account: l.account_code, cc, debit: 0, credit: 0 };
+      cur.debit += n(l.debit); cur.credit += n(l.credit);
+      agg.set(k, cur);
+    }
+    const ledgerCode = hdr.ledgerCode ?? '';
+    const period = hdr.period ?? '';
+    for (const r of agg.values()) {
+      // ON CONFLICT targets the ux_gl_period_balances expression index (0218): atomic accumulate.
+      await tx.execute(sql`
+        INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
+        VALUES (${hdr.tenantId}, ${ledgerCode}, ${period}, ${r.cc}, ${r.account}, ${fx(r.debit, 4)}, ${fx(r.credit, 4)})
+        ON CONFLICT (coalesce(tenant_id, 0), ledger_code, period, cost_center_code, account_code)
+        DO UPDATE SET debit = gl_period_balances.debit + excluded.debit, credit = gl_period_balances.credit + excluded.credit`);
+    }
+  }
+
   // ───────────────────── Post a balanced entry ─────────────────────
   // BALANCED BY CONSTRUCTION — throw UNBALANCED if Σdebit !== Σcredit (round 4) or empty.
   // `outerTx` lets a caller post this entry INSIDE its own transaction (e.g. a return reversing money +
@@ -190,9 +222,13 @@ export class LedgerService {
       }
     }
 
-    const totalDebit = round4(nzLines.reduce((a, l) => a + n(l.debit), 0));
-    const totalCredit = round4(nzLines.reduce((a, l) => a + n(l.credit), 0));
-    if (totalDebit !== totalCredit) {
+    // Exact scale-4 balance check (docs/27 R1-4): accumulate in bigint minor units — float sums that are
+    // then rounded can drift across a rounding boundary and are not a ledger-grade invariant.
+    const totalDebitM = nzLines.reduce((a, l) => a + toMinor4(n(l.debit)), 0n);
+    const totalCreditM = nzLines.reduce((a, l) => a + toMinor4(n(l.credit)), 0n);
+    const totalDebit = minorToNumber4(totalDebitM);
+    const totalCredit = minorToNumber4(totalCreditM);
+    if (totalDebitM !== totalCreditM) {
       throw new BadRequestException({
         code: 'UNBALANCED',
         message: `Entry not balanced: debit ${totalDebit} != credit ${totalCredit}`,
@@ -264,6 +300,8 @@ export class LedgerService {
         currency, memo: l.memo ?? null, costCenterCode: l.cost_center ?? null, tenantId: entryTenantId,
         branchId: l.branch_id ?? null, projectId: l.project_id ?? null, departmentId: l.dept_id ?? null,
       })));
+      // R1-2: a posting that lands Posted updates the period-balance snapshot in the SAME transaction.
+      if (willPost) await this.bumpPeriodBalances(tx, { tenantId: entryTenantId, ledgerCode: dto.ledgerCode ?? null, period }, nzLines);
       // GL-17: record a POST audit-trail row for entries that land Posted (skip Drafts — APPROVE logs them).
       if (willPost) {
         await tx.insert(glAuditLog).values({
@@ -292,9 +330,9 @@ export class LedgerService {
     if (!(FREQUENCIES as readonly string[]).includes(dto.frequency)) throw new BadRequestException({ code: 'BAD_FREQUENCY', message: `frequency must be one of ${FREQUENCIES.join('/')}`, messageTh: 'รอบเวลาไม่ถูกต้อง' });
     const nz = lines.filter((l) => !(n(l.debit) === 0 && n(l.credit) === 0));
     if (!nz.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No non-zero template lines', messageTh: 'ไม่มีรายการบัญชีที่มีมูลค่า' });
-    const td = round4(nz.reduce((a, l) => a + n(l.debit), 0));
-    const tc = round4(nz.reduce((a, l) => a + n(l.credit), 0));
-    if (td !== tc) throw new BadRequestException({ code: 'UNBALANCED', message: `Template not balanced: debit ${td} != credit ${tc}`, messageTh: 'แม่แบบไม่สมดุล (เดบิตไม่เท่าเครดิต)' });
+    const tdM = nz.reduce((a, l) => a + toMinor4(n(l.debit)), 0n);
+    const tcM = nz.reduce((a, l) => a + toMinor4(n(l.credit)), 0n);
+    if (tdM !== tcM) throw new BadRequestException({ code: 'UNBALANCED', message: `Template not balanced: debit ${minorToNumber4(tdM)} != credit ${minorToNumber4(tcM)}`, messageTh: 'แม่แบบไม่สมดุล (เดบิตไม่เท่าเครดิต)' });
     const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
     const nextRun = dto.startDate ?? ymd();
     const [r] = await db.insert(recurringJournals).values({
@@ -447,10 +485,16 @@ export class LedgerService {
       : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.code, e.period), eq(fiscalPeriods.tenantId, e.tenantId))).limit(1);
     if (pp && pp.status === 'Closed') throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${e.period} is closed`, messageTh: `งวดบัญชี ${e.period} ถูกปิดแล้ว` });
     // GL-17: a Draft → Posted transition is the moment of posting; stamp postedAt and log the APPROVE.
-    await db.update(journalEntries).set({ status: 'Posted', postedAt: new Date() }).where(eq(journalEntries.id, e.id));
-    await db.insert(glAuditLog).values({
-      tenantId: e.tenantId ?? null, entryId: Number(e.id), action: 'APPROVE', actor: approver.username,
-      detail: { entry_no: entryNo, prepared_by: e.createdBy },
+    // R1-2: the transition + audit row + period-balance snapshot commit ATOMICALLY.
+    await db.transaction(async (tx: any) => {
+      await tx.update(journalEntries).set({ status: 'Posted', postedAt: new Date() }).where(eq(journalEntries.id, e.id));
+      await tx.insert(glAuditLog).values({
+        tenantId: e.tenantId ?? null, entryId: Number(e.id), action: 'APPROVE', actor: approver.username,
+        detail: { entry_no: entryNo, prepared_by: e.createdBy },
+      });
+      const drLines = await tx.select({ account_code: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit, cost_center: journalLines.costCenterCode })
+        .from(journalLines).where(eq(journalLines.entryId, Number(e.id)));
+      await this.bumpPeriodBalances(tx, { tenantId: e.tenantId ?? null, ledgerCode: e.ledgerCode ?? null, period: e.period ?? null }, drLines);
     });
     return { entry_no: entryNo, status: 'Posted', approved_by: approver.username, prepared_by: e.createdBy };
   }
@@ -548,34 +592,37 @@ export class LedgerService {
   // group journal_lines by account_code (joined to accounts) — Σdebit, Σcredit, balance
   async trialBalance(period?: string, costCenter?: string | null, ledgerCode?: string | null) {
     const db = this.db as any;
-    const conds = [eq(journalEntries.status, 'Posted'), this.ledgerCond(ledgerCode)];
-    if (period) conds.push(sql`${journalEntries.period} = ${period}`);
-    if (costCenter === '__UNASSIGNED__') conds.push(sql`${journalLines.costCenterCode} IS NULL`);
-    else if (costCenter) conds.push(eq(journalLines.costCenterCode, costCenter));
-    const where = and(...conds);
+    // R1-2 (AUD-ARC-02): read the maintained gl_period_balances snapshot instead of aggregating the full
+    // journal_lines table per request. Same filters/semantics: Posted-only (the snapshot holds nothing
+    // else), ledger NULL-or-code ('' = NULL in the normalized key), per-period, per-cost-center; RLS
+    // scopes tenants exactly as the raw scan did. GL-20 reconciles snapshot↔raw at every close.
+    const conds: any[] = [inArray(glPeriodBalances.ledgerCode, ['', ledgerCode ?? LEADING])];
+    if (period) conds.push(eq(glPeriodBalances.period, period));
+    if (costCenter === '__UNASSIGNED__') conds.push(eq(glPeriodBalances.costCenterCode, ''));
+    else if (costCenter) conds.push(eq(glPeriodBalances.costCenterCode, costCenter));
     const rows = await db
       .select({
-        account_code: journalLines.accountCode,
+        account_code: glPeriodBalances.accountCode,
         account_name: accounts.name,
         account_type: accounts.type,
-        debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
-        credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
+        debit: sql<string>`coalesce(sum(${glPeriodBalances.debit}),0)`,
+        credit: sql<string>`coalesce(sum(${glPeriodBalances.credit}),0)`,
       })
-      .from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(where)
-      .groupBy(journalLines.accountCode, accounts.name, accounts.type)
-      .orderBy(journalLines.accountCode);
+      .from(glPeriodBalances)
+      .leftJoin(accounts, eq(glPeriodBalances.accountCode, accounts.code))
+      .where(and(...conds))
+      .groupBy(glPeriodBalances.accountCode, accounts.name, accounts.type)
+      .orderBy(glPeriodBalances.accountCode);
 
     const out = rows.map((r: any) => {
       const debit = round4(n(r.debit));
       const credit = round4(n(r.credit));
       return { account_code: r.account_code, account_name: r.account_name, account_type: r.account_type, debit, credit, balance: round4(debit - credit) };
     });
-    const totalDebit = round4(out.reduce((a: number, r: any) => a + r.debit, 0));
-    const totalCredit = round4(out.reduce((a: number, r: any) => a + r.credit, 0));
-    return { period: period ?? null, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING, rows: out, totals: { debit: totalDebit, credit: totalCredit, balanced: totalDebit === totalCredit } };
+    // Totals from the raw SQL numeric strings in bigint minor units — exact, order-independent (R1-4).
+    const totalDebitM = rows.reduce((a: bigint, r: any) => a + toMinor4(r.debit), 0n);
+    const totalCreditM = rows.reduce((a: bigint, r: any) => a + toMinor4(r.credit), 0n);
+    return { period: period ?? null, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING, rows: out, totals: { debit: minorToNumber4(totalDebitM), credit: minorToNumber4(totalCreditM), balanced: totalDebitM === totalCreditM } };
   }
 
   // ───────────────────── Income Statement ─────────────────────
@@ -643,23 +690,24 @@ export class LedgerService {
   async balanceSheet(asOf: string, ledgerCode?: string | null) {
     const db = this.db as any;
     const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
-    const assets = round4(typeTotal(rows, 'Asset', 'debit') - typeTotal(rows, 'Asset', 'credit'));
-    const liabilities = round4(typeTotal(rows, 'Liability', 'credit') - typeTotal(rows, 'Liability', 'debit'));
+    // Exact minor-unit arithmetic (docs/27 R1-4): the balanced flag compares bigints, not rounded floats.
+    const assetsM = typeTotalM(rows, 'Asset', 'debit') - typeTotalM(rows, 'Asset', 'credit');
+    const liabilitiesM = typeTotalM(rows, 'Liability', 'credit') - typeTotalM(rows, 'Liability', 'debit');
     // equity INCLUDES 3100 Retained Earnings (closed-year results carried here by closeYear)
-    const equity = round4(typeTotal(rows, 'Equity', 'credit') - typeTotal(rows, 'Equity', 'debit'));
+    const equityM = typeTotalM(rows, 'Equity', 'credit') - typeTotalM(rows, 'Equity', 'debit');
     // current UNCLOSED-period P&L still sits in Revenue/Expense (closed years were zeroed into 3100)
-    const netIncome = round4(
-      (typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit')) -
-      (typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit')),
-    );
+    const netIncomeM =
+      (typeTotalM(rows, 'Revenue', 'credit') - typeTotalM(rows, 'Revenue', 'debit')) -
+      (typeTotalM(rows, 'Expense', 'debit') - typeTotalM(rows, 'Expense', 'credit'));
     // retained_earnings is a DISPLAY sub-total of equity (the 3100 balance) — not added again
-    const retainedEarnings = round4(rows.filter((r: any) => r.account_code === '3100').reduce((a: number, r: any) => a + (n(r.credit) - n(r.debit)), 0));
-    const liabilitiesEquity = round4(liabilities + equity + netIncome);
+    const retainedEarningsM = rows.filter((r: any) => r.account_code === '3100').reduce((a: bigint, r: any) => a + (toMinor4(r.credit) - toMinor4(r.debit)), 0n);
+    const liabilitiesEquityM = liabilitiesM + equityM + netIncomeM;
     return {
       as_of: asOf, ledger: ledgerCode ?? LEADING,
-      assets, liabilities, equity, retained_earnings: retainedEarnings, net_income: netIncome,
-      liabilities_plus_equity: liabilitiesEquity,
-      balanced: assets === liabilitiesEquity,
+      assets: minorToNumber4(assetsM), liabilities: minorToNumber4(liabilitiesM), equity: minorToNumber4(equityM),
+      retained_earnings: minorToNumber4(retainedEarningsM), net_income: minorToNumber4(netIncomeM),
+      liabilities_plus_equity: minorToNumber4(liabilitiesEquityM),
+      balanced: assetsM === liabilitiesEquityM,
     };
   }
 
@@ -1124,4 +1172,8 @@ function prevDay(ymdStr: string): string {
 }
 function typeTotal(rows: any[], type: string, side: 'debit' | 'credit'): number {
   return rows.filter((r) => r.account_type === type).reduce((a, r) => a + n(r[side]), 0);
+}
+// Exact variant over the raw SQL numeric strings, in bigint minor units (docs/27 R1-4 / AUD-ARC-04).
+function typeTotalM(rows: any[], type: string, side: 'debit' | 'credit'): bigint {
+  return rows.filter((r) => r.account_type === type).reduce((a: bigint, r) => a + toMinor4(r[side]), 0n);
 }

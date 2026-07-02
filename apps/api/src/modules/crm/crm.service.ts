@@ -126,7 +126,7 @@ export class CrmService {
     return { member_id: memberId, rfm_segment: segment, total_orders: totalOrders, total_spend: totalSpend, rfm_recency: rfmRecency, rfm_frequency: rfmFrequency, rfm_monetary: rfmMonetary, churn_risk: churnRisk, predicted_ltv: predictedLtv, score_version: SCORE_VERSION, preferred_hour: preferredHour };
   }
 
-  // Phase F2 (docs/24) — bulk RFM re-profiling. Sweeps the tenant's ACTIVE members in id-keyed batches
+  // Phase F2 (docs/27) — bulk RFM re-profiling. Sweeps the tenant's ACTIVE members in id-keyed batches
   // through the single reviewed refreshProfile() path (no new scoring logic), so segments and analytics stop
   // drifting stale between orders. Idempotent (the profile is a pure upsert; a re-run with no new orders
   // reports 0 segment changes). Explicitly tenant-scoped — the BI scheduler also runs this under Admin

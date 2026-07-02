@@ -13,7 +13,9 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-001 | JWT login returns token + role | ITGC-AC-01 | 08 §7, §9 |
 | UAT-SEC-002 | Bad-credential rejection | ITGC-AC-01 | 08 §9, §13 |
 | UAT-SEC-003 | Auth required on protected routes | ITGC-AC-02 | 08 §7 |
-| UAT-SEC-004 | First-login forced password change | ITGC-AC-04 | 08 §7 |
+| UAT-SEC-004 | First login forces password change (hard API gate) | ITGC-AC-07 | 08 §7 |
+| UAT-SEC-046 | Permission change revokes outstanding sessions immediately | ITGC-AC-15, ITGC-AC-02 | 08 §7 |
+| UAT-SEC-047 | Employee DSAR access/erasure with statutory payroll retention | PDPA-02, ITGC-AC-19 | 08 §7 |
 | UAT-SEC-005 | Password min-length policy | ITGC-AC-05 | 08 §9 |
 | UAT-SEC-006 | Mandatory MFA for privileged role | ITGC-AC-06 | 08 §9 |
 | UAT-SEC-007 | MFA not forced for low-privilege role | ITGC-AC-06 | 08 §9 |
@@ -297,6 +299,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-060 | PR raised by any employee (company-wide `pr_raise`) | R03 (access design) | 02 §3, §6, §7 |
 | UAT-P2P-061 | GR refused for a procurement-only user (R04 at permission layer) | R04 | 02 §7, §9 |
 | UAT-P2P-062 | AP disbursement approved on finance Disbursements screen | EXP-06, R07 | 02 §3, §7 |
+| UAT-P2P-066 | Vendor PII encrypted at rest; ghost-vendor detector still fires | ITGC-AC-19, EXP-02 | 02 §9 |
 | UAT-UI-P2P-ACC-01 | Procurement & AP screens split by user group | R03/R04/R07 | 02 §3 |
 | UAT-UI-SUP-01 | Supplier portal screen (vendor self-service) — PO ack + invoice submit | Feature (supplier portal UI) | 02 §7 |
 | UAT-P2P-040 | Capital PO line → GR eligible (not stocked) | FA-10 | 02 §7, 09 §7 |
@@ -450,6 +453,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-106 | GlAccountant cannot see certify button on /reconciliation | R06, REC-03 | 04 §7 |
 | UAT-GL-107 | FinancialController can certify a recon period | R06, REC-03 | 04 §7 |
 | UAT-GL-108 | API certify blocked for recon_prep-only token | R06, REC-03 | 04 §9 |
+| UAT-GL-113 | Snapshot reconciliation blocks a drifted close | GL-20 | 04 §9 |
+| UAT-GL-114 | Trial balance reads the maintained snapshot | GL-01, GL-20 | 04 §7 |
 
 ## 06 — Tax → `06-tax-compliance.md`
 
@@ -500,6 +505,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-PAY-023 | Reject a pending run, then re-run | PAY-03 | 05 §7 |
 | UAT-PAY-035 | Async payroll run executes off-thread via the job queue | PAY-03, availability | 05 §7 |
 | UAT-PAY-036 | Async run idempotent + job status tenant-isolated | ITGC-AC-03 | 05 §7 |
+| UAT-PAY-037 | Employee PII encrypted at rest; forms still show the real ID | ITGC-AC-19 | 05 §9 |
 | UAT-UI-ESS-01 | ESS self-service screen reachable + own data + submit-only (UI) | Feature (ESS UI) | 25 §7 |
 | UAT-PAY-024 | Approver inbox lists pending expense claims (tenant-scoped) | Feature (ESS), ITGC-AC-03 | 25 §7 |
 | UAT-UI-ESS-02 | Expense approval screen — approve/reject + self-block (UI) | Feature (ESS UI), ITGC-AC-09 | 25 §7 |
@@ -649,6 +655,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-041 | One-click draft PO + AI tools | Feature (production plan), AI | 20 §rev3.2 |
 | UAT-RPT-042 | Residual-gap BI report types (exec / budget / supplier) | RG-1/2/3 (docs/21); ELC-06 | docs/21 §2 |
 | UAT-RPT-043 | Streaming analytics — live KPI feed | (operational) | docs/22 Phase B |
+| UAT-RPT-044 | Weekly-seasonal demand auto-selects the day-of-week model | demand forecasting | 26 §7 |
+| UAT-RPT-045 | Thai-holiday demand model applies the learned uplift | demand forecasting | 26 §7 |
 | UAT-UI-DEM-01 | Demand forecasting screen (forecast / backtest / accuracy) (UI) | Feature (demand ML UI) | 13 §7 |
 | UAT-UI-BUD-01 | Budget vs Actual screen (set budget + variance) (UI) | Feature (budget-vs-actual UI) | 13 §7 |
 | UAT-BUD-02 | Budget maker-checker — pending excluded until approved | BUD-01 | 13 §7 |

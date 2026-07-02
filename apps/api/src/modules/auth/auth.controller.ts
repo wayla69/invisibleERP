@@ -113,7 +113,7 @@ export class AuthController {
   @Post('auth/logout')
   @HttpCode(200)
   async logout(@Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<{ ok: true }> {
-    // Revoke the presented token (jti denylist) so it can't be replayed before its 8h expiry, then clear cookies.
+    // Revoke the presented token (jti denylist) so it can't be replayed before its access-token expiry (default 1h), then clear cookies.
     const auth = req.headers['authorization'];
     const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : undefined;
     const token = bearer ?? readCookie(req, AUTH_COOKIE);

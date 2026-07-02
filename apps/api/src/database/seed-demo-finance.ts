@@ -123,6 +123,14 @@ async function main() {
     console.log(`   ${seq} posted journals · revenue ฿${r2(revTot).toLocaleString()} · COGS ฿${r2(cogsTot).toLocaleString()} · opex ฿${r2(opexTot).toLocaleString()}`);
     console.log(`   → net profit ฿${netProfit.toLocaleString()} (${r2((netProfit / revTot) * 100)}% margin)`);
   });
+  // Direct journal inserts bypass LedgerService → rebuild the gl_period_balances snapshot (docs/27 R1-2)
+  // so the trial balance (snapshot-backed) reflects the demo books. Same recompute as the 0219 backfill.
+  await client.unsafe(`DELETE FROM gl_period_balances`);
+  await client.unsafe(`INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
+    SELECT je.tenant_id, coalesce(je.ledger_code,''), coalesce(je.period,''), coalesce(jl.cost_center_code,''), jl.account_code, coalesce(sum(jl.debit),0), coalesce(sum(jl.credit),0)
+    FROM journal_lines jl JOIN journal_entries je ON je.id = jl.entry_id
+    WHERE je.status = 'Posted'
+    GROUP BY 1,2,3,4,5`);
   await client.end();
 }
 

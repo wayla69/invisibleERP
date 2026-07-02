@@ -1,4 +1,5 @@
 import { pgTable, bigserial, bigint, text, numeric, integer, date, timestamp, boolean, index } from 'drizzle-orm/pg-core';
+import { encryptedText } from '../encrypted-column';
 import { poStatusEnum } from './enums';
 import { tenants } from './tenants';
 
@@ -20,12 +21,15 @@ export const vendors = pgTable('vendors', {
   email: text('email'),
   userName: text('user_name'),  // supplier portal: link to users.username for vendor self-service (Phase D3)
   address: text('address'),
-  taxId: text('tax_id'),
+  // PII-at-rest (ITGC-AC-19, docs/27 R0-1): vendor tax ID + bank account are encrypted (AES-256-GCM,
+  // legacy-plaintext passthrough). NOT queried by value in SQL — the ghost-vendor detector
+  // (controls.service.ts) groups decrypted values in app code, since random-IV ciphertext never collides.
+  taxId: encryptedText('tax_id'),
   paymentTerms: text('payment_terms').default('Cash'),
   leadTimeDays: integer('lead_time_days').default(3),
   rating: numeric('rating').default('3.0'),
   bankName: text('bank_name'),
-  bankAccount: text('bank_account'),
+  bankAccount: encryptedText('bank_account'), // PII-at-rest (ITGC-AC-19) — decrypts only at the payment boundary
   creditLimit: numeric('credit_limit', { precision: 14, scale: 2 }),
   currency: text('currency').default('THB'),
   category: text('category').default('Supplier'),

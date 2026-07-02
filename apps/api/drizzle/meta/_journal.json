@@ -1527,6 +1527,27 @@
       "when": 2023820000044,
       "tag": "0217_send_time",
       "breakpoints": true
+    },
+    {
+      "idx": 218,
+      "version": "7",
+      "when": 2023820000045,
+      "tag": "0218_tenant_indexes_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "7",
+      "when": 2023820000046,
+      "tag": "0219_gl_period_balances",
+      "breakpoints": true
+    },
+    {
+      "idx": 220,
+      "version": "7",
+      "when": 2023820000047,
+      "tag": "0220_kb_embed_provider",
+      "breakpoints": true
     }
   ]
 }

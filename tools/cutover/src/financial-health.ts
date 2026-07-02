@@ -49,6 +49,14 @@ async function main() {
     { entryId: Number(je.id), accountCode: '1000', debit: '100000', credit: '0', tenantId: t1 },
     { entryId: Number(je.id), accountCode: '3000', debit: '0', credit: '100000', tenantId: t1 },
   ]);
+  // Direct insert bypasses LedgerService → rebuild the gl_period_balances snapshot (R1-2; the service's
+  // health check reads the trial balance, which now reads the snapshot).
+  await pg.exec(`DELETE FROM gl_period_balances;
+    INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
+    SELECT je.tenant_id, coalesce(je.ledger_code,''), coalesce(je.period,''), coalesce(jl.cost_center_code,''), jl.account_code, coalesce(sum(jl.debit),0), coalesce(sum(jl.credit),0)
+    FROM journal_lines jl JOIN journal_entries je ON je.id = jl.entry_id
+    WHERE je.status = 'Posted'
+    GROUP BY 1,2,3,4,5;`);
   // AR (inflows): 30k due in 3 days + 10k OVERDUE (5 days ago) → both collect in week 1
   await db.insert(s.arInvoices).values([
     { invoiceNo: 'INV-A', dueDate: shift(3), tenantId: t1, amount: '30000', paidAmount: '0', status: 'Unpaid' },

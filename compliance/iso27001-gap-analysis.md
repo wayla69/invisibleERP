@@ -8,7 +8,7 @@
 **Related:** `soc2-readiness.md` · `COSO_ICFR_Audit_Readiness_Plan.md` · `Oshinei_ERP_SOX_RCM_v1.xlsx` · `policies/`
 
 > **Relationship to SOC 2 and SOX work:** ISO 27001:2022 Annex A maps almost one-to-one with SOC 2 CC6–CC9
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The 66-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->171<!-- /rcm-total -->-control RCM built for SOX
 > 404(a) covers the ITGC spine of ISO 27001; the gap analysis below shows where existing controls satisfy
 > Annex A requirements and where incremental work is needed. A shared evidence base keeps the three
 > certifications from tripling compliance work.
@@ -313,3 +313,4 @@ in Railway's ISO 27001 / SOC 2 report, which is reviewed annually as a complemen
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-28 | Platform | Initial ISO 27001:2022 Annex A gap analysis. 93 controls assessed: 53 ✅, 24 🟡, 3 ❌, 13 N/A. Gap summary, risk register excerpt, SOA skeleton, and remediation roadmap. |
+| 0.2 DRAFT | 2026-07-02 | Platform | Census reconciliation (docs/27 R3-1): SOX-RCM population reference corrected to the generated census (169) with a machine-readable tag. |

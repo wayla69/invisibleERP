@@ -287,7 +287,7 @@ across the group.
 **API:** `/api/pdpa/dsar` · **Required permission:** `users` (the DPO / access-admin duty).
 
 Under Thailand's PDPA, a person can ask what data you hold about them, ask for a copy,
-or ask you to erase it. Use the DSAR (Data Subject Access Request) register to track and
+or ask you to erase it — this covers loyalty members **and employees** (an employee's access bundle includes their citizen ID/bank details and payslip history; erasure redacts their master record while payroll/withholding records stay per Thai statutory retention, noted in the request result). Use the DSAR (Data Subject Access Request) register to track and
 fulfil these on time.
 
 1. **Log the request.** Record the subject (e.g. a loyalty member by code/id) and the

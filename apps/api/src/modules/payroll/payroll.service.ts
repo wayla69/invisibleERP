@@ -167,14 +167,26 @@ export class PayrollService implements OnModuleInit {
   }
 
   // ภ.ง.ด.1ก — annual withholding summary per employee (income + WHT for the year).
+  // national_id is encrypted at rest (ITGC-AC-19) with a random IV, so SQL GROUP BY on it would split one
+  // employee into one group per ciphertext — aggregate in app code instead, keyed on employee_id/emp_code
+  // (the per-year row count is headcount × months, small per tenant).
   async pnd1a(year: string, user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select({
-      empName: payslips.empName, nationalId: payslips.nationalId,
-      income: sql<string>`coalesce(sum(${payslips.gross}),0)`, wht: sql<string>`coalesce(sum(${payslips.wht}),0)`,
+      employeeId: payslips.employeeId, empCode: payslips.empCode, empName: payslips.empName,
+      nationalId: payslips.nationalId, gross: payslips.gross, wht: payslips.wht,
     }).from(payslips).innerJoin(payruns, eq(payslips.payrunId, payruns.id))
-      .where(sql`${payruns.period}::text like ${year + '-%'}`).groupBy(payslips.empName, payslips.nationalId);
-    const lines = rows.map((r: any) => ({ emp_name: r.empName, national_id: r.nationalId, income: n(r.income), wht: n(r.wht) }));
+      .where(sql`${payruns.period}::text like ${year + '-%'}`);
+    const byEmp = new Map<string, { emp_name: string; national_id: string | null; income: number; wht: number }>();
+    for (const r of rows as any[]) {
+      const key = r.employeeId != null ? `id:${r.employeeId}` : `code:${r.empCode ?? r.empName}`;
+      const cur = byEmp.get(key) ?? { emp_name: r.empName, national_id: r.nationalId ?? null, income: 0, wht: 0 };
+      cur.income = r2(cur.income + n(r.gross));
+      cur.wht = r2(cur.wht + n(r.wht));
+      if (cur.national_id == null && r.nationalId != null) cur.national_id = r.nationalId;
+      byEmp.set(key, cur);
+    }
+    const lines = [...byEmp.values()];
     return {
       year, form: 'PND1A', headcount: lines.length, lines,
       total_income: r2(lines.reduce((a: number, l: any) => a + l.income, 0)),

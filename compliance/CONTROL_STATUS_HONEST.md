@@ -28,12 +28,17 @@ evidenced over an audit period or tested by an independent firm. Those are separ
 
 | Status | Count | Share | Meaning |
 |--------|-------|-------|---------|
-| Implemented | **151** | 98% | Exists + automated ToE harness re-performs it |
-| Partial | **3** | 2% | Capability present; must be formalized/extended |
-| Gap | **0** | 0% | — every control now has at least system scaffolding |
-| **Total** | **154** | | |
+| Implemented | **<!-- rcm-implemented -->168<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
+| Partial | **<!-- rcm-partial -->3<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
+| Gap | **<!-- rcm-gap -->0<!-- /rcm-gap -->** | 0% | — every control now has at least system scaffolding |
+| **Total** | **<!-- rcm-total -->171<!-- /rcm-total -->** | | |
 
-> Note on the panel's "49/77": that snapshot is **stale**. The control set has roughly doubled (77 → 154)
+> The counts above carry machine-readable census tags: `python3 compliance/build_rcm.py --counts` is the
+> **only source of truth**, and `tools/ci/check-rcm-census.mjs` (CI) fails when any tagged claim drifts
+> from it — the 2026-07 investment audit found FIVE different populations quoted across the compliance
+> docs (66, 57, 68, 153, 154 vs the real 169), which fails an auditor's first PBC reconciliation.
+>
+> Note on the panel's "49/77": that snapshot is **stale**. The control set has roughly doubled (77 → 169)
 > and implemented coverage has risen as the deepening programs landed. The figures above are generated from
 > `build_rcm.py`, not asserted.
 >
@@ -109,3 +114,5 @@ the audit-committee meetings, operating the hotline) is the org/PMO process that
 | Date | Change |
 |------|--------|
 | 2026-06-30 | Initial — honest baseline (138/9/6 of 153), panel↔RCM ID crosswalk, "audit-ready" correction, EGC/404(b) timeline. PwC Capital Markets follow-up. |
+| 2026-07-02 | **Census reconciliation (docs/27 R3-1 / AUD-CMP-01).** All counts re-generated from `build_rcm.py --counts` (169: 166 Implemented / 3 Partial / 0 Gap) and tagged machine-readable; the new CI guard `check-rcm-census.mjs` blocks future drift. Prior figures in this doc (151/3/0 of 154) were a stale hand-copy. |
+| 2026-07-02 | **Operating-evidence clock started (docs/27 R3-3).** CI now retains every `compliance` ToE run as a structured evidence artifact (see soc2-readiness.md §revision 0.3 for the quarterly-archive runbook). The "≥1 quarter of retained operating evidence" precondition for auditor sampling accrues from this date — every earlier day had ToE runs but no retained artifacts. |

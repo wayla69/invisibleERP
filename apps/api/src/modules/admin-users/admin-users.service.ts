@@ -111,12 +111,18 @@ export class AdminUsersService {
     const set: any = {};
     if (dto.role) set.role = dto.role;
     if (dto.customer_name !== undefined) set.tenantId = await this.tenantIdFor(dto.customer_name || undefined);
+    // docs/27 R2-2 / AUD-SEC-02 — an authorization change takes effect IMMEDIATELY, not at token expiry:
+    // fine-grained permissions ride the JWT claim (guards re-derive only the role live), so narrowing a
+    // user's role/overrides must invalidate their outstanding sessions. Bumping tokens_valid_from makes the
+    // global guard reject every earlier-issued token (same watermark as revokeAllSessions) — the user
+    // re-authenticates and receives freshly resolved permissions. Zero per-request cost.
+    if (dto.role || dto.permissions) set.tokensValidFrom = new Date();
     if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, u.id));
     if (dto.permissions) {
       await db.delete(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
       if (dto.permissions.length) await db.insert(userPermissions).values(dto.permissions.map((p) => ({ userId: Number(u.id), perm: p }))).onConflictDoNothing();
     }
-    return { username, updated: true };
+    return { username, updated: true, sessions_revoked: !!(dto.role || dto.permissions) };
   }
 
   async resetPassword(username: string, newPassword: string) {

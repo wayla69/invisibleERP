@@ -43,10 +43,20 @@ export class ControlsService {
       .groupBy(vkey, apTransactions.amount).having(sql`count(*) > 1`);
     for (const r of dupAmt) { await this.upsert(user, { controlKey: 'duplicate_amount', severity: 'warning', entityRef: `${r.vkey}/${r.amount}`, detail: `มีบิลจาก ${r.vkey} ยอด ${Number(r.amount).toLocaleString()} ซ้ำ ${r.c} รายการ (อาจจ่ายซ้ำ)`, amount: Number(r.amount), fingerprint: `dupamt:${r.vkey}:${r.amount}` }); candidates++; }
 
-    const ghosts = await db.select({ tax: vendors.taxId, c: sql<string>`count(*)`, names: sql<string>`string_agg(${vendors.name}, ', ')` })
-      .from(vendors).where(sql`coalesce(${vendors.taxId}, '') <> ''`)
-      .groupBy(vendors.taxId).having(sql`count(*) > 1`);
-    for (const r of ghosts) { await this.upsert(user, { controlKey: 'ghost_vendor', severity: 'warning', entityRef: String(r.tax), detail: `เลขผู้เสียภาษี ${r.tax} ใช้ร่วมกัน ${r.c} ผู้ขาย: ${r.names}`, fingerprint: `ghost:${r.tax}` }); candidates++; }
+    // Ghost vendor: vendors.tax_id is encrypted at rest (ITGC-AC-19) with a random IV, so a SQL GROUP BY
+    // would compare ciphertexts (never equal → detector silently blind). Group the DECRYPTED values in app
+    // code instead — the schema read decrypts per row, and the vendor master is small per tenant.
+    const vRows = await db.select({ tax: vendors.taxId, name: vendors.name }).from(vendors);
+    const byTax = new Map<string, string[]>();
+    for (const r of vRows as { tax: string | null; name: string }[]) {
+      const tax = (r.tax ?? '').trim();
+      if (!tax) continue;
+      byTax.set(tax, [...(byTax.get(tax) ?? []), r.name]);
+    }
+    for (const [tax, names] of byTax) {
+      if (names.length <= 1) continue;
+      await this.upsert(user, { controlKey: 'ghost_vendor', severity: 'warning', entityRef: tax, detail: `เลขผู้เสียภาษี ${tax} ใช้ร่วมกัน ${names.length} ผู้ขาย: ${names.join(', ')}`, fingerprint: `ghost:${tax}` }); candidates++;
+    }
 
     return { scanned: true, candidates };
   }

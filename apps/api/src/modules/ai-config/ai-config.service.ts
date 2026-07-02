@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { llmClient } from '../../common/llm-client';
 import type { JwtUser } from '../../common/decorators';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 
@@ -38,9 +39,8 @@ export class AiConfigService {
     if (!TARGETS.includes(target as any)) throw new BadRequestException({ code: 'BAD_TARGET', message: `target must be one of ${TARGETS.join(', ')}`, messageTh: 'ประเภทคอนฟิกไม่ถูกต้อง' });
     if (!this.apiKey) return { target, proposal: this.template(target, description), source: 'template', note: 'ตรวจทานก่อนนำไปใช้งานจริง' };
     try {
-      const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-      const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 });
-      const res: any = await client.messages.create({
+      const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
+      const res: any = await client.create({
         model: this.model, max_tokens: 700,
         system: `You propose a JSON configuration for a "${target}" in an ERP customization studio. Return ONLY JSON, no prose.`,
         messages: [{ role: 'user', content: description }],
