@@ -5,6 +5,19 @@ import { tenants } from './tenants';
 import { posMembers } from './loyalty-members';
 import { promotions } from './marketing';
 
+// Saved custom segments (Phase D1) — a reusable, tenant-defined "audience" beyond the fixed RFM buckets:
+// a named set of rules (field/op/value) over member + profile fields, combined with all/any. Resolved to the
+// matching members on demand by SavedSegmentsService (whitelisted field→column map; bound values). RLS.
+export const savedSegments = pgTable('saved_segments', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  name: text('name').notNull(),
+  matchMode: text('match_mode').notNull().default('all'), // 'all' (AND) | 'any' (OR)
+  rules: jsonb('rules').notNull().default('[]'),           // [{ field, op, value }]
+  createdBy: text('created_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
 // Aggregated customer view — one row per (tenant, member). Upserted after each order + on-demand.
 export const customerProfiles = pgTable('customer_profiles', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
