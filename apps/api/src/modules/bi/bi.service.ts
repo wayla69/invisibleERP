@@ -17,7 +17,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { LeasesService } from '../leases/leases.service';
 import { RevRecService } from '../revenue/revrec.service';
 import { ProjectsService } from '../projects/projects.service';
-import { CrmPipelineService } from '../crm-pipeline/crm-pipeline.service';
+import { CrmPipelineService } from '../crm/pipeline/crm-pipeline.service';
 import { CrmService } from '../crm/crm.service';
 import { NpsService } from '../nps/nps.service';
 import { JourneysService } from '../journeys/journeys.service';

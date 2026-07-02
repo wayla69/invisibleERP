@@ -1,9 +1,9 @@
 import { Controller, Get, Post, Body, Param, ParseIntPipe, Query, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { PipelineService } from './pipeline.service';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { CurrentUser, Permissions } from '../../common/decorators';
-import type { JwtUser } from '../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
+import { CurrentUser, Permissions } from '../../../common/decorators';
+import type { JwtUser } from '../../../common/decorators';
 
 const OppBody = z.object({ name: z.string().min(1), account_name: z.string().optional(), stage_name: z.string().optional(), expected_value: z.number().optional(), expected_close: z.string().optional(), assigned_to: z.string().optional(), notes: z.string().optional() });
 const MoveBody = z.object({ stage_name: z.string().min(1) });

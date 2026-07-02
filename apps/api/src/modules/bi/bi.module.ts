@@ -6,7 +6,7 @@ import { LedgerModule } from '../ledger/ledger.module';
 import { LeasesModule } from '../leases/leases.module';
 import { RevenueModule } from '../revenue/revenue.module';
 import { ProjectsModule } from '../projects/projects.module';
-import { CrmPipelineModule } from '../crm-pipeline/crm-pipeline.module';
+import { CrmPipelineModule } from '../crm/pipeline/crm-pipeline.module';
 import { CrmModule } from '../crm/crm.module';
 import { BudgetModule } from '../budget/budget.module';
 import { ProcurementModule } from '../procurement/procurement.module';

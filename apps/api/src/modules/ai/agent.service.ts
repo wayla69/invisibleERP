@@ -6,7 +6,7 @@ import { FinanceService } from '../finance/finance.service';
 import { FinancialHealthService } from '../finance/financial-health.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { BiService } from '../bi/bi.service';
-import { PipelineService } from '../pipeline/pipeline.service';
+import { PipelineService } from '../crm/pipeline/pipeline.service';
 import { CpqService } from '../cpq/cpq.service';
 import { ServiceService } from '../service/service.service';
 import { ProfitabilityService } from '../profitability/profitability.service';
