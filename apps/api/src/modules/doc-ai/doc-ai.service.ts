@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { llmClient } from '../../common/llm-client';
 import type { JwtUser } from '../../common/decorators';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 
@@ -32,9 +33,8 @@ export class DocAiService {
     if (!t) return { fields: { vendor_name: null, vendor_tax_id: null, invoice_no: null, invoice_date: null, amount: null, currency: 'THB' }, source: 'none' };
     if (!this.apiKey) return { fields: this.ruleExtract(t), source: 'rules' };
     try {
-      const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-      const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 });
-      const res: any = await client.messages.create({
+      const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
+      const res: any = await client.create({
         model: this.model, max_tokens: 1024,
         system: 'You extract vendor-invoice fields. Return ONLY JSON: {vendor_name, vendor_tax_id, invoice_no, invoice_date (YYYY-MM-DD), amount (number), currency}. No prose.',
         messages: [{ role: 'user', content: `Extract from this invoice:\n${t}` }],

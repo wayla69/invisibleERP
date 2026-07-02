@@ -1,4 +1,5 @@
 import { Injectable, Optional, ServiceUnavailableException, Inject, ForbiddenException } from '@nestjs/common';
+import { llmClient } from '../../common/llm-client';
 import { PosService } from '../pos/pos.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
@@ -214,15 +215,14 @@ export class AgentService {
 
     const dailyLimit = await this.checkBudget(_user?.tenantId ?? null);
 
-    const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-    const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 }); // jittered backoff for 429/5xx
+    const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
     const messages: any[] = [...history.slice(-MAX_HISTORY), { role: 'user', content: message }];
 
     let reply = THAI_FALLBACK;
     let totalInput = 0, totalOutput = 0;
     try {
       for (let turn = 0; turn < MAX_LOOP_TURNS; turn++) {
-        const res = await client.messages.create(
+        const res = await client.create(
           { model: this.selectModel(messages), max_tokens: 4096, system: SYSTEM_CACHED, tools: TOOLS, messages },
           { headers: CACHING_BETA_HEADER },
         );
@@ -273,8 +273,7 @@ export class AgentService {
 
     const dailyLimit = await this.checkBudget(_user?.tenantId ?? null);
 
-    const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-    const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 }); // jittered backoff for 429/5xx
+    const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
     const messages: any[] = [...history.slice(-MAX_HISTORY), { role: 'user', content: message }];
 
     let reply = THAI_FALLBACK;
@@ -282,7 +281,7 @@ export class AgentService {
     try {
       for (let turn = 0; turn < MAX_LOOP_TURNS; turn++) {
         const isLast = turn === MAX_LOOP_TURNS - 1;
-        const streamed = client.messages.stream(
+        const streamed = client.stream(
           {
             model: this.selectModel(messages),
             max_tokens: 4096,

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { llmClient } from '../../common/llm-client';
 import type { JwtUser } from '../../common/decorators';
 import { QueryService } from '../query/query.service';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
@@ -29,9 +30,8 @@ export class NlAnalyticsService {
     if (this.apiKey) {
       try {
         const dims = this.query.dimensionKeys();
-        const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-        const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 });
-        const res: any = await client.messages.create({
+        const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
+        const res: any = await client.create({
           model: this.model, max_tokens: 300,
           system: `Map the user's question to a JSON query over POS sales. "dimension" must be exactly one of: ${dims.join(', ')}. Return ONLY JSON: {"dimension": "...", "date_from"?: "YYYY-MM-DD", "date_to"?: "YYYY-MM-DD"}.`,
           messages: [{ role: 'user', content: q }],

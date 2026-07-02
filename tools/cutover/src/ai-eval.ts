@@ -8,6 +8,11 @@
  *  2. Tool-accuracy over a seeded DB: the figures the model is handed are CORRECT (a wrong number is worse
  *     than a refusal). Boots the real services over PGlite, seeds known sales, asserts the summary total.
  *
+ *  3. SCORED agent benchmark (docs/24 R4-4, always runs, no key): a scripted fake LLM (injected through the
+ *     common/llm-client provider seam) drives the REAL agent loop end-to-end over the seeded DB — scoring
+ *     that the tool pipeline hands the model the right figures, that Voided rows stay excluded through the
+ *     whole loop, and that tool results reach the model wrapped as untrusted data. Deterministic → 100% gate.
+ *
  * An optional LIVE accuracy eval (seed → ask fixed questions → assert figures in the reply) runs only when
  * ANTHROPIC_API_KEY is present; it is skipped in CI.
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover ai-eval
@@ -27,7 +32,8 @@ import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { tenantALS } from '../../../apps/api/dist/common/tenant-context';
-import { pickModel, SYSTEM_CACHED } from '../../../apps/api/dist/modules/ai/agent.service';
+import { pickModel, SYSTEM_CACHED, AgentService } from '../../../apps/api/dist/modules/ai/agent.service';
+import { setLlmClientForTests } from '../../../apps/api/dist/common/llm-client';
 import { modelFor, MODEL } from '../../../apps/api/dist/common/ai-models';
 import { redactPii } from '../../../apps/api/dist/common/pii-redact';
 import { PosService } from '../../../apps/api/dist/modules/pos/pos.service';
@@ -71,6 +77,11 @@ async function main() {
     { saleNo: 'AIE-3', saleDate: '2026-06-20', tenantId: tid, total: '9999.00', status: 'Voided' },
   ]);
 
+  // Layer 3 needs AgentService to construct with an apiKey — inject a placeholder when no real key exists
+  // (the fake client below intercepts every call, so nothing ever reaches the network).
+  const hadRealKey = !!(process.env.ANTHROPIC_API_KEY ?? '').trim();
+  if (!hadRealKey) process.env.ANTHROPIC_API_KEY = 'fake-scored-eval-key';
+
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   await app.init();
@@ -80,11 +91,51 @@ async function main() {
   const summary: any = await tenantALS.run({ tx: db, tenantId: tid, bypass: true }, () => pos.summary('2026-06-01', '2026-06-30'));
   ok('sales summary sums Completed sales (1000+1500)', near(summary?.total_sales, 2500), `got ${summary?.total_sales}`);
   ok('sales summary EXCLUDES the Voided sale', !near(summary?.total_sales, 12499), `got ${summary?.total_sales}`);
+
+  // ── Layer 3: SCORED agent benchmark over the fake LLM (docs/24 R4-4) ───────────────────────────
+  // The fake is scripted, so what we score is everything the model does NOT control: the agent loop, the
+  // tool pipeline's figures from the seeded DB, the Voided exclusion, and the untrusted-data framing.
+  const seenToolResults: string[] = [];
+  setLlmClientForTests({
+    create: async (params: any) => {
+      const last = params.messages[params.messages.length - 1];
+      const toolResults = Array.isArray(last?.content) ? last.content.filter((b: any) => b.type === 'tool_result') : [];
+      if (!toolResults.length) {
+        // Opening turn → ask for the June sales summary via the real tool.
+        return { stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 10 },
+          content: [{ type: 'tool_use', id: 'bench-1', name: 'get_sales_summary', input: { start_date: '2026-06-01', end_date: '2026-06-30' } }] };
+      }
+      // Tool round-trip → echo the figure the pipeline handed us; capture what the model actually saw.
+      for (const tr of toolResults) seenToolResults.push(String(tr.content));
+      let total = NaN;
+      try { total = Number(JSON.parse(String(toolResults[0].content))?.untrusted_data?.total_sales); } catch { /* scored below */ }
+      return { stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 },
+        content: [{ type: 'text', text: `ยอดขายรวมเดือนมิถุนายน ${total} บาท` }] };
+    },
+    stream: () => { throw new Error('bench uses the blocking path'); },
+  });
+  try {
+    const agent = app.get(AgentService);
+    const benchUser: any = { username: 'aie-bench', role: 'Admin', customerName: null, tenantId: tid, permissions: [] };
+    const res: any = await tenantALS.run({ tx: db, tenantId: tid, bypass: true }, () => agent.chat('ยอดขายเดือนมิถุนายนเท่าไร', [], benchUser));
+    const reply = String(res?.reply ?? '');
+    const bench: { name: string; pass: boolean; detail: string }[] = [
+      { name: 'figure correctness end-to-end (reply carries 2500 from the seeded DB)', pass: /2500/.test(reply.replace(/[,\s]/g, '')), detail: reply },
+      { name: 'Voided sale excluded through the whole agent loop', pass: !/9999|12499/.test(reply.replace(/[,\s]/g, '')), detail: reply },
+      { name: 'tool result reached the model wrapped as untrusted data', pass: seenToolResults.length > 0 && seenToolResults.every((t) => /untrusted_data/.test(t)), detail: `${seenToolResults.length} tool result(s)` },
+    ];
+    const score = bench.filter((b) => b.pass).length;
+    for (const b of bench) ok(`bench: ${b.name}`, b.pass, b.detail.slice(0, 120));
+    ok(`scored agent benchmark = ${score}/${bench.length} (gate: 100%)`, score === bench.length, `score=${score}/${bench.length}`);
+  } finally {
+    setLlmClientForTests(null);
+    if (!hadRealKey) delete process.env.ANTHROPIC_API_KEY;
+  }
   await app.close();
 
   // ── Optional live accuracy eval (skipped without a key) ─────────────────────────────────────────
   if (!process.env.ANTHROPIC_API_KEY) {
-    console.log('ai-eval: live accuracy eval SKIPPED (no ANTHROPIC_API_KEY) — deterministic guardrails + tool accuracy ran.');
+    console.log('ai-eval: live accuracy eval SKIPPED (no ANTHROPIC_API_KEY) — deterministic guardrails + tool accuracy + scored fake-LLM benchmark ran.');
   }
 }
 

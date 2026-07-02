@@ -452,7 +452,14 @@ factors learned in the same walk-forward backtest. Auto-select stays WAPE-based,
 must **win on backtest** to be chosen — measured, not asserted. Harness: `demand-ml` gains a
 holiday-spike fixture the flat models lose on.
 
-### R4-4 · Provider seam + scored evals — closes AUD-AI-04
+### R4-4 · Provider seam + scored evals — closes AUD-AI-04 — **DELIVERED 2026-07-02**
+> Shipped: `common/llm-client.ts` — the single Anthropic construction point (agent ×2 incl. streaming,
+> doc-ai, nl-analytics, ai-config, insights all rewired; params/response stay the Messages API shape, so a
+> second provider adapts in one file) with a `setLlmClientForTests` injection hook. That hook powers the
+> new **layer-3 scored benchmark** in `ai-eval`: a scripted fake LLM drives the REAL agent loop over the
+> seeded DB — scored on end-to-end figure correctness, Voided-exclusion through the loop, and
+> untrusted-data framing of every tool result — deterministic 100% gate, runs in CI with no key (ai-eval
+> now 20 checks). RCM AIG-04 evidence updated.
 - Thin `LlmClient` interface over the Anthropic SDK call-sites (`agent`, `doc-ai`, `nl-analytics`,
   `ai-config`, `copilot`, `insights` all route through it) — not a second provider *yet*, just the
   seam + a fake for tests.
@@ -554,3 +561,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.5 | 2026-07-02 | ERP/Product | AUD-LGL-03 closed (employee DSAR access/erasure with statutory payroll carve-out; PDPA-02 text + narrative 08 rev 1.6 + UAT-SEC-047) |
 | 2.6 | 2026-07-02 | ERP/Product | R4-3 partial (croston_sba + dow_seasonal in ALGOS, measured wins in demand-ml 16; holiday-calendar regressor tracked open) |
 | 2.7 | 2026-07-02 | ERP/Product | Status header updated: 16 pieces delivered, Wave 0 closed; open items enumerated |
+| 2.8 | 2026-07-02 | ERP/Product | R4-4 delivered (llm-client seam across 6 services + scored fake-LLM agent benchmark as an ai-eval CI gate) |

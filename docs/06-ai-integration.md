@@ -1,5 +1,10 @@
 # 06 — AI & Analytics Integration
 
+> **Provider seam (docs/24 R4-4):** every service reaches the model through `common/llm-client.ts` — the
+> single construction point for the Anthropic SDK (retries/backoff included) and the injection point
+> (`setLlmClientForTests`) that lets the CI eval drive the REAL agent loop with a scripted fake model.
+> Still single-provider by design; a second provider would adapt into this contract in one file.
+>
 > **Honest labeling (docs/24 R4-5):** the "demand-ml" module and the analytics forecasters are
 > **classical statistics** (SMA/SES/Holt/seasonal-naive/Croston + walk-forward WAPE/MASE backtesting;
 > z-score anomaly flags) — deliberately explainable for audit, **not machine learning**, and must not be
