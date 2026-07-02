@@ -35,7 +35,7 @@ export class WasteService {
   ) {}
 
   async logWaste(dto: LogWasteDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     if (n(dto.qty) <= 0) throw new BadRequestException({ code: 'BAD_QTY', message: 'qty must be positive', messageTh: 'จำนวนต้องมากกว่าศูนย์' });
     if (!WASTE_REASONS.includes(dto.reason_code)) throw new BadRequestException({ code: 'BAD_REASON', message: 'invalid reason_code', messageTh: 'เหตุผลไม่ถูกต้อง' });
@@ -73,7 +73,7 @@ export class WasteService {
   }
 
   async list(dto: ListWasteDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(wasteLog.tenantId, user.tenantId as number)];
     if (dto.reason) conds.push(eq(wasteLog.reasonCode, dto.reason));
     if (dto.from) conds.push(gte(wasteLog.createdAt, new Date(dto.from + 'T00:00:00.000Z')));

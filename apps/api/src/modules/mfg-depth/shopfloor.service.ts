@@ -23,7 +23,7 @@ export class ShopFloorService {
 
   // Generate WO operations from a routing, scaled to the WO planned qty (per-op labor pre-computed).
   async generate(woNo: string, routingCode: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const w = await this.wo(woNo);
     const tenantId = w.tenantId ?? user.tenantId ?? null;
     const [r] = await db.select().from(routings).where(eq(routings.routingCode, routingCode)).limit(1);
@@ -43,7 +43,7 @@ export class ShopFloorService {
 
   // Report progress on one operation (accumulates completed + scrap).
   async report(woNo: string, opNo: number, dto: ReportOpDto, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const w = await this.wo(woNo);
     const [op] = await db.select().from(workOrderOperations).where(and(eq(workOrderOperations.woId, Number(w.id)), eq(workOrderOperations.opNo, String(opNo)))).limit(1);
     if (!op) throw new NotFoundException({ code: 'OP_NOT_FOUND', message: `Operation ${opNo} not found on ${woNo}`, messageTh: 'ไม่พบขั้นตอนการผลิต' });
@@ -59,7 +59,7 @@ export class ShopFloorService {
   }
 
   async listOps(woNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const w = await this.wo(woNo);
     const ops = await db.select().from(workOrderOperations).where(eq(workOrderOperations.woId, Number(w.id))).orderBy(asc(workOrderOperations.opNo));
     const done = ops.filter((o: any) => o.status === 'Done').length;

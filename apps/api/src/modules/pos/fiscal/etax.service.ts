@@ -20,7 +20,7 @@ export class EtaxService {
 
   // Build the e-Tax UBL DTO straight from the stored tax invoice (no cross-module DI → no cycle).
   private async invoiceDto(docNo: string): Promise<EtaxInvoice> {
-    const db = this.db as any;
+    const db = this.db;
     const [h] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, docNo)).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tax invoice not found', messageTh: 'ไม่พบใบกำกับภาษี' });
     const lines = await db.select().from(taxInvoiceLines).where(eq(taxInvoiceLines.taxInvoiceId, Number(h.id))).orderBy(taxInvoiceLines.lineNo);
@@ -64,7 +64,7 @@ export class EtaxService {
   }
 
   async submit(docNo: string, provider: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const prov = provider ?? process.env.ETAX_PROVIDER ?? 'mock';
     const [existing] = await db.select().from(etaxSubmissions).where(and(eq(etaxSubmissions.docNo, docNo), eq(etaxSubmissions.status, 'Accepted'))).limit(1);
     if (existing) return { doc_no: docNo, status: 'Accepted', provider_ref: existing.providerRef, idempotent: true };
@@ -80,14 +80,14 @@ export class EtaxService {
   }
 
   async status(docNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.select().from(etaxSubmissions).where(eq(etaxSubmissions.docNo, docNo)).orderBy(desc(etaxSubmissions.id)).limit(1);
     if (!s) return { doc_no: docNo, status: 'NotSubmitted' };
     return { doc_no: docNo, status: s.status, provider: s.provider, provider_ref: s.providerRef, submitted_at: s.submittedAt, rd_response: s.rdResponse };
   }
 
   async list(limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(etaxSubmissions).orderBy(desc(etaxSubmissions.id)).limit(limit);
     return { submissions: rows.map((r: any) => ({ doc_no: r.docNo, provider: r.provider, status: r.status, provider_ref: r.providerRef, signed: r.rdResponse?.signed ?? false, submitted_at: r.submittedAt })), count: rows.length };
   }

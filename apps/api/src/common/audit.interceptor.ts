@@ -79,7 +79,7 @@ export class AuditInterceptor implements NestInterceptor {
     meta?: Record<string, unknown>,
   ): Promise<void> {
     try {
-      const db = this.db as any;
+      const db = this.db;
       // The request tx already committed/rolled back, so the proxy routes this to the base connection.
       // audit_log is FORCE-RLS (0002_rls.sql) — run in its own tx that sets app.bypass_rls so the
       // WITH CHECK policy admits the row even when tenant_id is NULL (system/pre-auth events). We do

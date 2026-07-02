@@ -45,7 +45,7 @@ export class RestaurantOfflineSyncService {
   }
 
   private async syncOne(op: RegisterOfflineSaleOp, user: JwtUser): Promise<SyncResult> {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     // dedup gate — short-circuit ONLY on a genuinely-completed sale (sale_no set). A prior 'failed'
     // tombstone (e.g. a transient 86'd item) must NOT block a retry, so we require sale_no IS NOT NULL.

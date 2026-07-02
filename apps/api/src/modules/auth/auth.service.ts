@@ -146,7 +146,7 @@ export class AuthService {
   async refresh(rawRefresh: string | undefined): Promise<{ token: string; refresh: string }> {
     const invalid = new UnauthorizedException({ code: 'REFRESH_INVALID', message: 'Invalid or expired session', messageTh: 'เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่' });
     if (!rawRefresh) throw invalid;
-    const db = this.db as any;
+    const db = this.db;
     const hash = this.hashRefresh(rawRefresh);
     const [tok] = await db.select().from(refreshTokens).where(eq(refreshTokens.tokenHash, hash)).limit(1);
     if (!tok) throw invalid;

@@ -24,7 +24,7 @@ export class MrpService {
   ) {}
 
   async run(dto: MrpRunDto, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const lead = dto.lead_time_days ?? 7;
 
     // on-hand from the latest stock snapshot; `remaining` is consumed as requirements net against it.
@@ -113,7 +113,7 @@ export class MrpService {
   // centre from the product's routing (setup + run·qty minutes) and compare to the available minutes
   // supplied per work centre — flags overloaded centres so a planner can re-time or offload.
   async capacity(dto: MrpCapacityDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const plan = await this.run(dto, user);
     const avail = new Map<string, number>((dto.work_centers ?? []).map((w) => [w.code, n(w.available_minutes)]));
     const load = new Map<string, number>();

@@ -41,7 +41,7 @@ export class UserPrefsService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   private async row(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(userPrefs).where(eq(userPrefs.owner, user.username)).limit(1);
     return rows[0] as { id: number; prefs: unknown } | undefined;
   }
@@ -52,7 +52,7 @@ export class UserPrefsService {
   }
 
   async update(patch: Partial<UserPrefs>, user: JwtUser): Promise<UserPrefs & { saved: boolean }> {
-    const db = this.db as any;
+    const db = this.db;
     const row = await this.row(user);
     const current = normalize(row?.prefs);
     const merged = normalize({

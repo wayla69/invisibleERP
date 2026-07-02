@@ -48,7 +48,7 @@ export class AuditViewerService {
   }
 
   async query(f: AuditFilters, limit: number, offset: number) {
-    const db = this.db as any;
+    const db = this.db;
     const w = this.where(f);
     const rows = await db.select().from(auditLog).where(w).orderBy(desc(auditLog.ts)).limit(limit).offset(offset);
     const [c] = await db.select({ c: sql<number>`count(*)` }).from(auditLog).where(w);
@@ -59,7 +59,7 @@ export class AuditViewerService {
 
   // CSV of the same filtered set (capped) — auditor-friendly export.
   async exportCsv(f: AuditFilters): Promise<string> {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(auditLog).where(this.where(f)).orderBy(desc(auditLog.ts)).limit(5000);
     let mapped = rows.map((r: any) => this.fmt(r));
     if (this.pdpa) mapped = await this.pdpa.maskAuditRows(mapped); // PDPA: mask erased subjects in the export too
@@ -75,7 +75,7 @@ export class AuditViewerService {
   // Field-level OLD→NEW change log (ITGC-AC-14), captured by DB triggers on the financial tables. Append-only.
   // Tenant scoping is applied here (data_change_log opts out of RLS): a non-Admin caller sees only their tenant.
   async changes(f: ChangeFilters, limit: number, offset: number) {
-    const db = this.db as any;
+    const db = this.db;
     const c: SQL[] = [];
     if (f.table) c.push(eq(dataChangeLog.tableName, f.table));
     if (f.row_pk) c.push(eq(dataChangeLog.rowPk, f.row_pk));
@@ -98,7 +98,7 @@ export class AuditViewerService {
   // ITGC-AC-16 — re-walk the hash chain(s) and report the first row where it breaks (tamper / gap / forgery).
   // Tenant isolation is by RLS: a tenant admin verifies their own chain; HQ/Admin (bypass) verifies all.
   async verifyChain() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(auditLog).where(isNotNull(auditLog.seq)).orderBy(asc(auditLog.tenantId), asc(auditLog.seq));
     const chains = new Map<string, any[]>();
     for (const r of rows) { const k = String(r.tenantId ?? ''); if (!chains.has(k)) chains.set(k, []); chains.get(k)!.push(r); }

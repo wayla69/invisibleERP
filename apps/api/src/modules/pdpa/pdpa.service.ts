@@ -29,7 +29,7 @@ export class PdpaService {
     if (!SUBJECT_TYPES.includes(dto.subject_type as any)) throw new BadRequestException({ code: 'BAD_SUBJECT_TYPE', message: `subject_type must be one of ${SUBJECT_TYPES.join('/')}`, messageTh: 'ประเภทเจ้าของข้อมูลไม่ถูกต้อง' });
     if (!REQUEST_TYPES.includes(dto.request_type as any)) throw new BadRequestException({ code: 'BAD_REQUEST_TYPE', message: `request_type must be one of ${REQUEST_TYPES.join('/')}`, messageTh: 'ประเภทคำขอไม่ถูกต้อง' });
     if (!dto.subject_ref?.trim()) throw new BadRequestException({ code: 'SUBJECT_REQUIRED', message: 'subject_ref is required', messageTh: 'ต้องระบุเจ้าของข้อมูล' });
-    const db = this.db as any;
+    const db = this.db;
     const due = new Date(Date.now() + DSAR_SLA_DAYS * 86400_000);
     const [row] = await db.insert(dsarRequests).values({
       tenantId: user.tenantId ?? null, subjectType: dto.subject_type, subjectRef: dto.subject_ref.trim(),
@@ -40,21 +40,21 @@ export class PdpaService {
   }
 
   async listDsar(status: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(dsarRequests.status, status) : undefined;
     const rows = await db.select().from(dsarRequests).where(where).orderBy(desc(dsarRequests.id)).limit(200);
     return { requests: rows.map((r: any) => this.view(r)), count: rows.length };
   }
 
   async getDsar(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(dsarRequests).where(eq(dsarRequests.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'DSAR not found', messageTh: 'ไม่พบคำขอ' });
     return this.view(r);
   }
 
   private async loadDsar(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(dsarRequests).where(eq(dsarRequests.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'DSAR not found', messageTh: 'ไม่พบคำขอ' });
     return r;
@@ -63,7 +63,7 @@ export class PdpaService {
   // Access / portability: assemble everything held about the subject into a portable bundle, attach it to
   // the DSAR result, and close the request. Currently implemented for loyalty members (the main PII store).
   async exportSubject(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const r = await this.loadDsar(id);
     const bundle = r.subjectType === 'employee'
       ? await this.collectEmployee(r.subjectRef)
@@ -76,7 +76,7 @@ export class PdpaService {
     if (subjectType !== 'member') {
       return { subject_type: subjectType, subject_ref: subjectRef, note: 'No structured PII store wired for this subject type; compile manually.' };
     }
-    const db = this.db as any;
+    const db = this.db;
     const m = await this.resolveMember(subjectRef);
     if (!m) return { subject_type: subjectType, subject_ref: subjectRef, found: false };
     const consents = await db.select().from(memberConsents).where(eq(memberConsents.memberId, Number(m.id)));
@@ -97,7 +97,7 @@ export class PdpaService {
   // return the identifiers the employer actually holds — the encryptedText columns decrypt on this read
   // (ITGC-AC-19), which is correct: the subject is entitled to their own citizen ID / bank account.
   private async collectEmployee(subjectRef: string) {
-    const db = this.db as any;
+    const db = this.db;
     const e = await this.resolveEmployee(subjectRef);
     if (!e) return { subject_type: 'employee', subject_ref: subjectRef, found: false };
     const slips = await db.select().from(payslips).where(eq(payslips.employeeId, Number(e.id))).limit(500);
@@ -114,7 +114,7 @@ export class PdpaService {
   }
 
   private async resolveEmployee(subjectRef: string) {
-    const db = this.db as any;
+    const db = this.db;
     const asId = Number(subjectRef);
     if (Number.isFinite(asId) && String(asId) === subjectRef.trim()) {
       const [e] = await db.select().from(employees).where(eq(employees.id, asId)).limit(1);
@@ -125,7 +125,7 @@ export class PdpaService {
   }
 
   private async resolveMember(subjectRef: string) {
-    const db = this.db as any;
+    const db = this.db;
     const asId = Number(subjectRef);
     if (Number.isFinite(asId) && String(asId) === subjectRef.trim()) {
       const [m] = await db.select().from(posMembers).where(eq(posMembers.id, asId)).limit(1);
@@ -139,7 +139,7 @@ export class PdpaService {
   // erasure-ledger row that drives read-time pseudonymisation of the immutable audit trail. The audit_log
   // rows are NOT mutated (hash chain stays intact) — the PII is simply never shown again.
   async eraseSubject(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const r = await this.loadDsar(id);
     if (r.requestType !== 'erasure') throw new BadRequestException({ code: 'NOT_ERASURE', message: 'This DSAR is not an erasure request', messageTh: 'คำขอนี้ไม่ใช่การลบข้อมูล' });
     if (r.status === 'completed') throw new BadRequestException({ code: 'ALREADY_DONE', message: 'Already completed', messageTh: 'ดำเนินการแล้ว' });
@@ -185,7 +185,7 @@ export class PdpaService {
   // squarely inside PDPA's legal-obligation exemption. Mirrors PDPA-02's reconcile-don't-destroy design:
   // the erasure ledger read-time-pseudonymises the audit trail, the hash chain stays intact.
   private async eraseEmployee(r: any, id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const e = await this.resolveEmployee(r.subjectRef);
     if (!e) throw new NotFoundException({ code: 'SUBJECT_NOT_FOUND', message: 'Subject not found', messageTh: 'ไม่พบเจ้าของข้อมูล' });
     // Decrypted identifier values (schema read) → the audit-masking substitution list.
@@ -206,7 +206,7 @@ export class PdpaService {
   }
 
   async rejectDsar(id: number, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.loadDsar(id);
     await db.update(dsarRequests).set({ status: 'rejected', handledBy: user.username, completedAt: new Date(), result: { rejected: true, reason: reason ?? null } }).where(eq(dsarRequests.id, id));
     return { id, status: 'rejected' };
@@ -217,7 +217,7 @@ export class PdpaService {
   // subjects without touching the immutable, hash-chained stored rows. RLS scopes the read to the caller's
   // tenant (runs inside the request tx), so no explicit tenant arg is needed.
   async erasureMap(): Promise<Array<{ pseudonym: string; values: string[] }>> {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({ pseudonym: pdpaErasures.pseudonym, erasedValues: pdpaErasures.erasedValues }).from(pdpaErasures);
     return rows.map((r: any) => ({ pseudonym: r.pseudonym, values: Array.isArray(r.erasedValues) ? r.erasedValues : [] }));
   }

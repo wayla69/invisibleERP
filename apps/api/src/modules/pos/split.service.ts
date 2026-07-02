@@ -74,7 +74,7 @@ export class SplitBillService {
     const tenderBy = new Map<number, { method: string; gateway?: string }>();
     for (const t of (dto as any).tenders ?? []) tenderBy.set(t.check, { method: t.method, gateway: t.gateway });
     const groupNo = await this.docNo.nextDaily('SPLIT');
-    const db = this.db as any;
+    const db = this.db;
     const checks = [];
     let allCaptured = true;
     for (const s of slices) {
@@ -94,7 +94,7 @@ export class SplitBillService {
 
   // shared slicing math (equal back-out inclusive / by-items net+vat); used by preview + settle
   private async computeSlices(o: any, dto: SplitPreviewDto) {
-    const db = this.db as any;
+    const db = this.db;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, Number(o.id)), ne(dineInOrderItems.kdsStatus, 'voided')));
     if (dto.method === 'equal') {
       const gross = roundCurrency(n(o.total), 'THB');

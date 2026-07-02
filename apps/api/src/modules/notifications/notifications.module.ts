@@ -13,7 +13,7 @@ export class NotificationsService {
 
   // GET /api/notifications — 3 แหล่ง, สตริงไทย + ฿ format (parity-critical contract)
   async list() {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const alerts: any[] = [];
 
@@ -89,7 +89,7 @@ export class NotificationsService {
 
   // GET /api/notifications/inbox — paginated, unread-first then newest-first.
   async inbox(user: JwtUser, opts: { limit?: number; offset?: number; unread_only?: boolean } = {}) {
-    const db = this.db as any;
+    const db = this.db;
     if (user.tenantId == null) return { items: [], total: 0, unread_count: 0 };
     const limit = Math.min(Math.max(n(opts.limit) || 20, 1), 100);
     const offset = Math.max(n(opts.offset) || 0, 0);
@@ -126,7 +126,7 @@ export class NotificationsService {
 
   // GET /api/notifications/unread-count — for the header bell badge.
   async unreadCount(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (user.tenantId == null) return 0;
     const readJoin = and(
       eq(notificationReads.notificationId, notifications.id),
@@ -144,7 +144,7 @@ export class NotificationsService {
   // Guarded: only notifications actually visible to this user can be marked, so a
   // user can never write a read marker for another tenant/role's notification.
   async markRead(user: JwtUser, id: number) {
-    const db = this.db as any;
+    const db = this.db;
     if (user.tenantId == null) return { ok: false };
     const visible = (await db.select({ id: notifications.id }).from(notifications)
       .where(and(eq(notifications.id, id), this.visibleTo(user))))[0];
@@ -155,7 +155,7 @@ export class NotificationsService {
 
   // POST /api/notifications/mark-all-read — mark every currently-visible unread one.
   async markAllRead(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (user.tenantId == null) return { ok: false, marked: 0 };
     const readJoin = and(
       eq(notificationReads.notificationId, notifications.id),

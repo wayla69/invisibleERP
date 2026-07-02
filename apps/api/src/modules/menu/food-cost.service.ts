@@ -24,7 +24,7 @@ export class FoodCostService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   private async recipeCostByItem() {
-    const db = this.db as any;
+    const db = this.db;
     const recs = await db.select().from(menuRecipes);
     const lines = await db.select().from(menuRecipeLines);
     const byRecipe = new Map<number, any[]>();
@@ -40,7 +40,7 @@ export class FoodCostService {
 
   // per-item price / cost / margin %, with a menu-level summary against a food-cost target
   async menuMargins(_user: JwtUser, targetPct = 35) {
-    const db = this.db as any;
+    const db = this.db;
     const its = await db.select().from(menuItems).where(eq(menuItems.active, true));
     const recipeCost = await this.recipeCostByItem();
     const items = its.map((it: any) => {
@@ -66,7 +66,7 @@ export class FoodCostService {
 
   // which ingredients drive cost across the menu (theoretical cost-per-serving summed over recipes using them)
   async ingredientCost(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const recs = await db.select().from(menuRecipes);
     const yldByRecipe = new Map<number, number>(recs.map((r: any) => [Number(r.id), Math.max(n(r.yieldQty), 1)]));
     const lines = await db.select().from(menuRecipeLines);
@@ -88,7 +88,7 @@ export class FoodCostService {
   // over-portioning / waste / shrinkage beyond what recipes predicted, plus the % off theoretical.
   // Sign: variance > 0 ⇒ used MORE than the recipe theoretical ⇒ unfavorable (extra cost).
   async foodCostVariance(_user: JwtUser, opts?: { from?: string; to?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const to = opts?.to ?? ymd();
     const from = opts?.from ?? to; // default: a single day
     // cost basis per ingredient: the item master cost, falling back to a recipe line's unit cost

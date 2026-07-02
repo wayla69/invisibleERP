@@ -23,7 +23,7 @@ export class GamificationService {
   }
 
   async listMissions(user: JwtUser, q: { active?: boolean } = {}) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const conds: any[] = [eq(loyaltyMissions.tenantId, tenantId)];
     if (q.active !== undefined) conds.push(eq(loyaltyMissions.active, q.active));
     const rows = await db.select().from(loyaltyMissions).where(and(...conds)).orderBy(loyaltyMissions.id);
@@ -31,7 +31,7 @@ export class GamificationService {
   }
 
   async upsertMission(user: JwtUser, dto: any) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const vals: any = {
       name: dto.name, type: dto.type ?? 'stamp', goal: dto.goal ?? 1,
       rewardKind: dto.reward_kind ?? 'points', rewardPoints: dto.reward_points ?? 0,
@@ -49,7 +49,7 @@ export class GamificationService {
   }
 
   async setMissionActive(user: JwtUser, id: number, active: boolean) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [r] = await db.update(loyaltyMissions).set({ active }).where(and(eq(loyaltyMissions.id, id), eq(loyaltyMissions.tenantId, tenantId))).returning();
     if (!r) throw new NotFoundException({ code: 'MISSION_NOT_FOUND', message: 'Mission not found', messageTh: 'ไม่พบภารกิจ' });
     return shapeMission(r);
@@ -57,7 +57,7 @@ export class GamificationService {
 
   // Record progress (e.g. a stamp). Serialized per member via FOR UPDATE so the get-or-create is race-free.
   async addProgress(user: JwtUser, missionId: number, dto: { member_id: number; amount?: number }) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const amount = Math.max(1, Math.floor(dto.amount ?? 1));
     const [mission] = await db.select().from(loyaltyMissions).where(and(eq(loyaltyMissions.id, missionId), eq(loyaltyMissions.tenantId, tenantId))).limit(1);
     if (!mission || mission.active === false) throw new NotFoundException({ code: 'MISSION_NOT_FOUND', message: 'Mission not found/inactive', messageTh: 'ไม่พบภารกิจ' });
@@ -76,7 +76,7 @@ export class GamificationService {
 
   // Claim a completed mission's reward — exactly once (claimedAt under FOR UPDATE).
   async claimMission(user: JwtUser, missionId: number, dto: { member_id: number }) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [mission] = await db.select().from(loyaltyMissions).where(and(eq(loyaltyMissions.id, missionId), eq(loyaltyMissions.tenantId, tenantId))).limit(1);
     if (!mission) throw new NotFoundException({ code: 'MISSION_NOT_FOUND', message: 'Mission not found', messageTh: 'ไม่พบภารกิจ' });
     return await db.transaction(async (tx: any) => {
@@ -103,7 +103,7 @@ export class GamificationService {
   }
 
   async memberMissions(user: JwtUser, memberId: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const missions = await db.select().from(loyaltyMissions).where(and(eq(loyaltyMissions.tenantId, tenantId), eq(loyaltyMissions.active, true))).orderBy(loyaltyMissions.id);
     const prog = await db.select().from(loyaltyMissionProgress).where(and(eq(loyaltyMissionProgress.memberId, memberId), eq(loyaltyMissionProgress.tenantId, tenantId)));
     const pmap: Record<number, any> = {};

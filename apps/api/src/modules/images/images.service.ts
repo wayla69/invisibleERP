@@ -12,7 +12,7 @@ export class ImagesService {
   async upsert(itemId: string, dataUrl: string, user: JwtUser) {
     if (!dataUrl?.startsWith('data:image/')) throw new BadRequestException({ code: 'BAD_IMAGE', message: 'data_url must be a data:image/* URL', messageTh: 'รูปไม่ถูกต้อง' });
     if (dataUrl.length > 3_000_000) throw new BadRequestException({ code: 'IMAGE_TOO_LARGE', message: 'Image too large (max ~2MB)', messageTh: 'รูปใหญ่เกินไป' });
-    const db = this.db as any;
+    const db = this.db;
     const now = new Date();
     await db.insert(itemImages).values({ itemId, imageKey: itemId, dataUrl, updatedAt: now, updatedBy: user.username })
       .onConflictDoUpdate({ target: itemImages.itemId, set: { dataUrl, imageKey: itemId, updatedAt: now, updatedBy: user.username } });
@@ -21,20 +21,20 @@ export class ImagesService {
   }
 
   async get(itemId: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(itemImages).where(eq(itemImages.itemId, itemId)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No image for item', messageTh: 'ไม่มีรูปสำหรับสินค้านี้' });
     return { item_id: r.itemId, data_url: r.dataUrl, updated_at: r.updatedAt, updated_by: r.updatedBy };
   }
 
   async list() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({ itemId: itemImages.itemId, updatedAt: itemImages.updatedAt }).from(itemImages).orderBy(desc(itemImages.updatedAt));
     return { items: rows.map((r: any) => ({ item_id: r.itemId, updated_at: r.updatedAt })), count: rows.length };
   }
 
   async remove(itemId: string) {
-    const db = this.db as any;
+    const db = this.db;
     await db.delete(itemImages).where(eq(itemImages.itemId, itemId));
     await db.update(items).set({ imageKey: null }).where(eq(items.itemId, itemId));
     return { item_id: itemId, deleted: true };

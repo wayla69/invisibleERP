@@ -30,7 +30,7 @@ export class MasterDataService {
   // ── Export current rows as header-keyed objects ──────────────────────────
   async exportRows(key: string): Promise<{ headers: string[]; rows: any[] }> {
     const e = this.entOrThrow(key);
-    const db = this.db as any;
+    const db = this.db;
     const data = await db.select().from(e.table);
     const headers = e.cols.map((c) => c.header);
     const rows = data.map((r: any) => {
@@ -117,7 +117,7 @@ export class MasterDataService {
       values.push(o);
     });
 
-    const db = this.db as any;
+    const db = this.db;
     let count = 0;
     await db.transaction(async (tx: any) => {
       if (mode === 'replace') await tx.delete(e.table); // RLS scopes tenant tables to caller
@@ -200,7 +200,7 @@ export class MasterDataService {
     if (blocking || (v.invalid > 0 && !skipErrors)) {
       return { entity: key, mode, status: 'invalid' as const, total: v.total, imported: 0, skipped: v.total, errors: v.errors };
     }
-    const db = this.db as any;
+    const db = this.db;
     let imported = 0;
     const extra: ImportError[] = [];
     await db.transaction(async (tx: any) => {

@@ -26,7 +26,7 @@ export class TaxReportsService {
 
   // รายงานภาษีขาย (output VAT) — from issued tax invoices (RLS scopes to the seller)
   async outputVat(month: number, year: number) {
-    const db = this.db as any; const { start, end, period } = this.win(month, year);
+    const db = this.db; const { start, end, period } = this.win(month, year);
     const rows = await db.select({
       date: taxInvoices.issueDate, doc_no: taxInvoices.docNo, type: taxInvoices.type,
       buyer_name: taxInvoices.buyerName, buyer_tax_id: taxInvoices.buyerTaxId, value: taxInvoices.subtotal, vat: taxInvoices.vatAmount,
@@ -37,7 +37,7 @@ export class TaxReportsService {
 
   // รายงานภาษีซื้อ (input VAT) — from AP bills (AP is tenant-global, exec/creditors only)
   async inputVat(month: number, year: number) {
-    const db = this.db as any; const { start, end, period } = this.win(month, year);
+    const db = this.db; const { start, end, period } = this.win(month, year);
     const rows = await db.select({
       date: apTransactions.invoiceDate, doc_no: apTransactions.txnNo, invoice_no: apTransactions.invoiceNo,
       vendor_name: apTransactions.vendorName, amount: apTransactions.amount,
@@ -54,7 +54,7 @@ export class TaxReportsService {
     const inp = await this.inputVat(month, year);
     const outputTax = out.totals.vat, inputTax = inp.totals.vat;
     const netVat = round2(outputTax - inputTax);
-    const db = this.db as any;
+    const db = this.db;
     const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .where(and(eq(journalLines.accountCode, '2100'), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
@@ -71,7 +71,7 @@ export class TaxReportsService {
   // ภ.ง.ด.3 / ภ.ง.ด.53 — WHT remittance from 50-tawi certificates
   async pnd(type: string, month: number, year: number) {
     if (type !== 'PND3' && type !== 'PND53') throw new BadRequestException({ code: 'BAD_PND', message: 'type must be PND3 or PND53', messageTh: 'ประเภทต้องเป็น PND3 หรือ PND53' });
-    const db = this.db as any; const { start, end, period } = this.win(month, year);
+    const db = this.db; const { start, end, period } = this.win(month, year);
     const rows = await db.select({
       doc_no: whtCertificates.docNo, date_paid: whtCertificates.datePaid, payee_name: whtCertificates.payeeName, payee_tax_id: whtCertificates.payeeTaxId,
       income_type: whtCertLines.incomeType, amount_paid: whtCertLines.amountPaid, rate: whtCertLines.rate, tax_withheld: whtCertLines.taxWithheld,
@@ -92,7 +92,7 @@ export class TaxReportsService {
   // manual JE that touched 2361 outside the AP process; (2) against the 50-ทวิ certificates issued for the
   // period — any gap is un-certificated WHT (a control: every withholding owes the payee a certificate).
   async pndTieOut(month: number, year: number) {
-    const db = this.db as any; const { start, end, period } = this.win(month, year);
+    const db = this.db; const { start, end, period } = this.win(month, year);
     // (1) GL 2361 net credit movement (Posted) in the period.
     const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
@@ -124,7 +124,7 @@ export class TaxReportsService {
   // tenant/type/period). A return already SUBMITTED/ACCEPTED is returned as-is (you don't silently
   // overwrite a filed return); a DRAFT is refreshed to the latest computed figures.
   async fileReturn(type: string, month: number, year: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenantId();
     const ft = type.toUpperCase();
     if (!['PP30', 'PND3', 'PND53'].includes(ft)) throw new BadRequestException({ code: 'BAD_FILING_TYPE', message: 'filing_type must be PP30/PND3/PND53', messageTh: 'ประเภทแบบต้องเป็น PP30/PND3/PND53' });
@@ -151,7 +151,7 @@ export class TaxReportsService {
 
   // Submit a DRAFT filing to the Revenue Department: requires a submission reference; stamps SUBMITTED.
   async submitFiling(id: number, submissionRef: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [f] = await db.select().from(thaiTaxFilings).where(eq(thaiTaxFilings.id, id)).limit(1);
     if (!f) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Filing not found', messageTh: 'ไม่พบแบบยื่น' });
     if (f.status !== 'DRAFT') throw new BadRequestException({ code: 'NOT_DRAFT', message: `Filing is ${f.status}, not DRAFT`, messageTh: 'ยื่นได้เฉพาะแบบที่เป็นฉบับร่าง' });
@@ -162,7 +162,7 @@ export class TaxReportsService {
 
   // Mark a SUBMITTED filing ACCEPTED (RD acknowledgement).
   async acceptFiling(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [f] = await db.select().from(thaiTaxFilings).where(eq(thaiTaxFilings.id, id)).limit(1);
     if (!f) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Filing not found', messageTh: 'ไม่พบแบบยื่น' });
     if (f.status !== 'SUBMITTED') throw new BadRequestException({ code: 'NOT_SUBMITTED', message: `Filing is ${f.status}, not SUBMITTED`, messageTh: 'รับรองได้เฉพาะแบบที่ยื่นแล้ว' });
@@ -171,7 +171,7 @@ export class TaxReportsService {
   }
 
   async listFilings(opts?: { year?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(thaiTaxFilings)
       .where(opts?.year ? eq(thaiTaxFilings.periodYear, opts.year) : sql`true`)
       .orderBy(desc(thaiTaxFilings.periodYear), desc(thaiTaxFilings.periodMonth), asc(thaiTaxFilings.filingType));
@@ -181,7 +181,7 @@ export class TaxReportsService {
   // Remittance calendar: every monthly filing obligation for the year (PP30 by the 15th, PND by the 7th of
   // the following month) with the current filing status, so the controller sees what is due / filed / late.
   async remittanceCalendar(year: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(thaiTaxFilings).where(eq(thaiTaxFilings.periodYear, year));
     const byKey = new Map<string, any>(rows.map((r: any) => [`${r.filingType}|${r.periodMonth}`, r]));
     const out: any[] = [];

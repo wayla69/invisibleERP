@@ -30,7 +30,7 @@ export class BudgetService {
   // BUD-01 maker-checker: an upserted budget lands as PendingApproval and is EXCLUDED from budget-vs-actual until
   // a DIFFERENT user approves it (a wrong budget can no longer silently drive the variance/performance report).
   async upsertBudget(dto: UpsertBudgetDto) {
-    const db = this.db as any;
+    const db = this.db;
     const cc = dto.cost_center_code ?? null;
     const tenantId = dto.tenantId ?? null;
     const rows = dto.mode === 'annual'
@@ -50,7 +50,7 @@ export class BudgetService {
   // Approve (or reject) a pending budget for (fiscal_year, account_code, [cost_center], [period]). Approver ≠
   // requester, binds even Admin. Approval makes it count in budget-vs-actual; reject marks it Rejected (excluded).
   private async decideBudget(decision: 'Approved' | 'Rejected', q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = q.tenantId ?? null;
     const conds: any[] = [eq(budgets.fiscalYear, q.fiscal_year), eq(budgets.accountCode, q.account_code), eq(budgets.status, 'PendingApproval')];
     conds.push(tenantId != null ? eq(budgets.tenantId, tenantId) : isNull(budgets.tenantId));
@@ -68,7 +68,7 @@ export class BudgetService {
   async rejectBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser) { return this.decideBudget('Rejected', q, user); }
 
   async listBudgets(q: { fiscal_year?: number; account_code?: string; cost_center_code?: string; status?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (q.fiscal_year) conds.push(eq(budgets.fiscalYear, q.fiscal_year));
     if (q.account_code) conds.push(eq(budgets.accountCode, q.account_code));
@@ -79,7 +79,7 @@ export class BudgetService {
   }
 
   async deleteBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [eq(budgets.fiscalYear, q.fiscal_year), eq(budgets.accountCode, q.account_code)];
     if (q.cost_center_code != null) conds.push(eq(budgets.costCenterCode, q.cost_center_code));
     if (q.period) conds.push(eq(budgets.period, q.period));
@@ -89,7 +89,7 @@ export class BudgetService {
 
   // budget vs actual: actuals read from the GL (Posted journal lines), budgets summed; variance + favorability
   async budgetVsActual(q: { fiscal_year: number; period?: string; cost_center?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const periodCond = q.period
       ? sql`${journalEntries.period} = ${q.period}`
       : and(sql`${journalEntries.entryDate} >= ${`${q.fiscal_year}-01-01`}`, sql`${journalEntries.entryDate} <= ${`${q.fiscal_year}-12-31`}`);
@@ -152,7 +152,7 @@ export class BudgetService {
   }
 
   private async lastReview(fiscalYear: number, period: string | null, costCenter: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(budgetReviews.fiscalYear, fiscalYear), period ? eq(budgetReviews.period, period) : isNull(budgetReviews.period), costCenter ? eq(budgetReviews.costCenterCode, costCenter) : isNull(budgetReviews.costCenterCode)];
     const [r] = await db.select().from(budgetReviews).where(and(...conds)).orderBy(desc(budgetReviews.id)).limit(1);
     return r ? this.fmtReview(r) : null;
@@ -163,7 +163,7 @@ export class BudgetService {
   async signOffReview(dto: { fiscal_year: number; period?: string | null; cost_center?: string | null; notes?: string }, user: JwtUser) {
     if (!dto.notes || !dto.notes.trim()) throw new BadRequestException({ code: 'NOTES_REQUIRED', message: 'A review note is required', messageTh: 'ต้องระบุบันทึกการสอบทาน' });
     const va = await this.budgetVsActual({ fiscal_year: dto.fiscal_year, period: dto.period ?? undefined, cost_center: dto.cost_center ?? undefined });
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.insert(budgetReviews).values({
       tenantId: user.tenantId ?? null, fiscalYear: dto.fiscal_year, period: dto.period ?? null, costCenterCode: dto.cost_center ?? null,
       materialCount: va.review.material_count, unfavorableTotal: fx(va.review.unfavorable_total, 4), notes: dto.notes.trim(), reviewedBy: user.username, reviewedAt: new Date(),
@@ -172,7 +172,7 @@ export class BudgetService {
   }
 
   async listReviews(fiscalYear?: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(budgetReviews).where(fiscalYear != null ? eq(budgetReviews.fiscalYear, fiscalYear) : undefined).orderBy(desc(budgetReviews.id)).limit(100);
     return { reviews: rows.map((r: any) => this.fmtReview(r)), count: rows.length };
   }

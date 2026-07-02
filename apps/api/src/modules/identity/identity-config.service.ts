@@ -25,7 +25,7 @@ export class IdentityConfigService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   private async row(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(tenantIdentity).where(eq(tenantIdentity.tenantId, tenantId)).limit(1);
     return r;
   }
@@ -59,7 +59,7 @@ export class IdentityConfigService {
     if (dto.oidc_redirect_uri && !/^https?:\/\//.test(dto.oidc_redirect_uri)) {
       throw new BadRequestException({ code: 'BAD_REDIRECT_URI', message: 'redirect_uri must be http(s)', messageTh: 'redirect_uri ต้องเป็น http(s)' });
     }
-    const db = this.db as any;
+    const db = this.db;
     const existing = await this.row(user.tenantId);
     const set: any = { updatedBy: user.username, updatedAt: new Date() };
     if (dto.sso_enabled !== undefined) set.ssoEnabled = dto.sso_enabled;
@@ -77,7 +77,7 @@ export class IdentityConfigService {
   // (Re)generate a SCIM bearer token — returned in plaintext ONCE; only its hash is stored.
   async rotateScimToken(user: JwtUser) {
     if (user.tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'No tenant context', messageTh: 'ไม่พบผู้เช่า' });
-    const db = this.db as any;
+    const db = this.db;
     const raw = 'scim_' + randomBytes(24).toString('hex');
     const prefix = raw.slice(0, 12);
     const set = { scimTokenHash: sha256(raw), scimTokenPrefix: prefix, scimEnabled: true, updatedBy: user.username, updatedAt: new Date() };

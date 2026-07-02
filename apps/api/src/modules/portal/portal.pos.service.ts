@@ -53,7 +53,7 @@ export class PortalPosService {
   // opts.saleDate (offline sync) books the sale + its GL on the original offline day, not today.
   async createSale(dto: PortalSaleDto, user: JwtUser, opts?: { saleDate?: string; branchId?: number }) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการสินค้า' });
 
     // multi-branch tag: validate the outlet belongs to this tenant (explicit tenant predicate even under
@@ -213,7 +213,7 @@ export class PortalPosService {
   // GET /api/portal/pos/sales — history (this tenant)
   async listSales(user: JwtUser, limit: number, offset: number) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       sale_no: custPosSales.saleNo, sale_date: custPosSales.saleDate, subtotal: custPosSales.subtotal,
       discount: custPosSales.discount, tax_amount: custPosSales.taxAmount, total: custPosSales.total,

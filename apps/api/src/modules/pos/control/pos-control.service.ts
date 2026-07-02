@@ -17,7 +17,7 @@ export class PosControlService {
 
   async hold(dto: HoldDto, user: JwtUser) {
     if (!dto.cart) throw new BadRequestException({ code: 'NO_CART', message: 'cart required', messageTh: 'ไม่มีตะกร้า' });
-    const db = this.db as any;
+    const db = this.db;
     const holdNo = await this.docNo.nextDaily('HOLD');
     await db.insert(posHeldOrders).values({
       tenantId: user.tenantId ?? null, holdNo, label: dto.label ?? null, customerName: dto.customer_name ?? null,
@@ -27,13 +27,13 @@ export class PosControlService {
   }
 
   async listHeld() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(posHeldOrders).where(eq(posHeldOrders.status, 'Held')).orderBy(desc(posHeldOrders.id));
     return { held: rows.map((r: any) => ({ hold_no: r.holdNo, label: r.label, customer_name: r.customerName, created_by: r.createdBy, created_at: r.createdAt })), count: rows.length };
   }
 
   async recall(holdNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [h] = await db.select().from(posHeldOrders).where(eq(posHeldOrders.holdNo, holdNo)).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Held order not found', messageTh: 'ไม่พบรายการที่พัก' });
     if (h.status !== 'Held') throw new BadRequestException({ code: 'NOT_HELD', message: `Order is ${h.status}`, messageTh: 'รายการนี้ถูกเรียกคืน/ยกเลิกแล้ว' });
@@ -42,14 +42,14 @@ export class PosControlService {
   }
 
   async discard(holdNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     await db.update(posHeldOrders).set({ status: 'Discarded' }).where(eq(posHeldOrders.holdNo, holdNo));
     return { hold_no: holdNo, status: 'Discarded' };
   }
 
   // Record (and thereby authorize) a manager override. Approver captured for the audit trail.
   async override(dto: OverrideDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const overrideNo = await this.docNo.nextDaily('OVR');
     await db.insert(posOverrides).values({
       tenantId: user.tenantId ?? null, overrideNo, saleNo: dto.sale_no ?? null, action: dto.action,
@@ -62,7 +62,7 @@ export class PosControlService {
   }
 
   async listOverrides(limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(posOverrides).orderBy(desc(posOverrides.id)).limit(limit);
     return {
       overrides: rows.map((r: any) => ({ override_no: r.overrideNo, sale_no: r.saleNo, action: r.action, reason_code: r.reasonCode, reason: r.reason, amount: r.amount != null ? n(r.amount) : null, requested_by: r.requestedBy, approved_by: r.approvedBy, created_at: r.createdAt })),

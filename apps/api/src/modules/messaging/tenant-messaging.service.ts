@@ -23,7 +23,7 @@ export class TenantMessagingService {
   // glance whether messaging actually delivers. Secrets are decrypted internally for the boolean checks and
   // never serialized.
   async get(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(tenantMessagingConfig).where(eq(tenantMessagingConfig.tenantId, user.tenantId as number));
     const byChannel = new Map<string, any>(rows.map((r: any) => [r.channel, r]));
     const e = process.env;
@@ -100,7 +100,7 @@ export class TenantMessagingService {
     if (dto.weekly_cap != null && (!Number.isInteger(dto.weekly_cap) || dto.weekly_cap < 0)) throw new BadRequestException({ code: 'BAD_CAP', message: 'weekly_cap must be an integer ≥ 0', messageTh: 'เพดานต้องเป็นจำนวนเต็ม ≥ 0' });
     const cur = await this.getGovernance(user.tenantId);
     const next = { quiet_start: dto.quiet_start ?? cur.quiet_start, quiet_end: dto.quiet_end ?? cur.quiet_end, weekly_cap: dto.weekly_cap ?? cur.weekly_cap };
-    const db = this.db as any;
+    const db = this.db;
     const now = new Date();
     const configEnc = encrypt(JSON.stringify(next));
     await db.insert(tenantMessagingConfig)
@@ -113,7 +113,7 @@ export class TenantMessagingService {
   // for the channel → the gateway falls back to the platform env. Called inside a tenant-scoped request (RLS).
   async resolveCreds(tenantId: number | null | undefined, channel: MessageChannel): Promise<Record<string, any> | null> {
     if (tenantId == null) return null;
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(tenantMessagingConfig)
       .where(and(eq(tenantMessagingConfig.tenantId, tenantId), eq(tenantMessagingConfig.channel, channel))).limit(1);
     if (!r || r.enabled !== true || !r.configEnc) return null;

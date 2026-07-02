@@ -18,21 +18,21 @@ export class CrmPipelineService {
 
   // ── Leads ──────────────────────────────────────────────────────────────
   async createLead(dto: { name: string; company?: string; email?: string; phone?: string; source?: string; owner?: string; notes?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const leadNo = await this.docNo.nextDaily('LEAD');
     await db.insert(crmLeads).values({ tenantId: user.tenantId ?? null, leadNo, name: dto.name, company: dto.company ?? null, email: dto.email ?? null, phone: dto.phone ?? null, source: dto.source ?? null, status: 'new', owner: dto.owner ?? user.username, notes: dto.notes ?? null, createdBy: user.username });
     return { lead_no: leadNo, name: dto.name, status: 'new' };
   }
 
   async listLeads(status: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(crmLeads.status, status) : undefined;
     const rows = await db.select().from(crmLeads).where(where).orderBy(desc(crmLeads.id)).limit(300);
     return { leads: rows.map(shapeLead), count: rows.length };
   }
 
   private async leadByNo(leadNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(crmLeads.leadNo, leadNo)];
     if (user.tenantId != null) conds.push(eq(crmLeads.tenantId, user.tenantId));
     const [l] = await db.select().from(crmLeads).where(and(...conds)).limit(1);
@@ -41,7 +41,7 @@ export class CrmPipelineService {
   }
 
   async qualifyLead(leadNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const l = await this.leadByNo(leadNo, user);
     if (l.status === 'converted' || l.status === 'lost') throw new BadRequestException({ code: 'LEAD_CLOSED', message: 'Lead is already closed', messageTh: 'ลีดนี้ปิดแล้ว' });
     await db.update(crmLeads).set({ status: 'qualified' }).where(eq(crmLeads.id, Number(l.id)));
@@ -49,7 +49,7 @@ export class CrmPipelineService {
   }
 
   async loseLead(leadNo: string, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const l = await this.leadByNo(leadNo, user);
     if (l.status === 'converted') throw new BadRequestException({ code: 'LEAD_CONVERTED', message: 'Lead already converted', messageTh: 'ลีดถูกแปลงแล้ว' });
     await db.update(crmLeads).set({ status: 'lost', lostReason: reason ?? null }).where(eq(crmLeads.id, Number(l.id)));
@@ -59,7 +59,7 @@ export class CrmPipelineService {
   // Convert a qualified lead → a customer-of-record (customer_master) + an opportunity. Idempotency: a lead
   // already converted is rejected so it can't spawn duplicate customers/opportunities.
   async convertLead(leadNo: string, dto: { opportunity_name?: string; amount?: number; expected_close_date?: string; customer_no?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const l = await this.leadByNo(leadNo, user);
     if (l.status === 'converted') throw new BadRequestException({ code: 'LEAD_CONVERTED', message: 'Lead already converted', messageTh: 'ลีดถูกแปลงแล้ว' });
     if (l.status === 'lost') throw new BadRequestException({ code: 'LEAD_LOST', message: 'A lost lead cannot be converted', messageTh: 'ลีดที่เสียแล้วแปลงไม่ได้' });
@@ -77,21 +77,21 @@ export class CrmPipelineService {
 
   // ── Opportunities ──────────────────────────────────────────────────────
   async createOpportunity(dto: { name: string; customer_no?: string; amount?: number; probability?: number; expected_close_date?: string; owner?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const oppNo = await this.docNo.nextDaily('OPP');
     await db.insert(crmOpportunities).values({ tenantId: user.tenantId ?? null, oppNo, customerNo: dto.customer_no ?? null, name: dto.name, stage: 'prospecting', amount: dto.amount != null ? String(dto.amount) : '0', probability: dto.probability ?? 10, expectedCloseDate: dto.expected_close_date ?? null, owner: dto.owner ?? user.username, createdBy: user.username });
     return { opp_no: oppNo, name: dto.name, stage: 'prospecting' };
   }
 
   async listOpportunities(stage: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const where = stage ? eq(crmOpportunities.stage, stage) : undefined;
     const rows = await db.select().from(crmOpportunities).where(where).orderBy(desc(crmOpportunities.id)).limit(300);
     return { opportunities: rows.map(shapeOpp), count: rows.length };
   }
 
   private async oppByNo(oppNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(crmOpportunities.oppNo, oppNo)];
     if (user.tenantId != null) conds.push(eq(crmOpportunities.tenantId, user.tenantId));
     const [o] = await db.select().from(crmOpportunities).where(and(...conds)).limit(1);
@@ -102,7 +102,7 @@ export class CrmPipelineService {
   // Move an opportunity through the stage machine. won/lost are terminal; lost requires a reason; the
   // default probability tracks the stage (prospecting 10 → qualification 25 → proposal 50 → negotiation 75).
   async setStage(oppNo: string, stage: string, dto: { lost_reason?: string; probability?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!STAGES.includes(stage as any)) throw new BadRequestException({ code: 'BAD_STAGE', message: `Unknown stage ${stage}`, messageTh: 'สถานะไม่ถูกต้อง' });
     const o = await this.oppByNo(oppNo, user);
     if (o.stage === 'won' || o.stage === 'lost') throw new BadRequestException({ code: 'OPP_CLOSED', message: `Opportunity is already ${o.stage}`, messageTh: 'โอกาสการขายปิดแล้ว' });
@@ -117,7 +117,7 @@ export class CrmPipelineService {
   // Weighted pipeline forecast: open opportunities by stage (count + amount + Σ amount×probability), plus
   // won/lost totals. The weighted figure is the revenue forecast finance can rely on.
   async pipelineSummary(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(crmOpportunities);
     const byStage: Record<string, { count: number; amount: number; weighted: number }> = {};
     let openAmount = 0, weightedForecast = 0, wonAmount = 0, lostAmount = 0;
@@ -138,7 +138,7 @@ export class CrmPipelineService {
   // each owner's win rate), and a monthly won/lost/win-rate trend — everything a sales leader needs to see why
   // deals are won or lost. Tenant-scoped by RLS.
   async winLoss(user: JwtUser, dto?: { months?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(crmOpportunities);
     const months = Math.max(1, Math.min(24, dto?.months ?? 6));
     const lossReasons: Record<string, { count: number; amount: number }> = {};
@@ -175,13 +175,13 @@ export class CrmPipelineService {
 
   // ── Activities ─────────────────────────────────────────────────────────
   async logActivity(dto: { entity_type: 'lead' | 'opportunity'; entity_no: string; type: string; subject?: string; notes?: string; due_date?: string; done?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(crmActivities).values({ tenantId: user.tenantId ?? null, entityType: dto.entity_type, entityNo: dto.entity_no, type: dto.type, subject: dto.subject ?? null, notes: dto.notes ?? null, dueDate: dto.due_date ?? null, done: dto.done ?? false, owner: user.username, createdBy: user.username });
     return { entity_type: dto.entity_type, entity_no: dto.entity_no, type: dto.type };
   }
 
   async listActivities(entityType: string | undefined, entityNo: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (entityType) conds.push(eq(crmActivities.entityType, entityType));
     if (entityNo) conds.push(eq(crmActivities.entityNo, entityNo));

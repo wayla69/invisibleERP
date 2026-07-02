@@ -78,7 +78,7 @@ export class CollectionsService {
   // ───────────────────── Collections worklist ─────────────────────
   // Open AR invoices with aging, the current dunning stage (latest action) and the next recommended rung.
   async worklist(opts: { onlyOverdue?: boolean } = {}) {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const rows = await db.select({
       invoice_no: arInvoices.invoiceNo, tenant_id: arInvoices.tenantId, party: tenants.code,
@@ -118,7 +118,7 @@ export class CollectionsService {
 
   // ───────────────────── Record a dunning action ─────────────────────
   async recordDunning(invoiceNo: string, dto: DunningDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!STAGE_INDEX.has(dto.stage)) {
       throw new BadRequestException({ code: 'INVALID_STAGE', message: `Unknown dunning stage ${dto.stage}`, messageTh: 'ขั้นการทวงถามไม่ถูกต้อง' });
     }
@@ -178,7 +178,7 @@ export class CollectionsService {
 
   // Full dunning history for one invoice (newest first).
   async history(invoiceNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(arDunningLog).where(eq(arDunningLog.invoiceNo, invoiceNo)).orderBy(desc(arDunningLog.createdAt), desc(arDunningLog.id));
     return {
       invoice_no: invoiceNo, count: rows.length,
@@ -191,7 +191,7 @@ export class CollectionsService {
   // (POS / portal / sales order) consults before extending further credit. The hold control addresses
   // SoD risk R09 (raise credit then sell): the limit is master data, the check is enforced at the txn.
   async creditStatus(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ code: tenants.code, creditLimit: tenants.creditLimit, creditTerm: tenants.creditTerm, creditHold: tenants.creditHold })
       .from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
@@ -229,7 +229,7 @@ export class CollectionsService {
   // ───────────────────── Credit-manager workflow (hold / release / limit change) ─────────────────────
   // Place a manual credit hold on a customer — blocks new credit orders at order entry (CREDIT_HOLD).
   async placeHold(tenantId: number, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ id: tenants.id, code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
     await db.update(tenants).set({ creditHold: true }).where(eq(tenants.id, tenantId));
@@ -239,7 +239,7 @@ export class CollectionsService {
 
   // Release a manual hold. SoD: the releaser must differ from whoever placed the active hold (maker-checker).
   async releaseHold(tenantId: number, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ id: tenants.id, code: tenants.code, creditHold: tenants.creditHold }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
     if (t.creditHold !== true) throw new BadRequestException({ code: 'NOT_ON_HOLD', message: 'Customer is not on credit hold', messageTh: 'ลูกค้าไม่ได้ถูกระงับเครดิต' });
@@ -255,7 +255,7 @@ export class CollectionsService {
 
   // Change a customer's credit limit, recording old→new for the credit-change report.
   async changeLimit(tenantId: number, newLimit: number, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ id: tenants.id, code: tenants.code, creditLimit: tenants.creditLimit }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
     const oldLimit = n(t.creditLimit);
@@ -266,7 +266,7 @@ export class CollectionsService {
 
   // Credit-change audit for a customer (holds, releases, limit changes) — newest first.
   async creditEventsFor(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(creditEvents).where(eq(creditEvents.tenantId, tenantId)).orderBy(desc(creditEvents.id));
     return { tenant_id: tenantId, count: rows.length, events: rows.map((e: any) => ({ event_type: e.eventType, old_limit: e.oldLimit != null ? n(e.oldLimit) : null, new_limit: e.newLimit != null ? n(e.newLimit) : null, reason: e.reason, actioned_by: e.actionedBy, created_at: e.createdAt })) };
   }
@@ -274,7 +274,7 @@ export class CollectionsService {
   // All-customer credit-position summary — aggregate exposure/overdue/hold state across every customer
   // with open AR. Used by the credit-hold management dashboard to show the full book at a glance.
   async creditPositions() {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const openAr = await db.select({
       tenant_id: arInvoices.tenantId,

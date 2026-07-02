@@ -29,7 +29,7 @@ export class ControlsService {
 
   // Run every detector over the caller's (RLS-scoped) data and upsert findings. Idempotent by fingerprint.
   async scan(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const vkey = sql<string>`coalesce(${apTransactions.vendorName}, ${apTransactions.vendorId}::text, '?')`;
     let candidates = 0;
 
@@ -62,7 +62,7 @@ export class ControlsService {
   }
 
   async listFindings(_user: JwtUser, status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const base = db.select().from(controlFindings);
     const rows = await (status ? base.where(eq(controlFindings.status, status)) : base).orderBy(sql`${controlFindings.detectedAt} desc`);
     return { findings: rows.map((r: any) => ({ id: Number(r.id), control_key: r.controlKey, severity: r.severity, entity_ref: r.entityRef, detail: r.detail, amount: r.amount != null ? Number(r.amount) : null, status: r.status, detected_at: r.detectedAt })) };

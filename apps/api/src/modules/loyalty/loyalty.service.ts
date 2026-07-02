@@ -17,7 +17,7 @@ export class LoyaltyService {
 
   // ── CONFIG (singleton id=1) ──
   async getConfig() {
-    const db = this.db as any;
+    const db = this.db;
     let [cfg] = await db.select().from(loyaltyConfig).where(eq(loyaltyConfig.id, 1)).limit(1);
     if (!cfg) {
       // ใส่ค่า default ตาม schema (singleton)
@@ -37,7 +37,7 @@ export class LoyaltyService {
   }
 
   async updateConfig(dto: LoyaltyConfigDto) {
-    const db = this.db as any;
+    const db = this.db;
     const set: Record<string, unknown> = { updatedAt: new Date() };
     if (dto.enabled != null) set.enabled = dto.enabled;
     if (dto.points_per_baht != null) set.pointsPerBaht = String(dto.points_per_baht);
@@ -60,7 +60,7 @@ export class LoyaltyService {
 
   // ── ME (this tenant balance/lifetime + recent txn) ──
   async me(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenant = await this.resolveTenant(user);
     const [lp] = await db.select().from(loyaltyPoints).where(eq(loyaltyPoints.tenantId, tenant.id)).limit(1);
     const txns = await db.select().from(loyaltyTxn)
@@ -81,7 +81,7 @@ export class LoyaltyService {
   // ── REDEEM ──
   // require balance>=min_redeem ; redeem_val=points*baht_per_point ; decrement balance ; insert Redeem (negative points)
   async redeem(dto: RedeemDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const points = n(dto.points);
     if (points <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Points must be positive', messageTh: 'จำนวนแต้มต้องมากกว่าศูนย์' });
 
@@ -115,7 +115,7 @@ export class LoyaltyService {
 
   // ── helper ──
   private async resolveTenant(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const code = user.customerName;
     if (!code) throw new BadRequestException({ code: 'NO_TENANT', message: 'No customer linked to this user', messageTh: 'ผู้ใช้นี้ไม่ผูกกับลูกค้า' });
     const [tenant] = await db.select().from(tenants).where(eq(tenants.code, code)).limit(1);

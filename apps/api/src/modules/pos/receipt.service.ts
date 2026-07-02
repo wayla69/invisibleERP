@@ -21,7 +21,7 @@ export class ReceiptService {
 
   // Immutable model from a sale. Idempotent body; copy/reprint flags are set by the render methods.
   async buildModel(saleNo: string): Promise<{ model: ReceiptModel; tenantId: number | null }> {
-    const db = this.db as any;
+    const db = this.db;
     const [sale] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
     if (!sale) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sale not found', messageTh: 'ไม่พบรายการขาย' });
     const [t] = sale.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(sale.tenantId))).limit(1) : [null];
@@ -46,12 +46,12 @@ export class ReceiptService {
 
   // number of prior print rows for this sale (0 = original)
   private async reprintCount(saleNo: string): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select({ c: sql<string>`count(*)` }).from(receiptPrints).where(and(eq(receiptPrints.saleNo, saleNo), eq(receiptPrints.channel, 'print')));
     return Number(row?.c ?? 0);
   }
   private async recordPrint(saleNo: string, tenantId: number | null, channel: string, isCopy: boolean, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(receiptPrints).values({ saleNo, tenantId, channel, isCopy: isCopy ? 'true' : 'false', printedBy: user.username });
   }
 

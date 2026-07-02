@@ -53,7 +53,7 @@ export class ConnectorsService {
   }
 
   async sync(user: JwtUser, id: number, body: any) {
-    const db = this.db as any;
+    const db = this.db;
     const [conn] = await db.select().from(connectors).where(eq(connectors.id, id)).limit(1);
     if (!conn) throw new NotFoundException({ code: 'CONNECTOR_NOT_FOUND', message: 'connector not found', messageTh: 'ไม่พบตัวเชื่อมต่อ' });
     const batch = this.fixtures(conn.type, body);

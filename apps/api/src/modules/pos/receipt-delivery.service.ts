@@ -31,7 +31,7 @@ export class ReceiptDeliveryService {
 
   // Build the receipt body (HTML for email, text for SMS) and hand to the provider. Records a print row.
   async send(saleNo: string, dto: SendReceiptDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const body = await this.receipts.bodyFor(saleNo, dto.channel === 'email' ? 'html' : 'text'); // throws 404 if no sale
     const subject = `ใบเสร็จรับเงิน ${saleNo}`;
     const r = await this.provider.send(dto.channel, dto.to, subject, body);

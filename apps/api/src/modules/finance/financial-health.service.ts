@@ -24,7 +24,7 @@ export class FinancialHealthService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, @Optional() private readonly ledger?: LedgerService) {}
 
   async score(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
 
     // cash on hand = posted balance of the cash/bank GL accounts (debit − credit)

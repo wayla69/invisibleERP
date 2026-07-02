@@ -28,7 +28,7 @@ export class InventoryQrController {
 
   @Post('qr/labels')
   async labels(@Body(new ZodValidationPipe(LabelsBody)) b: LabelsBodyT, @Res() reply: FastifyReply) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = b.item_ids?.length
       ? await db.select().from(items).where(inArray(items.itemId, b.item_ids))
       : await db.select().from(items).orderBy(asc(items.itemId)).limit(b.limit ?? 200);

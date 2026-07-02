@@ -24,7 +24,7 @@ export class WheelsService {
   }
 
   async listWheels(user: JwtUser, q: { active?: boolean } = {}) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const conds: any[] = [eq(loyaltyWheels.tenantId, tenantId)];
     if (q.active !== undefined) conds.push(eq(loyaltyWheels.active, q.active));
     const wheels = await db.select().from(loyaltyWheels).where(and(...conds)).orderBy(loyaltyWheels.id);
@@ -34,7 +34,7 @@ export class WheelsService {
 
   // Create/replace a wheel and its prize segments (config; segments fully replaced on update).
   async upsertWheel(user: JwtUser, dto: any) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const segments: any[] = Array.isArray(dto.segments) ? dto.segments : [];
     if (!segments.length) throw new BadRequestException({ code: 'NO_SEGMENTS', message: 'A wheel needs at least one segment', messageTh: 'ต้องมีช่องรางวัลอย่างน้อยหนึ่งช่อง' });
     if (!segments.some((sg) => Number(sg.weight ?? 0) > 0)) throw new BadRequestException({ code: 'NO_WEIGHT', message: 'At least one segment must have a positive weight', messageTh: 'ต้องมีช่องที่มีน้ำหนักมากกว่า 0' });
@@ -64,7 +64,7 @@ export class WheelsService {
   }
 
   async setWheelActive(user: JwtUser, id: number, active: boolean) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [w] = await db.update(loyaltyWheels).set({ active }).where(and(eq(loyaltyWheels.id, id), eq(loyaltyWheels.tenantId, tenantId))).returning();
     if (!w) throw new NotFoundException({ code: 'WHEEL_NOT_FOUND', message: 'Wheel not found', messageTh: 'ไม่พบวงล้อ' });
     return this.getWheel(db, tenantId, Number(w.id));
@@ -72,7 +72,7 @@ export class WheelsService {
 
   // Spin: pay (points or a daily free spin), pick a weighted in-stock segment, grant the prize, audit it.
   async spin(user: JwtUser, wheelId: number, dto: { member_id: number }) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [wheel] = await db.select().from(loyaltyWheels).where(and(eq(loyaltyWheels.id, wheelId), eq(loyaltyWheels.tenantId, tenantId), eq(loyaltyWheels.active, true))).limit(1);
     if (!wheel) throw new NotFoundException({ code: 'WHEEL_NOT_FOUND', message: 'Wheel not found/inactive', messageTh: 'ไม่พบวงล้อ' });
     // Start of the current business day (Asia/Bangkok, UTC+7) for the daily-free-spin window.
@@ -125,7 +125,7 @@ export class WheelsService {
   }
 
   async memberSpins(user: JwtUser, memberId: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const rows = await db.select().from(loyaltySpins).where(and(eq(loyaltySpins.memberId, memberId), eq(loyaltySpins.tenantId, tenantId))).orderBy(desc(loyaltySpins.id)).limit(50);
     return { member_id: memberId, spins: rows.map((s: any) => ({ id: Number(s.id), spin_code: s.spinCode, prize_kind: s.prizeKind, prize_points: Number(s.prizePoints ?? 0), cost_points: Number(s.costPoints ?? 0), free: !!s.free, created_at: s.createdAt })) };
   }
