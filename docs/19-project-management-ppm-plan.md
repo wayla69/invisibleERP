@@ -34,7 +34,7 @@ wire the spine together, not a greenfield rewrite.
 | Budget cap, variance, over-budget flag, margin/WIP roll-up | `projects.service.ts` (computed) | ✅ Working |
 | `project_id` GL dimension (indexed) | `database/schema/ledger.ts` `journalLines.project_id` | ✅ Working |
 | Controls PROJ-01/02/03, SoD R07; narrative; harness | RCM `compliance/build_rcm.py` · `docs/process-narratives/16-project-accounting.md` · `tools/cutover/src/projects.ts` | ✅ Working |
-| CRM pipeline: leads → opportunities (6-stage prospecting→qualification→proposal→negotiation→won/lost), `lostReason`, `closedAt`, weighted forecast + **win_rate** | `apps/api/src/modules/crm-pipeline/` · `GET /api/crm/pipeline/summary` | ✅ Working |
+| CRM pipeline: leads → opportunities (6-stage prospecting→qualification→proposal→negotiation→won/lost), `lostReason`, `closedAt`, weighted forecast + **win_rate** | `apps/api/src/modules/crm/pipeline/` (moved from `crm-pipeline/` in the docs/28 consolidation) · `GET /api/crm/pipeline/summary` | ✅ Working |
 | Win-rate trend reporting | `apps/api/src/modules/bi/bi.service.ts` `pipeline_trend` (`win_rate_pct`) | ✅ Working |
 | Customer master | `database/schema/customer-master.ts` (`customer_no`) | ✅ Working |
 | CPQ quotes → accept posts AR/revenue | `apps/api/src/modules/cpq/` | ⚠️ Binds the **dormant** `pipeline.ts` `opportunities` table, not `crmOpportunities` |

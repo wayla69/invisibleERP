@@ -313,4 +313,4 @@ in Railway's ISO 27001 / SOC 2 report, which is reviewed annually as a complemen
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-28 | Platform | Initial ISO 27001:2022 Annex A gap analysis. 93 controls assessed: 53 ✅, 24 🟡, 3 ❌, 13 N/A. Gap summary, risk register excerpt, SOA skeleton, and remediation roadmap. |
-| 0.2 DRAFT | 2026-07-02 | Platform | Census reconciliation (docs/27 R3-1): SOX-RCM population reference corrected to the generated census (169) with a machine-readable tag. |
+| 0.2 DRAFT | 2026-07-02 | Platform | Census reconciliation (docs/27 R3-1): SOX-RCM population reference corrected to the generated census (169 as of that date — the tagged census is the live figure) with a machine-readable tag. |

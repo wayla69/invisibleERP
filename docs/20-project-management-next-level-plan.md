@@ -19,7 +19,7 @@ resourcing & rate cards, timesheet→labor (maker-checker), dependencies & EVM, 
 What it does **not** yet have: an **executive cross-project view**, **change-controlled baselines**, a way
 to **start projects from a template**, **risk/issue governance**, and a **dedicated PM information
 architecture**. This plan closes those, building on what already exists (`modules/projects`,
-`ProjectsService.portfolioEvm`/`schedule`/`evm`/`evmSeries`, `modules/crm-pipeline.winLoss`).
+`ProjectsService.portfolioEvm`/`schedule`/`evm`/`evmSeries`, `modules/crm/pipeline` `winLoss`).
 
 Current state to build on: **RCM 140 controls**; `projects` cutover harness **44 checks**; PN-16 narrative
 at **rev 0.11**; UAT through **UAT-O2C-211**.
