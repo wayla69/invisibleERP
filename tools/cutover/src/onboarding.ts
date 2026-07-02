@@ -140,6 +140,20 @@ async function main() {
   const oldLogin = await login('admin', 'admin123');
   ok('Old password no longer works (401)', oldLogin.status === 401, `${oldLogin.status}`);
 
+  // ── 4b. docs/24 R2-2 — an authorization change revokes outstanding sessions immediately ──
+  // Permissions ride the JWT claim, so narrowing a user's overrides must not wait out the token TTL:
+  // PATCH /api/admin/users bumps tokens_valid_from → the pre-change token dies NOW (TOKEN_REVOKED) and a
+  // fresh login carries the narrowed permission set.
+  const preChangeTok = (await login('planuser', 'planpass1')).json.token;
+  const preOk = await inj('GET', '/api/ai/kb/search?q=hours', preChangeTok);
+  const permPatch = await inj('PATCH', '/api/admin/users/planuser', a2.json.token, { permissions: ['dashboard'] });
+  ok('R2-2: permission update accepted + reports sessions_revoked', (permPatch.status === 200 || permPatch.status === 201) && permPatch.json.sessions_revoked === true, `${permPatch.status} ${JSON.stringify(permPatch.json)}`);
+  const staleTok = await inj('GET', '/api/ai/kb/search?q=hours', preChangeTok);
+  ok('R2-2: pre-change token rejected immediately (401 TOKEN_REVOKED, not TTL-lagged)',
+    preOk.status !== 401 && staleTok.status === 401 && staleTok.json.error?.code === 'TOKEN_REVOKED', `pre=${preOk.status} post=${staleTok.status} ${staleTok.json.error?.code}`);
+  const freshLogin = await login('planuser', 'planpass1');
+  ok('R2-2: fresh login works with the narrowed permission set', freshLogin.status === 200, `${freshLogin.status}`);
+
   // ── 5. Step 10: feature flags / Labs ──
   const ff = await inj('GET', '/api/feature-flags', owner);
   const consol = (ff.json.flags ?? []).find((f: any) => f.key === 'consolidation');

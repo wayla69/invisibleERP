@@ -14,6 +14,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SEC-002 | Bad-credential rejection | ITGC-AC-01 | 08 §9, §13 |
 | UAT-SEC-003 | Auth required on protected routes | ITGC-AC-02 | 08 §7 |
 | UAT-SEC-004 | First login forces password change (hard API gate) | ITGC-AC-07 | 08 §7 |
+| UAT-SEC-046 | Permission change revokes outstanding sessions immediately | ITGC-AC-15, ITGC-AC-02 | 08 §7 |
 | UAT-SEC-005 | Password min-length policy | ITGC-AC-05 | 08 §9 |
 | UAT-SEC-006 | Mandatory MFA for privileged role | ITGC-AC-06 | 08 §9 |
 | UAT-SEC-007 | MFA not forced for low-privilege role | ITGC-AC-06 | 08 §9 |

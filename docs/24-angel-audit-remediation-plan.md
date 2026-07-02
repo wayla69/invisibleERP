@@ -276,7 +276,13 @@ edge-limiter values (`AUTH_MAX=30/min` — the load-test override must not leak)
 the table, asserts the metric increments and login still works. Document the residual in
 `compliance/CONTROL_STATUS_HONEST.md` (ITGC-AC-07 note).
 
-### R2-2 · Live permission re-resolution — closes AUD-SEC-02
+### R2-2 · Live permission re-resolution — closes AUD-SEC-02 — **DELIVERED 2026-07-02**
+> Shipped with a better mechanism than planned: instead of re-resolving permissions on every request
+> (extra query per API call), an authorization change **revokes the outstanding sessions** — `PATCH
+> /api/admin/users` with a role/permission change bumps `tokens_valid_from` (the existing
+> revokeAllSessions watermark the guard already checks), so the stale-claim window collapses from ≤1h to
+> the next request, at zero per-request cost. Response reports `sessions_revoked`. ToE in `onboarding`
+> (pre-change token → 401 TOKEN_REVOKED); RCM AC-15 text, ITGC narrative rev 1.5, new UAT-SEC case.
 In `guards.ts`, the role is already re-derived live (`dbRole`); extend the same lookup to per-user
 permission **overrides** (they live on the same user row — zero extra queries) so a narrowed
 override takes effect immediately, not at token expiry. Fallback: if the lookup fails, keep the JWT
@@ -471,3 +477,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.4 | 2026-07-02 | ERP/Product | R1-4 delivered (bigint minor-unit balance invariants in the ledger; common/money.ts + money.test.ts; GL narrative rev 1.7) |
 | 1.5 | 2026-07-02 | ERP/Product | R0-3 delivered (must-change hard gate + random seed credential + prod-seed refusal); R2-3 found already-implemented (sod_reason ToE exists) |
 | 1.6 | 2026-07-02 | ERP/Product | R2-1 delivered (throttled fail-open ops alert on the lockout store; AC-15 RCM text drift fixed; runbook rev 1.2) |
+| 1.7 | 2026-07-02 | ERP/Product | R2-2 delivered (authz change bumps tokens_valid_from → immediate revocation instead of per-request re-resolution) |
