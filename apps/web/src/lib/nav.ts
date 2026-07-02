@@ -56,6 +56,7 @@ import {
   LifeBuoy,
   Filter,
   Megaphone,
+  Route,
   MessageSquare,
   Package,
   PackagePlus,
@@ -239,6 +240,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.loyalty_wheels', href: '/loyalty/wheels', icon: Disc3, perms: ['loyalty', 'marketing'] },
       { label: 'nav.loyalty_campaigns', href: '/loyalty/campaigns', icon: Megaphone, perms: ['marketing', 'exec'] },
       { label: 'nav.loyalty_segments', href: '/loyalty/segments', icon: Filter, perms: ['marketing', 'exec'] },
+      { label: 'nav.loyalty_journeys', href: '/loyalty/journeys', icon: Route, perms: ['marketing', 'exec'] },
       { label: 'nav.loyalty_partners', href: '/loyalty/partners', icon: Handshake, perms: ['loyalty', 'marketing'] },
       { label: 'nav.loyalty_analytics', href: '/loyalty/analytics', icon: BarChart3, perms: ['marketing', 'exec'] },
       // LYL-17 — review queue for member-submitted receipt photos (points post on approval)

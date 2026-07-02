@@ -30,6 +30,7 @@ import { GamificationModule } from './modules/gamification/gamification.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { WheelsModule } from './modules/wheels/wheels.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { JourneysModule } from './modules/journeys/journeys.module';
 import { PartnersModule } from './modules/partners/partners.module';
 import { LoyaltyAnalyticsModule } from './modules/loyalty-analytics/loyalty-analytics.module';
 import { MemberModule } from './modules/member/member.module';
@@ -159,6 +160,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     ReferralsModule,
     WheelsModule,
     CampaignsModule,
+    JourneysModule,
     PartnersModule,
     LoyaltyAnalyticsModule,
     MemberModule,

@@ -287,6 +287,23 @@ The API remains available for integrations: `GET`/`POST`/`PUT`/`DELETE /api/loya
 `GET /api/loyalty/saved-segments/:id/members`. Only whitelisted fields are allowed, so a bad rule is
 rejected safely.
 
+**Journeys (เจอร์นีย์ลูกค้า).** Design a message *sequence* once and let it run per member — e.g. a welcome
+series (*enrol → send now → wait 7 days → follow-up*) or a win-back drip. On **เจอร์นีย์ลูกค้า**
+(`/loyalty/journeys`, permission `marketing`/`exec`):
+
+1. Name the journey, pick the **entry** — *manual/Automation* (enrol from the API or an Automation rule's
+   **enroll_journey** action, e.g. "when a member enrols → start the welcome series") or *เข้าเซกเมนต์*
+   (members who match a saved segment are enrolled automatically) — and optionally a **frequency cap**
+   (at most N journey messages per member per window).
+2. Add **steps**: each waits N days, then sends an SMS / Email / LINE message. Press **เปิดใช้** to activate
+   (pause before editing).
+3. Steps are driven by the daily **รันเจอร์นีย์ลูกค้า** job (`journey_runner` BI subscription) or
+   `POST /api/loyalty/journeys/run-due`. The funnel column shows members in-flight vs completed.
+
+> **Controls (MKT-12):** a member can enrol in a journey only **once**; every step fires **at most once**
+> (safe against re-runs and crashes); opted-out members are **skipped, never contacted**; over-cap messages
+> are skipped — every outcome is audited in the message log under `journey:<code>:<step>`.
+
 **Customer segments (RFM).** The **กลุ่มลูกค้า RFM** panel shows how your members split across the five RFM
 segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
 without a computed profile yet appear under **Unsegmented**). Click a segment to open it in **CRM 360**
@@ -380,3 +397,4 @@ claim points by uploading a photo of the receipt.
 | 1.20 | 2026-07-02 | Platform | §13 **Segment-builder screen** (`/loyalty/segments`) — visual rule-builder over the saved-segments whitelist with live member preview; saved segments are now selectable as a **campaign / blast audience** (เซกเมนต์ที่บันทึกไว้). Consent unchanged. |
 | 1.21 | 2026-07-02 | Platform | §13 **Segments stay fresh automatically** — schedule the `crm_profile_refresh` daily BI job to re-profile the whole member base (RFM); on-demand full refresh via `POST /api/crm/profiles/refresh`. |
 | 1.22 | 2026-07-02 | Platform | §11 **Go-live readiness badges** on the messaging-providers screen — per-channel 🟢/🟡/⚪ resolved provider, last delivery, delivery-receipt chip, and a demo-mode warning when sends silently no-op. |
+| 1.23 | 2026-07-02 | Platform | §13 **Journeys** — multi-step drips on `/loyalty/journeys` (entry manual/Automation/segment, wait→send steps, frequency cap); consent + at-most-once per step enforced (MKT-12); runs via the `journey_runner` daily job. |

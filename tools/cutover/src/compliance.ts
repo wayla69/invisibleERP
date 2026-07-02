@@ -24,7 +24,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
@@ -733,6 +733,20 @@ async function main() {
       && rcDup.status === 409 && rcDup.json.error?.code === 'DUPLICATE_RECEIPT'
       && (rcReject.status === 200 || rcReject.status === 201) && rcReject.json.status === 'Rejected' && rcMeAfterReject.json.balance === 300,
     `submit=${rcSubmit.status}/${rcSubmit.json.status} self=${rcSelfApprove.status} approve=${rcApprove.status}/${rcApprove.json.points_granted} bal=${rcMeAfter.json.balance} re-approve=${rcReapprove.status}/${rcReapprove.json.error?.code} dup=${rcDup.status}/${rcDup.json.error?.code} reject=${rcReject.status}/${rcReject.json.status} balAfterReject=${rcMeAfterReject.json.balance}`);
+
+  // ════════ MKT-12 — Lifecycle journeys: consent-gated, frequency-capped, at-most-once per step ════════
+  // An opted-out member enrols but the step send is SKIPPED (audited in message_log); a re-run fires
+  // nothing (the enrollment-step was claimed before delivery — claim-first, mirrors MKT-10).
+  const [jm1] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-JNY1', name: 'เจอร์นีย์', phone: '0890000031', balance: '0', lifetime: '0', active: true, marketingOptIn: false }).returning({ id: s.posMembers.id });
+  const jny = await inj('POST', '/api/loyalty/journeys', execu, { name: 'MKT-12 series', trigger: 'manual', cap_messages: 1, cap_window_days: 7, steps: [{ wait_days: 0, channel: 'sms', body: 'ยินดีต้อนรับ' }] });
+  await inj('POST', `/api/loyalty/journeys/${jny.json.id}/activate`, execu, {});
+  await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, execu, { member_id: Number(jm1.id) });
+  const jr1 = await inj('POST', '/api/loyalty/journeys/run-due', execu, {});
+  const jr2 = await inj('POST', '/api/loyalty/journeys/run-due', execu, {});
+  const jrows = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.campaign, `journey:${jny.json.code}:1`)));
+  ok('MKT-12: journey step is consent-gated (opted-out ⇒ skipped, audited) and at-most-once (a re-run fires nothing)',
+    jr1.json.sent === 0 && (jr1.json.skipped ?? 0) >= 1 && jr2.json.sent === 0 && (jr2.json.skipped ?? 0) === 0 && jrows.length === 1 && jrows[0].status === 'skipped',
+    `run1={sent:${jr1.json.sent},skipped:${jr1.json.skipped}} run2={sent:${jr2.json.sent},skipped:${jr2.json.skipped}} audited=${jrows[0]?.status}`);
 
   // ════════════════════════ INV-06 — Perpetual inventory sub-ledger ↔ GL reconciliation ════════════════════════
   // Receipts/issues/adjustments post valued moves + balanced JEs; the sub-ledger value ties to the inventory
