@@ -1,5 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
 import { LoyaltyAnalyticsService } from './loyalty-analytics.service';
 
 // Loyalty analytics — liability, redemption funnel, breakage, tier mix, churn risk. Read-only; exec/marketing.

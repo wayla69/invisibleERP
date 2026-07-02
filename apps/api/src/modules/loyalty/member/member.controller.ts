@@ -1,18 +1,18 @@
 import { Controller, Get, Post, Put, Param, Body, UseGuards, HttpCode, Res, Req } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { Public, NoTx, CurrentUser, type JwtUser } from '../../common/decorators';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { setAuthCookies, clearAuthCookies, readCookie, AUTH_COOKIE } from '../../common/cookies';
+import { Public, NoTx, CurrentUser, type JwtUser } from '../../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
+import { setAuthCookies, clearAuthCookies, readCookie, AUTH_COOKIE } from '../../../common/cookies';
 import { MemberGuard } from './member.guard';
 import { MemberAuthService } from './member-auth.service';
-import { MemberService } from '../loyalty/member.service';
-import { ReceiptSubmissionsService } from '../loyalty/receipt-submissions.service';
-import { RewardsService } from '../rewards/rewards.service';
-import { GamificationService } from '../gamification/gamification.service';
-import { ReferralsService } from '../referrals/referrals.service';
-import { WheelsService } from '../wheels/wheels.service';
-import { PartnersService } from '../partners/partners.service';
+import { MemberService } from '../member.service';
+import { ReceiptSubmissionsService } from '../receipt-submissions.service';
+import { RewardsService } from '../engagement/rewards.service';
+import { GamificationService } from '../engagement/gamification.service';
+import { ReferralsService } from '../engagement/referrals.service';
+import { WheelsService } from '../engagement/wheels.service';
+import { PartnersService } from '../../partners/partners.service';
 
 const RequestOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string().min(1) });
 const VerifyOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string().min(1), code: z.string().min(4) });
