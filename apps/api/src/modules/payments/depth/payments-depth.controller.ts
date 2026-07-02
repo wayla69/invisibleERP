@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { PaymentsDepthService } from './payments-depth.service';
 
 const DepositBody = z.object({ amount: z.number().positive(), member_id: z.number().int().positive().optional(), customer_name: z.string().optional(), purpose: z.enum(['booking', 'tab', 'other']).optional() });

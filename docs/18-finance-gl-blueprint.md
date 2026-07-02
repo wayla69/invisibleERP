@@ -616,7 +616,7 @@ Each step = one PR. Branch from `main`, implement, verify (build + harness), ope
 ### Step 7 — WS2.3: AR/AP operational controls
 **Files to modify:** `0161_ar_ap_controls.sql`, `finance.ts` (schema), `finance.service.ts` (credit hold
   gate, allowance method), `collections.service.ts` (dunning gate),
-  `payments.service.ts` / `payments-depth.service.ts` (3-way match payment gate)
+  `payments.service.ts` / `payments/depth/payments-depth.service.ts` (3-way match payment gate)
 **Verify:** basics — credit-hold order rejected; allowance posts contra-AR; AP pay blocked without match
 
 ### Step 8 — WS3.1: Thai tax filing pack
