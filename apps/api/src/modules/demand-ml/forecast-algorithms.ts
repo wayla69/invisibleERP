@@ -62,6 +62,33 @@ export const croston = (alpha = 0.1): Forecaster => (h, hz) => {
   return Array(hz).fill(rate);
 };
 
+// Croston–SBA (Syntetos–Boylan approximation) — Croston's rate is biased HIGH for intermittent demand;
+// SBA applies the (1 − α/2) correction. Same inputs, same explainability (docs/24 R4-3).
+export const crostonSba = (alpha = 0.1): Forecaster => (h, hz) => {
+  const base = croston(alpha)(h, hz);
+  const k = 1 - alpha / 2;
+  return base.map((v) => v * k);
+};
+
+// Multiplicative day-of-week seasonality (docs/24 R4-3 / AUD-AI-03): learn a per-position factor over a
+// weekly cycle (position = index mod period, so forecast step k continues the cycle at
+// (history.length + k) mod period), deseasonalize, smooth the level with SES, then re-apply the factor.
+// This is the dominant restaurant demand pattern the flat models miss (weekend ≫ weekday). Still classic,
+// dependency-free and explainable — auto-selection only picks it when it WINS the walk-forward backtest.
+// (A calendar-holiday regressor — Songkran etc. — needs date-aware history and is tracked in docs/24.)
+export const dowSeasonal = (alpha = 0.3, period = 7): Forecaster => (h, hz) => {
+  if (h.length < period * 2) return ses(alpha)(h, hz);
+  const overall = mean(h);
+  if (overall <= 0) return Array(hz).fill(0);
+  const sums = Array(period).fill(0);
+  const counts = Array(period).fill(0);
+  for (let i = 0; i < h.length; i++) { sums[i % period] += h[i]; counts[i % period]++; }
+  const factors = sums.map((sm, p) => (counts[p] ? sm / counts[p] / overall : 1)).map((f) => (f > 0 ? f : 1));
+  let level = h[0] / factors[0];
+  for (let i = 1; i < h.length; i++) level = alpha * (h[i] / factors[i % period]) + (1 - alpha) * level;
+  return Array.from({ length: hz }, (_, k) => Math.max(0, level * factors[(h.length + k) % period]));
+};
+
 // The candidate model set, keyed by name. Auto-selection picks the lowest-WAPE entry.
 export const ALGOS: Record<string, Forecaster> = {
   sma: sma(7),
@@ -69,6 +96,8 @@ export const ALGOS: Record<string, Forecaster> = {
   holt: holt(0.4, 0.1),
   seasonal_naive: seasonalNaive(7),
   croston: croston(0.1),
+  croston_sba: crostonSba(0.1),
+  dow_seasonal: dowSeasonal(0.3, 7),
 };
 
 // ── accuracy metrics ──

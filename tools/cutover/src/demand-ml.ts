@@ -63,6 +63,7 @@ async function main() {
     'DM-STEADY': (i) => 10 + (i % 2),                 // ~constant — any model nails it
     'DM-TREND': (i) => Math.round((5 + 0.25 * i) * 10) / 10, // linear up — Holt should beat SMA
     'DM-INTER': (i) => (i % 14 === 0 ? 28 : 0),       // demand every 14 days — Croston should beat SMA
+    'DM-WEEKLY': (i) => (i % 7 >= 5 ? 30 : 10) + (((i * 7919) % 5) - 2), // weekend ≈ 3× weekday + deterministic jitter — dow_seasonal (averaged factors) must beat seasonal_naive (copies last week's noise) (R4-3)
   };
   let saleSeq = 0;
   for (let i = 0; i < DAYS; i++) {
@@ -97,9 +98,22 @@ async function main() {
   const bSteady = await inj('POST', '/api/demand/backtest', admin, { item_id: 'DM-STEADY' });
   const cand = (resp: any) => (resp.json.candidates ?? []) as any[];
   const byAlgo = (resp: any, a: string) => cand(resp).find((c) => c.algorithm === a);
-  ok('Backtest STEADY → all 5 candidates scored', cand(bSteady).length === 5 && cand(bSteady).every((c) => typeof c.wape === 'number'), JSON.stringify(cand(bSteady).map((c) => [c.algorithm, c.wape])));
+  ok('Backtest STEADY → all 7 candidates scored (incl. croston_sba + dow_seasonal, docs/24 R4-3)', cand(bSteady).length === 7 && cand(bSteady).every((c) => typeof c.wape === 'number'), JSON.stringify(cand(bSteady).map((c) => [c.algorithm, c.wape])));
   ok('Backtest STEADY → best WAPE small (< 0.10)', (bSteady.json.best?.wape ?? 1) < 0.10, `best=${bSteady.json.best?.algorithm} wape=${bSteady.json.best?.wape}`);
   ok('Backtest STEADY → MASE computed (finite)', Number.isFinite(bSteady.json.best?.mase), `mase=${bSteady.json.best?.mase}`);
+
+  // ── 1b. weekly-seasonal series (docs/24 R4-3 / AUD-AI-03): weekend ≈ 3× weekday. The flat models
+  // (sma/ses) cannot express it — the multiplicative day-of-week model must WIN the backtest and be
+  // auto-selected, proving seasonality is now measured, not asserted.
+  const bWeekly = await inj('POST', '/api/demand/backtest', admin, { item_id: 'DM-WEEKLY' });
+  ok('Backtest WEEKLY → dow_seasonal wins on WAPE (beats flat sma/ses on a weekend-heavy pattern)',
+    bWeekly.json.best?.algorithm === 'dow_seasonal' && (byAlgo(bWeekly, 'dow_seasonal')?.wape ?? 1) < (byAlgo(bWeekly, 'ses')?.wape ?? 0),
+    JSON.stringify(cand(bWeekly).map((c) => [c.algorithm, c.wape])));
+  const fcWeekly = await inj('POST', '/api/demand/forecast', admin, { item_id: 'DM-WEEKLY', horizon: 7 });
+  const wf: number[] = fcWeekly.json.forecast ?? [];
+  ok('Forecast WEEKLY → auto-selects dow_seasonal and the 7-day shape peaks on the weekend positions',
+    fcWeekly.json.algorithm === 'dow_seasonal' && wf.length === 7 && Math.max(...wf) > Math.min(...wf) * 1.5,
+    JSON.stringify({ algo: fcWeekly.json.algorithm, fc: wf.map((x) => Math.round(x * 10) / 10) }));
 
   // ── 2. trending series: Holt (trend-aware) beats the flat SMA baseline ──
   const bTrend = await inj('POST', '/api/demand/backtest', admin, { item_id: 'DM-TREND' });

@@ -426,7 +426,15 @@ Add the corrected per-day-baseline math as the default; keep the buggy path only
 CLAUDE.md debug mantra #4). Update the `analytics` parity harness to pin the legacy flag; new
 `basics` check asserts the corrected math on a crafted series. Docs: analytics narrative + UAT.
 
-### R4-3 · Thai-calendar seasonality for demand — closes AUD-AI-03
+### R4-3 · Thai-calendar seasonality for demand — closes AUD-AI-03 — **PARTIALLY DELIVERED 2026-07-02**
+> Shipped: **croston_sba** (Syntetos–Boylan bias correction) + **dow_seasonal** (multiplicative day-of-week
+> factors × SES level) join the ALGOS candidate set — pure, dependency-free, and only chosen when they WIN
+> the walk-forward backtest (measured: the weekend-heavy jittered fixture scores dow_seasonal WAPE 0.095 vs
+> seasonal-naive 0.152, and the 7-day forecast peaks on weekend positions; `demand-ml` harness 16).
+> **Open remainder:** the calendar-HOLIDAY regressor (Songkran, national holidays) requires date-aware
+> history — today's `Forecaster` contract is positional (`(history, horizon)`); extending it to carry dates
+> ripples through walkForward + the service and stays a follow-up piece. The parity-locked reorder-point
+> model remains untouched by design.
 Extend `demand-ml/forecast-algorithms.ts` (NOT the parity-locked `forecasting.service.ts`) with:
 (a) Croston-SBA variant, (b) a day-of-week × holiday regressor using a Thai holiday table
 (`0xxx_th_holidays.sql`, seeded — Songkran, New Year, royal holidays), applied as multiplicative
@@ -534,3 +542,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.3 | 2026-07-02 | ERP/Product | R3-3 code delivered (compliance ToE evidence artifact per CI run + quarterly-archive runbook; evidence clock runs from 2026-07-02) |
 | 2.4 | 2026-07-02 | ERP/Product | R0-2 drafts delivered (privacy policy v0.1 + /legal/privacy page + signup consent line; fact-placeholders fixed; execution remains org work) |
 | 2.5 | 2026-07-02 | ERP/Product | AUD-LGL-03 closed (employee DSAR access/erasure with statutory payroll carve-out; PDPA-02 text + narrative 08 rev 1.6 + UAT-SEC-047) |
+| 2.6 | 2026-07-02 | ERP/Product | R4-3 partial (croston_sba + dow_seasonal in ALGOS, measured wins in demand-ml 16; holiday-calendar regressor tracked open) |
