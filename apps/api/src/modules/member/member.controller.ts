@@ -19,6 +19,9 @@ const VerifyOtpBody = z.object({ phone: z.string().min(4), tenant_code: z.string
 const EmptyBody = z.preprocess((v) => v ?? {}, z.object({}).passthrough());
 const ReferBody = z.object({ referred_member_id: z.number().int().positive().optional(), referred_phone: z.string().optional() })
   .refine((d) => d.referred_member_id != null || d.referred_phone, { message: 'referred_member_id or referred_phone required' });
+// W1 LYL-18: member sends points to a friend (recipient by phone; same tenant enforced in the service).
+const TransferBody = z.object({ to_phone: z.string().min(4).optional(), to_member_id: z.number().int().positive().optional(), points: z.number().int().positive(), note: z.string().max(200).optional() })
+  .refine((d) => d.to_member_id != null || d.to_phone, { message: 'to_member_id or to_phone required' });
 const LineLoginBody = z.object({ tenant_code: z.string().min(1), id_token: z.string().min(1) });
 const LinkLineBody = z.object({ id_token: z.string().min(1) });
 // PDPA: a member managing their OWN consent. `purpose` e.g. 'marketing' | 'analytics' | 'transactional'.
@@ -89,6 +92,10 @@ export class MemberController {
   tier(@CurrentUser() u: JwtUser) { return this.member.tierJourney(u, u.memberId!); }
   @Get('history') @UseGuards(MemberGuard)
   history(@CurrentUser() u: JwtUser) { return this.member.history(u.memberId!, u); }
+  // W1 LYL-18 — P2P point transfer: the authenticated member sends THEIR OWN points to another member of the
+  // same shop (atomic two-row ledger move, day-capped, net-zero liability). Sender is always u.memberId.
+  @Post('points/transfer') @UseGuards(MemberGuard)
+  transfer(@Body(new ZodValidationPipe(TransferBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.transferPoints(u, u.memberId!, b, 'self'); }
 
   // PDPA data-subject self-service: a member views and updates their OWN consents (scoped to u.memberId — a
   // member can never read/alter another member's). Delegates to the same getConsents/setConsent the staff

@@ -63,6 +63,17 @@ export const posMemberLedger = pgTable('pos_member_ledger', {
   createdBy: text('created_by'),
 }, (t) => ({ idxMember: index('pos_member_ledger_member').on(t.memberId), idxRef: index('pos_member_ledger_ref').on(t.refDoc) }));
 
+// W1 (docs/27) — idempotency register for the loyalty.points_expiring look-ahead event: one notice per
+// member × expire-by date, so a daily maintenance sweep never re-nags the member about the same batch.
+export const loyaltyExpiryNotices = pgTable('loyalty_expiry_notices', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  memberId: bigint('member_id', { mode: 'number' }).notNull().references(() => posMembers.id),
+  expireBy: date('expire_by').notNull(),
+  expiringPoints: numeric('expiring_points', { precision: 14, scale: 2 }).notNull().default('0'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uqWindow: uniqueIndex('loyalty_expiry_notices_member_window').on(t.memberId, t.expireBy), idxTenant: index('loyalty_expiry_notices_tenant').on(t.tenantId) }));
+
 export type PosMember = typeof posMembers.$inferSelect;
 export type PosMemberLedger = typeof posMemberLedger.$inferSelect;
 export type MessageLog = typeof messageLog.$inferSelect;

@@ -1548,6 +1548,20 @@
       "when": 2023820000047,
       "tag": "0220_kb_embed_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 221,
+      "version": "7",
+      "when": 2023820000048,
+      "tag": "0221_loyalty_worldclass_w1",
+      "breakpoints": true
+    },
+    {
+      "idx": 222,
+      "version": "7",
+      "when": 2023820000049,
+      "tag": "0222_coalition",
+      "breakpoints": true
     }
   ]
 }

@@ -72,6 +72,7 @@
     "multiledger": "tsx src/multiledger.ts",
     "recipe": "tsx src/recipe.ts",
     "loyalty": "tsx src/loyalty.ts",
+    "coalition": "tsx src/coalition.ts",
     "giftcards": "tsx src/giftcards.ts",
     "receipts": "tsx src/receipts.ts",
     "offline-sync": "tsx src/offline-sync.ts",

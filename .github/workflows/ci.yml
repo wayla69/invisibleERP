@@ -139,6 +139,7 @@ jobs:
           - { pkg: cutover, script: pipeline }
           - { pkg: cutover, script: service }
           - { pkg: cutover, script: loyalty }
+          - { pkg: cutover, script: coalition }
           - { pkg: cutover, script: giftcards }
           - { pkg: cutover, script: receipts }
           # ── planning / analytics / channels / HR ──

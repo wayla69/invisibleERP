@@ -12,7 +12,11 @@ const ConfigBody = z.object({
   baht_per_point: z.number().nonnegative().optional(),
   min_redeem: z.number().nonnegative().optional(),
   expiry_days: z.number().int().nonnegative().optional(),
+  transfer_day_cap: z.number().int().nonnegative().optional(), // W1 LYL-18 (0 disables transfers)
 });
+// W1 LYL-18 — staff-side P2P transfer (sender = :id path param; recipient by id or phone).
+const TransferBody = z.object({ to_member_id: z.number().int().positive().optional(), to_phone: z.string().min(4).optional(), points: z.number().int().positive(), note: z.string().max(200).optional() })
+  .refine((d) => d.to_member_id != null || d.to_phone, { message: 'to_member_id or to_phone required' });
 
 const RedeemBody = z.object({ points: z.number().positive() });
 const bday = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -99,6 +103,10 @@ export class LoyaltyController {
   getMember(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.member.balance(+id, u); }
   @Get('members/:id/history') @Permissions('loyalty', 'pos')
   history(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.member.history(+id, u); }
+  // W1 LYL-18 — staff-assisted P2P point transfer (atomic two-row ledger move; net-zero on the 2250
+  // liability). Points-adjust duty, same gate as manual adjustments — a cashier cannot move points around.
+  @Post('members/:id/transfer') @Permissions('crm_points_adjust', 'loyalty', 'exec')
+  transfer(@Param('id') id: string, @Body(new ZodValidationPipe(TransferBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.transferPoints(u, +id, b, 'staff'); }
 
   // ── Receipt-upload-for-points review queue (LYL-17). Members submit via /api/member/receipts;
   // staff review here. Approve grants points through the same earnInTx path POS checkout uses. ──

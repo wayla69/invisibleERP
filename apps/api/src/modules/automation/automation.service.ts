@@ -15,6 +15,8 @@ const EVENTS = [
   { key: 'loyalty.enrolled', label: 'สมัครสมาชิกใหม่', label_en: 'Loyalty member enrolled', fields: ['member_id', 'member_code', 'phone'] },
   { key: 'loyalty.earned', label: 'สะสมแต้ม', label_en: 'Loyalty points earned', fields: ['member_id', 'points_earned', 'balance', 'ref_doc'] },
   { key: 'loyalty.redeemed', label: 'แลกแต้ม', label_en: 'Loyalty points redeemed', fields: ['member_id', 'points_redeemed', 'redeem_value', 'balance', 'ref_doc'] },
+  // W1 (docs/27): fired by the maintenance sweep's look-ahead, once per member × expire-by date.
+  { key: 'loyalty.points_expiring', label: 'แต้มใกล้หมดอายุ', label_en: 'Loyalty points expiring soon', fields: ['member_id', 'expiring_points', 'days_left', 'expire_by'] },
 ] as const;
 const EVENT_KEYS = EVENTS.map((e) => e.key) as readonly string[];
 const ACTION_TYPES = ['notification', 'message', 'log', 'enroll_journey'] as const;

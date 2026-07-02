@@ -21,6 +21,7 @@ export * from './revenue';
 export * from './fx';
 export * from './intercompany';
 export * from './loyalty-members';
+export * from './coalition';
 export * from './loyalty-receipt-submissions';
 export * from './marketing-campaigns';
 export * from './member-consents';

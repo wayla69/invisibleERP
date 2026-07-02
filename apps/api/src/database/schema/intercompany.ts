@@ -3,7 +3,7 @@ import { tenants } from './tenants';
 
 // ระหว่างกิจการ — Intercompany. One IC txn = TWO mirrored balanced GL entries (Dr 1150 Due-From in the
 // creditor / Dr…Cr 2150 Due-To in the debtor). tenant_id = FROM (creditor/owning) tenant → RLS owner.
-export const icCategoryEnum = pgEnum('ic_category', ['shared-cost', 'transfer', 'loan']);
+export const icCategoryEnum = pgEnum('ic_category', ['shared-cost', 'transfer', 'loan', 'loyalty-clearing']); // 'loyalty-clearing' = W2 coalition point-movement clearing (docs/27, LYL-19)
 export const icStatusEnum = pgEnum('ic_status', ['Open', 'Partial', 'Settled']);
 
 export const icTransactions = pgTable('ic_transactions', {

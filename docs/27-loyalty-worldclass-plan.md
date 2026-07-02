@@ -1,6 +1,6 @@
 # 27 — Loyalty World-Class: Tier Economics, Coalition Network & the CX Loop — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v1.0 — **PLANNING** · **Owner:** ERP / Product (CMO + SVP-IT review)
+> **Date:** 2026-07-02 · **Status:** v1.2 — **W1+W2 SHIPPED**, W3 pending · **Owner:** ERP / Product (CMO + SVP-IT review)
 > **Scope:** The push from "BuzzeBees-parity" (docs/24–26, DELIVERED) to **above** the BuzzeBees/Hato bar —
 > by shipping the three things a survey of that class shows we still lack, and by weaponising the one thing
 > they cannot copy: **our GL**. **W1 tier economics + points liquidity** (per-tier earn multipliers, P2P
@@ -44,7 +44,7 @@ nobody's points die silently.
   (must be active), guards: min balance after, per-day cap, no self-transfer. **Net liability unchanged**
   (2250 untouched — the obligation just changes owner), so no GL posting; the ledger rows are the audit.
   New control **LYL-18** — *P2P transfers are atomic, capped, and net-zero on the liability* (Preventive,
-  Application) → RCM 171; ToE in the `compliance` harness.
+  Application) — RCM census now includes it; ToE in the `compliance` harness.
 - **Expiry-reminder trigger:** the maintenance sweep gains a *look-ahead*: members with points expiring
   within N days (default 30) fire `loyalty.points_expiring` into the automation catalog (`{expiring_points,
   days_left}`) — a marketer wires it to a journey/message ("แต้ม 500 จะหมดอายุใน 30 วัน") with the usual
@@ -71,7 +71,7 @@ BuzzeBees, every cross-shop point movement lands as an **auditable intercompany 
   (B caused A's liability to grow); a burn at B reverses it. Periodic `settleIc` nets the balances.
   Every shop's 2250 accrual (LYL-03) keeps tying out to *its own* members' ledger — by construction.
 - **Control:** new **LYL-19** — *coalition point movements settle through balanced intercompany entries;
-  cross-shop resolution is coalition-scoped and PDPA-minimal* (Preventive+Detective) → RCM 172. SoD: shop
+  cross-shop resolution is coalition-scoped and PDPA-minimal* (Preventive+Detective) — in the RCM census. SoD: shop
   staff earn/burn (`pos`/`loyalty`); coalition config is HQ-only.
 - **Web:** coalition admin card on `/loyalty` (HQ), a "เครือข่ายพันธมิตรแต้ม" badge at POS member lookup
   when a coalition member resolves, and the IC settlement rides the existing intercompany screen.
@@ -108,7 +108,7 @@ BuzzeBees, every cross-shop point movement lands as an **auditable intercompany 
 - Three PRs, **W1 → W2 → W3**; merge only on all-green CI; branch restarts from `main` after each merge.
   Migrations take the next free 4-digit id at PR time (expected: W1 tier column, W2 coalition tables + RLS
   loop, W3 `nps_responses` + RLS), journaled sequentially.
-- **New controls:** W1 **LYL-18** (RCM 171), W2 **LYL-19** (RCM 172) — `build_rcm.py` regen in each PR;
+- **New controls:** W1 **LYL-18**, W2 **LYL-19** (both in the RCM census — 173 controls as of the audit-remediation merge) — `build_rcm.py` regen in each PR;
   W3 rides MKT-04/12.
 - Sequencing: W1 first (small, consumer-visible, and W2's fair-value math reuses the multiplier-aware earn);
   W2 second (the differentiator — biggest surface, wants W1 settled); W3 last (independent polish).
@@ -123,4 +123,6 @@ marketplace coupon exchange, blockchain points. Multi-armed bandits / trained mo
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.2 | 2026-07-02 | Platform | **W2 SHIPPED — the differentiator.** `coalitions`/`coalition_members` + `ic_category` `'loyalty-clearing'` (migration `0222`); HQ-only config (`COALITION_HQ_ONLY`); PDPA-minimal coalition-scoped resolve; `POST /api/coalition/earn|redeem` on the member's HOME ledger (locked earnInTx/redeemInTx — per-shop 2250 truth by construction) + atomic balanced IC clearing at fair value (closed partner period rejects the whole movement); `settleIc` nets, reconciliation eliminates; `createIcInternal` extracted (manual IC endpoint unchanged/HQ-only). Control **LYL-19** added to the RCM. New CI-gated `coalition` harness (21 checks); compliance 117/117; intercompany 16/16, loyalty 30/30. Narrative 19 rev 1.34 (step 30 + row 30), manual 13 rev 1.30 (§7b), UAT 54→56, data-retention 0.3. |
+| 1.1 | 2026-07-02 | Platform | **W1 SHIPPED.** Tier `earn_mult` now applies on the REAL earn path (`earnInTx`; the column already existed — no schema change; ledger notes audit `tier Gold ×2`); P2P transfer (`POST /api/member/points/transfer` + staff route; atomic ascending-id-locked two-row move; `loyalty_config.transfer_day_cap`, migration `0221`; control **LYL-18** added to the RCM); expiry look-ahead `loyalty.points_expiring` (idempotent per member × expire-by via `loyalty_expiry_notices`, migration `0221`). Transfer rows integrated into the expiry model (inbound ages from its own date, outbound consumes). Harness: `loyalty` +14 → 30/30, `compliance` +1 → 116/116; narrative 19 rev 1.33, manual 13 rev 1.29, UAT 52→54. |
 | 1.0 | 2026-07-02 | Platform | Initial above-BuzzeBees plan: W1 tier economics + P2P transfer + expiry nudges (LYL-18), W2 coalition earn/burn with intercompany GL settlement (LYL-19 — the differentiator no loyalty SaaS can match), W3 NPS closed loop + quiet-hours/global-cap messaging governance. |
