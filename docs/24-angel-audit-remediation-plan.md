@@ -513,13 +513,17 @@ credibility in the next diligence pass.
   **Decision recorded:** `GRANDFATHERED_DUP` stays — the four dup numbers are applied in prod and drizzle
   tracks by full tag, so renumbering applied migrations is the dangerous move; the divergence risk class
   is what the parity harness now guards. Debt doc rev 1.2.
-- **R5-2 (AUD-ARC-09):** web perf pass — convert the top-5 heaviest pages' data loading to server
-  components/route handlers (start `accounting/page.tsx`, `eam/page.tsx`, split `app-shell.tsx`);
-  measure with the existing Playwright e2e + a Lighthouse budget in CI (report-only first).
-- **R5-3 (AUD-ARC-10):** module-boundary consolidation RFC — one owning module per domain
-  (POS×7→facade, loyalty×8→core+plugins, crm/pipeline merge, tax trio, payments pair). RFC first,
-  then mechanical moves; **no behavior change**, harness matrix is the safety net (which is why
-  R2-5's test depth lands first).
+- **R5-2 (AUD-ARC-09) — DIRECTION SET (docs/25 §4), conversions open:** server-by-default for new pages
+  (`/legal/privacy` shipped as the pattern); top-5 read-heavy conversions (`accounting`, `eam`,
+  `projects/[code]` with a Gantt client island, `reports`, `insights`) remain the rolling work, each
+  measured via the Playwright smoke + a bundle note.
+- **R5-3 (AUD-ARC-10) — RFC DELIVERED 2026-07-02:** `docs/25-module-consolidation-rfc.md` — 5-cluster
+  target ownership map (payments 2→1, tax trio, crm/pipeline fold, loyalty core+engagement with giftcards
+  deliberately kept separate as a GL instrument, POS umbrella last), the behavior-identical mechanical
+  recipe (git-mv + facades + full matrix), 5-PR sequencing, and the explicit NOT-consolidated list
+  (finance/ledger, analytics/bi/demand-ml parity-lock isolation, hcm/payroll, the ai trio). Code moves
+  await RFC approval. §4 also carries the **R5-2 (AUD-ARC-09)** direction: server-by-default for new
+  pages, `/legal/privacy` as the shipped pattern, top-5 conversion list + a use-client ratchet idea.
 
 ---
 
@@ -593,3 +597,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 3.0 | 2026-07-02 | ERP/Product | R5-1 delivered (orphans found already-journaled idx 102/103, dead grandfather list removed; migration-parity harness; dup-number decision recorded) |
 | 3.1 | 2026-07-02 | ERP/Product | R1-5 repo-half delivered (loadtest manual-dispatch workflow + capacity doc rev 1.2; PgBouncer/Redis provisioning = console actions) |
 | 3.2 | 2026-07-02 | ERP/Product | R2-5 ratchet delivered (ts-debt guard in CI: as-any 1456 + strict-index 248 baselines may only go down) |
+| 3.3 | 2026-07-02 | ERP/Product | R5-3 RFC delivered (docs/25: 5-cluster map + mechanical recipe + sequencing); R5-2 direction set in docs/25 §4 |
