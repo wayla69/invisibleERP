@@ -58,7 +58,14 @@ export type PgClient = ReturnType<typeof postgres>;
         const maxLifetime = Number(process.env.DB_MAX_LIFETIME ?? 1800);
         const opts: Record<string, unknown> = { max, idle_timeout: idleTimeout, connect_timeout: connectTimeout, max_lifetime: maxLifetime };
         // simple-protocol mode (เช่น ต่อ PGlite-wire/บาง pooler ที่ไม่รองรับ extended protocol/type-fetch)
-        if (process.env.DB_SIMPLE === '1') { opts.prepare = false; opts.fetch_types = false; }
+        // Round-2 ARC NEW-1: transaction-mode pgbouncer breaks server-side prepared statements under
+        // connection reuse, and the coupling was documented-but-unenforced. Detect the pooler by its
+        // conventional port (6432 — tools/ops/pgbouncer/pgbouncer.ini) and auto-enable simple protocol;
+        // DB_SIMPLE=1 still forces it, DB_SIMPLE=0 explicitly opts out of the auto-detection.
+        const viaPgbouncer = /:6432(\/|$)/.test(url ?? '');
+        const simple = process.env.DB_SIMPLE === '1' || (viaPgbouncer && process.env.DB_SIMPLE !== '0');
+        if (simple) { opts.prepare = false; opts.fetch_types = false; }
+        if (viaPgbouncer && process.env.DB_SIMPLE == null) logger.log('pgbouncer port detected (6432) — prepared statements disabled automatically (set DB_SIMPLE=0 to override)');
         // Boot-time visibility of the effective pool config (deeper utilization / wait-queue-depth metrics
         // need an external pooler + exporter — pgbouncer + Prometheus — tracked as an ops follow-up).
         if (url) logger.log(`PG pool: max=${max}, idle_timeout=${idleTimeout}s, connect_timeout=${connectTimeout}s, max_lifetime=${maxLifetime}s`);

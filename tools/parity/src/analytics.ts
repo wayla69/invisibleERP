@@ -6,9 +6,27 @@
 import 'reflect-metadata';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { ForecastingService } from '../../../apps/api/dist/modules/analytics/forecasting.service';
 import { AnomaliesService } from '../../../apps/api/dist/modules/analytics/anomalies.service';
+
+// ── Parity diff-lock (round-2 AI NEW-1) ─────────────────────────────────────────────────────────────
+// forecasting.service.ts is banner-locked "ห้ามเปลี่ยน — parity", yet a type-only edit slipped through in
+// the 2026-07-02 ts-debt sweep because nothing enforced the banner. This pins the SOURCE file's sha256:
+// ANY edit — even a whitespace or type-only one — fails the parity gate until the change is consciously
+// acknowledged by re-pinning the hash here in the same PR (which forces this file into the diff/review).
+const FORECASTING_SRC = resolve(process.cwd(), '../../apps/api/src/modules/analytics/forecasting.service.ts');
+const FORECASTING_SHA256 = '13d88e1018cd20f9a14f9e7018c0c0a5ef61696a488588ee275d7a66e495efb0'; // pinned 2026-07-02 (incl. the acknowledged rows[0]! type assertion)
+{
+  const actual = createHash('sha256').update(readFileSync(FORECASTING_SRC)).digest('hex');
+  if (actual !== FORECASTING_SHA256) {
+    console.error(`❌ parity diff-lock: forecasting.service.ts changed (sha256 ${actual.slice(0, 12)}… ≠ pinned ${FORECASTING_SHA256.slice(0, 12)}…).`);
+    console.error('   This file is parity-locked (ห้ามเปลี่ยน). If the change is intentional and parity-preserving,');
+    console.error('   re-pin FORECASTING_SHA256 in tools/parity/src/analytics.ts in the SAME PR.');
+    process.exit(1);
+  }
+}
 import { InsightsService } from '../../../apps/api/dist/modules/analytics/insights.service';
 import { AnalyticsService } from '../../../apps/api/dist/modules/analytics/analytics.service';
 import { ymd as bizYmd } from '../../../apps/api/dist/database/queries'; // business-TZ (Asia/Bangkok) date — same basis the forecasting service uses

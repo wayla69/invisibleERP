@@ -25,6 +25,10 @@ app transactions onto a small fixed server-connection pool, so the app can run a
 while Postgres sees only `default_pool_size` (× replicas) connections.
 
 - Point the API `DATABASE_URL` at PgBouncer (`:6432`), not Postgres directly.
+- **Prepared statements (round-2 hardening):** transaction pooling breaks server-side prepared statements,
+  so the API now **auto-detects port 6432** and disables them (simple protocol) with a boot log line —
+  `DB_SIMPLE=1` still forces it on any URL, `DB_SIMPLE=0` opts out of the auto-detection. The coupling is
+  no longer trust-the-runbook.
 - **`pool_mode = transaction` requires `DB_SIMPLE=1` on the API** — server-side prepared statements are
   bound to a server connection that transaction-pooling reassigns, so postgres-js must run with
   `{ prepare:false, fetch_types:false }` (the `DB_SIMPLE` switch in `database.module.ts`). The app's

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { pickModel, SYSTEM_CACHED, TOOLS } from '../src/modules/ai/agent.service';
-import { modelFor, aiDpaBlocked, MODEL } from '../src/common/ai-models';
+import { modelFor, aiDpaBlocked, MODEL, resolveBudgetCaps } from '../src/common/ai-models';
 
 // Regression guards for the two AI cost optimizations (both already implemented in AgentService): model
 // tiering and prompt caching. These exist to stop a future edit silently removing them.
@@ -62,5 +62,24 @@ describe('AI cost optimization — prompt caching (cache_control breakpoints)', 
   it('caches the whole tools manifest via cache_control on the LAST tool', () => {
     const lastTool: any = TOOLS[TOOLS.length - 1];
     expect(lastTool?.cache_control?.type).toBe('ephemeral');
+  });
+});
+
+describe('resolveBudgetCaps (ITGC-SEC-AI-01 — no unlimited tier)', () => {
+  const D = { includedDefault: 50_000, enterpriseCap: 2_000_000 };
+  it('missing plan → conservative finite default, no overage band', () => {
+    expect(resolveBudgetCaps(undefined, D)).toEqual({ included: 50_000, hardMax: 50_000 });
+  });
+  it('legacy -1 "unlimited" becomes the finite enterprise ceiling', () => {
+    expect(resolveBudgetCaps({ included: -1, hardmax: null }, D)).toEqual({ included: 2_000_000, hardMax: 2_000_000 });
+  });
+  it('hard max below the included cap clamps up (no inverted band)', () => {
+    expect(resolveBudgetCaps({ included: 100_000, hardmax: 60_000 }, D)).toEqual({ included: 100_000, hardMax: 100_000 });
+  });
+  it('normal plan: included < hardMax defines the metered overage band', () => {
+    expect(resolveBudgetCaps({ included: 100_000, hardmax: 300_000 }, D)).toEqual({ included: 100_000, hardMax: 300_000 });
+  });
+  it('-1 hard max also becomes the enterprise ceiling', () => {
+    expect(resolveBudgetCaps({ included: 100_000, hardmax: -1 }, D)).toEqual({ included: 100_000, hardMax: 2_000_000 });
   });
 });
