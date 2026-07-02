@@ -140,7 +140,18 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 - **Acceptance:** zero `<<` placeholders under `docs/legal/`; privacy policy linked from the web
   footer + signup flow (`apps/web` — small PR); SOC2 CC2.3 marked Implemented with evidence pointer.
 
-### R0-3 · Seed-credential hardening — closes AUD-SEC-03
+### R0-3 · Seed-credential hardening — closes AUD-SEC-03 — **DELIVERED 2026-07-02**
+> Shipped: the security audit's suspicion was right — `must_change_password` was only a login-response
+> flag. It is now a **hard API gate** in the global guard (`403 PASSWORD_CHANGE_REQUIRED` everywhere except
+> change-password/logout/me/refresh, zero extra round-trips). `db:seed` generates a random initial admin
+> password (or `SEED_ADMIN_PASSWORD`), prints it once, and refuses `NODE_ENV=production` without
+> `ALLOW_PROD_SEED=1`. No literal `admin123` remains in product code (harnesses seed their own throwaway
+> creds directly). RCM ITGC-AC-07 text updated; `onboarding` harness gains the gate ToE (26 checks);
+> UAT-SEC-004 + ITGC narrative rev 0.8.
+>
+> **Also verified while here:** R2-3's `sod_reason` requirement is ALREADY implemented and ToE-tested
+> (`compliance.ts` — override without reason rejected, justified override honoured, override surfaces in
+> the UAR row) — R2-3 needs no code, only this note.
 - `seed.ts`: generate a **random** initial admin password printed once to stdout (dev) or read from
   `SEED_ADMIN_PASSWORD` env; keep `mustChangePassword: true`.
 - Add a guard: seeding refuses to run when `NODE_ENV=production` unless `ALLOW_PROD_SEED=1`
@@ -452,3 +463,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.2 | 2026-07-02 | ERP/Product | R1-1 delivered (0211 backfills 132 tenant indexes; `tenant-idx` CI guard added; real count 132 vs audit's ~40-file estimate) |
 | 1.3 | 2026-07-02 | ERP/Product | R3-1 + R3-2 delivered (census 169/166/3/0 tagged + CI-guarded across 5 compliance docs; docs/09 SUPERSEDED banner; PRE_PRODUCTION audit banner-marked historical) |
 | 1.4 | 2026-07-02 | ERP/Product | R1-4 delivered (bigint minor-unit balance invariants in the ledger; common/money.ts + money.test.ts; GL narrative rev 1.7) |
+| 1.5 | 2026-07-02 | ERP/Product | R0-3 delivered (must-change hard gate + random seed credential + prod-seed refusal); R2-3 found already-implemented (sod_reason ToE exists) |
