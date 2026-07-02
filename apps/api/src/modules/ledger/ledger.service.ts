@@ -185,14 +185,19 @@ export class LedgerService {
     }
     const ledgerCode = hdr.ledgerCode ?? '';
     const period = hdr.period ?? '';
-    for (const r of agg.values()) {
-      // ON CONFLICT targets the ux_gl_period_balances expression index (0218): atomic accumulate.
-      await tx.execute(sql`
-        INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
-        VALUES (${hdr.tenantId}, ${ledgerCode}, ${period}, ${r.cc}, ${r.account}, ${fx(r.debit, 4)}, ${fx(r.credit, 4)})
-        ON CONFLICT (coalesce(tenant_id, 0), ledger_code, period, cost_center_code, account_code)
-        DO UPDATE SET debit = gl_period_balances.debit + excluded.debit, credit = gl_period_balances.credit + excluded.credit`);
-    }
+    // Round-2 ARC NEW-2 (write amplification): ONE multi-row upsert per entry instead of one round-trip
+    // per (account, cost-center) group — bulk imports and reversals stop paying N sequential awaits, and
+    // the row locks for all touched balance rows are taken in a single statement. Safe for ON CONFLICT:
+    // `agg` already dedupes the conflict key, so no two VALUES rows can hit the same target row.
+    const rows = [...agg.values()];
+    if (!rows.length) return;
+    const values = rows.map((r) => sql`(${hdr.tenantId}, ${ledgerCode}, ${period}, ${r.cc}, ${r.account}, ${fx(r.debit, 4)}, ${fx(r.credit, 4)})`);
+    // ON CONFLICT targets the ux_gl_period_balances expression index (0218): atomic accumulate.
+    await tx.execute(sql`
+      INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
+      VALUES ${sql.join(values, sql`, `)}
+      ON CONFLICT (coalesce(tenant_id, 0), ledger_code, period, cost_center_code, account_code)
+      DO UPDATE SET debit = gl_period_balances.debit + excluded.debit, credit = gl_period_balances.credit + excluded.credit`);
   }
 
   // ───────────────────── Post a balanced entry ─────────────────────

@@ -43,3 +43,20 @@ export function aiDpaBlocked(): boolean {
     && !!(process.env.ANTHROPIC_API_KEY || '').trim()
     && !(process.env.AI_DPA_ACKNOWLEDGED || '').trim();
 }
+
+// ── Token-budget cap resolution (round-2 AI NEW-2: previously untested inline logic) ────────────────
+// Pure: resolves a plan's raw feature values to two FINITE thresholds. Rules (ITGC-SEC-AI-01):
+//   • missing plan / missing included cap → conservative finite default (never unlimited)
+//   • legacy -1 "unlimited" → the enterprise ceiling (finite)
+//   • hard max missing or below the included cap → no overage band (included IS the ceiling)
+export function resolveBudgetCaps(
+  plan: { included: number | null; hardmax: number | null } | undefined,
+  defaults: { includedDefault: number; enterpriseCap: number },
+): { included: number; hardMax: number } {
+  let included = plan && plan.included != null ? Number(plan.included) : defaults.includedDefault;
+  if (included < 0) included = defaults.enterpriseCap;
+  let hardMax = plan && plan.hardmax != null ? Number(plan.hardmax) : included;
+  if (hardMax < 0) hardMax = defaults.enterpriseCap;
+  if (hardMax < included) hardMax = included;
+  return { included, hardMax };
+}

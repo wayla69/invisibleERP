@@ -19,7 +19,7 @@ import { MarketingAutomationService } from '../marketing/marketing-automation.se
 import { PG_CLIENT, type PgClient } from '../../database/database.module';
 import type { JwtUser } from '../../common/decorators';
 import { redactPii, PII_REDACTION_ENABLED } from '../../common/pii-redact';
-import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { modelFor, aiDpaBlocked, resolveBudgetCaps } from '../../common/ai-models';
 
 // port จาก agents/base_agent.py + erp_agent.py
 const MAX_LOOP_TURNS = 15;
@@ -161,14 +161,9 @@ export class AgentService {
         FROM subscriptions s JOIN plans p ON p.code = s.plan_code
         WHERE s.tenant_id = ${tenantId} AND s.status IN ('Active', 'Trialing')
         LIMIT 1`;
-      // No active sub OR plan omits the cap → conservative finite default (never unlimited).
-      let included = plan && plan.included != null ? Number(plan.included) : AgentService.DEFAULT_AI_DAILY;
-      if (included < 0) included = enterpriseCap; // kill the legacy "unlimited" bucket → finite ceiling
-      // Hard ceiling: absolute cutoff incl. the metered overage band. Falls back to the included cap (no
-      // overage band) when the plan omits a max or sets it below the included cap.
-      let hardMax = plan && plan.hardmax != null ? Number(plan.hardmax) : included;
-      if (hardMax < 0) hardMax = enterpriseCap;
-      if (hardMax < included) hardMax = included;
+      // Cap math is the pure, unit-tested resolveBudgetCaps (common/ai-models.ts): finite default when
+      // the plan omits the cap, legacy -1 "unlimited" → enterprise ceiling, hardMax clamped ≥ included.
+      const { included, hardMax } = resolveBudgetCaps(plan, { includedDefault: AgentService.DEFAULT_AI_DAILY, enterpriseCap });
       const [usage] = await this.sql<{ total: number }[]>`
         SELECT COALESCE(input_tokens + output_tokens, 0) AS total
         FROM ai_token_usage
