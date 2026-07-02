@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { loyaltyCampaigns, posMembers, messageLog, customerProfiles } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { resolveMessageGateway } from '../messaging/gateways';
+import { SavedSegmentsService } from '../loyalty/saved-segments.service';
 import type { JwtUser } from '../../common/decorators';
 
 // CRM Phase 4 — campaign orchestration. A segmented, optionally-scheduled broadcast over the messaging
@@ -16,6 +17,8 @@ export class CampaignsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
+    // Saved-segment audience resolution (Phase F1) — the whitelisted/bound rule engine stays the only gate.
+    private readonly savedSegments: SavedSegmentsService,
   ) {}
 
   private tid(user: JwtUser): number {
@@ -35,8 +38,13 @@ export class CampaignsService {
     const db = this.db as any; const tenantId = this.tid(user);
     if (dto.audience === 'segment' && !dto.segment) throw new BadRequestException({ code: 'NO_SEGMENT', message: 'segment required for a segment campaign', messageTh: 'ต้องระบุกลุ่ม RFM' });
     if (dto.audience === 'tier' && !dto.tier) throw new BadRequestException({ code: 'NO_TIER', message: 'tier required for a tier campaign', messageTh: 'ต้องระบุระดับสมาชิก' });
+    if (dto.audience === 'saved_segment') {
+      if (!dto.saved_segment_id) throw new BadRequestException({ code: 'NO_SAVED_SEGMENT', message: 'saved_segment_id required for a saved-segment campaign', messageTh: 'ต้องระบุเซกเมนต์ที่บันทึกไว้' });
+      // Fail fast on an unknown/foreign segment at create time (send would 404 anyway).
+      await this.savedSegments.membersForSend(db, tenantId, Number(dto.saved_segment_id));
+    }
     const scheduleAt = dto.schedule_at ? new Date(dto.schedule_at) : null;
-    const vals: any = { name: dto.name, channel: dto.channel ?? 'sms', audience: dto.audience ?? 'all', segment: dto.segment ?? null, tier: dto.tier ?? null, body: dto.body, scheduleAt, status: scheduleAt ? 'scheduled' : 'draft' };
+    const vals: any = { name: dto.name, channel: dto.channel ?? 'sms', audience: dto.audience ?? 'all', segment: dto.segment ?? null, tier: dto.tier ?? null, savedSegmentId: dto.audience === 'saved_segment' ? Number(dto.saved_segment_id) : null, body: dto.body, scheduleAt, status: scheduleAt ? 'scheduled' : 'draft' };
     if (dto.id) {
       // Only an un-sent campaign may be edited.
       const [cur] = await db.select({ status: loyaltyCampaigns.status }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.id, dto.id), eq(loyaltyCampaigns.tenantId, tenantId))).limit(1);
@@ -111,6 +119,13 @@ export class CampaignsService {
 
   // Resolve the audience to a tenant-scoped, active member list.
   private async resolveAudience(tx: any, tenantId: number, c: any): Promise<any[]> {
+    if (c.audience === 'saved_segment') {
+      // Saved custom segment (Phase F1) — rules resolved at SEND time (fresh membership), tenant-scoped.
+      // A segment deleted after the campaign was created resolves to an empty audience (the campaign is
+      // already claimed 'sent' at this point — throwing would strand it half-delivered).
+      if (!c.savedSegmentId) return [];
+      try { return await this.savedSegments.membersForSend(tx, tenantId, Number(c.savedSegmentId)); } catch { return []; }
+    }
     if (c.audience === 'segment') {
       const profs = await tx.select({ memberId: customerProfiles.memberId }).from(customerProfiles).where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.rfmSegment, c.segment)));
       const ids = profs.map((p: any) => Number(p.memberId)).filter(Boolean);
@@ -148,7 +163,7 @@ export class CampaignsService {
 function shape(c: any) {
   return {
     id: Number(c.id), campaign_code: c.campaignCode, name: c.name, channel: c.channel, audience: c.audience,
-    segment: c.segment, tier: c.tier, body: c.body, schedule_at: c.scheduleAt, status: c.status,
+    segment: c.segment, tier: c.tier, saved_segment_id: c.savedSegmentId != null ? Number(c.savedSegmentId) : null, body: c.body, schedule_at: c.scheduleAt, status: c.status,
     targeted: Number(c.targeted ?? 0), sent_count: Number(c.sentCount ?? 0), skipped_count: Number(c.skippedCount ?? 0), failed_count: Number(c.failedCount ?? 0),
     created_at: c.createdAt, sent_at: c.sentAt,
   };

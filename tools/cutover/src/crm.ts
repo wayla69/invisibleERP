@@ -178,6 +178,23 @@ async function main() {
   const segT2 = await inj('GET', `/api/loyalty/saved-segments/${segCreate.json.id}/members`, mgr2);
   ok('Saved segments: T2 cannot resolve a T1 segment (tenant-scoped, 404)', segT2.status === 404, JSON.stringify({ s: segT2.status }));
 
+  // ── 7g. Saved segments as SEND audiences (Phase F1) — blast + campaign resolve through the rule engine ──
+  // A second member who matches the segment but has opted out (consent must hold at send time).
+  const optout = await inj('POST', '/api/loyalty/members', mgr1, { name: 'งดข่าวสาร', phone: '0809999911' });
+  await db.insert(s.customerProfiles).values({ tenantId: t1, memberId: Number(optout.json.id), rfmSegment: 'New' }).onConflictDoNothing();
+  await inj('PATCH', `/api/loyalty/members/${optout.json.id}`, mgr1, { marketing_opt_in: false });
+  const segBlast = await inj('POST', '/api/messaging/blast', mgr1, { audience: 'saved_segment', segment_id: segCreate.json.id, channel: 'sms', body: 'โปรสำหรับกลุ่ม New' });
+  ok('Saved-segment blast: targets only matching members and respects opt-out (2 targeted → 1 sent, 1 skipped)',
+    (segBlast.status === 200 || segBlast.status === 201) && segBlast.json.targeted === 2 && segBlast.json.sent === 1 && segBlast.json.skipped === 1,
+    JSON.stringify({ s: segBlast.status, t: segBlast.json.targeted, sent: segBlast.json.sent, sk: segBlast.json.skipped }));
+  const segCamp = await inj('POST', '/api/loyalty/campaigns', mgr1, { name: 'Seg campaign', channel: 'sms', audience: 'saved_segment', saved_segment_id: segCreate.json.id, body: 'สวัสดีกลุ่ม New' });
+  const segCampSend = await inj('POST', `/api/loyalty/campaigns/${segCamp.json.id}/send`, mgr1);
+  ok('Saved-segment campaign: audience resolved at send time, PDPA opt-out skipped (2 targeted, 1 sent, 1 skipped)',
+    segCamp.json.saved_segment_id === segCreate.json.id && segCampSend.json.targeted === 2 && segCampSend.json.sent === 1 && segCampSend.json.skipped === 1,
+    JSON.stringify({ segId: segCamp.json.saved_segment_id, t: segCampSend.json.targeted, sent: segCampSend.json.sent, sk: segCampSend.json.skipped }));
+  const segCampT2 = await inj('POST', '/api/loyalty/campaigns', mgr2, { name: 'steal', channel: 'sms', audience: 'saved_segment', saved_segment_id: segCreate.json.id, body: 'x' });
+  ok('Saved-segment campaign: a T2 user cannot target a T1 segment (404 at create)', segCampT2.status === 404, JSON.stringify({ s: segCampT2.status, code: segCampT2.json?.error?.code }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });

@@ -107,6 +107,20 @@ export class SavedSegmentsService {
     return { id, deleted: true };
   }
 
+  // Resolve a saved segment to its matching ACTIVE member rows for one tenant — the send-loop variant used
+  // by campaign/blast delivery (Phase F1). EXPLICITLY tenant-scoped on both the segment and the members
+  // (campaign sends also run from the Admin/cron path where RLS is bypassed). Returns full pos_members rows.
+  async membersForSend(tx: any, tenantId: number, segmentId: number): Promise<any[]> {
+    const [seg] = await tx.select().from(savedSegments).where(and(eq(savedSegments.id, segmentId), eq(savedSegments.tenantId, tenantId))).limit(1);
+    if (!seg) throw new NotFoundException({ code: 'SEGMENT_NOT_FOUND', message: 'Segment not found', messageTh: 'ไม่พบเซกเมนต์' });
+    const rules = (Array.isArray(seg.rules) ? seg.rules : []) as SegmentRule[];
+    const w = this.where(rules, seg.matchMode);
+    const cond = and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true), ...(w ? [w] : []));
+    const rows = await tx.select({ m: posMembers }).from(posMembers)
+      .leftJoin(customerProfiles, eq(customerProfiles.memberId, posMembers.id)).where(cond);
+    return rows.map((r: any) => r.m);
+  }
+
   // Resolve a saved segment to its matching active members (paginated) + a total count.
   async resolve(id: number, opts: { limit?: number; offset?: number }, user: JwtUser) {
     const db = this.db as any;
