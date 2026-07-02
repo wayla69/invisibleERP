@@ -40,7 +40,7 @@ This narrative documents the front of the revenue cycle: the maintenance of cust
 - Policies: `<<Revenue Recognition Policy>>`, `<<Pricing & Discount Authority Policy>>`.
 - Code:
   - `apps/api/src/modules/crm/crm.controller.ts`, `apps/api/src/modules/crm/crm.service.ts`
-  - `apps/api/src/modules/pipeline/pipeline.controller.ts`, `apps/api/src/modules/pipeline/pipeline.service.ts`
+  - `apps/api/src/modules/crm/pipeline/pipeline.controller.ts`, `apps/api/src/modules/crm/pipeline/pipeline.service.ts` (+ `crm-pipeline.service.ts` — lead→convert, REV-17)
   - `apps/api/src/modules/cpq/cpq.controller.ts`, `apps/api/src/modules/cpq/cpq.service.ts`
 
 ## 5. Definitions & Abbreviations
@@ -179,3 +179,4 @@ flowchart TD
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
+| 0.2 | 2026-07-02 | Platform | **Module consolidation (docs/28 PR #3) — code pointers only.** `modules/pipeline` + `modules/crm-pipeline` moved under `modules/crm/pipeline/` (umbrella `CrmModule`); services, routes (`/api/pipeline`, `/api/crm/pipeline`) and tables unchanged. |

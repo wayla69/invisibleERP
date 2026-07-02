@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Param, Query, Body, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { CrmPipelineService } from './crm-pipeline.service';
 
 const LeadBody = z.object({ name: z.string().min(1), company: z.string().optional(), email: z.string().optional(), phone: z.string().optional(), source: z.string().optional(), owner: z.string().optional(), notes: z.string().optional() });

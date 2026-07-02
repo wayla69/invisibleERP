@@ -13,7 +13,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { FinanceModule } from '../finance/finance.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { BiModule } from '../bi/bi.module';
-import { PipelineModule } from '../pipeline/pipeline.module';
+import { PipelineModule } from '../crm/pipeline/pipeline.module';
 import { CpqModule } from '../cpq/cpq.module';
 import { ServiceModule } from '../service/service.module';
 import { ProfitabilityModule } from '../profitability/profitability.module';
