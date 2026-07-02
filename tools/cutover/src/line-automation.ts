@@ -160,6 +160,25 @@ async function main() {
     org?.organic_lift != null && typeof org.organic_lift.purchase_rate_pp === 'number' && typeof org.organic_lift.incremental_revenue === 'number' && org.messaged.members > 0 && org.holdout.members > 0 && typeof org.note === 'string',
     JSON.stringify(org?.organic_lift));
 
+  // ── V3 (docs/29): significance — tiny groups can never claim "real"; a strong big-sample effect can ──
+  const orgSig = org?.organic_lift?.significance;
+  ok('V3 significance: the small-group organic lift is honestly UNDERPOWERED (never significant)',
+    orgSig != null && orgSig.significant === false && String(orgSig.verdict).includes('underpowered') && orgSig.stats_version === 'v1' && Array.isArray(orgSig.ci95_pp),
+    JSON.stringify(orgSig));
+  // Seed a synthetic large A/B: A 40 sent / 30 redeemed vs B 40 sent / 5 redeemed → p ≪ .05, CI excludes 0.
+  const [bigCamp] = await db.insert(s.automationCampaigns).values({ tenantId: t1, name: 'V3 big', trigger: 'all', channel: 'line', discountType: 'amount', discountValue: '10', status: 'sent', splitBPct: 50, holdoutPct: 0, windowDays: 30 }).returning({ id: s.automationCampaigns.id });
+  const bigRows: any[] = [];
+  for (let i = 0; i < 40; i++) {
+    bigRows.push({ tenantId: t1, campaignId: Number(bigCamp.id), memberId: null, variant: 'A', status: 'sent', couponCode: `V3A-${i}`, sentAt: new Date(), redeemedAt: i < 30 ? new Date() : null, redeemedValue: i < 30 ? '10' : null });
+    bigRows.push({ tenantId: t1, campaignId: Number(bigCamp.id), memberId: null, variant: 'B', status: 'sent', couponCode: `V3B-${i}`, sentAt: new Date(), redeemedAt: i < 5 ? new Date() : null, redeemedValue: i < 5 ? '10' : null });
+  }
+  await db.insert(s.campaignSends).values(bigRows);
+  const bigRep = await inj('GET', `/api/marketing/automation/campaigns/${Number(bigCamp.id)}`);
+  const abSig = bigRep.json.ab?.ab_significance;
+  ok('V3 significance: a strong 40v40 A/B effect (75% vs 12.5%) is REAL — p < .05, 95% CI excludes zero, verdict "real"',
+    abSig != null && abSig.significant === true && abSig.verdict === 'real' && abSig.p_value < 0.05 && (abSig.ci95_pp[0] > 0 || abSig.ci95_pp[1] < 0) && abSig.delta_pp === 62.5,
+    JSON.stringify(abSig));
+
   console.log('\n── C12 — LINE marketing automation (closed loop) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

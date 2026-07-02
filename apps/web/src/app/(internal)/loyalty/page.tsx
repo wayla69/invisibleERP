@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 interface Cfg { enabled: boolean; points_per_baht: number; baht_per_point: number; min_redeem: number; expiry_days: number; transfer_day_cap: number }
 interface Tier { id?: number; tier: string; min_lifetime: number; earn_mult: number; redeem_mult: number }
 interface Coalition { id: number; code: string; name: string; active: boolean; members: { tenant_id: number; active: boolean }[] }
+interface Plan { id: number; code: string; name: string; tier: string; price: number; period_months: number; active: boolean }
 interface Resolved { coalition: string; member_id: number; member_code: string; name: string | null; tier: string | null; balance: number; home_tenant_code: string | null; home_tenant_name: string | null; is_home: boolean }
 
 export default function LoyaltyConfig() {
@@ -21,10 +22,14 @@ export default function LoyaltyConfig() {
   const q = useQuery<Cfg>({ queryKey: ['loy-cfg'], queryFn: () => api('/api/loyalty/config') });
   const tiersQ = useQuery<{ tiers: Tier[] }>({ queryKey: ['loy-tiers'], queryFn: () => api('/api/loyalty/tiers') });
   const coalQ = useQuery<{ coalitions: Coalition[] }>({ queryKey: ['coalitions'], queryFn: () => api('/api/coalition') });
+  const plansQ = useQuery<{ plans: Plan[] }>({ queryKey: ['vip-plans'], queryFn: () => api('/api/loyalty/membership-plans') });
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [tierDraft, setTierDraft] = useState<Tier>({ tier: '', min_lifetime: 0, earn_mult: 1, redeem_mult: 1 });
   const [coalDraft, setCoalDraft] = useState({ code: '', name: '' });
   const [shopDraft, setShopDraft] = useState({ coalition_id: 0, tenant_id: 0 });
+  const [planDraft, setPlanDraft] = useState({ code: '', name: '', tier: '', price: 0, period_months: 12 });
+  const [sellDraft, setSellDraft] = useState({ member_id: 0, plan_id: 0 });
+  const [sellMsg, setSellMsg] = useState('');
   const [resolvePhone, setResolvePhone] = useState('');
   const [resolved, setResolved] = useState<Resolved | null>(null);
   const [resolveErr, setResolveErr] = useState('');
@@ -45,6 +50,15 @@ export default function LoyaltyConfig() {
   const addShop = useMutation({
     mutationFn: () => api(`/api/coalition/${shopDraft.coalition_id}/members`, { method: 'POST', body: JSON.stringify({ tenant_id: shopDraft.tenant_id }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['coalitions'] }),
+  });
+  const savePlan = useMutation({
+    mutationFn: () => api('/api/loyalty/membership-plans', { method: 'POST', body: JSON.stringify(planDraft) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vip-plans'] }); setPlanDraft({ code: '', name: '', tier: '', price: 0, period_months: 12 }); },
+  });
+  const sellVip = useMutation({
+    mutationFn: () => api('/api/loyalty/memberships/sell', { method: 'POST', body: JSON.stringify(sellDraft) }),
+    onSuccess: (r: any) => setSellMsg(`✅ ขายแล้ว — ${r.plan} ให้สมาชิก #${r.member_id} ถึง ${r.end_date}`),
+    onError: (e) => setSellMsg((e as Error).message),
   });
   const doResolve = async () => {
     setResolved(null); setResolveErr('');
@@ -115,6 +129,31 @@ export default function LoyaltyConfig() {
             <Button variant="outline" disabled={!tierDraft.tier || saveTier.isPending} onClick={() => saveTier.mutate(tierDraft)}>เพิ่ม/แก้ไข</Button>
           </div>
           {saveTier.error && <Msg>{(saveTier.error as Error).message}</Msg>}
+        </Card>
+
+        {/* V4 (docs/29) — paid VIP membership plans (LYL-21): fee deferred to 2410, recognized monthly */}
+        <Card className="max-w-lg gap-3 p-5">
+          <div className="font-semibold">สมาชิก VIP แบบเสียเงิน (Paid membership)</div>
+          <p className="text-sm text-muted-foreground">ขายแพ็กเกจระดับสมาชิก — เก็บเงินวันนี้ รับรู้รายได้รายเดือนตามมาตรฐาน และระดับหมดสิทธิ์เองเมื่อไม่ต่อ</p>
+          {(plansQ.data?.plans ?? []).map((pl) => (
+            <div key={pl.id} className="rounded border p-2 text-sm">
+              <span className="font-medium">{pl.code}</span> — {pl.name} · ระดับ {pl.tier} · ฿{pl.price.toLocaleString()} / {pl.period_months} เดือน {!pl.active && '(ปิด)'}
+            </div>
+          ))}
+          <div className="grid grid-cols-5 items-end gap-2">
+            <div className="grid gap-1"><Label className="text-xs">รหัส</Label><Input value={planDraft.code} onChange={(e) => setPlanDraft({ ...planDraft, code: e.target.value })} placeholder="VIP12" /></div>
+            <div className="grid gap-1"><Label className="text-xs">ชื่อ</Label><Input value={planDraft.name} onChange={(e) => setPlanDraft({ ...planDraft, name: e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-xs">ระดับ</Label><Input value={planDraft.tier} onChange={(e) => setPlanDraft({ ...planDraft, tier: e.target.value })} placeholder="Platinum" /></div>
+            <div className="grid gap-1"><Label className="text-xs">ราคา ฿</Label><Input type="number" value={planDraft.price || ''} onChange={(e) => setPlanDraft({ ...planDraft, price: +e.target.value })} /></div>
+            <Button variant="outline" disabled={!planDraft.code || !planDraft.tier || planDraft.price <= 0 || savePlan.isPending} onClick={() => savePlan.mutate()}>เพิ่มแผน</Button>
+          </div>
+          <div className="grid grid-cols-3 items-end gap-2 border-t pt-3">
+            <div className="grid gap-1"><Label className="text-xs">สมาชิก (id)</Label><Input type="number" value={sellDraft.member_id || ''} onChange={(e) => setSellDraft({ ...sellDraft, member_id: +e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-xs">แผน (id)</Label><Input type="number" value={sellDraft.plan_id || ''} onChange={(e) => setSellDraft({ ...sellDraft, plan_id: +e.target.value })} /></div>
+            <Button disabled={!sellDraft.member_id || !sellDraft.plan_id || sellVip.isPending} onClick={() => sellVip.mutate()}>ขายแพ็กเกจ</Button>
+          </div>
+          {sellMsg && <Msg ok={sellMsg.startsWith('✅')}>{sellMsg}</Msg>}
+          {(savePlan.error) && <Msg>{(savePlan.error as Error).message}</Msg>}
         </Card>
 
         {/* W2 (docs/27) — coalition network: earn/burn anywhere, settled through intercompany (LYL-19) */}

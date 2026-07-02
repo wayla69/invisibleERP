@@ -204,6 +204,51 @@ async function main() {
   const t1res2 = (mt2.json.results ?? []).find((r: any) => Number(r.tenant_id) === t1);
   ok('W1 expiring: second sweep is idempotent for the same batch (no re-nag)', Number(t1res2?.expiry_notices ?? -1) === 0, JSON.stringify(t1res2));
 
+  // ════════ V4 (docs/29) — paid VIP membership: deferred revenue + tier grant + lapse (LYL-21) ════════
+  await db.insert(s.users).values([{ username: 'mkt1', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 }]).onConflictDoNothing();
+  const mkt1 = await login('mkt1', 'pw'); // Sales carries legacy exec → plan config + recognition
+  const plan = await inj('POST', '/api/loyalty/membership-plans', mkt1, { code: 'VIP12', name: 'บัตรทองรายปี', tier: 'Platinum', price: 1200, period_months: 12 });
+  const vipMem = await inj('POST', '/api/loyalty/members', sales1, { name: 'คุณวีไอพี', phone: '0810000777' });
+  const vipId = Number(vipMem.json.id);
+  const twoMonthsAgo = new Date(Date.now() - 65 * 86400000).toISOString().slice(0, 10);
+  const sell = await inj('POST', '/api/loyalty/memberships/sell', loystaff, { member_id: vipId, plan_id: plan.json.id, sale_ref: 'POS-VIP-1', start_date: twoMonthsAgo });
+  const sellDup = await inj('POST', '/api/loyalty/memberships/sell', loystaff, { member_id: vipId, plan_id: plan.json.id });
+  const vipGl = (await pg.query(`SELECT jl.account_code, jl.debit, jl.credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source_ref='VIP-${sell.json.id}'`)).rows as any[];
+  const vipHist = (await pg.query(`SELECT reason, to_tier FROM loyalty_tier_history WHERE member_id=${vipId} AND reason='vip'`)).rows as any[];
+  const vipBal = await inj('GET', `/api/loyalty/members/${vipId}`, sales1);
+  ok('V4 VIP: sell defers the fee (Dr 1000 / Cr 2410 ฿1200), grants the plan tier with a "vip" audit row, one-active enforced (409)',
+    (sell.status === 200 || sell.status === 201) && sell.json.status === 'Active' && !!sell.json.entry_no
+      && leg(vipGl, '1000', 'debit') === 1200 && leg(vipGl, '2410', 'credit') === 1200
+      && vipBal.json.tier === 'Platinum' && vipHist.length === 1 && vipHist[0].to_tier === 'Platinum'
+      && sellDup.status === 409 && sellDup.json.error?.code === 'MEMBERSHIP_ACTIVE',
+    `sell=${sell.status} gl=${leg(vipGl, '1000', 'debit')}/${leg(vipGl, '2410', 'credit')} tier=${vipBal.json.tier} dup=${sellDup.status}/${sellDup.json.error?.code}`);
+  const rec1 = await inj('POST', '/api/loyalty/memberships/recognize', mkt1, {});
+  const rec2 = await inj('POST', '/api/loyalty/memberships/recognize', mkt1, {});
+  const recGl = (await pg.query(`SELECT jl.account_code, jl.debit, jl.credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source_ref LIKE 'VIP-${sell.json.id}:M%'`)).rows as any[];
+  ok('V4 VIP: 65 days in → exactly 3 months recognized straight-line (Dr 2410 / Cr 4300 ฿300); a re-run posts nothing',
+    rec1.json.posted === 3 && near(rec1.json.amount, 300) && rec2.json.posted === 0
+      && near(leg(recGl, '2410', 'debit'), 300) && near(leg(recGl, '4300', 'credit'), 300),
+    `rec1=${rec1.json.posted}/${rec1.json.amount} rec2=${rec2.json.posted} gl=${leg(recGl, '2410', 'debit')}/${leg(recGl, '4300', 'credit')}`);
+  const tj = await inj('GET', `/api/loyalty/members/${vipId}/tier`, sales1);
+  ok('V4 VIP: tier journey carries the membership ("VIP ถึง {end_date}" for the /m card)',
+    tj.json.membership?.status === 'Active' && tj.json.membership?.plan === 'VIP12' && tj.json.membership?.recognized_months === 3,
+    JSON.stringify(tj.json.membership));
+  // Lapse: a membership that ended long ago expires on the sweep and the tier falls back to the EARNED rung.
+  const lapMem = await inj('POST', '/api/loyalty/members', sales1, { name: 'หมดอายุ', phone: '0810000778' });
+  const lapId = Number(lapMem.json.id);
+  const thirteenMonthsAgo = new Date(Date.now() - 396 * 86400000).toISOString().slice(0, 10);
+  await inj('POST', '/api/loyalty/memberships/sell', loystaff, { member_id: lapId, plan_id: plan.json.id, start_date: thirteenMonthsAgo });
+  const lapBefore = await inj('GET', `/api/loyalty/members/${lapId}`, sales1);
+  const sweepV4 = await inj('POST', '/api/loyalty/maintenance/run', admin, { tenant_id: t1 });
+  const v4res = (sweepV4.json.results ?? []).find((r: any) => Number(r.tenant_id) === t1);
+  const lapAfter = await inj('GET', `/api/loyalty/members/${lapId}`, sales1);
+  const lapHist = (await pg.query(`SELECT reason FROM loyalty_tier_history WHERE member_id=${lapId} ORDER BY id`)).rows as any[];
+  ok('V4 VIP: a lapsed membership expires on the sweep and the tier falls BACK to the earned rung (no perpetual free VIP)',
+    lapBefore.json.tier === 'Platinum' && Number(v4res?.vip_expired ?? 0) >= 1
+      && lapAfter.json.tier === 'Standard'
+      && lapHist.some((h: any) => h.reason === 'vip') && lapHist.some((h: any) => h.reason === 'vip-expired'),
+    `before=${lapBefore.json.tier} after=${lapAfter.json.tier} vip_expired=${v4res?.vip_expired} hist=${JSON.stringify(lapHist)}`);
+
   // ── 14. trial balance balanced overall ──
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced at end', near(Number(tb.totals?.debit ?? tb.total_debit), Number(tb.totals?.credit ?? tb.total_credit)), JSON.stringify(tb.totals ?? {}).slice(0, 80));

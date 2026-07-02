@@ -6,6 +6,7 @@ import { n } from '../../database/queries';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
 import { WebhookService } from '../platform/webhook.service';
+import { MembershipService } from './membership.service';
 import { AutomationService } from '../automation/automation.service';
 import type { JwtUser } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
@@ -25,6 +26,9 @@ export class MemberService {
     // no-code automation engine. Optional for the same partial-harness reason; the event is best-effort.
     @Optional() private readonly webhooks?: WebhookService,
     @Optional() private readonly automation?: AutomationService,
+    // V4 (docs/29): lapsed VIP memberships expire on the sweep BEFORE the tier recompute, so the recompute
+    // pulls the tier back to the earned rung. Optional for partial harnesses.
+    @Optional() private readonly membership?: MembershipService,
   ) {}
 
   // Emit a live points-movement tick to the BiLive SSE bus (best-effort; the bus is optional + in-memory).
@@ -414,13 +418,14 @@ export class MemberService {
       try {
         const expired: any = await this.expireForTenant(tenantId, 'system:sweep');
         const accrual: any = await this.ledger.accrueLiability({ tenantId, createdBy: 'system:sweep' });
+        const vip: any = this.membership ? await this.membership.expireLapsed(tenantId, 'system:sweep') : { expired: 0 }; // V4: lapse BEFORE recompute
         const tiers: any = await this.recomputeTiersForTenant(tenantId, 'system:sweep');
         const notices: any = await this.notifyExpiring(tenantId, user);
         totalExpired += Number(expired.expired_points ?? 0);
         if (accrual.posted) accrualsPosted++;
         totalTierChanges += Number(tiers.changed ?? 0);
         totalExpiryNotices += Number(notices.fired ?? 0);
-        results.push({ tenant_id: tenantId, expired_points: expired.expired_points ?? 0, expired_members: expired.expired_members ?? 0, accrual: { posted: accrual.posted, liability_delta: accrual.liability_delta, posted_liability: accrual.posted_liability }, tier_changes: tiers.changed ?? 0, expiry_notices: notices.fired ?? 0 });
+        results.push({ tenant_id: tenantId, expired_points: expired.expired_points ?? 0, expired_members: expired.expired_members ?? 0, accrual: { posted: accrual.posted, liability_delta: accrual.liability_delta, posted_liability: accrual.posted_liability }, tier_changes: tiers.changed ?? 0, expiry_notices: notices.fired ?? 0, vip_expired: vip.expired ?? 0 });
       } catch (e: any) {
         results.push({ tenant_id: tenantId, error: String(e?.message ?? e) });
       }
@@ -541,8 +546,9 @@ export class MemberService {
     const span = next ? n(next.minLifetime) - currentMin : 0;
     const progressPct = next ? (span > 0 ? Math.min(100, Math.round(((life - currentMin) / span) * 100)) : 0) : 100;
     const history = await db.select().from(loyaltyTierHistory).where(eq(loyaltyTierHistory.memberId, memberId)).orderBy(desc(loyaltyTierHistory.id)).limit(10);
+    const membership = this.membership ? await this.membership.forMember(tenantId, memberId) : null; // V4: "VIP ถึง {date}"
     return {
-      member_id: memberId, tier: m.tier, lifetime: life,
+      member_id: memberId, tier: m.tier, lifetime: life, membership,
       current_tier: current?.tier ?? m.tier ?? null, next_tier: next?.tier ?? null, to_next: toNext, progress_pct: progressPct,
       tiers: tiers.map((t: any) => ({ tier: t.tier, min_lifetime: n(t.minLifetime), earn_mult: n(t.earnMult), redeem_mult: n(t.redeemMult) })),
       history: history.map((h: any) => ({ from_tier: h.fromTier, to_tier: h.toTier, reason: h.reason, lifetime: n(h.lifetime), effective_at: h.effectiveAt })),

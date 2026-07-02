@@ -4,6 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { LoyaltyService, type LoyaltyConfigDto, type RedeemDto } from './loyalty.service';
 import { MemberService } from './member.service';
+import { MembershipService } from './membership.service';
 import { ReceiptSubmissionsService } from './receipt-submissions.service';
 
 const ConfigBody = z.object({
@@ -17,6 +18,9 @@ const ConfigBody = z.object({
 // W1 LYL-18 — staff-side P2P transfer (sender = :id path param; recipient by id or phone).
 const TransferBody = z.object({ to_member_id: z.number().int().positive().optional(), to_phone: z.string().min(4).optional(), points: z.number().int().positive(), note: z.string().max(200).optional() })
   .refine((d) => d.to_member_id != null || d.to_phone, { message: 'to_member_id or to_phone required' });
+// V4 LYL-21 — paid VIP membership plans + sale.
+const PlanBody = z.object({ id: z.number().int().positive().optional(), code: z.string().min(1).max(20), name: z.string().min(1), tier: z.string().min(1), price: z.number().positive(), period_months: z.number().int().positive().max(60).optional(), active: z.boolean().optional() });
+const SellMembershipBody = z.object({ member_id: z.number().int().positive(), plan_id: z.number().int().positive(), sale_ref: z.string().max(60).optional(), start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 
 const RedeemBody = z.object({ points: z.number().positive() });
 const bday = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -44,7 +48,7 @@ const RejectReceiptBody = z.preprocess((v) => v ?? {}, z.object({ reason: z.stri
 
 @Controller('api/loyalty')
 export class LoyaltyController {
-  constructor(private readonly svc: LoyaltyService, private readonly member: MemberService, private readonly receipts: ReceiptSubmissionsService) {}
+  constructor(private readonly svc: LoyaltyService, private readonly member: MemberService, private readonly membership: MembershipService, private readonly receipts: ReceiptSubmissionsService) {}
 
   @Get('config') @Permissions('loyalty', 'marketing')
   getConfig() { return this.svc.getConfig(); }
@@ -107,6 +111,16 @@ export class LoyaltyController {
   // liability). Points-adjust duty, same gate as manual adjustments — a cashier cannot move points around.
   @Post('members/:id/transfer') @Permissions('crm_points_adjust', 'loyalty', 'exec')
   transfer(@Param('id') id: string, @Body(new ZodValidationPipe(TransferBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.transferPoints(u, +id, b, 'staff'); }
+
+  // ── V4 (docs/29, LYL-21): paid VIP membership — plans (marketing), sale (pos/loyalty), recognition (finance) ──
+  @Get('membership-plans') @Permissions('loyalty', 'marketing', 'pos')
+  listPlans(@CurrentUser() u: JwtUser) { return this.membership.listPlans(u); }
+  @Post('membership-plans') @Permissions('marketing', 'exec')
+  upsertPlan(@Body(new ZodValidationPipe(PlanBody)) b: any, @CurrentUser() u: JwtUser) { return this.membership.upsertPlan(b, u); }
+  @Post('memberships/sell') @Permissions('pos', 'loyalty')
+  sellMembership(@Body(new ZodValidationPipe(SellMembershipBody)) b: any, @CurrentUser() u: JwtUser) { return this.membership.sell(u, b); }
+  @Post('memberships/recognize') @Permissions('gl_post', 'exec')
+  recognizeMemberships(@Body(new ZodValidationPipe(LiabilityPostBody)) b: any, @CurrentUser() u: JwtUser) { return this.membership.recognizeDue(u, b?.tenant_id ?? null); }
 
   // ── Receipt-upload-for-points review queue (LYL-17). Members submit via /api/member/receipts;
   // staff review here. Approve grants points through the same earnInTx path POS checkout uses. ──

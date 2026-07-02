@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { LoyaltyController } from './loyalty.controller';
 import { LoyaltyService } from './loyalty.service';
 import { MemberService } from './member.service';
+import { MembershipService } from './membership.service';
 import { ReceiptSubmissionsService } from './receipt-submissions.service';
 import { SavedSegmentsController } from './saved-segments.controller';
 import { SavedSegmentsService } from './saved-segments.service';
@@ -25,7 +26,7 @@ import { GamificationModule } from './engagement/gamification.module';
 @Module({
   imports: [LedgerModule, BiLiveModule, PlatformModule, AutomationModule, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule],
   controllers: [LoyaltyController, SavedSegmentsController],
-  providers: [LoyaltyService, MemberService, ReceiptSubmissionsService, SavedSegmentsService],
-  exports: [LoyaltyService, MemberService, ReceiptSubmissionsService, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule],
+  providers: [LoyaltyService, MemberService, MembershipService, ReceiptSubmissionsService, SavedSegmentsService],
+  exports: [LoyaltyService, MemberService, MembershipService, ReceiptSubmissionsService, LoyaltyAnalyticsModule, RewardsModule, ReferralsModule, WheelsModule, GamificationModule],
 })
 export class LoyaltyModule {}

@@ -23,6 +23,7 @@ export * from './intercompany';
 export * from './loyalty-members';
 export * from './coalition';
 export * from './nps';
+export * from './membership';
 export * from './loyalty-receipt-submissions';
 export * from './marketing-campaigns';
 export * from './member-consents';

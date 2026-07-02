@@ -20,6 +20,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { CrmPipelineService } from '../crm/pipeline/crm-pipeline.service';
 import { CrmService } from '../crm/crm.service';
 import { NpsService } from '../nps/nps.service';
+import { MembershipService } from '../loyalty/membership.service';
 import { JourneysService } from '../journeys/journeys.service';
 import { cdpConfigured, pushToCdp } from '../../common/cdp-sync';
 import { BudgetService } from '../budget/budget.service';
@@ -66,6 +67,7 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
   lease_periodic_run: { label: 'ลงรายการสัญญาเช่าประจำงวด', labelEn: 'Post due lease periods' },
   nps_post_purchase: { label: 'ส่งแบบสอบถาม NPS หลังการขาย', labelEn: 'Send post-purchase NPS surveys' }, // W3 (docs/27)
+  membership_revenue_recognize: { label: 'รับรู้รายได้ค่าสมาชิก VIP รายเดือน', labelEn: 'Recognize monthly VIP membership revenue' }, // V4 (docs/29)
   // Likewise: each run recognizes every due TFRS-15 revenue schedule through the current period (idempotent).
   rev_rec_recognize: { label: 'รับรู้รายได้ตามสัญญา (TFRS 15)', labelEn: 'Recognize due revenue schedules' },
   // Governance readiness (ELC-01/02/04): each run snapshots acknowledgement coverage, oversight cadence and
@@ -110,6 +112,7 @@ export class BiService implements OnModuleInit {
     // Member CRM (cdp_export_sync action job) — Optional so a partial harness still constructs.
     @Optional() private readonly crmMembers?: CrmService,
     @Optional() private readonly nps?: NpsService, // W3 (docs/27) nps_post_purchase job
+    @Optional() private readonly membership?: MembershipService, // V4 (docs/29) membership_revenue_recognize job
     @Optional() private readonly journeys?: JourneysService,
     // Residual-gap report types (RG-1/2/3): exec scorecard composition + budget-variance + supplier scorecard.
     // Optional so a partial harness still constructs; the full app provides BudgetModule/ProcurementModule/MatchModule.
@@ -607,6 +610,11 @@ export class BiService implements OnModuleInit {
       if (!this.nps) throw new BadRequestException({ code: 'NPS_UNAVAILABLE', message: 'NPS service not available', messageTh: 'ระบบ NPS ไม่พร้อมใช้งาน' });
       const r = await this.nps.sendDue(user, Number(f.window_days) > 0 ? Number(f.window_days) : 1); // idempotent per member × sale (unique index)
       return { data: r, summary: `NPS surveys: sent ${r.sent} of ${r.orders} recent paid orders (${r.skipped} skipped/already surveyed)`, summaryTh: `แบบสอบถาม NPS: ส่ง ${r.sent} จาก ${r.orders} บิลล่าสุด` };
+    }
+    if (reportType === 'membership_revenue_recognize') {
+      if (!this.membership) throw new BadRequestException({ code: 'MEMBERSHIP_UNAVAILABLE', message: 'Membership service not available', messageTh: 'ระบบสมาชิก VIP ไม่พร้อมใช้งาน' });
+      const r = await this.membership.recognizeDue(user); // idempotent per (membership, month) via the JE dedup
+      return { data: r, summary: `VIP recognition: posted ${r.posted} month(s), ฿${r.amount} across ${r.scanned} membership(s)`, summaryTh: `รับรู้รายได้ VIP: ${r.posted} งวด ฿${r.amount}` };
     }
     if (reportType === 'governance_readiness') {
       if (!this.governance) throw new BadRequestException({ code: 'GOVERNANCE_UNAVAILABLE', message: 'Governance service not available', messageTh: 'ระบบธรรมาภิบาลไม่พร้อมใช้งาน' });

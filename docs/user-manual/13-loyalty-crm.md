@@ -189,6 +189,20 @@ earns and redeems at partner shop B, and the accounting between the shops settle
 - **ข้อความธุรกรรมส่งได้เสมอ:** OTP ใบเสร็จ แจ้งคิว/จัดส่ง ทวงหนี้ รายงาน และ NPS ไม่ติดกติกานี้ (แต่ยังเคารพ
   ความยินยอมของสมาชิก)
 
+## 7d. Paid VIP membership (สมาชิก VIP แบบเสียเงิน)
+
+ขายแพ็กเกจระดับสมาชิก (เช่น "บัตรทองรายปี ฿1,200") ที่การ์ด *สมาชิก VIP แบบเสียเงิน* บน `/loyalty`:
+
+1. **สร้างแผน** (สิทธิ์ `marketing`/`exec`) — รหัส, ชื่อ, **ระดับที่ได้** (เช่น Platinum), ราคา, จำนวนเดือน.
+2. **ขาย** (สิทธิ์ `pos`/`loyalty`) — ใส่ id สมาชิก + id แผน → ระบบเก็บเงิน (Dr เงินสด / Cr **2410 รายได้รอรับรู้**
+   ตาม TFRS 15 — ไม่รับรู้รายได้ทันที), อัปเกรดระดับให้พร้อมบันทึกประวัติ `vip`, และสมาชิกเห็น "👑 สมาชิก … ถึง
+   {วันหมดอายุ}" บนการ์ดในแอป `/m`. สมาชิกมีแพ็กเกจ Active ได้ครั้งละหนึ่ง (`MEMBERSHIP_ACTIVE`).
+3. **รับรู้รายได้รายเดือน** — อัตโนมัติผ่านงานรายงาน `membership_revenue_recognize` (หรือ
+   `POST /api/loyalty/memberships/recognize`, สิทธิ์ `gl_post`/`exec`): ตัด 2410 → 4300 เดือนละ
+   ราคา÷จำนวนเดือน แบบ idempotent — รันซ้ำไม่ลงซ้ำ.
+4. **หมดอายุเอง** — sweep รายคืนปิดแพ็กเกจที่เลยวันสิ้นสุด (ประวัติ `vip-expired`) แล้วระดับ**ถอยกลับ**ไปตาม
+   แต้มสะสมจริงโดยอัตโนมัติ — ไม่มี VIP ฟรีตลอดชีพ. (control LYL-21)
+
 ## 8. Refer a friend (แนะนำเพื่อน)
 
 Members bring in new members and both get rewarded. On a member's **360 page** under *แนะนำเพื่อน
@@ -482,6 +496,8 @@ claim points by uploading a photo of the receipt.
 | 1.26 | 2026-07-02 | Platform | §13 **Journey ทางแยก (branching)** — แต่ละขั้นตั้ง *ทางแยก* ได้: เลือกขั้นปลายทาง (ต้องเป็นขั้นถัด ๆ ไปเท่านั้น — ระบบบังคับ จึงวนลูปไม่ได้) + เงื่อนไขจาก catalog เดียวกับ segment builder เช่น *ถ้า recency ≤ 5 ข้ามไปขั้นขอบคุณ*; consent/frequency cap/ส่งครั้งเดียวต่อขั้น (MKT-12) เหมือนเดิมทุกประการ |
 | 1.27 | 2026-07-02 | Platform | §11 **อ่าน lift ให้เป็น (organic baseline)** — รายงานแคมเปญเพิ่มบล็อก *ยอดซื้อจริง* ต่อกลุ่ม A/B/holdout ในหน้าต่าง attribution (ตั้งได้ต่อแคมเปญ, ค่าเริ่มต้น 30 วัน): ยอดซื้อของกลุ่ม holdout คือฐาน "ถ้าไม่ส่งเลย" — lift = อัตราซื้อกลุ่มที่ถูกส่งข้อความ − holdout (pp) + รายได้ส่วนเพิ่มถ่วงขนาดกลุ่ม; ตัวเลขมาพร้อมขนาดกลุ่มเสมอ (holdout เล็ก = ฐานแกว่ง) |
 | 1.28 | 2026-07-02 | Platform | §13 **ส่งถูกเวลา (right-time sends)** — สมาชิกที่มีออเดอร์ ≥3 ครั้งจะได้ *ชั่วโมงที่ชอบซื้อ* (โหมดของฮิสโตแกรมเวลาออเดอร์, เวลาไทย); ขั้น journey ที่มีการรอจะเลื่อนไปส่ง **ตรงชั่วโมงนั้น** (เลื่อนไปข้างหน้าเท่านั้น <24 ชม.; ขั้นส่งทันทียังส่งทันที) — ตั้งชั่วโมง fallback ต่อ journey ได้ (ค่าเริ่มต้น 10:00) |
+| 1.35 | 2026-07-02 | Platform | **V4 (docs/29) สมาชิก VIP แบบเสียเงิน:** new §7d — สร้างแผน/ขาย/รับรู้รายได้รายเดือน (TFRS 15: เงินเข้า 2410 ก่อน ตัดเป็นรายได้ 4300 ตามงวด, idempotent)/หมดอายุถอยระดับอัตโนมัติ; การ์ดขายบน `/loyalty`, บรรทัด 👑 บน `/m`. New error `MEMBERSHIP_ACTIVE`, `PLAN_EXISTS`/`PLAN_NOT_FOUND` (LYL-21). |
+| 1.34 | 2026-07-02 | Platform | **V3 (docs/29) อ่านผล A/B อย่างมั่นใจ:** รายงานแคมเปญ (§11) แสดง **verdict** ต่อการเปรียบเทียบ — `real` (ผลต่างจริง, ช่วงเชื่อมั่น 95% ไม่คร่อมศูนย์), `underpowered — grow the groups` (กลุ่มเล็กกว่า 30 ระบบไม่ตัดสินให้), `no detectable effect` (กลุ่มใหญ่พอแต่ไม่ต่างกัน — อย่าประกาศผู้ชนะ) พร้อม p-value และช่วงเชื่อมั่นเป็น percentage points · สูตรอ้างอิง `docs/ops/ab-significance.md`. |
 | 1.33 | 2026-07-02 | Platform | **V2 (docs/29) service recovery:** §7c — ทุก NPS ≤6 เปิดเคสกู้คืนบริการอัตโนมัติ (SLA ติดต่อกลับ 24 ชม., ประทับชื่อผู้ติดต่อ/ผู้ปิด, ปิดเคสต้องมีบันทึก, เกิน SLA ขึ้นป้ายแดงทุกหน้าจอ) — worklist ใหม่ `/loyalty/recovery` (LYL-20). |
 | 1.32 | 2026-07-02 | Platform | **V1 (docs/29) member-app completion:** §9 — the /m app now shows the tier-ladder strip (level + ×earn + progress), an expiring-points warning chip (new self-scoped `GET /api/member/points/expiring`, read-only over the W1 register), the **ส่งแต้มให้เพื่อน** transfer form (W1 API, guards surfaced verbatim), and the full points history (สะสม/แลก/โอน/หมดอายุ). No new permissions or controls. |
 | 1.31 | 2026-07-02 | Platform | **W3 (docs/27) NPS + governance:** new §7c — post-purchase NPS micro-survey (single-use tokenized link, no PII; detractor ≤6 fires `loyalty.nps_detractor` into Automation/Webhooks; summary + 360 flag; schedulable `nps_post_purchase` job) and the *กติกาการส่ง* governance card on `/settings/messaging` (opt-in quiet hours + global weekly marketing cap, transactional exempt, audited skips). New error codes `NPS_ALREADY_SENT`, `NPS_ALREADY_ANSWERED`/`NPS_EXPIRED`. |

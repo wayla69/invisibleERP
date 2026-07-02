@@ -1,6 +1,6 @@
 # 29 — Loyalty CX & Monetization: Close the Loops, Charge for the Club — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v1.2 — **V1+V2 SHIPPED**, V3–V5 pending · **Owner:** ERP / Product (CMO + SVP-IT review)
+> **Date:** 2026-07-02 · **Status:** v1.4 — **V1–V4 SHIPPED**, V5 pending · **Owner:** ERP / Product (CMO + SVP-IT review)
 > **Scope:** The five follow-ups after docs/27 (Loyalty World-Class, DELIVERED): **V1 member-app completion**
 > (ship the consumer UI the W1–W3 APIs already have), **V2 NPS → service-recovery cases** (a detractor
 > becomes an owned, SLA-tracked task — not just a notification), **V3 statistical rigor for A/B + holdout**
@@ -157,6 +157,8 @@ riding the service module — not a generic helpdesk).
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.4 | 2026-07-02 | Platform | **V4 SHIPPED.** `membership_plans`+`member_memberships` (migration `0225`, one-active partial unique); sell Dr 1000 / Cr **2410** (deviation from the plan's illustrative 2260 — 2410 is the existing TFRS-15 contract-liability account; no new COA entry) + tier grant 'vip'; straight-line recognition 2410→4300 per 30-day month (idempotent; endpoint + BI job `membership_revenue_recognize`); sweep lapse before recompute → tier falls back ('vip-expired'). Control **LYL-21** → RCM **175**. loyalty +4 → 34/34, compliance +1 → 120/120; narrative 19 rev 1.39, manual 13 rev 1.35, UAT 62→64. |
+| 1.3 | 2026-07-02 | Platform | **V3 SHIPPED.** `compareProportions` (pooled two-proportion z via A&S erfc + Newcombe/Wilson 95% CI; `AB_STATS` constants, `AB_STATS_VERSION v1`; new `docs/ops/ab-significance.md`); report gains `ab.ab_significance` + `organic_lift.significance` with the real/underpowered/no-effect verdict; significance gated on p<.05 AND groups ≥30. line-automation +2 → 15/15; narrative 19 rev 1.38, manual 13 rev 1.34, UAT 61→62. |
 | 1.2 | 2026-07-02 | Platform | **V2 SHIPPED.** `recovery_cases` (migration `0224`); auto-open per detractor (non-best-effort, idempotent unique source_ref); actor-stamped contact/resolve (note required); overdue on worklist + `GET /api/nps/summary` + member 360; web `/loyalty/recovery`. Control **LYL-20** → RCM **174** (census tags bumped). crm +3 → 56/56, compliance +1 → 119/119; narrative 19 rev 1.37, manual 13 rev 1.33, UAT 59→61. |
 | 1.1 | 2026-07-02 | Platform | **V1 SHIPPED.** /m gains the tier-ladder strip (×earn + progress), expiring-points chip (new read-only self-scoped `GET /api/member/points/expiring` over the W1 register), the ส่งแต้มให้เพื่อน transfer form (guards surfaced verbatim), and the full points history. compliance +1 → 118/118; loyalty 30/30, cookie-auth 16/16; manual 13 rev 1.32, narrative 19 rev 1.36, UAT 58→59. |
 | 1.0 | 2026-07-02 | Platform | Initial plan: V1 member-app completion (transfer/tier/history/expiry UI), V2 NPS→recovery cases (LYL-20), V3 A/B significance (Wilson CI + z-test, explainable), V4 paid VIP membership with deferred-revenue recognition (LYL-21), V5 Apple/Google wallet passes (mock-first provider seam). |
