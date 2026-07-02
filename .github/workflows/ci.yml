@@ -273,6 +273,10 @@ jobs:
             console.log("OK: " + sqls.length + " migrations registered (" + GRANDFATHERED.length + " grandfathered), no duplicate numbers/tags/idx.");
           '
 
+      - name: RCM census reconciles (docs may not misquote the control population)
+        # docs/24 R3-1 / AUD-CMP-01 — tagged counts in compliance/docs markdown must match build_rcm.py.
+        run: node tools/ci/check-rcm-census.mjs
+
   # Real-Postgres smoke (panel #1) — the divergence class PGlite hides: FORCE-RLS under app_user,
   # the 0193 org-scoped policy, and postgres-js Date round-trips. Report-only for now (continue-on-error)
   # until proven stable on main, then promote to a required check.

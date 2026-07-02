@@ -284,7 +284,14 @@ comment. No behavior change beyond alignment.
 
 ## Wave 3 — Compliance & documentation integrity 📋 (parallel with Wave 1; mostly docs)
 
-### R3-1 · Reconcile the control population to ONE number — closes AUD-CMP-01 ⭐ do this month
+### R3-1 · Reconcile the control population to ONE number — closes AUD-CMP-01 ⭐ do this month — **DELIVERED 2026-07-02**
+> Shipped: `build_rcm.py --counts` machine-readable census (169 = 166 Implemented / 3 Partial / 0 Gap);
+> every current-state count claim in `CONTROL_STATUS_HONEST.md`, `COSO_ICFR_Audit_Readiness_Plan.md` (§2 —
+> which cited BOTH 66 and 153 — and §8), `soc2-readiness.md`, `iso27001-gap-analysis.md` corrected and
+> wrapped in `<!-- rcm-* -->` tags (16 tagged claims); `PRE_PRODUCTION_AUDIT_2026Q2.md` banner-marked as a
+> historical snapshot (audit records are annotated, never rewritten); CI guard
+> `tools/ci/check-rcm-census.mjs` added to the `migrations-journaled` job — fails on any tagged-claim
+> drift and on tag removal. Revision histories bumped; xlsx regenerated.
 - `compliance/build_rcm.py` is the **only** source of truth. Emit a machine-readable census
   (`build_rcm.py --counts` → JSON: total + per-cycle + per-status) alongside the xlsx.
 - Sweep and correct every stale count: `CONTROL_STATUS_HONEST.md` (154→actual),
@@ -296,7 +303,11 @@ comment. No behavior change beyond alignment.
   `--counts`. Counts can never drift again.
 - Bump every touched doc's revision history. Regenerate the xlsx once at the end.
 
-### R3-2 · Retire stale/contradictory docs — closes AUD-CMP-02
+### R3-2 · Retire stale/contradictory docs — closes AUD-CMP-02 — **DELIVERED 2026-07-02**
+> Shipped: `docs/09-worldclass-roadmap.md` now opens with a SUPERSEDED banner enumerating each now-false
+> claim (RLS/GL/billing/MFA/AI) with the shipped counter-evidence, pointing to `CONTROL_STATUS_HONEST.md` +
+> docs/24 §0 for current state; document body kept unedited as history. `docs/10`–`12` audited — `docs/11`
+> already presents the fixes as a ✅ table (not stale); no banner needed.
 Prepend a dated banner to `docs/09-worldclass-roadmap.md` (and audit `docs/10`–`12` for the same
 disease): `> **SUPERSEDED (2026-07-02):** §§X–Y describe the pre-remediation state; RLS
 (0002_rls.sql), MFA/TOTP, SSO, billing, RAG, evals, PII redaction have since shipped — see
@@ -432,3 +443,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.0 | 2026-07-02 | ERP/Product | Initial remediation plan from the 2026-07 five-persona investment-audit findings (26 findings registered; 6 waves; R0-1/R1-1/R3-1/R1-4 sequenced first) |
 | 1.1 | 2026-07-02 | ERP/Product | R0-1 delivered (employee/vendor PII encrypted at rest; decision recorded: passthrough → no migration/blind index; DSAR-for-employees deferred to the AUD-LGL-03 piece) |
 | 1.2 | 2026-07-02 | ERP/Product | R1-1 delivered (0211 backfills 132 tenant indexes; `tenant-idx` CI guard added; real count 132 vs audit's ~40-file estimate) |
+| 1.3 | 2026-07-02 | ERP/Product | R3-1 + R3-2 delivered (census 169/166/3/0 tagged + CI-guarded across 5 compliance docs; docs/09 SUPERSEDED banner; PRE_PRODUCTION audit banner-marked historical) |

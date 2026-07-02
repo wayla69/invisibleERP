@@ -740,8 +740,22 @@ dash["B17"]=("Read with the 'RCM' tab (full control detail + tests), 'Gap Remedi
 dash.merge_cells("B17:E19"); dash["B17"].font=f(9,False,GREY); dash["B17"].alignment=WRAP
 for col,w in (("A",3),("B",22),("C",12),("D",3),("E",40)): dash.column_dimensions[col].width=w
 
+# ---- census (docs/24 R3-1) ----
+# `python3 compliance/build_rcm.py --counts` prints the machine-readable control census and SKIPS the xlsx
+# write. This is the ONLY number any narrative doc may cite (tagged <!-- rcm-total -->N<!-- /rcm-total -->
+# etc.); tools/ci/check-rcm-census.mjs fails CI when a tagged claim drifts from this source of truth.
+import sys as _sys, json as _json
+_by_status, _by_family = {}, {}
+for _row in R:
+    _by_status[_row[-1]] = _by_status.get(_row[-1], 0) + 1
+    _by_family[_row[1]] = _by_family.get(_row[1], 0) + 1
+CENSUS = {"total": len(R), "by_status": dict(sorted(_by_status.items())), "by_family": dict(sorted(_by_family.items()))}
+if "--counts" in _sys.argv:
+    print(_json.dumps(CENSUS, ensure_ascii=False, indent=2))
+    _sys.exit(0)
+
 # order tabs
 wb.move_sheet("Cover", -wb.sheetnames.index("Cover"))
 out = "compliance/Oshinei_ERP_SOX_RCM_v1.xlsx"
 wb.save(out)
-print("WROTE", out, "| controls:", len(R), "| gaps:", len(GAP))
+print("WROTE", out, "| controls:", len(R), "| gaps:", len(GAP), "| census:", _json.dumps(CENSUS["by_status"]))
