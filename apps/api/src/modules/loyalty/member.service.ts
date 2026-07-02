@@ -436,6 +436,21 @@ export class MemberService {
   // approaches its expiry date, never re-nagging about the same one. The math mirrors expireForTenant with
   // the cutoff shifted forward: what would expire if today were `lookAheadDays` from now, minus what is
   // already expirable today (that part belongs to expireForTenant, not a warning).
+  // V1 (docs/29) — a member's own upcoming expiry, for the /m warning chip. Reads the W1 look-ahead
+  // register (soonest future batch only); read-only, self-scoped by the caller (memberId from the token).
+  async expiringForMember(memberId: number) {
+    const db = this.db as DrizzleDb & Record<string, any>;
+    const today = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10); // BKK business day
+    const rows = await db.select().from(loyaltyExpiryNotices)
+      .where(and(eq(loyaltyExpiryNotices.memberId, memberId), sql`${loyaltyExpiryNotices.expireBy} >= ${today}`))
+      .orderBy(loyaltyExpiryNotices.expireBy).limit(1);
+    const r: any = rows[0];
+    if (!r) return { member_id: memberId, expiring_points: 0, expire_by: null, days_left: null };
+    const expireByYmd = String(r.expireBy).slice(0, 10);
+    const daysLeft = Math.max(0, Math.ceil((new Date(expireByYmd + 'T00:00:00Z').getTime() - 7 * 3600_000 + 86_400_000 - Date.now()) / 86_400_000));
+    return { member_id: memberId, expiring_points: n(r.expiringPoints), expire_by: expireByYmd, days_left: daysLeft };
+  }
+
   async notifyExpiring(tenantId: number, user: JwtUser, lookAheadDays = 30) {
     const db = this.db as DrizzleDb & Record<string, any>;
     const [c] = await db.select().from(loyaltyConfig).limit(1);

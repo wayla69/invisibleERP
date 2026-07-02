@@ -758,6 +758,14 @@ async function main() {
       && p2pCap.status === 409 && p2pCap.json.error?.code === 'TRANSFER_CAP',
     `staff=${p2pStaff.status} ${p2pStaff.json.from_balance}/${p2pStaff.json.to_balance} rows=${p2pRows.length} net=${p2pNet} lia ${liaBefore18.outstanding_points}→${liaAfter18.outstanding_points} denied=${p2pSelfDenied.status} self=${p2pSelf.status} selfself=${p2pSelfSelf.status}/${p2pSelfSelf.json.error?.code} cap=${p2pCap.status}/${p2pCap.json.error?.code}`);
 
+  // V1 (docs/29) — member self-scoped expiring-points read (the /m warning chip; reads the W1 register).
+  const expBy = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+  await db.insert(s.loyaltyExpiryNotices).values({ tenantId: t1, memberId: Number(appMem.id), expireBy: expBy, expiringPoints: '80' }).onConflictDoNothing();
+  const myExp = await inj('GET', '/api/member/points/expiring', memberTok);
+  ok('V1: member reads THEIR OWN upcoming points expiry (self-scoped, from the W1 look-ahead register)',
+    myExp.status === 200 && near(myExp.json.expiring_points, 80) && myExp.json.expire_by === expBy && Number(myExp.json.days_left) >= 19 && Number(myExp.json.days_left) <= 21,
+    JSON.stringify(myExp.json));
+
   // ════════ LYL-19 — Coalition: cross-shop earn lands on the HOME ledger + balanced IC clearing; config HQ-only ════════
   // Partner shop = HQ (t2's current period is already CLOSED by the LYL-05 check above — the clearing JE
   // legs post to BOTH shops, so the partner must have an open period; the all-or-nothing behaviour on a

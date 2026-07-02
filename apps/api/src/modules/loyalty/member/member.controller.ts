@@ -96,6 +96,9 @@ export class MemberController {
   // same shop (atomic two-row ledger move, day-capped, net-zero liability). Sender is always u.memberId.
   @Post('points/transfer') @UseGuards(MemberGuard)
   transfer(@Body(new ZodValidationPipe(TransferBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.transferPoints(u, u.memberId!, b, 'self'); }
+  // V1 (docs/29) — the member's own upcoming points expiry (reads the W1 look-ahead register; read-only).
+  @Get('points/expiring') @UseGuards(MemberGuard)
+  expiring(@CurrentUser() u: JwtUser) { return this.member.expiringForMember(u.memberId!); }
 
   // PDPA data-subject self-service: a member views and updates their OWN consents (scoped to u.memberId — a
   // member can never read/alter another member's). Delegates to the same getConsents/setConsent the staff
