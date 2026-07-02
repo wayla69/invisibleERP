@@ -1513,6 +1513,13 @@
       "when": 2023820000042,
       "tag": "0215_journey_branching",
       "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "7",
+      "when": 2023820000043,
+      "tag": "0216_campaign_window",
+      "breakpoints": true
     }
   ]
 }

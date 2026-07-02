@@ -19,6 +19,7 @@ export const automationCampaigns = pgTable('automation_campaigns', {
   variantBBody: text('variant_b_body'),                // message body for the B group (null = no A/B)
   splitBPct: integer('split_b_pct').notNull().default(0),   // % of audience assigned to B
   holdoutPct: integer('holdout_pct').notNull().default(0),  // % held out (no send — the control group)
+  windowDays: integer('window_days').notNull().default(30), // H2: attribution window for the organic-purchase baseline
   status: text('status').notNull().default('sent'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
