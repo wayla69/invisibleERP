@@ -56,13 +56,20 @@ export class AuditInterceptor implements NestInterceptor {
       : (req as any).__rlsOrgScope != null ? { rls_org_scope: (req as any).__rlsOrgScope }
       : undefined;
 
+    // Service-attached audit metadata (appendAuditMeta) is read at tap-time — after the handler ran —
+    // so a deep service's evidence (e.g. an SoD-override reason) lands in the same hash-chained row.
+    const svcMeta = () => (req as any).__auditMeta as Record<string, unknown> | undefined;
     return next.handle().pipe(
       tap({
-        next: () => void this.record(action, actor, tenantId, ip, rid, 'success', xtenant),
+        next: () => {
+          const extra = svcMeta();
+          void this.record(action, actor, tenantId, ip, rid, 'success', xtenant || extra ? { ...(xtenant ?? {}), ...(extra ?? {}) } : undefined);
+        },
         error: (err) =>
           void this.record(action, actor, tenantId, ip, rid, 'fail', {
             error: err?.message ?? String(err),
             ...(xtenant ?? {}),
+            ...(svcMeta() ?? {}),
           }),
       }),
     );

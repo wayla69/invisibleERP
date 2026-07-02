@@ -305,11 +305,27 @@ async function main() {
   const noReason = await inj('POST', '/api/admin/users', admin, { username: 'sod_noreason', password: 'pw1234', role: 'Sales', permissions: conflictPerms, allow_sod_override: true });
   ok('ITGC-AC-09: override without a reason is still rejected', noReason.status === 422 && noReason.json.error?.code === 'SOD_CONFLICT', `${noReason.status} ${noReason.json.error?.code}`);
 
-  // 5. A clean single-duty set is accepted with no friction.
+  // 5. The override's WHO/WHY/WHICH-RULES is persisted as tamper-evident evidence in the hash-chained
+  //    audit_log meta (round-2 AUD-SEC-04: an ephemeral logger.warn is not audit evidence).
+  {
+    let evidenceRow: any = null;
+    for (let i = 0; i < 10 && !evidenceRow; i++) { // audit write is fire-and-forget → tiny settle loop
+      const rows = (await pg.query(`SELECT meta FROM audit_log WHERE action LIKE 'POST /api/admin/users%' AND status = 'success' AND meta::jsonb ? 'sod_override' ORDER BY id DESC LIMIT 1`)).rows as any[];
+      evidenceRow = rows[0] ?? null;
+      if (!evidenceRow) await new Promise((r) => setTimeout(r, 50));
+    }
+    const meta = typeof evidenceRow?.meta === 'string' ? JSON.parse(evidenceRow.meta) : evidenceRow?.meta;
+    const ev = meta?.sod_override;
+    ok('ITGC-AC-09: override reason + rule ids persisted in hash-chained audit_log meta (durable evidence)',
+      !!ev && ev.username === 'sod_override' && String(ev.reason).includes('compensating') && (ev.rules ?? []).includes('R03'),
+      JSON.stringify(ev ?? 'no audit row'));
+  }
+
+  // 6. A clean single-duty set is accepted with no friction.
   const clean = await inj('POST', '/api/admin/users', admin, { username: 'sod_clean', password: 'pw1234', role: 'Sales', permissions: ['ar'] });
   ok('ITGC-AC-09: conflict-free permission set assigned normally', (clean.status === 200 || clean.status === 201), `${clean.status}`);
 
-  // 6. The same guard applies on UPDATE, not just create.
+  // 7. The same guard applies on UPDATE, not just create.
   const updateConflict = await inj('PATCH', '/api/admin/users/sod_clean', admin, { permissions: conflictPerms });
   ok('ITGC-AC-09: preventive block also enforced on permission UPDATE', updateConflict.status === 422 && updateConflict.json.error?.code === 'SOD_CONFLICT', `${updateConflict.status} ${updateConflict.json.error?.code}`);
 

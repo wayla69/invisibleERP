@@ -6,6 +6,7 @@ import { desc } from 'drizzle-orm';
 import { PasswordService } from '../auth/password.service';
 import { BillingService } from '../billing/billing.service';
 import { resolvePermissions, detectSodConflicts, type Role, type Permission } from '@ierp/shared';
+import { appendAuditMeta } from '../../common/tenant-context';
 import type { JwtUser } from '../../common/decorators';
 import { normalizeUsername } from '../../common/username';
 
@@ -46,6 +47,9 @@ export class AdminUsersService {
         conflicts,
       });
     }
+    // ITGC-AC-09 evidence (round-2 AUD-SEC-04): persist WHO overrode WHAT and WHY into the
+    // hash-chained audit_log row for this mutation — the log line alone is ephemeral stdout.
+    appendAuditMeta({ sod_override: { username, reason: reason.trim(), rules: conflicts.map((c) => c.ruleId) } });
     this.logger.warn(`SoD override for "${username}" by reason="${reason}" — conflicts: ${conflicts.map((c) => c.ruleId).join(',')}`);
   }
 
