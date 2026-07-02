@@ -219,7 +219,15 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
   pre-change implementation (golden-file compare in the harness); `EXPLAIN` shows no full
   `journal_lines` scan for a closed-period TB.
 
-### R1-3 · Redis-backed realtime fan-out — closes AUD-ARC-03
+### R1-3 · Redis-backed realtime fan-out — closes AUD-ARC-03 — **DELIVERED 2026-07-02**
+> Shipped: shared `common/realtime-bus.ts` (transport-pluggable) now backs BOTH SSE buses (`pos-scale`
+> RealtimeService + `bi` BiLiveService) with identical public surfaces. `REALTIME_REDIS_URL` unset (CI,
+> single node) → pure in-memory, behavior unchanged; set → every publish routes through Redis pub/sub with
+> the local subject/buffer fed only from the subscription (single delivery path — publisher sees its own
+> event exactly once). Publish failure degrades to local-only + throttled `realtime_redis_publish_failed`
+> ops alert. Cross-instance ToE via injected fake transport (`realtime-bus.test.ts`, 5 tests — two bus
+> instances model two replicas); deployment doc §4 + runbook + `.env.example` updated. `recent()` buffer
+> stays per-process (documented).
 - Introduce `REALTIME_REDIS_URL` (unset ⇒ current in-memory `Subject`, keeps CI/PGlite and
   single-node deploys zero-dependency). When set, `bi-live.service.ts` and
   `pos-scale/realtime.service.ts` publish/subscribe via Redis pub/sub (`ioredis`), tenant-prefixed
@@ -484,3 +492,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.6 | 2026-07-02 | ERP/Product | R2-1 delivered (throttled fail-open ops alert on the lockout store; AC-15 RCM text drift fixed; runbook rev 1.2) |
 | 1.7 | 2026-07-02 | ERP/Product | R2-2 delivered (authz change bumps tokens_valid_from → immediate revocation instead of per-request re-resolution) |
 | 1.8 | 2026-07-02 | ERP/Product | R2-4 delivered (cookie Max-Age defaults to the JWT TTL; stale 8h/12h comments + .env.example aligned) |
+| 1.9 | 2026-07-02 | ERP/Product | R1-3 delivered (shared realtime-bus with optional Redis pub/sub behind both SSE buses; fake-transport cross-instance ToE) |
