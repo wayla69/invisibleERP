@@ -1,4 +1,5 @@
 import { pgTable, bigserial, bigint, text, numeric, date, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { encryptedText } from '../encrypted-column';
 import { tenants } from './tenants';
 
 // Employees (พนักงาน) — tenant-scoped (RLS via tenant_id). Salary drives payroll.
@@ -9,8 +10,10 @@ export const employees = pgTable(
     tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
     empCode: text('emp_code').notNull(),
     name: text('name').notNull(),
-    nationalId: text('national_id'),           // เลขบัตรประชาชน (13 หลัก) — for ภ.ง.ด.1
-    ssoNo: text('sso_no'),                      // เลขประกันสังคม
+    // PII-at-rest (ITGC-AC-19, docs/24 R0-1): citizen ID / SSO no / bank account are encrypted (AES-256-GCM,
+    // legacy-plaintext passthrough). NOT queried by value anywhere — aggregations key on employee_id/emp_code.
+    nationalId: encryptedText('national_id'),   // เลขบัตรประชาชน (13 หลัก) — for ภ.ง.ด.1
+    ssoNo: encryptedText('sso_no'),             // เลขประกันสังคม
     position: text('position'),
     department: text('department'),
     monthlySalary: numeric('monthly_salary', { precision: 14, scale: 2 }).notNull().default('0'),
@@ -18,7 +21,7 @@ export const employees = pgTable(
     pfRate: numeric('pf_rate', { precision: 6, scale: 4 }).default('0'),               // provident fund % (ee=er)
     allowances: numeric('allowances', { precision: 14, scale: 2 }).default('0'), // extra tax allowances (annual)
     ssoEligible: boolean('sso_eligible').default(true),
-    bankAccount: text('bank_account'),
+    bankAccount: encryptedText('bank_account'), // PII-at-rest (ITGC-AC-19) — decrypts only at the payment boundary
     userName: text('user_name'),                // ESS: link to users.username for self-service (Phase D3)
     startDate: date('start_date'),
     active: boolean('active').default(true),
@@ -60,7 +63,9 @@ export const payslips = pgTable(
     employeeId: bigint('employee_id', { mode: 'number' }).references(() => employees.id),
     empCode: text('emp_code'),
     empName: text('emp_name'),
-    nationalId: text('national_id'),
+    // PII-at-rest (ITGC-AC-19): the per-slip citizen-ID snapshot is ciphertext too. Random-IV AES-GCM means
+    // ciphertext is NOT groupable in SQL — PND1A aggregates in app code keyed on employee_id/emp_code.
+    nationalId: encryptedText('national_id'),
     gross: numeric('gross', { precision: 14, scale: 2 }).default('0'),
     otPay: numeric('ot_pay', { precision: 14, scale: 2 }).default('0'),
     unpaid: numeric('unpaid', { precision: 14, scale: 2 }).default('0'),

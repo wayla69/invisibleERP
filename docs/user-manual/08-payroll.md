@@ -24,6 +24,11 @@ Tabs: **Employees** · **Run Payroll** · **PND1** (ภ.ง.ด.1, monthly) ·
 **Expected result:** The employee is added and will be included in the next
 payroll run.
 
+> 🔒 **PII protection:** the citizen ID (เลขบัตรประชาชน), SSO number and bank
+> account you enter are **encrypted at rest** (AES-256-GCM) — a database snapshot
+> never contains them in the clear. Screens and statutory forms (ภ.ง.ด.1/1ก)
+> still show the real values to authorized payroll users. (Control ITGC-AC-19.)
+
 [screenshot: employee list]
 
 ---

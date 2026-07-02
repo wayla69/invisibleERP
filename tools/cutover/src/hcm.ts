@@ -59,7 +59,7 @@ async function main() {
   const approver = (await inj('POST', '/api/login', undefined, { username: 'approver', password: 'admin123' })).json.token;
 
   // ── 1. employee: salary 30000, hourly 200, PF 5% ──
-  const e = await inj('POST', '/api/payroll/employees', admin, { name: 'Somchai', national_id: '1234567890123', monthly_salary: 30000, hourly_rate: 200, pf_rate: 0.05 });
+  const e = await inj('POST', '/api/payroll/employees', admin, { name: 'Somchai', national_id: '1234567890123', bank_account: '123-4-56789-0', monthly_salary: 30000, hourly_rate: 200, pf_rate: 0.05 });
   const code = e.json.emp_code;
   ok('Create employee w/ PF 5% + hourly 200', e.status < 300 && /^EMP/.test(code ?? ''), JSON.stringify({ s: e.status }));
 
@@ -92,6 +92,18 @@ async function main() {
   ok('ภ.ง.ด.1ก 2026: 1 employee, income 31000, WHT 220.83',
     pnd1a.json.headcount === 1 && near(pnd1a.json.total_income, 31000) && near(pnd1a.json.total_wht, 220.83),
     JSON.stringify({ h: pnd1a.json.headcount, inc: pnd1a.json.total_income, wht: pnd1a.json.total_wht }));
+
+  // ── 7. ITGC-AC-19 (docs/24 R0-1) — employee PII is ciphertext AT REST but decrypts through the API ──
+  // Raw SQL sees the stored bytes (v1:<iv>:<tag>:<ct>); the schema read decrypts, so PND1A still carries
+  // the real citizen ID. The payslip snapshot column is encrypted independently of the employee master.
+  const empRest: any = await pg.query('select national_id, bank_account from employees limit 1');
+  const slipRest: any = await pg.query('select national_id from payslips limit 1');
+  const erow = empRest.rows?.[0] ?? {}; const srow = slipRest.rows?.[0] ?? {};
+  ok('ITGC-AC-19: citizen ID + bank account ciphertext at rest (employees + payslips)',
+    String(erow.national_id ?? '').startsWith('v1:') && String(erow.bank_account ?? '').startsWith('v1:') && String(srow.national_id ?? '').startsWith('v1:'),
+    JSON.stringify({ nid: String(erow.national_id ?? '').slice(0, 6), bank: String(erow.bank_account ?? '').slice(0, 6), slip: String(srow.national_id ?? '').slice(0, 6) }));
+  ok('ITGC-AC-19: API still returns the decrypted citizen ID (PND1A line)',
+    (pnd1a.json.lines ?? [])[0]?.national_id === '1234567890123', JSON.stringify((pnd1a.json.lines ?? [])[0]));
 
   console.log('\n── Phase 19 — HCM/Payroll depth (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

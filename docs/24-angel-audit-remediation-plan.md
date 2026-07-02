@@ -80,7 +80,16 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 
 ## Wave 0 — Legal / PDPA emergencies 🔴 (target: ≤ 60 days; blocks ANY external tenant)
 
-### R0-1 · Encrypt employee & vendor PII at rest — closes AUD-LGL-01 ⭐ do first
+### R0-1 · Encrypt employee & vendor PII at rest — closes AUD-LGL-01 ⭐ do first — **DELIVERED 2026-07-02**
+> Shipped smaller than planned (better): the `encryptedText` legacy-plaintext passthrough means **no DDL
+> migration** and no blind index were needed (no value-based lookups exist on these columns — the two SQL
+> aggregations that keyed on them, PND1A and ghost-vendor, were rewritten to group decrypted values in app
+> code). Delivered: `schema/payroll.ts` + `schema/procurement.ts` encrypted columns, `payroll.service.ts
+> pnd1a` + `controls.service.ts scan` rewrites, idempotent `db:backfill:pii` script (also clears the
+> customer_master backfill debt), at-rest ToE in `hcm`/`ext` harnesses, RCM ITGC-AC-19 updated (xlsx
+> regenerated, still 169), narratives 05/02 + manuals 08/03 + UAT-PAY-037/UAT-P2P-066 + traceability +
+> `docs/ops/pii-encryption-rollout.md` v0.2. The PDPA DSAR employee-subject extension moves to a follow-up
+> piece (tracked as part of AUD-LGL-03).
 *The one-sprint fix with the largest legal-exposure reduction. The `encryptedText` column type
 (AES-256-GCM via `common/crypto.ts` `APP_ENC_KEY`) already exists and is proven on
 `customer-master.ts:16` — this is adoption, not invention.*
@@ -412,3 +421,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 1.0 | 2026-07-02 | ERP/Product | Initial remediation plan from the 2026-07 five-persona investment-audit findings (26 findings registered; 6 waves; R0-1/R1-1/R3-1/R1-4 sequenced first) |
+| 1.1 | 2026-07-02 | ERP/Product | R0-1 delivered (employee/vendor PII encrypted at rest; decision recorded: passthrough → no migration/blind index; DSAR-for-employees deferred to the AUD-LGL-03 piece) |
