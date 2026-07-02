@@ -262,7 +262,13 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 
 ## Wave 2 — Security residuals 🛡 (one PR each, small)
 
-### R2-1 · Lockout fail-open observability — closes AUD-SEC-01
+### R2-1 · Lockout fail-open observability — closes AUD-SEC-01 — **DELIVERED 2026-07-02**
+> Shipped: the deliberate fail-open stays (login availability > lockout), but every swallowed store
+> failure now raises a throttled (1/min) `login_lockout_store_unavailable` ops alert via the existing
+> `captureOpsAlert` sink (pino error + Sentry), naming the degradation explicitly. RCM ITGC-AC-15 text
+> corrected while here — it still said brute-force lockout was "a tracked follow-on" when the lockout has
+> long existed (another doc-drift instance). Runbook entry in `docs/ops/observability-incident.md` rev 1.2;
+> unit ToE `login-attempt-failopen.test.ts` (store down → fail-open, no throw, auth path unbroken).
 Keep the deliberate fail-open (availability of login > lockout) but make it **loud**: increment an
 OTel counter + `pino` error with a dedicated event code on every swallowed store failure in
 `login-attempt.store.ts`; alert rule documented in `docs/ops/`. Confirm prod env uses production
@@ -464,3 +470,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.3 | 2026-07-02 | ERP/Product | R3-1 + R3-2 delivered (census 169/166/3/0 tagged + CI-guarded across 5 compliance docs; docs/09 SUPERSEDED banner; PRE_PRODUCTION audit banner-marked historical) |
 | 1.4 | 2026-07-02 | ERP/Product | R1-4 delivered (bigint minor-unit balance invariants in the ledger; common/money.ts + money.test.ts; GL narrative rev 1.7) |
 | 1.5 | 2026-07-02 | ERP/Product | R0-3 delivered (must-change hard gate + random seed credential + prod-seed refusal); R2-3 found already-implemented (sod_reason ToE exists) |
+| 1.6 | 2026-07-02 | ERP/Product | R2-1 delivered (throttled fail-open ops alert on the lockout store; AC-15 RCM text drift fixed; runbook rev 1.2) |

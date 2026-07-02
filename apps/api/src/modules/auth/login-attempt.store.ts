@@ -10,6 +10,18 @@ const THRESHOLD = Number(process.env.LOGIN_LOCK_THRESHOLD ?? 10); // consecutive
 const LOCK_MINUTES = Number(process.env.LOGIN_LOCK_MINUTES ?? 15); // lockout duration
 const WINDOW_MINUTES = Number(process.env.LOGIN_FAIL_WINDOW_MIN ?? 15); // idle gap that resets the counter
 
+// docs/24 R2-1 / AUD-SEC-01 — the store deliberately FAILS OPEN (login availability > lockout), but the
+// degradation must be LOUD: while the store is unreachable, per-account brute-force protection is off and
+// only the per-IP edge limiter remains. Alert ops (throttled — a down DB must not emit one alert per
+// login attempt) so the fail-open window is short and visible, not silent.
+let lastStoreAlertAt = 0;
+function alertStoreUnavailable(op: string, err: unknown): void {
+  const now = Date.now();
+  if (now - lastStoreAlertAt < 60_000) return;
+  lastStoreAlertAt = now;
+  captureOpsAlert('login_lockout_store_unavailable', { op, degraded: 'per-account lockout FAIL-OPEN (ITGC-AC-07); per-IP edge limiter still active' }, err);
+}
+
 @Injectable()
 export class LoginAttemptStore {
   constructor(@Inject(PG_CLIENT) private readonly sql: PgClient) {}
@@ -21,7 +33,8 @@ export class LoginAttemptStore {
         SELECT ceil(extract(epoch FROM (locked_until - now())))::int AS secs
         FROM login_attempts WHERE username = ${username} AND locked_until IS NOT NULL AND locked_until > now()`;
       return rows.length ? Math.max(1, Number(rows[0].secs)) : 0;
-    } catch {
+    } catch (e) {
+      alertStoreUnavailable('retryAfterSeconds', e);
       return 0; // never block login because the lockout store is unavailable (fail open on infra error)
     }
   }
@@ -49,11 +62,11 @@ export class LoginAttemptStore {
       if (r && Number(r.fail_count) >= THRESHOLD && r.locked_until) {
         captureOpsAlert('login_lockout', { username, fail_count: Number(r.fail_count), lock_minutes: LOCK_MINUTES });
       }
-    } catch { /* best-effort: a counter write failure must not break the auth path */ }
+    } catch (e) { alertStoreUnavailable('recordFailure', e); /* best-effort: a counter write failure must not break the auth path */ }
   }
 
   // Clear on successful authentication.
   async clear(username: string): Promise<void> {
-    try { await this.sql`DELETE FROM login_attempts WHERE username = ${username}`; } catch { /* best-effort */ }
+    try { await this.sql`DELETE FROM login_attempts WHERE username = ${username}`; } catch (e) { alertStoreUnavailable('clear', e); /* best-effort */ }
   }
 }
