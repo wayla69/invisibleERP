@@ -122,6 +122,7 @@ export const loyaltyConfig = pgTable('loyalty_config', {
   bahtPerPoint: numeric('baht_per_point').default('0.1'),
   minRedeem: numeric('min_redeem').default('100'),
   expiryDays: integer('expiry_days').default(365),
+  transferDayCap: integer('transfer_day_cap').notNull().default(1000), // W1 LYL-18: max points a member may transfer out per day (0 = transfers disabled)
   updatedAt: timestamp('updated_at', { withTimezone: true }),
 });
 

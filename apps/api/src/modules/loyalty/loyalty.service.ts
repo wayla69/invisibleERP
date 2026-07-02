@@ -7,7 +7,7 @@ import type { JwtUser } from '../../common/decorators';
 
 export interface LoyaltyConfigDto {
   enabled?: boolean; points_per_baht?: number; baht_per_point?: number;
-  min_redeem?: number; expiry_days?: number;
+  min_redeem?: number; expiry_days?: number; transfer_day_cap?: number;
 }
 export interface RedeemDto { points: number }
 
@@ -31,6 +31,7 @@ export class LoyaltyService {
       baht_per_point: n(cfg?.bahtPerPoint),
       min_redeem: n(cfg?.minRedeem),
       expiry_days: n(cfg?.expiryDays),
+      transfer_day_cap: cfg?.transferDayCap != null ? Number(cfg.transferDayCap) : 1000,
       updated_at: cfg?.updatedAt ?? null,
     };
   }
@@ -43,6 +44,7 @@ export class LoyaltyService {
     if (dto.baht_per_point != null) set.bahtPerPoint = String(dto.baht_per_point);
     if (dto.min_redeem != null) set.minRedeem = String(dto.min_redeem);
     if (dto.expiry_days != null) set.expiryDays = dto.expiry_days;
+    if (dto.transfer_day_cap != null) set.transferDayCap = dto.transfer_day_cap;
     await db.insert(loyaltyConfig).values({
       id: 1,
       enabled: dto.enabled ?? false,
@@ -50,6 +52,7 @@ export class LoyaltyService {
       bahtPerPoint: dto.baht_per_point != null ? String(dto.baht_per_point) : undefined,
       minRedeem: dto.min_redeem != null ? String(dto.min_redeem) : undefined,
       expiryDays: dto.expiry_days ?? undefined,
+      transferDayCap: dto.transfer_day_cap ?? undefined,
       updatedAt: new Date(),
     }).onConflictDoUpdate({ target: loyaltyConfig.id, set });
     return this.getConfig();

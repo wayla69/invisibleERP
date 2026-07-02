@@ -1,6 +1,6 @@
 # 27 — Loyalty World-Class: Tier Economics, Coalition Network & the CX Loop — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v1.0 — **PLANNING** · **Owner:** ERP / Product (CMO + SVP-IT review)
+> **Date:** 2026-07-02 · **Status:** v1.1 — **W1 SHIPPED**, W2/W3 pending · **Owner:** ERP / Product (CMO + SVP-IT review)
 > **Scope:** The push from "BuzzeBees-parity" (docs/24–26, DELIVERED) to **above** the BuzzeBees/Hato bar —
 > by shipping the three things a survey of that class shows we still lack, and by weaponising the one thing
 > they cannot copy: **our GL**. **W1 tier economics + points liquidity** (per-tier earn multipliers, P2P
@@ -123,4 +123,5 @@ marketplace coupon exchange, blockchain points. Multi-armed bandits / trained mo
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.1 | 2026-07-02 | Platform | **W1 SHIPPED.** Tier `earn_mult` now applies on the REAL earn path (`earnInTx`; the column already existed — no schema change; ledger notes audit `tier Gold ×2`); P2P transfer (`POST /api/member/points/transfer` + staff route; atomic ascending-id-locked two-row move; `loyalty_config.transfer_day_cap`, migration `0218`; control **LYL-18** → RCM **171**); expiry look-ahead `loyalty.points_expiring` (idempotent per member × expire-by via `loyalty_expiry_notices`, migration `0218`). Transfer rows integrated into the expiry model (inbound ages from its own date, outbound consumes). Harness: `loyalty` +14 → 30/30, `compliance` +1 → 116/116; narrative 19 rev 1.33, manual 13 rev 1.29, UAT 52→54. |
 | 1.0 | 2026-07-02 | Platform | Initial above-BuzzeBees plan: W1 tier economics + P2P transfer + expiry nudges (LYL-18), W2 coalition earn/burn with intercompany GL settlement (LYL-19 — the differentiator no loyalty SaaS can match), W3 NPS closed loop + quiet-hours/global-cap messaging governance. |

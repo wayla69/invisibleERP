@@ -734,6 +734,30 @@ async function main() {
       && (rcReject.status === 200 || rcReject.status === 201) && rcReject.json.status === 'Rejected' && rcMeAfterReject.json.balance === 300,
     `submit=${rcSubmit.status}/${rcSubmit.json.status} self=${rcSelfApprove.status} approve=${rcApprove.status}/${rcApprove.json.points_granted} bal=${rcMeAfter.json.balance} re-approve=${rcReapprove.status}/${rcReapprove.json.error?.code} dup=${rcDup.status}/${rcDup.json.error?.code} reject=${rcReject.status}/${rcReject.json.status} balAfterReject=${rcMeAfterReject.json.balance}`);
 
+  // ════════ LYL-18 — P2P point transfer: atomic two-row move, day-capped, net-zero on the 2250 liability ════════
+  const [p2pA] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-P2PA', name: 'ผู้ส่ง', phone: '0890000041', balance: '500', lifetime: '500', active: true }).returning({ id: s.posMembers.id });
+  const [p2pB] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-P2PB', name: 'ผู้รับ', phone: '0890000042', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  const liaBefore18 = (await inj('GET', '/api/loyalty/liability', execu)).json;
+  const p2pStaff = await inj('POST', `/api/loyalty/members/${Number(p2pA.id)}/transfer`, execu, { to_member_id: Number(p2pB.id), points: 200 });
+  const p2pRows = await db.select().from(s.posMemberLedger).where(eq(s.posMemberLedger.refDoc, `P2P-${Number(p2pA.id)}-${Number(p2pB.id)}`));
+  const p2pNet = p2pRows.reduce((a: number, r: any) => a + Number(r.points), 0);
+  const liaAfter18 = (await inj('GET', '/api/loyalty/liability', execu)).json;
+  const p2pSelfDenied = await inj('POST', `/api/loyalty/members/${Number(p2pA.id)}/transfer`, memberTok, { to_member_id: Number(p2pB.id), points: 10 }); // member token lacks crm_points_adjust/loyalty/exec → 403
+  const p2pSelf = await inj('POST', '/api/member/points/transfer', memberTok, { to_phone: '0890000041', points: 50 });   // member self-service moves THEIR OWN points
+  const p2pSelfSelf = await inj('POST', `/api/loyalty/members/${Number(p2pA.id)}/transfer`, execu, { to_member_id: Number(p2pA.id), points: 10 });
+  await inj('PUT', '/api/loyalty/config', admin, { transfer_day_cap: 210 });
+  const p2pCap = await inj('POST', `/api/loyalty/members/${Number(p2pA.id)}/transfer`, execu, { to_member_id: Number(p2pB.id), points: 20 }); // 200 already sent today → over the 210 cap
+  await inj('PUT', '/api/loyalty/config', admin, { transfer_day_cap: 1000 });
+  ok('LYL-18: P2P transfer — atomic two-row ledger move (net 0), staff-gated endpoint (member token 403), member self-scope path works, self-transfer rejected, day cap enforced, 2250 liability constant',
+    (p2pStaff.status === 200 || p2pStaff.status === 201) && near(p2pStaff.json.from_balance, 300) && near(p2pStaff.json.to_balance, 200)
+      && p2pRows.length === 2 && near(p2pNet, 0)
+      && near(liaAfter18.outstanding_points, Number(liaBefore18.outstanding_points)) && near(liaAfter18.movements?.transfer_net_points ?? 0, 0)
+      && p2pSelfDenied.status === 403
+      && (p2pSelf.status === 200 || p2pSelf.status === 201)
+      && p2pSelfSelf.status === 400 && p2pSelfSelf.json.error?.code === 'SELF_TRANSFER'
+      && p2pCap.status === 409 && p2pCap.json.error?.code === 'TRANSFER_CAP',
+    `staff=${p2pStaff.status} ${p2pStaff.json.from_balance}/${p2pStaff.json.to_balance} rows=${p2pRows.length} net=${p2pNet} lia ${liaBefore18.outstanding_points}→${liaAfter18.outstanding_points} denied=${p2pSelfDenied.status} self=${p2pSelf.status} selfself=${p2pSelfSelf.status}/${p2pSelfSelf.json.error?.code} cap=${p2pCap.status}/${p2pCap.json.error?.code}`);
+
   // ════════ MKT-12 — Lifecycle journeys: consent-gated, frequency-capped, at-most-once per step ════════
   // An opted-out member enrols but the step send is SKIPPED (audited in message_log); a re-run fires
   // nothing (the enrollment-step was claimed before delivery — claim-first, mirrors MKT-10).
@@ -902,7 +926,7 @@ async function main() {
     exOvr.json.override === true && exOvr.json.override_by !== 'admin' && (exPayOk.status === 200 || exPayOk.status === 201) && exPayOk.json.status === 'PendingApproval',
     JSON.stringify({ ovr: exOvr.json.override, by: exOvr.json.override_by, pay: exPayOk.json.status }));
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
+  console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..18) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} compliance checks failed` : `\n✅ All ${checks.length} compliance control checks passed`);

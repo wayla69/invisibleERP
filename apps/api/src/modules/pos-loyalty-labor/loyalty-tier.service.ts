@@ -62,6 +62,8 @@ export class LoyaltyTierService {
       if (e.txnType === 'Earn') { if (new Date(e.txnDate) >= cutoff) earnedRecent += pts; }
       else if (e.txnType === 'Redeem') redeemed += Math.abs(pts);
       else if (e.txnType === 'Adjust') adjusted += pts; // manual adjustments don't age — never shown as expired
+      // W1 P2P transfers: inbound ages from its own date (like an earn); outbound consumes like a redeem.
+      else if (e.txnType === 'Transfer') { if (pts > 0) { if (new Date(e.txnDate) >= cutoff) earnedRecent += pts; } else redeemed += Math.abs(pts); }
     }
     const redeemableBal = Math.max(0, round0(earnedRecent + adjusted - redeemed));
     return { member_id: memberId, balance: round0(balance), redeemable: redeemableBal, expired: Math.max(0, round0(balance - redeemableBal)), expiry_days: expiryDays };

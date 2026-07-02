@@ -1,10 +1,12 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc, or, sql, ilike, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { posMembers, posMemberLedger, loyaltyConfig, memberConsents, customerProfiles, loyaltyPostingRuns, loyaltyTiers, loyaltyTierHistory } from '../../database/schema';
+import { posMembers, posMemberLedger, loyaltyConfig, memberConsents, customerProfiles, loyaltyPostingRuns, loyaltyTiers, loyaltyTierHistory, loyaltyExpiryNotices } from '../../database/schema';
 import { n } from '../../database/queries';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
+import { WebhookService } from '../platform/webhook.service';
+import { AutomationService } from '../automation/automation.service';
 import type { JwtUser } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
 import { verifyLineIdToken } from './line-auth';
@@ -19,6 +21,10 @@ export class MemberService {
     // Optional so partial harnesses that don't wire BiLiveModule still construct. Real-time ticks are a
     // best-effort advisory signal (in-memory bus) — never a control; a rollback after publish is tolerable.
     @Optional() private readonly live?: BiLiveService,
+    // W1 (docs/27): the maintenance sweep fires loyalty.points_expiring into the webhook fan-out + the
+    // no-code automation engine. Optional for the same partial-harness reason; the event is best-effort.
+    @Optional() private readonly webhooks?: WebhookService,
+    @Optional() private readonly automation?: AutomationService,
   ) {}
 
   // Emit a live points-movement tick to the BiLive SSE bus (best-effort; the bus is optional + in-memory).
@@ -29,7 +35,7 @@ export class MemberService {
   async config() {
     const db = this.db as any;
     const [c] = await db.select().from(loyaltyConfig).where(eq(loyaltyConfig.id, 1)).limit(1);
-    return { enabled: !!c?.enabled, pointsPerBaht: n(c?.pointsPerBaht), bahtPerPoint: n(c?.bahtPerPoint), minRedeem: n(c?.minRedeem) };
+    return { enabled: !!c?.enabled, pointsPerBaht: n(c?.pointsPerBaht), bahtPerPoint: n(c?.bahtPerPoint), minRedeem: n(c?.minRedeem), transferDayCap: c?.transferDayCap != null ? Number(c.transferDayCap) : 1000 };
   }
   private tid(user: JwtUser): number {
     if (user.tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'No tenant context', messageTh: 'ไม่พบบริบทร้านค้า' });
@@ -146,21 +152,86 @@ export class MemberService {
     return { member_id: id, balance: n(m.balance), history: rows.map((r: any) => ({ txn_date: r.txnDate, txn_type: r.txnType, points: n(r.points), redeem_value: n(r.redeemValue), balance_after: n(r.balanceAfter), ref_doc: r.refDoc })) };
   }
 
-  // EARN — inside the checkout tx. points = floor(netSpend × pointsPerBaht). Returns pointsEarned.
+  // EARN — inside the checkout tx. points = floor(netSpend × pointsPerBaht × tier earn_mult). Returns
+  // pointsEarned. W1 (docs/27): the member's tier multiplier (loyalty_tiers.earn_mult, ladder by lifetime —
+  // the same tierFor rule recomputeTiers uses) now applies on the REAL earn path, not just quoteEarn's
+  // preview. GL stays honest for free: the 2250 liability accrual derives from the points ledger, so a 2×
+  // earn simply accrues 2× liability — no accrual-logic change.
   async earnInTx(tx: any, tenantId: number, memberId: number, netSpend: number, saleNo: string, createdBy: string): Promise<number> {
     const cfg = await this.config();
     if (!cfg.enabled || !memberId) return 0;
-    const pts = Math.floor(netSpend * cfg.pointsPerBaht);
-    if (pts <= 0) return 0;
     // FOR UPDATE: this is a read-modify-write of an absolute balance. Without the lock, two concurrent
     // sales for the same member both read the same starting balance and the last writer wins → one earn is
     // lost (silent points/value loss). Mirrors redeemInTx's lock so earn+redeem serialize on the member row.
+    // Locked BEFORE the multiplier lookup so the tier is derived from the locked lifetime.
     const [m] = await tx.select().from(posMembers).where(eq(posMembers.id, memberId)).for('update').limit(1);
+    if (!m) return 0;
+    const tiers = await tx.select().from(loyaltyTiers).where(and(eq(loyaltyTiers.tenantId, tenantId), eq(loyaltyTiers.active, true))).orderBy(desc(loyaltyTiers.minLifetime));
+    const tier = tiers.find((t: any) => n(m.lifetime) >= n(t.minLifetime));
+    const mult = tier ? n(tier.earnMult) || 1 : 1;
+    const pts = Math.floor(netSpend * cfg.pointsPerBaht * mult);
+    if (pts <= 0) return 0;
     const bal = n(m?.balance) + pts; const life = n(m?.lifetime) + pts;
     await tx.update(posMembers).set({ balance: String(bal), lifetime: String(life), lastUpdated: new Date() }).where(eq(posMembers.id, memberId));
-    await tx.insert(posMemberLedger).values({ tenantId, memberId, txnType: 'Earn', points: String(pts), balanceAfter: String(bal), refDoc: saleNo, createdBy });
+    await tx.insert(posMemberLedger).values({ tenantId, memberId, txnType: 'Earn', points: String(pts), balanceAfter: String(bal), refDoc: saleNo, notes: mult !== 1 && tier ? `tier ${tier.tier} ×${mult}` : null, createdBy });
     this.tick(tenantId, 'earn', memberId, pts, bal, saleNo);
     return pts;
+  }
+
+  // ── W1 (docs/27) — P2P point transfer (LYL-18) ────────────────────────────
+  // Move points between two members of the SAME tenant as an atomic two-row ledger move: 'Transfer' −pts on
+  // the sender / +pts on the recipient in ONE transaction. Net points outstanding is unchanged, so the 2250
+  // liability is untouched by construction (the obligation just changes owner) — no GL posting; the ledger
+  // rows ARE the audit. Guards: feature-off when transfer_day_cap = 0; integer points > 0; recipient must
+  // exist, be active, differ from the sender, and share the tenant; sender balance must cover the points;
+  // the sender's outgoing transfers per Bangkok day are capped at transfer_day_cap (re-checked INSIDE the tx
+  // after the locks so concurrent transfers cannot overshoot). Locks are taken in ascending member-id order
+  // (the referral-deadlock lesson) so two opposite-direction transfers can never deadlock.
+  async transferPoints(user: JwtUser, fromMemberId: number, dto: { to_member_id?: number; to_phone?: string; points: number; note?: string }, source: 'self' | 'staff') {
+    const db = this.db as any; const tenantId = this.tid(user);
+    const cfg = await this.config();
+    if (!cfg.enabled) throw new ConflictException({ code: 'LOYALTY_DISABLED', message: 'Loyalty program disabled', messageTh: 'ระบบสะสมแต้มปิดอยู่' });
+    if (cfg.transferDayCap <= 0) throw new ConflictException({ code: 'TRANSFER_DISABLED', message: 'Point transfers are disabled (transfer_day_cap = 0)', messageTh: 'ปิดการโอนแต้ม' });
+    const points = Number(dto.points);
+    if (!Number.isInteger(points) || points <= 0) throw new BadRequestException({ code: 'BAD_POINTS', message: 'points must be a positive integer', messageTh: 'แต้มต้องเป็นจำนวนเต็มบวก' });
+    // Resolve the recipient within the caller's tenant (id or phone).
+    const conds: any[] = [eq(posMembers.tenantId, tenantId)];
+    if (dto.to_member_id != null) conds.push(eq(posMembers.id, Number(dto.to_member_id)));
+    else if (dto.to_phone) conds.push(eq(posMembers.phone, dto.to_phone));
+    else throw new BadRequestException({ code: 'BAD_RECIPIENT', message: 'to_member_id or to_phone required', messageTh: 'ต้องระบุสมาชิกผู้รับ' });
+    const [rcpt] = await db.select().from(posMembers).where(and(...conds)).limit(1);
+    if (!rcpt || rcpt.active === false) throw new NotFoundException({ code: 'RECIPIENT_NOT_FOUND', message: 'Recipient member not found/inactive', messageTh: 'ไม่พบสมาชิกผู้รับ' });
+    const toId = Number(rcpt.id);
+    if (toId === Number(fromMemberId)) throw new BadRequestException({ code: 'SELF_TRANSFER', message: 'Cannot transfer points to yourself', messageTh: 'โอนแต้มให้ตัวเองไม่ได้' });
+    const refDoc = `P2P-${fromMemberId}-${toId}`;
+    const res = await db.transaction(async (tx: any) => {
+      // Ascending-id lock order — deterministic across both directions, so A→B and B→A never deadlock.
+      const [loId, hiId] = fromMemberId < toId ? [fromMemberId, toId] : [toId, fromMemberId];
+      const [lo] = await tx.select().from(posMembers).where(eq(posMembers.id, loId)).for('update').limit(1);
+      const [hi] = await tx.select().from(posMembers).where(eq(posMembers.id, hiId)).for('update').limit(1);
+      const sender = Number(lo?.id) === Number(fromMemberId) ? lo : hi;
+      const receiver = sender === lo ? hi : lo;
+      if (!sender || Number(sender.tenantId) !== tenantId) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Sender not found', messageTh: 'ไม่พบสมาชิกผู้ส่ง' });
+      if (!receiver || receiver.active === false) throw new NotFoundException({ code: 'RECIPIENT_NOT_FOUND', message: 'Recipient member not found/inactive', messageTh: 'ไม่พบสมาชิกผู้รับ' });
+      if (n(sender.balance) < points) throw new ConflictException({ code: 'INSUFFICIENT_POINTS', message: `Balance ${n(sender.balance)} < ${points}`, messageTh: `แต้มไม่พอ (มี ${n(sender.balance)})` });
+      // Per-day outgoing cap — Bangkok business day, computed UNDER the sender lock (race-safe).
+      const bkkDayStartUtc = new Date(Math.floor((Date.now() + 7 * 3600_000) / 86_400_000) * 86_400_000 - 7 * 3600_000);
+      const [sent] = await tx.select({ pts: sql`coalesce(sum(-${posMemberLedger.points}), 0)` }).from(posMemberLedger)
+        .where(and(eq(posMemberLedger.memberId, fromMemberId), eq(posMemberLedger.txnType, 'Transfer'), sql`${posMemberLedger.points} < 0`, sql`${posMemberLedger.txnDate} >= ${bkkDayStartUtc}`));
+      if (n(sent?.pts) + points > cfg.transferDayCap) throw new ConflictException({ code: 'TRANSFER_CAP', message: `Daily transfer cap ${cfg.transferDayCap} exceeded (${n(sent?.pts)} already sent today)`, messageTh: `เกินเพดานโอนแต้มต่อวัน (${cfg.transferDayCap})` });
+      const fromBal = n(sender.balance) - points;
+      const toBal = n(receiver.balance) + points;
+      const now = new Date();
+      await tx.update(posMembers).set({ balance: String(fromBal), lastUpdated: now }).where(eq(posMembers.id, fromMemberId));
+      await tx.update(posMembers).set({ balance: String(toBal), lastUpdated: now }).where(eq(posMembers.id, toId));
+      // NB: lifetime is untouched on both sides — a transfer is not an earn; tiers don't move.
+      await tx.insert(posMemberLedger).values([
+        { tenantId, memberId: fromMemberId, txnType: 'Transfer', points: String(-points), balanceAfter: String(fromBal), refDoc, notes: dto.note ? String(dto.note).slice(0, 200) : `to M-${toId}`, createdBy: source === 'self' ? `member:${fromMemberId}` : user.username },
+        { tenantId, memberId: toId, txnType: 'Transfer', points: String(points), balanceAfter: String(toBal), refDoc, notes: `from M-${fromMemberId}`, createdBy: source === 'self' ? `member:${fromMemberId}` : user.username },
+      ]);
+      return { fromBal, toBal };
+    });
+    return { from_member_id: Number(fromMemberId), to_member_id: toId, points, from_balance: res.fromBal, to_balance: res.toBal, ref_doc: refDoc };
   }
 
   // REDEEM quote (validation) — returns the baht value buildSale uses as an order discount.
@@ -263,6 +334,7 @@ export class MemberService {
         redeemed_value: round2(mv['Redeem']?.value ?? 0),
         adjusted_points: mv['Adjust']?.points ?? 0,
         expired_points: Math.abs(mv['Expire']?.points ?? 0),
+        transfer_net_points: mv['Transfer']?.points ?? 0, // LYL-18 invariant: P2P rows always net to 0
       },
     };
   }
@@ -307,6 +379,9 @@ export class MemberService {
           if (e.txnType === 'Earn') { if (new Date(e.txnDate).getTime() >= cutoffMs) earnedRecent += pts; }
           else if (e.txnType === 'Redeem') redeemed += Math.abs(pts);
           else if (e.txnType === 'Adjust') adjusted += pts; // manual adjustments don't age — never auto-expired
+          // W1 P2P transfers: an inbound transfer ages from ITS OWN date (like an earn — otherwise a fresh
+          // gift would expire instantly, redeemable=0); an outbound one consumes like a redeem.
+          else if (e.txnType === 'Transfer') { if (pts > 0) { if (new Date(e.txnDate).getTime() >= cutoffMs) earnedRecent += pts; } else redeemed += Math.abs(pts); }
         }
         const redeemableBal = Math.max(0, earnedRecent + adjusted - redeemed);
         const toExpire = Math.max(0, Math.round(bal - redeemableBal));
@@ -334,21 +409,73 @@ export class MemberService {
       tenantIds = rows.map((r: any) => Number(r.tid)).filter((x: number) => x > 0);
     }
     const results: any[] = [];
-    let totalExpired = 0, accrualsPosted = 0, totalTierChanges = 0;
+    let totalExpired = 0, accrualsPosted = 0, totalTierChanges = 0, totalExpiryNotices = 0;
     for (const tenantId of tenantIds) {
       try {
         const expired: any = await this.expireForTenant(tenantId, 'system:sweep');
         const accrual: any = await this.ledger.accrueLiability({ tenantId, createdBy: 'system:sweep' });
         const tiers: any = await this.recomputeTiersForTenant(tenantId, 'system:sweep');
+        const notices: any = await this.notifyExpiring(tenantId, user);
         totalExpired += Number(expired.expired_points ?? 0);
         if (accrual.posted) accrualsPosted++;
         totalTierChanges += Number(tiers.changed ?? 0);
-        results.push({ tenant_id: tenantId, expired_points: expired.expired_points ?? 0, expired_members: expired.expired_members ?? 0, accrual: { posted: accrual.posted, liability_delta: accrual.liability_delta, posted_liability: accrual.posted_liability }, tier_changes: tiers.changed ?? 0 });
+        totalExpiryNotices += Number(notices.fired ?? 0);
+        results.push({ tenant_id: tenantId, expired_points: expired.expired_points ?? 0, expired_members: expired.expired_members ?? 0, accrual: { posted: accrual.posted, liability_delta: accrual.liability_delta, posted_liability: accrual.posted_liability }, tier_changes: tiers.changed ?? 0, expiry_notices: notices.fired ?? 0 });
       } catch (e: any) {
         results.push({ tenant_id: tenantId, error: String(e?.message ?? e) });
       }
     }
-    return { tenants_processed: tenantIds.length, total_expired_points: totalExpired, accruals_posted: accrualsPosted, tier_changes: totalTierChanges, results };
+    return { tenants_processed: tenantIds.length, total_expired_points: totalExpired, accruals_posted: accrualsPosted, tier_changes: totalTierChanges, expiry_notices: totalExpiryNotices, results };
+  }
+
+  // ── W1 (docs/27) — points-expiry look-ahead ────────────────────────────────
+  // Members whose points will expire within `lookAheadDays` (default 30) fire ONE `loyalty.points_expiring`
+  // event per member × expire-by date into the webhook fan-out + the automation catalog — a marketer wires
+  // it to a journey/message ("แต้มจะหมดอายุใน 30 วัน") with the usual consent path. Idempotency rides the
+  // loyalty_expiry_notices unique index (member_id, expire_by): a daily sweep re-fires only when a NEW batch
+  // approaches its expiry date, never re-nagging about the same one. The math mirrors expireForTenant with
+  // the cutoff shifted forward: what would expire if today were `lookAheadDays` from now, minus what is
+  // already expirable today (that part belongs to expireForTenant, not a warning).
+  async notifyExpiring(tenantId: number, user: JwtUser, lookAheadDays = 30) {
+    const db = this.db as any;
+    const [c] = await db.select().from(loyaltyConfig).limit(1);
+    const expiryDays = Number(c?.expiryDays ?? 365);
+    if (!expiryDays || expiryDays <= 0) return { tenant_id: tenantId, fired: 0, note: 'expiry disabled' };
+    const nowMs = Date.now();
+    const cutoffNowMs = nowMs - expiryDays * 86400000;                       // earns older than this are already expired
+    const cutoffFutureMs = cutoffNowMs + lookAheadDays * 86400000;           // ...and these will be, within the look-ahead
+    const ids = await db.select({ id: posMembers.id, balance: posMembers.balance }).from(posMembers).where(and(eq(posMembers.tenantId, tenantId), sql`${posMembers.balance} > 0`));
+    let fired = 0;
+    for (const row of ids) {
+      const bal = n(row.balance);
+      const ledger = await db.select().from(posMemberLedger).where(eq(posMemberLedger.memberId, row.id));
+      let aliveNow = 0, aliveFuture = 0, redeemed = 0, adjusted = 0; let oldestExpiringMs: number | null = null;
+      for (const e of ledger) {
+        const pts = n(e.points);
+        const tms = new Date(e.txnDate).getTime();
+        const agedEarn = e.txnType === 'Earn' || (e.txnType === 'Transfer' && pts > 0);
+        if (agedEarn) {
+          if (tms >= cutoffNowMs) aliveNow += pts;
+          if (tms >= cutoffFutureMs) aliveFuture += pts;
+          else if (tms >= cutoffNowMs && (oldestExpiringMs == null || tms < oldestExpiringMs)) oldestExpiringMs = tms;
+        } else if (e.txnType === 'Redeem' || (e.txnType === 'Transfer' && pts < 0)) redeemed += Math.abs(pts);
+        else if (e.txnType === 'Adjust') adjusted += pts;
+      }
+      const redeemableNow = Math.max(0, aliveNow + adjusted - redeemed);
+      const redeemableFuture = Math.max(0, aliveFuture + adjusted - redeemed);
+      const expiring = Math.round(Math.min(redeemableNow, bal) - Math.min(redeemableFuture, bal));
+      if (expiring <= 0 || oldestExpiringMs == null) continue;
+      // expire_by = the day the oldest at-risk earn crosses expiry_days (Bangkok business day)
+      const expireBy = new Date(oldestExpiringMs + expiryDays * 86400000 + 7 * 3600_000).toISOString().slice(0, 10);
+      const ins = await db.insert(loyaltyExpiryNotices).values({ tenantId, memberId: row.id, expireBy, expiringPoints: String(expiring) }).onConflictDoNothing().returning({ id: loyaltyExpiryNotices.id });
+      if (!ins.length) continue; // already notified about this batch
+      fired++;
+      const daysLeft = Math.max(0, Math.ceil((oldestExpiringMs + expiryDays * 86400000 - nowMs) / 86400000));
+      const payload = { member_id: Number(row.id), expiring_points: expiring, days_left: daysLeft, expire_by: expireBy };
+      try { await this.webhooks?.deliver('loyalty.points_expiring', payload, tenantId); } catch { /* best-effort */ }
+      try { await this.automation?.runEvent('loyalty.points_expiring', payload, user); } catch { /* best-effort */ }
+    }
+    return { tenant_id: tenantId, look_ahead_days: lookAheadDays, fired };
   }
 
   // ── Tier auto-recompute (CRM Phase 3) ───────────────────────────────────────

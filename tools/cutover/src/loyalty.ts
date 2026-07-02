@@ -147,6 +147,63 @@ async function main() {
   ok('Disabled program: redeem checkout → 409 LOYALTY_DISABLED', c13.status === 409 && c13.json.error?.code === 'LOYALTY_DISABLED', `${c13.status} ${c13.json.error?.code}`);
   await inj('PUT', '/api/loyalty/config', admin, { enabled: true });
 
+  // ════════ W1 (docs/27) — tier earn multiplier · P2P transfer (LYL-18) · expiry look-ahead ════════
+  // T1 staff principal with the 'loyalty' duty (the Customer role carries it) for tenant-scoped calls.
+  await db.insert(s.users).values([{ username: 'loystaff', passwordHash: await pw.hash('pw'), role: 'Customer', tenantId: t1 }]).onConflictDoNothing();
+  const loystaff = await login('loystaff', 'pw');
+
+  // ── 15. tier ladder: Gold ×2 applies on the REAL earn path (m1 lifetime 390 ≥ 250 ⇒ Gold) ──
+  await inj('POST', '/api/loyalty/tiers', loystaff, { tier: 'Standard', min_lifetime: 0, earn_mult: 1 });
+  await inj('POST', '/api/loyalty/tiers', loystaff, { tier: 'Gold', min_lifetime: 250, earn_mult: 2 });
+  const o15 = await makeOrder(one(100));
+  await checkout(o15.order_no, { member_id: m1 });
+  const bal15 = await inj('GET', `/api/loyalty/members/${m1}`, sales1);
+  ok('W1 tier earn: Gold ×2 → ฿100 net earns 200 pts (bal 290→490)', near(bal15.json.balance, 490), `bal=${bal15.json.balance}`);
+  const led15 = (await pg.query(`SELECT notes FROM pos_member_ledger WHERE member_id=${m1} AND txn_type='Earn' ORDER BY id DESC LIMIT 1`)).rows as any[];
+  ok('W1 tier earn: ledger row audits the multiplier (tier Gold ×2)', String(led15[0]?.notes ?? '').includes('Gold'), JSON.stringify(led15));
+
+  // ── 16. P2P transfer (LYL-18): atomic two-row move, liability net-zero, guards ──
+  const liaBefore = (await inj('GET', '/api/loyalty/liability', loystaff)).json;
+  const tr = await inj('POST', `/api/loyalty/members/${m2}/transfer`, loystaff, { to_member_id: m1, points: 100, note: 'ให้เพื่อน' });
+  ok('W1 P2P: staff transfer 100 m2→m1 → balances 1400/590', tr.status === 201 || tr.status === 200 ? near(tr.json.from_balance, 1400) && near(tr.json.to_balance, 590) : false, `${tr.status} ${JSON.stringify(tr.json).slice(0, 90)}`);
+  const trLed = (await pg.query(`SELECT member_id, points FROM pos_member_ledger WHERE txn_type='Transfer' AND ref_doc='P2P-${m2}-${m1}'`)).rows as any[];
+  ok('W1 P2P: exactly two Transfer ledger rows netting to zero', trLed.length === 2 && near(trLed.reduce((a, r) => a + Number(r.points), 0), 0), JSON.stringify(trLed));
+  const liaAfter = (await inj('GET', '/api/loyalty/liability', loystaff)).json;
+  ok('W1 P2P: 2250 liability unchanged (outstanding constant; transfer_net_points 0)',
+    near(liaAfter.outstanding_points, Number(liaBefore.outstanding_points)) && near(liaAfter.movements?.transfer_net_points, 0),
+    `out ${liaBefore.outstanding_points}→${liaAfter.outstanding_points} net=${liaAfter.movements?.transfer_net_points}`);
+  const trSelf = await inj('POST', `/api/loyalty/members/${m2}/transfer`, loystaff, { to_member_id: m2, points: 10 });
+  ok('W1 P2P: self-transfer → 400 SELF_TRANSFER', trSelf.status === 400 && trSelf.json.error?.code === 'SELF_TRANSFER', `${trSelf.status} ${trSelf.json.error?.code}`);
+  const trOver = await inj('POST', `/api/loyalty/members/${m1}/transfer`, loystaff, { to_member_id: m2, points: 99999 });
+  ok('W1 P2P: over-balance transfer → 409 INSUFFICIENT_POINTS', trOver.status === 409 && trOver.json.error?.code === 'INSUFFICIENT_POINTS', `${trOver.status} ${trOver.json.error?.code}`);
+  await inj('PUT', '/api/loyalty/config', admin, { transfer_day_cap: 150 });
+  const trCap = await inj('POST', `/api/loyalty/members/${m2}/transfer`, loystaff, { to_member_id: m1, points: 100 });
+  ok('W1 P2P: daily cap 150 with 100 already sent today → 409 TRANSFER_CAP', trCap.status === 409 && trCap.json.error?.code === 'TRANSFER_CAP', `${trCap.status} ${trCap.json.error?.code}`);
+  await inj('PUT', '/api/loyalty/config', admin, { transfer_day_cap: 0 });
+  const trOff = await inj('POST', `/api/loyalty/members/${m2}/transfer`, loystaff, { to_member_id: m1, points: 1 });
+  ok('W1 P2P: transfer_day_cap 0 disables the feature → 409 TRANSFER_DISABLED', trOff.status === 409 && trOff.json.error?.code === 'TRANSFER_DISABLED', `${trOff.status} ${trOff.json.error?.code}`);
+  await inj('PUT', '/api/loyalty/config', admin, { transfer_day_cap: 1000 });
+  const en3 = await inj('POST', '/api/loyalty/members', sales2, { name: 'ต่างร้าน', phone: '0890000009' });
+  const trX = await inj('POST', `/api/loyalty/members/${m2}/transfer`, loystaff, { to_member_id: Number(en3.json.id), points: 10 });
+  ok('W1 P2P: recipient in another tenant → 404 RECIPIENT_NOT_FOUND (no cross-shop leak)', trX.status === 404 && trX.json.error?.code === 'RECIPIENT_NOT_FOUND', `${trX.status} ${trX.json.error?.code}`);
+
+  // ── 17. expiry look-ahead: loyalty.points_expiring fires once per member × expire-by batch ──
+  await inj('PUT', '/api/loyalty/config', admin, { expiry_days: 60 });
+  await inj('POST', '/api/automation/rules', admin, { name: 'เตือนแต้มใกล้หมดอายุ', event_type: 'loyalty.points_expiring', action: { type: 'notification', message: 'แต้มของคุณใกล้หมดอายุ' } });
+  const [expm] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-EXPIRE1', name: 'ใกล้หมดอายุ', phone: '0810000099', balance: '500', lifetime: '500', createdBy: 'seed' }).returning();
+  const fortyDaysAgo = new Date(Date.now() - 40 * 86400000);
+  await db.insert(s.posMemberLedger).values({ tenantId: t1, memberId: expm.id, txnDate: fortyDaysAgo, txnType: 'Earn', points: '500', balanceAfter: '500', refDoc: 'SEED-EXP', createdBy: 'seed' });
+  const mt1 = await inj('POST', '/api/loyalty/maintenance/run', admin, { tenant_id: t1 });
+  const t1res = (mt1.json.results ?? []).find((r: any) => Number(r.tenant_id) === t1);
+  ok('W1 expiring: sweep look-ahead fires the notice (points expiring in ~20d < 30d window)', mt1.status === 201 || mt1.status === 200 ? Number(t1res?.expiry_notices ?? 0) >= 1 : false, JSON.stringify(t1res));
+  const notice = (await pg.query(`SELECT member_id, expiring_points, expire_by FROM loyalty_expiry_notices WHERE member_id=${expm.id}`)).rows as any[];
+  ok('W1 expiring: notice row records 500 pts + expire-by date', notice.length === 1 && near(notice[0].expiring_points, 500) && !!notice[0].expire_by, JSON.stringify(notice));
+  const exec1 = (await pg.query(`SELECT status FROM automation_executions WHERE event_type='loyalty.points_expiring' AND status='executed'`)).rows as any[];
+  ok('W1 expiring: automation rule executed (notification action) off the event', exec1.length >= 1, `executed=${exec1.length}`);
+  const mt2 = await inj('POST', '/api/loyalty/maintenance/run', admin, { tenant_id: t1 });
+  const t1res2 = (mt2.json.results ?? []).find((r: any) => Number(r.tenant_id) === t1);
+  ok('W1 expiring: second sweep is idempotent for the same batch (no re-nag)', Number(t1res2?.expiry_notices ?? -1) === 0, JSON.stringify(t1res2));
+
   // ── 14. trial balance balanced overall ──
   const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
   ok('Trial balance balanced at end', near(Number(tb.totals?.debit ?? tb.total_debit), Number(tb.totals?.credit ?? tb.total_credit)), JSON.stringify(tb.totals ?? {}).slice(0, 80));
