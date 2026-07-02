@@ -75,6 +75,35 @@ export default function MemberApp() {
   );
 }
 
+// ── LINE LIFF wrapper (post-docs/29 follow-up) ───────────────────────────────
+// When /m opens INSIDE LINE (the LIFF in-app browser) and NEXT_PUBLIC_LIFF_ID is set, the member signs in
+// with one tap: the LIFF SDK — loaded from LINE's CDN only in that context, so the normal bundle is
+// untouched — hands us a verified id_token which /api/member/auth/line exchanges for the member session.
+// A LINE account not yet linked falls back to the normal OTP login and then links automatically, so every
+// later open is one-tap. The id_token comes from the SDK, NEVER from the URL (the CWE-598 lesson); the
+// shop code comes from the LIFF URL query (?shop=T1) or the last successful login on this device.
+// Unset NEXT_PUBLIC_LIFF_ID (or a normal browser) ⇒ exactly the old OTP flow.
+const LIFF_ID = process.env.NEXT_PUBLIC_LIFF_ID ?? '';
+const SHOP_KEY = 'm:last_shop';
+interface LiffLike {
+  init(cfg: { liffId: string }): Promise<void>;
+  isInClient(): boolean;
+  isLoggedIn(): boolean;
+  login(): void;
+  getIDToken(): string | null;
+}
+function loadLiff(): Promise<LiffLike | null> {
+  return new Promise((resolve) => {
+    const w = window as unknown as { liff?: LiffLike };
+    if (w.liff) return resolve(w.liff);
+    const s = document.createElement('script');
+    s.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
+    s.onload = () => resolve((window as unknown as { liff?: LiffLike }).liff ?? null);
+    s.onerror = () => resolve(null);
+    document.head.appendChild(s);
+  });
+}
+
 // ── Phone-OTP login ──────────────────────────────────────────────────────────
 function Login({ onAuthed }: { onAuthed: () => void }) {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
@@ -84,6 +113,37 @@ function Login({ onAuthed }: { onAuthed: () => void }) {
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // LIFF: 'trying' = attempting the one-tap login; a pending idToken means "link after the OTP succeeds".
+  const [liffTrying, setLiffTrying] = useState(false);
+  const [liffToken, setLiffToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!LIFF_ID) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const liff = await loadLiff();
+        if (!liff || cancelled) return;
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isInClient()) return; // normal browser → normal OTP flow, no redirects
+        if (!liff.isLoggedIn()) { liff.login(); return; } // in-app: establish the LINE session (redirects)
+        const idToken = liff.getIDToken();
+        if (!idToken || cancelled) return;
+        setLiffTrying(true);
+        const shopCode = (new URLSearchParams(window.location.search).get('shop') ?? localStorage.getItem(SHOP_KEY) ?? '').trim();
+        if (shopCode) {
+          try {
+            await mapi('/api/member/auth/line', { method: 'POST', body: JSON.stringify({ tenant_code: shopCode, id_token: idToken }) });
+            if (!cancelled) { localStorage.setItem(SHOP_KEY, shopCode); onAuthed(); }
+            return;
+          } catch { /* not linked yet (or wrong shop) → OTP once, then auto-link below */ }
+        }
+        if (!cancelled) { if (shopCode) setShop(shopCode); setLiffToken(idToken); setLiffTrying(false); }
+      } catch { if (!cancelled) setLiffTrying(false); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run the one-tap attempt once per mount
+  }, []);
 
   const request = async () => {
     setBusy(true); setErr('');
@@ -97,9 +157,21 @@ function Login({ onAuthed }: { onAuthed: () => void }) {
     try {
       // verify-otp sets the httpOnly auth cookie + CSRF cookie on success; nothing to store client-side.
       await mapi<{ token: string }>('/api/member/auth/verify-otp', { method: 'POST', body: JSON.stringify({ phone, tenant_code: shop, code }) });
+      // First OTP login from inside LINE: link the LINE account (best-effort) so the next open is one-tap.
+      if (liffToken) { try { await mapi('/api/member/link-line', { method: 'POST', body: JSON.stringify({ id_token: liffToken }) }); } catch { /* link next time */ } }
+      localStorage.setItem(SHOP_KEY, shop.trim());
       onAuthed();
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
+
+  if (liffTrying) {
+    return (
+      <div className="flex min-h-[80vh] flex-col items-center justify-center gap-3">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">กำลังเข้าสู่ระบบผ่าน LINE…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-[80vh] flex-col justify-center">
@@ -107,6 +179,7 @@ function Login({ onAuthed }: { onAuthed: () => void }) {
         <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground"><Sparkles className="size-7" /></div>
         <h1 className="text-xl font-bold">สมาชิก & แต้ม</h1>
         <p className="text-sm text-muted-foreground">เข้าสู่ระบบด้วยเบอร์โทรเพื่อดูแต้มและสิทธิพิเศษ</p>
+        {liffToken && <p className="mt-2 rounded-md bg-success/10 px-3 py-2 text-xs text-success">เข้าครั้งแรกผ่าน LINE — ยืนยัน OTP หนึ่งครั้งเพื่อผูกบัญชี แล้วครั้งหน้าเข้าได้แบบแตะเดียว</p>}
       </div>
       <Card>
         <CardContent className="space-y-3 pt-6">

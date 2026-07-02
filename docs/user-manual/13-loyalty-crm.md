@@ -219,6 +219,11 @@ consumer page, not the staff app; LINE LIFF is a future wrapper on the same logi
    **ขอรหัส OTP**. A 6-digit code is sent by SMS (valid **5 minutes**, single use). Enter it → **เข้าสู่ระบบ**.
    The login stays valid for 7 days on that device. The session is held in a secure browser cookie (the
    sign-in token is **not** readable by page scripts), so leave cookies enabled for `/m`.
+   **เปิดจาก LINE (LIFF):** ถ้าร้านตั้งค่า LIFF แล้ว (`NEXT_PUBLIC_LIFF_ID`) การเปิด `/m` จากใน LINE จะ
+   **เข้าสู่ระบบแบบแตะเดียว** — ครั้งแรกระบบให้ยืนยัน OTP หนึ่งครั้งเพื่อผูกบัญชี LINE กับสมาชิก
+   (ขึ้นข้อความสีเขียวบอก) หลังจากนั้นเปิดจาก LINE เมื่อไหร่ก็เข้าเลยไม่ต้องกรอกอะไร · ลิงก์ LIFF ควรพก
+   รหัสร้านมาด้วย (`?shop=T1`) ไม่งั้นระบบใช้ร้านล่าสุดที่เคยเข้าบนเครื่องนั้น · เปิดในเบราว์เซอร์ปกติ =
+   OTP ตามเดิม ไม่มีอะไรเปลี่ยน
 2. **What the member sees** — a digital **card** (name, code, tier, points balance) with a **tier-ladder
    strip** (current level, its **×earn multiplier**, and a progress bar to the next rung), an
    **expiring-points warning chip** ("แต้ม 500 จะหมดอายุใน 20 วัน — ใช้ก่อนหมดนะ!") when the daily sweep has
@@ -239,7 +244,8 @@ consumer page, not the staff app; LINE LIFF is a future wrapper on the same logi
    กดซ้ำได้ ไม่สร้างบัตรซ้ำ (หนึ่งใบต่อแพลตฟอร์ม) พนักงานดูสถานะบัตรของสมาชิกได้ที่หน้า Member 360.
    > **Ops note:** จนกว่าจะตั้งค่า certificate/service-account จริง (`WALLET_APPLE_*` / `WALLET_GOOGLE_*`
    > หรือ per-tenant ในตั้งค่า) ระบบใช้ **mock provider** — ลิงก์ติดตั้งเป็นลิงก์ทดสอบ ไม่มีอะไรออกนอกระบบ
-   > ตั้งค่า creds เมื่อไหร่ โค้ดเดิมออกบัตรจริงทันที (แบบเดียวกับ SMS/LINE ก่อนมี credentials).
+   > ตั้งค่า creds เมื่อไหร่ โค้ดเดิมออกบัตรจริงทันที (แบบเดียวกับ SMS/LINE ก่อนมี credentials) —
+> ขั้นตอนตั้งค่าจริงทีละสเต็ป: `docs/ops/wallet-pass-certs-runbook.md`.
 3. **Log out** — press **ออกจากระบบ** on the card. This ends the session on the server and clears the
    secure cookie, so the device can't be reused without logging in again.
 4. **Safety** — a member can only ever see and act on **their own** account; the app cannot reach any
@@ -503,6 +509,7 @@ claim points by uploading a photo of the receipt.
 | 1.26 | 2026-07-02 | Platform | §13 **Journey ทางแยก (branching)** — แต่ละขั้นตั้ง *ทางแยก* ได้: เลือกขั้นปลายทาง (ต้องเป็นขั้นถัด ๆ ไปเท่านั้น — ระบบบังคับ จึงวนลูปไม่ได้) + เงื่อนไขจาก catalog เดียวกับ segment builder เช่น *ถ้า recency ≤ 5 ข้ามไปขั้นขอบคุณ*; consent/frequency cap/ส่งครั้งเดียวต่อขั้น (MKT-12) เหมือนเดิมทุกประการ |
 | 1.27 | 2026-07-02 | Platform | §11 **อ่าน lift ให้เป็น (organic baseline)** — รายงานแคมเปญเพิ่มบล็อก *ยอดซื้อจริง* ต่อกลุ่ม A/B/holdout ในหน้าต่าง attribution (ตั้งได้ต่อแคมเปญ, ค่าเริ่มต้น 30 วัน): ยอดซื้อของกลุ่ม holdout คือฐาน "ถ้าไม่ส่งเลย" — lift = อัตราซื้อกลุ่มที่ถูกส่งข้อความ − holdout (pp) + รายได้ส่วนเพิ่มถ่วงขนาดกลุ่ม; ตัวเลขมาพร้อมขนาดกลุ่มเสมอ (holdout เล็ก = ฐานแกว่ง) |
 | 1.28 | 2026-07-02 | Platform | §13 **ส่งถูกเวลา (right-time sends)** — สมาชิกที่มีออเดอร์ ≥3 ครั้งจะได้ *ชั่วโมงที่ชอบซื้อ* (โหมดของฮิสโตแกรมเวลาออเดอร์, เวลาไทย); ขั้น journey ที่มีการรอจะเลื่อนไปส่ง **ตรงชั่วโมงนั้น** (เลื่อนไปข้างหน้าเท่านั้น <24 ชม.; ขั้นส่งทันทียังส่งทันที) — ตั้งชั่วโมง fallback ต่อ journey ได้ (ค่าเริ่มต้น 10:00) |
+| 1.37 | 2026-07-02 | Platform | **LIFF wrapper + wallet-certs runbook:** §9 gains the เปิดจาก LINE one-tap flow (`NEXT_PUBLIC_LIFF_ID`; OTP ครั้งแรกเพื่อผูกบัญชี แล้ว auto-link); the §9 wallet ops note now links `docs/ops/wallet-pass-certs-runbook.md` (Apple .p12/WWDR + Google Wallet SA setup, rotation, troubleshooting). |
 | 1.36 | 2026-07-02 | Platform | **V5 (docs/29) บัตรสมาชิกใน Apple/Google Wallet:** §9 gains the เพิ่มลงใน Wallet flow (`POST /api/member/wallet-pass`, idempotent ต่อ member×platform, แต้มบนบัตรอัปเดตอัตโนมัติ, payload เป็นข้อมูลขั้นต่ำตาม PDPA) + ops note ว่า mock จนกว่าจะตั้งค่า WALLET_* creds. |
 | 1.35 | 2026-07-02 | Platform | **V4 (docs/29) สมาชิก VIP แบบเสียเงิน:** new §7d — สร้างแผน/ขาย/รับรู้รายได้รายเดือน (TFRS 15: เงินเข้า 2410 ก่อน ตัดเป็นรายได้ 4300 ตามงวด, idempotent)/หมดอายุถอยระดับอัตโนมัติ; การ์ดขายบน `/loyalty`, บรรทัด 👑 บน `/m`. New error `MEMBERSHIP_ACTIVE`, `PLAN_EXISTS`/`PLAN_NOT_FOUND` (LYL-21). |
 | 1.34 | 2026-07-02 | Platform | **V3 (docs/29) อ่านผล A/B อย่างมั่นใจ:** รายงานแคมเปญ (§11) แสดง **verdict** ต่อการเปรียบเทียบ — `real` (ผลต่างจริง, ช่วงเชื่อมั่น 95% ไม่คร่อมศูนย์), `underpowered — grow the groups` (กลุ่มเล็กกว่า 30 ระบบไม่ตัดสินให้), `no detectable effect` (กลุ่มใหญ่พอแต่ไม่ต่างกัน — อย่าประกาศผู้ชนะ) พร้อม p-value และช่วงเชื่อมั่นเป็น percentage points · สูตรอ้างอิง `docs/ops/ab-significance.md`. |
