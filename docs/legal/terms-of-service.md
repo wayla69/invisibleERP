@@ -46,13 +46,13 @@ as required by Thai law and for engaging its own auditors.
 ## 6. Data protection (PDPA)
 6.1 Personal data is processed in accordance with the [Data Processing Agreement](./data-processing-agreement.md)
 and the Personal Data Protection Act B.E. 2562 (PDPA). 6.2 Customer personal data of Thai data subjects is
-hosted in Thailand (`<<Alibaba Cloud, Bangkok region>>`). 6.3 Data-subject requests (access, rectification,
+hosted in Thailand (Alibaba Cloud, Bangkok region). 6.3 Data-subject requests (access, rectification,
 erasure, portability, objection) are supported via the platform's DSAR workflow.
 
 ## 7. Third-party services & AI
 7.1 The Service uses sub-processors listed in the [DPA](./data-processing-agreement.md) (e.g. the payment
 processor and cloud host). 7.2 Optional **AI-assisted features** send business data to a third-party model
-provider (`<<Anthropic>>`) to generate summaries/insights and extract document fields. **Direct contact
+provider (Anthropic) to generate summaries/insights and extract document fields. **Direct contact
 identifiers are minimized/redacted before transmission where feasible** (`AI_PII_REDACTION`), and AI features
 can be disabled per tenant. Use of AI features is governed by the DPA. 7.3 AI output may be inaccurate or
 incomplete and must not be relied upon without human verification; AI may only **propose** (not post)

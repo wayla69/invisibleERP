@@ -83,7 +83,7 @@ apply; each PSP carries its own SOC 2 / PCI-DSS report.
 |---|---|---|
 | CC2.1 Information to support internal control | 30-cycle ISO process narratives in `docs/process-narratives/`; RCM in `Oshinei_ERP_SOX_RCM_v1.xlsx` | ✅ Designed |
 | CC2.2 Communicates internally | ELC-POL-02 Whistleblower Policy; `compliance@invisible-erp.co.th` + `/compliance-reports` route | ✅ Designed |
-| CC2.3 Communicates externally (to customers) | Terms of service / privacy policy — **to be authored** | ❌ Gap — draft customer-facing system description + ToS |
+| CC2.3 Communicates externally (to customers) | ToS (DRAFT v0.1), DPA (DRAFT v0.2), **privacy policy (DRAFT v0.1, `docs/legal/privacy-policy.md`)** + public `/legal/privacy` page linked from signup (docs/24 R0-2) | 🟡 Drafted — counsel review + publication pending |
 
 **Incremental actions:** author Terms of Service and Privacy Policy (legal); publish a brief security whitepaper (link in the customer portal) describing the multi-tenant isolation model.
 

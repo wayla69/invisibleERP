@@ -124,7 +124,15 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
   bank export still round-trips; `pdpa` + `compliance` + `basics` harnesses green; a DSAR erasure for
   an employee completes within the 30-day SLA machinery.
 
-### R0-2 · Execute the legal framework — closes AUD-LGL-02 (legal + doc PR, code toggle at the end)
+### R0-2 · Execute the legal framework — closes AUD-LGL-02 (legal + doc PR, code toggle at the end) — **DRAFTS DELIVERED 2026-07-02** (counsel execution = org work)
+> Shipped: the missing **privacy policy** authored (`docs/legal/privacy-policy.md`, DRAFT v0.1 — dual
+> controller/processor scope, PDPA basis table, the as-built protections incl. ITGC-AC-19 encryption and
+> the AI redaction/DPA gate, DSAR/erasure design, breach/retention terms) + a public `/legal/privacy` web
+> page (server component) linked from the signup flow ("การสมัครถือว่ายอมรับ…"). Architecture-fact
+> placeholders in the ToS/DPA (sub-processor names/regions) converted to fixed text. **Deliberately NOT
+> filled:** entity registration numbers, effective dates, contact addresses, notice periods — those are
+> counsel/business decisions and inventing them would be worse than a placeholder. Remaining org steps:
+> counsel review + execution, Anthropic addendum signature → set `AI_DPA_ACKNOWLEDGED`.
 - Fill every `<<placeholder>>` in `docs/legal/terms-of-service.md` (entity = Invisible Consulting
   Co., Ltd., governing law/jurisdiction = Thailand, liability cap = 12-month fees as already
   drafted, trial length) and `data-processing-agreement.md`; author the missing **standalone privacy
@@ -524,3 +532,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.1 | 2026-07-02 | ERP/Product | R4-2 delivered (corrected anomaly math default; legacy behind ANOMALY_PARITY_MODE; parity harness pins + proves both) |
 | 2.2 | 2026-07-02 | ERP/Product | R4-5 delivered (nav + manual + docs/06 honest statistical labeling) |
 | 2.3 | 2026-07-02 | ERP/Product | R3-3 code delivered (compliance ToE evidence artifact per CI run + quarterly-archive runbook; evidence clock runs from 2026-07-02) |
+| 2.4 | 2026-07-02 | ERP/Product | R0-2 drafts delivered (privacy policy v0.1 + /legal/privacy page + signup consent line; fact-placeholders fixed; execution remains org work) |

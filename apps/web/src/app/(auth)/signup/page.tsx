@@ -99,6 +99,13 @@ export default function SignupPage() {
             {loading ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}
             {loading ? 'กำลังสร้าง…' : 'สร้างบัญชีและเริ่มใช้งาน'}
           </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            การสมัครถือว่ายอมรับ{' '}
+            <Link href="/legal/privacy" className="underline hover:text-primary" target="_blank">
+              นโยบายความเป็นส่วนตัว
+            </Link>{' '}
+            และข้อกำหนดการใช้บริการ
+          </p>
         </form>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
