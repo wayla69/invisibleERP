@@ -195,6 +195,21 @@ async function main() {
   const segCampT2 = await inj('POST', '/api/loyalty/campaigns', mgr2, { name: 'steal', channel: 'sms', audience: 'saved_segment', saved_segment_id: segCreate.json.id, body: 'x' });
   ok('Saved-segment campaign: a T2 user cannot target a T1 segment (404 at create)', segCampT2.status === 404, JSON.stringify({ s: segCampT2.status, code: segCampT2.json?.error?.code }));
 
+  // ── 7h. Scheduled RFM re-profiling (Phase F2) — a stale profile is re-bucketed; re-run is stable ──
+  // Stale-ify the paying member's profile (simulates drift between orders), then bulk-refresh.
+  await db.update(s.customerProfiles).set({ rfmSegment: 'Lost' }).where(and(eq(s.customerProfiles.tenantId, t1), eq(s.customerProfiles.memberId, memberId)));
+  const bulkRefresh = await inj('POST', '/api/crm/profiles/refresh', mgr1, {});
+  const profAfter = await inj('GET', `/api/crm/profile/${memberId}`, mgr1);
+  ok('RFM bulk refresh: sweeps the active base and re-buckets a stale profile (Lost → New, changes counted)',
+    bulkRefresh.status === 200 && bulkRefresh.json.profiled >= 2 && bulkRefresh.json.segment_changes >= 1 && profAfter.json.crm?.rfm_segment === 'New',
+    JSON.stringify({ profiled: bulkRefresh.json.profiled, changes: bulkRefresh.json.segment_changes, seg: profAfter.json.crm?.rfm_segment }));
+  // Scheduled surface: the crm_profile_refresh BI job runs the same sweep; a repeat run reports 0 changes.
+  const rfmSub = await inj('POST', '/api/bi/subscriptions', mgr1, { name: 'RFM nightly', report_type: 'crm_profile_refresh', frequency: 'daily' });
+  const rfmRun = await inj('POST', `/api/bi/subscriptions/${rfmSub.json.id}/run`, mgr1);
+  ok('RFM refresh job (BI scheduler): repeat run succeeds and is stable — 0 segment changes (idempotent)',
+    rfmRun.status === 200 && rfmRun.json.status === 'success' && /RFM refresh/.test(rfmRun.json.summary ?? '') && /0 segment change/.test(rfmRun.json.summary ?? ''),
+    JSON.stringify({ status: rfmRun.json.status, summary: rfmRun.json.summary }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });

@@ -5,6 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
 
+const RefreshAllBody = z.object({ tenant_id: z.number().int().positive().optional() }).optional();
 const AudienceRuleBody = z.object({ promo_id: z.number().int(), rfm_segment: z.string().optional(), min_lifetime: z.number().optional(), min_frequency: z.number().optional(), preferred_channel: z.string().optional() });
 
 @Controller('api/crm')
@@ -16,6 +17,15 @@ export class CrmController {
   @Permissions('crm')
   profile(@Param('memberId', ParseIntPipe) memberId: number, @CurrentUser() user: JwtUser) {
     return this.crm.profile(memberId, user);
+  }
+
+  // POST /api/crm/profiles/refresh — bulk RFM re-profiling for the whole active member base (Phase F2).
+  // On-demand counterpart of the scheduled `crm_profile_refresh` BI job — e.g. force-fresh before a big send.
+  @Post('profiles/refresh')
+  @Permissions('marketing', 'exec')
+  @HttpCode(200)
+  refreshAll(@Body(new ZodValidationPipe(RefreshAllBody)) b: any, @CurrentUser() user: JwtUser) {
+    return this.crm.refreshAllProfiles(user, { tenantId: b?.tenant_id ?? null });
   }
 
   // POST /api/crm/profile/:memberId/refresh — recompute RFM profile

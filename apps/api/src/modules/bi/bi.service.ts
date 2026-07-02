@@ -48,6 +48,8 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   project_evm: { label: 'มูลค่าที่ได้รับของพอร์ตโครงการ (EVM)', labelEn: 'Portfolio earned value (EVM)' },
   // CRM win/loss: win rate, loss reasons, by-owner, monthly trend. Read-only.
   crm_win_loss: { label: 'วิเคราะห์ Win/Loss', labelEn: 'CRM win/loss analytics' },
+  // Likewise: each run re-profiles the tenant's whole active member base (RFM) so segments stay fresh (F2).
+  crm_profile_refresh: { label: 'รีเฟรชโปรไฟล์ลูกค้า (RFM)', labelEn: 'CRM profile refresh (RFM)' },
   // An "action" job that rides the scheduler: each run executes the AR dunning sweep and reports a summary.
   // Create a `daily` subscription of this type to dun overdue customers automatically (idempotent per run).
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
@@ -544,6 +546,11 @@ export class BiService implements OnModuleInit {
       if (!this.collections) throw new BadRequestException({ code: 'COLLECTIONS_UNAVAILABLE', message: 'Collections service not available', messageTh: 'ระบบติดตามหนี้ไม่พร้อมใช้งาน' });
       const r = await this.collections.runDunningSweep(user); // idempotent: re-runs the same day advance nothing
       return { data: r, summary: `Dunning sweep: advanced ${r.advanced} of ${r.scanned} overdue invoices`, summaryTh: `ทวงถามอัตโนมัติ: เลื่อนขั้น ${r.advanced} จาก ${r.scanned} รายการค้างชำระ` };
+    }
+    if (reportType === 'crm_profile_refresh') {
+      if (!this.crmMembers) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM service not available', messageTh: 'ระบบ CRM ไม่พร้อมใช้งาน' });
+      const r = await this.crmMembers.refreshAllProfiles(user); // idempotent: a pure profile upsert per member
+      return { data: r, summary: `RFM refresh: profiled ${r.profiled} members, ${r.segment_changes} segment change(s)`, summaryTh: `รีเฟรช RFM: ${r.profiled} สมาชิก เปลี่ยนกลุ่ม ${r.segment_changes} ราย` };
     }
     if (reportType === 'cdp_export_sync') {
       if (!this.crmMembers) throw new BadRequestException({ code: 'CRM_UNAVAILABLE', message: 'CRM service not available', messageTh: 'ระบบ CRM ไม่พร้อมใช้งาน' });

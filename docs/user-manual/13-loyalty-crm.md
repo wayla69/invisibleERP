@@ -284,7 +284,11 @@ rejected safely.
 segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
 without a computed profile yet appear under **Unsegmented**). Click a segment to open it in **CRM 360**
 (`/crm`) pre-filtered, where you can fire a targeted campaign at exactly that group. Segments are computed from
-each member's recency/frequency/monetary behaviour (refreshed as orders post).
+each member's recency/frequency/monetary behaviour — and stay **fresh automatically**: schedule the
+**รีเฟรชโปรไฟล์ลูกค้า (RFM)** job (`crm_profile_refresh`, a daily BI subscription) to re-profile the whole
+active member base overnight, so a customer who lapses moves segment without anyone clicking anything. To
+force-refresh right now (e.g. before a big campaign), use `POST /api/crm/profiles/refresh`
+(`marketing`/`exec`) — safe to repeat.
 
 ## 14. Receipt upload for points (อัปโหลดใบเสร็จ — ขอแต้ม)
 
@@ -367,3 +371,4 @@ claim points by uploading a photo of the receipt.
 | 1.18 | 2026-07-02 | Platform | §13 **Saved custom segments** — define reusable audiences from rules over member/RFM fields (all/any) via `/api/loyalty/saved-segments`; resolve to matching members. Whitelisted fields only (safe). Rule-builder UI is a follow-up. |
 | 1.19 | 2026-07-02 | Platform | §11 **Own-provider OTP + delivery receipts** — once your **SMS** provider is connected, member-login OTPs go out from your own sender. The message log now keeps each message's provider reference, and a provider can call back `POST /api/messaging/delivery-callback/<shop-code>` (with your per-channel callback token) to mark a message *delivered*/*undelivered*. |
 | 1.20 | 2026-07-02 | Platform | §13 **Segment-builder screen** (`/loyalty/segments`) — visual rule-builder over the saved-segments whitelist with live member preview; saved segments are now selectable as a **campaign / blast audience** (เซกเมนต์ที่บันทึกไว้). Consent unchanged. |
+| 1.21 | 2026-07-02 | Platform | §13 **Segments stay fresh automatically** — schedule the `crm_profile_refresh` daily BI job to re-profile the whole member base (RFM); on-demand full refresh via `POST /api/crm/profiles/refresh`. |
