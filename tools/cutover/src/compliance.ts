@@ -789,6 +789,25 @@ async function main() {
       && coalBurnOver.status === 409 && coalBurnOver.json.error?.code === 'INSUFFICIENT_POINTS',
     `hq=${coalDenied.status}/${coalDenied.json.error?.code} earn=${coalEarn.status}/${coalEarn.json.error?.code ?? coalEarn.json.points_earned}/${coalEarn.json.ic_no} led=${coalLed.length}@${(coalLed[0] as any)?.tenantId} ic=${coalIc.json.category}/${coalIc.json.from_tenant_id}->${coalIc.json.to_tenant_id}/${coalIc.json.amount} burn=${coalBurnOver.status}/${coalBurnOver.json.error?.code}`);
 
+  // ════════ LYL-20 — NPS detractor → exactly ONE owned, SLA-timed recovery case (V2, docs/29) ════════
+  const [rcm20] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-LYL20', name: 'เคสกู้คืน', phone: '0890000061', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  await db.insert(s.npsResponses).values({ tenantId: t1, memberId: Number(rcm20.id), token: 'toe-lyl20-tok', expiresAt: new Date(Date.now() + 86400000) });
+  const lyl20Ans = await inj('POST', '/api/nps/toe-lyl20-tok', undefined, { score: 2, comment: 'ช้ามาก' });
+  const lyl20Again = await inj('POST', '/api/nps/toe-lyl20-tok', undefined, { score: 9 });
+  const lyl20Cases = await db.select().from(s.recoveryCases).where(eq(s.recoveryCases.memberId, Number(rcm20.id)));
+  const lyl20Case: any = lyl20Cases[0];
+  const lyl20NoNote = await inj('POST', `/api/recovery/cases/${Number(lyl20Case?.id)}/resolve`, execu, {});
+  const lyl20Contact = await inj('POST', `/api/recovery/cases/${Number(lyl20Case?.id)}/contact`, execu, {});
+  const lyl20Resolve = await inj('POST', `/api/recovery/cases/${Number(lyl20Case?.id)}/resolve`, execu, { note: 'โทรกลับ + ชดเชย' });
+  ok('LYL-20: a detractor answer opens exactly ONE Open recovery case (24h SLA; the single-use answer makes a duplicate impossible); resolution requires a note and contact/resolve are actor-stamped',
+    (lyl20Ans.status === 200 || lyl20Ans.status === 201) && lyl20Ans.json.detractor === true
+      && lyl20Again.status === 409
+      && lyl20Cases.length === 1 && lyl20Case.status === 'Open' && lyl20Case.responseDueAt != null
+      && lyl20NoNote.status === 400
+      && lyl20Contact.json.status === 'Contacted' && lyl20Contact.json.contacted_by === 'execu'
+      && lyl20Resolve.json.status === 'Resolved' && lyl20Resolve.json.resolved_by === 'execu',
+    `ans=${lyl20Ans.status}/${lyl20Ans.json.detractor} again=${lyl20Again.status} cases=${lyl20Cases.length} noNote=${lyl20NoNote.status} contact=${lyl20Contact.json.status}/${lyl20Contact.json.contacted_by} resolve=${lyl20Resolve.json.status}`);
+
   // ════════ MKT-12 — Lifecycle journeys: consent-gated, frequency-capped, at-most-once per step ════════
   // An opted-out member enrols but the step send is SKIPPED (audited in message_log); a re-run fires
   // nothing (the enrollment-step was claimed before delivery — claim-first, mirrors MKT-10).
@@ -957,7 +976,7 @@ async function main() {
     exOvr.json.override === true && exOvr.json.override_by !== 'admin' && (exPayOk.status === 200 || exPayOk.status === 201) && exPayOk.json.status === 'PendingApproval',
     JSON.stringify({ ovr: exOvr.json.override, by: exOvr.json.override_by, pay: exPayOk.json.status }));
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..19) ──');
+  console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..20) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   // docs/27 R3-3 — retained operating evidence: when EVIDENCE_OUT is set (CI), write the structured
   // run result (every control check, pass/fail, commit, timestamp) for artifact retention. This file is

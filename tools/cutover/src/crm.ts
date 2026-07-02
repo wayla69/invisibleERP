@@ -397,6 +397,28 @@ async function main() {
     npsSummary.json.responses === 1 && npsSummary.json.nps === -100 && nps360.json.nps?.score === 3 && nps360.json.nps?.detractor === true,
     `sum=${npsSummary.json.responses}/${npsSummary.json.nps} 360=${JSON.stringify(nps360.json.nps)}`);
 
+  // ── V2 (docs/29, LYL-20): the detractor became an owned, SLA-timed recovery case ──
+  const rc1 = await inj('GET', '/api/recovery/cases', mgr1);
+  const theCase = (rc1.json.cases ?? []).find((c: any) => Number(c.member_id) === memberId);
+  ok('V2 recovery: the detractor answer auto-opened exactly ONE Open case with a 24h response SLA',
+    rc1.json.cases?.length === 1 && !!theCase && theCase.status === 'Open' && theCase.score === 3 && !!theCase.response_due_at && theCase.overdue === false,
+    JSON.stringify({ n: rc1.json.cases?.length, status: theCase?.status, score: theCase?.score }));
+  const noNote = await inj('POST', `/api/recovery/cases/${theCase.id}/resolve`, mgr1, {});
+  const rcContact = await inj('POST', `/api/recovery/cases/${theCase.id}/contact`, mgr1, {});
+  const rcContact2 = await inj('POST', `/api/recovery/cases/${theCase.id}/contact`, mgr1, {});
+  const rcResolve = await inj('POST', `/api/recovery/cases/${theCase.id}/resolve`, mgr1, { note: 'โทรขอโทษ + มอบคูปอง' });
+  ok('V2 recovery: contact→resolve are actor-stamped; note required to close; repeat transitions rejected',
+    noNote.status === 400 && rcContact.json.status === 'Contacted' && rcContact.json.contacted_by === 'mgr1'
+      && rcContact2.status === 409 && rcContact2.json.error?.code === 'CASE_NOT_OPEN'
+      && rcResolve.json.status === 'Resolved' && rcResolve.json.resolved_by === 'mgr1' && rcResolve.json.resolution_note?.includes('คูปอง'),
+    `noNote=${noNote.status} contact=${rcContact.json.status}/${rcContact.json.contacted_by} re=${rcContact2.status} resolve=${rcResolve.json.status}/${rcResolve.json.resolved_by}`);
+  await db.insert(s.recoveryCases).values({ tenantId: t1, memberId, source: 'nps', sourceRef: 'seed-overdue', score: 2, responseDueAt: new Date(Date.now() - 3600_000) });
+  const rc2 = await inj('GET', '/api/recovery/cases?status=Open', mgr1);
+  const npsSum2 = await inj('GET', '/api/nps/summary', mgr1);
+  ok('V2 recovery: an Open case past its SLA reads overdue on the worklist AND the NPS summary — never silently dropped',
+    rc2.json.overdue === 1 && rc2.json.cases?.[0]?.overdue === true && npsSum2.json.recovery?.open === 1 && npsSum2.json.recovery?.overdue === 1,
+    JSON.stringify({ list: rc2.json.overdue, sum: npsSum2.json.recovery }));
+
   // ── 11. GL balanced (trial balance Dr=Cr) ──
   const tb = await inj('GET', '/api/ledger/trial-balance', admin);
   ok('Trial balance balanced after CRM order (Dr==Cr)', tb.json.totals?.balanced === true, JSON.stringify(tb.json.totals ?? {}));
