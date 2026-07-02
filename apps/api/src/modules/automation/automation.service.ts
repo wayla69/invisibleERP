@@ -11,6 +11,9 @@ const EVENTS = [
   { key: 'po.approved', label: 'ใบสั่งซื้อได้รับอนุมัติ', label_en: 'Purchase order approved', fields: ['po_no', 'vendor', 'total_amount', 'status', 'decided_by'] },
   { key: 'po.rejected', label: 'ใบสั่งซื้อถูกปฏิเสธ', label_en: 'Purchase order rejected', fields: ['po_no', 'vendor', 'total_amount', 'status', 'reason'] },
   { key: 'alert.fired', label: 'การแจ้งเตือนทำงาน', label_en: 'Alert rule fired', fields: ['rule_id', 'name', 'metric', 'value', 'threshold', 'severity'] },
+  { key: 'loyalty.enrolled', label: 'สมัครสมาชิกใหม่', label_en: 'Loyalty member enrolled', fields: ['member_id', 'member_code', 'phone'] },
+  { key: 'loyalty.earned', label: 'สะสมแต้ม', label_en: 'Loyalty points earned', fields: ['member_id', 'points_earned', 'balance', 'ref_doc'] },
+  { key: 'loyalty.redeemed', label: 'แลกแต้ม', label_en: 'Loyalty points redeemed', fields: ['member_id', 'points_redeemed', 'redeem_value', 'balance', 'ref_doc'] },
 ] as const;
 const EVENT_KEYS = EVENTS.map((e) => e.key) as readonly string[];
 const ACTION_TYPES = ['notification', 'message', 'log'] as const;
