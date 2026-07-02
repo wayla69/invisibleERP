@@ -40,13 +40,11 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { PlatformModule } from './modules/platform/platform.module';
-import { TaxDocsModule } from './modules/tax-docs/tax-docs.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { AssetsModule } from './modules/assets/assets.module';
 import { PettyCashModule } from './modules/petty-cash/petty-cash.module';
 import { EamModule } from './modules/eam/eam.module';
 import { LeasesModule } from './modules/leases/leases.module';
-import { TaxReportsModule } from './modules/tax-reports/tax-reports.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { ReturnsModule } from './modules/returns/returns.module';
 import { BankModule } from './modules/bank/bank.module';
@@ -169,13 +167,11 @@ import { PdfModule } from './modules/pdf/pdf.module';
     TaxModule,
     BillingModule,
     PlatformModule,
-    TaxDocsModule,
     RestaurantModule,
     AssetsModule,
     PettyCashModule,
     EamModule,
     LeasesModule,
-    TaxReportsModule,
     MenuModule,
     ReturnsModule,
     BankModule,

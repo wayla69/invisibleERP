@@ -11,7 +11,9 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       include: [
-        'src/modules/tax/**',
+        // top-level tax core only — documents/ + reports/ moved under tax/ in the docs/28 consolidation
+        // and are harness-tested (taxdocs/etax), not unit-tested; add them here WITH tests, not before
+        'src/modules/tax/*.ts',
         'src/common/doc-number.service.ts',
         'src/common/ai-models.ts',
         'src/common/pii-redact.ts',

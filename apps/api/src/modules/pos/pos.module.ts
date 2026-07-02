@@ -7,7 +7,7 @@ import { ReceiptController } from './receipt.controller';
 import { ReceiptService } from './receipt.service';
 import { ReceiptDeliveryService, NoopReceiptProvider } from './receipt-delivery.service';
 import { CfdService } from './cfd.service';
-import { TaxDocsPdfService } from '../tax-docs/tax-docs-pdf.service';
+import { TaxDocsPdfService } from '../tax/documents/tax-docs-pdf.service';
 import { RestaurantModule } from '../restaurant/restaurant.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { TaxModule } from '../tax/tax.module';

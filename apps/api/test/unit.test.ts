@@ -5,8 +5,8 @@ import { round2, getCurrency, isSupportedCurrency } from '../src/modules/tax/mon
 import { DocNumberService } from '../src/common/doc-number.service';
 import { buildPromptPayPayload, crc16ccitt, isValidPromptPayTarget } from '../src/modules/payments/promptpay-qr';
 import { socialSecurity, annualPit, computePayslip } from '../src/modules/payroll/payroll-calc';
-import { buildEtaxInvoiceXml } from '../src/modules/tax-docs/etax-xml';
-import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax-docs/etax-email.service';
+import { buildEtaxInvoiceXml } from '../src/modules/tax/documents/etax-xml';
+import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax/documents/etax-email.service';
 import { hmacSha256Hex, verifyWebhookSignature } from '../src/common/crypto';
 import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 

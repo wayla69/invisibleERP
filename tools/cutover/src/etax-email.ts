@@ -19,7 +19,7 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
-import { MAILER } from '../../../apps/api/dist/modules/tax-docs/mailer';
+import { MAILER } from '../../../apps/api/dist/modules/tax/documents/mailer';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');

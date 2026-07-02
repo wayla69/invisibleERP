@@ -1,12 +1,12 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, eq, gte, lt, asc, desc, isNotNull, inArray, sql } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings } from '../../database/schema';
-import { n } from '../../database/queries';
-import { PND_LABELS } from '../tax-docs/wht-rates';
-import { currentTenantStore } from '../../common/tenant-context';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings } from '../../../database/schema';
+import { n } from '../../../database/queries';
+import { PND_LABELS } from '../documents/wht-rates';
+import { currentTenantStore } from '../../../common/tenant-context';
 import { NotFoundException } from '@nestjs/common';
-import type { JwtUser } from '../../common/decorators';
+import type { JwtUser } from '../../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const nextMonthDay = (month: number, year: number, day: number) => {

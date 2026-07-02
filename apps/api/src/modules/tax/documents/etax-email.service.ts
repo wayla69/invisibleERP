@@ -1,8 +1,8 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { taxInvoices, tenants } from '../../database/schema';
-import type { JwtUser } from '../../common/decorators';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { taxInvoices, tenants } from '../../../database/schema';
+import type { JwtUser } from '../../../common/decorators';
 import { TaxInvoiceService } from './tax-invoice.service';
 import { buildEtaxInvoiceXml, type EtaxInvoice } from './etax-xml';
 import { MAILER, type Mailer, type MailMessage } from './mailer';
