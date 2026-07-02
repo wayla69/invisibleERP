@@ -491,9 +491,9 @@ credibility in the next diligence pass.
 
 ## Wave 5 — Architecture hygiene 🧹 (rolling; behind everything above)
 
-- **R5-1 (AUD-ARC-08) — DELIVERED 2026-07-02:** orphans `0085_floor_zone_geometry`/`0088_dine_in_order_zone`
-  journaled append-only (idx 214/215 — idempotent, already applied in prod, no intervening column
-  references; verified); the CI gate's unjournaled-`GRANDFATHERED` list is now **empty**. New
+- **R5-1 (AUD-ARC-08) — DELIVERED 2026-07-02:** the "orphans" turned out to be journaled **all along**
+  (idx 102/103) — the CI `GRANDFATHERED` list was dead code masking that; it is now **empty** (and my own
+  first attempt to append them was itself caught by the dup-tag gate — the guard works). New
   **`migration-parity` harness** (CI matrix) builds a fresh DB in filename order (harness path) AND
   journal order (prod path) and fails on any schema divergence — 4,254 columns / 974 indexes identical.
   **Decision recorded:** `GRANDFATHERED_DUP` stays — the four dup numbers are applied in prod and drizzle
@@ -576,4 +576,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.7 | 2026-07-02 | ERP/Product | Status header updated: 16 pieces delivered, Wave 0 closed; open items enumerated |
 | 2.8 | 2026-07-02 | ERP/Product | R4-4 delivered (llm-client seam across 6 services + scored fake-LLM agent benchmark as an ai-eval CI gate) |
 | 2.9 | 2026-07-02 | ERP/Product | R4-1 delivered provider-first (Voyage adapter + embed-space column/filter/reembed; pgvector deferred by recorded decision) |
-| 3.0 | 2026-07-02 | ERP/Product | R5-1 delivered (orphans journaled idx 214/215; GRANDFATHERED empty; migration-parity harness; dup-number decision recorded) |
+| 3.0 | 2026-07-02 | ERP/Product | R5-1 delivered (orphans found already-journaled idx 102/103, dead grandfather list removed; migration-parity harness; dup-number decision recorded) |

@@ -52,11 +52,10 @@ again produces a minimal diff. Verified: `migrations-journaled` gate ✅, `tenan
 `e2e` harness ✅ (fresh PGlite DB from all 130 `.sql`).
 
 ### Remaining grandfathered exceptions — RESOLVED / DECIDED (2026-07-02, docs/24 R5-1)
-- **Unjournaled orphans — RESOLVED:** `0085_floor_zone_geometry`, `0088_dine_in_order_zone` were journaled
-  as **append-only entries (idx 214/215)**. Safe because both are idempotent (`ADD COLUMN IF NOT EXISTS` +
-  a null-guarded backfill), already applied in prod (their journal-order application is a no-op), and no
-  intervening migration references the columns they add (verified). The CI gate's `GRANDFATHERED` list is
-  now **empty**.
+- **Unjournaled orphans — RESOLVED (they never were):** remediating this found `0085_floor_zone_geometry`
+  and `0088_dine_in_order_zone` had been journaled **all along** (idx 102/103) — the CI `GRANDFATHERED`
+  list was dead code masking that fact (an entry only fires for a file NOT in the journal, and both were).
+  The list is now **empty**, so any genuinely unjournaled file fails the gate again.
 - **Duplicate numbers — DECIDED, stay grandfathered:** `0085`, `0088`, `0104`, `0105` are already applied
   in prod and drizzle tracks by full tag — renumbering applied migrations is the dangerous move, so they
   stay. Full filenames sort deterministically, and the risk class ("fresh-DB rebuild diverges from prod")
@@ -81,4 +80,4 @@ again produces a minimal diff. Verified: `migrations-journaled` gate ✅, `tenan
 |---|---|---|---|
 | 2026-06-25 | v1.0 | Platform / DB | Initial: documents the migration-number collision pattern (+ the new CI duplicate-number guard), the snapshot drift that makes `db:generate` unusable, the grandfathered orphans/dup-numbers, and a safe remediation procedure for a quiet main. |
 | 2026-06-25 | v1.1 | Platform / DB | **Snapshot drift resolved**: regenerated the baseline (`0129_baseline_resync`, snapshot-only, catch-up neutralised to a no-op). `db:generate` now yields a minimal diff again; zero runtime/prod effect (snapshots are generate-only). Verified by the `migrations-journaled` gate + `tenant-isolation`/`e2e` harnesses. §3/§4 rewritten; orphan-journaling + dup-number grandfathering left as low-priority follow-ups. |
-| 2026-07-02 | v1.2 | Platform / DB | **docs/24 R5-1:** orphans journaled append-only (idx 214/215; CI `GRANDFATHERED` now empty); dup-number grandfathering made a recorded decision (cannot renumber applied migrations); new `migration-parity` CI harness proves filename-order ≡ journal-order schema. |
+| 2026-07-02 | v1.2 | Platform / DB | **docs/24 R5-1:** the 'orphans' were found journaled all along (idx 102/103) — stale dead-code `GRANDFATHERED` list removed (now empty); dup-number grandfathering made a recorded decision (cannot renumber applied migrations); new `migration-parity` CI harness proves filename-order ≡ journal-order schema. |

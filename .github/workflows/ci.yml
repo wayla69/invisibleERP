@@ -262,8 +262,9 @@ jobs:
         run: |
           node -e '
             const fs = require("fs"), dir = "apps/api/drizzle";
-            // docs/24 R5-1: the two historical orphans were journaled as append-only entries (idx 214/215 —
-            // idempotent IF-NOT-EXISTS, already applied in prod) — NO unjournaled grandfathers remain.
+            // docs/24 R5-1: the "orphans" (0085_floor_zone_geometry / 0088_dine_in_order_zone) turned out to be
+            // journaled all along (idx 102/103) — the old grandfather list was dead code masking that fact.
+            // NO unjournaled grandfathers exist; any new one fails here.
             const GRANDFATHERED = [];
             const sqls = fs.readdirSync(dir).filter(f => f.endsWith(".sql")).map(f => f.slice(0, -4));
             const journal = JSON.parse(fs.readFileSync(dir + "/meta/_journal.json", "utf8")).entries;
