@@ -223,6 +223,13 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > encrypted and are write-only — the screen shows only which channels are connected, never the keys. If you set
 > nothing, the platform's shared provider (or demo mode) is used. Once your **SMS** sender is connected, the
 > member-app login OTP also goes out from **your** sender id (not the shared platform number).
+>
+> **Go-live readiness at a glance.** Each channel card carries a status badge — 🟢 **พร้อมใช้งาน** (your own
+> provider), 🟡 **ค่ากลางแพลตฟอร์ม** (shared platform provider), ⚪ **โหมดเดโม** (nothing actually leaves the
+> system) — plus the channel's **last delivery** (status / provider / time) and a *รับ delivery receipt* chip
+> when a callback token is set. If a channel shows ⚪ demo mode but has been "sending", the card warns you:
+> those messages were logged as *sent* but never reached a customer — connect a provider, then use **ส่งทดสอบ**
+> to confirm the badge flips to 🟢 and the last delivery shows the real provider name.
 
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
@@ -372,3 +379,4 @@ claim points by uploading a photo of the receipt.
 | 1.19 | 2026-07-02 | Platform | §11 **Own-provider OTP + delivery receipts** — once your **SMS** provider is connected, member-login OTPs go out from your own sender. The message log now keeps each message's provider reference, and a provider can call back `POST /api/messaging/delivery-callback/<shop-code>` (with your per-channel callback token) to mark a message *delivered*/*undelivered*. |
 | 1.20 | 2026-07-02 | Platform | §13 **Segment-builder screen** (`/loyalty/segments`) — visual rule-builder over the saved-segments whitelist with live member preview; saved segments are now selectable as a **campaign / blast audience** (เซกเมนต์ที่บันทึกไว้). Consent unchanged. |
 | 1.21 | 2026-07-02 | Platform | §13 **Segments stay fresh automatically** — schedule the `crm_profile_refresh` daily BI job to re-profile the whole member base (RFM); on-demand full refresh via `POST /api/crm/profiles/refresh`. |
+| 1.22 | 2026-07-02 | Platform | §11 **Go-live readiness badges** on the messaging-providers screen — per-channel 🟢/🟡/⚪ resolved provider, last delivery, delivery-receipt chip, and a demo-mode warning when sends silently no-op. |

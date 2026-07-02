@@ -1,6 +1,6 @@
 # 24 — CRM Usability Depth: From Width to a Marketer's Daily Tool — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v1.0 — **PLANNING** · **Owner:** ERP / Product (CMO + SVP-IT review)
+> **Date:** 2026-07-02 · **Status:** v1.1 — **DELIVERED** (F1 #296, F2 #297, F3 shipped) · **Owner:** ERP / Product (CMO + SVP-IT review)
 > **Scope:** Close the three gaps that keep the (deep, GL-grade) loyalty/CRM stack from being **operable by a
 > marketer without an engineer**: a visual **segment-builder UI** on the already-safe `saved_segments` API,
 > a **scheduled RFM re-profiling** job so segments stop drifting stale, and a **provider go-live readiness**
@@ -109,4 +109,5 @@ docs/19/23 (one PR per phase; narrative + user manual + UAT + harness in the sam
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.1 | 2026-07-02 | Platform | **DELIVERED.** F1 segment-builder UI + saved-segment audiences (#296, narrative rev 1.24), F2 scheduled RFM re-profiling (`crm_profile_refresh`, #297, rev 1.25), F3 provider go-live readiness panel (rev 1.26) — all doc-synced + harness-verified (`crm` 34/34, `line-crm` 26/26, `compliance` 114/114). §5 (journeys, A/B + holdout, predictive) remains the next horizon. |
 | 1.0 | 2026-07-02 | Platform | Initial plan: three-phase (F1 segment-builder UI + saved-segment audiences, F2 scheduled RFM re-profiling via the BI scheduler, F3 provider go-live readiness panel) usability-depth roadmap from the CMO/SVP-IT audit; journeys/AB/predictive deferred to §5. |

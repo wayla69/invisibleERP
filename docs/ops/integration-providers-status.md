@@ -37,6 +37,7 @@ real credentials needs no downstream change.
 2. Set the env var(s) in the table above on the API service (or the per-tenant config row where noted).
 3. Redeploy/restart the API so the factory re-resolves the provider.
 4. Run one transaction and confirm the persisted log row shows the **real** provider name (not `mock`) and a real provider ref.
+5. For customer messaging, `GET /api/messaging/providers` (surfaced on `/settings/messaging`) reports each channel's **resolved provider** (`tenant`/`env`/`mock`) and last delivery — a ⚪ `mock` channel that has been "sending" is the silent-no-op case this panel exists to catch.
 5. For e-Tax, also configure `ETAX_SIGNING_*` if the SP requires a signed document.
 
 ## Related

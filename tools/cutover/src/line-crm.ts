@@ -219,6 +219,26 @@ async function main() {
     rowUndel?.status === 'undelivered' && rowUndel?.error === 'mailbox full',
     JSON.stringify({ status: rowUndel?.status, error: rowUndel?.error }));
 
+  // ── 15. Go-live readiness panel (F3) — resolved provider per channel + last delivery, secrets never leak ──
+  // line: tenant creds set (checks 10/14) → 'tenant' + callback token flag; sms/email: no tenant creds and no
+  // env (only LINE_CHANNEL_TOKEN is set in this harness) → 'mock'; the LINE last-send info reflects check 14.
+  const health1 = await inj('GET', '/api/messaging/providers', token);
+  const hLine = (health1.json.channels ?? []).find((c: any) => c.channel === 'line');
+  const hSms = (health1.json.channels ?? []).find((c: any) => c.channel === 'sms');
+  const healthRaw = JSON.stringify(health1.json);
+  ok('providers health: line resolved=tenant (+callback flag, last send recorded); sms resolved=mock; secrets never returned',
+    hLine?.resolved_provider === 'tenant' && hLine?.callback_token_set === true && hLine?.last_status != null && hLine?.last_send_at != null
+      && hSms?.resolved_provider === 'mock' && hSms?.last_send_at === null
+      && !healthRaw.includes('tenant-line-tok-999') && !healthRaw.includes('cb-secret-line'),
+    JSON.stringify({ line: hLine?.resolved_provider, cb: hLine?.callback_token_set, last: hLine?.last_status, sms: hSms?.resolved_provider, leaked: healthRaw.includes('tenant-line-tok-999') || healthRaw.includes('cb-secret-line') }));
+  // Connecting the shop's own SMS provider flips the channel mock → tenant (the go-live transition).
+  await inj('PUT', '/api/messaging/providers/sms', token, { creds: { apiKey: 'sms-key-1', apiUrl: 'https://sms.example/send' }, enabled: true });
+  const health2 = await inj('GET', '/api/messaging/providers', token);
+  const hSms2 = (health2.json.channels ?? []).find((c: any) => c.channel === 'sms');
+  ok('providers health: connecting own SMS creds flips resolved mock → tenant (go-live visible)',
+    hSms2?.resolved_provider === 'tenant' && hSms2?.configured === true && !JSON.stringify(health2.json).includes('sms-key-1'),
+    JSON.stringify({ sms: hSms2?.resolved_provider, configured: hSms2?.configured }));
+
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
