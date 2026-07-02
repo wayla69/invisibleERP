@@ -1,6 +1,16 @@
 # 24 — Angel-Investor / Technical-Audit Remediation Plan
 
-> **Date:** 2026-07-02 · **Status:** v1.0 — **PLANNING** · **Owner:** ERP / Product + Compliance + Legal
+> **Date:** 2026-07-02 · **Status:** v2.7 — **IN PROGRESS (16 pieces delivered)** · **Owner:** ERP / Product + Compliance + Legal
+> **Delivered:** R0-1 (PII encryption) · R0-2 drafts (privacy policy + /legal/privacy) · R0-3 (must-change
+> hard gate + seed hardening) · AUD-LGL-03 (employee DSAR) — **Wave 0 closed** · R1-1 (132 tenant indexes +
+> CI guard) · R1-2 (GL snapshots + GL-20) · R1-3 (Redis SSE fan-out) · R1-4 (bigint money invariants) ·
+> R2-1 (lockout fail-open alert) · R2-2 (authz-change session revocation) · R2-3 (verified pre-existing) ·
+> R2-4 (cookie/TTL coherence) · R3-1+R3-2 (census 170 CI-guarded + stale-doc banners) · R3-3 code
+> (evidence clock from 2026-07-02) · R4-2 (anomaly math corrected) · R4-3 partial (dow_seasonal +
+> croston_sba) · R4-5 (honest labeling).
+> **Open:** R1-5 deploy (pgbouncer/Redis provisioning) · R2-5 + R5-1/2/3 (ratchets & refactors) · R4-1
+> (pgvector RAG) · R4-4 (LLM seam + scored evals) · R4-3 holiday-calendar remainder · R3-4 + Wave 6 (org:
+> counsel execution, Anthropic addendum, SOC 2 engagement, customers).
 > **Scope:** Close **every** finding raised by the 2026-07 five-persona investment audit panel
 > (IT architecture, PwC-style capital-markets/ICFR, legal & compliance, AI/LLM, and the chairman's
 > value-investing synthesis). The audit fanned out over the live tree and produced findings with
@@ -543,3 +553,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.4 | 2026-07-02 | ERP/Product | R0-2 drafts delivered (privacy policy v0.1 + /legal/privacy page + signup consent line; fact-placeholders fixed; execution remains org work) |
 | 2.5 | 2026-07-02 | ERP/Product | AUD-LGL-03 closed (employee DSAR access/erasure with statutory payroll carve-out; PDPA-02 text + narrative 08 rev 1.6 + UAT-SEC-047) |
 | 2.6 | 2026-07-02 | ERP/Product | R4-3 partial (croston_sba + dow_seasonal in ALGOS, measured wins in demand-ml 16; holiday-calendar regressor tracked open) |
+| 2.7 | 2026-07-02 | ERP/Product | Status header updated: 16 pieces delivered, Wave 0 closed; open items enumerated |
