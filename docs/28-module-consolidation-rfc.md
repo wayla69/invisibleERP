@@ -58,10 +58,16 @@ are often correct); the goal is **server-by-default for new pages + conversion o
 
 - Pattern (already shipped once): `/legal/privacy` (docs/27 R0-2) is a pure server component — zero JS
   shipped for a content page. Use it as the template for content/report-like pages.
-- Conversion candidates, in order of bundle-weight × read-share: `accounting/page.tsx` (545 lines),
-  `eam/page.tsx` (552), `projects/[code]/page.tsx` (605 — split the Gantt into a client island),
-  `reports`, `insights` overview tabs. Pattern: server component fetches + renders the shell/tables;
-  interactive islands (`'use client'`) only for filters/charts/dialogs.
+- Conversion candidates, in order of bundle-weight × read-share: `accounting/page.tsx` ✅ **(converted
+  2026-07-02 — RSC conversion #1)**, `eam/page.tsx` (552), `projects/[code]/page.tsx` (605 — split the
+  Gantt into a client island), `reports`, `insights` overview tabs. Pattern: server component fetches +
+  renders the shell/tables; interactive islands (`'use client'`) only for filters/charts/dialogs.
+- **Shipped seam (conversion #1):** `lib/server-api.ts` — a server-only, cookie-forwarding, GET-only fetch
+  helper (`API_PROXY_TARGET → NEXT_PUBLIC_API_URL → localhost` base; null on any failure). `accounting`
+  is now a server page that prefetches the default tab's trial balance and hands it to the client island
+  as react-query `initialData` — first paint carries data, no client fetch waterfall; mutations and
+  filters unchanged in the island. Measured: route chunk 14.2→14.3 kB (islands still ship — the byte win
+  comes when report tables move fully server-side), route `○ static → ƒ dynamic`, e2e smoke green.
 - Guardrail before converting: cookie-based auth already works server-side (httpOnly `ierp_token` is
   readable by route handlers) — verify per page that data fetching moves to the server without widening
   CORS. Measure with the Playwright e2e smoke + a bundle-size note in the PR.
@@ -80,6 +86,7 @@ previous one merges (the docs/19 lesson — shared files, sequential PRs).
 |---|---|---|---|
 | 1.0 | 2026-07-02 | Platform | Initial RFC from the 2026-07 investment-audit findings AUD-ARC-10 (module sprawl → 5-cluster ownership map + mechanical recipe + 5-PR sequencing) and AUD-ARC-09 (RSC direction: server-by-default for new pages, top-5 conversion list, /legal/privacy as the shipped pattern). |
 | 1.1 | 2026-07-02 | Platform | **Consolidation PR #1 (payments) shipped** — `payments-depth` folded into `payments/depth/` under the `PaymentsModule` umbrella (import + re-export); app.module registration removed; zero route/permission/GL change. Proof: pos-p2 33 · cash-banking 11 · restaurant 162 · basics 215 · compliance 115 · ts-debt green; typecheck + build green. Module count 122→121. |
+| 1.6 | 2026-07-02 | Platform | **RSC conversion #1 (accounting) shipped (§4 / R5-2).** New `lib/server-api.ts` server-fetch seam (cookie-forwarded, GET-only, null-on-failure fallback); `accounting/page.tsx` → server shell prefetching the trial balance, `accounting-client.tsx` island unchanged for tabs/forms/mutations. No route/permission/behavior change; web build + e2e smoke green (the one qr-self-order local failure pre-exists on main and passes in CI). Bundle note: route chunk 14.2→14.3 kB, static→dynamic. |
 | 1.5 | 2026-07-02 | Platform | **Consolidation PR #5 (pos) shipped — RFC fully executed.** Six POS satellites moved under `pos/` (`audit`/`control`/`fiscal`/`labor`/`scale`/`terminal`); `PosModule` umbrella imports + re-exports all six; importers re-pointed (payments module/service/gateways, portal module/pos.service, restaurant module/dine-in, tax/documents ×2); app.module 6 registrations removed (module count 113→108, from 122 at RFC start). `pos/` core unmoved — harness dist imports untouched. Proof: pos-p0 25 · pos-p1 19 · pos-p2 33 · pos-wiring 20 · pos-pin 10 · pos-discount 20 · payments-gateway 8 · taxdocs 52 · etax 9 · portal-extra 7 · restaurant 162 · realtime-kds 4 · basics 215 · compliance 117 · vitest 95 + coverage · ts-debt green; typecheck + build green. AUD-ARC-10 remediation complete. |
 | 1.4 | 2026-07-02 | Platform | **Consolidation PR #4 (loyalty) shipped** — `rewards`/`referrals`/`wheels`/`gamification` → `loyalty/engagement/`, `loyalty-analytics` → `loyalty/analytics/`, `member` → `loyalty/member/`; `LoyaltyModule` umbrella imports + re-exports engagement + analytics. `MemberModule` deliberately stays app-registered (it imports `LoyaltyModule` + the engagement modules — umbrella inclusion would cycle); `giftcards` untouched per the finance-boundary rule. Proof: loyalty 30 · line-crm 26 · coalition 21 · pos-p2 33 · cookie-auth 16 · ext 262 · restaurant 162 · crm 48 · basics 215 · compliance 117 · vitest 95 + coverage · ts-debt green; typecheck + build green. Module count 118→113. |
 | 1.3 | 2026-07-02 | Platform | **Consolidation PR #3 (crm/pipeline) shipped** — `crm-pipeline` + `pipeline` co-located under `crm/pipeline/` beneath the `CrmModule` umbrella (imports + re-exports both); bi + ai import paths re-pointed; app.module entries removed. Route-collision check clean (`/api/pipeline` vs `/api/crm/pipeline` — distinct, unchanged). The RFC's floated "one service behind both routes" was **rejected**: different tables + semantics ⇒ non-mechanical. Proof: pipeline 12 · crm 48 · bi 32 · projects 114 · ai-actions 14 · basics 215 · compliance 115 · vitest 95 + coverage gate · ts-debt green; typecheck + build green. Module count 120→118. |
