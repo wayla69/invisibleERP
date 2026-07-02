@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { MemberService } from '../loyalty/member.service';
 import { WebhookService } from '../platform/webhook.service';
+import { AutomationService } from '../automation/automation.service';
 import type { JwtUser } from '../../common/decorators';
 
 // Public loyalty write API (Phase C2) — the machine-facing surface for integrations to enrol members and
@@ -12,13 +13,17 @@ export class PublicLoyaltyService {
   constructor(
     private readonly members: MemberService,
     private readonly webhooks: WebhookService,
+    private readonly automation: AutomationService,
   ) {}
 
-  // Fire post-commit (the MemberService own-tx has already returned). Awaited but best-effort — a webhook
-  // failure is swallowed so it never rolls back the points (deliver() itself records the failed delivery for
-  // retry via the standard dispatcher). Mirrors how other business events emit webhooks inline.
+  // Fire post-commit (the MemberService own-tx has already returned). Awaited but best-effort — a failure is
+  // swallowed so it never rolls back the points. Two consumers: (1) webhooks — `deliver` scoped to the
+  // caller's tenant (NOT emit(), whose users-table tenant lookup misses for an apikey principal); (2) the
+  // no-code automation engine — `runEvent` drives "when loyalty.earned and points ≥ N then action" rules,
+  // tenant-scoped by the per-request RLS tx.
   private async fire(event: string, payload: Record<string, any>, user: JwtUser) {
     try { await this.webhooks.deliver(event, payload, user.tenantId ?? null); } catch { /* best-effort */ }
+    try { await this.automation.runEvent(event, payload, user); } catch { /* best-effort */ }
   }
 
   async enroll(dto: { name?: string; phone?: string; card_no?: string; email?: string; birthday?: string; marketing_opt_in?: boolean }, user: JwtUser) {

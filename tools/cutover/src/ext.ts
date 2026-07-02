@@ -544,6 +544,10 @@ async function main() {
     .onConflictDoUpdate({ target: s.loyaltyConfig.id, set: { enabled: true, pointsPerBaht: '1', bahtPerPoint: '0.1', minRedeem: '0' } });
   await db.insert(s.webhooks).values({ tenantId: hq.id, url: 'https://example.invalid/hook', events: 'loyalty.earned,loyalty.enrolled', secret: 'whsec', active: true, createdBy: 'test' });
 
+  // D2: an automation rule "when loyalty.earned and points_earned ≥ 100 then log" — must exist before the earn.
+  const autoRule = await inj('POST', '/api/automation/rules', token, { name: 'VIP earn', event_type: 'loyalty.earned', condition: { field: 'points_earned', op: 'gte', value: 100 }, action: { type: 'log' } });
+  ok('Automation: a loyalty.earned rule can be created (event in the catalog)', autoRule.status === 201 && autoRule.json.id > 0, `${autoRule.status}`);
+
   const enr = await inj('POST', '/api/v1/loyalty/enroll', hqKey, { phone: '0899990000', name: 'API Member' });
   ok('Public API loyalty: enroll returns a member (scope loyalty:write)', enr.status === 201 && enr.json.id > 0 && /^M-/.test(enr.json.member_code ?? ''), `${enr.status} ${enr.json.member_code}`);
   const earn = await inj('POST', '/api/v1/loyalty/earn', hqKey, { member_id: enr.json.id, net_spend: 100 });
@@ -556,6 +560,9 @@ async function main() {
   ok('Public API loyalty: earn requires loyalty:write scope (catalog-only key → 403)', noScope.status === 403, `${noScope.status}`);
   const whDeliveries = await db.select().from(s.webhookDeliveries).where(eq(s.webhookDeliveries.event, 'loyalty.earned'));
   ok('Public API loyalty: earn fired a loyalty.earned webhook delivery', whDeliveries.length >= 1, `n=${whDeliveries.length}`);
+  // D2: the earn also drove the automation engine — the ≥100 rule matched and executed.
+  const autoExec = await db.select().from(s.automationExecutions).where(and(eq(s.automationExecutions.eventType, 'loyalty.earned'), eq(s.automationExecutions.status, 'executed')));
+  ok('Automation: loyalty.earned (points ≥ 100) triggered the rule (execution recorded)', autoExec.length >= 1, `executed=${autoExec.length}`);
 
   // Scope enforcement: a catalog-only key reads /items but is denied /orders.
   const catItems = await inj('GET', '/api/v1/items', catKey);
