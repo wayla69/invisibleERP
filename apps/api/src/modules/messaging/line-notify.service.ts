@@ -39,7 +39,7 @@ export class LineNotifyService {
   // the doc's tenant plus HQ users (tenant NULL). Capped to keep a misconfigured role from blasting.
   async notifyRole(role: string, tenantId: number | null | undefined, text: string, cap = 20): Promise<void> {
     try {
-      const conds = [eq(users.role, role as any), eq(users.isActive, true), isNotNull(users.lineUserId)];
+      const conds = [eq(users.role, role as typeof users.$inferSelect.role), eq(users.isActive, true), isNotNull(users.lineUserId)];
       if (tenantId != null) conds.push(or(eq(users.tenantId, tenantId), isNull(users.tenantId))!);
       const rows = await this.db.select({ lineUserId: users.lineUserId, tenantId: users.tenantId })
         .from(users).where(and(...conds)).limit(cap);
