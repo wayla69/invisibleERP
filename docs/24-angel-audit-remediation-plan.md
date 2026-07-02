@@ -57,7 +57,7 @@ Every remediation item below traces to one of these findings. IDs are stable; us
 | AUD-CMP-02 | Stale internal docs assert as-current defects that are now false ("RLS not implemented", "no MFA", "no billing") — a diligence reviewer reading `docs/09` reaches the opposite conclusion from `compliance/` | `docs/09-worldclass-roadmap.md:207-208,231,320-353` |
 | AUD-CMP-03 | Zero external attestation and no operating-evidence window: SOC 2 / ISO 27001 / PCI all v0.1 drafts, no auditor engaged, no control has ≥1 quarter of retained evidence | `compliance/soc2-readiness.md`, `iso27001-gap-analysis.md`, `pci-dss-scope-design.md` |
 | AUD-CMP-04 | Remaining "Partial" controls are entity-level governance nobody has operated (ELC-01 ethics campaign, ELC-02 audit committee, ELC-04 whistleblower); no SOX PMO / CISO / CFO sign-off evidenced | `compliance/CONTROL_STATUS_HONEST.md:74-83` |
-| AUD-LGL-03 | DSAR/erasure machinery is member/loyalty-centric — does **not** cover employees, whose data is the worst-protected (see AUD-LGL-01) | `modules/pdpa/` (`memberConsents`, `pdpaErasures`) |
+| AUD-LGL-03 ✅ | DSAR/erasure machinery is member/loyalty-centric — does **not** cover employees, whose data is the worst-protected (see AUD-LGL-01) — **CLOSED 2026-07-02**: `collectEmployee`/`eraseEmployee` in `pdpa.service.ts` (access = decrypted identifiers + payslips; erasure = master redaction with statutory payroll retention carve-out); `pdpa` harness 13 | `modules/pdpa/` (`memberConsents`, `pdpaErasures`) |
 
 ### Severity: LOW / opportunity (AI differentiation)
 
@@ -533,3 +533,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.2 | 2026-07-02 | ERP/Product | R4-5 delivered (nav + manual + docs/06 honest statistical labeling) |
 | 2.3 | 2026-07-02 | ERP/Product | R3-3 code delivered (compliance ToE evidence artifact per CI run + quarterly-archive runbook; evidence clock runs from 2026-07-02) |
 | 2.4 | 2026-07-02 | ERP/Product | R0-2 drafts delivered (privacy policy v0.1 + /legal/privacy page + signup consent line; fact-placeholders fixed; execution remains org work) |
+| 2.5 | 2026-07-02 | ERP/Product | AUD-LGL-03 closed (employee DSAR access/erasure with statutory payroll carve-out; PDPA-02 text + narrative 08 rev 1.6 + UAT-SEC-047) |

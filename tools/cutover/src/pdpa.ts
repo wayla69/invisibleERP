@@ -115,6 +115,30 @@ async function main() {
   ok('RLS: other-tenant DPO cannot read the DSAR (404)', cross.status === 404 || cross.json?.error?.code === 'NOT_FOUND', `status=${cross.status}`);
 
   // 8. Reject flow.
+  // ── Employee data subject (docs/24 AUD-LGL-03) — access returns the DECRYPTED identifiers the employer
+  // holds (ITGC-AC-19 columns); erasure redacts the master record but KEEPS payslips (statutory retention).
+  const [emp] = await db.insert(s.employees).values({ tenantId: t1, empCode: 'EMP-PD1', name: 'Prasert K.', nationalId: '1102003330011', ssoNo: 'SSO-777', bankAccount: '111-2-33333-1', monthlySalary: '25000' }).returning();
+  await db.insert(s.payruns).values({ tenantId: t1, period: '2026-05', status: 'Posted', headcount: 1 }).onConflictDoNothing();
+  const [prun] = await db.select().from(s.payruns).where(eq(s.payruns.period, '2026-05'));
+  await db.insert(s.payslips).values({ payrunId: Number(prun.id), tenantId: t1, employeeId: Number(emp.id), empCode: 'EMP-PD1', empName: 'Prasert K.', nationalId: '1102003330011', gross: '25000', net: '24000' });
+
+  const eacc = await inj('POST', '/api/pdpa/dsar', dpo1, { subject_type: 'employee', subject_ref: 'EMP-PD1', request_type: 'access' });
+  const eexp = await inj('POST', `/api/pdpa/dsar/${eacc.json.id}/export`, dpo1);
+  ok('employee DSAR access → bundle carries the decrypted citizen ID + bank account + payslips',
+    eexp.json.export?.found === true && eexp.json.export?.profile?.national_id === '1102003330011' && eexp.json.export?.profile?.bank_account === '111-2-33333-1' && (eexp.json.export?.payslips?.length ?? 0) === 1,
+    JSON.stringify({ nid: eexp.json.export?.profile?.national_id, slips: eexp.json.export?.payslips?.length }));
+
+  const eer = await inj('POST', '/api/pdpa/dsar', dpo1, { subject_type: 'employee', subject_ref: 'EMP-PD1', request_type: 'erasure' });
+  const eerRes = await inj('POST', `/api/pdpa/dsar/${eer.json.id}/erase`, dpo1);
+  const empRow: any = (await pg.query(`select name, national_id, sso_no, bank_account, active from employees where emp_code = 'EMP-PD1'`)).rows[0];
+  const slipRow: any = (await pg.query(`select national_id, gross from payslips where emp_code = 'EMP-PD1'`)).rows[0];
+  ok('employee erasure → master identifiers redacted, account deactivated, pseudonym issued',
+    eerRes.json.erased === true && /^PDPA-ERASED-EMP-/.test(eerRes.json.pseudonym ?? '') && empRow.name === '[erased]' && empRow.national_id == null && empRow.bank_account == null && empRow.active === false,
+    JSON.stringify({ name: empRow.name, nid: empRow.national_id, act: empRow.active }));
+  ok('employee erasure keeps statutory payroll records (payslip intact — PDPA legal-obligation carve-out)',
+    !!slipRow && Number(slipRow.gross) === 25000 && !!slipRow.national_id,
+    JSON.stringify({ gross: slipRow?.gross, has_nid: !!slipRow?.national_id }));
+
   const rej0 = await inj('POST', '/api/pdpa/dsar', dpo1, { subject_type: 'customer', subject_ref: 'CUST-9', request_type: 'objection' });
   const rej = await inj('POST', `/api/pdpa/dsar/${rej0.json.id}/reject`, dpo1, { reason: 'not a data subject of this controller' });
   ok('reject DSAR → status rejected', rej.json.status === 'rejected', JSON.stringify(rej.json));
