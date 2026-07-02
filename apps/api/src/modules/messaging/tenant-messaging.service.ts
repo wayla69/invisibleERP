@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenantMessagingConfig } from '../../database/schema';
+import { tenantMessagingConfig, messageLog } from '../../database/schema';
 import { encrypt, decrypt } from '../../common/crypto';
 import type { MessageChannel } from './gateways';
 import type { JwtUser } from '../../common/decorators';
@@ -16,17 +16,37 @@ const CHANNELS: MessageChannel[] = ['line', 'sms', 'email'];
 export class TenantMessagingService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
-  // Admin UI view — configured/enabled per channel, NEVER the secret values.
+  // Admin UI view — configured/enabled per channel, NEVER the secret values. Phase F3 (docs/24) adds go-live
+  // readiness: `resolved_provider` mirrors the gateway's resolution order (tenant creds → platform env →
+  // mock — a ⚪ mock channel logs sends as 'sent' but nothing leaves the building), `callback_token_set`
+  // (boolean only), and the channel's last message_log row (when/status/provider) so an admin can see at a
+  // glance whether messaging actually delivers. Secrets are decrypted internally for the boolean checks and
+  // never serialized.
   async get(user: JwtUser) {
     const db = this.db as any;
     const rows = await db.select().from(tenantMessagingConfig).where(eq(tenantMessagingConfig.tenantId, user.tenantId as number));
     const byChannel = new Map<string, any>(rows.map((r: any) => [r.channel, r]));
-    return {
-      channels: CHANNELS.map((ch) => {
-        const r = byChannel.get(ch);
-        return { channel: ch, configured: !!r?.configEnc, enabled: r ? r.enabled === true : false, updated_at: r?.updatedAt ?? null, updated_by: r?.updatedBy ?? null };
-      }),
-    };
+    const e = process.env;
+    const envPrimary: Record<MessageChannel, string | undefined> = { line: e.LINE_CHANNEL_TOKEN, sms: e.SMS_API_KEY, email: e.SMTP_HOST };
+    const primaryKey: Record<MessageChannel, string> = { line: 'token', sms: 'apiKey', email: 'host' };
+    const channels: any[] = [];
+    for (const ch of CHANNELS) {
+      const r = byChannel.get(ch);
+      let creds: Record<string, any> | null = null;
+      if (r?.configEnc) { try { creds = JSON.parse(decrypt(r.configEnc)); } catch { creds = null; } }
+      const tenantLive = r?.enabled === true && !!creds?.[primaryKey[ch]];
+      const resolved = tenantLive ? 'tenant' : envPrimary[ch] ? 'env' : 'mock';
+      const [last] = await db.select({ at: messageLog.createdAt, status: messageLog.status, provider: messageLog.provider })
+        .from(messageLog).where(and(eq(messageLog.tenantId, user.tenantId as number), eq(messageLog.channel, ch)))
+        .orderBy(desc(messageLog.id)).limit(1);
+      channels.push({
+        channel: ch, configured: !!r?.configEnc, enabled: r ? r.enabled === true : false,
+        resolved_provider: resolved, callback_token_set: !!creds?.callbackToken,
+        last_send_at: last?.at ?? null, last_status: last?.status ?? null, last_provider: last?.provider ?? null,
+        updated_at: r?.updatedAt ?? null, updated_by: r?.updatedBy ?? null,
+      });
+    }
+    return { channels };
   }
 
   // Store (encrypted) per-tenant provider credentials for a channel. Minimal shape validation per channel.
