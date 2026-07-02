@@ -76,7 +76,7 @@ export class TaxReportsService {
       doc_no: whtCertificates.docNo, date_paid: whtCertificates.datePaid, payee_name: whtCertificates.payeeName, payee_tax_id: whtCertificates.payeeTaxId,
       income_type: whtCertLines.incomeType, amount_paid: whtCertLines.amountPaid, rate: whtCertLines.rate, tax_withheld: whtCertLines.taxWithheld,
     }).from(whtCertLines).innerJoin(whtCertificates, eq(whtCertLines.whtCertId, whtCertificates.id))
-      .where(and(eq(whtCertificates.pndType, type as any), eq(whtCertificates.status, 'Issued'), gte(whtCertificates.datePaid, start), lt(whtCertificates.datePaid, end)))
+      .where(and(eq(whtCertificates.pndType, type as typeof whtCertificates.$inferSelect.pndType), eq(whtCertificates.status, 'Issued'), gte(whtCertificates.datePaid, start), lt(whtCertificates.datePaid, end)))
       .orderBy(asc(whtCertificates.datePaid), asc(whtCertificates.docNo));
     const out = rows.map((r: any) => ({ doc_no: r.doc_no, date_paid: r.date_paid, payee_name: r.payee_name, payee_tax_id: r.payee_tax_id, income_type: r.income_type, amount_paid: n(r.amount_paid), rate: n(r.rate), tax_withheld: n(r.tax_withheld) }));
     return {

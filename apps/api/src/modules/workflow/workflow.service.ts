@@ -27,7 +27,7 @@ export class WorkflowService {
   // Replace a definition's steps (no-code builder save). Validates the same XOR rule per step.
   async updateDefinition(id: number, dto: { name?: string; sla_hours?: number; steps?: StepDto[] }, user: JwtUser) {
     const db = this.db;
-    const [def] = await db.select().from(workflowDefinitions).where(and(eq(workflowDefinitions.tenantId, user.tenantId as any), eq(workflowDefinitions.id, id))).limit(1);
+    const [def] = await db.select().from(workflowDefinitions).where(and(eq(workflowDefinitions.tenantId, user.tenantId!), eq(workflowDefinitions.id, id))).limit(1);
     if (!def) throw new NotFoundException({ code: 'DEF_NOT_FOUND', message: 'Workflow definition not found', messageTh: 'ไม่พบเวิร์กโฟลว์' });
     const patch: any = {};
     if (dto.name !== undefined) patch.name = dto.name;
@@ -70,7 +70,7 @@ export class WorkflowService {
     return d ?? null;
   }
   private async defById(id: number) {
-    const [d] = await (this.db as any).select().from(workflowDefinitions).where(eq(workflowDefinitions.id, id)).limit(1);
+    const [d] = await this.db.select().from(workflowDefinitions).where(eq(workflowDefinitions.id, id)).limit(1);
     return d ?? null;
   }
   private async steps(definitionId: number) {

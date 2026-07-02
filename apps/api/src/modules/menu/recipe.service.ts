@@ -92,16 +92,16 @@ export class RecipeService {
     const low = Math.max(0, opts?.low ?? 5);
     // Scope to the caller's tenant explicitly (sku/itemId are unique only per tenant; an HQ/bypass caller
     // must not blend another shop's recipes or stock — mirrors explode()).
-    const recipes = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId as any), eq(menuRecipes.active, true)));
+    const recipes = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId!), eq(menuRecipes.active, true)));
     if (!recipes.length) return { low_threshold: low, summary: { dishes: 0, out: 0, low: 0, ok: 0, low_ingredients: 0 }, items: [], low_ingredients: [] };
 
     const recipeIds = recipes.map((r: any) => Number(r.id));
     const allLines = await db.select().from(menuRecipeLines).where(inArray(menuRecipeLines.recipeId, recipeIds));
     const linesByRecipe = new Map<number, any[]>();
     for (const l of allLines) { const k = Number(l.recipeId); (linesByRecipe.get(k) ?? linesByRecipe.set(k, []).get(k))!.push(l); }
-    const mis = await db.select().from(menuItems).where(eq(menuItems.tenantId, tenantId as any));
+    const mis = await db.select().from(menuItems).where(eq(menuItems.tenantId, tenantId!));
     const miById = new Map<number, any>(mis.map((m: any) => [Number(m.id), m]));
-    const inv = await db.select().from(customerInventory).where(eq(customerInventory.tenantId, tenantId as any));
+    const inv = await db.select().from(customerInventory).where(eq(customerInventory.tenantId, tenantId!));
     const stockByItem = new Map<string, { stock: number; reorder: number; desc: string | null }>(inv.map((i: any) => [String(i.itemId), { stock: n(i.currentStock), reorder: n(i.reorderPoint), desc: i.itemDescription }]));
 
     const items: any[] = [];
@@ -148,7 +148,7 @@ export class RecipeService {
   // Admin/HQ checkout app.bypass_rls='on' makes RLS see every tenant's recipe, so a bare sku lookup could
   // return another shop's recipe (wrong lines/costs deducted). The known order/sale tenant disambiguates.
   private async explode(db: any, tenantId: number | null, sku: string) {
-    const [rec] = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId as any), eq(menuRecipes.sku, sku), eq(menuRecipes.active, true))).limit(1);
+    const [rec] = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId!), eq(menuRecipes.sku, sku), eq(menuRecipes.active, true))).limit(1);
     if (!rec) return null;
     const lines = await db.select().from(menuRecipeLines).where(eq(menuRecipeLines.recipeId, Number(rec.id)));
     const yld = Math.max(n(rec.yieldQty), 1);
@@ -168,14 +168,14 @@ export class RecipeService {
       const needed = round4(l.qtyPerServing * soldQty);
       // FOR UPDATE serializes concurrent sales sharing an ingredient → no lost stock decrement (mirrors
       // gift-card/loyalty redeem). The second tx blocks then re-reads the post-decrement balance.
-      let [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId as any), eq(customerInventory.itemId, l.itemId))).for('update').limit(1);
+      let [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId!), eq(customerInventory.itemId, l.itemId))).for('update').limit(1);
       if (!inv) { [inv] = await db.insert(customerInventory).values({ tenantId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, uom: l.uom ?? null, currentStock: '0' }).returning(); }
       const after = round4(n(inv.currentStock) - needed);
       await db.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));
       await db.insert(custStockLog).values({ tenantId, branchId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, logDate: new Date(), logType: 'Consume', qtyChange: String(-needed), balanceAfter: String(after), refDoc: saleNo, notes: after < 0 ? 'OVERSOLD' : null, createdBy: user.username });
       // mirror into the per-branch ledger. Lock order: rollup row (above) → branch row, to avoid deadlocks.
       if (branchId != null) {
-        let [bs] = await db.select().from(branchStock).where(and(eq(branchStock.tenantId, tenantId as any), eq(branchStock.branchId, branchId), eq(branchStock.itemId, l.itemId))).for('update').limit(1);
+        let [bs] = await db.select().from(branchStock).where(and(eq(branchStock.tenantId, tenantId!), eq(branchStock.branchId, branchId), eq(branchStock.itemId, l.itemId))).for('update').limit(1);
         if (!bs) { [bs] = await db.insert(branchStock).values({ tenantId, branchId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, uom: l.uom ?? null, onHand: '0' }).returning(); }
         await db.update(branchStock).set({ onHand: String(round4(n(bs.onHand) - needed)), lastUpdated: new Date() }).where(eq(branchStock.id, bs.id));
       }
@@ -191,7 +191,7 @@ export class RecipeService {
   async modifierCogs(db: any, tenantId: number | null, optionIds: number[], soldQty: number): Promise<number> {
     if (!optionIds?.length) return 0;
     const opts = await db.select({ cogsDelta: modifierOptions.cogsDelta }).from(modifierOptions)
-      .where(and(eq(modifierOptions.tenantId, tenantId as any), inArray(modifierOptions.id, optionIds)));
+      .where(and(eq(modifierOptions.tenantId, tenantId!), inArray(modifierOptions.id, optionIds)));
     const perUnit = opts.reduce((a: number, o: any) => a + n(o.cogsDelta), 0);
     return round4(perUnit * soldQty);
   }
@@ -203,13 +203,13 @@ export class RecipeService {
     let cost = 0;
     for (const l of r.lines) {
       const back = round4(l.qtyPerServing * returnedQty);
-      const [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId as any), eq(customerInventory.itemId, l.itemId))).for('update').limit(1);
+      const [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId!), eq(customerInventory.itemId, l.itemId))).for('update').limit(1);
       if (!inv) continue;
       const after = round4(n(inv.currentStock) + back);
       await db.update(customerInventory).set({ currentStock: String(after), lastUpdated: new Date() }).where(eq(customerInventory.id, inv.id));
       await db.insert(custStockLog).values({ tenantId, branchId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, logDate: new Date(), logType: 'Consume-Reverse', qtyChange: String(back), balanceAfter: String(after), refDoc: returnNo, createdBy: user.username });
       if (branchId != null) {
-        let [bs] = await db.select().from(branchStock).where(and(eq(branchStock.tenantId, tenantId as any), eq(branchStock.branchId, branchId), eq(branchStock.itemId, l.itemId))).for('update').limit(1);
+        let [bs] = await db.select().from(branchStock).where(and(eq(branchStock.tenantId, tenantId!), eq(branchStock.branchId, branchId), eq(branchStock.itemId, l.itemId))).for('update').limit(1);
         if (!bs) { [bs] = await db.insert(branchStock).values({ tenantId, branchId, itemId: l.itemId, itemDescription: l.desc ?? l.itemId, uom: l.uom ?? null, onHand: '0' }).returning(); }
         await db.update(branchStock).set({ onHand: String(round4(n(bs.onHand) + back)), lastUpdated: new Date() }).where(eq(branchStock.id, bs.id));
       }

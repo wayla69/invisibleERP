@@ -10,7 +10,7 @@ import type { JwtUser } from '../../common/decorators';
 import { mintTableToken } from './qr-token.util';
 import type { CreateTableDto, UpdateTableDto, ZoneDto, ZoneUpdateDto } from './dto';
 
-const LIVE_SESSION = ['open', 'bill_requested', 'paying'];
+const LIVE_SESSION: NonNullable<typeof tableSessions.$inferSelect.status>[] = ['open', 'bill_requested', 'paying'];
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
 @Injectable()
@@ -145,7 +145,7 @@ export class TableService {
     const db = this.db;
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
     if (!t || !t.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
-    const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION))).limit(1);
     if (live) throw new BadRequestException({ code: 'TABLE_BUSY', message: 'Table has a live session — clear it first', messageTh: 'โต๊ะมีลูกค้าอยู่ — เคลียร์โต๊ะก่อนจึงจะลบได้' });
     await db.update(diningTables).set({ active: false, updatedAt: new Date() }).where(eq(diningTables.id, id));
     return { id, deleted: true, table_no: t.tableNo };
@@ -156,7 +156,7 @@ export class TableService {
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, id)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     if (status === 'out_of_service') {
-      const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+      const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, id), inArray(tableSessions.status, LIVE_SESSION))).limit(1);
       if (live) throw new BadRequestException({ code: 'TABLE_BUSY', message: 'Table has a live session', messageTh: 'โต๊ะมีลูกค้าอยู่' });
     }
     await db.update(diningTables).set({ status: status as typeof diningTables.$inferInsert.status, updatedAt: new Date() }).where(eq(diningTables.id, id));
@@ -169,14 +169,14 @@ export class TableService {
     const [t] = await db.select().from(diningTables).where(eq(diningTables.id, tableId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Table not found', messageTh: 'ไม่พบโต๊ะ' });
     // reuse an existing live session if present (idempotent for diner re-scan)
-    const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, tableId), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    const [live] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, tableId), inArray(tableSessions.status, LIVE_SESSION))).limit(1);
     if (live) return { session_id: Number(live.id), session_no: live.sessionNo, public_token: live.publicToken, table_no: t.tableNo, reused: true };
     const sessionNo = await this.docNo.nextDaily('TS');
     const tenantId = Number(t.tenantId);
     const [s] = await db.insert(tableSessions).values({ tenantId, tableId, sessionNo, publicToken: 'pending', status: 'open', partySize: partySize ?? null, openedBy }).returning({ id: tableSessions.id });
     const publicToken = mintTableToken({ tenantId, tableId, sessionId: Number(s!.id) });
     await db.update(tableSessions).set({ publicToken }).where(eq(tableSessions.id, s!.id));
-    await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, tableId), inArray(diningTables.status, ['available', 'reserved'] as any)));
+    await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, tableId), inArray(diningTables.status, ['available', 'reserved'] as NonNullable<typeof diningTables.$inferSelect.status>[])));
     return { session_id: Number(s!.id), session_no: sessionNo, public_token: publicToken, table_no: t.tableNo, qr_token: t.qrToken, reused: false };
   }
 
@@ -189,10 +189,10 @@ export class TableService {
     if (!from) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Source table not found', messageTh: 'ไม่พบโต๊ะต้นทาง' });
     const [to] = await db.select().from(diningTables).where(eq(diningTables.id, toTableId)).limit(1);
     if (!to || !to.active) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Target table not found', messageTh: 'ไม่พบโต๊ะปลายทาง' });
-    const [sess] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, fromTableId), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    const [sess] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, fromTableId), inArray(tableSessions.status, LIVE_SESSION))).limit(1);
     if (!sess) throw new BadRequestException({ code: 'NO_SESSION', message: 'No live session on the source table', messageTh: 'โต๊ะต้นทางไม่มีลูกค้า' });
     // target must be free — moving onto a table that already has a live session would be a merge
-    const [busy] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, toTableId), inArray(tableSessions.status, LIVE_SESSION as any))).limit(1);
+    const [busy] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, toTableId), inArray(tableSessions.status, LIVE_SESSION))).limit(1);
     if (busy) throw new BadRequestException({ code: 'TABLE_BUSY', message: 'Target table is occupied (use merge instead)', messageTh: 'โต๊ะปลายทางมีลูกค้าอยู่ (ใช้การรวมโต๊ะ)' });
     const now = new Date();
     await db.update(tableSessions).set({ tableId: toTableId }).where(eq(tableSessions.id, sess.id));
@@ -228,7 +228,7 @@ export class TableService {
     const now = Date.now();
     const out = [];
     for (const t of tables) {
-      const [sess] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, Number(t.id)), inArray(tableSessions.status, LIVE_SESSION as any))).orderBy(desc(tableSessions.id)).limit(1);
+      const [sess] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, Number(t.id)), inArray(tableSessions.status, LIVE_SESSION))).orderBy(desc(tableSessions.id)).limit(1);
       let order = null;
       if (sess) {
         const [o] = await db.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, Number(sess.id)), ne(dineInOrders.status, 'cancelled'))).orderBy(desc(dineInOrders.id)).limit(1);

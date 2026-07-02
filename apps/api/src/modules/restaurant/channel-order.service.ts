@@ -142,21 +142,21 @@ export class ChannelOrderService {
     return this.scope.run(claim.tenantId, async () => {
       const u = diner(claim.tenantId);
       const settled: any = await this.payments.settle(paymentNo, u);
-      const guard = await this.loadByToken(this.db as any, claim, token);
+      const guard = await this.loadByToken(this.db, claim, token);
       const o = await this.dineIn.loadOrderForUpdate(guard.orderNo); // FOR UPDATE → double-confirm serializes
       if (!o.saleNo) throw new BadRequestException({ code: 'NO_SALE', message: 'Call /pay first', messageTh: 'กรุณาเริ่มชำระเงินก่อน' });
       const built: any = await this.dineIn.buildSale(o, o.saleNo, 0, u);
       await this.postDeliveryFeeGL(o, o.saleNo, u);
       // reconciliation guard: the captured tender (set at pay) must equal the freshly-built bill. If items
       // changed between pay and confirm, the books would diverge from the money — reject instead (rolls back GL).
-      const [pmt] = await (this.db as any).select({ amount: payments.amount }).from(payments).where(eq(payments.paymentNo, paymentNo)).limit(1);
+      const [pmt] = await this.db.select({ amount: payments.amount }).from(payments).where(eq(payments.paymentNo, paymentNo)).limit(1);
       const expected = roundCurrency(n(built.total) + n(o.deliveryFee), 'THB');
       if (pmt && Math.abs(n(pmt.amount) - expected) > 0.01) throw new BadRequestException({ code: 'TENDER_MISMATCH', message: `Captured ${n(pmt.amount)} != bill ${expected} — order changed after payment`, messageTh: 'ยอดที่ชำระไม่ตรงกับบิล' });
       const invNo = await this.dineIn.markPaidAndInvoice(o, o.saleNo, u);
       // Loyalty earn for linked member — idempotent on saleNo (skip if already earned).
       let pointsEarned = 0;
       if (this.member && o.memberId) {
-        const db2 = this.db as any;
+        const db2 = this.db;
         const [ex] = await db2.select({ id: posMemberLedger.id }).from(posMemberLedger)
           .where(and(eq(posMemberLedger.refDoc, o.saleNo), eq(posMemberLedger.txnType, 'Earn'))).limit(1);
         if (!ex) {

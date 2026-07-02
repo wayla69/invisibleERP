@@ -82,7 +82,7 @@ export class EInvoiceService {
   }
 
   async config(_user: JwtUser) {
-    const [row] = await (this.db as any).select({ p: einvoiceConfig.providerKey }).from(einvoiceConfig).limit(1);
+    const [row] = await this.db.select({ p: einvoiceConfig.providerKey }).from(einvoiceConfig).limit(1);
     return { provider: row?.p ?? 'stub' };
   }
 
@@ -115,7 +115,7 @@ export class EInvoiceService {
   }
 
   async submissions(_user: JwtUser) {
-    const rows = await (this.db as any).select().from(einvoiceSubmissions);
+    const rows = await this.db.select().from(einvoiceSubmissions);
     return { submissions: rows.map((s: any) => ({ id: Number(s.id), doc_ref: s.docRef, provider: s.provider, status: s.status, ref: (s.response as any)?.ref, submitted_at: s.submittedAt })) };
   }
 }

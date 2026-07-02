@@ -75,7 +75,7 @@ export class GovernanceService {
   // ELC-04 — advance a case through its lifecycle with a resolution note (audit committee / compliance).
   async updateCase(caseRef: string, dto: { status: string; resolution_note?: string }, user: JwtUser) {
     const db = this.db;
-    if (!STATUSES.includes(dto.status as any)) throw new BadRequestException({ code: 'BAD_STATUS', message: `status must be one of ${STATUSES.join(', ')}`, messageTh: 'สถานะไม่ถูกต้อง' });
+    if (!(STATUSES as readonly string[]).includes(dto.status)) throw new BadRequestException({ code: 'BAD_STATUS', message: `status must be one of ${STATUSES.join(', ')}`, messageTh: 'สถานะไม่ถูกต้อง' });
     const [existing] = await db.select().from(whistleblowerCases).where(eq(whistleblowerCases.caseRef, caseRef)).limit(1);
     if (!existing) throw new NotFoundException({ code: 'CASE_NOT_FOUND', message: 'Whistleblower case not found', messageTh: 'ไม่พบเคสแจ้งเบาะแส' });
     await db.update(whistleblowerCases).set({
@@ -128,7 +128,7 @@ export class GovernanceService {
   // Review a fraud risk: advance its status + stamp last_reviewed_at (the periodic review evidence).
   async reviewFraudRisk(riskRef: string, dto: { status: string; mitigating_controls?: string; owner?: string }, user: JwtUser) {
     const db = this.db;
-    if (!RISK_STATUSES.includes(dto.status as any)) throw new BadRequestException({ code: 'BAD_STATUS', message: `status must be one of ${RISK_STATUSES.join(', ')}`, messageTh: 'สถานะไม่ถูกต้อง' });
+    if (!(RISK_STATUSES as readonly string[]).includes(dto.status)) throw new BadRequestException({ code: 'BAD_STATUS', message: `status must be one of ${RISK_STATUSES.join(', ')}`, messageTh: 'สถานะไม่ถูกต้อง' });
     const [existing] = await db.select().from(fraudRisks).where(eq(fraudRisks.riskRef, riskRef)).limit(1);
     if (!existing) throw new NotFoundException({ code: 'RISK_NOT_FOUND', message: 'Fraud risk not found', messageTh: 'ไม่พบความเสี่ยงทุจริต' });
     await db.update(fraudRisks).set({

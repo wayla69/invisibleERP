@@ -56,7 +56,7 @@ export class JobQueueService {
   // handler runs (the row lock is NOT held for the handler's duration). Runs with RLS bypass.
   async claimNext(): Promise<ClaimedJob | null> {
     return runInTenantContext(this.db, { tenantId: null, bypass: true, actor: 'system:worker' }, async () => {
-      const tx = (this.db as any);
+      const tx = this.db;
       const picked = await tx.execute(sql`
         SELECT id FROM background_jobs
         WHERE status = 'queued' AND run_after <= now()
@@ -72,16 +72,16 @@ export class JobQueueService {
         .where(eq(backgroundJobs.id, id))
         .returning();
       return {
-        id: Number(job.id), tenantId: job.tenantId != null ? Number(job.tenantId) : null,
-        jobType: job.jobType, payload: job.payload, actor: job.actor, bypass: !!job.bypassRls,
-        attempts: Number(job.attempts), maxAttempts: Number(job.maxAttempts),
+        id: Number(job!.id), tenantId: job!.tenantId != null ? Number(job!.tenantId) : null,
+        jobType: job!.jobType, payload: job!.payload, actor: job!.actor, bypass: !!job!.bypassRls,
+        attempts: Number(job!.attempts), maxAttempts: Number(job!.maxAttempts),
       };
     });
   }
 
   async markDone(id: number, result: unknown): Promise<void> {
     await runInTenantContext(this.db, { tenantId: null, bypass: true, actor: 'system:worker' }, async () => {
-      await (this.db as any).update(backgroundJobs)
+      await this.db.update(backgroundJobs)
         .set({ status: 'done', result: (result ?? {}) as any, error: null, lockedAt: null, updatedAt: new Date() })
         .where(eq(backgroundJobs.id, id));
     });
@@ -92,7 +92,7 @@ export class JobQueueService {
     const exhausted = job.attempts >= job.maxAttempts;
     const backoffSec = Math.min(300, 2 ** job.attempts); // 2,4,8,… capped at 5 min
     await runInTenantContext(this.db, { tenantId: null, bypass: true, actor: 'system:worker' }, async () => {
-      await (this.db as any).update(backgroundJobs)
+      await this.db.update(backgroundJobs)
         .set(exhausted
           ? { status: 'failed', error: err.slice(0, 2000), lockedAt: null, updatedAt: new Date() }
           : { status: 'queued', error: err.slice(0, 2000), lockedAt: null, runAfter: new Date(Date.now() + backoffSec * 1000), updatedAt: new Date() })
@@ -108,7 +108,7 @@ export class JobQueueService {
   // else dead-letter. Returns counts. Bypass context (cross-tenant). Idempotent / safe to run repeatedly.
   async reapStuck(staleMs: number = STUCK_MS()): Promise<{ requeued: number; deadLettered: number }> {
     return runInTenantContext(this.db, { tenantId: null, bypass: true, actor: 'system:reaper' }, async () => {
-      const tx = this.db as any;
+      const tx = this.db;
       // Typed builder (NOT a raw sql Date template — that crashes postgres-js in prod) for the cutoff.
       const cutoff = new Date(Date.now() - staleMs);
       const stale = await tx.select().from(backgroundJobs)
@@ -139,7 +139,7 @@ export class JobQueueService {
   async opsCounts(): Promise<{ queued: number; running: number; failed: number; stuck: number }> {
     return runInTenantContext(this.db, { tenantId: null, bypass: true, actor: 'system:metrics' }, async () => {
       const cutoffIso = new Date(Date.now() - STUCK_MS()).toISOString(); // string param — never a raw Date
-      const res: any = await (this.db as any).execute(sql`SELECT
+      const res: any = await this.db.execute(sql`SELECT
         count(*) FILTER (WHERE status = 'queued')  AS queued,
         count(*) FILTER (WHERE status = 'running') AS running,
         count(*) FILTER (WHERE status = 'failed')  AS failed,

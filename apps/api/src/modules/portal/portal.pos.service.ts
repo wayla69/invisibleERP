@@ -100,7 +100,7 @@ export class PortalPosService {
     // bumped second until cust_pos_sales.sale_no (UNIQUE) is free.
     let saleNo = this.docNo.nextTenantStamped('SALE', t.code);
     for (let attempt = 1; attempt < 12; attempt++) {
-      const [exists] = await (this.db as any).select({ id: custPosSales.id }).from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
+      const [exists] = await this.db.select({ id: custPosSales.id }).from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
       if (!exists) break;
       saleNo = this.docNo.nextTenantStamped('SALE', t.code, new Date(Date.now() + attempt * 1000));
     }

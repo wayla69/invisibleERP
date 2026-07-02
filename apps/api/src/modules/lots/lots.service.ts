@@ -16,7 +16,7 @@ export class LotsService {
     const conds: any[] = [];
     if (q.item_id) conds.push(eq(lotLedger.itemId, q.item_id));
     if (q.location) conds.push(eq(lotLedger.locationId, q.location));
-    if (q.status) conds.push(eq(lotLedger.status, q.status as any));
+    if (q.status) conds.push(eq(lotLedger.status, q.status as NonNullable<typeof lotLedger.$inferSelect.status>));
     const rows = await db.select().from(lotLedger).where(conds.length ? and(...conds) : undefined).orderBy(desc(lotLedger.id)).limit(q.limit ?? 200);
     return { lots: rows.map(shape), count: rows.length };
   }

@@ -66,7 +66,7 @@ export class CustomObjectsService {
 
   async removeObject(key: string, user: JwtUser) {
     const db = this.db;
-    const upd = await db.update(customObjects).set({ active: false }).where(and(eq(customObjects.objectKey, slug(key)), eq(customObjects.tenantId, user.tenantId as any))).returning({ id: customObjects.id });
+    const upd = await db.update(customObjects).set({ active: false }).where(and(eq(customObjects.objectKey, slug(key)), eq(customObjects.tenantId, user.tenantId!))).returning({ id: customObjects.id });
     if (!upd.length) throw new NotFoundException({ code: 'OBJECT_NOT_FOUND', message: 'Object not found', messageTh: 'ไม่พบออบเจ็กต์' });
     return { object_key: slug(key), active: false };
   }

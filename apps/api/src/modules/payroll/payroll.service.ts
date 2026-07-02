@@ -178,9 +178,9 @@ export class PayrollService implements OnModuleInit {
     }).from(payslips).innerJoin(payruns, eq(payslips.payrunId, payruns.id))
       .where(sql`${payruns.period}::text like ${year + '-%'}`);
     const byEmp = new Map<string, { emp_name: string; national_id: string | null; income: number; wht: number }>();
-    for (const r of rows as any[]) {
+    for (const r of rows) {
       const key = r.employeeId != null ? `id:${r.employeeId}` : `code:${r.empCode ?? r.empName}`;
-      const cur = byEmp.get(key) ?? { emp_name: r.empName, national_id: r.nationalId ?? null, income: 0, wht: 0 };
+      const cur = byEmp.get(key) ?? { emp_name: r.empName ?? '', national_id: r.nationalId ?? null, income: 0, wht: 0 };
       cur.income = r2(cur.income + n(r.gross));
       cur.wht = r2(cur.wht + n(r.wht));
       if (cur.national_id == null && r.nationalId != null) cur.national_id = r.nationalId;

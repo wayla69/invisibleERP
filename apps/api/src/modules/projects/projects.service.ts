@@ -1326,7 +1326,7 @@ export class ProjectsService {
   }
 
   private async row(code: string) {
-    const [p] = await (this.db as any).select().from(projects).where(eq(projects.projectCode, code)).limit(1);
+    const [p] = await this.db.select().from(projects).where(eq(projects.projectCode, code)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
     return p;
   }

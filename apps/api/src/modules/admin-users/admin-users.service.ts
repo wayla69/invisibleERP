@@ -94,7 +94,7 @@ export class AdminUsersService {
     // Admin principal (tenantId=null) is cross-tenant HQ — no limit applies.
     if (tenantId != null) await this.billing.checkUserLimit(tenantId);
     const hash = await this.passwords.hash(dto.password);
-    const [u] = await db.insert(users).values({ username, passwordHash: hash, role: dto.role as any, tenantId, mustChangePassword: true }).returning({ id: users.id });
+    const [u] = await db.insert(users).values({ username, passwordHash: hash, role: dto.role as typeof users.$inferInsert.role, tenantId, mustChangePassword: true }).returning({ id: users.id });
     if (dto.permissions?.length) {
       await db.insert(userPermissions).values(dto.permissions.map((p) => ({ userId: Number(u!.id), perm: p }))).onConflictDoNothing();
     }

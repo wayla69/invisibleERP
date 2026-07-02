@@ -95,7 +95,7 @@ export class PrintService {
 
   // Receipt previews (no queue) — used by the web printable page and the tie-out control.
   async preview(saleNo: string, format: 'html' | 'data', user: JwtUser, lang?: 'th' | 'en' | 'both') {
-    const prior = await (this.db as any).select({ id: printJobs.id }).from(printJobs).where(and(eq(printJobs.saleNo, saleNo), eq(printJobs.jobType, 'receipt'))).limit(1);
+    const prior = await this.db.select({ id: printJobs.id }).from(printJobs).where(and(eq(printJobs.saleNo, saleNo), eq(printJobs.jobType, 'receipt'))).limit(1);
     const d = await this.receipts.loadData(saleNo, { isCopy: prior.length > 0, lang });
     return format === 'html' ? { html: this.receipts.html(d) } : { data: d, tie_out: this.receipts.tieOut(d) };
   }

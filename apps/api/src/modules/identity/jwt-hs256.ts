@@ -14,13 +14,13 @@ export function verifyHs256(token: string, secret: string): IdTokenClaims {
   const parts = token.split('.');
   if (parts.length !== 3) throw new Error('MALFORMED');
   const [h, p, sig] = parts;
-  const header = JSON.parse(b64uDecode(h));
+  const header = JSON.parse(b64uDecode(h!));
   if (header.alg !== 'HS256') throw new Error('UNSUPPORTED_ALG');
   const expected = b64u(createHmac('sha256', secret).update(`${h}.${p}`).digest());
-  const a = Buffer.from(sig);
+  const a = Buffer.from(sig!);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) throw new Error('BAD_SIGNATURE');
-  return JSON.parse(b64uDecode(p)) as IdTokenClaims;
+  return JSON.parse(b64uDecode(p!)) as IdTokenClaims;
 }
 
 // Sign helper (used by the test harness to mint an id_token; also handy for a future internal IdP).

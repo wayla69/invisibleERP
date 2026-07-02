@@ -18,9 +18,9 @@ export class DocAiService {
     let amount: number | null = null;
     // Prefer an explicit total. The negative lookbehind keeps "Subtotal" from matching the bare "total".
     const totalM = text.match(/(?:(?<![a-z])(?:grand\s+)?total|amount\s+due|รวมทั้งสิ้น|รวมสุทธิ|ยอดรวมสุทธิ)[^\d]{0,16}([\d,]+(?:\.\d{2})?)/i);
-    if (totalM) amount = Number(totalM[1].replace(/,/g, ''));
+    if (totalM) amount = Number(totalM[1]!.replace(/,/g, ''));
     if (amount == null) {
-      const nums = [...text.matchAll(/([\d,]+\.\d{2})/g)].map((m) => Number(m[1].replace(/,/g, ''))).filter((n) => Number.isFinite(n));
+      const nums = [...text.matchAll(/([\d,]+\.\d{2})/g)].map((m) => Number(m[1]!.replace(/,/g, ''))).filter((n) => Number.isFinite(n));
       if (nums.length) amount = Math.max(...nums);
     }
     const taxId = text.match(/(\d{13})/)?.[1] ?? null;

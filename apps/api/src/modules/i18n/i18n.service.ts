@@ -40,14 +40,14 @@ export class I18nService {
 
   async setMe(user: JwtUser, locale: string) {
     this.assertCode(locale);
-    await (this.db as any).update(users).set({ locale }).where(eq(users.username, user.username));
+    await this.db.update(users).set({ locale }).where(eq(users.username, user.username));
     return { locale };
   }
 
   async setTenantDefault(user: JwtUser, locale: string) {
     this.assertCode(locale);
     if (user.tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'no tenant in context', messageTh: 'ไม่มีกิจการในบริบท' });
-    await (this.db as any).update(tenants).set({ defaultLanguage: locale }).where(eq(tenants.id, user.tenantId));
+    await this.db.update(tenants).set({ defaultLanguage: locale }).where(eq(tenants.id, user.tenantId));
     return { locale };
   }
 }

@@ -83,7 +83,7 @@ export class NotificationsService {
   private visibleTo(user: JwtUser) {
     return and(
       eq(notifications.targetTenantId, user.tenantId as number),
-      or(isNull(notifications.targetRole), eq(notifications.targetRole, user.role as any)),
+      or(isNull(notifications.targetRole), eq(notifications.targetRole, user.role as NonNullable<typeof notifications.$inferSelect.targetRole>)),
     );
   }
 

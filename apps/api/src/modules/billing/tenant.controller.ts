@@ -49,7 +49,7 @@ export class TenantController {
   @Permissions('users')
   async getProfile(@CurrentUser() user: JwtUser) {
     const id = await this.billing.resolveTenantId({ username: user.username, customerName: user.customerName });
-    const [t] = await (this.db as any).select().from(tenants).where(eq(tenants.id, id)).limit(1);
+    const [t] = await this.db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
     return this.fmt(t);
   }
 
@@ -68,9 +68,9 @@ export class TenantController {
     for (const [k, col] of Object.entries(map)) if (b[k as keyof ProfileBody] !== undefined) patch[col] = b[k as keyof ProfileBody];
     if (b.vat_rate !== undefined) patch.vatRate = String(b.vat_rate);
     if (b.branding_prefs !== undefined) patch.brandingPrefs = b.branding_prefs;
-    if (Object.keys(patch).length) await (this.db as any).update(tenants).set(patch).where(eq(tenants.id, id));
+    if (Object.keys(patch).length) await this.db.update(tenants).set(patch).where(eq(tenants.id, id));
     if (b.vat_rate !== undefined || b.tax_country !== undefined) this.tax.invalidateTenantTax(id); // drop stale cache
-    const [t] = await (this.db as any).select().from(tenants).where(eq(tenants.id, id)).limit(1);
+    const [t] = await this.db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
     return this.fmt(t);
   }
 

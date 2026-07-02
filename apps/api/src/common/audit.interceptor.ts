@@ -106,7 +106,7 @@ export class AuditInterceptor implements NestInterceptor {
 
 function clientIp(req: FastifyRequest): string | null {
   const fwd = req.headers?.['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length) return fwd!.split(',')[0].trim();
+  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0]!.trim();
   if (Array.isArray(fwd) && fwd.length) return String(fwd[0]).trim();
   return (req as any).ip ?? null;
 }

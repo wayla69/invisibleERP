@@ -377,6 +377,15 @@ comment. No behavior change beyond alignment.
 > sites in earlier-tranche files. Remaining: 290 as-any are non-db patterns (jsonb payloads, provider
 > seams, test fakes); 118 strict sites live in demo seeds + `net-guard`/auth utils — none in tenant
 > service code. `forecasting.service.ts` stays parity-locked.
+> **Paydown tranche #4 — FINAL (2026-07-02): as-any 290 → 120 and strict-index 118 → 0.**
+> `noUncheckedIndexedAccess` is now **ENABLED in apps/api/tsconfig.json** — the audit's original ask,
+> closed for real. Swept: the inline `(this.db as any)` variants (103, zero fallout), `tenantId as any`
+> null-launders (34 → `!`), `eq(col, x as any)` filter sites (→ `NonNullable<$inferSelect>` casts),
+> `includes(x as any)` (→ readonly-widened lists), status-list `inArray` casts (→ typed constants), and
+> every remaining strict site in seeds/utils. The 120 residual as-any are the irreducible seams: fastify
+> `req` augmentation, `@Optional()` DI fakes, jsonb payload reads, provider adapters, and the
+> parity-locked forecasting service — each requires either declaration-merging or a runtime contract
+> change to remove, none is a silent type hole on a money path.
 - Re-enable `noUncheckedIndexedAccess` in `apps/api/tsconfig.json`; fix fallout module-by-module
   (start with `ledger`, `finance`, `projects` — the money paths), using per-file `// @ts-expect-error`
   only as a tracked, lint-counted escape hatch.
@@ -632,3 +641,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 4.0 | 2026-07-02 | ERP/Product | RSC conversions #4 (tax/reports) + #5 (insights) merged — the R5-2 top-5 conversion list is complete; AUD-ARC-09 remediation now rides the use-client ratchet |
 | 4.1 | 2026-07-02 | ERP/Product | ts-debt tranche #2 — as-any 1155→821 and strict-index 229→203 (both down; 38 held-back files properly typed, ~67 real type errors + ~90 exposed index accesses fixed at source) |
 | 4.2 | 2026-07-02 | ERP/Product | ts-debt tranche #3 — as-any 821→290, strict 203→118 (all db-handle erasures gone; remaining debt is non-db patterns + seeds/utils). Cumulative from ratchet birth: as-any 1465→290 (−80%), strict 248→118 (−52%) |
+| 4.3 | 2026-07-02 | ERP/Product | ts-debt tranche #4 (final): noUncheckedIndexedAccess ENABLED in tsconfig (strict 0); as-any 290→120 (residual = irreducible seams). Ratchet-lifetime: as-any 1465→120 (−92%), strict 248→0. AUD-ARC-05 closed |

@@ -52,12 +52,12 @@ export class MigrationService {
     const total = canon.length;
     const rowsError = errors.length;
     const rowsValid = total - rowsError;
-    await (this.db as any).insert(migrationJobs).values({ tenantId: user.tenantId ?? null, source, entity, status: 'validated', rowsTotal: total, rowsValid, rowsError, detail: { errors: errors.slice(0, 50) }, createdBy: user.username });
+    await this.db.insert(migrationJobs).values({ tenantId: user.tenantId ?? null, source, entity, status: 'validated', rowsTotal: total, rowsValid, rowsError, detail: { errors: errors.slice(0, 50) }, createdBy: user.username });
     return { source, entity, total, valid: rowsValid, errors };
   }
 
   async jobs(_user: JwtUser) {
-    const rows = await (this.db as any).select().from(migrationJobs).orderBy(desc(migrationJobs.createdAt));
+    const rows = await this.db.select().from(migrationJobs).orderBy(desc(migrationJobs.createdAt));
     return { jobs: rows.map((j: any) => ({ id: Number(j.id), source: j.source, entity: j.entity, status: j.status, total: j.rowsTotal, valid: j.rowsValid, errors: j.rowsError, created_at: j.createdAt })) };
   }
 }

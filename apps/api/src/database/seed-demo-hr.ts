@@ -133,12 +133,12 @@ async function main() {
         const unpaidDays = rnd() < 0.12 ? between(1, 2) : 0;
         const p = payslip(salary, pfRate, ot, hr, unpaidDays);
         gT += p.gross; eeT += p.ssoEe; erT += p.ssoEr; whtT += p.wht; netT += p.net;
-        slipRows.push({ payrunId: run.id, tenantId: T, employeeId: e.id, empCode: e.empCode, empName: e.name, nationalId: e.nationalId,
+        slipRows.push({ payrunId: run!.id, tenantId: T, employeeId: e.id, empCode: e.empCode, empName: e.name, nationalId: e.nationalId,
           gross: String(p.gross), otPay: String(p.otPay), unpaid: String(p.unpaid), ssoEmployee: String(p.ssoEe), ssoEmployer: String(p.ssoEr),
           pfEmployee: String(p.pfEe), pfEmployer: String(p.pfEr), wht: String(p.wht), net: String(p.net) });
       }
       await tx.insert(schema.payslips).values(slipRows);
-      await tx.update(schema.payruns).set({ grossTotal: String(r2(gT)), ssoEeTotal: String(r2(eeT)), ssoErTotal: String(r2(erT)), whtTotal: String(r2(whtT)), netTotal: String(r2(netT)) }).where(eq(schema.payruns.id, run.id));
+      await tx.update(schema.payruns).set({ grossTotal: String(r2(gT)), ssoEeTotal: String(r2(eeT)), ssoErTotal: String(r2(erT)), whtTotal: String(r2(whtT)), netTotal: String(r2(netT)) }).where(eq(schema.payruns.id, run!.id));
       runs++; slips += slipRows.length;
     }
 

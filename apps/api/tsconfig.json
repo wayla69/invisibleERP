@@ -6,7 +6,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": false,
-    "noUncheckedIndexedAccess": false,
+    "noUncheckedIndexedAccess": true,
     "types": ["node", "reflect-metadata"],
     "paths": {}
   },

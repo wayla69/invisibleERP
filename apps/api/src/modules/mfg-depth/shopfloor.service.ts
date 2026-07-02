@@ -16,7 +16,7 @@ export class ShopFloorService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   private async wo(woNo: string) {
-    const [w] = await (this.db as any).select().from(workOrders).where(eq(workOrders.woNo, woNo)).limit(1);
+    const [w] = await this.db.select().from(workOrders).where(eq(workOrders.woNo, woNo)).limit(1);
     if (!w) throw new NotFoundException({ code: 'WO_NOT_FOUND', message: `Work order ${woNo} not found`, messageTh: 'ไม่พบใบสั่งผลิต' });
     return w;
   }

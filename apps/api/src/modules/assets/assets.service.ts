@@ -389,7 +389,7 @@ export class AssetsService {
 
   async assetLabels(_user: JwtUser, opts: { status?: string; cols?: number; rows?: number }) {
     const db = this.db;
-    const where = opts.status ? eq(fixedAssets.status, opts.status as any) : undefined;
+    const where = opts.status ? eq(fixedAssets.status, opts.status as typeof fixedAssets.$inferSelect.status) : undefined;
     const rows = await db.select().from(fixedAssets).where(where).orderBy(asc(fixedAssets.assetNo));
     const labels = rows.map((a: any) => ({
       payload: buildAssetQrPayload({ assetNo: a.assetNo, name: a.name, loc: a.location ?? '', cat: '' }),
@@ -427,7 +427,7 @@ export class AssetsService {
 
   async assetRegister(_user: JwtUser, status?: string) {
     const db = this.db;
-    const where = status ? eq(fixedAssets.status, status as any) : undefined;
+    const where = status ? eq(fixedAssets.status, status as typeof fixedAssets.$inferSelect.status) : undefined;
     const rows = await db.select().from(fixedAssets).where(where).orderBy(asc(fixedAssets.assetNo));
     const assets = rows.map(shapeAsset);
     return {

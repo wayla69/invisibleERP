@@ -21,7 +21,7 @@ export class ControlsService {
   catalog() { return { controls: CONTROLS.map((c) => ({ ...c })) }; }
 
   private async upsert(user: JwtUser, f: { controlKey: string; severity: string; entityRef: string; detail: string; amount?: number | null; fingerprint: string }) {
-    await (this.db as any).insert(controlFindings).values({
+    await this.db.insert(controlFindings).values({
       tenantId: user.tenantId ?? null, controlKey: f.controlKey, severity: f.severity, entityRef: f.entityRef,
       detail: f.detail, amount: f.amount != null ? String(f.amount) : null, status: 'open', fingerprint: f.fingerprint,
     }).onConflictDoNothing();
@@ -70,7 +70,7 @@ export class ControlsService {
 
   async review(id: number, status: string, user: JwtUser) {
     const st = status === 'dismissed' ? 'dismissed' : 'reviewed';
-    const upd = await (this.db as any).update(controlFindings).set({ status: st, reviewedBy: user.username, reviewedAt: new Date() }).where(eq(controlFindings.id, id)).returning({ id: controlFindings.id });
+    const upd = await this.db.update(controlFindings).set({ status: st, reviewedBy: user.username, reviewedAt: new Date() }).where(eq(controlFindings.id, id)).returning({ id: controlFindings.id });
     if (!upd.length) throw new NotFoundException({ code: 'FINDING_NOT_FOUND', message: 'Finding not found', messageTh: 'ไม่พบรายการตรวจพบ' });
     return { id, status: st };
   }

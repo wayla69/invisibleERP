@@ -17,7 +17,7 @@ export class HcmService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly projects: ProjectsService) {}
 
   private async emp(code: string) {
-    const [e] = await (this.db as any).select().from(employees).where(eq(employees.empCode, code)).limit(1);
+    const [e] = await this.db.select().from(employees).where(eq(employees.empCode, code)).limit(1);
     if (!e) throw new NotFoundException({ code: 'EMP_NOT_FOUND', message: `Employee ${code} not found`, messageTh: 'ไม่พบพนักงาน' });
     return e;
   }

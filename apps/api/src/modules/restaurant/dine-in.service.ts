@@ -110,7 +110,7 @@ export class DineInService {
     await this.insertItems(Number(h!.id), user.tenantId, dto.items, user, opts);
     await this.refreshTotals(Number(h!.id));
     // opening an order occupies the table
-    if (dto.table_id) await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, dto.table_id), inArray(diningTables.status, ['available', 'reserved'] as any)));
+    if (dto.table_id) await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, dto.table_id), inArray(diningTables.status, ['available', 'reserved'] as NonNullable<typeof diningTables.$inferSelect.status>[])));
     return this.getOrder(orderNo, user);
   }
 
@@ -307,7 +307,7 @@ export class DineInService {
       const pr = await this.pricing.ruleDiscountsForLines(rlines, { channel: opts.pricing?.channel, location: opts.pricing?.location, at: opts.pricing?.at });
       items.forEach((l: any, i: number) => {
         const key = String(l.id);
-        if (lineDiscounts[key] == null && pr.lineDiscounts[i]! > 0) { lineDiscounts[key] = { discount_amt: pr.lineDiscounts[i]! }; appliedRules.push(...pr!.lineRules[i]); }
+        if (lineDiscounts[key] == null && pr.lineDiscounts[i]! > 0) { lineDiscounts[key] = { discount_amt: pr.lineDiscounts[i]! }; appliedRules.push(...pr!.lineRules[i]!); }
       });
       ruleOrderDiscount = roundCurrency(pr.orderDiscount, 'THB'); appliedRules.push(...pr.orderRules);
     }

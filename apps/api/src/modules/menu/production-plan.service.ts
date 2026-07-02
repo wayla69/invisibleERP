@@ -45,7 +45,7 @@ export class ProductionPlanService {
       .select({ itemId: custPosItems.itemId, d: custPosSales.saleDate, qty: sql<string>`coalesce(sum(${custPosItems.qty}),0)` })
       .from(custPosItems)
       .innerJoin(custPosSales, eq(custPosItems.saleId, custPosSales.id))
-      .where(and(eq(custPosSales.tenantId, tenantId as any), gte(custPosSales.saleDate, histStart), lte(custPosSales.saleDate, histEnd), sql`${custPosSales.status}::text = 'Completed'`))
+      .where(and(eq(custPosSales.tenantId, tenantId!), gte(custPosSales.saleDate, histStart), lte(custPosSales.saleDate, histEnd), sql`${custPosSales.status}::text = 'Completed'`))
       .groupBy(custPosItems.itemId, custPosSales.saleDate);
 
     // weekday → qty per dish, and total per dish, plus how many of each weekday the window covered
@@ -73,7 +73,7 @@ export class ProductionPlanService {
     };
 
     // ── recipes (tenant-scoped) + lines + dish names + ingredient stock ──
-    const recipes = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId as any), eq(menuRecipes.active, true)));
+    const recipes = await db.select().from(menuRecipes).where(and(eq(menuRecipes.tenantId, tenantId!), eq(menuRecipes.active, true)));
     const recipeIds = recipes.map((r: any) => Number(r.id));
     const lines = recipeIds.length ? await db.select().from(menuRecipeLines).where(inArray(menuRecipeLines.recipeId, recipeIds)) : [];
     const linesByRecipe = new Map<number, any[]>();
@@ -82,9 +82,9 @@ export class ProductionPlanService {
       const k = Number(l.recipeId); (linesByRecipe.get(k) ?? linesByRecipe.set(k, []).get(k))!.push(l);
       const c = n(l.unitCost); if (c > 0 && !costByIngredient.has(String(l.ingredientItemId))) costByIngredient.set(String(l.ingredientItemId), c);
     }
-    const mis = await db.select().from(menuItems).where(eq(menuItems.tenantId, tenantId as any));
+    const mis = await db.select().from(menuItems).where(eq(menuItems.tenantId, tenantId!));
     const miById = new Map<number, any>(mis.map((m: any) => [Number(m.id), m]));
-    const inv = await db.select().from(customerInventory).where(eq(customerInventory.tenantId, tenantId as any));
+    const inv = await db.select().from(customerInventory).where(eq(customerInventory.tenantId, tenantId!));
     const stockBy = new Map<string, { stock: number; reorder: number; reorderQty: number; desc: string | null; uom: string | null }>(
       inv.map((i: any) => [String(i.itemId), { stock: n(i.currentStock), reorder: n(i.reorderPoint), reorderQty: n(i.reorderQty), desc: i.itemDescription, uom: i.uom }]),
     );

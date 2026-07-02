@@ -36,9 +36,9 @@ export function decrypt(blob: string): string {
     return blob; // back-compat: value predates encryption (plaintext) — return as-is
   }
   const [, ivB64, tagB64, ctB64] = parts;
-  const decipher = createDecipheriv(ALG, encKey(), Buffer.from(ivB64, 'base64'));
-  decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
-  return Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64')), decipher.final()]).toString('utf8');
+  const decipher = createDecipheriv(ALG, encKey(), Buffer.from(ivB64!, 'base64'));
+  decipher.setAuthTag(Buffer.from(tagB64!, 'base64'));
+  return Buffer.concat([decipher.update(Buffer.from(ctB64!, 'base64')), decipher.final()]).toString('utf8');
 }
 
 // Constant-time hex-string compare (for hashed-secret verification).

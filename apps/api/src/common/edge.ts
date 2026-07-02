@@ -38,14 +38,14 @@ export async function registerEdge(app: NestFastifyApplication): Promise<void> {
   await fastify.register(rateLimit, {
     // Per-request ceiling: stricter for auth/OTP, loose for the rest.
     max: (req: { url?: string }) => {
-      const b = bucketOf(pathOf(req));
+      const b = bucketOf(pathOf(req)!);
       return b === 'otp' ? OTP_MAX : b === 'auth' ? AUTH_MAX : GLOBAL_MAX;
     },
     timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
     // Segment the counter by bucket so each (IP, bucket) is isolated — auth attempts can't drain the
     // global budget and vice versa. Falls back to req.ip (the plugin's default key) within each bucket.
-    keyGenerator: (req: { ip?: string; url?: string }) => `${req.ip ?? 'unknown'}:${bucketOf(pathOf(req))}`,
-    allowList: (req: { url?: string }) => ALLOW_LIST.has(pathOf(req)),
+    keyGenerator: (req: { ip?: string; url?: string }) => `${req.ip ?? 'unknown'}:${bucketOf(pathOf(req)!)}`,
+    allowList: (req: { url?: string }) => ALLOW_LIST.has(pathOf(req)!),
     // The plugin THROWS this builder's return value (index.js: `throw errorResponseBuilder(...)`), and the
     // throw is caught by the global AllExceptionsFilter. A plain object falls through to the filter's
     // generic 500 branch (the old body did exactly that — silently 500 instead of 429 on exceed, never

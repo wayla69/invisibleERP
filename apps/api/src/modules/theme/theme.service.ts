@@ -22,7 +22,7 @@ export class ThemeService {
 
   async get(user: JwtUser) {
     if (user.tenantId == null) return { theme: this.compute({}) };
-    const [row] = await (this.db as any).select({ tp: tenants.themePrefs }).from(tenants).where(eq(tenants.id, user.tenantId)).limit(1);
+    const [row] = await this.db.select({ tp: tenants.themePrefs }).from(tenants).where(eq(tenants.id, user.tenantId)).limit(1);
     return { theme: this.compute(row?.tp ?? {}) };
   }
 
@@ -40,7 +40,7 @@ export class ThemeService {
       logo_url: logo.slice(0, 2000),
       tagline: String(body.tagline ?? '').slice(0, 80),
     };
-    await (this.db as any).update(tenants).set({ themePrefs: prefs }).where(eq(tenants.id, user.tenantId));
+    await this.db.update(tenants).set({ themePrefs: prefs }).where(eq(tenants.id, user.tenantId));
     return { theme: this.compute(prefs) };
   }
 }

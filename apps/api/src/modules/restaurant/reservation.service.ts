@@ -50,7 +50,7 @@ export class ReservationService {
     const db = this.db;
     const conds = [eq(tableReservations.tenantId, user.tenantId as number)];
     if (dto.kind) conds.push(eq(tableReservations.kind, dto.kind));
-    if (dto.status) conds.push(eq(tableReservations.status, dto.status as any));
+    if (dto.status) conds.push(eq(tableReservations.status, dto.status as typeof tableReservations.$inferSelect.status));
     if (dto.from) conds.push(gte(tableReservations.reservedFor, new Date(dto.from)));
     if (dto.to) conds.push(lte(tableReservations.reservedFor, new Date(dto.to)));
     const rows = await db.select().from(tableReservations).where(and(...conds))
@@ -90,7 +90,7 @@ export class ReservationService {
       throw new BadRequestException({ code: 'BAD_STATUS', message: `Already ${row.status}`, messageTh: 'รายการนี้ปิดแล้ว' });
     }
     await db.update(tableReservations).set({ status: 'seated', seatedAt: new Date(), updatedAt: new Date() }).where(eq(tableReservations.id, id));
-    if (row.tableId) await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, row.tableId), inArray(diningTables.status, ['available', 'reserved'] as any)));
+    if (row.tableId) await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, row.tableId), inArray(diningTables.status, ['available', 'reserved'] as NonNullable<typeof diningTables.$inferSelect.status>[])));
     return { id, status: 'seated', table_id: row.tableId ?? null };
   }
 

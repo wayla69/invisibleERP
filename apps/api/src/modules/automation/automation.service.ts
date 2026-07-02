@@ -114,7 +114,7 @@ export class AutomationService {
 
   // ── CRUD ──
   async listRules(_user: JwtUser) {
-    const rows = await (this.db as any).select().from(automationRules).where(eq(automationRules.active, true)).orderBy(desc(automationRules.id));
+    const rows = await this.db.select().from(automationRules).where(eq(automationRules.active, true)).orderBy(desc(automationRules.id));
     return { rules: rows.map(this.shape) };
   }
 
@@ -150,13 +150,13 @@ export class AutomationService {
   }
 
   async removeRule(id: number, _user: JwtUser) {
-    const upd = await (this.db as any).update(automationRules).set({ active: false }).where(eq(automationRules.id, id)).returning({ id: automationRules.id });
+    const upd = await this.db.update(automationRules).set({ active: false }).where(eq(automationRules.id, id)).returning({ id: automationRules.id });
     if (!upd.length) throw new NotFoundException({ code: 'RULE_NOT_FOUND', message: 'Rule not found', messageTh: 'ไม่พบกฎ' });
     return { id, active: false };
   }
 
   async listExecutions(_user: JwtUser, limit = 50) {
-    const rows = await (this.db as any).select().from(automationExecutions).orderBy(desc(automationExecutions.id)).limit(limit);
+    const rows = await this.db.select().from(automationExecutions).orderBy(desc(automationExecutions.id)).limit(limit);
     return { executions: rows.map((r: any) => ({ id: Number(r.id), rule_id: r.ruleId != null ? Number(r.ruleId) : null, event_type: r.eventType, status: r.status, detail: r.detail, fired_at: r.firedAt })) };
   }
 }

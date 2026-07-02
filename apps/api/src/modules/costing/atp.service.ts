@@ -52,7 +52,7 @@ export class AtpService {
   // a reservation can never oversell available-to-promise.
   async allocate(tenantId: number, itemId: string, qty: number, refDoc: string, needBy: string | undefined, _user: JwtUser) {
     const newQty = r4(qty);
-    return await (this.db as any).transaction(async (tx: any) => {
+    return await this.db.transaction(async (tx: any) => {
       const [existing] = await tx.select().from(stockAllocations)
         .where(and(eq(stockAllocations.tenantId, tenantId), eq(stockAllocations.refDoc, refDoc), eq(stockAllocations.itemId, itemId), eq(stockAllocations.status, 'Open')))
         .for('update').limit(1);

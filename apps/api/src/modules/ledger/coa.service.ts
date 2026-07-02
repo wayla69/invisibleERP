@@ -33,7 +33,7 @@ export class CoaService {
       code: dto.code,
       name: dto.name,
       nameTh: dto.nameTh,
-      type: dto.type as any,
+      type: dto.type as typeof accounts.$inferInsert.type,
       parentCode: dto.parentCode,
       accountGroupId: dto.accountGroupId,
       normalBalance: dto.normalBalance ?? ((['Liability','Equity','Revenue'].includes(dto.type)) ? 'C' : 'D'),

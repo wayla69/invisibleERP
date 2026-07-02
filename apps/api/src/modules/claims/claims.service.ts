@@ -19,7 +19,7 @@ export class ClaimsService {
   // ── Sales claims ─────────────────────────────────────────────────────────
   async listSalesClaims(status?: string) {
     const db = this.db;
-    const where = status ? eq(orderClaims.adminStatus, status as any) : undefined;
+    const where = status ? eq(orderClaims.adminStatus, status as NonNullable<typeof orderClaims.$inferSelect.adminStatus>) : undefined;
     const rows = await db
       .select({
         id: orderClaims.id, order_no: orders.orderNo, item_id: orderLines.itemId, item_description: orderLines.itemDescription,

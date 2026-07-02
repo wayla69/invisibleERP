@@ -108,8 +108,8 @@ async function main() {
 
     for (let i = 0; i < 16; i++) {
       const v = pick(VENDORS);
-      const vendor = vendorByCode.get(v.code)!;
-      const pool = poolFor(v.prefixes);
+      const vendor = vendorByCode.get(v!.code)!;
+      const pool = poolFor(v!.prefixes);
       if (!pool.length) continue;
       const poDate = new Date(now - between(1, 30) * 86400000);
       const day = ymd(poDate);
@@ -130,12 +130,12 @@ async function main() {
       const [po] = await tx.insert(schema.purchaseOrders).values({
         poNo, poDate: day, vendorId: vendor.id, vendorName: vendor.name, status,
         approvedBy: approved ? TAG : null, approvedAt: approved ? poDate : null,
-        totalAmount: String(total), createdBy: TAG, expectedDate: ymd(new Date(poDate.getTime() + v.lead * 86400000)),
+        totalAmount: String(total), createdBy: TAG, expectedDate: ymd(new Date(poDate.getTime() + v!.lead * 86400000)),
         remarks: 'จัดซื้อวัตถุดิบประจำสัปดาห์',
       }).returning({ id: schema.purchaseOrders.id });
       poCount++;
       await tx.insert(schema.poItems).values(lines.map((l) => ({
-        poId: po.id, itemId: l.itemId, itemDescription: l.itemDescription, orderQty: String(l.orderQty),
+        poId: po!.id, itemId: l.itemId, itemDescription: l.itemDescription, orderQty: String(l.orderQty),
         unitPrice: String(l.unitPrice), uom: l.uom, amount: String(l.amount),
         receivedQty: String(received ? (status === 'Closed' ? l.orderQty : Math.round(l.orderQty * 0.6)) : 0),
         status: status === 'Closed' ? 'Closed' : received ? 'Partial' : 'Open',
@@ -143,7 +143,7 @@ async function main() {
       lineCount += lines.length;
 
       if (received) {
-        const grDate = new Date(poDate.getTime() + v.lead * 86400000);
+        const grDate = new Date(poDate.getTime() + v!.lead * 86400000);
         const gday = ymd(grDate);
         const grNo = `GR-${gday.replace(/-/g, '')}-${String(seqFor(gday)).padStart(3, '0')}`;
         const [gr] = await tx.insert(schema.goodsReceipts).values({
@@ -152,7 +152,7 @@ async function main() {
         grCount++;
         const recvLines = lines.map((l) => ({ ...l, recv: status === 'Closed' ? l.orderQty : Math.round(l.orderQty * 0.6) }));
         await tx.insert(schema.grItems).values(recvLines.map((l) => ({
-          grId: gr.id, poNo, itemId: l.itemId, itemDescription: l.itemDescription, poQty: String(l.orderQty),
+          grId: gr!.id, poNo, itemId: l.itemId, itemDescription: l.itemDescription, poQty: String(l.orderQty),
           receivedQty: String(l.recv), uom: l.uom, lotNo: `LOT-${grNo.slice(3)}-${l.itemId}`.slice(0, 40),
           expiryDate: ymd(new Date(grDate.getTime() + between(7, 120) * 86400000)), unitCost: String(l.unitPrice),
         })));

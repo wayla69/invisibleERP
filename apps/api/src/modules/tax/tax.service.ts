@@ -97,7 +97,7 @@ export class TaxService {
     if (hit) return hit;
     let cfg = { rate: 0.07, country: 'TH' };
     if (this.db) {
-      const [t] = await (this.db as any).select({ vatRate: tenants.vatRate, taxCountry: tenants.taxCountry })
+      const [t] = await this.db.select({ vatRate: tenants.vatRate, taxCountry: tenants.taxCountry })
         .from(tenants).where(eq(tenants.id, tenantId)).limit(1);
       if (t) cfg = { rate: t.vatRate != null ? Number(t.vatRate) : 0.07, country: (t.taxCountry || 'TH').toUpperCase() };
     }

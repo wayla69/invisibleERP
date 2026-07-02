@@ -52,7 +52,7 @@ export class InventoryLedgerService {
   // Reject if the item is explicitly costed by the `costing` module (a per-item item_costing row) — the two
   // valued-inventory engines are mutually exclusive per item (see costing.setMethod for the reverse guard).
   private async assertNotCostingManaged(tenantId: number, itemId: string) {
-    const [ic] = await (this.db as any).select().from(itemCosting)
+    const [ic] = await this.db.select().from(itemCosting)
       .where(and(eq(itemCosting.tenantId, tenantId), eq(itemCosting.itemId, itemId))).limit(1);
     if (ic) throw bad('CONFLICTING_COSTING', `Item ${itemId} is managed by the costing module (method ${ic.method}); use the procurement-GR/costing path, or clear its costing config first`, 'สินค้านี้คิดต้นทุนผ่านโมดูล costing แล้ว — ใช้ช่องทาง GR/costing หรือยกเลิกการตั้งค่า costing ของสินค้านี้ก่อน');
   }
@@ -64,13 +64,13 @@ export class InventoryLedgerService {
   }
 
   private async balanceRow(tenantId: number, itemId: string, locationId: string) {
-    const [b] = await (this.db as any).select().from(invBalances)
+    const [b] = await this.db.select().from(invBalances)
       .where(and(eq(invBalances.tenantId, tenantId), eq(invBalances.itemId, itemId), eq(invBalances.locationId, locationId))).limit(1);
     return b ?? null;
   }
 
   private async findByRef(tenantId: number, refType: string, refId: string) {
-    const [r] = await (this.db as any).select().from(invMoves)
+    const [r] = await this.db.select().from(invMoves)
       .where(and(eq(invMoves.tenantId, tenantId), eq(invMoves.refType, refType), eq(invMoves.refId, refId))).limit(1);
     return r ?? null;
   }
@@ -80,7 +80,7 @@ export class InventoryLedgerService {
     locationId: string; qtySigned: number; unitCost: number; valueSigned: number; balanceQty: number; avgCost: number;
     refType?: string | null; refId?: string | null; reason?: string | null; glNo: string | null; by: string;
   }) {
-    await (this.db as any).insert(invMoves).values({
+    await this.db.insert(invMoves).values({
       tenantId: a.tenantId, moveNo: a.moveNo, moveType: a.moveType, itemId: a.itemId,
       itemDescription: a.itemDescription ?? null, uom: a.uom ?? null, locationId: a.locationId,
       qty: String(a.qtySigned), unitCost: String(a.unitCost), totalCost: String(a.valueSigned),
@@ -93,7 +93,7 @@ export class InventoryLedgerService {
   private async upsertBalance(tenantId: number, itemId: string, itemDescription: string | null | undefined, locationId: string, qty: number, avg: number, value: number, method: CostingMethod = 'moving_avg') {
     // costingMethod is set only on INSERT (first touch); it is intentionally absent from the conflict
     // SET so an item's method is fixed once established.
-    await (this.db as any).insert(invBalances).values({
+    await this.db.insert(invBalances).values({
       tenantId, itemId, itemDescription: itemDescription ?? null, locationId,
       onHandQty: String(qty), avgCost: String(avg), totalValue: String(value), costingMethod: method,
     }).onConflictDoUpdate({
@@ -105,7 +105,7 @@ export class InventoryLedgerService {
   // ── FIFO/FEFO cost-layer helpers (0131) ───────────────────────────────────────────────────
   private async createLayer(tenantId: number, itemId: string, loc: string, qty: number, unitCost: number, lotNo: string | null, expiry: string | null, refType: string | null, refId: string | null, by: string) {
     if (!(qty > EPS)) return;
-    await (this.db as any).insert(invCostLayers).values({
+    await this.db.insert(invCostLayers).values({
       tenantId, itemId, locationId: loc, lotNo: lotNo ?? null, expiryDate: expiry ?? null,
       origQty: String(qty), remainingQty: String(qty), unitCost: String(unitCost),
       refType: refType ?? null, refId: refId ?? null, createdBy: by,
@@ -118,7 +118,7 @@ export class InventoryLedgerService {
     const order = method === 'fefo'
       ? [sql`${invCostLayers.expiryDate} asc nulls last`, asc(invCostLayers.id)]
       : [asc(invCostLayers.id)]; // fifo = oldest receipt first (id is monotonic)
-    const layers = await (this.db as any).select().from(invCostLayers)
+    const layers = await this.db.select().from(invCostLayers)
       .where(and(eq(invCostLayers.tenantId, tenantId), eq(invCostLayers.itemId, itemId), eq(invCostLayers.locationId, loc), sql`${invCostLayers.remainingQty} > 0`))
       .orderBy(...order);
     let remaining = round4(qty), cost = 0;
@@ -128,7 +128,7 @@ export class InventoryLedgerService {
       const take = Math.min(n(l.remainingQty), remaining);
       cost = round4(cost + take * n(l.unitCost));
       slices.push({ qty: round4(take), unitCost: n(l.unitCost), lotNo: l.lotNo ?? null, expiry: l.expiryDate ?? null });
-      await (this.db as any).update(invCostLayers).set({ remainingQty: String(round4(n(l.remainingQty) - take)) }).where(eq(invCostLayers.id, l.id));
+      await this.db.update(invCostLayers).set({ remainingQty: String(round4(n(l.remainingQty) - take)) }).where(eq(invCostLayers.id, l.id));
       remaining = round4(remaining - take);
     }
     if (remaining > EPS) throw bad('LAYER_SHORT', `Insufficient cost layers for ${itemId} (${remaining} uncosted)`, 'ชั้นต้นทุนไม่พอสำหรับการเบิก');
@@ -267,7 +267,7 @@ export class InventoryLedgerService {
     const tenantId = this.tenant(user);
     const conds: any[] = [eq(invWriteoffRequests.tenantId, tenantId)];
     if (status) conds.push(eq(invWriteoffRequests.status, status));
-    const rows = await (this.db as any).select().from(invWriteoffRequests).where(and(...conds)).orderBy(desc(invWriteoffRequests.id)).limit(200);
+    const rows = await this.db.select().from(invWriteoffRequests).where(and(...conds)).orderBy(desc(invWriteoffRequests.id)).limit(200);
     const writeoffs = rows.map((r: any) => ({ request_id: Number(r.id), item_id: r.itemId, location_id: r.locationId, qty_delta: n(r.qtyDelta), est_value: n(r.estValue), reason: r.reason, status: r.status, requested_by: r.requestedBy, approved_by: r.approvedBy, move_no: r.moveNo, gl_entry_no: r.glEntryNo, created_at: r.createdAt }));
     return { writeoffs, count: writeoffs.length, pending: writeoffs.filter((r: any) => r.status === 'PendingApproval').length };
   }
@@ -318,7 +318,7 @@ export class InventoryLedgerService {
   // ── Valuation: on-hand value at moving-average per item/location ───────────────────────────
   async valuation(user: JwtUser) {
     const tenantId = this.tenant(user);
-    const rows = await (this.db as any).select().from(invBalances)
+    const rows = await this.db.select().from(invBalances)
       .where(eq(invBalances.tenantId, tenantId)).orderBy(invBalances.itemId);
     const items = rows
       .filter((r: any) => Math.abs(n(r.onHandQty)) > EPS || Math.abs(n(r.totalValue)) > EPS)
@@ -332,7 +332,7 @@ export class InventoryLedgerService {
     const tenantId = this.tenant(user);
     const conds = [eq(invCostLayers.tenantId, tenantId), sql`${invCostLayers.remainingQty} > 0`];
     if (q.item_id) conds.push(eq(invCostLayers.itemId, q.item_id));
-    const rows = await (this.db as any).select().from(invCostLayers).where(and(...conds)).orderBy(asc(invCostLayers.itemId), asc(invCostLayers.id));
+    const rows = await this.db.select().from(invCostLayers).where(and(...conds)).orderBy(asc(invCostLayers.itemId), asc(invCostLayers.id));
     const layers = rows.map((r: any) => ({
       item_id: r.itemId, location_id: r.locationId, lot_no: r.lotNo, expiry_date: r.expiryDate,
       remaining_qty: n(r.remainingQty), unit_cost: n(r.unitCost), layer_value: round4(n(r.remainingQty) * n(r.unitCost)),
@@ -344,10 +344,10 @@ export class InventoryLedgerService {
   // ── INV-06 — sub-ledger ↔ GL inventory control-account reconciliation ──────────────────────
   async reconcile(user: JwtUser) {
     const tenantId = this.tenant(user);
-    const bals = await (this.db as any).select().from(invBalances).where(eq(invBalances.tenantId, tenantId));
+    const bals = await this.db.select().from(invBalances).where(eq(invBalances.tenantId, tenantId));
     const subLedger = round4(bals.reduce((a: number, r: any) => a + n(r.totalValue), 0));
     // GL inventory (1200) attributable to the inventory sub-ledger's own postings, for this tenant.
-    const [g] = await (this.db as any).select({
+    const [g] = await this.db.select({
       d: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
       c: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
     }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
@@ -432,7 +432,7 @@ export class InventoryLedgerService {
     const tenantId = this.tenant(user);
     const conds = [eq(invMoves.tenantId, tenantId)];
     if (q.item_id) conds.push(eq(invMoves.itemId, q.item_id));
-    const rows = await (this.db as any).select().from(invMoves).where(and(...conds)).orderBy(desc(invMoves.id)).limit(q.limit ?? 100);
+    const rows = await this.db.select().from(invMoves).where(and(...conds)).orderBy(desc(invMoves.id)).limit(q.limit ?? 100);
     return {
       moves: rows.map((r: any) => ({
         move_no: r.moveNo, move_date: r.moveDate, move_type: r.moveType, item_id: r.itemId, location_id: r.locationId,

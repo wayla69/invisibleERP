@@ -112,7 +112,7 @@ export class PaymentService {
 
   // Look up a tender by its idempotency key (globally unique). Used to replay a retried capture.
   private async findByIdempotencyKey(key: string): Promise<any | null> {
-    const [row] = await (this.db as any).select().from(payments).where(eq(payments.idempotencyKey, key)).limit(1);
+    const [row] = await this.db.select().from(payments).where(eq(payments.idempotencyKey, key)).limit(1);
     return row ?? null;
   }
 
@@ -127,7 +127,7 @@ export class PaymentService {
   // Current tenant's stored PromptPay merchant id (null if unset).
   private async tenantPromptPayId(tenantId: number | null): Promise<string | undefined> {
     if (tenantId == null) return undefined;
-    const [t] = await (this.db as any).select({ pp: tenants.promptpayId }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    const [t] = await this.db.select({ pp: tenants.promptpayId }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     return t?.pp ?? undefined;
   }
 
@@ -199,7 +199,7 @@ export class PaymentService {
       return { refund_no: refundNo, status: 'Refunded', refunded_total: round2(already + n(dto.amount)), remaining_refundable: round2(remaining - n(dto.amount)), fully_refunded: fullyRefunded };
     };
 
-    const res = outerTx ? await run(outerTx) : await (this.db as any).transaction(run);
+    const res = outerTx ? await run(outerTx) : await this.db.transaction(run);
 
     // wiring (best-effort): central audit + electronic journal. Only fired when WE own the tx — when
     // nested, the refund commits with the caller's tx and the caller owns the post-commit side effects,
@@ -216,7 +216,7 @@ export class PaymentService {
   // so two concurrent large requests can't each pass the remaining-amount check and later be approved into an
   // over-refund (the approval path re-checks under its own lock, but we refuse to even queue an over-commit).
   private async requestRefund(dto: RefundDto, user: JwtUser) {
-    return await (this.db as any).transaction(async (tx: any) => {
+    return await this.db.transaction(async (tx: any) => {
       const [pay] = await tx.select().from(payments).where(eq(payments.paymentNo, dto.payment_no)).for('update').limit(1);
       if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
       const status = String(pay.status ?? '');

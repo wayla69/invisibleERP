@@ -154,7 +154,7 @@ export class ManufacturingService {
   }
 
   private async row(woNo: string) {
-    const [wo] = await (this.db as any).select().from(workOrders).where(eq(workOrders.woNo, woNo)).limit(1);
+    const [wo] = await this.db.select().from(workOrders).where(eq(workOrders.woNo, woNo)).limit(1);
     if (!wo) throw new NotFoundException({ code: 'WO_NOT_FOUND', message: `Work order ${woNo} not found`, messageTh: 'ไม่พบใบสั่งผลิต' });
     return wo;
   }

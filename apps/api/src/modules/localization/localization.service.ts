@@ -25,7 +25,7 @@ export class LocalizationService {
   packs() { return { packs: PACKS.map((p) => ({ ...p })) }; }
 
   async get(_user: JwtUser) {
-    const [row] = await (this.db as any).select().from(tenantLocalization).limit(1);
+    const [row] = await this.db.select().from(tenantLocalization).limit(1);
     return { active: row ? { country: row.country, version: row.version, applied_at: row.appliedAt } : null };
   }
 

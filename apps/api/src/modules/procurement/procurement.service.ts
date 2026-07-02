@@ -149,7 +149,7 @@ export class ProcurementService {
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(supplierScorecards.period), desc(supplierScorecards.score)).limit(q.limit ?? 200);
     // No period filter → keep only each vendor's latest scorecard (rows are period-desc, so first wins).
-    let list = rows as any[];
+    let list = rows;
     if (!q.period) { const seen = new Set<number>(); list = rows.filter((r: any) => { const v = Number(r.vendorId); if (seen.has(v)) return false; seen.add(v); return true; }); }
     const scorecards = list
       .map((r: any) => ({ vendor_id: Number(r.vendorId), vendor_name: r.vendorName, period: r.period, on_time_pct: Number(r.onTimePct ?? 0), quality_pct: Number(r.qualityPct ?? 0), price_var_pct: Number(r.priceVarPct ?? 0), score: Number(r.score ?? 0), gr_count: Number(r.grCount ?? 0), claim_count: Number(r.claimCount ?? 0) }))
@@ -194,7 +194,7 @@ export class ProcurementService {
     const db = this.db;
     const tenantId = user.tenantId;
     const conds: any[] = [eq(supplierPriceLists.status, 'active')];
-    if (tenantId != null) conds.push(or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId)) as any);
+    if (tenantId != null) conds.push(or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId))!);
     if (q.vendor_id) conds.push(eq(supplierPriceLists.vendorId, q.vendor_id));
     if (q.item_id) conds.push(eq(supplierPriceLists.itemId, q.item_id));
     const rows = await db.select({
@@ -225,7 +225,7 @@ export class ProcurementService {
     const db = this.db;
     const tenantId = user.tenantId;
     const conds: any[] = [eq(supplierPriceLists.vendorId, vendorId), eq(supplierPriceLists.itemId, itemId)];
-    if (tenantId != null) conds.push(or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId)) as any);
+    if (tenantId != null) conds.push(or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId))!);
     const rows = await db.select({
       id: supplierPriceLists.id, uom: supplierPriceLists.uom, currency: supplierPriceLists.currency,
       unitPrice: supplierPriceLists.unitPrice, minQty: supplierPriceLists.minQty,

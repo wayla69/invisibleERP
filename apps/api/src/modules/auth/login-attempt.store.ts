@@ -32,7 +32,7 @@ export class LoginAttemptStore {
       const rows = await this.sql<{ secs: number }[]>`
         SELECT ceil(extract(epoch FROM (locked_until - now())))::int AS secs
         FROM login_attempts WHERE username = ${username} AND locked_until IS NOT NULL AND locked_until > now()`;
-      return rows.length ? Math.max(1, Number(rows[0].secs)) : 0;
+      return rows.length ? Math.max(1, Number(rows[0]!.secs)) : 0;
     } catch (e) {
       alertStoreUnavailable('retryAfterSeconds', e);
       return 0; // never block login because the lockout store is unavailable (fail open on infra error)

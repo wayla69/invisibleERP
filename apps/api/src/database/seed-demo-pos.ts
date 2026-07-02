@@ -59,13 +59,13 @@ async function main() {
     for (let g = 0; g < GROUPS.length; g++) {
       const grp = GROUPS[g];
       const [row] = await tx.insert(schema.modifierGroups).values({
-        tenantId: T, code: grp.code, name: grp.name, minSelect: grp.min, maxSelect: grp.max, required: grp.required, sort: g + 1, active: true,
+        tenantId: T, code: grp!.code, name: grp!.name, minSelect: grp!.min, maxSelect: grp!.max, required: grp!.required, sort: g + 1, active: true,
       }).returning({ id: schema.modifierGroups.id });
-      groupIdByCode.set(grp.code, row.id);
-      await tx.insert(schema.modifierOptions).values(grp.options.map((o, i) => ({
-        tenantId: T, groupId: row.id, name: o[0], priceDelta: String(o[1]), isDefault: o[2], sort: i + 1, active: true,
+      groupIdByCode.set(grp!.code, row!.id);
+      await tx.insert(schema.modifierOptions).values(grp!.options.map((o, i) => ({
+        tenantId: T, groupId: row!.id, name: o[0], priceDelta: String(o[1]), isDefault: o[2], sort: i + 1, active: true,
       })));
-      optCount += grp.options.length;
+      optCount += grp!.options.length;
     }
 
     // ── attach groups to items by category ──

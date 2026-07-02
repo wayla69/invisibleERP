@@ -53,7 +53,7 @@ const between = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1
 const weighted = <T,>(opts: [T, number][]) => {
   let r = rnd();
   for (const [v, w] of opts) { if ((r -= w) <= 0) return v; }
-  return opts[opts.length - 1][0];
+  return opts[opts.length - 1]![0];
 };
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -97,7 +97,7 @@ async function main() {
     if (!items.length || !pkgs.length || !tables.length) throw new Error('menu/buffet/tables not seeded — run db:seed:demo first');
 
     const stationId = new Map(stations.map((s) => [s.code, s.id]));
-    const dishStation = (it: typeof items[number]) => stationId.get(it.stationCode ?? 'hot') ?? stations[0].id;
+    const dishStation = (it: typeof items[number]) => stationId.get(it.stationCode ?? 'hot') ?? stations[0]!.id;
     const itemById = new Map(items.map((i) => [i.id, i]));
     const alacarte = items.filter((i) => Number(i.price) > 0);
     // buffet dishes eligible per package
@@ -139,25 +139,25 @@ async function main() {
         let pkgId: number | null = null;
         let pax = 1;
         if (isBuffet) {
-          const pkg = pick(pkgs); pkgId = pkg.id; pax = between(1, 6);
-          const price = Number(pkg.pricePerPax);
-          revLines.push({ itemId: pkg.code, desc: pkg.nameEn ?? pkg.name, qty: pax, unitPrice: price, amount: r2(pax * price) });
-          const pool = pkgDishes.get(pkg.id)?.length ? pkgDishes.get(pkg.id)! : alacarte;
+          const pkg = pick(pkgs); pkgId = pkg!.id; pax = between(1, 6);
+          const price = Number(pkg!.pricePerPax);
+          revLines.push({ itemId: pkg!.code, desc: pkg!.nameEn ?? pkg!.name, qty: pax, unitPrice: price, amount: r2(pax * price) });
+          const pool = pkgDishes.get(pkg!.id)?.length ? pkgDishes.get(pkg!.id)! : alacarte;
           const k = between(3, 7);
-          for (let j = 0; j < k; j++) { const it = pick(pool); dishes.push({ itemId: it.sku, name: it.nameEn ?? it.name, station: it.stationCode ?? 'hot', isBuffet: true, pkgId: pkg.id, price: 0 }); }
+          for (let j = 0; j < k; j++) { const it = pick(pool); dishes.push({ itemId: it!.sku, name: it!.nameEn ?? it!.name, station: it!.stationCode ?? 'hot', isBuffet: true, pkgId: pkg!.id, price: 0 }); }
         } else {
           pax = between(1, 4);
           const k = between(2, 5);
           for (let j = 0; j < k; j++) {
-            const it = pick(alacarte); const qty = between(1, 2); const price = Number(it.price);
-            revLines.push({ itemId: it.sku, desc: it.nameEn ?? it.name, qty, unitPrice: price, amount: r2(qty * price) });
-            dishes.push({ itemId: it.sku, name: it.nameEn ?? it.name, station: it.stationCode ?? 'hot', isBuffet: false, pkgId: null, price });
+            const it = pick(alacarte); const qty = between(1, 2); const price = Number(it!.price);
+            revLines.push({ itemId: it!.sku, desc: it!.nameEn ?? it!.name, qty, unitPrice: price, amount: r2(qty * price) });
+            dishes.push({ itemId: it!.sku, name: it!.nameEn ?? it!.name, station: it!.stationCode ?? 'hot', isBuffet: false, pkgId: null, price });
           }
         }
         const subtotal = r2(revLines.reduce((a, l) => a + l.amount, 0));
         tickets.push({
           saleNo: `SALE-OSHI-${ymd}-${String(s).padStart(3, '0')}`, day, openedAt: at(day, h, m),
-          tableIdx: between(0, tables.length - 1), server: pick(STAFF), pax, isBuffet, pkgId,
+          tableIdx: between(0, tables.length - 1), server: pick(STAFF)!, pax, isBuffet, pkgId,
           revLines, dishes, subtotal, tax: r2(subtotal - subtotal / (1 + VAT)), payment: weighted(PAYMENTS),
         });
       }
@@ -181,7 +181,7 @@ async function main() {
     for (let i = 0; i < posItems.length; i += 800) await tx.insert(schema.custPosItems).values(posItems.slice(i, i + 800));
 
     // ── dine-in orders + sessions + KDS for the recent window (served history) ──
-    const recent = tickets.filter((t) => t.day >= dineinCutoff);
+    const recent = tickets.filter((t) => t.day >= dineinCutoff!);
     const dayCounter = new Map<string, number>();
     type OrderIns = typeof schema.dineInOrders.$inferInsert;
     const sessByOrderNo = new Map<string, number>();
@@ -196,14 +196,14 @@ async function main() {
       const tbl = tables[t.tableIdx];
       const opened = t.openedAt, fired = plusMin(opened, 2), paid = plusMin(opened, between(45, 75)), closed = plusMin(paid, 3);
       const [sess] = await tx.insert(schema.tableSessions).values({
-        tenantId: T, tableId: tbl.id, sessionNo, publicToken: randomUUID(), status: 'closed',
+        tenantId: T, tableId: tbl!.id, sessionNo, publicToken: randomUUID(), status: 'closed',
         partySize: t.pax, openedAt: opened, closedAt: closed, openedBy: t.server, saleNo: t.saleNo,
         orderMode: t.isBuffet ? 'buffet' : 'a_la_carte', buffetPackageId: t.pkgId, pax: t.isBuffet ? t.pax : null,
         buffetStartedAt: t.isBuffet ? opened : null, buffetExpiresAt: t.isBuffet ? plusMin(opened, 90) : null,
       }).returning({ id: schema.tableSessions.id });
-      sessByOrderNo.set(orderNo, sess.id);
+      sessByOrderNo.set(orderNo, sess!.id);
       orderRows.push({
-        _saleNo: t.saleNo, orderNo, tenantId: T, tableId: tbl.id, zoneId: tbl.zoneId, sessionId: sess.id,
+        _saleNo: t.saleNo, orderNo, tenantId: T, tableId: tbl!.id, zoneId: tbl!.zoneId, sessionId: sess!.id,
         status: 'paid', channel: 'dine_in', fulfillmentType: 'dine_in', guestCount: t.pax, server: t.server,
         subtotal: String(t.subtotal), vat: String(t.tax), total: String(t.subtotal), saleNo: t.saleNo,
         openedAt: opened, firedAt: fired, paidAt: paid, closedAt: closed, createdBy: t.server,
@@ -222,7 +222,7 @@ async function main() {
       dishes.forEach((d, idx) => {
         const fired = plusMin(opened, 2 + Math.floor(idx / 3) * 6);
         kdsRows.push({
-          tenantId: T, orderId: oid, stationId: stationId.get(d.station) ?? stations[0].id, itemId: d.itemId, name: d.name,
+          tenantId: T, orderId: oid, stationId: stationId.get(d.station) ?? stations[0]!.id, itemId: d.itemId, name: d.name,
           qty: '1', unitPrice: String(d.price), amount: String(d.price), isBuffet: d.isBuffet, buffetPackageId: d.pkgId,
           course: 1 + Math.floor(idx / 3), kdsStatus: 'served', estPrepMinutes: 10,
           firedAt: fired, startedAt: plusMin(fired, 1), readyAt: plusMin(fired, 8), servedAt: plusMin(fired, 11), createdBy: 'pos-demo',
@@ -235,11 +235,11 @@ async function main() {
     const now = new Date();
     const today = recentDays(1)[0];
     const liveTables = [...tables].sort(() => rnd() - 0.5).slice(0, Math.min(LIVE_TICKETS, tables.length));
-    let liveSeq = (dayCounter.get(today) ?? 0);
+    let liveSeq = (dayCounter.get(today!) ?? 0);
     let liveItems = 0;
     for (const tbl of liveTables) {
       liveSeq++;
-      const ymd = today.replace(/-/g, '');
+      const ymd = today!.replace(/-/g, '');
       const orderNo = `DIN-${ymd}-${String(liveSeq).padStart(3, '0')}`;
       const sessionNo = `TS-${ymd}-${String(liveSeq).padStart(3, '0')}`;
       const isBuffet = rnd() < 0.7;
@@ -255,7 +255,7 @@ async function main() {
       const pool = isBuffet ? (pkgDishes.get(pkg!.id)?.length ? pkgDishes.get(pkg!.id)! : alacarte) : alacarte;
       const k = between(2, 5);
       const [ord] = await tx.insert(schema.dineInOrders).values({
-        tenantId: T, tableId: tbl.id, zoneId: tbl.zoneId, sessionId: sess.id, orderNo,
+        tenantId: T, tableId: tbl.id, zoneId: tbl.zoneId, sessionId: sess!.id, orderNo,
         status: 'sent_to_kitchen', channel: 'dine_in', fulfillmentType: 'dine_in', guestCount: pax, server: pick(STAFF),
         openedAt: opened, firedAt: plusMin(opened, 1), createdBy: 'pos-demo',
       }).returning({ id: schema.dineInOrders.id });
@@ -264,8 +264,8 @@ async function main() {
         const it = pick(pool); const status = LIVE_KDS[j % LIVE_KDS.length];
         const fired = status === 'new' ? null : plusMin(opened, 1);
         live.push({
-          tenantId: T, orderId: ord.id, stationId: dishStation(it), itemId: it.sku, name: it.nameEn ?? it.name,
-          qty: '1', unitPrice: isBuffet ? '0' : String(it.price), amount: isBuffet ? '0' : String(it.price),
+          tenantId: T, orderId: ord!.id, stationId: dishStation(it!), itemId: it!.sku, name: it!.nameEn ?? it!.name,
+          qty: '1', unitPrice: isBuffet ? '0' : String(it!.price), amount: isBuffet ? '0' : String(it!.price),
           isBuffet, buffetPackageId: pkg?.id ?? null, course: 1, kdsStatus: status, estPrepMinutes: 10,
           firedAt: fired, startedAt: status === 'preparing' || status === 'ready' ? plusMin(opened, 2) : null,
           readyAt: status === 'ready' ? plusMin(opened, 4) : null, createdBy: 'pos-demo',
@@ -284,14 +284,14 @@ async function main() {
     const dlvSales: (typeof schema.custPosSales.$inferInsert)[] = [];
     let deliveryItems = 0;
     for (let i = 0; i < DELIVERY; i++) {
-      const [src, pre] = PLATFORMS[i % 2];
-      const payLabel = PLATFORMS[i % 2][2];
+      const [src, pre] = PLATFORMS[i % 2]!;
+      const payLabel = PLATFORMS[i % 2]![2];
       const completed = i < 5;
       const opened = completed ? plusMin(now, -between(60, 5 * 24 * 60)) : plusMin(now, -between(8, 35));
       const dday = opened.toISOString().slice(0, 10);
       const orderNo = `DIN-${dday.replace(/-/g, '')}-D${String(i + 1).padStart(2, '0')}`;
       const k = between(2, 4);
-      const revLines = Array.from({ length: k }, () => { const it = pick(alacarte); return { it, qty: between(1, 2), price: Number(it.price) }; });
+      const revLines = Array.from({ length: k }, () => { const it = pick(alacarte); return { it, qty: between(1, 2), price: Number(it!.price) }; });
       const subtotal = r2(revLines.reduce((a, l) => a + l.qty * l.price, 0));
       const tax = r2(subtotal - subtotal / (1 + VAT));
       const fee = between(40, 60);
@@ -310,7 +310,7 @@ async function main() {
         const status = (completed ? 'served' : (['preparing', 'ready', 'queued'] as const)[idx % 3]);
         const fired = plusMin(opened, 1);
         return {
-          tenantId: T, orderId: ord.id, stationId: dishStation(l.it), itemId: l.it.sku, name: l.it.nameEn ?? l.it.name,
+          tenantId: T, orderId: ord!.id, stationId: dishStation(l!.it!), itemId: l!.it!.sku, name: l!.it!.nameEn ?? l!.it!.name,
           qty: String(l.qty), unitPrice: String(l.price), amount: String(r2(l.qty * l.price)), isBuffet: false, course: 1,
           kdsStatus: status, estPrepMinutes: 12, firedAt: fired,
           startedAt: status === 'queued' ? null : plusMin(fired, 1), readyAt: status === 'ready' || status === 'served' ? plusMin(fired, 8) : null,
@@ -319,7 +319,7 @@ async function main() {
       }));
       deliveryItems += revLines.length;
       await tx.insert(schema.orderDeliveryDetails).values({
-        tenantId: T, orderId: ord.id, contactName: CUST[i % CUST.length], contactPhone: `08${between(10000000, 99999999)}`,
+        tenantId: T, orderId: ord!.id, contactName: CUST[i % CUST.length], contactPhone: `08${between(10000000, 99999999)}`,
         addressLine: `${between(1, 199)} ถนนสุขุมวิท ซ.${between(1, 71)} แขวงคลองเตย เขตคลองเตย`,
         addressNote: pick(['ใกล้ 7-11', `คอนโด ชั้น ${between(2, 30)}`, 'หน้าปากซอย']),
         lat: String(r2(13.7 + rnd() * 0.1)), lng: String(r2(100.5 + rnd() * 0.1)),

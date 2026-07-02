@@ -136,7 +136,7 @@ export class AuthService {
   async issueRefreshToken(username: string): Promise<string> {
     const raw = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + AuthService.REFRESH_TTL_MS);
-    await (this.db as any).insert(refreshTokens).values({ tokenHash: this.hashRefresh(raw), username, expiresAt }).onConflictDoNothing();
+    await this.db.insert(refreshTokens).values({ tokenHash: this.hashRefresh(raw), username, expiresAt }).onConflictDoNothing();
     return raw;
   }
 
@@ -171,7 +171,7 @@ export class AuthService {
   async revokeRefreshToken(rawRefresh: string | undefined): Promise<void> {
     if (!rawRefresh) return;
     try {
-      await (this.db as any).update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.tokenHash, this.hashRefresh(rawRefresh)), isNull(refreshTokens.revokedAt)));
+      await this.db.update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.tokenHash, this.hashRefresh(rawRefresh)), isNull(refreshTokens.revokedAt)));
     } catch { /* best-effort */ }
   }
 
@@ -232,7 +232,7 @@ export class AuthService {
     try { payload = await this.jwt.verifyAsync(token); } catch { return { revoked: false }; }
     if (!payload?.jti) return { revoked: false };
     const expiresAt = payload.exp ? new Date(payload.exp * 1000) : new Date(Date.now() + 24 * 3600_000);
-    await (this.db as any).insert(revokedTokens).values({ jti: payload.jti, username: payload.sub ?? null, expiresAt }).onConflictDoNothing();
+    await this.db.insert(revokedTokens).values({ jti: payload.jti, username: payload.sub ?? null, expiresAt }).onConflictDoNothing();
     return { revoked: true };
   }
 

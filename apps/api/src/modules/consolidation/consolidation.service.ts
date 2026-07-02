@@ -340,7 +340,7 @@ export class ConsolidationService {
     }
 
     const bySeg: Record<string, { segment: string; name: string; revenue: number; expense: number; net: number }> = {};
-    for (const r of rows as any[]) {
+    for (const r of rows) {
       const rawKey = r.dim != null ? String(r.dim) : 'unassigned';
       const seg = keyToSeg.get(rawKey);
       const segKey = seg?.code ?? rawKey;

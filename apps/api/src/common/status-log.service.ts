@@ -8,7 +8,7 @@ export class StatusLogService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async log(docType: string, docNo: string, oldStatus: string, newStatus: string, changedBy: string, remarks?: string) {
-    await (this.db as any).insert(docStatusLog).values({
+    await this.db.insert(docStatusLog).values({
       docType, docNo, oldStatus, newStatus, changedBy: changedBy || 'system', remarks: remarks ?? null,
     });
   }
