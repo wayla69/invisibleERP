@@ -163,6 +163,21 @@ async function main() {
     cdpRun.status === 200 && cdpRun.json.status === 'success' && /CDP sync/.test(cdpRun.json.summary ?? '') && /1\/1/.test(cdpRun.json.summary ?? ''),
     JSON.stringify({ status: cdpRun.json.status, summary: cdpRun.json.summary }));
 
+  // ── 7f. Saved custom segments (Phase D1) — rule-builder over member/profile fields, resolve to members ──
+  const segCat = await inj('GET', '/api/loyalty/saved-segments/catalog', mgr1);
+  ok('Saved segments: catalog exposes whitelisted fields + operators',
+    segCat.status === 200 && (segCat.json.fields ?? []).some((f: any) => f.key === 'segment') && (segCat.json.operators ?? []).includes('gte'),
+    JSON.stringify({ fields: (segCat.json.fields ?? []).length }));
+  const segCreate = await inj('POST', '/api/loyalty/saved-segments', mgr1, { name: 'New members', match_mode: 'all', rules: [{ field: 'segment', op: 'eq', value: 'New' }] });
+  ok('Saved segments: create returns the segment + its rules', segCreate.status === 201 && segCreate.json.id > 0 && segCreate.json.rules?.[0]?.field === 'segment', JSON.stringify({ s: segCreate.status, id: segCreate.json.id }));
+  const segMembers = await inj('GET', `/api/loyalty/saved-segments/${segCreate.json.id}/members`, mgr1);
+  ok('Saved segments: resolve returns the matching members (New → the enrolled member)',
+    segMembers.status === 200 && segMembers.json.total >= 1 && (segMembers.json.members ?? []).some((m: any) => m.id === memberId), JSON.stringify({ total: segMembers.json.total }));
+  const segBad = await inj('POST', '/api/loyalty/saved-segments', mgr1, { name: 'bad', rules: [{ field: 'DROP TABLE', op: 'eq', value: 'x' }] });
+  ok('Saved segments: an unknown field is rejected (whitelist → no SQLi)', segBad.status === 400 && (segBad.json?.error?.code === 'BAD_FIELD'), JSON.stringify({ s: segBad.status, code: segBad.json?.error?.code }));
+  const segT2 = await inj('GET', `/api/loyalty/saved-segments/${segCreate.json.id}/members`, mgr2);
+  ok('Saved segments: T2 cannot resolve a T1 segment (tenant-scoped, 404)', segT2.status === 404, JSON.stringify({ s: segT2.status }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });

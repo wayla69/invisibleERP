@@ -254,6 +254,14 @@ report (`cdp_export_sync`) from Scheduled reports (`/scheduled-reports`): each r
 snapshot to your CDP endpoint in batches (set `CDP_WEBHOOK_URL` — your administrator). It's safe to run daily
 (a full snapshot, so re-runs just refresh) and carries the same consent flags.
 
+**Saved custom segments.** Beyond the fixed RFM buckets you can define your **own** reusable segments — a
+named set of rules over member fields (points balance, lifetime, tier, marketing opt-in) and RFM traits
+(segment, total orders/spend, recency/frequency, preferred channel, …) combined with **all** (AND) or **any**
+(OR). Manage them via `GET`/`POST`/`PUT`/`DELETE /api/loyalty/saved-segments` (create/edit needs
+`marketing`/`exec`); `GET /api/loyalty/saved-segments/:id/members` lists the members who match right now. Only
+whitelisted fields are allowed, so a bad rule is rejected safely. *(A visual rule-builder screen is on the
+way; the API is available today.)*
+
 **Customer segments (RFM).** The **กลุ่มลูกค้า RFM** panel shows how your members split across the five RFM
 segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
 without a computed profile yet appear under **Unsegmented**). Click a segment to open it in **CRM 360**
@@ -338,3 +346,4 @@ claim points by uploading a photo of the receipt.
 | 1.15 | 2026-07-01 | Platform | §13 **Scheduled CDP sync** — schedule `cdp_export_sync` to push the member snapshot to your CDP endpoint in batches (daily, idempotent, consent-carrying; `CDP_WEBHOOK_URL`). |
 | 1.16 | 2026-07-01 | Platform | §11 **Loyalty write API + webhooks** — integrations can enrol/earn/redeem via API key (`POST /api/v1/loyalty/enroll|earn|redeem`, scope `loyalty:write`; `GET /api/v1/loyalty/member`, `loyalty:read`); each point movement fires a `loyalty.*` webhook. |
 | 1.17 | 2026-07-02 | Platform | §11 **Loyalty automation triggers** — build no-code rules on Automation (`/automation`): *when a member earns/redeems (optionally over a threshold) → send a notification / message / log*. Loyalty events `loyalty.enrolled/earned/redeemed` are in the event catalog. |
+| 1.18 | 2026-07-02 | Platform | §13 **Saved custom segments** — define reusable audiences from rules over member/RFM fields (all/any) via `/api/loyalty/saved-segments`; resolve to matching members. Whitelisted fields only (safe). Rule-builder UI is a follow-up. |
