@@ -1,6 +1,6 @@
 # 22 — Advanced scheduling (APS) + real-time streaming analytics
 
-> **Status:** PLANNING. Promotes the two items parked as out-of-scope in `docs/21 §4` into a delivery plan.
+> **Status:** **DELIVERED** (Phase A APS + Phase B streaming both shipped — see the per-phase DELIVERED notes). Promoted the two items parked as out-of-scope in `docs/21 §4` into a delivery plan.
 > Both **build on existing primitives** (mfg-depth routings/RCCP; the `@Sse` `RealtimeService` bus) — they
 > are *not* greenfield, and nothing already built will be rebuilt.
 
@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | Owner | ERP / Product |
-| Version | 0.1 DRAFT |
+| Version | 1.0 DELIVERED |
 | Date | 2026-06-30 |
 | Scope | (A) Finite-capacity **advanced production scheduling** on the manufacturing routings; (B) **real-time streaming analytics** — a live KPI/event feed. |
 
@@ -101,4 +101,5 @@ and machine-learning sequence optimisation — future increments if requested.
 ## 6. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.0 | 2026-07-02 | ERP / Product | Status reconciled to **DELIVERED** — both phases had shipped (Phase A: `aps.service.ts` + `work_centers` migration 0193 + `/production/schedule`, harness `mfg-depth` 11/11; Phase B: `BiLiveService` SSE + live dashboard, harness `bi`), but the header still read PLANNING. Docs-only housekeeping; §5 parked items unchanged. |
 | 0.1 DRAFT | 2026-06-30 | ERP / Product | Initial plan for APS finite-capacity scheduling + real-time streaming analytics (the two `docs/21 §4` parked items). Grounded in a current-state check: both extend existing primitives (mfg-depth routings/RCCP; the `@Sse` `RealtimeService` bus). No greenfield rebuilds. |
