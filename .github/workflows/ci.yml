@@ -66,6 +66,7 @@ jobs:
           - { pkg: cutover, script: ext }
           - { pkg: cutover, script: worldclass }
           - { pkg: cutover, script: tenant-isolation }
+          - { pkg: cutover, script: tenant-idx }
           - { pkg: cutover, script: ai-eval }
           - { pkg: cutover, script: module-qr }
           - { pkg: cutover, script: gaps }

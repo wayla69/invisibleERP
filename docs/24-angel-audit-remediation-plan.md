@@ -154,7 +154,16 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 
 ## Wave 1 — Engineering fires 🔥 (before onboarding tenant #2; sequential PRs, each green)
 
-### R1-1 · Index the un-indexed 40 — closes AUD-ARC-01 ⭐ cheapest/highest-leverage
+### R1-1 · Index the un-indexed 40 — closes AUD-ARC-01 ⭐ cheapest/highest-leverage — **DELIVERED 2026-07-02**
+> Live introspection found the real number was **132 tables** (worse than the audit's ~40-file estimate).
+> Delivered: migration `0211_tenant_indexes_backfill.sql` (uniform `(tenant_id)` btree per uncovered table,
+> generated from PGlite introspection with collision-checked names, journaled idx 211) + the **`tenant-idx`
+> cutover harness** in the CI matrix (re-introspects the applied migration set; fails on ANY uncovered
+> table, zero grandfathers) + `docs/ops/capacity-and-pooling.md` §5b policy. Decision recorded: uniform
+> plain `(tenant_id)` rather than per-table composites — composites remain per-module upgrades when a
+> profiled query needs them; the guard enforces only the leading-column minimum. Schema-TS `index()` defs
+> were NOT added for the backfill (drizzle-kit diffs TS-vs-snapshot, so SQL-only indexes are invisible to
+> `db:generate` — no phantom DROPs); new tables should declare theirs in TS as usual.
 - Sweep all 110 schema files: every tenant-scoped table gets, minimum, an index on `(tenant_id)` —
   and where an obvious hot query exists, the composite the query wants
   (`(tenant_id, created_at)`, `(tenant_id, status)`, `(tenant_id, <fk>)`). Priority order:
@@ -422,3 +431,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 |---|---|---|---|
 | 1.0 | 2026-07-02 | ERP/Product | Initial remediation plan from the 2026-07 five-persona investment-audit findings (26 findings registered; 6 waves; R0-1/R1-1/R3-1/R1-4 sequenced first) |
 | 1.1 | 2026-07-02 | ERP/Product | R0-1 delivered (employee/vendor PII encrypted at rest; decision recorded: passthrough → no migration/blind index; DSAR-for-employees deferred to the AUD-LGL-03 piece) |
+| 1.2 | 2026-07-02 | ERP/Product | R1-1 delivered (0211 backfills 132 tenant indexes; `tenant-idx` CI guard added; real count 132 vs audit's ~40-file estimate) |

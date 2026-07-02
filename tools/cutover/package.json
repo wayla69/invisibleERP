@@ -14,6 +14,7 @@
     "portal-extra": "tsx src/portal-extra.ts",
     "pos-p0": "tsx src/pos-p0.ts",
     "ext": "tsx src/ext.ts",
+    "tenant-idx": "tsx src/tenant-idx.ts",
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "pg-smoke": "tsx src/pg-smoke.ts",
     "pg-core": "tsx src/pg-core.ts",

@@ -57,7 +57,19 @@ run against staging for a real capacity number (`LOAD_N` / `LOAD_C` to tune).
 - Run the load test against staging and record the baseline above; re-run each release.
 - Add a Prometheus exporter for PgBouncer (`SHOW POOLS`/`SHOW STATS`) for historical pool-pressure graphs.
 
+## 5b. Read-path indexing policy (docs/24 R1-1)
+
+RLS (`0002_rls.sql`) adds a `tenant_id` predicate to **every** query on a tenant-scoped table, so **every
+tenant-scoped table must carry an index whose leading column is `tenant_id`** — without one, per-tenant
+reads seq-scan and connection hold-time (and therefore pool pressure, §2) grows with table size instead of
+result size. Migration `0211_tenant_indexes_backfill.sql` backfilled the 132 uncovered tables (uniform
+plain `(tenant_id)` btree, generated from live introspection); the **`tenant-idx` cutover harness** (CI
+matrix) re-introspects the applied migration set and fails on any uncovered table — no grandfathering, so
+a new tenant table cannot ship without one. Composite `(tenant_id, <hot column>)` upgrades stay per-module
+work when a profiled query needs them; the guard only enforces the leading-column minimum.
+
 ## 6. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-06-30 | Platform / SRE | Pool model, PgBouncer config (transaction mode + `DB_SIMPLE`), saturation alert, load-test tool. |
+| 1.1 | 2026-07-02 | Platform / SRE | §5b read-path indexing policy: `0211` tenant-index backfill (132 tables) + `tenant-idx` CI guard (docs/24 R1-1 / AUD-ARC-01). |
