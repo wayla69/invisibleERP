@@ -1,5 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable, ForbiddenException } from '@nestjs/common';
-import type { JwtUser } from '../../common/decorators';
+import type { JwtUser } from '../../../common/decorators';
 
 // Gate for /api/member/* self-service routes — only a loyalty MEMBER token (role 'Member' + memberId) passes.
 // The global JwtAuthGuard already verified the JWT and set req.user (RLS-scoped to the member's tenant); this

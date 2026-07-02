@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { RewardsService } from './rewards.service';
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);

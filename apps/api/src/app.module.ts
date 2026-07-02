@@ -24,15 +24,10 @@ import { AiModule } from './modules/ai/ai.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { MarketingModule } from './modules/marketing/marketing.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
-import { RewardsModule } from './modules/rewards/rewards.module';
-import { GamificationModule } from './modules/gamification/gamification.module';
-import { ReferralsModule } from './modules/referrals/referrals.module';
-import { WheelsModule } from './modules/wheels/wheels.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { JourneysModule } from './modules/journeys/journeys.module';
 import { PartnersModule } from './modules/partners/partners.module';
-import { LoyaltyAnalyticsModule } from './modules/loyalty-analytics/loyalty-analytics.module';
-import { MemberModule } from './modules/member/member.module';
+import { MemberModule } from './modules/loyalty/member/member.module';
 import { BomModule } from './modules/bom/bom.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -151,14 +146,9 @@ import { PdfModule } from './modules/pdf/pdf.module';
     PortalModule,
     MarketingModule,
     LoyaltyModule,
-    RewardsModule,
-    GamificationModule,
-    ReferralsModule,
-    WheelsModule,
     CampaignsModule,
     JourneysModule,
     PartnersModule,
-    LoyaltyAnalyticsModule,
     MemberModule,
     BomModule,
     LedgerModule,

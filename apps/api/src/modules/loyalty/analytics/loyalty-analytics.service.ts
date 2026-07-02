@@ -1,10 +1,10 @@
 import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/common';
 import { eq, and, sql, gt, lt, desc } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { posMembers, posMemberLedger, loyaltyConfig, loyaltyRedemptions, memberCoupons, loyaltyPostingRuns, customerProfiles } from '../../database/schema';
-import { n } from '../../database/queries';
-import { BiLiveService } from '../bi/bi-live.service';
-import type { JwtUser } from '../../common/decorators';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { posMembers, posMemberLedger, loyaltyConfig, loyaltyRedemptions, memberCoupons, loyaltyPostingRuns, customerProfiles } from '../../../database/schema';
+import { n } from '../../../database/queries';
+import { BiLiveService } from '../../bi/bi-live.service';
+import type { JwtUser } from '../../../common/decorators';
 
 // CRM Phase 4 — loyalty analytics (the "liability + redemption funnel + churn" gap). Read-only aggregation
 // over the existing tables; NO new schema. EVERY query is explicitly tenant-scoped (RLS is bypassed for

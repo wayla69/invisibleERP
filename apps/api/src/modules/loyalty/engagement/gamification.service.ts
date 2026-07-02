@@ -1,10 +1,10 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { loyaltyMissions, loyaltyMissionProgress, posMembers, posMemberLedger, memberCoupons } from '../../database/schema';
-import { n } from '../../database/queries';
-import { DocNumberService } from '../../common/doc-number.service';
-import type { JwtUser } from '../../common/decorators';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { loyaltyMissions, loyaltyMissionProgress, posMembers, posMemberLedger, memberCoupons } from '../../../database/schema';
+import { n } from '../../../database/queries';
+import { DocNumberService } from '../../../common/doc-number.service';
+import type { JwtUser } from '../../../common/decorators';
 
 // CRM Phase 3 — gamification (missions / stamp cards). A member accrues progress toward a mission goal; on
 // completion they claim a reward (bonus points → pos_member_ledger 'Adjust', which the liability accrual then
