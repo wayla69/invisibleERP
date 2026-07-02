@@ -1,4 +1,4 @@
--- 0218_loyalty_worldclass_w1 — docs/27 Phase W1: tier economics + points liquidity.
+-- 0221_loyalty_worldclass_w1 — docs/27 Phase W1: tier economics + points liquidity.
 -- (a) loyalty_config.transfer_day_cap — per-member daily cap on outgoing P2P point transfers (LYL-18);
 --     0 disables the transfer feature entirely. The tier earn multiplier itself needs NO schema change —
 --     loyalty_tiers.earn_mult has existed since the tier ladder shipped; W1 makes earnInTx honour it.
@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS loyalty_expiry_notices (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS loyalty_expiry_notices_member_window ON loyalty_expiry_notices (member_id, expire_by);
+--> statement-breakpoint
+-- tenant-leading index (AUD-ARC-01 guard: every tenant-scoped table must have one)
+CREATE INDEX IF NOT EXISTS loyalty_expiry_notices_tenant ON loyalty_expiry_notices (tenant_id);
 --> statement-breakpoint
 DO $$ DECLARE r record; BEGIN
   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user';

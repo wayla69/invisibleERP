@@ -87,7 +87,16 @@ async function main() {
     await db.insert(s.journalLines).values(lines.map((l) => ({
       entryId: Number(h.id), accountCode: l.code, debit: String(l.debit ?? 0), credit: String(l.credit ?? 0), currency: 'THB', tenantId: hq,
     })));
+    // Direct inserts bypass LedgerService, so the gl_period_balances snapshot (R1-2) must be rebuilt —
+    // exactly what the 0219 backfill does. Idempotent full recompute; trivial on harness-sized data.
+    await rebuildGl();
   };
+  const rebuildGl = async () => pg.exec(`DELETE FROM gl_period_balances;
+    INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
+    SELECT je.tenant_id, coalesce(je.ledger_code,''), coalesce(je.period,''), coalesce(jl.cost_center_code,''), jl.account_code, coalesce(sum(jl.debit),0), coalesce(sum(jl.credit),0)
+    FROM journal_lines jl JOIN journal_entries je ON je.id = jl.entry_id
+    WHERE je.status = 'Posted'
+    GROUP BY 1,2,3,4,5;`);
 
   // ───────────────────── Statement of Cash Flows (indirect) ─────────────────────
   // Window 2026-03. Opening cash struck in Feb (before window). March: credit sale, cash expense,
@@ -810,6 +819,7 @@ async function main() {
     { entryId: Number(hb2.id), accountCode: '4000', debit: '0', credit: '300', currency: 'THB', tenantId: hq, branchId: 2 },
     { entryId: Number(hb2.id), accountCode: '1000', debit: '300', credit: '0', currency: 'THB', tenantId: hq, branchId: 2 },
   ]);
+  await rebuildGl(); // direct inserts above bypass LedgerService → resync the R1-2 snapshot
   const bb2 = await inj('GET', `/api/ledger/income-statement/by-branch?from=${today}&to=${today}`, admin);
   ok('GL-13: branch_id=1 and branch_id=2 both appear in by-branch P&L', bb2.status === 200 && !!bb2.json?.branches?.['1'] && !!bb2.json?.branches?.['2'], `branches=${Object.keys(bb2.json?.branches ?? {}).join(',')}`);
 
@@ -930,6 +940,24 @@ async function main() {
     valDraft.json?.ready === false && (valDraft.json?.blockers ?? []).includes('unposted_drafts') &&
     valDraft.json?.checks?.find((c: any) => c.key === 'unposted_drafts')?.count >= 1,
     `ready=${valDraft.json?.ready} blockers=${JSON.stringify(valDraft.json?.blockers)}`);
+
+  // TC-GL-20-01 (docs/27 R1-2): the clean-period validate above already proved snapshot==raw (the
+  // gl_snapshot_drift check passed inside GL-19). Now INDUCE drift — mutate the snapshot directly, exactly
+  // what a rogue/bypassing write path would do — and the validator must block the close.
+  ok('GL-20: clean period → snapshot reconciles to the raw ledger (gl_snapshot_drift ok)',
+    valClean.json?.checks?.find((c: any) => c.key === 'gl_snapshot_drift')?.ok === true,
+    JSON.stringify(valClean.json?.checks?.find((c: any) => c.key === 'gl_snapshot_drift')));
+  await pg.exec(`INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit) VALUES (${hq}, '', '${closePeriod}', '', '1000', 123.45, 0)`);
+  const valDrift = await inj('GET', `/api/ledger/close/validate?period=${closePeriod}`, admin);
+  const driftCheck = valDrift.json?.checks?.find((c: any) => c.key === 'gl_snapshot_drift');
+  ok('GL-20: induced snapshot drift → ready=false, gl_snapshot_drift blocker names the account',
+    valDrift.json?.ready === false && (valDrift.json?.blockers ?? []).includes('gl_snapshot_drift') && (driftCheck?.accounts ?? []).length >= 1,
+    JSON.stringify({ ready: valDrift.json?.ready, drift: driftCheck?.accounts?.[0] }));
+  await rebuildGl(); // repair (same recompute as the 0219 backfill) so the close below still locks clean
+  const valRepaired = await inj('GET', `/api/ledger/close/validate?period=${closePeriod}`, admin);
+  ok('GL-20: rebuild resyncs the snapshot → drift cleared, period ready again',
+    valRepaired.json?.checks?.find((c: any) => c.key === 'gl_snapshot_drift')?.ok === true,
+    JSON.stringify(valRepaired.json?.blockers));
 
   // TC-GL-15-02: lock before steps are done → STEPS_INCOMPLETE.
   const lockEarly = await inj('POST', '/api/ledger/close/lock', admin, { close_run_id: closeRunId });

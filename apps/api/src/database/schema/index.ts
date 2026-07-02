@@ -110,3 +110,4 @@ export * from './background-jobs';
 export * from './pdpa';
 export * from './governance';
 export * from './journeys';
+export * from './gl-period-balances';

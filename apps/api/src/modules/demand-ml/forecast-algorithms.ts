@@ -2,7 +2,12 @@
 // including the PGlite CI harness). A Forecaster takes the demand history and a horizon and returns that many
 // point forecasts. Algorithms are deliberately classic and explainable (no opaque ML) for audit.
 
-export type Forecaster = (history: number[], horizon: number) => number[];
+// Optional date context (docs/27 R4-3 remainder): `lastDate` is the ISO date of the LAST history point.
+// Date-blind models ignore it; calendar-aware models (th_holiday) use it to place each point on the Thai
+// calendar. walkForward shifts it per fold so backtests stay honest.
+export interface ForecastContext { lastDate?: string }
+
+export type Forecaster = (history: number[], horizon: number, ctx?: ForecastContext) => number[];
 
 export const mean = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 
@@ -15,19 +20,19 @@ export const sma = (window = 7): Forecaster => (h, hz) => {
 // Simple exponential smoothing — recursively smoothed level (recent points weighted more), flat forecast.
 export const ses = (alpha = 0.3): Forecaster => (h, hz) => {
   if (!h.length) return Array(hz).fill(0);
-  let level = h[0];
-  for (let i = 1; i < h.length; i++) level = alpha * h[i] + (1 - alpha) * level;
+  let level = h[0]!;
+  for (let i = 1; i < h.length; i++) level = alpha * h[i]! + (1 - alpha) * level;
   return Array(hz).fill(level);
 };
 
 // Holt's linear trend (double exponential smoothing) — level + trend, extrapolated over the horizon.
 export const holt = (alpha = 0.4, beta = 0.1): Forecaster => (h, hz) => {
   if (h.length < 2) return Array(hz).fill(h[0] ?? 0);
-  let level = h[0];
-  let trend = h[1] - h[0];
+  let level = h[0]!;
+  let trend = h[1]! - h[0]!;
   for (let i = 1; i < h.length; i++) {
     const prev = level;
-    level = alpha * h[i] + (1 - alpha) * (level + trend);
+    level = alpha * h[i]! + (1 - alpha) * (level + trend);
     trend = beta * (level - prev) + (1 - beta) * trend;
   }
   return Array.from({ length: hz }, (_, k) => level + (k + 1) * trend);
@@ -62,6 +67,87 @@ export const croston = (alpha = 0.1): Forecaster => (h, hz) => {
   return Array(hz).fill(rate);
 };
 
+// Croston–SBA (Syntetos–Boylan approximation) — Croston's rate is biased HIGH for intermittent demand;
+// SBA applies the (1 − α/2) correction. Same inputs, same explainability (docs/27 R4-3).
+export const crostonSba = (alpha = 0.1): Forecaster => (h, hz) => {
+  const base = croston(alpha)(h, hz);
+  const k = 1 - alpha / 2;
+  return base.map((v) => v * k);
+};
+
+// Multiplicative day-of-week seasonality (docs/27 R4-3 / AUD-AI-03): learn a per-position factor over a
+// weekly cycle (position = index mod period, so forecast step k continues the cycle at
+// (history.length + k) mod period), deseasonalize, smooth the level with SES, then re-apply the factor.
+// This is the dominant restaurant demand pattern the flat models miss (weekend ≫ weekday). Still classic,
+// dependency-free and explainable — auto-selection only picks it when it WINS the walk-forward backtest.
+// (The calendar-holiday variant ships as th_holiday below — docs/27 R4-3.)
+export const dowSeasonal = (alpha = 0.3, period = 7): Forecaster => (h, hz) => {
+  if (h.length < period * 2) return ses(alpha)(h, hz);
+  const overall = mean(h);
+  if (overall <= 0) return Array(hz).fill(0);
+  const sums = Array(period).fill(0);
+  const counts = Array(period).fill(0);
+  for (let i = 0; i < h.length; i++) { sums[i % period] += h[i]!; counts[i % period]++; }
+  const factors = sums.map((sm, p) => (counts[p] ? sm / counts[p] / overall : 1)).map((f) => (f > 0 ? f : 1));
+  let level = h[0]! / factors[0]!;
+  for (let i = 1; i < h.length; i++) level = alpha * (h[i]! / factors[i % period]!) + (1 - alpha) * level;
+  return Array.from({ length: hz }, (_, k) => Math.max(0, level * factors[(h.length + k) % period]!));
+};
+
+// Fixed-date Thai public holidays (MM-DD). Deliberately FIXED-DATE ONLY — the lunar Buddhist holidays
+// (Makha/Visakha/Asalha Bucha) move year-to-year and would need a real calendar table; documented scope.
+export const TH_FIXED_HOLIDAYS = new Set([
+  '01-01',                    // วันขึ้นปีใหม่
+  '04-06',                    // วันจักรี
+  '04-13', '04-14', '04-15',  // สงกรานต์
+  '05-01',                    // วันแรงงาน
+  '05-04',                    // วันฉัตรมงคล
+  '07-28',                    // วันเฉลิมพระชนมพรรษา ร.10
+  '08-12',                    // วันแม่แห่งชาติ
+  '10-13',                    // วันคล้ายวันสวรรคต ร.9
+  '10-23',                    // วันปิยมหาราช
+  '12-05',                    // วันพ่อแห่งชาติ
+  '12-10',                    // วันรัฐธรรมนูญ
+  '12-31',                    // วันสิ้นปี
+]);
+export function addDaysYmd(ymdStr: string, days: number): string {
+  const d = new Date(`${ymdStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+const isThHoliday = (ymdStr: string) => TH_FIXED_HOLIDAYS.has(ymdStr.slice(5));
+
+// Thai-calendar holiday model (docs/27 R4-3 / AUD-AI-03 — the Songkran gap): day-of-week factors learned
+// from NON-holiday days × a multiplicative holiday uplift learned from the holidays observed in-window
+// (needs ≥2 observations, else factor 1), applied to future dates that land on a fixed Thai holiday.
+// Without date context it degrades to dowSeasonal — and auto-selection only ever picks it when it WINS
+// the walk-forward backtest.
+export const thaiHoliday = (alpha = 0.3, period = 7): Forecaster => (h, hz, ctx) => {
+  if (!ctx?.lastDate || h.length < period * 2) return dowSeasonal(alpha, period)(h, hz, ctx);
+  const dates = h.map((_, i) => addDaysYmd(ctx.lastDate as string, i - (h.length - 1)));
+  const hol = h.filter((_, i) => isThHoliday(dates[i]!));
+  const nonHol = h.filter((_, i) => !isThHoliday(dates[i]!));
+  const base = mean(nonHol.length ? nonHol : h);
+  if (base <= 0) return Array(hz).fill(0);
+  const holFactor = hol.length >= 2 ? Math.max(0.1, mean(hol) / base) : 1;
+  // DOW factors + SES level from non-holiday days only (a holiday spike must not contaminate its weekday).
+  const sums = Array(period).fill(0);
+  const counts = Array(period).fill(0);
+  for (let i = 0; i < h.length; i++) { if (isThHoliday(dates[i]!)) continue; sums[i % period] += h[i]!; counts[i % period]++; }
+  const factors = sums.map((sm, p) => (counts[p] ? sm / counts[p] / base : 1)).map((f) => (f > 0 ? f : 1));
+  let level = 0; let init = false;
+  for (let i = 0; i < h.length; i++) {
+    if (isThHoliday(dates[i]!)) continue;
+    const d = h[i]! / factors[i % period]!;
+    if (!init) { level = d; init = true; } else level = alpha * d + (1 - alpha) * level;
+  }
+  if (!init) return dowSeasonal(alpha, period)(h, hz, ctx);
+  return Array.from({ length: hz }, (_, k) => {
+    const date = addDaysYmd(ctx.lastDate as string, k + 1);
+    return Math.max(0, level * factors[(h.length + k) % period]! * (isThHoliday(date) ? holFactor : 1));
+  });
+};
+
 // The candidate model set, keyed by name. Auto-selection picks the lowest-WAPE entry.
 export const ALGOS: Record<string, Forecaster> = {
   sma: sma(7),
@@ -69,6 +155,9 @@ export const ALGOS: Record<string, Forecaster> = {
   holt: holt(0.4, 0.1),
   seasonal_naive: seasonalNaive(7),
   croston: croston(0.1),
+  croston_sba: crostonSba(0.1),
+  dow_seasonal: dowSeasonal(0.3, 7),
+  th_holiday: thaiHoliday(0.3, 7),
 };
 
 // ── accuracy metrics ──
@@ -87,7 +176,7 @@ export function mase(actual: number[], forecast: number[], train: number[], peri
   const mae = actual.length ? actual.reduce((s, a, i) => s + Math.abs(a - (forecast[i] ?? 0)), 0) / actual.length : 0;
   let diffSum = 0;
   let diffCount = 0;
-  for (let i = period; i < train.length; i++) { diffSum += Math.abs(train[i] - train[i - period]); diffCount++; }
+  for (let i = period; i < train.length; i++) { diffSum += Math.abs(train[i]! - train[i - period]!); diffCount++; }
   const naiveMae = diffCount > 0 ? diffSum / diffCount : 0;
   return naiveMae > 0 ? mae / naiveMae : mae > 0 ? Infinity : 0;
 }
@@ -105,13 +194,16 @@ export function bias(actual: number[], forecast: number[]): number {
 
 // Walk-forward (rolling-origin) one-step-ahead backtest over the last `testSize` points: for each test
 // point, refit on all history up to it and forecast a single step, then compare to the held-out actual.
-export function walkForward(series: number[], f: Forecaster, testSize: number): { actual: number[]; pred: number[] } {
+export function walkForward(series: number[], f: Forecaster, testSize: number, ctx?: ForecastContext): { actual: number[]; pred: number[] } {
   const start = Math.max(1, series.length - testSize);
   const actual: number[] = [];
   const pred: number[] = [];
   for (let t = start; t < series.length; t++) {
-    pred.push(f(series.slice(0, t), 1)[0]);
-    actual.push(series[t]);
+    // Per-fold date shift: the fold's history is series[0..t), whose last point sits (series.length - t)
+    // days BEFORE the full series' lastDate — calendar-aware models must not see the future's dates.
+    const foldCtx = ctx?.lastDate ? { lastDate: addDaysYmd(ctx.lastDate, t - series.length) } : undefined;
+    pred.push(f(series.slice(0, t), 1, foldCtx)[0]!);
+    actual.push(series[t]!);
   }
   return { actual, pred };
 }

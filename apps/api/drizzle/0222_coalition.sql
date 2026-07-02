@@ -1,4 +1,4 @@
--- 0219_coalition — docs/27 Phase W2: coalition network (earn anywhere, burn anywhere, settle in the GL).
+-- 0222_coalition — docs/27 Phase W2: coalition network (earn anywhere, burn anywhere, settle in the GL).
 -- `coalitions` is HQ-owned master data (no tenant_id — like tenants itself); `coalition_members` maps
 -- shops into a coalition (tenant_id → RLS; cross-shop reads run through the service's validated
 -- bypass context, control LYL-19). Earn/burn stays on the member's HOME ledger via earnInTx/redeemInTx;
@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS coalition_members (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS coalition_members_coalition_tenant ON coalition_members (coalition_id, tenant_id);
+--> statement-breakpoint
+-- tenant-leading index (AUD-ARC-01 guard: every tenant-scoped table must have one)
+CREATE INDEX IF NOT EXISTS coalition_members_tenant ON coalition_members (tenant_id);
 --> statement-breakpoint
 DO $$ DECLARE r record; BEGIN
   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user';

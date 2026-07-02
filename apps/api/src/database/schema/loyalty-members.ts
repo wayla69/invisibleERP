@@ -72,7 +72,7 @@ export const loyaltyExpiryNotices = pgTable('loyalty_expiry_notices', {
   expireBy: date('expire_by').notNull(),
   expiringPoints: numeric('expiring_points', { precision: 14, scale: 2 }).notNull().default('0'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-}, (t) => ({ uqWindow: uniqueIndex('loyalty_expiry_notices_member_window').on(t.memberId, t.expireBy) }));
+}, (t) => ({ uqWindow: uniqueIndex('loyalty_expiry_notices_member_window').on(t.memberId, t.expireBy), idxTenant: index('loyalty_expiry_notices_tenant').on(t.tenantId) }));
 
 export type PosMember = typeof posMembers.$inferSelect;
 export type PosMemberLedger = typeof posMemberLedger.$inferSelect;

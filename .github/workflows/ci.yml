@@ -24,6 +24,9 @@ jobs:
         run: pnpm -r build
       - name: Unit tests + coverage gate (ratchet thresholds)
         run: pnpm --filter @ierp/api test:coverage
+      - name: TypeScript-debt ratchet (as-any + strict-index errors may only go DOWN)
+        # docs/27 R2-5 / AUD-ARC-05 — baseline in tools/ci/ts-debt-baseline.json; lower it when you reduce debt.
+        run: node tools/ci/check-ts-debt.mjs
       # Hand the compiled output to the harness matrix so 50+ jobs don't each rebuild.
       - name: Upload dist
         uses: actions/upload-artifact@v4
@@ -66,6 +69,8 @@ jobs:
           - { pkg: cutover, script: ext }
           - { pkg: cutover, script: worldclass }
           - { pkg: cutover, script: tenant-isolation }
+          - { pkg: cutover, script: tenant-idx }
+          - { pkg: cutover, script: migration-parity }
           - { pkg: cutover, script: ai-eval }
           - { pkg: cutover, script: module-qr }
           - { pkg: cutover, script: gaps }
@@ -167,6 +172,20 @@ jobs:
           name: dist
       - name: ${{ matrix.pkg }} → ${{ matrix.script }}
         run: pnpm --filter @ierp/${{ matrix.pkg }} ${{ matrix.script }}
+        env:
+          # docs/27 R3-3 — the compliance ToE run writes structured evidence for retention (below).
+          EVIDENCE_OUT: ${{ matrix.script == 'compliance' && format('{0}/compliance-evidence.json', github.workspace) || '' }}
+      - name: Retain compliance ToE evidence (docs/27 R3-3 — operating-evidence clock)
+        if: matrix.script == 'compliance' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-evidence-${{ github.sha }}
+          path: compliance-evidence.json
+          if-no-files-found: warn
+          # GitHub caps artifact retention at 90 days by default (400 with an org setting). The quarterly
+          # archive job (compliance/soc2-readiness.md §evidence runbook) copies these to durable storage so
+          # the ≥15-month ICFR sampling window holds.
+          retention-days: 90
 
   # ITGC vulnerability management: dependency advisories + secret scanning. Evidence for the IT auditor /
   # IPO security review. The dependency audit is a HARD GATE at --audit-level high: any NEW high/critical
@@ -247,8 +266,10 @@ jobs:
         run: |
           node -e '
             const fs = require("fs"), dir = "apps/api/drizzle";
-            // pre-existing orphans, prod patched via SQL ALTER ... IF NOT EXISTS; to be journaled when main is quiet.
-            const GRANDFATHERED = ["0085_floor_zone_geometry", "0088_dine_in_order_zone"];
+            // docs/27 R5-1: the "orphans" (0085_floor_zone_geometry / 0088_dine_in_order_zone) turned out to be
+            // journaled all along (idx 102/103) — the old grandfather list was dead code masking that fact.
+            // NO unjournaled grandfathers exist; any new one fails here.
+            const GRANDFATHERED = [];
             const sqls = fs.readdirSync(dir).filter(f => f.endsWith(".sql")).map(f => f.slice(0, -4));
             const journal = JSON.parse(fs.readFileSync(dir + "/meta/_journal.json", "utf8")).entries;
             const tags = new Set(journal.map(e => e.tag));
@@ -256,7 +277,10 @@ jobs:
             const orphan = Array.from(tags).filter(t => sqls.indexOf(t) < 0);
             // Two migrations with the SAME 4-digit number (concurrent PRs both adding e.g. 0119_*) collide:
             // prod drizzle-kit migrate ordering is ambiguous and one silently wins. Renumber the newer one.
-            // Pre-existing historical collisions (already applied in prod) are grandfathered; only NEW ones fail.
+            // Decision (docs/27 R5-1): the four historical collisions STAY grandfathered — they are already
+            // applied in prod and drizzle tracks by full tag, so renumbering applied migrations would be the
+            // dangerous move; full filenames sort deterministically. The migration-parity harness proves
+            // filename-order == journal-order schema equivalence, so the ambiguity class is now guarded.
             const GRANDFATHERED_DUP = ["0085", "0088", "0104", "0105"];
             const byNum = {};
             for (const t of sqls) { const n = t.slice(0, 4); (byNum[n] = byNum[n] || []).push(t); }
@@ -272,6 +296,10 @@ jobs:
             if (unjournaled.length || orphan.length || dupNum.length || dupTag.length || dupIdx.length) { console.error("::error::drizzle migration journal/numbering problem — hand-write the NEXT FREE 4-digit number and journal it (or run db:generate)"); process.exit(1); }
             console.log("OK: " + sqls.length + " migrations registered (" + GRANDFATHERED.length + " grandfathered), no duplicate numbers/tags/idx.");
           '
+
+      - name: RCM census reconciles (docs may not misquote the control population)
+        # docs/27 R3-1 / AUD-CMP-01 — tagged counts in compliance/docs markdown must match build_rcm.py.
+        run: node tools/ci/check-rcm-census.mjs
 
   # Real-Postgres smoke (panel #1) — the divergence class PGlite hides: FORCE-RLS under app_user,
   # the 0193 org-scoped policy, and postgres-js Date round-trips. Report-only for now (continue-on-error)

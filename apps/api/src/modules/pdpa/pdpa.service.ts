@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { dsarRequests, pdpaErasures, posMembers, memberConsents, loyaltyReceiptSubmissions } from '../../database/schema';
+import { dsarRequests, pdpaErasures, posMembers, memberConsents, loyaltyReceiptSubmissions, employees, payslips } from '../../database/schema';
 import { posMemberLedger } from '../../database/schema/loyalty-members';
 import { objectUrl, deleteObject } from '../../common/object-storage';
 import type { JwtUser } from '../../common/decorators';
@@ -65,7 +65,9 @@ export class PdpaService {
   async exportSubject(id: number, user: JwtUser) {
     const db = this.db as any;
     const r = await this.loadDsar(id);
-    const bundle = await this.collectMember(r.subjectType, r.subjectRef, user);
+    const bundle = r.subjectType === 'employee'
+      ? await this.collectEmployee(r.subjectRef)
+      : await this.collectMember(r.subjectType, r.subjectRef, user);
     await db.update(dsarRequests).set({ status: 'completed', result: bundle, handledBy: user.username, completedAt: new Date() }).where(eq(dsarRequests.id, id));
     return { id, status: 'completed', export: bundle };
   }
@@ -91,6 +93,37 @@ export class PdpaService {
     };
   }
 
+  // Employee data subject (docs/27 AUD-LGL-03 — deferred from R0-1). An ACCESS/PORTABILITY request must
+  // return the identifiers the employer actually holds — the encryptedText columns decrypt on this read
+  // (ITGC-AC-19), which is correct: the subject is entitled to their own citizen ID / bank account.
+  private async collectEmployee(subjectRef: string) {
+    const db = this.db as any;
+    const e = await this.resolveEmployee(subjectRef);
+    if (!e) return { subject_type: 'employee', subject_ref: subjectRef, found: false };
+    const slips = await db.select().from(payslips).where(eq(payslips.employeeId, Number(e.id))).limit(500);
+    return {
+      subject_type: 'employee', found: true,
+      profile: {
+        id: Number(e.id), emp_code: e.empCode, name: e.name, national_id: e.nationalId, sso_no: e.ssoNo,
+        bank_account: e.bankAccount, position: e.position, department: e.department,
+        monthly_salary: e.monthlySalary, start_date: e.startDate, active: e.active !== false,
+      },
+      payslips: slips.map((s2: any) => ({ payrun_id: Number(s2.payrunId), gross: s2.gross, sso_employee: s2.ssoEmployee, wht: s2.wht, net: s2.net, created_at: s2.createdAt })),
+      retention_note: 'Payroll/payslip records are retained per Thai statutory periods (Revenue Code / Accounting Act) even after an erasure request — see PDPA-02.',
+    };
+  }
+
+  private async resolveEmployee(subjectRef: string) {
+    const db = this.db as any;
+    const asId = Number(subjectRef);
+    if (Number.isFinite(asId) && String(asId) === subjectRef.trim()) {
+      const [e] = await db.select().from(employees).where(eq(employees.id, asId)).limit(1);
+      if (e) return e;
+    }
+    const [byCode] = await db.select().from(employees).where(eq(employees.empCode, subjectRef.trim())).limit(1);
+    return byCode ?? null;
+  }
+
   private async resolveMember(subjectRef: string) {
     const db = this.db as any;
     const asId = Number(subjectRef);
@@ -110,7 +143,8 @@ export class PdpaService {
     const r = await this.loadDsar(id);
     if (r.requestType !== 'erasure') throw new BadRequestException({ code: 'NOT_ERASURE', message: 'This DSAR is not an erasure request', messageTh: 'คำขอนี้ไม่ใช่การลบข้อมูล' });
     if (r.status === 'completed') throw new BadRequestException({ code: 'ALREADY_DONE', message: 'Already completed', messageTh: 'ดำเนินการแล้ว' });
-    if (r.subjectType !== 'member') throw new BadRequestException({ code: 'UNSUPPORTED_SUBJECT', message: 'Automated erasure currently supports member subjects', messageTh: 'รองรับการลบเฉพาะสมาชิก' });
+    if (r.subjectType === 'employee') return this.eraseEmployee(r, id, user);
+    if (r.subjectType !== 'member') throw new BadRequestException({ code: 'UNSUPPORTED_SUBJECT', message: 'Automated erasure currently supports member and employee subjects', messageTh: 'รองรับการลบเฉพาะสมาชิกและพนักงาน' });
 
     const m = await this.resolveMember(r.subjectRef);
     if (!m) throw new NotFoundException({ code: 'SUBJECT_NOT_FOUND', message: 'Subject not found', messageTh: 'ไม่พบเจ้าของข้อมูล' });
@@ -143,6 +177,31 @@ export class PdpaService {
     // 4. Close the DSAR.
     await db.update(dsarRequests).set({ status: 'completed', handledBy: user.username, completedAt: new Date(), result: { erased: true, pseudonym, fields_redacted: ['name', 'phone', 'email', 'card_no', 'line_user_id', 'line_display_name', 'birthday', 'receipt_image', 'receipt_store_name', 'receipt_note'] } }).where(eq(dsarRequests.id, id));
 
+    return { id, status: 'completed', erased: true, pseudonym };
+  }
+
+  // Employee erasure (AUD-LGL-03): redact the master-record identifiers; PAYSLIPS AND PAYRUNS ARE KEPT —
+  // payroll/withholding records are statutory accounting records (Revenue Code / Accounting Act retention),
+  // squarely inside PDPA's legal-obligation exemption. Mirrors PDPA-02's reconcile-don't-destroy design:
+  // the erasure ledger read-time-pseudonymises the audit trail, the hash chain stays intact.
+  private async eraseEmployee(r: any, id: number, user: JwtUser) {
+    const db = this.db as any;
+    const e = await this.resolveEmployee(r.subjectRef);
+    if (!e) throw new NotFoundException({ code: 'SUBJECT_NOT_FOUND', message: 'Subject not found', messageTh: 'ไม่พบเจ้าของข้อมูล' });
+    // Decrypted identifier values (schema read) → the audit-masking substitution list.
+    const erasedValues = [e.name, e.nationalId, e.ssoNo, e.bankAccount].filter((v: any) => !!v && String(v).trim());
+    const pseudonym = `PDPA-ERASED-EMP-${Number(e.id)}`;
+    await db.update(employees).set({
+      name: '[erased]', nationalId: null, ssoNo: null, bankAccount: null, userName: null, active: false,
+    }).where(eq(employees.id, Number(e.id)));
+    await db.insert(pdpaErasures).values({
+      tenantId: user.tenantId ?? null, subjectType: 'employee', subjectId: Number(e.id),
+      pseudonym, erasedValues, dsarId: id, erasedBy: user.username,
+    });
+    await db.update(dsarRequests).set({
+      status: 'completed', handledBy: user.username, completedAt: new Date(),
+      result: { erased: true, pseudonym, fields_redacted: ['name', 'national_id', 'sso_no', 'bank_account', 'user_name'], retained_statutory: ['payslips', 'payruns'], retention_basis: 'Revenue Code / Accounting Act (PDPA legal-obligation exemption)' },
+    }).where(eq(dsarRequests.id, id));
     return { id, status: 'completed', erased: true, pseudonym };
   }
 

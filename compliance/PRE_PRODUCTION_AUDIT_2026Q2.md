@@ -1,5 +1,12 @@
 # Pre-Production Final Gate-keeping Audit — 2026 Q2 (NASDAQ readiness)
 
+> **HISTORICAL AUDIT RECORD — 2026-06-24 snapshot (docs/27 R3-1, added 2026-07-02).** The control counts
+> cited in this document (57/57, later 68/68) were the compliance-harness population **as of each run** and
+> are intentionally NOT rewritten. The RCM has since grown; the only current source of truth is
+> `python3 compliance/build_rcm.py --counts` (see `CONTROL_STATUS_HONEST.md` for the reconciled status).
+> On "NASDAQ readiness": per `CONTROL_STATUS_HONEST.md`, "audit-ready" is **retracted** — the earliest
+> defensible management ICFR assertion (SOX 404(a)) is **Q1 2027**, and no external attestation exists yet.
+
 **Scope:** full-codebase audit across four pillars (E2E wiring, DB performance, SOX/ICFR controls,
 functional/component testing) of the Invisible ERP + POS single-app platform.
 **Date:** 2026-06-24 · **Branch:** `claude/erp-pos-nasdaq-audit-3ovoey`

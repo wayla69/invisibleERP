@@ -12,6 +12,16 @@
 - **Applied (safe — not queried by value):** `customer_master.tax_id` (Thai tax/national ID),
   `customer_master.notes`. No DDL needed (column stays `text`, now holds ciphertext); existing rows read via
   passthrough.
+- **Applied 2026-07-02 (docs/27 R0-1 — investment-audit finding AUD-LGL-01):**
+  `employees.national_id` / `sso_no` / `bank_account`, `payslips.national_id` (per-slip snapshot),
+  `vendors.tax_id` / `bank_account`. Two value-keyed SQL aggregations were rewritten to group **decrypted**
+  values in app code (random-IV ciphertext never collides): ภ.ง.ด.1ก per-employee summary
+  (`payroll.service.ts pnd1a`, now keyed on `employee_id`) and the ghost-vendor duplicate-tax-ID detector
+  (`controls.service.ts scan`). At-rest ToE lives in the `hcm` + `ext` harnesses.
+- **Backfill shipped:** `pnpm --filter @ierp/api db:backfill:pii` (`database/backfill-encrypt-pii.ts`) —
+  idempotent (`not like 'v1:%'` discriminator), re-writes every legacy plaintext row through the column type
+  for ALL encrypted columns above (including the customer_master ones that predate it). Run once per
+  environment after deploy; requires the same `APP_ENC_KEY` as the API.
 - **Unit test:** `apps/api/test/pii-encrypt.test.ts` (round-trip, fresh-IV, plaintext passthrough, blind-index
   determinism/normalization).
 
@@ -28,7 +38,9 @@ remaining PII columns are either **lookup keys** or **substring-searched**, so e
 | `customer_master.email` / `phone` | `ilike` substring search (`customers.module.ts:89`) | **substring search over ciphertext is impossible** — choose: (a) drop substring search and use exact-match bidx, or (b) keep plaintext and accept the residual risk, documented |
 | `crm_pipeline.email` / `phone` | display (leads) | safe to encrypt if not searched — verify, then apply `encryptedText` |
 | `loyalty_referrals.referred_phone` | display | likely safe — verify, then apply |
-| `hcm` employee identifiers | varies | per-column review |
+| ~~`hcm` employee identifiers~~ | ~~varies~~ | **DONE 2026-07-02** — `employees.national_id`/`sso_no`/`bank_account` + `payslips.national_id` encrypted; PND1A grouped in app code |
+| ~~`vendors.tax_id` / `bank_account`~~ | ~~ghost-vendor GROUP BY~~ | **DONE 2026-07-02** — encrypted; detector groups decrypted values in app code |
+| `wht_certificates.payee_tax_id` (+ payer) | statutory filing snapshot (display/PDF) | verify no value-based query, then apply `encryptedText` (next phase) |
 
 ## Rollout checklist (per table)
 
@@ -49,3 +61,4 @@ remaining PII columns are either **lookup keys** or **substring-searched**, so e
 | Date | Version | Change |
 |------|---------|--------|
 | 2026-06-30 | v0.1 | Mechanism + `customer_master.tax_id`/`notes` shipped; lookup-keyed fields scaffolded + deferred. |
+| 2026-07-02 | v0.2 | **docs/27 R0-1:** employee (`national_id`/`sso_no`/`bank_account`), payslip (`national_id`) and vendor (`tax_id`/`bank_account`) columns encrypted; PND1A + ghost-vendor aggregations moved to app-code grouping over decrypted values; idempotent `db:backfill:pii` script ships (covers the earlier customer_master debt too); at-rest ToE in `hcm`/`ext`; RCM ITGC-AC-19 text updated + xlsx regenerated. |

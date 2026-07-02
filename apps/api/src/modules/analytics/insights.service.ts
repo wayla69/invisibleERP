@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { llmClient } from '../../common/llm-client';
 import type { Prediction } from './forecasting.service';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 
@@ -34,9 +35,8 @@ export class InsightsService {
 
   private async call(prompt: string, maxTokens: number, fallback: () => string): Promise<string> {
     try {
-      const Anthropic = require('@anthropic-ai/sdk').default ?? require('@anthropic-ai/sdk');
-      const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 3 });
-      const msg = await client.messages.create({ model: this.model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] });
+      const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
+      const msg = await client.create({ model: this.model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] });
       const block = msg.content?.[0];
       return (block?.type === 'text' ? block.text : '').trim() || fallback();
     } catch {

@@ -188,7 +188,7 @@ export class MemberService {
   // after the locks so concurrent transfers cannot overshoot). Locks are taken in ascending member-id order
   // (the referral-deadlock lesson) so two opposite-direction transfers can never deadlock.
   async transferPoints(user: JwtUser, fromMemberId: number, dto: { to_member_id?: number; to_phone?: string; points: number; note?: string }, source: 'self' | 'staff') {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const cfg = await this.config();
     if (!cfg.enabled) throw new ConflictException({ code: 'LOYALTY_DISABLED', message: 'Loyalty program disabled', messageTh: 'ระบบสะสมแต้มปิดอยู่' });
     if (cfg.transferDayCap <= 0) throw new ConflictException({ code: 'TRANSFER_DISABLED', message: 'Point transfers are disabled (transfer_day_cap = 0)', messageTh: 'ปิดการโอนแต้ม' });
@@ -437,7 +437,7 @@ export class MemberService {
   // the cutoff shifted forward: what would expire if today were `lookAheadDays` from now, minus what is
   // already expirable today (that part belongs to expireForTenant, not a warning).
   async notifyExpiring(tenantId: number, user: JwtUser, lookAheadDays = 30) {
-    const db = this.db as any;
+    const db = this.db as DrizzleDb & Record<string, any>;
     const [c] = await db.select().from(loyaltyConfig).limit(1);
     const expiryDays = Number(c?.expiryDays ?? 365);
     if (!expiryDays || expiryDays <= 0) return { tenant_id: tenantId, fired: 0, note: 'expiry disabled' };
@@ -452,7 +452,7 @@ export class MemberService {
       let aliveNow = 0, aliveFuture = 0, redeemed = 0, adjusted = 0; let oldestExpiringMs: number | null = null;
       for (const e of ledger) {
         const pts = n(e.points);
-        const tms = new Date(e.txnDate).getTime();
+        const tms = e.txnDate ? new Date(e.txnDate).getTime() : 0;
         const agedEarn = e.txnType === 'Earn' || (e.txnType === 'Transfer' && pts > 0);
         if (agedEarn) {
           if (tms >= cutoffNowMs) aliveNow += pts;

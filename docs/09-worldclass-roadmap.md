@@ -1,5 +1,20 @@
 # 09 — World-Class / Global Upgrade Roadmap
 
+> **⚠️ SUPERSEDED — HISTORICAL GAP REVIEW (banner added 2026-07-02, docs/27 R3-2 / AUD-CMP-02).**
+> This document is a point-in-time review from **before** the hardening programs landed and several of its
+> central "honest verdict" claims are now **false as current-state statements** — kept unedited as history:
+> - "tenant isolation designed but **not enforced** / RLS grep returns zero hits" → RLS is DB-enforced with
+>   `FORCE ROW LEVEL SECURITY` + fail-closed prod behavior (`apps/api/drizzle/0002_rls.sql`,
+>   `common/tenant-tx.interceptor.ts`) and is ToE-tested (`tenant-isolation`, `pg-smoke`).
+> - "no general ledger / no payment capture" → full GL with maker-checker + DB-level posted-JE immutability
+>   (`modules/ledger`, `0165_gl_immutability.sql`), payments/PSP integrations shipped.
+> - "no signup, no billing" → self-serve signup + Stripe subscription billing (`modules/billing`).
+> - "no MFA/SSO", "no ML, no RAG, no evals, no PII redaction, hard-coded Opus" (§AI) → TOTP MFA + OIDC SSO;
+>   demand-ml + RAG + CI-gated `ai-eval` + `pii-redact` + model tiering/budgets (`common/ai-models.ts`).
+> For current state read `compliance/CONTROL_STATUS_HONEST.md`, `docs/27-angel-audit-remediation-plan.md`
+> §0, and the per-cycle process narratives. The *roadmap framing* below (T0–T3 sequencing, go-to-market
+> tiers) remains useful as strategy history; treat every "current state" assertion as stale.
+>
 > Multi-lens architecture review (8 domain experts) of Invisible ERP V2 vs SAP/NetSuite/Odoo (ERP) and Square/Toast/Shopify (POS). Synthesized executive roadmap + per-area detail.
 
 All eight reviews independently converge on the same root cause (unenforced RLS), so I have what I need to synthesize without further file checks.

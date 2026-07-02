@@ -37,17 +37,18 @@ The Controller authorizes the following sub-processors:
 
 | Sub-processor | Location | Purpose | Data categories |
 |---|---|---|---|
-| `<<Alibaba Cloud>>` | `<<Bangkok, Thailand>>` | Hosting, managed PostgreSQL, object storage, backups | All Service data |
-| `<<Stripe>>` | `<<USA/EU>>` | Subscription payment processing | Billing contact, payment metadata (no card data stored by Provider) |
-| `<<Anthropic>>` | `<<USA>>` | AI-assisted summaries/insights & document field extraction (optional feature) | Business data sent to the model; **direct contact identifiers minimized/redacted before transmission** (`AI_PII_REDACTION`); feature disableable per tenant |
-| `<<Sentry / OpenTelemetry>>` | `<<…>>` | Error monitoring / observability (optional) | Diagnostic metadata |
+| Alibaba Cloud | Bangkok, Thailand | Hosting, managed PostgreSQL, object storage, backups | All Service data |
+| Stripe | USA/EU | Subscription payment processing | Billing contact, payment metadata (no card data stored by Provider) |
+| Anthropic | USA | AI-assisted summaries/insights & document field extraction (optional feature) | Business data sent to the model; **direct contact identifiers minimized/redacted before transmission** (`AI_PII_REDACTION`); feature disableable per tenant |
+| Voyage AI (optional, `EMBED_PROVIDER=voyage`) | USA | Semantic text embeddings for knowledge-base retrieval (optional feature) | Knowledge-base document text (tenant policies/SOPs); transmission gated by the same production DPA acknowledgment gate as the AI features; fail-safe local (no-transmission) embedder otherwise |
+| Sentry / OpenTelemetry | USA/EU (SaaS) | Error monitoring / observability (optional) | Diagnostic metadata |
 
 The Processor will give the Controller `<<30 days'>>` notice of any new sub-processor; the Controller may
 object on reasonable data-protection grounds, in which case the parties will work in good faith to resolve
 (or the Controller may terminate the affected feature).
 
 > **AI sub-processor note (required before enabling AI in production):** execute a data-processing addendum
-> with `<<Anthropic>>` that (a) restricts processing to providing the feature, (b) prohibits use of Customer
+> with Anthropic that (a) restricts processing to providing the feature, (b) prohibits use of Customer
 > data for model training without explicit opt-in, and (c) provides audit/security commitments. Until that is
 > in place, AI features should be disabled (`ANTHROPIC_API_KEY` unset / per-tenant opt-out).
 

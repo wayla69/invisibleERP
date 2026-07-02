@@ -181,6 +181,11 @@ AP can pay. The list is **store-scoped** (you see only your own).
 - **Screen** the vendor (approve / block) before transacting.
 - **Scorecard** — recompute a vendor's performance score (delivery, quality).
 
+> 🔒 **PII protection:** a vendor's tax ID (เลขผู้เสียภาษี) and bank account are
+> **encrypted at rest** (AES-256-GCM) — a database snapshot never contains them in
+> the clear. Screens, payment files and the duplicate/ghost-vendor monitor still
+> work on the real values for authorized users. (Control ITGC-AC-19.)
+
 ### Supplier scorecards register
 
 **Screen:** `/supplier-scorecards` (**คะแนนซัพพลายเออร์**, ERP nav → จัดซื้อ) ·

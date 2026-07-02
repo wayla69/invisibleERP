@@ -44,9 +44,10 @@ export class CoalitionService {
   // ── HQ configuration (users/exec + Admin role) ────────────────────────────
   async createCoalition(dto: { code: string; name: string }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     try {
-      const [row] = await db.insert(coalitions).values({ code: dto.code.trim(), name: dto.name.trim(), createdBy: user.username }).returning();
+      const rows = await db.insert(coalitions).values({ code: dto.code.trim(), name: dto.name.trim(), createdBy: user.username }).returning();
+      const row = rows[0]!;
       return { id: Number(row.id), code: row.code, name: row.name, active: row.active };
     } catch (e: any) {
       if (isUniqueViolation(e)) throw new ConflictException({ code: 'COALITION_EXISTS', message: `Coalition '${dto.code}' already exists`, messageTh: 'มีเครือข่ายรหัสนี้แล้ว' });
@@ -56,7 +57,7 @@ export class CoalitionService {
 
   async addMember(coalitionId: number, dto: { tenant_id: number }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(coalitions).where(eq(coalitions.id, coalitionId)).limit(1);
     if (!c) throw new NotFoundException({ code: 'COALITION_NOT_FOUND', message: 'Coalition not found', messageTh: 'ไม่พบเครือข่าย' });
     const [t] = await db.select().from(tenants).where(eq(tenants.id, dto.tenant_id)).limit(1);
@@ -75,14 +76,14 @@ export class CoalitionService {
 
   async removeMember(coalitionId: number, tenantId: number, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const upd = await db.update(coalitionMembers).set({ active: false }).where(and(eq(coalitionMembers.coalitionId, coalitionId), eq(coalitionMembers.tenantId, tenantId))).returning({ id: coalitionMembers.id });
     if (!upd.length) throw new NotFoundException({ code: 'MEMBERSHIP_NOT_FOUND', message: 'Coalition membership not found', messageTh: 'ไม่พบร้านในเครือข่าย' });
     return { coalition_id: coalitionId, tenant_id: tenantId, active: false };
   }
 
   async list(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const cs = await db.select().from(coalitions).orderBy(desc(coalitions.id));
     // Membership rows are RLS-scoped: a shop sees its own memberships; HQ/Admin (bypass) sees all.
     const ms = await db.select().from(coalitionMembers);
@@ -97,15 +98,16 @@ export class CoalitionService {
   // The caller-shop's ACTIVE coalition (one shop can practically belong to one active network at a time;
   // if several, the first by id wins deterministically). Returns null when the shop is in none.
   private async coalitionOf(tenantId: number): Promise<{ coalitionId: number; code: string } | null> {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({ cid: coalitionMembers.coalitionId, code: coalitions.code, cActive: coalitions.active })
       .from(coalitionMembers).innerJoin(coalitions, eq(coalitionMembers.coalitionId, coalitions.id))
       .where(and(eq(coalitionMembers.tenantId, tenantId), eq(coalitionMembers.active, true), eq(coalitions.active, true)))
       .orderBy(coalitionMembers.coalitionId);
-    return rows.length ? { coalitionId: Number(rows[0].cid), code: rows[0].code } : null;
+    const first = rows[0];
+    return first ? { coalitionId: Number(first.cid), code: first.code } : null;
   }
   private async shopsIn(coalitionId: number): Promise<number[]> {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({ tid: coalitionMembers.tenantId }).from(coalitionMembers).where(and(eq(coalitionMembers.coalitionId, coalitionId), eq(coalitionMembers.active, true)));
     return rows.map((r: any) => Number(r.tid));
   }
@@ -115,12 +117,12 @@ export class CoalitionService {
   async resolve(user: JwtUser, phone: string) {
     const callerTid = this.tid(user);
     if (!phone) throw new BadRequestException({ code: 'BAD_QUERY', message: 'phone required', messageTh: 'ต้องระบุเบอร์โทร' });
-    const base = this.db as any;
+    const base = this.db;
     return runInTenantContext(base, { tenantId: callerTid, bypass: true, actor: user.username }, async () => {
       const net = await this.coalitionOf(callerTid);
       if (!net) throw new NotFoundException({ code: 'NOT_IN_COALITION', message: 'This shop is not in a coalition', messageTh: 'ร้านนี้ไม่ได้อยู่ในเครือข่ายพันธมิตรแต้ม' });
       const shopIds = await this.shopsIn(net.coalitionId);
-      const candidates = await base.select().from(posMembers).where(and(eq(posMembers.phone, phone), eq(posMembers.active, true)));
+      const candidates: any[] = await base.select().from(posMembers).where(and(eq(posMembers.phone, phone), eq(posMembers.active, true)));
       const m = candidates.find((r: any) => shopIds.includes(Number(r.tenantId)));
       if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'No coalition member with that phone', messageTh: 'ไม่พบสมาชิกเครือข่ายจากเบอร์นี้' });
       const [home] = await base.select({ code: tenants.code, name: tenants.name }).from(tenants).where(eq(tenants.id, m.tenantId)).limit(1);
@@ -140,7 +142,7 @@ export class CoalitionService {
     const callerTid = this.tid(user);
     if (!(dto.net_spend > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'net_spend must be > 0', messageTh: 'ยอดต้องมากกว่าศูนย์' });
     if (!this.ic) throw new ConflictException({ code: 'IC_UNAVAILABLE', message: 'Intercompany service unavailable — coalition movements cannot post without the clearing entry', messageTh: 'ระบบระหว่างกิจการไม่พร้อม' });
-    const base = this.db as any;
+    const base = this.db;
     return runInTenantContext(base, { tenantId: callerTid, bypass: true, actor: user.username }, async () => {
       const { member, homeTid, net } = await this.validateCross(callerTid, dto.member_id);
       const refDoc = dto.ref_doc ?? `COAL-${net.code}-${callerTid}-${dto.member_id}`;
@@ -167,7 +169,7 @@ export class CoalitionService {
     const points = Number(dto.points);
     if (!Number.isInteger(points) || points <= 0) throw new BadRequestException({ code: 'BAD_POINTS', message: 'points must be a positive integer', messageTh: 'แต้มต้องเป็นจำนวนเต็มบวก' });
     if (!this.ic) throw new ConflictException({ code: 'IC_UNAVAILABLE', message: 'Intercompany service unavailable — coalition movements cannot post without the clearing entry', messageTh: 'ระบบระหว่างกิจการไม่พร้อม' });
-    const base = this.db as any;
+    const base = this.db;
     return runInTenantContext(base, { tenantId: callerTid, bypass: true, actor: user.username }, async () => {
       const { homeTid, net } = await this.validateCross(callerTid, dto.member_id);
       const [c] = await base.select().from(loyaltyConfig).where(eq(loyaltyConfig.id, 1)).limit(1);
@@ -191,7 +193,7 @@ export class CoalitionService {
   // shop shares an ACTIVE coalition with the calling shop. Throws 404 for outsiders — existence of a
   // member in a non-coalition shop is never revealed.
   private async validateCross(callerTid: number, memberId: number) {
-    const base = this.db as any;
+    const base = this.db;
     const net = await this.coalitionOf(callerTid);
     if (!net) throw new NotFoundException({ code: 'NOT_IN_COALITION', message: 'This shop is not in a coalition', messageTh: 'ร้านนี้ไม่ได้อยู่ในเครือข่ายพันธมิตรแต้ม' });
     const [member] = await base.select().from(posMembers).where(eq(posMembers.id, memberId)).limit(1);

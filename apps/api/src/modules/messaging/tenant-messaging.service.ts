@@ -16,7 +16,7 @@ const CHANNELS: MessageChannel[] = ['line', 'sms', 'email'];
 export class TenantMessagingService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
-  // Admin UI view — configured/enabled per channel, NEVER the secret values. Phase F3 (docs/24) adds go-live
+  // Admin UI view — configured/enabled per channel, NEVER the secret values. Phase F3 (docs/27) adds go-live
   // readiness: `resolved_provider` mirrors the gateway's resolution order (tenant creds → platform env →
   // mock — a ⚪ mock channel logs sends as 'sent' but nothing leaves the building), `callback_token_set`
   // (boolean only), and the channel's last message_log row (when/status/provider) so an admin can see at a
