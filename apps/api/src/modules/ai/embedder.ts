@@ -27,7 +27,10 @@ export class EmbedderService {
   // default voyage-3-lite). Fail-safe by design: the AI DPA gate (AIG-05) also covers embedding
   // transmission, and any provider error degrades to the deterministic local embedder with a throttled
   // ops alert — retrieval keeps working on the locally-embedded corpus (provider-filtered), never breaks.
-  async embed(text: string): Promise<Embedded> {
+  async embed(textIn: string): Promise<Embedded> {
+    // Explicit type guard (CodeQL js/type-confusion): a tampered/repeated HTTP param can arrive as an
+    // array — never let a non-string reach slice/tokenize or the provider payload.
+    const text = typeof textIn === 'string' ? textIn : '';
     if (this.provider === 'voyage' && !aiDpaBlocked()) {
       try {
         return { vector: await voyageEmbed(text), provider: 'voyage' };

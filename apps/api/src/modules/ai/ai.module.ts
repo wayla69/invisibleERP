@@ -102,6 +102,12 @@ export class AiActionController {
   reject(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.actions.reject(+id, b.reason, u); }
 }
 
+// A repeated query param (?q=a&q=b) reaches Fastify as an ARRAY; take the first value as a plain string.
+function firstString(v: string | string[] | undefined): string {
+  if (Array.isArray(v)) return typeof v[0] === 'string' ? v[0] : '';
+  return typeof v === 'string' ? v : '';
+}
+
 // Phase D2 — RAG knowledge base. Ingest policies/SOPs (perm masterdata), then search/ask with
 // cite-or-refuse (perm ai_chat). The agent's `search_knowledge_base` tool uses the same service.
 @Controller('api/ai/kb')
@@ -111,11 +117,13 @@ export class KnowledgeController {
   @Post('documents') @Permissions('masterdata', 'ai_chat')
   ingest(@Body(new ZodValidationPipe(IngestBody)) b: z.infer<typeof IngestBody>, @CurrentUser() u: JwtUser) { return this.kb.ingest(b, u); }
 
+  // Fastify query params arrive as string OR string[] (?q=a&q=b) — normalize to ONE string before the
+  // value reaches the embedder (CodeQL js/type-confusion-through-parameter-tampering).
   @Get('search') @Permissions('ai_chat', 'dashboard') @RequiresPlanFeature('ai_chat')
-  search(@Query('q') q: string, @Query('k') k: string | undefined, @CurrentUser() u: JwtUser) { return this.kb.search(q ?? '', k ? +k : 5, u); }
+  search(@Query('q') q: string | string[], @Query('k') k: string | undefined, @CurrentUser() u: JwtUser) { return this.kb.search(firstString(q), k ? +k : 5, u); }
 
   @Get('ask') @Permissions('ai_chat', 'dashboard') @RequiresPlanFeature('ai_chat')
-  ask(@Query('q') q: string, @CurrentUser() u: JwtUser) { return this.kb.ask(q ?? '', u); }
+  ask(@Query('q') q: string | string[], @CurrentUser() u: JwtUser) { return this.kb.ask(firstString(q), u); }
 
   // docs/27 R4-1 — migrate the KB onto the CURRENT embedding provider (after switching EMBED_PROVIDER).
   // Same authority as ingest; idempotent — already-current chunks are skipped.
