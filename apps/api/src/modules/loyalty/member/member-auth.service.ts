@@ -2,15 +2,15 @@ import { Inject, Injectable, UnauthorizedException, ConflictException } from '@n
 import { JwtService } from '@nestjs/jwt';
 import { eq, and, desc, gt, isNull, sql } from 'drizzle-orm';
 import { randomInt, randomUUID } from 'node:crypto';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenants, posMembers, memberOtps, messageLog, revokedTokens } from '../../database/schema';
-import { n } from '../../database/queries';
-import { PasswordService } from '../auth/password.service';
-import { resolveMessageGateway } from '../messaging/gateways';
-import { TenantMessagingService } from '../messaging/tenant-messaging.service';
-import { verifyLineIdToken } from '../loyalty/line-auth';
-import type { JwtUser } from '../../common/decorators';
-import { isUniqueViolation } from '../../common/db-error';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { tenants, posMembers, memberOtps, messageLog, revokedTokens } from '../../../database/schema';
+import { n } from '../../../database/queries';
+import { PasswordService } from '../../auth/password.service';
+import { resolveMessageGateway } from '../../messaging/gateways';
+import { TenantMessagingService } from '../../messaging/tenant-messaging.service';
+import { verifyLineIdToken } from '../line-auth';
+import type { JwtUser } from '../../../common/decorators';
+import { isUniqueViolation } from '../../../common/db-error';
 
 // CRM Phase 4 — phone-OTP login for the loyalty member self-service app.
 // The request/verify routes are @Public (RLS bypassed), so we resolve the tenant by code and filter every
