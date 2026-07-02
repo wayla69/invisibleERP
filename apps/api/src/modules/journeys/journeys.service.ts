@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc, lte, isNotNull, gte, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { journeys, journeySteps, journeyEnrollments, posMembers, messageLog } from '../../database/schema';
+import { journeys, journeySteps, journeyEnrollments, posMembers, messageLog, customerProfiles } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { SavedSegmentsService, type SegmentRule } from '../loyalty/saved-segments.service';
@@ -71,6 +71,7 @@ export class JourneysService {
       name: dto.name, trigger: dto.trigger === 'segment' ? 'segment' : 'manual',
       segmentId: dto.trigger === 'segment' ? Number(dto.segment_id) : null,
       capMessages: Math.max(0, Number(dto.cap_messages ?? 0)), capWindowDays: Math.max(1, Number(dto.cap_window_days ?? 7)),
+      defaultSendHour: Math.min(23, Math.max(0, Number(dto.default_send_hour ?? 10))),
     };
     let row: any;
     if (dto.id) {
@@ -111,7 +112,8 @@ export class JourneysService {
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const [s1] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, journeyId), eq(journeySteps.stepNo, 1))).limit(1);
     if (!s1) throw new ConflictException({ code: 'NO_STEPS', message: 'Journey has no steps', messageTh: 'เจอร์นีย์ไม่มีขั้นตอน' });
-    const nextRunAt = new Date(Date.now() + Number(s1.waitDays) * 86400_000);
+    let nextRunAt = new Date(Date.now() + Number(s1.waitDays) * 86400_000);
+    if (Number(s1.waitDays) > 0) nextRunAt = snapForwardToHour(nextRunAt, await this.sendHourFor(db, tenantId, memberId, j)); // H3: right-time send
     const res = await db.insert(journeyEnrollments)
       .values({ tenantId, journeyId, memberId, currentStep: 1, status: 'active', nextRunAt })
       .onConflictDoNothing({ target: [journeyEnrollments.journeyId, journeyEnrollments.memberId] })
@@ -182,9 +184,11 @@ export class JourneysService {
       }
       const [next] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(e.journeyId)), eq(journeySteps.stepNo, nextNo))).limit(1);
       if (next) {
+        let nextAt = new Date(Date.now() + Number(next.waitDays) * 86400_000);
+        if (Number(next.waitDays) > 0) nextAt = snapForwardToHour(nextAt, await this.sendHourFor(db, tenantId, Number(claimed.memberId), j)); // H3
         await db.update(journeyEnrollments).set({
           currentStep: nextNo, lastStepAt: new Date(),
-          nextRunAt: new Date(Date.now() + Number(next.waitDays) * 86400_000),
+          nextRunAt: nextAt,
         }).where(and(eq(journeyEnrollments.id, Number(e.id)), eq(journeyEnrollments.tenantId, tenantId)));
       } else {
         await db.update(journeyEnrollments).set({ status: 'completed', lastStepAt: new Date() })
@@ -193,6 +197,14 @@ export class JourneysService {
       }
     }
     return { enrolled, sent, skipped, completed };
+  }
+
+  // H3 — the hour a member should be messaged at: their own preferred_hour (histogram mode, v2 scoring)
+  // else the journey's default_send_hour.
+  private async sendHourFor(db: any, tenantId: number, memberId: number, j: any): Promise<number> {
+    const [p] = await db.select({ h: customerProfiles.preferredHour }).from(customerProfiles)
+      .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.memberId, memberId))).limit(1);
+    return p?.h != null ? Number(p.h) : Number(j?.defaultSendHour ?? 10);
   }
 
   // Execute one claimed step: skip-rule → frequency cap → consent-respecting send (audited in message_log).
@@ -220,11 +232,21 @@ export class JourneysService {
   }
 }
 
+// H3 (docs/26) — snap a scheduled time FORWARD to the target hour (Asia/Bangkok). Never backward, so a
+// wait can only grow by <24h and cadence contracts hold; immediate steps (wait 0) are not snapped at all.
+export function snapForwardToHour(base: Date, hourBkk: number): Date {
+  const h = Math.min(23, Math.max(0, Math.floor(hourBkk)));
+  const d = new Date(base.getTime() + 7 * 3600_000); // shift into BKK wall-clock
+  const snapped = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, 0, 0) - 7 * 3600_000;
+  return new Date(snapped >= base.getTime() ? snapped : snapped + 86_400_000);
+}
+
 function shape(r: any) {
   return {
     id: Number(r.id), code: r.code, name: r.name, status: r.status, trigger: r.trigger,
     segment_id: r.segmentId != null ? Number(r.segmentId) : null,
     cap_messages: Number(r.capMessages ?? 0), cap_window_days: Number(r.capWindowDays ?? 7),
+    default_send_hour: Number(r.defaultSendHour ?? 10),
     created_at: r.createdAt,
   };
 }
