@@ -1,5 +1,5 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, isNotNull, desc, sql, gte, lt, inArray } from 'drizzle-orm';
+import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { eq, and, isNotNull, desc, sql, gt, gte, lt, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, promoAudienceRules } from '../../database/schema/crm';
 import { posMembers } from '../../database/schema/loyalty-members';
@@ -79,6 +79,35 @@ export class CrmService {
     });
 
     return { member_id: memberId, rfm_segment: segment, total_orders: totalOrders, total_spend: totalSpend, rfm_recency: rfmRecency, rfm_frequency: rfmFrequency, rfm_monetary: rfmMonetary };
+  }
+
+  // Phase F2 (docs/24) — bulk RFM re-profiling. Sweeps the tenant's ACTIVE members in id-keyed batches
+  // through the single reviewed refreshProfile() path (no new scoring logic), so segments and analytics stop
+  // drifting stale between orders. Idempotent (the profile is a pure upsert; a re-run with no new orders
+  // reports 0 segment changes). Explicitly tenant-scoped — the BI scheduler also runs this under Admin
+  // (RLS-bypassing), and an HQ/Admin caller must pass an explicit tenant_id.
+  async refreshAllProfiles(user: JwtUser, opts: { tenantId?: number | null } = {}) {
+    const db = this.db as any;
+    const tenantId = user.role === 'Admin' || user.tenantId == null ? (opts.tenantId ?? user.tenantId) : user.tenantId;
+    if (tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'tenant_id required', messageTh: 'ต้องระบุร้านค้า' });
+    const BATCH = 500; let lastId = 0, profiled = 0, segmentChanges = 0;
+    for (let i = 0; i < 200; i++) { // safety cap: 200 batches (100k members)
+      const batch = await db.select({ id: posMembers.id }).from(posMembers)
+        .where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true), gt(posMembers.id, lastId)))
+        .orderBy(posMembers.id).limit(BATCH);
+      if (!batch.length) break;
+      for (const m of batch) {
+        const memberId = Number(m.id);
+        const [before] = await db.select({ seg: customerProfiles.rfmSegment }).from(customerProfiles)
+          .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.memberId, memberId))).limit(1);
+        const r = await this.refreshProfile(tenantId, memberId);
+        profiled++;
+        if ((before?.seg ?? null) !== r.rfm_segment) segmentChanges++;
+      }
+      lastId = Number(batch[batch.length - 1].id);
+      if (batch.length < BATCH) break;
+    }
+    return { tenant_id: tenantId, profiled, segment_changes: segmentChanges };
   }
 
   // 360-degree customer view
