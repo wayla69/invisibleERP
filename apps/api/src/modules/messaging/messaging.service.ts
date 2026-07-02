@@ -2,12 +2,37 @@ import { Inject, Injectable, Optional, BadRequestException, NotFoundException } 
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posMembers, messageLog, customerProfiles } from '../../database/schema';
+import { gte } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { resolveMessageGateway, broadcastLine, broadcastLineFlex, pushLineFlex, type ChannelCreds, type MessageChannel } from './gateways';
 import { TenantMessagingService } from './tenant-messaging.service';
 import { SavedSegmentsService } from '../loyalty/saved-segments.service';
 
 type SendDto = { member_id?: number; to?: string; channel: MessageChannel; body: string; campaign?: string };
+
+// W3 (docs/27) — governance classification. Member-addressed sends are MARKETING (quiet hours + the global
+// cross-channel cap apply) unless the campaign's base name is on this transactional exempt list — OTPs,
+// receipts, operational notices and service follow-ups must go out whenever they happen. The campaign base
+// is the part before the first ':' (journey:code:step → 'journey'; dunning:stage → 'dunning').
+const TRANSACTIONAL_CAMPAIGNS = new Set(['otp', 'receipt', 'e-receipt', 'reservation_ready', 'report', 'alert', 'provider_test', 'dunning', 'delivery', 'nps']);
+export const isMarketingCampaign = (campaign?: string | null): boolean =>
+  !TRANSACTIONAL_CAMPAIGNS.has(String(campaign ?? '').split(':')[0] || '');
+// Next moment a quiet-hours-deferred marketing send may go out: today's/tomorrow's quiet_end (BKK wall clock).
+export function nextQuietEnd(now: Date, quietEndHHMM: string): Date {
+  const [h, m] = quietEndHHMM.split(':').map(Number);
+  const bkk = new Date(now.getTime() + 7 * 3600_000);
+  const endUtc = Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate(), h ?? 9, m ?? 0, 0) - 7 * 3600_000;
+  return new Date(endUtc > now.getTime() ? endUtc : endUtc + 86_400_000);
+}
+// Is `now` inside the [quiet_start, quiet_end) window (BKK wall clock, wraps midnight)? Equal bounds = off.
+export function inQuietHours(now: Date, quietStart: string, quietEnd: string): boolean {
+  if (quietStart === quietEnd) return false;
+  const bkk = new Date(now.getTime() + 7 * 3600_000);
+  const cur = bkk.getUTCHours() * 60 + bkk.getUTCMinutes();
+  const [sh, sm] = quietStart.split(':').map(Number); const [eh, em] = quietEnd.split(':').map(Number);
+  const s = (sh ?? 21) * 60 + (sm ?? 0), e = (eh ?? 9) * 60 + (em ?? 0);
+  return s < e ? cur >= s && cur < e : cur >= s || cur < e;
+}
 type BlastDto = { audience: 'all' | 'birthdays_today' | 'segment' | 'saved_segment'; segment?: string; segment_id?: number; channel: MessageChannel; body: string; campaign?: string };
 type BroadcastDto = { body?: string; flex?: any; alt_text?: string; campaign?: string };
 type FlexDto = { to: string; alt_text: string; flex: any; member_id?: number; campaign?: string };
@@ -36,6 +61,30 @@ export class MessagingService {
       [member] = await db.select().from(posMembers).where(eq(posMembers.id, dto.member_id)).limit(1);
       if (!member) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
       if (member.marketingOptIn === false) return this.record(user, { memberId: dto.member_id, channel: dto.channel, recipient: null, body: dto.body, campaign: dto.campaign, status: 'skipped', provider: null, error: 'opted out' });
+      // W3 (docs/27) — messaging governance for MARKETING sends (transactional campaigns exempt):
+      // (a) tenant quiet hours (default 21:00–09:00 BKK): the send is not made — audited 'skipped: quiet
+      //     hours' with a retry_at hint (journeys re-arm the SAME step to that time; ad-hoc blasts just skip);
+      // (b) global cross-channel frequency cap (default 4 marketing messages / member / 7 days) counted over
+      //     ALL sent marketing messages in message_log, whatever channel or engine sent them.
+      if (isMarketingCampaign(dto.campaign)) {
+        const gov = await (this.tenantMsg?.getGovernance(user.tenantId) ?? Promise.resolve({ quiet_start: '00:00', quiet_end: '00:00', weekly_cap: 0 }));
+        const now = new Date();
+        if (inQuietHours(now, gov.quiet_start, gov.quiet_end)) {
+          const rec = await this.record(user, { memberId: dto.member_id, channel: dto.channel, recipient: null, body: dto.body, campaign: dto.campaign, status: 'skipped', provider: null, error: 'quiet hours' });
+          return { ...rec, retry_at: nextQuietEnd(now, gov.quiet_end) };
+        }
+        if (gov.weekly_cap > 0) {
+          const since = new Date(now.getTime() - 7 * 86400_000);
+          const recent = await db.select({ campaign: messageLog.campaign }).from(messageLog).where(and(
+            eq(messageLog.memberId, dto.member_id), eq(messageLog.status, 'sent'), gte(messageLog.createdAt, since),
+            ...(user.tenantId != null ? [eq(messageLog.tenantId, user.tenantId)] : []),
+          ));
+          const marketingSent = recent.filter((r: any) => isMarketingCampaign(r.campaign)).length;
+          if (marketingSent >= gov.weekly_cap) {
+            return this.record(user, { memberId: dto.member_id, channel: dto.channel, recipient: null, body: dto.body, campaign: dto.campaign, status: 'skipped', provider: null, error: 'global cap' });
+          }
+        }
+      }
       // LINE pushes address the member's LINE userId (not their phone); email→email; else phone.
       recipient = recipient ?? (dto.channel === 'email' ? member.email : dto.channel === 'line' ? member.lineUserId : member.phone);
     }

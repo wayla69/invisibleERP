@@ -164,6 +164,26 @@ earns and redeems at partner shop B, and the accounting between the shops settle
    nets to zero. If the partner shop's accounting period is closed, the whole movement is rejected —
    points never move without the matching entry.
 
+## 7c. NPS & messaging governance (เสียงลูกค้า & กติกาการส่งข้อความ)
+
+**NPS — ทุกบิลกลายเป็นผู้แนะนำได้ (W3).** ส่งแบบสอบถาม 0–10 หลังการขายให้สมาชิก:
+กดส่งรายคน (`POST /api/nps/send`), กวาดบิลล่าสุด (`POST /api/nps/send-due`), หรือ**ตั้งเวลาอัตโนมัติ**ด้วย
+งานรายงาน `nps_post_purchase` (หน้าสมัครรายงาน BI). สมาชิกได้รับ**ลิงก์เฉพาะตัวแบบใช้ครั้งเดียว**
+(`/nps/<token>` — ไม่มีข้อมูลส่วนตัวใน URL, หมดอายุใน 7 วัน) ตอบซ้ำไม่ได้ ระบบส่งลิงก์ผ่านช่องทางปกติ
+และเคารพความยินยอมเสมอ. **คะแนน ≤ 6 (detractor)** ยิงเหตุการณ์ `loyalty.nps_detractor` เข้า
+**Automation/Webhooks** — ผูกกฎ *เมื่อคะแนนต่ำ → แจ้งเตือนทีม / ดึงเข้า journey กู้คืนบริการ* ได้ทันที.
+ดูภาพรวมที่ `GET /api/nps/summary` (NPS = %ผู้แนะนำ − %ผู้ตำหนิ + แนวโน้มรายเดือน) และหน้า 360 ของสมาชิก
+จะติดธง detractor ให้เห็นทันที.
+
+**กติกาการส่งข้อความ (governance).** ที่ **ตั้งค่า → ผู้ให้บริการข้อความ** (`/settings/messaging`) การ์ด
+*กติกาการส่ง* กำหนด (เปิดใช้เมื่อบันทึกครั้งแรก — ค่าแนะนำ 21:00–09:00 และ 4 ข้อความ/สมาชิก/7วัน):
+- **ช่วงเงียบ (quiet hours):** ข้อความ**การตลาด**ที่ถึงกำหนดในช่วงเงียบจะไม่ถูกส่ง — journey จะ**เลื่อนขั้นเดิม
+  ไปส่งหลังสิ้นสุดช่วง** (ไม่ข้ามข้อความ) ส่วนบรอดแคสต์จะข้ามพร้อมบันทึกเหตุผล `quiet hours` ในบันทึกการส่ง
+- **เพดานรวมทุกช่องทาง:** จำกัดจำนวนข้อความการตลาดต่อสมาชิกต่อ 7 วัน — นับรวม LINE/SMS/อีเมลจากทุกเครื่องมือ
+  ส่วนที่เกินถูกข้ามพร้อมบันทึก `global cap`
+- **ข้อความธุรกรรมส่งได้เสมอ:** OTP ใบเสร็จ แจ้งคิว/จัดส่ง ทวงหนี้ รายงาน และ NPS ไม่ติดกติกานี้ (แต่ยังเคารพ
+  ความยินยอมของสมาชิก)
+
 ## 8. Refer a friend (แนะนำเพื่อน)
 
 Members bring in new members and both get rewarded. On a member's **360 page** under *แนะนำเพื่อน
@@ -407,6 +427,8 @@ claim points by uploading a photo of the receipt.
 | `NOT_IN_COALITION` (coalition) | This shop isn't in a points network | HQ adds the shop on the `/loyalty` coalition card. |
 | `COALITION_HQ_ONLY` (coalition) | Only an HQ admin can configure the network | Ask HQ to create the network / add shops. |
 | `PERIOD_CLOSED` (coalition earn/redeem) | The partner shop's accounting period is closed, so the clearing entry can't post | Reopen/advance the period — the points movement is rejected as a whole until it can settle. |
+| `NPS_ALREADY_SENT` | A survey for this member × sale already exists | The trigger is idempotent — nothing more to send. |
+| `NPS_ALREADY_ANSWERED` / `NPS_EXPIRED` | The survey link was already used, or passed its 7-day expiry | Answers are single-use; send a fresh survey for a new purchase. |
 
 ## Revision history
 
@@ -450,5 +472,6 @@ claim points by uploading a photo of the receipt.
 | 1.26 | 2026-07-02 | Platform | §13 **Journey ทางแยก (branching)** — แต่ละขั้นตั้ง *ทางแยก* ได้: เลือกขั้นปลายทาง (ต้องเป็นขั้นถัด ๆ ไปเท่านั้น — ระบบบังคับ จึงวนลูปไม่ได้) + เงื่อนไขจาก catalog เดียวกับ segment builder เช่น *ถ้า recency ≤ 5 ข้ามไปขั้นขอบคุณ*; consent/frequency cap/ส่งครั้งเดียวต่อขั้น (MKT-12) เหมือนเดิมทุกประการ |
 | 1.27 | 2026-07-02 | Platform | §11 **อ่าน lift ให้เป็น (organic baseline)** — รายงานแคมเปญเพิ่มบล็อก *ยอดซื้อจริง* ต่อกลุ่ม A/B/holdout ในหน้าต่าง attribution (ตั้งได้ต่อแคมเปญ, ค่าเริ่มต้น 30 วัน): ยอดซื้อของกลุ่ม holdout คือฐาน "ถ้าไม่ส่งเลย" — lift = อัตราซื้อกลุ่มที่ถูกส่งข้อความ − holdout (pp) + รายได้ส่วนเพิ่มถ่วงขนาดกลุ่ม; ตัวเลขมาพร้อมขนาดกลุ่มเสมอ (holdout เล็ก = ฐานแกว่ง) |
 | 1.28 | 2026-07-02 | Platform | §13 **ส่งถูกเวลา (right-time sends)** — สมาชิกที่มีออเดอร์ ≥3 ครั้งจะได้ *ชั่วโมงที่ชอบซื้อ* (โหมดของฮิสโตแกรมเวลาออเดอร์, เวลาไทย); ขั้น journey ที่มีการรอจะเลื่อนไปส่ง **ตรงชั่วโมงนั้น** (เลื่อนไปข้างหน้าเท่านั้น <24 ชม.; ขั้นส่งทันทียังส่งทันที) — ตั้งชั่วโมง fallback ต่อ journey ได้ (ค่าเริ่มต้น 10:00) |
+| 1.31 | 2026-07-02 | Platform | **W3 (docs/27) NPS + governance:** new §7c — post-purchase NPS micro-survey (single-use tokenized link, no PII; detractor ≤6 fires `loyalty.nps_detractor` into Automation/Webhooks; summary + 360 flag; schedulable `nps_post_purchase` job) and the *กติกาการส่ง* governance card on `/settings/messaging` (opt-in quiet hours + global weekly marketing cap, transactional exempt, audited skips). New error codes `NPS_ALREADY_SENT`, `NPS_ALREADY_ANSWERED`/`NPS_EXPIRED`. |
 | 1.30 | 2026-07-02 | Platform | **W2 (docs/27) coalition network:** new §7b **เครือข่ายพันธมิตรแต้ม** — HQ creates a points network and adds shops (`/loyalty` card); partner tills resolve members by phone (badge shows code/name/tier/points/home shop only — no contact data crosses shops); earn/redeem at any shop in the network lands on the member's home-shop ledger, and every cross-shop movement books a balanced intercompany clearing entry that HQ settles. New error codes `NOT_IN_COALITION`, `COALITION_HQ_ONLY` (+ `PERIOD_CLOSED` on coalition moves). |
 | 1.29 | 2026-07-02 | Platform | **W1 (docs/27) tier economics + points liquidity:** §7 **ตัวคูณแต้มตามระดับ** — tier-ladder card on `/loyalty` sets ×earn per tier (Gold ×2 earns double **at the till**, audited in the ledger; liability accrues the multiplied points automatically); §9 **โอนแต้มให้เพื่อน** — member-to-member point transfer by phone (same shop, all-or-nothing, daily cap `เพดานโอนแต้มต่อวัน`, 0 = off; staff-assist route for the back office; LYL-18); §4 **เตือนแต้มใกล้หมดอายุ** — the daily sweep fires `loyalty.points_expiring` into Automation/Webhooks 30 days ahead, one nudge per expiring batch. New error codes `SELF_TRANSFER`, `RECIPIENT_NOT_FOUND`, `TRANSFER_CAP`, `TRANSFER_DISABLED`. |

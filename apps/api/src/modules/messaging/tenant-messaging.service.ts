@@ -53,7 +53,7 @@ export class TenantMessagingService {
   async set(channel: string, creds: Record<string, any>, enabled: boolean, user: JwtUser) {
     if (!CHANNELS.includes(channel as MessageChannel)) throw new BadRequestException({ code: 'BAD_CHANNEL', message: `Unknown channel: ${channel}`, messageTh: 'ช่องทางไม่ถูกต้อง' });
     this.validate(channel as MessageChannel, creds);
-    const db = this.db as any;
+    const db = this.db;
     const now = new Date();
     const configEnc = encrypt(JSON.stringify(creds));
     await db.insert(tenantMessagingConfig)
@@ -67,6 +67,46 @@ export class TenantMessagingService {
     if (channel === 'line') need('token');
     else if (channel === 'sms') { need('apiKey'); need('apiUrl'); }
     else if (channel === 'email') need('host');
+  }
+
+  // ── W3 (docs/27) — tenant-wide messaging governance ──────────────────────
+  // Quiet hours + a GLOBAL cross-channel frequency cap for MARKETING sends (transactional exempt), enforced
+  // inside MessagingService.send. Stored as a synthetic 'governance' row in tenant_messaging_config (no new
+  // table); not a secret, but rides the same encrypted column for storage consistency. OPT-IN: a tenant with
+  // no governance row has no quiet window and no cap (existing behaviour unchanged, and harness/CI runs stay
+  // deterministic); the settings UI suggests 21:00–09:00 Asia/Bangkok + 4 msgs/member/7d when enabling.
+  // cap 0 = no cap; quiet_start == quiet_end = no quiet window.
+  async getGovernance(tenantId: number | null | undefined): Promise<{ quiet_start: string; quiet_end: string; weekly_cap: number }> {
+    const fallback = { quiet_start: '00:00', quiet_end: '00:00', weekly_cap: 0 };
+    if (tenantId == null) return fallback;
+    const db = this.db;
+    const [r] = await db.select().from(tenantMessagingConfig)
+      .where(and(eq(tenantMessagingConfig.tenantId, tenantId), eq(tenantMessagingConfig.channel, 'governance'))).limit(1);
+    if (!r?.configEnc) return fallback;
+    try {
+      const g = JSON.parse(decrypt(r.configEnc));
+      return {
+        quiet_start: /^\d{2}:\d{2}$/.test(g.quiet_start ?? '') ? g.quiet_start : fallback.quiet_start,
+        quiet_end: /^\d{2}:\d{2}$/.test(g.quiet_end ?? '') ? g.quiet_end : fallback.quiet_end,
+        weekly_cap: Number.isFinite(Number(g.weekly_cap)) ? Math.max(0, Math.floor(Number(g.weekly_cap))) : fallback.weekly_cap,
+      };
+    } catch { return fallback; }
+  }
+
+  async setGovernance(dto: { quiet_start?: string; quiet_end?: string; weekly_cap?: number }, user: JwtUser) {
+    const hhmm = /^\d{2}:\d{2}$/;
+    if (dto.quiet_start != null && !hhmm.test(dto.quiet_start)) throw new BadRequestException({ code: 'BAD_TIME', message: 'quiet_start must be HH:MM', messageTh: 'รูปแบบเวลาไม่ถูกต้อง' });
+    if (dto.quiet_end != null && !hhmm.test(dto.quiet_end)) throw new BadRequestException({ code: 'BAD_TIME', message: 'quiet_end must be HH:MM', messageTh: 'รูปแบบเวลาไม่ถูกต้อง' });
+    if (dto.weekly_cap != null && (!Number.isInteger(dto.weekly_cap) || dto.weekly_cap < 0)) throw new BadRequestException({ code: 'BAD_CAP', message: 'weekly_cap must be an integer ≥ 0', messageTh: 'เพดานต้องเป็นจำนวนเต็ม ≥ 0' });
+    const cur = await this.getGovernance(user.tenantId);
+    const next = { quiet_start: dto.quiet_start ?? cur.quiet_start, quiet_end: dto.quiet_end ?? cur.quiet_end, weekly_cap: dto.weekly_cap ?? cur.weekly_cap };
+    const db = this.db as any;
+    const now = new Date();
+    const configEnc = encrypt(JSON.stringify(next));
+    await db.insert(tenantMessagingConfig)
+      .values({ tenantId: user.tenantId, channel: 'governance', configEnc, enabled: true, updatedAt: now, updatedBy: user.username ?? null })
+      .onConflictDoUpdate({ target: [tenantMessagingConfig.tenantId, tenantMessagingConfig.channel], set: { configEnc, enabled: true, updatedAt: now, updatedBy: user.username ?? null } });
+    return { governance: next };
   }
 
   // Resolve decrypted per-tenant creds for the gateway. Returns null when the tenant has no (enabled) override

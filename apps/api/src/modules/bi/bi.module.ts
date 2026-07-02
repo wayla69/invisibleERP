@@ -14,6 +14,7 @@ import { MatchModule } from '../match/match.module';
 import { BillingModule } from '../billing/billing.module';
 import { GovernanceModule } from '../governance/governance.module';
 import { JourneysModule } from '../journeys/journeys.module';
+import { NpsModule } from '../nps/nps.module';
 import { BiService } from './bi.service';
 import { BiLiveModule } from './bi-live.module';
 import { BiController } from './bi.controller';
@@ -25,5 +26,5 @@ import { BiController } from './bi.controller';
 // (CrmPipelineService) supply the project_evm + crm_win_loss report types. DRIZZLE is global.
 // BudgetModule/ProcurementModule/MatchModule supply the residual-gap report types budget_variance,
 // supplier_scorecard and the exec_scorecard supply-chain leg (RG-1/2/3).
-@Module({ imports: [MessagingModule, FinanceModule, EamModule, LedgerModule, LeasesModule, RevenueModule, ProjectsModule, CrmPipelineModule, CrmModule, BudgetModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, BiLiveModule, JourneysModule], providers: [BiService], controllers: [BiController], exports: [BiService] })
+@Module({ imports: [MessagingModule, FinanceModule, EamModule, LedgerModule, LeasesModule, RevenueModule, ProjectsModule, CrmPipelineModule, CrmModule, BudgetModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, BiLiveModule, JourneysModule, NpsModule], providers: [BiService], controllers: [BiController], exports: [BiService] })
 export class BiModule {}

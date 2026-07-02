@@ -379,6 +379,24 @@ async function main() {
   const t2Sees = t2View.json.member?.id === memberId;
   ok('RLS: T2 manager cannot see T1 member 360 profile', !t2Sees, `T2 saw T1 member: ${t2Sees}`);
 
+  // ── W3 (docs/27): NPS closed loop — tokenized public survey, single-use, detractor event, 360/summary ──
+  await inj('POST', '/api/automation/rules', admin, { name: 'กู้คืนบริการ NPS', event_type: 'loyalty.nps_detractor', action: { type: 'notification', message: 'ลูกค้าให้คะแนนต่ำ — ติดต่อกลับด่วน' } });
+  const npsSend = await inj('POST', '/api/nps/send', mgr1, { member_id: memberId, sale_ref: 'NPS-S1', channel: 'sms' });
+  ok('W3 NPS: staff sends a tokenized survey (consent path, sale-keyed)', (npsSend.status === 200 || npsSend.status === 201) && !!npsSend.json.token && npsSend.json.link.includes(npsSend.json.token), JSON.stringify(npsSend.json).slice(0, 110));
+  const npsDup = await inj('POST', '/api/nps/send', mgr1, { member_id: memberId, sale_ref: 'NPS-S1' });
+  ok('W3 NPS: a second survey for the same member × sale → 409 NPS_ALREADY_SENT (idempotent trigger)', npsDup.status === 409 && npsDup.json.error?.code === 'NPS_ALREADY_SENT', `${npsDup.status} ${npsDup.json.error?.code}`);
+  const npsGet = await inj('GET', `/api/nps/${npsSend.json.token}`);
+  ok('W3 NPS: public GET by token → question only, no member PII in the payload', npsGet.status === 200 && !!npsGet.json.question && npsGet.json.answered === false && npsGet.json.member_id === undefined && npsGet.json.phone === undefined, Object.keys(npsGet.json).join(','));
+  const npsAns = await inj('POST', `/api/nps/${npsSend.json.token}`, undefined, { score: 3, comment: 'อาหารช้า' });
+  const npsAgain = await inj('POST', `/api/nps/${npsSend.json.token}`, undefined, { score: 10 });
+  const npsExec = (await pg.query(`SELECT status FROM automation_executions WHERE event_type='loyalty.nps_detractor' AND status='executed'`)).rows as any[];
+  ok('W3 NPS: detractor (3) answer is single-use (repeat → 409) and fires loyalty.nps_detractor into automation', (npsAns.status === 200 || npsAns.status === 201) && npsAns.json.detractor === true && npsAgain.status === 409 && npsAgain.json.error?.code === 'NPS_ALREADY_ANSWERED' && npsExec.length >= 1, `ans=${npsAns.status}/${npsAns.json.detractor} again=${npsAgain.status}/${npsAgain.json.error?.code} exec=${npsExec.length}`);
+  const npsSummary = await inj('GET', '/api/nps/summary', mgr1);
+  const nps360 = await inj('GET', `/api/crm/profile/${memberId}`, mgr1);
+  ok('W3 NPS: summary scores −100 (1 detractor, 0 promoters) and the 360 shows the detractor flag',
+    npsSummary.json.responses === 1 && npsSummary.json.nps === -100 && nps360.json.nps?.score === 3 && nps360.json.nps?.detractor === true,
+    `sum=${npsSummary.json.responses}/${npsSummary.json.nps} 360=${JSON.stringify(nps360.json.nps)}`);
+
   // ── 11. GL balanced (trial balance Dr=Cr) ──
   const tb = await inj('GET', '/api/ledger/trial-balance', admin);
   ok('Trial balance balanced after CRM order (Dr==Cr)', tb.json.totals?.balanced === true, JSON.stringify(tb.json.totals ?? {}));

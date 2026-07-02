@@ -170,10 +170,19 @@ export class JourneysService {
           eq(journeyEnrollments.status, 'active'), isNotNull(journeyEnrollments.nextRunAt))).returning();
       if (!claimed) continue;
       const j = jm.get(Number(e.journeyId));
+      let deferred = false;
       try {
         const r = await this.executeStep(db, tenantId, j, claimed, actor);
-        if (r === 'sent') sent++; else if (r === 'completed') completed++; else skipped++;
+        if (r === 'deferred') {
+          // W3 quiet-hours deferral: re-arm the SAME step at the retry time — no advance, nothing was sent.
+          const retryAt = this.deferredUntil ?? new Date(Date.now() + 3600_000);
+          this.deferredUntil = null;
+          await db.update(journeyEnrollments).set({ nextRunAt: retryAt })
+            .where(and(eq(journeyEnrollments.id, Number(e.id)), eq(journeyEnrollments.tenantId, tenantId)));
+          skipped++; deferred = true;
+        } else if (r === 'sent') sent++; else if (r === 'completed') completed++; else skipped++;
       } catch { skipped++; }
+      if (deferred) continue;
       // Advance (or complete) — even after a skip, so a capped/skipped member still moves through.
       // H1 branch decision: if the just-executed step has a matching branch_rule, jump FORWARD to its
       // target instead of step+1 (forward-only is enforced at create, so this always progresses).
@@ -208,7 +217,8 @@ export class JourneysService {
   }
 
   // Execute one claimed step: skip-rule → frequency cap → consent-respecting send (audited in message_log).
-  private async executeStep(db: any, tenantId: number, j: any, enr: any, actor: string): Promise<'sent' | 'skipped' | 'completed'> {
+  // 'deferred' = the governance quiet window blocked the send; runDue re-arms the SAME step (W3, docs/27).
+  private async executeStep(db: any, tenantId: number, j: any, enr: any, actor: string): Promise<'sent' | 'skipped' | 'completed' | 'deferred'> {
     const [step] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(enr.journeyId)), eq(journeySteps.stepNo, Number(enr.currentStep)))).limit(1);
     if (!step) return 'completed';
     const memberId = Number(enr.memberId);
@@ -228,8 +238,14 @@ export class JourneysService {
       }
     }
     const res: any = await this.messaging.send({ member_id: memberId, channel: step.channel, body: step.body, campaign: `journey:${j.code}:${step.stepNo}` }, sysUser);
+    // W3 (docs/27) — a quiet-hours governance deferral re-snaps the SAME step to the retry time instead of
+    // advancing past an unsent message. Safe under claim-first: nothing was delivered, so re-arming the
+    // due-marker cannot double-send; the step simply fires when the quiet window ends.
+    if (res?.status === 'skipped' && res?.error === 'quiet hours' && res?.retry_at) { this.deferredUntil = new Date(res.retry_at); return 'deferred'; }
     return res?.status === 'sent' ? 'sent' : 'skipped';
   }
+  // Per-execution deferral marker (set by executeStep when governance defers a send; consumed by runDue).
+  private deferredUntil: Date | null = null;
 }
 
 // H3 (docs/26) — snap a scheduled time FORWARD to the target hour (Asia/Bangkok). Never backward, so a

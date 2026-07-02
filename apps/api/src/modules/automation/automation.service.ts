@@ -17,6 +17,8 @@ const EVENTS = [
   { key: 'loyalty.redeemed', label: 'แลกแต้ม', label_en: 'Loyalty points redeemed', fields: ['member_id', 'points_redeemed', 'redeem_value', 'balance', 'ref_doc'] },
   // W1 (docs/27): fired by the maintenance sweep's look-ahead, once per member × expire-by date.
   { key: 'loyalty.points_expiring', label: 'แต้มใกล้หมดอายุ', label_en: 'Loyalty points expiring soon', fields: ['member_id', 'expiring_points', 'days_left', 'expire_by'] },
+  // W3 (docs/27): fired when an NPS answer scores ≤ 6 — wire to a service-recovery journey/notification.
+  { key: 'loyalty.nps_detractor', label: 'ลูกค้าให้คะแนน NPS ต่ำ', label_en: 'NPS detractor response (≤6)', fields: ['member_id', 'score', 'comment', 'sale_ref'] },
 ] as const;
 const EVENT_KEYS = EVENTS.map((e) => e.key) as readonly string[];
 const ACTION_TYPES = ['notification', 'message', 'log', 'enroll_journey'] as const;

@@ -6,6 +6,7 @@ import { posMembers } from '../../database/schema/loyalty-members';
 import { memberConsents } from '../../database/schema/member-consents';
 import { auditLog } from '../../database/schema';
 import { dineInOrders } from '../../database/schema/restaurant';
+import { npsResponses } from '../../database/schema/nps';
 import { promotions } from '../../database/schema/marketing';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -163,8 +164,13 @@ export class CrmService {
     const [p] = await db.select().from(customerProfiles).where(and(eq(customerProfiles.memberId, memberId))).limit(1);
     const recent = await db.select({ orderNo: dineInOrders.orderNo, total: dineInOrders.total, channel: dineInOrders.channel, openedAt: dineInOrders.openedAt })
       .from(dineInOrders).where(and(eq(dineInOrders.memberId, memberId), isNotNull(dineInOrders.saleNo))).orderBy(desc(dineInOrders.openedAt)).limit(5);
+    // W3 (docs/27): latest NPS answer — the 360 shows a detractor at a glance (service recovery).
+    const [lastNps] = await db.select().from(npsResponses)
+      .where(and(eq(npsResponses.memberId, memberId), isNotNull(npsResponses.respondedAt)))
+      .orderBy(desc(npsResponses.respondedAt)).limit(1);
     return {
       member: { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, balance: n(m.balance), lifetime: n(m.lifetime), tier: m.tier },
+      nps: lastNps ? { score: Number(lastNps.score), detractor: Number(lastNps.score) <= 6, comment: lastNps.comment ?? null, responded_at: lastNps.respondedAt } : null,
       crm: p ? {
         rfm_segment: p.rfmSegment, total_orders: p.totalOrders, total_spend: n(p.totalSpend),
         rfm_recency: p.rfmRecency, rfm_frequency: p.rfmFrequency, rfm_monetary: n(p.rfmMonetary),
