@@ -36,7 +36,7 @@ export class AttachmentsService {
     }
     if (dto.data_url.length > MAX_DATA_URL) throw new BadRequestException({ code: 'IMAGE_TOO_LARGE', message: 'File too large (max ~2MB)', messageTh: 'ไฟล์ใหญ่เกินไป (สูงสุด ~2MB)' });
     const kind = dto.kind ?? 'invoice';
-    if (!KINDS.includes(kind as any)) throw new BadRequestException({ code: 'BAD_KIND', message: `kind must be one of ${KINDS.join('/')}`, messageTh: 'ชนิดเอกสารไม่ถูกต้อง' });
+    if (!(KINDS as readonly string[]).includes(kind)) throw new BadRequestException({ code: 'BAD_KIND', message: `kind must be one of ${KINDS.join('/')}`, messageTh: 'ชนิดเอกสารไม่ถูกต้อง' });
     const docNo = dto.doc_no.toUpperCase();
     const docType = dto.doc_type.toUpperCase();
     await this.assertDocExists(docType, docNo);
