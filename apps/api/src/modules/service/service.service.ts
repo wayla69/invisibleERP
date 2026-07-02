@@ -32,18 +32,18 @@ export class ServiceService {
   // ── Service Contracts ──
 
   private async nextContractNo(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const r = await db.insert(docCountersTenant)
       .values({ docType: 'SVC', tenantId, period: 'all', n: 1 })
       .onConflictDoUpdate({
         target: [docCountersTenant.docType, docCountersTenant.tenantId, docCountersTenant.period],
         set: { n: sql`${docCountersTenant.n} + 1` },
       }).returning({ n: docCountersTenant.n });
-    return `SVC-${String(Number(r[0].n)).padStart(5, '0')}`;
+    return `SVC-${String(Number(r[0]!.n)).padStart(5, '0')}`;
   }
 
   async createContract(dto: { customer_name: string; sla_tier?: string; start_date: string; end_date: string; monthly_value?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const tier = dto.sla_tier ?? 'Silver';
     const sla = SLA_TIERS[tier] ?? SLA_TIERS.Silver;
@@ -51,7 +51,7 @@ export class ServiceService {
 
     const [c] = await db.insert(serviceContracts).values({
       tenantId, contractNo, customerName: dto.customer_name, slaTier: tier,
-      responseHours: sla.responseHours, resolutionHours: sla.resolutionHours,
+      responseHours: sla!.responseHours, resolutionHours: sla!.resolutionHours,
       startDate: dto.start_date, endDate: dto.end_date,
       status: 'Active', monthlyValue: fx(dto.monthly_value ?? 0, 4), currency: 'THB',
       createdBy: user.username,
@@ -60,7 +60,7 @@ export class ServiceService {
   }
 
   async listContracts(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(serviceContracts).where(eq(serviceContracts.tenantId, user.tenantId!)).orderBy(sql`${serviceContracts.id} DESC`);
     return { contracts: rows.map((c: any) => this.fmtContract(c)), count: rows.length };
   }
@@ -68,25 +68,25 @@ export class ServiceService {
   // ── SLA Events ──
 
   private async nextEventNo(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const r = await db.insert(docCountersTenant)
       .values({ docType: 'INC', tenantId, period: 'all', n: 1 })
       .onConflictDoUpdate({
         target: [docCountersTenant.docType, docCountersTenant.tenantId, docCountersTenant.period],
         set: { n: sql`${docCountersTenant.n} + 1` },
       }).returning({ n: docCountersTenant.n });
-    return `INC-${String(Number(r[0].n)).padStart(5, '0')}`;
+    return `INC-${String(Number(r[0]!.n)).padStart(5, '0')}`;
   }
 
   async logEvent(contractId: number, dto: { title: string; priority?: string; notes?: string; opened_at?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const contract = await this.assertContract(contractId);
     const sla = SLA_TIERS[contract.slaTier] ?? SLA_TIERS.Silver;
     const eventNo = await this.nextEventNo(user.tenantId!);
 
     const openedAt = dto.opened_at ? new Date(dto.opened_at) : new Date();
-    const responseDueAt = new Date(openedAt.getTime() + sla.responseHours * 3600000);
-    const resolutionDueAt = new Date(openedAt.getTime() + sla.resolutionHours * 3600000);
+    const responseDueAt = new Date(openedAt.getTime() + sla!.responseHours * 3600000);
+    const resolutionDueAt = new Date(openedAt.getTime() + sla!.resolutionHours * 3600000);
 
     const [ev] = await db.insert(slaEvents).values({
       contractId, eventNo, title: dto.title, priority: dto.priority ?? 'P3',
@@ -97,7 +97,7 @@ export class ServiceService {
   }
 
   async resolveEvent(eventId: number, dto: { responded_at?: string; resolved_at?: string; notes?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [ev] = await db.select().from(slaEvents).where(eq(slaEvents.id, eventId)).limit(1);
     if (!ev) throw new NotFoundException({ code: 'EVENT_NOT_FOUND', message: `SLA event ${eventId} not found` });
 
@@ -115,7 +115,7 @@ export class ServiceService {
   }
 
   async listEvents(contractId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(slaEvents).where(eq(slaEvents.contractId, contractId)).orderBy(sql`${slaEvents.id} DESC`);
     return { events: rows.map((e: any) => this.fmtEvent(e)), count: rows.length };
   }
@@ -123,18 +123,18 @@ export class ServiceService {
   // ── Subscriptions ──
 
   private async nextSubNo(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const r = await db.insert(docCountersTenant)
       .values({ docType: 'SUB', tenantId, period: 'all', n: 1 })
       .onConflictDoUpdate({
         target: [docCountersTenant.docType, docCountersTenant.tenantId, docCountersTenant.period],
         set: { n: sql`${docCountersTenant.n} + 1` },
       }).returning({ n: docCountersTenant.n });
-    return `SUB-${String(Number(r[0].n)).padStart(5, '0')}`;
+    return `SUB-${String(Number(r[0]!.n)).padStart(5, '0')}`;
   }
 
   async createSubscription(dto: { customer_name: string; product_code: string; description?: string; billing_cycle?: string; unit_price: number; qty?: number; start_date: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const subNo = await this.nextSubNo(tenantId);
     const cycle = dto.billing_cycle ?? 'monthly';
@@ -150,7 +150,7 @@ export class ServiceService {
   }
 
   async updateSubscriptionStatus(subId: number, status: 'Active' | 'Paused' | 'Cancelled', user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.assertSub(subId);
     const [updated] = await db.update(serviceSubscriptions).set({ status }).where(eq(serviceSubscriptions.id, subId)).returning();
     return this.fmtSub(updated);
@@ -160,7 +160,7 @@ export class ServiceService {
   // Generates invoices for all Active serviceSubscriptions whose next_billing_date <= today
 
   async runBilling(dto: { as_of_date?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const asOf = dto.as_of_date ?? new Date().toISOString().slice(0, 10);
 
@@ -184,7 +184,7 @@ export class ServiceService {
           target: [docCountersTenant.docType, docCountersTenant.tenantId, docCountersTenant.period],
           set: { n: sql`${docCountersTenant.n} + 1` },
         }).returning({ n: docCountersTenant.n });
-      const invoiceNo = `INV-${String(Number(r[0].n)).padStart(5, '0')}`;
+      const invoiceNo = `INV-${String(Number(r[0]!.n)).padStart(5, '0')}`;
 
       // Compute next billing date by advancing months
       const months = CYCLE_MONTHS[sub.billingCycle] ?? 1;
@@ -227,34 +227,34 @@ export class ServiceService {
   }
 
   async payInvoice(invoiceId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [inv] = await db.select().from(serviceSubscriptionInvoices).where(eq(serviceSubscriptionInvoices.id, invoiceId)).limit(1);
     if (!inv) throw new NotFoundException({ code: 'INVOICE_NOT_FOUND', message: `Invoice ${invoiceId} not found` });
     if (inv.status === 'Paid') throw new BadRequestException({ code: 'ALREADY_PAID', message: 'Invoice already paid' });
     const [updated] = await db.update(serviceSubscriptionInvoices).set({ status: 'Paid' }).where(eq(serviceSubscriptionInvoices.id, invoiceId)).returning();
     // settle on the GL: Dr 1000 Cash / Cr 1100 AR (idempotent per invoice)
     let entryNo: string | null = null;
-    if (this.ledger && !(await this.ledger.alreadyPosted('SUB-PAY', updated.invoiceNo, user.tenantId ?? null))) {
+    if (this.ledger && !(await this.ledger.alreadyPosted('SUB-PAY', updated!.invoiceNo, user.tenantId ?? null))) {
       const je: any = await this.ledger.postEntry({
-        source: 'SUB-PAY', sourceRef: updated.invoiceNo, tenantId: user.tenantId ?? null, memo: `Subscription payment ${updated.invoiceNo}`, createdBy: user.username,
+        source: 'SUB-PAY', sourceRef: updated!.invoiceNo, tenantId: user.tenantId ?? null, memo: `Subscription payment ${updated!.invoiceNo}`, createdBy: user.username,
         lines: [
-          { account_code: '1000', debit: n(updated.amount), memo: 'Cash — subscription' },
-          { account_code: '1100', credit: n(updated.amount), memo: 'AR cleared' },
+          { account_code: '1000', debit: n(updated!.amount), memo: 'Cash — subscription' },
+          { account_code: '1100', credit: n(updated!.amount), memo: 'AR cleared' },
         ],
       });
       entryNo = je.entry_no;
     }
-    return { id: Number(updated.id), invoice_no: updated.invoiceNo, status: updated.status, amount: n(updated.amount), entry_no: entryNo };
+    return { id: Number(updated!.id), invoice_no: updated!.invoiceNo, status: updated!.status, amount: n(updated!.amount), entry_no: entryNo };
   }
 
   async listInvoices(subId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(serviceSubscriptionInvoices).where(eq(serviceSubscriptionInvoices.subscriptionId, subId)).orderBy(sql`${serviceSubscriptionInvoices.id} DESC`);
     return { invoices: rows.map((i: any) => ({ id: Number(i.id), invoice_no: i.invoiceNo, billing_period: i.billingPeriod, amount: n(i.amount), status: i.status, due_date: i.dueDate })) };
   }
 
   async listSubscriptions(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(serviceSubscriptions).where(eq(serviceSubscriptions.tenantId, user.tenantId!)).orderBy(sql`${serviceSubscriptions.id} DESC`);
     return { subscriptions: rows.map((s: any) => this.fmtSub(s)), count: rows.length };
   }
@@ -262,14 +262,14 @@ export class ServiceService {
   // ── Helpers ──
 
   private async assertContract(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(serviceContracts).where(eq(serviceContracts.id, id)).limit(1);
     if (!c) throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: `Service contract ${id} not found` });
     return c;
   }
 
   private async assertSub(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.select().from(serviceSubscriptions).where(eq(serviceSubscriptions.id, id)).limit(1);
     if (!s) throw new NotFoundException({ code: 'SUB_NOT_FOUND', message: `Subscription ${id} not found` });
     return s;

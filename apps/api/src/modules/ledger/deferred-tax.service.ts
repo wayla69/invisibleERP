@@ -54,14 +54,14 @@ export class DeferredTaxService {
   }
   private periodEndDate(period: string): string {
     const [y, m] = period.split('-').map(Number);
-    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const last = new Date(Date.UTC(y!, m, 0)).getUTCDate();
     return `${period}-${String(last).padStart(2, '0')}`;
   }
 
   // runDeferredTax — gather temporary differences, compute DTA/DTL and the delta vs the prior posted run,
   // stage an 'Open' run. Idempotent: re-running an Open period updates it; a Posted period throws ALREADY_POSTED.
   async runDeferredTax(dto: RunDeferredTaxDto) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenant(dto.tenantId);
     const asOf = dto.asOfDate ?? this.periodEndDate(dto.period);
     const taxRate = dto.taxRate ?? DEFAULT_TAX_RATE;
@@ -128,7 +128,7 @@ export class DeferredTaxService {
       id = Number(existing.id);
     } else {
       const [ins] = await db.insert(deferredTaxRuns).values({ tenantId, period: dto.period, status: 'Open', ...vals }).returning({ id: deferredTaxRuns.id });
-      id = Number(ins.id);
+      id = Number(ins!.id);
     }
     return { id, period: dto.period, as_of_date: asOf, status: 'Open', tenant_id: tenantId, tax_rate: taxRate, temp_differences: temp, dta, dtl, net_deferred: netDeferred, prior_net: priorNet, delta_posted: delta };
   }
@@ -136,7 +136,7 @@ export class DeferredTaxService {
   // postDeferredTax — maker-checker post of an Open run (poster ≠ runner ⇒ SELF_POST). Posts the period
   // DELTA to 1700/5950 per the sign convention above; marks the run Posted. A Posted run throws ALREADY_POSTED.
   async postDeferredTax(dto: PostDeferredTaxDto) {
-    const db = this.db as any;
+    const db = this.db;
     const [run] = await db.select().from(deferredTaxRuns).where(eq(deferredTaxRuns.id, dto.id)).limit(1);
     if (!run) throw new NotFoundException({ code: 'DT_RUN_NOT_FOUND', message: `Deferred tax run ${dto.id} not found`, messageTh: `ไม่พบรายการภาษีเงินได้รอการตัดบัญชี ${dto.id}` });
     if (run.status === 'Posted') throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This deferred tax run is already posted', messageTh: 'รายการนี้โพสต์แล้ว' });
@@ -161,7 +161,7 @@ export class DeferredTaxService {
   }
 
   async list(tenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = this.tenant(tenantId);
     const rows = await db.select().from(deferredTaxRuns)
       .where(tid != null ? eq(deferredTaxRuns.tenantId, tid) : undefined)
@@ -169,7 +169,7 @@ export class DeferredTaxService {
     return { runs: rows.map(shape), count: rows.length };
   }
   async get(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(deferredTaxRuns).where(eq(deferredTaxRuns.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'DT_RUN_NOT_FOUND', message: `Deferred tax run ${id} not found`, messageTh: `ไม่พบรายการภาษีเงินได้รอการตัดบัญชี ${id}` });
     return shape(r);

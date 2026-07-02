@@ -13,7 +13,7 @@ export class KdsService {
 
   // active kitchen items grouped by station, oldest-fired first (cook next), excl served/voided
   async feed(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       itemId: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, kdsStatus: dineInOrderItems.kdsStatus,
@@ -47,19 +47,19 @@ export class KdsService {
   }
 
   async listStations(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(kitchenStations).orderBy(asc(kitchenStations.sort));
     return { stations: rows.map((s: any) => ({ id: Number(s.id), code: s.code, name: s.name, sort: s.sort, default_prep_minutes: s.defaultPrepMinutes, active: s.active })) };
   }
 
   async upsertStation(dto: z.infer<typeof StationBody>, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [existing] = await db.select().from(kitchenStations).where(eq(kitchenStations.code, dto.code)).limit(1);
     if (existing) {
       await db.update(kitchenStations).set({ name: dto.name, sort: dto.sort ?? existing.sort, defaultPrepMinutes: dto.default_prep_minutes ?? existing.defaultPrepMinutes }).where(eq(kitchenStations.id, existing.id));
       return { id: Number(existing.id), code: dto.code };
     }
     const [created] = await db.insert(kitchenStations).values({ tenantId: user.tenantId, code: dto.code, name: dto.name, sort: dto.sort ?? 0, defaultPrepMinutes: dto.default_prep_minutes ?? 10 }).returning({ id: kitchenStations.id });
-    return { id: Number(created.id), code: dto.code };
+    return { id: Number(created!.id), code: dto.code };
   }
 }

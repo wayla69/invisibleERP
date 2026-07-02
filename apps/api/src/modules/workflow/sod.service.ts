@@ -13,17 +13,17 @@ export class SodService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async createRule(dto: { name: string; kind?: string; doc_type?: string; perm_a?: string; perm_b?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.insert(sodRules).values({ tenantId: user.tenantId ?? null, name: dto.name, kind: dto.kind ?? 'PERM_PAIR', docType: dto.doc_type ?? null, permA: dto.perm_a ?? null, permB: dto.perm_b ?? null, active: true }).returning({ id: sodRules.id });
-    return { id: Number(r.id) };
+    return { id: Number(r!.id) };
   }
   async listRules(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(sodRules).orderBy(sodRules.id);
     return { rules: rows.map((r: any) => ({ id: Number(r.id), name: r.name, kind: r.kind, doc_type: r.docType, perm_a: r.permA, perm_b: r.permB, active: r.active })) };
   }
   async setRuleActive(id: number, active: boolean, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.update(sodRules).set({ active }).where(eq(sodRules.id, id));
     return { id, active };
   }
@@ -31,7 +31,7 @@ export class SodService {
   // Throws ForbiddenException{SOD_VIOLATION} when the actor breaches a configured rule. Reusable by ANY
   // module before a sensitive action.
   async assertActionAllowed(ctx: { tenantId: number | null; docType: string; createdBy: string; actor: string; actorPermissions: string[]; action: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const rules = await db.select().from(sodRules).where(eq(sodRules.active, true));
     const perms = new Set(ctx.actorPermissions ?? []);
     for (const r of rules) {
@@ -51,7 +51,7 @@ export class SodService {
   // evaluated on EFFECTIVE permissions (role defaults + per-user overrides, expanded for sub-permissions).
   // Complements violationReport() (configurable role-level PERM_PAIR rules). Admins are flagged inherent.
   async userConflicts(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const us = await db.select({ id: users.id, username: users.username, role: users.role }).from(users).orderBy(users.username);
     const ups = await db.select({ userId: userPermissions.userId, perm: userPermissions.perm }).from(userPermissions);
     const byUser = new Map<number, string[]>();
@@ -85,7 +85,7 @@ export class SodService {
 
   // Oversight: which ROLES violate an active PERM_PAIR rule (hold both conflicting perms) — read-only.
   async violationReport(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rules = await db.select().from(sodRules).where(and(eq(sodRules.active, true), eq(sodRules.kind, 'PERM_PAIR')));
     const violations: any[] = [];
     for (const r of rules) {

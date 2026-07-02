@@ -24,7 +24,7 @@ export class CustomFieldsService {
 
   // ── definitions ──
   async defineField(dto: { entity: string; field_key?: string; label: string; label_en?: string; data_type?: DataType; options?: string[]; required?: boolean; default_value?: string; help_text?: string; sort?: number; active?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const entity = slug(dto.entity);
     if (!entity) throw new BadRequestException({ code: 'BAD_ENTITY', message: 'entity required', messageTh: 'ต้องระบุประเภทข้อมูล' });
     const dataType = dto.data_type ?? 'text';
@@ -43,11 +43,11 @@ export class CustomFieldsService {
       return { id: Number(existing.id), entity, field_key: fieldKey, data_type: dataType, updated: true };
     }
     const [d] = await db.insert(customFieldDefs).values({ ...row, createdBy: user.username }).returning({ id: customFieldDefs.id });
-    return { id: Number(d.id), entity, field_key: fieldKey, data_type: dataType, updated: false };
+    return { id: Number(d!.id), entity, field_key: fieldKey, data_type: dataType, updated: false };
   }
 
   async listDefs(entity: string | undefined, _user: JwtUser, includeInactive = false) {
-    const db = this.db as any;
+    const db = this.db;
     let rows = entity
       ? await db.select().from(customFieldDefs).where(eq(customFieldDefs.entity, slug(entity)))
       : await db.select().from(customFieldDefs);
@@ -56,7 +56,7 @@ export class CustomFieldsService {
   }
 
   async removeField(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const upd = await db.update(customFieldDefs).set({ active: false }).where(and(eq(customFieldDefs.tenantId, user.tenantId as any), eq(customFieldDefs.id, id))).returning({ id: customFieldDefs.id });
     if (!upd.length) throw new NotFoundException({ code: 'FIELD_NOT_FOUND', message: 'Field not found', messageTh: 'ไม่พบฟิลด์' });
     return { id, active: false };
@@ -66,7 +66,7 @@ export class CustomFieldsService {
   // Set values for one record. Validates each against its definition (type, required, select options) and
   // stores it in the typed column. Unknown keys (no active def) are rejected.
   async setValues(entity: string, recordId: string, values: Record<string, any>, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const ent = slug(entity);
     if (!recordId) throw new BadRequestException({ code: 'NO_RECORD', message: 'record_id required', messageTh: 'ต้องระบุรหัสเรคคอร์ด' });
     const defs = (await db.select().from(customFieldDefs).where(and(eq(customFieldDefs.tenantId, user.tenantId as any), eq(customFieldDefs.entity, ent), eq(customFieldDefs.active, true))));
@@ -90,7 +90,7 @@ export class CustomFieldsService {
   }
 
   async getValues(entity: string, recordId: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const ent = slug(entity);
     const defs = await db.select().from(customFieldDefs).where(and(eq(customFieldDefs.entity, ent), eq(customFieldDefs.active, true)));
     const vals = await db.select().from(customFieldValues).where(and(eq(customFieldValues.entity, ent), eq(customFieldValues.recordId, recordId)));
@@ -104,7 +104,7 @@ export class CustomFieldsService {
 
   // Batch-load values for many records of one entity (for list views) → { recordId: { fieldKey: value } }.
   async getValuesBulk(entity: string, recordIds: string[], _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const ent = slug(entity);
     if (!recordIds.length) return { entity: ent, records: {} };
     const defs = await db.select().from(customFieldDefs).where(and(eq(customFieldDefs.entity, ent), eq(customFieldDefs.active, true)));
@@ -120,7 +120,7 @@ export class CustomFieldsService {
 
   // ── helpers ──
   private async upsertValue(user: JwtUser, entity: string, fieldKey: string, recordId: string, typed: { valueText: any; valueNum: any; valueDate: any; valueBool: any }) {
-    const db = this.db as any;
+    const db = this.db;
     const [existing] = await db.select({ id: customFieldValues.id }).from(customFieldValues).where(and(eq(customFieldValues.tenantId, user.tenantId as any), eq(customFieldValues.entity, entity), eq(customFieldValues.fieldKey, fieldKey), eq(customFieldValues.recordId, recordId))).limit(1);
     const cols = { valueText: typed.valueText, valueNum: typed.valueNum, valueDate: typed.valueDate, valueBool: typed.valueBool, updatedBy: user.username, updatedAt: new Date() };
     if (existing) await db.update(customFieldValues).set(cols).where(eq(customFieldValues.id, existing.id));

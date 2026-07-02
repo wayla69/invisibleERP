@@ -36,7 +36,7 @@ export class DemandForecastService {
       .groupBy(custPosSales.saleDate).orderBy(custPosSales.saleDate);
     if (!rows.length) return [];
     const byDay = new Map(rows.map((r) => [r.d, Number(r.q)]));
-    const start = new Date(rows[0].d);
+    const start = new Date(rows[0]!.d);
     const today = new Date(ymd());
     const series: number[] = [];
     for (let t = new Date(start); t <= today; t.setUTCDate(t.getUTCDate() + 1)) {
@@ -86,8 +86,8 @@ export class DemandForecastService {
     if (series.length < MIN_HISTORY) return null;
     const hz = Math.min(Math.max(1, Math.floor(horizon)), 90);
     const chosen = this.evaluate(series, this.testSize(series.length), { lastDate: ymd() })[0];
-    const forecast = ALGOS[chosen.algorithm](series, hz, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));
-    return { algorithm: chosen.algorithm, forecast, wape: chosen.wape, data_days: series.length };
+    const forecast = ALGOS[chosen!.algorithm]!(series, hz, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));
+    return { algorithm: chosen!.algorithm, forecast, wape: chosen!.wape, data_days: series.length };
   }
 
   // Forecast: auto-select the best model (or use a pinned one), forecast the horizon, and persist the run.
@@ -104,10 +104,10 @@ export class DemandForecastService {
       const m = candidates.find((c) => c.algorithm === dto.algorithm);
       if (!m) throw new BadRequestException({ code: 'UNKNOWN_ALGORITHM', message: `Unknown algorithm '${dto.algorithm}'`, messageTh: 'อัลกอริทึมไม่ถูกต้อง' });
       chosen = m; selectedBy = 'requested';
-    } else { chosen = candidates[0]; selectedBy = 'lowest_wape'; }
+    } else { chosen! = candidates[0]; selectedBy = 'lowest_wape'; }
 
     // demand can't be negative — clamp (Holt can extrapolate below 0 on a declining trend).
-    const forecast = ALGOS[chosen.algorithm](series, horizon, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));
+    const forecast = ALGOS[chosen.algorithm]!(series, horizon, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));
 
     await db.insert(demandForecasts).values({
       tenantId: user.tenantId, itemId: dto.item_id, algorithm: chosen.algorithm, selectedBy, horizon,

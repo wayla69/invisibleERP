@@ -178,7 +178,7 @@ export class ChannelOrderService {
     const kioskMemberId = dto.member_id ? Number(dto.member_id) : null;
     // mint a per-order public token so the takeaway customer can track the order (GET /api/order/t/:token).
     const trackToken = mintChannelToken({ tenantId: user.tenantId ?? 0, orderId: Number(created!.id) });
-    await db.update(dineInOrders).set({ channel: 'kiosk', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received', deliveryFee: fx(fee, 2), memberId: kioskMemberId, publicToken: trackToken }).where(eq(dineInOrders.id, created.id));
+    await db.update(dineInOrders).set({ channel: 'kiosk', fulfillmentType: dto.fulfillment_type ?? 'takeaway', fulfillmentStatus: 'received', deliveryFee: fx(fee, 2), memberId: kioskMemberId, publicToken: trackToken }).where(eq(dineInOrders.id, created!.id));
     const o = await this.dineIn.loadOrderForUpdate(view.order_no);
     const saleNo = await this.dineIn.mintSaleNo(user.tenantId ?? null);
     const built: any = await this.dineIn.buildSale(o, saleNo, 0, user);

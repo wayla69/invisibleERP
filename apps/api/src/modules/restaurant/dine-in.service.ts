@@ -307,7 +307,7 @@ export class DineInService {
       const pr = await this.pricing.ruleDiscountsForLines(rlines, { channel: opts.pricing?.channel, location: opts.pricing?.location, at: opts.pricing?.at });
       items.forEach((l: any, i: number) => {
         const key = String(l.id);
-        if (lineDiscounts[key] == null && pr.lineDiscounts[i]! > 0) { lineDiscounts[key] = { discount_amt: pr.lineDiscounts[i]! }; appliedRules.push(...pr.lineRules[i]); }
+        if (lineDiscounts[key] == null && pr.lineDiscounts[i]! > 0) { lineDiscounts[key] = { discount_amt: pr.lineDiscounts[i]! }; appliedRules.push(...pr!.lineRules[i]); }
       });
       ruleOrderDiscount = roundCurrency(pr.orderDiscount, 'THB'); appliedRules.push(...pr.orderRules);
     }

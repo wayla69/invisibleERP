@@ -37,7 +37,7 @@ export class MemberService {
   }
 
   async config() {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(loyaltyConfig).where(eq(loyaltyConfig.id, 1)).limit(1);
     return { enabled: !!c?.enabled, pointsPerBaht: n(c?.pointsPerBaht), bahtPerPoint: n(c?.bahtPerPoint), minRedeem: n(c?.minRedeem), transferDayCap: c?.transferDayCap != null ? Number(c.transferDayCap) : 1000 };
   }
@@ -47,7 +47,7 @@ export class MemberService {
   }
 
   async enroll(dto: { name?: string; phone?: string; card_no?: string; email?: string; birthday?: string; marketing_opt_in?: boolean }, user: JwtUser) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     let row;
     try {
       [row] = await db.insert(posMembers).values({ tenantId, memberCode: `M-TMP`, name: dto.name ?? null, phone: dto.phone ?? null, cardNo: dto.card_no ?? null, email: dto.email ?? null, birthday: dto.birthday ?? null, marketingOptIn: dto.marketing_opt_in ?? true, balance: '0', lifetime: '0', createdBy: user.username }).returning();
@@ -55,13 +55,13 @@ export class MemberService {
       if (isUniqueViolation(e)) throw new ConflictException({ code: 'MEMBER_EXISTS', message: 'Member with this phone/card already exists', messageTh: 'มีสมาชิกที่ใช้เบอร์/บัตรนี้แล้ว' });
       throw e;
     }
-    const memberCode = `M-${String(row.id).padStart(6, '0')}`;
-    await db.update(posMembers).set({ memberCode }).where(eq(posMembers.id, row.id));
-    return { id: Number(row.id), member_code: memberCode, name: row.name, phone: row.phone, balance: 0 };
+    const memberCode = `M-${String(row!.id).padStart(6, '0')}`;
+    await db.update(posMembers).set({ memberCode }).where(eq(posMembers.id, row!.id));
+    return { id: Number(row!.id), member_code: memberCode, name: row!.name, phone: row!.phone, balance: 0 };
   }
 
   async lookup(q: { phone?: string; card?: string; code?: string; line_user_id?: string }, user: JwtUser) {
-    const db = this.db as any; this.tid(user);
+    const db = this.db; this.tid(user);
     const conds: any[] = [];
     if (q.phone) conds.push(eq(posMembers.phone, q.phone));
     if (q.card) conds.push(eq(posMembers.cardNo, q.card));
@@ -76,7 +76,7 @@ export class MemberService {
   // Enrol-or-return a member from a verified LINE identity (LIFF/LINE-Login id token). Idempotent: a
   // second sign-in with the same LINE account returns the existing member, never a duplicate.
   async enrollViaLine(dto: { id_token: string; name?: string; phone?: string; marketing_opt_in?: boolean }, user: JwtUser) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const prof = await verifyLineIdToken(dto.id_token);
     const [existing] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.lineUserId, prof.lineUserId))).limit(1);
     if (existing) return { ...shape(existing), created: false };
@@ -95,14 +95,14 @@ export class MemberService {
       }
       throw e;
     }
-    const memberCode = `M-${String(row.id).padStart(6, '0')}`;
-    await db.update(posMembers).set({ memberCode }).where(eq(posMembers.id, row.id));
+    const memberCode = `M-${String(row!.id).padStart(6, '0')}`;
+    await db.update(posMembers).set({ memberCode }).where(eq(posMembers.id, row!.id));
     return { ...shape({ ...row, memberCode }), created: true };
   }
 
   // Link a verified LINE identity to an EXISTING member (e.g. a phone member who later signs in with LINE).
   async linkLine(memberId: number, idToken: string, user: JwtUser) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const prof = await verifyLineIdToken(idToken);
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
@@ -112,7 +112,7 @@ export class MemberService {
     return this.balance(memberId, user);
   }
   async balance(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, id)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     return shape(m);
@@ -120,7 +120,7 @@ export class MemberService {
 
   // update member profile (contact + birthday + marketing consent)
   async update(id: number, dto: { name?: string; phone?: string; email?: string; birthday?: string | null; marketing_opt_in?: boolean; tier?: string; active?: boolean }, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, id)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const set: any = { lastUpdated: new Date() };
@@ -137,7 +137,7 @@ export class MemberService {
 
   // members with a birthday today / this month (Asia/Bangkok), active & opted-in — for birthday campaigns
   async birthdays(window: 'today' | 'month', _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const bkk = new Date(Date.now() + 7 * 3600 * 1000);
     const mo = bkk.getUTCMonth() + 1, day = bkk.getUTCDate();
     const rows = await db.select().from(posMembers).where(eq(posMembers.active, true));
@@ -149,7 +149,7 @@ export class MemberService {
     return { window, count: out.length, members: out.map(shape) };
   }
   async history(id: number, _user: JwtUser, limit = 20) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, id)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const rows = await db.select().from(posMemberLedger).where(eq(posMemberLedger.memberId, id)).orderBy(desc(posMemberLedger.id)).limit(limit);
@@ -192,7 +192,7 @@ export class MemberService {
   // after the locks so concurrent transfers cannot overshoot). Locks are taken in ascending member-id order
   // (the referral-deadlock lesson) so two opposite-direction transfers can never deadlock.
   async transferPoints(user: JwtUser, fromMemberId: number, dto: { to_member_id?: number; to_phone?: string; points: number; note?: string }, source: 'self' | 'staff') {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const cfg = await this.config();
     if (!cfg.enabled) throw new ConflictException({ code: 'LOYALTY_DISABLED', message: 'Loyalty program disabled', messageTh: 'ระบบสะสมแต้มปิดอยู่' });
     if (cfg.transferDayCap <= 0) throw new ConflictException({ code: 'TRANSFER_DISABLED', message: 'Point transfers are disabled (transfer_day_cap = 0)', messageTh: 'ปิดการโอนแต้ม' });
@@ -240,7 +240,7 @@ export class MemberService {
 
   // REDEEM quote (validation) — returns the baht value buildSale uses as an order discount.
   async quoteRedeem(memberId: number, points: number, user: JwtUser) {
-    const db = this.db as any; const cfg = await this.config();
+    const db = this.db; const cfg = await this.config();
     if (!cfg.enabled) throw new ConflictException({ code: 'LOYALTY_DISABLED', message: 'Loyalty program disabled', messageTh: 'ระบบสะสมแต้มปิดอยู่' });
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
     if (!m || m.active === false) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found/inactive', messageTh: 'ไม่พบสมาชิก' });
@@ -264,7 +264,7 @@ export class MemberService {
   // Standalone EARN (own transaction) — for callers that are not already inside a checkout tx (the public
   // loyalty API, integrations). Delegates to the locked earnInTx; returns the points earned + new balance.
   async earn(user: JwtUser, memberId: number, netSpend: number, refDoc: string) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const pts = await db.transaction((tx: any) => this.earnInTx(tx, tenantId, memberId, netSpend, refDoc, user.username));
     const [m] = await db.select({ balance: posMembers.balance }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
     return { member_id: memberId, points_earned: pts, balance: n(m?.balance), ref_doc: refDoc };
@@ -273,7 +273,7 @@ export class MemberService {
   // Standalone REDEEM (own transaction) — validates via quoteRedeem then applies redeemInTx under the lock.
   async redeem(user: JwtUser, memberId: number, points: number, refDoc: string) {
     const q = await this.quoteRedeem(memberId, points, user); // throws on disabled/not-found/insufficient
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const consumed = await db.transaction((tx: any) => this.redeemInTx(tx, tenantId, memberId, points, q.redeemValue, refDoc, user.username));
     const [m] = await db.select({ balance: posMembers.balance }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
     return { member_id: memberId, points_redeemed: consumed, redeem_value: q.redeemValue, balance: n(m?.balance), ref_doc: refDoc };
@@ -282,7 +282,7 @@ export class MemberService {
   // ── CRM Phase 1 ────────────────────────────────────────────────────────────
   // Searchable member directory (left-joined to RFM segment). Read-only, tenant-scoped via RLS.
   async list(q: { q?: string; segment?: string; tier?: string; active?: boolean; limit?: number; offset?: number }, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (q.q) { const s = `%${q.q}%`; conds.push(or(ilike(posMembers.name, s), ilike(posMembers.phone, s), ilike(posMembers.cardNo, s), ilike(posMembers.memberCode, s))); }
     if (q.tier) conds.push(eq(posMembers.tier, q.tier));
@@ -308,7 +308,7 @@ export class MemberService {
   // Adjust). Explicitly tenant-scoped — RLS is bypassed for Admin, so an explicit tenant_id is required for
   // an HQ/Admin caller with no tenant context (mirrors postLiability + the ledger close routines).
   async liability(user: JwtUser, explicitTenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? (explicitTenantId != null ? Number(explicitTenantId) : null);
     if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id to read loyalty liability', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id เพื่อดูหนี้สินแต้ม' });
     const cfg = await this.config();
@@ -364,7 +364,7 @@ export class MemberService {
   }
 
   private async expireForTenant(tenantId: number, createdBy: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(loyaltyConfig).limit(1);
     const expiryDays = Number(c?.expiryDays ?? 365); // matches redeemable(); explicit 0 = disabled
     if (!expiryDays || expiryDays <= 0) return { tenant_id: tenantId, expiry_days: expiryDays, expired_members: 0, expired_points: 0, note: 'expiry disabled (expiry_days = 0)' };
@@ -405,7 +405,7 @@ export class MemberService {
   // ⇒ every tenant) or a tenant user (RLS ⇒ own tenant only); pass tenant_id to limit to one. Best-effort per
   // tenant — one tenant's failure (e.g. a closed period) is recorded and never aborts the others.
   async sweepMaintenance(user: JwtUser, explicitTenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     let tenantIds: number[];
     if (explicitTenantId != null) tenantIds = [Number(explicitTenantId)];
     else {
@@ -509,7 +509,7 @@ export class MemberService {
   }
 
   private async recomputeTiersForTenant(tenantId: number, createdBy: string) {
-    const db = this.db as any;
+    const db = this.db;
     const tiers = await db.select().from(loyaltyTiers).where(and(eq(loyaltyTiers.tenantId, tenantId), eq(loyaltyTiers.active, true))).orderBy(desc(loyaltyTiers.minLifetime));
     if (!tiers.length) return { tenant_id: tenantId, changed: 0, note: 'no tiers configured' };
     const members = await db.select({ id: posMembers.id, lifetime: posMembers.lifetime, tier: posMembers.tier }).from(posMembers).where(eq(posMembers.tenantId, tenantId));
@@ -534,7 +534,7 @@ export class MemberService {
 
   // Tier journey for a member — current tier, the next tier up, and progress toward it. Tenant-scoped.
   async tierJourney(user: JwtUser, memberId: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [m] = await db.select().from(posMembers).where(and(eq(posMembers.id, memberId), eq(posMembers.tenantId, tenantId))).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const tiers = await db.select().from(loyaltyTiers).where(and(eq(loyaltyTiers.tenantId, tenantId), eq(loyaltyTiers.active, true))).orderBy(loyaltyTiers.minLifetime);
@@ -557,7 +557,7 @@ export class MemberService {
 
   // PDPA consents for a member — per-purpose rows + the synced marketing flag.
   async getConsents(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, id)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const rows = await db.select().from(memberConsents).where(eq(memberConsents.memberId, id)).orderBy(memberConsents.purpose);
@@ -567,7 +567,7 @@ export class MemberService {
   // Set/withdraw a consent purpose (upsert). 'marketing' syncs pos_members.marketing_opt_in (back-compat),
   // so the existing messaging blast automatically honours opt-out.
   async setConsent(id: number, dto: { purpose: string; granted: boolean; channel?: string; source?: string }, user: JwtUser) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, id)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const now = new Date();

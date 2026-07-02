@@ -19,7 +19,7 @@ export class WhtService {
 
   // ออกหนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ): payer = tenant ปัจจุบัน, payee จาก dto
   async issue(dto: IssueWhtDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId;
     if (tenantId == null) {
       throw new BadRequestException({ code: 'NO_TENANT', message: 'A tenant context is required to issue a WHT certificate', messageTh: 'ต้องระบุกิจการผู้จ่ายเงินก่อนออกหนังสือรับรองฯ' });
@@ -57,7 +57,7 @@ export class WhtService {
 
     const totalPaid = roundCurrency(computed.reduce((a, l) => a + l.amount_paid, 0), 'THB');
     const totalWht = roundCurrency(computed.reduce((a, l) => a + l.tax_withheld, 0), 'THB');
-    const pndType = dto.pnd_type ?? resolvePnd(dto.lines[0].income_type, kind);
+    const pndType = dto.pnd_type ?? resolvePnd(dto!.lines[0].income_type, kind);
     const docNo = await this.docNo.nextMonthlyTenant('WHT', tenantId);
 
     const [head] = await db.insert(whtCertificates).values({
@@ -73,7 +73,7 @@ export class WhtService {
     }).returning({ id: whtCertificates.id });
 
     await db.insert(whtCertLines).values(computed.map((l) => ({
-      whtCertId: Number(head.id), tenantId, incomeType: l.income_type, description: l.description,
+      whtCertId: Number(head!.id), tenantId, incomeType: l.income_type, description: l.description,
       datePaid: l.date_paid, amountPaid: fx(l.amount_paid, 2), rate: String(l.rate), taxWithheld: fx(l.tax_withheld, 2),
     })));
 
@@ -81,14 +81,14 @@ export class WhtService {
   }
 
   async list(user: JwtUser, pndType?: string, limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const where = pndType ? eq(whtCertificates.pndType, pndType as any) : undefined;
     const rows = await db.select().from(whtCertificates).where(where).orderBy(desc(whtCertificates.id)).limit(limit);
     return { certificates: rows.map(shape), count: rows.length };
   }
 
   async getByDocNo(user: JwtUser, docNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [head] = await db.select().from(whtCertificates).where(eq(whtCertificates.docNo, docNo)).limit(1);
     if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'WHT certificate not found', messageTh: 'ไม่พบหนังสือรับรองหักภาษี ณ ที่จ่าย' });
     const lines = await db.select().from(whtCertLines).where(eq(whtCertLines.whtCertId, Number(head.id)));
@@ -96,7 +96,7 @@ export class WhtService {
   }
 
   async void(user: JwtUser, docNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [head] = await db.select().from(whtCertificates).where(eq(whtCertificates.docNo, docNo)).limit(1);
     if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'WHT certificate not found', messageTh: 'ไม่พบหนังสือรับรองฯ' });
     await db.update(whtCertificates).set({ status: 'Voided' }).where(eq(whtCertificates.id, head.id));

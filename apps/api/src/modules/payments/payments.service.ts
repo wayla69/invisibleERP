@@ -58,7 +58,7 @@ export class PaymentService {
   //   succeeds at the PSP but fails to persist is never an orphaned, unrecorded charge — it survives as
   //   a row to reconcile. A gateway error flips the row to 'Failed' rather than leaving it dangling.
   async recordTender(dto: RecordTenderDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     const currency = dto.currency ?? 'THB';
     // Tenant is derived from the authenticated user, never from the request body (no cross-tenant tender).
@@ -233,7 +233,7 @@ export class PaymentService {
 
   // POST /api/payments/refund-requests/:id/approve — a DIFFERENT user approves a parked refund → runs it.
   async approveRefund(requestId: number, approver: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [req] = await db.select().from(refundRequests).where(eq(refundRequests.id, requestId)).limit(1);
     if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Refund request not found', messageTh: 'ไม่พบคำขอคืนเงิน' });
     if (String(req.status) !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request is ${req.status}`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
@@ -246,7 +246,7 @@ export class PaymentService {
 
   // POST /api/payments/refund-requests/:id/reject
   async rejectRefund(requestId: number, approver: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [req] = await db.select().from(refundRequests).where(eq(refundRequests.id, requestId)).limit(1);
     if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Refund request not found', messageTh: 'ไม่พบคำขอคืนเงิน' });
     if (String(req.status) !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request is ${req.status}`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
@@ -257,7 +257,7 @@ export class PaymentService {
 
   // GET /api/payments/refund-requests — the refund-approval worklist (tenant-scoped).
   async listRefundRequests(status: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(refundRequests.tenantId, user.tenantId as number)];
     if (status) conds.push(eq(refundRequests.status, status));
     const rows = await db.select().from(refundRequests).where(and(...conds)).orderBy(desc(refundRequests.createdAt)).limit(300);
@@ -266,7 +266,7 @@ export class PaymentService {
 
   // PATCH /api/payments/:no/void — void a payment that has not been captured/settled.
   async voidPayment(paymentNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [pay] = await db.select().from(payments).where(eq(payments.paymentNo, paymentNo)).limit(1);
     if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
     const status = String(pay.status ?? '');
@@ -283,7 +283,7 @@ export class PaymentService {
   // PATCH /api/payments/:no/settle — confirm an async tender (PromptPay/Authorized) as Captured.
   // Completes the lifecycle for gateways that settle out-of-band (so a Pending tender is not a dead-end).
   async settle(paymentNo: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [pay] = await db.select().from(payments).where(eq(payments.paymentNo, paymentNo)).limit(1);
     if (!pay) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
     const st = String(pay.status ?? '');
@@ -297,7 +297,7 @@ export class PaymentService {
 
   // POST /api/payments/till/open — open a till session with an opening float.
   async openTill(dto: OpenTillDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const sessionNo = await this.docNo.nextDaily('TILL');
     // Scope the session to the user's tenant so POS can find "the current open till" per shop.
     await db.insert(tillSessions).values({
@@ -308,7 +308,7 @@ export class PaymentService {
 
   // Most-recent OPEN till session for a tenant, or null if none is open.
   async currentOpenTill(tenantId: number): Promise<{ id: number; sessionNo: string } | null> {
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.select({ id: tillSessions.id, sessionNo: tillSessions.sessionNo })
       .from(tillSessions)
       .where(and(eq(tillSessions.tenantId, tenantId), sql`${tillSessions.status}::text = 'Open'`))
@@ -327,7 +327,7 @@ export class PaymentService {
 
   // POST /api/payments/till/close — reconcile cash: expected = float + Σ cash captured; variance = counted − expected.
   async closeTill(dto: CloseTillDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, dto.session_no)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
     if (String(sess.status) === 'Closed') throw new BadRequestException({ code: 'ALREADY_CLOSED', message: 'Till session already closed', messageTh: 'รอบเงินสดถูกปิดแล้ว' });
@@ -373,7 +373,7 @@ export class PaymentService {
   // Maker-checker: the approver must differ from the cashier who closed the till (enforced by
   // ledger.approveEntry → SOD_VIOLATION). Approving makes the parked Draft over/short JE effective.
   async approveVariance(sessionNo: string, approver: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
     if (String(sess.varianceStatus) !== 'PendingApproval' || !sess.varianceJournalNo) {
@@ -387,7 +387,7 @@ export class PaymentService {
   // POST /api/payments/till/variance/:sessionNo/reject — manager rejects a material cash variance.
   // Voids the parked Draft over/short JE (the discrepancy stays recorded on the till for follow-up).
   async rejectVariance(sessionNo: string, approver: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
     if (String(sess.varianceStatus) !== 'PendingApproval' || !sess.varianceJournalNo) {
@@ -402,7 +402,7 @@ export class PaymentService {
 
   // record a paid-in / paid-out / drop on an OPEN till; paid_in/out also post GL (drop is drawer-only).
   async recordCashMovement(tillId: number, dto: CashMovementDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
     if (String(sess.status) === 'Closed') throw new BadRequestException({ code: 'TILL_CLOSED', message: 'Till session is closed', messageTh: 'รอบเงินสดถูกปิดแล้ว' });
@@ -424,7 +424,7 @@ export class PaymentService {
 
   // shared aggregation for X-report / Z-report / closeTill
   private async aggregateTill(sessId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const captured = sql`${payments.status}::text IN ('Captured','Settled','Refunded')`;
     const [gross] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured));
     const byMethod = await db.select({ method: payments.method, amount: sql<string>`coalesce(sum(${payments.amount}),0)`, cnt: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured)).groupBy(payments.method);
@@ -450,7 +450,7 @@ export class PaymentService {
 
   // X-report — mid-shift, non-resetting, works on an open till. No writes.
   async xReport(tillId: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
     const a = await this.aggregateTill(tillId);
@@ -459,7 +459,7 @@ export class PaymentService {
 
   // Z-report — shift summary at/after close.
   async zReport(tillId: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
     const a = await this.aggregateTill(tillId);
@@ -472,7 +472,7 @@ export class PaymentService {
   // canonical totals, so any later edit to the persisted row is detectable. Idempotent per till: a second
   // sign returns the existing signed record (no duplicate Z-tape).
   async signZReport(sessionNo: string, user: JwtUser, denominations?: Record<string, number>) {
-    const db = this.db as any;
+    const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
     if (String(sess.status) !== 'Closed') throw new BadRequestException({ code: 'TILL_NOT_CLOSED', message: 'Z-report can only be signed for a closed till', messageTh: 'ลงนามรายงาน Z ได้เฉพาะรอบที่ปิดแล้ว' });
@@ -501,19 +501,19 @@ export class PaymentService {
       status: 'SIGNED', contentHash, htmlSnapshot: html,
     }).returning({ id: xzReports.id });
     const denomRows = Object.entries(denoms).filter(([, c]) => Number(c) > 0)
-      .map(([d, c]) => ({ tenantId: sess.tenantId ?? null, reportId: Number(rep.id), denomination: fx(Number(d), 2), count: Number(c), total: fx(Number(d) * Number(c), 4) }));
+      .map(([d, c]) => ({ tenantId: sess.tenantId ?? null, reportId: Number(rep!.id), denomination: fx(Number(d), 2), count: Number(c), total: fx(Number(d) * Number(c), 4) }));
     if (denomRows.length) await db.insert(xzReportDenominations).values(denomRows);
-    return { ...(await this.getXzReport(Number(rep.id))), already: false };
+    return { ...(await this.getXzReport(Number(rep!.id))), already: false };
   }
 
   async listXzReports(_user: JwtUser, limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(xzReports).orderBy(desc(xzReports.generatedAt), desc(xzReports.id)).limit(limit);
     return { reports: rows.map((r: any) => this.shapeXz(r)), count: rows.length };
   }
 
   async getXzReport(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(xzReports).where(eq(xzReports.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Z-report not found', messageTh: 'ไม่พบรายงาน Z' });
     const dn = await db.select().from(xzReportDenominations).where(eq(xzReportDenominations.reportId, id)).orderBy(desc(xzReportDenominations.denomination));
@@ -561,7 +561,7 @@ ${dnRows ? `<h3>นับเงินตามหน่วย</h3><table><tr><th
 
   // GET /api/payments?sale_no= — all tenders attached to a sale.
   async listPaymentsForSale(saleNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       payment_no: payments.paymentNo, sale_no: payments.saleNo, method: payments.method, amount: payments.amount,
       currency: payments.currency, gateway: payments.gateway, gateway_ref: payments.gatewayRef, status: payments.status,

@@ -130,7 +130,7 @@ export class JwtAuthGuard implements CanActivate {
         if (u.mcp) {
           const path = String(req.url ?? '').split('?')[0];
           const allowed = ['/api/auth/change-password', '/api/auth/logout', '/api/auth/me', '/api/auth/refresh'];
-          if (!allowed.includes(path)) {
+          if (!allowed.includes(path!)) {
             throw new ForbiddenException({ code: 'PASSWORD_CHANGE_REQUIRED', message: 'Password change required before using the system', messageTh: 'ต้องเปลี่ยนรหัสผ่านก่อนใช้งานระบบ' });
           }
         }

@@ -39,25 +39,25 @@ export class WebhookService {
   events() { return { events: WEBHOOK_EVENTS }; }
 
   private async tenantOf(user: JwtUser): Promise<number | null> {
-    const db = this.db as any;
+    const db = this.db;
     const [u] = await db.select({ tenantId: users.tenantId }).from(users).where(eq(users.username, user.username)).limit(1);
     return u?.tenantId ?? null;
   }
 
   async register(dto: RegisterWebhookDto, user: JwtUser) {
     await assertPublicUrl(dto.url, { allowHttp: ALLOW_HTTP }); // SSRF: reject internal/metadata/loopback targets
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = await this.tenantOf(user);
     const secret = randomBytes(24).toString('hex');
     const events = (dto.events ?? []).join(',');
     const [row] = await db.insert(webhooks).values({
       tenantId, url: dto.url, events, secret: encrypt(secret), active: true, createdBy: user.username, // ciphertext at rest
     }).returning({ id: webhooks.id });
-    return { id: Number(row.id), url: dto.url, events: dto.events ?? [], secret }; // plaintext to caller, once
+    return { id: Number(row!.id), url: dto.url, events: dto.events ?? [], secret }; // plaintext to caller, once
   }
 
   async list(tenantId: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       id: webhooks.id, url: webhooks.url, events: webhooks.events, active: webhooks.active, createdBy: webhooks.createdBy, createdAt: webhooks.createdAt,
     }).from(webhooks)
@@ -71,7 +71,7 @@ export class WebhookService {
   }
 
   async remove(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = await this.tenantOf(user);
     const [hook] = await db.select({ id: webhooks.id }).from(webhooks)
       .where(and(eq(webhooks.id, id), tenantId == null ? (undefined as any) : eq(webhooks.tenantId, tenantId)));
@@ -87,7 +87,7 @@ export class WebhookService {
   // ── delivery ───────────────────────────────────────────────────────────────
   // Sign one delivery and POST it (10s bound); record the outcome on the delivery row. Returns ok.
   private async sendOnce(hook: any, delivery: any): Promise<boolean> {
-    const db = this.db as any;
+    const db = this.db;
     const timestamp = new Date().toISOString();
     const body = JSON.stringify({ id: Number(delivery.id), event: delivery.event, payload: delivery.payload, ts: timestamp });
     const secret = decrypt(hook.secret);
@@ -136,7 +136,7 @@ export class WebhookService {
 
   // Best-effort fan-out: for every active subscription matching the event, insert a delivery and POST it.
   async deliver(event: string, payload: unknown, tenantId: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(webhooks.active, true)];
     if (tenantId != null) conds.push(eq(webhooks.tenantId, tenantId));
     // subscribed = events empty (all) or this event present in the csv
@@ -165,7 +165,7 @@ export class WebhookService {
   }
 
   async deliveries(user: JwtUser, limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = await this.tenantOf(user);
     const rows = await db.select({
       id: webhookDeliveries.id, webhookId: webhookDeliveries.webhookId, event: webhookDeliveries.event,
@@ -179,7 +179,7 @@ export class WebhookService {
 
   // Re-send one delivery on demand (tenant-scoped via its webhook).
   async redeliver(deliveryId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = await this.tenantOf(user);
     const [row] = await db.select({ d: webhookDeliveries, h: webhooks }).from(webhookDeliveries)
       .innerJoin(webhooks, eq(webhookDeliveries.webhookId, webhooks.id))
@@ -191,7 +191,7 @@ export class WebhookService {
 
   // Cron-callable: re-attempt failed deliveries that have not yet exhausted their retries (tenant-scoped).
   async dispatchPending(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = await this.tenantOf(user);
     const rows = await db.select({ d: webhookDeliveries, h: webhooks }).from(webhookDeliveries)
       .innerJoin(webhooks, eq(webhookDeliveries.webhookId, webhooks.id))

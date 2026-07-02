@@ -19,7 +19,7 @@ export class RecipeService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   private async loadItem(sku: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [it] = await db.select().from(menuItems).where(eq(menuItems.sku, sku)).limit(1);
     if (!it) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Menu item not found', messageTh: 'ไม่พบเมนู' });
     return it;
@@ -28,13 +28,13 @@ export class RecipeService {
   // resolve a unit cost: explicit → else the inventory item's unitPrice → else 0
   private async unitCostFor(ingredientItemId: string, explicit?: number): Promise<number> {
     if (explicit != null) return n(explicit);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select({ p: items.unitPrice }).from(items).where(eq(items.itemId, ingredientItemId)).limit(1);
     return row ? n(row.p) : 0;
   }
 
   async upsertRecipe(sku: string, dto: UpsertRecipeDto, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const it = await this.loadItem(sku);
     const tenantId = it.tenantId ?? null;
     // insert-or-replace by menu_item_id
@@ -46,7 +46,7 @@ export class RecipeService {
       await db.delete(menuRecipeLines).where(eq(menuRecipeLines.recipeId, recipeId));
     } else {
       const [h] = await db.insert(menuRecipes).values({ tenantId, menuItemId: Number(it.id), sku, yieldQty: String(dto.yield_qty), postCogs: dto.post_cogs ?? false, notes: dto.notes ?? null }).returning({ id: menuRecipes.id });
-      recipeId = Number(h.id);
+      recipeId = Number(h!.id);
     }
     for (const l of dto.lines) {
       const uc = await this.unitCostFor(l.ingredient_item_id, l.unit_cost);
@@ -56,7 +56,7 @@ export class RecipeService {
   }
 
   async getRecipe(sku: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const it = await this.loadItem(sku);
     const [rec] = await db.select().from(menuRecipes).where(eq(menuRecipes.menuItemId, Number(it.id))).limit(1);
     if (!rec) throw new NotFoundException({ code: 'NO_RECIPE', message: 'No recipe for this item', messageTh: 'ยังไม่มีสูตรสำหรับเมนูนี้' });
@@ -69,7 +69,7 @@ export class RecipeService {
   }
 
   async deleteRecipe(sku: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const it = await this.loadItem(sku);
     const [rec] = await db.select().from(menuRecipes).where(eq(menuRecipes.menuItemId, Number(it.id))).limit(1);
     if (rec) { await db.delete(menuRecipeLines).where(eq(menuRecipeLines.recipeId, Number(rec.id))); await db.delete(menuRecipes).where(eq(menuRecipes.id, Number(rec.id))); }
@@ -77,7 +77,7 @@ export class RecipeService {
   }
 
   async listRecipes(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const recs = await db.select().from(menuRecipes).orderBy(menuRecipes.sku);
     return { recipes: recs.map((r: any) => ({ sku: r.sku, yield_qty: n(r.yieldQty), post_cogs: r.postCogs })), count: recs.length };
   }
@@ -87,7 +87,7 @@ export class RecipeService {
   // ingredient is the bottleneck. servings_left = floor(min over ingredients of stock / qty-per-serving).
   // Classifies out (0 → should be 86'd) / low (≤ threshold) / ok, and lists low ingredients (≤ reorder pt).
   async availabilityForecast(user: JwtUser, opts?: { low?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     const low = Math.max(0, opts?.low ?? 5);
     // Scope to the caller's tenant explicitly (sku/itemId are unique only per tenant; an HQ/bypass caller

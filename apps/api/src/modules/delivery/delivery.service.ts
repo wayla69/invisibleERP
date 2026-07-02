@@ -18,7 +18,7 @@ export class DeliveryService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService) {}
 
   async create(dto: DeliveryDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     let lines = dto.lines ?? [];
     if (!lines.length && dto.order_no) {
       const [o] = await db.select().from(orders).where(eq(orders.orderNo, dto.order_no)).limit(1);
@@ -34,20 +34,20 @@ export class DeliveryService {
       vehicle: dto.vehicle ?? null, status: 'Pending', remarks: dto.remarks ?? null, createdBy: user.username,
     }).returning({ id: deliveryOrders.id });
     for (const l of lines) {
-      await db.insert(doItems).values({ doId: Number(hdr.id), orderNo: dto.order_no ?? null, itemId: l.item_id, itemDescription: l.item_description ?? null, qty: String(n(l.qty)), uom: l.uom ?? null, status: 'Pending' });
+      await db.insert(doItems).values({ doId: Number(hdr!.id), orderNo: dto.order_no ?? null, itemId: l.item_id, itemDescription: l.item_description ?? null, qty: String(n(l.qty)), uom: l.uom ?? null, status: 'Pending' });
     }
     return { do_no: doNo, status: 'Pending', lines: lines.length };
   }
 
   async list(status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(deliveryOrders.status, status) : undefined;
     const rows = await db.select().from(deliveryOrders).where(where).orderBy(desc(deliveryOrders.id));
     return { deliveries: rows.map(shape), count: rows.length };
   }
 
   async detail(doNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [h] = await db.select().from(deliveryOrders).where(eq(deliveryOrders.doNo, doNo)).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Delivery order not found', messageTh: 'ไม่พบใบส่งสินค้า' });
     const items = await db.select().from(doItems).where(eq(doItems.doId, Number(h.id)));
@@ -56,7 +56,7 @@ export class DeliveryService {
 
   async updateStatus(doNo: string, dto: { status: string; pod_image_key?: string; driver?: string; vehicle?: string }, _user: JwtUser) {
     if (!VALID.includes(dto.status)) throw new BadRequestException({ code: 'BAD_STATUS', message: `Invalid status: ${dto.status}`, messageTh: 'สถานะไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     const [h] = await db.select().from(deliveryOrders).where(eq(deliveryOrders.doNo, doNo)).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Delivery order not found', messageTh: 'ไม่พบใบส่งสินค้า' });
     const set: any = { status: dto.status };

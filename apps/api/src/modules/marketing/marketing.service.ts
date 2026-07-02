@@ -45,7 +45,7 @@ export class MarketingService {
 
   // ───────────────────────── CAMPAIGNS ─────────────────────────
   async createCampaign(dto: CreateCampaignDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const campaignId = `CMP-${stamp()}`;
     await db.insert(marketingCampaigns).values({
       campaignId, campaignName: dto.campaign_name, campaignType: dto.campaign_type ?? 'Popup',
@@ -58,7 +58,7 @@ export class MarketingService {
   }
 
   async toggleCampaign(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, id)).limit(1);
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Campaign not found', messageTh: 'ไม่พบแคมเปญ' });
     const active = !c.active;
@@ -67,14 +67,14 @@ export class MarketingService {
   }
 
   async listCampaigns() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(marketingCampaigns).orderBy(desc(marketingCampaigns.id));
     return { campaigns: rows, count: rows.length };
   }
 
   // GET /api/marketing/campaigns/active — active Popup/Ticker (Active=1, อยู่ในช่วงวันที่) สำหรับ portal
   async activeCampaigns() {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const rows = await db.select().from(marketingCampaigns).where(and(
       eq(marketingCampaigns.active, true),
@@ -88,7 +88,7 @@ export class MarketingService {
   // ───────────────────────── SEGMENTS (RFM-lite) ─────────────────────────
   // คำนวณ spend/order_count/last_order/days_since ต่อ tenant จาก custPosSales
   async segments() {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const rows = await db.select({
       tenant_id: custPosSales.tenantId,
@@ -128,7 +128,7 @@ export class MarketingService {
 
   // ───────────────────────── A/B TESTS ─────────────────────────
   async createAbTest(dto: CreateAbTestDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const testId = `AB-${stamp()}`;
     await db.transaction(async (tx: any) => {
       await tx.insert(abTests).values({
@@ -144,7 +144,7 @@ export class MarketingService {
   }
 
   async listAbTests() {
-    const db = this.db as any;
+    const db = this.db;
     const tests = await db.select().from(abTests).orderBy(desc(abTests.id));
     const variants = await db.select().from(abVariants);
     const out = tests.map((t: any) => {
@@ -165,7 +165,7 @@ export class MarketingService {
   // ───────────────────────── ABANDONED CARTS ─────────────────────────
   // POST /api/marketing/abandoned-carts/remind — set notifiedAt บน recovered=false rows
   async remindAbandonedCarts() {
-    const db = this.db as any;
+    const db = this.db;
     const now = new Date();
     const updated = await db.update(abandonedCarts)
       .set({ notifiedAt: now })
@@ -176,7 +176,7 @@ export class MarketingService {
 
   // ───────────────────────── PROMOTIONS ─────────────────────────
   async listPromotions() {
-    const db = this.db as any;
+    const db = this.db;
     const promos = await db.select().from(promotions).orderBy(desc(promotions.id));
     const items = await db.select().from(promotionItems);
     const out = promos.map((p: any) => ({
@@ -187,7 +187,7 @@ export class MarketingService {
   }
 
   async createPromotion(dto: CreatePromotionDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!PROMO_TYPES.includes(dto.promo_type))
       throw new BadRequestException({ code: 'BAD_PROMO_TYPE', message: `Invalid promo type: ${dto.promo_type}`, messageTh: 'ประเภทโปรโมชันไม่ถูกต้อง' });
     const itemIds = Array.from(new Set((dto.item_ids ?? []).filter(Boolean)));
@@ -231,7 +231,7 @@ export class MarketingService {
   }
 
   async togglePromotion(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [p] = await db.select().from(promotions).where(eq(promotions.id, id)).limit(1);
     if (!p) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Promotion not found', messageTh: 'ไม่พบโปรโมชัน' });
     const active = !p.active;
@@ -242,7 +242,7 @@ export class MarketingService {
   // ───────────────────────── PRICE LIST ─────────────────────────
   // effective = special>0 ? special : base*(1-disc/100) ; tenant null = All Customers
   async listPriceList() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       id: priceList.id, list_name: priceList.listName, tenant_id: priceList.tenantId,
       customer_name: tenants.code, item_id: priceList.itemId, item_description: priceList.itemDescription,
@@ -262,7 +262,7 @@ export class MarketingService {
   }
 
   async createPriceList(dto: CreatePriceListDto) {
-    const db = this.db as any;
+    const db = this.db;
     const base = n(dto.base_price); const special = n(dto.special_price); const disc = n(dto.discount_pct);
     const effective = special > 0 ? special : round2(base * (1 - disc / 100));
     const [h] = await db.insert(priceList).values({
@@ -273,18 +273,18 @@ export class MarketingService {
       minQty: dto.min_qty != null ? String(dto.min_qty) : '1',
       validFrom: dto.valid_from ?? null, validTo: dto.valid_to ?? null, active: true,
     }).returning({ id: priceList.id });
-    return { id: Number(h.id), item_id: dto.item_id, effective_price: effective, tenant: dto.tenant_id ?? 'All Customers' };
+    return { id: Number(h!.id), item_id: dto.item_id, effective_price: effective, tenant: dto.tenant_id ?? 'All Customers' };
   }
 
   // ───────────────────────── SURVEYS ─────────────────────────
   async listSurveys() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(surveys).orderBy(desc(surveys.id));
     return { surveys: rows, count: rows.length };
   }
 
   async createSurvey(dto: CreateSurveyDto) {
-    const db = this.db as any;
+    const db = this.db;
     const surveyId = `SVY-${stamp()}`;
     await db.insert(surveys).values({
       surveyId, surveyName: dto.survey_name, surveyType: dto.survey_type ?? 'NPS',
@@ -295,7 +295,7 @@ export class MarketingService {
 
   // POST /api/surveys/:id/responses — NPS + Q1-3 -> surveyAnswers (EAV)
   async createSurveyResponse(surveyId: string, dto: SurveyResponseDto) {
-    const db = this.db as any;
+    const db = this.db;
     const [svy] = await db.select().from(surveys).where(eq(surveys.surveyId, surveyId)).limit(1);
     if (!svy) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Survey not found', messageTh: 'ไม่พบแบบสำรวจ' });
     let responseId = 0;
@@ -324,10 +324,10 @@ function stamp(d = new Date()) {
 // percentile แบบ nearest-rank บน array ที่ sort แล้ว (ascending)
 function percentile(sorted: number[], p: number): number {
   if (!sorted.length) return 0;
-  if (sorted.length === 1) return sorted[0];
+  if (sorted.length === 1) return sorted[0]!;
   const rank = (p / 100) * (sorted.length - 1);
   const lo = Math.floor(rank); const hi = Math.ceil(rank);
-  if (lo === hi) return sorted[lo];
+  if (lo === hi) return sorted[lo]!;
   const frac = rank - lo;
-  return sorted[lo] + (sorted[hi] - sorted[lo]) * frac;
+  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * frac;
 }

@@ -803,7 +803,7 @@ export class LedgerService {
       if (Math.abs(cashNet) < 1e-9) continue;
       const nonCash = legs.filter((l) => !CASH_ACCOUNTS.includes(l.account_code));
       const dominant = nonCash.sort((a, b) => Math.abs(n(b.debit) - n(b.credit)) - Math.abs(n(a.debit) - n(a.credit)))[0];
-      buckets[cashContraCategory(dominant?.account_code, dominant?.account_type)] += cashNet;
+      buckets[cashContraCategory(dominant?.account_code, dominant?.account_type)]! += cashNet;
     }
     for (const k of Object.keys(buckets)) buckets[k] = round4(buckets[k]!);
     const operatingNet = round4(buckets.receipts_from_customers! + buckets.payments_to_suppliers! + buckets.tax_and_payroll! + buckets.other_operating!);

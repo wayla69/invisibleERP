@@ -71,7 +71,7 @@ export class ProjectsService {
   }
 
   async create(dto: CreateProjectDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const code = dto.project_code?.trim() || `PRJ${String(Date.now()).slice(-6)}`;
     const revMethod = dto.rev_method === 'poc' ? 'poc' : 'billing';
     await db.insert(projects).values({
@@ -88,7 +88,7 @@ export class ProjectsService {
   // Guards: only a won opportunity converts (an open/lost deal is rejected), and a given opportunity converts
   // to at most ONE project (idempotent on crm_opp_no) so a re-submit can't spawn duplicate projects.
   async createFromOpportunity(oppNo: string, dto: FromOpportunityDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const oc = [eq(crmOpportunities.oppNo, oppNo)];
     if (user.tenantId != null) oc.push(eq(crmOpportunities.tenantId, user.tenantId));
     const [opp] = await db.select().from(crmOpportunities).where(and(...oc)).limit(1);
@@ -120,7 +120,7 @@ export class ProjectsService {
   // immediately to project COGS (Dr 5800 / Cr 2390) and never enters the billable WIP — you can't bill the
   // customer for it, and conservative accounting must not carry it as a recoverable asset.
   async logCost(code: string, dto: CostDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const amount = r2(dto.amount != null ? n(dto.amount) : n(dto.qty) * n(dto.rate));
     if (amount <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Cost amount must be positive', messageTh: 'จำนวนต้นทุนต้องมากกว่าศูนย์' });
@@ -135,12 +135,12 @@ export class ProjectsService {
 
     const conv = dto.entry_type === 'expense' ? 'Project expense' : 'Project labor';
     const je: any = await this.ledger.postEntry({
-      source: 'PRJ-COST', sourceRef: `${code}:${Number(e.id)}`, tenantId, memo: `Project cost ${code}${billable ? '' : ' (non-billable)'}`, createdBy: user.username,
+      source: 'PRJ-COST', sourceRef: `${code}:${Number(e!.id)}`, tenantId, memo: `Project cost ${code}${billable ? '' : ' (non-billable)'}`, createdBy: user.username,
       lines: billable
         ? [{ account_code: '1260', debit: amount, memo: `WIP ${code}` }, { account_code: '2390', credit: amount, memo: conv }]
         : [{ account_code: '5800', debit: amount, memo: `Non-billable cost ${code}` }, { account_code: '2390', credit: amount, memo: conv }],
     });
-    await db.update(projectEntries).set({ entryNo: je.entry_no }).where(eq(projectEntries.id, Number(e.id)));
+    await db.update(projectEntries).set({ entryNo: je.entry_no }).where(eq(projectEntries.id, Number(e!.id)));
     // Only billable costs accumulate in the recoverable WIP (cost_to_date); non-billable are already expensed.
     const costToDate = billable ? r2(n(p.costToDate) + amount) : n(p.costToDate);
     await db.update(projects).set({ costToDate: fx(costToDate, 2), status: p.status === 'Open' ? 'Active' : p.status }).where(eq(projects.id, Number(p.id)));
@@ -150,7 +150,7 @@ export class ProjectsService {
   // Bill the customer → recognize revenue + relieve outstanding WIP to cost of services.
   // GL: Dr 1100 AR / Cr 4200 Revenue ; Dr 5800 COGS / Cr 1260 WIP (for the unrecognized cost).
   async bill(code: string, dto: BillDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     // Milestone / progressive billing: a Fixed-price contract can be billed by PERCENT of the contract
     // value (e.g. 30% at a phase) instead of a raw amount. T&M still bills a raw amount.
@@ -207,7 +207,7 @@ export class ProjectsService {
   // 1260. Only a Fixed-price `poc` project recognises this way; idempotent per (project, recognised total) so
   // a re-run posts nothing. Authorised (gl_post/exec); posts through the PERIOD_LOCKED + GL-audit gates.
   async recognizePoc(code: string, dto: RecognizeDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     if (p.revMethod !== 'poc') throw new BadRequestException({ code: 'NOT_POC', message: 'Project is not on over-time (POC) revenue recognition', messageTh: 'โครงการนี้ไม่ได้ใช้การรับรู้รายได้ตามความสำเร็จของงาน' });
     const contract = n(p.contractAmount);
@@ -251,7 +251,7 @@ export class ProjectsService {
   }
 
   async list(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(projects).orderBy(desc(projects.id)).limit(100);
     // Aggregate the non-billable (already-expensed) cost per project so the register shows total cost + true margin.
     const nb = await db.select({ pid: projectEntries.projectId, v: sql<string>`coalesce(sum(${projectEntries.amount}),0)` })
@@ -261,7 +261,7 @@ export class ProjectsService {
   }
 
   async get(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const entries = await db.select().from(projectEntries).where(eq(projectEntries.projectId, Number(p.id))).orderBy(desc(projectEntries.id));
     const nonBillable = r2(entries.filter((e: any) => e.billable === false).reduce((s: number, e: any) => s + n(e.amount), 0));
@@ -277,7 +277,7 @@ export class ProjectsService {
 
   // ── WBS tasks (P1) ───────────────────────────────────────────────────────
   async addTask(code: string, dto: TaskDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const tenantId = p.tenantId ?? user.tenantId ?? null;
     const [t] = await db.insert(projectTasks).values({
@@ -292,14 +292,14 @@ export class ProjectsService {
   }
 
   async listTasks(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const rows = await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id))).orderBy(projectTasks.id);
     return { project_code: code, pct_complete: this.taskRollup(rows), tasks: rows.map(shapeTask), count: rows.length };
   }
 
   async patchTask(taskId: number, dto: TaskPatchDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select().from(projectTasks).where(eq(projectTasks.id, Number(taskId))).limit(1);
     if (!t) throw new NotFoundException({ code: 'TASK_NOT_FOUND', message: `Task ${taskId} not found`, messageTh: 'ไม่พบงาน' });
     const set: any = {};
@@ -323,7 +323,7 @@ export class ProjectsService {
     else if (dto.status === 'done') set.pctComplete = fx(100, 2);
     await db.update(projectTasks).set(set).where(eq(projectTasks.id, Number(taskId)));
     const [proj] = await db.select().from(projects).where(eq(projects.id, Number(t.projectId))).limit(1);
-    return this.listTasks(proj.projectCode);
+    return this.listTasks(proj!.projectCode);
   }
 
   // Project overall % complete = planned-hours-weighted mean of task pct (simple mean if no planned hours).
@@ -340,7 +340,7 @@ export class ProjectsService {
   // "My tasks": the caller's still-open tasks across every project where they are the accountable owner or a
   // responsible doer (matched on username). The personal work-queue that the RACI roles drive.
   async myTasks(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const me = String(user.username ?? '').trim();
     const rows = (await db.select().from(projectTasks).where(sql`${projectTasks.status} not in ('done','cancelled')`)).map(shapeTask);
     const projRows = await db.select().from(projects);
@@ -359,7 +359,7 @@ export class ProjectsService {
   // lack a single accountable owner (an accountability gap). SoD note: the accountable owner should not be the
   // same person who later approves the task's cost/timesheet — surfaced here, enforced by the cost maker-checker.
   async raci(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const rows = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id))).orderBy(projectTasks.id)).map(shapeTask);
     const active = rows.filter((t: any) => t.status !== 'cancelled');
@@ -386,7 +386,7 @@ export class ProjectsService {
 
   // ── Milestones (P1) ──────────────────────────────────────────────────────
   async addMilestone(code: string, dto: MilestoneDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const tenantId = p.tenantId ?? user.tenantId ?? null;
     if (dto.billing_percent != null && (dto.billing_percent <= 0 || dto.billing_percent > 100))
@@ -399,7 +399,7 @@ export class ProjectsService {
   }
 
   async listMilestones(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const rows = await db.select().from(projectMilestones).where(eq(projectMilestones.projectId, Number(p.id))).orderBy(projectMilestones.id);
     return { project_code: code, milestones: rows.map(shapeMilestone), count: rows.length };
@@ -408,20 +408,20 @@ export class ProjectsService {
   // Mark a milestone reached. If it carries a billing_percent, the same act raises the Fixed-price progress
   // bill through the EXISTING authorized PRJ-BILL path (revenue recognition + WIP relief, contract cap) — PROJ-02.
   async reachMilestone(milestoneId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(projectMilestones).where(eq(projectMilestones.id, Number(milestoneId))).limit(1);
     if (!m) throw new NotFoundException({ code: 'MILESTONE_NOT_FOUND', message: `Milestone ${milestoneId} not found`, messageTh: 'ไม่พบหมุดหมาย' });
     if (m.status === 'reached') throw new BadRequestException({ code: 'MILESTONE_REACHED', message: 'Milestone already reached', messageTh: 'หมุดหมายถูกบรรลุแล้ว' });
     const [proj] = await db.select().from(projects).where(eq(projects.id, Number(m.projectId))).limit(1);
     await db.update(projectMilestones).set({ status: 'reached', reachedAt: new Date() }).where(eq(projectMilestones.id, Number(milestoneId)));
     let billing: any = null;
-    if (m.billingPercent != null && n(m.billingPercent) > 0) billing = await this.bill(proj.projectCode, { percent: n(m.billingPercent) }, user);
-    return { milestone_id: Number(milestoneId), project_code: proj.projectCode, status: 'reached', billing };
+    if (m.billingPercent != null && n(m.billingPercent) > 0) billing = await this.bill(proj!.projectCode, { percent: n(m.billingPercent) }, user);
+    return { milestone_id: Number(milestoneId), project_code: proj!.projectCode, status: 'reached', billing };
   }
 
   // ── Resource rate card (P2) ──────────────────────────────────────────────
   async addRateCard(dto: RateCardDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(resourceRates).values({
       tenantId: user.tenantId ?? null, role: dto.role, costRate: fx(dto.cost_rate ?? 0, 2), billRate: fx(dto.bill_rate ?? 0, 2),
       effectiveFrom: dto.effective_from ?? ymd(), effectiveTo: dto.effective_to ?? null, createdBy: user.username,
@@ -430,7 +430,7 @@ export class ProjectsService {
   }
 
   async listRateCards(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(resourceRates).orderBy(desc(resourceRates.id)).limit(300);
     return { rate_cards: rows.map((r: any) => ({ id: Number(r.id), role: r.role, cost_rate: n(r.costRate), bill_rate: n(r.billRate), effective_from: r.effectiveFrom, effective_to: r.effectiveTo })), count: rows.length };
   }
@@ -439,7 +439,7 @@ export class ProjectsService {
   // date and whose effective_to is empty or on/after it. Returns zeros if the role has no rate card.
   private async resolveRate(role: string | undefined, onDate: string, user: JwtUser) {
     if (!role) return { costRate: 0, billRate: 0 };
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(resourceRates.role, role)];
     if (user.tenantId != null) conds.push(eq(resourceRates.tenantId, user.tenantId));
     const rows = await db.select().from(resourceRates).where(and(...conds));
@@ -452,7 +452,7 @@ export class ProjectsService {
 
   // ── Project resource assignment + capacity (P2) ──────────────────────────
   async assignResource(code: string, dto: ResourceDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const alloc = r2(dto.alloc_pct ?? 100);
     if (alloc <= 0 || alloc > 100) throw new BadRequestException({ code: 'BAD_ALLOC', message: 'alloc_pct must be within (0,100]', messageTh: 'สัดส่วนการจัดสรรต้องอยู่ระหว่าง 0-100' });
@@ -467,7 +467,7 @@ export class ProjectsService {
   }
 
   async listResources(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const rows = await db.select().from(projectResources).where(eq(projectResources.projectId, Number(p.id))).orderBy(projectResources.id);
     return { project_code: code, resources: rows.map(shapeResource), count: rows.length };
@@ -476,7 +476,7 @@ export class ProjectsService {
   // Capacity/utilization (PROJ-05): total allocation per named resource across all of the caller's projects;
   // >100% flags over-allocation (a resource booked beyond capacity).
   async resourceUtilization(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(projectResources);
     const by = new Map<string, number>();
     for (const r of rows) by.set(r.resourceName, r2((by.get(r.resourceName) ?? 0) + n(r.allocPct)));
@@ -491,10 +491,10 @@ export class ProjectsService {
   // compares the per-month demand to capacity (100%/resource/month), so a resource over-booked in a *specific*
   // window is visible even when the lifetime average looks fine. Read-only; horizon = `months` from `from`.
   async resourceCapacity(_user: JwtUser, dto?: { months?: number; from?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const months = Math.max(1, Math.min(24, Math.round(dto?.months ?? 6)));
     const start = (dto?.from && /^\d{4}-\d{2}$/.test(dto.from)) ? dto.from : ymd().slice(0, 7);
-    const addMonths = (period: string, k: number) => { const [y, m] = period.split('-').map(Number); const idx = y * 12 + (m - 1) + k; return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`; };
+    const addMonths = (period: string, k: number) => { const [y, m] = period.split('-').map(Number); const idx = y! * 12 + (m! - 1) + k; return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`; };
     const horizon = Array.from({ length: months }, (_, i) => addMonths(start, i));
     const rows = await db.select().from(projectResources);
     // An assignment is active in month M when period_start ≤ M-end and (period_end is open or ≥ M-start). A
@@ -528,7 +528,7 @@ export class ProjectsService {
   // (planned cost, % complete, planned_end schedule) and its actual cost incurred, and reconciles EV/AC against
   // the project's WIP actuals. `as_of` defaults to the business day; PV counts tasks scheduled to finish by then.
   async evm(code: string, asOf?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
     const today = asOf ?? ymd();
@@ -561,7 +561,7 @@ export class ProjectsService {
   // planned_start→planned_end span, else planned_hours/8, min 1). Tasks with zero slack are on the critical
   // path. Cancelled tasks are excluded; a dependency cycle degrades gracefully (the back-edge is ignored).
   async schedule(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const rows = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
     const tasks = rows.map(shapeTask);
@@ -613,7 +613,7 @@ export class ProjectsService {
   // it gives the PROGRAM critical path, end date, and per-project slack — so a delay that ripples ACROSS
   // projects is visible, not just within one. Detective/non-posting (rides PROJ-06).
   async setProgram(code: string, dto: ProgramDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const set: any = {};
     if (dto.program_code !== undefined) set.programCode = (dto.program_code ?? '').toString().trim() || null;
@@ -634,7 +634,7 @@ export class ProjectsService {
   }
 
   async programCriticalPath(programCode: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(projects).where(eq(projects.programCode, programCode));
     if (!rows.length) throw new NotFoundException({ code: 'PROGRAM_NOT_FOUND', message: `No projects in program ${programCode}`, messageTh: 'ไม่พบโปรแกรม' });
     const members = new Set<string>(rows.map((p: any) => p.projectCode));
@@ -667,7 +667,7 @@ export class ProjectsService {
   }
 
   async programs(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(projects).where(sql`${projects.programCode} is not null`);
     const byProg = new Map<string, number>();
     for (const p of rows) { const k = p.programCode as string; if (!k) continue; byProg.set(k, (byProg.get(k) ?? 0) + 1); }
@@ -682,7 +682,7 @@ export class ProjectsService {
   // EVM S-curve: the planned-cost baseline accumulated by month (each task's planned cost lands in its
   // planned_end month), with the current EV/AC/PV snapshot overlaid — the classic planned-vs-actual S-curve.
   async evmSeries(code: string, dto?: { months?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
     const buckets = new Map<string, number>();
@@ -703,7 +703,7 @@ export class ProjectsService {
   // status + financial totals, the at-risk list, resource capacity, and the pipeline→delivery funnel. Also
   // backs the schedulable `project_evm` BI report. Read-only — rides evm() / resourceUtilization() / crm.
   async portfolioEvm(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const list = await this.list(user);
     const rows: any[] = [];
     let bac = 0, ev = 0, ac = 0, eac = 0, contract = 0, billed = 0, wip = 0, margin = 0, costToDate = 0;
@@ -756,7 +756,7 @@ export class ProjectsService {
   //  • governance gaps: an Open project with no change-controlled baseline (PROJ-07) or a stale health
   //    snapshot (none in `stale_days`, default 14). Each item deep-links to the offending project tab.
   async actionCenter(user: JwtUser, dto?: { stale_days?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const staleDays = dto?.stale_days != null && Number(dto.stale_days) > 0 ? Math.floor(Number(dto.stale_days)) : 14;
     const staleCutoff = addDays(today, -staleDays);
@@ -827,7 +827,7 @@ export class ProjectsService {
       push('risk_unmitigated_high', 'high', r.project_id ?? null, r.project_code ?? null, `ความเสี่ยงสูงยังไม่มีแผนรับมือ: ${r.title}`, `Unmitigated high risk: ${r.title}`, r.title, 'risks', { risk_id: r.id, score: r.score });
     }
 
-    items.sort((a, b) => (SEV_RANK[a.severity] - SEV_RANK[b.severity]) || String(a.project_code ?? '').localeCompare(String(b.project_code ?? '')) || a.kind.localeCompare(b.kind));
+    items.sort((a, b) => (SEV_RANK[a.severity]! - SEV_RANK[b.severity]!) || String(a.project_code ?? '').localeCompare(String(b.project_code ?? '')) || a.kind.localeCompare(b.kind));
     const by_kind: Record<string, number> = {};
     for (const it of items) by_kind[it.kind] = (by_kind[it.kind] ?? 0) + 1;
     const summary = {
@@ -850,7 +850,7 @@ export class ProjectsService {
   //  • weighted pipeline = each OPEN opportunity's amount × probability%, placed at its expected close month;
   //  • committed demand = the resource capacity calendar's per-month allocation roll-up.
   async forecast(user: JwtUser, dto?: { months?: number; from?: string; rev_per_fte_month?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const months = Math.max(1, Math.min(24, Math.round(dto?.months ?? 6)));
     const start = (dto?.from && /^\d{4}-\d{2}$/.test(dto.from)) ? dto.from : ymd().slice(0, 7);
     // Configurable value→FTE rate: the revenue one full-time-equivalent delivers per month — used to turn the
@@ -878,7 +878,7 @@ export class ProjectsService {
     // POC earned-but-unbilled (contract asset) is billable now → place in the first horizon month.
     let pocAsset = 0;
     for (const f of (await this.list(user)).projects) if (f.rev_method === 'poc' && (f.contract_asset ?? 0) > 0) pocAsset = r2(pocAsset + (f.contract_asset ?? 0));
-    if (pocAsset > 0) committedBill.set(firstMonth, r2((committedBill.get(firstMonth) ?? 0) + pocAsset));
+    if (pocAsset > 0) committedBill.set(firstMonth!, r2((committedBill.get(firstMonth!) ?? 0) + pocAsset));
 
     // Probability-weighted pipeline per month (expected close).
     const weightedPipe = new Map<string, number>(horizon.map((m) => [m, 0]));
@@ -948,7 +948,7 @@ export class ProjectsService {
       rows.push({ project_code: code, name: f.name, status: f.status, rag, cpi: e.cpi, spi: e.spi, margin: f.margin, wip: f.wip,
         open_high_risks: risks.summary.high_open, unmitigated_high: risks.summary.unmitigated_high, overdue_milestones: overdue, pending_change_orders: co.summary.pending });
     }
-    rows.sort((a, b) => (ragRank[a.rag] - ragRank[b.rag]) || String(a.project_code).localeCompare(String(b.project_code)));
+    rows.sort((a, b) => (ragRank[a.rag]! - ragRank[b.rag]!) || String(a.project_code).localeCompare(String(b.project_code)));
     return { scope: 'portfolio', as_of: today, period, count: rows.length, summary: sum, projects: rows };
   }
 
@@ -990,7 +990,7 @@ export class ProjectsService {
   // Current planned BAC (Σ non-cancelled task planned cost; falls back to the project budget) + critical-path
   // duration — the figures a baseline snapshots and the current plan is compared against.
   private async currentPlan(code: string, p: any) {
-    const db = this.db as any;
+    const db = this.db;
     const tasks = (await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)))).filter((t: any) => t.status !== 'cancelled');
     let bac = r2(tasks.reduce((s: number, t: any) => s + n(t.plannedCost), 0));
     if (bac === 0) bac = n(p.budgetAmount);
@@ -1001,7 +1001,7 @@ export class ProjectsService {
   // Capture a baseline. The FIRST baseline is free; **re-baselining requires a reason** (BASELINE_REASON_REQUIRED)
   // and supersedes the prior active baseline (history preserved) — a project can't silently move its goalposts.
   async captureBaseline(code: string, dto: BaselineDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const tenantId = p.tenantId ?? user.tenantId ?? null;
     const plan = await this.currentPlan(code, p);
@@ -1018,7 +1018,7 @@ export class ProjectsService {
 
   // The active baseline + the current plan + variance (scope/cost creep) + the full baseline history.
   async getBaseline(code: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const all = await db.select().from(projectBaselines).where(eq(projectBaselines.projectId, Number(p.id))).orderBy(desc(projectBaselines.id));
     const active = all.find((b: any) => b.status === 'active') ?? null;
@@ -1036,7 +1036,7 @@ export class ProjectsService {
   // it stays `pending` until a DIFFERENT user approves it (maker-checker), so a project can't move its
   // contract goalposts unilaterally.
   async createChangeOrder(code: string, dto: ChangeOrderDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const contractDelta = r2(dto.contract_delta ?? 0), budgetDelta = r2(dto.budget_delta ?? 0), estDelta = r2(dto.estimated_cost_delta ?? 0);
     if (contractDelta === 0 && budgetDelta === 0 && estDelta === 0) throw new BadRequestException({ code: 'EMPTY_CHANGE_ORDER', message: 'A change order must change the contract, budget, or estimated cost', messageTh: 'ใบเปลี่ยนแปลงต้องเปลี่ยนมูลค่าสัญญา งบประมาณ หรือประมาณการต้นทุน' });
@@ -1053,35 +1053,35 @@ export class ProjectsService {
   // On approval the contract/budget/EAC deltas are applied to the project AND a new baseline is auto-captured
   // (reason = the CO), so the scope/contract change is authorised, segregated, and re-baselined (ties to PROJ-07).
   async approveChangeOrder(coId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
     if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
     if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
     if (co.requestedBy && co.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a change order you requested', messageTh: 'ผู้ขอเปลี่ยนแปลงอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
-    const newContract = r2(Math.max(0, n(proj.contractAmount) + n(co.contractDelta)));
-    const newBudget = r2(Math.max(0, n(proj.budgetAmount) + n(co.budgetDelta)));
-    const newEst = r2(Math.max(0, n(proj.estimatedCost) + n(co.estimatedCostDelta)));
-    await db.update(projects).set({ contractAmount: fx(newContract, 2), budgetAmount: fx(newBudget, 2), estimatedCost: fx(newEst, 2) }).where(eq(projects.id, Number(proj.id)));
+    const newContract = r2(Math.max(0, n(proj!.contractAmount) + n(co.contractDelta)));
+    const newBudget = r2(Math.max(0, n(proj!.budgetAmount) + n(co.budgetDelta)));
+    const newEst = r2(Math.max(0, n(proj!.estimatedCost) + n(co.estimatedCostDelta)));
+    await db.update(projects).set({ contractAmount: fx(newContract, 2), budgetAmount: fx(newBudget, 2), estimatedCost: fx(newEst, 2) }).where(eq(projects.id, Number(proj!.id)));
     await db.update(projectChangeOrders).set({ status: 'approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectChangeOrders.id, Number(coId)));
     // Re-baseline so the variance trail records the authorised change (PROJ-07). Best-effort.
     let baseline: any = null;
-    try { baseline = await this.captureBaseline(proj.projectCode, { label: `Change order ${co.coNo}`, reason: `Change order ${co.coNo}` }, user); } catch { /* baseline optional */ }
-    return { change_order: co.coNo, project_code: proj.projectCode, status: 'approved', contract_amount: newContract, budget_amount: newBudget, estimated_cost: newEst, baseline: baseline?.baseline ?? null };
+    try { baseline = await this.captureBaseline(proj!.projectCode, { label: `Change order ${co.coNo}`, reason: `Change order ${co.coNo}` }, user); } catch { /* baseline optional */ }
+    return { change_order: co.coNo, project_code: proj!.projectCode, status: 'approved', contract_amount: newContract, budget_amount: newBudget, estimated_cost: newEst, baseline: baseline?.baseline ?? null };
   }
 
   async rejectChangeOrder(coId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
     if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
     if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
     const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
     await db.update(projectChangeOrders).set({ status: 'rejected', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectChangeOrders.id, Number(coId)));
-    return this.listChangeOrders(proj.projectCode);
+    return this.listChangeOrders(proj!.projectCode);
   }
 
   async listChangeOrders(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const rows = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.projectId, Number(p.id))).orderBy(desc(projectChangeOrders.id));
     const approved = rows.filter((r: any) => r.status === 'approved');
@@ -1099,7 +1099,7 @@ export class ProjectsService {
   // Create a reusable WBS/milestone scaffold. Items default their seq to declaration order (1-based) so a
   // template can omit explicit seqs; parent_seq / depends_on_seq reference those ordinals.
   async createTemplate(dto: TemplateDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const code = dto.code?.trim() || `TPL${String(Date.now()).slice(-6)}`;
     const [existing] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, code)).limit(1);
     if (existing) throw new BadRequestException({ code: 'TEMPLATE_EXISTS', message: `Template ${code} already exists`, messageTh: 'รหัสแม่แบบซ้ำ' });
@@ -1111,20 +1111,20 @@ export class ProjectsService {
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       await db.insert(projectTemplateItems).values({
-        templateId: Number(tpl.id), tenantId, itemType: it.item_type ?? 'task', seq: it.seq ?? i + 1, name: it.name,
-        parentSeq: it.parent_seq ?? null, wbsCode: it.wbs_code ?? null,
-        plannedHours: fx(it.planned_hours ?? 0, 2), plannedCost: fx(it.planned_cost ?? 0, 2),
-        offsetStartDays: Math.round(n(it.offset_start_days)), offsetEndDays: Math.round(n(it.offset_end_days)),
-        dependsOnSeq: depsCsv(it.depends_on_seq),
-        billingPercent: it.billing_percent != null ? fx(it.billing_percent, 2) : null,
-        owner: it.owner ?? null, assignee: it.assignee ?? null,
+        templateId: Number(tpl!.id), tenantId, itemType: it!.item_type ?? 'task', seq: it!.seq ?? i + 1, name: it!.name,
+        parentSeq: it!.parent_seq ?? null, wbsCode: it!.wbs_code ?? null,
+        plannedHours: fx(it!.planned_hours ?? 0, 2), plannedCost: fx(it!.planned_cost ?? 0, 2),
+        offsetStartDays: Math.round(n(it!.offset_start_days)), offsetEndDays: Math.round(n(it!.offset_end_days)),
+        dependsOnSeq: depsCsv(it!.depends_on_seq),
+        billingPercent: it!.billing_percent != null ? fx(it!.billing_percent, 2) : null,
+        owner: it!.owner ?? null, assignee: it!.assignee ?? null,
       });
     }
     return this.getTemplate(code);
   }
 
   async listTemplates(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(projectTemplates).orderBy(desc(projectTemplates.id)).limit(200);
     const counts = await db.select({ tid: projectTemplateItems.templateId, c: sql<string>`count(*)` }).from(projectTemplateItems).groupBy(projectTemplateItems.templateId);
     const cBy = new Map<number, number>(counts.map((x: any) => [Number(x.tid), Number(x.c)]));
@@ -1132,7 +1132,7 @@ export class ProjectsService {
   }
 
   async getTemplate(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [tpl] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, code)).limit(1);
     if (!tpl) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: `Template ${code} not found`, messageTh: 'ไม่พบแม่แบบ' });
     const items = await db.select().from(projectTemplateItems).where(eq(projectTemplateItems.templateId, Number(tpl.id))).orderBy(projectTemplateItems.seq);
@@ -1147,7 +1147,7 @@ export class ProjectsService {
   // first to map seq→id, then a second pass wires parent_id and depends_on; milestones are dated off the same
   // start. Idempotent-ish guard: refuses if the project already has tasks (so re-apply can't duplicate a WBS).
   async applyTemplate(code: string, tplCode: string, dto: ApplyTemplateDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const tenantId = p.tenantId ?? user.tenantId ?? null;
     const [tpl] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, tplCode)).limit(1);
@@ -1167,7 +1167,7 @@ export class ProjectsService {
         plannedHours: fx(n(it.plannedHours), 2), plannedCost: fx(n(it.plannedCost), 2), pctComplete: fx(0, 2),
         dependsOn: null, assignee: it.assignee ?? null, createdBy: user.username,
       }).returning({ id: projectTasks.id });
-      seqToId.set(Number(it.seq), Number(t.id));
+      seqToId.set(Number(it.seq), Number(t!.id));
     }
     // Pass 2 — wire parent_id + depends_on now that every seq has a real id.
     for (const it of taskItems) {
@@ -1195,7 +1195,7 @@ export class ProjectsService {
   // Log a risk (future threat) or issue (materialised problem). Score = prob×impact (risk) / 5×impact (issue);
   // RAG is derived from the score band. A HIGH (red) risk with no mitigation is the governance signal.
   async addRisk(code: string, dto: RiskDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const tenantId = p.tenantId ?? user.tenantId ?? null;
     const kind = dto.kind === 'issue' ? 'issue' : 'risk';
@@ -1213,7 +1213,7 @@ export class ProjectsService {
   }
 
   async listRisks(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const rows = (await db.select().from(projectRisks).where(eq(projectRisks.projectId, Number(p.id))).orderBy(desc(projectRisks.score), desc(projectRisks.id))).map(shapeRisk);
     const open = rows.filter((r: any) => r.status !== 'closed');
@@ -1233,7 +1233,7 @@ export class ProjectsService {
   // Update a risk/issue: status (closing stamps closed_at), mitigation, owner, due, or a re-score (prob/impact →
   // score + rag recomputed). Returns the refreshed register.
   async patchRisk(riskId: number, dto: RiskPatchDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(projectRisks).where(eq(projectRisks.id, Number(riskId))).limit(1);
     if (!r) throw new NotFoundException({ code: 'RISK_NOT_FOUND', message: `Risk ${riskId} not found`, messageTh: 'ไม่พบความเสี่ยง' });
     const set: any = {};
@@ -1253,13 +1253,13 @@ export class ProjectsService {
     }
     await db.update(projectRisks).set(set).where(eq(projectRisks.id, Number(riskId)));
     const [proj] = await db.select().from(projects).where(eq(projects.id, Number(r.projectId))).limit(1);
-    return this.listRisks(proj.projectCode);
+    return this.listRisks(proj!.projectCode);
   }
 
   // Portfolio top-risks roll-up (Track A tie-in): every open risk/issue across the caller's projects, ranked by
   // score; `high` are the red (HIGH) ones and `unmitigated_high` the subset with no mitigation plan (PROJ-08).
   async topRisks(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = (await db.select().from(projectRisks).where(sql`${projectRisks.status} <> 'closed'`)).map(shapeRisk);
     const projRows = await db.select().from(projects);
     const pById = new Map<number, any>(projRows.map((p: any) => [Number(p.id), p]));
@@ -1279,14 +1279,14 @@ export class ProjectsService {
   // red if CPI or SPI < 0.9, amber if either < 1, green if both ≥ 1, no_data if neither is computable.
   // Idempotent per (project, date) — re-capturing the same day refreshes the row.
   async captureHealth(code: string, dto: { as_of?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     return this.snapProject(p, dto?.as_of ?? ymd(), user);
   }
 
   // Capture a snapshot for EVERY project for the caller's tenant — the scheduled (BI action job) path.
   async captureAllHealth(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const date = ymd();
     const rows = await db.select().from(projects).orderBy(desc(projects.id)).limit(500);
     let captured = 0;
@@ -1296,7 +1296,7 @@ export class ProjectsService {
 
   // Compute + upsert one project's health snapshot for a date.
   private async snapProject(p: any, date: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const e = await this.evm(p.projectCode, date);
     const f = this.fmt(p);
     const tasks = await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)));
@@ -1319,7 +1319,7 @@ export class ProjectsService {
 
   // The dated health trajectory for a project (ascending) — feeds a CPI/SPI/RAG trend chart.
   async healthHistory(code: string) {
-    const db = this.db as any;
+    const db = this.db;
     const p = await this.row(code);
     const rows = await db.select().from(projectHealthSnapshots).where(eq(projectHealthSnapshots.projectId, Number(p.id))).orderBy(projectHealthSnapshots.snapshotDate);
     return { project_code: code, history: rows.map(shapeHealth), count: rows.length };
@@ -1369,7 +1369,7 @@ export class ProjectsService {
   // ───────────────── PROJ-03 — period-end project-close WIP/clearing review + sign-off ─────────────────
   // Snapshot unbilled-WIP (GL 1260) + the applied-costs clearing balance (GL 2390) + open-project count.
   private async closeSnapshot() {
-    const db = this.db as any;
+    const db = this.db;
     const [wip] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}),0)` })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .where(and(eq(journalLines.accountCode, '1260'), eq(journalEntries.status, 'Posted')));
@@ -1384,7 +1384,7 @@ export class ProjectsService {
   // Rejected/Prepared is refreshed). A control account that gets reviewed at close (PROJ-03, detective).
   async prepareCloseReview(period: string, user: JwtUser) {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
-    const db = this.db as any;
+    const db = this.db;
     const snap = await this.closeSnapshot();
     const [existing] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
     if (existing?.status === 'Approved') throw new BadRequestException({ code: 'ALREADY_APPROVED', message: `Project close review for ${period} is already approved`, messageTh: 'งวดนี้อนุมัติแล้ว' });
@@ -1401,7 +1401,7 @@ export class ProjectsService {
   // Checker: sign off (SoD — approver ≠ preparer). Detective review, so no hard numeric gate; the independent
   // sign-off IS the control.
   async approveCloseReview(period: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `Project close review for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการสอบทาน' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
@@ -1411,7 +1411,7 @@ export class ProjectsService {
   }
 
   async rejectCloseReview(period: string, reason: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: 'Project close review has not been prepared', messageTh: 'ยังไม่ได้จัดทำ' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
@@ -1420,14 +1420,14 @@ export class ProjectsService {
   }
 
   async getCloseReview(period: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId ?? null as any), eq(projectCloseReviews.period, period))).limit(1);
     if (!rp) return { period, status: 'None' };
     return this.shapeCloseReview(rp);
   }
 
   async listCloseReviews(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(projectCloseReviews).where(user.tenantId != null ? eq(projectCloseReviews.tenantId, user.tenantId) : undefined).orderBy(desc(projectCloseReviews.period)).limit(60);
     return { reviews: rows.map((r: any) => this.shapeCloseReview(r)), count: rows.length };
   }

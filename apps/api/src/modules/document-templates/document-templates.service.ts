@@ -47,7 +47,7 @@ export class DocumentTemplatesService {
   });
 
   async list(docType: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (docType) this.assertDocType(docType);
     let rows = docType
       ? await db.select().from(documentTemplates).where(and(eq(documentTemplates.docType, docType), eq(documentTemplates.active, true)))
@@ -59,7 +59,7 @@ export class DocumentTemplatesService {
   // The active config for a doc_type (default row → else most-recent active → else {}). Called at render time.
   // RLS already scopes the read to the caller's tenant. Returns the raw config; callers normalize per doc_type.
   async resolveActive(docType: string): Promise<any> {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(documentTemplates).where(and(eq(documentTemplates.docType, docType), eq(documentTemplates.active, true)));
     if (!rows.length) return {};
     const def = rows.find((r: any) => r.isDefault) ?? rows.sort((a: any, b: any) => Number(b.id) - Number(a.id))[0];
@@ -67,7 +67,7 @@ export class DocumentTemplatesService {
   }
 
   async create(dto: { doc_type: string; name: string; config?: any; is_default?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     this.assertDocType(dto.doc_type);
     const name = (dto.name ?? '').trim();
     if (!name) throw new BadRequestException({ code: 'NAME_REQUIRED', message: 'name required', messageTh: 'ต้องระบุชื่อเทมเพลต' });
@@ -82,11 +82,11 @@ export class DocumentTemplatesService {
       tenantId: user.tenantId ?? null, docType: dto.doc_type, name, config: this.normalize(dto.doc_type, dto.config),
       isDefault: makeDefault, active: true, createdBy: user.username, updatedBy: user.username,
     }).returning({ id: documentTemplates.id });
-    return { id: Number(row.id), doc_type: dto.doc_type, name, is_default: makeDefault };
+    return { id: Number(row!.id), doc_type: dto.doc_type, name, is_default: makeDefault };
   }
 
   async update(id: number, dto: { name?: string; config?: any }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(documentTemplates).where(eq(documentTemplates.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: 'Template not found', messageTh: 'ไม่พบเทมเพลต' });
     const patch: any = { updatedBy: user.username, updatedAt: new Date() };
@@ -101,7 +101,7 @@ export class DocumentTemplatesService {
   }
 
   async setDefault(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(documentTemplates).where(eq(documentTemplates.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: 'Template not found', messageTh: 'ไม่พบเทมเพลต' });
     await db.update(documentTemplates).set({ isDefault: false }).where(eq(documentTemplates.docType, row.docType));
@@ -110,7 +110,7 @@ export class DocumentTemplatesService {
   }
 
   async remove(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const upd = await db.update(documentTemplates).set({ isDefault: false, active: false }).where(eq(documentTemplates.id, id)).returning({ id: documentTemplates.id });
     if (!upd.length) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: 'Template not found', messageTh: 'ไม่พบเทมเพลต' });
     return { id, active: false };
@@ -126,7 +126,7 @@ export class DocumentTemplatesService {
         + `<p style="font-size:12px">Live preview for this document type is not available yet (the template is saved and will apply when its rendering lands).</p></div>`;
       return { doc_type: docType, html };
     }
-    const db = this.db as any;
+    const db = this.db;
     let t: any = null;
     if (user.tenantId != null) [t] = await db.select().from(tenants).where(eq(tenants.id, Number(user.tenantId))).limit(1);
     const addr = t ? [t.addressLine1, t.addressLine2, t.subDistrict, t.district, t.province, t.postalCode].filter(Boolean).join(' ') : '';

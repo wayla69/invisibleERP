@@ -20,7 +20,7 @@ export class TaxInvoiceService {
   ) {}
 
   private async tenantRow(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Seller (tenant) not found', messageTh: 'ไม่พบข้อมูลผู้ขาย' });
     return t;
@@ -37,7 +37,7 @@ export class TaxInvoiceService {
 
   // ── ใบกำกับภาษีอย่างย่อ (ม.86/6) จากการขายหน้าร้าน (VAT-inclusive slip) ──
   async issueAbbreviatedFromSale(saleNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sale] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
     if (!sale) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sale not found', messageTh: 'ไม่พบรายการขาย' });
 
@@ -63,7 +63,7 @@ export class TaxInvoiceService {
       createdBy: user.username,
     }).returning({ id: taxInvoices.id });
 
-    await this.insertLines(Number(head.id), Number(sale.tenantId), items.map((it: any, i: number) => ({
+    await this.insertLines(Number(head!.id), Number(sale.tenantId), items.map((it: any, i: number) => ({
       lineNo: i + 1, itemId: it.itemId, description: it.itemDescription ?? it.itemId ?? 'สินค้า',
       qty: n(it.qty), uom: it.uom, unitPrice: n(it.unitPrice), discount: n(0), amount: n(it.amount),
     })));
@@ -72,7 +72,7 @@ export class TaxInvoiceService {
 
   // ── ใบกำกับภาษีเต็มรูป (ม.86/4) จาก POS หรือ AR — VAT แยก, ต้องมีข้อมูลผู้ซื้อ ──
   async issueFull(dto: IssueFullDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     // buyer block mandatory (ม.86/4(3)); Tax ID optional but validated if provided
     if (!dto.buyer?.name || !dto.buyer?.address) {
       throw new BadRequestException({ code: 'BUYER_REQUIRED', message: 'Full tax invoice requires buyer name + address', messageTh: 'ใบกำกับภาษีเต็มรูปต้องมีชื่อและที่อยู่ผู้ซื้อ' });
@@ -109,7 +109,7 @@ export class TaxInvoiceService {
       subtotal: fx(subtotal, 2), vatRate: fx(n(seller.vatRate ?? 0.07), 4), vatAmount: fx(vat, 2), grandTotal: fx(total, 2), isVatInclusive: false,
       bookNo: dto.book_no ?? null, notes: dto.notes ?? null, createdBy: user.username,
     }).returning({ id: taxInvoices.id });
-    await this.insertLines(Number(head.id), tenantId, lines);
+    await this.insertLines(Number(head!.id), tenantId, lines);
     // wiring (best-effort): hand the full tax invoice to the RD/ETDA e-Tax provider
     if (this.etax) { try { await this.etax.submit(docNo, undefined, user); } catch { /* e-Tax submit best-effort */ } }
     return this.getByDocNo(user, docNo);
@@ -117,7 +117,7 @@ export class TaxInvoiceService {
 
   private async insertLines(taxInvoiceId: number, tenantId: number, lines: any[]) {
     if (!lines.length) return;
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(taxInvoiceLines).values(lines.map((l) => ({
       taxInvoiceId, tenantId, lineNo: String(l.lineNo), itemId: l.itemId ?? null, description: l.description,
       qty: l.qty != null ? fx(l.qty, 3) : null, uom: l.uom ?? null,
@@ -126,27 +126,27 @@ export class TaxInvoiceService {
   }
 
   async list(user: JwtUser, type?: string, limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const where = type ? eq(taxInvoices.type, type as any) : undefined;
     const rows = await db.select().from(taxInvoices).where(where).orderBy(desc(taxInvoices.id)).limit(limit);
     return { invoices: rows.map(shape), count: rows.length };
   }
 
   async getByDocNo(user: JwtUser, docNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [head] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, docNo)).limit(1);
     if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tax invoice not found', messageTh: 'ไม่พบใบกำกับภาษี' });
     return this.withLines(head);
   }
 
   private async withLines(head: any) {
-    const db = this.db as any;
+    const db = this.db;
     const lines = await db.select().from(taxInvoiceLines).where(eq(taxInvoiceLines.taxInvoiceId, Number(head.id))).orderBy(taxInvoiceLines.lineNo);
     return { ...shape(head), lines: lines.map(shapeLine) };
   }
 
   async void(user: JwtUser, docNo: string, reason: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [head] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, docNo)).limit(1);
     if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tax invoice not found', messageTh: 'ไม่พบใบกำกับภาษี' });
     // numbers are NEVER reused — keep the row, flip status (RD requirement).

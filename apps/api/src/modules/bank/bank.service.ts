@@ -25,7 +25,7 @@ export class BankService {
 
   // Till 'drop's not yet banked = cash still in the safe (deposit_id NULL). The detective exposure.
   async undepositedDrops(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(cashMovements)
       .where(and(eq(cashMovements.tenantId, user.tenantId as number), sql`${cashMovements.type}::text = 'drop'`, sql`${cashMovements.depositId} is null`))
       .orderBy(asc(cashMovements.createdAt));
@@ -36,7 +36,7 @@ export class BankService {
   // Bank the safe cash: batch the unbanked drops (all, or a chosen set) into a deposit and post the GL
   // (Dr <bank account GL> / Cr 1000 Cash). SoD: banking is exec/ar — segregated from the cashier (pos_till).
   async createDeposit(dto: { bank_account_id: number; movement_nos?: string[]; deposit_date?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [bank] = await db.select().from(bankAccounts).where(and(eq(bankAccounts.id, dto.bank_account_id), eq(bankAccounts.tenantId, user.tenantId as number))).limit(1);
     if (!bank) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Bank account not found', messageTh: 'ไม่พบบัญชีธนาคาร' });
     const conds = [eq(cashMovements.tenantId, user.tenantId as number), sql`${cashMovements.type}::text = 'drop'`, sql`${cashMovements.depositId} is null`];
@@ -58,7 +58,7 @@ export class BankService {
 
   // Mark a deposit reconciled to the bank statement (it appeared as a credit on the statement).
   async reconcileDeposit(depositId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [dep] = await db.select().from(bankDeposits).where(and(eq(bankDeposits.id, depositId), eq(bankDeposits.tenantId, user.tenantId as number))).limit(1);
     if (!dep) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Deposit not found', messageTh: 'ไม่พบรายการนำฝาก' });
     if (String(dep.status) === 'Reconciled') throw new BadRequestException({ code: 'ALREADY_RECONCILED', message: 'Deposit already reconciled', messageTh: 'รายการนี้กระทบยอดแล้ว' });
@@ -67,7 +67,7 @@ export class BankService {
   }
 
   async listDeposits(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(bankDeposits).where(eq(bankDeposits.tenantId, user.tenantId as number)).orderBy(desc(bankDeposits.createdAt)).limit(300);
     const undep = await this.undepositedDrops(user);
     return {
@@ -79,7 +79,7 @@ export class BankService {
   }
 
   async createBankAccount(dto: CreateBankAccountDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [acc] = await db.select({ code: accounts.code }).from(accounts).where(eq(accounts.code, dto.gl_account_code)).limit(1);
     if (!acc) throw new BadRequestException({ code: 'BAD_GL_ACCOUNT', message: `GL account ${dto.gl_account_code} not found`, messageTh: 'ไม่พบรหัสบัญชี GL' });
     const [b] = await db.insert(bankAccounts).values({ tenantId: user.tenantId ?? null, bankName: dto.bank_name, accountNo: dto.account_no, glAccountCode: dto.gl_account_code, currency: dto.currency, openingBalance: fx(dto.opening_balance, 4), createdBy: user.username }).onConflictDoNothing().returning();
@@ -87,23 +87,23 @@ export class BankService {
     return shapeAcct(b);
   }
   async listBankAccounts(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(bankAccounts).orderBy(asc(bankAccounts.id));
     return { accounts: rows.map(shapeAcct), count: rows.length };
   }
 
   async importStatement(bankAccountId: number, dto: ImportStatementDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const acct = await this.loadAccount(bankAccountId);
     const statementNo = await this.docNo.nextDaily('BANKSTMT');
     const [h] = await db.insert(bankStatements).values({ tenantId: acct.tenantId ?? null, statementNo, bankAccountId, statementDate: dto.statement_date, openingBal: fx(dto.opening_bal, 4), closingBal: fx(dto.closing_bal, 4), lineCount: dto.lines.length, createdBy: user.username }).returning({ id: bankStatements.id });
-    await db.insert(bankStatementLines).values(dto.lines.map((l) => ({ tenantId: acct.tenantId ?? null, statementId: Number(h.id), bankAccountId, lineDate: l.date, description: l.description ?? null, amount: fx(l.amount, 4), runningBalance: l.balance != null ? fx(l.balance, 4) : null, reconciled: 'false' })));
+    await db.insert(bankStatementLines).values(dto.lines.map((l) => ({ tenantId: acct.tenantId ?? null, statementId: Number(h!.id), bankAccountId, lineDate: l.date, description: l.description ?? null, amount: fx(l.amount, 4), runningBalance: l.balance != null ? fx(l.balance, 4) : null, reconciled: 'false' })));
     return { statement_no: statementNo, line_count: dto.lines.length, opening_bal: n(dto.opening_bal), closing_bal: n(dto.closing_bal) };
   }
 
   // auto-match unreconciled statement lines to unreconciled GL cash movements on the bank's gl account
   async autoMatch(bankAccountId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const acct = await this.loadAccount(bankAccountId);
     const bankGl = acct.glAccountCode;
     // Scope book lines to THIS account's tenant — the bank GL (e.g. 1010) is shared across tenants, so an
@@ -132,7 +132,7 @@ export class BankService {
   }
 
   async manualMatch(statementLineId: number, journalLineId: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
     if (!sl) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Statement line not found', messageTh: 'ไม่พบรายการ statement' });
     const [jl] = await db.select({ id: journalLines.id }).from(journalLines).where(eq(journalLines.id, journalLineId)).limit(1);
@@ -142,7 +142,7 @@ export class BankService {
   }
 
   async unmatch(statementLineId: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.update(bankStatementLines).set({ reconciled: 'false', matchedJournalLineId: null, matchedPaymentNo: null }).where(eq(bankStatementLines.id, statementLineId));
     return { statement_line_id: statementLineId, reconciled: false };
   }
@@ -153,7 +153,7 @@ export class BankService {
   // sourceRef STMTLN-<id>) is also surfaced, aged, by the pending-approvals monitor (GOV-01). The line carries the
   // Draft entry_no in adjustmentJournalNo while reconciled='false' (= pending); approval flips reconciled='true'.
   async requestAdjustment(statementLineId: number, dto: AdjustmentDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
     if (!sl) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Statement line not found', messageTh: 'ไม่พบรายการ statement' });
     if (sl.reconciled === 'true') throw new BadRequestException({ code: 'ALREADY_RECONCILED', message: 'Line already reconciled', messageTh: 'รายการนี้กระทบยอดแล้ว' });
@@ -173,7 +173,7 @@ export class BankService {
 
   // Checker queue — bank adjustments awaiting approval (Draft JE posted, line not yet reconciled).
   async listPendingAdjustments(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({ id: bankStatementLines.id, bankAccountId: bankStatementLines.bankAccountId, lineDate: bankStatementLines.lineDate, description: bankStatementLines.description, amount: bankStatementLines.amount, journalNo: bankStatementLines.adjustmentJournalNo })
       .from(bankStatementLines).where(and(isNotNull(bankStatementLines.adjustmentJournalNo), eq(bankStatementLines.reconciled, 'false'))).orderBy(asc(bankStatementLines.lineDate));
     return { pending: rows.map((r: any) => ({ statement_line_id: Number(r.id), bank_account_id: Number(r.bankAccountId), date: r.lineDate, description: r.description, amount: round4(n(r.amount)), journal_no: r.journalNo })), count: rows.length };
@@ -181,7 +181,7 @@ export class BankService {
 
   // Approve a pending bank adjustment (checker; approver ≠ requester enforced by ledger.approveEntry, binds Admin).
   async approveAdjustment(statementLineId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
     if (!sl || sl.reconciled === 'true' || !sl.adjustmentJournalNo) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No bank adjustment pending approval for this line', messageTh: 'ไม่พบรายการปรับปรุงที่รออนุมัติ' });
     const acct = await this.loadAccount(Number(sl.bankAccountId));
@@ -197,7 +197,7 @@ export class BankService {
 
   // Reject a pending bank adjustment (checker) — voids the Draft JE and frees the line.
   async rejectAdjustment(statementLineId: number, user: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
     if (!sl || sl.reconciled === 'true' || !sl.adjustmentJournalNo) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No bank adjustment pending approval for this line', messageTh: 'ไม่พบรายการปรับปรุงที่รออนุมัติ' });
     const sourceRef = `STMTLN-${statementLineId}`;
@@ -209,7 +209,7 @@ export class BankService {
   }
 
   async reconciliation(bankAccountId: number, asOf: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const acct = await this.loadAccount(bankAccountId);
     const bankGl = acct.glAccountCode;
     const cutoff = asOf ?? '9999-12-31';
@@ -231,7 +231,7 @@ export class BankService {
   }
 
   private async loadAccount(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [a] = await db.select().from(bankAccounts).where(eq(bankAccounts.id, id)).limit(1);
     if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Bank account not found', messageTh: 'ไม่พบบัญชีธนาคาร' });
     return a;

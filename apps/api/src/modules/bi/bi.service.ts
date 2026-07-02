@@ -135,7 +135,7 @@ export class BiService implements OnModuleInit {
   // (set by the worker) scopes the handler to the job's tenant, so we reconstruct a minimal principal here.
   onModuleInit(): void {
     this.worker?.register(REPORT_SUBSCRIPTION_JOB, async (payload: { subscriptionId: number }, ctx: JobContext) => {
-      const db = this.db as any;
+      const db = this.db;
       const [sub] = await db.select().from(reportSubscriptions).where(eq(reportSubscriptions.id, Number(payload.subscriptionId))).limit(1);
       if (!sub) return { skipped: 'subscription not found' };
       const user = { username: ctx.actor ?? 'system:scheduler', role: ctx.bypass ? 'Admin' : 'Sales', tenantId: ctx.tenantId ?? sub.tenantId, permissions: [], customerName: null } as unknown as JwtUser;
@@ -148,7 +148,7 @@ export class BiService implements OnModuleInit {
   // worker with retry/backoff, off the cron request path. Falls back to inline runDue if the queue is absent.
   async runDueAsync(user: JwtUser) {
     if (!this.jobs) return { ...(await this.runDue(user)), mode: 'inline (queue unavailable)' };
-    const db = this.db as any;
+    const db = this.db;
     const now = Date.now();
     const subs = await db.select().from(reportSubscriptions)
       .where(and(eq(reportSubscriptions.tenantId, user.tenantId!), eq(reportSubscriptions.isActive, true)));
@@ -182,7 +182,7 @@ export class BiService implements OnModuleInit {
     return this.cache.wrap(this.cacheKey('kpiBoard', user.tenantId!, null), this.cacheTtlMs, () => this.kpiBoardUncached(user));
   }
   private async kpiBoardUncached(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = user.tenantId!;
     const today = new Date().toISOString().slice(0, 10);
     const monthStart = today.slice(0, 7) + '-01';
@@ -227,20 +227,20 @@ export class BiService implements OnModuleInit {
     return {
       as_of: today,
       sales: {
-        mtd: round2(n(mtdSales.total)), mtd_orders: Number(mtdSales.count),
-        ytd: round2(n(ytdSales.total)),
-        avg_order_mtd: Number(mtdSales.count) > 0 ? round2(n(mtdSales.total) / Number(mtdSales.count)) : 0,
+        mtd: round2(n(mtdSales!.total)), mtd_orders: Number(mtdSales!.count),
+        ytd: round2(n(ytdSales!.total)),
+        avg_order_mtd: Number(mtdSales!.count) > 0 ? round2(n(mtdSales!.total) / Number(mtdSales!.count)) : 0,
       },
       receivables: {
-        open_ar: round2(n(openAr.total)),
-        overdue_ar: round2(n(overdueAr.total)),
-        overdue_count: Number(overdueAr.count),
+        open_ar: round2(n(openAr!.total)),
+        overdue_ar: round2(n(overdueAr!.total)),
+        overdue_count: Number(overdueAr!.count),
       },
-      payables: { open_ap: round2(n(openAp.total)) },
+      payables: { open_ap: round2(n(openAp!.total)) },
       pipeline: {
-        open_value: round2(n(pipeline.total)),
-        weighted_value: round2(n(pipeline.weighted)),
-        open_count: Number(pipeline.count),
+        open_value: round2(n(pipeline!.total)),
+        weighted_value: round2(n(pipeline!.weighted)),
+        open_count: Number(pipeline!.count),
       },
     };
   }
@@ -252,7 +252,7 @@ export class BiService implements OnModuleInit {
     return this.cache.wrap(this.cacheKey('salesCube', user.tenantId!, dto), this.cacheTtlMs, () => this.salesCubeUncached(dto, user));
   }
   private async salesCubeUncached(dto: { period?: 'day' | 'week' | 'month'; start_date?: string; end_date?: string; months?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 3;
     const today = new Date().toISOString().slice(0, 10);
@@ -300,7 +300,7 @@ export class BiService implements OnModuleInit {
     return this.cache.wrap(this.cacheKey('financeTrend', user.tenantId!, dto), this.cacheTtlMs, () => this.financeTrendUncached(dto, user));
   }
   private async financeTrendUncached(dto: { months?: number; ledger_code?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 6;
     const today = new Date().toISOString().slice(0, 10);
@@ -353,7 +353,7 @@ export class BiService implements OnModuleInit {
     return this.cache.wrap(this.cacheKey('pipelineTrend', user.tenantId!, dto), this.cacheTtlMs, () => this.pipelineTrendUncached(dto, user));
   }
   private async pipelineTrendUncached(dto: { months?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 6;
     const today = new Date().toISOString().slice(0, 10);
@@ -392,7 +392,7 @@ export class BiService implements OnModuleInit {
   // Top-selling items for a date range — clicked from the sales cube bar chart.
 
   async salesCubeTopItems(dto: { start_date?: string; end_date?: string; months?: number; limit?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 1;
     const today = new Date().toISOString().slice(0, 10);
@@ -426,7 +426,7 @@ export class BiService implements OnModuleInit {
   // ── Snapshot Refresh + Retrieval ───────────────────────────────────────────
 
   async refreshSnapshot(dto: { date?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = user.tenantId!;
     const date = dto.date ?? new Date().toISOString().slice(0, 10);
 
@@ -474,7 +474,7 @@ export class BiService implements OnModuleInit {
   }
 
   async getSnapshots(dto: { start_date?: string; end_date?: string; days?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = user.tenantId!;
     const today = new Date().toISOString().slice(0, 10);
     const days = dto.days ?? 30;
@@ -503,7 +503,7 @@ export class BiService implements OnModuleInit {
   }
 
   async createSubscription(dto: { name: string; report_type: string; frequency: string; filters?: object; recipients?: object[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!REPORT_TYPES[dto.report_type]) throw new BadRequestException({ code: 'BAD_REPORT_TYPE', message: `Unknown report type '${dto.report_type}'`, messageTh: 'ไม่รู้จักประเภทรายงานนี้' });
     if (!(FREQUENCIES as readonly string[]).includes(dto.frequency)) throw new BadRequestException({ code: 'BAD_FREQUENCY', message: 'frequency must be daily|weekly|monthly', messageTh: 'ความถี่ต้องเป็น รายวัน/รายสัปดาห์/รายเดือน' });
     const nextRun = this.nextRunDate(dto.frequency);
@@ -516,7 +516,7 @@ export class BiService implements OnModuleInit {
   }
 
   async listSubscriptions(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(reportSubscriptions)
       .where(and(eq(reportSubscriptions.tenantId, user.tenantId!), eq(reportSubscriptions.isActive, true)))
       .orderBy(desc(reportSubscriptions.createdAt));
@@ -524,7 +524,7 @@ export class BiService implements OnModuleInit {
   }
 
   async deleteSubscription(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.update(reportSubscriptions).set({ isActive: false })
       .where(and(eq(reportSubscriptions.id, id), eq(reportSubscriptions.tenantId, user.tenantId!)));
     return { deleted: id };
@@ -637,7 +637,7 @@ export class BiService implements OnModuleInit {
       // NEVER touches financial / audit / transactional / PII tables — those are under statutory legal
       // hold (see docs/ops/data-retention-policy.md). Idempotent. refresh_tokens are kept until EXPIRED
       // (not merely rotated) so reuse-detection still works within a token's life.
-      const db = this.db as any;
+      const db = this.db;
       const rows = (res: any): number => (res?.rows?.length ?? (Array.isArray(res) ? res.length : 0));
       const a = await db.execute(sql`DELETE FROM revoked_tokens WHERE expires_at < now() RETURNING 1 AS one`);
       const b = await db.execute(sql`DELETE FROM refresh_tokens WHERE expires_at < now() RETURNING 1 AS one`);
@@ -734,7 +734,7 @@ export class BiService implements OnModuleInit {
   // Execute one subscription: generate → deliver (email recipients + in-app notification) → log a run →
   // advance the schedule. Delivery is best-effort; the run is always recorded.
   private async executeSubscription(sub: any, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     try {
       const report = await this.generateReport(sub.reportType, sub.filters, user);
       const recipients = Array.isArray(sub.recipients) ? sub.recipients : [];
@@ -751,7 +751,7 @@ export class BiService implements OnModuleInit {
         frequency: sub.frequency, status: 'success', recipientsCount: delivered, summary: report.data,
       }).returning({ id: reportRuns.id });
       await db.update(reportSubscriptions).set({ lastRunAt: new Date(), nextRunAt: this.nextRunDate(sub.frequency) }).where(eq(reportSubscriptions.id, sub.id));
-      return { run_id: Number(run.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'success', delivered, summary: report.summary };
+      return { run_id: Number(run!.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'success', delivered, summary: report.summary };
     } catch (e: any) {
       const errMsg = String(e?.message ?? e);
       // ITGC-OP-04 — a scheduled (often FINANCIAL) job that fails must never be SILENT. executeSubscription
@@ -773,13 +773,13 @@ export class BiService implements OnModuleInit {
         frequency: sub.frequency, status: 'failed', recipientsCount: 0, summary: {}, error: errMsg,
       }).returning({ id: reportRuns.id });
       await db.update(reportSubscriptions).set({ lastRunAt: new Date(), nextRunAt: this.nextRunDate(sub.frequency) }).where(eq(reportSubscriptions.id, sub.id));
-      return { run_id: Number(run.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'failed', delivered: 0, error: errMsg };
+      return { run_id: Number(run!.id), subscription_id: Number(sub.id), name: sub.name, report_type: sub.reportType, status: 'failed', delivered: 0, error: errMsg };
     }
   }
 
   // Cron-callable sweep: run every active subscription that is due (never run yet, or next_run_at has passed).
   async runDue(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const now = Date.now();
     const subs = await db.select().from(reportSubscriptions)
       .where(and(eq(reportSubscriptions.tenantId, user.tenantId!), eq(reportSubscriptions.isActive, true)));
@@ -791,7 +791,7 @@ export class BiService implements OnModuleInit {
 
   // Run one subscription on demand (ignores the schedule) — the "Run now" button.
   async runSubscriptionNow(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sub] = await db.select().from(reportSubscriptions)
       .where(and(eq(reportSubscriptions.id, id), eq(reportSubscriptions.tenantId, user.tenantId!)));
     if (!sub) throw new NotFoundException({ code: 'SUB_NOT_FOUND', message: 'Subscription not found', messageTh: 'ไม่พบการสมัครรับรายงาน' });
@@ -799,7 +799,7 @@ export class BiService implements OnModuleInit {
   }
 
   async listRuns(user: JwtUser, limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(reportRuns)
       .where(eq(reportRuns.tenantId, user.tenantId!))
       .orderBy(desc(reportRuns.ranAt)).limit(limit);

@@ -28,12 +28,12 @@ export class PosTerminalService {
 
   // ── Terminals ─────────────────────────────────────────────────────────────
   async registerTerminal(dto: { terminal_code: string; name?: string; provider?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(paymentTerminals).values({ tenantId: user.tenantId ?? null, terminalCode: dto.terminal_code, name: dto.name ?? null, provider: dto.provider ?? 'mock', status: 'active', createdBy: user.username });
     return { terminal_code: dto.terminal_code, provider: dto.provider ?? 'mock', status: 'active' };
   }
   async listTerminals() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(paymentTerminals).orderBy(desc(paymentTerminals.id));
     return { terminals: rows.map((r: any) => ({ terminal_code: r.terminalCode, name: r.name, provider: r.provider, status: r.status, last_seen_at: r.lastSeenAt })), count: rows.length };
   }
@@ -41,7 +41,7 @@ export class PosTerminalService {
   // ── Charge / pre-auth ──────────────────────────────────────────────────────
   async charge(dto: ChargeDto, user: JwtUser) {
     if (!(dto.amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     let provider = 'mock';
     if (dto.terminal_code) {
       const [t] = await db.select().from(paymentTerminals).where(eq(paymentTerminals.terminalCode, dto.terminal_code)).limit(1);
@@ -70,7 +70,7 @@ export class PosTerminalService {
   }
 
   async capture(intentNo: string, amount: number | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     return db.transaction(async (tx: any) => {
       const [i] = await tx.select().from(paymentIntents).where(eq(paymentIntents.intentNo, intentNo)).limit(1).for('update');
       if (!i) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Intent not found', messageTh: 'ไม่พบรายการชำระ' });
@@ -85,7 +85,7 @@ export class PosTerminalService {
   }
 
   async voidIntent(intentNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     return db.transaction(async (tx: any) => {
       const [i] = await tx.select().from(paymentIntents).where(eq(paymentIntents.intentNo, intentNo)).limit(1).for('update');
       if (!i) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Intent not found', messageTh: 'ไม่พบรายการชำระ' });
@@ -97,7 +97,7 @@ export class PosTerminalService {
   }
 
   async refundIntent(intentNo: string, amount: number) {
-    const db = this.db as any;
+    const db = this.db;
     return db.transaction(async (tx: any) => {
       const [i] = await tx.select().from(paymentIntents).where(eq(paymentIntents.intentNo, intentNo)).limit(1).for('update');
       if (!i) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Intent not found', messageTh: 'ไม่พบรายการชำระ' });
@@ -116,13 +116,13 @@ export class PosTerminalService {
   // webhook can never mutate another tenant's payment even if the signature secret were compromised.
   async webhook(provider: string, providerRef: string, status: string) {
     const intent = await this.scope.bypassQuery(async () => {
-      const db = this.db as any;
+      const db = this.db;
       const [i] = await db.select().from(paymentIntents).where(and(eq(paymentIntents.provider, provider), eq(paymentIntents.providerRef, providerRef))).limit(1);
       return i ?? null;
     });
     if (!intent) return { ok: true, note: 'no matching intent' }; // idempotent / unknown → ack
     const doUpdate = async () => {
-      const db = this.db as any;
+      const db = this.db;
       // Trust the PSP API, not the webhook payload: re-fetch authoritative status (mock returns null → use payload).
       const verified = await getProvider(provider).verifyWebhook(providerRef);
       const finalStatus = verified ?? status;
@@ -139,27 +139,27 @@ export class PosTerminalService {
   // ── Settlement ─────────────────────────────────────────────────────────────
   // Batch all unsettled Captured intents for the day, compute fees/net, mark Settled.
   async settle(dto: { fee_pct?: number; date?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const open = await db.select().from(paymentIntents).where(and(eq(paymentIntents.status, 'Captured'), isNull(paymentIntents.settlementBatchNo)));
     if (!open.length) throw new BadRequestException({ code: 'NOTHING_TO_SETTLE', message: 'No captured intents to settle', messageTh: 'ไม่มีรายการให้สรุปยอด' });
     const gross = round2(open.reduce((a: number, r: any) => a + n(r.capturedAmount), 0));
     const fees = round2(gross * (dto.fee_pct ?? 0) / 100);
     const batchNo = await this.docNo.nextDaily('STL');
     await db.transaction(async (tx: any) => {
-      await tx.insert(settlementBatches).values({ tenantId: user.tenantId ?? null, batchNo, provider: open[0].provider, batchDate: dto.date ?? ymd(), gross: String(gross), fees: String(fees), net: String(round2(gross - fees)), txnCount: open.length, status: 'Settled' });
+      await tx.insert(settlementBatches).values({ tenantId: user.tenantId ?? null, batchNo, provider: open[0]!.provider, batchDate: dto.date ?? ymd(), gross: String(gross), fees: String(fees), net: String(round2(gross - fees)), txnCount: open.length, status: 'Settled' });
       for (const i of open) await tx.update(paymentIntents).set({ settlementBatchNo: batchNo }).where(eq(paymentIntents.id, i.id));
     });
     return { batch_no: batchNo, gross, fees, net: round2(gross - fees), txn_count: open.length, status: 'Settled' };
   }
 
   async listSettlements(limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(settlementBatches).orderBy(desc(settlementBatches.id)).limit(limit);
     return { batches: rows.map((r: any) => ({ batch_no: r.batchNo, provider: r.provider, batch_date: r.batchDate, gross: n(r.gross), fees: n(r.fees), net: n(r.net), txn_count: r.txnCount, status: r.status })), count: rows.length };
   }
 
   async reconcile(batchNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [b] = await db.select().from(settlementBatches).where(eq(settlementBatches.batchNo, batchNo)).limit(1);
     if (!b) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Batch not found', messageTh: 'ไม่พบรอบสรุปยอด' });
     await db.update(settlementBatches).set({ status: 'Reconciled', reconciledBy: user.username }).where(eq(settlementBatches.id, b.id));
@@ -167,7 +167,7 @@ export class PosTerminalService {
   }
 
   async listIntents(saleNo?: string, limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const where = saleNo ? eq(paymentIntents.saleNo, saleNo) : undefined;
     const rows = await db.select().from(paymentIntents).where(where).orderBy(desc(paymentIntents.id)).limit(limit);
     return { intents: rows.map((r: any) => ({ intent_no: r.intentNo, sale_no: r.saleNo, provider: r.provider, type: r.type, amount: n(r.amount), captured_amount: n(r.capturedAmount), status: r.status, settlement_batch_no: r.settlementBatchNo })), count: rows.length };

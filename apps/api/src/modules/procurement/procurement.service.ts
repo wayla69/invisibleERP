@@ -31,7 +31,7 @@ export class ProcurementService {
 
   // ── PR ──────────────────────────────────────────────────────────────
   async createPr(dto: CreatePrDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการ' });
     const prNo = await this.docNo.nextDaily('PR');
     await db.transaction(async (tx: any) => {
@@ -51,7 +51,7 @@ export class ProcurementService {
   }
 
   async approvePr(prNo: string, approve: boolean, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [pr] = await db.select().from(purchaseRequests).where(eq(purchaseRequests.prNo, prNo)).limit(1);
     if (!pr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PR not found', messageTh: 'ไม่พบ PR' });
     // if a workflow is configured (a live instance exists), route the decision through the engine —
@@ -75,7 +75,7 @@ export class ProcurementService {
   // ── Supplier screening (Phase 16) ───────────────────────────────────
   // blocklisted or non-approved vendor → 422; unknown/freeform vendor (no master row) → allowed.
   async assertSupplierAllowed(vendorId: number | null, vendorName: string | null) {
-    const db = this.db as any;
+    const db = this.db;
     // fail-CLOSED + check EVERY matching row: a blocklisted vendor must not be evadable via a duplicate-name
     // twin (no unique on vendors.name) or a freeform name. Only a genuinely-unknown vendor (no row) is allowed.
     let rows: any[] = [];
@@ -85,7 +85,7 @@ export class ProcurementService {
     if (bad) throw new UnprocessableEntityException({ code: 'SUPPLIER_BLOCKED', message: `Supplier ${bad.name} is ${bad.blocklisted ? 'blocklisted' : bad.approvalStatus}`, messageTh: `ผู้ขายถูกระงับ (${bad.name})` });
   }
   async setSupplierStatus(vendorId: number, dto: { approval_status?: string; blocklisted?: boolean; reason?: string }, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const set: any = {};
     if (dto.approval_status != null) set.approvalStatus = dto.approval_status;
     if (dto.blocklisted != null) { set.blocklisted = dto.blocklisted; set.blocklistReason = dto.reason ?? null; }
@@ -101,7 +101,7 @@ export class ProcurementService {
   // price_var_pct: for each GR item received from this vendor, compare unit_cost vs the active
   // list price (supplier_price_lists) for that item+uom. avg(abs(actual − list) / list * 100).
   async recomputeScorecard(vendorId: number, period: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [g] = await db.select({ c: sql<string>`count(*)` }).from(goodsReceipts).where(eq(goodsReceipts.vendorId, vendorId));
     const grCount = Number(g?.c ?? 0);
     const onTime = 100, quality = 100;
@@ -137,7 +137,7 @@ export class ProcurementService {
   // period; without → the LATEST scorecard per vendor (current standing). Tenant-scoped explicitly. Returns
   // the ranking + avg score + count of underperformers (< 70) for at-a-glance vendor management.
   async listScorecards(q: { period?: string; limit?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (user.tenantId != null) conds.push(eq(supplierScorecards.tenantId, user.tenantId));
     if (q.period) conds.push(eq(supplierScorecards.period, q.period));
@@ -162,7 +162,7 @@ export class ProcurementService {
   // Upsert: creates a new 'active' price row, supersedes any existing active row for the same
   // (tenant, vendor, item, uom). Returns the new row id + the prior version id if superseded.
   async upsertSupplierPrice(dto: UpsertSupplierPriceDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     const uom = dto.uom ?? 'EA';
     // supersede any existing active version for this vendor+item+uom in this tenant
@@ -186,12 +186,12 @@ export class ProcurementService {
       effectiveTo: dto.effective_to ?? null,
       status: 'active', notes: dto.notes ?? null, createdBy: user.username,
     }).returning({ id: supplierPriceLists.id });
-    return { id: Number(row.id), superseded_id: superseded[0] ? Number(superseded[0].id) : null };
+    return { id: Number(row!.id), superseded_id: superseded[0] ? Number(superseded[0].id) : null };
   }
 
   // List active supplier prices. Optionally filter by vendor_id. Returns newest effective_from first.
   async listSupplierPrices(q: { vendor_id?: number; item_id?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId;
     const conds: any[] = [eq(supplierPriceLists.status, 'active')];
     if (tenantId != null) conds.push(or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId)) as any);
@@ -222,7 +222,7 @@ export class ProcurementService {
 
   // Full version history for a vendor+item pair (all statuses, newest first).
   async supplierPriceHistory(vendorId: number, itemId: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId;
     const conds: any[] = [eq(supplierPriceLists.vendorId, vendorId), eq(supplierPriceLists.itemId, itemId)];
     if (tenantId != null) conds.push(or(eq(supplierPriceLists.tenantId, tenantId), isNull(supplierPriceLists.tenantId)) as any);
@@ -248,7 +248,7 @@ export class ProcurementService {
 
   // ── PO ──────────────────────────────────────────────────────────────
   async createPo(dto: CreatePoDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการ' });
     let vendorId = dto.vendor_id ?? null;
     let vendorName = dto.vendor_name ?? null;
@@ -282,7 +282,7 @@ export class ProcurementService {
   }
 
   async approvePo(poNo: string, approve: boolean, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
     if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบ PO' });
     // route through the approval engine when a workflow is configured (maker-checker + multi-level + SoD +
@@ -316,7 +316,7 @@ export class ProcurementService {
   }
 
   async cancelPo(poNo: string, reason: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
     if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบ PO' });
     // parity: ถ้ามี GR แล้วและไม่ใช่ Admin → ปิดไม่ได้
@@ -330,7 +330,7 @@ export class ProcurementService {
 
   // ── GR ── (received_qty++ ; stock_movement ; lot_ledger ; auto-close PO)
   async createGr(dto: CreateGrDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, dto.po_no)).limit(1);
     if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบ PO' });
     // EXP-03 — a PO must clear its approval (maker-checker + DoA thresholds, enforced by the workflow engine)

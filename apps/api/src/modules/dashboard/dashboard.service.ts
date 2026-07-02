@@ -186,7 +186,7 @@ export class DashboardService {
     const widgets = [];
     for (const k of allowed) {
       const w = WIDGETS[k];
-      widgets.push({ key: k, label: w.label, label_en: w.labelEn, unit: w.unit, value: await this.evaluateWidget(k) });
+      widgets.push({ key: k, label: w!.label, label_en: w!.labelEn, unit: w!.unit, value: await this.evaluateWidget(k) });
     }
     return { role: user.role, configured: !!row, widgets };
   }

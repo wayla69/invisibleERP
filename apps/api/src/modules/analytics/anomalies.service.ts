@@ -55,8 +55,8 @@ export class AnomaliesService {
     for (const r of recRows) {
       const all = seriesMap.get(`${r.item}|${r.type}`) ?? [];
       const allDays = dayMap.get(`${r.item}|${r.type}`) ?? [];
-      const baseline = legacy ? all : all.filter((_, i) => allDays[i] < recentYmd);
-      const recentDaily = legacy ? [] : all.filter((_, i) => allDays[i] >= recentYmd);
+      const baseline = legacy ? all : all.filter((_, i) => allDays[i]! < recentYmd);
+      const recentDaily = legacy ? [] : all.filter((_, i) => allDays[i]! >= recentYmd);
       const value = legacy ? Number(r.total) : recentDaily.length ? Math.max(...recentDaily) : 0;
       const z = zscore(value, baseline);
       if (z > Z_THRESHOLD) {

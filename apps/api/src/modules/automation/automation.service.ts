@@ -59,7 +59,7 @@ export class AutomationService {
   }
 
   private async execAction(rule: any, payload: any, user: JwtUser): Promise<string> {
-    const db = this.db as any;
+    const db = this.db;
     const a = rule.action || {};
     if (a.type === 'notification') {
       await db.insert(notifications).values({
@@ -90,7 +90,7 @@ export class AutomationService {
   // Evaluate every active rule for an event against the payload; execute matching rules' actions; log each.
   // Called by the webhook dispatcher (real events) and the /run-event endpoint (manual/test). Never throws.
   async runEvent(event: string, payload: any, user: JwtUser): Promise<{ event: string; matched: number; executed: number }> {
-    const db = this.db as any;
+    const db = this.db;
     if (!EVENT_KEYS.includes(event)) return { event, matched: 0, executed: 0 };
     let rules: any[] = [];
     try { rules = await db.select().from(automationRules).where(and(eq(automationRules.eventType, event), eq(automationRules.active, true))); } catch { return { event, matched: 0, executed: 0 }; }
@@ -119,7 +119,7 @@ export class AutomationService {
   }
 
   async createRule(dto: { name: string; event_type: string; condition?: any; action: any }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const name = (dto.name ?? '').trim();
     if (!name) throw new BadRequestException({ code: 'NAME_REQUIRED', message: 'name required', messageTh: 'ต้องระบุชื่อกฎ' });
     if (!EVENT_KEYS.includes(dto.event_type)) throw new BadRequestException({ code: 'BAD_EVENT', message: `Unknown event '${dto.event_type}'`, messageTh: 'เหตุการณ์ไม่ถูกต้อง' });
@@ -130,11 +130,11 @@ export class AutomationService {
       tenantId: user.tenantId ?? null, name, eventType: dto.event_type,
       condition: dto.condition ?? null, action, active: true, createdBy: user.username, updatedBy: user.username,
     }).returning({ id: automationRules.id });
-    return { id: Number(row.id), name, event_type: dto.event_type };
+    return { id: Number(row!.id), name, event_type: dto.event_type };
   }
 
   async updateRule(id: number, dto: { name?: string; condition?: any; action?: any; active?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(automationRules).where(eq(automationRules.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'RULE_NOT_FOUND', message: 'Rule not found', messageTh: 'ไม่พบกฎ' });
     const patch: any = { updatedBy: user.username, updatedAt: new Date() };

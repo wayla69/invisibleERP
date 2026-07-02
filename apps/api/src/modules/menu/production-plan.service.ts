@@ -54,11 +54,11 @@ export class ProductionPlanService {
     for (const r of soldRows) {
       const sku = String(r.itemId); const q = n(r.qty); const wd = weekdayOf(String(r.d));
       const arr = wdSumByDish.get(sku) ?? [0, 0, 0, 0, 0, 0, 0];
-      arr[wd] += q; wdSumByDish.set(sku, arr);
+      arr[wd]! += q; wdSumByDish.set(sku, arr);
       totalByDish.set(sku, (totalByDish.get(sku) ?? 0) + q);
     }
     const wdOccurrences = [0, 0, 0, 0, 0, 0, 0];
-    for (let i = 0; i < lookback; i++) wdOccurrences[weekdayOf(shiftYmd(histStart, i))]++;
+    for (let i = 0; i < lookback; i++) wdOccurrences[weekdayOf(shiftYmd(histStart, i))]!++;
     const targetWeekdays: number[] = [];
     for (let i = 0; i < days; i++) targetWeekdays.push(weekdayOf(shiftYmd(anchor, i)));
 
@@ -68,7 +68,7 @@ export class ProductionPlanService {
       const wdSum = wdSumByDish.get(sku) ?? [0, 0, 0, 0, 0, 0, 0];
       const overall = (totalByDish.get(sku) ?? 0) / lookback;
       let f = 0;
-      for (const wd of targetWeekdays) f += wdOccurrences[wd] > 0 ? wdSum[wd] / wdOccurrences[wd] : overall;
+      for (const wd of targetWeekdays) f += wdOccurrences[wd]! > 0 ? wdSum[wd]! / wdOccurrences[wd]! : overall;
       return { forecast: Math.ceil(f), velocity: overall };
     };
 

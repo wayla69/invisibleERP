@@ -27,7 +27,7 @@ export class RewardsService {
 
   // ── Catalog ────────────────────────────────────────────────────────────────
   async listRewards(user: JwtUser, q: { active?: boolean } = {}) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const conds: any[] = [eq(loyaltyRewards.tenantId, tenantId)];
     if (q.active !== undefined) conds.push(eq(loyaltyRewards.active, q.active));
     const rows = await db.select().from(loyaltyRewards).where(and(...conds)).orderBy(loyaltyRewards.pointCost);
@@ -35,7 +35,7 @@ export class RewardsService {
   }
 
   async upsertReward(user: JwtUser, dto: any) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const vals: any = {
       name: dto.name, type: dto.type ?? 'evoucher', pointCost: String(dto.point_cost),
       cashValue: String(dto.cash_value ?? 0), couponKind: dto.coupon_kind ?? null, couponValue: String(dto.coupon_value ?? 0),
@@ -54,7 +54,7 @@ export class RewardsService {
   }
 
   async setRewardActive(user: JwtUser, id: number, active: boolean) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [r] = await db.update(loyaltyRewards).set({ active, updatedAt: new Date() }).where(and(eq(loyaltyRewards.id, id), eq(loyaltyRewards.tenantId, tenantId))).returning();
     if (!r) throw new NotFoundException({ code: 'REWARD_NOT_FOUND', message: 'Reward not found', messageTh: 'ไม่พบของรางวัล' });
     return shapeReward(r);
@@ -62,7 +62,7 @@ export class RewardsService {
 
   // ── Redeem a reward (burn points → single-use code) ─────────────────────────
   async redeemReward(user: JwtUser, rewardId: number, dto: { member_id: number }) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [reward] = await db.select().from(loyaltyRewards).where(and(eq(loyaltyRewards.id, rewardId), eq(loyaltyRewards.tenantId, tenantId))).limit(1);
     if (!reward || reward.active === false) throw new NotFoundException({ code: 'REWARD_NOT_FOUND', message: 'Reward not found/inactive', messageTh: 'ไม่พบของรางวัล' });
     const today = ymd();
@@ -98,7 +98,7 @@ export class RewardsService {
 
   // ── Use a redemption code at POS (single-use) ───────────────────────────────
   async useRedemption(user: JwtUser, code: string, dto: { sale_no?: string }) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     return await db.transaction(async (tx: any) => {
       const [r] = await tx.select().from(loyaltyRedemptions).where(and(eq(loyaltyRedemptions.redemptionCode, code), eq(loyaltyRedemptions.tenantId, tenantId))).for('update').limit(1);
       if (!r) throw new NotFoundException({ code: 'REDEMPTION_NOT_FOUND', message: 'Redemption code not found', messageTh: 'ไม่พบรหัสแลก' });
@@ -115,7 +115,7 @@ export class RewardsService {
 
   // ── Member wallet (redemptions + coupons) ───────────────────────────────────
   async wallet(user: JwtUser, memberId: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const reds = await db.select().from(loyaltyRedemptions).where(and(eq(loyaltyRedemptions.memberId, memberId), eq(loyaltyRedemptions.tenantId, tenantId))).orderBy(desc(loyaltyRedemptions.id)).limit(50);
     const cps = await db.select().from(memberCoupons).where(and(eq(memberCoupons.memberId, memberId), eq(memberCoupons.tenantId, tenantId))).orderBy(desc(memberCoupons.id)).limit(50);
     return {
@@ -127,16 +127,16 @@ export class RewardsService {
 
   // ── Coupons (issued without burning points) ─────────────────────────────────
   async issueCoupon(user: JwtUser, dto: { member_id: number; kind: string; value: number; source?: string; expires_at?: string }) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [m] = await db.select({ id: posMembers.id }).from(posMembers).where(and(eq(posMembers.id, dto.member_id), eq(posMembers.tenantId, tenantId))).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const code = await this.docNo.nextDaily('CPN');
     const [c] = await db.insert(memberCoupons).values({ tenantId, memberId: dto.member_id, code, kind: dto.kind, value: String(dto.value), source: dto.source ?? 'manual', status: 'active', expiresAt: dto.expires_at ? new Date(dto.expires_at) : null, createdBy: user.username }).returning();
-    return { code: c.code, kind: c.kind, value: n(c.value), source: c.source, status: c.status, expires_at: c.expiresAt };
+    return { code: c!.code, kind: c!.kind, value: n(c!.value), source: c!.source, status: c!.status, expires_at: c!.expiresAt };
   }
 
   async redeemCoupon(user: JwtUser, code: string, dto: { sale_no?: string }) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     return await db.transaction(async (tx: any) => {
       const [c] = await tx.select().from(memberCoupons).where(and(eq(memberCoupons.code, code), eq(memberCoupons.tenantId, tenantId))).for('update').limit(1);
       if (!c) throw new NotFoundException({ code: 'COUPON_NOT_FOUND', message: 'Coupon not found', messageTh: 'ไม่พบคูปอง' });

@@ -81,7 +81,7 @@ export class MarketingAutomationService {
 
   // Resolve the audience for a trigger: active, opted-in members (LINE channel ⇒ must have a linked LINE id).
   private async audience(tenantId: number, trigger: Trigger, channel: string, opts?: { lapsed_days?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const lapsedDays = Math.max(1, Math.floor(opts?.lapsed_days ?? 30));
     const rows = await db.select({
       id: posMembers.id, name: posMembers.name, lineUserId: posMembers.lineUserId, phone: posMembers.phone, email: posMembers.email,
@@ -111,7 +111,7 @@ export class MarketingAutomationService {
 
   // Run a campaign: create it, generate a per-member coupon, push it (consent-respecting), record each send.
   async run(dto: { name: string; trigger: Trigger; channel?: string; coupon_prefix?: string; discount_type?: 'amount' | 'percent'; discount_value?: number; lapsed_days?: number; variant_b_body?: string; split_b_pct?: number; holdout_pct?: number; window_days?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tid(user);
     const channel = (dto.channel ?? 'line') as 'line' | 'sms' | 'email';
     const prefix = (dto.coupon_prefix || dto.trigger.toUpperCase()).replace(/[^A-Z0-9]/gi, '').slice(0, 10) || 'PROMO';
@@ -128,7 +128,7 @@ export class MarketingAutomationService {
       windowDays: Math.min(365, Math.max(1, Math.floor(dto.window_days ?? 30))),
       status: 'sent', createdBy: user.username,
     }).returning({ id: automationCampaigns.id });
-    const campaignId = Number(camp.id);
+    const campaignId = Number(camp!.id);
 
     const aud = await this.audience(tenantId, dto.trigger, channel, { lapsed_days: dto.lapsed_days });
     const gw = resolveMessageGateway(channel);
@@ -159,14 +159,14 @@ export class MarketingAutomationService {
   }
 
   private async record(tenantId: number, campaignId: number, memberId: number, coupon: string | null, channel: string, recipient: string | null, status: string, error: string | null, by: string, variant: string | null = null) {
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(campaignSends).values({ tenantId, campaignId, memberId, couponCode: coupon, channel, recipient, status, error, variant, createdBy: by });
   }
 
   // Close the loop: redeem a coupon against a sale. Idempotent — a re-presented coupon returns the original
   // redemption rather than double-counting. Returns the discount to apply.
   async redeem(dto: { coupon_code: string; sale_no?: string; value?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tid(user);
     const [send] = await db.select().from(campaignSends).where(and(eq(campaignSends.tenantId, tenantId), eq(campaignSends.couponCode, dto.coupon_code))).limit(1);
     if (!send) throw new NotFoundException({ code: 'COUPON_NOT_FOUND', message: 'Coupon not found', messageTh: 'ไม่พบคูปอง' });
@@ -180,7 +180,7 @@ export class MarketingAutomationService {
 
   // Closed-loop report: delivery + redemption rate + attributed revenue.
   async report(campaignId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     this.tid(user);
     const [camp] = await db.select().from(automationCampaigns).where(eq(automationCampaigns.id, campaignId)).limit(1);
     if (!camp) throw new NotFoundException({ code: 'CAMPAIGN_NOT_FOUND', message: 'Campaign not found', messageTh: 'ไม่พบแคมเปญ' });
@@ -255,7 +255,7 @@ export class MarketingAutomationService {
   }
 
   async list(user: JwtUser, limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     this.tid(user);
     const camps = await db.select().from(automationCampaigns).orderBy(desc(automationCampaigns.id)).limit(limit);
     if (!camps.length) return { campaigns: [], count: 0 };

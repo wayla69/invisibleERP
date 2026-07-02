@@ -50,7 +50,7 @@ export class AiActionService {
   /** File a PENDING action proposal. Called by the agent's write-tools (or a human drafting via AI). */
   async propose(input: ProposeInput, user: JwtUser) {
     this.validate(input.kind, input.payload);
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.insert(aiActionRequests).values({
       tenantId: user.tenantId ?? null,
       kind: input.kind,
@@ -61,25 +61,25 @@ export class AiActionService {
       proposedBy: user.username,
       source: input.source ?? 'ai',
     }).returning({ id: aiActionRequests.id });
-    return { id: Number(r.id), kind: input.kind, status: 'pending', amount: this.headlineAmount(input.kind, input.payload), message: 'Proposed — awaiting human approval', messageTh: 'เสนอแล้ว — รอการอนุมัติจากผู้มีสิทธิ์' };
+    return { id: Number(r!.id), kind: input.kind, status: 'pending', amount: this.headlineAmount(input.kind, input.payload), message: 'Proposed — awaiting human approval', messageTh: 'เสนอแล้ว — รอการอนุมัติจากผู้มีสิทธิ์' };
   }
 
   async list(status: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(aiActionRequests);
     const filtered = status ? rows.filter((r: any) => r.status === status) : rows;
     return { actions: filtered.map(mapRow), count: filtered.length };
   }
 
   async get(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(aiActionRequests).where(eq(aiActionRequests.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Action not found', messageTh: 'ไม่พบคำสั่ง' });
     return mapRow(r);
   }
 
   private async load(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(aiActionRequests).where(eq(aiActionRequests.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Action not found', messageTh: 'ไม่พบคำสั่ง' });
     return r;
@@ -87,7 +87,7 @@ export class AiActionService {
 
   /** Approve + EXECUTE a pending action. Enforces SoD (approver ≠ proposer) + the action's permission. */
   async approve(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const row = await this.load(id);
     if (row.status !== 'pending') throw new ConflictException({ code: 'NOT_PENDING', message: `Action is ${row.status}`, messageTh: 'คำสั่งนี้ไม่ได้อยู่ในสถานะรออนุมัติ' });
     // SoD R-style: the approver must differ from the proposer (no self-approval of one's own AI proposal).
@@ -108,7 +108,7 @@ export class AiActionService {
   }
 
   async reject(id: number, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const row = await this.load(id);
     if (row.status !== 'pending') throw new ConflictException({ code: 'NOT_PENDING', message: `Action is ${row.status}`, messageTh: 'คำสั่งนี้ไม่ได้อยู่ในสถานะรออนุมัติ' });
     await db.update(aiActionRequests).set({ status: 'rejected', decidedBy: user.username, decidedAt: new Date(), decisionReason: reason ?? null }).where(eq(aiActionRequests.id, id));
