@@ -27,6 +27,10 @@ jobs:
       - name: TypeScript-debt ratchet (as-any + strict-index errors may only go DOWN)
         # docs/27 R2-5 / AUD-ARC-05 — baseline in tools/ci/ts-debt-baseline.json; lower it when you reduce debt.
         run: node tools/ci/check-ts-debt.mjs
+      - name: use-client ratchet (client-first web files may only go DOWN)
+        # docs/28 §4 / AUD-ARC-09 — baseline in tools/ci/use-client-baseline.json; new pages are server
+        # components with client islands (see accounting/eam page.tsx + lib/server-api.ts).
+        run: node tools/ci/check-use-client.mjs
       # Hand the compiled output to the harness matrix so 50+ jobs don't each rebuild.
       - name: Upload dist
         uses: actions/upload-artifact@v4
