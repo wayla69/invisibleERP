@@ -38,3 +38,14 @@ describe('PDPA — PII redaction before the LLM boundary', () => {
     expect(PII_REDACTION_ENABLED()).toBe(true);
   });
 });
+
+it('masks non-scalar values under sensitive keys wholesale (round-2 depth fix)', () => {
+  const out: any = redactPii({
+    bank_account: { bank: 'KBank', number: '123-4-56789-0' },
+    national_id: ['1101700230705'],
+    note: 'ok',
+  });
+  expect(out.bank_account).toBe('[REDACTED]');
+  expect(out.national_id).toBe('[REDACTED]');
+  expect(out.note).toBe('ok');
+});

@@ -134,6 +134,11 @@ export class JwtAuthGuard implements CanActivate {
             throw new ForbiddenException({ code: 'PASSWORD_CHANGE_REQUIRED', message: 'Password change required before using the system', messageTh: 'ต้องเปลี่ยนรหัสผ่านก่อนใช้งานระบบ' });
           }
         }
+      } else {
+        // Round-2 AUD-SEC NEW-3: a STAFF token whose users row no longer exists (hard delete) must not
+        // be honored on its stale claims until expiry — the deactivation/tokensValidFrom checks above
+        // can't run without a row. Member principals never reach here (caught by the member branch).
+        throw new UnauthorizedException({ code: 'USER_NOT_FOUND', message: 'Account no longer exists', messageTh: 'บัญชีนี้ถูกลบแล้ว' });
       }
     }
     req.user = {

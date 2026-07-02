@@ -37,7 +37,7 @@ export class AuditInterceptor implements NestInterceptor {
   intercept(ctx: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (ctx.getType() !== 'http') return next.handle();
 
-    const req = ctx.switchToHttp().getRequest<FastifyRequest & { user?: JwtUser }>();
+    const req = ctx.switchToHttp().getRequest<FastifyRequest & { user?: JwtUser; __auditMeta?: Record<string, unknown> }>();
     const method = (req.method ?? '').toUpperCase();
     if (!MUTATING.has(method)) return next.handle();
 
@@ -56,13 +56,20 @@ export class AuditInterceptor implements NestInterceptor {
       : (req as any).__rlsOrgScope != null ? { rls_org_scope: (req as any).__rlsOrgScope }
       : undefined;
 
+    // Service-attached audit metadata (appendAuditMeta) is read at tap-time — after the handler ran —
+    // so a deep service's evidence (e.g. an SoD-override reason) lands in the same hash-chained row.
+    const svcMeta = () => req.__auditMeta;
     return next.handle().pipe(
       tap({
-        next: () => void this.record(action, actor, tenantId, ip, rid, 'success', xtenant),
+        next: () => {
+          const extra = svcMeta();
+          void this.record(action, actor, tenantId, ip, rid, 'success', xtenant || extra ? { ...(xtenant ?? {}), ...(extra ?? {}) } : undefined);
+        },
         error: (err) =>
           void this.record(action, actor, tenantId, ip, rid, 'fail', {
             error: err?.message ?? String(err),
             ...(xtenant ?? {}),
+            ...(svcMeta() ?? {}),
           }),
       }),
     );

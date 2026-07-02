@@ -11,7 +11,7 @@ export const PII_REDACTION_ENABLED = (): boolean =>
 
 // Object keys whose VALUE is a direct contact identifier → masked wholesale (precise, structured path).
 const SENSITIVE_KEY =
-  /^(e[-_]?mail|phone|phone_no|phone_number|mobile|tel|telephone|fax|contact|contact_name|contact_phone|line_user_id|line_id|line_display_name|national_id|citizen_id|tax_id|taxid|vat_id|address|address_line1|address_line2|postal_code|zip|birthday|dob|passport)$/i;
+  /^(e[-_]?mail|phone|phone_no|phone_number|mobile|tel|telephone|fax|contact|contact_name|contact_phone|line_user_id|line_id|line_display_name|national_id|citizen_id|tax_id|taxid|vat_id|address|address_line1|address_line2|postal_code|zip|birthday|dob|passport|bank_account|sso_no|ssn)$/i;
 
 // Free-text backstop: scrub identifiers embedded inside string values (memos, descriptions).
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
@@ -32,7 +32,9 @@ export function redactPii<T>(value: T): T {
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = SENSITIVE_KEY.test(k) && (typeof v === 'string' || typeof v === 'number') ? MASK : redactPii(v);
+      // Round-2 defense-in-depth: a sensitive-named key masks WHOLESALE regardless of value shape —
+      // an object/array nested under `bank_account` is as sensitive as a string (null stays null).
+      out[k] = SENSITIVE_KEY.test(k) && v != null ? MASK : redactPii(v);
     }
     return out as unknown as T;
   }

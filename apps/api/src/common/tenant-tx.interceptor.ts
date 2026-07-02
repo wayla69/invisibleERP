@@ -96,7 +96,7 @@ export class TenantTxInterceptor implements NestInterceptor {
         // legitimate writes (dashboard auto-reorder, lazy loyalty-config seed), and Postgres rejects
         // changing access mode after the first query anyway (25001). @NoTx is the opt-out for non-tenant
         // handlers. defaultValue guards handlers that complete without emitting (would throw EmptyError).
-        return tenantALS.run({ tx, tenantId, bypass }, () => firstValueFrom(next.handle(), { defaultValue: undefined }));
+        return tenantALS.run({ tx, tenantId, bypass, req }, () => firstValueFrom(next.handle(), { defaultValue: undefined }));
       }),
     ).pipe(
       finalize(() => {
