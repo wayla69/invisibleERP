@@ -143,6 +143,27 @@ add a **stamp** to a member (the `+ แสตมป์` button on their 360, or 
 When the goal is reached the member **claims** the reward (`รับรางวัล`) — **once only** (a second claim is
 rejected). Bonus points land on the member's balance and count toward their tier.
 
+## 7b. Coalition network (เครือข่ายพันธมิตรแต้ม — สะสม/แลกได้ทุกร้านในเครือ)
+
+Run **one points economy across several shops** (a franchise or multi-brand group) — a member of shop A
+earns and redeems at partner shop B, and the accounting between the shops settles itself.
+
+1. **Set up (HQ only).** On **ตั้งค่าระบบสะสมแต้ม** (`/loyalty`) the *เครือข่ายพันธมิตรแต้ม* card lets an
+   HQ admin create a network (code + name) and add shops to it. Shop staff cannot change the network
+   (`COALITION_HQ_ONLY`).
+2. **At the partner till.** Staff look the member up **by phone** (the resolve box on the card, or
+   `GET /api/coalition/resolve?phone=`). A member of any shop in the same network resolves with the
+   **เครือข่ายพันธมิตรแต้ม badge** — code, name, tier, points and home shop only (no phone/email/birthday:
+   partner shops never see another shop's contact data). A shop outside the network simply gets *not found*.
+3. **Earn / redeem.** `POST /api/coalition/earn` (`{member_id, net_spend}`) and `POST /api/coalition/redeem`
+   (`{member_id, points}`) — the points always move on the member's **home-shop ledger** (same rules as a
+   home sale: tier multipliers, balance checks), so each shop's points liability stays exactly its own.
+4. **The money sorts itself out.** Every cross-shop movement books a balanced **intercompany clearing
+   entry** at fair value — the shop that made the other shop's liability grow owes it (and a redeem
+   reverses it). HQ settles the running balances on the intercompany screen; the group reconciliation
+   nets to zero. If the partner shop's accounting period is closed, the whole movement is rejected —
+   points never move without the matching entry.
+
 ## 8. Refer a friend (แนะนำเพื่อน)
 
 Members bring in new members and both get rewarded. On a member's **360 page** under *แนะนำเพื่อน
@@ -383,6 +404,9 @@ claim points by uploading a photo of the receipt.
 | `RECIPIENT_NOT_FOUND` (point transfer) | The recipient phone/id isn't an active member of **this shop** | Check the phone number; transfers never cross shops. |
 | `TRANSFER_CAP` (point transfer) | The sender hit the daily transfer limit | Wait until tomorrow, or raise `เพดานโอนแต้มต่อวัน` in Loyalty settings. |
 | `TRANSFER_DISABLED` (point transfer) | Transfers are switched off (`เพดานโอนแต้มต่อวัน = 0`) | Set a positive daily cap in Loyalty settings to enable. |
+| `NOT_IN_COALITION` (coalition) | This shop isn't in a points network | HQ adds the shop on the `/loyalty` coalition card. |
+| `COALITION_HQ_ONLY` (coalition) | Only an HQ admin can configure the network | Ask HQ to create the network / add shops. |
+| `PERIOD_CLOSED` (coalition earn/redeem) | The partner shop's accounting period is closed, so the clearing entry can't post | Reopen/advance the period — the points movement is rejected as a whole until it can settle. |
 
 ## Revision history
 
@@ -426,4 +450,5 @@ claim points by uploading a photo of the receipt.
 | 1.26 | 2026-07-02 | Platform | §13 **Journey ทางแยก (branching)** — แต่ละขั้นตั้ง *ทางแยก* ได้: เลือกขั้นปลายทาง (ต้องเป็นขั้นถัด ๆ ไปเท่านั้น — ระบบบังคับ จึงวนลูปไม่ได้) + เงื่อนไขจาก catalog เดียวกับ segment builder เช่น *ถ้า recency ≤ 5 ข้ามไปขั้นขอบคุณ*; consent/frequency cap/ส่งครั้งเดียวต่อขั้น (MKT-12) เหมือนเดิมทุกประการ |
 | 1.27 | 2026-07-02 | Platform | §11 **อ่าน lift ให้เป็น (organic baseline)** — รายงานแคมเปญเพิ่มบล็อก *ยอดซื้อจริง* ต่อกลุ่ม A/B/holdout ในหน้าต่าง attribution (ตั้งได้ต่อแคมเปญ, ค่าเริ่มต้น 30 วัน): ยอดซื้อของกลุ่ม holdout คือฐาน "ถ้าไม่ส่งเลย" — lift = อัตราซื้อกลุ่มที่ถูกส่งข้อความ − holdout (pp) + รายได้ส่วนเพิ่มถ่วงขนาดกลุ่ม; ตัวเลขมาพร้อมขนาดกลุ่มเสมอ (holdout เล็ก = ฐานแกว่ง) |
 | 1.28 | 2026-07-02 | Platform | §13 **ส่งถูกเวลา (right-time sends)** — สมาชิกที่มีออเดอร์ ≥3 ครั้งจะได้ *ชั่วโมงที่ชอบซื้อ* (โหมดของฮิสโตแกรมเวลาออเดอร์, เวลาไทย); ขั้น journey ที่มีการรอจะเลื่อนไปส่ง **ตรงชั่วโมงนั้น** (เลื่อนไปข้างหน้าเท่านั้น <24 ชม.; ขั้นส่งทันทียังส่งทันที) — ตั้งชั่วโมง fallback ต่อ journey ได้ (ค่าเริ่มต้น 10:00) |
+| 1.30 | 2026-07-02 | Platform | **W2 (docs/27) coalition network:** new §7b **เครือข่ายพันธมิตรแต้ม** — HQ creates a points network and adds shops (`/loyalty` card); partner tills resolve members by phone (badge shows code/name/tier/points/home shop only — no contact data crosses shops); earn/redeem at any shop in the network lands on the member's home-shop ledger, and every cross-shop movement books a balanced intercompany clearing entry that HQ settles. New error codes `NOT_IN_COALITION`, `COALITION_HQ_ONLY` (+ `PERIOD_CLOSED` on coalition moves). |
 | 1.29 | 2026-07-02 | Platform | **W1 (docs/27) tier economics + points liquidity:** §7 **ตัวคูณแต้มตามระดับ** — tier-ladder card on `/loyalty` sets ×earn per tier (Gold ×2 earns double **at the till**, audited in the ledger; liability accrues the multiplied points automatically); §9 **โอนแต้มให้เพื่อน** — member-to-member point transfer by phone (same shop, all-or-nothing, daily cap `เพดานโอนแต้มต่อวัน`, 0 = off; staff-assist route for the back office; LYL-18); §4 **เตือนแต้มใกล้หมดอายุ** — the daily sweep fires `loyalty.points_expiring` into Automation/Webhooks 30 days ahead, one nudge per expiring batch. New error codes `SELF_TRANSFER`, `RECIPIENT_NOT_FOUND`, `TRANSFER_CAP`, `TRANSFER_DISABLED`. |

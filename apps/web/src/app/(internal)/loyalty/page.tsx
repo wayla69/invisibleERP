@@ -13,13 +13,21 @@ import { Label } from '@/components/ui/label';
 
 interface Cfg { enabled: boolean; points_per_baht: number; baht_per_point: number; min_redeem: number; expiry_days: number; transfer_day_cap: number }
 interface Tier { id?: number; tier: string; min_lifetime: number; earn_mult: number; redeem_mult: number }
+interface Coalition { id: number; code: string; name: string; active: boolean; members: { tenant_id: number; active: boolean }[] }
+interface Resolved { coalition: string; member_id: number; member_code: string; name: string | null; tier: string | null; balance: number; home_tenant_code: string | null; home_tenant_name: string | null; is_home: boolean }
 
 export default function LoyaltyConfig() {
   const qc = useQueryClient();
   const q = useQuery<Cfg>({ queryKey: ['loy-cfg'], queryFn: () => api('/api/loyalty/config') });
   const tiersQ = useQuery<{ tiers: Tier[] }>({ queryKey: ['loy-tiers'], queryFn: () => api('/api/loyalty/tiers') });
+  const coalQ = useQuery<{ coalitions: Coalition[] }>({ queryKey: ['coalitions'], queryFn: () => api('/api/coalition') });
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [tierDraft, setTierDraft] = useState<Tier>({ tier: '', min_lifetime: 0, earn_mult: 1, redeem_mult: 1 });
+  const [coalDraft, setCoalDraft] = useState({ code: '', name: '' });
+  const [shopDraft, setShopDraft] = useState({ coalition_id: 0, tenant_id: 0 });
+  const [resolvePhone, setResolvePhone] = useState('');
+  const [resolved, setResolved] = useState<Resolved | null>(null);
+  const [resolveErr, setResolveErr] = useState('');
   useEffect(() => { if (q.data && !cfg) setCfg(q.data); }, [q.data, cfg]);
 
   const save = useMutation({
@@ -30,6 +38,19 @@ export default function LoyaltyConfig() {
     mutationFn: (t: Tier) => api('/api/loyalty/tiers', { method: 'POST', body: JSON.stringify(t) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['loy-tiers'] }); setTierDraft({ tier: '', min_lifetime: 0, earn_mult: 1, redeem_mult: 1 }); },
   });
+  const createCoal = useMutation({
+    mutationFn: () => api('/api/coalition', { method: 'POST', body: JSON.stringify(coalDraft) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['coalitions'] }); setCoalDraft({ code: '', name: '' }); },
+  });
+  const addShop = useMutation({
+    mutationFn: () => api(`/api/coalition/${shopDraft.coalition_id}/members`, { method: 'POST', body: JSON.stringify({ tenant_id: shopDraft.tenant_id }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['coalitions'] }),
+  });
+  const doResolve = async () => {
+    setResolved(null); setResolveErr('');
+    try { setResolved(await api(`/api/coalition/resolve?phone=${encodeURIComponent(resolvePhone)}`)); }
+    catch (e) { setResolveErr((e as Error).message); }
+  };
   const set = (p: Partial<Cfg>) => setCfg((c) => (c ? { ...c, ...p } : c));
 
   return (
@@ -94,6 +115,44 @@ export default function LoyaltyConfig() {
             <Button variant="outline" disabled={!tierDraft.tier || saveTier.isPending} onClick={() => saveTier.mutate(tierDraft)}>เพิ่ม/แก้ไข</Button>
           </div>
           {saveTier.error && <Msg>{(saveTier.error as Error).message}</Msg>}
+        </Card>
+
+        {/* W2 (docs/27) — coalition network: earn/burn anywhere, settled through intercompany (LYL-19) */}
+        <Card className="max-w-lg gap-3 p-5">
+          <div className="font-semibold">เครือข่ายพันธมิตรแต้ม (Coalition)</div>
+          <p className="text-sm text-muted-foreground">สมาชิกสะสม/แลกแต้มได้ทุกร้านในเครือข่าย — แต้มอยู่ที่ร้านบ้าน ทุกการเคลื่อนไหวข้ามร้านตั้งหนี้ระหว่างกิจการอัตโนมัติ (ตั้งค่าโดยสำนักงานใหญ่)</p>
+          {(coalQ.data?.coalitions ?? []).map((c) => (
+            <div key={c.id} className="rounded border p-2 text-sm">
+              <span className="font-medium">{c.code}</span> — {c.name} {!c.active && <span className="text-muted-foreground">(ปิด)</span>}
+              <span className="ml-2 text-muted-foreground">ร้านในเครือ: {c.members.filter((m) => m.active).map((m) => m.tenant_id).join(', ') || '—'}</span>
+            </div>
+          ))}
+          <div className="grid grid-cols-3 items-end gap-2">
+            <div className="grid gap-1"><Label className="text-xs">รหัส</Label><Input value={coalDraft.code} onChange={(e) => setCoalDraft({ ...coalDraft, code: e.target.value })} placeholder="THAICOAL" /></div>
+            <div className="grid gap-1"><Label className="text-xs">ชื่อเครือข่าย</Label><Input value={coalDraft.name} onChange={(e) => setCoalDraft({ ...coalDraft, name: e.target.value })} /></div>
+            <Button variant="outline" disabled={!coalDraft.code || !coalDraft.name || createCoal.isPending} onClick={() => createCoal.mutate()}>สร้างเครือข่าย</Button>
+          </div>
+          <div className="grid grid-cols-3 items-end gap-2">
+            <div className="grid gap-1"><Label className="text-xs">เครือข่าย (id)</Label><Input type="number" value={shopDraft.coalition_id || ''} onChange={(e) => setShopDraft({ ...shopDraft, coalition_id: +e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-xs">ร้าน (tenant id)</Label><Input type="number" value={shopDraft.tenant_id || ''} onChange={(e) => setShopDraft({ ...shopDraft, tenant_id: +e.target.value })} /></div>
+            <Button variant="outline" disabled={!shopDraft.coalition_id || !shopDraft.tenant_id || addShop.isPending} onClick={() => addShop.mutate()}>เพิ่มร้านเข้าเครือ</Button>
+          </div>
+          {(createCoal.error || addShop.error) && <Msg>{((createCoal.error ?? addShop.error) as Error).message}</Msg>}
+          <div className="border-t pt-3">
+            <Label className="text-xs">ค้นหาสมาชิกเครือข่ายจากเบอร์โทร (หน้าร้านพันธมิตร)</Label>
+            <div className="mt-1 flex gap-2">
+              <Input value={resolvePhone} onChange={(e) => setResolvePhone(e.target.value)} placeholder="08x-xxx-xxxx" />
+              <Button variant="outline" disabled={!resolvePhone} onClick={doResolve}>ค้นหา</Button>
+            </div>
+            {resolved && (
+              <div className="mt-2 rounded border p-2 text-sm">
+                <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">เครือข่ายพันธมิตรแต้ม · {resolved.coalition}</span>
+                <div className="mt-1">{resolved.member_code} — {resolved.name ?? '—'} · {resolved.tier ?? '—'} · {resolved.balance} แต้ม</div>
+                <div className="text-muted-foreground">ร้านบ้าน: {resolved.home_tenant_name ?? resolved.home_tenant_code ?? resolved.member_id} {resolved.is_home ? '(ร้านนี้)' : ''}</div>
+              </div>
+            )}
+            {resolveErr && <Msg>{resolveErr}</Msg>}
+          </div>
         </Card>
       </div>
     </div>

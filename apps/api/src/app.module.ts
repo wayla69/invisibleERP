@@ -54,6 +54,7 @@ import { BudgetModule } from './modules/budget/budget.module';
 import { RevenueModule } from './modules/revenue/revenue.module';
 import { FxModule } from './modules/fx/fx.module';
 import { IntercompanyModule } from './modules/intercompany/intercompany.module';
+import { CoalitionModule } from './modules/coalition/coalition.module';
 import { GiftCardsModule } from './modules/giftcards/gift-card.module';
 import { WorkflowModule } from './modules/workflow/workflow.module';
 import { MatchModule } from './modules/match/match.module';
@@ -184,6 +185,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     RevenueModule,
     FxModule,
     IntercompanyModule,
+    CoalitionModule,
     GiftCardsModule,
     WorkflowModule,
     MatchModule,

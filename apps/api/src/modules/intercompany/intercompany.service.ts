@@ -14,6 +14,12 @@ const MAP: Record<string, { creditorCr: string; debtorDr: string }> = {
   'shared-cost': { creditorCr: '5100', debtorDr: '5100' },
   'transfer': { creditorCr: '4000', debtorDr: '5100' },
   'loan': { creditorCr: '1000', debtorDr: '1000' },
+  // W2 (docs/27) coalition clearing: cross-shop loyalty point movements at fair value. Both legs ride
+  // 5700 (loyalty points expense) — the debtor shop bears the cost it caused, the creditor shop recovers
+  // it against the accrual its own ledger books (LYL-03 stays per-shop-true by construction). NOT exposed
+  // on the manual /api/intercompany endpoint (dto enum unchanged) — only the coalition service (LYL-19)
+  // creates these, via createIcInternal.
+  'loyalty-clearing': { creditorCr: '5700', debtorDr: '5700' },
 };
 
 @Injectable()
@@ -29,21 +35,29 @@ export class IntercompanyService {
   }
 
   async createIcTransaction(dto: CreateIcDto, user: JwtUser) {
-    this.hqOnly(user);
+    this.hqOnly(user); // manual IC posting stays HQ-only; system flows (coalition clearing) use createIcInternal
+    return this.createIcInternal(dto, user.username);
+  }
+
+  // Post an IC transaction WITHOUT the HQ-role guard — for system-generated clearing entries whose
+  // authorization is enforced upstream (the coalition service validates active shared membership before
+  // every cross-shop movement, control LYL-19). Never expose this on a controller directly.
+  async createIcInternal(dto: Omit<CreateIcDto, 'category'> & { category: string }, username: string) {
     const db = this.db as any;
     const A = n(dto.amount); const date = dto.date ?? ymd(); const cat = dto.category; const m = MAP[cat];
+    if (!m) throw new BadRequestException({ code: 'IC_BAD_CATEGORY', message: `Unknown IC category '${cat}'`, messageTh: 'ประเภทรายการระหว่างกิจการไม่ถูกต้อง' });
     const icNo = await this.docNo.nextDaily('IC');
-    await db.insert(icTransactions).values({ icNo, tenantId: dto.from_tenant_id, fromTenantId: dto.from_tenant_id, toTenantId: dto.to_tenant_id, txnDate: date, amount: fx(A, 4), settledAmount: '0', currency: dto.currency ?? 'THB', category: cat, description: dto.description ?? null, status: 'Open', createdBy: user.username });
+    await db.insert(icTransactions).values({ icNo, tenantId: dto.from_tenant_id, fromTenantId: dto.from_tenant_id, toTenantId: dto.to_tenant_id, txnDate: date, amount: fx(A, 4), settledAmount: '0', currency: dto.currency ?? 'THB', category: cat, description: dto.description ?? null, status: 'Open', createdBy: username });
     // FROM (creditor): Dr 1150 Due-From / Cr recovery
     let fromJe: string | null = null;
     if (!(await this.ledger.alreadyPosted('IC', icNo))) {
-      const je: any = await this.ledger.postEntry({ date, source: 'IC', sourceRef: icNo, tenantId: dto.from_tenant_id, currency: dto.currency, memo: `IC ${icNo} due-from`, createdBy: user.username, lines: [{ account_code: '1150', debit: A }, { account_code: m.creditorCr, credit: A }] });
+      const je: any = await this.ledger.postEntry({ date, source: 'IC', sourceRef: icNo, tenantId: dto.from_tenant_id, currency: dto.currency, memo: `IC ${icNo} due-from`, createdBy: username, lines: [{ account_code: '1150', debit: A }, { account_code: m.creditorCr, credit: A }] });
       fromJe = je?.entry_no ?? null;
     }
     // TO (debtor): Dr expense/cash / Cr 2150 Due-To
     let toJe: string | null = null;
     if (!(await this.ledger.alreadyPosted('IC', `${icNo}:TO`))) {
-      const je: any = await this.ledger.postEntry({ date, source: 'IC', sourceRef: `${icNo}:TO`, tenantId: dto.to_tenant_id, currency: dto.currency, memo: `IC ${icNo} due-to`, createdBy: user.username, lines: [{ account_code: m.debtorDr, debit: A }, { account_code: '2150', credit: A }] });
+      const je: any = await this.ledger.postEntry({ date, source: 'IC', sourceRef: `${icNo}:TO`, tenantId: dto.to_tenant_id, currency: dto.currency, memo: `IC ${icNo} due-to`, createdBy: username, lines: [{ account_code: m.debtorDr, debit: A }, { account_code: '2150', credit: A }] });
       toJe = je?.entry_no ?? null;
     }
     await db.update(icTransactions).set({ fromJournalNo: fromJe, toJournalNo: toJe }).where(eq(icTransactions.icNo, icNo));
