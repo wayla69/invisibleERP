@@ -155,8 +155,9 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 ### R0-3 · Seed-credential hardening — closes AUD-SEC-03 — **DELIVERED 2026-07-02**
 > Shipped: the security audit's suspicion was right — `must_change_password` was only a login-response
 > flag. It is now a **hard API gate** in the global guard (`403 PASSWORD_CHANGE_REQUIRED` everywhere except
-> change-password/logout/me/refresh, zero extra round-trips). `db:seed` generates a random initial admin
-> password (or `SEED_ADMIN_PASSWORD`), prints it once, and refuses `NODE_ENV=production` without
+> change-password/logout/me/refresh, zero extra round-trips). `db:seed` REQUIRES the operator-supplied
+> `SEED_ADMIN_PASSWORD` (≥8 chars — never generated, never logged; the original print-once design tripped
+> CodeQL clear-text-logging on the PR and was hardened in-flight) and refuses `NODE_ENV=production` without
 > `ALLOW_PROD_SEED=1`. No literal `admin123` remains in product code (harnesses seed their own throwaway
 > creds directly). RCM ITGC-AC-07 text updated; `onboarding` harness gains the gate ToE (26 checks);
 > UAT-SEC-004 + ITGC narrative rev 0.8.

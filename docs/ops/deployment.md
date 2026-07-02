@@ -23,7 +23,7 @@
 
 ### A. Railway (primary) — `apps/api/railway.json`, `apps/web/railway.json`
 **RAILPACK** build (Railway's current default); `api` runs **migrate + seed** via **`preDeployCommand`**
-(`db:migrate && db:seed`) so the schema applies and the baseline rows (permissions, HQ tenant, the
+(`db:migrate && db:seed` — the seed additionally requires `SEED_ADMIN_PASSWORD`, docs/27 R0-3) so the schema applies and the baseline rows (permissions, HQ tenant, the
 `admin` user with a forced first-login password change) exist **once per release**, not per replica. The
 seed is idempotent (`onConflictDoNothing`) — it never resets a changed admin password. Health checks: api `/`
 (and now `/healthz`/`/readyz`), web `/login`. Node is pinned to **22** via `.node-version` / `.nvmrc` /
