@@ -890,6 +890,18 @@ async function main() {
 
   console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..16) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
+  // docs/24 R3-3 — retained operating evidence: when EVIDENCE_OUT is set (CI), write the structured
+  // run result (every control check, pass/fail, commit, timestamp) for artifact retention. This file is
+  // what the SOC 2 / ICFR evidence clock samples — see compliance/soc2-readiness.md §evidence.
+  if (process.env.EVIDENCE_OUT) {
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(process.env.EVIDENCE_OUT, JSON.stringify({
+      harness: 'compliance', run_at: new Date().toISOString(),
+      commit: process.env.GITHUB_SHA ?? null, ref: process.env.GITHUB_REF ?? null,
+      total: checks.length, failed: checks.filter((c) => !c.ok).length,
+      checks: checks.map((c) => ({ name: c.name, ok: c.ok, detail: c.detail ?? '' })),
+    }, null, 2));
+  }
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} compliance checks failed` : `\n✅ All ${checks.length} compliance control checks passed`);
   await app.close();

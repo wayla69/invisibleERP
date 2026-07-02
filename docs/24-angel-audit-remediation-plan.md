@@ -367,7 +367,13 @@ disease): `> **SUPERSEDED (2026-07-02):** §§X–Y describe the pre-remediation
 docs/24 §0 and compliance/CONTROL_STATUS_HONEST.md for current state.` Do **not** delete —
 the honest history is a diligence asset; the lie-by-staleness is the liability.
 
-### R3-3 · Start the evidence clock + engage attestation — closes AUD-CMP-03 (org + light code)
+### R3-3 · Start the evidence clock + engage attestation — closes AUD-CMP-03 (org + light code) — **CODE DELIVERED 2026-07-02** (auditor engagement = org work)
+> Shipped: the `compliance` ToE harness emits structured evidence (`EVIDENCE_OUT` → run timestamp, commit,
+> all 114 control checks pass/fail) and CI uploads it per-run as artifact `compliance-evidence-<sha>`
+> (90-day GitHub retention cap documented, with the quarterly durable-archive runbook in
+> `soc2-readiness.md` rev 0.3 covering the ≥15-month sampling window). **The operating-evidence clock
+> accrues from 2026-07-02.** Remaining (organizational): engage the SOC 2 Type I auditor; run the
+> quarterly archive; ISO/PCI stay sequenced after Type I.
 - **SOC 2 Type I first** (design-only): engage the auditor; repo work = evidence-pointer columns in
   `soc2-readiness.md` mapping each CC to its ToE harness check ID + retained-artifact location.
 - **Evidence retention:** make the CI harness runs *retained evidence* — persist each `compliance`
@@ -517,3 +523,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.0 | 2026-07-02 | ERP/Product | R1-2 delivered (gl_period_balances snapshot + transactional maintenance + TB snapshot read + control GL-20; census 170) |
 | 2.1 | 2026-07-02 | ERP/Product | R4-2 delivered (corrected anomaly math default; legacy behind ANOMALY_PARITY_MODE; parity harness pins + proves both) |
 | 2.2 | 2026-07-02 | ERP/Product | R4-5 delivered (nav + manual + docs/06 honest statistical labeling) |
+| 2.3 | 2026-07-02 | ERP/Product | R3-3 code delivered (compliance ToE evidence artifact per CI run + quarterly-archive runbook; evidence clock runs from 2026-07-02) |

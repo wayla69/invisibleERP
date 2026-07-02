@@ -167,6 +167,20 @@ jobs:
           name: dist
       - name: ${{ matrix.pkg }} → ${{ matrix.script }}
         run: pnpm --filter @ierp/${{ matrix.pkg }} ${{ matrix.script }}
+        env:
+          # docs/24 R3-3 — the compliance ToE run writes structured evidence for retention (below).
+          EVIDENCE_OUT: ${{ matrix.script == 'compliance' && format('{0}/compliance-evidence.json', github.workspace) || '' }}
+      - name: Retain compliance ToE evidence (docs/24 R3-3 — operating-evidence clock)
+        if: matrix.script == 'compliance' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-evidence-${{ github.sha }}
+          path: compliance-evidence.json
+          if-no-files-found: warn
+          # GitHub caps artifact retention at 90 days by default (400 with an org setting). The quarterly
+          # archive job (compliance/soc2-readiness.md §evidence runbook) copies these to durable storage so
+          # the ≥15-month ICFR sampling window holds.
+          retention-days: 90
 
   # ITGC vulnerability management: dependency advisories + secret scanning. Evidence for the IT auditor /
   # IPO security review. The dependency audit is a HARD GATE at --audit-level high: any NEW high/critical

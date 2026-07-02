@@ -115,3 +115,4 @@ the audit-committee meetings, operating the hotline) is the org/PMO process that
 |------|--------|
 | 2026-06-30 | Initial — honest baseline (138/9/6 of 153), panel↔RCM ID crosswalk, "audit-ready" correction, EGC/404(b) timeline. PwC Capital Markets follow-up. |
 | 2026-07-02 | **Census reconciliation (docs/24 R3-1 / AUD-CMP-01).** All counts re-generated from `build_rcm.py --counts` (169: 166 Implemented / 3 Partial / 0 Gap) and tagged machine-readable; the new CI guard `check-rcm-census.mjs` blocks future drift. Prior figures in this doc (151/3/0 of 154) were a stale hand-copy. |
+| 2026-07-02 | **Operating-evidence clock started (docs/24 R3-3).** CI now retains every `compliance` ToE run as a structured evidence artifact (see soc2-readiness.md §revision 0.3 for the quarterly-archive runbook). The "≥1 quarter of retained operating evidence" precondition for auditor sampling accrues from this date — every earlier day had ToE runs but no retained artifacts. |
