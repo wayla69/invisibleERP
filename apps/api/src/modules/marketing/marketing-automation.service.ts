@@ -14,6 +14,50 @@ const WINBACK_SEGMENTS = ['At Risk', 'Lost'];
 // Deterministic A/B/holdout assignment (Phase G2, docs/25): FNV-1a over "campaignId:memberId" → 0..99.
 // No RNG — the same member always lands in the same bucket for a campaign (reproducible, harness-testable,
 // and a retry can never flip groups).
+// ── V3 (docs/29) — A/B + holdout significance: explainable closed-form statistics (SOX posture like
+// docs/ops/predictive-scoring.md — constants live here, every payload carries AB_STATS_VERSION, and
+// docs/ops/ab-significance.md is the audit reference). No RNG, no library:
+//   • two-proportion z-test (pooled) → two-sided p-value via the Abramowitz–Stegun erfc polynomial 7.1.26
+//   • 95% CI on the rate difference via Newcombe's Wilson-score hybrid (robust at small counts/0%/100%)
+// `significant` requires BOTH p < ALPHA and both groups ≥ MIN_GROUP — a tiny sample can never claim "real".
+export const AB_STATS_VERSION = 'v1';
+export const AB_STATS = { alpha: 0.05, z95: 1.959964, minGroup: 30 } as const;
+const erfc = (x: number): number => {
+  // Abramowitz & Stegun 7.1.26 (|error| ≤ 1.5e-7) — even symmetry via erfc(-x) = 2 - erfc(x)
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-x * x);
+  return x >= 0 ? y : 2 - y;
+};
+const wilson = (x: number, n: number): [number, number] => {
+  if (n <= 0) return [0, 1];
+  const z = AB_STATS.z95, p = x / n, z2 = z * z;
+  const denom = 1 + z2 / n;
+  const centre = p + z2 / (2 * n);
+  const half = z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n));
+  return [Math.max(0, (centre - half) / denom), Math.min(1, (centre + half) / denom)];
+};
+export function compareProportions(x1: number, n1: number, x2: number, n2: number) {
+  const r2x = (v: number) => Math.round(v * 100) / 100;
+  if (n1 <= 0 || n2 <= 0) return null;
+  const p1 = x1 / n1, p2 = x2 / n2, d = p1 - p2;
+  // pooled two-proportion z (0 when both rates identical or the pooled variance degenerates)
+  const pp = (x1 + x2) / (n1 + n2);
+  const se = Math.sqrt(pp * (1 - pp) * (1 / n1 + 1 / n2));
+  const z = se > 0 ? d / se : 0;
+  const pValue = Math.min(1, erfc(Math.abs(z) / Math.SQRT2)); // two-sided
+  const [l1, u1] = wilson(x1, n1); const [l2, u2] = wilson(x2, n2);
+  const lo = d - Math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2);
+  const hi = d + Math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2);
+  const powered = n1 >= AB_STATS.minGroup && n2 >= AB_STATS.minGroup;
+  const significant = powered && pValue < AB_STATS.alpha;
+  const verdict = !powered ? 'underpowered — grow the groups' : significant ? 'real' : 'no detectable effect';
+  return {
+    delta_pp: r2x(d * 100), ci95_pp: [r2x(lo * 100), r2x(hi * 100)] as [number, number],
+    z: Math.round(z * 1000) / 1000, p_value: Math.round(pValue * 10000) / 10000,
+    significant, verdict, groups: [n1, n2] as [number, number], stats_version: AB_STATS_VERSION,
+  };
+}
+
 export function bucketPct(campaignId: number, memberId: number): number {
   const s = `${campaignId}:${memberId}`;
   let h = 0x811c9dc5;
@@ -186,8 +230,10 @@ export class MarketingAutomationService {
         organic_lift: holdoutG.members > 0 ? {
           purchase_rate_pp: r2(messaged.purchase_rate_pct - holdoutG.purchase_rate_pct),
           incremental_revenue: r2(messaged.order_revenue - (holdoutG.order_revenue * (holdoutG.members > 0 ? messaged.members / holdoutG.members : 0))),
+          // V3 (docs/29): is the purchase-rate delta real? (messaged vs holdout; Newcombe CI + pooled z)
+          significance: compareProportions(messaged.purchasers, messaged.members, holdoutG.purchasers, holdoutG.members),
         } : null,
-        note: 'baseline = ยอดซื้อจริงของกลุ่ม holdout ในหน้าต่างเดียวกัน — กลุ่มเล็กค่าจะแกว่ง ดูขนาดกลุ่มประกอบ',
+        note: 'baseline = ยอดซื้อจริงของกลุ่ม holdout ในหน้าต่างเดียวกัน — กลุ่มเล็กค่าจะแกว่ง ดูขนาดกลุ่มและ verdict ประกอบ',
       };
     }
     const hasAb = (Number(camp.splitBPct ?? 0) > 0 || Number(camp.holdoutPct ?? 0) > 0) && sends.some((s: any) => s.variant != null);
@@ -195,6 +241,8 @@ export class MarketingAutomationService {
       const a = group('A'), b = group('B'), h = group('holdout');
       const messagedRate = sent > 0 ? r2((redeemed / sent) * 100) : 0;
       return { a, b, holdout: { count: h.count }, lift_redemption_rate_pct: messagedRate,
+        // V3 (docs/29): A-vs-B redemption-rate significance (only meaningful when a real split ran)
+        ab_significance: a.sent > 0 && b.sent > 0 ? compareProportions(a.redeemed, a.sent, b.redeemed, b.sent) : null,
         lift_note: 'holdout ไม่ได้รับคูปอง จึงมีอัตราแลก 0 โดยนิยาม — ตัวเลขนี้คือการแลกที่เกิดจาก "การถูกส่งข้อความ" (ยังไม่หัก organic baseline)' };
     })() : null;
     return {

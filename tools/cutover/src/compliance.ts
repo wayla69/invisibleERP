@@ -808,6 +808,21 @@ async function main() {
       && lyl20Resolve.json.status === 'Resolved' && lyl20Resolve.json.resolved_by === 'execu',
     `ans=${lyl20Ans.status}/${lyl20Ans.json.detractor} again=${lyl20Again.status} cases=${lyl20Cases.length} noNote=${lyl20NoNote.status} contact=${lyl20Contact.json.status}/${lyl20Contact.json.contacted_by} resolve=${lyl20Resolve.json.status}`);
 
+  // ════════ LYL-21 — paid VIP: deferred fee, monthly recognition, tier auto-revoke on lapse (V4, docs/29) ════════
+  const v4plan = await inj('POST', '/api/loyalty/membership-plans', execu, { code: 'TOE-VIP', name: 'ToE VIP', tier: 'Gold', price: 600, period_months: 6 });
+  const [v4m] = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-VIP21', name: 'วีไอพี', phone: '0890000071', balance: '0', lifetime: '0', active: true }).returning({ id: s.posMembers.id });
+  const v4start = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
+  const v4sell = await inj('POST', '/api/loyalty/memberships/sell', execu, { member_id: Number(v4m.id), plan_id: v4plan.json.id, start_date: v4start });
+  const v4rec = await inj('POST', '/api/loyalty/memberships/recognize', execu, {});
+  const v4rec2 = await inj('POST', '/api/loyalty/memberships/recognize', execu, {});
+  const v4gl = (await pg.query(`SELECT jl.account_code, sum(jl.debit)::float d, sum(jl.credit)::float c FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source_ref LIKE 'VIP-${v4sell.json.id}%' GROUP BY jl.account_code`)).rows as any[];
+  const bal = (code: string, side: 'd' | 'c') => Number(v4gl.find((r: any) => r.account_code === code)?.[side] ?? 0);
+  ok('LYL-21: VIP fee is DEFERRED (Cr 2410) and recognized straight-line to 4300 only as months elapse (idempotent re-run posts 0) — revenue is never taken up-front',
+    (v4sell.status === 200 || v4sell.status === 201) && bal('1000', 'd') === 600 && bal('2410', 'c') === 600
+      && v4rec.json.posted === 2 && near(v4rec.json.amount, 200) && v4rec2.json.posted === 0
+      && near(bal('2410', 'd'), 200) && near(bal('4300', 'c'), 200),
+    `sell=${v4sell.status} cash=${bal('1000','d')} defer=${bal('2410','c')} rec=${v4rec.json.posted}/${v4rec.json.amount} rerun=${v4rec2.json.posted} released=${bal('2410','d')} rev=${bal('4300','c')}`);
+
   // ════════ MKT-12 — Lifecycle journeys: consent-gated, frequency-capped, at-most-once per step ════════
   // An opted-out member enrols but the step send is SKIPPED (audited in message_log); a re-run fires
   // nothing (the enrollment-step was claimed before delivery — claim-first, mirrors MKT-10).
@@ -976,7 +991,7 @@ async function main() {
     exOvr.json.override === true && exOvr.json.override_by !== 'admin' && (exPayOk.status === 200 || exPayOk.status === 201) && exPayOk.json.status === 'PendingApproval',
     JSON.stringify({ ovr: exOvr.json.override, by: exOvr.json.override_by, pay: exPayOk.json.status }));
 
-  console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..20) ──');
+  console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..21) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   // docs/27 R3-3 — retained operating evidence: when EVIDENCE_OUT is set (CI), write the structured
   // run result (every control check, pass/fail, commit, timestamp) for artifact retention. This file is

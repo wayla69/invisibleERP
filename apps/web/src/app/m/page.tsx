@@ -227,6 +227,10 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
                 <div className="h-full rounded-full bg-white" style={{ width: `${Math.min(100, Number(tier.progress_pct ?? 0))}%` }} />
               </div>
             )}
+            {/* V4 (docs/29): paid VIP membership status */}
+            {tier.membership?.status === 'Active' && (
+              <p className="mt-1 text-[11px] opacity-90">👑 สมาชิก {tier.membership.plan_name ?? tier.membership.plan} ถึง {tier.membership.end_date}</p>
+            )}
           </div>
         )}
       </div>
