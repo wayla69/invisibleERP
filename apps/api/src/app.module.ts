@@ -18,7 +18,6 @@ import { ProcurementModule } from './modules/procurement/procurement.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { CustomersModule } from './modules/customers/customers.module';
-import { CrmPipelineModule } from './modules/crm-pipeline/crm-pipeline.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -73,7 +72,6 @@ import { ConsolidationModule } from './modules/consolidation/consolidation.modul
 import { IcReconModule } from './modules/ic-reconciliation/ic-recon.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { ProfitabilityModule } from './modules/profitability/profitability.module';
-import { PipelineModule } from './modules/pipeline/pipeline.module';
 import { CpqModule } from './modules/cpq/cpq.module';
 import { ServiceModule } from './modules/service/service.module';
 import { BiModule } from './modules/bi/bi.module';
@@ -145,7 +143,6 @@ import { PdfModule } from './modules/pdf/pdf.module';
     FinanceModule,
     ReportsModule,
     CustomersModule,
-    CrmPipelineModule,
     NotificationsModule,
     AnalyticsModule,
     AiModule,
@@ -200,7 +197,6 @@ import { PdfModule } from './modules/pdf/pdf.module';
     IcReconModule,
     ReconciliationModule,
     ProfitabilityModule,
-    PipelineModule,
     CpqModule,
     ServiceModule,
     BiModule,

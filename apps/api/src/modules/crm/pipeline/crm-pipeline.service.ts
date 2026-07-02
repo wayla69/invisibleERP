@@ -1,10 +1,10 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { crmLeads, crmOpportunities, crmActivities, customerMaster } from '../../database/schema';
-import { DocNumberService } from '../../common/doc-number.service';
-import { n } from '../../database/queries';
-import type { JwtUser } from './../../common/decorators';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { crmLeads, crmOpportunities, crmActivities, customerMaster } from '../../../database/schema';
+import { DocNumberService } from '../../../common/doc-number.service';
+import { n } from '../../../database/queries';
+import type { JwtUser } from './../../../common/decorators';
 
 const STAGES = ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'] as const;
 const OPEN_STAGES = ['prospecting', 'qualification', 'proposal', 'negotiation'];
