@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, integer, date, timestamp, boolean, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, date, timestamp, boolean, index, jsonb } from 'drizzle-orm/pg-core';
 import { encryptedText } from '../encrypted-column';
 import { poStatusEnum } from './enums';
 import { tenants } from './tenants';
@@ -100,6 +100,40 @@ export const invoiceMatchLines = pgTable('invoice_match_lines', {
   qtyVarPct: numeric('qty_var_pct', { precision: 8, scale: 3 }), priceVarPct: numeric('price_var_pct', { precision: 8, scale: 3 }),
   lineStatus: text('line_status').notNull(),
 });
+
+// Scanned-invoice intake → PO auto-map → automated 3-way match (EXP-10, migration 0228). Holds the
+// extracted draft + the mapping decision; posting creates the AP bill and runs the EXP-01 match. Payment
+// stays behind the AP-PAY maker-checker — this automates the path TO payment-ready, not the disbursement.
+export const apInvoiceIntakes = pgTable('ap_invoice_intakes', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  intakeNo: text('intake_no').notNull().unique(), // AINV-YYYYMMDD-NNN
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  rawText: text('raw_text'),
+  vendorId: bigint('vendor_id', { mode: 'number' }).references(() => vendors.id), // resolved during mapping
+  vendorName: text('vendor_name'),
+  vendorTaxId: text('vendor_tax_id'),
+  invoiceNo: text('invoice_no'),
+  invoiceDate: date('invoice_date'),
+  amount: numeric('amount', { precision: 14, scale: 2 }),
+  currency: text('currency').default('THB'),
+  extractSource: text('extract_source'), // ai | rules | rules-fallback
+  poNo: text('po_no'),
+  mapMethod: text('map_method'), // po_number | vendor_tax_id | vendor_amount | manual
+  mapConfidence: numeric('map_confidence', { precision: 5, scale: 2 }), // 0–100
+  candidates: jsonb('candidates'), // scored PO candidates surfaced for human review
+  dupOf: text('dup_of'), // earlier intake carrying the same vendor invoice no (duplicate-payment guard)
+  status: text('status').notNull().default('NeedsReview'), // NeedsReview | Mapped | Posted
+  txnNo: text('txn_no'), // ap_transactions.txn_no once posted
+  matchStatus: text('match_status'), // verdict copied from the auto-run 3-way match
+  payable: boolean('payable'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  postedBy: text('posted_by'),
+  postedAt: timestamp('posted_at', { withTimezone: true }),
+}, (t) => ({
+  byStatus: index('idx_ap_intake_status').on(t.tenantId, t.status),
+  byTxn: index('idx_ap_intake_txn').on(t.txnNo),
+}));
 
 export const supplierRequests = pgTable('supplier_requests', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

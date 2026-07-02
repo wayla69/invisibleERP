@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { eq, and, isNull, or, like, desc, sql } from 'drizzle-orm';
+import { eq, and, ne, isNull, or, like, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { apTransactions, purchaseOrders, poItems, invoiceMatchResults, invoiceMatchLines, matchTolerance } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -51,9 +51,31 @@ export class ThreeWayMatchService {
     const byItem = new Map<string, any>(poLines.map((l: any) => [String(l.itemId), l]));
     const tol = await this.getTolerance(tx.tenantId ?? user.tenantId ?? null);
 
-    // fall back to a single header line (invoice amount vs PO total) when no lines are supplied
-    const inputLines: MatchLineInput[] = lines?.length ? lines : [{ item_id: '__TOTAL__', qty: 1, unit_price: n(tx.amount) }];
     const resultLines: any[] = [];
+    if (!lines?.length) {
+      // Header-level amount match (no invoice lines — e.g. a scanned-total AP intake, EXP-10): compare the
+      // invoice amount against the RECEIVED value on the PO (Σ received_qty × unit_price) within the amount
+      // tolerance (amount_pct/amount_abs — stored since Phase 16, previously unused), on the same price
+      // basis as the PO. Invoicing beyond received value is over_invoiced (blocked until the GR catches up
+      // or a checker overrides); billing at/below the remaining value is matched — partial billing
+      // carries no pay-for-goods-not-received risk. The row stores the VALUE comparison in the qty
+      // columns (inv=invoice total, po=ordered value, gr=remaining un-invoiced received value), price 1.
+      const invAmt = n(tx.amount);
+      const receivedValue = r3(poLines.reduce((s: number, l: any) => s + n(l.receivedQty) * n(l.unitPrice), 0));
+      const orderedValue = r3(poLines.reduce((s: number, l: any) => s + (l.amount != null ? n(l.amount) : n(l.orderQty) * n(l.unitPrice)), 0));
+      // Cumulative guard: every OTHER invoice already matched to this PO consumes its received value —
+      // a second header invoice can only bill what remains (stops double-billing one PO under two
+      // invoice numbers). Blocked invoices count too (conservative: both could later be released).
+      const prior = await db.select({ amt: apTransactions.amount }).from(invoiceMatchResults)
+        .innerJoin(apTransactions, eq(invoiceMatchResults.txnNo, apTransactions.txnNo))
+        .where(and(eq(invoiceMatchResults.poNo, poNo), ne(invoiceMatchResults.txnNo, txnNo)));
+      const available = r3(receivedValue - prior.reduce((s: number, p: any) => s + n(p.amt), 0));
+      const tolAmt = Math.max(receivedValue * tol.amountPct / 100, tol.amountAbs);
+      const status = invAmt - available > tolAmt + 1e-9 ? 'over_invoiced' : 'matched';
+      const varPct = available > 0 ? r3(Math.abs(invAmt - available) / available * 100) : (invAmt > 0 ? 100 : 0);
+      resultLines.push({ itemId: '__TOTAL__', invQty: String(invAmt), invPrice: '1', poQty: String(orderedValue), poPrice: '1', grQty: String(available), qtyVarPct: String(varPct), priceVarPct: '0', lineStatus: status });
+    }
+    const inputLines: MatchLineInput[] = lines?.length ? lines : [];
     for (const il of inputLines) {
       const po = byItem.get(String(il.item_id));
       let status = 'matched'; let poQty = 0, poPrice = 0, grQty = 0, priceVar = 0, qtyVar = 0;
@@ -114,6 +136,29 @@ export class ThreeWayMatchService {
     await db.update(invoiceMatchResults).set({ override: true, overrideBy: user.username, overrideReason: reason ?? null, overrideAt: new Date() }).where(eq(invoiceMatchResults.id, m.id));
     await this.statusLog.log('MATCH', m.matchNo, m.matchStatus, 'Override', user.username);
     return { txn_no: txnNo, match_status: m.matchStatus, payable: m.payable, override: true, override_by: user.username, matched_by: m.matchedBy };
+  }
+
+  // Automated re-match sweep (EXP-10; ridden by the BI scheduler `ap_automatch_rerun` job): re-run the
+  // 3-way match for every BLOCKED invoice (not payable, not overridden) in the caller's tenant. A block
+  // typically clears itself once the outstanding GR is posted (received qty/value catches up) — the sweep
+  // turns that into an automatic release instead of a manual re-run. Override rows are never touched, and
+  // each match() re-verdicts from CURRENT PO/GR state using the invoice lines recorded at first match.
+  async rematchBlocked(user: JwtUser) {
+    const db = this.db;
+    const conds: any[] = [eq(invoiceMatchResults.payable, false), eq(invoiceMatchResults.override, false)];
+    if (user.tenantId != null) conds.push(eq(invoiceMatchResults.tenantId, user.tenantId));
+    const blocked = await db.select().from(invoiceMatchResults).where(and(...conds)).orderBy(desc(invoiceMatchResults.id)).limit(500);
+    let released = 0; const results: any[] = [];
+    for (const m of blocked) {
+      if (!m.poNo) continue;
+      const rows = await db.select().from(invoiceMatchLines).where(eq(invoiceMatchLines.matchId, Number(m.id)));
+      const isHeader = rows.length === 1 && rows[0]!.itemId === '__TOTAL__';
+      const lineInputs = isHeader ? undefined : rows.map((l: any) => ({ item_id: String(l.itemId), qty: n(l.invQty), unit_price: n(l.invPrice) }));
+      const r = await this.match(m.txnNo, m.poNo, lineInputs, user);
+      if (r.payable) released++;
+      results.push({ txn_no: m.txnNo, po_no: m.poNo, match_status: r.match_status, payable: r.payable });
+    }
+    return { swept: results.length, released, results };
   }
 
   async getMatch(txnNo: string) {

@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.9 · 2026-07-02** · *v0.9: added UAT-P2P-076..080 (LINE chat phase 2 — workflow notifications, chat approve/reject with engine SoD, self-service commands).* · *v0.8: added UAT-P2P-070..075 (LINE chat → PR — link-code identity binding, chat-raised PR into the same approval workflow, entry-integrity negatives).* · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
+**Status: DRAFT v1.0 · 2026-07-02** · *v1.0: added UAT-P2P-081..085 (EXP-10 — AP invoice intake: scan → PO auto-map → matched-at-posting, duplicate refusal, cumulative guard, scheduled auto re-match release).* · *v0.9: added UAT-P2P-076..080 (LINE chat phase 2 — workflow notifications, chat approve/reject with engine SoD, self-service commands).* · *v0.8: added UAT-P2P-070..075 (LINE chat → PR — link-code identity binding, chat-raised PR into the same approval workflow, entry-integrity negatives).* · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -311,6 +311,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-078 | LINE chat: approve without `procurement` refused; reject decides + notifies | EXP-03 | 02 §7, §9 |
 | UAT-P2P-079 | LINE chat: `my prs` / `find` self-service lookups | Feature (chat self-service) | 02 §7 |
 | UAT-P2P-080 | LINE chat: `cancel` own pending PR only; `stock` read-only | EXP-03 (entry integrity) | 02 §7 |
+| UAT-P2P-081 | AP intake: scan with PO no. → auto-map + book + match in one flow | EXP-10, EXP-01 | 02 §3, §7, §9 |
+| UAT-P2P-082 | AP intake: vendor+amount auto-map only when unambiguous; ties → NeedsReview | EXP-10 | 02 §7, §9 |
+| UAT-P2P-083 | AP intake: duplicate invoice number never auto-booked; post refused | EXP-10 | 02 §7, §9, §13 |
+| UAT-P2P-084 | AP intake: cumulative guard — one PO not billable twice | EXP-10, EXP-01, EXP-09 | 02 §7, §9 |
+| UAT-P2P-085 | AP intake: blocked-ahead-of-goods released by scheduled auto re-match; non-PO fail-open | EXP-10, EXP-09 | 02 §7, §9 |
 | UAT-UI-P2P-ACC-01 | Procurement & AP screens split by user group | R03/R04/R07 | 02 §3 |
 | UAT-UI-SUP-01 | Supplier portal screen (vendor self-service) — PO ack + invoice submit | Feature (supplier portal UI) | 02 §7 |
 | UAT-P2P-040 | Capital PO line → GR eligible (not stocked) | FA-10 | 02 §7, 09 §7 |

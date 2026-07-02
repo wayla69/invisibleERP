@@ -243,6 +243,93 @@ async function main() {
   const wlT2 = await inj('GET', '/api/procurement/match', procT2);
   ok('Match worklist: RLS — tenant T2 sees none of HQ match results', (wlT2.json.results ?? []).length === 0 && wlT2.json.total === 0, `n=${wlT2.json.count}`);
 
+  // ── P. AP invoice intake (EXP-10): scan → extract → PO auto-map → post bill → automated 3-way match ──
+  // (a) explicit PO number in the scan → one-shot auto: mapped(po_number) + bill posted + header match.
+  const poI = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 40, unit_price: 25 }] });
+  const poINo = poI.json.po_no as string;
+  await inj('PATCH', `/api/procurement/pos/${poINo}/approve`, admin, { approve: true });
+  await inj('POST', '/api/procurement/grs', admin, { po_no: poINo, items: [{ item_id: 'X', received_qty: 40 }] });
+  const scanA = `ผู้ขาย V1 จำกัด\nInvoice# IV-9001\n2026-07-01\nPO Number: ${poINo}\nรวมทั้งสิ้น 1,000.00`;
+  const auto1 = await inj('POST', '/api/procurement/ap-intake/auto', admin, { text: scanA });
+  ok('Intake auto: PO no. in scan → mapped(po_number 100%) + bill posted + header match=matched, payable',
+    auto1.json.po_no === poINo && auto1.json.map_method === 'po_number' && auto1.json.status === 'Posted' && auto1.json.match_status === 'matched' && truthy(auto1.json.payable) && auto1.json.invoice_no === 'IV-9001' && near(auto1.json.amount, 1000),
+    JSON.stringify({ po: auto1.json.po_no, m: auto1.json.map_method, st: auto1.json.status, match: auto1.json.match_status }));
+  const payAuto = await payFull(auto1.json.txn_no, 1000);
+  ok('Intake-posted matched bill passes the pay gate → request+approve → Paid', payAuto.json.bill_status === 'Paid', `${payAuto.status} ${payAuto.json.bill_status}`);
+
+  // (b) no PO number in the scan → auto-map by vendor + amount (unambiguous winner) → post → matched.
+  const poB = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 30, unit_price: 20 }] });
+  const poBNo = poB.json.po_no as string;
+  await inj('PATCH', `/api/procurement/pos/${poBNo}/approve`, admin, { approve: true });
+  await inj('POST', '/api/procurement/grs', admin, { po_no: poBNo, items: [{ item_id: 'X', received_qty: 30 }] });
+  const scanB = `ผู้ขาย V1 จำกัด\nInvoice# IV-9002\n2026-07-01\nรวมทั้งสิ้น 600.00`;
+  const intB = await inj('POST', '/api/procurement/ap-intake', admin, { text: scanB });
+  ok('Intake map: vendor + amount (no PO no. in scan) → auto-mapped vendor_amount to the 600-baht PO',
+    intB.json.status === 'Mapped' && intB.json.po_no === poBNo && intB.json.map_method === 'vendor_amount',
+    JSON.stringify({ st: intB.json.status, po: intB.json.po_no, m: intB.json.map_method, cands: (intB.json.candidates ?? []).length }));
+  const postB = await inj('POST', `/api/procurement/ap-intake/${intB.json.intake_no}/post`, admin, {});
+  ok('Intake post: books the bill + auto-runs the match → matched, payable', postB.json.status === 'Posted' && postB.json.match_status === 'matched' && truthy(postB.json.payable), JSON.stringify({ st: postB.json.status, match: postB.json.match_status }));
+
+  // (c) ambiguous candidates → NeedsReview (never guess); manual map; cumulative guard: the mapped PO's
+  // received value is already fully invoiced by (a) → a second invoice on it is over_invoiced + blocked.
+  const scanC = `ผู้ขาย V1 จำกัด\nInvoice# IV-9003\n2026-07-01\nรวมทั้งสิ้น 1,000.00`;
+  const intC = await inj('POST', '/api/procurement/ap-intake', admin, { text: scanC });
+  ok('Intake ambiguity: two 1,000-baht POs for the vendor → NeedsReview with scored candidates (no auto-map)',
+    intC.json.status === 'NeedsReview' && intC.json.po_no == null && (intC.json.candidates ?? []).length >= 2,
+    JSON.stringify({ st: intC.json.status, cands: (intC.json.candidates ?? []).map((c: any) => c.po_no) }));
+  await inj('PUT', `/api/procurement/ap-intake/${intC.json.intake_no}/map`, admin, { po_no: poINo });
+  const postC = await inj('POST', `/api/procurement/ap-intake/${intC.json.intake_no}/post`, admin, {});
+  const payC = await payAttempt(postC.json.txn_no, 1000);
+  ok('Cumulative guard: 2nd invoice on an already-fully-invoiced PO → over_invoiced, pay BLOCKED 409',
+    postC.json.match_status === 'over_invoiced' && !truthy(postC.json.payable) && payC.status === 409 && payC.json.error?.code === 'MATCH_BLOCKED',
+    JSON.stringify({ match: postC.json.match_status, pay: payC.status }));
+
+  // (d) duplicate-invoice guard: the same vendor invoice number scanned twice never books twice.
+  const dupAuto = await inj('POST', '/api/procurement/ap-intake/auto', admin, { text: scanA });
+  const dupPost = await inj('POST', `/api/procurement/ap-intake/${dupAuto.json.intake_no}/post`, admin, {});
+  ok('Duplicate guard: re-scan of IV-9001 → NeedsReview (not auto-posted) and explicit post → 409 DUPLICATE_INVOICE',
+    dupAuto.json.auto_posted === false && dupAuto.json.status === 'NeedsReview' && dupAuto.json.dup_of != null && dupPost.status === 409 && dupPost.json.error?.code === 'DUPLICATE_INVOICE',
+    JSON.stringify({ st: dupAuto.json.status, dup: dupAuto.json.dup_of, post: dupPost.status }));
+
+  // (e) invoice arrives BEFORE the goods → blocked; the scheduled auto re-match releases it once the GR posts.
+  const poE = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 20, unit_price: 50 }] });
+  const poENo = poE.json.po_no as string;
+  await inj('PATCH', `/api/procurement/pos/${poENo}/approve`, admin, { approve: true });
+  await inj('POST', '/api/procurement/grs', admin, { po_no: poENo, items: [{ item_id: 'X', received_qty: 10 }] }); // half received
+  const scanE = `ผู้ขาย V1 จำกัด\nInvoice# IV-9004\n2026-07-01\nPO Number: ${poENo}\nรวมทั้งสิ้น 1,000.00`;
+  const autoE = await inj('POST', '/api/procurement/ap-intake/auto', admin, { text: scanE });
+  const payE1 = await payAttempt(autoE.json.txn_no, 1000);
+  ok('Invoice ahead of goods: 1,000 invoiced vs 500 received → over_invoiced, pay BLOCKED 409',
+    autoE.json.match_status === 'over_invoiced' && payE1.status === 409, JSON.stringify({ match: autoE.json.match_status, pay: payE1.status }));
+  await inj('POST', '/api/procurement/grs', admin, { po_no: poENo, items: [{ item_id: 'X', received_qty: 10 }] }); // rest arrives
+  const rtI = (await inj('GET', '/api/bi/report-types', admin)).json;
+  ok('Auto re-match is a schedulable job type (rides the report scheduler)', (rtI.report_types ?? []).some((t: any) => t.key === 'ap_automatch_rerun'), '');
+  await inj('POST', '/api/bi/subscriptions', admin, { name: 'Auto re-match', report_type: 'ap_automatch_rerun', frequency: 'daily' });
+  const ranI = (await inj('POST', '/api/bi/subscriptions/run', admin)).json;
+  const rerun = (ranI.runs ?? []).find((r: any) => r.report_type === 'ap_automatch_rerun');
+  const mE = await inj('GET', `/api/procurement/match/${autoE.json.txn_no}`, admin);
+  const payE2 = await payFull(autoE.json.txn_no, 1000);
+  ok('Scheduled auto re-match: GR caught up → sweep releases the hold, invoice now matched + payable → Paid',
+    rerun?.status === 'success' && /released \d+/i.test(rerun?.summary ?? '') && mE.json.match_status === 'matched' && truthy(mE.json.payable) && payE2.json.bill_status === 'Paid',
+    JSON.stringify({ sum: rerun?.summary, match: mE.json.match_status, pay: payE2.json.bill_status }));
+
+  // (f) unmappable document → NeedsReview; posting WITHOUT a PO books a non-PO bill (fail-open, payable).
+  const scanF = `ร้านสาธารณูปโภค ไม่มีในระบบ\nInvoice# UTIL-77\n2026-07-01\nรวมทั้งสิ้น 777.00`;
+  const intF = await inj('POST', '/api/procurement/ap-intake', admin, { text: scanF });
+  const postF = await inj('POST', `/api/procurement/ap-intake/${intF.json.intake_no}/post`, admin, {});
+  const payF = await payFull(postF.json.txn_no, 777);
+  ok('Unmappable scan → NeedsReview; posted without PO → non-PO bill, no match row, payable (fail-open)',
+    intF.json.status === 'NeedsReview' && (intF.json.candidates ?? []).length === 0 && postF.json.match_status == null && truthy(postF.json.payable) && payF.json.bill_status === 'Paid',
+    JSON.stringify({ st: intF.json.status, match: postF.json.match_status, pay: payF.json.bill_status }));
+
+  // (g) worklist + RLS: HQ sees the intakes; tenant T2 sees none; idempotent re-post returns the same bill.
+  const wlI = await inj('GET', '/api/procurement/ap-intake', admin);
+  const wlIT2 = await inj('GET', '/api/procurement/ap-intake', procT2);
+  const repost = await inj('POST', `/api/procurement/ap-intake/${intB.json.intake_no}/post`, admin, {});
+  ok('Intake worklist: HQ sees all intakes; tenant T2 sees none (RLS); re-post is idempotent (same txn)',
+    (wlI.json.intakes ?? []).length >= 6 && (wlIT2.json.intakes ?? []).length === 0 && repost.json.txn_no === postB.json.txn_no,
+    JSON.stringify({ hq: wlI.json.count, t2: wlIT2.json.count, same: repost.json.txn_no === postB.json.txn_no }));
+
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

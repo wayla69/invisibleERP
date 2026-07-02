@@ -6,5 +6,6 @@ import { DocAiController } from './doc-ai.controller';
 @Module({
   controllers: [DocAiController],
   providers: [DocAiService],
+  exports: [DocAiService], // AP-intake (scan → PO auto-map) reuses the extractor
 })
 export class DocAiModule {}

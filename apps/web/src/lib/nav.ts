@@ -296,6 +296,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.procurement', href: '/procurement', icon: ShoppingBag, perms: ['procurement'] },
       { label: 'nav.rfqs', href: '/procurement/rfqs', icon: ClipboardList, perms: ['procurement'] },
       { label: 'nav.po_match', href: '/procurement/match', icon: CheckCheck, perms: ['procurement'] },
+      // scan → PO auto-map → automated 3-way match (EXP-10); booking the bill stays a creditors action
+      { label: 'nav.ap_intake', href: '/procurement/ap-intake', icon: ScanLine, perms: ['procurement', 'creditors'] },
       { label: 'nav.supplier_scorecards', href: '/supplier-scorecards', icon: Award, perms: ['procurement', 'exec'] },
       { label: 'nav.supplier_prices', href: '/supplier-prices', icon: Tag, perms: ['procurement', 'md_vendor', 'planner', 'exec'] },
       { label: 'nav.doc_ai', href: '/doc-ai', icon: FileScan, perms: ['procurement', 'creditors', 'exec'] },

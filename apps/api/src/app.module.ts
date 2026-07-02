@@ -96,6 +96,7 @@ import { AutomationModule } from './modules/automation/automation.module';
 import { QueryModule } from './modules/query/query.module';
 import { CopilotModule } from './modules/copilot/copilot.module';
 import { DocAiModule } from './modules/doc-ai/doc-ai.module';
+import { ApIntakeModule } from './modules/ap-intake/ap-intake.module';
 import { NlAnalyticsModule } from './modules/nl-analytics/nl-analytics.module';
 import { AiConfigModule } from './modules/ai-config/ai-config.module';
 import { ControlsModule } from './modules/controls/controls.module';
@@ -217,6 +218,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     QueryModule,
     CopilotModule,
     DocAiModule,
+    ApIntakeModule,
     NlAnalyticsModule,
     AiConfigModule,
     ControlsModule,

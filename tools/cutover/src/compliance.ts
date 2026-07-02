@@ -11,6 +11,8 @@
  *   EXP-01/EXP-09 — 3-way match HARD-GATES AP payment: a PO-based invoice failing match (price/qty variance)
  *            is blocked from payment (MATCH_BLOCKED) until a DIFFERENT user overrides the variance (SoD).
  *            (PwC panel called this "EXP-03"; see compliance/CONTROL_STATUS_HONEST.md for the ID crosswalk.)
+ *   EXP-10 — AP invoice intake: a scanned invoice is auto-mapped to its PO and 3-way matched IN the posting
+ *            flow (never books unmatched); a duplicate vendor invoice number is refused (DUPLICATE_INVOICE).
  *   PAY-03 — Payroll run maker-checker: a run posts a Draft JE excluded from balances until a different user approves.
  *   ITGC-AC-09 — SoD preventive block: assigning a permission set that holds both sides of a conflict
  *            rule is blocked unless an explicit override-with-reason is supplied (and logged).
@@ -1006,6 +1008,26 @@ async function main() {
   ok('EXP-01/EXP-09: independent override (≠ matcher) unblocks → payment request now accepted (PendingApproval)',
     exOvr.json.override === true && exOvr.json.override_by !== 'admin' && (exPayOk.status === 200 || exPayOk.status === 201) && exPayOk.json.status === 'PendingApproval',
     JSON.stringify({ ovr: exOvr.json.override, by: exOvr.json.override_by, pay: exPayOk.json.status }));
+
+  // ════════════════════════ EXP-10 — AP invoice INTAKE: scan → PO auto-map → matched-at-posting ════════════════════════
+  // A scanned invoice carrying its PO number auto-posts ONLY through the 3-way match (bill + verdict in one
+  // flow, payable when matched); the same vendor invoice number scanned again is never auto-posted and an
+  // explicit post is refused (duplicate-payment prevention). Deeper variants (ambiguity → NeedsReview,
+  // cumulative PO guard, scheduled auto re-match release) are re-performed in the `match` harness.
+  const exPo2 = await inj('POST', '/api/procurement/pos', admin, { vendor_id: VEXP, items: [{ item_id: 'EXP3X', order_qty: 50, unit_price: 20 }] });
+  const exPo2No = exPo2.json.po_no as string;
+  await inj('PATCH', `/api/procurement/pos/${exPo2No}/approve`, admin, { approve: true });
+  await inj('POST', '/api/procurement/grs', admin, { po_no: exPo2No, items: [{ item_id: 'EXP3X', received_qty: 50 }] });
+  const exScan = `ผู้ขาย EXP-03 จำกัด\nInvoice# IV-EXP10-1\n2026-07-01\nPO Number: ${exPo2No}\nรวมทั้งสิ้น 1,000.00`;
+  const exIntake = await inj('POST', '/api/procurement/ap-intake/auto', admin, { text: exScan });
+  ok('EXP-10: scanned invoice auto-maps to its PO and posts THROUGH the 3-way match → matched, payable',
+    exIntake.json.po_no === exPo2No && exIntake.json.status === 'Posted' && exIntake.json.match_status === 'matched' && exIntake.json.payable === true,
+    JSON.stringify({ po: exIntake.json.po_no, st: exIntake.json.status, match: exIntake.json.match_status }));
+  const exDup = await inj('POST', '/api/procurement/ap-intake/auto', admin, { text: exScan });
+  const exDupPost = await inj('POST', `/api/procurement/ap-intake/${exDup.json.intake_no}/post`, admin, {});
+  ok('EXP-10: duplicate invoice number re-scanned → NOT auto-posted; explicit post → 409 DUPLICATE_INVOICE',
+    exDup.json.auto_posted === false && exDup.json.dup_of != null && exDupPost.status === 409 && exDupPost.json.error?.code === 'DUPLICATE_INVOICE',
+    JSON.stringify({ dup: exDup.json.dup_of, post: exDupPost.status }));
 
   console.log('\n── COSO / ICFR control tests (GL-05 · GL-10 · period-lock · RLS · REV-08 · AC-09 · AC-08 · AC-06 · AC-10 · INV-01/02/04/05 · LYL-03..21) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

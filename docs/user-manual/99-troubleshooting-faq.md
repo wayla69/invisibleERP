@@ -64,6 +64,9 @@ your code below.
 | `MATCH_BLOCKED` | The supplier invoice failed the 3-way match (PO ↔ GR ↔ invoice), so it can't be paid. | Investigate the variance (quantity / price). Fix the document, or have an authorised user **override** the match with a reason. See [Procurement](./03-procurement.md). |
 | `AP_PREPAID_BLOCKED` | You tried to create a supplier bill that is already paid. | Create the bill **Unpaid**, then request the payment so a second person can approve it (control EXP-06). |
 | `AP_OVERPAY` (ยอดจ่ายเกินยอดคงค้าง) | The payment amount exceeds the bill's outstanding balance (including requests already awaiting approval). | Reduce the amount to the remaining balance. |
+| `DUPLICATE_INVOICE` (409) | The scanned invoice's number was already received or booked (another intake or AP bill carries it). | Check the earlier document shown in the error. If this really is a separate bill, an accountant can post it deliberately with the *allow duplicate* option. See [Procurement — AP intake](./03-procurement.md). |
+| `PO_NOT_APPROVED` (on intake map) | You tried to map a scanned invoice to a PO that is still Draft/Pending or was cancelled. | Have Procurement approve the PO first (or pick the correct approved PO). |
+| `INTAKE_AMOUNT_REQUIRED` | The scan didn't yield an invoice amount, so the bill can't be booked. | Re-scan or correct the document text, then post again. |
 
 ### Finance & General Ledger
 

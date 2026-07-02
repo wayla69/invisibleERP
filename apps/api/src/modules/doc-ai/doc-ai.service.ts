@@ -24,19 +24,24 @@ export class DocAiService {
       if (nums.length) amount = Math.max(...nums);
     }
     const taxId = text.match(/(\d{13})/)?.[1] ?? null;
+    // PO reference (feeds the AP-intake auto-mapper): prefer the canonical PO-YYYYMMDD-NNN shape anywhere
+    // in the document, else a labelled reference ("PO no", "Purchase Order", "ใบสั่งซื้อเลขที่", …).
+    const po_no = text.match(/\b(PO-\d{8}-\d{1,4})\b/i)?.[1]?.toUpperCase()
+      ?? text.match(/(?:P\.?O\.?|purchase\s*order|ใบสั่งซื้อ)[\s#:.]*(?:no\.?|number|เลขที่)?[\s#:.]*([A-Za-z]{2,4}-[A-Za-z0-9/\-]{3,})/i)?.[1]?.toUpperCase()
+      ?? null;
     const firstLine = (text.split(/\n/).map((s) => s.trim()).filter(Boolean)[0] ?? '').slice(0, 80);
-    return { vendor_name: firstLine || null, vendor_tax_id: taxId, invoice_no, invoice_date, amount, currency: 'THB' };
+    return { vendor_name: firstLine || null, vendor_tax_id: taxId, invoice_no, invoice_date, amount, currency: 'THB', po_no };
   }
 
   async extractInvoice(text: string, _user: JwtUser) {
     const t = (text ?? '').trim();
-    if (!t) return { fields: { vendor_name: null, vendor_tax_id: null, invoice_no: null, invoice_date: null, amount: null, currency: 'THB' }, source: 'none' };
+    if (!t) return { fields: { vendor_name: null, vendor_tax_id: null, invoice_no: null, invoice_date: null, amount: null, currency: 'THB', po_no: null }, source: 'none' };
     if (!this.apiKey) return { fields: this.ruleExtract(t), source: 'rules' };
     try {
       const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
       const res: any = await client.create({
         model: this.model, max_tokens: 1024,
-        system: 'You extract vendor-invoice fields. Return ONLY JSON: {vendor_name, vendor_tax_id, invoice_no, invoice_date (YYYY-MM-DD), amount (number), currency}. No prose.',
+        system: 'You extract vendor-invoice fields. Return ONLY JSON: {vendor_name, vendor_tax_id, invoice_no, invoice_date (YYYY-MM-DD), amount (number), currency, po_no (the referenced purchase-order number, null if absent)}. No prose.',
         messages: [{ role: 'user', content: `Extract from this invoice:\n${t}` }],
       });
       const out = (res.content as any[]).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
