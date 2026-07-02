@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosItems, custPosSales, demandForecasts } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
-import { ALGOS, walkForward, wape, mase, rmse, bias, type Forecaster } from './forecast-algorithms';
+import { ALGOS, walkForward, wape, mase, rmse, bias, type Forecaster, type ForecastContext } from './forecast-algorithms';
 
 const LOOKBACK = 400;        // days of POS history to build the demand series from
 const MIN_HISTORY = 14;      // need at least 2 weeks to backtest meaningfully
@@ -52,9 +52,9 @@ export class DemandForecastService {
   }
 
   // Backtest every candidate model; return metrics sorted best-WAPE-first.
-  private evaluate(series: number[], testSize: number): AlgoMetric[] {
+  private evaluate(series: number[], testSize: number, ctx?: ForecastContext): AlgoMetric[] {
     const out = Object.entries(ALGOS).map(([algorithm, f]: [string, Forecaster]) => {
-      const { actual, pred: raw } = walkForward(series, f, testSize);
+      const { actual, pred: raw } = walkForward(series, f, testSize, ctx);
       // Score the SAME non-negative forecast we deploy (forecast() clamps to ≥ 0), so model selection
       // reflects production behaviour rather than a model's raw (possibly negative) extrapolation.
       const pred = raw.map((x) => Math.max(0, x));
@@ -74,7 +74,7 @@ export class DemandForecastService {
     const series = await this.dailyDemand(dto.item_id);
     if (series.length < MIN_HISTORY) throw new BadRequestException({ code: 'INSUFFICIENT_HISTORY', message: `Need ≥${MIN_HISTORY} days of demand history`, messageTh: `ต้องมีประวัติอย่างน้อย ${MIN_HISTORY} วัน` });
     const testSize = this.testSize(series.length, dto.test_size);
-    const candidates = this.evaluate(series, testSize);
+    const candidates = this.evaluate(series, testSize, { lastDate: ymd() });
     return { item_id: dto.item_id, data_days: series.length, test_size: testSize, candidates, best: candidates[0] };
   }
 
@@ -85,8 +85,8 @@ export class DemandForecastService {
     const series = await this.dailyDemand(itemId);
     if (series.length < MIN_HISTORY) return null;
     const hz = Math.min(Math.max(1, Math.floor(horizon)), 90);
-    const chosen = this.evaluate(series, this.testSize(series.length))[0];
-    const forecast = ALGOS[chosen.algorithm](series, hz).map((x) => Math.max(0, r2(x)));
+    const chosen = this.evaluate(series, this.testSize(series.length), { lastDate: ymd() })[0];
+    const forecast = ALGOS[chosen.algorithm](series, hz, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));
     return { algorithm: chosen.algorithm, forecast, wape: chosen.wape, data_days: series.length };
   }
 
@@ -96,7 +96,7 @@ export class DemandForecastService {
     const series = await this.dailyDemand(dto.item_id);
     if (series.length < MIN_HISTORY) throw new BadRequestException({ code: 'INSUFFICIENT_HISTORY', message: `Need ≥${MIN_HISTORY} days of demand history`, messageTh: `ต้องมีประวัติอย่างน้อย ${MIN_HISTORY} วัน` });
     const horizon = dto.horizon && dto.horizon > 0 ? Math.min(dto.horizon, 90) : DEFAULT_HORIZON;
-    const candidates = this.evaluate(series, this.testSize(series.length, dto.test_size));
+    const candidates = this.evaluate(series, this.testSize(series.length, dto.test_size), { lastDate: ymd() });
 
     let chosen: AlgoMetric;
     let selectedBy: string;
@@ -107,7 +107,7 @@ export class DemandForecastService {
     } else { chosen = candidates[0]; selectedBy = 'lowest_wape'; }
 
     // demand can't be negative — clamp (Holt can extrapolate below 0 on a declining trend).
-    const forecast = ALGOS[chosen.algorithm](series, horizon).map((x) => Math.max(0, r2(x)));
+    const forecast = ALGOS[chosen.algorithm](series, horizon, { lastDate: ymd() }).map((x) => Math.max(0, r2(x)));
 
     await db.insert(demandForecasts).values({
       tenantId: user.tenantId, itemId: dto.item_id, algorithm: chosen.algorithm, selectedBy, horizon,

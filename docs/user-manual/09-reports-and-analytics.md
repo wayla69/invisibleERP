@@ -123,10 +123,12 @@ for [procurement](./03-procurement.md).
 
 For items with enough sales history, the system forecasts future demand using
 several classic models (moving average, exponential smoothing, Holt trend,
-seasonal-naive, Croston and Croston-SBA for sporadic items, and a
+seasonal-naive, Croston and Croston-SBA for sporadic items, a
 **day-of-week seasonal** model for weekly patterns like weekend-heavy
-restaurant demand) and **automatically picks the most accurate one** by
-back-testing each on recent history.
+restaurant demand, and a **Thai-calendar holiday** model that learns each
+item's uplift on fixed public holidays — ปีใหม่, สงกรานต์, วันแม่/วันพ่อ — and
+applies it to future dates that land on one) and **automatically picks the
+most accurate one** by back-testing each on recent history.
 
 1. **Compare models** — the **เทียบโมเดล** tab back-tests every model for an item.
    You get each model's accuracy scored by **WAPE** (lower is better) and

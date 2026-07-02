@@ -656,6 +656,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-RPT-042 | Residual-gap BI report types (exec / budget / supplier) | RG-1/2/3 (docs/21); ELC-06 | docs/21 §2 |
 | UAT-RPT-043 | Streaming analytics — live KPI feed | (operational) | docs/22 Phase B |
 | UAT-RPT-044 | Weekly-seasonal demand auto-selects the day-of-week model | demand forecasting | 26 §7 |
+| UAT-RPT-045 | Thai-holiday demand model applies the learned uplift | demand forecasting | 26 §7 |
 | UAT-UI-DEM-01 | Demand forecasting screen (forecast / backtest / accuracy) (UI) | Feature (demand ML UI) | 13 §7 |
 | UAT-UI-BUD-01 | Budget vs Actual screen (set budget + variance) (UI) | Feature (budget-vs-actual UI) | 13 §7 |
 | UAT-BUD-02 | Budget maker-checker — pending excluded until approved | BUD-01 | 13 §7 |
