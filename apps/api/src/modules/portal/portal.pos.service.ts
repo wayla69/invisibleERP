@@ -16,8 +16,8 @@ import { LedgerService } from '../ledger/ledger.service';
 import { RecipeService } from '../menu/recipe.service';
 import { CostingService } from '../costing/costing.service';
 import { PricingService } from '../pricing/pricing.service';
-import { JournalService } from '../pos-fiscal/journal.service';
-import { LockingService } from '../pos-scale/locking.service';
+import { JournalService } from '../pos/fiscal/journal.service';
+import { LockingService } from '../pos/scale/locking.service';
 
 export interface PortalSaleDto {
   items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number; modifier_option_ids?: number[] }[];

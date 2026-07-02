@@ -8,7 +8,7 @@ import { n, fx, ymd } from '../../../database/queries';
 import type { JwtUser } from '../../../common/decorators';
 import { sellerSnapshot, isValidTaxId } from './tax-docs.snapshot';
 import type { IssueFullDto } from './dto';
-import { EtaxService } from '../../pos-fiscal/etax.service';
+import { EtaxService } from '../../pos/fiscal/etax.service';
 
 @Injectable()
 export class TaxInvoiceService {

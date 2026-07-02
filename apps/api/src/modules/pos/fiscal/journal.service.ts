@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq, desc, isNull } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { posJournal } from '../../database/schema';
-import type { JwtUser } from '../../common/decorators';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { posJournal } from '../../../database/schema';
+import type { JwtUser } from '../../../common/decorators';
 
 export interface JournalEntry { doc_type: string; doc_no?: string; action?: string; payload: Record<string, any> }
 

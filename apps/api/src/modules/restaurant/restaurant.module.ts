@@ -24,7 +24,7 @@ import { RealtimeScope } from './realtime.scope';
 import { RestaurantController } from './restaurant.controller';
 import { QrController } from './qr.controller';
 import { ChannelController } from './channel.controller';
-import { PosScaleModule } from '../pos-scale/pos-scale.module';
+import { PosScaleModule } from '../pos/scale/pos-scale.module';
 
 // Restaurant / F&B POS: dine-in orders + KDS, floor-plan tables, table QR sessions (public diner),
 // online/delivery/kiosk channel orders, PromptPay pay → cust_pos_sales + GL + abbreviated tax invoice.

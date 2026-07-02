@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
-import { RealtimeService } from '../pos-scale/realtime.service';
+import { RealtimeService } from '../pos/scale/realtime.service';
 import { eq, and, inArray, desc, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {

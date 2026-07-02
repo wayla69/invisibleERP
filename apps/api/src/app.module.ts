@@ -83,17 +83,11 @@ import { ImagesModule } from './modules/images/images.module';
 import { AdminUsersModule } from './modules/admin-users/admin-users.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
-import { PosControlModule } from './modules/pos-control/pos-control.module';
-import { PosTerminalModule } from './modules/pos-terminal/pos-terminal.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
 import { HcmModule } from './modules/hcm/hcm.module';
 import { PricingModule } from './modules/pricing/pricing.module';
-import { PosAuditModule } from './modules/pos-audit/pos-audit.module';
-import { PosFiscalModule } from './modules/pos-fiscal/pos-fiscal.module';
-import { PosScaleModule } from './modules/pos-scale/pos-scale.module';
 import { ChannelAdapterModule } from './modules/channel-adapter/channel-adapter.module';
-import { PosLoyaltyLaborModule } from './modules/pos-loyalty-labor/pos-loyalty-labor.module';
 import { BranchModule } from './modules/branch/branch.module';
 import { EssModule } from './modules/ess/ess.module';
 import { SupplierModule } from './modules/supplier/supplier.module';
@@ -205,17 +199,11 @@ import { PdfModule } from './modules/pdf/pdf.module';
     AdminUsersModule,
     PayrollModule,
     ManufacturingModule,
-    PosControlModule,
-    PosTerminalModule,
     ProjectsModule,
     MfgDepthModule,
     HcmModule,
     PricingModule,
-    PosAuditModule,
-    PosFiscalModule,
-    PosScaleModule,
     ChannelAdapterModule,
-    PosLoyaltyLaborModule,
     BranchModule,
     EssModule,
     SupplierModule,
