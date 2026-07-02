@@ -220,7 +220,14 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
   proves an event published on node A reaches an SSE client on node B; no-Redis mode still passes
   the existing `pos-scale`/BI harness checks.
 
-### R1-4 · Money math: kill float equality — closes AUD-ARC-04
+### R1-4 · Money math: kill float equality — closes AUD-ARC-04 — **DELIVERED 2026-07-02**
+> Shipped: `common/money.ts` (`toMinor4` bigint scale-4 minor units — numeric strings parsed exactly with
+> round-half-up, JS numbers clamped once; `minorToNumber4`, `eqMoney4`) and the four ledger equality sites
+> rewritten to bigint comparison: `postEntry` UNBALANCED check, recurring-template validation,
+> `trialBalance` totals/`balanced`, `balanceSheet` `balanced` (new `typeTotalM` over raw SQL strings).
+> Response shapes/error codes unchanged. Unit suite `money.test.ts` (7 — incl. beyond-2^53 exactness,
+> order-independence, the 0.1+0.2 clamp) + vitest coverage scope ratcheted. The wider float sweep across
+> finance/projects services stays with R2-5's ratchet (this piece is the ledger-invariant fix).
 - `ledger.service.ts:578` and every `round4/n()` comparison site: compare/sum in **integer
   minor-units** (scale-4 → `BigInt` of `numeric * 10^4`, parsed from the pg string **without** a
   float hop) or push the sum into SQL (`SUM(debit)::numeric`) and compare the returned strings.
@@ -444,3 +451,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.1 | 2026-07-02 | ERP/Product | R0-1 delivered (employee/vendor PII encrypted at rest; decision recorded: passthrough → no migration/blind index; DSAR-for-employees deferred to the AUD-LGL-03 piece) |
 | 1.2 | 2026-07-02 | ERP/Product | R1-1 delivered (0211 backfills 132 tenant indexes; `tenant-idx` CI guard added; real count 132 vs audit's ~40-file estimate) |
 | 1.3 | 2026-07-02 | ERP/Product | R3-1 + R3-2 delivered (census 169/166/3/0 tagged + CI-guarded across 5 compliance docs; docs/09 SUPERSEDED banner; PRE_PRODUCTION audit banner-marked historical) |
+| 1.4 | 2026-07-02 | ERP/Product | R1-4 delivered (bigint minor-unit balance invariants in the ledger; common/money.ts + money.test.ts; GL narrative rev 1.7) |

@@ -6,6 +6,7 @@ import { accounts, journalEntries, journalLines, fiscalPeriods, ledgers, posMemb
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n, fx } from '../../database/queries';
+import { toMinor4, minorToNumber4 } from '../../common/money';
 import { assertTemplatesSubsetOf, isIndustryKey, COA_TEMPLATES, type IndustryKey, type CoaTemplateRow } from './coa-templates';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -190,9 +191,13 @@ export class LedgerService {
       }
     }
 
-    const totalDebit = round4(nzLines.reduce((a, l) => a + n(l.debit), 0));
-    const totalCredit = round4(nzLines.reduce((a, l) => a + n(l.credit), 0));
-    if (totalDebit !== totalCredit) {
+    // Exact scale-4 balance check (docs/24 R1-4): accumulate in bigint minor units — float sums that are
+    // then rounded can drift across a rounding boundary and are not a ledger-grade invariant.
+    const totalDebitM = nzLines.reduce((a, l) => a + toMinor4(n(l.debit)), 0n);
+    const totalCreditM = nzLines.reduce((a, l) => a + toMinor4(n(l.credit)), 0n);
+    const totalDebit = minorToNumber4(totalDebitM);
+    const totalCredit = minorToNumber4(totalCreditM);
+    if (totalDebitM !== totalCreditM) {
       throw new BadRequestException({
         code: 'UNBALANCED',
         message: `Entry not balanced: debit ${totalDebit} != credit ${totalCredit}`,
@@ -292,9 +297,9 @@ export class LedgerService {
     if (!(FREQUENCIES as readonly string[]).includes(dto.frequency)) throw new BadRequestException({ code: 'BAD_FREQUENCY', message: `frequency must be one of ${FREQUENCIES.join('/')}`, messageTh: 'รอบเวลาไม่ถูกต้อง' });
     const nz = lines.filter((l) => !(n(l.debit) === 0 && n(l.credit) === 0));
     if (!nz.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No non-zero template lines', messageTh: 'ไม่มีรายการบัญชีที่มีมูลค่า' });
-    const td = round4(nz.reduce((a, l) => a + n(l.debit), 0));
-    const tc = round4(nz.reduce((a, l) => a + n(l.credit), 0));
-    if (td !== tc) throw new BadRequestException({ code: 'UNBALANCED', message: `Template not balanced: debit ${td} != credit ${tc}`, messageTh: 'แม่แบบไม่สมดุล (เดบิตไม่เท่าเครดิต)' });
+    const tdM = nz.reduce((a, l) => a + toMinor4(n(l.debit)), 0n);
+    const tcM = nz.reduce((a, l) => a + toMinor4(n(l.credit)), 0n);
+    if (tdM !== tcM) throw new BadRequestException({ code: 'UNBALANCED', message: `Template not balanced: debit ${minorToNumber4(tdM)} != credit ${minorToNumber4(tcM)}`, messageTh: 'แม่แบบไม่สมดุล (เดบิตไม่เท่าเครดิต)' });
     const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
     const nextRun = dto.startDate ?? ymd();
     const [r] = await db.insert(recurringJournals).values({
@@ -573,9 +578,10 @@ export class LedgerService {
       const credit = round4(n(r.credit));
       return { account_code: r.account_code, account_name: r.account_name, account_type: r.account_type, debit, credit, balance: round4(debit - credit) };
     });
-    const totalDebit = round4(out.reduce((a: number, r: any) => a + r.debit, 0));
-    const totalCredit = round4(out.reduce((a: number, r: any) => a + r.credit, 0));
-    return { period: period ?? null, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING, rows: out, totals: { debit: totalDebit, credit: totalCredit, balanced: totalDebit === totalCredit } };
+    // Totals from the raw SQL numeric strings in bigint minor units — exact, order-independent (R1-4).
+    const totalDebitM = rows.reduce((a: bigint, r: any) => a + toMinor4(r.debit), 0n);
+    const totalCreditM = rows.reduce((a: bigint, r: any) => a + toMinor4(r.credit), 0n);
+    return { period: period ?? null, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING, rows: out, totals: { debit: minorToNumber4(totalDebitM), credit: minorToNumber4(totalCreditM), balanced: totalDebitM === totalCreditM } };
   }
 
   // ───────────────────── Income Statement ─────────────────────
@@ -643,23 +649,24 @@ export class LedgerService {
   async balanceSheet(asOf: string, ledgerCode?: string | null) {
     const db = this.db as any;
     const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
-    const assets = round4(typeTotal(rows, 'Asset', 'debit') - typeTotal(rows, 'Asset', 'credit'));
-    const liabilities = round4(typeTotal(rows, 'Liability', 'credit') - typeTotal(rows, 'Liability', 'debit'));
+    // Exact minor-unit arithmetic (docs/24 R1-4): the balanced flag compares bigints, not rounded floats.
+    const assetsM = typeTotalM(rows, 'Asset', 'debit') - typeTotalM(rows, 'Asset', 'credit');
+    const liabilitiesM = typeTotalM(rows, 'Liability', 'credit') - typeTotalM(rows, 'Liability', 'debit');
     // equity INCLUDES 3100 Retained Earnings (closed-year results carried here by closeYear)
-    const equity = round4(typeTotal(rows, 'Equity', 'credit') - typeTotal(rows, 'Equity', 'debit'));
+    const equityM = typeTotalM(rows, 'Equity', 'credit') - typeTotalM(rows, 'Equity', 'debit');
     // current UNCLOSED-period P&L still sits in Revenue/Expense (closed years were zeroed into 3100)
-    const netIncome = round4(
-      (typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit')) -
-      (typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit')),
-    );
+    const netIncomeM =
+      (typeTotalM(rows, 'Revenue', 'credit') - typeTotalM(rows, 'Revenue', 'debit')) -
+      (typeTotalM(rows, 'Expense', 'debit') - typeTotalM(rows, 'Expense', 'credit'));
     // retained_earnings is a DISPLAY sub-total of equity (the 3100 balance) — not added again
-    const retainedEarnings = round4(rows.filter((r: any) => r.account_code === '3100').reduce((a: number, r: any) => a + (n(r.credit) - n(r.debit)), 0));
-    const liabilitiesEquity = round4(liabilities + equity + netIncome);
+    const retainedEarningsM = rows.filter((r: any) => r.account_code === '3100').reduce((a: bigint, r: any) => a + (toMinor4(r.credit) - toMinor4(r.debit)), 0n);
+    const liabilitiesEquityM = liabilitiesM + equityM + netIncomeM;
     return {
       as_of: asOf, ledger: ledgerCode ?? LEADING,
-      assets, liabilities, equity, retained_earnings: retainedEarnings, net_income: netIncome,
-      liabilities_plus_equity: liabilitiesEquity,
-      balanced: assets === liabilitiesEquity,
+      assets: minorToNumber4(assetsM), liabilities: minorToNumber4(liabilitiesM), equity: minorToNumber4(equityM),
+      retained_earnings: minorToNumber4(retainedEarningsM), net_income: minorToNumber4(netIncomeM),
+      liabilities_plus_equity: minorToNumber4(liabilitiesEquityM),
+      balanced: assetsM === liabilitiesEquityM,
     };
   }
 
@@ -1124,4 +1131,8 @@ function prevDay(ymdStr: string): string {
 }
 function typeTotal(rows: any[], type: string, side: 'debit' | 'credit'): number {
   return rows.filter((r) => r.account_type === type).reduce((a, r) => a + n(r[side]), 0);
+}
+// Exact variant over the raw SQL numeric strings, in bigint minor units (docs/24 R1-4 / AUD-ARC-04).
+function typeTotalM(rows: any[], type: string, side: 'debit' | 'credit'): bigint {
+  return rows.filter((r) => r.account_type === type).reduce((a: bigint, r) => a + toMinor4(r[side]), 0n);
 }

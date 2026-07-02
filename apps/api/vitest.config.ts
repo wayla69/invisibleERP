@@ -16,6 +16,7 @@ export default defineConfig({
         'src/common/ai-models.ts',
         'src/common/pii-redact.ts',
         'src/common/crypto.ts',
+        'src/common/money.ts',
         'src/database/encrypted-column.ts',
         'src/observability/runtime-metrics.ts',
       ],
