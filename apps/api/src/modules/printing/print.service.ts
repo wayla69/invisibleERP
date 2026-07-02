@@ -22,7 +22,7 @@ export class PrintService {
   // Enqueue a job. For a receipt with no explicit payload, render it from the sale now (so the queued bytes
   // are a stable snapshot). A second+ receipt job for the same sale is flagged as a COPY (สำเนา).
   async enqueue(dto: EnqueueDto, user: JwtUser, opts?: { taxInvoiceNo?: string | null; lang?: 'th' | 'en' | 'both' }) {
-    const db = this.db as any;
+    const db = this.db;
     const format = dto.format ?? 'escpos';
     let payload = dto.payload ?? '';
     if (dto.job_type === 'receipt') {
@@ -40,12 +40,12 @@ export class PrintService {
       station: dto.station ?? null, saleNo: dto.sale_no ?? null, orderNo: dto.order_no ?? null,
       format, payload, printerId: dto.printer_id ?? null, status: 'queued', createdBy: user.username,
     }).returning({ id: printJobs.id });
-    return { id: Number(r.id), job_type: dto.job_type, status: 'queued', format };
+    return { id: Number(r!.id), job_type: dto.job_type, status: 'queued', format };
   }
 
   // Agent pull: claim the oldest queued job for this tenant (and printer, if the agent declares one).
   async nextJob(user: JwtUser, printerId?: string): Promise<{ job: null | { id: number; job_type: string; station: string | null; sale_no: string | null; order_no: string | null; format: string; payload: string; printer_id: string | null } }> {
-    const db = this.db as any;
+    const db = this.db;
     const where = printerId
       ? and(eq(printJobs.status, 'queued'), sql`(${printJobs.printerId} IS NULL OR ${printJobs.printerId} = ${printerId})`)
       : eq(printJobs.status, 'queued');
@@ -60,7 +60,7 @@ export class PrintService {
 
   // Agent ack: mark printed (or failed with an error → re-queued for retry up to 5 attempts).
   async ack(id: number, ok: boolean, error: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [job] = await db.select().from(printJobs).where(eq(printJobs.id, id)).limit(1);
     if (!job) throw new NotFoundException({ code: 'JOB_NOT_FOUND', message: 'Job not found', messageTh: 'ไม่พบงานพิมพ์' });
     if (ok) {
@@ -87,7 +87,7 @@ export class PrintService {
   }
 
   async list(_user: JwtUser, status?: string, limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(printJobs.status, status) : undefined;
     const rows = await (where ? db.select().from(printJobs).where(where) : db.select().from(printJobs)).orderBy(desc(printJobs.id)).limit(limit);
     return { jobs: rows.map((r: any) => ({ id: Number(r.id), job_type: r.jobType, station: r.station, sale_no: r.saleNo, order_no: r.orderNo, format: r.format, status: r.status, attempts: r.attempts, error: r.error, created_at: r.createdAt, printed_at: r.printedAt })) };

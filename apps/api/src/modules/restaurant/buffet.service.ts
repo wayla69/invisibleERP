@@ -32,7 +32,7 @@ export class BuffetService {
 
   // ── admin (back office) ──
   async listPackages(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const pkgs = await db.select().from(buffetPackages).where(eq(buffetPackages.active, true)).orderBy(buffetPackages.id);
     const links = await db.select().from(buffetPackageItems);
     const skuById = await this.skuMap(links.map((l: any) => Number(l.menuItemId)));
@@ -45,7 +45,7 @@ export class BuffetService {
   }
 
   async createPackage(dto: { code: string; name: string; name_en?: string; price_per_pax: number; time_limit_min?: number; overtime_fee_per_pax?: number; item_skus?: string[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [p] = await db.insert(buffetPackages).values({
       tenantId: user.tenantId ?? null, code: dto.code, name: dto.name, nameEn: dto.name_en ?? null,
       pricePerPax: fx(dto.price_per_pax, 2), timeLimitMin: dto.time_limit_min ?? 90,
@@ -57,7 +57,7 @@ export class BuffetService {
   }
 
   async updatePackage(id: number, dto: { name?: string; name_en?: string; price_per_pax?: number; time_limit_min?: number; overtime_fee_per_pax?: number; active?: boolean; item_skus?: string[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const set: any = {};
     if (dto.name != null) set.name = dto.name;
     if (dto.name_en != null) set.nameEn = dto.name_en;
@@ -72,7 +72,7 @@ export class BuffetService {
 
   // ── diner (public) ──
   async publicTiers() {
-    const db = this.db as any;
+    const db = this.db;
     const pkgs = await db.select().from(buffetPackages).where(eq(buffetPackages.active, true)).orderBy(buffetPackages.id);
     return { tiers: pkgs.map(shapePkg) };
   }
@@ -80,7 +80,7 @@ export class BuffetService {
   // diner (or staff) starts a buffet on the table → set the session mode + window, open the order with the
   // per-pax charge line. One mode per session: rejected if the session already has an order (à la carte).
   async startBuffet(claim: { tenantId: number; tableId: number; sessionId: number }, packageId: number, pax: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const existing = await this.openOrderForSession(claim.sessionId);
     if (existing) throw new BadRequestException({ code: 'MODE_LOCKED', message: 'Session already has an order; cannot switch to buffet', messageTh: 'โต๊ะนี้มีรายการสั่งแล้ว เริ่มบุฟเฟต์ไม่ได้' });
     const [pkg] = await db.select().from(buffetPackages).where(and(eq(buffetPackages.id, packageId), eq(buffetPackages.active, true))).limit(1);
@@ -94,8 +94,8 @@ export class BuffetService {
       orderNo, tenantId: claim.tenantId, tableId: claim.tableId, sessionId: claim.sessionId,
       status: 'open', guestCount: seats, server: user.username, createdBy: user.username,
     }).returning({ id: dineInOrders.id });
-    await this.insertChargeLine(Number(h.id), claim.tenantId, packageId, CHARGE_REF, `บุฟเฟต์ ${pkg.name} × ${seats}`, n(pkg.pricePerPax), seats, user);
-    await this.dineIn.refreshOrderTotals(Number(h.id));
+    await this.insertChargeLine(Number(h!.id), claim.tenantId, packageId, CHARGE_REF, `บุฟเฟต์ ${pkg.name} × ${seats}`, n(pkg.pricePerPax), seats, user);
+    await this.dineIn.refreshOrderTotals(Number(h!.id));
 
     await db.update(tableSessions).set({ orderMode: 'buffet', buffetPackageId: packageId, pax: seats, buffetStartedAt: now, buffetExpiresAt: expires }).where(eq(tableSessions.id, claim.sessionId));
     await db.update(diningTables).set({ status: 'occupied', updatedAt: now }).where(and(eq(diningTables.id, claim.tableId), inArray(diningTables.status, ['available', 'reserved'] as any)));
@@ -110,7 +110,7 @@ export class BuffetService {
 
   // every ordered item must belong to the chosen tier
   async assertEligible(packageId: number, items: { sku?: string; menu_item_id?: number }[]) {
-    const db = this.db as any;
+    const db = this.db;
     const skus = items.filter((i) => i.sku != null).map((i) => i.sku!) as string[];
     const bySku = skus.length ? await db.select({ id: menuItems.id, sku: menuItems.sku }).from(menuItems).where(inArray(menuItems.sku, skus)) : [];
     const skuToId = new Map<string, number>(bySku.map((r: any) => [r.sku, Number(r.id)]));
@@ -123,7 +123,7 @@ export class BuffetService {
 
   // at bill time: if the window elapsed and the tier carries an overtime fee, add a one-off surcharge (idempotent)
   async applyOvertime(orderNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).limit(1);
     if (!o || !o.sessionId) return;
     const [s] = await db.select().from(tableSessions).where(eq(tableSessions.id, Number(o.sessionId))).limit(1);
@@ -140,7 +140,7 @@ export class BuffetService {
 
   // per-tier behaviour analytics: menu mix, covers, consumption per head, revenue + overtime (tenant-scoped)
   async analytics(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const pkgs = await db.select().from(buffetPackages).orderBy(buffetPackages.id);
     const tiers = [];
     for (const p of pkgs) {
@@ -181,7 +181,7 @@ export class BuffetService {
 
   // ── helpers ──
   private async insertChargeLine(orderId: number, tenantId: number | null, packageId: number, ref: string, name: string, unit: number, qty: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const now = new Date();
     await db.insert(dineInOrderItems).values({
       tenantId, orderId, stationId: null, itemId: ref, name,
@@ -192,13 +192,13 @@ export class BuffetService {
   }
 
   private async openOrderForSession(sessionId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [o] = await db.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, sessionId), ne(dineInOrders.status, 'cancelled'), ne(dineInOrders.status, 'closed'))).orderBy(desc(dineInOrders.id)).limit(1);
     return o;
   }
 
   private async setItems(packageId: number, skus: string[], user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.delete(buffetPackageItems).where(eq(buffetPackageItems.packageId, packageId));
     if (!skus.length) return;
     const rows = await db.select({ id: menuItems.id, sku: menuItems.sku }).from(menuItems).where(inArray(menuItems.sku, skus));
@@ -209,7 +209,7 @@ export class BuffetService {
   }
 
   private async getPackage(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [p] = await db.select().from(buffetPackages).where(eq(buffetPackages.id, id)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PACKAGE_NOT_FOUND', message: 'Buffet package not found', messageTh: 'ไม่พบแพ็กเกจบุฟเฟต์' });
     const links = await db.select().from(buffetPackageItems).where(eq(buffetPackageItems.packageId, id));
@@ -218,7 +218,7 @@ export class BuffetService {
   }
 
   private async skuMap(ids: number[]) {
-    const db = this.db as any;
+    const db = this.db;
     if (!ids.length) return new Map<number, string>();
     const rows = await db.select({ id: menuItems.id, sku: menuItems.sku }).from(menuItems).where(inArray(menuItems.id, ids));
     return new Map<number, string>(rows.map((r: any) => [Number(r.id), r.sku]));

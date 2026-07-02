@@ -27,7 +27,7 @@ export class CustomObjectsService {
   private shapeObj = (o: any) => ({ id: Number(o.id), object_key: o.objectKey, label: o.label, label_en: o.labelEn, icon: o.icon, active: o.active });
 
   private async findObject(key: string): Promise<any> {
-    const db = this.db as any;
+    const db = this.db;
     const [o] = await db.select().from(customObjects).where(and(eq(customObjects.objectKey, key), eq(customObjects.active, true))).limit(1);
     if (!o) throw new NotFoundException({ code: 'OBJECT_NOT_FOUND', message: `No custom object '${key}'`, messageTh: 'ไม่พบออบเจ็กต์' });
     return o;
@@ -41,7 +41,7 @@ export class CustomObjectsService {
 
   // ── objects ──
   async defineObject(dto: { object_key?: string; label: string; label_en?: string; icon?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const key = slug(dto.object_key ?? dto.label);
     if (!key) throw new BadRequestException({ code: 'BAD_OBJECT', message: 'object_key/label required', messageTh: 'ต้องระบุชื่อออบเจ็กต์' });
     const label = (dto.label ?? '').trim();
@@ -53,7 +53,7 @@ export class CustomObjectsService {
   }
 
   async listObjects(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(customObjects).where(eq(customObjects.active, true)).orderBy(desc(customObjects.id));
     return { objects: rows.map(this.shapeObj) };
   }
@@ -65,7 +65,7 @@ export class CustomObjectsService {
   }
 
   async removeObject(key: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const upd = await db.update(customObjects).set({ active: false }).where(and(eq(customObjects.objectKey, slug(key)), eq(customObjects.tenantId, user.tenantId as any))).returning({ id: customObjects.id });
     if (!upd.length) throw new NotFoundException({ code: 'OBJECT_NOT_FOUND', message: 'Object not found', messageTh: 'ไม่พบออบเจ็กต์' });
     return { object_key: slug(key), active: false };
@@ -73,19 +73,19 @@ export class CustomObjectsService {
 
   // ── records ──
   async createRecord(key: string, values: Record<string, any>, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.findObject(slug(key));
     const [reg] = await db.insert(customObjectRecords).values({ tenantId: user.tenantId ?? null, objectKey: o.objectKey, recordId: '', createdBy: user.username, updatedBy: user.username }).returning({ id: customObjectRecords.id });
-    const recordId = String(reg.id);
+    const recordId = String(reg!.id);
     await this.cf.setValues(o.objectKey, recordId, values ?? {}, user); // validates types/required/options + stores
     const full = await this.cf.getValues(o.objectKey, recordId, user);
     const display = this.displayFromFields(full.fields);
-    await db.update(customObjectRecords).set({ recordId, displayName: display }).where(eq(customObjectRecords.id, reg.id));
+    await db.update(customObjectRecords).set({ recordId, displayName: display }).where(eq(customObjectRecords.id, reg!.id));
     return { object_key: o.objectKey, record_id: recordId, display_name: display };
   }
 
   async listRecords(key: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.findObject(slug(key));
     const rows = await db.select().from(customObjectRecords).where(and(eq(customObjectRecords.objectKey, o.objectKey), eq(customObjectRecords.active, true))).orderBy(desc(customObjectRecords.id));
     const fields = (await this.cf.listDefs(o.objectKey, user)).fields;
@@ -98,7 +98,7 @@ export class CustomObjectsService {
   }
 
   async getRecord(key: string, recordId: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.findObject(slug(key));
     const [reg] = await db.select().from(customObjectRecords).where(and(eq(customObjectRecords.objectKey, o.objectKey), eq(customObjectRecords.recordId, recordId), eq(customObjectRecords.active, true))).limit(1);
     if (!reg) throw new NotFoundException({ code: 'RECORD_NOT_FOUND', message: 'Record not found', messageTh: 'ไม่พบเรคคอร์ด' });
@@ -107,7 +107,7 @@ export class CustomObjectsService {
   }
 
   async updateRecord(key: string, recordId: string, values: Record<string, any>, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.findObject(slug(key));
     const [reg] = await db.select({ id: customObjectRecords.id }).from(customObjectRecords).where(and(eq(customObjectRecords.objectKey, o.objectKey), eq(customObjectRecords.recordId, recordId), eq(customObjectRecords.active, true))).limit(1);
     if (!reg) throw new NotFoundException({ code: 'RECORD_NOT_FOUND', message: 'Record not found', messageTh: 'ไม่พบเรคคอร์ด' });
@@ -119,7 +119,7 @@ export class CustomObjectsService {
   }
 
   async removeRecord(key: string, recordId: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.findObject(slug(key));
     const upd = await db.update(customObjectRecords).set({ active: false, updatedBy: user.username, updatedAt: new Date() }).where(and(eq(customObjectRecords.objectKey, o.objectKey), eq(customObjectRecords.recordId, recordId))).returning({ id: customObjectRecords.id });
     if (!upd.length) throw new NotFoundException({ code: 'RECORD_NOT_FOUND', message: 'Record not found', messageTh: 'ไม่พบเรคคอร์ด' });

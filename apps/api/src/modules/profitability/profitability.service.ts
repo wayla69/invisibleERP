@@ -15,18 +15,18 @@ export class ProfitabilityService {
   // ── Segments ──
 
   async createSegment(dto: { segment_type: string; code: string; name: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.insert(profitSegments).values({
       tenantId: user.tenantId!, segmentType: dto.segment_type, code: dto.code, name: dto.name, isActive: true,
     }).onConflictDoUpdate({
       target: [profitSegments.tenantId, profitSegments.segmentType, profitSegments.code],
       set: { name: dto.name, isActive: true },
     }).returning();
-    return { id: Number(s.id), segment_type: s.segmentType, code: s.code, name: s.name };
+    return { id: Number(s!.id), segment_type: s!.segmentType, code: s!.code, name: s!.name };
   }
 
   async listSegments(segmentType?: string, user?: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [eq(profitSegments.tenantId, user!.tenantId!), eq(profitSegments.isActive, true)];
     if (segmentType) conds.push(eq(profitSegments.segmentType, segmentType));
     const rows = await db.select().from(profitSegments).where(and(...conds)).orderBy(profitSegments.segmentType, profitSegments.code);
@@ -36,13 +36,13 @@ export class ProfitabilityService {
   // ── Allocation Rules ──
 
   async createRule(dto: { name: string; from_account_code: string; to_segment_type: string; driver?: string; weights?: { segment_code: string; weight: number }[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [rule] = await db.insert(allocationRules).values({
       tenantId: user.tenantId!, name: dto.name,
       fromAccountCode: dto.from_account_code, toSegmentType: dto.to_segment_type,
       driver: dto.driver ?? 'equal', isActive: true,
     }).returning();
-    const ruleId = Number(rule.id);
+    const ruleId = Number(rule!.id);
 
     if (dto.weights?.length) {
       await db.insert(allocationWeights).values(
@@ -52,11 +52,11 @@ export class ProfitabilityService {
         set: { weight: sql`excluded.weight` },
       });
     }
-    return { id: ruleId, name: rule.name, from_account_code: rule.fromAccountCode, to_segment_type: rule.toSegmentType, driver: rule.driver };
+    return { id: ruleId, name: rule!.name, from_account_code: rule!.fromAccountCode, to_segment_type: rule!.toSegmentType, driver: rule!.driver };
   }
 
   async listRules(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(allocationRules).where(and(eq(allocationRules.tenantId, user.tenantId!), eq(allocationRules.isActive, true)));
     return { rules: rows.map((r: any) => ({ id: Number(r.id), name: r.name, from_account_code: r.fromAccountCode, to_segment_type: r.toSegmentType, driver: r.driver })), count: rows.length };
   }
@@ -64,14 +64,14 @@ export class ProfitabilityService {
   // ── Allocation Run ──
 
   async runAllocation(dto: { period: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const period = dto.period;
 
     const rules = await db.select().from(allocationRules).where(and(eq(allocationRules.tenantId, tenantId), eq(allocationRules.isActive, true)));
 
     const [run] = await db.insert(allocationRuns).values({ tenantId, period, status: 'Draft', runBy: user.username }).returning();
-    const runId = Number(run.id);
+    const runId = Number(run!.id);
 
     const lineValues: any[] = [];
 
@@ -127,7 +127,7 @@ export class ProfitabilityService {
   // Returns contribution margin = revenue (4xxx) - direct expenses (5xxx) + allocated amounts per segment
 
   async profitabilityReport(dto: { period: string; segment_type?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const period = dto.period;
 

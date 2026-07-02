@@ -22,7 +22,7 @@ export class LineWebhookService {
   ) {}
 
   async handle(tenantCode: string, rawBody: Buffer | undefined, signature: string | undefined, parsed: any) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, tenantCode)).limit(1);
     if (!t) throw new UnauthorizedException({ code: 'UNKNOWN_TENANT', message: 'Unknown shop code', messageTh: 'ไม่พบรหัสร้าน' });
     const tenantId = Number(t.id);
@@ -62,7 +62,7 @@ export class LineWebhookService {
   // Following the OA auto-enrols (or re-activates) a member keyed by the LINE userId — so a walk-in who adds
   // the OA becomes a reachable member. Idempotent + tenant-scoped; logs a follow event for auditing.
   private async onFollow(tenantId: number, lineUserId: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [existing] = await db.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.lineUserId, lineUserId))).limit(1);
     if (existing) {
       if (existing.active === false) await db.update(posMembers).set({ active: true, lastUpdated: new Date() }).where(eq(posMembers.id, existing.id));
@@ -72,7 +72,7 @@ export class LineWebhookService {
           tenantId, memberCode: 'M-TMP', lineUserId, marketingOptIn: true, active: true,
           balance: '0', lifetime: '0', createdBy: 'system:line-follow',
         }).returning();
-        await db.update(posMembers).set({ memberCode: `M-${String(row.id).padStart(6, '0')}` }).where(eq(posMembers.id, row.id));
+        await db.update(posMembers).set({ memberCode: `M-${String(row!.id).padStart(6, '0')}` }).where(eq(posMembers.id, row!.id));
       } catch (e: any) { if (!isUniqueViolation(e)) throw e; /* raced another follow → fine */ }
     }
     await this.log(tenantId, lineUserId, 'follow');
@@ -85,7 +85,7 @@ export class LineWebhookService {
   }
 
   private async log(tenantId: number, recipient: string, kind: 'follow' | 'unfollow') {
-    const db = this.db as any;
+    const db = this.db;
     try {
       await db.insert(messageLog).values({ tenantId, memberId: null, channel: 'line', recipient, body: `[oa:${kind}]`, campaign: `oa_${kind}`, status: 'received', provider: 'line', createdBy: 'system:line-webhook' });
     } catch { /* audit best-effort */ }

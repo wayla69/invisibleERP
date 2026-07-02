@@ -33,20 +33,20 @@ export class KnowledgeService {
 
   async ingest(dto: { title: string; source?: string; content: string }, user: JwtUser) {
     if (!dto.content?.trim()) throw new BadRequestException({ code: 'BAD_PAYLOAD', message: 'content required', messageTh: 'ต้องมีเนื้อหา' });
-    const db = this.db as any;
+    const db = this.db;
     const [doc] = await db.insert(kbDocuments).values({ tenantId: user.tenantId ?? null, title: dto.title, source: dto.source ?? null, createdBy: user.username }).returning({ id: kbDocuments.id });
     const chunks = this.chunk(dto.content);
     const rows = [] as any[];
     for (let i = 0; i < chunks.length; i++) {
-      const emb = await this.embedder.embed(chunks[i]);
-      rows.push({ tenantId: user.tenantId ?? null, docId: Number(doc.id), ord: i, content: chunks[i], embedding: emb.vector, embedProvider: emb.provider });
+      const emb = await this.embedder.embed(chunks[i]!);
+      rows.push({ tenantId: user.tenantId ?? null, docId: Number(doc!.id), ord: i, content: chunks[i], embedding: emb.vector, embedProvider: emb.provider });
     }
     if (rows.length) await db.insert(kbChunks).values(rows);
-    return { doc_id: Number(doc.id), title: dto.title, chunks: rows.length };
+    return { doc_id: Number(doc!.id), title: dto.title, chunks: rows.length };
   }
 
   async search(query: string, k: number, _user: JwtUser): Promise<{ results: Citation[]; provider: string }> {
-    const db = this.db as any;
+    const db = this.db;
     // Embed the query, then compare ONLY against chunks in the same embedding space (docs/27 R4-1) —
     // cross-space cosine is noise. Chunks embedded by another provider stay invisible until re-embedded
     // (POST /api/ai/kb/reembed) — degraded coverage, never wrong scores.
@@ -65,7 +65,7 @@ export class KnowledgeService {
   // Re-embed every chunk with the CURRENT provider (docs/27 R4-1) — the migration path after switching
   // EMBED_PROVIDER (e.g. local → voyage). Idempotent; RLS scopes to the caller's tenant.
   async reembedAll(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const chunks = await db.select().from(kbChunks);
     let updated = 0;
     for (const c of chunks) {

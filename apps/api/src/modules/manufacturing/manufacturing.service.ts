@@ -22,7 +22,7 @@ export class ManufacturingService {
 
   // Create a work order from a BOM — scale components + labor/overhead to the planned qty (BOM-standard cost).
   async createWorkOrder(dto: CreateWoDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const qty = n(dto.qty_planned);
     if (qty <= 0) throw new BadRequestException({ code: 'BAD_QTY', message: 'qty_planned must be positive', messageTh: 'จำนวนผลิตต้องมากกว่าศูนย์' });
     const [bom] = await db.select().from(bomMaster).where(eq(bomMaster.bomCode, dto.bom_code)).limit(1);
@@ -57,7 +57,7 @@ export class ManufacturingService {
     }).returning({ id: workOrders.id });
     if (comps.length)
       await db.insert(workOrderComponents).values(comps.map((c: any) => ({
-        woId: Number(wo.id), tenantId, itemId: c.itemId, itemDescription: c.itemDescription, uom: c.uom,
+        woId: Number(wo!.id), tenantId, itemId: c.itemId, itemDescription: c.itemDescription, uom: c.uom,
         qtyRequired: fx(c.qtyRequired, 3), unitCost: fx(c.unitCost, 4), lineCost: fx(c.lineCost, 2),
       })));
     return this.get(woNo);
@@ -65,7 +65,7 @@ export class ManufacturingService {
 
   // Release/issue: consume components into WIP. Stock issues + GL Dr WIP / Cr Inventory(material) / Cr Mfg-Applied(labor+oh).
   async issue(woNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const wo = await this.row(woNo);
     if (wo.status !== 'Open') throw new BadRequestException({ code: 'BAD_STATUS', message: `Work order is ${wo.status}, cannot issue`, messageTh: 'ใบสั่งผลิตไม่อยู่ในสถานะที่เบิกได้' });
     const tenantId = wo.tenantId ?? user.tenantId ?? null;
@@ -95,7 +95,7 @@ export class ManufacturingService {
   // Complete: receive finished goods. Stock receipt + GL Dr Finished Goods / Cr WIP (total cost), with a
   // YIELD variance and an optional MATERIAL-USAGE variance (actual material consumed vs the standard BOM).
   async complete(woNo: string, qtyProduced: number | undefined, user: JwtUser, actualMaterial?: number) {
-    const db = this.db as any;
+    const db = this.db;
     const wo = await this.row(woNo);
     if (wo.status !== 'Released') throw new BadRequestException({ code: 'BAD_STATUS', message: `Work order is ${wo.status}, must be Released to complete`, messageTh: 'ต้องเบิกวัตถุดิบ (Released) ก่อนปิดงาน' });
     const tenantId = wo.tenantId ?? user.tenantId ?? null;
@@ -138,13 +138,13 @@ export class ManufacturingService {
   }
 
   async list(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(workOrders).orderBy(desc(workOrders.id)).limit(100);
     return { work_orders: rows.map((r: any) => this.fmt(r)), count: rows.length };
   }
 
   async get(woNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const wo = await this.row(woNo);
     const comps = await db.select().from(workOrderComponents).where(eq(workOrderComponents.woId, Number(wo.id)));
     return {

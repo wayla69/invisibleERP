@@ -25,7 +25,7 @@ export class PortalMyErpService {
   // ── My Customers ─────────────────────────────────────────
   async listCustomers(user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(myCustomers).where(eq(myCustomers.tenantId, t.id)).orderBy(desc(myCustomers.id));
     return {
       customers: rows.map((r: any) => ({ id: Number(r.id), customer_name: r.customerName, phone: r.phone, address: r.address, notes: r.notes })),
@@ -35,16 +35,16 @@ export class PortalMyErpService {
 
   async addCustomer(dto: MyCustomerDto, user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.insert(myCustomers).values({
       tenantId: t.id, customerName: dto.customer_name, phone: dto.phone ?? null, address: dto.address ?? null, notes: dto.notes ?? null,
     }).returning({ id: myCustomers.id });
-    return { id: Number(row.id), customer_name: dto.customer_name };
+    return { id: Number(row!.id), customer_name: dto.customer_name };
   }
 
   async deleteCustomer(id: number, user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(myCustomers).where(and(eq(myCustomers.id, id), eq(myCustomers.tenantId, t.id))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
     await db.delete(myCustomers).where(eq(myCustomers.id, id));
@@ -54,7 +54,7 @@ export class PortalMyErpService {
   // ── My Suppliers ─────────────────────────────────────────
   async listSuppliers(user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(mySuppliers).where(eq(mySuppliers.tenantId, t.id)).orderBy(desc(mySuppliers.id));
     return {
       suppliers: rows.map((r: any) => ({ id: Number(r.id), supplier_name: r.supplierName, contact_name: r.contactName, phone: r.phone, address: r.address })),
@@ -64,16 +64,16 @@ export class PortalMyErpService {
 
   async addSupplier(dto: MySupplierDto, user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.insert(mySuppliers).values({
       tenantId: t.id, supplierName: dto.supplier_name, contactName: dto.contact_name ?? null, phone: dto.phone ?? null, address: dto.address ?? null,
     }).returning({ id: mySuppliers.id });
-    return { id: Number(row.id), supplier_name: dto.supplier_name };
+    return { id: Number(row!.id), supplier_name: dto.supplier_name };
   }
 
   async deleteSupplier(id: number, user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(mySuppliers).where(and(eq(mySuppliers.id, id), eq(mySuppliers.tenantId, t.id))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Supplier not found', messageTh: 'ไม่พบซัพพลายเออร์' });
     await db.delete(mySuppliers).where(eq(mySuppliers.id, id));
@@ -83,7 +83,7 @@ export class PortalMyErpService {
   // ── My Purchase Orders (MPO-) ────────────────────────────
   async listPurchaseOrders(user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const hdrs = await db.select().from(myPurchaseOrders).where(eq(myPurchaseOrders.tenantId, t.id)).orderBy(desc(myPurchaseOrders.id));
     const out = [];
     for (const h of hdrs) {
@@ -99,7 +99,7 @@ export class PortalMyErpService {
 
   async createPurchaseOrder(dto: MyPoDto, user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการ' });
     const total = Math.round(dto.items.reduce((a, it) => a + n(it.qty) * n(it.unit_price), 0) * 100) / 100;
     const poNo = this.docNo.nextTenantStamped('MPO', t.code);
@@ -120,7 +120,7 @@ export class PortalMyErpService {
 
   async deletePurchaseOrder(poNo: string, user: JwtUser) {
     const t = await this.portal.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const [h] = await db.select().from(myPurchaseOrders).where(and(eq(myPurchaseOrders.poNo, poNo), eq(myPurchaseOrders.tenantId, t.id))).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
     await db.transaction(async (tx: any) => {

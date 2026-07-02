@@ -136,7 +136,7 @@ export class FxService {
     let reverseEntry: string | null = null;
     if (dto.auto_reverse) {
       const [y, m] = dto.as_of.slice(0, 7).split('-').map(Number);
-      const nm = m < 12 ? `${y}-${String(m + 1).padStart(2, '0')}-01` : `${y + 1}-01-01`;
+      const nm = m! < 12 ? `${y}-${String(m! + 1).padStart(2, '0')}-01` : `${y! + 1}-01-01`;
       const revRef = `${dto.as_of}:${dto.currency}:rev`;
       if (!(await this.ledger.alreadyPosted('FXREVAL-REV', revRef))) {
         const rev: any = await this.ledger.postEntry({ date: nm, source: 'FXREVAL-REV', sourceRef: revRef, tenantId: dto.tenantId ?? null, currency: 'THB', memo: `FX revaluation reversal ${dto.currency} ${dto.as_of}`, createdBy: dto.createdBy, lines: lines.map((l) => ({ account_code: l.account_code, debit: l.credit, credit: l.debit })) });

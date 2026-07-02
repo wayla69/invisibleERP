@@ -63,7 +63,7 @@ export class BillingService {
 
   // ───────────────────── Seed (idempotent — run at startup) ─────────────────────
   async seedPlans(): Promise<{ seeded: number }> {
-    const db = this.db as any;
+    const db = this.db;
     let seeded = 0;
     for (const p of PLAN_SEED) {
       await db.insert(plans).values({
@@ -79,7 +79,7 @@ export class BillingService {
 
   // ───────────────────── PUBLIC plan catalogue ─────────────────────
   async listPlans() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db
       .select({ code: plans.code, name: plans.name, price_monthly: plans.priceMonthly, currency: plans.currency, features: plans.features, active: plans.active })
       .from(plans)
@@ -91,7 +91,7 @@ export class BillingService {
   // ───────────────────── PUBLIC self-serve signup ─────────────────────
   // Atomic provisioning: tenant + admin user + trialing subscription.
   async signup(dto: SignupDto) {
-    const db = this.db as any;
+    const db = this.db;
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);
     const planCode = dto.plan_code?.trim() || 'free';
@@ -155,7 +155,7 @@ export class BillingService {
   // Resolve the tenantId for an authenticated user. Admins created via signup carry
   // tenantId on their users row; customer users carry it via customerName (tenant code).
   async resolveTenantId(user: { username: string; customerName: string | null }): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     if (user.customerName) {
       const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, user.customerName)).limit(1);
       if (t) return Number(t.id);
@@ -167,7 +167,7 @@ export class BillingService {
 
   // ───────────────────── Subscription read / change ─────────────────────
   async getSubscription(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db
       .select({
         id: subscriptions.id,
@@ -195,7 +195,7 @@ export class BillingService {
   // read-only view of the same `ai_token_usage` rows, plus the plan's daily limit so the UI can show
   // "X of Y tokens used today". Read through the normal (tenant-scoped) connection.
   async aiUsage(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [planRow] = await db.select({ features: plans.features })
       .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
       .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
@@ -249,7 +249,7 @@ export class BillingService {
   // line a monthly invoice run appends so heavy AI usage is billed (panel #3: connect the COGS meter to a
   // price). Returns a zero line when the plan has no overage rate or the tenant stayed within its cap.
   async aiOverageInvoice(tenantId: number, month?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const ym = (month && /^\d{4}-\d{2}$/.test(month)) ? month : null;
     const [planRow] = await db.select({ features: plans.features, plan_code: subscriptions.planCode })
       .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
@@ -290,7 +290,7 @@ export class BillingService {
   // Idempotency ordering: we INSERT the run row FIRST (ON CONFLICT DO NOTHING); only the winner calls Stripe,
   // so a concurrent/retried run can never double-charge. The Stripe idempotencyKey is a second guard.
   async runAiOverageBilling(user: JwtUser, month?: string): Promise<{ month: string; processed_count: number; total_amount: number; processed: any[] }> {
-    const db = this.db as any;
+    const db = this.db;
     const round2 = (x: number) => Math.round(x * 100) / 100;
     let billingMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : '';
     if (!billingMonth) {
@@ -315,7 +315,7 @@ export class BillingService {
         amount: String(inv.amount), currency: inv.currency, status: 'pending', processedBy: user?.username ?? 'system:scheduler',
       }).onConflictDoNothing({ target: [aiOverageBillingRuns.tenantId, aiOverageBillingRuns.billingMonth] }).returning({ id: aiOverageBillingRuns.id });
       if (!ins.length) continue; // already billed this (tenant, month) → idempotent skip
-      const runId = Number(ins[0].id);
+      const runId = Number(ins[0]!.id);
       const charge = await new StripeBilling().createOverageInvoiceItem(s.cust ?? null, inv.amount, inv.line_description, `ai-overage:${tenantId}:${billingMonth}`);
       const status = charge.mock ? 'recorded' : 'invoiced';
       await db.update(aiOverageBillingRuns).set({ stripeInvoiceItemId: charge.id, status }).where(eq(aiOverageBillingRuns.id, runId));
@@ -327,7 +327,7 @@ export class BillingService {
 
   // History of AI-overage charges for a tenant (most recent first) — the read view of ai_overage_billing_runs.
   async listOverageRuns(tenantId: number, month?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [eq(aiOverageBillingRuns.tenantId, tenantId)];
     if (month && /^\d{4}-\d{2}$/.test(month)) conds.push(eq(aiOverageBillingRuns.billingMonth, month));
     const rows = await db.select().from(aiOverageBillingRuns).where(and(...conds)).orderBy(desc(aiOverageBillingRuns.billingMonth)).limit(36);
@@ -340,7 +340,7 @@ export class BillingService {
   }
 
   async changePlan(tenantId: number, planCode: string) {
-    const db = this.db as any;
+    const db = this.db;
     const target = planCode.trim();
     const [plan] = await db.select().from(plans).where(eq(plans.code, target)).limit(1);
     if (!plan) throw new BadRequestException({ code: 'BAD_REQUEST', message: `Unknown plan: ${target}`, messageTh: 'ไม่พบแพ็กเกจที่เลือก' });
@@ -357,7 +357,7 @@ export class BillingService {
   // Reads the tenant's active subscription + plan features and throws PLAN_USER_LIMIT when
   // the tenant has reached the maxUsers ceiling for their plan (-1 = unlimited).
   async checkUserLimit(tenantId: number): Promise<void> {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db
       .select({ features: plans.features, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt })
       .from(subscriptions)
@@ -378,7 +378,7 @@ export class BillingService {
     const maxUsers = typeof features.users === 'number' ? features.users : -1;
     if (maxUsers < 0) return; // -1 = unlimited (enterprise)
 
-    const [{ count }] = await db
+    const [{ count } = { count: '0' }] = await db
       .select({ count: sql<string>`count(*)` })
       .from(users)
       .where(and(eq(users.tenantId, tenantId)));
@@ -399,7 +399,7 @@ export class BillingService {
   // Stripe customer and a real subscription Checkout session; activation happens via the webhook (see
   // BillingWebhookService) when Stripe confirms payment.
   async createCheckoutSession(tenantId: number, planCode: string) {
-    const db = this.db as any;
+    const db = this.db;
     const target = planCode.trim();
     const [plan] = await db.select().from(plans).where(eq(plans.code, target)).limit(1);
     if (!plan) throw new BadRequestException({ code: 'BAD_REQUEST', message: `Unknown plan: ${target}`, messageTh: 'ไม่พบแพ็กเกจที่เลือก' });
@@ -426,7 +426,7 @@ export class BillingService {
   // Idempotent: re-delivering the same event converges to the same end state. All updates are scoped to a
   // single tenant by tenant_id / stripe_customer_id.
   async applyStripeEvent(event: { type?: string; data?: { object?: any } }): Promise<{ handled: boolean; tenant_id?: number; status?: string }> {
-    const db = this.db as any;
+    const db = this.db;
     const obj = event?.data?.object ?? {};
     const setByTenant = (tenantId: number, patch: Record<string, unknown>) =>
       db.update(subscriptions).set(patch).where(eq(subscriptions.tenantId, tenantId));

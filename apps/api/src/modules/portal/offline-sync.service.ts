@@ -38,7 +38,7 @@ export class OfflineSyncService {
     const results: SyncResult[] = [];
     for (const op of ops) results.push(await this.syncOne(t, op, user));
     const summary = { synced: 0, duplicate: 0, failed: 0 } as Record<string, number>;
-    for (const r of results) summary[r.status]++;
+    for (const r of results) summary[r.status]!++;
     return { results, summary };
   }
 

@@ -66,14 +66,14 @@ export class AdminUsersService {
 
   private async tenantIdFor(code?: string): Promise<number | null> {
     if (!code) return null;
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, code)).limit(1);
     if (!t) throw new BadRequestException({ code: 'BAD_TENANT', message: `Unknown company/tenant: ${code}`, messageTh: 'ไม่พบบริษัท/ผู้เช่า' });
     return Number(t.id);
   }
 
   async list() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db
       .select({ username: users.username, role: users.role, tenantId: users.tenantId, code: tenants.code, mustChange: users.mustChangePassword })
       .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).orderBy(users.username);
@@ -81,7 +81,7 @@ export class AdminUsersService {
   }
 
   async create(dto: CreateUserDto, actor: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.password || dto.password.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException({ code: 'BAD_USERNAME', message: 'Username is required', messageTh: 'ต้องระบุชื่อผู้ใช้' });
@@ -96,14 +96,14 @@ export class AdminUsersService {
     const hash = await this.passwords.hash(dto.password);
     const [u] = await db.insert(users).values({ username, passwordHash: hash, role: dto.role as any, tenantId, mustChangePassword: true }).returning({ id: users.id });
     if (dto.permissions?.length) {
-      await db.insert(userPermissions).values(dto.permissions.map((p) => ({ userId: Number(u.id), perm: p }))).onConflictDoNothing();
+      await db.insert(userPermissions).values(dto.permissions.map((p) => ({ userId: Number(u!.id), perm: p }))).onConflictDoNothing();
     }
     return { username, role: dto.role, created: true };
   }
 
   async update(username: string, dto: UpdateUserDto, actor: JwtUser) {
     username = normalizeUsername(username);
-    const db = this.db as any;
+    const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
     this.assertCanGrantRole(dto.role, actor);
@@ -128,7 +128,7 @@ export class AdminUsersService {
   async resetPassword(username: string, newPassword: string) {
     if (!newPassword || newPassword.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
     username = normalizeUsername(username);
-    const db = this.db as any;
+    const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
     const hash = await this.passwords.hash(newPassword);
@@ -140,7 +140,7 @@ export class AdminUsersService {
   // Build the recertification dataset: every user with role, effective (resolved+expanded) permissions,
   // and any SoD conflicts — the population a reviewer signs off each quarter.
   private async buildReview() {
-    const db = this.db as any;
+    const db = this.db;
     const us = await db.select({ id: users.id, username: users.username, role: users.role, code: tenants.code })
       .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).orderBy(users.username);
     const ups = await db.select({ userId: userPermissions.userId, perm: userPermissions.perm }).from(userPermissions);
@@ -185,17 +185,17 @@ export class AdminUsersService {
 
   // Record the periodic recertification sign-off (attestation evidence).
   async certifyReview(dto: { period: string; notes?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await this.buildReview();
     const [r] = await db.insert(accessReviews).values({
       period: dto.period, reviewedBy: user.username, tenantId: user.tenantId ?? null, notes: dto.notes ?? null,
       userCount: rows.length, conflictUserCount: rows.filter((x: any) => x.sod_conflict_count > 0).length,
     }).returning({ id: accessReviews.id });
-    return { id: Number(r.id), period: dto.period, reviewed_by: user.username, user_count: rows.length, certified: true };
+    return { id: Number(r!.id), period: dto.period, reviewed_by: user.username, user_count: rows.length, certified: true };
   }
 
   async listReviews() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(accessReviews).orderBy(desc(accessReviews.id)).limit(50);
     return { reviews: rows.map((r: any) => ({ id: Number(r.id), period: r.period, reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt, user_count: r.userCount, conflict_user_count: r.conflictUserCount, notes: r.notes })), count: rows.length };
   }
@@ -203,7 +203,7 @@ export class AdminUsersService {
   async remove(username: string, actor: JwtUser) {
     username = normalizeUsername(username);
     if (username === actor.username) throw new BadRequestException({ code: 'SELF_DELETE', message: 'Cannot delete yourself', messageTh: 'ลบบัญชีตัวเองไม่ได้' });
-    const db = this.db as any;
+    const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
     await db.delete(userPermissions).where(eq(userPermissions.userId, Number(u.id)));

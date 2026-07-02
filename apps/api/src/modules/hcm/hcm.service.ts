@@ -23,7 +23,7 @@ export class HcmService {
   }
 
   async logTimesheet(dto: TimesheetDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const e = await this.emp(dto.emp_code);
     // Optional project target: resolve the project by code so an approved timesheet can post labor to it (P3).
     let projectId: number | null = null;
@@ -37,14 +37,14 @@ export class HcmService {
       regularHours: fx(dto.regular_hours ?? 0, 2), otHours: fx(dto.ot_hours ?? 0, 2), note: dto.note ?? null,
       projectId, taskId: dto.task_id ?? null, billable: dto.billable !== false, status: 'Pending', submittedBy: user.username, createdBy: user.username,
     }).returning({ id: timesheets.id });
-    return { id: Number(row.id), emp_code: dto.emp_code, work_date: dto.work_date ?? ymd(), ot_hours: n(dto.ot_hours), project_code: dto.project_code ?? null, status: 'Pending' };
+    return { id: Number(row!.id), emp_code: dto.emp_code, work_date: dto.work_date ?? ymd(), ot_hours: n(dto.ot_hours), project_code: dto.project_code ?? null, status: 'Pending' };
   }
 
   // Approve a timesheet (maker-checker — PROJ-04). The approver must differ from the submitter (SoD; binds even
   // Admin). On approval, if the timesheet targets a project, its labor cost (total hours × the employee's hourly
   // rate) posts into the project's WIP through the existing authorized PRJ-COST path (billable → 1260, else 5800).
   async approveTimesheet(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [ts] = await db.select().from(timesheets).where(eq(timesheets.id, Number(id))).limit(1);
     if (!ts) throw new NotFoundException({ code: 'TIMESHEET_NOT_FOUND', message: `Timesheet ${id} not found`, messageTh: 'ไม่พบใบลงเวลา' });
     if (ts.status === 'Approved') return { id: Number(id), status: 'Approved', already: true, entry_no: ts.entryNo ?? null };
@@ -71,7 +71,7 @@ export class HcmService {
   }
 
   async listTimesheets(empCode: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const q = db.select().from(timesheets);
     const rows = empCode ? await q.where(eq(timesheets.employeeId, Number((await this.emp(empCode)).id))).orderBy(desc(timesheets.workDate)).limit(100) : await q.orderBy(desc(timesheets.id)).limit(100);
     // Resolve project ids → codes so the caller sees the PROJ-04 allocation + maker-checker status.
@@ -85,18 +85,18 @@ export class HcmService {
   }
 
   async requestLeave(dto: LeaveDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const e = await this.emp(dto.emp_code);
     if (n(dto.days) <= 0) throw new BadRequestException({ code: 'BAD_DAYS', message: 'days must be positive', messageTh: 'จำนวนวันลาต้องมากกว่าศูนย์' });
     const [row] = await db.insert(leaveRequests).values({
       tenantId: e.tenantId ?? user.tenantId ?? null, employeeId: Number(e.id), leaveType: dto.leave_type ?? 'annual',
       fromDate: dto.from_date, toDate: dto.to_date, days: fx(dto.days, 2), paid: dto.paid ?? true, status: 'Pending', reason: dto.reason ?? null, createdBy: user.username,
     }).returning({ id: leaveRequests.id });
-    return { id: Number(row.id), emp_code: dto.emp_code, leave_type: dto.leave_type ?? 'annual', days: n(dto.days), paid: dto.paid ?? true, status: 'Pending' };
+    return { id: Number(row!.id), emp_code: dto.emp_code, leave_type: dto.leave_type ?? 'annual', days: n(dto.days), paid: dto.paid ?? true, status: 'Pending' };
   }
 
   async approveLeave(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [lr] = await db.select().from(leaveRequests).where(eq(leaveRequests.id, id)).limit(1);
     if (!lr) throw new NotFoundException({ code: 'LEAVE_NOT_FOUND', message: 'Leave request not found', messageTh: 'ไม่พบใบลา' });
     if (lr.status !== 'Pending') return { id, status: lr.status, already: true };
@@ -112,7 +112,7 @@ export class HcmService {
   }
 
   async listLeave(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(leaveRequests).orderBy(desc(leaveRequests.id)).limit(100);
     return { leave_requests: rows.map((r: any) => ({ id: Number(r.id), leave_type: r.leaveType, from_date: r.fromDate, to_date: r.toDate, days: n(r.days), paid: r.paid !== false, status: r.status, reason: r.reason })), count: rows.length };
   }

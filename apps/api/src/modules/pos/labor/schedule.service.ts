@@ -27,7 +27,7 @@ export class ScheduleService {
 
   // hours between two HH:MM times (handles an overnight shift that ends past midnight).
   private hoursBetween(start: string, end: string): number {
-    const mins = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
+    const mins = (t: string) => { const [h, m] = t.split(':').map(Number); return h! * 60 + (m || 0); };
     let d = mins(end) - mins(start);
     if (d < 0) d += 24 * 60; // overnight
     return round2(d / 60);
@@ -84,9 +84,9 @@ export class ScheduleService {
     const byStaff: Record<string, { hours: number; cost: number; shifts: number }> = {};
     for (const sft of shifts) {
       byStaff[sft.empCode] = byStaff[sft.empCode] ?? { hours: 0, cost: 0, shifts: 0 };
-      byStaff[sft.empCode].hours = round2(byStaff[sft.empCode].hours + n(sft.hours));
-      byStaff[sft.empCode].cost = round2(byStaff[sft.empCode].cost + n(sft.hours) * n(sft.hourlyRate));
-      byStaff[sft.empCode].shifts++;
+      byStaff[sft.empCode]!.hours = round2(byStaff[sft.empCode]!.hours + n(sft.hours));
+      byStaff[sft.empCode]!.cost = round2(byStaff[sft.empCode]!.cost + n(sft.hours) * n(sft.hourlyRate));
+      byStaff[sft.empCode]!.shifts++;
     }
     return {
       from: opts.from, to: opts.to,
@@ -121,10 +121,10 @@ export class ScheduleService {
     const d = THAI_OT_DEFAULTS[dto.rule_type];
     await db.insert(laborOtRules).values({
       tenantId: user.tenantId, ruleType: dto.rule_type, multiplier: fx(dto.multiplier, 2),
-      dailyTriggerHours: dto.daily_trigger_hours ?? d.daily, weeklyTriggerHours: dto.weekly_trigger_hours ?? d.weekly,
+      dailyTriggerHours: dto.daily_trigger_hours ?? d!.daily, weeklyTriggerHours: dto.weekly_trigger_hours ?? d!.weekly,
     }).onConflictDoUpdate({
       target: [laborOtRules.tenantId, laborOtRules.ruleType],
-      set: { multiplier: fx(dto.multiplier, 2), dailyTriggerHours: dto.daily_trigger_hours ?? d.daily, weeklyTriggerHours: dto.weekly_trigger_hours ?? d.weekly },
+      set: { multiplier: fx(dto.multiplier, 2), dailyTriggerHours: dto.daily_trigger_hours ?? d!.daily, weeklyTriggerHours: dto.weekly_trigger_hours ?? d!.weekly },
     });
     return this.getOtRules(user);
   }

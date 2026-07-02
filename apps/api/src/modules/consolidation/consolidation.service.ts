@@ -24,7 +24,7 @@ export class ConsolidationService {
 
   async createGroup(dto: { name: string; fiscal_year: number; base_currency?: string; notes?: string }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const [g] = await db.insert(consolidationGroups).values({
       tenantId: user.tenantId ?? null,
       name: dto.name,
@@ -38,14 +38,14 @@ export class ConsolidationService {
 
   async listGroups(user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(consolidationGroups).orderBy(consolidationGroups.fiscalYear);
     return { groups: rows.map((g: any) => this.fmtGroup(g)), count: rows.length };
   }
 
   async addEntity(groupId: number, dto: { entity_tenant_id: number; ownership_pct?: number; entity_currency?: string }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     await this.assertGroup(groupId);
     const [e] = await db.insert(consolidationEntities).values({
       groupId, entityTenantId: dto.entity_tenant_id,
@@ -56,12 +56,12 @@ export class ConsolidationService {
       target: [consolidationEntities.groupId, consolidationEntities.entityTenantId],
       set: { ownershipPct: fx(dto.ownership_pct ?? 100, 4), entityCurrency: dto.entity_currency ?? 'THB', isActive: true },
     }).returning();
-    return { id: Number(e.id), group_id: groupId, entity_tenant_id: Number(e.entityTenantId), ownership_pct: n(e.ownershipPct), entity_currency: e.entityCurrency };
+    return { id: Number(e!.id), group_id: groupId, entity_tenant_id: Number(e!.entityTenantId), ownership_pct: n(e!.ownershipPct), entity_currency: e!.entityCurrency };
   }
 
   async removeEntity(groupId: number, entityTenantId: number, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     await db.update(consolidationEntities)
       .set({ isActive: false })
       .where(and(eq(consolidationEntities.groupId, groupId), eq(consolidationEntities.entityTenantId, entityTenantId)));
@@ -70,7 +70,7 @@ export class ConsolidationService {
 
   async listEntities(groupId: number, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(consolidationEntities).where(and(eq(consolidationEntities.groupId, groupId), eq(consolidationEntities.isActive, true)));
     return { entities: rows.map((e: any) => ({ id: Number(e.id), entity_tenant_id: Number(e.entityTenantId), ownership_pct: n(e.ownershipPct), entity_currency: e.entityCurrency })) };
   }
@@ -79,7 +79,7 @@ export class ConsolidationService {
 
   async runConsolidation(groupId: number, dto: { period: string }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     await this.assertGroup(groupId);
     const period = dto.period; // 'YYYY-MM'
 
@@ -113,7 +113,7 @@ export class ConsolidationService {
 
     // Insert run header
     const [run] = await db.insert(consolidationRuns).values({ groupId, period, status: 'Draft', runBy: user.username }).returning();
-    const runId = Number(run.id);
+    const runId = Number(run!.id);
 
     const runLineValues: any[] = [];
 
@@ -237,7 +237,7 @@ export class ConsolidationService {
   // entity's GL — they live at the group layer (consolidation_run_lines); posting only freezes the run.
   async postConsolidation(runId: number, dto: { postedBy: string }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const [run] = await db.select().from(consolidationRuns).where(eq(consolidationRuns.id, runId)).limit(1);
     if (!run) throw new NotFoundException({ code: 'CONSOL_RUN_NOT_FOUND', message: `Consolidation run ${runId} not found` });
     if (run.status === 'Posted') throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This consolidation run is already posted', messageTh: 'การรวมงบนี้โพสต์แล้ว' });
@@ -252,7 +252,7 @@ export class ConsolidationService {
 
   async listRuns(groupId: number, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     await this.assertGroup(groupId);
     const rows = await db.select().from(consolidationRuns).where(eq(consolidationRuns.groupId, groupId)).orderBy(consolidationRuns.runAt);
     return { runs: rows.map((r: any) => ({ id: Number(r.id), period: r.period, status: r.status, run_by: r.runBy, run_at: r.runAt })) };
@@ -260,7 +260,7 @@ export class ConsolidationService {
 
   async getRunLines(runId: number, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const lines = await db.select().from(consolidationRunLines).where(eq(consolidationRunLines.runId, runId));
     return {
       run_id: runId,
@@ -272,7 +272,7 @@ export class ConsolidationService {
 
   async defineEliminationRule(dto: { group_id: number; name: string; rule_type?: string; match_account_pattern?: string; debit_account?: string; credit_account?: string }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     await this.assertGroup(dto.group_id);
     const [r] = await db.insert(consolEliminationRules).values({
       tenantId: user.tenantId ?? null, groupId: dto.group_id, name: dto.name,
@@ -284,7 +284,7 @@ export class ConsolidationService {
 
   async listRules(groupId: number, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(consolEliminationRules).where(and(eq(consolEliminationRules.groupId, groupId), eq(consolEliminationRules.active, true)));
     return { rules: rows.map((r: any) => this.fmtRule(r)), count: rows.length };
   }
@@ -293,7 +293,7 @@ export class ConsolidationService {
 
   async defineSegment(dto: { code: string; name: string; dimension?: string; member_keys?: any }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.insert(segmentDefinitions).values({
       tenantId: user.tenantId ?? null, code: dto.code, name: dto.name,
       dimension: dto.dimension ?? 'branch', memberKeys: dto.member_keys ?? null, active: true,
@@ -303,7 +303,7 @@ export class ConsolidationService {
 
   async listSegments(user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(segmentDefinitions).where(eq(segmentDefinitions.active, true)).orderBy(segmentDefinitions.dimension);
     return { segments: rows.map((s: any) => this.fmtSegment(s)), count: rows.length };
   }
@@ -314,7 +314,7 @@ export class ConsolidationService {
   // the dimension, raw dimension values are returned as their own segments (key + 'unassigned' bucket).
   async segmentReport(dto: { period: string; dimension?: string }, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const dimension = dto.dimension ?? 'branch';
     const period = dto.period; // 'YYYY-MM'
     const dimCol = dimension === 'project' ? journalLines.projectId
@@ -366,7 +366,7 @@ export class ConsolidationService {
   }
 
   private async assertGroup(groupId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [g] = await db.select().from(consolidationGroups).where(eq(consolidationGroups.id, groupId)).limit(1);
     if (!g) throw new NotFoundException({ code: 'GROUP_NOT_FOUND', message: `Consolidation group ${groupId} not found` });
     return g;

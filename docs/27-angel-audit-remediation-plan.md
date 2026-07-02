@@ -369,6 +369,14 @@ comment. No behavior change beyond alignment.
 > arithmetic, cash-flow bucket keys) — no metric traded for the other this time; both went down. The
 > parity-locked `forecasting.service.ts` remains untouched. Remaining as-any (821) concentrates in the
 > 59 strict-trading files from tranche #1 plus non-db patterns — same recipe applies per module.
+> **Paydown tranche #3 (2026-07-02): as-any 821 → 290 (−531) AND strict-index 203 → 118 (−85).** The last
+> 59 db-erasure files retyped with ZERO build fallout (tranche #2's source fixes had already cleared the
+> shared types); the ~190 exposed index accesses fixed by a diagnostics-driven assertion inserter
+> (`!` after the flagged identifier/element access, bottom-up) + hand-fixes where it mis-placed (a
+> destructure pattern, two `return!` negations the compiler caught). The pass also cleared 85 pre-existing
+> sites in earlier-tranche files. Remaining: 290 as-any are non-db patterns (jsonb payloads, provider
+> seams, test fakes); 118 strict sites live in demo seeds + `net-guard`/auth utils — none in tenant
+> service code. `forecasting.service.ts` stays parity-locked.
 - Re-enable `noUncheckedIndexedAccess` in `apps/api/tsconfig.json`; fix fallout module-by-module
   (start with `ledger`, `finance`, `projects` — the money paths), using per-file `// @ts-expect-error`
   only as a tracked, lint-counted escape hatch.
@@ -623,3 +631,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 3.9 | 2026-07-02 | ERP/Product | RSC conversion #3 merged (projects/[code] — dynamic-route server shell, Gantt island); reports + insights remain |
 | 4.0 | 2026-07-02 | ERP/Product | RSC conversions #4 (tax/reports) + #5 (insights) merged — the R5-2 top-5 conversion list is complete; AUD-ARC-09 remediation now rides the use-client ratchet |
 | 4.1 | 2026-07-02 | ERP/Product | ts-debt tranche #2 — as-any 1155→821 and strict-index 229→203 (both down; 38 held-back files properly typed, ~67 real type errors + ~90 exposed index accesses fixed at source) |
+| 4.2 | 2026-07-02 | ERP/Product | ts-debt tranche #3 — as-any 821→290, strict 203→118 (all db-handle erasures gone; remaining debt is non-db patterns + seeds/utils). Cumulative from ratchet birth: as-any 1465→290 (−80%), strict 248→118 (−52%) |

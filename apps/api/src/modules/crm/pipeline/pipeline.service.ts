@@ -25,7 +25,7 @@ export class PipelineService {
   // ── Stages ──
 
   async seedStages(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(pipelineStages)
       .values(DEFAULT_STAGES.map((s) => ({ ...s, tenantId, isActive: true })))
       .onConflictDoNothing();
@@ -33,7 +33,7 @@ export class PipelineService {
   }
 
   async listStages(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(pipelineStages)
       .where(and(eq(pipelineStages.tenantId, user.tenantId!), eq(pipelineStages.isActive, true)))
       .orderBy(pipelineStages.sequence);
@@ -44,18 +44,18 @@ export class PipelineService {
   // ── Opportunities ──
 
   private async nextOppNo(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const r = await db.insert(docCountersTenant)
       .values({ docType: 'OPP', tenantId, period: 'all', n: 1 })
       .onConflictDoUpdate({
         target: [docCountersTenant.docType, docCountersTenant.tenantId, docCountersTenant.period],
         set: { n: sql`${docCountersTenant.n} + 1` },
       }).returning({ n: docCountersTenant.n });
-    return `OPP-${String(Number(r[0].n)).padStart(5, '0')}`;
+    return `OPP-${String(Number(r[0]!.n)).padStart(5, '0')}`;
   }
 
   async createOpportunity(dto: { name: string; account_name?: string; stage_name?: string; expected_value?: number; expected_close?: string; assigned_to?: string; notes?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const oppNo = await this.nextOppNo(tenantId);
 
@@ -82,7 +82,7 @@ export class PipelineService {
   }
 
   async moveStage(oppId: number, dto: { stage_name: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const opp = await this.assertOpp(oppId);
     const stages = await this.listStages(user);
     const stage = stages.find((s: any) => s.name === dto.stage_name);
@@ -96,7 +96,7 @@ export class PipelineService {
   }
 
   async closeOpportunity(oppId: number, dto: { outcome: 'Won' | 'Lost'; reason?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const stages = await this.listStages(user);
     const targetStage = stages.find((s: any) => dto.outcome === 'Won' ? s.isWon : s.isLost) ?? stages[0];
     if (!targetStage) throw new BadRequestException({ code: 'NO_STAGES', message: 'No pipeline stages configured', messageTh: 'ยังไม่ได้ตั้งค่าขั้นตอน pipeline' });
@@ -108,7 +108,7 @@ export class PipelineService {
   }
 
   async listOpportunities(filter: { status?: string; stage_name?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [eq(opportunities.tenantId, user.tenantId!)];
     if (filter.status) conds.push(eq(opportunities.status, filter.status));
     const rows = await db.select().from(opportunities).where(and(...conds)).orderBy(desc(opportunities.createdAt));
@@ -118,18 +118,18 @@ export class PipelineService {
   // ── Activities ──
 
   async addActivity(oppId: number, dto: { activity_type: string; subject: string; notes?: string; activity_date?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.assertOpp(oppId);
     const [act] = await db.insert(opportunityActivities).values({
       oppId, activityType: dto.activity_type, subject: dto.subject,
       notes: dto.notes ?? null, activityDate: dto.activity_date ?? null,
       completed: false, createdBy: user.username,
     }).returning();
-    return { id: Number(act.id), activity_type: act.activityType, subject: act.subject, notes: act.notes, activity_date: act.activityDate, completed: act.completed };
+    return { id: Number(act!.id), activity_type: act!.activityType, subject: act!.subject, notes: act!.notes, activity_date: act!.activityDate, completed: act!.completed };
   }
 
   async listActivities(oppId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(opportunityActivities).where(eq(opportunityActivities.oppId, oppId)).orderBy(desc(opportunityActivities.createdAt));
     return { activities: rows.map((a: any) => ({ id: Number(a.id), activity_type: a.activityType, subject: a.subject, notes: a.notes, activity_date: a.activityDate, completed: a.completed })), count: rows.length };
   }
@@ -137,7 +137,7 @@ export class PipelineService {
   // ── Forecast ──
 
   async forecast(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       stageName: pipelineStages.name,
       probability: pipelineStages.defaultProbability,
@@ -162,7 +162,7 @@ export class PipelineService {
   }
 
   private async assertOpp(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [o] = await db.select().from(opportunities).where(eq(opportunities.id, id)).limit(1);
     if (!o) throw new NotFoundException({ code: 'OPP_NOT_FOUND', message: `Opportunity ${id} not found` });
     return o;

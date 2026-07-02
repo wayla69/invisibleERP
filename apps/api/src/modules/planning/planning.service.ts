@@ -18,7 +18,7 @@ export class PlanningService {
 
   // ── Doc-number: BV-{year}-{n:04d}, sequential per tenant+year ──
   private async nextVersionNo(tenantId: number, fiscalYear: number): Promise<string> {
-    const db = this.db as any;
+    const db = this.db;
     const period = String(fiscalYear);
     const r = await db.insert(docCountersTenant)
       .values({ docType: 'BV', tenantId, period, n: 1 })
@@ -27,19 +27,19 @@ export class PlanningService {
         set: { n: sql`${docCountersTenant.n} + 1` },
       })
       .returning({ n: docCountersTenant.n });
-    return `BV-${period}-${String(Number(r[0].n)).padStart(4, '0')}`;
+    return `BV-${period}-${String(Number(r[0]!.n)).padStart(4, '0')}`;
   }
 
   // ── Guard: version must belong to caller's tenant ──
   private async assertVersion(versionId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [v] = await db.select().from(budgetVersions).where(eq(budgetVersions.id, versionId)).limit(1);
     if (!v) throw new NotFoundException({ code: 'VERSION_NOT_FOUND', message: `Budget version ${versionId} not found` });
     return v;
   }
 
   private async assertScenario(scenarioId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.select().from(budgetScenarios).where(eq(budgetScenarios.id, scenarioId)).limit(1);
     if (!s) throw new NotFoundException({ code: 'SCENARIO_NOT_FOUND', message: `Budget scenario ${scenarioId} not found` });
     return s;
@@ -48,7 +48,7 @@ export class PlanningService {
   // ── Versions ──
 
   async createVersion(dto: { name: string; fiscal_year: number; notes?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const versionNo = await this.nextVersionNo(tenantId, dto.fiscal_year);
     const [v] = await db.insert(budgetVersions).values({
@@ -59,20 +59,20 @@ export class PlanningService {
   }
 
   async listVersions(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(budgetVersions).orderBy(asc(budgetVersions.fiscalYear), asc(budgetVersions.id));
     return { versions: rows.map(this.formatVersion) };
   }
 
   async getVersion(versionId: number, user: JwtUser) {
     const v = await this.assertVersion(versionId, user);
-    const db = this.db as any;
+    const db = this.db;
     const scenarios = await db.select().from(budgetScenarios).where(eq(budgetScenarios.versionId, versionId)).orderBy(asc(budgetScenarios.id));
     return { ...this.formatVersion(v), scenarios: scenarios.map(this.formatScenario) };
   }
 
   async submitVersion(versionId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const v = await this.assertVersion(versionId, user);
     if (v.status !== 'Working') throw new BadRequestException({ code: 'INVALID_STATUS', message: `Version must be in Working status to submit (current: ${v.status})`, messageTh: 'สถานะต้องเป็น Working เพื่อส่งอนุมัติ' });
 
@@ -90,7 +90,7 @@ export class PlanningService {
   }
 
   async approveVersion(versionId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const v = await this.assertVersion(versionId, user);
     if (v.status !== 'Submitted') throw new BadRequestException({ code: 'INVALID_STATUS', message: `Version must be Submitted to approve (current: ${v.status})`, messageTh: 'สถานะต้องเป็น Submitted เพื่ออนุมัติ' });
 
@@ -105,7 +105,7 @@ export class PlanningService {
   }
 
   async baselineVersion(versionId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const v = await this.assertVersion(versionId, user);
     if (v.status !== 'Approved') throw new BadRequestException({ code: 'INVALID_STATUS', message: `Version must be Approved to set as Baseline (current: ${v.status})`, messageTh: 'ต้องอนุมัติก่อนกำหนดเป็น Baseline' });
     await db.update(budgetVersions).set({ status: 'Baseline', updatedAt: new Date() }).where(eq(budgetVersions.id, versionId));
@@ -115,7 +115,7 @@ export class PlanningService {
   // ── Scenarios ──
 
   async addScenario(versionId: number, dto: { name: string; description?: string; is_default?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.assertVersion(versionId, user);
     const [s] = await db.insert(budgetScenarios).values({
       tenantId: user.tenantId!, versionId, name: dto.name,
@@ -125,7 +125,7 @@ export class PlanningService {
   }
 
   async cloneScenario(scenarioId: number, dto: { name: string; description?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const src = await this.assertScenario(scenarioId, user);
 
     // new scenario under same version
@@ -138,7 +138,7 @@ export class PlanningService {
     const lines = await db.select().from(forecastLines).where(eq(forecastLines.scenarioId, scenarioId));
     if (lines.length > 0) {
       await db.insert(forecastLines).values(lines.map((l: any) => ({
-        tenantId: user.tenantId!, scenarioId: Number(newScen.id),
+        tenantId: user.tenantId!, scenarioId: Number(newScen!.id),
         accountCode: l.accountCode, costCenterCode: l.costCenterCode,
         period: l.period, amount: l.amount, source: 'Manual', notes: l.notes,
       })));
@@ -148,7 +148,7 @@ export class PlanningService {
   }
 
   async getScenarioLines(scenarioId: number, period: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.assertScenario(scenarioId, user);
     const where = period
       ? and(eq(forecastLines.scenarioId, scenarioId), eq(forecastLines.period, period))
@@ -160,7 +160,7 @@ export class PlanningService {
   // ── Forecast Lines ──
 
   async upsertForecastLine(scenarioId: number, dto: { account_code: string; period: string; amount: number; cost_center_code?: string; notes?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.assertScenario(scenarioId, user);
     const tenantId = user.tenantId!;
 
@@ -179,7 +179,7 @@ export class PlanningService {
   // ── Drivers ──
 
   async upsertDriver(scenarioId: number, dto: { account_code: string; driver_type: 'percent' | 'rate' | 'absolute'; rate_value: number; notes?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const scen = await this.assertScenario(scenarioId, user);
     const tenantId = user.tenantId!;
 
@@ -193,7 +193,7 @@ export class PlanningService {
 
     if (existing.length > 0) {
       await db.update(budgetDrivers).set({ driverType: dto.driver_type, rateValue: fx(dto.rate_value, 4), notes: dto.notes ?? null })
-        .where(eq(budgetDrivers.id, Number(existing[0].id)));
+        .where(eq(budgetDrivers.id, Number(existing[0]!.id)));
       return { scenario_id: scenarioId, account_code: dto.account_code, driver_type: dto.driver_type, rate_value: dto.rate_value, upserted: 'updated' };
     }
 
@@ -206,7 +206,7 @@ export class PlanningService {
 
   // Run all driver rules for a scenario over the given periods, computing amounts from GL actuals.
   async runDrivers(scenarioId: number, dto: { periods: string[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const scen = await this.assertScenario(scenarioId, user);
     const tenantId = user.tenantId!;
     if (!dto.periods?.length) throw new BadRequestException({ code: 'NO_PERIODS', message: 'periods array required' });
@@ -233,7 +233,7 @@ export class PlanningService {
     const actuals: Record<string, Record<string, number>> = {};
     for (const r of glRows) {
       if (!actuals[r.accountCode]) actuals[r.accountCode] = {};
-      actuals[r.accountCode][r.period] = n(r.net);
+      actuals[r.accountCode]![r.period] = n(r.net);
     }
 
     let linesWritten = 0;
@@ -267,7 +267,7 @@ export class PlanningService {
 
   // ── 3-Way Variance — Budget (flat budgets table) vs Forecast (forecast_lines) vs Actual (GL) ──
   async threeWayVariance(versionId: number, scenarioId: number, period: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     await this.assertVersion(versionId, user);
     await this.assertScenario(scenarioId, user);
@@ -333,7 +333,7 @@ export class PlanningService {
 
   // ── Helpers ──
   private async versionTotal(versionId: number): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     // sum all forecast_lines across scenarios in this version
     const scenarios = await db.select({ id: budgetScenarios.id }).from(budgetScenarios).where(eq(budgetScenarios.versionId, versionId));
     if (!scenarios.length) return 0;

@@ -20,7 +20,7 @@ export class PortalUsersService {
 
   async list(u: JwtUser) {
     const tenantId = this.requireTenant(u);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({ username: users.username, role: users.role }).from(users).where(eq(users.tenantId, tenantId)).orderBy(users.username);
     return { users: rows.map((r: any) => ({ username: r.username, role: r.role })), count: rows.length };
   }
@@ -30,7 +30,7 @@ export class PortalUsersService {
     if (!dto.password || dto.password.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException({ code: 'BAD_USERNAME', message: 'Username is required', messageTh: 'ต้องระบุชื่อผู้ใช้' });
-    const db = this.db as any;
+    const db = this.db;
     const [exists] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
     if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
     const hash = await this.passwords.hash(dto.password);
@@ -38,7 +38,7 @@ export class PortalUsersService {
     // Limit sub-account permissions to customer-portal scopes only.
     const allowed = new Set(['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track']);
     const perms = (dto.permissions ?? []).filter((p) => allowed.has(p));
-    if (perms.length) await db.insert(userPermissions).values(perms.map((p) => ({ userId: Number(created.id), perm: p }))).onConflictDoNothing();
+    if (perms.length) await db.insert(userPermissions).values(perms.map((p) => ({ userId: Number(created!.id), perm: p }))).onConflictDoNothing();
     return { username, role: 'Customer', created: true };
   }
 
@@ -46,7 +46,7 @@ export class PortalUsersService {
     username = normalizeUsername(username);
     const tenantId = this.requireTenant(u);
     if (username === u.username) throw new BadRequestException({ code: 'SELF_DELETE', message: 'Cannot delete yourself', messageTh: 'ลบบัญชีตัวเองไม่ได้' });
-    const db = this.db as any;
+    const db = this.db;
     const [target] = await db.select().from(users).where(and(eq(users.username, username), eq(users.tenantId, tenantId), ne(users.username, u.username))).limit(1);
     if (!target) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sub-user not found in your company', messageTh: 'ไม่พบผู้ใช้ในบริษัทของคุณ' });
     await db.delete(userPermissions).where(eq(userPermissions.userId, Number(target.id)));

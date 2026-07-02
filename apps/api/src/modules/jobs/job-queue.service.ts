@@ -39,7 +39,7 @@ export class JobQueueService {
 
   // Enqueue from within a request (the caller's tenant tx). Returns the new job id.
   async enqueue(args: EnqueueArgs): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.insert(backgroundJobs).values({
       tenantId: args.tenantId,
       jobType: args.jobType,
@@ -48,7 +48,7 @@ export class JobQueueService {
       bypassRls: !!args.bypass,
       maxAttempts: args.maxAttempts ?? 3,
     }).returning({ id: backgroundJobs.id });
-    return Number(row.id);
+    return Number(row!.id);
   }
 
   // Claim the next due job across all tenants (worker path). One row at a time under FOR UPDATE SKIP LOCKED
@@ -152,14 +152,14 @@ export class JobQueueService {
 
   // Status read for the API — runs in the request's tenant tx, so RLS returns only the caller's jobs.
   async getJob(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [j] = await db.select().from(backgroundJobs).where(eq(backgroundJobs.id, id)).limit(1);
     if (!j) return null;
     return this.view(j);
   }
 
   async listJobs(jobType: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const where = jobType ? eq(backgroundJobs.jobType, jobType) : undefined;
     const rows = await db.select().from(backgroundJobs).where(where).orderBy(desc(backgroundJobs.id)).limit(100);
     return { jobs: rows.map((r: any) => this.view(r)), count: rows.length };

@@ -23,14 +23,14 @@ export class ThreeWayMatchService {
   // tenant-scoped read — never rely on RLS+limit(1) (an Admin/HQ request bypasses RLS, so an unfiltered
   // limit(1) could return another tenant's tolerance and flip the payable verdict).
   async getTolerance(tenantId?: number | null): Promise<{ qtyPct: number; pricePct: number; amountPct: number; amountAbs: number }> {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = tenantId != null
       ? await db.select().from(matchTolerance).where(eq(matchTolerance.tenantId, tenantId)).limit(1)
       : await db.select().from(matchTolerance).where(isNull(matchTolerance.tenantId)).limit(1);
     return { qtyPct: n(t?.qtyPct ?? 0), pricePct: t ? n(t.pricePct) : 2, amountPct: t ? n(t.amountPct) : 2, amountAbs: t ? n(t.amountAbs) : 0.5 };
   }
   async setTolerance(dto: { qty_pct?: number; price_pct?: number; amount_pct?: number; amount_abs?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [ex] = await db.select().from(matchTolerance).where(user.tenantId != null ? eq(matchTolerance.tenantId, user.tenantId) : isNull(matchTolerance.tenantId)).limit(1);
     const cur = await this.getTolerance(user.tenantId ?? null);
     const vals = { qtyPct: String(dto.qty_pct ?? cur.qtyPct), pricePct: String(dto.price_pct ?? cur.pricePct), amountPct: String(dto.amount_pct ?? cur.amountPct), amountAbs: String(dto.amount_abs ?? cur.amountAbs), updatedBy: user.username };
@@ -41,7 +41,7 @@ export class ThreeWayMatchService {
 
   // Run the match for an AP invoice against a PO. Idempotent on txn_no (re-match overwrites header + lines).
   async match(txnNo: string, poNo: string | undefined, lines: MatchLineInput[] | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [tx] = await db.select().from(apTransactions).where(eq(apTransactions.txnNo, txnNo)).limit(1);
     if (!tx) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
     if (!poNo) throw new BadRequestException({ code: 'PO_REQUIRED', message: 'po_no is required for matching', messageTh: 'ต้องระบุเลข PO' });
@@ -80,7 +80,7 @@ export class ThreeWayMatchService {
       matchNo = await this.docNo.nextDaily('MAT');
       const ins = await db.insert(invoiceMatchResults).values({ tenantId: tx.tenantId ?? user.tenantId ?? null, matchNo, txnNo, poNo, matchStatus: headerStatus, payable, matchedBy: user.username })
         .onConflictDoNothing({ target: invoiceMatchResults.txnNo }).returning({ id: invoiceMatchResults.id });
-      if (ins.length) matchId = Number(ins[0].id);
+      if (ins.length) matchId = Number(ins[0]!.id);
       else { [existing] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1); } // concurrent first-match won
     }
     if (existing) {
@@ -97,7 +97,7 @@ export class ThreeWayMatchService {
   // (utilities/services/reimbursements) is never matched and must remain payable. The gate only BLOCKS a
   // PO-based invoice that was run through match() and did not pass (or was overridden).
   async assertPayable(txnNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1);
     if (!m) return; // non-PO bill — not subject to the 3-way gate
     if (m.payable || m.override) return;
@@ -107,7 +107,7 @@ export class ThreeWayMatchService {
   // EXP-01 override is maker-checked: the person who RAN the match cannot also override its variance to force the
   // invoice payable — a different user must. Binds even Admin (no self-override). Mirrors GL-05/INV-07 SoD.
   async override(txnNo: string, reason: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1);
     if (!m) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No match to override', messageTh: 'ไม่พบการจับคู่' });
     if (m.matchedBy && m.matchedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot override a 3-way match you performed', messageTh: 'ผู้จับคู่อนุมัติข้ามผลการตรวจของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
@@ -117,7 +117,7 @@ export class ThreeWayMatchService {
   }
 
   async getMatch(txnNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1);
     if (!m) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No match for this invoice', messageTh: 'ไม่พบการจับคู่' });
     const lines = await db.select().from(invoiceMatchLines).where(eq(invoiceMatchLines.matchId, Number(m.id)));
@@ -129,7 +129,7 @@ export class ThreeWayMatchService {
   // (not payable AND not overridden) — the invoices the AP-pay gate (assertPayable) will refuse. Tenant-scoped
   // explicitly (an HQ/Admin request bypasses RLS); typed builders only at user-input sites.
   async listResults(q: { status?: string; blocked?: boolean; search?: string; limit?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (user.tenantId != null) conds.push(eq(invoiceMatchResults.tenantId, user.tenantId));
     if (q.status) conds.push(eq(invoiceMatchResults.matchStatus, q.status));

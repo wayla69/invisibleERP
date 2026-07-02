@@ -29,12 +29,12 @@ export class PricingService {
 
   // ── Rules CRUD ──────────────────────────────────────────────────────────────
   async listRules() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(priceRules).orderBy(priceRules.priority);
     return { rules: rows.map(mapRule), count: rows.length };
   }
   async upsertRule(dto: RuleDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const vals = {
       tenantId: user.tenantId ?? null, name: dto.name, scope: dto.scope ?? 'all', targetId: dto.target_id ?? null,
       channel: dto.channel ?? 'any', location: dto.location ?? null, dow: dto.dow ?? null, timeStart: dto.time_start ?? null,
@@ -47,31 +47,31 @@ export class PricingService {
       return { id: dto.id, updated: true };
     }
     const [r] = await db.insert(priceRules).values({ ...vals, createdBy: user.username }).returning({ id: priceRules.id });
-    return { id: r.id, created: true };
+    return { id: r!.id, created: true };
   }
   async deleteRule(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     await db.delete(priceRules).where(eq(priceRules.id, id));
     return { id, deleted: true };
   }
 
   // ── Combo components ─────────────────────────────────────────────────────────
   async setCombo(comboSku: string, components: { component_sku: string; qty?: number; unit_price_override?: number }[], user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await db.delete(comboComponents).where(eq(comboComponents.comboSku, comboSku));
     for (const c of components)
       await db.insert(comboComponents).values({ tenantId: user.tenantId ?? null, comboSku, componentSku: c.component_sku, qty: String(c.qty ?? 1), unitPriceOverride: c.unit_price_override != null ? String(c.unit_price_override) : null });
     return { combo_sku: comboSku, components: components.length };
   }
   async getCombo(comboSku: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(comboComponents).where(eq(comboComponents.comboSku, comboSku));
     return { combo_sku: comboSku, components: rows.map((r: any) => ({ component_sku: r.componentSku, qty: n(r.qty), unit_price_override: r.unitPriceOverride != null ? n(r.unitPriceOverride) : null })) };
   }
 
   // ── Quote ────────────────────────────────────────────────────────────────────
   async quote(dto: QuoteDto, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     // 1. explode combos into component lines
     const exploded: QuoteLine[] = [];
     for (const l of dto.lines) {
@@ -154,7 +154,7 @@ export class PricingService {
     lines: { sku: string; qty: number; unit_price: number; category?: string }[],
     ctx: { channel?: string; location?: string; at?: string },
   ): Promise<{ lineDiscounts: number[]; lineRules: string[][]; orderDiscount: number; orderRules: string[] }> {
-    const db = this.db as any;
+    const db = this.db;
     const at = ctx.at ? new Date(ctx.at) : new Date();
     const bkk = new Date(at.getTime() + 7 * 3600 * 1000); // Bangkok wall-clock
     const isoDow = ((bkk.getUTCDay() + 6) % 7) + 1;        // Mon=1 … Sun=7
@@ -192,7 +192,7 @@ export class PricingService {
   }
 
   async getRule(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(priceRules).where(eq(priceRules.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Rule not found', messageTh: 'ไม่พบกฎราคา' });
     return mapRule(r);

@@ -36,7 +36,7 @@ export class PortalService {
   private async tenant(user: JwtUser): Promise<{ id: number; code: string }> {
     if (!user.customerName)
       throw new ForbiddenException({ code: 'NO_TENANT', message: 'User is not tenant-scoped', messageTh: 'บัญชีนี้ไม่ผูกกับร้านค้า' });
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ id: tenants.id, code: tenants.code }).from(tenants).where(eq(tenants.code, user.customerName)).limit(1);
     if (!t) throw new ForbiddenException({ code: 'NO_TENANT', message: 'Tenant not found', messageTh: 'ไม่พบร้านค้า' });
     return { id: Number(t.id), code: t.code };
@@ -50,7 +50,7 @@ export class PortalService {
   // ───────────────────── dashboard (+ auto-reorder) ─────────────────────
   async dashboard(user: JwtUser) {
     const t = await this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const mStart = monthStart();
     const notVoided = ne(custPosSales.status, 'Voided');
@@ -94,7 +94,7 @@ export class PortalService {
   // For customer_inventory rows where current_stock <= reorder_point AND no open Draft pending line:
   // create/get today's Draft pending order (PND-) and insert suggested=final=reorder_qty lines.
   private async autoReorder(tenantId: number, code: string, user: JwtUser): Promise<{ pending_no: string; lines: number } | null> {
-    const db = this.db as any;
+    const db = this.db;
     const lowRows = await db.select().from(customerInventory)
       .where(and(eq(customerInventory.tenantId, tenantId), sql`${customerInventory.currentStock} <= ${customerInventory.reorderPoint}`));
     if (!lowRows.length) return null;
@@ -127,21 +127,21 @@ export class PortalService {
     for (const r of toOrder) {
       const qty = n(r.reorderQty);
       await db.insert(pendingOrderItems).values({
-        pendingId: Number(hdr.id), itemId: r.itemId, itemDescription: r.itemDescription,
+        pendingId: Number(hdr!.id), itemId: r.itemId, itemDescription: r.itemDescription,
         suggestedQty: String(qty), finalQty: String(qty), uom: r.uom,
         triggerReason: `Stock ${n(r.currentStock)} <= reorder point ${n(r.reorderPoint)}`,
       });
     }
-    const [cnt] = await db.select({ c: sql<string>`count(*)` }).from(pendingOrderItems).where(eq(pendingOrderItems.pendingId, Number(hdr.id)));
-    await db.update(pendingOrders).set({ totalItems: String(n(cnt?.c)) }).where(eq(pendingOrders.id, Number(hdr.id)));
+    const [cnt] = await db.select({ c: sql<string>`count(*)` }).from(pendingOrderItems).where(eq(pendingOrderItems.pendingId, Number(hdr!.id)));
+    await db.update(pendingOrders).set({ totalItems: String(n(cnt?.c)) }).where(eq(pendingOrders.id, Number(hdr!.id)));
 
-    return { pending_no: hdr.pendingNo, lines: toOrder.length };
+    return { pending_no: hdr!.pendingNo, lines: toOrder.length };
   }
 
   // ───────────────────── inventory ─────────────────────
   async listInventory(user: JwtUser) {
     const t = await this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(customerInventory)
       .where(eq(customerInventory.tenantId, t.id)).orderBy(desc(customerInventory.id));
     return {
@@ -157,18 +157,18 @@ export class PortalService {
 
   async addInventory(dto: AddInventoryDto, user: JwtUser) {
     const t = await this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.insert(customerInventory).values({
       tenantId: t.id, itemId: dto.item_id, itemDescription: dto.item_description ?? null, uom: dto.uom ?? null,
       currentStock: String(n(dto.current_stock)), reorderPoint: String(n(dto.reorder_point)), reorderQty: String(n(dto.reorder_qty)),
       lastUpdated: new Date(), notes: dto.notes ?? null,
     }).returning({ id: customerInventory.id });
-    return { id: Number(row.id), item_id: dto.item_id };
+    return { id: Number(row!.id), item_id: dto.item_id };
   }
 
   async updateInventory(id: number, dto: UpdateInventoryDto, user: JwtUser) {
     const t = await this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(customerInventory)
       .where(and(eq(customerInventory.id, id), eq(customerInventory.tenantId, t.id))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Inventory item not found', messageTh: 'ไม่พบสินค้า' });
@@ -184,7 +184,7 @@ export class PortalService {
   // ───────────────────── pending orders ─────────────────────
   async listPendingOrders(user: JwtUser) {
     const t = await this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const hdrs = await db.select().from(pendingOrders)
       .where(eq(pendingOrders.tenantId, t.id)).orderBy(desc(pendingOrders.id));
     const out = [];
@@ -204,7 +204,7 @@ export class PortalService {
 
   async submitPendingOrder(pendingNo: string, user: JwtUser) {
     const t = await this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const [h] = await db.select().from(pendingOrders)
       .where(and(eq(pendingOrders.pendingNo, pendingNo), eq(pendingOrders.tenantId, t.id))).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pending order not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
@@ -215,7 +215,7 @@ export class PortalService {
   // ───────────────────── variance (EOD count) ─────────────────────
   async createVariance(dto: VarianceDto, user: JwtUser) {
     const t = await this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการ' });
     const today = ymd();
     const now = new Date();
@@ -268,7 +268,7 @@ export class PortalService {
   // ───────────────────── track (composite display status) ─────────────────────
   async track(user: JwtUser) {
     const t = await this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       id: orders.id, order_no: orders.orderNo, order_date: orders.orderDate, status: orders.status, estimated_delivery: orders.estimatedDelivery,
     }).from(orders).where(eq(orders.tenantId, t.id)).orderBy(desc(orders.orderNo));

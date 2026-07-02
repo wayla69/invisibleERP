@@ -30,7 +30,7 @@ export class QualityService {
   ) {}
 
   async inspect(dto: InspectDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     const failed = r2(dto.qty_failed != null ? n(dto.qty_failed) : n(dto.qty_inspected) - n(dto.qty_passed));
     if (failed < 0) throw new BadRequestException({ code: 'BAD_QTY', message: 'passed cannot exceed inspected', messageTh: 'จำนวนผ่านมากกว่าจำนวนตรวจไม่ได้' });
@@ -56,13 +56,13 @@ export class QualityService {
         ],
       });
       entryNo = je.entry_no;
-      await db.update(qualityInspections).set({ entryNo }).where(eq(qualityInspections.id, Number(row.id)));
+      await db.update(qualityInspections).set({ entryNo }).where(eq(qualityInspections.id, Number(row!.id)));
     }
     return { insp_no: inspNo, ref_type: dto.ref_type, ref_doc: dto.ref_doc, disposition, qty_failed: failed, scrap_value: scrapValue, entry_no: entryNo };
   }
 
   async list(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(qualityInspections).orderBy(desc(qualityInspections.id)).limit(100);
     return {
       inspections: rows.map((r: any) => ({ insp_no: r.inspNo, ref_type: r.refType, ref_doc: r.refDoc, item_id: r.itemId, qty_inspected: n(r.qtyInspected), qty_passed: n(r.qtyPassed), qty_failed: n(r.qtyFailed), disposition: r.disposition, scrap_value: n(r.scrapValue), entry_no: r.entryNo, inspected_by: r.inspectedBy, inspected_at: r.inspectedAt })),

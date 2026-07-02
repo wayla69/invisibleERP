@@ -16,14 +16,14 @@ export class ApiKeyService {
 
   // resolve tenant_id จาก username (JwtUser ไม่พก tenantId)
   private async tenantOf(user: JwtUser): Promise<number | null> {
-    const db = this.db as any;
+    const db = this.db;
     const [u] = await db.select({ tenantId: users.tenantId }).from(users).where(eq(users.username, user.username)).limit(1);
     return u?.tenantId ?? null;
   }
 
   // ออกคีย์ใหม่ — คืน "คีย์เต็ม" เพียงครั้งเดียว (เก็บแค่ sha256)
   async issue(dto: IssueKeyDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = await this.tenantOf(user);
     const rawKey = 'ierp_' + randomBytes(16).toString('hex'); // 'ierp_' + 32 hex chars
     const prefix = rawKey.slice(0, 12);
@@ -34,7 +34,7 @@ export class ApiKeyService {
     const [row] = await db.insert(apiKeys).values({
       tenantId, name: dto.name, prefix, hashedKey, scopes, revoked: false, expiresAt,
     }).returning({ id: apiKeys.id, prefix: apiKeys.prefix, name: apiKeys.name });
-    return { id: Number(row.id), name: row.name, prefix: row.prefix, scopes: dto.scopes ?? [], expires_at: expiresAt, key: rawKey };
+    return { id: Number(row!.id), name: row!.name, prefix: row!.prefix, scopes: dto.scopes ?? [], expires_at: expiresAt, key: rawKey };
   }
 
   // ตรวจคีย์ดิบ → คืน row หรือ null. Lookup by indexed prefix, then constant-time hash compare.
@@ -46,7 +46,7 @@ export class ApiKeyService {
     if (!rawKey || !rawKey.startsWith('ierp_')) return null;
     const prefix = rawKey.slice(0, 12); // matches issue() slice(0,12)
     const hashed = sha256(rawKey);
-    const db = this.db as any;
+    const db = this.db;
     return db.transaction(async (tx: any) => {
       try { await tx.execute(sql`SET LOCAL ROLE app_user`); } catch { /* dev base role; ignore */ }
       await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
@@ -64,7 +64,7 @@ export class ApiKeyService {
   }
 
   async list(tenantId: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       id: apiKeys.id, name: apiKeys.name, prefix: apiKeys.prefix, scopes: apiKeys.scopes,
       lastUsedAt: apiKeys.lastUsedAt, revoked: apiKeys.revoked, createdAt: apiKeys.createdAt,
@@ -79,7 +79,7 @@ export class ApiKeyService {
   }
 
   async revoke(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = await this.tenantOf(user);
     const cond = tenantId == null ? eq(apiKeys.id, id) : and(eq(apiKeys.id, id), eq(apiKeys.tenantId, tenantId));
     const [row] = await db.select({ id: apiKeys.id }).from(apiKeys).where(cond).limit(1);

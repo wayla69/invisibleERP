@@ -50,7 +50,7 @@ export class LeasesService {
   // At commencement: recognise the right-of-use asset + lease liability at the PV of the lease payments
   // (Dr 1600 / Cr 2600, non-cash).
   async createLease(dto: LeaseDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!Number.isInteger(dto.termMonths) || dto.termMonths < 1) throw new BadRequestException({ code: 'BAD_TERM', message: 'term_months must be a positive integer', messageTh: 'จำนวนงวดต้องเป็นจำนวนเต็มบวก' });
     const pmt = round2(dto.monthlyPayment);
     if (!(pmt > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'monthly_payment must be > 0', messageTh: 'ค่าเช่าต้องมากกว่าศูนย์' });
@@ -66,14 +66,14 @@ export class LeasesService {
       monthlyPayment: String(pmt), annualRatePct: String(ratePct), initialLiability: String(liability), liabilityBalance: String(liability),
       rouNbv: String(liability), accumulatedDep: '0', periodsPosted: 0, nextRunDate: start, status: 'active', createdBy: user.username,
     }).returning({ id: leases.id });
-    return { id: Number(l.id), lease_no: leaseNo, name: dto.name, term_months: dto.termMonths, monthly_payment: pmt, annual_rate_pct: ratePct, initial_liability: liability, rou_asset: liability, next_run_date: start };
+    return { id: Number(l!.id), lease_no: leaseNo, name: dto.name, term_months: dto.termMonths, monthly_payment: pmt, annual_rate_pct: ratePct, initial_liability: liability, rou_asset: liability, next_run_date: start };
   }
 
   // LSE-01 detective tie-out: the GL lease-liability control account (2600) must equal the sum of the
   // remaining liability balances on the lease schedule. A divergence means a manual JE hit 2600 outside the
   // lease engine, or a periodic run / remeasurement didn't post — surfaced for the controller at close.
   async reconcileLiability(tenantId?: number) {
-    const db = this.db as any;
+    const db = this.db;
     const where = tenantId != null ? eq(leases.tenantId, tenantId) : undefined;
     const rows = await db.select().from(leases).where(where).orderBy(desc(leases.id));
     const scheduleLiability = round2(rows.reduce((s: number, l: any) => s + n(l.liabilityBalance), 0));
@@ -96,7 +96,7 @@ export class LeasesService {
   }
 
   async listLeases(tenantId?: number) {
-    const db = this.db as any;
+    const db = this.db;
     const where = tenantId != null ? eq(leases.tenantId, tenantId) : undefined;
     const rows = await db.select().from(leases).where(where).orderBy(desc(leases.id));
     return { leases: rows.map((l: any) => ({
@@ -111,7 +111,7 @@ export class LeasesService {
   // interest unwinding (Dr 5900), the cash payment reducing the liability (Dr 2600 / Cr 1000), and ROU
   // depreciation (Dr 5210 / Cr 1690). Last period clears the liability + ROU exactly.
   async runDueLeases(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const due = await db.select().from(leases).where(and(eq(leases.status, 'active'), sql`${leases.nextRunDate} <= ${today}`));
     const posted: { entry_no: string | null; lease_no: string; interest: number; principal: number; depreciation: number }[] = [];
@@ -157,7 +157,7 @@ export class LeasesService {
   // is reduced to zero and the excess is recognised in P&L as a gain (Cr 1510). Depreciation then runs
   // straight-line over the revised remaining term.
   async modifyLease(leaseNo: string, dto: LeaseModifyDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [l] = await db.select().from(leases).where(eq(leases.leaseNo, leaseNo)).limit(1);
     if (!l) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Lease not found', messageTh: 'ไม่พบสัญญาเช่า' });
     if (l.status !== 'active') throw new BadRequestException({ code: 'NOT_ACTIVE', message: 'Lease is not active', messageTh: 'สัญญาเช่าไม่อยู่ในสถานะใช้งาน' });

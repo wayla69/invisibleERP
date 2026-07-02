@@ -38,7 +38,7 @@ export class CloseService {
   // GL-15: create the close_runs row (InProgress) + seed the standard checklist. Upsert-safe: if a run
   // already exists for the period and is not Locked, return it; if Locked, reject (PERIOD_ALREADY_LOCKED).
   async startClose(dto: { period: string; startedBy: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenantId();
     const existing = await this.findRunByPeriod(dto.period, tenantId);
     if (existing) {
@@ -54,7 +54,7 @@ export class CloseService {
       startedBy: dto.startedBy,
     }).returning();
     await db.insert(closeRunSteps).values(CHECKLIST.map((c, i) => ({
-      closeRunId: Number(run.id),
+      closeRunId: Number(run!.id),
       tenantId: tenantId as number,
       stepKey: c.stepKey,
       title: c.title,
@@ -62,14 +62,14 @@ export class CloseService {
       required: c.required,
       status: 'Pending',
     })));
-    return this.shape(run, await this.stepsFor(Number(run.id)));
+    return this.shape(run, await this.stepsFor(Number(run!.id)));
   }
 
   // ───────────────────── Complete a checklist step ─────────────────────
   // GL-15: mark a step Done (record completedBy/At). When all REQUIRED steps are Done, advance the run
   // to ReadyToLock.
   async completeStep(dto: { closeRunId: number; stepKey: string; completedBy: string; detail?: any }) {
-    const db = this.db as any;
+    const db = this.db;
     const run = await this.getRun(dto.closeRunId);
     if (run.status === 'Locked') {
       throw new BadRequestException({ code: 'PERIOD_ALREADY_LOCKED', message: `Period ${run.period} is already locked`, messageTh: `งวดบัญชี ${run.period} ถูกล็อกแล้ว` });
@@ -99,7 +99,7 @@ export class CloseService {
   // differ from the starter (SELF_LOCK). Sets the run Locked AND marks fiscal_periods.status = 'Locked' so
   // postEntry hard-blocks the period.
   async lockPeriod(dto: { closeRunId: number; lockedBy: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenantId();
     const run = await this.getRun(dto.closeRunId);
     if (run.status === 'Locked') {
@@ -143,7 +143,7 @@ export class CloseService {
   // then re-lock. The POST is captured by the append-only audit_log (tamper-evident hash chain) with the
   // actor + reason, so every reopen is attributable.
   async reopenPeriod(dto: { closeRunId: number; reopenedBy: string; reason: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenantId();
     const run = await this.getRun(dto.closeRunId);
     if (run.status !== 'Locked') {
@@ -176,7 +176,7 @@ export class CloseService {
   }
 
   async list() {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenantId();
     const rows = await db.select().from(closeRuns)
       .where(tenantId == null ? undefined : eq(closeRuns.tenantId, tenantId))
@@ -192,7 +192,7 @@ export class CloseService {
   // nothing — a detective gate surfaced in the period-close UI before the maker-checker lock.
   async validate(period: string) {
     if (!/^\d{4}-\d{2}$/.test(period ?? '')) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenantId();
     const start = `${period}-01`;
     const end = this.periodEndDate(period);
@@ -266,14 +266,14 @@ export class CloseService {
 
   // ───────────────────── helpers ─────────────────────
   private async getRun(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [run] = await db.select().from(closeRuns).where(eq(closeRuns.id, id)).limit(1);
     if (!run) throw new NotFoundException({ code: 'CLOSE_RUN_NOT_FOUND', message: `Close run ${id} not found`, messageTh: 'ไม่พบการปิดงวด' });
     return run;
   }
 
   private async findRunByPeriod(period: string, tenantId: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(closeRuns.period, period)];
     if (tenantId != null) conds.push(eq(closeRuns.tenantId, tenantId));
     const [run] = await db.select().from(closeRuns).where(and(...conds)).limit(1);
@@ -281,7 +281,7 @@ export class CloseService {
   }
 
   private async stepsFor(closeRunId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(closeRunSteps)
       .where(eq(closeRunSteps.closeRunId, closeRunId))
       .orderBy(closeRunSteps.seq);
@@ -300,7 +300,7 @@ export class CloseService {
 
   private periodEndDate(period: string): string {
     const [y, m] = period.split('-').map(Number);
-    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const last = new Date(Date.UTC(y!, m, 0)).getUTCDate();
     return `${period}-${String(last).padStart(2, '0')}`;
   }
 

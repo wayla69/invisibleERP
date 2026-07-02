@@ -21,7 +21,7 @@ export class CpqService {
   // ── Product Configs ──
 
   async createConfig(dto: { code: string; name: string; base_price?: number; description?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [cfg] = await db.insert(productConfigs).values({
       tenantId: user.tenantId!, code: dto.code, name: dto.name,
       basePrice: fx(dto.base_price ?? 0, 4), description: dto.description ?? null, isActive: true,
@@ -33,7 +33,7 @@ export class CpqService {
   }
 
   async addOption(configId: number, dto: { group_name: string; option_code: string; option_name: string; price_delta?: number; is_default?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.assertConfig(configId);
     const [opt] = await db.insert(configOptions).values({
       configId, groupName: dto.group_name, optionCode: dto.option_code,
@@ -43,11 +43,11 @@ export class CpqService {
       target: [configOptions.configId, configOptions.groupName, configOptions.optionCode],
       set: { optionName: dto.option_name, priceDelta: fx(dto.price_delta ?? 0, 4) },
     }).returning();
-    return { id: Number(opt.id), group_name: opt.groupName, option_code: opt.optionCode, option_name: opt.optionName, price_delta: n(opt.priceDelta) };
+    return { id: Number(opt!.id), group_name: opt!.groupName, option_code: opt!.optionCode, option_name: opt!.optionName, price_delta: n(opt!.priceDelta) };
   }
 
   async listConfigs(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(productConfigs).where(and(eq(productConfigs.tenantId, user.tenantId!), eq(productConfigs.isActive, true)));
     return { configs: rows.map((c: any) => this.fmtConfig(c)), count: rows.length };
   }
@@ -55,26 +55,26 @@ export class CpqService {
   // ── Pricing Rules ──
 
   async createRule(dto: { config_id?: number; name: string; rule_type?: string; discount_pct: number; min_qty?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [rule] = await db.insert(pricingRules).values({
       tenantId: user.tenantId!, configId: dto.config_id ?? null,
       name: dto.name, ruleType: dto.rule_type ?? 'volume',
       discountPct: fx(dto.discount_pct, 4), minQty: dto.min_qty ?? 1, isActive: true,
     }).returning();
-    return { id: Number(rule.id), name: rule.name, rule_type: rule.ruleType, discount_pct: n(rule.discountPct), min_qty: rule.minQty };
+    return { id: Number(rule!.id), name: rule!.name, rule_type: rule!.ruleType, discount_pct: n(rule!.discountPct), min_qty: rule!.minQty };
   }
 
   // ── Quotes ──
 
   private async nextQuoteNo(tenantId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const r = await db.insert(docCountersTenant)
       .values({ docType: 'QT', tenantId, period: 'all', n: 1 })
       .onConflictDoUpdate({
         target: [docCountersTenant.docType, docCountersTenant.tenantId, docCountersTenant.period],
         set: { n: sql`${docCountersTenant.n} + 1` },
       }).returning({ n: docCountersTenant.n });
-    return `QT-${String(Number(r[0].n)).padStart(5, '0')}`;
+    return `QT-${String(Number(r[0]!.n)).padStart(5, '0')}`;
   }
 
   async createQuote(dto: {
@@ -82,7 +82,7 @@ export class CpqService {
     qty?: number; selected_options?: { group_name: string; option_code: string }[];
     validity_days?: number; notes?: string; lines?: { description: string; qty?: number; unit_price?: number }[];
   }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const quoteNo = await this.nextQuoteNo(tenantId);
     const qty = dto.qty ?? 1;
@@ -137,7 +137,7 @@ export class CpqService {
     }).returning();
 
     if (lineValues.length) {
-      await db.insert(quoteLines).values(lineValues.map((l) => ({ ...l, quoteId: Number(quote.id) })));
+      await db.insert(quoteLines).values(lineValues.map((l) => ({ ...l, quoteId: Number(quote!.id) })));
     }
 
     return this.fmtQuote(quote);
@@ -175,7 +175,7 @@ export class CpqService {
   }
 
   async listQuotes(filter: { status?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [eq(quotes.tenantId, user.tenantId!)];
     if (filter.status) conds.push(eq(quotes.status, filter.status));
     const rows = await db.select().from(quotes).where(and(...conds)).orderBy(sql`${quotes.id} DESC`);
@@ -183,7 +183,7 @@ export class CpqService {
   }
 
   async getQuoteLines(quoteId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, quoteId)).orderBy(quoteLines.lineNo);
     return { lines: lines.map((l: any) => ({ line_no: l.lineNo, description: l.description, qty: n(l.qty), unit_price: n(l.unitPrice), discount_pct: n(l.discountPct), line_total: n(l.lineTotal) })) };
   }
@@ -191,7 +191,7 @@ export class CpqService {
   // ── Helpers ──
 
   private async transitionQuote(quoteId: number, toStatus: string, allowedFrom: string[], user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const q = await this.assertQuote(quoteId);
     if (!allowedFrom.includes(q.status)) throw new BadRequestException({ code: 'INVALID_TRANSITION', message: `Cannot move from ${q.status} to ${toStatus}` });
     const [updated] = await db.update(quotes).set({ status: toStatus }).where(eq(quotes.id, quoteId)).returning();
@@ -199,14 +199,14 @@ export class CpqService {
   }
 
   private async assertConfig(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(productConfigs).where(eq(productConfigs.id, id)).limit(1);
     if (!c) throw new NotFoundException({ code: 'CONFIG_NOT_FOUND', message: `Product config ${id} not found` });
     return c;
   }
 
   private async assertQuote(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [q] = await db.select().from(quotes).where(eq(quotes.id, id)).limit(1);
     if (!q) throw new NotFoundException({ code: 'QUOTE_NOT_FOUND', message: `Quote ${id} not found` });
     return q;

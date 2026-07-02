@@ -130,8 +130,8 @@ export class MenuEngineeringService {
       if (bizYmdDash(when) < from || bizYmdDash(when) > to) continue; // exact business-day window
       const h = bizParts(when).h;
       const amt = n(row.amount);
-      byHour[h].revenue = r2(byHour[h].revenue + amt);
-      byHour[h].txns += 1;
+      byHour[h]!.revenue = r2(byHour[h]!.revenue + amt);
+      byHour[h]!.txns += 1;
       const dp = daypartOf(h).key;
       const e = byPart.get(dp) ?? { revenue: 0, txns: 0 };
       e.revenue = r2(e.revenue + amt); e.txns += 1;
@@ -144,13 +144,13 @@ export class MenuEngineeringService {
       const sample = daypartOf(key === 'late' ? 23 : key === 'breakfast' ? 6 : key === 'lunch' ? 11 : key === 'afternoon' ? 15 : 18);
       return { daypart: key, label_th: sample.label_th, revenue: r2(e.revenue), txns: e.txns, avg_ticket: e.txns > 0 ? r2(e.revenue / e.txns) : 0 };
     });
-    const peakHour = by_hour.reduce((best, b) => (b.revenue > best.revenue ? b : best), by_hour[0]);
-    const peakPart = by_daypart.reduce((best, b) => (b.revenue > best.revenue ? b : best), by_daypart[0]);
+    const peakHour = by_hour.reduce((best, b) => (b.revenue > best!.revenue ? b : best), by_hour[0]);
+    const peakPart = by_daypart.reduce((best, b) => (b.revenue > best!.revenue ? b : best), by_daypart[0]);
     const totalRevenue = r2(by_hour.reduce((a, b) => a + b.revenue, 0));
     const totalTxns = by_hour.reduce((a, b) => a + b.txns, 0);
     return {
       from, to,
-      summary: { revenue: totalRevenue, txns: totalTxns, avg_ticket: totalTxns > 0 ? r2(totalRevenue / totalTxns) : 0, peak_hour: peakPart.txns ? peakHour.hour : null, peak_daypart: peakPart.txns ? peakPart.daypart : null },
+      summary: { revenue: totalRevenue, txns: totalTxns, avg_ticket: totalTxns > 0 ? r2(totalRevenue / totalTxns) : 0, peak_hour: peakPart!.txns ? peakHour!.hour : null, peak_daypart: peakPart!.txns ? peakPart!.daypart : null },
       by_hour,
       by_daypart,
     };

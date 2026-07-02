@@ -49,14 +49,14 @@ export class ObjectLayoutsService {
     // any active field not placed and not hidden (e.g. added after the layout was saved) → append so it's never lost
     const unplaced = defs.filter((d) => !placed.has(d.field_key) && !hiddenSet.has(d.field_key));
     if (unplaced.length) {
-      if (sections.length) sections[sections.length - 1].fields.push(...unplaced);
+      if (sections.length) sections[sections.length - 1]!.fields.push(...unplaced);
       else sections.push({ title: 'ข้อมูล', columns: 1, fields: unplaced });
     }
     return { sections, hidden: hiddenKeys.map((k) => byKey.get(k)) };
   }
 
   private async findDefault(objectKey: string, role: string | null): Promise<any | null> {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(objectLayouts).where(and(eq(objectLayouts.objectKey, objectKey), eq(objectLayouts.active, true)));
     let r = role != null ? rows.find((x: any) => x.isDefault && x.role === role) : undefined;
     if (!r) r = rows.find((x: any) => x.isDefault && x.role == null);
@@ -67,7 +67,7 @@ export class ObjectLayoutsService {
 
   // ── public API ──
   async list(objectKey: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(objectLayouts).where(and(eq(objectLayouts.objectKey, objectKey), eq(objectLayouts.active, true)));
     return { object_key: objectKey, layouts: rows.map(this.shape) };
   }
@@ -85,7 +85,7 @@ export class ObjectLayoutsService {
   }
 
   async create(dto: { object_key: string; name: string; role?: string | null; config?: any; is_default?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const objectKey = (dto.object_key ?? '').trim();
     const name = (dto.name ?? '').trim();
     if (!objectKey) throw new BadRequestException({ code: 'BAD_OBJECT', message: 'object_key required', messageTh: 'ต้องระบุออบเจ็กต์' });
@@ -103,11 +103,11 @@ export class ObjectLayoutsService {
       tenantId: user.tenantId ?? null, objectKey, role, name, config: this.normalizeStored(dto.config),
       isDefault: makeDefault, active: true, createdBy: user.username, updatedBy: user.username,
     }).returning({ id: objectLayouts.id });
-    return { id: Number(row.id), object_key: objectKey, role, name, is_default: makeDefault };
+    return { id: Number(row!.id), object_key: objectKey, role, name, is_default: makeDefault };
   }
 
   async update(id: number, dto: { name?: string; config?: any }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(objectLayouts).where(eq(objectLayouts.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'LAYOUT_NOT_FOUND', message: 'Layout not found', messageTh: 'ไม่พบเลย์เอาต์' });
     const patch: any = { updatedBy: user.username, updatedAt: new Date() };
@@ -122,7 +122,7 @@ export class ObjectLayoutsService {
   }
 
   async setDefault(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(objectLayouts).where(eq(objectLayouts.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'LAYOUT_NOT_FOUND', message: 'Layout not found', messageTh: 'ไม่พบเลย์เอาต์' });
     const roleCond = row.role == null ? isNull(objectLayouts.role) : eq(objectLayouts.role, row.role);
@@ -132,7 +132,7 @@ export class ObjectLayoutsService {
   }
 
   async remove(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const upd = await db.update(objectLayouts).set({ isDefault: false, active: false }).where(eq(objectLayouts.id, id)).returning({ id: objectLayouts.id });
     if (!upd.length) throw new NotFoundException({ code: 'LAYOUT_NOT_FOUND', message: 'Layout not found', messageTh: 'ไม่พบเลย์เอาต์' });
     return { id, active: false };

@@ -44,7 +44,7 @@ export class ArAllowanceService {
 
   // Aging-driven (or flat-percentage) allowance computation. Upserts the (tenant, as_of_date) row UNposted.
   async computeAllowance(dto: ComputeAllowanceDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const asOf = dto.as_of_date ?? ymd();
     const method = dto.method ?? 'aging';
     const tenantId = dto.tenant_id ?? user.tenantId ?? null;
@@ -98,7 +98,7 @@ export class ArAllowanceService {
       id = Number(existing.id);
     } else {
       const [ins] = await db.insert(arAllowance).values({ tenantId, asOfDate: asOf, method, totalAr: String(totalAr), allowance: String(allowance), buckets, computedBy: user.username }).returning({ id: arAllowance.id });
-      id = Number(ins.id);
+      id = Number(ins!.id);
     }
     return { id, as_of_date: asOf, method, tenant_id: tenantId, total_ar: totalAr, allowance, buckets, posted: false };
   }
@@ -107,7 +107,7 @@ export class ArAllowanceService {
   // PRIOR posted allowance for the tenant. Increase ⇒ Dr 5720 / Cr 1190; decrease ⇒ Dr 1190 / Cr 5720.
   async postAllowance(id: number, user: JwtUser) {
     if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger not available', messageTh: 'ระบบบัญชีไม่พร้อมใช้งาน' });
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(arAllowance).where(eq(arAllowance.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Allowance computation not found', messageTh: 'ไม่พบการคำนวณค่าเผื่อ' });
     if (row.posted) throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This allowance is already posted', messageTh: 'ค่าเผื่อนี้โพสต์แล้ว' });
@@ -140,7 +140,7 @@ export class ArAllowanceService {
   }
 
   async list(tenantId?: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(arAllowance)
       .where(tenantId != null ? eq(arAllowance.tenantId, tenantId) : undefined)
       .orderBy(desc(arAllowance.asOfDate), desc(arAllowance.id)).limit(200);

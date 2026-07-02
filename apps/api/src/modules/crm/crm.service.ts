@@ -50,7 +50,7 @@ export class CrmService {
   // Compute and upsert the customer_profile for one member.
   // Aggregates from dine_in_orders (channel/online/kiosk) where member_id is set.
   async refreshProfile(tenantId: number, memberId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [mem] = await db.select({ id: posMembers.id, lifetime: posMembers.lifetime }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
     if (!mem) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
 
@@ -133,7 +133,7 @@ export class CrmService {
   // reports 0 segment changes). Explicitly tenant-scoped — the BI scheduler also runs this under Admin
   // (RLS-bypassing), and an HQ/Admin caller must pass an explicit tenant_id.
   async refreshAllProfiles(user: JwtUser, opts: { tenantId?: number | null } = {}) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.role === 'Admin' || user.tenantId == null ? (opts.tenantId ?? user.tenantId) : user.tenantId;
     if (tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'tenant_id required', messageTh: 'ต้องระบุร้านค้า' });
     const BATCH = 500; let lastId = 0, profiled = 0, segmentChanges = 0;
@@ -150,7 +150,7 @@ export class CrmService {
         profiled++;
         if ((before?.seg ?? null) !== r.rfm_segment) segmentChanges++;
       }
-      lastId = Number(batch[batch.length - 1].id);
+      lastId = Number(batch[batch.length - 1]!.id);
       if (batch.length < BATCH) break;
     }
     return { tenant_id: tenantId, profiled, segment_changes: segmentChanges };
@@ -158,7 +158,7 @@ export class CrmService {
 
   // 360-degree customer view
   async profile(memberId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const [p] = await db.select().from(customerProfiles).where(and(eq(customerProfiles.memberId, memberId))).limit(1);
@@ -194,7 +194,7 @@ export class CrmService {
   // Consent flags ship WITH each row so the downstream CDP can honour opt-outs — the export never itself
   // sends anything. (For a single data-subject access/erasure request, use the PDPA DSAR endpoints instead.)
   async exportForCdp(user: JwtUser, opts: { tenantId?: number | null; limit?: number; offset?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = opts.tenantId ?? user.tenantId;
     if (tenantId == null) return { error: { code: 'TENANT_REQUIRED', message: 'HQ/Admin must specify tenant_id', messageTh: 'สำนักงานใหญ่ต้องระบุ tenant_id' } };
     const limit = Math.min(Math.max(opts.limit ?? 500, 1), 5000);
@@ -260,7 +260,7 @@ export class CrmService {
 
   // Personalized promos: filter active promos whose audience rules match this member's profile.
   async personalizedPromos(memberId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [p] = await db.select().from(customerProfiles).where(eq(customerProfiles.memberId, memberId)).limit(1);
     const [m] = await db.select({ lifetime: posMembers.lifetime }).from(posMembers).where(eq(posMembers.id, memberId)).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
@@ -304,7 +304,7 @@ export class CrmService {
 
   // Branch/store KPI dashboard — today's performance for the caller's tenant
   async branchKpi(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId;
     if (tenantId == null) return { error: 'No tenant context' };
 
@@ -337,7 +337,7 @@ export class CrmService {
     const hourly: number[] = new Array(24).fill(0);
     for (const r of todayRows) {
       const bkkHour = (new Date(r.openedAt).getHours() + 7 + 24) % 24;
-      hourly[bkkHour] += n(r.total);
+      hourly[bkkHour]! += n(r.total);
     }
 
     // Active members today
@@ -357,7 +357,7 @@ export class CrmService {
 
   // Upsert a personalized promo rule
   async upsertAudienceRule(dto: { promo_id: number; rfm_segment?: string; min_lifetime?: number; min_frequency?: number; preferred_channel?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId!;
     const [row] = await db.insert(promoAudienceRules).values({
       tenantId, promoId: dto.promo_id, rfmSegment: dto.rfm_segment ?? null,
@@ -365,6 +365,6 @@ export class CrmService {
       minFrequency: dto.min_frequency ?? null,
       preferredChannel: dto.preferred_channel ?? null, active: true,
     }).returning();
-    return { id: Number(row.id), promo_id: dto.promo_id, rfm_segment: dto.rfm_segment ?? null };
+    return { id: Number(row!.id), promo_id: dto.promo_id, rfm_segment: dto.rfm_segment ?? null };
   }
 }

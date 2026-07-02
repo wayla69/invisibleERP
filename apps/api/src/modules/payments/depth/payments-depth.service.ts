@@ -26,18 +26,18 @@ export class PaymentsDepthService {
   // ── customer deposits ──
   // Take a deposit (cash in advance): Dr 1000 Cash / Cr 2210 Customer Deposits.
   async takeDeposit(dto: { amount: number; member_id?: number; customer_name?: string; purpose?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const amount = r2(n(dto.amount));
     if (amount <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     const depositNo = await this.docNo.nextDaily('DEP');
     const je: any = await this.ledger.postEntry({ source: 'DEPOSIT', sourceRef: depositNo, tenantId: user.tenantId, memo: `Deposit ${depositNo}`, createdBy: user.username, lines: [{ account_code: '1000', debit: amount }, { account_code: '2210', credit: amount }] });
     const [d] = await db.insert(customerDeposits).values({ tenantId: user.tenantId ?? null, depositNo, memberId: dto.member_id ?? null, customerName: dto.customer_name ?? null, purpose: dto.purpose ?? 'booking', amount: String(amount), status: 'open', journalNo: je?.entry_no ?? null, createdBy: user.username }).returning({ id: customerDeposits.id });
-    return { id: Number(d.id), deposit_no: depositNo, amount, status: 'open', journal_no: je?.entry_no ?? null };
+    return { id: Number(d!.id), deposit_no: depositNo, amount, status: 'open', journal_no: je?.entry_no ?? null };
   }
 
   // Apply a deposit to a sale (revenue recognised, VAT-inclusive): Dr 2210 Deposit / Cr 4000 net / Cr 2100 VAT.
   async applyDeposit(depositNo: string, dto: { amount?: number; sale_no?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const dep = await this.loadDeposit(depositNo, user);
     const remaining = r2(n(dep.amount) - n(dep.appliedAmount) - n(dep.refundedAmount));
     const amount = dto.amount != null ? r2(n(dto.amount)) : remaining;
@@ -53,7 +53,7 @@ export class PaymentsDepthService {
 
   // Refund the unused deposit: Dr 2210 Deposit / Cr 1000 Cash.
   async refundDeposit(depositNo: string, dto: { amount?: number; reason?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const dep = await this.loadDeposit(depositNo, user);
     const remaining = r2(n(dep.amount) - n(dep.appliedAmount) - n(dep.refundedAmount));
     const amount = dto.amount != null ? r2(n(dto.amount)) : remaining;
@@ -66,7 +66,7 @@ export class PaymentsDepthService {
   }
 
   async listDeposits(_user: JwtUser, status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(customerDeposits.status, status) : undefined;
     const rows = await (where ? db.select().from(customerDeposits).where(where) : db.select().from(customerDeposits)).orderBy(desc(customerDeposits.id)).limit(200);
     return { deposits: rows.map((d: any) => ({ deposit_no: d.depositNo, member_id: d.memberId != null ? Number(d.memberId) : null, customer_name: d.customerName, purpose: d.purpose, amount: n(d.amount), applied: n(d.appliedAmount), refunded: n(d.refundedAmount), remaining: r2(n(d.amount) - n(d.appliedAmount) - n(d.refundedAmount)), status: d.status, created_at: d.createdAt })) };
@@ -80,15 +80,15 @@ export class PaymentsDepthService {
 
   // ── house / charge accounts ──
   async openAccount(dto: { name: string; member_id?: number; credit_limit?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const accountNo = await this.docNo.nextDaily('HA');
     const [a] = await db.insert(houseAccounts).values({ tenantId: user.tenantId ?? null, accountNo, memberId: dto.member_id ?? null, name: dto.name, creditLimit: String(r2(n(dto.credit_limit))), balance: '0', status: 'active', createdBy: user.username }).returning({ id: houseAccounts.id });
-    return { id: Number(a.id), account_no: accountNo, name: dto.name, credit_limit: r2(n(dto.credit_limit)), balance: 0, status: 'active' };
+    return { id: Number(a!.id), account_no: accountNo, name: dto.name, credit_limit: r2(n(dto.credit_limit)), balance: 0, status: 'active' };
   }
 
   // Charge a credit sale to the account (enforces the credit limit): Dr 1100 AR / Cr 4000 net / Cr 2100 VAT.
   async charge(accountNo: string, dto: { amount: number; sale_no?: string; memo?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const acct = await this.loadAccount(accountNo, user);
     if (acct.status !== 'active') throw new BadRequestException({ code: 'ACCOUNT_NOT_ACTIVE', message: 'Account is not active', messageTh: 'บัญชีไม่พร้อมใช้งาน' });
     const amount = r2(n(dto.amount));
@@ -106,7 +106,7 @@ export class PaymentsDepthService {
   // tendered in a foreign currency: `foreign_tendered` × `fx_rate` = THB cash received; any difference vs the
   // THB cleared is a REALISED FX gain/loss (5410). Dr 1000 received + (Dr 5410 loss) = Cr 1100 applied + (Cr 5410 gain).
   async settle(accountNo: string, dto: { amount: number; currency?: string; fx_rate?: number; foreign_tendered?: number; memo?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const acct = await this.loadAccount(accountNo, user);
     const appliedThb = r2(n(dto.amount));
     if (appliedThb <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
@@ -130,7 +130,7 @@ export class PaymentsDepthService {
   }
 
   async statement(accountNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const acct = await this.loadAccount(accountNo, user);
     const rows = await db.select().from(houseAccountEntries).where(eq(houseAccountEntries.accountId, Number(acct.id))).orderBy(houseAccountEntries.id);
     return {
@@ -141,7 +141,7 @@ export class PaymentsDepthService {
   }
 
   async listAccounts(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(houseAccounts).orderBy(desc(houseAccounts.id)).limit(200);
     return { accounts: rows.map((a: any) => ({ account_no: a.accountNo, name: a.name, member_id: a.memberId != null ? Number(a.memberId) : null, credit_limit: n(a.creditLimit), balance: n(a.balance), status: a.status })) };
   }
@@ -160,7 +160,7 @@ export class PaymentsDepthService {
 
   // ── card surcharge ──
   async setSurcharge(dto: { method: string; pct: number; active?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (n(dto.pct) < 0 || n(dto.pct) > 20) throw new BadRequestException({ code: 'BAD_PCT', message: 'Surcharge % must be 0–20', messageTh: 'เปอร์เซ็นต์ค่าธรรมเนียมต้องอยู่ที่ 0–20' });
     const [existing] = await db.select().from(paymentSurcharges).where(and(eq(paymentSurcharges.tenantId, user.tenantId as any), eq(paymentSurcharges.method, dto.method))).limit(1);
     if (existing) { await db.update(paymentSurcharges).set({ pct: String(dto.pct), active: dto.active ?? true }).where(eq(paymentSurcharges.id, existing.id)); return { method: dto.method, pct: n(dto.pct), active: dto.active ?? true, updated: true }; }

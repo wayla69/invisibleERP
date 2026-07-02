@@ -55,9 +55,9 @@ export class SavedSegmentsService {
   // Build a single bound SQL condition for one rule (value always bound by drizzle).
   private cond(r: SegmentRule): SQL | undefined {
     const f = FIELDS[r.field];
-    const col = f.col;
+    const col = f!.col;
     if (r.op === 'contains') return ilike(col, `%${String(r.value ?? '')}%`);
-    const v = f.kind === 'bool' ? (r.value === true || r.value === 'true') : f.kind === 'num' ? String(r.value) : r.value;
+    const v = f!.kind === 'bool' ? (r.value === true || r.value === 'true') : f!.kind === 'num' ? String(r.value) : r.value;
     switch (r.op) {
       case 'eq': return eq(col, v);
       case 'ne': return ne(col, v);

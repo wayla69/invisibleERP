@@ -174,7 +174,7 @@ export class MasterDataService {
           o[c.prop] = ['1', 'true', 'yes', 'y', 't'].includes(s.toLowerCase());
         } else o[c.prop] = s;
       }
-      const k = String(raw[keyHeader] ?? '').trim();
+      const k = String(raw[keyHeader!] ?? '').trim();
       if (k) {
         if (seen.has(k)) { errors.push({ row: rowNo, column: keyHeader, code: 'DUP_IN_FILE', message: `Duplicate ${keyHeader} "${k}" (first seen at row ${seen.get(k)})`, messageTh: `${keyHeader} ซ้ำในไฟล์` }); rowBad = true; }
         else seen.set(k, rowNo);
@@ -264,7 +264,7 @@ export function parseCsv(text: string): Record<string, string>[] {
   }
   if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
   if (!rows.length) return [];
-  const headers = rows[0].map((h) => h.trim());
+  const headers = rows[0]!.map((h) => h.trim());
   return rows.slice(1)
     .filter((r) => r.some((c) => c.trim() !== ''))
     .map((r) => {

@@ -14,16 +14,16 @@ export class RfqService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService, private readonly procurement: ProcurementService) {}
 
   async createRfq(dto: { items: { item_id: string; item_description?: string; qty: number; uom?: string }[]; required_date?: string; remarks?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการ' });
     const rfqNo = await this.docNo.nextDaily('RFQ');
     const [h] = await db.insert(rfqs).values({ tenantId: user.tenantId ?? null, rfqNo, rfqDate: ymd(), status: 'Open', requiredDate: dto.required_date ?? null, remarks: dto.remarks ?? null, createdBy: user.username }).returning({ id: rfqs.id });
-    await db.insert(rfqItems).values(dto.items.map((it) => ({ rfqId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null, qty: String(n(it.qty)), uom: it.uom ?? null })));
+    await db.insert(rfqItems).values(dto.items.map((it) => ({ rfqId: Number(h!.id), itemId: it.item_id, itemDescription: it.item_description ?? null, qty: String(n(it.qty)), uom: it.uom ?? null })));
     return { rfq_no: rfqNo, status: 'Open', lines: dto.items.length };
   }
 
   async submitQuote(rfqNo: string, dto: { vendor_id?: number; vendor_name?: string; items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string }[]; valid_until?: string; lead_time_days?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [rfq] = await db.select().from(rfqs).where(eq(rfqs.rfqNo, rfqNo)).limit(1);
     if (!rfq) throw new NotFoundException({ code: 'NOT_FOUND', message: 'RFQ not found', messageTh: 'ไม่พบ RFQ' });
     if (rfq.status !== 'Open') throw new ConflictException({ code: 'RFQ_CLOSED', message: 'RFQ is not open', messageTh: 'RFQ ปิดแล้ว' });
@@ -34,12 +34,12 @@ export class RfqService {
     const total = dto.items.reduce((a, it) => a + n(it.qty) * n(it.unit_price), 0);
     const quoteNo = await this.docNo.nextDaily('QTE');
     const [q] = await db.insert(supplierQuotes).values({ tenantId: user.tenantId ?? null, quoteNo, rfqId: Number(rfq.id), vendorId, vendorName, quoteDate: ymd(), validUntil: dto.valid_until ?? null, leadTimeDays: dto.lead_time_days ?? null, totalAmount: String(total), status: 'Submitted', createdBy: user.username }).returning({ id: supplierQuotes.id });
-    await db.insert(supplierQuoteItems).values(dto.items.map((it) => ({ quoteId: Number(q.id), itemId: it.item_id, itemDescription: it.item_description ?? null, qty: String(n(it.qty)), unitPrice: String(n(it.unit_price)), uom: it.uom ?? null })));
+    await db.insert(supplierQuoteItems).values(dto.items.map((it) => ({ quoteId: Number(q!.id), itemId: it.item_id, itemDescription: it.item_description ?? null, qty: String(n(it.qty)), unitPrice: String(n(it.unit_price)), uom: it.uom ?? null })));
     return { quote_no: quoteNo, rfq_no: rfqNo, total_amount: total, status: 'Submitted' };
   }
 
   async award(rfqNo: string, quoteNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     // lock the RFQ row + re-check status under the lock so two concurrent awards can't both create a PO
     const [rfq] = await db.select().from(rfqs).where(eq(rfqs.rfqNo, rfqNo)).for('update').limit(1);
     if (!rfq) throw new NotFoundException({ code: 'NOT_FOUND', message: 'RFQ not found', messageTh: 'ไม่พบ RFQ' });
@@ -56,12 +56,12 @@ export class RfqService {
   }
 
   async listRfqs(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(rfqs).orderBy(desc(rfqs.id)).limit(100);
     return { rfqs: rows.map((r: any) => ({ rfq_no: r.rfqNo, status: r.status, rfq_date: r.rfqDate, required_date: r.requiredDate })) };
   }
   async getRfq(rfqNo: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(rfqs).where(eq(rfqs.rfqNo, rfqNo)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'RFQ not found', messageTh: 'ไม่พบ RFQ' });
     const items = await db.select().from(rfqItems).where(eq(rfqItems.rfqId, Number(r.id)));
