@@ -106,8 +106,12 @@ async function main() {
   // (sma/ses) cannot express it — the multiplicative day-of-week model must WIN the backtest and be
   // auto-selected, proving seasonality is now measured, not asserted.
   const bWeekly = await inj('POST', '/api/demand/backtest', admin, { item_id: 'DM-WEEKLY' });
-  ok('Backtest WEEKLY → dow_seasonal wins on WAPE (beats flat sma/ses on a weekend-heavy pattern)',
-    bWeekly.json.best?.algorithm === 'dow_seasonal' && (byAlgo(bWeekly, 'dow_seasonal')?.wape ?? 1) < (byAlgo(bWeekly, 'ses')?.wape ?? 0),
+  // Accept either DOW-aware model: th_holiday CONTAINS dow_seasonal (it degrades to it with no holiday
+  // context), so which of the two wins is date-dependent — it flips when Thai holidays fall inside the
+  // rolling relative-date seed window. The ToE intent — seasonality is measured, flat models lose — holds.
+  const DOW_FAMILY = ['dow_seasonal', 'th_holiday'];
+  ok('Backtest WEEKLY → a DOW-aware model (dow_seasonal/th_holiday) wins on WAPE (beats flat sma/ses on a weekend-heavy pattern)',
+    DOW_FAMILY.includes(bWeekly.json.best?.algorithm) && (byAlgo(bWeekly, 'dow_seasonal')?.wape ?? 1) < (byAlgo(bWeekly, 'ses')?.wape ?? 0),
     JSON.stringify(cand(bWeekly).map((c) => [c.algorithm, c.wape])));
   // ── docs/27 R4-3 remainder — Thai holiday-calendar model, deterministic direct check ──
   // History = 120 days ending 2026-04-12 (the day before Songkran): base 10/day, in-window fixed holidays
@@ -132,8 +136,8 @@ async function main() {
 
   const fcWeekly = await inj('POST', '/api/demand/forecast', admin, { item_id: 'DM-WEEKLY', horizon: 7 });
   const wf: number[] = fcWeekly.json.forecast ?? [];
-  ok('Forecast WEEKLY → auto-selects dow_seasonal and the 7-day shape peaks on the weekend positions',
-    fcWeekly.json.algorithm === 'dow_seasonal' && wf.length === 7 && Math.max(...wf) > Math.min(...wf) * 1.5,
+  ok('Forecast WEEKLY → auto-selects a DOW-aware model (dow_seasonal/th_holiday) and the 7-day shape peaks on the weekend positions',
+    DOW_FAMILY.includes(fcWeekly.json.algorithm) && wf.length === 7 && Math.max(...wf) > Math.min(...wf) * 1.5,
     JSON.stringify({ algo: fcWeekly.json.algorithm, fc: wf.map((x) => Math.round(x * 10) / 10) }));
 
   // ── 2. trending series: Holt (trend-aware) beats the flat SMA baseline ──
