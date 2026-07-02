@@ -296,7 +296,12 @@ permission in `packages/shared/src/permissions.ts`, granted to Admin only by def
 overrides in the quarterly UAR export (`compliance` harness asserts the row appears). RCM: strengthen
 the ITGC-AC user-admin control text; regenerate xlsx.
 
-### R2-4 · Cookie/TTL coherence — closes AUD-SEC-05
+### R2-4 · Cookie/TTL coherence — closes AUD-SEC-05 — **DELIVERED 2026-07-02**
+> Shipped: the auth/CSRF cookie `Max-Age` now defaults to the **access-token TTL** (parses
+> `JWT_EXPIRES_IN`; `AUTH_COOKIE_MAX_AGE` still overrides) instead of a hardcoded 12h that outlived the
+> 1h JWT; the stale "8h expiry" comments corrected; `.env.example` aligned (`JWT_EXPIRES_IN=1h` — the
+> refresh flow renews silently, and the web client already does refresh-on-401 + retry, so no UX change).
+> No security-behavior change (the signed JWT always governed); this is auditability hygiene.
 Single source of truth: cookie `Max-Age` derives from the JWT TTL constant; fix the stale "8h"
 comment. No behavior change beyond alignment.
 
@@ -478,3 +483,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.5 | 2026-07-02 | ERP/Product | R0-3 delivered (must-change hard gate + random seed credential + prod-seed refusal); R2-3 found already-implemented (sod_reason ToE exists) |
 | 1.6 | 2026-07-02 | ERP/Product | R2-1 delivered (throttled fail-open ops alert on the lockout store; AC-15 RCM text drift fixed; runbook rev 1.2) |
 | 1.7 | 2026-07-02 | ERP/Product | R2-2 delivered (authz change bumps tokens_valid_from → immediate revocation instead of per-request re-resolution) |
+| 1.8 | 2026-07-02 | ERP/Product | R2-4 delivered (cookie Max-Age defaults to the JWT TTL; stale 8h/12h comments + .env.example aligned) |
