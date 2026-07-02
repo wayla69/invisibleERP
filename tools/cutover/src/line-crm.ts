@@ -30,6 +30,7 @@ const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok:
 const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string; ref?: string }[] = [];
 const lineBroadcasts: { auth: string; text: string; type?: string; altText?: string }[] = [];
 const lineReplies: { replyToken: string; auth: string; text: string }[] = [];
+const lineContentFetches: { url: string; auth: string }[] = [];
 let pushSeq = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
@@ -46,6 +47,12 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
     const m = body.messages?.[0] ?? {};
     lineReplies.push({ replyToken: body.replyToken, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '' });
     return { ok: true, status: 200, headers: { get: () => `req-r-${lineReplies.length}` }, text: async () => '' } as any;
+  }
+  if (url.includes('api-data.line.me/v2/bot/message/')) {
+    // LINE content API — return a tiny deterministic "photo" so the chat attach flow can be exercised
+    lineContentFetches.push({ url, auth: String(init?.headers?.Authorization ?? '') });
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    return { ok: true, status: 200, headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'image/png' : null) }, arrayBuffer: async () => bytes.buffer, text: async () => '' } as any;
   }
   if (url.includes('api.line.me/v2/bot/message/broadcast')) {
     const body = JSON.parse(init?.body ?? '{}');
@@ -453,6 +460,60 @@ async function main() {
   ok('chat-PR2: stock <item> → on-hand total + per-location breakdown (case-insensitive item id)',
     stk.json.chat === 1 && stkText.includes('A4-PAPER') && stkText.includes('42') && stkText.includes('WH-MAIN'),
     JSON.stringify({ reply: stkText.slice(0, 60) }));
+
+  // ── 18. Attachments (0228): invoice/receipt photo onto a PO — web API + LINE chat `attach` flow. ──
+  const poRes = await inj('POST', '/api/procurement/pos', token, { vendor_name: 'ผู้ขายทดสอบแนบ', items: [{ item_id: 'A4-PAPER', order_qty: 5, unit_price: 100 }] });
+  const poNo = poRes.json.po_no as string;
+  ok('attach: seed PO created', !!poNo, JSON.stringify({ po: poNo }));
+
+  // 18a. attach at an unknown doc → immediate "not found" reply (no pending state parked).
+  const badDoc = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18a', source: { userId: 'Uprayut' }, message: { id: 'mid-18a', type: 'text', text: 'attach PO-19990101-999' } }] });
+  ok('attach: unknown PO → ไม่พบเอกสาร reply', badDoc.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่พบเอกสาร'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 40) }));
+
+  // 18b. permission: a linked user without procurement/creditors/wh_receive cannot start an attach.
+  await db.update(s.users).set({ lineUserId: 'Usomchai' }).where(eq(s.users.username, 'somchai'));
+  const noPermAtt = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18b', source: { userId: 'Usomchai' }, message: { id: 'mid-18b', type: 'text', text: `attach ${poNo}` } }] });
+  ok('attach: linked user without paper-handling perms → refused', noPermAtt.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 18c. happy path: attach command parks the state; the next photo is fetched from the LINE content API
+  //      and lands as a doc_attachments row (source line, kind receipt, uploader = the linked staff).
+  const attStart = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18c1', source: { userId: 'Uprayut' }, message: { id: 'mid-18c1', type: 'text', text: `attach ${poNo} receipt` } }] });
+  const photo = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18c2', source: { userId: 'Uprayut' }, message: { id: 'mid-18c2', type: 'image' } }] });
+  const attRows = await db.select().from(s.docAttachments).where(and(eq(s.docAttachments.docType, 'PO'), eq(s.docAttachments.docNo, poNo)));
+  ok('attach: command + photo → attachment stored from the LINE content API (source line, kind receipt)',
+    attStart.json.chat === 1 && photo.json.chat === 1 && lineReplies.at(-1)!.text.includes('แนบรูปกับ') && attRows.length === 1
+      && attRows[0].source === 'line' && attRows[0].kind === 'receipt' && attRows[0].createdBy === 'prayut'
+      && String(attRows[0].dataUrl).startsWith('data:image/png;base64,') && lineContentFetches.length >= 1,
+    JSON.stringify({ rows: attRows.length, kind: attRows[0]?.kind, by: attRows[0]?.createdBy }));
+
+  // 18d. replayed photo webhook (same message id) → deduped, no second attachment; a photo with NO pending
+  //      state (somchai) is ignored entirely (customers send images all day).
+  const replayPhoto = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18d1', source: { userId: 'Uprayut' }, message: { id: 'mid-18c2', type: 'image' } }] });
+  const strayPhoto = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18d2', source: { userId: 'Usomchai' }, message: { id: 'mid-18d2', type: 'image' } }] });
+  const attRows2 = await db.select().from(s.docAttachments).where(and(eq(s.docAttachments.docType, 'PO'), eq(s.docAttachments.docNo, poNo)));
+  ok('attach: replayed photo cannot double-attach (state consumed → ignored); stateless photo ignored silently',
+    replayPhoto.json.chat === 0 && strayPhoto.json.chat === 0 && attRows2.length === 1, JSON.stringify({ rows: attRows2.length, replay: replayPhoto.json.chat, stray: strayPhoto.json.chat }));
+
+  // 18e. web API round-trip + evidence-integrity delete rules (uploader-or-Admin only).
+  const prayutTok = (await inj('POST', '/api/login', undefined, { username: 'prayut', password: 'pw' })).json.token as string;
+  await db.insert(s.users).values([{ username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 }]).onConflictDoNothing();
+  const apTok = (await inj('POST', '/api/login', undefined, { username: 'apclerk', password: 'pw' })).json.token as string;
+  const webUp = await inj('POST', '/api/procurement/attachments', apTok, { doc_type: 'PO', doc_no: poNo, kind: 'invoice', filename: 'inv.png', data_url: 'data:image/png;base64,aGk=' });
+  const listAtt = await inj('GET', `/api/procurement/attachments?doc_type=PO&doc_no=${poNo}`, token);
+  const getOne = await inj('GET', `/api/procurement/attachments/${webUp.json.id}`, prayutTok);
+  const delWrongUser = await inj('DELETE', `/api/procurement/attachments/${webUp.json.id}`, prayutTok); // procurement perm but NOT the uploader
+  const delUploader = await inj('DELETE', `/api/procurement/attachments/${webUp.json.id}`, apTok);
+  ok('attach: web upload + list (metadata only) + fetch; delete refused for non-uploader (NOT_UPLOADER), allowed for uploader',
+    (webUp.status === 200 || webUp.status === 201) && listAtt.json.count === 2 && !JSON.stringify(listAtt.json).includes('base64')
+      && getOne.json.data_url === 'data:image/png;base64,aGk=' && delWrongUser.status === 403 && delWrongUser.json.error?.code === 'NOT_UPLOADER'
+      && delUploader.json.deleted === true,
+    JSON.stringify({ up: webUp.status, count: listAtt.json.count, delWrong: delWrongUser.status }));
+
+  // 18f. unknown doc on web upload → 404; bad payload → 400.
+  const web404 = await inj('POST', '/api/procurement/attachments', apTok, { doc_type: 'PO', doc_no: 'PO-19990101-999', data_url: 'data:image/png;base64,aGk=' });
+  const web400 = await inj('POST', '/api/procurement/attachments', apTok, { doc_type: 'PO', doc_no: poNo, data_url: 'https://not-a-data-url' });
+  ok('attach: web negatives — unknown PO 404, non-data-URL 400 BAD_IMAGE',
+    web404.status === 404 && web400.status === 400 && web400.json.error?.code === 'BAD_IMAGE', JSON.stringify({ s404: web404.status, s400: web400.status }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

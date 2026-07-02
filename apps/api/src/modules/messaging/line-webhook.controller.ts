@@ -5,13 +5,14 @@ import { createHmac, randomInt } from 'node:crypto';
 import { eq, and, or, desc, ilike } from 'drizzle-orm';
 import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenants, posMembers, messageLog, users, userPermissions, purchaseRequests, items, invBalances } from '../../database/schema';
+import { tenants, posMembers, messageLog, users, userPermissions, purchaseRequests, items, invBalances, lineChatStates } from '../../database/schema';
 import { safeEqualStr } from '../../common/crypto';
 import { isUniqueViolation } from '../../common/db-error';
 import { Public, NoTx, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { TenantMessagingService } from './tenant-messaging.service';
-import { replyLine, type SendResult } from './gateways';
+import { replyLine, fetchLineContent, type SendResult } from './gateways';
 import { ProcurementService } from '../procurement/procurement.service';
+import { AttachmentsService } from '../procurement/attachments.service';
 
 // LINE Messaging API webhook (follow / unfollow / message …). Public + no JWT: authenticity is the LINE
 // signature (`X-Line-Signature` = base64 HMAC-SHA256 of the RAW body under the tenant's Channel Secret).
@@ -40,6 +41,9 @@ export class LineWebhookService {
   private procurementSvc(): ProcurementService | null {
     try { return this.moduleRef.get(ProcurementService, { strict: false }); } catch { return null; }
   }
+  private attachmentsSvc(): AttachmentsService | null {
+    try { return this.moduleRef.get(AttachmentsService, { strict: false }); } catch { return null; }
+  }
 
   async handle(tenantCode: string, rawBody: Buffer | undefined, signature: string | undefined, parsed: any) {
     const db = this.db;
@@ -59,6 +63,7 @@ export class LineWebhookService {
       if (ev.type === 'follow') { await this.onFollow(tenantId, userId); followed++; }
       else if (ev.type === 'unfollow') { await this.onUnfollow(tenantId, userId); unfollowed++; }
       else if (ev.type === 'message' && ev.message?.type === 'text') { if (await this.onChatMessage(tenantId, token, ev)) chat++; }
+      else if (ev.type === 'message' && ev.message?.type === 'image') { if (await this.onChatImage(tenantId, token, ev)) chat++; }
     }
     return { received: true, followed, unfollowed, chat };
   }
@@ -143,8 +148,9 @@ export class LineWebhookService {
     const isFind = (cmd === 'find' || cmd === 'ค้นหา') && !!arg1;
     const isCancel = (cmd === 'cancel' || cmd === 'ยกเลิก') && !!arg1;
     const isStock = (cmd === 'stock' || cmd === 'สต็อก') && !!arg1;
+    const isAttach = (cmd === 'attach' || cmd === 'แนบ') && !!arg1;
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isPr) return false;
 
     // LINE may redeliver a webhook — the reply log row carries the inbound message id, so a duplicate
     // delivery of the same message is dropped instead of acting twice (e.g. raising a duplicate PR).
@@ -168,6 +174,7 @@ export class LineWebhookService {
       else if (isFind) { reply = await this.chatFind(parts.slice(1).join(' ')); campaign = 'chat_find'; }
       else if (isCancel) { reply = await this.chatCancel(staff, arg1); campaign = 'chat_cancel'; }
       else if (isStock) { reply = await this.chatStock(staff, arg1); campaign = 'chat_stock'; }
+      else if (isAttach) { reply = await this.chatAttachStart(tenantId, lineUserId, staff, arg1, (parts[2] ?? '').toLowerCase()); campaign = 'chat_attach'; }
       else reply = await this.chatCreatePr(staff, text);
     }
     await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, campaign);
@@ -227,6 +234,77 @@ export class LineWebhookService {
       const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
       return `${prNo}: ยกเลิกไม่ได้ — ${String(msg).slice(0, 200)}`;
     }
+  }
+
+  // ── attach <doc no> [invoice|receipt|other] → next photo binds to the document (0228) ─────────────
+  // The command validates authority + the target doc NOW and parks a short-lived pending state; the photo
+  // that follows (onChatImage) is fetched from the LINE content API and stored as a doc attachment —
+  // evidence for the 3-way match (EXP-01 documentation; permission mirrors the web upload endpoint).
+
+  private static readonly ATTACH_PERMS = ['procurement', 'creditors', 'wh_receive'];
+  private static readonly ATTACH_TTL_MS = 10 * 60_000;
+
+  private async chatAttachStart(tenantId: number, lineUserId: string, u: any, docNo: string, kindArg: string): Promise<string> {
+    const no = docNo.toUpperCase();
+    const docType = no.startsWith('PO-') ? 'PO' : no.startsWith('PR-') ? 'PR' : null;
+    if (!docType) return 'แนบได้กับใบสั่งซื้อ/คำขอซื้อ (เลขที่ขึ้นต้น PO- หรือ PR-)';
+    const kind = ['invoice', 'receipt', 'other'].includes(kindArg) ? kindArg : kindArg === 'ใบเสร็จ' ? 'receipt' : 'invoice';
+    const perms = await this.effectivePerms(u);
+    if (!LineWebhookService.ATTACH_PERMS.some((p) => perms.includes(p))) return 'บัญชีของคุณไม่มีสิทธิ์แนบเอกสาร (ต้องมี procurement / creditors / wh_receive)';
+    const attachments = this.attachmentsSvc();
+    if (!attachments) return 'ระบบแนบเอกสารยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    // validate the target NOW so the user isn't told to send a photo at a doc that doesn't exist
+    try { await attachments.assertDocExists(docType, no); } catch { return `ไม่พบเอกสาร ${no}`; }
+    const expiresAt = new Date(Date.now() + LineWebhookService.ATTACH_TTL_MS);
+    await this.db.insert(lineChatStates)
+      .values({ tenantId, lineUserId, kind: 'attach', payload: { docType, docNo: no, kind }, expiresAt })
+      .onConflictDoUpdate({ target: [lineChatStates.tenantId, lineChatStates.lineUserId], set: { kind: 'attach', payload: { docType, docNo: no, kind }, expiresAt, createdAt: new Date() } });
+    return `พร้อมรับรูปสำหรับ ${no} (${kind === 'receipt' ? 'ใบเสร็จ' : kind === 'other' ? 'อื่น ๆ' : 'ใบแจ้งหนี้/ใบกำกับ'}) — ส่งรูปมาในแชทนี้ภายใน 10 นาที`;
+  }
+
+  // A photo from a linked staff member with a live pending-attach state → fetch the bytes from the LINE
+  // content API and pin them to the document. Any other image (customers, no pending state) is ignored.
+  private async onChatImage(tenantId: number, token: string | undefined, ev: any): Promise<boolean> {
+    const lineUserId = String(ev?.source?.userId ?? '');
+    const msgId = String(ev?.message?.id ?? '');
+    if (!lineUserId || !msgId) return false;
+    const [state] = await this.db.select().from(lineChatStates)
+      .where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId), eq(lineChatStates.kind, 'attach'))).limit(1);
+    if (!state || new Date(state.expiresAt).getTime() < Date.now()) return false; // no live flow → not ours
+    const staff = await this.staffByLine(tenantId, lineUserId);
+    if (!staff) return false;
+
+    // webhook-redelivery dedupe (same mechanism as text commands)
+    const [dup] = await this.db.select({ id: messageLog.id }).from(messageLog)
+      .where(and(eq(messageLog.tenantId, tenantId), eq(messageLog.providerRef, `line:msg:${msgId}`))).limit(1);
+    if (dup) return true;
+
+    const p = (state.payload ?? {}) as { docType?: string; docNo?: string; kind?: string };
+    let reply: string;
+    const attachments = this.attachmentsSvc();
+    if (!attachments || !p.docType || !p.docNo) {
+      reply = 'ระบบแนบเอกสารยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    } else if (!token) {
+      reply = 'ดึงรูปจาก LINE ไม่ได้ (ยังไม่ได้ตั้งค่า channel token ของร้าน)';
+    } else {
+      const content = await fetchLineContent(token, msgId);
+      if ('error' in content) {
+        reply = content.error === 'too-large' ? 'รูปใหญ่เกินไป (สูงสุด ~2MB) — ลองถ่ายใหม่หรือลดขนาด' : 'ดึงรูปจาก LINE ไม่สำเร็จ กรุณาส่งใหม่อีกครั้ง';
+      } else {
+        const perms = await this.effectivePerms(staff);
+        const jwtUser: JwtUser = { username: staff.username, role: staff.role, customerName: null, tenantId: staff.tenantId != null ? Number(staff.tenantId) : null, permissions: perms };
+        try {
+          const res = await attachments.add({ doc_type: p.docType, doc_no: p.docNo, data_url: content.dataUrl, kind: p.kind, filename: `line-${msgId}.jpg`, source: 'line' }, jwtUser);
+          await this.db.delete(lineChatStates).where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId)));
+          reply = `แนบรูปกับ ${res.doc_no} แล้ว ✔ (ไฟล์แนบทั้งหมด ${res.count} รายการ) — ดูได้ที่หน้าใบสั่งซื้อในระบบ ERP`;
+        } catch (e: any) {
+          const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+          reply = `แนบรูปไม่สำเร็จ: ${String(msg).slice(0, 200)}`;
+        }
+      }
+    }
+    await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, 'chat_attach');
+    return true;
   }
 
   // stock <item id> — read-only on-hand lookup from inv_balances (tenant-scoped to the linked user's shop).
