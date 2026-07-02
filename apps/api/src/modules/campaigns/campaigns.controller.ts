@@ -13,6 +13,8 @@ const CampaignBody = z.object({
   tier: z.string().optional(),
   saved_segment_id: z.number().int().positive().optional(),
   body: z.string().min(1),
+  variant_b_body: z.string().min(1).optional(),
+  split_b_pct: z.number().int().min(0).max(90).optional(),
   schedule_at: z.string().datetime().optional(),
 });
 

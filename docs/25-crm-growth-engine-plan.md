@@ -130,5 +130,6 @@ and the system runs it per member, forever, without cron babysitting.
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.2 | 2026-07-02 | Platform | **G2 SHIPPED** — A/B variants + holdout on the campaign_sends closed loop (migration 0213, deterministic bucketPct, per-group lift report with the honest 0-baseline caveat); loyalty_campaigns body-only A/B. G3 pending. |
 | 1.1 | 2026-07-02 | Platform | **G1 SHIPPED** — lifecycle journeys (migration 0212, module `journeys`, `journey_runner` BI job, `enroll_journey` automation action, web `/loyalty/journeys`, control **MKT-12** + RCM regen → 170). G2/G3 pending. |
 | 1.0 | 2026-07-02 | Platform | Initial plan: three-phase growth engine (G1 lifecycle journeys + MKT-12, G2 A/B + holdout lift on the campaign_sends closed loop, G3 explainable churn/LTV scoring composing into F1 segments + G1 journeys), continuing docs/24. |

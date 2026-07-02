@@ -27,16 +27,16 @@ export default function CampaignsPage() {
   const list = useQuery<{ campaigns: Campaign[] }>({ queryKey: ['loy-campaigns'], queryFn: () => api('/api/loyalty/campaigns') });
   const segs = useQuery<{ segments: SavedSegment[] }>({ queryKey: ['saved-segments'], queryFn: () => api('/api/loyalty/saved-segments') });
 
-  const [f, setF] = useState({ name: '', channel: 'sms', audience: 'all', segment: '', tier: '', saved_segment_id: '', body: '', schedule_at: '' });
+  const [f, setF] = useState({ name: '', channel: 'sms', audience: 'all', segment: '', tier: '', saved_segment_id: '', body: '', variant_b_body: '', split_b_pct: '0', schedule_at: '' });
   const set = (p: Partial<typeof f>) => setF((s) => ({ ...s, ...p }));
 
   const create = useMutation({
     mutationFn: () => api('/api/loyalty/campaigns', { method: 'POST', body: JSON.stringify({
       name: f.name, channel: f.channel, audience: f.audience, body: f.body,
-      ...(f.audience === 'segment' ? { segment: f.segment } : {}), ...(f.audience === 'tier' ? { tier: f.tier } : {}), ...(f.audience === 'saved_segment' ? { saved_segment_id: Number(f.saved_segment_id) } : {}),
+      ...(f.audience === 'segment' ? { segment: f.segment } : {}), ...(f.audience === 'tier' ? { tier: f.tier } : {}), ...(f.audience === 'saved_segment' ? { saved_segment_id: Number(f.saved_segment_id) } : {}), ...(f.variant_b_body.trim() ? { variant_b_body: f.variant_b_body.trim(), split_b_pct: Number(f.split_b_pct) || 0 } : {}),
       ...(f.schedule_at ? { schedule_at: new Date(f.schedule_at).toISOString() } : {}),
     }) }),
-    onSuccess: () => { notifySuccess('สร้างแคมเปญแล้ว'); setF({ name: '', channel: 'sms', audience: 'all', segment: '', tier: '', saved_segment_id: '', body: '', schedule_at: '' }); qc.invalidateQueries({ queryKey: ['loy-campaigns'] }); },
+    onSuccess: () => { notifySuccess('สร้างแคมเปญแล้ว'); setF({ name: '', channel: 'sms', audience: 'all', segment: '', tier: '', saved_segment_id: '', body: '', variant_b_body: '', split_b_pct: '0', schedule_at: '' }); qc.invalidateQueries({ queryKey: ['loy-campaigns'] }); },
     onError: (e: Error) => notifyError(e.message),
   });
   const sendNow = useMutation({ mutationFn: (c: Campaign) => api(`/api/loyalty/campaigns/${c.id}/send`, { method: 'POST' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['loy-campaigns'] }), onError: (e: Error) => notifyError(e.message) });
@@ -60,6 +60,10 @@ export default function CampaignsPage() {
               <div className="grid gap-1.5"><Label>ตั้งเวลาส่ง (ว่าง=ส่งเอง)</Label><Input type="datetime-local" value={f.schedule_at} onChange={(e) => set({ schedule_at: e.target.value })} /></div>
             </div>
             <div className="grid gap-1.5"><Label>ข้อความ</Label><textarea className="min-h-20 rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" value={f.body} onChange={(e) => set({ body: e.target.value })} placeholder="สวัสดีค่ะ รับสิทธิพิเศษ…" /></div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-1.5 sm:col-span-2"><Label>ข้อความแบบ B (A/B — ว่าง=ไม่ทดสอบ)</Label><Input value={f.variant_b_body} onChange={(e) => set({ variant_b_body: e.target.value })} placeholder="ข้อความทางเลือกเพื่อเทียบผล" /></div>
+              {f.variant_b_body.trim() !== '' && <div className="grid gap-1.5"><Label>สัดส่วน B (%)</Label><Input type="number" min="0" max="90" value={f.split_b_pct} onChange={(e) => set({ split_b_pct: e.target.value })} /></div>}
+            </div>
             <div className="flex items-center gap-3"><Button onClick={() => create.mutate()} disabled={!f.name.trim() || !f.body.trim() || (f.audience === 'saved_segment' && !f.saved_segment_id) || create.isPending}>{create.isPending ? 'กำลังบันทึก…' : 'สร้างแคมเปญ'}</Button></div>
           </CardContent>
         </Card>
