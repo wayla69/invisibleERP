@@ -346,7 +346,16 @@ the ITGC-AC user-admin control text; regenerate xlsx.
 Single source of truth: cookie `Max-Age` derives from the JWT TTL constant; fix the stale "8h"
 comment. No behavior change beyond alignment.
 
-### R2-5 · Test depth + TS strictness ratchet — closes AUD-ARC-05 (rolling, not one PR)
+### R2-5 · Test depth + TS strictness ratchet — closes AUD-ARC-05 (rolling, not one PR) — **RATCHET DELIVERED 2026-07-02**
+> Shipped the enforcement half: `tools/ci/check-ts-debt.mjs` in the CI build job — counts `as any`
+> (1,456 across `apps/api/src`) and the `noUncheckedIndexedAccess` error count (248, measured by
+> re-running tsc with the CLI flag override) against the committed `ts-debt-baseline.json`; **any increase
+> fails CI**, decreases print the new baseline to commit. Flipping the tsconfig flag outright was measured
+> and deliberately rejected (248 errors — regression-roulette on money paths in one PR); the ratchet
+> guarantees monotonic progress instead. The unit-test lane also grew this remediation series: `money`,
+> `realtime-bus`, `embedder`, `login-attempt-failopen` suites + the coverage-scope ratchet
+> (`common/money.ts` added). Remaining rolling work: pay the 248+1,456 down module-by-module (start
+> `ledger`/`finance`/`projects`), lowering the baseline each PR.
 - Re-enable `noUncheckedIndexedAccess` in `apps/api/tsconfig.json`; fix fallout module-by-module
   (start with `ledger`, `finance`, `projects` — the money paths), using per-file `// @ts-expect-error`
   only as a tracked, lint-counted escape hatch.
@@ -583,3 +592,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 2.9 | 2026-07-02 | ERP/Product | R4-1 delivered provider-first (Voyage adapter + embed-space column/filter/reembed; pgvector deferred by recorded decision) |
 | 3.0 | 2026-07-02 | ERP/Product | R5-1 delivered (orphans found already-journaled idx 102/103, dead grandfather list removed; migration-parity harness; dup-number decision recorded) |
 | 3.1 | 2026-07-02 | ERP/Product | R1-5 repo-half delivered (loadtest manual-dispatch workflow + capacity doc rev 1.2; PgBouncer/Redis provisioning = console actions) |
+| 3.2 | 2026-07-02 | ERP/Product | R2-5 ratchet delivered (ts-debt guard in CI: as-any 1456 + strict-index 248 baselines may only go down) |
