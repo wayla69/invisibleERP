@@ -10,10 +10,13 @@
 > semantic RAG (Voyage + space isolation) · R4-2 anomaly math corrected · R4-3 dow/holiday models incl.
 > Songkran · R4-4 LLM seam + scored benchmark · R4-5 honest labeling · R5-1 migration parity + dead
 > grandfather removed · R5-3 consolidation RFC (docs/28).
-> **Open (blocked on people/console, not code):** counsel execution of ToS/DPA/privacy + Anthropic
+> **Open (blocked on people/console, not code — consolidated with owners + verification in
+> `docs/ops/go-live-console-runbook.md`):** counsel execution of ToS/DPA/privacy + Anthropic
 > addendum → `AI_DPA_ACKNOWLEDGED` · SOC 2 Type I engagement + quarterly evidence archive · ELC operation
-> (R3-4) · PgBouncer/Redis provisioning on Railway · docs/28 RFC approval → the 5 move-PRs + top-5 RSC
-> conversions · rolling ts-debt paydown · Wave 6 (customers, pricing, PMO).
+> (R3-4) · PgBouncer/Redis provisioning on Railway · prod `db:backfill:pii` · staging loadtest baseline ·
+> Wave 6 (customers, pricing, PMO). Rolling in-repo: remaining RSC conversions (eam, projects/[code],
+> reports, insights) · further ts-debt tranches. **Done since v3.5:** docs/28 all 5 consolidation PRs ·
+> RSC #1 (accounting) · ts-debt tranche #1 (as-any −310).
 
 ---
 
