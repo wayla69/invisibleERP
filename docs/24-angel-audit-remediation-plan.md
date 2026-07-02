@@ -428,7 +428,12 @@ holiday-spike fixture the flat models lose on.
   expected structured outcomes, score = exact-match/tolerance, tracked release-over-release in the
   retained-evidence artifact (R3-3). Budget-gate stays.
 
-### R4-5 · Honest labeling sweep — closes the "stop calling statistics ML" note
+### R4-5 · Honest labeling sweep — closes the "stop calling statistics ML" note — **DELIVERED 2026-07-02**
+> Shipped: the only user-facing "ML" claims were the nav label (`nav.demand` → now "Demand Forecast
+> (statistical)" TH+EN) and the user-manual section header — both relabeled, with an honest-labeling
+> callout in the manual and `docs/06-ai-integration.md` (classical statistics, walk-forward backtesting,
+> deliberately not ML; "AI" = the governed LLM copilot only). Code identifiers (`modules/demand-ml`,
+> `/demand`) stay — they are names, not claims.
 One docs PR: `docs/06-ai-integration.md` + user-manual + any pitch-adjacent doc consistently say
 "classical statistical forecasting with walk-forward backtesting (SMA/SES/Holt/seasonal-naive/
 Croston)" and "governed AI copilot," never "machine learning" for the stats layer. Cheap; protects
@@ -511,3 +516,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.9 | 2026-07-02 | ERP/Product | R1-3 delivered (shared realtime-bus with optional Redis pub/sub behind both SSE buses; fake-transport cross-instance ToE) |
 | 2.0 | 2026-07-02 | ERP/Product | R1-2 delivered (gl_period_balances snapshot + transactional maintenance + TB snapshot read + control GL-20; census 170) |
 | 2.1 | 2026-07-02 | ERP/Product | R4-2 delivered (corrected anomaly math default; legacy behind ANOMALY_PARITY_MODE; parity harness pins + proves both) |
+| 2.2 | 2026-07-02 | ERP/Product | R4-5 delivered (nav + manual + docs/06 honest statistical labeling) |

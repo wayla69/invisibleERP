@@ -1,5 +1,11 @@
 # 06 — AI & Analytics Integration
 
+> **Honest labeling (docs/24 R4-5):** the "demand-ml" module and the analytics forecasters are
+> **classical statistics** (SMA/SES/Holt/seasonal-naive/Croston + walk-forward WAPE/MASE backtesting;
+> z-score anomaly flags) — deliberately explainable for audit, **not machine learning**, and must not be
+> marketed as ML. "AI" in this document means the governed LLM copilot (agent/RAG/doc-extraction), which
+> is advisory-only and never posts transactions.
+
 พอร์ตสมอง AI ของระบบ (Anthropic Claude) จาก Python `agents/` + `analytics/` → TypeScript ใน NestJS module `ai` โดยคงพฤติกรรมเป๊ะ และยกระดับ (streaming, tools จริง, prompt caching)
 
 **SDK:** `@anthropic-ai/sdk` (พอร์ตตรงจาก `base_agent.py` ReAct loop)

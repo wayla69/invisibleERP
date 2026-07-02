@@ -114,7 +114,12 @@ for [procurement](./03-procurement.md).
 ## 3a. Demand forecasting (multi-model + backtesting)
 
 **Screen:** `/demand` · **Where:** sidebar → **วางแผน & BI → พยากรณ์ความต้องการ
-(Demand ML)** · **Required permission:** `planner` (also `exec` / `warehouse`).
+(สถิติ + backtest)** · **Required permission:** `planner` (also `exec` / `warehouse`).
+
+> ℹ️ **Honest labeling:** these are **classical statistical models** (moving average, exponential
+> smoothing, Holt, seasonal-naive, Croston) chosen deliberately for auditability — measured by
+> walk-forward backtesting, not machine learning. Anything described as *AI* in this product refers to
+> the LLM copilot features, which are advisory and never post transactions.
 
 For items with enough sales history, the system forecasts future demand using
 several classic models (moving average, exponential smoothing, Holt trend,
