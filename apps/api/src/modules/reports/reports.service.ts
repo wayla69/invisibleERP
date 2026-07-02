@@ -10,7 +10,7 @@ export class ReportsService {
 
   // GET /api/reports/daily-sales — LEFT JOIN (item-less orders ยังปรากฏ)
   async dailySales(date?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const d = date ?? ymd();
     const rows = await db.select({
       Sale_No: custPosSales.saleNo, Sale_Date: custPosSales.saleDate, Total: custPosSales.total,
@@ -25,7 +25,7 @@ export class ReportsService {
 
   // GET /api/reports/stock-summary
   async stockSummary() {
-    const db = this.db as any;
+    const db = this.db;
     const snap = await latestSnapshotDate(db);
     if (!snap) return { snapshot_date: null, items: [], count: 0 };
     const items = await db.select({

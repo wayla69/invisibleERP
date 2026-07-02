@@ -33,7 +33,7 @@ export class DashboardService {
 
   // GET /api/dashboard — aggregation (parity-critical: Voided excl, AV_QTY<=0, latest snapshot)
   async getDashboard() {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const mStart = monthStart();
     const notVoided = ne(custPosSales.status, 'Voided');
@@ -81,7 +81,7 @@ export class DashboardService {
 
   // GET /api/dashboard/sales-trend
   async getSalesTrend(days: number) {
-    const db = this.db as any;
+    const db = this.db;
     const cutoff = ymd(new Date(Date.now() - days * 86400_000));
     const rows = await db.select({
       date: custPosSales.saleDate,
@@ -105,7 +105,7 @@ export class DashboardService {
 
   // Compute one widget's current value over the caller's tenant (RLS-scoped, same as getDashboard()).
   private async evaluateWidget(key: string): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const notVoided = ne(custPosSales.status, 'Voided');
     const sales = async (where: any, col: 'sales' | 'orders') => {
@@ -158,7 +158,7 @@ export class DashboardService {
   // Fetch the configured widget keys for a role (empty array if none configured).
   async getLayout(role: string, _user: JwtUser) {
     this.validRole(role);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(dashboardLayouts).where(eq(dashboardLayouts.role, role as any));
     const widgets = Array.isArray(row?.widgets) ? row.widgets : [];
     return { role, widgets, configured: !!row };
@@ -169,7 +169,7 @@ export class DashboardService {
     this.validRole(role);
     if (!Array.isArray(widgets) || !widgets.every((w) => typeof w === 'string')) throw new BadRequestException({ code: 'BAD_WIDGETS', message: 'widgets must be an array of widget keys', messageTh: 'ต้องเป็นรายการรหัสวิดเจ็ต' });
     for (const k of widgets as string[]) if (!WIDGETS[k]) throw new BadRequestException({ code: 'BAD_WIDGET', message: `Unknown widget '${k}'`, messageTh: `ไม่รู้จักวิดเจ็ต '${k}'` });
-    const db = this.db as any;
+    const db = this.db;
     await db.insert(dashboardLayouts).values({ tenantId: user.tenantId ?? null, role: role as any, widgets, updatedBy: user.username, updatedAt: new Date() })
       .onConflictDoUpdate({ target: [dashboardLayouts.tenantId, dashboardLayouts.role], set: { widgets, updatedBy: user.username, updatedAt: new Date() } });
     return { role, widgets };
@@ -178,7 +178,7 @@ export class DashboardService {
   // Resolve the dashboard for the CURRENT user: their role's layout (or the default), filtered to the widgets
   // their own permissions allow, each with its live value. This is what the role-aware dashboard renders.
   async resolveMine(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(dashboardLayouts).where(eq(dashboardLayouts.role, user.role as any));
     const keys: string[] = Array.isArray(row?.widgets) && row.widgets.length ? row.widgets : DEFAULT_WIDGETS;
     const perms = user.permissions ?? [];

@@ -88,7 +88,7 @@ export class EInvoiceService {
 
   async setConfig(user: JwtUser, providerKey: string) {
     if (!PROVIDER_KEYS.includes(providerKey)) throw new BadRequestException({ code: 'BAD_PROVIDER', message: `provider must be one of ${PROVIDER_KEYS.join(', ')}`, messageTh: 'ผู้ให้บริการไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     const [exists] = await db.select({ id: einvoiceConfig.id }).from(einvoiceConfig).limit(1);
     if (exists) await db.update(einvoiceConfig).set({ providerKey }).where(eq(einvoiceConfig.id, exists.id));
     else await db.insert(einvoiceConfig).values({ tenantId: user.tenantId ?? null, providerKey });
@@ -97,7 +97,7 @@ export class EInvoiceService {
 
   async submit(user: JwtUser, doc: InvoiceDoc) {
     this.validate(doc);
-    const db = this.db as any;
+    const db = this.db;
     const [exists] = await db.select().from(einvoiceSubmissions).where(eq(einvoiceSubmissions.docRef, doc.doc_ref)).limit(1);
     if (exists) return { status: exists.status, ref: (exists.response as any)?.ref, qr: (exists.response as any)?.qr, provider: exists.provider, idempotent: true };
     const [cfg] = await db.select({ p: einvoiceConfig.providerKey }).from(einvoiceConfig).limit(1);

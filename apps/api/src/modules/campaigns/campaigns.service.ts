@@ -28,7 +28,7 @@ export class CampaignsService {
   }
 
   async listCampaigns(user: JwtUser, q: { status?: string } = {}) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const conds: any[] = [eq(loyaltyCampaigns.tenantId, tenantId)];
     if (q.status) conds.push(eq(loyaltyCampaigns.status, q.status));
     const rows = await db.select().from(loyaltyCampaigns).where(and(...conds)).orderBy(desc(loyaltyCampaigns.id));
@@ -36,7 +36,7 @@ export class CampaignsService {
   }
 
   async upsertCampaign(user: JwtUser, dto: any) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     if (dto.audience === 'segment' && !dto.segment) throw new BadRequestException({ code: 'NO_SEGMENT', message: 'segment required for a segment campaign', messageTh: 'ต้องระบุกลุ่ม RFM' });
     if (dto.audience === 'tier' && !dto.tier) throw new BadRequestException({ code: 'NO_TIER', message: 'tier required for a tier campaign', messageTh: 'ต้องระบุระดับสมาชิก' });
     if (dto.audience === 'saved_segment') {
@@ -60,7 +60,7 @@ export class CampaignsService {
   }
 
   async cancelCampaign(user: JwtUser, id: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [r] = await db.update(loyaltyCampaigns).set({ status: 'cancelled' }).where(and(eq(loyaltyCampaigns.id, id), eq(loyaltyCampaigns.tenantId, tenantId), inArray(loyaltyCampaigns.status, ['draft', 'scheduled']))).returning();
     if (!r) throw new ConflictException({ code: 'CANNOT_CANCEL', message: 'Only a draft/scheduled campaign can be cancelled', messageTh: 'ยกเลิกได้เฉพาะแคมเปญร่าง/ตั้งเวลา' });
     return shape(r);
@@ -73,7 +73,7 @@ export class CampaignsService {
   // auto-commit, so the audit is durable too. (Gateway sends are irreversible; we must not put them inside a
   // transaction whose rollback would re-open the campaign.)
   async sendCampaign(user: JwtUser, id: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [claimed] = await db.update(loyaltyCampaigns).set({ status: 'sent', sentAt: new Date() })
       .where(and(eq(loyaltyCampaigns.id, id), eq(loyaltyCampaigns.tenantId, tenantId), inArray(loyaltyCampaigns.status, ['draft', 'scheduled']))).returning();
     if (!claimed) {
@@ -98,7 +98,7 @@ export class CampaignsService {
   // Cron entry (the @NoTx run-due route, NOT the sweep's big transaction — so each claim commits durably).
   // Admin/HQ runs every tenant's due campaigns; a tenant-scoped caller runs only its own.
   async runDueAll(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     let tenantIds: number[];
     if (user.role === 'Admin' || user.tenantId == null) {
       const rows = await db.selectDistinct({ tid: loyaltyCampaigns.tenantId }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.status, 'scheduled'), lte(loyaltyCampaigns.scheduleAt, new Date())));
@@ -112,7 +112,7 @@ export class CampaignsService {
   // Send every scheduled campaign whose time has come, for one tenant. Best-effort per campaign (claim-first
   // means a campaign that partially sent stays 'sent' and is never re-picked).
   async runDue(tenantId: number, createdBy = 'system:campaign-cron'): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     const due = await db.select({ id: loyaltyCampaigns.id }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.tenantId, tenantId), eq(loyaltyCampaigns.status, 'scheduled'), lte(loyaltyCampaigns.scheduleAt, new Date())));
     let ran = 0;
     for (const d of due) {

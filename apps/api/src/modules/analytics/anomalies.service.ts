@@ -11,7 +11,7 @@ export class AnomaliesService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async detectStockAnomalies(days = 30) {
-    const db = this.db as any;
+    const db = this.db;
     const histCutoff = new Date(Date.now() - (days + 60) * 86400_000);
     const recentCutoff = new Date(Date.now() - days * 86400_000);
 
@@ -71,7 +71,7 @@ export class AnomaliesService {
   }
 
   async detectStocktakeVariance(threshold = VAR_THRESHOLD) {
-    const db = this.db as any;
+    const db = this.db;
     const [mx] = await db.select({ d: sql<string>`max(${stocktakes.stDate})` }).from(stocktakes);
     if (!mx?.d) return [];
     const rows: any[] = await db.select({

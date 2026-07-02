@@ -32,7 +32,7 @@ export class ProductionPlanService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, @Optional() private readonly demand?: DemandForecastService) {}
 
   async plan(user: JwtUser, opts?: { days?: number; lookback?: number; date?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     const days = Math.max(1, Math.floor(opts?.days ?? 1));          // horizon to prep/buy for
     const lookback = Math.max(1, Math.floor(opts?.lookback ?? 28)); // learning window (days)

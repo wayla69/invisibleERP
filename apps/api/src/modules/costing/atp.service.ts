@@ -16,7 +16,7 @@ export class AtpService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async atp(tenantId: number, itemId: string, needBy: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [inv] = await db.select().from(customerInventory).where(and(eq(customerInventory.tenantId, tenantId), eq(customerInventory.itemId, itemId))).limit(1);
     const onHand = n(inv?.currentStock);
     const safety = n(inv?.reorderPoint);
@@ -70,7 +70,7 @@ export class AtpService {
 
   // Release a reservation (order cancelled): Open → Cancelled. Frees the qty back to ATP.
   async releaseAllocation(tenantId: number, refDoc: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.update(stockAllocations).set({ status: 'Cancelled' })
       .where(and(eq(stockAllocations.tenantId, tenantId), eq(stockAllocations.refDoc, refDoc), eq(stockAllocations.status, 'Open')))
       .returning({ qty: stockAllocations.qty });
@@ -81,7 +81,7 @@ export class AtpService {
   // posted by the issue path; marking it Fulfilled removes it from the OPEN reservation pool so ATP is not
   // double-counted (reservation + lower on-hand).
   async fulfillAllocation(tenantId: number, refDoc: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.update(stockAllocations).set({ status: 'Fulfilled' })
       .where(and(eq(stockAllocations.tenantId, tenantId), eq(stockAllocations.refDoc, refDoc), eq(stockAllocations.status, 'Open')))
       .returning({ qty: stockAllocations.qty });
@@ -90,7 +90,7 @@ export class AtpService {
 
   // Reservation register — open (and optionally historical) allocations, for visibility / control review.
   async listAllocations(tenantId: number, opts: { item_id?: string; status?: string; ref_doc?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(stockAllocations.tenantId, tenantId)];
     if (opts.item_id) conds.push(eq(stockAllocations.itemId, opts.item_id));
     if (opts.status) conds.push(eq(stockAllocations.status, opts.status));

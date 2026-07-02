@@ -30,7 +30,7 @@ export class ApsService {
 
   // ── Work-centre master ──
   async upsertWorkCenter(dto: WorkCenterDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     const code = dto.code.trim();
     if (!code) throw new BadRequestException({ code: 'BAD_CODE', message: 'work-centre code is required', messageTh: 'ต้องระบุรหัสศูนย์งาน' });
@@ -48,14 +48,14 @@ export class ApsService {
   }
 
   async listWorkCenters(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(workCenters).orderBy(desc(workCenters.id)).limit(500);
     return { work_centers: rows.map((w: any) => ({ id: Number(w.id), code: w.code, name: w.name, minutes_per_day: n(w.minutesPerDay), active: w.active })), count: rows.length };
   }
 
   // ── The finite-capacity schedule ──
   async schedule(dto: ScheduleDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     const horizonStart = dto.horizon_start ?? new Date().toISOString().slice(0, 10);
     const shopMin = dto.minutes_per_day && dto.minutes_per_day > 0 ? r2(dto.minutes_per_day) : DEFAULT_MIN_PER_DAY;

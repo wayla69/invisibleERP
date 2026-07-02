@@ -15,7 +15,7 @@ export class SavedViewsService {
   }
 
   async list(module: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const where = [eq(savedViews.owner, user.username), eq(savedViews.shared, true)] as any;
     const rows = await db.select().from(savedViews)
       .where(and(module ? eq(savedViews.module, module) : (undefined as any), or(...where)))
@@ -24,7 +24,7 @@ export class SavedViewsService {
   }
 
   async create(dto: { module: string; name: string; config?: object; shared?: boolean }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [v] = await db.insert(savedViews).values({
       tenantId: user.tenantId ?? null, owner: user.username, module: dto.module, name: dto.name,
       config: dto.config ?? {}, shared: dto.shared ?? false,
@@ -33,7 +33,7 @@ export class SavedViewsService {
   }
 
   async remove(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     // owner-only delete (a shared view can only be removed by its creator)
     const del = await db.delete(savedViews)
       .where(and(eq(savedViews.id, id), eq(savedViews.owner, user.username)))

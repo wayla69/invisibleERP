@@ -14,7 +14,7 @@ export class CustomersService {
 
   // GET /api/customers/{name} — key = tenant code (ไม่มี 404; คืน 0/ว่างถ้าไม่พบ)
   async detail(name: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [tenant] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, name)).limit(1);
     const tid = tenant?.id ?? -1;
 
@@ -74,7 +74,7 @@ export class CustomerMasterService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService, private readonly customers: CustomersService) {}
 
   async create(dto: z.infer<typeof CreateCustomerBody>, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const customerNo = await this.docNo.nextDaily('CUS');
     await db.insert(customerMaster).values({
       tenantId: user.tenantId ?? null, customerNo, name: dto.name, kind: dto.kind, email: dto.email ?? null,
@@ -85,14 +85,14 @@ export class CustomerMasterService {
   }
 
   async list(q: { search?: string }, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const where = q.search ? or(ilike(customerMaster.name, `%${q.search}%`), ilike(customerMaster.phone, `%${q.search}%`), ilike(customerMaster.email, `%${q.search}%`), ilike(customerMaster.customerNo, `%${q.search}%`)) : undefined;
     const rows = await db.select().from(customerMaster).where(where).orderBy(desc(customerMaster.id)).limit(200);
     return { customers: rows.map(shapeCustomer), count: rows.length };
   }
 
   private async byNo(customerNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(customerMaster.customerNo, customerNo)];
     if (user.tenantId != null) conds.push(eq(customerMaster.tenantId, user.tenantId));
     const [c] = await db.select().from(customerMaster).where(and(...conds)).limit(1);
@@ -105,7 +105,7 @@ export class CustomerMasterService {
   }
 
   async link(customerNo: string, dto: z.infer<typeof LinkCustomerBody>, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const c = await this.byNo(customerNo, user);
     const set: any = {};
     if (dto.member_id !== undefined) set.memberId = dto.member_id;
@@ -117,7 +117,7 @@ export class CustomerMasterService {
   // 360° view — the single customer-of-record joined to both silos: B2C loyalty (pos_members via member_id)
   // and B2B account (orders + AR via account_code, reusing the existing per-tenant detail).
   async view360(customerNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const c = await this.byNo(customerNo, user);
     let loyalty: any = null;
     if (c.memberId != null) {

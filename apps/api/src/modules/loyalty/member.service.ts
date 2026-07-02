@@ -188,7 +188,7 @@ export class MemberService {
   // after the locks so concurrent transfers cannot overshoot). Locks are taken in ascending member-id order
   // (the referral-deadlock lesson) so two opposite-direction transfers can never deadlock.
   async transferPoints(user: JwtUser, fromMemberId: number, dto: { to_member_id?: number; to_phone?: string; points: number; note?: string }, source: 'self' | 'staff') {
-    const db = this.db; const tenantId = this.tid(user);
+    const db = this.db as any; const tenantId = this.tid(user);
     const cfg = await this.config();
     if (!cfg.enabled) throw new ConflictException({ code: 'LOYALTY_DISABLED', message: 'Loyalty program disabled', messageTh: 'ระบบสะสมแต้มปิดอยู่' });
     if (cfg.transferDayCap <= 0) throw new ConflictException({ code: 'TRANSFER_DISABLED', message: 'Point transfers are disabled (transfer_day_cap = 0)', messageTh: 'ปิดการโอนแต้ม' });

@@ -22,7 +22,7 @@ export class GiftCardService {
 
   // Issue (sell) a card → Dr 1000 Cash / Cr 2200 Customer Deposits (NOT revenue). Idempotent per cardNo.
   async issue(dto: IssueGiftCardDto, user: JwtUser): Promise<{ card_no: string; balance: number; journal_no: string | null }> {
-    const db = this.db as any;
+    const db = this.db;
     const face = roundCurrency(dto.amount, 'THB');
     if (face <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     const cardNo = await this.docNo.nextDaily('GC');
@@ -40,7 +40,7 @@ export class GiftCardService {
   // (sum of Active balances = the unredeemed 2200 Customer-Deposits exposure). Tenant-scoped explicitly
   // (an HQ/Admin request bypasses RLS); typed builders / column refs only at user-input sites.
   async listCards(q: { status?: string; search?: string; limit?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (user.tenantId != null) conds.push(eq(giftCards.tenantId, user.tenantId));
     if (q.status) conds.push(eq(giftCards.status, q.status as any));
@@ -60,7 +60,7 @@ export class GiftCardService {
 
   // Per-card transaction ledger (issue / redeem / refund) for the register drill-down.
   async cardTxns(cardNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).limit(1);
     if (!c) throw new NotFoundException({ code: 'GIFT_CARD_NOT_FOUND', message: 'Gift card not found', messageTh: 'ไม่พบบัตรของขวัญ' });
     const txns = await db.select().from(giftCardTxns).where(eq(giftCardTxns.cardNo, cardNo)).orderBy(desc(giftCardTxns.id));
@@ -69,7 +69,7 @@ export class GiftCardService {
 
   // Live balance + status (RLS-scoped → cross-tenant lookup 404s).
   async balance(cardNo: string): Promise<{ card_no: string; balance: number; status: string; currency: string }> {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).limit(1);
     if (!c) throw new NotFoundException({ code: 'GIFT_CARD_NOT_FOUND', message: 'Gift card not found', messageTh: 'ไม่พบบัตรของขวัญ' });
     return { card_no: c.cardNo, balance: n(c.balance), status: String(c.status), currency: c.currency ?? 'THB' };

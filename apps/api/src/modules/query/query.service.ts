@@ -48,7 +48,7 @@ export class QueryService {
     if (!DIM_KEYS.includes(spec.dimension)) {
       throw new BadRequestException({ code: 'BAD_DIMENSION', message: `dimension must be one of ${DIM_KEYS.join(', ')}`, messageTh: 'มิติข้อมูลไม่ถูกต้อง' });
     }
-    const db = this.db as any;
+    const db = this.db;
     const dim = this.dimExpr(spec.dimension);
     const conds: any[] = [sql`coalesce(${custPosSales.status}::text, '') <> 'Voided'`];
     if (spec.date_from) conds.push(sql`${custPosSales.saleDate} >= ${spec.date_from}`);

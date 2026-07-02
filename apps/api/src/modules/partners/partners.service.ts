@@ -28,7 +28,7 @@ export class PartnersService {
 
   // ── Partners ──
   async listPartners(user: JwtUser, q: { active?: boolean } = {}) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const conds: any[] = [eq(loyaltyPartners.tenantId, tenantId)];
     if (q.active !== undefined) conds.push(eq(loyaltyPartners.active, q.active));
     const partners = await db.select().from(loyaltyPartners).where(and(...conds)).orderBy(loyaltyPartners.id);
@@ -36,7 +36,7 @@ export class PartnersService {
     return { partners: partners.map((p: any) => ({ ...shapePartner(p), privileges: privs.filter((v: any) => Number(v.partnerId) === Number(p.id)).map(shapePriv) })), count: partners.length };
   }
   async upsertPartner(user: JwtUser, dto: any) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const vals = { name: dto.name, category: dto.category ?? null, contact: dto.contact ?? null, active: dto.active ?? true };
     if (dto.id) {
       const [p] = await db.update(loyaltyPartners).set(vals).where(and(eq(loyaltyPartners.id, dto.id), eq(loyaltyPartners.tenantId, tenantId))).returning();
@@ -50,7 +50,7 @@ export class PartnersService {
 
   // ── Privileges ──
   async upsertPrivilege(user: JwtUser, dto: any) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [partner] = await db.select({ id: loyaltyPartners.id }).from(loyaltyPartners).where(and(eq(loyaltyPartners.id, dto.partner_id), eq(loyaltyPartners.tenantId, tenantId))).limit(1);
     if (!partner) throw new NotFoundException({ code: 'PARTNER_NOT_FOUND', message: 'Partner not found', messageTh: 'ไม่พบพันธมิตร' });
     const vals: any = {
@@ -68,7 +68,7 @@ export class PartnersService {
     return shapePriv(v);
   }
   async setPrivilegeActive(user: JwtUser, id: number, active: boolean) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [v] = await db.update(loyaltyPrivileges).set({ active }).where(and(eq(loyaltyPrivileges.id, id), eq(loyaltyPrivileges.tenantId, tenantId))).returning();
     if (!v) throw new NotFoundException({ code: 'PRIVILEGE_NOT_FOUND', message: 'Privilege not found', messageTh: 'ไม่พบสิทธิพิเศษ' });
     return shapePriv(v);
@@ -76,7 +76,7 @@ export class PartnersService {
 
   // Privileges a member currently QUALIFIES for (active, in window, tier_min ≤ lifetime, stock left).
   async available(user: JwtUser, memberId: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [m] = await db.select().from(posMembers).where(and(eq(posMembers.id, memberId), eq(posMembers.tenantId, tenantId))).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
     const today = this.today(); const life = n(m.lifetime);
@@ -92,7 +92,7 @@ export class PartnersService {
 
   // Claim a privilege → single-use PRV code (tier/stock/per-member-limit guarded under FOR UPDATE).
   async claim(user: JwtUser, privilegeId: number, dto: { member_id: number }) {
-    const db = this.db as any; const tenantId = this.tid(user); const today = this.today();
+    const db = this.db; const tenantId = this.tid(user); const today = this.today();
     return await db.transaction(async (tx: any) => {
       const [priv] = await tx.select().from(loyaltyPrivileges).where(and(eq(loyaltyPrivileges.id, privilegeId), eq(loyaltyPrivileges.tenantId, tenantId), eq(loyaltyPrivileges.active, true))).for('update').limit(1);
       if (!priv) throw new NotFoundException({ code: 'PRIVILEGE_NOT_FOUND', message: 'Privilege not found/inactive', messageTh: 'ไม่พบสิทธิพิเศษ' });
@@ -116,7 +116,7 @@ export class PartnersService {
 
   // Partner redeems a claim code — single-use (claimed → used) under FOR UPDATE.
   async use(user: JwtUser, code: string, dto: { partner?: string } = {}) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     return await db.transaction(async (tx: any) => {
       const [claim] = await tx.select().from(loyaltyPrivilegeClaims).where(and(eq(loyaltyPrivilegeClaims.claimCode, code), eq(loyaltyPrivilegeClaims.tenantId, tenantId))).for('update').limit(1);
       if (!claim) throw new NotFoundException({ code: 'CLAIM_NOT_FOUND', message: 'Privilege claim not found', messageTh: 'ไม่พบรหัสสิทธิพิเศษ' });
@@ -128,7 +128,7 @@ export class PartnersService {
   }
 
   async memberClaims(user: JwtUser, memberId: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const rows = await db.select().from(loyaltyPrivilegeClaims).where(and(eq(loyaltyPrivilegeClaims.memberId, memberId), eq(loyaltyPrivilegeClaims.tenantId, tenantId))).orderBy(desc(loyaltyPrivilegeClaims.id)).limit(50);
     return { member_id: memberId, claims: rows.map((c: any) => ({ id: Number(c.id), claim_code: c.claimCode, privilege_id: Number(c.privilegeId), status: c.status, claimed_at: c.claimedAt, used_at: c.usedAt })) };
   }

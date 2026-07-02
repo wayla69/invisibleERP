@@ -36,7 +36,7 @@ export class BranchService {
     if (!code || !(dto.name ?? '').trim()) {
       throw new BadRequestException({ code: 'BAD_REQUEST', message: 'code and name are required', messageTh: 'ต้องระบุรหัสและชื่อสาขา' });
     }
-    const db = this.db as any;
+    const db = this.db;
     try {
       const [b] = await db.insert(branches).values({
         tenantId: t, code, name: dto.name.trim(), isHq: !!dto.is_hq,
@@ -53,7 +53,7 @@ export class BranchService {
 
   async listBranches(user: JwtUser) {
     const t = this.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(branches)
       .where(eq(branches.tenantId, t))
       .orderBy(desc(branches.isHq), branches.code);
@@ -62,7 +62,7 @@ export class BranchService {
 
   async updateBranch(id: number, dto: UpdateBranchDto, user: JwtUser) {
     const t = this.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const patch: any = {};
     if (dto.name !== undefined) patch.name = dto.name;
     if (dto.active !== undefined) patch.active = !!dto.active;
@@ -79,7 +79,7 @@ export class BranchService {
   // HQ consolidation — per-branch POS totals for the tenant. Untagged sales surface as branch "(none)".
   async consolidatedSales(user: JwtUser, from?: string, to?: string) {
     const t = this.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(custPosSales.tenantId, t), ne(custPosSales.status, 'Voided')];
     if (from) conds.push(gte(custPosSales.saleDate, from));
     if (to) conds.push(lte(custPosSales.saleDate, to));
@@ -120,7 +120,7 @@ export class BranchService {
   // RLS already scopes every row to this tenant.
   async masterBundle(user: JwtUser) {
     const t = this.tenantId(user);
-    const db = this.db as any;
+    const db = this.db;
     const items = await db.select().from(customerItems).where(eq(customerItems.tenantId, t));
     const prices = await db.select().from(priceList).where(and(eq(priceList.tenantId, t), eq(priceList.active, true)));
     const promos = await db.select().from(promotions).where(and(eq(promotions.tenantId, t), eq(promotions.active, true)));

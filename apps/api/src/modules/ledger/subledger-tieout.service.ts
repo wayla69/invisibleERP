@@ -27,7 +27,7 @@ export class SubledgerTieoutService {
   // GL-14: compute the GL control-account balance and the matching sub-ledger detail balance as of a
   // date, then record the variance. Upserts on (tenant, subledger, as-of) so a same-day re-run refreshes.
   async runTieOut(dto: RunTieOutDto) {
-    const db = this.db as any;
+    const db = this.db;
     const subledger = dto.subledger;
     if (!SUBLEDGERS.includes(subledger)) {
       throw new BadRequestException({ code: 'BAD_SUBLEDGER', message: `subledger must be one of ${SUBLEDGERS.join('/')}`, messageTh: 'ระบบบัญชีย่อยไม่ถูกต้อง' });
@@ -106,7 +106,7 @@ export class SubledgerTieoutService {
 
   // Compute the sub-ledger detail balance + a small breakdown for the `detail` jsonb.
   private async subledgerBalance(subledger: Subledger, asOf: string, tenantId: number | null): Promise<{ subledgerBalance: number; detail: any }> {
-    const db = this.db as any;
+    const db = this.db;
     if (subledger === 'AR') {
       // AR sub-ledger = Σ outstanding (amount − paid_amount) of customer invoices issued up to asOf.
       // Summed directly off ar_invoices (the AR sub-ledger of record) — equivalent to the closing balance
@@ -154,7 +154,7 @@ export class SubledgerTieoutService {
   // certifier + timestamp and sets status to 'Certified' regardless of variance (a variance may be
   // accepted with a note explaining the reconciling items).
   async certify(dto: { id: number; certifiedBy: string; note?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const [run] = await db.select().from(subledgerTieoutRuns).where(eq(subledgerTieoutRuns.id, dto.id)).limit(1);
     if (!run) throw new NotFoundException({ code: 'NOT_FOUND', message: `Tie-out run ${dto.id} not found`, messageTh: 'ไม่พบรายการกระทบยอด' });
     if (run.runBy === dto.certifiedBy) {
@@ -171,7 +171,7 @@ export class SubledgerTieoutService {
 
   // ───────────────────── Read ─────────────────────
   async list(opts?: { subledger?: string; asOfDate?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = this.tenantId();
     const conds: any[] = [];
     if (tenantId != null) conds.push(eq(subledgerTieoutRuns.tenantId, tenantId));
@@ -184,7 +184,7 @@ export class SubledgerTieoutService {
   }
 
   async get(id: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(subledgerTieoutRuns).where(eq(subledgerTieoutRuns.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: `Tie-out run ${id} not found`, messageTh: 'ไม่พบรายการกระทบยอด' });
     return this.shape(row);

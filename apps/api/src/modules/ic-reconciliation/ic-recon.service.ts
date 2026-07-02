@@ -22,7 +22,7 @@ export class IcReconService {
   }
 
   private async assertGroup(groupId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [g] = await db.select().from(consolidationGroups).where(eq(consolidationGroups.id, groupId)).limit(1);
     if (!g) throw new NotFoundException({ code: 'GROUP_NOT_FOUND', message: `Consolidation group ${groupId} not found`, messageTh: 'ไม่พบกลุ่มกิจการ' });
     return g;
@@ -31,7 +31,7 @@ export class IcReconService {
   // Snapshot the group's IC reconciliation: Due-From (1150) vs Due-To (2150) net balances + count of IC
   // items not yet settled. Mirrors consolidation.reconciliation() but self-contained (no service dependency).
   private async snapshot() {
-    const db = this.db as any;
+    const db = this.db;
     const [df] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}),0)` })
       .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .where(and(eq(journalLines.accountCode, '1150'), eq(journalEntries.status, 'Posted')));
@@ -47,7 +47,7 @@ export class IcReconService {
   async preparePeriod(groupId: number, period: string, user: JwtUser) {
     this.hqOnly(user);
     await this.assertGroup(groupId);
-    const db = this.db as any;
+    const db = this.db;
     const snap = await this.snapshot();
     const [existing] = await db.select().from(icReconPeriods).where(and(eq(icReconPeriods.groupId, groupId), eq(icReconPeriods.period, period))).limit(1);
     if (existing?.status === 'Approved') throw new BadRequestException({ code: 'ALREADY_APPROVED', message: `IC reconciliation for ${period} is already approved`, messageTh: 'งวดนี้อนุมัติแล้ว' });
@@ -64,7 +64,7 @@ export class IcReconService {
   // Checker: approve (SoD — approver ≠ preparer; the IC balances MUST eliminate to be signed off).
   async approvePeriod(groupId: number, period: string, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const [rp] = await db.select().from(icReconPeriods).where(and(eq(icReconPeriods.groupId, groupId), eq(icReconPeriods.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `IC reconciliation for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการกระทบยอด' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `IC reconciliation is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
@@ -76,7 +76,7 @@ export class IcReconService {
 
   async rejectPeriod(groupId: number, period: string, reason: string, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const [rp] = await db.select().from(icReconPeriods).where(and(eq(icReconPeriods.groupId, groupId), eq(icReconPeriods.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: 'IC reconciliation has not been prepared', messageTh: 'ยังไม่ได้จัดทำ' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `IC reconciliation is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
@@ -86,7 +86,7 @@ export class IcReconService {
 
   async getStatus(groupId: number, period: string, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const [rp] = await db.select().from(icReconPeriods).where(and(eq(icReconPeriods.groupId, groupId), eq(icReconPeriods.period, period))).limit(1);
     if (!rp) return { group_id: groupId, period, status: 'None' };
     return this.shape(rp);
@@ -94,7 +94,7 @@ export class IcReconService {
 
   async list(groupId: number, user: JwtUser) {
     this.hqOnly(user);
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(icReconPeriods).where(eq(icReconPeriods.groupId, groupId)).orderBy(sql`${icReconPeriods.period} DESC`);
     return { periods: rows.map((r: any) => this.shape(r)), count: rows.length };
   }

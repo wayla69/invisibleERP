@@ -15,14 +15,14 @@ export class ScanService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService) {}
 
   async open(dto: { session_type: string; location_id?: string; doc_ref?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const sessionNo = this.docNo.nextStamped('SCAN');
     await db.insert(scanSessions).values({ sessionNo, sessionType: dto.session_type, locationId: dto.location_id ?? null, docRef: dto.doc_ref ?? null, status: 'Open', createdBy: user.username, createdAt: new Date() });
     return { session_no: sessionNo, session_type: dto.session_type, status: 'Open' };
   }
 
   async addLine(sessionNo: string, dto: { qr_data: string; qty?: number; action?: string; lot_no?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.select().from(scanSessions).where(eq(scanSessions.sessionNo, sessionNo)).limit(1);
     if (!s) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Session not found', messageTh: 'ไม่พบเซสชัน' });
     if (s.status !== 'Open') throw new BadRequestException({ code: 'SESSION_CLOSED', message: 'Session is closed', messageTh: 'เซสชันถูกปิดแล้ว' });
@@ -36,7 +36,7 @@ export class ScanService {
   }
 
   async getSession(sessionNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.select().from(scanSessions).where(eq(scanSessions.sessionNo, sessionNo)).limit(1);
     if (!s) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Session not found', messageTh: 'ไม่พบเซสชัน' });
     const lines = await db.select().from(scanLines).where(eq(scanLines.sessionNo, sessionNo)).orderBy(desc(scanLines.id));
@@ -48,7 +48,7 @@ export class ScanService {
 
   // Commit each scanned line to stock_movements per the session type, then close.
   async close(sessionNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     return db.transaction(async (tx: any) => {
       // FOR UPDATE + re-check under lock so concurrent closes can't double-commit movements.
       const [s] = await tx.select().from(scanSessions).where(eq(scanSessions.sessionNo, sessionNo)).limit(1).for('update');
@@ -74,7 +74,7 @@ export class ScanService {
   }
 
   async listSessions(limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(scanSessions).orderBy(desc(scanSessions.id)).limit(limit);
     return { sessions: rows.map((r: any) => ({ session_no: r.sessionNo, session_type: r.sessionType, location_id: r.locationId, status: r.status, created_by: r.createdBy })), count: rows.length };
   }

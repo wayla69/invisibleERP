@@ -13,7 +13,7 @@ export class ReportExportService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async expressTxt(orderNo: string): Promise<string> {
-    const db = this.db as any;
+    const db = this.db;
     const [order] = await db.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1);
     if (!order) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบคำสั่งซื้อ' });
 

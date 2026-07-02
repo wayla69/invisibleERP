@@ -43,7 +43,7 @@ export class OfflineSyncService {
   }
 
   private async syncOne(t: { id: number; code: string }, op: OfflineSaleOp, user: JwtUser): Promise<SyncResult> {
-    const db = this.db as any;
+    const db = this.db;
     // 1. dedup gate — short-circuit ONLY on a genuinely-completed sale (sale_no set). A prior 'failed'
     //    tombstone (e.g. transient PERIOD_CLOSED) must NOT block a retry, so we require sale_no IS NOT NULL.
     const [seen] = await db.select().from(posOfflineSync)

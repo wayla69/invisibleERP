@@ -66,7 +66,7 @@ export class TenantTxInterceptor implements NestInterceptor {
     // Bracket the request's DB transaction for ops metrics + slow-path logging (operational visibility).
     const started = Date.now();
     txStart();
-    const db = this.db as any;
+    const db = this.db;
     return from(
       db.transaction(async (tx: any) => {
         try {

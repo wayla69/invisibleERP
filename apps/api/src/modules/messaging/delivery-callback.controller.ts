@@ -26,7 +26,7 @@ export class DeliveryCallbackService {
   ) {}
 
   async handle(tenantCode: string, token: string | undefined, dto: z.infer<typeof CallbackBody>) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, tenantCode)).limit(1);
     if (!t) throw new UnauthorizedException({ code: 'UNKNOWN_TENANT', message: 'Unknown shop code', messageTh: 'ไม่พบรหัสร้าน' });
     const tenantId = Number(t.id);

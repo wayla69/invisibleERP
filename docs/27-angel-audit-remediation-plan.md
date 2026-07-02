@@ -351,6 +351,13 @@ comment. No behavior change beyond alignment.
 > `realtime-bus`, `embedder`, `login-attempt-failopen` suites + the coverage-scope ratchet
 > (`common/money.ts` added). Remaining rolling work: pay the 248+1,456 down module-by-module (start
 > `ledger`/`finance`/`projects`), lowering the baseline each PR.
+> **Paydown tranche #1 (2026-07-02): as-any 1,465 → 1,155 (−310).** The dominant erasure — `const db =
+> this.db as any;` (1,278 of the occurrences) — is vestigial in most files: 119 files now use the typed
+> `DrizzleDb` handle with zero typecheck fallout. Files where typing the handle either broke the build
+> (39) or *raised* the strict-index count (59 — typed selects expose latent `rows[0]` accesses that `any`
+> was hiding) keep the erasure for a later, per-module fix; the parity-locked `forecasting.service.ts` was
+> reverted untouched. Strict-index count intentionally held at 229 — this tranche trades no metric for the
+> other. Baseline ratcheted to {asAny: 1155, strictIndexErrors: 229}.
 - Re-enable `noUncheckedIndexedAccess` in `apps/api/tsconfig.json`; fix fallout module-by-module
   (start with `ledger`, `finance`, `projects` — the money paths), using per-file `// @ts-expect-error`
   only as a tracked, lint-counted escape hatch.
@@ -600,3 +607,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 3.4 | 2026-07-02 | ERP/Product | R4-3 fully closed (date-aware Forecaster ctx + th_holiday model; deterministic Songkran ToE 40/40/40 vs ~10) |
 | 3.5 | 2026-07-02 | ERP/Product | Repo-tractable scope complete (23 pieces); final sweep green (basics 215 / compliance 114 / ext 262 / worldclass 58 / unit 95 + all guards); open items = people/console work |
 | 3.6 | 2026-07-02 | ERP/Product | docs/28 consolidation executed (5/5 PRs: payments, tax, crm/pipeline, loyalty, pos — module registrations 122→108, AUD-ARC-10 closed); R5-2 conversions started — `accounting` converted (server-api seam + server shell + client island) |
+| 3.7 | 2026-07-02 | ERP/Product | RSC conversion #1 merged (accounting, PR #318); ts-debt paydown tranche #1 — as-any 1465→1155 via typed DrizzleDb handles in 119 zero-fallout files, strict-index held at 229, baseline ratcheted |
