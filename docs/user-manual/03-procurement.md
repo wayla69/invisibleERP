@@ -39,6 +39,37 @@ and Planner have it automatically)
 
 **Expected result:** A purchase requisition is created, awaiting approval.
 
+### Raise a PR from LINE chat
+
+You can also raise a PR by chatting with your shop's **LINE Official Account** —
+handy on the floor or in the stockroom. One-time setup first:
+
+**Link your LINE account (once):**
+
+1. On **คำขอซื้อ (PR)** (`/requisitions`), find the card **สร้างคำขอซื้อผ่านแชท LINE**
+   and click **สร้างรหัสเชื่อม LINE**. You get a 6-character code (valid **10 minutes**).
+2. In the shop's LINE OA chat, type `link <code>` (e.g. `link KM7Q2X`).
+3. The bot replies **เชื่อมบัญชีสำเร็จ ✔** — you are linked. A LINE account can be
+   linked to only one ERP user; use **ยกเลิกการเชื่อมต่อ LINE** on the same card to unlink.
+
+**Chat commands (after linking):**
+
+| Command | What it does |
+|---|---|
+| `pr <item> <qty> [reason]` — several items separated by `,` (also `ขอซื้อ …`) | Raises a PR, e.g. `pr A4-PAPER 10 กระดาษหมด, TONER-85A 2` |
+| `status <PR no>` (also `สถานะ <PR no>`) | Replies the PR's current approval state |
+
+**Expected result:** The bot replies the new PR number (e.g. `PR-20260702-001`).
+The PR is **identical** to one raised on the web — same numbering, same status log,
+and it enters the same Procurement approval workflow. The chat can only *raise*
+requisitions; approval always happens in the ERP (and never by the requester —
+`SOD_VIOLATION`).
+
+> **Notes:** you need the same `pr_raise` permission as the web screen (the bot
+> refuses otherwise); ordinary chat messages are ignored, so customers talking to
+> the OA are unaffected; if the bot answers "ยังไม่ได้เชื่อมบัญชีพนักงาน", generate a
+> fresh link code and link again.
+
 ### Approve a PR
 
 1. Open the PR.

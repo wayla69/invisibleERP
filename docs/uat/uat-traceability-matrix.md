@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v0.7 · 2026-07-01** · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
+**Status: DRAFT v0.8 · 2026-07-02** · *v0.8: added UAT-P2P-070..075 (LINE chat → PR — link-code identity binding, chat-raised PR into the same approval workflow, entry-integrity negatives).* · *v0.7: added UAT-O2C-226..227 (PROJ-03 project period-end close review UI + PROJ-04 timesheet project allocation surfaced in `/hcm`).* · *v0.6: added UAT-SEC-036..045 (ITGC-AC-17 — POS-PIN quick-login restriction).* · *v0.5: added UAT-ADM-094..096 (SoD R12 — /returns nav perm for AR/pos_refund).*
 
 Maps every UAT case → cycle → requirement/feature → RCM control (where applicable) → process-narrative section. RCM control IDs reference `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; SoD rules (R01–R16) reference `packages/shared/src/permissions.ts`. Process-narrative files are in `docs/process-narratives/`.
 
@@ -300,6 +300,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-061 | GR refused for a procurement-only user (R04 at permission layer) | R04 | 02 §7, §9 |
 | UAT-P2P-062 | AP disbursement approved on finance Disbursements screen | EXP-06, R07 | 02 §3, §7 |
 | UAT-P2P-066 | Vendor PII encrypted at rest; ghost-vendor detector still fires | ITGC-AC-19, EXP-02 | 02 §9 |
+| UAT-P2P-070 | LINE chat: staff links LINE account with one-time code | EXP-03 (entry integrity) | 02 §3, §7 |
+| UAT-P2P-071 | LINE chat: `pr` command raises a PR into the approval workflow | EXP-03 | 02 §7 |
+| UAT-P2P-072 | LINE chat: unlinked / expired-code identities refused | EXP-03 (entry integrity) | 02 §7, §9 |
+| UAT-P2P-073 | LINE chat: no `pr_raise` → refused; customer role gets no link code | EXP-03, R03 (access design) | 02 §7, §9 |
+| UAT-P2P-074 | LINE chat: redelivery deduped; LINE account binds to one user | EXP-03 (entry integrity) | 02 §7, §9 |
+| UAT-P2P-075 | LINE chat: free customer chat ignored; unlink stops the channel | EXP-03 (entry integrity) | 02 §7 |
 | UAT-UI-P2P-ACC-01 | Procurement & AP screens split by user group | R03/R04/R07 | 02 §3 |
 | UAT-UI-SUP-01 | Supplier portal screen (vendor self-service) — PO ack + invoice submit | Feature (supplier portal UI) | 02 §7 |
 | UAT-P2P-040 | Capital PO line → GR eligible (not stocked) | FA-10 | 02 §7, 09 §7 |

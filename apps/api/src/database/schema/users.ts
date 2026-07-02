@@ -23,6 +23,11 @@ export const users = pgTable('users', {
   isActive: boolean('is_active').notNull().default(true), // SCIM deprovisioning deactivates (no hard delete)
   tokensValidFrom: timestamp('tokens_valid_from', { withTimezone: true }), // ITGC-AC-15: JWTs issued before this are rejected ("revoke all sessions")
   locale: text('locale'), // C1 (Phase 20) — per-user UI locale override; resolves user → tenant.default_language → 'th'
+  // ── LINE chat → PR (0227) — staff LINE identity link. lineUserId is the stable LINE userId (unique
+  // across users); the short-lived link code is generated on /requisitions and typed into the LINE OA chat.
+  lineUserId: text('line_user_id'),
+  lineLinkCode: text('line_link_code'),
+  lineLinkExpiresAt: timestamp('line_link_expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
