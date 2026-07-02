@@ -72,6 +72,25 @@ export class ProcurementService {
     return { pr_no: prNo, status: newStatus };
   }
 
+  // Requester withdraws their own still-Pending PR (0228 — also reachable from the LINE chat `cancel`
+  // command). Own-doc only (Admin may cancel any); the pending workflow instance is closed alongside so
+  // the approval queue carries no orphan. A decided (Approved/Rejected) PR cannot be cancelled.
+  async cancelPr(prNo: string, user: JwtUser) {
+    const db = this.db;
+    const [pr] = await db.select().from(purchaseRequests).where(eq(purchaseRequests.prNo, prNo)).limit(1);
+    if (!pr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PR not found', messageTh: 'ไม่พบ PR' });
+    if (pr.requestedBy !== user.username && user.role !== 'Admin') {
+      throw new ForbiddenException({ code: 'PR_NOT_YOURS', message: 'Only the requester can cancel their PR', messageTh: 'ยกเลิกได้เฉพาะคำขอของตนเอง' });
+    }
+    if (pr.status !== 'Pending') {
+      throw new BadRequestException({ code: 'PR_NOT_PENDING', message: `Cannot cancel a '${pr.status}' PR`, messageTh: `ยกเลิกไม่ได้: PR สถานะ '${pr.status}'` });
+    }
+    await db.update(purchaseRequests).set({ status: 'Cancelled' }).where(eq(purchaseRequests.id, pr.id));
+    await this.statusLog.log('PR', prNo, pr.status ?? '', 'Cancelled', user.username);
+    await this.workflow?.cancel('PR', prNo);
+    return { pr_no: prNo, status: 'Cancelled' };
+  }
+
   // ── Supplier screening (Phase 16) ───────────────────────────────────
   // blocklisted or non-approved vendor → 422; unknown/freeform vendor (no master row) → allowed.
   async assertSupplierAllowed(vendorId: number | null, vendorName: string | null) {

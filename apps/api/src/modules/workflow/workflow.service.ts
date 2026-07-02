@@ -1,10 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, asc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { workflowDefinitions, workflowSteps, workflowInstances, approvalActions, approvalDelegations, users, notifications } from '../../database/schema';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { SodService } from './sod.service';
+import { LineNotifyService } from '../messaging/line-notify.service';
 
 export interface StartWorkflowArgs { docType: string; docNo: string; amount: number; createdBy: string; tenantId: number | null; context?: Record<string, string>; }
 export interface StepDto { step_no: number; approver_role?: string; approver_user?: string; min_amount?: number; all_of_n?: number; name?: string; sla_hours?: number; escalate_to_role?: string; escalate_to_user?: string; match_key?: string; match_value?: string; }
@@ -14,7 +15,22 @@ export interface StepDto { step_no: number; approver_role?: string; approver_use
 // always on (an approver can never be the document's creator).
 @Injectable()
 export class WorkflowService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly sod: SodService) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly sod: SodService,
+    // 0228 — LINE staff notifications on workflow events. @Optional + last so harnesses that construct
+    // this service directly keep working; every call is best-effort (never breaks the approval).
+    @Optional() private readonly lineNotify?: LineNotifyService,
+  ) {}
+
+  // Push a LINE notification to the step's approver (user or role fan-out) that a doc awaits them.
+  private async notifyStepApprovers(inst: { docType: string; docNo: string; createdBy: string | null; tenantId: number | null }, step: any) {
+    if (!this.lineNotify || !step) return;
+    const chatHint = inst.docType === 'PR' ? `\nอนุมัติจากแชทนี้ได้: พิมพ์ "approve ${inst.docNo}" หรือ "reject ${inst.docNo} <เหตุผล>"` : '';
+    const text = `🔔 รออนุมัติ: ${inst.docType} ${inst.docNo} (โดย ${inst.createdBy ?? '-'})${chatHint}`;
+    if (step.approverUser) await this.lineNotify.notifyUser(step.approverUser, inst.tenantId, text);
+    else if (step.approverRole) await this.lineNotify.notifyRole(step.approverRole, inst.tenantId, text);
+  }
 
   // ── Definitions ──
   async createDefinition(dto: { doc_type: string; name: string; sla_hours?: number; steps: StepDto[] }, user: JwtUser) {
@@ -109,7 +125,17 @@ export class WorkflowService {
     const engaged = this.firstEngaged(steps, args.amount, context, 0) ?? [...steps].sort((a, b) => a.stepNo - b.stepNo)[0] ?? null;
     const status = engaged ? 'pending' : 'approved';
     const [inst] = await db.insert(workflowInstances).values({ tenantId: args.tenantId ?? null, definitionId: Number(def.id), docType: args.docType, docNo: args.docNo, amount: String(args.amount), createdBy: args.createdBy, status, currentStep: engaged ? engaged.stepNo : 0, context, dueAt: engaged ? this.dueFor(engaged, def) : null, closedAt: engaged ? null : new Date() }).returning({ id: workflowInstances.id });
+    if (engaged) await this.notifyStepApprovers({ docType: args.docType, docNo: args.docNo, createdBy: args.createdBy, tenantId: args.tenantId ?? null }, engaged);
     return { instanceId: Number(inst!.id), status, currentStep: engaged ? engaged.stepNo : 0, autoApproved: !engaged };
+  }
+
+  // Cancel a doc's pending instance (e.g. the requester withdraws a PR before approval). No-op when none.
+  async cancel(docType: string, docNo: string): Promise<boolean> {
+    const updated = await this.db.update(workflowInstances)
+      .set({ status: 'cancelled', closedAt: new Date() })
+      .where(and(eq(workflowInstances.docType, docType), eq(workflowInstances.docNo, docNo), eq(workflowInstances.status, 'pending')))
+      .returning({ id: workflowInstances.id });
+    return updated.length > 0;
   }
 
   private async liveInstance(docType: string, docNo: string) {
@@ -184,6 +210,7 @@ export class WorkflowService {
     await db.insert(approvalActions).values({ tenantId: inst.tenantId, instanceId, stepNo: inst.currentStep!, actor: user.username, onBehalfOf: who.onBehalfOf, decision: args.decision, comment: args.comment ?? null });
     if (args.decision === 'reject') {
       await db.update(workflowInstances).set({ status: 'rejected', closedAt: new Date() }).where(eq(workflowInstances.id, instanceId));
+      if (inst.createdBy) await this.lineNotify?.notifyUser(inst.createdBy, inst.tenantId, `❌ ${inst.docType} ${inst.docNo} ไม่ได้รับอนุมัติ (โดย ${effectiveApprover})${args.comment ? ` — ${args.comment}` : ''}`);
       return { status: 'rejected', currentStep: inst.currentStep };
     }
     // approve — clear the step (all-of-N: count DISTINCT approving actors at this step)
@@ -192,8 +219,13 @@ export class WorkflowService {
     if (distinct < (step.allOfN ?? 1)) return { status: 'pending', currentStep: inst.currentStep };
     const def = await this.defById(Number(inst.definitionId));
     const next = this.firstEngaged(steps, n(inst.amount), (inst.context as any) ?? {}, Number(inst.currentStep));
-    if (next) { await db.update(workflowInstances).set({ currentStep: next.stepNo, dueAt: this.dueFor(next, def), escalated: false, lastRemindedAt: null }).where(eq(workflowInstances.id, instanceId)); return { status: 'pending', currentStep: next.stepNo }; }
+    if (next) {
+      await db.update(workflowInstances).set({ currentStep: next.stepNo, dueAt: this.dueFor(next, def), escalated: false, lastRemindedAt: null }).where(eq(workflowInstances.id, instanceId));
+      await this.notifyStepApprovers({ docType: inst.docType, docNo: inst.docNo, createdBy: inst.createdBy, tenantId: inst.tenantId }, next);
+      return { status: 'pending', currentStep: next.stepNo };
+    }
     await db.update(workflowInstances).set({ status: 'approved', closedAt: new Date() }).where(eq(workflowInstances.id, instanceId));
+    if (inst.createdBy) await this.lineNotify?.notifyUser(inst.createdBy, inst.tenantId, `✅ ${inst.docType} ${inst.docNo} อนุมัติแล้ว (โดย ${effectiveApprover})`);
     return { status: 'approved', currentStep: inst.currentStep };
   }
 

@@ -2,10 +2,10 @@ import { Controller, Post, Get, Delete, Param, Req, Headers, Inject, Injectable,
 import { ModuleRef } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
 import { createHmac, randomInt } from 'node:crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, desc, ilike } from 'drizzle-orm';
 import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenants, posMembers, messageLog, users, userPermissions, purchaseRequests } from '../../database/schema';
+import { tenants, posMembers, messageLog, users, userPermissions, purchaseRequests, items, invBalances } from '../../database/schema';
 import { safeEqualStr } from '../../common/crypto';
 import { isUniqueViolation } from '../../common/db-error';
 import { Public, NoTx, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -116,26 +116,38 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะคำขอซื้อ\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
+
+  private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
   private static readonly NOT_LINKED =
     'ยังไม่ได้เชื่อมบัญชีพนักงาน — เปิดหน้า "คำขอซื้อ (PR)" ในระบบ ERP กด "เชื่อมต่อ LINE" เพื่อรับรหัส แล้วพิมพ์ link <รหัส> ที่นี่';
 
-  // Handle one inbound text message. Returns true when the text was a recognised command (link / pr /
-  // status); any other text is a customer conversation → not our business, no reply, no log.
+  // Handle one inbound text message. Returns true when the text was a recognised command; any other text
+  // is a customer conversation → not our business, no reply, no log. Routing is token-based (linear —
+  // chat text is uncontrolled input, so no backtracking regexes here).
   private async onChatMessage(tenantId: number, token: string | undefined, ev: any): Promise<boolean> {
     const lineUserId = String(ev?.source?.userId ?? '');
     const text = String(ev?.message?.text ?? '').slice(0, 2000).trim(); // LINE caps at 5000; bound our parse work
     const msgId = String(ev?.message?.id ?? '');
     if (!lineUserId || !text) return false;
 
-    const linkM = /^link\s+([A-Za-z0-9]{4,24})$/i.exec(text);
-    const statusM = /^(?:pr\s+)?(?:status|สถานะ)\s+(\S+)$/i.exec(text);
-    const isPr = !statusM && /^(?:pr\b|ขอซื้อ)/i.test(text);
-    if (!linkM && !statusM && !isPr) return false;
+    const parts = text.split(/\s+/);
+    const cmd = (parts[0] ?? '').toLowerCase();
+    const arg1 = parts[1] ?? '';
+    const isLink = cmd === 'link' && /^[A-Za-z0-9]{4,24}$/.test(arg1);
+    const isStatus = ((cmd === 'status' || cmd === 'สถานะ') && !!arg1) || (cmd === 'pr' && arg1.toLowerCase() === 'status' && !!parts[2]);
+    const isApprove = (cmd === 'approve' || cmd === 'อนุมัติ') && !!arg1;
+    const isReject = (cmd === 'reject' || cmd === 'ปฏิเสธ') && !!arg1;
+    const isMyPrs = (cmd === 'my' && arg1.toLowerCase() === 'prs') || cmd === 'รายการของฉัน';
+    const isFind = (cmd === 'find' || cmd === 'ค้นหา') && !!arg1;
+    const isCancel = (cmd === 'cancel' || cmd === 'ยกเลิก') && !!arg1;
+    const isStock = (cmd === 'stock' || cmd === 'สต็อก') && !!arg1;
+    const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isPr) return false;
 
     // LINE may redeliver a webhook — the reply log row carries the inbound message id, so a duplicate
-    // delivery of the same message is dropped instead of raising a second PR.
+    // delivery of the same message is dropped instead of acting twice (e.g. raising a duplicate PR).
     if (msgId) {
       const [dup] = await this.db.select({ id: messageLog.id }).from(messageLog)
         .where(and(eq(messageLog.tenantId, tenantId), eq(messageLog.providerRef, `line:msg:${msgId}`))).limit(1);
@@ -144,17 +156,88 @@ export class LineWebhookService {
 
     let reply: string;
     let campaign = 'chat_pr';
-    if (linkM) {
-      reply = await this.linkStaff(tenantId, lineUserId, linkM[1]!.toUpperCase());
+    if (isLink) {
+      reply = await this.linkStaff(tenantId, lineUserId, arg1.toUpperCase());
       campaign = 'chat_link';
     } else {
       const staff = await this.staffByLine(tenantId, lineUserId);
       if (!staff) reply = LineWebhookService.NOT_LINKED;
-      else if (statusM) { reply = await this.prStatus(statusM[1]!); campaign = 'chat_pr_status'; }
+      else if (isStatus) { reply = await this.prStatus(cmd === 'pr' ? parts[2]! : arg1); campaign = 'chat_pr_status'; }
+      else if (isApprove || isReject) { reply = await this.chatDecision(staff, arg1, isApprove); campaign = 'chat_approve'; }
+      else if (isMyPrs) { reply = await this.chatMyPrs(staff); campaign = 'chat_myprs'; }
+      else if (isFind) { reply = await this.chatFind(parts.slice(1).join(' ')); campaign = 'chat_find'; }
+      else if (isCancel) { reply = await this.chatCancel(staff, arg1); campaign = 'chat_cancel'; }
+      else if (isStock) { reply = await this.chatStock(staff, arg1); campaign = 'chat_stock'; }
       else reply = await this.chatCreatePr(staff, text);
     }
     await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, campaign);
     return true;
+  }
+
+  // approve/reject <PR no> — the chat approval channel (0228). The permission mirrors the web endpoint
+  // (`procurement`), and the decision routes through ProcurementService.approvePr → the workflow engine,
+  // so maker-checker/SoD and multi-level chains bind exactly as on the web.
+  private async chatDecision(u: any, docNo: string, approve: boolean): Promise<string> {
+    const prNo = docNo.toUpperCase();
+    if (!prNo.startsWith('PR-')) return 'อนุมัติผ่านแชทได้เฉพาะคำขอซื้อ (เลขที่ขึ้นต้น PR-)';
+    const perms = await this.effectivePerms(u);
+    if (!perms.includes('procurement')) return 'บัญชีของคุณไม่มีสิทธิ์อนุมัติคำขอซื้อ (procurement)';
+    const procurement = this.procurementSvc();
+    if (!procurement) return 'ระบบคำขอซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    try {
+      const res = await procurement.approvePr(prNo, approve, jwtUser);
+      const th = res.status === 'Approved' ? 'อนุมัติแล้ว ✅' : res.status === 'Rejected' ? 'ปฏิเสธแล้ว ❌' : `${LineWebhookService.STATUS_TH[String(res.status)] ?? res.status} (รอขั้นถัดไป)`;
+      return `${prNo}: ${th}`;
+    } catch (e: any) {
+      if (e?.response?.code === 'SOD_VIOLATION') return `${prNo}: อนุมัติไม่ได้ — ผู้สร้างเอกสารอนุมัติเองไม่ได้ (SOD_VIOLATION)`;
+      const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+      return `${prNo}: ดำเนินการไม่สำเร็จ — ${String(msg).slice(0, 200)}`;
+    }
+  }
+
+  // my prs — the caller's 5 most recent requisitions with status.
+  private async chatMyPrs(u: any): Promise<string> {
+    const rows = await this.db.select().from(purchaseRequests).where(eq(purchaseRequests.requestedBy, u.username)).orderBy(desc(purchaseRequests.id)).limit(5);
+    if (!rows.length) return 'คุณยังไม่มีคำขอซื้อ — พิมพ์ "pr <รหัสสินค้า> <จำนวน>" เพื่อสร้าง';
+    return 'คำขอซื้อล่าสุดของคุณ:\n' + rows.map((r: any) => `• ${r.prNo} — ${LineWebhookService.STATUS_TH[String(r.status)] ?? r.status}${r.prDate ? ` (${r.prDate})` : ''}`).join('\n');
+  }
+
+  // find <keyword> — item-master search so people can discover real item ids before raising a PR.
+  private async chatFind(keyword: string): Promise<string> {
+    const kw = keyword.trim().slice(0, 100);
+    if (!kw) return 'ระบุคำค้น เช่น find กระดาษ';
+    const rows = await this.db.select({ itemId: items.itemId, itemDescription: items.itemDescription, uom: items.uom })
+      .from(items).where(or(ilike(items.itemId, `%${kw}%`), ilike(items.itemDescription, `%${kw}%`))).limit(5);
+    if (!rows.length) return `ไม่พบสินค้าที่ตรงกับ "${kw}"`;
+    return `ผลค้นหา "${kw}":\n` + rows.map((r: any) => `• ${r.itemId} — ${r.itemDescription ?? '-'}${r.uom ? ` (${r.uom})` : ''}`).join('\n') + '\nสร้างคำขอซื้อ: pr <รหัสสินค้า> <จำนวน>';
+  }
+
+  // cancel <PR no> — the requester withdraws their own still-Pending PR (service enforces own-doc + status).
+  private async chatCancel(u: any, docNo: string): Promise<string> {
+    const prNo = docNo.toUpperCase();
+    const procurement = this.procurementSvc();
+    if (!procurement) return 'ระบบคำขอซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const perms = await this.effectivePerms(u);
+    const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    try {
+      await procurement.cancelPr(prNo, jwtUser);
+      return `${prNo}: ยกเลิกแล้ว ✅`;
+    } catch (e: any) {
+      const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+      return `${prNo}: ยกเลิกไม่ได้ — ${String(msg).slice(0, 200)}`;
+    }
+  }
+
+  // stock <item id> — read-only on-hand lookup from inv_balances (tenant-scoped to the linked user's shop).
+  private async chatStock(u: any, itemId: string): Promise<string> {
+    const conds: any[] = [ilike(invBalances.itemId, itemId)]; // ilike w/o wildcards = case-insensitive equality
+    if (u.tenantId != null) conds.push(eq(invBalances.tenantId, Number(u.tenantId)));
+    const rows = await this.db.select().from(invBalances).where(and(...conds)).limit(5);
+    if (!rows.length) return `ไม่พบยอดคงเหลือของ ${itemId}`;
+    const total = rows.reduce((a: number, r: any) => a + Number(r.onHandQty ?? 0), 0);
+    const name = rows[0]?.itemDescription ? ` (${rows[0].itemDescription})` : '';
+    return `สต็อก ${rows[0]!.itemId}${name}: รวม ${total}\n` + rows.map((r: any) => `• ${r.locationId}: ${Number(r.onHandQty ?? 0)}`).join('\n');
   }
 
   // Bind the LINE account to the staff user holding this (unexpired) one-time code. The code was issued to
@@ -228,8 +311,7 @@ export class LineWebhookService {
   private async prStatus(prNo: string): Promise<string> {
     const [pr] = await this.db.select().from(purchaseRequests).where(eq(purchaseRequests.prNo, prNo)).limit(1);
     if (!pr) return `ไม่พบคำขอซื้อ ${prNo}`;
-    const th: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ' };
-    return `PR ${prNo}: ${th[String(pr.status)] ?? pr.status}${pr.approvedBy ? ` (โดย ${pr.approvedBy})` : ''}`;
+    return `PR ${prNo}: ${LineWebhookService.STATUS_TH[String(pr.status)] ?? pr.status}${pr.approvedBy ? ` (โดย ${pr.approvedBy})` : ''}`;
   }
 
   // Reply over the one-time replyToken (no push quota); without a configured token (dev mock) the network

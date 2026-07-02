@@ -368,6 +368,92 @@ async function main() {
     unlinkRes.json.linked === false && afterUnlink.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยังไม่ได้เชื่อมบัญชี'),
     JSON.stringify({ linked: unlinkRes.json.linked }));
 
+  // ── 17. Chat-PR phase 2 (0228): workflow LINE notifications, approve/reject via chat (engine SoD),
+  //        my prs / find / cancel / stock. A real PR workflow definition is activated so the engine path
+  //        (not the legacy Admin flip) is exercised end-to-end over LINE. ──
+  await db.update(s.users).set({ lineUserId: 'Usomchai' }).where(eq(s.users.username, 'somchai')); // re-link after 16l
+  await db.insert(s.users).values([{ username: 'prayut', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 }]).onConflictDoNothing();
+  await db.update(s.users).set({ lineUserId: 'Uprayut' }).where(eq(s.users.username, 'prayut'));
+  const wfDef = await inj('POST', '/api/workflow/definitions', token, { doc_type: 'PR', name: 'PR approval', steps: [{ step_no: 1, approver_role: 'Procurement' }] });
+  ok('chat-PR2: PR workflow definition activated (step 1 → Procurement)', wfDef.status === 200 || wfDef.status === 201, JSON.stringify({ s: wfDef.status }));
+
+  // 17a. chat-raised PR → the linked Procurement approver gets a LINE queue-entry PUSH naming the PR.
+  const pushesBefore17 = linePushes.length;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17a', source: { userId: 'Usomchai' }, message: { id: 'mid-17a', type: 'text', text: 'pr A4-PAPER 3 หมึกใกล้หมด' } }] });
+  const pr17 = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const queuePush = linePushes.slice(pushesBefore17).find((p) => p.to === 'Uprayut');
+  ok('chat-PR2: queue-entry notification — linked approver (role Procurement) pushed the PR no + chat hint',
+    !!pr17 && !!queuePush && queuePush.text.includes(pr17) && queuePush.text.includes('approve'),
+    JSON.stringify({ pr: pr17, pushed: !!queuePush }));
+
+  // 17b. approver chats `approve <PR no>` → engine approves (maker≠checker), PR flips Approved, and the
+  //      REQUESTER gets a LINE decision push.
+  const pushesBefore17b = linePushes.length;
+  const apr = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17b', source: { userId: 'Uprayut' }, message: { id: 'mid-17b', type: 'text', text: `approve ${pr17}` } }] });
+  const [pr17Row] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, pr17));
+  const decidePush = linePushes.slice(pushesBefore17b).find((p) => p.to === 'Usomchai');
+  ok('chat-PR2: approve via chat → engine approves, PR Approved, requester pushed the ✅ decision',
+    apr.json.chat === 1 && lineReplies.at(-1)!.text.includes('อนุมัติแล้ว') && pr17Row?.status === 'Approved' && pr17Row?.approvedBy === 'prayut'
+      && !!decidePush && decidePush.text.includes(pr17) && decidePush.text.includes('อนุมัติแล้ว'),
+    JSON.stringify({ status: pr17Row?.status, by: pr17Row?.approvedBy, notified: !!decidePush }));
+
+  // 17c. maker-checker binds in chat: the approver cannot approve a PR they raised themselves.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17c1', source: { userId: 'Uprayut' }, message: { id: 'mid-17c1', type: 'text', text: 'pr TONER-85A 1 ของตัวเอง' } }] });
+  const prOwn = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const sodTry = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17c2', source: { userId: 'Uprayut' }, message: { id: 'mid-17c2', type: 'text', text: `approve ${prOwn}` } }] });
+  const [prOwnRow] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prOwn));
+  ok('chat-PR2: SoD in chat — approver cannot approve their own PR (SOD_VIOLATION, stays Pending)',
+    sodTry.json.chat === 1 && lineReplies.at(-1)!.text.includes('SOD_VIOLATION') && prOwnRow?.status === 'Pending',
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 60), status: prOwnRow?.status }));
+
+  // 17d. permission binds in chat: a linked user WITHOUT `procurement` cannot approve.
+  const noAuth = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17d', source: { userId: 'Usomchai' }, message: { id: 'mid-17d', type: 'text', text: `approve ${prOwn}` } }] });
+  ok('chat-PR2: approve without procurement permission → refused',
+    noAuth.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 17e. reject via chat → PR Rejected + requester pushed the ❌ decision.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17e1', source: { userId: 'Usomchai' }, message: { id: 'mid-17e1', type: 'text', text: 'pr GLUE-STICK 12' } }] });
+  const prRej = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const pushesBefore17e = linePushes.length;
+  const rej = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17e2', source: { userId: 'Uprayut' }, message: { id: 'mid-17e2', type: 'text', text: `reject ${prRej} ซื้อรวมล็อตหน้า` } }] });
+  const [prRejRow] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prRej));
+  const rejPush = linePushes.slice(pushesBefore17e).find((p) => p.to === 'Usomchai');
+  ok('chat-PR2: reject via chat → PR Rejected, requester pushed the ❌ decision',
+    rej.json.chat === 1 && prRejRow?.status === 'Rejected' && !!rejPush && rejPush.text.includes(prRej) && rejPush.text.includes('ไม่ได้รับอนุมัติ'),
+    JSON.stringify({ status: prRejRow?.status, notified: !!rejPush }));
+
+  // 17f. my prs — the requester's recent PRs with Thai statuses.
+  const mine = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17f', source: { userId: 'Usomchai' }, message: { id: 'mid-17f', type: 'text', text: 'my prs' } }] });
+  const mineText = lineReplies.at(-1)?.text ?? '';
+  ok('chat-PR2: my prs → lists own recent PRs with statuses',
+    mine.json.chat === 1 && mineText.includes(pr17) && mineText.includes('อนุมัติแล้ว') && mineText.includes(prRej) && !mineText.includes(prOwn),
+    JSON.stringify({ head: mineText.slice(0, 60) }));
+
+  // 17g. find — item-master search surfaces real item ids.
+  await db.insert(s.items).values({ itemId: 'A4-PAPER', itemDescription: 'กระดาษ A4 80 แกรม', uom: 'REAM' }).onConflictDoNothing();
+  const found = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17g', source: { userId: 'Usomchai' }, message: { id: 'mid-17g', type: 'text', text: 'find กระดาษ' } }] });
+  ok('chat-PR2: find <keyword> → returns matching item ids', found.json.chat === 1 && lineReplies.at(-1)!.text.includes('A4-PAPER'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 60) }));
+
+  // 17h. cancel — own pending PR withdrawn (workflow instance closed); someone else's PR is refused.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17h1', source: { userId: 'Usomchai' }, message: { id: 'mid-17h1', type: 'text', text: 'pr STAPLER 2' } }] });
+  const prCxl = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const cxl = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17h2', source: { userId: 'Usomchai' }, message: { id: 'mid-17h2', type: 'text', text: `cancel ${prCxl}` } }] });
+  const [prCxlRow] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prCxl));
+  const [wfCxl] = await db.select().from(s.workflowInstances).where(and(eq(s.workflowInstances.docType, 'PR'), eq(s.workflowInstances.docNo, prCxl)));
+  const cxlOther = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17h3', source: { userId: 'Usomchai' }, message: { id: 'mid-17h3', type: 'text', text: `cancel ${prOwn}` } }] });
+  ok('chat-PR2: cancel own pending PR → Cancelled + workflow instance closed; another user\'s PR refused',
+    cxl.json.chat === 1 && prCxlRow?.status === 'Cancelled' && wfCxl?.status === 'cancelled'
+      && cxlOther.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยกเลิกไม่ได้'),
+    JSON.stringify({ pr: prCxlRow?.status, wf: wfCxl?.status }));
+
+  // 17i. stock — read-only on-hand lookup (tenant-scoped).
+  await db.insert(s.invBalances).values({ tenantId: t1, itemId: 'A4-PAPER', itemDescription: 'กระดาษ A4 80 แกรม', locationId: 'WH-MAIN', onHandQty: '42', avgCost: '95', totalValue: '3990' }).onConflictDoNothing();
+  const stk = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17i', source: { userId: 'Usomchai' }, message: { id: 'mid-17i', type: 'text', text: 'stock a4-paper' } }] });
+  const stkText = lineReplies.at(-1)?.text ?? '';
+  ok('chat-PR2: stock <item> → on-hand total + per-location breakdown (case-insensitive item id)',
+    stk.json.chat === 1 && stkText.includes('A4-PAPER') && stkText.includes('42') && stkText.includes('WH-MAIN'),
+    JSON.stringify({ reply: stkText.slice(0, 60) }));
+
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
