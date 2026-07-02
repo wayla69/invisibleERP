@@ -1,4 +1,4 @@
--- 0218_gl_period_balances — GL period-balance snapshots (docs/24 R1-2, investment-audit finding AUD-ARC-02).
+-- 0219_gl_period_balances — GL period-balance snapshots (docs/27 R1-2, investment-audit finding AUD-ARC-02).
 -- The trial balance aggregated the FULL journal_lines table on every request; at millions of lines the
 -- read path melts the DB. This snapshot holds Σdebit/Σcredit per (tenant, ledger, period, cost-center,
 -- account), maintained TRANSACTIONALLY at the only two balance-affecting transitions (postEntry lands

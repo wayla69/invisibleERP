@@ -13,7 +13,7 @@ import type { JwtUser } from '../../common/decorators';
 // Predictive scoring (Growth Engine G3, docs/25) — EXPLAINABLE versioned weighted formula, deliberately
 // not a trained model (SOX posture: coefficients are code-reviewed + documented in
 // docs/ops/predictive-scoring.md; every stored score carries SCORE_VERSION). Null until ≥1 paid order.
-export const SCORE_VERSION = 'v1';
+export const SCORE_VERSION = 'v2'; // v2 adds preferred_hour (H3, docs/26) — churn/LTV formulas unchanged from v1
 export const SCORE_COEFFS = {
   assumedCadenceDays: 30, // cadence fallback when the member has exactly 1 order (assume monthly)
   ratioSoftness: 3,       // churn base = 100·r/(r+softness), r = recency ÷ personal cadence
@@ -89,6 +89,14 @@ export class CrmService {
     // not bookkeeping: never posted anywhere, surfaced with the version stamp.
     let churnRisk: number | null = null;
     let predictedLtv: number | null = null;
+    // H3 (docs/26) — preferred send hour: histogram MODE of paid-order hours in Asia/Bangkok (ties →
+    // earliest hour); null under 3 orders (no signal — journey falls back to its default hour).
+    let preferredHour: number | null = null;
+    if (totalOrders >= 3) {
+      const histo = new Array(24).fill(0);
+      for (const r of rows) histo[(new Date(r.openedAt).getUTCHours() + 7) % 24]++;
+      preferredHour = histo.indexOf(Math.max(...histo));
+    }
     if (totalOrders > 0 && lastOrderAt) {
       const cadence = totalOrders >= 2 && firstOrderAt
         ? Math.max(1, (lastOrderAt.getTime() - firstOrderAt.getTime()) / 86_400_000 / (totalOrders - 1))
@@ -106,7 +114,7 @@ export class CrmService {
       rfmRecency, rfmFrequency, rfmMonetary: String(rfmMonetary), rfmSegment: segment,
       preferredChannel, visitCount: totalOrders,
       avgOrderValue: String(avgOrderValue),
-      churnRisk, predictedLtv: predictedLtv != null ? String(predictedLtv) : null, scoreVersion: SCORE_VERSION,
+      churnRisk, predictedLtv: predictedLtv != null ? String(predictedLtv) : null, scoreVersion: SCORE_VERSION, preferredHour,
       refreshedAt: new Date(),
     };
 
@@ -115,7 +123,7 @@ export class CrmService {
       set: { ...vals },
     });
 
-    return { member_id: memberId, rfm_segment: segment, total_orders: totalOrders, total_spend: totalSpend, rfm_recency: rfmRecency, rfm_frequency: rfmFrequency, rfm_monetary: rfmMonetary, churn_risk: churnRisk, predicted_ltv: predictedLtv, score_version: SCORE_VERSION };
+    return { member_id: memberId, rfm_segment: segment, total_orders: totalOrders, total_spend: totalSpend, rfm_recency: rfmRecency, rfm_frequency: rfmFrequency, rfm_monetary: rfmMonetary, churn_risk: churnRisk, predicted_ltv: predictedLtv, score_version: SCORE_VERSION, preferred_hour: preferredHour };
   }
 
   // Phase F2 (docs/27) — bulk RFM re-profiling. Sweeps the tenant's ACTIVE members in id-keyed batches
@@ -163,7 +171,7 @@ export class CrmService {
         preferred_channel: p.preferredChannel, avg_order_value: n(p.avgOrderValue),
         churn_risk: p.churnRisk != null ? Number(p.churnRisk) : null,
         predicted_ltv: p.predictedLtv != null ? n(p.predictedLtv) : null,
-        score_version: p.scoreVersion ?? null, refreshed_at: p.refreshedAt,
+        score_version: p.scoreVersion ?? null, preferred_hour: p.preferredHour != null ? Number(p.preferredHour) : null, refreshed_at: p.refreshedAt,
       } : null,
       recent_orders: recent.map((o: any) => ({ order_no: o.orderNo, total: n(o.total), channel: o.channel, opened_at: o.openedAt })),
     };

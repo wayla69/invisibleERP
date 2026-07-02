@@ -155,7 +155,7 @@ For every such change, review and update as needed:
 - **Project Management — next-level roadmap:** `docs/20-project-management-next-level-plan.md` (DELIVERED) —
   Portfolio command center, delivery depth (baselines/templates/RACI/risk-issue, controls PROJ-07/08),
   and a dedicated PM workspace IA. Phased, doc-synced PRs like docs/19.
-- **PMO command center — plan:** `docs/23-pmo-command-center-plan.md` (PLANNING) — turn the PPM signals into
+- **PMO command center:** `docs/23-pmo-command-center-plan.md` (DELIVERED — PMO-1..5 shipped) — turn the PPM signals into
   a PMO operating loop: a single *what-needs-me-now* **action center** (`GET /api/projects/action-center`,
   proactive via the `BiLiveService` SSE bus; new detective control **PROJ-11**), a **pipeline-weighted
   forward** resource/cash forecast (`pipelineSummary` × `resourceCapacity` × milestone/POC billing), and a
@@ -168,7 +168,7 @@ For every such change, review and update as needed:
   `api/procurement/match`), budget-vs-actual (`modules/budget` `budgetVsActual`), supplier scorecards. Only
   thin residual gaps remain → BI `exec_scorecard`/`budget_variance`/`supplier_scorecard` report types +
   optional close pre-lock validation (GL-19). **Do not rebuild the above — extend it.**
-- **APS scheduling + streaming analytics — plan:** `docs/22-aps-streaming-analytics-plan.md` (PLANNING) —
+- **APS scheduling + streaming analytics:** `docs/22-aps-streaming-analytics-plan.md` (DELIVERED — APS + BiLive SSE shipped) —
   finite-capacity production scheduler (extends `mfg-depth` routings/RCCP; new `work_centers` master) +
   a live KPI SSE feed (reuses the `@Sse` `RealtimeService` bus; BI is poll-based today). Build on, don't duplicate.
 - **Finance/GL feature map (controls + where the logic lives):**

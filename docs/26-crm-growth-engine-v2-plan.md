@@ -1,6 +1,6 @@
 # 26 — CRM Growth Engine v2: Branching, True Baselines & Right-Time Sends — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v1.0 — **PLANNING** · **Owner:** ERP / Product (CMO + SVP-IT review)
+> **Date:** 2026-07-02 · **Status:** v1.3 — **DELIVERED** (H1 #304, H2 #305, H3 shipped) · **Owner:** ERP / Product (CMO + SVP-IT review)
 > **Scope:** The v2 refinements `docs/25` §5 explicitly deferred, now that the growth engine's spine is
 > merged (journeys #300, A/B + holdout #301, predictive scoring #302): **H1 branching journeys**
 > (conditional paths, not just linear + skip), **H2 organic-purchase holdout baseline** (true incremental
@@ -112,6 +112,7 @@ human judges; a proper test is a future refinement).
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.3 | 2026-07-02 | Platform | **H3 SHIPPED — plan DELIVERED.** preferred_hour (histogram mode, SCORE_VERSION v2) + journeys.default_send_hour (migration 0217); wait steps snap forward, wait-0 unsnapped; scoring doc rev 1.1. §5 (bandits, ML, canvas, per-member campaign times, significance tests) remains beyond v2. |
 | 1.2 | 2026-07-02 | Platform | **H2 SHIPPED** — window_days (migration 0216) + `organic` report block (per-group real-purchase rates/revenue, holdout as baseline, size-scaled incremental lift, noise note). H3 pending. |
 | 1.1 | 2026-07-02 | Platform | **H1 SHIPPED** — branch_rule/branch_to_step on journey_steps (migration 0215), forward-only enforced (BAD_BRANCH), runner one decision point, web ทางแยก row. H2/H3 pending. |
 | 1.0 | 2026-07-02 | Platform | Initial v2 plan: H1 rule-based forward-jump branching (termination by construction), H2 organic-purchase holdout baseline (true incremental lift on the G2 closed loop), H3 explainable per-member send-hour (histogram mode; journeys snap forward). Bandits/ML/canvas stay out. |

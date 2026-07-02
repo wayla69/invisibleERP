@@ -1,4 +1,4 @@
--- 0217 — Tenant-index backfill (docs/24 R1-1, investment-audit finding AUD-ARC-01).
+-- 0218 — Tenant-index backfill (docs/27 R1-1, investment-audit finding AUD-ARC-01).
 -- RLS (0002_rls.sql) puts a tenant_id predicate on EVERY query against a tenant-scoped table; 132 such
 -- tables had no index whose LEADING column is tenant_id, so per-tenant reads seq-scanned and degrade
 -- non-linearly under concurrency. This adds the minimum uniform cover: a plain (tenant_id) btree per

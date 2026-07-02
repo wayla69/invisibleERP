@@ -7,7 +7,7 @@
 >
 > **Semantic embeddings (docs/27 R4-1):** `EMBED_PROVIDER=voyage` (+`VOYAGE_API_KEY`, default model
 > `voyage-3-lite`) switches KB retrieval from the local hashed bag-of-words to real semantic vectors.
-> Each chunk records its **embedding space** (`kb_chunks.embed_provider`, migration 0219); search only
+> Each chunk records its **embedding space** (`kb_chunks.embed_provider`, migration 0220); search only
 > compares within the query's space (cross-space cosine is noise), `POST /api/ai/kb/reembed` migrates the
 > corpus after switching, and any provider failure or un-acknowledged DPA degrades fail-safe to the local
 > embedder (throttled `embed_provider_degraded` ops alert). pgvector indexing remains the at-scale upgrade

@@ -1,4 +1,4 @@
--- 0219_kb_embed_provider — semantic-RAG groundwork (docs/24 R4-1, investment-audit finding AUD-AI-01).
+-- 0220_kb_embed_provider — semantic-RAG groundwork (docs/27 R4-1, investment-audit finding AUD-AI-01).
 -- Each kb_chunks embedding now records WHICH embedding space it lives in (local hashed bag-of-words vs a
 -- real semantic provider like Voyage). Vectors from different spaces are not comparable, so retrieval
 -- filters to the space the query was embedded in; existing rows are all 'local'. Re-embedding onto a

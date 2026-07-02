@@ -13,6 +13,7 @@ const JourneyBody = z.object({
   segment_id: z.number().int().positive().optional(),
   cap_messages: z.number().int().min(0).default(0),
   cap_window_days: z.number().int().min(1).default(7),
+  default_send_hour: z.number().int().min(0).max(23).default(10),
   steps: z.array(Step).min(1),
 });
 const EnrollBody = z.object({ member_id: z.number().int().positive() });

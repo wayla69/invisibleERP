@@ -279,7 +279,7 @@ async function main() {
   const freshProf = await inj('GET', `/api/crm/profile/${memberId}`, mgr1);
   ok('Churn scoring: a member far past their own cadence scores high; a just-purchased member scores low; version stamped',
     sweep2.status === 200 && (decayProf.json.crm?.churn_risk ?? 0) >= 60 && (freshProf.json.crm?.churn_risk ?? 99) <= 20
-      && decayProf.json.crm?.score_version === 'v1' && (decayProf.json.crm?.predicted_ltv ?? -1) >= 0,
+      && /^v\d+$/.test(String(decayProf.json.crm?.score_version)) && (decayProf.json.crm?.predicted_ltv ?? -1) >= 0,
     JSON.stringify({ decay: decayProf.json.crm?.churn_risk, fresh: freshProf.json.crm?.churn_risk, ver: decayProf.json.crm?.score_version, ltv: decayProf.json.crm?.predicted_ltv }));
 
   // Scores are usable as saved-segment fields (whitelist extended, values still drizzle-bound).
@@ -327,6 +327,38 @@ async function main() {
   });
   ok('Backward/self jump rejected at create (BAD_BRANCH) — termination is structural, no loops possible',
     badBr.status === 400 && badBr.json.error?.code === 'BAD_BRANCH', JSON.stringify({ s: badBr.status, code: badBr.json.error?.code }));
+
+  // ── 7l. Send-time optimization (Phase H3) — preferred hour = histogram mode; journeys snap FORWARD ──
+  // A member with 3 paid orders all at 03:30Z (= 10:30 Asia/Bangkok) → preferred_hour 10.
+  const hourMem = await inj('POST', '/api/loyalty/members', mgr1, { name: 'ลูกค้าสิบโมง', phone: '0807777701' });
+  await db.insert(s.dineInOrders).values([1, 2, 3].map((d) => ({
+    orderNo: `DIN-H3-${d}`, tenantId: t1, memberId: Number(hourMem.json.id), saleNo: `SALE-H3-${d}`,
+    total: '150', openedAt: new Date(`2026-06-0${d}T03:30:00Z`), channel: 'web' as const,
+  })));
+  await inj('POST', '/api/crm/profiles/refresh', mgr1, {});
+  const hourProf = await inj('GET', `/api/crm/profile/${hourMem.json.id}`, mgr1);
+  const decayProf2 = await inj('GET', `/api/crm/profile/${decay.json.id}`, mgr1);
+  ok('preferred_hour: 3 paid orders at 10:30 BKK → mode 10; version stamped v2',
+    hourProf.json.crm?.preferred_hour === 10 && hourProf.json.crm?.score_version === 'v2',
+    JSON.stringify({ h: hourProf.json.crm?.preferred_hour, ver: hourProf.json.crm?.score_version }));
+  ok('preferred_hour: under 3 orders → null (no signal; journey falls back to its default hour)',
+    decayProf2.json.crm?.preferred_hour === null,
+    JSON.stringify({ h: decayProf2.json.crm?.preferred_hour, orders: decayProf2.json.crm?.total_orders }));
+  // A wait>0 journey step schedules on the member's hour — snapped FORWARD (never before the raw wait target).
+  const jnyH3 = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'right-time drip', trigger: 'manual', default_send_hour: 15,
+    steps: [{ wait_days: 0, channel: 'sms', body: 'ก่อน' }, { wait_days: 1, channel: 'sms', body: 'ตาม' }],
+  });
+  await inj('POST', `/api/loyalty/journeys/${jnyH3.json.id}/activate`, mgr1);
+  await inj('POST', `/api/loyalty/journeys/${jnyH3.json.id}/enroll`, mgr1, { member_id: hourMem.json.id });
+  const before = Date.now();
+  await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // step 1 (wait 0, unsnapped) executes now
+  const [enrH3] = await db.select().from(s.journeyEnrollments).where(and(eq(s.journeyEnrollments.journeyId, jnyH3.json.id), eq(s.journeyEnrollments.memberId, Number(hourMem.json.id))));
+  const nextAt = new Date(enrH3.nextRunAt);
+  const bkkHour = (nextAt.getUTCHours() + 7) % 24;
+  ok('journey wait step snaps FORWARD to the member preferred hour (10:00 BKK) and never before wait target',
+    bkkHour === 10 && nextAt.getTime() >= before + 86_400_000,
+    JSON.stringify({ bkkHour, deltaH: Math.round((nextAt.getTime() - before) / 3600_000) }));
 
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)

@@ -6,7 +6,7 @@ import { tenants } from './tenants';
 // balance-affecting transitions (postEntry→Posted, approveEntry Draft→Posted); Posted entries are
 // DB-immutable (0165) so no other mutation can drift it — verified anyway at close (GL-20).
 // Key columns are normalized NON-NULL ('' = NULL ledger/cost-center); the unique key lives in migration
-// 0218 as an expression index (coalesce(tenant_id,0), …) because tenant_id stays nullable like
+// 0219 as an expression index (coalesce(tenant_id,0), …) because tenant_id stays nullable like
 // journal_entries.
 export const glPeriodBalances = pgTable(
   'gl_period_balances',

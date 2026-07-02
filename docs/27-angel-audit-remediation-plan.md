@@ -179,7 +179,7 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 
 ### R1-1 · Index the un-indexed 40 — closes AUD-ARC-01 ⭐ cheapest/highest-leverage — **DELIVERED 2026-07-02**
 > Live introspection found the real number was **132 tables** (worse than the audit's ~40-file estimate).
-> Delivered: migration `0217_tenant_indexes_backfill.sql` (renumbered from 0211 on the main merge — the docs/25-crm series took 0211–0216) (uniform `(tenant_id)` btree per uncovered table,
+> Delivered: migration `0218_tenant_indexes_backfill.sql` (renumbered from 0211 across the main merges — the docs/25-crm series took 0211–0216) (uniform `(tenant_id)` btree per uncovered table,
 > generated from PGlite introspection with collision-checked names, journaled idx 211) + the **`tenant-idx`
 > cutover harness** in the CI matrix (re-introspects the applied migration set; fails on ANY uncovered
 > table, zero grandfathers) + `docs/ops/capacity-and-pooling.md` §5b policy. Decision recorded: uniform
@@ -205,7 +205,7 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
   state that explicitly in the PR.
 
 ### R1-2 · GL period-balance snapshots — closes AUD-ARC-02 (the big one; own PR, heavy harness) — **DELIVERED 2026-07-02**
-> Shipped: `gl_period_balances` (migration `0218`, renumbered from 0212 on the main merge: table + expression unique key + tenant index + RLS loop
+> Shipped: `gl_period_balances` (migration `0219`, renumbered from 0212 on the main merge: table + expression unique key + tenant index + RLS loop
 > + idempotent backfill from the Posted ledger), transactional maintenance in `bumpPeriodBalances` at the
 > only two balance-affecting transitions (`postEntry`→Posted, `approveEntry` Draft→Posted — now atomic in
 > one tx), `trialBalance` rewritten to read the snapshot (same filters/output; every existing TB harness
@@ -426,7 +426,7 @@ campaign evidence pointers; `CONTROL_STATUS_HONEST.md` flips each Partial with d
 > contract (L2-normalized `number[]`) is unchanged, so the pgvector index remains a drop-in when corpus
 > size demands. Delivered: Voyage adapter in `EmbedderService` (fetch, 15s bound, DPA-gated like all AI
 > transmission, fail-safe local fallback + `embed_provider_degraded` alert), `kb_chunks.embed_provider`
-> space column (migration 0219, renumbered from 0213 on the main merge) with space-filtered search (cross-space cosine never compared), and
+> space column (migration 0220, renumbered from 0213 on the main merge) with space-filtered search (cross-space cosine never compared), and
 > `POST /api/ai/kb/reembed` migration endpoint. ToE: `rag` 11 + `embedder` unit 2; DPA register + docs/06
 > + narrative 26 rev 1.4 updated.
 - Migration `02xx_kb_pgvector.sql`: `CREATE EXTENSION IF NOT EXISTS vector`, `embedding vector(1024)`
