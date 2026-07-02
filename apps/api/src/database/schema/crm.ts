@@ -39,7 +39,8 @@ export const customerProfiles = pgTable('customer_profiles', {
   // computed inside refreshProfile alongside RFM (one reviewed path). Null until the member has ≥1 order.
   churnRisk: integer('churn_risk'),                                  // 0..100 (docs/ops/predictive-scoring.md)
   predictedLtv: numeric('predicted_ltv', { precision: 14, scale: 2 }), // ฿, 12-month estimate
-  scoreVersion: text('score_version'),                               // formula version stamp (e.g. 'v1')
+  scoreVersion: text('score_version'),                               // formula version stamp (e.g. 'v2')
+  preferredHour: integer('preferred_hour'),                          // H3: 0-23 Asia/Bangkok — histogram mode of paid-order hours; null <3 orders
   refreshedAt: timestamp('refreshed_at', { withTimezone: true }).defaultNow(),
 });
 

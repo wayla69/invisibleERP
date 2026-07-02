@@ -1,6 +1,6 @@
 # Predictive scoring — churn risk & predicted LTV (formula reference)
 
-**Status: v1.0 · 2026-07-02** · Growth Engine G3 (`docs/25`) · Code: `apps/api/src/modules/crm/crm.service.ts`
+**Status: v1.1 · 2026-07-02** · Growth Engine G3 (`docs/25`) · Code: `apps/api/src/modules/crm/crm.service.ts`
 (`SCORE_VERSION`, `SCORE_COEFFS`, `churnScore`) · Columns: `customer_profiles.churn_risk / predicted_ltv /
 score_version` (migration `0214`)
 
@@ -18,7 +18,14 @@ same surfaces keep them fresh: the nightly `crm_profile_refresh` BI job (F2), th
 `POST /api/crm/profiles/refresh`, and the per-member refresh. A member with **no paid orders scores `null`**
 (a new member is not "churned"; a null never matches a segment rule).
 
-## Formula — version `v1`
+## Formula — version `v2`
+
+`v2` (H3, docs/26) **adds `preferred_hour`** — the churn/LTV formulas are unchanged from `v1`:
+
+- **`preferred_hour`** (0–23, Asia/Bangkok): the **histogram mode** of the member's paid-order hours
+  (ties → earliest hour); `null` under 3 orders (no signal). Consumed by journey wait-step scheduling —
+  `next_run_at` snaps **forward** to this hour (never backward; immediate wait-0 steps are not snapped);
+  falls back to the journey's `default_send_hour`.
 
 Coefficients (`SCORE_COEFFS`): `assumedCadenceDays=30`, `ratioSoftness=3`, `trendAdj=10`, `ltvHorizonDays=365`.
 
@@ -47,11 +54,12 @@ Coefficients (`SCORE_COEFFS`): `assumedCadenceDays=30`, `ratioSoftness=3`, `tren
 
 - Cadence needs ≥2 orders to be personal; single-order members use the monthly assumption.
 - The LTV horizon ignores seasonality, tier effects, and margin (it is revenue, not profit).
-- Engagement signals (redemptions, mission claims) are **not** in `v1` — listed for `v2`.
+- Engagement signals (redemptions, mission claims) are **not** in `v1`/`v2` — a future refinement.
 - Changing any coefficient REQUIRES bumping `SCORE_VERSION` and a revision row here.
 
 ## Revision history
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.1 | 2026-07-02 | Platform | `SCORE_VERSION → v2` (docs/26 H3): adds `preferred_hour` (paid-order-hour histogram mode, BKK, null <3 orders); churn/LTV formulas unchanged. |
 | 1.0 | 2026-07-02 | Platform | Initial `v1` formula (cadence-relative churn + trend nudge; 12-month LTV), per docs/25 G3. |

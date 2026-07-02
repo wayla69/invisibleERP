@@ -22,6 +22,7 @@ export const journeys = pgTable('journeys', {
   // Frequency cap: at most cap_messages journey messages per member per cap_window_days (0 = uncapped).
   capMessages: integer('cap_messages').notNull().default(0),
   capWindowDays: integer('cap_window_days').notNull().default(7),
+  defaultSendHour: integer('default_send_hour').notNull().default(10), // H3: snap hour (Asia/Bangkok) when the member has no preferred_hour
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqCode: uniqueIndex('journeys_tenant_code').on(t.tenantId, t.code) }));
