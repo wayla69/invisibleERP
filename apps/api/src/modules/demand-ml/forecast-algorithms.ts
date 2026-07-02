@@ -20,19 +20,19 @@ export const sma = (window = 7): Forecaster => (h, hz) => {
 // Simple exponential smoothing — recursively smoothed level (recent points weighted more), flat forecast.
 export const ses = (alpha = 0.3): Forecaster => (h, hz) => {
   if (!h.length) return Array(hz).fill(0);
-  let level = h[0];
-  for (let i = 1; i < h.length; i++) level = alpha * h[i] + (1 - alpha) * level;
+  let level = h[0]!;
+  for (let i = 1; i < h.length; i++) level = alpha * h[i]! + (1 - alpha) * level;
   return Array(hz).fill(level);
 };
 
 // Holt's linear trend (double exponential smoothing) — level + trend, extrapolated over the horizon.
 export const holt = (alpha = 0.4, beta = 0.1): Forecaster => (h, hz) => {
   if (h.length < 2) return Array(hz).fill(h[0] ?? 0);
-  let level = h[0];
-  let trend = h[1] - h[0];
+  let level = h[0]!;
+  let trend = h[1]! - h[0]!;
   for (let i = 1; i < h.length; i++) {
     const prev = level;
-    level = alpha * h[i] + (1 - alpha) * (level + trend);
+    level = alpha * h[i]! + (1 - alpha) * (level + trend);
     trend = beta * (level - prev) + (1 - beta) * trend;
   }
   return Array.from({ length: hz }, (_, k) => level + (k + 1) * trend);
@@ -87,11 +87,11 @@ export const dowSeasonal = (alpha = 0.3, period = 7): Forecaster => (h, hz) => {
   if (overall <= 0) return Array(hz).fill(0);
   const sums = Array(period).fill(0);
   const counts = Array(period).fill(0);
-  for (let i = 0; i < h.length; i++) { sums[i % period] += h[i]; counts[i % period]++; }
+  for (let i = 0; i < h.length; i++) { sums[i % period] += h[i]!; counts[i % period]++; }
   const factors = sums.map((sm, p) => (counts[p] ? sm / counts[p] / overall : 1)).map((f) => (f > 0 ? f : 1));
-  let level = h[0] / factors[0];
-  for (let i = 1; i < h.length; i++) level = alpha * (h[i] / factors[i % period]) + (1 - alpha) * level;
-  return Array.from({ length: hz }, (_, k) => Math.max(0, level * factors[(h.length + k) % period]));
+  let level = h[0]! / factors[0]!;
+  for (let i = 1; i < h.length; i++) level = alpha * (h[i]! / factors[i % period]!) + (1 - alpha) * level;
+  return Array.from({ length: hz }, (_, k) => Math.max(0, level * factors[(h.length + k) % period]!));
 };
 
 // Fixed-date Thai public holidays (MM-DD). Deliberately FIXED-DATE ONLY — the lunar Buddhist holidays
@@ -125,26 +125,26 @@ const isThHoliday = (ymdStr: string) => TH_FIXED_HOLIDAYS.has(ymdStr.slice(5));
 export const thaiHoliday = (alpha = 0.3, period = 7): Forecaster => (h, hz, ctx) => {
   if (!ctx?.lastDate || h.length < period * 2) return dowSeasonal(alpha, period)(h, hz, ctx);
   const dates = h.map((_, i) => addDaysYmd(ctx.lastDate as string, i - (h.length - 1)));
-  const hol = h.filter((_, i) => isThHoliday(dates[i]));
-  const nonHol = h.filter((_, i) => !isThHoliday(dates[i]));
+  const hol = h.filter((_, i) => isThHoliday(dates[i]!));
+  const nonHol = h.filter((_, i) => !isThHoliday(dates[i]!));
   const base = mean(nonHol.length ? nonHol : h);
   if (base <= 0) return Array(hz).fill(0);
   const holFactor = hol.length >= 2 ? Math.max(0.1, mean(hol) / base) : 1;
   // DOW factors + SES level from non-holiday days only (a holiday spike must not contaminate its weekday).
   const sums = Array(period).fill(0);
   const counts = Array(period).fill(0);
-  for (let i = 0; i < h.length; i++) { if (isThHoliday(dates[i])) continue; sums[i % period] += h[i]; counts[i % period]++; }
+  for (let i = 0; i < h.length; i++) { if (isThHoliday(dates[i]!)) continue; sums[i % period] += h[i]!; counts[i % period]++; }
   const factors = sums.map((sm, p) => (counts[p] ? sm / counts[p] / base : 1)).map((f) => (f > 0 ? f : 1));
   let level = 0; let init = false;
   for (let i = 0; i < h.length; i++) {
-    if (isThHoliday(dates[i])) continue;
-    const d = h[i] / factors[i % period];
+    if (isThHoliday(dates[i]!)) continue;
+    const d = h[i]! / factors[i % period]!;
     if (!init) { level = d; init = true; } else level = alpha * d + (1 - alpha) * level;
   }
   if (!init) return dowSeasonal(alpha, period)(h, hz, ctx);
   return Array.from({ length: hz }, (_, k) => {
     const date = addDaysYmd(ctx.lastDate as string, k + 1);
-    return Math.max(0, level * factors[(h.length + k) % period] * (isThHoliday(date) ? holFactor : 1));
+    return Math.max(0, level * factors[(h.length + k) % period]! * (isThHoliday(date) ? holFactor : 1));
   });
 };
 
@@ -176,7 +176,7 @@ export function mase(actual: number[], forecast: number[], train: number[], peri
   const mae = actual.length ? actual.reduce((s, a, i) => s + Math.abs(a - (forecast[i] ?? 0)), 0) / actual.length : 0;
   let diffSum = 0;
   let diffCount = 0;
-  for (let i = period; i < train.length; i++) { diffSum += Math.abs(train[i] - train[i - period]); diffCount++; }
+  for (let i = period; i < train.length; i++) { diffSum += Math.abs(train[i]! - train[i - period]!); diffCount++; }
   const naiveMae = diffCount > 0 ? diffSum / diffCount : 0;
   return naiveMae > 0 ? mae / naiveMae : mae > 0 ? Infinity : 0;
 }
@@ -202,8 +202,8 @@ export function walkForward(series: number[], f: Forecaster, testSize: number, c
     // Per-fold date shift: the fold's history is series[0..t), whose last point sits (series.length - t)
     // days BEFORE the full series' lastDate — calendar-aware models must not see the future's dates.
     const foldCtx = ctx?.lastDate ? { lastDate: addDaysYmd(ctx.lastDate, t - series.length) } : undefined;
-    pred.push(f(series.slice(0, t), 1, foldCtx)[0]);
-    actual.push(series[t]);
+    pred.push(f(series.slice(0, t), 1, foldCtx)[0]!);
+    actual.push(series[t]!);
   }
   return { actual, pred };
 }
