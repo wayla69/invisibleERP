@@ -27,6 +27,9 @@ const FIELDS: Record<string, { col: any; kind: Kind }> = {
   preferred_channel:{ col: customerProfiles.preferredChannel, kind: 'text' },
   visit_count:      { col: customerProfiles.visitCount,  kind: 'num' },
   avg_order_value:  { col: customerProfiles.avgOrderValue, kind: 'num' },
+  // G3 predictive scores — null until the member has a paid order (null never matches a rule).
+  churn_risk:       { col: customerProfiles.churnRisk,    kind: 'num' },
+  predicted_ltv:    { col: customerProfiles.predictedLtv, kind: 'num' },
 };
 const OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'] as const;
 type Op = (typeof OPS)[number];

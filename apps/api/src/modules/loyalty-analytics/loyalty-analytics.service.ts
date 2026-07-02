@@ -111,7 +111,14 @@ export class LoyaltyAnalyticsService {
     });
     const profiled = segments.filter((s) => s.segment !== 'Unsegmented').reduce((a, s) => a + s.members, 0);
     const totalSpend = segments.reduce((a, s) => a + s.total_spend, 0);
-    return { tenant_id: tenantId, profiled_members: profiled, total_spend: round2(totalSpend), segments };
+    // G3 — value at churn risk: Σ predicted_ltv of high-risk members (churn_risk ≥ 70). An ESTIMATE from the
+    // versioned scoring formula (docs/ops/predictive-scoring.md), for prioritising win-back — never posted.
+    const [risk] = await db.select({
+      members: sql<number>`count(*)`,
+      value: sql<string>`coalesce(sum(${customerProfiles.predictedLtv}),0)`,
+    }).from(customerProfiles).where(and(eq(customerProfiles.tenantId, tenantId), sql`${customerProfiles.churnRisk} >= 70`));
+    return { tenant_id: tenantId, profiled_members: profiled, total_spend: round2(totalSpend), segments,
+      at_risk_value: { members: Number(risk?.members ?? 0), predicted_ltv: round2(n(risk?.value)), threshold: 70 } };
   }
 
   // At-risk members (dormant ≥90d with points worth retaining) — for win-back campaigns.

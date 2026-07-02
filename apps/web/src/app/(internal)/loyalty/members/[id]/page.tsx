@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
 
 interface Member { id: number; member_code: string; name: string | null; phone: string | null; card_no: string | null; email: string | null; birthday: string | null; marketing_opt_in: boolean; balance: number; lifetime: number; tier: string | null; active: boolean }
-interface Profile { crm: null | { rfm_segment: string; total_orders: number; total_spend: number; rfm_recency: number; rfm_frequency: number; rfm_monetary: number; preferred_channel: string | null; avg_order_value: number } }
+interface Profile { crm: null | { rfm_segment: string; total_orders: number; total_spend: number; rfm_recency: number; rfm_frequency: number; rfm_monetary: number; preferred_channel: string | null; avg_order_value: number; churn_risk: number | null; predicted_ltv: number | null; score_version: string | null } }
 interface History { balance: number; history: { txn_date: string; txn_type: string; points: number; redeem_value: number; balance_after: number; ref_doc: string | null }[] }
 interface Consents { member_id: number; marketing_opt_in: boolean; consents: { purpose: string; granted: boolean; source: string | null; updated_at: string | null }[] }
 
@@ -58,6 +58,13 @@ export default function Member360Page() {
               <StatCard label="แต้มคงเหลือ" value={num(member.data.balance)} tone="primary" hint={member.data.phone ?? undefined} />
               <StatCard label="แต้มสะสมตลอดชีพ" value={num(member.data.lifetime)} tone="info" />
               <StatCard label="ยอดใช้จ่ายรวม" value={baht(profile.data?.crm?.total_spend ?? 0)} hint={`${num(profile.data?.crm?.total_orders ?? 0)} ออเดอร์`} />
+              {profile.data?.crm?.churn_risk != null && (
+                <StatCard
+                  label="ความเสี่ยงหาย (Churn risk)"
+                  value={<Badge variant={profile.data.crm.churn_risk >= 70 ? 'destructive' : profile.data.crm.churn_risk >= 40 ? 'warning' : 'success'}>{profile.data.crm.churn_risk}/100</Badge>}
+                  hint={`LTV คาดการณ์ 12 ด. ~${baht(profile.data.crm.predicted_ltv ?? 0)} · สูตร ${profile.data.crm.score_version ?? '—'} (ค่าประมาณ)`}
+                />
+              )}
             </div>
           )}
         </StateView>
