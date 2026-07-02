@@ -36,9 +36,9 @@ evidenced over an audit period or tested by an independent firm. Those are separ
 > The counts above carry machine-readable census tags: `python3 compliance/build_rcm.py --counts` is the
 > **only source of truth**, and `tools/ci/check-rcm-census.mjs` (CI) fails when any tagged claim drifts
 > from it — the 2026-07 investment audit found FIVE different populations quoted across the compliance
-> docs (66, 57, 68, 153, 154 vs the real 169), which fails an auditor's first PBC reconciliation.
+> docs (66, 57, 68, 153, 154 vs the then-current 169; the census has since grown as new controls landed), which fails an auditor's first PBC reconciliation.
 >
-> Note on the panel's "49/77": that snapshot is **stale**. The control set has roughly doubled (77 → 169)
+> Note on the panel's "49/77": that snapshot is **stale**. The control set has more than doubled (77 → the tagged total above)
 > and implemented coverage has risen as the deepening programs landed. The figures above are generated from
 > `build_rcm.py`, not asserted.
 >
@@ -49,7 +49,7 @@ evidenced over an audit period or tested by an independent firm. Those are separ
 > `cutover/governance.ts`). ELC-03 (DoA) and ELC-05 (fraud-risk) are **Implemented** (enforced + documented +
 > registered); ELC-01/02/04 remain **Partial** — the *system* captures the evidence, but the *human*
 > governance (running the ethics campaign, holding audit-committee meetings, operating the hotline) is the
-> org/PMO process that earns the rest. **"No gaps" ≠ "done":** the 6 Partials still need formalization +
+> org/PMO process that earns the rest. **"No gaps" ≠ "done":** the remaining Partials (the tagged count above — ELC-01/02/04) still need
 > operating evidence, and Implemented ≠ externally-attested (see §5).
 
 ## 3. Panel ID crosswalk — why "gaps" were actually built

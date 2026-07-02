@@ -40,7 +40,7 @@ Every remediation item below traces to one of these findings. IDs are stable; us
 |---|---|---|
 | AUD-ARC-01 | ~40 schema files define tables with **zero indexes** (~100+ tables); RLS puts a `tenant_id` predicate on every query → seq-scans that degrade non-linearly | e.g. `schema/marketing.ts` (15 tables/0 idx), `bom.ts` (9/0), `pos-scale.ts` (7/0), `governance.ts`, `payments-depth.ts`, `peripherals.ts`, `crm.ts`, `bi.ts`; 210 index defs across 373 `pgTable`s |
 | AUD-ARC-02 | GL has **no balance snapshots** — TB/P&L/BS/cash-flow aggregate the full `journal_lines` table on every request | `ledger.service.ts:549` (trialBalance), `:583`, `:643`, `:672`, `:735` |
-| AUD-ARC-03 | SSE realtime buses are in-memory/single-node — on 2+ replicas, live KDS/BI events silently drop for clients on the other node | `modules/pos-scale/realtime.service.ts:10-12`, `modules/bi/bi-live.service.ts` (rxjs `Subject` + ring buffer) |
+| AUD-ARC-03 | SSE realtime buses are in-memory/single-node — on 2+ replicas, live KDS/BI events silently drop for clients on the other node | `modules/pos/scale/realtime.service.ts:10-12` (path as consolidated by docs/28 PR #5), `modules/bi/bi-live.service.ts` (rxjs `Subject` + ring buffer) |
 | AUD-ARC-04 | **Float equality on money**: `balanced: totalDebit === totalCredit` after `round4()` on postgres-numeric strings — latent silent-corruption bug in the ledger | `ledger.service.ts:578` and sibling `round4/n()` sites |
 | AUD-ARC-05 | No unit tests (`0 *.spec.ts`; 8 `*.test.ts`), API tsconfig disables `noUncheckedIndexedAccess`, pervasive `as any` (e.g. `const db = this.db as any` throughout `ledger.service.ts`) | `apps/api/tsconfig.json`; `apps/api/test/` |
 

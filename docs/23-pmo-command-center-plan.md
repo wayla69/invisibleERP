@@ -33,7 +33,7 @@ The spine is strong and **already built**; this plan adds *no new business-cycle
 - **BI scheduler** — `apps/api/src/modules/bi/bi.service.ts` `REPORT_TYPES` (`:37`) + `generateReport()`
   dispatch (`:501`): idempotent **action jobs** already include `project_health_capture`. A governance
   pack rides the same rail.
-- **Pipeline** — `apps/api/src/modules/crm-pipeline/crm-pipeline.service.ts`: `pipelineSummary()` (`:119`,
+- **Pipeline** — `apps/api/src/modules/crm/pipeline/crm-pipeline.service.ts`: `pipelineSummary()` (`:119`,
   weighted forecast by stage probability) and `winLoss()` (`:140`).
 
 **Current state to build on:** RCM **≈153 controls** (highest project control **PROJ-10**); `projects`
