@@ -94,7 +94,7 @@ export class JwtAuthGuard implements CanActivate {
     }
     // ITGC-AC-15 — session revocation: a logged-out token (jti denylist), a deactivated account, or a token
     // issued before a "revoke all sessions" watermark is rejected even though the signature is still valid.
-    const db = this.db as any;
+    const db = this.db;
     let dbRole: string | undefined; // live role from the users table (staff); overrides the token's role claim
     let dbOrgId: number | null = null; // live org_id (staff) for hybrid multi-company bypass scoping
     const revoked = new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Session has been revoked — please sign in again', messageTh: 'เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบใหม่' });

@@ -134,7 +134,7 @@ export class ReturnsService {
   }
 
   async getReturn(returnNo: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select().from(posReturns).where(eq(posReturns.returnNo, returnNo)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Return not found', messageTh: 'ไม่พบรายการคืน' });
     const items = await db.select().from(posReturnItems).where(eq(posReturnItems.returnId, Number(r.id)));
@@ -142,7 +142,7 @@ export class ReturnsService {
   }
 
   async listReturnsForSale(saleNo: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(posReturns).where(eq(posReturns.saleNo, saleNo)).orderBy(desc(posReturns.id));
     return { sale_no: saleNo, returns: rows.map(shape), count: rows.length };
   }
@@ -151,7 +151,7 @@ export class ReturnsService {
   // date / status / refund method / free-text. Tenant-scoped EXPLICITLY (an HQ/Admin request bypasses RLS,
   // so an unfiltered list would leak another store's returns). Typed builders only (no raw SQL at user input).
   async listAll(q: { from?: string; to?: string; status?: string; method?: string; search?: string; limit?: number; offset?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (user.tenantId != null) conds.push(eq(posReturns.tenantId, user.tenantId));
     if (q.from) conds.push(gte(posReturns.returnDate, q.from));

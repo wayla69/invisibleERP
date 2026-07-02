@@ -28,7 +28,7 @@ export class FeatureFlagsService {
 
   // Effective flags = the default registry overlaid with this tenant's overrides.
   async list(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const overrides = await db.select().from(featureFlags).where(eq(featureFlags.tenantId, user.tenantId as number));
     const byKey = new Map<string, any>(overrides.map((o: any) => [o.flagKey, o]));
     const flags = DEFAULT_FLAGS.map((d) => ({ ...d, enabled: byKey.has(d.key) ? byKey.get(d.key).enabled : d.enabled, source: byKey.has(d.key) ? 'override' : 'default' }));
@@ -36,7 +36,7 @@ export class FeatureFlagsService {
   }
 
   async setFlag(key: string, enabled: boolean, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!DEFAULT_FLAGS.some((d) => d.key === key)) throw new BadRequestException({ code: 'UNKNOWN_FLAG', message: `Unknown flag ${key}`, messageTh: 'ไม่พบฟีเจอร์นี้' });
     await db.insert(featureFlags).values({ tenantId: user.tenantId, flagKey: key, enabled })
       .onConflictDoUpdate({ target: [featureFlags.tenantId, featureFlags.flagKey], set: { enabled } });

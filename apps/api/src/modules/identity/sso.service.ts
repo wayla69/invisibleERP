@@ -22,7 +22,7 @@ export class SsoService {
 
   // Look up a tenant's identity config by tenant CODE, cross-tenant (pre-auth) → bypass RLS for the read.
   private async configForCode(code: string): Promise<{ tenantId: number; cfg: any } | null> {
-    const db = this.db as any;
+    const db = this.db;
     return db.transaction(async (tx: any) => {
       try { await tx.execute(sql`SET LOCAL ROLE app_user`); } catch { /* dev base role */ }
       await tx.execute(sql`select set_config('app.bypass_rls','on',true)`);
@@ -115,7 +115,7 @@ export class SsoService {
   // Find-or-create the SSO user (by sso_subject within the tenant) and mint the session JWT. Runs in a
   // tenant-scoped tx so the user row is created/read under the tenant's RLS policy (no cross-tenant write).
   private async provisionAndMint(tenantId: number, tenantCode: string, defaultRole: string, subject: string, email?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const { username, role } = await db.transaction(async (tx: any) => {
       try { await tx.execute(sql`SET LOCAL ROLE app_user`); } catch { /* dev base role */ }
       await tx.execute(sql`select set_config('app.tenant_id', ${String(tenantId)}, true)`);

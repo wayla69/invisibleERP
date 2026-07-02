@@ -20,7 +20,7 @@ export class PublicApiService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async items(q: { limit?: string; offset?: string; q?: string; category?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const { limit, offset } = paging(q.limit, q.offset);
     const conds = [];
     if (q.q) conds.push(sql`(${items.itemId} ilike ${'%' + q.q + '%'} or ${items.itemDescription} ilike ${'%' + q.q + '%'})`);
@@ -35,7 +35,7 @@ export class PublicApiService {
   }
 
   async inventory(q: { limit?: string; offset?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const { limit, offset } = paging(q.limit, q.offset);
     const rows = await db.select({
       item_id: customerInventory.itemId, description: customerInventory.itemDescription, uom: customerInventory.uom,
@@ -49,7 +49,7 @@ export class PublicApiService {
   }
 
   async orders(q: { limit?: string; offset?: string; status?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const { limit, offset } = paging(q.limit, q.offset);
     const where = q.status ? sql`${orders.status}::text = ${q.status}` : undefined;
     const rows = await db.select({
@@ -60,7 +60,7 @@ export class PublicApiService {
   }
 
   async invoices(q: { limit?: string; offset?: string; status?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const { limit, offset } = paging(q.limit, q.offset);
     const where = q.status ? sql`${arInvoices.status}::text = ${q.status}` : undefined;
     const rows = await db.select({

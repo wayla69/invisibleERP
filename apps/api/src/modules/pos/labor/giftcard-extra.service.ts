@@ -27,7 +27,7 @@ export class GiftCardExtraService {
   }
 
   async setPin(cardNo: string, pin: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).limit(1);
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Card not found', messageTh: 'ไม่พบบัตร' });
     const pinHash = await this.pw.hash(pin);
@@ -36,7 +36,7 @@ export class GiftCardExtraService {
   }
 
   async balanceWithPin(cardNo: string, pin?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).limit(1);
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Card not found', messageTh: 'ไม่พบบัตร' });
     if (c.pin && !(await this.pinMatches(c.pin, pin))) throw new ForbiddenException({ code: 'BAD_PIN', message: 'Incorrect PIN', messageTh: 'PIN ไม่ถูกต้อง' });
@@ -45,7 +45,7 @@ export class GiftCardExtraService {
 
   async reload(cardNo: string, amount: number, pin: string | undefined, user: JwtUser) {
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     return db.transaction(async (tx: any) => {
       const [c] = await tx.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).limit(1).for('update');
       if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Card not found', messageTh: 'ไม่พบบัตร' });

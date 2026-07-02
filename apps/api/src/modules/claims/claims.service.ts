@@ -18,7 +18,7 @@ export class ClaimsService {
 
   // ── Sales claims ─────────────────────────────────────────────────────────
   async listSalesClaims(status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(orderClaims.adminStatus, status as any) : undefined;
     const rows = await db
       .select({
@@ -38,7 +38,7 @@ export class ClaimsService {
     if (decision === 'reject' && !rejectReason?.trim()) {
       throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'Reject reason required', messageTh: 'ต้องระบุเหตุผลการปฏิเสธ' });
     }
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(orderClaims).where(eq(orderClaims.id, id)).limit(1);
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Claim not found', messageTh: 'ไม่พบรายการเคลม' });
     const adminStatus = decision === 'approve' ? 'Approved' : 'Rejected';
@@ -48,7 +48,7 @@ export class ClaimsService {
 
   // ── GR / supplier (inbound) claims ───────────────────────────────────────
   async createGrClaim(dto: GrClaimDto, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const claimNo = await this.docNo.nextDaily('GRC');
     await db.insert(grClaims).values({
       claimNo, claimDate: ymd(), grNo: dto.gr_no ?? null, poNo: dto.po_no ?? null, vendorId: dto.vendor_id ?? null,
@@ -60,7 +60,7 @@ export class ClaimsService {
   }
 
   async listGrClaims(status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(grClaims.status, status) : undefined;
     const rows = await db.select().from(grClaims).where(where).orderBy(desc(grClaims.id));
     return {
@@ -74,7 +74,7 @@ export class ClaimsService {
 
   // Resolve/reject a GR claim. (gr_claims has no resolution column → resolution note appended to reason.)
   async resolveGrClaim(claimNo: string, status: 'Resolved' | 'Rejected', resolution: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select().from(grClaims).where(eq(grClaims.claimNo, claimNo)).limit(1);
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'GR claim not found', messageTh: 'ไม่พบเคลม' });
     const reason = resolution ? `${c.reason ? c.reason + ' | ' : ''}${status}: ${resolution}` : c.reason;

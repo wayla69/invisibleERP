@@ -28,7 +28,7 @@ export class I18nService {
 
   // user.locale → tenant.default_language → 'th'
   async resolveMe(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [u] = await db.select({ locale: users.locale }).from(users).where(eq(users.username, user.username)).limit(1);
     if (u?.locale && CODES.includes(u.locale)) return { locale: u.locale, source: 'user' };
     if (user.tenantId != null) {

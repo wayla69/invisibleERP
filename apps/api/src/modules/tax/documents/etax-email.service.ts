@@ -52,7 +52,7 @@ export class EtaxEmailService {
     const inv = await this.invoices.getByDocNo(user, docNo);
 
     // seller email lives on the tenant (issuer) row — resolve via the invoice's own seller tenant.
-    const db = this.db as any;
+    const db = this.db;
     const [head] = await db.select({ tid: taxInvoices.tenantId }).from(taxInvoices).where(eq(taxInvoices.docNo, docNo)).limit(1);
     const [t] = head ? await db.select({ email: tenants.email }).from(tenants).where(eq(tenants.id, head.tid)).limit(1) : [null];
     const sellerEmail = t?.email as string | undefined;

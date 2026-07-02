@@ -14,7 +14,7 @@ export class HouseAccountService {
 
   async charge(dto: { sale_no: string; amount: number; due_date?: string }, user: JwtUser) {
     if (!(dto.amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     const invoiceNo = `HA-${dto.sale_no}`;
     const [dup] = await db.select().from(arInvoices).where(eq(arInvoices.invoiceNo, invoiceNo)).limit(1);
     if (dup) return { invoice_no: invoiceNo, amount: n(dup.amount), status: dup.status, idempotent: true };
@@ -23,7 +23,7 @@ export class HouseAccountService {
   }
 
   async openBalance() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(arInvoices).where(and(ne(arInvoices.status, 'Paid'), ne(arInvoices.status, 'Cancelled'))).orderBy(desc(arInvoices.id)).limit(200);
     const outstanding = round2(rows.reduce((a: number, r: any) => a + (n(r.amount) - n(r.paidAmount)), 0));
     return { invoices: rows.map((r: any) => ({ invoice_no: r.invoiceNo, order_no: r.orderNo, amount: n(r.amount), paid: n(r.paidAmount), status: r.status })), outstanding, count: rows.length };

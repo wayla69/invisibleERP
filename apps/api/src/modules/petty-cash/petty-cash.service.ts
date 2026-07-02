@@ -26,7 +26,7 @@ export class PettyCashService {
 
   // ── Fund: establish (fund it Dr 1015 / Cr 1000 up to the float) + replenish (top up to the float) ──
   async establishFund(dto: EstablishFundDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId ?? null;
     const float = round2(dto.float_limit);
     if (!(float > 0)) throw new BadRequestException({ code: 'BAD_FLOAT', message: 'float_limit must be > 0', messageTh: 'วงเงินต้องมากกว่าศูนย์' });
@@ -44,7 +44,7 @@ export class PettyCashService {
   }
 
   async replenishFund(fundCode: string, dto: ReplenishDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const fund = await this.fundByCode(fundCode, user);
     const amount = round2(dto.amount);
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
@@ -56,14 +56,14 @@ export class PettyCashService {
   }
 
   async listFunds(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = user.tenantId != null ? [eq(pettyCashFunds.tenantId, user.tenantId)] : [];
     const rows = await db.select().from(pettyCashFunds).where(conds.length ? and(...conds) : undefined).orderBy(desc(pettyCashFunds.id));
     return { funds: rows.map(shapeFund), count: rows.length };
   }
 
   private async fundByCode(fundCode: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(pettyCashFunds.fundCode, fundCode)];
     if (user.tenantId != null) conds.push(eq(pettyCashFunds.tenantId, user.tenantId));
     const [f] = await db.select().from(pettyCashFunds).where(and(...conds)).limit(1);
@@ -74,7 +74,7 @@ export class PettyCashService {
   // ── Request: a direct expense or an advance drawn against a fund (maker; NO GL until approved) ──
   // The draw cannot exceed the fund's available balance (the imprest float is finite).
   async createRequest(dto: ExpenseRequestDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const fund = await this.fundByCode(dto.fund_code, user);
     if (fund.status !== 'active') throw new BadRequestException({ code: 'FUND_CLOSED', message: 'Fund is not active', messageTh: 'กองทุนปิดอยู่' });
     const amount = round2(dto.amount);
@@ -93,7 +93,7 @@ export class PettyCashService {
   // ── Approve (checker ≠ maker): post GL + decrement the fund. Expense → Dr <acct> / Cr 1015;
   //    advance → Dr 1180 / Cr 1015. Re-checks the fund still has the cash. ──
   async approveRequest(reqNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const req = await this.pendingRequest(reqNo, user);
     if (req.requestedBy && req.requestedBy === user.username)
       throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an expense you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
@@ -114,7 +114,7 @@ export class PettyCashService {
   }
 
   async rejectRequest(reqNo: string, user: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const req = await this.pendingRequest(reqNo, user);
     await db.update(expenseRequests).set({ status: 'Rejected', approvedBy: user.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(expenseRequests.id, Number(req.id)));
     await this.statusLog?.log('PEX', reqNo, 'PendingApproval', 'Rejected', user.username, reason);
@@ -124,7 +124,7 @@ export class PettyCashService {
   // ── Settle an approved ADVANCE: spend posts to the expense account, unused cash returns to the fund.
   //    settled_expense + returned_cash must equal the advance — Dr expense + Dr 1015 / Cr 1180. ──
   async settleRequest(reqNo: string, dto: SettleExpenseDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(expenseRequests.reqNo, reqNo)];
     if (user.tenantId != null) conds.push(eq(expenseRequests.tenantId, user.tenantId));
     const [req] = await db.select().from(expenseRequests).where(and(...conds)).limit(1);
@@ -148,7 +148,7 @@ export class PettyCashService {
   }
 
   async listRequests(user: JwtUser, opts: { status?: string; fund_code?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (user.tenantId != null) conds.push(eq(expenseRequests.tenantId, user.tenantId));
     if (opts.status) conds.push(eq(expenseRequests.status, opts.status));
@@ -157,7 +157,7 @@ export class PettyCashService {
   }
 
   private async pendingRequest(reqNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(expenseRequests.reqNo, reqNo), eq(expenseRequests.status, 'PendingApproval')];
     if (user.tenantId != null) conds.push(eq(expenseRequests.tenantId, user.tenantId));
     const [req] = await db.select().from(expenseRequests).where(and(...conds)).limit(1);

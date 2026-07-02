@@ -26,7 +26,7 @@ export class ScimAuthGuard implements CanActivate {
     }
     const prefix = token.slice(0, 12);
     const hashed = sha256(token);
-    const db = this.db as any;
+    const db = this.db;
     const row = await db.transaction(async (tx: any) => {
       try { await tx.execute(sql`SET LOCAL ROLE app_user`); } catch { /* dev base role */ }
       await tx.execute(sql`select set_config('app.bypass_rls','on',true)`);

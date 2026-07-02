@@ -25,7 +25,7 @@ export class ReceiptService {
   ) {}
 
   async loadData(saleNo: string, opts?: { isCopy?: boolean; taxInvoiceNo?: string | null; lang?: ReceiptLang }): Promise<ReceiptData> {
-    const db = this.db as any;
+    const db = this.db;
     const [sale] = await db.select().from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
     if (!sale) throw new NotFoundException({ code: 'SALE_NOT_FOUND', message: 'Sale not found', messageTh: 'ไม่พบรายการขาย' });
     const lines = await db.select().from(custPosItems).where(eq(custPosItems.saleId, Number(sale.id)));

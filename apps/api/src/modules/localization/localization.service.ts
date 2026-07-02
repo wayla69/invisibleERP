@@ -32,7 +32,7 @@ export class LocalizationService {
   async apply(user: JwtUser, country: string) {
     const pack = PACKS.find((p) => p.country === country);
     if (!pack) throw new BadRequestException({ code: 'BAD_COUNTRY', message: `country must be one of ${COUNTRIES.join(', ')}`, messageTh: 'ยังไม่รองรับประเทศนี้' });
-    const db = this.db as any;
+    const db = this.db;
     if (user.tenantId != null) await db.update(tenants).set({ taxCountry: country, defaultLanguage: pack.locale }).where(eq(tenants.id, user.tenantId));
     const [exists] = await db.select({ id: tenantLocalization.id }).from(tenantLocalization).limit(1);
     if (exists) await db.update(tenantLocalization).set({ country, version: '1', appliedBy: user.username }).where(eq(tenantLocalization.id, exists.id));

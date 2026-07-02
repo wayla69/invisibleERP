@@ -44,7 +44,7 @@ export class PlanGuard implements CanActivate {
     if (!user || user.role === 'Admin' || !user.tenantId) return true;
 
     try {
-      const db = this.db as any;
+      const db = this.db;
       const [row] = await db
         .select({
           features: plans.features,

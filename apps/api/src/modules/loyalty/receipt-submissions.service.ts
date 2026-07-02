@@ -29,7 +29,7 @@ export class ReceiptSubmissionsService {
     if (dto.receipt_image.length > 3_000_000) throw new BadRequestException({ code: 'IMAGE_TOO_LARGE', message: 'Image too large (max ~2MB)', messageTh: 'รูปใหญ่เกินไป' });
     const amount = round2(dto.purchase_amount);
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'purchase_amount must be > 0', messageTh: 'ยอดซื้อต้องมากกว่าศูนย์' });
-    const db = this.db as any;
+    const db = this.db;
     const cfg = await this.member.config();
     const claimedPreview = cfg.enabled ? Math.floor(amount * cfg.pointsPerBaht) : 0;
     // Offload the image bytes to object storage when configured, persisting only a compact `objstore:<key>`
@@ -56,14 +56,14 @@ export class ReceiptSubmissionsService {
 
   async myList(user: JwtUser) {
     if (user.memberId == null) throw new BadRequestException({ code: 'MEMBER_ONLY', message: 'Member login required', messageTh: 'ต้องเข้าสู่ระบบสมาชิก' });
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(loyaltyReceiptSubmissions).where(eq(loyaltyReceiptSubmissions.memberId, user.memberId)).orderBy(desc(loyaltyReceiptSubmissions.id));
     return { submissions: rows.map(shape), count: rows.length };
   }
 
   // ── Staff: review queue + approve/reject ──
   async queue(user: JwtUser, opts: { status?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (user.tenantId != null) conds.push(eq(loyaltyReceiptSubmissions.tenantId, user.tenantId));
     conds.push(eq(loyaltyReceiptSubmissions.status, opts.status ?? 'Pending'));
@@ -72,7 +72,7 @@ export class ReceiptSubmissionsService {
   }
 
   private async pending(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(loyaltyReceiptSubmissions.id, id)];
     if (user.tenantId != null) conds.push(eq(loyaltyReceiptSubmissions.tenantId, user.tenantId));
     const [row] = await db.select().from(loyaltyReceiptSubmissions).where(and(...conds)).limit(1);
@@ -82,7 +82,7 @@ export class ReceiptSubmissionsService {
   }
 
   async approve(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const row = await this.pending(id, user);
     const [m] = await db.select().from(posMembers).where(eq(posMembers.id, Number(row.memberId))).limit(1);
     if (!m) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
@@ -97,7 +97,7 @@ export class ReceiptSubmissionsService {
   }
 
   async reject(id: number, user: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     await this.pending(id, user);
     await db.update(loyaltyReceiptSubmissions).set({ status: 'Rejected', reviewedBy: user.username, reviewedAt: new Date(), rejectReason: reason ?? null }).where(eq(loyaltyReceiptSubmissions.id, id));
     return { id, status: 'Rejected', reject_reason: reason ?? null, reviewed_by: user.username };

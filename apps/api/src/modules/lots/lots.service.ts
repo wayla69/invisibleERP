@@ -12,7 +12,7 @@ export class LotsService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async ledger(q: { item_id?: string; location?: string; status?: string; limit?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (q.item_id) conds.push(eq(lotLedger.itemId, q.item_id));
     if (q.location) conds.push(eq(lotLedger.locationId, q.location));
@@ -22,7 +22,7 @@ export class LotsService {
   }
 
   async expiry() {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const rows = await db.select().from(lotLedger).where(and(sql`${lotLedger.expiryDate} is not null`, gt(lotLedger.balance, sql`0`))).orderBy(asc(lotLedger.expiryDate));
     const buckets = { expired: [] as any[], d0_7: [] as any[], d8_30: [] as any[], d31_plus: [] as any[] };
@@ -42,7 +42,7 @@ export class LotsService {
 
   // First-Expired-First-Out pick suggestion: active lots with balance, soonest expiry first.
   async fefo(itemId: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(lotLedger)
       .where(and(eq(lotLedger.itemId, itemId), eq(lotLedger.status, 'Active' as any), gt(lotLedger.balance, sql`0`)))
       .orderBy(asc(lotLedger.expiryDate));

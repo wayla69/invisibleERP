@@ -15,7 +15,7 @@ export class ReportExcelService {
 
   // GET /api/reports/daily-sales/export — ยอดขายรายวัน (ตัด Voided)
   async dailySalesXlsx(date?: string): Promise<Buffer> {
-    const db = this.db as any;
+    const db = this.db;
     const d = date ?? ymd();
     const rows = await db
       .select({
@@ -78,7 +78,7 @@ export class ReportExcelService {
 
   // GET /api/reports/monthly-pl/export — รวมรายได้ต่อวันในเดือน
   async monthlyPlXlsx(month: number, year: number): Promise<Buffer> {
-    const db = this.db as any;
+    const db = this.db;
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const end = month < 12 ? `${year}-${String(month + 1).padStart(2, '0')}-01` : `${year + 1}-01-01`;
     const inWin = and(ne(custPosSales.status, 'Voided'), gte(custPosSales.saleDate, start), lt(custPosSales.saleDate, end));
@@ -150,7 +150,7 @@ export class ReportExcelService {
 
   // GET /api/reports/ap-aging/export — open AP bucketed by days overdue
   async apAgingXlsx(): Promise<Buffer> {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const rows = await db.select({
       txn: apTransactions.txnNo, vendor: apTransactions.vendorName, due: apTransactions.dueDate,
@@ -187,7 +187,7 @@ export class ReportExcelService {
 
   // GET /api/reports/stock-summary/export — snapshot ล่าสุด, low → av_qty<=0
   async stockSummaryXlsx(lowOnly = false): Promise<Buffer> {
-    const db = this.db as any;
+    const db = this.db;
     const snap = await latestSnapshotDate(db);
 
     const wb = new ExcelJS.Workbook();

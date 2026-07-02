@@ -77,7 +77,7 @@ export class SavedSegmentsService {
   }
 
   async list(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(savedSegments).orderBy(desc(savedSegments.id));
     return { segments: rows.map(shape) };
   }
@@ -87,13 +87,13 @@ export class SavedSegmentsService {
     if (!name) throw new BadRequestException({ code: 'NAME_REQUIRED', message: 'name required', messageTh: 'ต้องระบุชื่อ' });
     const matchMode = dto.match_mode === 'any' ? 'any' : 'all';
     this.validate(dto.rules ?? []);
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.insert(savedSegments).values({ tenantId: user.tenantId, name, matchMode, rules: dto.rules ?? [], createdBy: user.username, updatedAt: new Date() }).returning();
     return shape(row);
   }
 
   async update(id: number, dto: { name?: string; match_mode?: string; rules?: SegmentRule[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const set: any = { updatedAt: new Date() };
     if (dto.name != null) set.name = dto.name.trim();
     if (dto.match_mode != null) set.matchMode = dto.match_mode === 'any' ? 'any' : 'all';
@@ -104,7 +104,7 @@ export class SavedSegmentsService {
   }
 
   async remove(id: number, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.delete(savedSegments).where(eq(savedSegments.id, id)).returning({ id: savedSegments.id });
     if (!row) throw new NotFoundException({ code: 'SEGMENT_NOT_FOUND', message: 'Segment not found', messageTh: 'ไม่พบเซกเมนต์' });
     return { id, deleted: true };
@@ -137,7 +137,7 @@ export class SavedSegmentsService {
 
   // Resolve a saved segment to its matching active members (paginated) + a total count.
   async resolve(id: number, opts: { limit?: number; offset?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [seg] = await db.select().from(savedSegments).where(eq(savedSegments.id, id)).limit(1);
     if (!seg) throw new NotFoundException({ code: 'SEGMENT_NOT_FOUND', message: 'Segment not found', messageTh: 'ไม่พบเซกเมนต์' });
     const rules = (Array.isArray(seg.rules) ? seg.rules : []) as SegmentRule[];

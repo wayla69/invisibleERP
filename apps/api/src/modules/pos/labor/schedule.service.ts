@@ -34,7 +34,7 @@ export class ScheduleService {
   }
 
   async createShift(dto: CreateShiftDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!/^\d{2}:\d{2}$/.test(dto.start_time) || !/^\d{2}:\d{2}$/.test(dto.end_time)) {
       throw new BadRequestException({ code: 'BAD_TIME', message: 'start_time/end_time must be HH:MM', messageTh: 'เวลาต้องเป็นรูปแบบ HH:MM' });
     }
@@ -48,7 +48,7 @@ export class ScheduleService {
   }
 
   async list(opts: { from?: string; to?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(shiftSchedules.tenantId, user.tenantId as number)];
     if (opts.from) conds.push(gte(shiftSchedules.shiftDate, opts.from));
     if (opts.to) conds.push(lte(shiftSchedules.shiftDate, opts.to));
@@ -57,7 +57,7 @@ export class ScheduleService {
   }
 
   async cancelShift(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(shiftSchedules).where(and(eq(shiftSchedules.id, id), eq(shiftSchedules.tenantId, user.tenantId as number))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Shift not found', messageTh: 'ไม่พบกะงาน' });
     await db.update(shiftSchedules).set({ status: 'cancelled' }).where(eq(shiftSchedules.id, id));
@@ -66,7 +66,7 @@ export class ScheduleService {
 
   // Labor summary: scheduled hours/cost (non-cancelled) vs actual punched hours, and labor % of sales.
   async laborSummary(opts: { from: string; to: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     const shifts = await db.select().from(shiftSchedules).where(and(eq(shiftSchedules.tenantId, tenantId), gte(shiftSchedules.shiftDate, opts.from), lte(shiftSchedules.shiftDate, opts.to), sql`${shiftSchedules.status}::text <> 'cancelled'`));
     const scheduledHours = round2(shifts.reduce((a: number, s: any) => a + n(s.hours), 0));
@@ -99,7 +99,7 @@ export class ScheduleService {
   // ───────────────────── Step 8: tiered OT rules (Thai LPA) ─────────────────────
   // Effective rules = the statutory defaults overlaid with any per-tenant override rows.
   async getOtRules(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const overrides = await db.select().from(laborOtRules).where(eq(laborOtRules.tenantId, user.tenantId as number));
     const byType = new Map<string, any>(overrides.map((o: any) => [o.ruleType, o]));
     const rules = Object.entries(THAI_OT_DEFAULTS).map(([rule_type, d]) => {
@@ -116,7 +116,7 @@ export class ScheduleService {
   }
 
   async upsertOtRule(dto: { rule_type: string; multiplier: number; daily_trigger_hours?: number; weekly_trigger_hours?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!THAI_OT_DEFAULTS[dto.rule_type]) throw new BadRequestException({ code: 'BAD_RULE_TYPE', message: 'rule_type must be REGULAR_OT/HOLIDAY/HOLIDAY_OT/NIGHT', messageTh: 'ประเภทกฎ OT ไม่ถูกต้อง' });
     const d = THAI_OT_DEFAULTS[dto.rule_type];
     await db.insert(laborOtRules).values({
@@ -148,7 +148,7 @@ export class ScheduleService {
   // Compute the labor summary for a period and, if labor % of sales exceeds the target, persist + return a
   // LABOR_PCT_EXCEEDED alert (idempotent per tenant/period). The manager's "are we over on labor?" check.
   async checkLaborAlert(opts: { from: string; to: string; threshold?: number; branch_id?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const threshold = opts.threshold != null ? n(opts.threshold) : DEFAULT_LABOR_PCT_TARGET;
     const summary = await this.laborSummary({ from: opts.from, to: opts.to }, user);
     const exceeded = summary.labor_pct > threshold;
@@ -173,7 +173,7 @@ export class ScheduleService {
   }
 
   async listAlerts(user: JwtUser, opts?: { resolved?: boolean }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(laborAlerts.tenantId, user.tenantId as number)];
     if (opts?.resolved === false) conds.push(sql`${laborAlerts.resolvedAt} is null`);
     if (opts?.resolved === true) conds.push(sql`${laborAlerts.resolvedAt} is not null`);
@@ -182,7 +182,7 @@ export class ScheduleService {
   }
 
   async resolveAlert(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(laborAlerts).where(and(eq(laborAlerts.id, id), eq(laborAlerts.tenantId, user.tenantId as number))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Alert not found', messageTh: 'ไม่พบการแจ้งเตือน' });
     await db.update(laborAlerts).set({ resolvedAt: new Date() }).where(eq(laborAlerts.id, id));

@@ -31,21 +31,21 @@ export class ScimService {
   }
 
   private async tenantCode(tenantId: number): Promise<string> {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select({ code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new BadRequestException({ code: 'NO_TENANT', message: 'Tenant not found', messageTh: 'ไม่พบผู้เช่า' });
     return t.code;
   }
 
   private async defaultRole(tenantId: number): Promise<string> {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.select({ r: tenantIdentity.defaultRole }).from(tenantIdentity).where(eq(tenantIdentity.tenantId, tenantId)).limit(1);
     return c?.r ?? 'Customer';
   }
 
   // GET /scim/v2/Users[?filter=userName eq "x"&startIndex=&count=]
   async list(user: JwtUser, q: { filter?: string; startIndex?: string; count?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     let unameEq: string | undefined;
     if (q.filter) {
       const m = /userName\s+eq\s+"([^"]+)"/i.exec(q.filter);
@@ -66,7 +66,7 @@ export class ScimService {
   }
 
   private async byId(tenantId: number, id: string) {
-    const db = this.db as any;
+    const db = this.db;
     const numId = Number(id);
     if (!Number.isFinite(numId)) return null;
     const [u] = await db.select().from(users).where(and(eq(users.id, numId), eq(users.tenantId, tenantId))).limit(1);
@@ -81,7 +81,7 @@ export class ScimService {
 
   // POST /scim/v2/Users — provision (SoD-checked via AdminUsersService).
   async create(user: JwtUser, body: any) {
-    const db = this.db as any;
+    const db = this.db;
     const userName: string = String(body?.userName ?? '').trim();
     if (!userName) throw new BadRequestException({ code: 'INVALID_VALUE', message: 'userName is required', messageTh: 'ต้องระบุ userName', scimType: 'invalidValue' });
     const role = body?.[ROLE_EXT]?.role ?? (await this.defaultRole(user.tenantId as number));
@@ -101,7 +101,7 @@ export class ScimService {
 
   // PUT /scim/v2/Users/:id — replace (role/active/externalId).
   async replace(user: JwtUser, id: string, body: any) {
-    const db = this.db as any;
+    const db = this.db;
     const u = await this.byId(user.tenantId as number, id);
     if (!u) throw this.notFound(id);
     const set: any = {};
@@ -117,7 +117,7 @@ export class ScimService {
 
   // PATCH /scim/v2/Users/:id — minimal Microsoft/Okta dialect: replace `active` (deprovision/reactivate).
   async patch(user: JwtUser, id: string, body: any) {
-    const db = this.db as any;
+    const db = this.db;
     const u = await this.byId(user.tenantId as number, id);
     if (!u) throw this.notFound(id);
     const ops: any[] = Array.isArray(body?.Operations) ? body.Operations : [];
@@ -137,7 +137,7 @@ export class ScimService {
 
   // DELETE /scim/v2/Users/:id — deprovision = DEACTIVATE (soft), never destroy the row.
   async deactivate(user: JwtUser, id: string) {
-    const db = this.db as any;
+    const db = this.db;
     const u = await this.byId(user.tenantId as number, id);
     if (!u) throw this.notFound(id);
     await db.update(users).set({ isActive: false }).where(eq(users.id, u.id));

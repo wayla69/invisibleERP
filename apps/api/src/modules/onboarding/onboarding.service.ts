@@ -43,7 +43,7 @@ export class OnboardingService {
   packs() { return { packs: PACKS.map((p) => ({ key: p.key, label: p.label, label_en: p.label_en, objects: p.objects.length })) }; }
 
   async status(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const done = new Set((await db.select({ k: onboardingProgress.stepKey }).from(onboardingProgress)).map((r: any) => r.k));
     const installs = (await db.select({ k: packInstalls.packKey }).from(packInstalls)).map((r: any) => r.k);
     const steps = STEPS.map((s) => ({ ...s, done: done.has(s.key) }));
@@ -53,7 +53,7 @@ export class OnboardingService {
 
   async completeStep(user: JwtUser, key: string) {
     if (!STEPS.some((s) => s.key === key)) throw new BadRequestException({ code: 'BAD_STEP', message: 'unknown onboarding step', messageTh: 'ขั้นตอนไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     const [exists] = await db.select({ id: onboardingProgress.id }).from(onboardingProgress).where(eq(onboardingProgress.stepKey, key)).limit(1);
     if (!exists) await db.insert(onboardingProgress).values({ tenantId: user.tenantId ?? null, stepKey: key, doneBy: user.username });
     return { key, done: true };
@@ -67,7 +67,7 @@ export class OnboardingService {
   async applyPack(user: JwtUser, packKey: string) {
     const pack = PACKS.find((p) => p.key === packKey);
     if (!pack) throw new BadRequestException({ code: 'BAD_PACK', message: `pack must be one of ${PACKS.map((p) => p.key).join(', ')}`, messageTh: 'ชุดอุตสาหกรรมไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     let created = 0;
     for (const o of pack.objects) {
       // RLS already scopes custom_objects to the caller's tenant, so matching object_key alone is sufficient.

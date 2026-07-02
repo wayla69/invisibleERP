@@ -25,7 +25,7 @@ export class ReferralsService {
   }
 
   async createReferral(user: JwtUser, dto: { referrer_member_id: number; referred_member_id?: number; referred_phone?: string; referrer_points?: number; referred_points?: number }) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const [referrer] = await db.select({ id: posMembers.id }).from(posMembers).where(and(eq(posMembers.id, dto.referrer_member_id), eq(posMembers.tenantId, tenantId))).limit(1);
     if (!referrer) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Referrer not found', messageTh: 'ไม่พบสมาชิกผู้แนะนำ' });
     // Resolve the referred member: by explicit id, or by phone if that phone ALREADY belongs to a member (an
@@ -63,7 +63,7 @@ export class ReferralsService {
 
   // Reward a referral — grant both sides their bonus points, exactly once (status under FOR UPDATE).
   async rewardReferral(user: JwtUser, id: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     return await db.transaction(async (tx: any) => {
       const [ref] = await tx.select().from(loyaltyReferrals).where(and(eq(loyaltyReferrals.id, id), eq(loyaltyReferrals.tenantId, tenantId))).for('update').limit(1);
       if (!ref) throw new NotFoundException({ code: 'REFERRAL_NOT_FOUND', message: 'Referral not found', messageTh: 'ไม่พบรายการแนะนำ' });
@@ -95,7 +95,7 @@ export class ReferralsService {
   }
 
   async memberReferrals(user: JwtUser, memberId: number) {
-    const db = this.db as any; const tenantId = this.tid(user);
+    const db = this.db; const tenantId = this.tid(user);
     const rows = await db.select().from(loyaltyReferrals).where(and(eq(loyaltyReferrals.referrerMemberId, memberId), eq(loyaltyReferrals.tenantId, tenantId))).orderBy(desc(loyaltyReferrals.id)).limit(50);
     return { member_id: memberId, referrals: rows.map(shapeReferral) };
   }

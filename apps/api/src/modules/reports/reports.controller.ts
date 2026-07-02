@@ -97,7 +97,7 @@ export class ReportsController {
     }
 
     // pdf → sales confirmation
-    const db = this.db as any;
+    const db = this.db;
     const [order] = await db.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1);
     if (!order) {
       throw new BadRequestException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบคำสั่งซื้อ' });

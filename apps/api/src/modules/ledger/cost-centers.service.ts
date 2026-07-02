@@ -11,14 +11,14 @@ export class CostCentersService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async create(dto: CostCenterDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.insert(costCenters).values({ tenantId: user.tenantId ?? null, code: dto.code, name: dto.name, type: dto.type ?? 'department', parentCode: dto.parent_code ?? null, createdBy: user.username }).onConflictDoNothing().returning();
     if (!c) throw new BadRequestException({ code: 'CC_EXISTS', message: `Cost center ${dto.code} already exists`, messageTh: 'มีศูนย์ต้นทุนนี้แล้ว' });
     return shape(c);
   }
 
   async list(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(costCenters).orderBy(asc(costCenters.code));
     return { cost_centers: rows.map(shape), count: rows.length };
   }

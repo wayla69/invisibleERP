@@ -27,19 +27,19 @@ export class MenuService {
 
   // ── categories ──
   async createCategory(dto: CreateCategoryDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.insert(menuCategories).values({ tenantId: user.tenantId ?? null, code: dto.code, name: dto.name, nameEn: dto.name_en ?? null, color: dto.color ?? null, sort: dto.sort ?? 0 }).onConflictDoNothing().returning();
     return c ? shapeCat(c) : { code: dto.code, note: 'exists' };
   }
   async listCategories(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(menuCategories).where(eq(menuCategories.active, true)).orderBy(asc(menuCategories.sort), asc(menuCategories.id));
     return { categories: rows.map(shapeCat), count: rows.length };
   }
 
   // ── items ──
   async createItem(dto: CreateItemDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [it] = await db.insert(menuItems).values({
       tenantId: user.tenantId ?? null, sku: dto.sku, name: dto.name, nameEn: dto.name_en ?? null, categoryId: dto.category_id ?? null,
       type: dto.type, price: fx(dto.price, 2), cost: dto.cost != null ? fx(dto.cost, 2) : null, stationCode: dto.station_code ?? 'main',
@@ -53,7 +53,7 @@ export class MenuService {
   }
 
   async updateItem(sku: string, dto: UpdateItemDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const it = await this.loadItem(sku);
     const set: any = { updatedAt: new Date() };
     if (dto.name != null) set.name = dto.name;
@@ -78,14 +78,14 @@ export class MenuService {
 
   // 86 / un-86 a menu item
   async setAvailability(sku: string, available: boolean, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const it = await this.loadItem(sku);
     await db.update(menuItems).set({ isAvailable: available, updatedAt: new Date() }).where(eq(menuItems.id, it.id));
     return { sku, is_available: available };
   }
 
   async getItem(sku: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const it = await this.loadItem(sku);
     const groups = await this.itemGroups(Number(it.id));
     return { ...shapeItem(it), modifier_groups: groups };
@@ -93,7 +93,7 @@ export class MenuService {
 
   // full menu grouped by category (active + available flags) — what POS renders
   async listMenu(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const cats = await db.select().from(menuCategories).where(eq(menuCategories.active, true)).orderBy(asc(menuCategories.sort), asc(menuCategories.id));
     const items = await db.select().from(menuItems).where(eq(menuItems.active, true)).orderBy(asc(menuItems.sort), asc(menuItems.id));
     const linkRows = await db.select({ menuItemId: menuItemModifierGroups.menuItemId }).from(menuItemModifierGroups);
@@ -123,7 +123,7 @@ export class MenuService {
 
   // ── modifier groups + options ──
   async createModifierGroup(dto: CreateModifierGroupDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (dto.min_select > dto.max_select) throw new BadRequestException({ code: 'BAD_RANGE', message: 'min_select > max_select', messageTh: 'ขั้นต่ำมากกว่าขั้นสูง' });
     const [g] = await db.insert(modifierGroups).values({ tenantId: user.tenantId ?? null, code: dto.code, name: dto.name, minSelect: dto.min_select, maxSelect: dto.max_select, required: dto.required ?? dto.min_select > 0 }).onConflictDoNothing().returning();
     if (!g) throw new BadRequestException({ code: 'GROUP_EXISTS', message: 'Group code exists', messageTh: 'รหัสกลุ่มตัวเลือกซ้ำ' });
@@ -131,14 +131,14 @@ export class MenuService {
     return this.getGroup(Number(g.id));
   }
   async addOption(groupId: number, opt: { name: string; price_delta: number; cogs_delta?: number; recipe_ref_id?: number; is_default?: boolean; sort?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [g] = await db.select().from(modifierGroups).where(eq(modifierGroups.id, groupId)).limit(1);
     if (!g) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Group not found', messageTh: 'ไม่พบกลุ่มตัวเลือก' });
     await db.insert(modifierOptions).values({ tenantId: user.tenantId ?? null, groupId, name: opt.name, priceDelta: fx(opt.price_delta, 2), cogsDelta: fx(opt.cogs_delta ?? 0, 2), recipeRefId: opt.recipe_ref_id ?? null, isDefault: opt.is_default ?? false, sort: opt.sort ?? 0 });
     return this.getGroup(groupId);
   }
   async listGroups(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const groups = await db.select().from(modifierGroups).where(eq(modifierGroups.active, true)).orderBy(asc(modifierGroups.sort), asc(modifierGroups.id));
     const out = [];
     for (const g of groups) out.push(await this.getGroup(Number(g.id)));
@@ -150,7 +150,7 @@ export class MenuService {
     return this.getItem(sku, user);
   }
   private async attachGroupRow(menuItemId: number, groupId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [g] = await db.select().from(modifierGroups).where(eq(modifierGroups.id, groupId)).limit(1);
     if (!g) throw new BadRequestException({ code: 'GROUP_NOT_FOUND', message: `Modifier group ${groupId} not found`, messageTh: 'ไม่พบกลุ่มตัวเลือก' });
     await db.insert(menuItemModifierGroups).values({ tenantId: user.tenantId ?? null, menuItemId, groupId }).onConflictDoNothing();
@@ -158,7 +158,7 @@ export class MenuService {
 
   // ── resolve a priced order line (the contract POS / dine-in entry calls) ──
   async resolveLine(dto: ResolveLineDto, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const where = dto.item_id != null ? eq(menuItems.id, dto.item_id) : eq(menuItems.sku, dto.sku!);
     const [it] = await db.select().from(menuItems).where(and(where, eq(menuItems.active, true))).limit(1);
     if (!it) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Menu item not found', messageTh: 'ไม่พบเมนู' });
@@ -199,13 +199,13 @@ export class MenuService {
 
   // ── helpers ──
   private async loadItem(sku: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [it] = await db.select().from(menuItems).where(eq(menuItems.sku, sku)).limit(1);
     if (!it) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: 'Menu item not found', messageTh: 'ไม่พบเมนู' });
     return it;
   }
   private async itemGroups(menuItemId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const links = await db.select({ groupId: menuItemModifierGroups.groupId }).from(menuItemModifierGroups).where(eq(menuItemModifierGroups.menuItemId, menuItemId));
     const ids = links.map((l: any) => Number(l.groupId));
     if (!ids.length) return [];
@@ -217,7 +217,7 @@ export class MenuService {
     }));
   }
   private async getGroup(groupId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [g] = await db.select().from(modifierGroups).where(eq(modifierGroups.id, groupId)).limit(1);
     if (!g) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Modifier group not found', messageTh: 'ไม่พบกลุ่มตัวเลือก' });
     const opts = await db.select().from(modifierOptions).where(and(eq(modifierOptions.groupId, groupId), eq(modifierOptions.active, true))).orderBy(asc(modifierOptions.sort));
