@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Optional, Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { automationRules, automationExecutions, notifications } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { MessagingService } from '../messaging/messaging.service';
+import { JourneysService } from '../journeys/journeys.service';
 
 // Event catalog — the business events the app already emits (via the webhook dispatcher). New events can be
 // added here as more emit-sites are wired; an unknown incoming event is ignored (forward-compatible).
@@ -16,7 +17,7 @@ const EVENTS = [
   { key: 'loyalty.redeemed', label: 'แลกแต้ม', label_en: 'Loyalty points redeemed', fields: ['member_id', 'points_redeemed', 'redeem_value', 'balance', 'ref_doc'] },
 ] as const;
 const EVENT_KEYS = EVENTS.map((e) => e.key) as readonly string[];
-const ACTION_TYPES = ['notification', 'message', 'log'] as const;
+const ACTION_TYPES = ['notification', 'message', 'log', 'enroll_journey'] as const;
 const OPS = ['gt', 'gte', 'lt', 'lte', 'eq', 'ne', 'contains'] as const;
 
 // Automation rules (Phase 13 — A4). A no-code "when EVENT [and CONDITION] then ACTION" engine. Rules are
@@ -27,6 +28,8 @@ export class AutomationService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly messaging: MessagingService,
+    // Journey entry action (Phase G1); optional so partial harnesses still construct.
+    @Optional() private readonly journeys?: JourneysService,
   ) {}
 
   catalog() {
@@ -62,6 +65,15 @@ export class AutomationService {
         messageEn: a.message_en ?? `Automation: ${rule.name}`,
       });
       return 'notification';
+    }
+    if (a.type === 'enroll_journey') {
+      // Enrol the event's member into a journey (Phase G1). Once-per-member (unique key) — a repeat event
+      // is a no-op. Requires a member_id on the payload (loyalty.* events carry it).
+      if (!this.journeys) throw new Error('journeys service unavailable');
+      const memberId = Number(payload?.member_id);
+      if (!memberId) throw new Error('enroll_journey requires payload.member_id');
+      const r = await this.journeys.enroll(Number(a.journey_id), memberId, user, rule.tenantId ?? user.tenantId ?? undefined);
+      return `enroll_journey:${a.journey_id}:${r.enrolled ? 'enrolled' : 'already'}`;
     }
     if (a.type === 'message') {
       if (!a.to || !a.channel) throw new Error('message action requires to + channel');

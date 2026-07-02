@@ -30,7 +30,7 @@ export class NlAnalyticsService {
     if (this.apiKey) {
       try {
         const dims = this.query.dimensionKeys();
-        const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
+        const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
         const res: any = await client.create({
           model: this.model, max_tokens: 300,
           system: `Map the user's question to a JSON query over POS sales. "dimension" must be exactly one of: ${dims.join(', ')}. Return ONLY JSON: {"dimension": "...", "date_from"?: "YYYY-MM-DD", "date_to"?: "YYYY-MM-DD"}.`,

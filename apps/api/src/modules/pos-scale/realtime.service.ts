@@ -4,7 +4,7 @@ import { RealtimeBus } from '../../common/realtime-bus';
 
 export interface RealtimeEvent { type: string; tenant_id?: number | null; at?: string; [k: string]: any }
 
-// P2a realtime — table/KDS state events over SSE. Backed by the shared RealtimeBus (docs/24 R1-3):
+// P2a realtime — table/KDS state events over SSE. Backed by the shared RealtimeBus (docs/27 R1-3):
 // in-memory on a single node (default), Redis pub/sub across replicas when REALTIME_REDIS_URL is set —
 // so a kitchen display connected to node B sees an order fired on node A.
 @Injectable()

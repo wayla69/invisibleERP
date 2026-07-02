@@ -123,7 +123,7 @@ async function main() {
   const a1 = await login('admin', 'admin123');
   ok('Seeded admin login → must_change_password=true', a1.json.must_change_password === true, JSON.stringify({ mcp: a1.json.must_change_password }));
   const adminTok = a1.json.token;
-  // docs/24 R0-3 — must_change_password is a HARD API gate (guards.ts), not just a login flag: every
+  // docs/27 R0-3 — must_change_password is a HARD API gate (guards.ts), not just a login flag: every
   // endpoint except change-password/logout/me/refresh answers 403 PASSWORD_CHANGE_REQUIRED until rotated.
   const gatedApi = await inj('GET', '/api/ledger/trial-balance', adminTok);
   ok('A5/R0-3: must-change user blocked from business APIs (403 PASSWORD_CHANGE_REQUIRED)',
@@ -140,7 +140,7 @@ async function main() {
   const oldLogin = await login('admin', 'admin123');
   ok('Old password no longer works (401)', oldLogin.status === 401, `${oldLogin.status}`);
 
-  // ── 4b. docs/24 R2-2 — an authorization change revokes outstanding sessions immediately ──
+  // ── 4b. docs/27 R2-2 — an authorization change revokes outstanding sessions immediately ──
   // Permissions ride the JWT claim, so narrowing a user's overrides must not wait out the token TTL:
   // PATCH /api/admin/users bumps tokens_valid_from → the pre-change token dies NOW (TOKEN_REVOKED) and a
   // fresh login carries the narrowed permission set.

@@ -21,7 +21,7 @@ export const vendors = pgTable('vendors', {
   email: text('email'),
   userName: text('user_name'),  // supplier portal: link to users.username for vendor self-service (Phase D3)
   address: text('address'),
-  // PII-at-rest (ITGC-AC-19, docs/24 R0-1): vendor tax ID + bank account are encrypted (AES-256-GCM,
+  // PII-at-rest (ITGC-AC-19, docs/27 R0-1): vendor tax ID + bank account are encrypted (AES-256-GCM,
   // legacy-plaintext passthrough). NOT queried by value in SQL — the ghost-vendor detector
   // (controls.service.ts) groups decrypted values in app code, since random-IV ciphertext never collides.
   taxId: encryptedText('tax_id'),

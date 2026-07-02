@@ -9,10 +9,10 @@
 > baselines) · R3-1+R3-2 census 170 CI-guarded + banners · R3-3 evidence clock (from 2026-07-02) · R4-1
 > semantic RAG (Voyage + space isolation) · R4-2 anomaly math corrected · R4-3 dow/holiday models incl.
 > Songkran · R4-4 LLM seam + scored benchmark · R4-5 honest labeling · R5-1 migration parity + dead
-> grandfather removed · R5-3 consolidation RFC (docs/25).
+> grandfather removed · R5-3 consolidation RFC (docs/28).
 > **Open (blocked on people/console, not code):** counsel execution of ToS/DPA/privacy + Anthropic
 > addendum → `AI_DPA_ACKNOWLEDGED` · SOC 2 Type I engagement + quarterly evidence archive · ELC operation
-> (R3-4) · PgBouncer/Redis provisioning on Railway · docs/25 RFC approval → the 5 move-PRs + top-5 RSC
+> (R3-4) · PgBouncer/Redis provisioning on Railway · docs/28 RFC approval → the 5 move-PRs + top-5 RSC
 > conversions · rolling ts-debt paydown · Wave 6 (customers, pricing, PMO).
 
 ---
@@ -179,7 +179,7 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
 
 ### R1-1 · Index the un-indexed 40 — closes AUD-ARC-01 ⭐ cheapest/highest-leverage — **DELIVERED 2026-07-02**
 > Live introspection found the real number was **132 tables** (worse than the audit's ~40-file estimate).
-> Delivered: migration `0211_tenant_indexes_backfill.sql` (uniform `(tenant_id)` btree per uncovered table,
+> Delivered: migration `0217_tenant_indexes_backfill.sql` (renumbered from 0211 on the main merge — the docs/25-crm series took 0211–0216) (uniform `(tenant_id)` btree per uncovered table,
 > generated from PGlite introspection with collision-checked names, journaled idx 211) + the **`tenant-idx`
 > cutover harness** in the CI matrix (re-introspects the applied migration set; fails on ANY uncovered
 > table, zero grandfathers) + `docs/ops/capacity-and-pooling.md` §5b policy. Decision recorded: uniform
@@ -205,7 +205,7 @@ queue, the governed AI agent (SoD-gated writes, PII redaction, token budgets, CI
   state that explicitly in the PR.
 
 ### R1-2 · GL period-balance snapshots — closes AUD-ARC-02 (the big one; own PR, heavy harness) — **DELIVERED 2026-07-02**
-> Shipped: `gl_period_balances` (migration `0212`: table + expression unique key + tenant index + RLS loop
+> Shipped: `gl_period_balances` (migration `0218`, renumbered from 0212 on the main merge: table + expression unique key + tenant index + RLS loop
 > + idempotent backfill from the Posted ledger), transactional maintenance in `bumpPeriodBalances` at the
 > only two balance-affecting transitions (`postEntry`→Posted, `approveEntry` Draft→Posted — now atomic in
 > one tx), `trialBalance` rewritten to read the snapshot (same filters/output; every existing TB harness
@@ -385,12 +385,12 @@ comment. No behavior change beyond alignment.
 ### R3-2 · Retire stale/contradictory docs — closes AUD-CMP-02 — **DELIVERED 2026-07-02**
 > Shipped: `docs/09-worldclass-roadmap.md` now opens with a SUPERSEDED banner enumerating each now-false
 > claim (RLS/GL/billing/MFA/AI) with the shipped counter-evidence, pointing to `CONTROL_STATUS_HONEST.md` +
-> docs/24 §0 for current state; document body kept unedited as history. `docs/10`–`12` audited — `docs/11`
+> docs/27 §0 for current state; document body kept unedited as history. `docs/10`–`12` audited — `docs/11`
 > already presents the fixes as a ✅ table (not stale); no banner needed.
 Prepend a dated banner to `docs/09-worldclass-roadmap.md` (and audit `docs/10`–`12` for the same
 disease): `> **SUPERSEDED (2026-07-02):** §§X–Y describe the pre-remediation state; RLS
 (0002_rls.sql), MFA/TOTP, SSO, billing, RAG, evals, PII redaction have since shipped — see
-docs/24 §0 and compliance/CONTROL_STATUS_HONEST.md for current state.` Do **not** delete —
+docs/27 §0 and compliance/CONTROL_STATUS_HONEST.md for current state.` Do **not** delete —
 the honest history is a diligence asset; the lie-by-staleness is the liability.
 
 ### R3-3 · Start the evidence clock + engage attestation — closes AUD-CMP-03 (org + light code) — **CODE DELIVERED 2026-07-02** (auditor engagement = org work)
@@ -426,7 +426,7 @@ campaign evidence pointers; `CONTROL_STATUS_HONEST.md` flips each Partial with d
 > contract (L2-normalized `number[]`) is unchanged, so the pgvector index remains a drop-in when corpus
 > size demands. Delivered: Voyage adapter in `EmbedderService` (fetch, 15s bound, DPA-gated like all AI
 > transmission, fail-safe local fallback + `embed_provider_degraded` alert), `kb_chunks.embed_provider`
-> space column (migration 0213) with space-filtered search (cross-space cosine never compared), and
+> space column (migration 0219, renumbered from 0213 on the main merge) with space-filtered search (cross-space cosine never compared), and
 > `POST /api/ai/kb/reembed` migration endpoint. ToE: `rag` 11 + `embedder` unit 2; DPA register + docs/06
 > + narrative 26 rev 1.4 updated.
 - Migration `02xx_kb_pgvector.sql`: `CREATE EXTENSION IF NOT EXISTS vector`, `embedding vector(1024)`
@@ -509,11 +509,11 @@ credibility in the next diligence pass.
   **Decision recorded:** `GRANDFATHERED_DUP` stays — the four dup numbers are applied in prod and drizzle
   tracks by full tag, so renumbering applied migrations is the dangerous move; the divergence risk class
   is what the parity harness now guards. Debt doc rev 1.2.
-- **R5-2 (AUD-ARC-09) — DIRECTION SET (docs/25 §4), conversions open:** server-by-default for new pages
+- **R5-2 (AUD-ARC-09) — DIRECTION SET (docs/28 §4), conversions open:** server-by-default for new pages
   (`/legal/privacy` shipped as the pattern); top-5 read-heavy conversions (`accounting`, `eam`,
   `projects/[code]` with a Gantt client island, `reports`, `insights`) remain the rolling work, each
   measured via the Playwright smoke + a bundle note.
-- **R5-3 (AUD-ARC-10) — RFC DELIVERED 2026-07-02:** `docs/25-module-consolidation-rfc.md` — 5-cluster
+- **R5-3 (AUD-ARC-10) — RFC DELIVERED 2026-07-02:** `docs/28-module-consolidation-rfc.md` — 5-cluster
   target ownership map (payments 2→1, tax trio, crm/pipeline fold, loyalty core+engagement with giftcards
   deliberately kept separate as a GL instrument, POS umbrella last), the behavior-identical mechanical
   recipe (git-mv + facades + full matrix), 5-PR sequencing, and the explicit NOT-consolidated list
@@ -593,6 +593,6 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 3.0 | 2026-07-02 | ERP/Product | R5-1 delivered (orphans found already-journaled idx 102/103, dead grandfather list removed; migration-parity harness; dup-number decision recorded) |
 | 3.1 | 2026-07-02 | ERP/Product | R1-5 repo-half delivered (loadtest manual-dispatch workflow + capacity doc rev 1.2; PgBouncer/Redis provisioning = console actions) |
 | 3.2 | 2026-07-02 | ERP/Product | R2-5 ratchet delivered (ts-debt guard in CI: as-any 1456 + strict-index 248 baselines may only go down) |
-| 3.3 | 2026-07-02 | ERP/Product | R5-3 RFC delivered (docs/25: 5-cluster map + mechanical recipe + sequencing); R5-2 direction set in docs/25 §4 |
+| 3.3 | 2026-07-02 | ERP/Product | R5-3 RFC delivered (docs/28: 5-cluster map + mechanical recipe + sequencing); R5-2 direction set in docs/28 §4 |
 | 3.4 | 2026-07-02 | ERP/Product | R4-3 fully closed (date-aware Forecaster ctx + th_holiday model; deterministic Songkran ToE 40/40/40 vs ~10) |
 | 3.5 | 2026-07-02 | ERP/Product | Repo-tractable scope complete (23 pieces); final sweep green (basics 215 / compliance 114 / ext 262 / worldclass 58 / unit 95 + all guards); open items = people/console work |

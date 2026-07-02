@@ -45,7 +45,7 @@ async function main() {
   await db.insert(s.stockMovements).values({ moveDate: daysAgo(5), moveType: 'Issue', itemId: 'Y', qty: '100' });
   await db.insert(s.items).values({ itemId: 'Y', itemDescription: 'Item Y' });
 
-  // ── seed item W (docs/24 R4-2): perfectly steady 4/6-alternating daily issues across the FULL 90-day
+  // ── seed item W (docs/27 R4-2): perfectly steady 4/6-alternating daily issues across the FULL 90-day
   // window — legacy math false-positives it (recent-window SUM vs per-day baseline), corrected math must not.
   for (let i = 1; i <= 90; i++)
     await db.insert(s.stockMovements).values({ moveDate: daysAgo(i), moveType: 'Issue', itemId: 'W', qty: String(i % 2 === 0 ? 4 : 6) });
@@ -76,7 +76,7 @@ async function main() {
   const insight = await ins.replenishment(pred);
   ok('rule-based insight (warning) starts with ⚡', insight.startsWith('⚡'), insight.slice(0, 20));
 
-  // ── anomalies (LEGACY parity mode — the historical unit-mismatch math, pinned; docs/24 R4-2) ──
+  // ── anomalies (LEGACY parity mode — the historical unit-mismatch math, pinned; docs/27 R4-2) ──
   process.env.ANOMALY_PARITY_MODE = 'legacy';
   const anom = await a.detectStockAnomalies(30);
   const y = anom.find((x: any) => x.item_id === 'Y');

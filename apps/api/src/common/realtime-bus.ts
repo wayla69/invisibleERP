@@ -1,4 +1,4 @@
-// Shared realtime event bus (docs/24 R1-3 / AUD-ARC-03).
+// Shared realtime event bus (docs/27 R1-3 / AUD-ARC-03).
 // The two SSE buses (pos-scale RealtimeService, bi BiLiveService) were in-memory rxjs Subjects — correct on
 // a single API node, but on 2+ replicas an event published on node A silently never reaches an SSE client
 // connected to node B (live KDS / live BI dropouts). This bus keeps the exact same public surface

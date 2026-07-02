@@ -233,7 +233,7 @@ export class CloseService {
     const susAccts = susRows.map((r: any) => ({ account: r.account, balance: r2(num(r.dr) - num(r.cr)) })).filter((a: any) => Math.abs(a.balance) > 0.01);
     const suspense = { key: 'suspense_clearing', title: 'Suspense/clearing accounts net to zero (advisory)', ok: susAccts.length === 0, advisory: true, accounts: susAccts };
 
-    // 5. GL-20 (docs/24 R1-2) — the gl_period_balances snapshot reconciles to the raw ledger for this
+    // 5. GL-20 (docs/27 R1-2) — the gl_period_balances snapshot reconciles to the raw ledger for this
     // period, per account. The snapshot is maintained transactionally at posting, so ANY mismatch means a
     // write path bypassed LedgerService (direct SQL/ETL) — a hard blocker until resynced (re-run the 0212
     // backfill recompute), because the trial balance reads the snapshot.

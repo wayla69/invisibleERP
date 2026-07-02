@@ -96,7 +96,7 @@ async function main() {
   const t2ask = await inj('GET', '/api/ai/kb/ask?q=' + encodeURIComponent('refund policy'), t2tok);
   ok('RLS: T2 ask refuses (no T1 leakage)', t2ask.json.refused === true, JSON.stringify(t2ask.json).slice(0, 80));
 
-  // ── docs/24 R4-1 — embedding-space isolation + reembed migration path ──
+  // ── docs/27 R4-1 — embedding-space isolation + reembed migration path ──
   // A chunk stamped into a DIFFERENT embedding space must be invisible to search (cross-space cosine is
   // noise, never compared); POST /api/ai/kb/reembed pulls it back into the current space.
   const stamped: any = await pg.query(`select count(*)::int c from kb_chunks where embed_provider = 'local'`);

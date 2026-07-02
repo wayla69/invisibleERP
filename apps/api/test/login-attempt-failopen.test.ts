@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { LoginAttemptStore } from '../src/modules/auth/login-attempt.store';
 
-// docs/24 R2-1 / AUD-SEC-01 — the lockout store fails OPEN on infra error (login availability wins), but
+// docs/27 R2-1 / AUD-SEC-01 — the lockout store fails OPEN on infra error (login availability wins), but
 // the degradation is alerted (throttled ops alert), never silent, and never breaks the auth path.
 const failingSql = Object.assign(
   () => { throw new Error('connection refused'); },

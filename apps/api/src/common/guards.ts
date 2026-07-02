@@ -124,7 +124,7 @@ export class JwtAuthGuard implements CanActivate {
         // Hybrid tenancy (0196) — the org an Admin is scoped to under TENANCY_MODE=multi-company. Sourced
         // live from the DB (same row) so a forged org claim can't widen an Admin's bypass.
         dbOrgId = u.orgId != null ? Number(u.orgId) : null;
-        // ITGC-AC-07 / docs/24 R0-3 — must_change_password is a HARD gate, not a UI hint: a seeded or
+        // ITGC-AC-07 / docs/27 R0-3 — must_change_password is a HARD gate, not a UI hint: a seeded or
         // admin-reset credential can reach nothing but the change-password/logout/me endpoints until the
         // password is rotated. Rides the same per-request row read (no extra round-trip).
         if (u.mcp) {

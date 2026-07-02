@@ -10,7 +10,7 @@ const THRESHOLD = Number(process.env.LOGIN_LOCK_THRESHOLD ?? 10); // consecutive
 const LOCK_MINUTES = Number(process.env.LOGIN_LOCK_MINUTES ?? 15); // lockout duration
 const WINDOW_MINUTES = Number(process.env.LOGIN_FAIL_WINDOW_MIN ?? 15); // idle gap that resets the counter
 
-// docs/24 R2-1 / AUD-SEC-01 — the store deliberately FAILS OPEN (login availability > lockout), but the
+// docs/27 R2-1 / AUD-SEC-01 — the store deliberately FAILS OPEN (login availability > lockout), but the
 // degradation must be LOUD: while the store is unreachable, per-account brute-force protection is off and
 // only the per-IP edge limiter remains. Alert ops (throttled — a down DB must not emit one alert per
 // login attempt) so the fail-open window is short and visible, not silent.

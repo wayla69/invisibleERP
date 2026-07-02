@@ -1,4 +1,4 @@
-// นโยบายความเป็นส่วนตัว (docs/24 R0-2) — a server-rendered summary of docs/legal/privacy-policy.md so the
+// นโยบายความเป็นส่วนตัว (docs/27 R0-2) — a server-rendered summary of docs/legal/privacy-policy.md so the
 // signup flow has a public target. DRAFT until counsel publishes the full policy; keep in sync with the doc.
 import Link from 'next/link';
 

@@ -178,6 +178,156 @@ async function main() {
   const segT2 = await inj('GET', `/api/loyalty/saved-segments/${segCreate.json.id}/members`, mgr2);
   ok('Saved segments: T2 cannot resolve a T1 segment (tenant-scoped, 404)', segT2.status === 404, JSON.stringify({ s: segT2.status }));
 
+  // ── 7g. Saved segments as SEND audiences (Phase F1) — blast + campaign resolve through the rule engine ──
+  // A second member who matches the segment but has opted out (consent must hold at send time).
+  const optout = await inj('POST', '/api/loyalty/members', mgr1, { name: 'งดข่าวสาร', phone: '0809999911' });
+  await db.insert(s.customerProfiles).values({ tenantId: t1, memberId: Number(optout.json.id), rfmSegment: 'New' }).onConflictDoNothing();
+  await inj('PATCH', `/api/loyalty/members/${optout.json.id}`, mgr1, { marketing_opt_in: false });
+  const segBlast = await inj('POST', '/api/messaging/blast', mgr1, { audience: 'saved_segment', segment_id: segCreate.json.id, channel: 'sms', body: 'โปรสำหรับกลุ่ม New' });
+  ok('Saved-segment blast: targets only matching members and respects opt-out (2 targeted → 1 sent, 1 skipped)',
+    (segBlast.status === 200 || segBlast.status === 201) && segBlast.json.targeted === 2 && segBlast.json.sent === 1 && segBlast.json.skipped === 1,
+    JSON.stringify({ s: segBlast.status, t: segBlast.json.targeted, sent: segBlast.json.sent, sk: segBlast.json.skipped }));
+  const segCamp = await inj('POST', '/api/loyalty/campaigns', mgr1, { name: 'Seg campaign', channel: 'sms', audience: 'saved_segment', saved_segment_id: segCreate.json.id, body: 'สวัสดีกลุ่ม New' });
+  const segCampSend = await inj('POST', `/api/loyalty/campaigns/${segCamp.json.id}/send`, mgr1);
+  ok('Saved-segment campaign: audience resolved at send time, PDPA opt-out skipped (2 targeted, 1 sent, 1 skipped)',
+    segCamp.json.saved_segment_id === segCreate.json.id && segCampSend.json.targeted === 2 && segCampSend.json.sent === 1 && segCampSend.json.skipped === 1,
+    JSON.stringify({ segId: segCamp.json.saved_segment_id, t: segCampSend.json.targeted, sent: segCampSend.json.sent, sk: segCampSend.json.skipped }));
+  const segCampT2 = await inj('POST', '/api/loyalty/campaigns', mgr2, { name: 'steal', channel: 'sms', audience: 'saved_segment', saved_segment_id: segCreate.json.id, body: 'x' });
+  ok('Saved-segment campaign: a T2 user cannot target a T1 segment (404 at create)', segCampT2.status === 404, JSON.stringify({ s: segCampT2.status, code: segCampT2.json?.error?.code }));
+
+  // ── 7h. Scheduled RFM re-profiling (Phase F2) — a stale profile is re-bucketed; re-run is stable ──
+  // Stale-ify the paying member's profile (simulates drift between orders), then bulk-refresh.
+  await db.update(s.customerProfiles).set({ rfmSegment: 'Lost' }).where(and(eq(s.customerProfiles.tenantId, t1), eq(s.customerProfiles.memberId, memberId)));
+  const bulkRefresh = await inj('POST', '/api/crm/profiles/refresh', mgr1, {});
+  const profAfter = await inj('GET', `/api/crm/profile/${memberId}`, mgr1);
+  ok('RFM bulk refresh: sweeps the active base and re-buckets a stale profile (Lost → New, changes counted)',
+    bulkRefresh.status === 200 && bulkRefresh.json.profiled >= 2 && bulkRefresh.json.segment_changes >= 1 && profAfter.json.crm?.rfm_segment === 'New',
+    JSON.stringify({ profiled: bulkRefresh.json.profiled, changes: bulkRefresh.json.segment_changes, seg: profAfter.json.crm?.rfm_segment }));
+  // Scheduled surface: the crm_profile_refresh BI job runs the same sweep; a repeat run reports 0 changes.
+  const rfmSub = await inj('POST', '/api/bi/subscriptions', mgr1, { name: 'RFM nightly', report_type: 'crm_profile_refresh', frequency: 'daily' });
+  const rfmRun = await inj('POST', `/api/bi/subscriptions/${rfmSub.json.id}/run`, mgr1);
+  ok('RFM refresh job (BI scheduler): repeat run succeeds and is stable — 0 segment changes (idempotent)',
+    rfmRun.status === 200 && rfmRun.json.status === 'success' && /RFM refresh/.test(rfmRun.json.summary ?? '') && /0 segment change/.test(rfmRun.json.summary ?? ''),
+    JSON.stringify({ status: rfmRun.json.status, summary: rfmRun.json.summary }));
+
+  // ── 7i. Lifecycle journeys (Phase G1, MKT-12) — claim-first at-most-once steps, consent, frequency cap ──
+  // Journey: step1 send now (wait 0), step2 send after 7 days. Cap: 1 msg / 7 days (step2 would be capped
+  // anyway if it were due — the cap check is exercised separately below).
+  const jny = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'Welcome series', trigger: 'manual', cap_messages: 2, cap_window_days: 7,
+    steps: [
+      { wait_days: 0, channel: 'sms', body: 'ยินดีต้อนรับ! รับส่วนลด 10%' },
+      { wait_days: 7, channel: 'sms', body: 'ครบสัปดาห์แล้ว มาอีกนะ' },
+    ],
+  });
+  await inj('POST', `/api/loyalty/journeys/${jny.json.id}/activate`, mgr1);
+  const jEnroll = await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, mgr1, { member_id: memberId });
+  const jEnrollDup = await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, mgr1, { member_id: memberId });
+  ok('Journey: created + activated; enrol once (re-enrol is a no-op — once-per-member policy)',
+    jny.json.code?.startsWith('JNY-') && jEnroll.json.enrolled === true && jEnrollDup.json.enrolled === false,
+    JSON.stringify({ code: jny.json.code, first: jEnroll.json.enrolled, dup: jEnrollDup.json.enrolled }));
+
+  const jRun1 = await inj('POST', '/api/loyalty/journeys/run-due', mgr1);
+  const jRun2 = await inj('POST', '/api/loyalty/journeys/run-due', mgr1);
+  const jLog1 = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.campaign, `journey:${jny.json.code}:1`)));
+  ok('Journey run: step 1 sends exactly once (claim-first) — a re-run sends nothing and step 2 waits 7 days',
+    jRun1.json.sent === 1 && jRun2.json.sent === 0 && jLog1.length === 1 && jLog1[0].status === 'sent',
+    JSON.stringify({ run1: jRun1.json.sent, run2: jRun2.json.sent, logged: jLog1.length }));
+
+  // Consent: the opted-out (but matching) member from 7g enrols, but the send is skipped + audited.
+  await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, mgr1, { member_id: Number(optout.json.id) });
+  const jRun3 = await inj('POST', '/api/loyalty/journeys/run-due', mgr1);
+  const jLogOptout = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.memberId, Number(optout.json.id)), eq(s.messageLog.campaign, `journey:${jny.json.code}:1`)));
+  ok('Journey consent (MKT-12): opted-out member is skipped at the step, audited in message_log',
+    jRun3.json.sent === 0 && jLogOptout.length === 1 && jLogOptout[0].status === 'skipped',
+    JSON.stringify({ sent: jRun3.json.sent, status: jLogOptout[0]?.status }));
+
+  // Frequency cap: a second journey (cap 1/7d, two zero-wait steps) — step 2 must be capped, audited.
+  const jny2 = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'Burst test', trigger: 'manual', cap_messages: 1, cap_window_days: 7,
+    steps: [
+      { wait_days: 0, channel: 'sms', body: 'ข้อความที่หนึ่ง' },
+      { wait_days: 0, channel: 'sms', body: 'ข้อความที่สอง (ต้องโดน cap)' },
+    ],
+  });
+  await inj('POST', `/api/loyalty/journeys/${jny2.json.id}/activate`, mgr1);
+  await inj('POST', `/api/loyalty/journeys/${jny2.json.id}/enroll`, mgr1, { member_id: memberId });
+  await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // step 1 sends (member's only journey msg in-window... plus jny step1: cap counts ALL journey msgs)
+  const jRunCap = await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // step 2 due (wait 0) → capped
+  const jLogCap = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.memberId, memberId), eq(s.messageLog.campaign, `journey:${jny2.json.code}:2`)));
+  ok('Journey frequency cap (MKT-12): over-cap step is skipped and audited (error: frequency cap)',
+    jRunCap.json.sent === 0 && jLogCap.length === 1 && jLogCap[0].status === 'skipped' && jLogCap[0].error === 'frequency cap',
+    JSON.stringify({ sent: jRunCap.json.sent, status: jLogCap[0]?.status, err: jLogCap[0]?.error }));
+
+  // Tenant isolation: T2 cannot see or enrol into T1 journeys.
+  const jT2List = await inj('GET', '/api/loyalty/journeys', mgr2);
+  const jT2Enroll = await inj('POST', `/api/loyalty/journeys/${jny.json.id}/enroll`, mgr2, { member_id: memberId });
+  ok('Journey tenant isolation: T2 sees no T1 journeys and cannot enrol into one (404)',
+    (jT2List.json.journeys ?? []).length === 0 && jT2Enroll.status === 404,
+    JSON.stringify({ t2n: (jT2List.json.journeys ?? []).length, s: jT2Enroll.status }));
+
+  // ── 7j. Predictive scoring (Phase G3) — explainable churn/LTV, versioned, refreshed by the F2 sweep ──
+  // A decaying member: 2 paid orders 100/90 days ago → personal cadence 10d, quiet 90d → HIGH churn risk.
+  const decay = await inj('POST', '/api/loyalty/members', mgr1, { name: 'ห่างหาย', phone: '0808888801' });
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
+  await db.insert(s.dineInOrders).values([
+    { orderNo: 'DIN-G3-1', tenantId: t1, memberId: Number(decay.json.id), saleNo: 'SALE-G3-1', total: '200', openedAt: daysAgo(100), channel: 'web' },
+    { orderNo: 'DIN-G3-2', tenantId: t1, memberId: Number(decay.json.id), saleNo: 'SALE-G3-2', total: '200', openedAt: daysAgo(90), channel: 'web' },
+  ]);
+  const sweep2 = await inj('POST', '/api/crm/profiles/refresh', mgr1, {});
+  const decayProf = await inj('GET', `/api/crm/profile/${decay.json.id}`, mgr1);
+  const freshProf = await inj('GET', `/api/crm/profile/${memberId}`, mgr1);
+  ok('Churn scoring: a member far past their own cadence scores high; a just-purchased member scores low; version stamped',
+    sweep2.status === 200 && (decayProf.json.crm?.churn_risk ?? 0) >= 60 && (freshProf.json.crm?.churn_risk ?? 99) <= 20
+      && decayProf.json.crm?.score_version === 'v1' && (decayProf.json.crm?.predicted_ltv ?? -1) >= 0,
+    JSON.stringify({ decay: decayProf.json.crm?.churn_risk, fresh: freshProf.json.crm?.churn_risk, ver: decayProf.json.crm?.score_version, ltv: decayProf.json.crm?.predicted_ltv }));
+
+  // Scores are usable as saved-segment fields (whitelist extended, values still drizzle-bound).
+  const riskSeg = await inj('POST', '/api/loyalty/saved-segments', mgr1, { name: 'High churn risk', rules: [{ field: 'churn_risk', op: 'gte', value: 60 }] });
+  const riskMembers = await inj('GET', `/api/loyalty/saved-segments/${riskSeg.json.id}/members`, mgr1);
+  ok('churn_risk / predicted_ltv are segment-builder fields: a churn_risk ≥ 60 segment resolves to the decaying member only',
+    riskSeg.status === 201 && riskMembers.json.total === 1 && riskMembers.json.members?.[0]?.id === decay.json.id,
+    JSON.stringify({ total: riskMembers.json.total, id: riskMembers.json.members?.[0]?.id }));
+
+  // Analytics: value at churn risk (Σ predicted_ltv of churn_risk ≥ 70 members) — estimate, monitoring only.
+  const segMix2 = await inj('GET', '/api/loyalty/analytics/segments', mgr1);
+  ok('Analytics at-risk value: Σ predicted LTV of high-risk members reported (threshold 70)',
+    segMix2.json.at_risk_value != null && segMix2.json.at_risk_value.threshold === 70
+      && segMix2.json.at_risk_value.members >= 1 && segMix2.json.at_risk_value.predicted_ltv >= 0,
+    JSON.stringify(segMix2.json.at_risk_value));
+
+  // ── 7k. Branching journeys (Phase H1) — forward-only rule jumps; matching member takes the branch ──
+  // Step 1 sends, then: if recency ≤ 5 (came back recently) jump to step 3 (thank-you); else walk to step 2
+  // (escalate). memberId bought today (recency 0) → branch; the G3 decay member (recency 90) → linear.
+  const jnyBr = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'Win-back branch', trigger: 'manual', cap_messages: 0, steps: [
+      { wait_days: 0, channel: 'sms', body: 'คิดถึงคุณ รับคูปอง', branch_rule: { field: 'recency', op: 'lte', value: 5 }, branch_to_step: 3 },
+      { wait_days: 0, channel: 'sms', body: 'ข้อเสนอพิเศษขึ้น (escalate)' },
+      { wait_days: 0, channel: 'sms', body: 'ขอบคุณที่กลับมา!' },
+    ],
+  });
+  await inj('POST', `/api/loyalty/journeys/${jnyBr.json.id}/activate`, mgr1);
+  await inj('POST', `/api/loyalty/journeys/${jnyBr.json.id}/enroll`, mgr1, { member_id: memberId });
+  await inj('POST', `/api/loyalty/journeys/${jnyBr.json.id}/enroll`, mgr1, { member_id: decay.json.id });
+  await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // step 1 for both → branch decision
+  await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // each executes its chosen next step
+  const brCode = jnyBr.json.code;
+  const logStep = async (mid: number, no: number) => (await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.memberId, mid), eq(s.messageLog.campaign, `journey:${brCode}:${no}`)))).length;
+  ok('Branch taken: recency-matching member jumps 1 → 3 (thank-you) and NEVER receives step 2',
+    (await logStep(memberId, 1)) === 1 && (await logStep(memberId, 3)) === 1 && (await logStep(memberId, 2)) === 0,
+    JSON.stringify({ s1: await logStep(memberId, 1), s2: await logStep(memberId, 2), s3: await logStep(memberId, 3) }));
+  ok('Branch not taken: non-matching member walks linearly 1 → 2 (escalate)',
+    (await logStep(decay.json.id, 1)) === 1 && (await logStep(decay.json.id, 2)) === 1,
+    JSON.stringify({ s1: await logStep(decay.json.id, 1), s2: await logStep(decay.json.id, 2) }));
+  const badBr = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'loop attempt', trigger: 'manual', steps: [
+      { wait_days: 0, channel: 'sms', body: 'a', branch_rule: { field: 'recency', op: 'gte', value: 0 }, branch_to_step: 1 },
+      { wait_days: 0, channel: 'sms', body: 'b' },
+    ],
+  });
+  ok('Backward/self jump rejected at create (BAD_BRANCH) — termination is structural, no loops possible',
+    badBr.status === 400 && badBr.json.error?.code === 'BAD_BRANCH', JSON.stringify({ s: badBr.status, code: badBr.json.error?.code }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });

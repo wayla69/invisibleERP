@@ -1,19 +1,19 @@
 # 06 — AI & Analytics Integration
 
-> **Provider seam (docs/24 R4-4):** every service reaches the model through `common/llm-client.ts` — the
+> **Provider seam (docs/27 R4-4):** every service reaches the model through `common/llm-client.ts` — the
 > single construction point for the Anthropic SDK (retries/backoff included) and the injection point
 > (`setLlmClientForTests`) that lets the CI eval drive the REAL agent loop with a scripted fake model.
 > Still single-provider by design; a second provider would adapt into this contract in one file.
 >
-> **Semantic embeddings (docs/24 R4-1):** `EMBED_PROVIDER=voyage` (+`VOYAGE_API_KEY`, default model
+> **Semantic embeddings (docs/27 R4-1):** `EMBED_PROVIDER=voyage` (+`VOYAGE_API_KEY`, default model
 > `voyage-3-lite`) switches KB retrieval from the local hashed bag-of-words to real semantic vectors.
-> Each chunk records its **embedding space** (`kb_chunks.embed_provider`, migration 0213); search only
+> Each chunk records its **embedding space** (`kb_chunks.embed_provider`, migration 0219); search only
 > compares within the query's space (cross-space cosine is noise), `POST /api/ai/kb/reembed` migrates the
 > corpus after switching, and any provider failure or un-acknowledged DPA degrades fail-safe to the local
 > embedder (throttled `embed_provider_degraded` ops alert). pgvector indexing remains the at-scale upgrade
 > once corpus size demands it — the storage contract (L2-normalized number[]) is unchanged.
 >
-> **Honest labeling (docs/24 R4-5):** the "demand-ml" module and the analytics forecasters are
+> **Honest labeling (docs/27 R4-5):** the "demand-ml" module and the analytics forecasters are
 > **classical statistics** (SMA/SES/Holt/seasonal-naive/Croston + walk-forward WAPE/MASE backtesting;
 > z-score anomaly flags) — deliberately explainable for audit, **not machine learning**, and must not be
 > marketed as ML. "AI" in this document means the governed LLM copilot (agent/RAG/doc-extraction), which

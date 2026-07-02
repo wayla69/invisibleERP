@@ -15,14 +15,14 @@ const MAX_TOKENS = 4000;
 
 // Provider result — the caller MUST key retrieval on `provider`: vectors from different embedding spaces
 // are not comparable (cosine across spaces is noise), so search filters chunks to the space the query was
-// embedded in (docs/24 R4-1).
+// embedded in (docs/27 R4-1).
 export interface Embedded { vector: number[]; provider: string }
 
 @Injectable()
 export class EmbedderService {
   get provider() { return process.env.EMBED_PROVIDER || 'local'; }
 
-  // Embed one text. SEMANTIC provider (docs/24 R4-1 / AUD-AI-01): EMBED_PROVIDER=voyage calls the Voyage
+  // Embed one text. SEMANTIC provider (docs/27 R4-1 / AUD-AI-01): EMBED_PROVIDER=voyage calls the Voyage
   // embeddings API (Anthropic's recommended embedding partner; VOYAGE_API_KEY + optional VOYAGE_MODEL,
   // default voyage-3-lite). Fail-safe by design: the AI DPA gate (AIG-05) also covers embedding
   // transmission, and any provider error degrades to the deterministic local embedder with a throttled

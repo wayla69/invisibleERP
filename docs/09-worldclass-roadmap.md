@@ -1,6 +1,6 @@
 # 09 — World-Class / Global Upgrade Roadmap
 
-> **⚠️ SUPERSEDED — HISTORICAL GAP REVIEW (banner added 2026-07-02, docs/24 R3-2 / AUD-CMP-02).**
+> **⚠️ SUPERSEDED — HISTORICAL GAP REVIEW (banner added 2026-07-02, docs/27 R3-2 / AUD-CMP-02).**
 > This document is a point-in-time review from **before** the hardening programs landed and several of its
 > central "honest verdict" claims are now **false as current-state statements** — kept unedited as history:
 > - "tenant isolation designed but **not enforced** / RLS grep returns zero hits" → RLS is DB-enforced with
@@ -11,7 +11,7 @@
 > - "no signup, no billing" → self-serve signup + Stripe subscription billing (`modules/billing`).
 > - "no MFA/SSO", "no ML, no RAG, no evals, no PII redaction, hard-coded Opus" (§AI) → TOTP MFA + OIDC SSO;
 >   demand-ml + RAG + CI-gated `ai-eval` + `pii-redact` + model tiering/budgets (`common/ai-models.ts`).
-> For current state read `compliance/CONTROL_STATUS_HONEST.md`, `docs/24-angel-audit-remediation-plan.md`
+> For current state read `compliance/CONTROL_STATUS_HONEST.md`, `docs/27-angel-audit-remediation-plan.md`
 > §0, and the per-cycle process narratives. The *roadmap framing* below (T0–T3 sequencing, go-to-market
 > tiers) remains useful as strategy history; treat every "current state" assertion as stale.
 >

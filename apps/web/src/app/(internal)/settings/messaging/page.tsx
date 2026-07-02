@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-type Channel = { channel: 'line' | 'sms' | 'email'; configured: boolean; enabled: boolean; updated_at: string | null; updated_by: string | null };
+type Channel = { channel: 'line' | 'sms' | 'email'; configured: boolean; enabled: boolean; resolved_provider: 'tenant' | 'env' | 'mock'; callback_token_set: boolean; last_send_at: string | null; last_status: string | null; last_provider: string | null; updated_at: string | null; updated_by: string | null };
 
 // The credential fields we collect per channel (write-only — never returned by the API).
 const FIELDS: Record<string, { key: string; label: string; placeholder?: string; type?: string }[]> = {
@@ -38,6 +38,13 @@ const FIELDS: Record<string, { key: string; label: string; placeholder?: string;
 };
 const CHANNEL_LABEL: Record<string, string> = { line: 'LINE Official Account', sms: 'SMS', email: 'อีเมล (SMTP)' };
 
+// Go-live readiness (Phase F3) — mirrors the gateway's resolution order (tenant creds → platform env → mock).
+const READINESS: Record<Channel['resolved_provider'], { dot: string; label: string; variant: 'success' | 'info' | 'muted' }> = {
+  tenant: { dot: '🟢', label: 'พร้อมใช้งาน — ผู้ให้บริการของร้าน', variant: 'success' },
+  env: { dot: '🟡', label: 'ใช้ผู้ให้บริการกลางของแพลตฟอร์ม', variant: 'info' },
+  mock: { dot: '⚪', label: 'โหมดเดโม — ข้อความไม่ออกจริง', variant: 'muted' },
+};
+
 function ChannelCard({ ch, onSaved }: { ch: Channel; onSaved: () => void }) {
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [to, setTo] = useState('');
@@ -57,13 +64,18 @@ function ChannelCard({ ch, onSaved }: { ch: Channel; onSaved: () => void }) {
   return (
     <div className="rounded-xl border bg-card">
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-2 font-semibold">
+        <div className="flex flex-wrap items-center gap-2 font-semibold">
           {CHANNEL_LABEL[ch.channel]}
+          <Badge variant={READINESS[ch.resolved_provider].variant} className="gap-1 text-[10px]">{READINESS[ch.resolved_provider].dot} {READINESS[ch.resolved_provider].label}</Badge>
           {ch.configured
             ? <Badge variant="muted" className="gap-1 text-[10px]"><CheckCircle2 className="size-3 text-success" /> เชื่อมต่อแล้ว{ch.enabled ? '' : ' (ปิดใช้งาน)'}</Badge>
-            : <Badge variant="muted" className="gap-1 text-[10px]"><XCircle className="size-3 text-muted-foreground" /> ยังไม่ตั้งค่า (ใช้ค่ากลาง/เดโม)</Badge>}
+            : <Badge variant="muted" className="gap-1 text-[10px]"><XCircle className="size-3 text-muted-foreground" /> ยังไม่ตั้งค่า</Badge>}
+          {ch.callback_token_set && <Badge variant="muted" className="text-[10px]">รับ delivery receipt</Badge>}
         </div>
-        {ch.updated_by && <span className="text-xs text-muted-foreground">แก้ไขล่าสุดโดย {ch.updated_by}</span>}
+        <span className="text-xs text-muted-foreground">
+          {ch.last_send_at ? `ส่งล่าสุด: ${ch.last_status} ผ่าน ${ch.last_provider ?? '—'} · ${new Date(ch.last_send_at).toLocaleString('th-TH')}` : 'ยังไม่เคยส่ง'}
+          {ch.updated_by ? ` · แก้ไขโดย ${ch.updated_by}` : ''}
+        </span>
       </div>
       <div className="space-y-3 p-4">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -74,6 +86,9 @@ function ChannelCard({ ch, onSaved }: { ch: Channel; onSaved: () => void }) {
             </div>
           ))}
         </div>
+        {ch.resolved_provider === 'mock' && ch.last_send_at && (
+          <p className="text-xs text-warning">⚠ ช่องทางนี้อยู่ในโหมดเดโม — ข้อความที่ผ่านมาถูกบันทึกว่า "ส่ง" แต่ไม่ได้ออกไปถึงลูกค้าจริง เชื่อมต่อผู้ให้บริการเพื่อส่งจริง</p>
+        )}
         <p className="text-xs text-muted-foreground">ข้อมูลลับถูกเข้ารหัสและเป็นแบบเขียนอย่างเดียว (ระบบไม่แสดงค่าที่บันทึกไว้)</p>
         <div className="flex flex-wrap items-end gap-2">
           <Button size="sm" disabled={save.isPending || fields.every((f) => !creds[f.key])} onClick={() => save.mutate()}>บันทึก</Button>

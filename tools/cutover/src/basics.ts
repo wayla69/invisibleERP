@@ -88,7 +88,7 @@ async function main() {
       entryId: Number(h.id), accountCode: l.code, debit: String(l.debit ?? 0), credit: String(l.credit ?? 0), currency: 'THB', tenantId: hq,
     })));
     // Direct inserts bypass LedgerService, so the gl_period_balances snapshot (R1-2) must be rebuilt —
-    // exactly what the 0212 backfill does. Idempotent full recompute; trivial on harness-sized data.
+    // exactly what the 0218 backfill does. Idempotent full recompute; trivial on harness-sized data.
     await rebuildGl();
   };
   const rebuildGl = async () => pg.exec(`DELETE FROM gl_period_balances;
@@ -941,7 +941,7 @@ async function main() {
     valDraft.json?.checks?.find((c: any) => c.key === 'unposted_drafts')?.count >= 1,
     `ready=${valDraft.json?.ready} blockers=${JSON.stringify(valDraft.json?.blockers)}`);
 
-  // TC-GL-20-01 (docs/24 R1-2): the clean-period validate above already proved snapshot==raw (the
+  // TC-GL-20-01 (docs/27 R1-2): the clean-period validate above already proved snapshot==raw (the
   // gl_snapshot_drift check passed inside GL-19). Now INDUCE drift — mutate the snapshot directly, exactly
   // what a rogue/bypassing write path would do — and the validator must block the close.
   ok('GL-20: clean period → snapshot reconciles to the raw ledger (gl_snapshot_drift ok)',
@@ -953,7 +953,7 @@ async function main() {
   ok('GL-20: induced snapshot drift → ready=false, gl_snapshot_drift blocker names the account',
     valDrift.json?.ready === false && (valDrift.json?.blockers ?? []).includes('gl_snapshot_drift') && (driftCheck?.accounts ?? []).length >= 1,
     JSON.stringify({ ready: valDrift.json?.ready, drift: driftCheck?.accounts?.[0] }));
-  await rebuildGl(); // repair (same recompute as the 0212 backfill) so the close below still locks clean
+  await rebuildGl(); // repair (same recompute as the 0218 backfill) so the close below still locks clean
   const valRepaired = await inj('GET', `/api/ledger/close/validate?period=${closePeriod}`, admin);
   ok('GL-20: rebuild resyncs the snapshot → drift cleared, period ready again',
     valRepaired.json?.checks?.find((c: any) => c.key === 'gl_snapshot_drift')?.ok === true,

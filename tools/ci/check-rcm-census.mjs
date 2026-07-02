@@ -1,4 +1,4 @@
-// RCM census guard (docs/24 R3-1 / AUD-CMP-01).
+// RCM census guard (docs/27 R3-1 / AUD-CMP-01).
 // The 2026-07 investment audit found FIVE different control populations quoted across the compliance docs
 // (66, 57, 68, 153, 154) vs the real 169 in build_rcm.py — failing an auditor's first PBC reconciliation.
 // Rule: any doc that cites the RCM population MUST tag the number machine-readably, e.g.

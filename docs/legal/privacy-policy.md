@@ -2,7 +2,7 @@
 
 > **DRAFT v0.1 — for counsel review; not in force until reviewed, completed and published.**
 > Placeholders in `<<…>>` must be completed by `<<Invisible Consulting Co., Ltd.>>` and its counsel.
-> Closes the SOC 2 CC2.3 external-communications gap (docs/24 R0-2 / AUD-LGL-02) at the *drafted* level;
+> Closes the SOC 2 CC2.3 external-communications gap (docs/27 R0-2 / AUD-LGL-02) at the *drafted* level;
 > publication + counsel sign-off remain organizational steps.
 
 **Controller/Processor:** `<<Invisible Consulting Co., Ltd.>>` (registration no. `<<…>>`), Thailand
@@ -72,4 +72,4 @@ Material changes are announced `<<30 days>>` in advance to tenant admins.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
-| 0.1 DRAFT | 2026-07-02 | Platform | Initial draft (docs/24 R0-2): dual controller/processor scope, collection/basis table, as-built protections (RLS, ITGC-AC-19 field encryption, audit chain, AI redaction + DPA gate), sub-processor pointer, PDPA rights incl. DSAR/erasure design, breach/retention terms. **Requires counsel review + completion of `<<…>>` placeholders before publication.** |
+| 0.1 DRAFT | 2026-07-02 | Platform | Initial draft (docs/27 R0-2): dual controller/processor scope, collection/basis table, as-built protections (RLS, ITGC-AC-19 field encryption, audit chain, AI redaction + DPA gate), sub-processor pointer, PDPA rights incl. DSAR/erasure design, breach/retention terms. **Requires counsel review + completion of `<<…>>` placeholders before publication.** |

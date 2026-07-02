@@ -11,10 +11,13 @@ export const loyaltyCampaigns = pgTable('loyalty_campaigns', {
   campaignCode: text('campaign_code').notNull(),          // CMP-…
   name: text('name').notNull(),
   channel: text('channel').notNull().default('sms'),      // sms | email | line
-  audience: text('audience').notNull().default('all'),    // all | segment | tier | birthdays_today
+  audience: text('audience').notNull().default('all'),    // all | segment | tier | birthdays_today | saved_segment
   segment: text('segment'),                               // RFM segment (audience=segment)
   tier: text('tier'),                                     // loyalty tier (audience=tier)
+  savedSegmentId: bigint('saved_segment_id', { mode: 'number' }), // saved_segments.id (audience=saved_segment)
   body: text('body').notNull(),
+  variantBBody: text('variant_b_body'),                   // body-only A/B (G2): deterministic per-member split
+  splitBPct: integer('split_b_pct').notNull().default(0), // % of the audience that receives variant B
   scheduleAt: timestamp('schedule_at', { withTimezone: true }), // null = manual send
   status: text('status').notNull().default('draft'),      // draft | scheduled | sent | cancelled
   targeted: integer('targeted').default(0),

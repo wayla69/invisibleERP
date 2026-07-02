@@ -12,7 +12,7 @@
 - **Applied (safe — not queried by value):** `customer_master.tax_id` (Thai tax/national ID),
   `customer_master.notes`. No DDL needed (column stays `text`, now holds ciphertext); existing rows read via
   passthrough.
-- **Applied 2026-07-02 (docs/24 R0-1 — investment-audit finding AUD-LGL-01):**
+- **Applied 2026-07-02 (docs/27 R0-1 — investment-audit finding AUD-LGL-01):**
   `employees.national_id` / `sso_no` / `bank_account`, `payslips.national_id` (per-slip snapshot),
   `vendors.tax_id` / `bank_account`. Two value-keyed SQL aggregations were rewritten to group **decrypted**
   values in app code (random-IV ciphertext never collides): ภ.ง.ด.1ก per-employee summary
@@ -61,4 +61,4 @@ remaining PII columns are either **lookup keys** or **substring-searched**, so e
 | Date | Version | Change |
 |------|---------|--------|
 | 2026-06-30 | v0.1 | Mechanism + `customer_master.tax_id`/`notes` shipped; lookup-keyed fields scaffolded + deferred. |
-| 2026-07-02 | v0.2 | **docs/24 R0-1:** employee (`national_id`/`sso_no`/`bank_account`), payslip (`national_id`) and vendor (`tax_id`/`bank_account`) columns encrypted; PND1A + ghost-vendor aggregations moved to app-code grouping over decrypted values; idempotent `db:backfill:pii` script ships (covers the earlier customer_master debt too); at-rest ToE in `hcm`/`ext`; RCM ITGC-AC-19 text updated + xlsx regenerated. |
+| 2026-07-02 | v0.2 | **docs/27 R0-1:** employee (`national_id`/`sso_no`/`bank_account`), payslip (`national_id`) and vendor (`tax_id`/`bank_account`) columns encrypted; PND1A + ghost-vendor aggregations moved to app-code grouping over decrypted values; idempotent `db:backfill:pii` script ships (covers the earlier customer_master debt too); at-rest ToE in `hcm`/`ext`; RCM ITGC-AC-19 text updated + xlsx regenerated. |

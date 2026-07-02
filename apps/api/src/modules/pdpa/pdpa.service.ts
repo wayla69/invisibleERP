@@ -93,7 +93,7 @@ export class PdpaService {
     };
   }
 
-  // Employee data subject (docs/24 AUD-LGL-03 — deferred from R0-1). An ACCESS/PORTABILITY request must
+  // Employee data subject (docs/27 AUD-LGL-03 — deferred from R0-1). An ACCESS/PORTABILITY request must
   // return the identifiers the employer actually holds — the encryptedText columns decrypt on this read
   // (ITGC-AC-19), which is correct: the subject is entitled to their own citizen ID / bank account.
   private async collectEmployee(subjectRef: string) {

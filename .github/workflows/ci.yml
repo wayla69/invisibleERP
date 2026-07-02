@@ -25,7 +25,7 @@ jobs:
       - name: Unit tests + coverage gate (ratchet thresholds)
         run: pnpm --filter @ierp/api test:coverage
       - name: TypeScript-debt ratchet (as-any + strict-index errors may only go DOWN)
-        # docs/24 R2-5 / AUD-ARC-05 — baseline in tools/ci/ts-debt-baseline.json; lower it when you reduce debt.
+        # docs/27 R2-5 / AUD-ARC-05 — baseline in tools/ci/ts-debt-baseline.json; lower it when you reduce debt.
         run: node tools/ci/check-ts-debt.mjs
       # Hand the compiled output to the harness matrix so 50+ jobs don't each rebuild.
       - name: Upload dist
@@ -172,9 +172,9 @@ jobs:
       - name: ${{ matrix.pkg }} → ${{ matrix.script }}
         run: pnpm --filter @ierp/${{ matrix.pkg }} ${{ matrix.script }}
         env:
-          # docs/24 R3-3 — the compliance ToE run writes structured evidence for retention (below).
+          # docs/27 R3-3 — the compliance ToE run writes structured evidence for retention (below).
           EVIDENCE_OUT: ${{ matrix.script == 'compliance' && format('{0}/compliance-evidence.json', github.workspace) || '' }}
-      - name: Retain compliance ToE evidence (docs/24 R3-3 — operating-evidence clock)
+      - name: Retain compliance ToE evidence (docs/27 R3-3 — operating-evidence clock)
         if: matrix.script == 'compliance' && always()
         uses: actions/upload-artifact@v4
         with:
@@ -265,7 +265,7 @@ jobs:
         run: |
           node -e '
             const fs = require("fs"), dir = "apps/api/drizzle";
-            // docs/24 R5-1: the "orphans" (0085_floor_zone_geometry / 0088_dine_in_order_zone) turned out to be
+            // docs/27 R5-1: the "orphans" (0085_floor_zone_geometry / 0088_dine_in_order_zone) turned out to be
             // journaled all along (idx 102/103) — the old grandfather list was dead code masking that fact.
             // NO unjournaled grandfathers exist; any new one fails here.
             const GRANDFATHERED = [];
@@ -276,7 +276,7 @@ jobs:
             const orphan = Array.from(tags).filter(t => sqls.indexOf(t) < 0);
             // Two migrations with the SAME 4-digit number (concurrent PRs both adding e.g. 0119_*) collide:
             // prod drizzle-kit migrate ordering is ambiguous and one silently wins. Renumber the newer one.
-            // Decision (docs/24 R5-1): the four historical collisions STAY grandfathered — they are already
+            // Decision (docs/27 R5-1): the four historical collisions STAY grandfathered — they are already
             // applied in prod and drizzle tracks by full tag, so renumbering applied migrations would be the
             // dangerous move; full filenames sort deterministically. The migration-parity harness proves
             // filename-order == journal-order schema equivalence, so the ambiguity class is now guarded.
@@ -297,7 +297,7 @@ jobs:
           '
 
       - name: RCM census reconciles (docs may not misquote the control population)
-        # docs/24 R3-1 / AUD-CMP-01 — tagged counts in compliance/docs markdown must match build_rcm.py.
+        # docs/27 R3-1 / AUD-CMP-01 — tagged counts in compliance/docs markdown must match build_rcm.py.
         run: node tools/ci/check-rcm-census.mjs
 
   # Real-Postgres smoke (panel #1) — the divergence class PGlite hides: FORCE-RLS under app_user,

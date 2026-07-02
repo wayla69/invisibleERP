@@ -118,6 +118,8 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.loyalty_missions': { th: 'ภารกิจ & แสตมป์', en: 'Missions & Stamps' },
   'nav.loyalty_wheels': { th: 'วงล้อนำโชค', en: 'Spin Wheel' },
   'nav.loyalty_campaigns': { th: 'แคมเปญ', en: 'Campaigns' },
+  'nav.loyalty_segments': { th: 'เซกเมนต์ลูกค้า', en: 'Segments' },
+  'nav.loyalty_journeys': { th: 'เจอร์นีย์ลูกค้า', en: 'Journeys' },
   'nav.loyalty_partners': { th: 'พันธมิตร & สิทธิพิเศษ', en: 'Partners & Privileges' },
   'nav.loyalty_analytics': { th: 'วิเคราะห์ลอยัลตี้', en: 'Loyalty Analytics' },
   'nav.loyalty_receipt_approvals': { th: 'อนุมัติใบเสร็จ', en: 'Receipt Approvals' },
@@ -206,7 +208,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Planning & BI ─────────────────────────────────────────────────────────
   'nav.planning': { th: 'งบประมาณ & แผน', en: 'Budgets & Plans' },
   'nav.budget': { th: 'งบประมาณเทียบจริง (Budget vs Actual)', en: 'Budget vs Actual' },
-  'nav.demand': { th: 'พยากรณ์ความต้องการ (สถิติ + backtest)', en: 'Demand Forecast (statistical)' }, // docs/24 R4-5: classical models honestly labeled — not ML
+  'nav.demand': { th: 'พยากรณ์ความต้องการ (สถิติ + backtest)', en: 'Demand Forecast (statistical)' }, // docs/27 R4-5: classical models honestly labeled — not ML
   'nav.projects': { th: 'โครงการ (Projects)', en: 'Projects' },
   'nav.pm_portfolio': { th: 'พอร์ตโครงการ', en: 'Portfolio' },
   'nav.pm_action_center': { th: 'ศูนย์งานที่ต้องทำ', en: 'Action Center' },

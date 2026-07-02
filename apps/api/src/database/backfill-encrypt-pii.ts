@@ -1,5 +1,5 @@
 /**
- * One-off, idempotent PII-at-rest encryption backfill (ITGC-AC-19, docs/24 R0-1).
+ * One-off, idempotent PII-at-rest encryption backfill (ITGC-AC-19, docs/27 R0-1).
  * The `encryptedText` column type encrypts NEW writes and passes legacy plaintext through on read —
  * this script re-writes the legacy plaintext rows so they are ciphertext at rest too.
  * รัน: pnpm --filter @ierp/api db:backfill:pii   (อ่าน DATABASE_URL + APP_ENC_KEY จาก root .env)

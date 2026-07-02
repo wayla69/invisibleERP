@@ -10,7 +10,7 @@ export const employees = pgTable(
     tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
     empCode: text('emp_code').notNull(),
     name: text('name').notNull(),
-    // PII-at-rest (ITGC-AC-19, docs/24 R0-1): citizen ID / SSO no / bank account are encrypted (AES-256-GCM,
+    // PII-at-rest (ITGC-AC-19, docs/27 R0-1): citizen ID / SSO no / bank account are encrypted (AES-256-GCM,
     // legacy-plaintext passthrough). NOT queried by value anywhere — aggregations key on employee_id/emp_code.
     nationalId: encryptedText('national_id'),   // เลขบัตรประชาชน (13 หลัก) — for ภ.ง.ด.1
     ssoNo: encryptedText('sso_no'),             // เลขประกันสังคม

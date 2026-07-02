@@ -85,7 +85,7 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 > bounces straight back to `/login`. For web/api on *different registrable domains*, also set
 > `AUTH_COOKIE_SAMESITE=None`. Same-origin deploys (§2C proxy) need neither. See `railway-setup.md` §4.
 
-> **Multi-replica deploys (2+ API instances) must set `REALTIME_REDIS_URL`** (docs/24 R1-3 / AUD-ARC-03—
+> **Multi-replica deploys (2+ API instances) must set `REALTIME_REDIS_URL`** (docs/27 R1-3 / AUD-ARC-03—
 > Railway: add the Redis add-on and reference its URL). The SSE buses (live KDS `pos-scale`, live BI) are
 > in-memory per process by default — fine for one node, but on 2+ replicas an event published on node A
 > silently never reaches an SSE client on node B. With the URL set, `common/realtime-bus.ts` routes every
@@ -105,5 +105,5 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
 | 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
-| 1.3 | 2026-07-02 | Platform | §4: `REALTIME_REDIS_URL` requirement for multi-replica deploys — shared `realtime-bus.ts` (Redis pub/sub) behind both SSE buses (docs/24 R1-3). |
+| 1.3 | 2026-07-02 | Platform | §4: `REALTIME_REDIS_URL` requirement for multi-replica deploys — shared `realtime-bus.ts` (Redis pub/sub) behind both SSE buses (docs/27 R1-3). |
 | 1.3 | 2026-07-01 | Platform | Link the multi-tenant "link-per-customer" onboarding runbook (`multi-tenant-subdomain-runbook.md`) — shared-deployment subdomain model (RLS-isolated) vs dedicated, tenant provisioning, wildcard DNS/TLS + cookie/CORS, and per-customer cost model. |

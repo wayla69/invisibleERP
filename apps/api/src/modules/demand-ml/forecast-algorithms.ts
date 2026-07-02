@@ -2,7 +2,7 @@
 // including the PGlite CI harness). A Forecaster takes the demand history and a horizon and returns that many
 // point forecasts. Algorithms are deliberately classic and explainable (no opaque ML) for audit.
 
-// Optional date context (docs/24 R4-3 remainder): `lastDate` is the ISO date of the LAST history point.
+// Optional date context (docs/27 R4-3 remainder): `lastDate` is the ISO date of the LAST history point.
 // Date-blind models ignore it; calendar-aware models (th_holiday) use it to place each point on the Thai
 // calendar. walkForward shifts it per fold so backtests stay honest.
 export interface ForecastContext { lastDate?: string }
@@ -68,19 +68,19 @@ export const croston = (alpha = 0.1): Forecaster => (h, hz) => {
 };
 
 // Croston–SBA (Syntetos–Boylan approximation) — Croston's rate is biased HIGH for intermittent demand;
-// SBA applies the (1 − α/2) correction. Same inputs, same explainability (docs/24 R4-3).
+// SBA applies the (1 − α/2) correction. Same inputs, same explainability (docs/27 R4-3).
 export const crostonSba = (alpha = 0.1): Forecaster => (h, hz) => {
   const base = croston(alpha)(h, hz);
   const k = 1 - alpha / 2;
   return base.map((v) => v * k);
 };
 
-// Multiplicative day-of-week seasonality (docs/24 R4-3 / AUD-AI-03): learn a per-position factor over a
+// Multiplicative day-of-week seasonality (docs/27 R4-3 / AUD-AI-03): learn a per-position factor over a
 // weekly cycle (position = index mod period, so forecast step k continues the cycle at
 // (history.length + k) mod period), deseasonalize, smooth the level with SES, then re-apply the factor.
 // This is the dominant restaurant demand pattern the flat models miss (weekend ≫ weekday). Still classic,
 // dependency-free and explainable — auto-selection only picks it when it WINS the walk-forward backtest.
-// (A calendar-holiday regressor — Songkran etc. — needs date-aware history and is tracked in docs/24.)
+// (The calendar-holiday variant ships as th_holiday below — docs/27 R4-3.)
 export const dowSeasonal = (alpha = 0.3, period = 7): Forecaster => (h, hz) => {
   if (h.length < period * 2) return ses(alpha)(h, hz);
   const overall = mean(h);
@@ -117,7 +117,7 @@ export function addDaysYmd(ymdStr: string, days: number): string {
 }
 const isThHoliday = (ymdStr: string) => TH_FIXED_HOLIDAYS.has(ymdStr.slice(5));
 
-// Thai-calendar holiday model (docs/24 R4-3 / AUD-AI-03 — the Songkran gap): day-of-week factors learned
+// Thai-calendar holiday model (docs/27 R4-3 / AUD-AI-03 — the Songkran gap): day-of-week factors learned
 // from NON-holiday days × a multiplicative holiday uplift learned from the holidays observed in-window
 // (needs ≥2 observations, else factor 1), applied to future dates that land on a fixed Thai holiday.
 // Without date context it degrades to dowSeasonal — and auto-selection only ever picks it when it WINS

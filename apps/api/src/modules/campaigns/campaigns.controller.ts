@@ -8,10 +8,13 @@ const CampaignBody = z.object({
   id: z.number().int().positive().optional(),
   name: z.string().min(1),
   channel: z.enum(['sms', 'email', 'line']).default('sms'),
-  audience: z.enum(['all', 'segment', 'tier', 'birthdays_today']).default('all'),
+  audience: z.enum(['all', 'segment', 'tier', 'birthdays_today', 'saved_segment']).default('all'),
   segment: z.string().optional(),
   tier: z.string().optional(),
+  saved_segment_id: z.number().int().positive().optional(),
   body: z.string().min(1),
+  variant_b_body: z.string().min(1).optional(),
+  split_b_pct: z.number().int().min(0).max(90).optional(),
   schedule_at: z.string().datetime().optional(),
 });
 

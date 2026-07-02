@@ -33,7 +33,7 @@ export class DocAiService {
     if (!t) return { fields: { vendor_name: null, vendor_tax_id: null, invoice_no: null, invoice_date: null, amount: null, currency: 'THB' }, source: 'none' };
     if (!this.apiKey) return { fields: this.ruleExtract(t), source: 'rules' };
     try {
-      const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
+      const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
       const res: any = await client.create({
         model: this.model, max_tokens: 1024,
         system: 'You extract vendor-invoice fields. Return ONLY JSON: {vendor_name, vendor_tax_id, invoice_no, invoice_date (YYYY-MM-DD), amount (number), currency}. No prose.',

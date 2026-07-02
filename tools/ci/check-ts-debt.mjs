@@ -1,4 +1,4 @@
-// TypeScript-debt ratchet (docs/24 R2-5 / AUD-ARC-05).
+// TypeScript-debt ratchet (docs/27 R2-5 / AUD-ARC-05).
 // The API weakened two safety nets: `noUncheckedIndexedAccess` is disabled in apps/api/tsconfig.json
 // (248 errors when enabled, as of 2026-07-02) and `as any` is pervasive (1,456 occurrences). Fixing all of
 // it in one PR is regression-roulette on money paths — so this guard RATCHETS instead: the committed

@@ -27,6 +27,9 @@ const FIELDS: Record<string, { col: any; kind: Kind }> = {
   preferred_channel:{ col: customerProfiles.preferredChannel, kind: 'text' },
   visit_count:      { col: customerProfiles.visitCount,  kind: 'num' },
   avg_order_value:  { col: customerProfiles.avgOrderValue, kind: 'num' },
+  // G3 predictive scores — null until the member has a paid order (null never matches a rule).
+  churn_risk:       { col: customerProfiles.churnRisk,    kind: 'num' },
+  predicted_ltv:    { col: customerProfiles.predictedLtv, kind: 'num' },
 };
 const OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'] as const;
 type Op = (typeof OPS)[number];
@@ -105,6 +108,31 @@ export class SavedSegmentsService {
     const [row] = await db.delete(savedSegments).where(eq(savedSegments.id, id)).returning({ id: savedSegments.id });
     if (!row) throw new NotFoundException({ code: 'SEGMENT_NOT_FOUND', message: 'Segment not found', messageTh: 'ไม่พบเซกเมนต์' });
     return { id, deleted: true };
+  }
+
+  // Resolve a saved segment to its matching ACTIVE member rows for one tenant — the send-loop variant used
+  // by campaign/blast delivery (Phase F1). EXPLICITLY tenant-scoped on both the segment and the members
+  // (campaign sends also run from the Admin/cron path where RLS is bypassed). Returns full pos_members rows.
+  async membersForSend(tx: any, tenantId: number, segmentId: number): Promise<any[]> {
+    const [seg] = await tx.select().from(savedSegments).where(and(eq(savedSegments.id, segmentId), eq(savedSegments.tenantId, tenantId))).limit(1);
+    if (!seg) throw new NotFoundException({ code: 'SEGMENT_NOT_FOUND', message: 'Segment not found', messageTh: 'ไม่พบเซกเมนต์' });
+    const rules = (Array.isArray(seg.rules) ? seg.rules : []) as SegmentRule[];
+    const w = this.where(rules, seg.matchMode);
+    const cond = and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true), ...(w ? [w] : []));
+    const rows = await tx.select({ m: posMembers }).from(posMembers)
+      .leftJoin(customerProfiles, eq(customerProfiles.memberId, posMembers.id)).where(cond);
+    return rows.map((r: any) => r.m);
+  }
+
+  // Does ONE member match a single rule? (Phase G1 journey skip-rules.) Same whitelist + bound values as
+  // segment resolution — an unknown field/op throws BAD_FIELD/BAD_OP, never reaches SQL. Tenant-scoped.
+  async memberMatchesRule(tx: any, tenantId: number, memberId: number, rule: SegmentRule): Promise<boolean> {
+    this.validate([rule]);
+    const w = this.cond(rule);
+    const cond = and(eq(posMembers.tenantId, tenantId), eq(posMembers.id, memberId), ...(w ? [w] : []));
+    const [row] = await tx.select({ id: posMembers.id }).from(posMembers)
+      .leftJoin(customerProfiles, eq(customerProfiles.memberId, posMembers.id)).where(cond).limit(1);
+    return !!row;
   }
 
   // Resolve a saved segment to its matching active members (paginated) + a total count.

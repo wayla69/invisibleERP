@@ -123,8 +123,8 @@ async function main() {
     console.log(`   ${seq} posted journals · revenue ฿${r2(revTot).toLocaleString()} · COGS ฿${r2(cogsTot).toLocaleString()} · opex ฿${r2(opexTot).toLocaleString()}`);
     console.log(`   → net profit ฿${netProfit.toLocaleString()} (${r2((netProfit / revTot) * 100)}% margin)`);
   });
-  // Direct journal inserts bypass LedgerService → rebuild the gl_period_balances snapshot (docs/24 R1-2)
-  // so the trial balance (snapshot-backed) reflects the demo books. Same recompute as the 0212 backfill.
+  // Direct journal inserts bypass LedgerService → rebuild the gl_period_balances snapshot (docs/27 R1-2)
+  // so the trial balance (snapshot-backed) reflects the demo books. Same recompute as the 0218 backfill.
   await client.unsafe(`DELETE FROM gl_period_balances`);
   await client.unsafe(`INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
     SELECT je.tenant_id, coalesce(je.ledger_code,''), coalesce(je.period,''), coalesce(jl.cost_center_code,''), jl.account_code, coalesce(sum(jl.debit),0), coalesce(sum(jl.credit),0)

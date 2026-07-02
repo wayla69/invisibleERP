@@ -164,7 +164,7 @@ export class LedgerService {
     return sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${c})`;
   }
 
-  // ───────────────────── GL period-balance snapshot (docs/24 R1-2 / AUD-ARC-02) ─────────────────────
+  // ───────────────────── GL period-balance snapshot (docs/27 R1-2 / AUD-ARC-02) ─────────────────────
   // Apply one posted entry's lines to gl_period_balances INSIDE the same transaction as the posting.
   // Posting is the only balance-affecting event (Drafts are excluded from balances, Posted entries are
   // DB-immutable per 0165, corrections are contra reversals that post normally), so the snapshot cannot
@@ -186,7 +186,7 @@ export class LedgerService {
     const ledgerCode = hdr.ledgerCode ?? '';
     const period = hdr.period ?? '';
     for (const r of agg.values()) {
-      // ON CONFLICT targets the ux_gl_period_balances expression index (0212): atomic accumulate.
+      // ON CONFLICT targets the ux_gl_period_balances expression index (0218): atomic accumulate.
       await tx.execute(sql`
         INSERT INTO gl_period_balances (tenant_id, ledger_code, period, cost_center_code, account_code, debit, credit)
         VALUES (${hdr.tenantId}, ${ledgerCode}, ${period}, ${r.cc}, ${r.account}, ${fx(r.debit, 4)}, ${fx(r.credit, 4)})
@@ -222,7 +222,7 @@ export class LedgerService {
       }
     }
 
-    // Exact scale-4 balance check (docs/24 R1-4): accumulate in bigint minor units — float sums that are
+    // Exact scale-4 balance check (docs/27 R1-4): accumulate in bigint minor units — float sums that are
     // then rounded can drift across a rounding boundary and are not a ledger-grade invariant.
     const totalDebitM = nzLines.reduce((a, l) => a + toMinor4(n(l.debit)), 0n);
     const totalCreditM = nzLines.reduce((a, l) => a + toMinor4(n(l.credit)), 0n);
@@ -690,7 +690,7 @@ export class LedgerService {
   async balanceSheet(asOf: string, ledgerCode?: string | null) {
     const db = this.db as any;
     const rows = await this.aggregateByType(db, null, asOf, undefined, ledgerCode);
-    // Exact minor-unit arithmetic (docs/24 R1-4): the balanced flag compares bigints, not rounded floats.
+    // Exact minor-unit arithmetic (docs/27 R1-4): the balanced flag compares bigints, not rounded floats.
     const assetsM = typeTotalM(rows, 'Asset', 'debit') - typeTotalM(rows, 'Asset', 'credit');
     const liabilitiesM = typeTotalM(rows, 'Liability', 'credit') - typeTotalM(rows, 'Liability', 'debit');
     // equity INCLUDES 3100 Retained Earnings (closed-year results carried here by closeYear)
@@ -1173,7 +1173,7 @@ function prevDay(ymdStr: string): string {
 function typeTotal(rows: any[], type: string, side: 'debit' | 'credit'): number {
   return rows.filter((r) => r.account_type === type).reduce((a, r) => a + n(r[side]), 0);
 }
-// Exact variant over the raw SQL numeric strings, in bigint minor units (docs/24 R1-4 / AUD-ARC-04).
+// Exact variant over the raw SQL numeric strings, in bigint minor units (docs/27 R1-4 / AUD-ARC-04).
 function typeTotalM(rows: any[], type: string, side: 'debit' | 'credit'): bigint {
   return rows.filter((r) => r.account_type === type).reduce((a: bigint, r) => a + toMinor4(r[side]), 0n);
 }

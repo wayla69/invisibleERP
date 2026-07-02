@@ -1,4 +1,4 @@
-// LLM provider seam (docs/24 R4-4 / AUD-AI-04).
+// LLM provider seam (docs/27 R4-4 / AUD-AI-04).
 // Six services each lazy-required the Anthropic SDK and built their own client — a hard single-provider
 // dependency with no way to substitute anything (second provider later, or a deterministic fake for
 // scored evals). This module is the ONE construction point:

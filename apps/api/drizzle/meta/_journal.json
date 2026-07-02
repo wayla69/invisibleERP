@@ -1483,21 +1483,63 @@
       "idx": 211,
       "version": "7",
       "when": 2023820000038,
-      "tag": "0211_tenant_indexes_backfill",
+      "tag": "0211_campaign_saved_segment",
       "breakpoints": true
     },
     {
       "idx": 212,
       "version": "7",
       "when": 2023820000039,
-      "tag": "0212_gl_period_balances",
+      "tag": "0212_journeys",
       "breakpoints": true
     },
     {
       "idx": 213,
       "version": "7",
       "when": 2023820000040,
-      "tag": "0213_kb_embed_provider",
+      "tag": "0213_ab_holdout",
+      "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "7",
+      "when": 2023820000041,
+      "tag": "0214_predictive_scoring",
+      "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "7",
+      "when": 2023820000042,
+      "tag": "0215_journey_branching",
+      "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "7",
+      "when": 2023820000043,
+      "tag": "0216_campaign_window",
+      "breakpoints": true
+    },
+    {
+      "idx": 217,
+      "version": "7",
+      "when": 2023820000044,
+      "tag": "0217_tenant_indexes_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 218,
+      "version": "7",
+      "when": 2023820000045,
+      "tag": "0218_gl_period_balances",
+      "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "7",
+      "when": 2023820000046,
+      "tag": "0219_kb_embed_provider",
       "breakpoints": true
     }
   ]

@@ -47,7 +47,7 @@ export class KnowledgeService {
 
   async search(query: string, k: number, _user: JwtUser): Promise<{ results: Citation[]; provider: string }> {
     const db = this.db as any;
-    // Embed the query, then compare ONLY against chunks in the same embedding space (docs/24 R4-1) —
+    // Embed the query, then compare ONLY against chunks in the same embedding space (docs/27 R4-1) —
     // cross-space cosine is noise. Chunks embedded by another provider stay invisible until re-embedded
     // (POST /api/ai/kb/reembed) — degraded coverage, never wrong scores.
     const q = await this.embedder.embed(query);
@@ -62,7 +62,7 @@ export class KnowledgeService {
     return { results: scored.slice(0, Math.max(1, k)), provider: q.provider };
   }
 
-  // Re-embed every chunk with the CURRENT provider (docs/24 R4-1) — the migration path after switching
+  // Re-embed every chunk with the CURRENT provider (docs/27 R4-1) — the migration path after switching
   // EMBED_PROVIDER (e.g. local → voyage). Idempotent; RLS scopes to the caller's tenant.
   async reembedAll(_user: JwtUser) {
     const db = this.db as any;

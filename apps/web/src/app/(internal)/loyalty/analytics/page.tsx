@@ -20,7 +20,7 @@ interface Overview {
   breakage_rate_pct: number; churn_rate_pct: number; active_rate_pct: number;
 }
 interface Churn { at_risk: { id: number; member_code: string; name: string; tier: string; balance: number; last_activity: string }[] }
-interface Segments { profiled_members: number; total_spend: number; segments: { segment: string; members: number; total_spend: number; total_orders: number; avg_spend: number }[] }
+interface Segments { profiled_members: number; total_spend: number; segments: { segment: string; members: number; total_spend: number; total_orders: number; avg_spend: number }[]; at_risk_value?: { members: number; predicted_ltv: number; threshold: number } }
 interface LiveFeed { available: boolean; events: { kind: 'earn' | 'redeem'; member_id: number; points: number; balance_after: number; ref_doc: string; at?: string }[] }
 
 // RFM segment → colour (Champions best → Lost worst; Unsegmented neutral).
@@ -106,7 +106,7 @@ export default function LoyaltyAnalyticsPage() {
             <Card className="gap-3">
               <CardHeader className="pb-0">
                 <CardTitle className="flex items-center gap-2 text-base"><BarChart3 className="size-4 text-primary" /> กลุ่มลูกค้า RFM (Customer segments)</CardTitle>
-                {seg.data && <p className="text-xs text-muted-foreground">จัดกลุ่มแล้ว {num(seg.data.profiled_members)} คน · ยอดซื้อรวม {baht(seg.data.total_spend)}</p>}
+                {seg.data && <p className="text-xs text-muted-foreground">จัดกลุ่มแล้ว {num(seg.data.profiled_members)} คน · ยอดซื้อรวม {baht(seg.data.total_spend)}{seg.data.at_risk_value && seg.data.at_risk_value.members > 0 ? ` · ⚠ มูลค่าเสี่ยงหาย ~${baht(seg.data.at_risk_value.predicted_ltv)} (${num(seg.data.at_risk_value.members)} คน churn ≥ ${seg.data.at_risk_value.threshold} — ค่าประมาณ)` : ''}</p>}
               </CardHeader>
               <CardContent className="space-y-2">
                 <StateView q={seg}>

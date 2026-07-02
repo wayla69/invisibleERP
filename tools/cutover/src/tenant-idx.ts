@@ -1,8 +1,8 @@
 /**
- * Tenant-index guard (docs/24 R1-1, AUD-ARC-01). RLS puts a tenant_id predicate on EVERY query against a
+ * Tenant-index guard (docs/27 R1-1, AUD-ARC-01). RLS puts a tenant_id predicate on EVERY query against a
  * tenant-scoped table, so each such table MUST have an index whose LEADING column is tenant_id — otherwise
  * per-tenant reads seq-scan and degrade non-linearly under concurrency. This harness boots the full
- * migration set over PGlite and fails on ANY uncovered table (no grandfathering — 0211 backfilled the lot),
+ * migration set over PGlite and fails on ANY uncovered table (no grandfathering — 0217 backfilled the lot),
  * so a new tenant-scoped table cannot ship without a tenant-leading index in its migration or schema.
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover tenant-idx
  */

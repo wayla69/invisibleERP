@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { toMinor4, minorToNumber4, eqMoney4 } from '../src/common/money';
 
-// Exact scale-4 money arithmetic (docs/24 R1-4 / AUD-ARC-04). The ledger's balanced checks compare
+// Exact scale-4 money arithmetic (docs/27 R1-4 / AUD-ARC-04). The ledger's balanced checks compare
 // bigint minor units, never independently-rounded float sums.
 describe('money — toMinor4 string parsing (no float hop)', () => {
   it('parses pg numeric strings exactly', () => {

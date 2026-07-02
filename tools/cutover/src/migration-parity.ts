@@ -1,5 +1,5 @@
 /**
- * Migration-order parity guard (docs/24 R5-1 / AUD-ARC-08).
+ * Migration-order parity guard (docs/27 R5-1 / AUD-ARC-08).
  * Two consumers apply the migrations in DIFFERENT orders: the PGlite harnesses read the .sql files sorted
  * by FILENAME, while prod `drizzle-kit migrate` applies meta/_journal.json JOURNAL order. Historical
  * duplicate numbers + append-journaled orphans mean those orders genuinely differ — this harness builds a

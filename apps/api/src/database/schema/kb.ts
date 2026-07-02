@@ -20,8 +20,8 @@ export const kbChunks = pgTable('kb_chunks', {
   ord: integer('ord').notNull(),   // chunk order within the document
   content: text('content').notNull(),
   embedding: jsonb('embedding').notNull(), // number[] (L2-normalized)
-  // Which embedding space the vector lives in (docs/24 R4-1) — search filters to the query's space;
-  // vectors from different providers are never compared. Backfilled 'local' by migration 0213.
+  // Which embedding space the vector lives in (docs/27 R4-1) — search filters to the query's space;
+  // vectors from different providers are never compared. Backfilled 'local' by migration 0219.
   embedProvider: text('embed_provider').notNull().default('local'),
   createdAt: timestamp('created_at').defaultNow(),
 });

@@ -1,4 +1,4 @@
-// Exact scale-4 minor-unit money arithmetic (docs/24 R1-4 / AUD-ARC-04).
+// Exact scale-4 minor-unit money arithmetic (docs/27 R1-4 / AUD-ARC-04).
 // Postgres `numeric` columns arrive in JS as STRINGS; summing/comparing them through floats and then
 // testing `roundedA === roundedB` is not a ledger-grade invariant — two independently accumulated float
 // sums can round to different 4-dp values (order-dependent ulp drift, half-way boundaries, large

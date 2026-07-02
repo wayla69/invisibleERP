@@ -39,7 +39,7 @@ export class AiConfigService {
     if (!TARGETS.includes(target as any)) throw new BadRequestException({ code: 'BAD_TARGET', message: `target must be one of ${TARGETS.join(', ')}`, messageTh: 'ประเภทคอนฟิกไม่ถูกต้อง' });
     if (!this.apiKey) return { target, proposal: this.template(target, description), source: 'template', note: 'ตรวจทานก่อนนำไปใช้งานจริง' };
     try {
-      const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
+      const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
       const res: any = await client.create({
         model: this.model, max_tokens: 700,
         system: `You propose a JSON configuration for a "${target}" in an ERP customization studio. Return ONLY JSON, no prose.`,

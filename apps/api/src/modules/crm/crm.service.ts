@@ -1,5 +1,5 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, isNotNull, desc, sql, gte, lt, inArray } from 'drizzle-orm';
+import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { eq, and, isNotNull, desc, sql, gt, gte, lt, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, promoAudienceRules } from '../../database/schema/crm';
 import { posMembers } from '../../database/schema/loyalty-members';
@@ -9,6 +9,25 @@ import { dineInOrders } from '../../database/schema/restaurant';
 import { promotions } from '../../database/schema/marketing';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+
+// Predictive scoring (Growth Engine G3, docs/25) — EXPLAINABLE versioned weighted formula, deliberately
+// not a trained model (SOX posture: coefficients are code-reviewed + documented in
+// docs/ops/predictive-scoring.md; every stored score carries SCORE_VERSION). Null until ≥1 paid order.
+export const SCORE_VERSION = 'v1';
+export const SCORE_COEFFS = {
+  assumedCadenceDays: 30, // cadence fallback when the member has exactly 1 order (assume monthly)
+  ratioSoftness: 3,       // churn base = 100·r/(r+softness), r = recency ÷ personal cadence
+  trendAdj: 10,           // ± adjustment when order count last 45d shrinks/grows vs the prior 45d
+  ltvHorizonDays: 365,    // predicted LTV horizon (12 months)
+} as const;
+// churn_risk 0..100: how far past their OWN purchase rhythm a member is (a weekly customer 3 weeks quiet
+// scores far higher than a quarterly one 3 weeks quiet), nudged by the frequency trend.
+function churnScore(recencyDays: number, cadenceDays: number, last45: number, prior45: number): number {
+  const r = recencyDays / Math.max(1, cadenceDays);
+  const base = 100 * (r / (r + SCORE_COEFFS.ratioSoftness));
+  const trend = last45 < prior45 ? SCORE_COEFFS.trendAdj : last45 > prior45 ? -SCORE_COEFFS.trendAdj : 0;
+  return Math.max(0, Math.min(100, Math.round(base + trend)));
+}
 
 // RFM scoring — each dimension 1-5
 function rfmScore(recencyDays: number, freq: number, monetary: number) {
@@ -65,12 +84,30 @@ export class CrmService {
 
     const avgOrderValue = totalOrders > 0 ? Math.round(totalSpend / totalOrders * 100) / 100 : 0;
 
+    // G3 predictive scores — personal cadence = avg days between orders (fallback: assume monthly with a
+    // single order); LTV = avg order value × orders/year at that cadence × survival (1 − churn). Estimates,
+    // not bookkeeping: never posted anywhere, surfaced with the version stamp.
+    let churnRisk: number | null = null;
+    let predictedLtv: number | null = null;
+    if (totalOrders > 0 && lastOrderAt) {
+      const cadence = totalOrders >= 2 && firstOrderAt
+        ? Math.max(1, (lastOrderAt.getTime() - firstOrderAt.getTime()) / 86_400_000 / (totalOrders - 1))
+        : SCORE_COEFFS.assumedCadenceDays;
+      const cut45 = Date.now() - 45 * 86_400_000, cut90 = Date.now() - 90 * 86_400_000;
+      const last45 = rows.filter(r => new Date(r.openedAt).getTime() >= cut45).length;
+      const prior45 = rows.filter(r => { const t = new Date(r.openedAt).getTime(); return t >= cut90 && t < cut45; }).length;
+      churnRisk = churnScore(rfmRecency, cadence, last45, prior45);
+      predictedLtv = Math.round(avgOrderValue * (SCORE_COEFFS.ltvHorizonDays / cadence) * (1 - churnRisk / 100) * 100) / 100;
+    }
+
     const vals = {
       tenantId, memberId,
       totalOrders, totalSpend: String(totalSpend), lastOrderAt, firstOrderAt,
       rfmRecency, rfmFrequency, rfmMonetary: String(rfmMonetary), rfmSegment: segment,
       preferredChannel, visitCount: totalOrders,
-      avgOrderValue: String(avgOrderValue), refreshedAt: new Date(),
+      avgOrderValue: String(avgOrderValue),
+      churnRisk, predictedLtv: predictedLtv != null ? String(predictedLtv) : null, scoreVersion: SCORE_VERSION,
+      refreshedAt: new Date(),
     };
 
     await db.insert(customerProfiles).values(vals).onConflictDoUpdate({
@@ -78,7 +115,36 @@ export class CrmService {
       set: { ...vals },
     });
 
-    return { member_id: memberId, rfm_segment: segment, total_orders: totalOrders, total_spend: totalSpend, rfm_recency: rfmRecency, rfm_frequency: rfmFrequency, rfm_monetary: rfmMonetary };
+    return { member_id: memberId, rfm_segment: segment, total_orders: totalOrders, total_spend: totalSpend, rfm_recency: rfmRecency, rfm_frequency: rfmFrequency, rfm_monetary: rfmMonetary, churn_risk: churnRisk, predicted_ltv: predictedLtv, score_version: SCORE_VERSION };
+  }
+
+  // Phase F2 (docs/27) — bulk RFM re-profiling. Sweeps the tenant's ACTIVE members in id-keyed batches
+  // through the single reviewed refreshProfile() path (no new scoring logic), so segments and analytics stop
+  // drifting stale between orders. Idempotent (the profile is a pure upsert; a re-run with no new orders
+  // reports 0 segment changes). Explicitly tenant-scoped — the BI scheduler also runs this under Admin
+  // (RLS-bypassing), and an HQ/Admin caller must pass an explicit tenant_id.
+  async refreshAllProfiles(user: JwtUser, opts: { tenantId?: number | null } = {}) {
+    const db = this.db as any;
+    const tenantId = user.role === 'Admin' || user.tenantId == null ? (opts.tenantId ?? user.tenantId) : user.tenantId;
+    if (tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'tenant_id required', messageTh: 'ต้องระบุร้านค้า' });
+    const BATCH = 500; let lastId = 0, profiled = 0, segmentChanges = 0;
+    for (let i = 0; i < 200; i++) { // safety cap: 200 batches (100k members)
+      const batch = await db.select({ id: posMembers.id }).from(posMembers)
+        .where(and(eq(posMembers.tenantId, tenantId), eq(posMembers.active, true), gt(posMembers.id, lastId)))
+        .orderBy(posMembers.id).limit(BATCH);
+      if (!batch.length) break;
+      for (const m of batch) {
+        const memberId = Number(m.id);
+        const [before] = await db.select({ seg: customerProfiles.rfmSegment }).from(customerProfiles)
+          .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.memberId, memberId))).limit(1);
+        const r = await this.refreshProfile(tenantId, memberId);
+        profiled++;
+        if ((before?.seg ?? null) !== r.rfm_segment) segmentChanges++;
+      }
+      lastId = Number(batch[batch.length - 1].id);
+      if (batch.length < BATCH) break;
+    }
+    return { tenant_id: tenantId, profiled, segment_changes: segmentChanges };
   }
 
   // 360-degree customer view
@@ -94,7 +160,10 @@ export class CrmService {
       crm: p ? {
         rfm_segment: p.rfmSegment, total_orders: p.totalOrders, total_spend: n(p.totalSpend),
         rfm_recency: p.rfmRecency, rfm_frequency: p.rfmFrequency, rfm_monetary: n(p.rfmMonetary),
-        preferred_channel: p.preferredChannel, avg_order_value: n(p.avgOrderValue), refreshed_at: p.refreshedAt,
+        preferred_channel: p.preferredChannel, avg_order_value: n(p.avgOrderValue),
+        churn_risk: p.churnRisk != null ? Number(p.churnRisk) : null,
+        predicted_ltv: p.predictedLtv != null ? n(p.predictedLtv) : null,
+        score_version: p.scoreVersion ?? null, refreshed_at: p.refreshedAt,
       } : null,
       recent_orders: recent.map((o: any) => ({ order_no: o.orderNo, total: n(o.total), channel: o.channel, opened_at: o.openedAt })),
     };

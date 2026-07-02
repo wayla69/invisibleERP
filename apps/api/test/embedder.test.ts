@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { EmbedderService, EMBED_DIM, cosine } from '../src/modules/ai/embedder';
 
-// docs/24 R4-1 — the semantic provider is fail-safe: any voyage failure (here: no key) degrades to the
+// docs/27 R4-1 — the semantic provider is fail-safe: any voyage failure (here: no key) degrades to the
 // deterministic local embedder, stamped with the space it actually used, so retrieval filters correctly.
 afterEach(() => { delete process.env.EMBED_PROVIDER; delete process.env.VOYAGE_API_KEY; });
 

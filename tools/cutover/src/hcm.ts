@@ -93,7 +93,7 @@ async function main() {
     pnd1a.json.headcount === 1 && near(pnd1a.json.total_income, 31000) && near(pnd1a.json.total_wht, 220.83),
     JSON.stringify({ h: pnd1a.json.headcount, inc: pnd1a.json.total_income, wht: pnd1a.json.total_wht }));
 
-  // ── 7. ITGC-AC-19 (docs/24 R0-1) — employee PII is ciphertext AT REST but decrypts through the API ──
+  // ── 7. ITGC-AC-19 (docs/27 R0-1) — employee PII is ciphertext AT REST but decrypts through the API ──
   // Raw SQL sees the stored bytes (v1:<iv>:<tag>:<ct>); the schema read decrypts, so PND1A still carries
   // the real citizen ID. The payslip snapshot column is encrypted independently of the employee master.
   const empRest: any = await pg.query('select national_id, bank_account from employees limit 1');

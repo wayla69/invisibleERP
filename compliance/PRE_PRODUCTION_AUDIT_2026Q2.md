@@ -1,6 +1,6 @@
 # Pre-Production Final Gate-keeping Audit — 2026 Q2 (NASDAQ readiness)
 
-> **HISTORICAL AUDIT RECORD — 2026-06-24 snapshot (docs/24 R3-1, added 2026-07-02).** The control counts
+> **HISTORICAL AUDIT RECORD — 2026-06-24 snapshot (docs/27 R3-1, added 2026-07-02).** The control counts
 > cited in this document (57/57, later 68/68) were the compliance-harness population **as of each run** and
 > are intentionally NOT rewritten. The RCM has since grown; the only current source of truth is
 > `python3 compliance/build_rcm.py --counts` (see `CONTROL_STATUS_HONEST.md` for the reconciled status).

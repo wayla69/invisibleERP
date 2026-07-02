@@ -1,4 +1,4 @@
--- 0211 — Tenant-index backfill (docs/24 R1-1, investment-audit finding AUD-ARC-01).
+-- 0217 — Tenant-index backfill (docs/24 R1-1, investment-audit finding AUD-ARC-01).
 -- RLS (0002_rls.sql) puts a tenant_id predicate on EVERY query against a tenant-scoped table; 132 such
 -- tables had no index whose LEADING column is tenant_id, so per-tenant reads seq-scanned and degrade
 -- non-linearly under concurrency. This adds the minimum uniform cover: a plain (tenant_id) btree per
@@ -139,3 +139,6 @@ CREATE INDEX IF NOT EXISTS "idx_work_order_components_tenant" ON "work_order_com
 CREATE INDEX IF NOT EXISTS "idx_work_order_operations_tenant" ON "work_order_operations" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_workflow_steps_tenant" ON "workflow_steps" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_xz_report_denominations_tenant" ON "xz_report_denominations" (tenant_id);
+-- Post-merge addition (docs/27 R1-1): journey_steps arrived from the docs/25-crm series (0212_journeys)
+-- without a tenant-leading index — caught by the tenant-idx guard on the main merge.
+CREATE INDEX IF NOT EXISTS "idx_journey_steps_tenant" ON "journey_steps" (tenant_id);

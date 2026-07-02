@@ -20,6 +20,7 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
+import { bucketPct } from '../../../apps/api/dist/modules/marketing/marketing-automation.service';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -107,6 +108,57 @@ async function main() {
   // ── 7. unknown coupon → 404 ──
   const bad = await inj('POST', '/api/marketing/automation/redeem', { coupon_code: 'NOPE-1-XXXXX' });
   ok('redeem unknown coupon → 404 COUPON_NOT_FOUND', bad.status === 404 && bad.json.error?.code === 'COUPON_NOT_FOUND', JSON.stringify({ s: bad.status }));
+
+  // ── 8. A/B + holdout (G2): holdout gets NO message and NO coupon — the control-group baseline ──
+  for (let i = 0; i < 36; i++) await mk(`M-AB${i}`, `Uab${i}`, true, 5, 'Loyal');
+  linePushes.length = 0;
+  const ab = await inj('POST', '/api/marketing/automation/campaigns', { name: 'AB test', trigger: 'all', channel: 'line', discount_type: 'amount', discount_value: 50, variant_b_body: '🔥 ดีลพิเศษเฉพาะคุณ', split_b_pct: 30, holdout_pct: 30 });
+  const abId = ab.json.campaign_id;
+  const abSends = await db.select().from(s.campaignSends).where(eq(s.campaignSends.campaignId, abId));
+  const holdRows = abSends.filter((r: any) => r.variant === 'holdout');
+  ok('A/B+holdout: holdout members recorded with no coupon/recipient and NO gateway call (pushes == sent)',
+    ab.json.holdout > 0 && holdRows.length === ab.json.holdout && holdRows.every((r: any) => r.status === 'holdout' && r.couponCode == null && r.recipient == null) && linePushes.length === ab.json.sent,
+    JSON.stringify({ holdout: ab.json.holdout, sent: ab.json.sent, pushes: linePushes.length }));
+
+  // ── 9. assignment is DETERMINISTIC — every recorded variant re-derives from bucketPct(campaign, member) ──
+  const expectVariant = (memberId: number) => { const p = bucketPct(abId, memberId); return p < 30 ? 'holdout' : p < 60 ? 'B' : 'A'; };
+  const mismatches = abSends.filter((r: any) => r.variant !== expectVariant(Number(r.memberId)));
+  const bSeen = linePushes.some((p) => p.text.includes('ดีลพิเศษเฉพาะคุณ'));
+  const aSeen = linePushes.some((p) => p.text.includes('ส่วนลดพิเศษ'));
+  ok('A/B assignment deterministic (hash-derived, no RNG); variant B body actually delivered alongside A',
+    mismatches.length === 0 && aSeen && bSeen,
+    JSON.stringify({ mismatches: mismatches.length, aSeen, bSeen }));
+
+  // ── 10. per-group report: A/B tallies, holdout count, honest lift framing; a B redemption lands in B ──
+  const bSend = abSends.find((r: any) => r.variant === 'B' && r.status === 'sent');
+  await inj('POST', '/api/marketing/automation/redeem', { coupon_code: bSend!.couponCode, sale_no: 'SALE-AB', value: 50 });
+  const abRep = await inj('GET', `/api/marketing/automation/campaigns/${abId}`);
+  ok('report: per-group A/B tallies + holdout count + lift note; the B redemption is attributed to group B',
+    abRep.json.ab != null && abRep.json.ab.b.redeemed === 1 && abRep.json.ab.a.redeemed === 0 && abRep.json.ab.holdout.count === ab.json.holdout && typeof abRep.json.ab.lift_note === 'string' && abRep.json.ab.b.attributed_revenue === 50,
+    JSON.stringify({ b: { sent: abRep.json.ab?.b?.sent, red: abRep.json.ab?.b?.redeemed, rev: abRep.json.ab?.b?.attributed_revenue }, hold: abRep.json.ab?.holdout?.count }));
+
+  // ── 11. Organic-purchase baseline (H2): actual paid orders per group inside the attribution window ──
+  // One HOLDOUT member buys in-window (the organic baseline), one messaged member buys in-window, and one
+  // messaged member bought BEFORE the send (out-of-window ⇒ must not count).
+  const holdMember = Number(holdRows[0].memberId);
+  const sentRows = abSends.filter((r: any) => r.status === 'sent');
+  const msgIn = Number(sentRows[0].memberId), msgOut = Number(sentRows[1].memberId);
+  await db.insert(s.dineInOrders).values([
+    { orderNo: 'DIN-H2-HOLD', tenantId: t1, memberId: holdMember, saleNo: 'SALE-H2-1', total: '300', openedAt: new Date(), channel: 'web' },
+    { orderNo: 'DIN-H2-MSG', tenantId: t1, memberId: msgIn, saleNo: 'SALE-H2-2', total: '500', openedAt: new Date(), channel: 'web' },
+    { orderNo: 'DIN-H2-OLD', tenantId: t1, memberId: msgOut, saleNo: 'SALE-H2-3', total: '999', openedAt: new Date(Date.now() - 5 * 86_400_000), channel: 'web' },
+  ]);
+  const orgRep = await inj('GET', `/api/marketing/automation/campaigns/${abId}`);
+  const org = orgRep.json.organic;
+  ok('organic baseline: holdout member\'s real purchase counted as the do-nothing baseline (window 30d)',
+    org != null && org.window_days === 30 && org.holdout.purchasers === 1 && org.holdout.order_revenue === 300 && org.holdout.members === ab.json.holdout,
+    JSON.stringify({ w: org?.window_days, hp: org?.holdout?.purchasers, hrev: org?.holdout?.order_revenue }));
+  ok('organic baseline: pre-send order excluded — messaged group counts only the in-window purchaser',
+    org?.messaged?.purchasers === 1 && org?.messaged?.order_revenue === 500,
+    JSON.stringify({ mp: org?.messaged?.purchasers, mrev: org?.messaged?.order_revenue }));
+  ok('organic lift: purchase-rate delta (messaged − holdout, pp) + scaled incremental revenue reported with group sizes',
+    org?.organic_lift != null && typeof org.organic_lift.purchase_rate_pp === 'number' && typeof org.organic_lift.incremental_revenue === 'number' && org.messaged.members > 0 && org.holdout.members > 0 && typeof org.note === 'string',
+    JSON.stringify(org?.organic_lift));
 
   console.log('\n── C12 — LINE marketing automation (closed loop) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

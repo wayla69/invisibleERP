@@ -35,7 +35,7 @@ export class InsightsService {
 
   private async call(prompt: string, maxTokens: number, fallback: () => string): Promise<string> {
     try {
-      const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
+      const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
       const msg = await client.create({ model: this.model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] });
       const block = msg.content?.[0];
       return (block?.type === 'text' ? block.text : '').trim() || fallback();

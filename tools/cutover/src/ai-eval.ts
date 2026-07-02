@@ -8,7 +8,7 @@
  *  2. Tool-accuracy over a seeded DB: the figures the model is handed are CORRECT (a wrong number is worse
  *     than a refusal). Boots the real services over PGlite, seeds known sales, asserts the summary total.
  *
- *  3. SCORED agent benchmark (docs/24 R4-4, always runs, no key): a scripted fake LLM (injected through the
+ *  3. SCORED agent benchmark (docs/27 R4-4, always runs, no key): a scripted fake LLM (injected through the
  *     common/llm-client provider seam) drives the REAL agent loop end-to-end over the seeded DB — scoring
  *     that the tool pipeline hands the model the right figures, that Voided rows stay excluded through the
  *     whole loop, and that tool results reach the model wrapped as untrusted data. Deterministic → 100% gate.
@@ -92,7 +92,7 @@ async function main() {
   ok('sales summary sums Completed sales (1000+1500)', near(summary?.total_sales, 2500), `got ${summary?.total_sales}`);
   ok('sales summary EXCLUDES the Voided sale', !near(summary?.total_sales, 12499), `got ${summary?.total_sales}`);
 
-  // ── Layer 3: SCORED agent benchmark over the fake LLM (docs/24 R4-4) ───────────────────────────
+  // ── Layer 3: SCORED agent benchmark over the fake LLM (docs/27 R4-4) ───────────────────────────
   // The fake is scripted, so what we score is everything the model does NOT control: the agent loop, the
   // tool pipeline's figures from the seeded DB, the Voided exclusion, and the untrusted-data framing.
   const seenToolResults: string[] = [];

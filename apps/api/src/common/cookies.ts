@@ -8,7 +8,7 @@ export const AUTH_COOKIE = 'ierp_token'; // httpOnly — the JWT (short-lived ac
 export const CSRF_COOKIE = 'ierp_csrf';  // readable — double-submit CSRF token (also the client's "session exists" flag)
 export const REFRESH_COOKIE = 'ierp_refresh'; // httpOnly — opaque refresh token, scoped to /api/auth
 
-// Access-cookie lifetime — coherent with the ACCESS-TOKEN TTL by default (docs/24 R2-4 / AUD-SEC-05: the
+// Access-cookie lifetime — coherent with the ACCESS-TOKEN TTL by default (docs/27 R2-4 / AUD-SEC-05: the
 // signed JWT always governs; a cookie that outlives it only confuses audits). Parses JWT_EXPIRES_IN
 // ('1h' / '30m' / bare seconds); AUTH_COOKIE_MAX_AGE still overrides explicitly.
 function jwtTtlSeconds(): number {

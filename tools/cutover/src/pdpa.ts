@@ -115,7 +115,7 @@ async function main() {
   ok('RLS: other-tenant DPO cannot read the DSAR (404)', cross.status === 404 || cross.json?.error?.code === 'NOT_FOUND', `status=${cross.status}`);
 
   // 8. Reject flow.
-  // ── Employee data subject (docs/24 AUD-LGL-03) — access returns the DECRYPTED identifiers the employer
+  // ── Employee data subject (docs/27 AUD-LGL-03) — access returns the DECRYPTED identifiers the employer
   // holds (ITGC-AC-19 columns); erasure redacts the master record but KEEPS payslips (statutory retention).
   const [emp] = await db.insert(s.employees).values({ tenantId: t1, empCode: 'EMP-PD1', name: 'Prasert K.', nationalId: '1102003330011', ssoNo: 'SSO-777', bankAccount: '111-2-33333-1', monthlySalary: '25000' }).returning();
   await db.insert(s.payruns).values({ tenantId: t1, period: '2026-05', status: 'Posted', headcount: 1 }).onConflictDoNothing();

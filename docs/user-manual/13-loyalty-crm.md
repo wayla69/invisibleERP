@@ -223,6 +223,13 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > encrypted and are write-only — the screen shows only which channels are connected, never the keys. If you set
 > nothing, the platform's shared provider (or demo mode) is used. Once your **SMS** sender is connected, the
 > member-app login OTP also goes out from **your** sender id (not the shared platform number).
+>
+> **Go-live readiness at a glance.** Each channel card carries a status badge — 🟢 **พร้อมใช้งาน** (your own
+> provider), 🟡 **ค่ากลางแพลตฟอร์ม** (shared platform provider), ⚪ **โหมดเดโม** (nothing actually leaves the
+> system) — plus the channel's **last delivery** (status / provider / time) and a *รับ delivery receipt* chip
+> when a callback token is set. If a channel shows ⚪ demo mode but has been "sending", the card warns you:
+> those messages were logged as *sent* but never reached a customer — connect a provider, then use **ส่งทดสอบ**
+> to confirm the badge flips to 🟢 and the last delivery shows the real provider name.
 
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
@@ -265,16 +272,47 @@ snapshot to your CDP endpoint in batches (set `CDP_WEBHOOK_URL` — your adminis
 **Saved custom segments.** Beyond the fixed RFM buckets you can define your **own** reusable segments — a
 named set of rules over member fields (points balance, lifetime, tier, marketing opt-in) and RFM traits
 (segment, total orders/spend, recency/frequency, preferred channel, …) combined with **all** (AND) or **any**
-(OR). Manage them via `GET`/`POST`/`PUT`/`DELETE /api/loyalty/saved-segments` (create/edit needs
-`marketing`/`exec`); `GET /api/loyalty/saved-segments/:id/members` lists the members who match right now. Only
-whitelisted fields are allowed, so a bad rule is rejected safely. *(A visual rule-builder screen is on the
-way; the API is available today.)*
+(OR). Build them on the **เซกเมนต์ลูกค้า** screen (`/loyalty/segments`, permission `marketing`/`exec`):
+
+1. Press **สร้างเซกเมนต์**, name it, pick **ทุกข้อ (AND)** or **ข้อใดข้อหนึ่ง (OR)**, and add rule rows —
+   choose a field, an operator, and a value (the field list and operators come from the server's whitelist,
+   so only safe rules can be built). Leave the rules empty to mean *all active members*.
+2. Press **ดูสมาชิก** on any saved segment to preview the live member count and a sample of who matches
+   **right now** (membership is evaluated fresh every time — it is a rule, not a frozen list).
+3. Use the segment as a campaign audience: on **แคมเปญ** pick กลุ่มเป้าหมาย → **เซกเมนต์ที่บันทึกไว้** and
+   choose the segment (or send an ad-hoc blast with `audience: saved_segment`). Consent still applies —
+   opted-out members are skipped, never contacted.
+
+The API remains available for integrations: `GET`/`POST`/`PUT`/`DELETE /api/loyalty/saved-segments`,
+`GET /api/loyalty/saved-segments/:id/members`. Only whitelisted fields are allowed, so a bad rule is
+rejected safely.
+
+**Journeys (เจอร์นีย์ลูกค้า).** Design a message *sequence* once and let it run per member — e.g. a welcome
+series (*enrol → send now → wait 7 days → follow-up*) or a win-back drip. On **เจอร์นีย์ลูกค้า**
+(`/loyalty/journeys`, permission `marketing`/`exec`):
+
+1. Name the journey, pick the **entry** — *manual/Automation* (enrol from the API or an Automation rule's
+   **enroll_journey** action, e.g. "when a member enrols → start the welcome series") or *เข้าเซกเมนต์*
+   (members who match a saved segment are enrolled automatically) — and optionally a **frequency cap**
+   (at most N journey messages per member per window).
+2. Add **steps**: each waits N days, then sends an SMS / Email / LINE message. Press **เปิดใช้** to activate
+   (pause before editing).
+3. Steps are driven by the daily **รันเจอร์นีย์ลูกค้า** job (`journey_runner` BI subscription) or
+   `POST /api/loyalty/journeys/run-due`. The funnel column shows members in-flight vs completed.
+
+> **Controls (MKT-12):** a member can enrol in a journey only **once**; every step fires **at most once**
+> (safe against re-runs and crashes); opted-out members are **skipped, never contacted**; over-cap messages
+> are skipped — every outcome is audited in the message log under `journey:<code>:<step>`.
 
 **Customer segments (RFM).** The **กลุ่มลูกค้า RFM** panel shows how your members split across the five RFM
 segments — **Champions, Loyal, New, At Risk, Lost** — with the member count and average spend per segment (members
 without a computed profile yet appear under **Unsegmented**). Click a segment to open it in **CRM 360**
 (`/crm`) pre-filtered, where you can fire a targeted campaign at exactly that group. Segments are computed from
-each member's recency/frequency/monetary behaviour (refreshed as orders post).
+each member's recency/frequency/monetary behaviour — and stay **fresh automatically**: schedule the
+**รีเฟรชโปรไฟล์ลูกค้า (RFM)** job (`crm_profile_refresh`, a daily BI subscription) to re-profile the whole
+active member base overnight, so a customer who lapses moves segment without anyone clicking anything. To
+force-refresh right now (e.g. before a big campaign), use `POST /api/crm/profiles/refresh`
+(`marketing`/`exec`) — safe to repeat.
 
 ## 14. Receipt upload for points (อัปโหลดใบเสร็จ — ขอแต้ม)
 
@@ -356,3 +394,11 @@ claim points by uploading a photo of the receipt.
 | 1.17 | 2026-07-02 | Platform | §11 **Loyalty automation triggers** — build no-code rules on Automation (`/automation`): *when a member earns/redeems (optionally over a threshold) → send a notification / message / log*. Loyalty events `loyalty.enrolled/earned/redeemed` are in the event catalog. |
 | 1.18 | 2026-07-02 | Platform | §13 **Saved custom segments** — define reusable audiences from rules over member/RFM fields (all/any) via `/api/loyalty/saved-segments`; resolve to matching members. Whitelisted fields only (safe). Rule-builder UI is a follow-up. |
 | 1.19 | 2026-07-02 | Platform | §11 **Own-provider OTP + delivery receipts** — once your **SMS** provider is connected, member-login OTPs go out from your own sender. The message log now keeps each message's provider reference, and a provider can call back `POST /api/messaging/delivery-callback/<shop-code>` (with your per-channel callback token) to mark a message *delivered*/*undelivered*. |
+| 1.20 | 2026-07-02 | Platform | §13 **Segment-builder screen** (`/loyalty/segments`) — visual rule-builder over the saved-segments whitelist with live member preview; saved segments are now selectable as a **campaign / blast audience** (เซกเมนต์ที่บันทึกไว้). Consent unchanged. |
+| 1.21 | 2026-07-02 | Platform | §13 **Segments stay fresh automatically** — schedule the `crm_profile_refresh` daily BI job to re-profile the whole member base (RFM); on-demand full refresh via `POST /api/crm/profiles/refresh`. |
+| 1.22 | 2026-07-02 | Platform | §11 **Go-live readiness badges** on the messaging-providers screen — per-channel 🟢/🟡/⚪ resolved provider, last delivery, delivery-receipt chip, and a demo-mode warning when sends silently no-op. |
+| 1.23 | 2026-07-02 | Platform | §13 **Journeys** — multi-step drips on `/loyalty/journeys` (entry manual/Automation/segment, wait→send steps, frequency cap); consent + at-most-once per step enforced (MKT-12); runs via the `journey_runner` daily job. |
+| 1.24 | 2026-07-02 | Platform | §11 **A/B + holdout** — campaign forms gain *ข้อความแบบ B (%)* and *กลุ่มควบคุม holdout (%)*: holdout members get no message/coupon (the baseline that proves lift), assignment is fixed per member (deterministic), and the automation-campaign report shows per-group sent/redeemed/revenue with a lift figure (holdout redeems 0 by definition — the note explains what the figure does and doesn't prove). |
+| 1.25 | 2026-07-02 | Platform | §13 **Churn risk & predicted LTV** — every profiled member now carries ความเสี่ยงหาย (0–100, เทียบกับจังหวะซื้อของตัวเอง) และ LTV คาดการณ์ 12 เดือน (ค่าประมาณ, มีเวอร์ชันสูตรกำกับ — ดู docs/ops/predictive-scoring.md): ใช้เป็นฟิลด์สร้างเซกเมนต์ (`churn_risk`, `predicted_ltv`) ต่อเข้า journey ดึงลูกค้ากลับได้ทันที; แผง analytics แสดง *มูลค่าเสี่ยงหาย*; หน้า 360 แสดง badge + ค่าประมาณ |
+| 1.26 | 2026-07-02 | Platform | §13 **Journey ทางแยก (branching)** — แต่ละขั้นตั้ง *ทางแยก* ได้: เลือกขั้นปลายทาง (ต้องเป็นขั้นถัด ๆ ไปเท่านั้น — ระบบบังคับ จึงวนลูปไม่ได้) + เงื่อนไขจาก catalog เดียวกับ segment builder เช่น *ถ้า recency ≤ 5 ข้ามไปขั้นขอบคุณ*; consent/frequency cap/ส่งครั้งเดียวต่อขั้น (MKT-12) เหมือนเดิมทุกประการ |
+| 1.27 | 2026-07-02 | Platform | §11 **อ่าน lift ให้เป็น (organic baseline)** — รายงานแคมเปญเพิ่มบล็อก *ยอดซื้อจริง* ต่อกลุ่ม A/B/holdout ในหน้าต่าง attribution (ตั้งได้ต่อแคมเปญ, ค่าเริ่มต้น 30 วัน): ยอดซื้อของกลุ่ม holdout คือฐาน "ถ้าไม่ส่งเลย" — lift = อัตราซื้อกลุ่มที่ถูกส่งข้อความ − holdout (pp) + รายได้ส่วนเพิ่มถ่วงขนาดกลุ่ม; ตัวเลขมาพร้อมขนาดกลุ่มเสมอ (holdout เล็ก = ฐานแกว่ง) |

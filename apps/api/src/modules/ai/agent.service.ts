@@ -215,7 +215,7 @@ export class AgentService {
 
     const dailyLimit = await this.checkBudget(_user?.tenantId ?? null);
 
-    const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
+    const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
     const messages: any[] = [...history.slice(-MAX_HISTORY), { role: 'user', content: message }];
 
     let reply = THAI_FALLBACK;
@@ -273,7 +273,7 @@ export class AgentService {
 
     const dailyLimit = await this.checkBudget(_user?.tenantId ?? null);
 
-    const client = llmClient(this.apiKey); // provider seam (docs/24 R4-4) — retries/backoff live inside
+    const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
     const messages: any[] = [...history.slice(-MAX_HISTORY), { role: 'user', content: message }];
 
     let reply = THAI_FALLBACK;

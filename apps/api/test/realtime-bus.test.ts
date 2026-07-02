@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { RealtimeBus, type RealtimeTransport, type BusEvent } from '../src/common/realtime-bus';
 
-// docs/24 R1-3 / AUD-ARC-03 — cross-node fan-out. A fake pub/sub transport shared by two bus instances
+// docs/27 R1-3 / AUD-ARC-03 — cross-node fan-out. A fake pub/sub transport shared by two bus instances
 // models two API replicas: an event published on "node A" must reach subscribers and the recent() buffer
 // on "node B" (this is exactly what the in-memory Subject could not do).
 function fakeTransport(): RealtimeTransport & { published: string[] } {

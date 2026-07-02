@@ -4,7 +4,7 @@
 > **Scope:** Answer the 2026-07 investment audit's two architecture-hygiene findings — **AUD-ARC-10**
 > (module sprawl: 122 API modules with overlapping domain ownership) and **AUD-ARC-09** (the web app is
 > ~89% `'use client'`; RSC benefits forfeited) — with a target ownership map, a mechanical sequencing that
-> cannot change behavior, and the guardrails that make each move provable. Per docs/24 R5-3: **RFC first,
+> cannot change behavior, and the guardrails that make each move provable. Per docs/27 R5-3: **RFC first,
 > then mechanical moves**, each its own doc-synced PR gated by the full harness matrix.
 
 ---
@@ -14,10 +14,10 @@
 122 modules is not itself a defect — most are healthy single-purpose slices. The audit's finding is the
 **duplicated ownership surface**: five domains where multiple modules co-own one business concept, so a
 change fans out over parallel files and copy-paste drift accumulates (the `round4` helper existed 10+
-times before docs/24 R1-4). The remedy is **boundary consolidation, not rewriting**: same services, same
+times before docs/27 R1-4). The remedy is **boundary consolidation, not rewriting**: same services, same
 routes, same tables — moved under one owning module with facades where the old import paths are load-bearing.
 
-**Non-negotiable discipline (from CLAUDE.md + docs/24):** every move is behavior-identical — API routes,
+**Non-negotiable discipline (from CLAUDE.md + docs/27):** every move is behavior-identical — API routes,
 permissions, error codes, GL postings unchanged; the ~90-harness matrix is the proof, and the `ts-debt`
 ratchet + `tenant-idx`/`migration-parity`/census guards must stay green. A move that needs a migration or
 a route change is out of scope for this RFC.
@@ -53,7 +53,7 @@ narrative names a module path; user manual/UAT untouched (no behavior change —
 conversion is NOT the goal (the app is an authenticated, highly interactive dashboard — client components
 are often correct); the goal is **server-by-default for new pages + conversion of the read-heavy top 5**:
 
-- Pattern (already shipped once): `/legal/privacy` (docs/24 R0-2) is a pure server component — zero JS
+- Pattern (already shipped once): `/legal/privacy` (docs/27 R0-2) is a pure server component — zero JS
   shipped for a content page. Use it as the template for content/report-like pages.
 - Conversion candidates, in order of bundle-weight × read-share: `accounting/page.tsx` (545 lines),
   `eam/page.tsx` (552), `projects/[code]/page.tsx` (605 — split the Gantt into a client island),

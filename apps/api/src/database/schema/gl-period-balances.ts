@@ -1,12 +1,12 @@
 import { pgTable, bigserial, bigint, text, numeric, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
-// GL period-balance snapshot (docs/24 R1-2 / AUD-ARC-02) — Σdebit/Σcredit per (tenant, ledger, period,
+// GL period-balance snapshot (docs/27 R1-2 / AUD-ARC-02) — Σdebit/Σcredit per (tenant, ledger, period,
 // cost-center, account) over POSTED entries only. Maintained transactionally by LedgerService at the two
 // balance-affecting transitions (postEntry→Posted, approveEntry Draft→Posted); Posted entries are
 // DB-immutable (0165) so no other mutation can drift it — verified anyway at close (GL-20).
 // Key columns are normalized NON-NULL ('' = NULL ledger/cost-center); the unique key lives in migration
-// 0212 as an expression index (coalesce(tenant_id,0), …) because tenant_id stays nullable like
+// 0218 as an expression index (coalesce(tenant_id,0), …) because tenant_id stays nullable like
 // journal_entries.
 export const glPeriodBalances = pgTable(
   'gl_period_balances',

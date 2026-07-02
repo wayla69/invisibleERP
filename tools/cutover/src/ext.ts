@@ -730,7 +730,7 @@ async function main() {
   const ctlFind = await inj('GET', '/api/controls/findings', cf2aa);
   const ctlKeys = (ctlFind.json.findings ?? []).map((f: any) => f.control_key);
   ok('Controls: duplicate-invoice + ghost-vendor findings raised', ctlKeys.includes('duplicate_invoice') && ctlKeys.includes('ghost_vendor'), `${JSON.stringify(ctlKeys)}`);
-  // ITGC-AC-19 (docs/24 R0-1): vendor tax_id is ciphertext AT REST (random-IV AES-GCM), yet the ghost
+  // ITGC-AC-19 (docs/27 R0-1): vendor tax_id is ciphertext AT REST (random-IV AES-GCM), yet the ghost
   // detector above still fired — proving the detector groups DECRYPTED values in app code, not ciphertext.
   const vRest: any = await pg.query(`select tax_id from vendors where vendor_code = 'GV-A'`);
   ok('ITGC-AC-19: vendor tax-id ciphertext at rest, ghost detector matches on decrypted value',

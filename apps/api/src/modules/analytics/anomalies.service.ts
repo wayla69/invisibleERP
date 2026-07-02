@@ -43,7 +43,7 @@ export class AnomaliesService {
       : [];
     const nameMap = new Map<string, string>(nameRows.map((x: any) => [x.id, x.name]));
 
-    // docs/24 R4-2 / AUD-AI-02 — the legacy port compared the recent-window SUM against a PER-DAY baseline
+    // docs/27 R4-2 / AUD-AI-02 — the legacy port compared the recent-window SUM against a PER-DAY baseline
     // (unit mismatch: any item with many active recent days false-positives) and let the baseline include
     // the recent window itself (the spike contaminates its own reference). The CORRECTED math (default)
     // compares the recent PEAK DAILY magnitude against the pre-window per-day baseline — same units, clean

@@ -98,18 +98,18 @@ async function main() {
   const bSteady = await inj('POST', '/api/demand/backtest', admin, { item_id: 'DM-STEADY' });
   const cand = (resp: any) => (resp.json.candidates ?? []) as any[];
   const byAlgo = (resp: any, a: string) => cand(resp).find((c) => c.algorithm === a);
-  ok('Backtest STEADY → all 8 candidates scored (incl. croston_sba/dow_seasonal/th_holiday, docs/24 R4-3)', cand(bSteady).length === 8 && cand(bSteady).every((c) => typeof c.wape === 'number'), JSON.stringify(cand(bSteady).map((c) => [c.algorithm, c.wape])));
+  ok('Backtest STEADY → all 8 candidates scored (incl. croston_sba/dow_seasonal/th_holiday, docs/27 R4-3)', cand(bSteady).length === 8 && cand(bSteady).every((c) => typeof c.wape === 'number'), JSON.stringify(cand(bSteady).map((c) => [c.algorithm, c.wape])));
   ok('Backtest STEADY → best WAPE small (< 0.10)', (bSteady.json.best?.wape ?? 1) < 0.10, `best=${bSteady.json.best?.algorithm} wape=${bSteady.json.best?.wape}`);
   ok('Backtest STEADY → MASE computed (finite)', Number.isFinite(bSteady.json.best?.mase), `mase=${bSteady.json.best?.mase}`);
 
-  // ── 1b. weekly-seasonal series (docs/24 R4-3 / AUD-AI-03): weekend ≈ 3× weekday. The flat models
+  // ── 1b. weekly-seasonal series (docs/27 R4-3 / AUD-AI-03): weekend ≈ 3× weekday. The flat models
   // (sma/ses) cannot express it — the multiplicative day-of-week model must WIN the backtest and be
   // auto-selected, proving seasonality is now measured, not asserted.
   const bWeekly = await inj('POST', '/api/demand/backtest', admin, { item_id: 'DM-WEEKLY' });
   ok('Backtest WEEKLY → dow_seasonal wins on WAPE (beats flat sma/ses on a weekend-heavy pattern)',
     bWeekly.json.best?.algorithm === 'dow_seasonal' && (byAlgo(bWeekly, 'dow_seasonal')?.wape ?? 1) < (byAlgo(bWeekly, 'ses')?.wape ?? 0),
     JSON.stringify(cand(bWeekly).map((c) => [c.algorithm, c.wape])));
-  // ── docs/24 R4-3 remainder — Thai holiday-calendar model, deterministic direct check ──
+  // ── docs/27 R4-3 remainder — Thai holiday-calendar model, deterministic direct check ──
   // History = 120 days ending 2026-04-12 (the day before Songkran): base 10/day, in-window fixed holidays
   // (Dec 31, Jan 1, Apr 6 — three observations) spiked ×4. Forecasting 3 days lands on Songkran
   // (Apr 13–15) — the calendar model must apply the learned holiday uplift; a date-blind model cannot.

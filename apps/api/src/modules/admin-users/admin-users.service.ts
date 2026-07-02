@@ -111,7 +111,7 @@ export class AdminUsersService {
     const set: any = {};
     if (dto.role) set.role = dto.role;
     if (dto.customer_name !== undefined) set.tenantId = await this.tenantIdFor(dto.customer_name || undefined);
-    // docs/24 R2-2 / AUD-SEC-02 — an authorization change takes effect IMMEDIATELY, not at token expiry:
+    // docs/27 R2-2 / AUD-SEC-02 — an authorization change takes effect IMMEDIATELY, not at token expiry:
     // fine-grained permissions ride the JWT claim (guards re-derive only the role live), so narrowing a
     // user's role/overrides must invalidate their outstanding sessions. Bumping tokens_valid_from makes the
     // global guard reject every earlier-issued token (same watermark as revokeAllSessions) — the user

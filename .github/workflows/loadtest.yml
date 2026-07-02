@@ -1,4 +1,4 @@
-# Manual-dispatch capacity load test (docs/24 R1-5 / AUD-ARC-06).
+# Manual-dispatch capacity load test (docs/27 R1-5 / AUD-ARC-06).
 # NOT a PR gate — absolute rps/latency depend on the backend, so the number is meaningful only against a
 # deliberately-chosen target: the in-process app over PGlite (relative regression tracking) or a real
 # Postgres/PgBouncer via HARNESS_PG_URL. Results are uploaded as an artifact; record the staging baseline
