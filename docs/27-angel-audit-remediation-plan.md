@@ -510,10 +510,12 @@ credibility in the next diligence pass.
   **Decision recorded:** `GRANDFATHERED_DUP` stays — the four dup numbers are applied in prod and drizzle
   tracks by full tag, so renumbering applied migrations is the dangerous move; the divergence risk class
   is what the parity harness now guards. Debt doc rev 1.2.
-- **R5-2 (AUD-ARC-09) — DIRECTION SET (docs/28 §4), conversions open:** server-by-default for new pages
-  (`/legal/privacy` shipped as the pattern); top-5 read-heavy conversions (`accounting`, `eam`,
-  `projects/[code]` with a Gantt client island, `reports`, `insights`) remain the rolling work, each
-  measured via the Playwright smoke + a bundle note.
+- **R5-2 (AUD-ARC-09) — DIRECTION SET (docs/28 §4), conversions IN PROGRESS:** server-by-default for new
+  pages (`/legal/privacy` shipped as the pattern); top-5 read-heavy conversions (`accounting` ✅ 2026-07-02,
+  `eam`, `projects/[code]` with a Gantt client island, `reports`, `insights`) are the rolling work, each
+  measured via the Playwright smoke + a bundle note. The `accounting` conversion shipped the reusable
+  server-fetch seam: `apps/web/src/lib/server-api.ts` (cookie-forwarded, GET-only, null-on-failure so the
+  client island falls back to its own fetch).
 - **R5-3 (AUD-ARC-10) — RFC DELIVERED 2026-07-02:** `docs/28-module-consolidation-rfc.md` — 5-cluster
   target ownership map (payments 2→1, tax trio, crm/pipeline fold, loyalty core+engagement with giftcards
   deliberately kept separate as a GL instrument, POS umbrella last), the behavior-identical mechanical
@@ -597,3 +599,4 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 3.3 | 2026-07-02 | ERP/Product | R5-3 RFC delivered (docs/28: 5-cluster map + mechanical recipe + sequencing); R5-2 direction set in docs/28 §4 |
 | 3.4 | 2026-07-02 | ERP/Product | R4-3 fully closed (date-aware Forecaster ctx + th_holiday model; deterministic Songkran ToE 40/40/40 vs ~10) |
 | 3.5 | 2026-07-02 | ERP/Product | Repo-tractable scope complete (23 pieces); final sweep green (basics 215 / compliance 114 / ext 262 / worldclass 58 / unit 95 + all guards); open items = people/console work |
+| 3.6 | 2026-07-02 | ERP/Product | docs/28 consolidation executed (5/5 PRs: payments, tax, crm/pipeline, loyalty, pos — module registrations 122→108, AUD-ARC-10 closed); R5-2 conversions started — `accounting` converted (server-api seam + server shell + client island) |
