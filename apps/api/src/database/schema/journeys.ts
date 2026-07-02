@@ -35,6 +35,11 @@ export const journeySteps = pgTable('journey_steps', {
   channel: text('channel').notNull().default('sms'),        // sms | email | line
   body: text('body').notNull(),
   skipRule: jsonb('skip_rule'),                             // { field, op, value } — F1 whitelist; null = always send
+  // H1 (docs/26) — rule-based FORWARD-ONLY jump: after this step executes, if branch_rule matches the member
+  // the enrollment advances to branch_to_step instead of step_no+1. branch_to_step > step_no is enforced at
+  // create, so termination is structural (no loop detection needed).
+  branchRule: jsonb('branch_rule'),                         // { field, op, value } — same F1 whitelist
+  branchToStep: integer('branch_to_step'),                  // forward jump target (> step_no)
 }, (t) => ({ uqStep: uniqueIndex('journey_steps_journey_step').on(t.journeyId, t.stepNo) }));
 
 export const journeyEnrollments = pgTable('journey_enrollments', {

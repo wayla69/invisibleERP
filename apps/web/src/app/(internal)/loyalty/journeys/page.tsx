@@ -22,7 +22,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 const selectCls = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 const tone: Record<string, any> = { draft: 'muted', active: 'success', paused: 'info' };
 
-interface Step { wait_days: number; channel: string; body: string; skip_rule?: { field: string; op: string; value: any } | null }
+interface Step { wait_days: number; channel: string; body: string; skip_rule?: { field: string; op: string; value: any } | null; branch_rule?: { field: string; op: string; value: any } | null; branch_to_step?: number | null }
+interface Catalog { fields: { key: string; kind: string }[] }
+const OP_TH: Record<string, string> = { eq: '=', ne: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤', contains: 'มีคำว่า' };
+const OPS_BY_KIND: Record<string, string[]> = { num: ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'], text: ['eq', 'ne', 'contains'], bool: ['eq', 'ne'] };
 interface Journey { id: number; code: string; name: string; status: string; trigger: string; segment_id: number | null; cap_messages: number; cap_window_days: number; steps: Step[]; funnel: { active: number; completed: number; exited: number } }
 interface SavedSegment { id: number; name: string }
 
@@ -33,6 +36,8 @@ export default function JourneysPage() {
 
   const [editId, setEditId] = useState<number | null>(null);
   const [f, setF] = useState({ name: '', trigger: 'manual', segment_id: '', cap_messages: '0', cap_window_days: '7' });
+  const catalog = useQuery<Catalog>({ queryKey: ['seg-catalog'], queryFn: () => api('/api/loyalty/saved-segments/catalog'), staleTime: 300_000 });
+  const kindOf = (field: string) => catalog.data?.fields.find((c) => c.key === field)?.kind ?? 'num';
   const [steps, setSteps] = useState<Step[]>([{ wait_days: 0, channel: 'sms', body: '' }]);
   const set = (p: Partial<typeof f>) => setF((s) => ({ ...s, ...p }));
   const setStep = (i: number, p: Partial<Step>) => setSteps((ss) => ss.map((s, ix) => (ix === i ? { ...s, ...p } : s)));
@@ -48,7 +53,7 @@ export default function JourneysPage() {
       ...(editId ? { id: editId } : {}), name: f.name, trigger: f.trigger,
       ...(f.trigger === 'segment' ? { segment_id: Number(f.segment_id) } : {}),
       cap_messages: Number(f.cap_messages) || 0, cap_window_days: Number(f.cap_window_days) || 7,
-      steps: steps.map((s) => ({ wait_days: Number(s.wait_days) || 0, channel: s.channel, body: s.body })),
+      steps: steps.map((s) => ({ wait_days: Number(s.wait_days) || 0, channel: s.channel, body: s.body, ...(s.branch_to_step != null && s.branch_rule ? { branch_rule: { ...s.branch_rule, value: kindOf(s.branch_rule.field) === 'num' ? Number(s.branch_rule.value) : s.branch_rule.value }, branch_to_step: Number(s.branch_to_step) } : {}) })),
     }) }),
     onSuccess: () => { notifySuccess(editId ? 'แก้ไขเจอร์นีย์แล้ว' : 'สร้างเจอร์นีย์แล้ว'); reset(); qc.invalidateQueries({ queryKey: ['journeys'] }); },
     onError: (e: Error) => notifyError(e.message),
@@ -87,6 +92,27 @@ export default function JourneysPage() {
                   <select className={selectCls} value={s.channel} onChange={(e) => setStep(i, { channel: e.target.value })} aria-label={`ช่องทาง ขั้นที่ ${i + 1}`}><option value="sms">SMS</option><option value="email">Email</option><option value="line">LINE</option></select>
                   <Input className="min-w-64 flex-1" value={s.body} onChange={(e) => setStep(i, { body: e.target.value })} placeholder="ข้อความ…" aria-label={`ข้อความ ขั้นที่ ${i + 1}`} />
                   {steps.length > 1 && <Button size="sm" variant="ghost" onClick={() => setSteps((ss) => ss.filter((_, ix) => ix !== i))} aria-label={`ลบขั้นที่ ${i + 1}`}><X className="size-3.5" /></Button>}
+                  {i < steps.length - 1 && (
+                    <div className="flex w-full flex-wrap items-center gap-2 pl-6 text-xs text-muted-foreground">
+                      <span>ทางแยก:</span>
+                      <select className={selectCls} value={s.branch_to_step ?? ''} onChange={(e) => setStep(i, e.target.value === '' ? { branch_to_step: null, branch_rule: null } : { branch_to_step: Number(e.target.value), branch_rule: s.branch_rule ?? { field: 'recency', op: 'lt', value: '' } })} aria-label={`ข้ามไปขั้นที่ (ขั้นที่ ${i + 1})`}>
+                        <option value="">— เดินตามลำดับ —</option>
+                        {steps.map((_, ix) => ix + 1).filter((no) => no > i + 1).map((no) => <option key={no} value={no}>ข้ามไปขั้นที่ {no}</option>)}
+                      </select>
+                      {s.branch_to_step != null && s.branch_rule && (
+                        <>
+                          <span>เมื่อ</span>
+                          <select className={selectCls} value={s.branch_rule.field} onChange={(e) => setStep(i, { branch_rule: { field: e.target.value, op: OPS_BY_KIND[kindOf(e.target.value)][0], value: '' } })} aria-label={`ฟิลด์เงื่อนไขทางแยก ขั้นที่ ${i + 1}`}>
+                            {(catalog.data?.fields ?? []).map((c) => <option key={c.key} value={c.key}>{c.key}</option>)}
+                          </select>
+                          <select className={selectCls} value={s.branch_rule.op} onChange={(e) => setStep(i, { branch_rule: { ...s.branch_rule!, op: e.target.value } })} aria-label={`ตัวดำเนินการทางแยก ขั้นที่ ${i + 1}`}>
+                            {OPS_BY_KIND[kindOf(s.branch_rule.field)].map((op) => <option key={op} value={op}>{OP_TH[op] ?? op}</option>)}
+                          </select>
+                          <Input className="w-28" value={s.branch_rule.value ?? ''} onChange={(e) => setStep(i, { branch_rule: { ...s.branch_rule!, value: e.target.value } })} placeholder="ค่า" aria-label={`ค่าเงื่อนไขทางแยก ขั้นที่ ${i + 1}`} />
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               <Button size="sm" variant="outline" onClick={() => setSteps((ss) => [...ss, { wait_days: 7, channel: 'sms', body: '' }])}><Plus className="size-3.5" /> เพิ่มขั้นตอน</Button>

@@ -5,7 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { JourneysService } from './journeys.service';
 
 const Rule = z.object({ field: z.string(), op: z.string(), value: z.any() });
-const Step = z.object({ wait_days: z.number().int().min(0).default(0), channel: z.enum(['sms', 'email', 'line']).default('sms'), body: z.string().min(1), skip_rule: Rule.optional().nullable() });
+const Step = z.object({ wait_days: z.number().int().min(0).default(0), channel: z.enum(['sms', 'email', 'line']).default('sms'), body: z.string().min(1), skip_rule: Rule.optional().nullable(), branch_rule: Rule.optional().nullable(), branch_to_step: z.number().int().positive().optional().nullable() });
 const JourneyBody = z.object({
   id: z.number().int().positive().optional(),
   name: z.string().min(1),
