@@ -1,7 +1,7 @@
 // Pure receipt formatters (no Nest deps → unit-testable). An 80mm thermal HTML slip + an ESC/POS-friendly
 // plain-text rendering. The body is a pure function of the sale; only the copy/reprint flags vary.
 import { bahtText } from '../../common/bahttext.util';
-import { formatTaxId } from '../tax-docs/tax-docs.snapshot';
+import { formatTaxId } from '../tax/documents/tax-docs.snapshot';
 
 export interface ReceiptModel {
   sale_no: string;

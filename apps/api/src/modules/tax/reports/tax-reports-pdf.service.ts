@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PdfRenderer } from '../pdf/pdf-renderer.service';
+import { PdfRenderer } from '../../pdf/pdf-renderer.service';
 
 const esc = (s: any) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const money = (v: any) => Number(v ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

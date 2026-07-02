@@ -1,14 +1,14 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { taxInvoices, taxInvoiceLines, custPosSales, custPosItems, arInvoices, tenants } from '../../database/schema';
-import { DocNumberService } from '../../common/doc-number.service';
-import { TaxService } from '../tax/tax.service';
-import { n, fx, ymd } from '../../database/queries';
-import type { JwtUser } from '../../common/decorators';
+import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { taxInvoices, taxInvoiceLines, custPosSales, custPosItems, arInvoices, tenants } from '../../../database/schema';
+import { DocNumberService } from '../../../common/doc-number.service';
+import { TaxService } from '../tax.service';
+import { n, fx, ymd } from '../../../database/queries';
+import type { JwtUser } from '../../../common/decorators';
 import { sellerSnapshot, isValidTaxId } from './tax-docs.snapshot';
 import type { IssueFullDto } from './dto';
-import { EtaxService } from '../pos-fiscal/etax.service';
+import { EtaxService } from '../../pos-fiscal/etax.service';
 
 @Injectable()
 export class TaxInvoiceService {

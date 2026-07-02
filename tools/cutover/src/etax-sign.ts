@@ -8,8 +8,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildEtaxInvoiceXml } from '../../../apps/api/dist/modules/tax-docs/etax-xml';
-import { getSigningMaterial, signEtaxXml, verifyEtaxSignature } from '../../../apps/api/dist/modules/tax-docs/etax-sign';
+import { buildEtaxInvoiceXml } from '../../../apps/api/dist/modules/tax/documents/etax-xml';
+import { getSigningMaterial, signEtaxXml, verifyEtaxSignature } from '../../../apps/api/dist/modules/tax/documents/etax-sign';
 
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });

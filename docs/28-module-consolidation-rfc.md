@@ -1,6 +1,6 @@
 # 25 — Module Consolidation & Web RSC Migration — RFC
 
-> **Date:** 2026-07-02 · **Status:** v1.0 — **RFC (decision requested; no code moves yet)** · **Owner:** ERP / Platform
+> **Date:** 2026-07-02 · **Status:** v1.2 — **IN EXECUTION (PRs 1–2 shipped: payments ✅, tax ✅)** · **Owner:** ERP / Platform
 > **Scope:** Answer the 2026-07 investment audit's two architecture-hygiene findings — **AUD-ARC-10**
 > (module sprawl: 122 API modules with overlapping domain ownership) and **AUD-ARC-09** (the web app is
 > ~89% `'use client'`; RSC benefits forfeited) — with a target ownership map, a mechanical sequencing that
@@ -29,7 +29,7 @@ a route change is out of scope for this RFC.
 | **POS** | `pos`, `pos-audit`, `pos-control`, `pos-fiscal`, `pos-loyalty-labor`, `pos-scale`, `pos-terminal` (7) | `pos/` core + `pos/` sub-folders (`audit`, `control`, `fiscal`, `labor`, `scale`, `terminal`) under ONE `PosModule` umbrella that re-exports today's Nest modules | Highest traffic domain; move folders + module imports only. `pos-scale`'s realtime bus already extracted to `common/realtime-bus.ts` (R1-3) — the hardest coupling is gone. |
 | **Loyalty/CRM-B2C** | `loyalty`, `loyalty-analytics`, `member`, `rewards`, `referrals`, `wheels`, `giftcards`, `gamification` (8) | `loyalty/` core (members, ledger, consents) + `loyalty/engagement/` (rewards, referrals, wheels, gamification); **`giftcards` stays separate** | Gift cards carry their own GL liability (2200) + REC-04 reconciliation — a finance instrument, not an engagement toy; keep its boundary. |
 | **CRM-B2B/pipeline** | `crm`, `crm-pipeline`, `pipeline` (3) | `crm/` (accounts + 360) + `crm/pipeline/` (opportunities, win/loss) — fold the older `pipeline` forecaster into `crm/pipeline` | `pipeline` predates `crm-pipeline`; both expose forecast views. Verify no route collision (`/api/pipeline` vs `/api/crm/pipeline`) before folding; keep both routes as aliases for one service. |
-| **Tax** | `tax`, `tax-docs`, `tax-reports` (3) | `tax/` core (VAT/WHT engines) + `tax/documents/` + `tax/reports/` | Statutory-filing snapshots (`tax-docs`) are audit records — folder moves only, never touch their tables. |
+| **Tax** ✅ | `tax`, `tax-docs`, `tax-reports` (3) | `tax/` core + `tax/documents/` + `tax/reports/` — **SHIPPED (PR #2, 2026-07-02):** files git-mv'd keeping names; new `TaxCoreModule` (bare `TaxService`) breaks the `TaxDocsModule`→umbrella cycle; umbrella `TaxModule` imports + re-exports all three, so the six existing `TaxModule` importers keep receiving `TaxService` unchanged; app.module standalone entries removed; routes (`/api/tax*`, `/api/tax-reports/*`), permissions and tables untouched | Statutory-filing snapshots (`tax-docs`) are audit records — folder moves only, never touch their tables. |
 | **Payments** ✅ | `payments`, `payments-depth` (2) | merge `payments-depth` into `payments/` — **SHIPPED (PR #1, 2026-07-02):** files moved to `payments/depth/`, `PaymentsModule` imports + re-exports `PaymentsDepthModule`, standalone app.module entry removed; routes/permissions/GL unchanged; no facade needed (zero external importers) | "depth" was a phase name, not a boundary. |
 
 Explicitly **NOT** consolidated: `finance` vs `ledger` (sub-ledger vs GL is a real accounting boundary),
@@ -39,7 +39,8 @@ authority models).
 
 ## 3. Sequencing (five PRs, priority order, each independently green)
 
-1. **payments** ✅ (2→1; smallest — SHIPPED, the recipe holds) → 2. **tax** → 3. **crm/pipeline** (needs the route-alias
+1. **payments** ✅ (2→1; smallest — SHIPPED, the recipe holds) → 2. **tax** ✅ (3→1; SHIPPED — first cluster that needed
+a cycle-breaker core module) → 3. **crm/pipeline** (needs the route-alias
 check) → 4. **loyalty** → 5. **pos** (largest; last, after the recipe is boring).
 
 **The recipe per PR:** `git mv` folders → update module imports + the Nest `imports:[]` graph → add
@@ -77,3 +78,4 @@ previous one merges (the docs/19 lesson — shared files, sequential PRs).
 |---|---|---|---|
 | 1.0 | 2026-07-02 | Platform | Initial RFC from the 2026-07 investment-audit findings AUD-ARC-10 (module sprawl → 5-cluster ownership map + mechanical recipe + 5-PR sequencing) and AUD-ARC-09 (RSC direction: server-by-default for new pages, top-5 conversion list, /legal/privacy as the shipped pattern). |
 | 1.1 | 2026-07-02 | Platform | **Consolidation PR #1 (payments) shipped** — `payments-depth` folded into `payments/depth/` under the `PaymentsModule` umbrella (import + re-export); app.module registration removed; zero route/permission/GL change. Proof: pos-p2 33 · cash-banking 11 · restaurant 162 · basics 215 · compliance 115 · ts-debt green; typecheck + build green. Module count 122→121. |
+| 1.2 | 2026-07-02 | Platform | **Consolidation PR #2 (tax) shipped** — `tax-docs` → `tax/documents/`, `tax-reports` → `tax/reports/`; new `TaxCoreModule` provides/exports `TaxService` so `TaxDocsModule` can depend on it without a cycle through the umbrella; umbrella `TaxModule` imports + re-exports `TaxCoreModule`/`TaxDocsModule`/`TaxReportsModule` (existing importers untouched); external import paths re-pointed (restaurant, pos, pos-fiscal, harness dist imports) — no facades, all importers in-repo. Zero route/permission/table change. Proof: taxdocs 52 · etax 9 · etax-sign 10 · etax-email 4 · promptpay 6 · pos-p0 25 · pos-p1 19 · restaurant 162 · basics 215 · compliance 115 · ts-debt green; typecheck + build green. Module count 121→120 (app.module registrations; TaxCoreModule is internal). |

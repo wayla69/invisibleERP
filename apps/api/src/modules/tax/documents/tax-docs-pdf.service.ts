@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { bahtText } from '../../common/bahttext.util';
+import { bahtText } from '../../../common/bahttext.util';
 import { formatTaxId } from './tax-docs.snapshot';
 import { PND_LABELS, WHT_CONDITION_LABELS, incomeType, type PndType } from './wht-rates';
-import { PdfRenderer } from '../pdf/pdf-renderer.service';
+import { PdfRenderer } from '../../pdf/pdf-renderer.service';
 
 // HTML → PDF templates for the three Thai tax documents. Rendering is delegated to the shared PdfRenderer
 // (external-service offload or pooled Chromium); if unavailable it returns null → caller sends the HTML.

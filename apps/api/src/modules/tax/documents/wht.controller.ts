@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Param, Query, Body, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { WhtService } from './wht.service';
 import { TaxDocsPdfService } from './tax-docs-pdf.service';
 import { IssueWhtBody, type IssueWhtDto } from './dto';

@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { TaxModule } from '../tax/tax.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { LedgerModule } from '../ledger/ledger.module';
-import { TaxDocsModule } from '../tax-docs/tax-docs.module';
+import { TaxDocsModule } from '../tax/documents/tax-docs.module';
 import { MenuModule } from '../menu/menu.module';
 import { MarketingModule } from '../marketing/marketing.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';

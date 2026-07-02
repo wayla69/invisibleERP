@@ -10,7 +10,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { TaxService } from '../tax/tax.service';
 import { PaymentService } from '../payments/payments.service';
 import { LedgerService } from '../ledger/ledger.service';
-import { TaxInvoiceService } from '../tax-docs/tax-invoice.service';
+import { TaxInvoiceService } from '../tax/documents/tax-invoice.service';
 import { MenuService } from '../menu/menu.service';
 import { RecipeService } from '../menu/recipe.service';
 import { MemberService } from '../loyalty/member.service';

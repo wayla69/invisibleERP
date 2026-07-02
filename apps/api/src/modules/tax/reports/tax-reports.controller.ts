@@ -1,8 +1,8 @@
 import { Controller, Get, Post, Body, Param, Query, Res, BadRequestException } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
-import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { Permissions, CurrentUser, type JwtUser } from '../../../common/decorators';
+import { ZodValidationPipe } from '../../../common/zod-validation.pipe';
 import { TaxReportsService } from './tax-reports.service';
 import { TaxReportsPdfService } from './tax-reports-pdf.service';
 
