@@ -25,4 +25,29 @@ export const npsResponses = pgTable('nps_responses', {
   idxTenant: index('nps_responses_tenant').on(t.tenantId),
 }));
 
+// V2 (docs/29, control LYL-20) — service-recovery cases: every detractor answer opens exactly ONE owned,
+// SLA-timed case (unique source_ref). Status Open → Contacted → Resolved; actor-stamped transitions.
+export const recoveryCases = pgTable('recovery_cases', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  memberId: bigint('member_id', { mode: 'number' }).notNull().references(() => posMembers.id),
+  source: text('source').notNull().default('nps'),
+  sourceRef: text('source_ref').notNull(),
+  score: integer('score'),
+  comment: text('comment'),
+  status: text('status').notNull().default('Open'),
+  responseDueAt: timestamp('response_due_at', { withTimezone: true }),
+  contactedAt: timestamp('contacted_at', { withTimezone: true }),
+  contactedBy: text('contacted_by'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedBy: text('resolved_by'),
+  resolutionNote: text('resolution_note'),
+  assignee: text('assignee'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqSource: uniqueIndex('recovery_cases_source').on(t.source, t.sourceRef),
+  idxTenant: index('recovery_cases_tenant').on(t.tenantId, t.status),
+}));
+
 export type NpsResponse = typeof npsResponses.$inferSelect;
+export type RecoveryCase = typeof recoveryCases.$inferSelect;

@@ -6,7 +6,7 @@ import { posMembers } from '../../database/schema/loyalty-members';
 import { memberConsents } from '../../database/schema/member-consents';
 import { auditLog } from '../../database/schema';
 import { dineInOrders } from '../../database/schema/restaurant';
-import { npsResponses } from '../../database/schema/nps';
+import { npsResponses, recoveryCases } from '../../database/schema/nps';
 import { promotions } from '../../database/schema/marketing';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -168,9 +168,14 @@ export class CrmService {
     const [lastNps] = await db.select().from(npsResponses)
       .where(and(eq(npsResponses.memberId, memberId), isNotNull(npsResponses.respondedAt)))
       .orderBy(desc(npsResponses.respondedAt)).limit(1);
+    // V2 (docs/29): an unresolved recovery case is front-and-centre on the 360.
+    const [openCase] = await db.select().from(recoveryCases)
+      .where(and(eq(recoveryCases.memberId, memberId), sql`${recoveryCases.status} IN ('Open','Contacted')`))
+      .orderBy(desc(recoveryCases.id)).limit(1);
     return {
       member: { id: Number(m.id), member_code: m.memberCode, name: m.name, phone: m.phone, balance: n(m.balance), lifetime: n(m.lifetime), tier: m.tier },
       nps: lastNps ? { score: Number(lastNps.score), detractor: Number(lastNps.score) <= 6, comment: lastNps.comment ?? null, responded_at: lastNps.respondedAt } : null,
+      recovery_case: openCase ? { id: Number(openCase.id), status: openCase.status, response_due_at: openCase.responseDueAt, overdue: openCase.status === 'Open' && openCase.responseDueAt != null && new Date(openCase.responseDueAt).getTime() < Date.now() } : null,
       crm: p ? {
         rfm_segment: p.rfmSegment, total_orders: p.totalOrders, total_spend: n(p.totalSpend),
         rfm_recency: p.rfmRecency, rfm_frequency: p.rfmFrequency, rfm_monetary: n(p.rfmMonetary),

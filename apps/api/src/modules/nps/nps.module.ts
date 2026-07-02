@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { NpsController } from './nps.controller';
+import { NpsController, RecoveryController } from './nps.controller';
 import { NpsService } from './nps.service';
+import { RecoveryService } from './recovery.service';
 import { MessagingModule } from '../messaging/messaging.module';
 import { PlatformModule } from '../platform/platform.module';
 import { AutomationModule } from '../automation/automation.module';
@@ -11,8 +12,8 @@ import { AutomationModule } from '../automation/automation.module';
 // No cycle: messaging/platform/automation never import NpsModule.
 @Module({
   imports: [MessagingModule, PlatformModule, AutomationModule],
-  controllers: [NpsController],
-  providers: [NpsService],
-  exports: [NpsService],
+  controllers: [NpsController, RecoveryController],
+  providers: [NpsService, RecoveryService],
+  exports: [NpsService, RecoveryService],
 })
 export class NpsModule {}
