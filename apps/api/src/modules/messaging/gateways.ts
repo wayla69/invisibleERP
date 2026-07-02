@@ -54,7 +54,7 @@ export function resolveMessageGateway(channel: MessageChannel, creds?: ChannelCr
 // 'failed' (logged in message_log) rather than throwing, so a receipt send never crashes the POS flow.
 // Shared LINE Messaging API poster — one place to send a `messages` array to a push/broadcast endpoint.
 // Network / non-2xx errors return 'failed' (logged), never throw, so a send never crashes the caller.
-async function postLine(token: string, endpoint: 'push' | 'broadcast', payload: Record<string, any>): Promise<SendResult> {
+async function postLine(token: string, endpoint: 'push' | 'broadcast' | 'reply', payload: Record<string, any>): Promise<SendResult> {
   try {
     const res = await fetch(`https://api.line.me/v2/bot/message/${endpoint}`, {
       method: 'POST',
@@ -79,6 +79,12 @@ export function flexMessage(altText: string, contents: any) {
 
 async function sendLinePush(token: string, to: string, text: string): Promise<SendResult> {
   return postLine(token, 'push', { to, messages: [{ type: 'text', text: text.slice(0, 5000) }] });
+}
+
+// Reply to an incoming LINE webhook event using its one-time replyToken (no push quota consumed). Used by
+// the OA chat command flow (link / pr). Without a token (mock/dev) the caller should skip the network call.
+export async function replyLine(token: string, replyToken: string, text: string): Promise<SendResult> {
+  return postLine(token, 'reply', { replyToken, messages: [{ type: 'text', text: text.slice(0, 5000) }] });
 }
 
 // Push a rich flex message to one LINE user (a card/carousel with images + buttons, not just plain text).

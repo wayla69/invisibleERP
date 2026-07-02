@@ -29,6 +29,7 @@ const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok:
 
 const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string; ref?: string }[] = [];
 const lineBroadcasts: { auth: string; text: string; type?: string; altText?: string }[] = [];
+const lineReplies: { replyToken: string; auth: string; text: string }[] = [];
 let pushSeq = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
@@ -39,6 +40,12 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
     const reqId = `req-${++pushSeq}`; // unique x-line-request-id per push → the provider_ref we store
     linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '', type: m.type, altText: m.altText, ref: reqId });
     return { ok: true, status: 200, headers: { get: () => reqId }, text: async () => '' } as any;
+  }
+  if (url.includes('api.line.me/v2/bot/message/reply')) {
+    const body = JSON.parse(init?.body ?? '{}');
+    const m = body.messages?.[0] ?? {};
+    lineReplies.push({ replyToken: body.replyToken, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '' });
+    return { ok: true, status: 200, headers: { get: () => `req-r-${lineReplies.length}` }, text: async () => '' } as any;
   }
   if (url.includes('api.line.me/v2/bot/message/broadcast')) {
     const body = JSON.parse(init?.body ?? '{}');
@@ -263,6 +270,103 @@ async function main() {
   const govGet = await inj('GET', '/api/messaging/governance', token);
   ok('W3 governance: config round-trips on GET /api/messaging/governance', govGet.json.governance?.weekly_cap === 1 && govGet.json.governance?.quiet_start === '00:00', JSON.stringify(govGet.json.governance));
   await inj('PUT', '/api/messaging/governance', token, { quiet_start: '21:00', quiet_end: '09:00', weekly_cap: 4 }); // restore defaults
+
+  // ── 16. LINE chat → PR (0227) — staff link their LINE identity, then raise a Purchase Requisition
+  //        from the OA chat. Commands only; free customer chat is ignored. Tenant LINE token (set in
+  //        check 10) is used for the reply. ──
+  await db.insert(s.users).values([
+    { username: 'somchai', passwordHash: await pw.hash('pw'), role: 'Cashier', tenantId: t1 },       // pr_raise via role seed
+    { username: 'auditor', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: t1 },   // NO pr_raise
+    { username: 'shopper', passwordHash: await pw.hash('pw'), role: 'Customer', tenantId: t1 },      // customer portal — excluded
+  ]).onConflictDoNothing();
+  const somchaiTok = (await inj('POST', '/api/login', undefined, { username: 'somchai', password: 'pw' })).json.token as string;
+  const shopperTok = (await inj('POST', '/api/login', undefined, { username: 'shopper', password: 'pw' })).json.token as string;
+
+  // 16a. link-code is a pr_raise surface — customer-portal roles are rejected.
+  const codeDenied = await inj('POST', '/api/line/link-code', shopperTok);
+  ok('chat-PR: link-code denied for a customer-portal role (403)', codeDenied.status === 403, JSON.stringify({ s: codeDenied.status }));
+
+  // 16b. staff issues a one-time link code (10-min TTL) and starts unlinked.
+  const codeRes = await inj('POST', '/api/line/link-code', somchaiTok);
+  const linkCode = codeRes.json.code as string;
+  const linked0 = await inj('GET', '/api/line/link', somchaiTok);
+  ok('chat-PR: staff gets a link code (6 chars, expiry) and is not yet linked',
+    (codeRes.status === 200 || codeRes.status === 201) && /^[A-Z2-9]{6}$/.test(linkCode ?? '') && !!codeRes.json.expires_at && linked0.json.linked === false,
+    JSON.stringify({ code: linkCode, linked: linked0.json.linked }));
+
+  // 16c. a wrong code is rejected in-chat (reply, no link).
+  const badLink = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-0', source: { userId: 'Usomchai' }, message: { id: 'mid-0', type: 'text', text: 'link WRONG9' } }] });
+  ok('chat-PR: wrong link code → rejected reply, no identity bound',
+    badLink.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่ถูกต้อง') && (await inj('GET', '/api/line/link', somchaiTok)).json.linked === false,
+    JSON.stringify({ chat: badLink.json.chat, reply: lineReplies.at(-1)?.text.slice(0, 40) }));
+
+  // 16d. `link <code>` binds the LINE account to the staff user; the reply rides the TENANT LINE token.
+  const doLink = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-1', source: { userId: 'Usomchai' }, message: { id: 'mid-1', type: 'text', text: `link ${linkCode}` } }] });
+  const linked1 = await inj('GET', '/api/line/link', somchaiTok);
+  ok('chat-PR: link <code> → LINE account bound to staff user; confirmation replied via tenant token',
+    doLink.json.chat === 1 && linked1.json.linked === true && lineReplies.at(-1)!.text.includes('เชื่อมบัญชีสำเร็จ') && lineReplies.at(-1)!.auth.includes('tenant-line-tok-999'),
+    JSON.stringify({ linked: linked1.json.linked, auth: lineReplies.at(-1)?.auth.includes('tenant-line-tok-999') }));
+
+  // 16e. `pr <item> <qty> [reason], …` → a real PR: Pending, requested_by the linked staff, 2 lines.
+  const chatPr = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-2', source: { userId: 'Usomchai' }, message: { id: 'mid-2', type: 'text', text: 'pr A4-PAPER 10 กระดาษหมด, TONER-85A 2' } }] });
+  const prNoM = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '');
+  const prNo = prNoM?.[0] ?? '';
+  const [prRow] = prNo ? await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prNo)) : [];
+  const prLines = prRow ? await db.select().from(s.prItems).where(eq(s.prItems.prId, Number(prRow.id))) : [];
+  ok('chat-PR: pr command → PR created (Pending, requested_by staff, 2 lines) and the PR no. replied',
+    chatPr.json.chat === 1 && !!prRow && prRow.status === 'Pending' && prRow.requestedBy === 'somchai' && prLines.length === 2
+      && prLines.some((l: any) => l.itemId === 'A4-PAPER' && Number(l.requestQty) === 10 && l.reason === 'กระดาษหมด'),
+    JSON.stringify({ prNo, status: prRow?.status, by: prRow?.requestedBy, lines: prLines.length }));
+
+  // 16f. webhook redelivery of the SAME message id is dropped (no duplicate PR).
+  const prCountBefore = (await db.select().from(s.purchaseRequests)).length;
+  const redeliver = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-2b', source: { userId: 'Usomchai' }, message: { id: 'mid-2', type: 'text', text: 'pr A4-PAPER 10 กระดาษหมด, TONER-85A 2' } }] });
+  const prCountAfter = (await db.select().from(s.purchaseRequests)).length;
+  ok('chat-PR: redelivered message id → deduped, no second PR raised',
+    redeliver.json.chat === 1 && prCountAfter === prCountBefore, JSON.stringify({ before: prCountBefore, after: prCountAfter }));
+
+  // 16g. `status <PR no>` reports the approval state in Thai.
+  const st = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-3', source: { userId: 'Usomchai' }, message: { id: 'mid-3', type: 'text', text: `status ${prNo}` } }] });
+  ok('chat-PR: status <PR no> → replies the current state (รออนุมัติ)',
+    st.json.chat === 1 && lineReplies.at(-1)!.text.includes(prNo) && lineReplies.at(-1)!.text.includes('รออนุมัติ'),
+    JSON.stringify({ reply: lineReplies.at(-1)?.text }));
+
+  // 16h. an UNLINKED LINE user issuing a pr command gets the how-to-link guidance and raises nothing.
+  const prCount2 = (await db.select().from(s.purchaseRequests)).length;
+  const stranger = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-4', source: { userId: 'Ustranger' }, message: { id: 'mid-4', type: 'text', text: 'pr GOLD-BAR 999' } }] });
+  ok('chat-PR: unlinked LINE user → guidance reply, no PR raised',
+    stranger.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยังไม่ได้เชื่อมบัญชี') && (await db.select().from(s.purchaseRequests)).length === prCount2,
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 40) }));
+
+  // 16i. free-form chat (a customer talking to the OA) is NOT a command → ignored: no reply, no log.
+  const repliesBefore = lineReplies.length;
+  const freeChat = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-5', source: { userId: 'Ualice' }, message: { id: 'mid-5', type: 'text', text: 'สวัสดีค่ะ ขอดูเมนูหน่อย' } }] });
+  ok('chat-PR: free customer chat → ignored silently (no reply, chat=0)',
+    freeChat.json.chat === 0 && lineReplies.length === repliesBefore, JSON.stringify({ chat: freeChat.json.chat }));
+
+  // 16j. a linked user WITHOUT pr_raise (AccessAdmin) cannot raise — permission enforced in the chat path.
+  await db.update(s.users).set({ lineUserId: 'Uauditor' }).where(eq(s.users.username, 'auditor'));
+  const prCount3 = (await db.select().from(s.purchaseRequests)).length;
+  const noPerm = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-6', source: { userId: 'Uauditor' }, message: { id: 'mid-6', type: 'text', text: 'pr A4-PAPER 1' } }] });
+  ok('chat-PR: linked user without pr_raise → refused (no PR)',
+    noPerm.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์') && (await db.select().from(s.purchaseRequests)).length === prCount3,
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 16k. a LINE account already bound to another user cannot be re-bound via a second user's code.
+  await db.insert(s.users).values([{ username: 'somsri', passwordHash: await pw.hash('pw'), role: 'Cashier', tenantId: t1 }]).onConflictDoNothing();
+  const somsriTok = (await inj('POST', '/api/login', undefined, { username: 'somsri', password: 'pw' })).json.token as string;
+  const code2 = (await inj('POST', '/api/line/link-code', somsriTok)).json.code as string;
+  const dupLink = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-7', source: { userId: 'Usomchai' }, message: { id: 'mid-7', type: 'text', text: `link ${code2}` } }] });
+  ok('chat-PR: LINE account already linked to another user → rejected (unique binding kept)',
+    dupLink.json.chat === 1 && lineReplies.at(-1)!.text.includes('ถูกเชื่อมกับผู้ใช้อื่น') && (await inj('GET', '/api/line/link', somsriTok)).json.linked === false,
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 16l. unlink from the web → chat commands stop resolving the identity.
+  const unlinkRes = await inj('DELETE', '/api/line/link', somchaiTok);
+  const afterUnlink = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-8', source: { userId: 'Usomchai' }, message: { id: 'mid-8', type: 'text', text: 'pr A4-PAPER 1' } }] });
+  ok('chat-PR: unlink → subsequent chat pr is treated as unlinked (guidance reply)',
+    unlinkRes.json.linked === false && afterUnlink.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยังไม่ได้เชื่อมบัญชี'),
+    JSON.stringify({ linked: unlinkRes.json.linked }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
