@@ -4,6 +4,7 @@ import { eq, and, sql, gte, isNotNull, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { npsResponses, posMembers, dineInOrders } from '../../database/schema';
 import { MessagingService } from '../messaging/messaging.service';
+import { RecoveryService } from './recovery.service';
 import { WebhookService } from '../platform/webhook.service';
 import { AutomationService } from '../automation/automation.service';
 import type { JwtUser } from '../../common/decorators';
@@ -22,6 +23,7 @@ export class NpsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly messaging: MessagingService,
+    private readonly recovery: RecoveryService,
     // Optional so partial harnesses still construct; the detractor event is best-effort.
     @Optional() private readonly webhooks?: WebhookService,
     @Optional() private readonly automation?: AutomationService,
@@ -116,6 +118,10 @@ export class NpsService {
     if (score <= 6) {
       const payload = { member_id: Number(row.memberId), score, comment: row.comment ?? null, sale_ref: row.saleRef ?? null };
       const sysUser = { username: 'system:nps', tenantId: row.tenantId != null ? Number(row.tenantId) : null, role: 'System' } as unknown as JwtUser;
+      // V2 (docs/29, LYL-20): the ACCOUNTABLE record — exactly one SLA-timed recovery case per response
+      // (idempotent unique source_ref; single-use answers make a duplicate impossible anyway). NOT
+      // best-effort: if the case cannot be written the submit fails and the member can retry.
+      await this.recovery.openForDetractor(row.tenantId != null ? Number(row.tenantId) : null, Number(row.memberId), String(row.id), score, row.comment ?? null);
       try { await this.webhooks?.deliver('loyalty.nps_detractor', payload, row.tenantId != null ? Number(row.tenantId) : null); } catch { /* best-effort */ }
       try { await this.automation?.runEvent('loyalty.nps_detractor', payload, sysUser); } catch { /* best-effort */ }
     }
@@ -147,9 +153,11 @@ export class NpsService {
     }
     const [pending] = await db.select({ c: sql<number>`count(*)` }).from(npsResponses)
       .where(and(eq(npsResponses.tenantId, tenantId), sql`${npsResponses.respondedAt} IS NULL`));
+    const recoveryStat = await this.recovery.overdueCount(tenantId); // V2: open/overdue recovery load
     return {
       ...calc(rows),
       awaiting_response: Number(pending?.c ?? 0),
+      recovery: recoveryStat,
       trend: [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, list]) => ({ month, ...calc(list) })),
     };
   }

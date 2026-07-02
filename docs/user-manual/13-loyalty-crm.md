@@ -175,6 +175,11 @@ earns and redeems at partner shop B, and the accounting between the shops settle
 ดูภาพรวมที่ `GET /api/nps/summary` (NPS = %ผู้แนะนำ − %ผู้ตำหนิ + แนวโน้มรายเดือน) และหน้า 360 ของสมาชิก
 จะติดธง detractor ให้เห็นทันที.
 
+**กู้คืนบริการ (Service recovery — `/loyalty/recovery`).** ทุกคะแนน ≤ 6 เปิด**เคส**ให้อัตโนมัติหนึ่งเคส
+พร้อมกำหนด**ติดต่อกลับภายใน 24 ชม.** — ทีมกด **📞 ติดต่อแล้ว** เมื่อโทรหาลูกค้า และ**ปิดเคส**ได้ต่อเมื่อกรอก
+บันทึกการแก้ไข (ระบบประทับชื่อผู้ทำทุกขั้น). เคสที่เปิดค้างเกินกำหนดขึ้นป้าย**เกิน SLA** สีแดงทั้งบน worklist,
+สรุป NPS และหน้า 360 ของสมาชิก — ไม่มีเคสหายเงียบ. (สิทธิ์ `crm`/`loyalty`/`marketing`; control LYL-20)
+
 **กติกาการส่งข้อความ (governance).** ที่ **ตั้งค่า → ผู้ให้บริการข้อความ** (`/settings/messaging`) การ์ด
 *กติกาการส่ง* กำหนด (เปิดใช้เมื่อบันทึกครั้งแรก — ค่าแนะนำ 21:00–09:00 และ 4 ข้อความ/สมาชิก/7วัน):
 - **ช่วงเงียบ (quiet hours):** ข้อความ**การตลาด**ที่ถึงกำหนดในช่วงเงียบจะไม่ถูกส่ง — journey จะ**เลื่อนขั้นเดิม
@@ -477,6 +482,7 @@ claim points by uploading a photo of the receipt.
 | 1.26 | 2026-07-02 | Platform | §13 **Journey ทางแยก (branching)** — แต่ละขั้นตั้ง *ทางแยก* ได้: เลือกขั้นปลายทาง (ต้องเป็นขั้นถัด ๆ ไปเท่านั้น — ระบบบังคับ จึงวนลูปไม่ได้) + เงื่อนไขจาก catalog เดียวกับ segment builder เช่น *ถ้า recency ≤ 5 ข้ามไปขั้นขอบคุณ*; consent/frequency cap/ส่งครั้งเดียวต่อขั้น (MKT-12) เหมือนเดิมทุกประการ |
 | 1.27 | 2026-07-02 | Platform | §11 **อ่าน lift ให้เป็น (organic baseline)** — รายงานแคมเปญเพิ่มบล็อก *ยอดซื้อจริง* ต่อกลุ่ม A/B/holdout ในหน้าต่าง attribution (ตั้งได้ต่อแคมเปญ, ค่าเริ่มต้น 30 วัน): ยอดซื้อของกลุ่ม holdout คือฐาน "ถ้าไม่ส่งเลย" — lift = อัตราซื้อกลุ่มที่ถูกส่งข้อความ − holdout (pp) + รายได้ส่วนเพิ่มถ่วงขนาดกลุ่ม; ตัวเลขมาพร้อมขนาดกลุ่มเสมอ (holdout เล็ก = ฐานแกว่ง) |
 | 1.28 | 2026-07-02 | Platform | §13 **ส่งถูกเวลา (right-time sends)** — สมาชิกที่มีออเดอร์ ≥3 ครั้งจะได้ *ชั่วโมงที่ชอบซื้อ* (โหมดของฮิสโตแกรมเวลาออเดอร์, เวลาไทย); ขั้น journey ที่มีการรอจะเลื่อนไปส่ง **ตรงชั่วโมงนั้น** (เลื่อนไปข้างหน้าเท่านั้น <24 ชม.; ขั้นส่งทันทียังส่งทันที) — ตั้งชั่วโมง fallback ต่อ journey ได้ (ค่าเริ่มต้น 10:00) |
+| 1.33 | 2026-07-02 | Platform | **V2 (docs/29) service recovery:** §7c — ทุก NPS ≤6 เปิดเคสกู้คืนบริการอัตโนมัติ (SLA ติดต่อกลับ 24 ชม., ประทับชื่อผู้ติดต่อ/ผู้ปิด, ปิดเคสต้องมีบันทึก, เกิน SLA ขึ้นป้ายแดงทุกหน้าจอ) — worklist ใหม่ `/loyalty/recovery` (LYL-20). |
 | 1.32 | 2026-07-02 | Platform | **V1 (docs/29) member-app completion:** §9 — the /m app now shows the tier-ladder strip (level + ×earn + progress), an expiring-points warning chip (new self-scoped `GET /api/member/points/expiring`, read-only over the W1 register), the **ส่งแต้มให้เพื่อน** transfer form (W1 API, guards surfaced verbatim), and the full points history (สะสม/แลก/โอน/หมดอายุ). No new permissions or controls. |
 | 1.31 | 2026-07-02 | Platform | **W3 (docs/27) NPS + governance:** new §7c — post-purchase NPS micro-survey (single-use tokenized link, no PII; detractor ≤6 fires `loyalty.nps_detractor` into Automation/Webhooks; summary + 360 flag; schedulable `nps_post_purchase` job) and the *กติกาการส่ง* governance card on `/settings/messaging` (opt-in quiet hours + global weekly marketing cap, transactional exempt, audited skips). New error codes `NPS_ALREADY_SENT`, `NPS_ALREADY_ANSWERED`/`NPS_EXPIRED`. |
 | 1.30 | 2026-07-02 | Platform | **W2 (docs/27) coalition network:** new §7b **เครือข่ายพันธมิตรแต้ม** — HQ creates a points network and adds shops (`/loyalty` card); partner tills resolve members by phone (badge shows code/name/tier/points/home shop only — no contact data crosses shops); earn/redeem at any shop in the network lands on the member's home-shop ledger, and every cross-shop movement books a balanced intercompany clearing entry that HQ settles. New error codes `NOT_IN_COALITION`, `COALITION_HQ_ONLY` (+ `PERIOD_CLOSED` on coalition moves). |
