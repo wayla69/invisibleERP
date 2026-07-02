@@ -7,6 +7,7 @@ import { tenants, posMembers, memberOtps, messageLog, revokedTokens } from '../.
 import { n } from '../../database/queries';
 import { PasswordService } from '../auth/password.service';
 import { resolveMessageGateway } from '../messaging/gateways';
+import { TenantMessagingService } from '../messaging/tenant-messaging.service';
 import { verifyLineIdToken } from '../loyalty/line-auth';
 import type { JwtUser } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
@@ -21,6 +22,7 @@ export class MemberAuthService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly jwt: JwtService,
     private readonly passwords: PasswordService,
+    private readonly tenantMsg: TenantMessagingService,
   ) {}
 
   private async resolveMember(tenantCode: string, phone: string) {
@@ -46,9 +48,11 @@ export class MemberAuthService {
         const codeHash = await this.passwords.hash(code);
         await db.update(memberOtps).set({ consumedAt: new Date() }).where(and(eq(memberOtps.tenantId, tenantId), eq(memberOtps.memberId, Number(member.id)), isNull(memberOtps.consumedAt))); // invalidate prior
         await db.insert(memberOtps).values({ tenantId, memberId: Number(member.id), codeHash, expiresAt: new Date(Date.now() + 5 * 60_000), attempts: 0 });
-        // Deliver via SMS — TRANSACTIONAL, so NOT subject to marketing opt-out — and audit-log it.
+        // Deliver via SMS — TRANSACTIONAL, so NOT subject to marketing opt-out — and audit-log it. Use the
+        // tenant's own SMS provider when configured (resolveCreds), else the platform env default, else mock.
         try {
-          const gw = resolveMessageGateway('sms');
+          const creds = await this.tenantMsg.resolveCreds(tenantId, 'sms');
+          const gw = resolveMessageGateway('sms', creds ?? undefined);
           const res = await gw.send(member.phone, `รหัสเข้าสู่ระบบสมาชิก: ${code} (หมดอายุใน 5 นาที)`);
           await db.insert(messageLog).values({ tenantId, memberId: Number(member.id), channel: 'sms', recipient: member.phone, body: 'OTP (login code)', campaign: 'otp', status: res.status, provider: res.provider, createdBy: 'system:otp' });
         } catch { /* delivery best-effort; the OTP row is already persisted */ }

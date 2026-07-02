@@ -41,7 +41,7 @@ export class MessagingService {
     const resolved = creds !== undefined ? creds : await this.creds(user, dto.channel);
     const gw = resolveMessageGateway(dto.channel, resolved ?? undefined);
     const res = await gw.send(recipient, dto.body);
-    return this.record(user, { memberId: dto.member_id ?? null, channel: dto.channel, recipient, body: dto.body, campaign: dto.campaign, status: res.status, provider: res.provider, error: res.error ?? null });
+    return this.record(user, { memberId: dto.member_id ?? null, channel: dto.channel, recipient, body: dto.body, campaign: dto.campaign, status: res.status, provider: res.provider, providerRef: res.ref ?? null, error: res.error ?? null });
   }
 
   // Blast to an audience (all opted-in / birthdays today / RFM segment). Sends per member, respecting consent.
@@ -86,7 +86,7 @@ export class MessagingService {
     const res = token
       ? (rich ? await broadcastLineFlex(token, dto.alt_text ?? logBody, dto.flex) : await broadcastLine(token, dto.body ?? ''))
       : { status: 'sent' as const, provider: 'mock', ref: 'mock_broadcast' };
-    return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: logBody, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, error: res.error ?? null });
+    return this.record(user, { memberId: null, channel: 'line', recipient: 'oa:broadcast', body: logBody, campaign: dto.campaign ?? 'oa_broadcast', status: res.status, provider: res.provider, providerRef: (res as any).ref ?? null, error: res.error ?? null });
   }
 
   // Push a rich LINE flex message (card/carousel) to one LINE userId — for a member or an ad-hoc recipient.
@@ -103,8 +103,8 @@ export class MessagingService {
     if (!recipient) return this.record(user, { memberId: dto.member_id ?? null, channel: 'line', recipient: null, body: dto.alt_text, campaign: dto.campaign, status: 'failed', provider: null, error: 'no recipient contact' });
     const creds = await this.creds(user, 'line');
     const token = creds?.token ?? process.env.LINE_CHANNEL_TOKEN;
-    const res = token ? await pushLineFlex(token, recipient, dto.alt_text, dto.flex) : { status: 'sent' as const, provider: 'mock', ref: 'mock_flex' };
-    return this.record(user, { memberId: dto.member_id ?? null, channel: 'line', recipient, body: dto.alt_text, campaign: dto.campaign ?? 'flex', status: res.status, provider: res.provider, error: res.error ?? null });
+    const res: any = token ? await pushLineFlex(token, recipient, dto.alt_text, dto.flex) : { status: 'sent' as const, provider: 'mock', ref: 'mock_flex' };
+    return this.record(user, { memberId: dto.member_id ?? null, channel: 'line', recipient, body: dto.alt_text, campaign: dto.campaign ?? 'flex', status: res.status, provider: res.provider, providerRef: res.ref ?? null, error: res.error ?? null });
   }
 
   // Send a canned test message through the channel's resolved provider (per-tenant creds → env → mock), so an
@@ -113,18 +113,31 @@ export class MessagingService {
     const creds = await this.creds(user, channel);
     const gw = resolveMessageGateway(channel, creds ?? undefined);
     const res = await gw.send(to, `ทดสอบการส่งข้อความจากระบบ (${channel})`);
-    return this.record(user, { memberId: null, channel, recipient: to, body: '[provider test]', campaign: 'provider_test', status: res.status, provider: res.provider, error: res.error ?? null });
+    return this.record(user, { memberId: null, channel, recipient: to, body: '[provider test]', campaign: 'provider_test', status: res.status, provider: res.provider, providerRef: res.ref ?? null, error: res.error ?? null });
   }
 
   async log(_user: JwtUser, limit = 100) {
     const db = this.db as any;
     const rows = await db.select().from(messageLog).orderBy(desc(messageLog.id)).limit(limit);
-    return { messages: rows.map((r: any) => ({ id: Number(r.id), member_id: r.memberId != null ? Number(r.memberId) : null, channel: r.channel, recipient: r.recipient, body: r.body, campaign: r.campaign, status: r.status, provider: r.provider, error: r.error, created_at: r.createdAt })) };
+    return { messages: rows.map((r: any) => ({ id: Number(r.id), member_id: r.memberId != null ? Number(r.memberId) : null, channel: r.channel, recipient: r.recipient, body: r.body, campaign: r.campaign, status: r.status, provider: r.provider, provider_ref: r.providerRef ?? null, error: r.error, created_at: r.createdAt })) };
   }
 
-  private async record(user: JwtUser, row: { memberId: number | null; channel: string; recipient: string | null; body: string; campaign?: string | null; status: string; provider: string | null; error: string | null }) {
+  private async record(user: JwtUser, row: { memberId: number | null; channel: string; recipient: string | null; body: string; campaign?: string | null; status: string; provider: string | null; error: string | null; providerRef?: string | null }) {
     const db = this.db as any;
-    const [r] = await db.insert(messageLog).values({ tenantId: user.tenantId ?? null, memberId: row.memberId, channel: row.channel, recipient: row.recipient, body: row.body, campaign: row.campaign ?? null, status: row.status, provider: row.provider, error: row.error, createdBy: user.username }).returning({ id: messageLog.id });
-    return { id: Number(r.id), status: row.status, provider: row.provider, recipient: row.recipient, error: row.error };
+    const [r] = await db.insert(messageLog).values({ tenantId: user.tenantId ?? null, memberId: row.memberId, channel: row.channel, recipient: row.recipient, body: row.body, campaign: row.campaign ?? null, status: row.status, provider: row.provider, providerRef: row.providerRef ?? null, error: row.error, createdBy: user.username }).returning({ id: messageLog.id });
+    return { id: Number(r.id), status: row.status, provider: row.provider, provider_ref: row.providerRef ?? null, recipient: row.recipient, error: row.error };
+  }
+
+  // Inbound delivery-status callback (Phase E2). A provider POSTs the final state of a message it previously
+  // accepted (identified by the provider_ref we stored on send). Updates that row's status (delivered /
+  // undelivered / …). Tenant-scoped by the resolved tenant + the provider_ref; only advances a 'sent' row.
+  async applyDeliveryStatus(tenantId: number, channel: string, providerRef: string, status: string, error?: string) {
+    const db = this.db as any;
+    const norm = ['delivered', 'undelivered', 'sent', 'failed'].includes(status) ? status : status === 'success' ? 'delivered' : 'undelivered';
+    const res = await db.update(messageLog)
+      .set({ status: norm, error: error ?? null })
+      .where(and(eq(messageLog.tenantId, tenantId), eq(messageLog.channel, channel), eq(messageLog.providerRef, providerRef)))
+      .returning({ id: messageLog.id });
+    return { updated: res.length, status: norm };
   }
 }

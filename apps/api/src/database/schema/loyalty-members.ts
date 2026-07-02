@@ -40,8 +40,9 @@ export const messageLog = pgTable('message_log', {
   recipient: text('recipient'),
   body: text('body').notNull(),
   campaign: text('campaign'),
-  status: text('status').notNull(),                 // sent | failed | skipped
+  status: text('status').notNull(),                 // sent | failed | skipped | delivered | undelivered
   provider: text('provider'),                       // mock | line | sms | email
+  providerRef: text('provider_ref'),                // provider message id — correlates a delivery-status callback
   error: text('error'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

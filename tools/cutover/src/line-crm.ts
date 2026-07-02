@@ -27,16 +27,18 @@ const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 
-const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string }[] = [];
+const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string; ref?: string }[] = [];
 const lineBroadcasts: { auth: string; text: string; type?: string; altText?: string }[] = [];
+let pushSeq = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
   const url = String(input);
   if (url.includes('api.line.me/v2/bot/message/push')) {
     const body = JSON.parse(init?.body ?? '{}');
     const m = body.messages?.[0] ?? {};
-    linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '', type: m.type, altText: m.altText });
-    return { ok: true, status: 200, headers: { get: () => 'req-1' }, text: async () => '' } as any;
+    const reqId = `req-${++pushSeq}`; // unique x-line-request-id per push → the provider_ref we store
+    linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '', type: m.type, altText: m.altText, ref: reqId });
+    return { ok: true, status: 200, headers: { get: () => reqId }, text: async () => '' } as any;
   }
   if (url.includes('api.line.me/v2/bot/message/broadcast')) {
     const body = JSON.parse(init?.body ?? '{}');
@@ -178,6 +180,44 @@ async function main() {
     JSON.stringify({ unfollowed: unfollow.json.unfollowed, logged: unfollowLog.length }));
   const badTenant = await inj('POST', '/api/line/webhook/NOPE', undefined, { events: [] });
   ok('LINE webhook → unknown shop code rejected (401)', badTenant.status === 401, JSON.stringify({ s: badTenant.status, code: badTenant.json?.error?.code ?? badTenant.json?.code }));
+
+  // ── 14. Delivery-status callback (E2) — a provider POSTs the final state of a message it accepted; we
+  //        correlate by provider_ref and flip the message_log row's status. Token-guarded, tenant-scoped. ──
+  // Configure the tenant's LINE provider with a callbackToken (creds are replaced wholesale, so re-supply token).
+  await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999', callbackToken: 'cb-secret-line' }, enabled: true });
+  // Send a fresh LINE push → captures a unique provider_ref (x-line-request-id) on the message_log row.
+  const dcSend = await inj('POST', '/api/messaging/send', token, { member_id: bob.json.id, channel: 'line', body: 'ยืนยันการจัดส่ง' });
+  const dcRef = dcSend.json.provider_ref as string;
+  ok('send returns a provider_ref to correlate a delivery callback', dcSend.json.status === 'sent' && typeof dcRef === 'string' && dcRef.length > 0, JSON.stringify({ ref: dcRef }));
+
+  // 14a. Unknown shop code → 401 (no leak of whether the ref exists).
+  const dcBadTenant = await inj('POST', '/api/messaging/delivery-callback/NOPE', undefined, { channel: 'line', ref: dcRef, status: 'delivered' });
+  ok('delivery-callback → unknown shop code rejected (401 UNKNOWN_TENANT)', dcBadTenant.status === 401 && dcBadTenant.json.error?.code === 'UNKNOWN_TENANT', JSON.stringify({ s: dcBadTenant.status, code: dcBadTenant.json.error?.code }));
+
+  // 14b. Missing/wrong callback token → 401 (the row is NOT updated).
+  const dcBadTok = await app.inject({ method: 'POST', url: '/api/messaging/delivery-callback/T1', headers: { 'x-callback-token': 'wrong' }, payload: { channel: 'line', ref: dcRef, status: 'delivered' } });
+  let dcBadTokJson: any = {}; try { dcBadTokJson = dcBadTok.json(); } catch { /* */ }
+  const rowAfterBad = (await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.providerRef, dcRef))))[0];
+  ok('delivery-callback → wrong callback token rejected (401), row status unchanged',
+    dcBadTok.statusCode === 401 && dcBadTokJson.error?.code === 'BAD_CALLBACK_TOKEN' && rowAfterBad?.status === 'sent',
+    JSON.stringify({ s: dcBadTok.statusCode, code: dcBadTokJson.error?.code, status: rowAfterBad?.status }));
+
+  // 14c. Valid token → the message_log row flips sent → delivered (correlated by provider_ref).
+  const dcOk = await app.inject({ method: 'POST', url: '/api/messaging/delivery-callback/T1', headers: { 'x-callback-token': 'cb-secret-line' }, payload: { channel: 'line', ref: dcRef, status: 'delivered' } });
+  let dcOkJson: any = {}; try { dcOkJson = dcOk.json(); } catch { /* */ }
+  const rowDelivered = (await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.providerRef, dcRef))))[0];
+  ok('delivery-callback (valid token) → message_log row updated sent → delivered',
+    (dcOk.statusCode === 200 || dcOk.statusCode === 201) && dcOkJson.updated === 1 && dcOkJson.status === 'delivered' && rowDelivered?.status === 'delivered',
+    JSON.stringify({ updated: dcOkJson.updated, status: rowDelivered?.status }));
+
+  // 14d. An unrecognised provider status normalises to 'undelivered' (never crashes the row).
+  const dcSend2 = await inj('POST', '/api/messaging/send', token, { member_id: bob.json.id, channel: 'line', body: 'สอง' });
+  const dcRef2 = dcSend2.json.provider_ref as string;
+  const dcUndel = await app.inject({ method: 'POST', url: '/api/messaging/delivery-callback/T1', headers: { 'x-callback-token': 'cb-secret-line' }, payload: { channel: 'line', ref: dcRef2, status: 'bounced', error: 'mailbox full' } });
+  const rowUndel = (await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.providerRef, dcRef2))))[0];
+  ok('delivery-callback → unknown status normalises to undelivered (with provider error captured)',
+    rowUndel?.status === 'undelivered' && rowUndel?.error === 'mailbox full',
+    JSON.stringify({ status: rowUndel?.status, error: rowUndel?.error }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

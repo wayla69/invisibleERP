@@ -19,11 +19,13 @@ const FIELDS: Record<string, { key: string; label: string; placeholder?: string;
   line: [
     { key: 'token', label: 'Channel access token (LINE OA)', type: 'password' },
     { key: 'secret', label: 'Channel secret (สำหรับ webhook follow/unfollow) — ถ้ามี', type: 'password' },
+    { key: 'callbackToken', label: 'Callback token (สำหรับ delivery-status callback) — ถ้ามี', type: 'password' },
   ],
   sms: [
     { key: 'apiKey', label: 'API key', type: 'password' },
     { key: 'apiUrl', label: 'API endpoint (URL)', placeholder: 'https://…' },
     { key: 'sender', label: 'ชื่อผู้ส่ง (Sender ID) — ถ้ามี' },
+    { key: 'callbackToken', label: 'Callback token (สำหรับ delivery-status callback) — ถ้ามี', type: 'password' },
   ],
   email: [
     { key: 'host', label: 'SMTP host', placeholder: 'smtp.example.com' },
@@ -31,6 +33,7 @@ const FIELDS: Record<string, { key: string; label: string; placeholder?: string;
     { key: 'user', label: 'Username' },
     { key: 'pass', label: 'Password', type: 'password' },
     { key: 'from', label: 'From address', placeholder: 'no-reply@shop.co' },
+    { key: 'callbackToken', label: 'Callback token (สำหรับ delivery-status callback) — ถ้ามี', type: 'password' },
   ],
 };
 const CHANNEL_LABEL: Record<string, string> = { line: 'LINE Official Account', sms: 'SMS', email: 'อีเมล (SMTP)' };

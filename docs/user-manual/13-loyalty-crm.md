@@ -209,12 +209,20 @@ Reach the right members with the right message. On **แคมเปญ** (`/loy
 > is logged as *sent* but no message actually leaves — check the message log's **provider** column (`mock` =
 > demo, the channel name = live).
 >
+> **Delivery receipts.** The message log keeps each message's **provider reference** (the id the SMS/LINE/email
+> provider returned). If your provider supports delivery callbacks, point it at
+> `POST /api/messaging/delivery-callback/<your-shop-code>` with the per-channel **callback token** you set in
+> your provider credentials (sent as the `X-Callback-Token` header) — the matching log row then advances from
+> *sent* to **delivered** or **undelivered**, so you can see which messages actually reached the customer. This
+> is optional; without it, a message stays *sent*.
+>
 > **Use your own provider.** An admin can connect this shop's **own** LINE Official Account / SMS sender /
 > email mailbox on the **ผู้ให้บริการข้อความ** screen (**Settings → Integrations → Messaging providers**,
 > `/settings/messaging`, permission `users`/`exec`) so messages go out under your brand. Enter the credentials,
 > press **บันทึก**, then use **ส่งทดสอบ** to send a test message and confirm delivery. Credentials are stored
 > encrypted and are write-only — the screen shows only which channels are connected, never the keys. If you set
-> nothing, the platform's shared provider (or demo mode) is used.
+> nothing, the platform's shared provider (or demo mode) is used. Once your **SMS** sender is connected, the
+> member-app login OTP also goes out from **your** sender id (not the shared platform number).
 
 ## 12. Partner privileges (พันธมิตร & สิทธิพิเศษ)
 
@@ -347,3 +355,4 @@ claim points by uploading a photo of the receipt.
 | 1.16 | 2026-07-01 | Platform | §11 **Loyalty write API + webhooks** — integrations can enrol/earn/redeem via API key (`POST /api/v1/loyalty/enroll|earn|redeem`, scope `loyalty:write`; `GET /api/v1/loyalty/member`, `loyalty:read`); each point movement fires a `loyalty.*` webhook. |
 | 1.17 | 2026-07-02 | Platform | §11 **Loyalty automation triggers** — build no-code rules on Automation (`/automation`): *when a member earns/redeems (optionally over a threshold) → send a notification / message / log*. Loyalty events `loyalty.enrolled/earned/redeemed` are in the event catalog. |
 | 1.18 | 2026-07-02 | Platform | §13 **Saved custom segments** — define reusable audiences from rules over member/RFM fields (all/any) via `/api/loyalty/saved-segments`; resolve to matching members. Whitelisted fields only (safe). Rule-builder UI is a follow-up. |
+| 1.19 | 2026-07-02 | Platform | §11 **Own-provider OTP + delivery receipts** — once your **SMS** provider is connected, member-login OTPs go out from your own sender. The message log now keeps each message's provider reference, and a provider can call back `POST /api/messaging/delivery-callback/<shop-code>` (with your per-channel callback token) to mark a message *delivered*/*undelivered*. |
