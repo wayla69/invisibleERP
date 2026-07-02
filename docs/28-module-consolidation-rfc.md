@@ -77,8 +77,9 @@ are often correct); the goal is **server-by-default for new pages + conversion o
   CORS. Measure with the Playwright e2e smoke + a bundle-size note in the PR.
 - ~~Ratchet idea (follow-up)~~ **Ratchet ARMED (2026-07-02, after conversions #1+#2 per this gate):**
   `tools/ci/check-use-client.mjs` in the CI build job counts files whose first statement is
-  `'use client'` against `use-client-baseline.json` (**232**) — any increase fails CI; conversions
-  lower the baseline in the same PR.
+  `'use client'` against `use-client-baseline.json` (**233** — re-based once when PR #320's new
+  `/loyalty/recovery` page raced past the freshly-armed guard: its CI predated the ratchet) — any
+  increase fails CI; conversions lower the baseline in the same PR.
 
 ## 5. Decision requested
 
