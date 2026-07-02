@@ -28,14 +28,14 @@ export class ReservationService {
   ) {}
 
   async create(dto: CreateReservationDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const kind = dto.kind === 'waitlist' ? 'waitlist' : 'reservation';
     if (kind === 'reservation' && !dto.reserved_for) {
       throw new BadRequestException({ code: 'BAD_REQUEST', message: 'reserved_for is required for a reservation', messageTh: 'ต้องระบุเวลาการจอง' });
     }
     if ((dto.party_size ?? 2) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'party_size must be positive', messageTh: 'จำนวนคนต้องมากกว่าศูนย์' });
     const [row] = await db.insert(tableReservations).values({
-      tenantId: user.tenantId, kind, tableId: dto.table_id ?? null,
+      tenantId: user.tenantId!, kind, tableId: dto.table_id ?? null,
       reservedFor: kind === 'reservation' ? new Date(dto.reserved_for!) : null,
       partySize: dto.party_size ?? 2, customerName: dto.customer_name ?? null, customerPhone: dto.customer_phone ?? null,
       memberId: dto.member_id ?? null, status: kind === 'waitlist' ? 'waiting' : 'booked',
@@ -47,7 +47,7 @@ export class ReservationService {
   }
 
   async list(dto: ListReservationsDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(tableReservations.tenantId, user.tenantId as number)];
     if (dto.kind) conds.push(eq(tableReservations.kind, dto.kind));
     if (dto.status) conds.push(eq(tableReservations.status, dto.status as any));
@@ -67,7 +67,7 @@ export class ReservationService {
 
   // Notify the guest their table is ready (waitlist) or confirm a booking is up next → status 'ready'.
   async notifyReady(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const row = await this.load(id, user);
     if (['seated', 'cancelled', 'no_show'].includes(String(row.status))) {
       throw new BadRequestException({ code: 'BAD_STATUS', message: `Cannot notify a ${row.status} entry`, messageTh: 'สถานะนี้แจ้งเตือนไม่ได้' });
@@ -84,7 +84,7 @@ export class ReservationService {
 
   // Seat the party → status 'seated'; the assigned table (if any) becomes occupied.
   async seat(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const row = await this.load(id, user);
     if (['seated', 'cancelled', 'no_show'].includes(String(row.status))) {
       throw new BadRequestException({ code: 'BAD_STATUS', message: `Already ${row.status}`, messageTh: 'รายการนี้ปิดแล้ว' });
@@ -98,7 +98,7 @@ export class ReservationService {
   async noShow(id: number, user: JwtUser) { return this.close(id, user, 'no_show'); }
 
   private async close(id: number, user: JwtUser, status: 'cancelled' | 'no_show') {
-    const db = this.db as any;
+    const db = this.db;
     const row = await this.load(id, user);
     if (['seated', 'cancelled', 'no_show'].includes(String(row.status))) {
       throw new BadRequestException({ code: 'BAD_STATUS', message: `Already ${row.status}`, messageTh: 'รายการนี้ปิดแล้ว' });
@@ -110,7 +110,7 @@ export class ReservationService {
   }
 
   private async load(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select().from(tableReservations).where(and(eq(tableReservations.id, id), eq(tableReservations.tenantId, user.tenantId as number))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Reservation not found', messageTh: 'ไม่พบรายการจอง' });
     return row;
@@ -119,7 +119,7 @@ export class ReservationService {
   // Prefer LINE when the linked member has a LINE identity, else SMS to the phone.
   private async preferredChannel(row: any): Promise<'line' | 'sms'> {
     if (row.memberId) {
-      const db = this.db as any;
+      const db = this.db;
       const [m] = await db.select({ line: posMembers.lineUserId }).from(posMembers).where(eq(posMembers.id, row.memberId)).limit(1);
       if (m?.line) return 'line';
     }

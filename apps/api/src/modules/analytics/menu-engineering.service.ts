@@ -37,7 +37,7 @@ export class MenuEngineeringService {
   // ── Menu-engineering matrix: popularity (mix-share, 70% rule) × profitability (unit contribution
   //    margin vs menu average) → Star / Plowhorse / Puzzle / Dog, with an action per quadrant. ──
   async menuEngineering(user: JwtUser, opts?: { from?: string; to?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const to = opts?.to ?? ymd();
     const from = opts?.from ?? to;
 
@@ -112,7 +112,7 @@ export class MenuEngineeringService {
   // ── Daypart / hour-of-day demand from captured tenders, bucketed on the business clock (Asia/Bangkok),
   //    so a sale at 01:00 Bangkok is "late", never shifted by the server's UTC clock. ──
   async daypart(_user: JwtUser, opts?: { from?: string; to?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const to = opts?.to ?? ymd();
     const from = opts?.from ?? to;
     // loose UTC pre-filter (±1 day) to bound the scan; exact day membership is decided on the business clock below
@@ -126,7 +126,7 @@ export class MenuEngineeringService {
     const byHour = Array.from({ length: 24 }, (_, h) => ({ hour: h, revenue: 0, txns: 0 }));
     const byPart = new Map<string, { revenue: number; txns: number }>();
     for (const row of rows) {
-      const when = new Date(row.capturedAt ?? row.createdAt);
+      const when = new Date((row.capturedAt ?? row.createdAt)!);
       if (bizYmdDash(when) < from || bizYmdDash(when) > to) continue; // exact business-day window
       const h = bizParts(when).h;
       const amt = n(row.amount);
@@ -159,7 +159,7 @@ export class MenuEngineeringService {
   // ── Void / discount (shrinkage & abuse) analytics from the manager-override audit. Surfaces who is
   //    voiding/discounting, why (reason codes), and the void rate vs total sales — a loss-prevention view. ──
   async voidsDiscounts(_user: JwtUser, opts?: { from?: string; to?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const to = opts?.to ?? ymd();
     const from = opts?.from ?? to;
     const loFrom = shiftDays(from, -1);
@@ -209,7 +209,7 @@ export class MenuEngineeringService {
 
   // ── Staff / cashier performance: who rang what, average ticket, and their void/discount activity. ──
   async staffPerformance(_user: JwtUser, opts?: { from?: string; to?: string }) {
-    const db = this.db as any;
+    const db = this.db;
     const to = opts?.to ?? ymd();
     const from = opts?.from ?? to;
     const sales = await db
@@ -223,7 +223,7 @@ export class MenuEngineeringService {
       .from(posOverrides).where(and(sql`${posOverrides.createdAt} >= ${shiftDays(from, -1)}`, sql`${posOverrides.createdAt} < ${shiftDays(to, 2)}`));
     const ovByActor = new Map<string, { voids: number; void_amount: number; discounts: number; discount_amount: number }>();
     for (const o of ov) {
-      if (bizYmdDash(new Date(o.createdAt)) < from || bizYmdDash(new Date(o.createdAt)) > to) continue;
+      if (bizYmdDash(new Date(o.createdAt!)) < from || bizYmdDash(new Date(o.createdAt!)) > to) continue;
       const k = o.requestedBy || '(unknown)';
       const e = ovByActor.get(k) ?? { voids: 0, void_amount: 0, discounts: 0, discount_amount: 0 };
       if (o.action === 'void') { e.voids++; e.void_amount = r2(e.void_amount + n(o.amount)); }
@@ -263,7 +263,7 @@ export class MenuEngineeringService {
   }
 
   private async windowTotals(from: string, to: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [row] = await db.select({ txns: sql<string>`count(*)`, revenue: sql<string>`coalesce(sum(${custPosSales.total}),0)` })
       .from(custPosSales).where(and(gte(custPosSales.saleDate, from), lte(custPosSales.saleDate, to), sql`${custPosSales.status}::text = 'Completed'`));
     const txns = Number(row?.txns ?? 0); const revenue = r2(n(row?.revenue));

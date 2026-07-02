@@ -23,23 +23,23 @@ export class ChannelAdapterService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService, private readonly scope: RealtimeScope) {}
 
   async listAdapters() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(channelAdapters).orderBy(desc(channelAdapters.id));
     return { adapters: rows.map((r: any) => ({ id: r.id, platform: r.platform, store_ref: r.storeRef, enabled: r.enabled, auto_accept: r.autoAccept })), count: rows.length };
   }
   async upsertAdapter(dto: { id?: number; platform: string; store_ref?: string; enabled?: boolean; auto_accept?: boolean; config?: any }, user: JwtUser) {
     if (!PLATFORMS.includes(dto.platform)) throw new BadRequestException({ code: 'BAD_PLATFORM', message: `Unknown platform ${dto.platform}`, messageTh: 'แพลตฟอร์มไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     const vals = { tenantId: user.tenantId ?? null, platform: dto.platform, storeRef: dto.store_ref ?? null, enabled: dto.enabled ?? true, autoAccept: dto.auto_accept ?? true, config: dto.config ?? null };
     if (dto.id) { await db.update(channelAdapters).set(vals).where(eq(channelAdapters.id, dto.id)); return { id: dto.id, updated: true }; }
     const [r] = await db.insert(channelAdapters).values({ ...vals, createdBy: user.username }).returning({ id: channelAdapters.id });
-    return { id: r.id, created: true };
+    return { id: r!.id, created: true };
   }
 
   // Push the available menu to the platform via its outbound provider (real HTTP when configured, else mock).
   async menuSyncOut(platform: string, user: JwtUser) {
     if (!PLATFORMS.includes(platform)) throw new BadRequestException({ code: 'BAD_PLATFORM', message: `Unknown platform ${platform}`, messageTh: 'แพลตฟอร์มไม่ถูกต้อง' });
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(menuItems).where(and(eq(menuItems.isAvailable, true), eq(menuItems.active, true)));
     const items = rows.map((r: any) => ({ sku: r.sku, name: r.name, price: n(r.price), available: r.isAvailable }));
     const [adapter] = await db.select().from(channelAdapters).where(eq(channelAdapters.platform, platform)).limit(1);
@@ -65,7 +65,7 @@ export class ChannelAdapterService {
     // resolve tenant from the registered adapter (store_ref) via a controlled bypass read (no user → RLS
     // would otherwise see nothing); reads only the adapter row to discover which tenant owns the store.
     const adapter = await this.scope.bypassQuery(async () => {
-      const db = this.db as any;
+      const db = this.db;
       const [a] = await db.select().from(channelAdapters).where(and(eq(channelAdapters.platform, platform), norm.storeRef ? eq(channelAdapters.storeRef, norm.storeRef) : eq(channelAdapters.enabled, true))).limit(1);
       return a ?? null;
     });
@@ -75,7 +75,7 @@ export class ChannelAdapterService {
     // everything else RLS-scoped to the resolved tenant (bypass OFF) — a forged store_ref cannot write
     // into another tenant because the inserts run under that tenant's RLS policy.
     return this.scope.run(tenantId, async () => {
-      const db = this.db as any;
+      const db = this.db;
       // idempotency: same ext_event_id already processed?
       if (norm.extEventId) {
         const [seen] = await db.select().from(channelWebhookEvents).where(and(eq(channelWebhookEvents.source, platform), eq(channelWebhookEvents.extEventId, norm.extEventId))).limit(1);
@@ -107,17 +107,17 @@ export class ChannelAdapterService {
 
   // Caller is already inside scope.run(tenantId) — write the event with the resolved tenant.
   private async logEvent(tenantId: number | null, platform: string, norm: any, orderNo: string | null, status: string) {
-    const db = this.db as any;
+    const db = this.db;
     const extEventId = norm.extEventId ?? (norm.extOrderId ? `ord-${norm.extOrderId}` : `evt-${orderNo ?? 'na'}`);
     await db.insert(channelWebhookEvents).values({ tenantId, source: platform, extEventId, extOrderId: norm.extOrderId ?? null, orderNo, payload: norm.raw ?? {}, status }).catch(() => { /* best-effort log */ });
   }
 
   // Status callback — update local fulfilment, then post the new status back to the platform.
   async updateStatus(orderNo: string, status: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [ord] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).limit(1);
     if (!ord) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
-    await db.update(dineInOrders).set({ fulfillmentStatus: status }).where(eq(dineInOrders.id, ord.id));
+    await db.update(dineInOrders).set({ fulfillmentStatus: status as typeof dineInOrders.$inferInsert.fulfillmentStatus }).where(eq(dineInOrders.id, ord.id));
     const res = ord.extSource ? await getPlatformProvider(ord.extSource).updateStatus(ord.extOrderId, status) : { ok: false };
     return { order_no: orderNo, fulfillment_status: status, posted_to_platform: ord.extSource ?? null, post_ok: res.ok, post_ref: (res as any).ref ?? null };
   }
@@ -128,7 +128,7 @@ export class ChannelAdapterService {
   async rejectOrder(orderNo: string, reason: string) { return this.decide(orderNo, false, reason); }
 
   private async decide(orderNo: string, accept: boolean, reason: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [ord] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).limit(1);
     if (!ord) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
     if (!ord.extSource) throw new BadRequestException({ code: 'NOT_CHANNEL_ORDER', message: 'Not an aggregator order', messageTh: 'ไม่ใช่ออเดอร์จากแพลตฟอร์ม' });
@@ -146,7 +146,7 @@ export class ChannelAdapterService {
   }
 
   async listChannelOrders(limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(dineInOrders).where(eq(dineInOrders.fulfillmentType, 'delivery')).orderBy(desc(dineInOrders.id)).limit(limit);
     return { orders: rows.map((r: any) => ({ order_no: r.orderNo, platform: r.extSource, ext_order_id: r.extOrderId, status: r.status, fulfillment_status: r.fulfillmentStatus, total: n(r.total) })), count: rows.length };
   }

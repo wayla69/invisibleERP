@@ -36,21 +36,21 @@ export class EamService {
 
   // Resolve an asset by its number within the caller's tenant (RLS-scoped) — the maintenance anchor.
   private async resolveAsset(assetNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
     if (!a) throw new NotFoundException({ code: 'ASSET_NOT_FOUND', message: `Asset ${assetNo} not found`, messageTh: `ไม่พบสินทรัพย์ ${assetNo}` });
     return a;
   }
 
   private async latestMeter(assetId: number): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select({ v: sql<string>`coalesce(max(${assetMeters.meterValue}),0)` }).from(assetMeters).where(eq(assetMeters.assetId, assetId));
     return n(r?.v);
   }
 
   // ───────────────────── Work orders ─────────────────────
   async createWorkOrder(dto: WorkOrderDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const type = dto.type ?? 'corrective';
     if (!WO_TYPES.includes(type)) throw new BadRequestException({ code: 'BAD_WO_TYPE', message: `type must be ${WO_TYPES.join('|')}`, messageTh: 'ประเภทงานซ่อมไม่ถูกต้อง' });
     const asset = await this.resolveAsset(dto.asset_no);
@@ -64,7 +64,7 @@ export class EamService {
   }
 
   async listWorkOrders(user: JwtUser, opts: { asset_no?: string; status?: string; type?: string; limit?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (opts.asset_no) conds.push(eq(maintenanceWorkOrders.assetNo, opts.asset_no));
     if (opts.status) conds.push(eq(maintenanceWorkOrders.status, opts.status));
@@ -77,7 +77,7 @@ export class EamService {
 
   // Advance a work order. Completing it with a vendor + actual cost raises an AP payable (Dr 5710 / Cr 2000).
   async updateWorkOrderStatus(woNo: string, dto: WoStatusDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [wo] = await db.select().from(maintenanceWorkOrders).where(eq(maintenanceWorkOrders.woNo, woNo)).limit(1);
     if (!wo) throw new NotFoundException({ code: 'WO_NOT_FOUND', message: `Work order ${woNo} not found`, messageTh: `ไม่พบใบสั่งงานซ่อม ${woNo}` });
     const allowed = WO_TRANSITIONS[wo.status] ?? [];
@@ -112,14 +112,14 @@ export class EamService {
 
   // ───────────────────── Work-order cost lines (labor / parts) ─────────────────────
   private async lineTotal(woId: number): Promise<number> {
-    const db = this.db as any;
+    const db = this.db;
     const [r] = await db.select({ s: sql<string>`coalesce(sum(${maintenanceWoLines.amount}),0)` }).from(maintenanceWoLines).where(eq(maintenanceWoLines.woId, woId));
     return n(r?.s);
   }
 
   // Add a labor (hours × rate) or part (qty × unit cost) line; the WO's actual_cost rolls up from the lines.
   async addWoLine(woNo: string, dto: WoLineDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (dto.kind !== 'labor' && dto.kind !== 'part') throw new BadRequestException({ code: 'BAD_LINE_KIND', message: 'kind must be labor|part', messageTh: 'ประเภทต้องเป็น labor หรือ part' });
     const [wo] = await db.select().from(maintenanceWorkOrders).where(eq(maintenanceWorkOrders.woNo, woNo)).limit(1);
     if (!wo) throw new NotFoundException({ code: 'WO_NOT_FOUND', message: `Work order ${woNo} not found`, messageTh: `ไม่พบใบสั่งงานซ่อม ${woNo}` });
@@ -136,7 +136,7 @@ export class EamService {
   }
 
   async listWoLines(woNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(maintenanceWoLines).where(eq(maintenanceWoLines.woNo, woNo)).orderBy(desc(maintenanceWoLines.id));
     const labor = round2(rows.filter((l: any) => l.kind === 'labor').reduce((a: number, l: any) => a + n(l.amount), 0));
     const parts = round2(rows.filter((l: any) => l.kind === 'part').reduce((a: number, l: any) => a + n(l.amount), 0));
@@ -147,7 +147,7 @@ export class EamService {
   // Failures (corrective WOs), total downtime, mean-time-between-failures (from corrective WO dates), and
   // total maintenance spend for an asset — the EAM KPIs.
   async reliability(assetNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     await this.resolveAsset(assetNo); // 404 if unknown / cross-tenant
     const wos = await db.select().from(maintenanceWorkOrders).where(eq(maintenanceWorkOrders.assetNo, assetNo)).orderBy(maintenanceWorkOrders.scheduledDate);
     const corrective = wos.filter((w: any) => w.type === 'corrective');
@@ -155,7 +155,7 @@ export class EamService {
     const totalCost = round2(wos.reduce((a: number, w: any) => a + n(w.actualCost), 0));
     // MTBF from corrective failure dates (completed/scheduled); needs ≥2 failures.
     const dates = corrective.map((w: any) => w.completedDate ?? w.scheduledDate ?? w.createdAt).filter(Boolean).map((d: any) => Date.parse(String(d))).filter((t: number) => !isNaN(t)).sort((a: number, b: number) => a - b);
-    const mtbfDays = dates.length >= 2 ? Math.round(((dates[dates.length - 1] - dates[0]) / 86400000) / (dates.length - 1) * 10) / 10 : null;
+    const mtbfDays = dates.length >= 2 ? Math.round(((dates[dates.length - 1]! - dates[0]!) / 86400000) / (dates.length - 1) * 10) / 10 : null;
     return {
       asset_no: assetNo,
       work_orders: wos.length, corrective_failures: corrective.length,
@@ -167,7 +167,7 @@ export class EamService {
 
   // ───────────────────── Preventive-maintenance schedules ─────────────────────
   async createPmSchedule(dto: PmScheduleDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.interval_days && !dto.meter_interval) throw new BadRequestException({ code: 'NO_CADENCE', message: 'interval_days or meter_interval required', messageTh: 'ต้องระบุรอบเวลา หรือรอบมิเตอร์' });
     const asset = await this.resolveAsset(dto.asset_no);
     const nextDue = dto.next_due_date ?? (dto.interval_days ? addDays(ymd(), dto.interval_days) : null);
@@ -176,11 +176,11 @@ export class EamService {
       intervalDays: dto.interval_days ?? null, meterInterval: dto.meter_interval != null ? String(dto.meter_interval) : null,
       lastServiceMeter: '0', nextDueDate: nextDue, active: 'true', createdBy: user.username,
     }).returning({ id: pmSchedules.id });
-    return { id: Number(s.id), asset_no: asset.assetNo, name: dto.name, interval_days: dto.interval_days ?? null, meter_interval: dto.meter_interval ?? null, next_due_date: nextDue };
+    return { id: Number(s!.id), asset_no: asset.assetNo, name: dto.name, interval_days: dto.interval_days ?? null, meter_interval: dto.meter_interval ?? null, next_due_date: nextDue };
   }
 
   async listPmSchedules(user: JwtUser, assetNo?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(pmSchedules.active, 'true')];
     if (assetNo) conds.push(eq(pmSchedules.assetNo, assetNo));
     const rows = await db.select().from(pmSchedules).where(and(...conds)).orderBy(desc(pmSchedules.id));
@@ -189,7 +189,7 @@ export class EamService {
 
   // ───────────────────── Meter readings ─────────────────────
   async recordMeter(assetNo: string, dto: MeterDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const asset = await this.resolveAsset(assetNo);
     await db.insert(assetMeters).values({
       tenantId: asset.tenantId, assetId: Number(asset.id), assetNo: asset.assetNo,
@@ -199,7 +199,7 @@ export class EamService {
   }
 
   async listMeters(assetNo: string, user: JwtUser, limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(assetMeters).where(eq(assetMeters.assetNo, assetNo)).orderBy(desc(assetMeters.id)).limit(limit);
     return { asset_no: assetNo, readings: rows.map((m: any) => ({ reading_date: m.readingDate, meter_value: n(m.meterValue), note: m.note, created_by: m.createdBy })), count: rows.length };
   }
@@ -209,7 +209,7 @@ export class EamService {
   // work order and roll the schedule forward. Idempotent: a schedule with an open/in-progress generated
   // WO is skipped, and the date is advanced on generation so a re-run produces nothing new.
   async runPmDue(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd();
     const schedules = await db.select().from(pmSchedules).where(eq(pmSchedules.active, 'true'));
     const generated: { wo_no: string; asset_no: string; schedule: string; reason: string }[] = [];
@@ -232,7 +232,7 @@ export class EamService {
         nextDueDate: s.intervalDays != null ? addDays(today, Number(s.intervalDays)) : s.nextDueDate,
         lastServiceMeter: meterDue ? String(meter) : s.lastServiceMeter,
       }).where(eq(pmSchedules.id, s.id));
-      generated.push({ wo_no: woNo, asset_no: s.assetNo, schedule: s.name, reason: meterDue ? 'meter' : 'time' });
+      generated.push({ wo_no: woNo, asset_no: s.assetNo!, schedule: s.name, reason: meterDue ? 'meter' : 'time' });
     }
     return { as_of: today, scanned: schedules.length, generated: generated.length, work_orders: generated };
   }

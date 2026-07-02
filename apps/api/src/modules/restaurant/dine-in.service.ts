@@ -44,7 +44,7 @@ export class DineInService {
   ) {}
 
   private async resolveStation(tenantId: number | null, code?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const c = code || 'main';
     const [st] = await db.select().from(kitchenStations).where(eq(kitchenStations.code, c)).limit(1);
     if (st) return st;
@@ -59,7 +59,7 @@ export class DineInService {
   }
 
   private async insertItems(orderId: number, tenantId: number | null, items: AddItemsDto['items'], user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const buffet = !!opts?.buffet;
     const rows = [] as any[];
     for (const it of items) {
@@ -78,7 +78,7 @@ export class DineInService {
       const st = await this.resolveStation(tenantId, stationCode);
       const amount = roundCurrency(n(it.qty) * effUnit, 'THB');
       rows.push({
-        tenantId, orderId, stationId: Number(st.id), itemId: itemRef, name,
+        tenantId, orderId, stationId: Number(st!.id), itemId: itemRef, name,
         qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
         modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
         buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as any).course ?? 1,
@@ -92,7 +92,7 @@ export class DineInService {
   async refreshOrderTotals(orderId: number) { return this.refreshTotals(orderId); }
 
   private async refreshTotals(orderId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, orderId), ne(dineInOrderItems.kdsStatus, 'voided')));
     const t = this.liveTotals(items.map((i: any) => ({ amount: n(i.amount) })));
     await db.update(dineInOrders).set({ subtotal: fx(t.subtotal, 2), vat: fx(t.vat, 2), total: fx(t.total, 2) }).where(eq(dineInOrders.id, orderId));
@@ -100,22 +100,22 @@ export class DineInService {
   }
 
   async createOrder(dto: CreateOrderDto, user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const orderNo = await this.docNo.nextDaily('DIN');
     const [h] = await db.insert(dineInOrders).values({
       orderNo, tenantId: user.tenantId, tableId: dto.table_id ?? null, sessionId: dto.session_id ?? null,
       status: 'open', guestCount: dto.guest_count ?? 1, fulfillmentType: dto.fulfillment_type ?? 'dine_in',
       server: user.username, notes: dto.notes ?? null, createdBy: user.username,
     }).returning({ id: dineInOrders.id });
-    await this.insertItems(Number(h.id), user.tenantId, dto.items, user, opts);
-    await this.refreshTotals(Number(h.id));
+    await this.insertItems(Number(h!.id), user.tenantId, dto.items, user, opts);
+    await this.refreshTotals(Number(h!.id));
     // opening an order occupies the table
     if (dto.table_id) await db.update(diningTables).set({ status: 'occupied', updatedAt: new Date() }).where(and(eq(diningTables.id, dto.table_id), inArray(diningTables.status, ['available', 'reserved'] as any)));
     return this.getOrder(orderNo, user);
   }
 
   async addItems(orderNo: string, dto: AddItemsDto, user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.loadOrder(orderNo);
     if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ORDER_CLOSED', message: 'Order is closed', messageTh: 'ออเดอร์ปิดแล้ว' });
     await this.insertItems(Number(o.id), o.tenantId, dto.items, user, opts);
@@ -125,14 +125,14 @@ export class DineInService {
 
   // ── table operations: transfer items / merge tabs (Phase 1) ──
   private async liveSessionForTable(tableId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [s] = await db.select().from(tableSessions).where(and(eq(tableSessions.tableId, tableId), inArray(tableSessions.status, ['open', 'bill_requested', 'paying'] as any))).orderBy(desc(tableSessions.id)).limit(1);
     return s;
   }
 
   // the live session's open order for a table — created empty if the table is seated but has none yet
   async ensureOpenOrder(tableId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const s = await this.liveSessionForTable(tableId);
     if (!s) throw new BadRequestException({ code: 'NO_SESSION', message: 'Target table has no live session', messageTh: 'โต๊ะปลายทางไม่มีลูกค้า' });
     const [o] = await db.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, Number(s.id)), ne(dineInOrders.status, 'closed'), ne(dineInOrders.status, 'cancelled'))).orderBy(desc(dineInOrders.id)).limit(1);
@@ -145,7 +145,7 @@ export class DineInService {
 
   // move selected (non-voided) line items from one order to another table's open order; bill follows the items
   async transferItems(orderNo: string, itemIds: number[], toTableId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const src = await this.loadOrder(orderNo);
     if (['paid', 'closed', 'cancelled'].includes(String(src.status))) throw new BadRequestException({ code: 'ORDER_CLOSED', message: 'Order is closed', messageTh: 'ออเดอร์ปิดแล้ว' });
     const tgt = await this.ensureOpenOrder(toTableId, user);
@@ -159,7 +159,7 @@ export class DineInService {
 
   // merge another table's tab into this one: move its items into the target order, close the source session/table
   async mergeTables(targetTableId: number, fromTableId: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (targetTableId === fromTableId) throw new BadRequestException({ code: 'SAME_TABLE', message: 'Cannot merge a table into itself', messageTh: 'รวมโต๊ะกับตัวเองไม่ได้' });
     const tgtSess = await this.liveSessionForTable(targetTableId);
     if (!tgtSess) throw new BadRequestException({ code: 'NO_SESSION', message: 'Target table has no live session', messageTh: 'โต๊ะปลายทางไม่มีลูกค้า' });
@@ -187,7 +187,7 @@ export class DineInService {
   // Fire the kitchen. With no course → fire ALL pending lines (legacy). With a course → fire only that
   // course's 'new' lines (course-by-course / hold-and-fire); others stay 'new' and off the KDS feed.
   async fire(orderNo: string, user: JwtUser, course?: number) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.loadOrder(orderNo);
     const now = new Date();
     const where = [eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'new')];
@@ -201,7 +201,7 @@ export class DineInService {
 
   // KDS item transition (start/ready/recall/serve/void)
   async itemTransition(itemId: number, action: string, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [item] = await db.select().from(dineInOrderItems).where(eq(dineInOrderItems.id, itemId)).limit(1);
     if (!item) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Item not found', messageTh: 'ไม่พบรายการ' });
     const now = new Date();
@@ -225,7 +225,7 @@ export class DineInService {
 
   // system-derived order status from aggregate item state (never downgrades terminal states)
   async recomputeOrderStatus(orderId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.id, orderId)).limit(1);
     if (!o) return null;
     if (['bill_requested', 'partially_paid', 'paid', 'closed', 'cancelled'].includes(String(o.status))) return o.status;
@@ -243,7 +243,7 @@ export class DineInService {
   }
 
   async requestBill(orderNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.loadOrder(orderNo);
     if (['paid', 'closed', 'cancelled'].includes(String(o.status))) throw new BadRequestException({ code: 'ORDER_CLOSED', message: 'Order closed', messageTh: 'ออเดอร์ปิดแล้ว' });
     const t = await this.refreshTotals(Number(o.id));
@@ -285,7 +285,7 @@ export class DineInService {
   // shared: insert cust_pos_sales + items + GL from a dine-in order, applying line/order/promo discounts.
   // VAT is on the discounted base (Thai rule). opts is optional → no-discount path matches the old behavior.
   async buildSale(o: any, saleNo: string, discount: number, user: JwtUser, opts?: { orderDiscountPct?: number; promoCode?: string; lineDiscounts?: Record<string, { discount_pct?: number; discount_amt?: number }>; maxDiscountPct?: number; memberId?: number; pointsRedeem?: { memberId: number; points: number; bahtPerPoint: number; redeemValue: number }; tip?: number; giftCardNo?: string; giftCardAmount?: number; applyPricingRules?: boolean; pricing?: { channel?: string; location?: string; partySize?: number; serviceChargePct?: number; serviceMinParty?: number; surchargePct?: number; rounding?: number; at?: string } }) {
-    const db = this.db as any;
+    const db = this.db;
     const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
     const items = await db.select().from(dineInOrderItems).where(and(eq(dineInOrderItems.orderId, Number(o.id)), ne(dineInOrderItems.kdsStatus, 'voided')));
     // B4: opt-in pricing rules. Resolve each order line's sku/category, ask the pricing engine for the
@@ -307,7 +307,7 @@ export class DineInService {
       const pr = await this.pricing.ruleDiscountsForLines(rlines, { channel: opts.pricing?.channel, location: opts.pricing?.location, at: opts.pricing?.at });
       items.forEach((l: any, i: number) => {
         const key = String(l.id);
-        if (lineDiscounts[key] == null && pr.lineDiscounts[i] > 0) { lineDiscounts[key] = { discount_amt: pr.lineDiscounts[i] }; appliedRules.push(...pr.lineRules[i]); }
+        if (lineDiscounts[key] == null && pr.lineDiscounts[i]! > 0) { lineDiscounts[key] = { discount_amt: pr.lineDiscounts[i]! }; appliedRules.push(...pr.lineRules[i]); }
       });
       ruleOrderDiscount = roundCurrency(pr.orderDiscount, 'THB'); appliedRules.push(...pr.orderRules);
     }
@@ -376,7 +376,7 @@ export class DineInService {
       taxAmount: fx(vat, 2), total: fx(total, 2), tip: fx(tip, 2), serviceCharge: fx(serviceCharge, 2), paymentMethod: 'Dine-in', pointsUsed: String(actualRedeemPoints), pointsEarned: '0',
       status: 'Completed', notes: `Dine-in ${o.orderNo}`, createdBy: user.username,
     }).returning({ id: custPosSales.id });
-    await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h.id), ...r })));
+    await db.insert(custPosItems).values(itemRows.map((r) => ({ saleId: Number(h!.id), ...r })));
     // recipe/BOM: deduct ingredients per sold menu line (allows negative, logs Consume); accumulate COGS if post_cogs
     let recipeCogs = 0;
     for (const l of items) { const ded = await this.recipe.applyDeduction(db, o.tenantId, String(l.itemId ?? ''), n(l.qty), saleNo, user); recipeCogs = roundCurrency(recipeCogs + ded.cost, 'THB'); }
@@ -416,7 +416,7 @@ export class DineInService {
     let pointsEarned = 0;
     if (opts?.memberId) {
       pointsEarned = await this.member.earnInTx(db, o.tenantId, opts.memberId, taxable, saleNo, user.username);
-      if (pointsEarned > 0) await db.update(custPosSales).set({ pointsEarned: String(pointsEarned) }).where(eq(custPosSales.id, h.id));
+      if (pointsEarned > 0) await db.update(custPosSales).set({ pointsEarned: String(pointsEarned) }).where(eq(custPosSales.id, h!.id));
       if (actualRedeemPoints > 0) await this.member.redeemInTx(db, o.tenantId, opts.memberId, actualRedeemPoints, pointsDisc, saleNo, user.username);
     }
     return { subtotal: subtotalNet, discount: roundCurrency(orderDisc + pointsDisc, 'THB'), vat, total, tip, total_with_tip: cashDue, gift_applied: giftApplied, cash_due: cashLeg, journal_no: journalNo, promo_code: pe?.promoCode ?? null, line_discount_total: lineDiscTotal, points_used: actualRedeemPoints, points_earned: pointsEarned, service_charge: serviceCharge, rounding_adjustment: roundingAdj, applied_rules: Array.from(new Set(appliedRules)) };
@@ -424,7 +424,7 @@ export class DineInService {
 
   // mark order paid + close table/session + idempotent abbreviated tax invoice
   async markPaidAndInvoice(o: any, saleNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const now = new Date();
     // snapshot the table's CURRENT room onto the order — keeps per-room revenue accurate even if the table
     // is later moved to another room (zone lives on the table, not on the historical sale).
@@ -444,7 +444,7 @@ export class DineInService {
   // SALE- number, collision-safe: nextTenantStamped is second-precision, so rapid/split sales in the
   // same second would clash on cust_pos_sales.sale_no (UNIQUE). Retry on a bumped second until unique.
   async mintSaleNo(tenantId: number | null) {
-    const db = this.db as any;
+    const db = this.db;
     let code = 'POS';
     if (tenantId != null) { const [t] = await db.select({ code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1); code = t?.code ?? 'POS'; }
     for (let attempt = 0; attempt < 12; attempt++) {
@@ -458,7 +458,7 @@ export class DineInService {
   // split bill: build a cust_pos_sales + items + ONE GL entry from a subset / pro-rated slice of an order.
   // grossOverride present (equal split) → the share is VAT-inclusive, back out net+vat; else compute from lines.
   async buildCheckSale(o: any, saleNo: string, lines: any[], opts: { grossOverride?: number; discount?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const disc = roundCurrency(opts.discount ?? 0, 'THB');
     let subtotal: number, vat: number, total: number;
     if (opts.grossOverride != null) {
@@ -478,7 +478,7 @@ export class DineInService {
     }).returning({ id: custPosSales.id });
     const itemRows = lines.length ? lines : [{ itemId: 'SPLIT', name: `แบ่งบิล ${o.orderNo}`, qty: 1, unitPrice: subtotal, amount: subtotal }];
     await db.insert(custPosItems).values(itemRows.map((l: any) => ({
-      saleId: Number(h.id), itemId: l.itemId ?? l.name, itemDescription: l.name, qty: String(n(l.qty ?? 1)), uom: 'จาน',
+      saleId: Number(h!.id), itemId: l.itemId ?? l.name, itemDescription: l.name, qty: String(n(l.qty ?? 1)), uom: 'จาน',
       unitPrice: fx(n(l.unitPrice ?? l.amount), 2), discountPct: '0', amount: fx(n(l.amount), 2), isCustom: l.itemId == null,
     })));
     let journalNo: string | null = null;
@@ -494,7 +494,7 @@ export class DineInService {
 
   // split: per-check invoices already issued — flip the order/table/session to paid/closed (no new sale).
   async markAllChecksPaid(o: any, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const now = new Date();
     await db.update(dineInOrders).set({ status: 'paid', paidAt: now, closedAt: now }).where(eq(dineInOrders.id, o.id));
     if (o.tableId) await db.update(diningTables).set({ status: 'cleaning', updatedAt: now }).where(eq(diningTables.id, o.tableId));
@@ -502,7 +502,7 @@ export class DineInService {
   }
 
   async closeTable(orderNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.loadOrder(orderNo);
     await db.update(dineInOrders).set({ status: 'closed', closedAt: new Date() }).where(eq(dineInOrders.id, o.id));
     if (o.tableId) await db.update(diningTables).set({ status: 'available', updatedAt: new Date() }).where(eq(diningTables.id, o.tableId));
@@ -510,7 +510,7 @@ export class DineInService {
   }
 
   async cancelOrder(orderNo: string, reason: string | undefined, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const o = await this.loadOrder(orderNo);
     if (!['open', 'sent_to_kitchen'].includes(String(o.status))) throw new BadRequestException({ code: 'CANNOT_CANCEL', message: 'Cannot cancel after serving/payment', messageTh: 'ยกเลิกไม่ได้หลังเสิร์ฟ/ชำระ' });
     await db.update(dineInOrders).set({ status: 'cancelled', closedAt: new Date(), notes: reason ?? o.notes }).where(eq(dineInOrders.id, o.id));
@@ -519,7 +519,7 @@ export class DineInService {
   }
 
   async loadOrder(orderNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).limit(1);
     if (!o) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
     return o;
@@ -527,7 +527,7 @@ export class DineInService {
 
   // FOR UPDATE — used by settle paths so a concurrent double-submit serializes + re-checks status (no double-book).
   async loadOrderForUpdate(orderNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [o] = await db.select().from(dineInOrders).where(eq(dineInOrders.orderNo, orderNo)).for('update').limit(1);
     if (!o) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found', messageTh: 'ไม่พบออเดอร์' });
     return o;
@@ -539,21 +539,21 @@ export class DineInService {
   }
 
   async listOpenOrders(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(dineInOrders).where(ne(dineInOrders.status, 'closed')).orderBy(desc(dineInOrders.id)).limit(100);
     return { orders: rows.filter((o: any) => o.status !== 'cancelled').map((o: any) => ({ order_no: o.orderNo, table_id: o.tableId, status: o.status, total: n(o.total), waited_min: o.firedAt ? Math.floor((Date.now() - new Date(o.firedAt).getTime()) / 60000) : 0 })) };
   }
 
   // order summary for the diner page (by session)
   async publicSummary(sessionId: number) {
-    const db = this.db as any;
+    const db = this.db;
     const [o] = await db.select().from(dineInOrders).where(and(eq(dineInOrders.sessionId, sessionId), ne(dineInOrders.status, 'cancelled'))).orderBy(desc(dineInOrders.id)).limit(1);
     if (!o) return null;
     return this.viewOrder(o);
   }
 
   private async viewOrder(o: any) {
-    const db = this.db as any;
+    const db = this.db;
     const items = await db.select({
       id: dineInOrderItems.id, itemId: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty, unitPrice: dineInOrderItems.unitPrice,
       amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet, course: dineInOrderItems.course,

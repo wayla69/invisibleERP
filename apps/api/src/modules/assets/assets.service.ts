@@ -22,7 +22,7 @@ export class AssetsService {
   ) {}
 
   async createCategory(dto: CreateCategoryDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [c] = await db.insert(assetCategories).values({
       tenantId: user.tenantId ?? null, code: dto.code, name: dto.name, defaultUsefulLifeYears: dto.default_useful_life_years,
       assetAccount: dto.asset_account, accumDepAccount: dto.accum_dep_account, depExpenseAccount: dto.dep_expense_account,
@@ -30,7 +30,7 @@ export class AssetsService {
     return c ? shapeCat(c) : { code: dto.code, note: 'exists' };
   }
   async listCategories(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(assetCategories).orderBy(asc(assetCategories.code));
     return { categories: rows.map(shapeCat), count: rows.length };
   }
@@ -38,7 +38,7 @@ export class AssetsService {
   // acquisition: Dr 1500 Fixed Assets / Cr 1000 Cash (or 2000 AP) = acquire_cost. `opts` carries internal-only
   // context (the owning tenant + the source GR/PO when capitalised via FA-10) that a request body must not spoof.
   async acquire(dto: AcquireAssetDto, user: JwtUser, opts?: { tenantId?: number | null; sourceGrNo?: string | null; sourcePoNo?: string | null }) {
-    const db = this.db as any;
+    const db = this.db;
     let life = dto.useful_life_months;
     if (life == null && dto.category_id != null) {
       const [cat] = await db.select().from(assetCategories).where(eq(assetCategories.id, dto.category_id)).limit(1);
@@ -76,7 +76,7 @@ export class AssetsService {
 
   // Capital GR lines on a GR that have not yet been registered (no PendingApproval/Posted request).
   async eligibleFromGr(grNo: string, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [gr] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.grNo, grNo)).limit(1);
     if (!gr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'GR not found', messageTh: 'ไม่พบใบรับสินค้า' });
     const rows = await db.select({ id: grItems.id, itemId: grItems.itemId, itemDescription: grItems.itemDescription, receivedQty: grItems.receivedQty, uom: grItems.uom, unitCost: grItems.unitCost })
@@ -95,7 +95,7 @@ export class AssetsService {
   // Maker: raise a registration request for a capital GR line. Posts NOTHING to the GL. Resolves the default
   // asset category / useful life from the item master when not supplied; cost defaults to the GR line value.
   async registerFromGr(dto: RegisterFromGrDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [gr] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.grNo, dto.gr_no)).limit(1);
     if (!gr) throw new NotFoundException({ code: 'NOT_FOUND', message: 'GR not found', messageTh: 'ไม่พบใบรับสินค้า' });
     const [line] = await db.select().from(grItems).where(and(eq(grItems.id, dto.gr_item_id), eq(grItems.grId, Number(gr.id)))).limit(1);
@@ -131,7 +131,7 @@ export class AssetsService {
 
   // List registration requests (default: the pending-approval queue).
   async listRegistrations(status: string | undefined, _user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(assetRegistrationRequests.status, status) : undefined;
     const rows = await db.select().from(assetRegistrationRequests).where(where).orderBy(desc(assetRegistrationRequests.id));
     return { registrations: rows.map(shapeReg), count: rows.length };
@@ -140,7 +140,7 @@ export class AssetsService {
   // Checker (FA-10 maker-checker): a DIFFERENT user approves → the fixed asset is created and the acquisition
   // JE (Dr 1500 / Cr 2000) posts EFFECTIVE. The asset is stamped with its source GR/PO for traceability.
   async approveRegistration(regNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const req = await this.pendingRegistration(regNo);
     if (req.requestedBy && req.requestedBy === user.username)
       throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an asset registration you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
@@ -156,14 +156,14 @@ export class AssetsService {
 
   // Reject a pending registration → no asset is created; the GR line becomes eligible to re-raise.
   async rejectRegistration(regNo: string, user: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const req = await this.pendingRegistration(regNo);
     await db.update(assetRegistrationRequests).set({ status: 'Rejected', approvedBy: user.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(assetRegistrationRequests.id, Number(req.id)));
     return { reg_no: regNo, status: 'Rejected', rejected_by: user.username };
   }
 
   private async pendingRegistration(regNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [req] = await db.select().from(assetRegistrationRequests).where(and(eq(assetRegistrationRequests.regNo, regNo), eq(assetRegistrationRequests.status, 'PendingApproval'))).limit(1);
     if (!req) throw new BadRequestException({ code: 'NO_PENDING_REGISTRATION', message: `No registration pending approval for ${regNo}`, messageTh: 'ไม่มีรายการตั้งทรัพย์สินที่รออนุมัติ' });
     return req;
@@ -173,8 +173,8 @@ export class AssetsService {
   // 1590) so each shop's trial balance ties — never one consolidated entry co-mingling every tenant's
   // assets under the caller's id. Idempotent per `${tenant}:${period}`. Null tenant = HQ-consolidated bucket.
   async runDepreciation(period: string, user: JwtUser) {
-    const db = this.db as any;
-    const [y, m] = period.split('-').map(Number);
+    const db = this.db;
+    const [y, m] = period.split('-').map(Number) as [number, number];
     const endExcl = m < 12 ? `${y}-${String(m + 1).padStart(2, '0')}-01` : `${y + 1}-01-01`;
     const periodEnd = new Date(new Date(endExcl + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
 
@@ -208,14 +208,14 @@ export class AssetsService {
       const [run] = await db.insert(depreciationRuns).values({ tenantId, runNo, period, totalDepreciation: fx(total, 4), assetCount: computed.length, createdBy: user.username }).returning({ id: depreciationRuns.id });
       for (const c of computed) {
         await db.update(fixedAssets).set({ accumulatedDepreciation: fx(c.accumAfter, 4), netBookValue: fx(c.nbvAfter, 4), status: c.status, lastDepreciatedPeriod: period }).where(eq(fixedAssets.id, c.id));
-        await db.insert(depreciationLines).values({ tenantId, runId: Number(run.id), assetId: c.id, amount: fx(c.amount, 4), accumulatedAfter: fx(c.accumAfter, 4), nbvAfter: fx(c.nbvAfter, 4) });
+        await db.insert(depreciationLines).values({ tenantId, runId: Number(run!.id), assetId: c.id, amount: fx(c.amount, 4), accumulatedAfter: fx(c.accumAfter, 4), nbvAfter: fx(c.nbvAfter, 4) });
       }
       const je: any = await this.ledger.postEntry({
         date: periodEnd, source: 'DEP', sourceRef: srcRef, tenantId,
         memo: `Depreciation ${period} (${computed.length} assets)`, createdBy: user.username,
         lines: [{ account_code: '5200', debit: total }, { account_code: '1590', credit: total }],
       });
-      await db.update(depreciationRuns).set({ journalNo: je?.entry_no ?? null }).where(eq(depreciationRuns.id, run.id));
+      await db.update(depreciationRuns).set({ journalNo: je?.entry_no ?? null }).where(eq(depreciationRuns.id, run!.id));
       runs.push({ tenant_id: tenantId, run_no: runNo, journal_no: je?.entry_no ?? null, total_depreciation: total, asset_count: computed.length });
       aggTotal = round4(aggTotal + total); aggCount += computed.length;
     }
@@ -233,7 +233,7 @@ export class AssetsService {
   // REQUEST posts the JE as a Draft (excluded from balances) and flags the asset disposal_pending WITHOUT
   // marking it disposed; a DIFFERENT user must approve before it is effective (asset-stripping control).
   async dispose(assetNo: string, dto: DisposeAssetDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
     if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Asset not found', messageTh: 'ไม่พบสินทรัพย์' });
     if (a.status === 'disposed') throw new BadRequestException({ code: 'ALREADY_DISPOSED', message: 'Asset already disposed', messageTh: 'สินทรัพย์ถูกจำหน่ายแล้ว' });
@@ -257,7 +257,7 @@ export class AssetsService {
   // the asset is marked disposed, and any revaluation surplus is recycled to retained earnings (posted fresh
   // here — approval is the authorization). Reuses GL-05's approveEntry (approver ≠ requester, period re-check).
   async approveDisposal(assetNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
     if (!a || !a.disposalPending) throw new BadRequestException({ code: 'NO_PENDING_DISPOSAL', message: `No disposal pending approval for ${assetNo}`, messageTh: 'ไม่มีรายการจำหน่ายที่รออนุมัติสำหรับสินทรัพย์นี้' });
     const draft = await this.pendingDisposalJe(assetNo);
@@ -281,7 +281,7 @@ export class AssetsService {
 
   // Reject a pending disposal → voids the Draft JE; the asset stays in service (fields cleared).
   async rejectDisposal(assetNo: string, user: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
     if (!a || !a.disposalPending) throw new BadRequestException({ code: 'NO_PENDING_DISPOSAL', message: `No disposal pending approval for ${assetNo}`, messageTh: 'ไม่มีรายการจำหน่ายที่รออนุมัติสำหรับสินทรัพย์นี้' });
     const draft = await this.pendingDisposalJe(assetNo);
@@ -291,7 +291,7 @@ export class AssetsService {
   }
 
   private async pendingDisposalJe(assetNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [je] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries)
       .where(and(eq(journalEntries.source, 'DISP'), eq(journalEntries.sourceRef, assetNo), eq(journalEntries.status, 'Draft'))).orderBy(desc(journalEntries.id)).limit(1);
     if (!je) throw new BadRequestException({ code: 'NO_PENDING_DISPOSAL', message: `No draft disposal entry for ${assetNo}`, messageTh: 'ไม่พบรายการบัญชีจำหน่ายที่รออนุมัติ' });
@@ -302,7 +302,7 @@ export class AssetsService {
   // the revaluation surplus (equity 3200); downward (impairment) → debit impairment loss (5820). The gross
   // 1500 moves by the delta so the register stays tied to the GL; accumulated depreciation is unchanged.
   async revalue(assetNo: string, dto: { new_value: number; reason?: string; reval_date?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
     if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Asset not found', messageTh: 'ไม่พบสินทรัพย์' });
     if (a.status === 'disposed') throw new BadRequestException({ code: 'ALREADY_DISPOSED', message: 'Asset already disposed', messageTh: 'สินทรัพย์ถูกจำหน่ายแล้ว' });
@@ -340,9 +340,9 @@ export class AssetsService {
   // FA-08 maker-checker: a DIFFERENT user approves the pending revaluation → the Draft JE becomes effective
   // AND the asset's carrying value moves. Reuses GL-05's approveEntry (approver ≠ preparer, period re-check).
   async approveRevaluation(assetNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rev = await this.pendingReval(assetNo);
-    await this.ledger.approveEntry(rev.glRef, user);
+    await this.ledger.approveEntry(rev.glRef!, user);
     const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.id, Number(rev.assetId))).limit(1);
     await db.update(fixedAssets).set({ netBookValue: fx(n(rev.newValue), 4), acquireCost: fx(round4(n(a?.acquireCost) + n(rev.delta)), 4) }).where(eq(fixedAssets.id, Number(rev.assetId)));
     await db.update(assetRevaluations).set({ status: 'Posted', approvedBy: user.username, approvedAt: new Date() }).where(eq(assetRevaluations.id, Number(rev.id)));
@@ -351,29 +351,29 @@ export class AssetsService {
 
   // Reject a pending revaluation → voids the Draft JE; the carrying value never moved.
   async rejectRevaluation(assetNo: string, user: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rev = await this.pendingReval(assetNo);
-    await this.ledger.rejectEntry(rev.glRef, user, reason);
+    await this.ledger.rejectEntry(rev.glRef!, user, reason);
     await db.update(assetRevaluations).set({ status: 'Rejected' }).where(eq(assetRevaluations.id, Number(rev.id)));
     return { asset_no: assetNo, status: 'Rejected', rejected_by: user.username, journal_no: rev.glRef };
   }
 
   private async pendingReval(assetNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [rev] = await db.select().from(assetRevaluations).where(and(eq(assetRevaluations.assetNo, assetNo), eq(assetRevaluations.status, 'PendingApproval'))).orderBy(desc(assetRevaluations.id)).limit(1);
     if (!rev) throw new BadRequestException({ code: 'NO_PENDING_REVALUATION', message: `No revaluation pending approval for ${assetNo}`, messageTh: 'ไม่มีรายการตีมูลค่าใหม่ที่รออนุมัติสำหรับสินทรัพย์นี้' });
     return rev;
   }
 
   async listRevaluations(assetNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(assetRevaluations).where(eq(assetRevaluations.assetNo, assetNo)).orderBy(desc(assetRevaluations.id));
     return { asset_no: assetNo, revaluations: rows.map((r: any) => ({ kind: r.kind, old_value: n(r.oldValue), new_value: n(r.newValue), delta: n(r.delta), reason: r.reason, reval_date: r.revalDate, status: r.status, journal_no: r.glRef, actioned_by: r.actionedBy, approved_by: r.approvedBy })), count: rows.length };
   }
 
   // ── QR asset tags ──────────────────────────────────────────────────────
   private async findAsset(assetNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(fixedAssets.assetNo, assetNo)];
     if (user.tenantId != null) conds.push(eq(fixedAssets.tenantId, user.tenantId)); // explicit predicate under Admin bypass
     const [a] = await db.select().from(fixedAssets).where(and(...conds)).limit(1);
@@ -388,7 +388,7 @@ export class AssetsService {
   }
 
   async assetLabels(_user: JwtUser, opts: { status?: string; cols?: number; rows?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const where = opts.status ? eq(fixedAssets.status, opts.status as any) : undefined;
     const rows = await db.select().from(fixedAssets).where(where).orderBy(asc(fixedAssets.assetNo));
     const labels = rows.map((a: any) => ({
@@ -406,7 +406,7 @@ export class AssetsService {
     const parsed = parseQrPayload(dto.code);
     const assetNo = (parsed.ASSET_ID || parsed.ITEM_ID || dto.code || '').trim();
     if (!assetNo) throw new BadRequestException({ code: 'NO_CODE', message: 'No asset code in QR', messageTh: 'ไม่พบรหัสทรัพย์สินใน QR' });
-    const db = this.db as any;
+    const db = this.db;
     return db.transaction(async (tx: any) => {
       const conds = [eq(fixedAssets.assetNo, assetNo)];
       if (user.tenantId != null) conds.push(eq(fixedAssets.tenantId, user.tenantId));
@@ -426,7 +426,7 @@ export class AssetsService {
   }
 
   async assetRegister(_user: JwtUser, status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? eq(fixedAssets.status, status as any) : undefined;
     const rows = await db.select().from(fixedAssets).where(where).orderBy(asc(fixedAssets.assetNo));
     const assets = rows.map(shapeAsset);
@@ -439,7 +439,7 @@ export class AssetsService {
   }
 
   async depreciationSchedule(_user: JwtUser, assetNo: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [a] = await db.select().from(fixedAssets).where(eq(fixedAssets.assetNo, assetNo)).limit(1);
     if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Asset not found', messageTh: 'ไม่พบสินทรัพย์' });
     const rows = await db.select({ period: depreciationRuns.period, amount: depreciationLines.amount, accumulatedAfter: depreciationLines.accumulatedAfter, nbvAfter: depreciationLines.nbvAfter })
@@ -448,7 +448,7 @@ export class AssetsService {
   }
 
   async listRuns(_user: JwtUser, limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(depreciationRuns).orderBy(desc(depreciationRuns.id)).limit(limit);
     return { runs: rows.map((r: any) => ({ run_no: r.runNo, period: r.period, total_depreciation: n(r.totalDepreciation), asset_count: r.assetCount, journal_no: r.journalNo, posted_at: r.postedAt })), count: rows.length };
   }

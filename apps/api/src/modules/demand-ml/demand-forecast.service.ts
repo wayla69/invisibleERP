@@ -27,10 +27,10 @@ export class DemandForecastService {
 
   // Dense daily demand: sum POS qty per business day, then fill gaps with 0 from the first sale to today.
   private async dailyDemand(itemId: string): Promise<number[]> {
-    const db = this.db as any;
+    const db = this.db;
     const cutoff = ymd(new Date(Date.now() - LOOKBACK * 86400_000));
     const rows: { d: string; q: string }[] = await db.select({
-      d: custPosSales.saleDate, q: sql<string>`coalesce(sum(${custPosItems.qty}),0)`,
+      d: sql<string>`${custPosSales.saleDate}`, q: sql<string>`coalesce(sum(${custPosItems.qty}),0)`,
     }).from(custPosItems).innerJoin(custPosSales, eq(custPosItems.saleId, custPosSales.id))
       .where(and(eq(custPosItems.itemId, itemId), ne(custPosSales.status, 'Voided'), gte(custPosSales.saleDate, cutoff)))
       .groupBy(custPosSales.saleDate).orderBy(custPosSales.saleDate);
@@ -92,7 +92,7 @@ export class DemandForecastService {
 
   // Forecast: auto-select the best model (or use a pinned one), forecast the horizon, and persist the run.
   async forecast(dto: DemandForecastDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const series = await this.dailyDemand(dto.item_id);
     if (series.length < MIN_HISTORY) throw new BadRequestException({ code: 'INSUFFICIENT_HISTORY', message: `Need ≥${MIN_HISTORY} days of demand history`, messageTh: `ต้องมีประวัติอย่างน้อย ${MIN_HISTORY} วัน` });
     const horizon = dto.horizon && dto.horizon > 0 ? Math.min(dto.horizon, 90) : DEFAULT_HORIZON;
@@ -120,7 +120,7 @@ export class DemandForecastService {
   }
 
   async list(_user: JwtUser, limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const lim = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 200) : 50;
     const rows = await db.select().from(demandForecasts).orderBy(desc(demandForecasts.createdAt)).limit(lim);
     return { count: rows.length, forecasts: rows };
@@ -129,7 +129,7 @@ export class DemandForecastService {
   // Forecast-accuracy KPI for the analytics plane: average WAPE/MASE across recent persisted runs, overall
   // and per algorithm. Scoped to the caller's tenant by RLS.
   async accuracy(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows: any[] = await db.select().from(demandForecasts).orderBy(desc(demandForecasts.createdAt)).limit(500);
     const num = (x: any) => (x == null ? null : Number(x));
     const avg = (xs: number[]) => (xs.length ? r4(xs.reduce((a, b) => a + b, 0) / xs.length) : null);

@@ -38,7 +38,7 @@ export class FinanceService {
 
   // ───────────────────── READ (Phase 2) ─────────────────────
   async pl(month: number, year: number) {
-    const db = this.db as any;
+    const db = this.db;
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const end = month < 12 ? `${year}-${String(month + 1).padStart(2, '0')}-01` : `${year}-12-31`;
     const inWin = and(ne(custPosSales.status, 'Voided'), gte(custPosSales.saleDate, start), lt(custPosSales.saleDate, end));
@@ -55,7 +55,7 @@ export class FinanceService {
   }
 
   async ap(status: string, limit: number, offset: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       Transaction_ID: apTransactions.txnNo, Creditor_ID: apTransactions.vendorId, Creditor_Name: apTransactions.vendorName, Amount: apTransactions.amount,
       Outstanding_Amount: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)`,
@@ -66,7 +66,7 @@ export class FinanceService {
   }
 
   async ar(limit: number, offset: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       Invoice_No: arInvoices.invoiceNo, Customer_Name: tenants.code, Invoice_Date: arInvoices.invoiceDate, Due_Date: arInvoices.dueDate, Amount: arInvoices.amount,
       Outstanding_Amount: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)`, Status: arInvoices.status,
@@ -76,7 +76,7 @@ export class FinanceService {
   }
 
   async kpi() {
-    const db = this.db as any;
+    const db = this.db;
     const today = ymd(); const mStart = monthStart(); const yStart = today.slice(0, 4) + '-01-01';
     const notVoided = ne(custPosSales.status, 'Voided');
     const [mtd] = await db.select({ rev: sql<string>`coalesce(sum(${custPosSales.total}),0)`, ord: sql<string>`count(*)` }).from(custPosSales).where(and(gte(custPosSales.saleDate, mStart), sql`${custPosSales.saleDate} <= ${today}`, notVoided));
@@ -105,7 +105,7 @@ export class FinanceService {
   }
 
   async arAging() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       ref: arInvoices.invoiceNo, party: tenants.code, due_date: arInvoices.dueDate,
       outstanding: sql<string>`${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)`,
@@ -114,7 +114,7 @@ export class FinanceService {
   }
 
   async apAging() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       ref: apTransactions.txnNo, party: apTransactions.vendorName, due_date: apTransactions.dueDate,
       outstanding: sql<string>`${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)`,
@@ -130,7 +130,7 @@ export class FinanceService {
   // that currency's documents in their own units. A receipt/payment inherits the currency of the invoice/
   // bill it settles.
   async customerStatement(tenantId: number, from?: string, to?: string, currency?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const lo = from ?? '0001-01-01';
     const hi = to ?? '9999-12-31';
     const invs = await db.select({ date: arInvoices.invoiceDate, ref: arInvoices.invoiceNo, amt: arInvoices.amount, cur: arInvoices.currency, fx: arInvoices.fxRate }).from(arInvoices).where(eq(arInvoices.tenantId, tenantId));
@@ -144,7 +144,7 @@ export class FinanceService {
   }
 
   async vendorStatement(vendor: string, from?: string, to?: string, currency?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const lo = from ?? '0001-01-01';
     const hi = to ?? '9999-12-31';
     const bills = await db.select({ date: apTransactions.invoiceDate, ref: apTransactions.txnNo, amt: apTransactions.amount, cur: apTransactions.currency, fx: apTransactions.fxRate }).from(apTransactions).where(eq(apTransactions.vendorName, vendor));
@@ -184,7 +184,7 @@ export class FinanceService {
   async issueAdvance(dto: AdvanceDto, user: JwtUser) {
     const amount = round2(dto.amount);
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = dto.tenant_id ?? user.tenantId ?? null;
     const advanceNo = await this.docNo.nextDaily('ADV');
     const today = ymd();
@@ -199,7 +199,7 @@ export class FinanceService {
   // Settle an advance: the employee's actual spend posts to the expense account, any unused cash is returned.
   // settled_expense + returned_cash must equal the advance — Dr expense + Dr 1000 / Cr 1180 (clears the float).
   async settleAdvance(advanceNo: string, dto: SettleAdvanceDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [a] = await db.select().from(employeeAdvances).where(eq(employeeAdvances.advanceNo, advanceNo)).limit(1);
     if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Advance not found', messageTh: 'ไม่พบเงินทดรองจ่าย' });
     if (a.status === 'settled') throw new BadRequestException({ code: 'ALREADY_SETTLED', message: 'Advance already settled', messageTh: 'เงินทดรองจ่ายนี้เคลียร์แล้ว' });
@@ -217,7 +217,7 @@ export class FinanceService {
   }
 
   async listAdvances(tenantId?: number, status?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [] as any[];
     if (tenantId != null) conds.push(eq(employeeAdvances.tenantId, tenantId));
     if (status) conds.push(eq(employeeAdvances.status, status));
@@ -252,7 +252,7 @@ export class FinanceService {
   // The write-off register: every AR-WRITEOFF entry — Draft (pending approval), Posted (approved/effective),
   // or Voided (rejected) — with its amount (the 5720 debit), so the controller can review bad-debt activity.
   async listWriteOffs(tenantId?: number) {
-    const db = this.db as any;
+    const db = this.db;
     // Each write-off has exactly one 5720 debit line, so an inner join on that line yields one row per write-off
     // with its amount directly (no correlated subquery).
     const conds = [eq(journalEntries.source, 'AR-WRITEOFF'), eq(journalLines.accountCode, '5720')] as any[];
@@ -274,7 +274,7 @@ export class FinanceService {
   // ───────────────────── WRITE (Phase 3) ─────────────────────
   // POST /api/finance/ar/sync — สร้าง INV-{order_no} จาก order ที่ Shipped/Completed ที่ยังไม่มี invoice
   async syncArInvoices(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const candidates = await db.select({ id: orders.id, orderNo: orders.orderNo, orderDate: orders.orderDate, tenantId: orders.tenantId })
       .from(orders).where(sql`${orders.status}::text in ('Shipped','Completed')`);
     const existing = new Set((await db.select({ no: arInvoices.orderNo }).from(arInvoices)).map((r: any) => r.no));
@@ -315,7 +315,7 @@ export class FinanceService {
 
   // POST /api/finance/ar/receipts — RCP- + อัปเดต paid/status
   async createReceipt(dto: ReceiptDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [inv] = await db.select().from(arInvoices).where(eq(arInvoices.invoiceNo, dto.invoice_no)).limit(1);
     if (!inv) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Invoice not found', messageTh: 'ไม่พบใบแจ้งหนี้' });
     // Idempotency: a retried request carrying the same key returns the original receipt instead of
@@ -354,7 +354,7 @@ export class FinanceService {
 
   // POST /api/finance/ap/transactions — AP-
   async createApTxn(dto: ApTxnDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     // input VAT is per shop (ภ.พ.30) → tenant-scoped. An internal caller (e.g. ESS reimbursement, EAM
     // maintenance) may pin the AP to the source document's tenant via dto.tenant_id.
     const tenantId = dto.tenant_id ?? user.tenantId ?? null;
@@ -398,7 +398,7 @@ export class FinanceService {
   // Step 1 (MAKER, `creditors`) — REQUEST a vendor payment. No cash moves and NO GL posts here: the bill's
   // paid_amount is untouched and a PendingApproval row is recorded. PATCH /api/finance/ap/transactions/{no}/pay
   async requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string, wht?: { income_type?: string; rate?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const [t] = await db.select().from(apTransactions).where(eq(apTransactions.txnNo, txnNo)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP txn not found', messageTh: 'ไม่พบรายการ AP' });
     // Phase 16 — 3-way match gate: a PO-based invoice must pass match (or be overridden) before payment.
@@ -441,7 +441,7 @@ export class FinanceService {
   // requester (segregation of duties) regardless of permissions held — even an Admin cannot approve their
   // own request. Only here does paid_amount move (under a row lock) and the cash-disbursement GL post.
   async approveApPayment(paymentNo: string, approver: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [p] = await db.select().from(apPayments).where(eq(apPayments.paymentNo, paymentNo)).limit(1);
     if (!p) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP payment not found', messageTh: 'ไม่พบรายการจ่าย' });
     if (p.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Payment ${paymentNo} is ${p.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
@@ -471,12 +471,12 @@ export class FinanceService {
     }
     // GL: clear the full payable (Dr 2000), hold the WHT (Cr 2361), pay the vendor net (Cr 1000). With no WHT
     // this is the original Dr 2000 / Cr 1000. The per-request glRef is stable + unique → idempotent post.
-    if (this.ledger && n(p.amount) > 0 && !(await this.ledger.alreadyPosted('PAY-AP', p.glRef, apTenant))) {
+    if (this.ledger && n(p.amount) > 0 && !(await this.ledger.alreadyPosted('PAY-AP', p.glRef!, apTenant))) {
       const lines: any[] = [{ account_code: '2000', debit: n(p.amount) }];
       if (whtAmount > 0) lines.push({ account_code: '2361', credit: whtAmount });
       lines.push({ account_code: '1000', credit: round2(n(p.amount) - whtAmount) });
       await this.ledger.postEntry({
-        date: ymd(), source: 'PAY-AP', sourceRef: p.glRef, tenantId: apTenant,
+        date: ymd(), source: 'PAY-AP', sourceRef: p.glRef ?? undefined, tenantId: apTenant,
         memo: `AP payment ${p.txnNo} (${paymentNo})${whtAmount > 0 ? ` — WHT ฿${whtAmount}` : ''}`, createdBy: approver.username,
         lines,
       });
@@ -488,7 +488,7 @@ export class FinanceService {
 
   // Step 2 (alt) — REJECT a pending payment (no cash/GL effect; recorded for the audit trail).
   async rejectApPayment(paymentNo: string, approver: JwtUser, reason?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [p] = await db.select().from(apPayments).where(eq(apPayments.paymentNo, paymentNo)).limit(1);
     if (!p) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP payment not found', messageTh: 'ไม่พบรายการจ่าย' });
     if (p.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Payment ${paymentNo} is ${p.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
@@ -499,7 +499,7 @@ export class FinanceService {
 
   // Checker queue — AP payments awaiting approval (joined to the bill for context).
   async listPendingApPayments(limit: number, offset: number) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select({
       payment_no: apPayments.paymentNo, txn_no: apPayments.txnNo, amount: apPayments.amount,
       requested_by: apPayments.requestedBy, requested_at: apPayments.requestedAt,
@@ -512,7 +512,7 @@ export class FinanceService {
 
   // Sub-ledger ↔ GL reconciliation: GL control account 1100 must equal open AR outstanding, 2000 = AP.
   async reconcile() {
-    const db = this.db as any;
+    const db = this.db;
     const [arSub] = await db.select({ v: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)),0)` }).from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
     const [apSub] = await db.select({ v: sql<string>`coalesce(sum(${apTransactions.amount} - coalesce(${apTransactions.paidAmount},0)),0)` }).from(apTransactions).where(sql`${apTransactions.status}::text <> 'Paid'`);
     const tb: any = this.ledger ? await this.ledger.trialBalance() : { rows: [] };
@@ -530,7 +530,7 @@ export class FinanceService {
   // controls (2000/2200/2400) carry a credit balance, so the GL balance is sign-flipped to compare to the
   // (positive) sub-ledger open value. Tenant-scoped via the caller's RLS (HQ/Admin aggregates all tenants).
   async reconcileControls() {
-    const db = this.db as any;
+    const db = this.db;
     const tb: any = this.ledger ? await this.ledger.trialBalance() : { rows: [] };
     const glBal = (code: string) => { const r = tb.rows.find((x: any) => x.account_code === code); return r ? n(r.balance) : 0; };
     const [arSub] = await db.select({ v: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount},0)),0)` }).from(arInvoices).where(sql`${arInvoices.status}::text <> 'Paid'`);
@@ -556,7 +556,7 @@ export class FinanceService {
   // inventory-write-off (INV-07), FX-rate (FX-04) and budget (BUD-01) maker-checkers. Read-only; tenant-scoped
   // via the caller's RLS (HQ/Admin sees every tenant).
   async pendingApprovals(opts?: { overdue_days?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const overdueDays = opts?.overdue_days ?? 3;
     const ageDays = (d: any): number | null => (d ? Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000)) : null);
     const items: any[] = [];

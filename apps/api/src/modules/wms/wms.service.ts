@@ -25,17 +25,17 @@ export class WmsService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly docNo: DocNumberService) {}
 
   async createBin(dto: { bin_code: string; location_id?: string; bin_type?: string; aisle?: string; rack?: string; level?: string; capacity?: number; pos_x?: number; pos_y?: number; pos_z?: number; dim_w?: number; dim_d?: number; dim_h?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [b] = await db.insert(bins).values({
       tenantId: user.tenantId ?? null, binCode: dto.bin_code, locationId: dto.location_id ?? null, binType: dto.bin_type ?? 'storage',
       aisle: dto.aisle ?? null, rack: dto.rack ?? null, level: dto.level ?? null, capacity: dto.capacity != null ? String(dto.capacity) : null,
       ...layoutSet(dto),
     }).returning({ id: bins.id });
-    return { id: Number(b.id), bin_code: dto.bin_code };
+    return { id: Number(b!.id), bin_code: dto.bin_code };
   }
   // Set/adjust a bin's storage-layout geometry + capacity (drives the 2D map / 3D view + INV-08 over-fill guard).
   async setBinLayout(binCode: string, dto: { capacity?: number; pos_x?: number; pos_y?: number; pos_z?: number; dim_w?: number; dim_d?: number; dim_h?: number }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(bins.binCode, binCode)];
     if (user.tenantId != null) conds.push(eq(bins.tenantId, user.tenantId));
     const set: any = { ...layoutSet(dto) };
@@ -46,14 +46,14 @@ export class WmsService {
     return { bin_code: binCode, ...dto };
   }
   async listBins(_user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(bins).orderBy(asc(bins.binCode));
     return { bins: rows.map((b: any) => ({ id: Number(b.id), bin_code: b.binCode, location_id: b.locationId, bin_type: b.binType, capacity: b.capacity != null ? n(b.capacity) : null, active: b.active })) };
   }
 
   // ── Storage layout (2D map / 3D view) ── bins with geometry + live utilisation (on-hand ÷ capacity). ──
   async warehouseLayout(user: JwtUser, locationId?: string) {
-    const db = this.db as any;
+    const db = this.db;
     const conds: any[] = [];
     if (user.tenantId != null) conds.push(eq(bins.tenantId, user.tenantId));
     if (locationId) conds.push(eq(bins.locationId, locationId));
@@ -81,7 +81,7 @@ export class WmsService {
 
   // Locate an item: every bin currently holding it (+ qty + geometry), for "where is this product" search.
   async locateItem(user: JwtUser, itemId: string) {
-    const db = this.db as any;
+    const db = this.db;
     const conds = [eq(binStock.itemId, itemId), sql`${binStock.qty} > 0`];
     if (user.tenantId != null) conds.push(eq(binStock.tenantId, user.tenantId));
     const rows = await db.select({
@@ -93,7 +93,7 @@ export class WmsService {
     return { item_id: itemId, locations, count: locations.length, total_qty: Math.round(locations.reduce((s: number, l: any) => s + l.qty, 0) * 1000) / 1000 };
   }
   async binStockOf(binCode: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [b] = await db.select().from(bins).where(eq(bins.binCode, binCode)).limit(1);
     if (!b) throw new NotFoundException({ code: 'BIN_NOT_FOUND', message: 'Bin not found', messageTh: 'ไม่พบช่องเก็บ' });
     const rows = await db.select().from(binStock).where(eq(binStock.binId, Number(b.id)));
@@ -112,7 +112,7 @@ export class WmsService {
 
   // ── PUTAWAY — record received stock into a bin. Idempotent per (gr_no, bin, item). ──
   async putaway(dto: { gr_no?: string; bin_code: string; item_id: string; lot_no?: string; qty: number; uom?: string; expiry_date?: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     const bin = await this.binByCode(db, tenantId, dto.bin_code);
     if (!bin) throw new NotFoundException({ code: 'BIN_NOT_FOUND', message: `Bin ${dto.bin_code} not found`, messageTh: 'ไม่พบช่องเก็บ' });
@@ -139,7 +139,7 @@ export class WmsService {
 
   // ── WAVE — batch N fulfillment orders into pick lists. Idempotent per (source_type, source_ref). ──
   async createWave(dto: { orders: { source_type: 'DINEIN' | 'POS' | 'SO'; source_ref: string }[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     if (!dto.orders?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No orders', messageTh: 'ไม่มีออเดอร์' });
     const waveNo = await this.docNo.nextDaily('WAVE');
@@ -147,14 +147,14 @@ export class WmsService {
     let pickCount = 0, lineCount = 0;
     for (const o of dto.orders) {
       const pickNo = await this.docNo.nextDaily('PICK');
-      const ins = await db.insert(pickLists).values({ tenantId, pickNo, waveId: Number(w.id), sourceType: o.source_type, sourceRef: o.source_ref, status: 'Open', createdBy: user.username })
+      const ins = await db.insert(pickLists).values({ tenantId, pickNo, waveId: Number(w!.id), sourceType: o.source_type, sourceRef: o.source_ref, status: 'Open', createdBy: user.username })
         .onConflictDoNothing({ target: [pickLists.tenantId, pickLists.sourceType, pickLists.sourceRef] }).returning({ id: pickLists.id });
       if (!ins.length) continue; // already waved → skip
       pickCount++;
       const lines = await this.resolveOrderLines(db, o.source_type, o.source_ref);
       for (const l of lines) {
         const bin = await this.suggestPickBin(db, tenantId, l.itemId);
-        await db.insert(pickListLines).values({ tenantId, pickId: Number(ins[0].id), itemId: l.itemId, itemDescription: l.desc, requestedQty: String(l.qty), binId: bin ? Number(bin.id) : null, lotNo: bin?.lotNo || null, uom: l.uom ?? null, status: 'Open' });
+        await db.insert(pickListLines).values({ tenantId, pickId: Number(ins[0]!.id), itemId: l.itemId, itemDescription: l.desc, requestedQty: String(l.qty), binId: bin ? Number(bin.id) : null, lotNo: bin?.lotNo || null, uom: l.uom ?? null, status: 'Open' });
         lineCount++;
       }
     }
@@ -207,7 +207,7 @@ export class WmsService {
 
   // ── PACK — create the shipment shell. Requires pick Picked. Idempotent (returns existing). ──
   async pack(pickNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [p] = await db.select().from(pickLists).where(eq(pickLists.pickNo, pickNo)).limit(1);
     if (!p) throw new NotFoundException({ code: 'PICK_NOT_FOUND', message: 'Pick list not found', messageTh: 'ไม่พบใบหยิบ' });
     if (p.status !== 'Picked' && p.status !== 'Packed') throw new BadRequestException({ code: 'NOT_PICKED', message: 'Pick must be fully picked before packing', messageTh: 'ต้องหยิบครบก่อนแพ็ค' });
@@ -221,7 +221,7 @@ export class WmsService {
 
   // ── SHIP — carrier + tracking. NO GL. Idempotent (already Shipped returns current). ──
   async ship(shipmentNo: string, dto: { carrier: string; tracking_no: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sh] = await db.select().from(shipments).where(eq(shipments.shipmentNo, shipmentNo)).limit(1);
     if (!sh) throw new NotFoundException({ code: 'SHIPMENT_NOT_FOUND', message: 'Shipment not found', messageTh: 'ไม่พบการจัดส่ง' });
     if (sh.status === 'Shipped') return { shipment_no: shipmentNo, tracking_no: sh.trackingNo, status: 'Shipped' };
@@ -233,7 +233,7 @@ export class WmsService {
   // ── 17C: GR → putaway. Derived task list = received (GR) minus already-put-away (Transfer→BIN), per item.
   // No new table — the existing idempotent putaway() executes each task. ──
   async pendingPutaway(grNo: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const recv = await db.select({ itemId: stockMovements.itemId, desc: stockMovements.itemDescription, uom: stockMovements.uom, qty: sql<string>`coalesce(sum(${stockMovements.qty}),0)` })
       .from(stockMovements).where(and(eq(stockMovements.docNo, grNo), eq(stockMovements.moveType, 'GR'))).groupBy(stockMovements.itemId, stockMovements.itemDescription, stockMovements.uom);
     const away = await db.select({ itemId: stockMovements.itemId, qty: sql<string>`coalesce(sum(${stockMovements.qty}),0)` })
@@ -242,7 +242,7 @@ export class WmsService {
     const [firstBin] = await db.select().from(bins).limit(1);
     const tasks: any[] = [];
     for (const r of recv) {
-      const pending = Math.round((n(r.qty) - (awayMap.get(r.itemId) ?? 0)) * 1000) / 1000;
+      const pending = Math.round((n(r.qty) - (awayMap.get(r.itemId!) ?? 0)) * 1000) / 1000;
       if (pending <= 0) continue;
       tasks.push({ gr_no: grNo, item_id: r.itemId, description: r.desc, pending_qty: pending, uom: r.uom, suggested_bin: firstBin?.binCode ?? null });
     }
@@ -251,7 +251,7 @@ export class WmsService {
 
   // ── 17C: wave-consolidated ship — ship all of a wave's packed shipments under ONE carrier/tracking. ──
   async shipWave(waveNo: string, dto: { carrier: string; tracking_no: string }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [w] = await db.select().from(pickWaves).where(eq(pickWaves.waveNo, waveNo)).limit(1);
     if (!w) throw new NotFoundException({ code: 'WAVE_NOT_FOUND', message: `Wave ${waveNo} not found`, messageTh: 'ไม่พบเวฟ' });
     const shps = await db.select().from(shipments).where(eq(shipments.waveId, Number(w.id)));

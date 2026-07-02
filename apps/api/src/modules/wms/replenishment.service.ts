@@ -33,7 +33,7 @@ export class ReplenishmentService {
 
   // recompute Suggested rows from current stock (PR_Created/Transfer_Done/Dismissed rows are terminal, left intact)
   async suggest(user: JwtUser, _limit = 50) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     // drop prior open suggestions for this tenant; rebuild from current state (idempotent)
     await db.delete(replenishmentSuggestions).where(and(eq(replenishmentSuggestions.tenantId, tenantId), eq(replenishmentSuggestions.status, 'Suggested')));
@@ -50,7 +50,7 @@ export class ReplenishmentService {
         if (qty <= 0) continue; // nothing to order
         const suggestionNo = await this.docNo.nextDaily('RPL');
         const urgency = this.urgency(onHand, rop);
-        await db.insert(replenishmentSuggestions).values({ tenantId, suggestionNo, itemId: r.itemId, onHand: String(onHand), reorderPoint: String(rop), suggestedQty: String(qty), urgency, status: 'Suggested', route: 'buy', transferQty: '0', buyQty: String(qty) });
+        await db.insert(replenishmentSuggestions).values({ tenantId, suggestionNo, itemId: r.itemId!, onHand: String(onHand), reorderPoint: String(rop), suggestedQty: String(qty), urgency, status: 'Suggested', route: 'buy', transferQty: '0', buyQty: String(qty) });
         out.push({ suggestion_no: suggestionNo, item_id: r.itemId, on_hand: onHand, reorder_point: rop, suggested_qty: qty, urgency, route: 'buy', transfer_qty: 0, buy_qty: qty });
       }
       return { suggestions: out, count: out.length };
@@ -62,9 +62,9 @@ export class ReplenishmentService {
     for (const b of branchRows) {
       const excess = n(b.onHand) - n(b.reorderPoint);
       if (excess > 0) {
-        const arr = surplusPool.get(b.itemId) ?? [];
+        const arr = surplusPool.get(b.itemId!) ?? [];
         arr.push({ branchId: Number(b.branchId), avail: excess });
-        surplusPool.set(b.itemId, arr);
+        surplusPool.set(b.itemId!, arr);
       }
     }
     for (const arr of surplusPool.values()) arr.sort((a, b) => b.avail - a.avail); // largest lender first
@@ -79,7 +79,7 @@ export class ReplenishmentService {
       let need = n(low.reorderQty);
       const urgency = this.urgency(onHand, rop);
       // transfer leg(s): draw from sibling branches' surplus, largest-first
-      const lenders = (surplusPool.get(low.itemId) ?? []).filter((l) => l.branchId !== Number(low.branchId) && l.avail > 0);
+      const lenders = (surplusPool.get(low.itemId!) ?? []).filter((l) => l.branchId !== Number(low.branchId) && l.avail > 0);
       for (const lender of lenders) {
         if (need <= 0.0001) break;
         const take = round2(Math.min(need, lender.avail));
@@ -87,14 +87,14 @@ export class ReplenishmentService {
         lender.avail -= take;
         need -= take;
         const suggestionNo = await this.docNo.nextDaily('RPL');
-        await db.insert(replenishmentSuggestions).values({ tenantId, suggestionNo, itemId: low.itemId, onHand: String(onHand), reorderPoint: String(rop), suggestedQty: String(take), urgency, status: 'Suggested', branchId: Number(low.branchId), route: 'transfer', fromBranchId: lender.branchId, transferQty: String(take), buyQty: '0' });
+        await db.insert(replenishmentSuggestions).values({ tenantId, suggestionNo, itemId: low.itemId!, onHand: String(onHand), reorderPoint: String(rop), suggestedQty: String(take), urgency, status: 'Suggested', branchId: Number(low.branchId), route: 'transfer', fromBranchId: lender.branchId, transferQty: String(take), buyQty: '0' });
         out.push({ suggestion_no: suggestionNo, item_id: low.itemId, on_hand: onHand, reorder_point: rop, suggested_qty: take, urgency, branch_id: Number(low.branchId), from_branch_id: lender.branchId, route: 'transfer', transfer_qty: take, buy_qty: 0 });
       }
       // buy leg: residual the transfers couldn't cover
       if (need > 0.0001) {
         const buyQty = round2(need);
         const suggestionNo = await this.docNo.nextDaily('RPL');
-        await db.insert(replenishmentSuggestions).values({ tenantId, suggestionNo, itemId: low.itemId, onHand: String(onHand), reorderPoint: String(rop), suggestedQty: String(buyQty), urgency, status: 'Suggested', branchId: Number(low.branchId), route: 'buy', transferQty: '0', buyQty: String(buyQty) });
+        await db.insert(replenishmentSuggestions).values({ tenantId, suggestionNo, itemId: low.itemId!, onHand: String(onHand), reorderPoint: String(rop), suggestedQty: String(buyQty), urgency, status: 'Suggested', branchId: Number(low.branchId), route: 'buy', transferQty: '0', buyQty: String(buyQty) });
         out.push({ suggestion_no: suggestionNo, item_id: low.itemId, on_hand: onHand, reorder_point: rop, suggested_qty: buyQty, urgency, branch_id: Number(low.branchId), route: 'buy', transfer_qty: 0, buy_qty: buyQty });
       }
     }
@@ -102,7 +102,7 @@ export class ReplenishmentService {
   }
 
   async list(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     const rows = await db.select().from(replenishmentSuggestions).where(eq(replenishmentSuggestions.tenantId, tenantId)).orderBy(asc(replenishmentSuggestions.itemId));
     // resolve branch + preferred-vendor display names (best-effort)
@@ -129,7 +129,7 @@ export class ReplenishmentService {
   // + a tenant-scoped cust_stock_log entry for BOTH branches (the authoritative, branch-attributed audit trail,
   // since stock_movements has no tenant_id). Stamps the rows Transfer_Done. Atomic.
   async autoTransfer(dto: { item_ids?: string[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     const all = await db.select().from(replenishmentSuggestions)
       .where(and(eq(replenishmentSuggestions.tenantId, tenantId), eq(replenishmentSuggestions.status, 'Suggested'), eq(replenishmentSuggestions.route, 'transfer')));
@@ -172,7 +172,7 @@ export class ReplenishmentService {
   // Execute the BUY legs (procurement duty): consolidate residual 'buy' rows into ONE PR via the maker-checker
   // procurement flow. Stamps them PR_Created. Legacy NULL-route rows are treated as buy (back-compat).
   async autoPr(dto: { item_ids?: string[] }, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     const rows = await db.select().from(replenishmentSuggestions).where(and(eq(replenishmentSuggestions.tenantId, tenantId), eq(replenishmentSuggestions.status, 'Suggested')));
     const buyRows = rows.filter((r: any) => (r.route ?? 'buy') !== 'transfer');
@@ -189,7 +189,7 @@ export class ReplenishmentService {
   // reorder_point is below their actual run-rate buffer (under_buffered). Read-only; planners apply per row.
   private static readonly SAFETY = 1.25;
   async parRecommendations(user: JwtUser, opts?: { branchId?: number; windowDays?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     const windowDays = Math.min(365, Math.max(1, opts?.windowDays ?? 30));
     const cutoff = new Date(Date.now() - windowDays * 86400 * 1000);
@@ -227,7 +227,7 @@ export class ReplenishmentService {
 
   // Apply a recommendation: write the demand-driven reorder_point onto the (branch,item) row (planner duty).
   async applyPar(user: JwtUser, branchId: number, itemId: string, opts?: { windowDays?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     const rec = (await this.parRecommendations(user, { branchId, windowDays: opts?.windowDays })).recommendations.find((r: any) => r.item_id === itemId);
     if (!rec) return { applied: false, reason: 'NO_RECOMMENDATION' };
@@ -243,7 +243,7 @@ export class ReplenishmentService {
   // replenishment_suggestions. The planner uses the ml_qty alongside the static suggestion to decide how much
   // to requisition. Horizon must be 7, 14, or 28 days (clamped to [7,28]).
   async demandForecast(user: JwtUser, opts?: { horizon?: number }) {
-    const db = this.db as any;
+    const db = this.db;
     const tenantId = user.tenantId as number;
     const horizon = Math.min(28, Math.max(7, Math.round(opts?.horizon ?? 14)));
 

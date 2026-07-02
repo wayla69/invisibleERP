@@ -93,7 +93,7 @@ export class BomService {
 
   // ───────────────────── HQ MASTER LIBRARY ─────────────────────
   async listMaster(limit: number, offset: number) {
-    const db = this.db as any;
+    const db = this.db;
     const heads = await db.select().from(bomMaster).orderBy(desc(bomMaster.bomCode)).limit(limit).offset(offset);
     const out = [];
     for (const h of heads) {
@@ -104,7 +104,7 @@ export class BomService {
   }
 
   async getMaster(bomCode: string) {
-    const db = this.db as any;
+    const db = this.db;
     const [h] = await db.select().from(bomMaster).where(eq(bomMaster.bomCode, bomCode)).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'BOM not found', messageTh: 'ไม่พบสูตรผลิต' });
     const lines = await db.select().from(bomMasterLines).where(eq(bomMasterLines.bomId, h.id));
@@ -132,7 +132,7 @@ export class BomService {
 
   // POST/PATCH — INSERT OR REPLACE by bomCode (recompute costing). Returns full view.
   async upsertMaster(dto: BomMasterDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.bom_code) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'bom_code required', messageTh: 'ต้องระบุรหัสสูตร' });
     const inLines = dto.lines ?? [];
 
@@ -179,7 +179,7 @@ export class BomService {
   }
 
   async deleteMaster(bomCode: string, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [h] = await db.select({ id: bomMaster.id }).from(bomMaster).where(eq(bomMaster.bomCode, bomCode)).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'BOM not found', messageTh: 'ไม่พบสูตรผลิต' });
     await db.transaction(async (tx: any) => {
@@ -192,7 +192,7 @@ export class BomService {
 
   // POST /api/bom/master/push — for each (bom x tenant): delete-then-insert into custBom + custBomLines
   async pushMaster(dto: PushDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const bomCodes = dto.bom_codes ?? [];
     const tenantCodes = dto.tenant_codes ?? [];
     if (!bomCodes.length || !tenantCodes.length)
@@ -235,7 +235,7 @@ export class BomService {
 
   // ───────────────────── SUBMISSIONS (tenant → HQ approval) ─────────────────────
   async listSubmissions(status: string | undefined, limit: number, offset: number) {
-    const db = this.db as any;
+    const db = this.db;
     const where = status ? sql`${bomSubmissions.status}::text = ${status}` : undefined;
     const rows = await db.select({
       id: bomSubmissions.id, bom_code: bomSubmissions.bomCode, tenant_code: tenants.code,
@@ -251,14 +251,14 @@ export class BomService {
 
   // PATCH /api/bom/submissions/:id/approve — copy submission → bomMaster (+lines), status 'Approved'
   async approveSubmission(id: number, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const [sub] = await db.select().from(bomSubmissions).where(eq(bomSubmissions.id, id)).limit(1);
     if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Submission not found', messageTh: 'ไม่พบคำขอ' });
     const subLines = await db.select().from(bomSubmissionLines).where(eq(bomSubmissionLines.submissionId, id));
 
     await db.transaction(async (tx: any) => {
       // upsert into bomMaster by bom_code (INSERT OR REPLACE)
-      const [existing] = await tx.select({ id: bomMaster.id }).from(bomMaster).where(eq(bomMaster.bomCode, sub.bomCode)).limit(1);
+      const [existing] = await tx.select({ id: bomMaster.id }).from(bomMaster).where(eq(bomMaster.bomCode, sub.bomCode!)).limit(1);
       const headVals = {
         bomCode: sub.bomCode, productName: sub.productName, yieldQty: sub.yieldQty, yieldUom: sub.yieldUom,
         laborCost: sub.laborCost, overheadCost: sub.overheadCost, otherCost: sub.otherCost, sellingPrice: sub.sellingPrice,
@@ -289,7 +289,7 @@ export class BomService {
 
   // ───────────────────── PORTAL (tenant BOM) ─────────────────────
   async listPortalBom(user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const t = await this.resolveTenant(db, user.customerName);
     const heads = await db.select().from(custBom).where(eq(custBom.tenantId, Number(t.id))).orderBy(desc(custBom.bomCode));
     const out = [];
@@ -311,7 +311,7 @@ export class BomService {
 
   // POST /api/portal/bom — tenant BOM (custBom+custBomLines) AND dual-write to bomSubmissions+lines (Pending)
   async createPortalBom(dto: PortalBomDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     if (!dto.bom_code) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'bom_code required', messageTh: 'ต้องระบุรหัสสูตร' });
     const t = await this.resolveTenant(db, user.customerName);
     const tenantId = Number(t.id);
@@ -375,7 +375,7 @@ export class BomService {
   // insert custProdRuns + custProdItems; decrement raw-material customerInventory (MAX 0) + log 'Production';
   // add finished good (+= yieldQty*batchQty) + log 'Production-FG'. Transaction.
   async createProductionRun(bomCode: string, dto: ProductionRunDto, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const t = await this.resolveTenant(db, user.customerName);
     const tenantId = Number(t.id);
     const batchQty = n(dto.batch_qty) || 1;
@@ -411,7 +411,7 @@ export class BomService {
         });
         // decrement raw-material inventory (MAX 0)
         const [inv] = await tx.select().from(customerInventory)
-          .where(and(eq(customerInventory.tenantId, tenantId), eq(customerInventory.itemId, l.itemId))).limit(1);
+          .where(and(eq(customerInventory.tenantId, tenantId), eq(customerInventory.itemId, l.itemId!))).limit(1);
         const before = n(inv?.currentStock);
         const after = Math.max(before - required, 0);
         if (inv) {

@@ -229,7 +229,7 @@ export class InventoryLedgerService {
   // posts no JE, consumes no layer, moves no balance. One write-off may be pending per item/location.
   private async requestWriteOff(dto: AdjustDto, delta: number, user: JwtUser) {
     const tenantId = this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const loc = dto.location_id ?? 'WH-MAIN';
     const cur = await this.balanceRow(tenantId, dto.item_id, loc);
     const oldQty = n(cur?.onHandQty), avg = n(cur?.avgCost);
@@ -237,14 +237,14 @@ export class InventoryLedgerService {
     const [pending] = await db.select().from(invWriteoffRequests).where(and(eq(invWriteoffRequests.tenantId, tenantId), eq(invWriteoffRequests.itemId, dto.item_id), eq(invWriteoffRequests.locationId, loc), eq(invWriteoffRequests.status, 'PendingApproval'))).limit(1);
     if (pending) throw bad('WRITEOFF_PENDING', `A write-off of ${dto.item_id} is already pending approval`, 'มีรายการตัดสต๊อกของรายการนี้รออนุมัติอยู่แล้ว');
     const estValue = round4(Math.abs(delta) * avg);
-    const [row] = await db.insert(invWriteoffRequests).values({ tenantId, itemId: dto.item_id, locationId: loc, qtyDelta: String(delta), estValue: String(estValue), reason: dto.reason, status: 'PendingApproval', requestedBy: user.username }).returning({ id: invWriteoffRequests.id });
-    return { request_id: Number(row.id), item_id: dto.item_id, location_id: loc, qty_delta: delta, estimated_value: -estValue, status: 'pending_approval' };
+    const [row] = await db.insert(invWriteoffRequests).values({ tenantId, itemId: dto.item_id, locationId: loc, qtyDelta: String(delta), estValue: String(estValue), reason: dto.reason!, status: 'PendingApproval', requestedBy: user.username }).returning({ id: invWriteoffRequests.id });
+    return { request_id: Number(row!.id), item_id: dto.item_id, location_id: loc, qty_delta: delta, estimated_value: -estValue, status: 'pending_approval' };
   }
 
   // INV-07: a DIFFERENT user approves → the real valued adjustment runs atomically against current state.
   async approveWriteOff(requestId: number, user: JwtUser) {
     const tenantId = this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const [req] = await db.select().from(invWriteoffRequests).where(and(eq(invWriteoffRequests.id, requestId), eq(invWriteoffRequests.tenantId, tenantId))).limit(1);
     if (!req || req.status !== 'PendingApproval') throw bad('NO_PENDING_WRITEOFF', `No write-off pending approval (#${requestId})`, 'ไม่พบรายการตัดสต๊อกที่รออนุมัติ');
     if (req.requestedBy && req.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a write-off you requested', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
@@ -255,7 +255,7 @@ export class InventoryLedgerService {
 
   async rejectWriteOff(requestId: number, user: JwtUser, reason?: string) {
     const tenantId = this.tenant(user);
-    const db = this.db as any;
+    const db = this.db;
     const [req] = await db.select().from(invWriteoffRequests).where(and(eq(invWriteoffRequests.id, requestId), eq(invWriteoffRequests.tenantId, tenantId))).limit(1);
     if (!req || req.status !== 'PendingApproval') throw bad('NO_PENDING_WRITEOFF', `No write-off pending approval (#${requestId})`, 'ไม่พบรายการตัดสต๊อกที่รออนุมัติ');
     await db.update(invWriteoffRequests).set({ status: 'Rejected', reason: reason ? `${req.reason} [REJECTED: ${reason}]` : req.reason }).where(eq(invWriteoffRequests.id, requestId));

@@ -14,7 +14,7 @@ export class JournalService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
   async append(e: JournalEntry, user: JwtUser) {
-    const db = this.db as any;
+    const db = this.db;
     const tid = user.tenantId ?? null;
     return db.transaction(async (tx: any) => {
       // serialize per tenant: lock the latest row (FOR UPDATE) so concurrent appends can't fork the chain
@@ -28,20 +28,20 @@ export class JournalService {
   }
 
   async list(limit = 100) {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(posJournal).orderBy(desc(posJournal.seq)).limit(limit);
     return { entries: rows.map((r: any) => ({ seq: r.seq, doc_type: r.docType, doc_no: r.docNo, action: r.action, payload: r.payload, prev_hash: r.prevHash, hash: r.hash, created_by: r.createdBy, created_at: r.createdAt })), count: rows.length };
   }
 
   // Recompute the whole chain and report the first seq where it breaks (tamper / gap).
   async verify() {
-    const db = this.db as any;
+    const db = this.db;
     const rows = await db.select().from(posJournal).orderBy(posJournal.seq);
     let prevHash: string | null = null;
     let expectedSeq = 1;
     for (const r of rows) {
       if (r.seq !== expectedSeq) return { ok: false, broken_at: r.seq, reason: 'sequence gap' };
-      const expect = hashEntry(prevHash, r.seq, { doc_type: r.docType, doc_no: r.docNo ?? undefined, action: r.action ?? undefined, payload: r.payload });
+      const expect = hashEntry(prevHash, r.seq, { doc_type: r.docType, doc_no: r.docNo ?? undefined, action: r.action ?? undefined, payload: r.payload as Record<string, any> });
       if (r.prevHash !== prevHash) return { ok: false, broken_at: r.seq, reason: 'prev_hash mismatch' };
       if (r.hash !== expect) return { ok: false, broken_at: r.seq, reason: 'hash mismatch' };
       prevHash = r.hash;
