@@ -5,6 +5,7 @@ import { loyaltyCampaigns, posMembers, messageLog, customerProfiles } from '../.
 import { DocNumberService } from '../../common/doc-number.service';
 import { resolveMessageGateway } from '../messaging/gateways';
 import { SavedSegmentsService } from '../loyalty/saved-segments.service';
+import { bucketPct } from '../marketing/marketing-automation.service';
 import type { JwtUser } from '../../common/decorators';
 
 // CRM Phase 4 — campaign orchestration. A segmented, optionally-scheduled broadcast over the messaging
@@ -44,7 +45,7 @@ export class CampaignsService {
       await this.savedSegments.membersForSend(db, tenantId, Number(dto.saved_segment_id));
     }
     const scheduleAt = dto.schedule_at ? new Date(dto.schedule_at) : null;
-    const vals: any = { name: dto.name, channel: dto.channel ?? 'sms', audience: dto.audience ?? 'all', segment: dto.segment ?? null, tier: dto.tier ?? null, savedSegmentId: dto.audience === 'saved_segment' ? Number(dto.saved_segment_id) : null, body: dto.body, scheduleAt, status: scheduleAt ? 'scheduled' : 'draft' };
+    const vals: any = { name: dto.name, channel: dto.channel ?? 'sms', audience: dto.audience ?? 'all', segment: dto.segment ?? null, tier: dto.tier ?? null, savedSegmentId: dto.audience === 'saved_segment' ? Number(dto.saved_segment_id) : null, body: dto.body, variantBBody: dto.variant_b_body ?? null, splitBPct: dto.variant_b_body ? Math.min(90, Math.max(0, Number(dto.split_b_pct ?? 0))) : 0, scheduleAt, status: scheduleAt ? 'scheduled' : 'draft' };
     if (dto.id) {
       // Only an un-sent campaign may be edited.
       const [cur] = await db.select({ status: loyaltyCampaigns.status }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.id, dto.id), eq(loyaltyCampaigns.tenantId, tenantId))).limit(1);
@@ -84,7 +85,10 @@ export class CampaignsService {
     const members = await this.resolveAudience(db, tenantId, claimed);
     let sent = 0, skipped = 0, failed = 0;
     for (const m of members) {
-      const r = await this.deliver(db, tenantId, m, claimed.channel, claimed.body, claimed.campaignCode, user.username);
+      // Body-only A/B (G2): deterministic per-member split — same member always gets the same variant.
+      const body = claimed.variantBBody && bucketPct(Number(claimed.id), Number(m.id)) < Number(claimed.splitBPct ?? 0)
+        ? claimed.variantBBody : claimed.body;
+      const r = await this.deliver(db, tenantId, m, claimed.channel, body, claimed.campaignCode, user.username);
       if (r === 'sent') sent++; else if (r === 'skipped') skipped++; else failed++;
     }
     await db.update(loyaltyCampaigns).set({ targeted: members.length, sentCount: sent, skippedCount: skipped, failedCount: failed }).where(and(eq(loyaltyCampaigns.id, id), eq(loyaltyCampaigns.tenantId, tenantId)));
@@ -163,7 +167,7 @@ export class CampaignsService {
 function shape(c: any) {
   return {
     id: Number(c.id), campaign_code: c.campaignCode, name: c.name, channel: c.channel, audience: c.audience,
-    segment: c.segment, tier: c.tier, saved_segment_id: c.savedSegmentId != null ? Number(c.savedSegmentId) : null, body: c.body, schedule_at: c.scheduleAt, status: c.status,
+    segment: c.segment, tier: c.tier, saved_segment_id: c.savedSegmentId != null ? Number(c.savedSegmentId) : null, body: c.body, variant_b_body: c.variantBBody ?? null, split_b_pct: Number(c.splitBPct ?? 0), schedule_at: c.scheduleAt, status: c.status,
     targeted: Number(c.targeted ?? 0), sent_count: Number(c.sentCount ?? 0), skipped_count: Number(c.skippedCount ?? 0), failed_count: Number(c.failedCount ?? 0),
     created_at: c.createdAt, sent_at: c.sentAt,
   };

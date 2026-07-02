@@ -9,6 +9,7 @@ const RunBody = z.object({
   name: z.string().min(1), trigger: Trigger, channel: z.enum(['line', 'sms', 'email']).optional(),
   coupon_prefix: z.string().optional(), discount_type: z.enum(['amount', 'percent']).optional(),
   discount_value: z.number().nonnegative().optional(), lapsed_days: z.number().int().positive().optional(),
+  variant_b_body: z.string().min(1).optional(), split_b_pct: z.number().int().min(0).max(90).optional(), holdout_pct: z.number().int().min(0).max(50).optional(),
 });
 const PreviewBody = z.object({ trigger: Trigger, channel: z.enum(['line', 'sms', 'email']).optional(), lapsed_days: z.number().int().positive().optional() });
 const RedeemBody = z.object({ coupon_code: z.string().min(1), sale_no: z.string().optional(), value: z.number().nonnegative().optional() });

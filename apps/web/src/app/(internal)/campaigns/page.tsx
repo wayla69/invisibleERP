@@ -28,10 +28,13 @@ export default function CampaignsPage() {
   const [name, setName] = useState('');
   const [trigger, setTrigger] = useState('lapsed');
   const [discount, setDiscount] = useState(50);
+  const [variantB, setVariantB] = useState('');
+  const [splitB, setSplitB] = useState(0);
+  const [holdout, setHoldout] = useState(0);
 
   const list = useQuery<any>({ queryKey: ['campaigns'], queryFn: () => api('/api/marketing/automation/campaigns') });
   const run = useMutation({
-    mutationFn: () => api<any>('/api/marketing/automation/campaigns', { method: 'POST', body: JSON.stringify({ name: name || 'แคมเปญ LINE', trigger, channel: 'line', discount_type: 'amount', discount_value: discount }) }),
+    mutationFn: () => api<any>('/api/marketing/automation/campaigns', { method: 'POST', body: JSON.stringify({ name: name || 'แคมเปญ LINE', trigger, channel: 'line', discount_type: 'amount', discount_value: discount, ...(variantB.trim() ? { variant_b_body: variantB.trim(), split_b_pct: splitB } : {}), ...(holdout > 0 ? { holdout_pct: holdout } : {}) }) }),
     onSuccess: (r) => { notifySuccess(`ส่งแล้ว: เป้าหมาย ${r.targeted} · ส่งสำเร็จ ${r.sent} · ข้าม ${r.skipped} · ล้มเหลว ${r.failed}`); qc.invalidateQueries({ queryKey: ['campaigns'] }); },
     onError: (e: any) => notifyError(e.message),
   });
@@ -52,9 +55,12 @@ export default function CampaignsPage() {
             </Select>
           </div>
           <div className="grid gap-1"><Label htmlFor="disc" className="text-xs">ส่วนลด (บาท)</Label><Input id="disc" type="number" min={0} value={discount} onChange={(e) => setDiscount(Math.max(0, +e.target.value))} className="h-9 w-32" /></div>
+          <div className="grid gap-1"><Label htmlFor="vb" className="text-xs">ข้อความแบบ B (A/B — ว่าง=ไม่ทดสอบ)</Label><Input id="vb" value={variantB} onChange={(e) => setVariantB(e.target.value)} placeholder="เช่น 🔥 ดีลพิเศษเฉพาะคุณ" className="h-9 w-64" /></div>
+          {variantB.trim() !== '' && <div className="grid gap-1"><Label htmlFor="sb" className="text-xs">สัดส่วน B (%)</Label><Input id="sb" type="number" min={0} max={90} value={splitB} onChange={(e) => setSplitB(Math.min(90, Math.max(0, +e.target.value)))} className="h-9 w-24" /></div>}
+          <div className="grid gap-1"><Label htmlFor="ho" className="text-xs">กลุ่มควบคุม holdout (%)</Label><Input id="ho" type="number" min={0} max={50} value={holdout} onChange={(e) => setHoldout(Math.min(50, Math.max(0, +e.target.value)))} className="h-9 w-24" /></div>
           <Button disabled={run.isPending} onClick={() => run.mutate()}><Send className="size-4" /> {run.isPending ? 'กำลังส่ง…' : 'ส่งแคมเปญ'}</Button>
         </div>
-        <p className="text-xs text-muted-foreground">เฉพาะสมาชิกที่ยินยอมรับข่าวสารและผูกบัญชี LINE เท่านั้นที่จะได้รับ — ระบบข้ามผู้ที่ไม่ยินยอมโดยอัตโนมัติ</p>
+        <p className="text-xs text-muted-foreground">เฉพาะสมาชิกที่ยินยอมรับข่าวสารและผูกบัญชี LINE เท่านั้นที่จะได้รับ — ระบบข้ามผู้ที่ไม่ยินยอมโดยอัตโนมัติ · กลุ่ม holdout จะไม่ได้รับข้อความ/คูปอง (ฐานเปรียบเทียบพิสูจน์ lift) — การแบ่งกลุ่มคงที่ต่อสมาชิก (deterministic)</p>
       </Card>
 
       <Card className="gap-3 p-4">
