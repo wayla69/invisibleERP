@@ -35,6 +35,11 @@ export const customerProfiles = pgTable('customer_profiles', {
   favoriteItemIds: jsonb('favorite_item_ids'), // top 3 item ids
   visitCount: integer('visit_count').notNull().default(0),
   avgOrderValue: numeric('avg_order_value', { precision: 14, scale: 2 }),
+  // Predictive scoring (Growth Engine G3, docs/25) — EXPLAINABLE versioned weighted formula, not a model:
+  // computed inside refreshProfile alongside RFM (one reviewed path). Null until the member has ≥1 order.
+  churnRisk: integer('churn_risk'),                                  // 0..100 (docs/ops/predictive-scoring.md)
+  predictedLtv: numeric('predicted_ltv', { precision: 14, scale: 2 }), // ฿, 12-month estimate
+  scoreVersion: text('score_version'),                               // formula version stamp (e.g. 'v1')
   refreshedAt: timestamp('refreshed_at', { withTimezone: true }).defaultNow(),
 });
 

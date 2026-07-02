@@ -266,6 +266,36 @@ async function main() {
     (jT2List.json.journeys ?? []).length === 0 && jT2Enroll.status === 404,
     JSON.stringify({ t2n: (jT2List.json.journeys ?? []).length, s: jT2Enroll.status }));
 
+  // ── 7j. Predictive scoring (Phase G3) — explainable churn/LTV, versioned, refreshed by the F2 sweep ──
+  // A decaying member: 2 paid orders 100/90 days ago → personal cadence 10d, quiet 90d → HIGH churn risk.
+  const decay = await inj('POST', '/api/loyalty/members', mgr1, { name: 'ห่างหาย', phone: '0808888801' });
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
+  await db.insert(s.dineInOrders).values([
+    { orderNo: 'DIN-G3-1', tenantId: t1, memberId: Number(decay.json.id), saleNo: 'SALE-G3-1', total: '200', openedAt: daysAgo(100), channel: 'web' },
+    { orderNo: 'DIN-G3-2', tenantId: t1, memberId: Number(decay.json.id), saleNo: 'SALE-G3-2', total: '200', openedAt: daysAgo(90), channel: 'web' },
+  ]);
+  const sweep2 = await inj('POST', '/api/crm/profiles/refresh', mgr1, {});
+  const decayProf = await inj('GET', `/api/crm/profile/${decay.json.id}`, mgr1);
+  const freshProf = await inj('GET', `/api/crm/profile/${memberId}`, mgr1);
+  ok('Churn scoring: a member far past their own cadence scores high; a just-purchased member scores low; version stamped',
+    sweep2.status === 200 && (decayProf.json.crm?.churn_risk ?? 0) >= 60 && (freshProf.json.crm?.churn_risk ?? 99) <= 20
+      && decayProf.json.crm?.score_version === 'v1' && (decayProf.json.crm?.predicted_ltv ?? -1) >= 0,
+    JSON.stringify({ decay: decayProf.json.crm?.churn_risk, fresh: freshProf.json.crm?.churn_risk, ver: decayProf.json.crm?.score_version, ltv: decayProf.json.crm?.predicted_ltv }));
+
+  // Scores are usable as saved-segment fields (whitelist extended, values still drizzle-bound).
+  const riskSeg = await inj('POST', '/api/loyalty/saved-segments', mgr1, { name: 'High churn risk', rules: [{ field: 'churn_risk', op: 'gte', value: 60 }] });
+  const riskMembers = await inj('GET', `/api/loyalty/saved-segments/${riskSeg.json.id}/members`, mgr1);
+  ok('churn_risk / predicted_ltv are segment-builder fields: a churn_risk ≥ 60 segment resolves to the decaying member only',
+    riskSeg.status === 201 && riskMembers.json.total === 1 && riskMembers.json.members?.[0]?.id === decay.json.id,
+    JSON.stringify({ total: riskMembers.json.total, id: riskMembers.json.members?.[0]?.id }));
+
+  // Analytics: value at churn risk (Σ predicted_ltv of churn_risk ≥ 70 members) — estimate, monitoring only.
+  const segMix2 = await inj('GET', '/api/loyalty/analytics/segments', mgr1);
+  ok('Analytics at-risk value: Σ predicted LTV of high-risk members reported (threshold 70)',
+    segMix2.json.at_risk_value != null && segMix2.json.at_risk_value.threshold === 70
+      && segMix2.json.at_risk_value.members >= 1 && segMix2.json.at_risk_value.predicted_ltv >= 0,
+    JSON.stringify(segMix2.json.at_risk_value));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });

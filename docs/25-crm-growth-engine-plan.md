@@ -1,6 +1,6 @@
 # 25 — CRM Growth Engine: Journeys, Proof of Lift & Prediction — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v1.0 — **PLANNING** · **Owner:** ERP / Product (CMO + SVP-IT review)
+> **Date:** 2026-07-02 · **Status:** v1.3 — **DELIVERED** (G1 #300, G2 #301, G3 shipped) · **Owner:** ERP / Product (CMO + SVP-IT review)
 > **Scope:** The three strategic capabilities deferred by `docs/24` §5 — the gap between "a marketer can
 > operate it" (docs/24, DELIVERED) and "the platform *grows revenue by itself and proves it*":
 > **G1 lifecycle journeys** (multi-step, wait/condition, frequency-capped), **G2 A/B + holdout** (prove a
@@ -130,6 +130,7 @@ and the system runs it per member, forever, without cron babysitting.
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.3 | 2026-07-02 | Platform | **G3 SHIPPED — plan DELIVERED.** Explainable churn-risk + predicted-LTV (migration 0214, SCORE_VERSION v1, docs/ops/predictive-scoring.md) inside refreshProfile; segment fields churn_risk/predicted_ltv; analytics value-at-churn-risk; member-360 scores. §5 (branching graphs, bandits, organic baselines, trained models, send-time optimization) remains the next horizon. |
 | 1.2 | 2026-07-02 | Platform | **G2 SHIPPED** — A/B variants + holdout on the campaign_sends closed loop (migration 0213, deterministic bucketPct, per-group lift report with the honest 0-baseline caveat); loyalty_campaigns body-only A/B. G3 pending. |
 | 1.1 | 2026-07-02 | Platform | **G1 SHIPPED** — lifecycle journeys (migration 0212, module `journeys`, `journey_runner` BI job, `enroll_journey` automation action, web `/loyalty/journeys`, control **MKT-12** + RCM regen → 170). G2/G3 pending. |
 | 1.0 | 2026-07-02 | Platform | Initial plan: three-phase growth engine (G1 lifecycle journeys + MKT-12, G2 A/B + holdout lift on the campaign_sends closed loop, G3 explainable churn/LTV scoring composing into F1 segments + G1 journeys), continuing docs/24. |
