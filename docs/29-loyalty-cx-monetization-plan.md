@@ -1,6 +1,6 @@
 # 29 — Loyalty CX & Monetization: Close the Loops, Charge for the Club — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v1.4 — **V1–V4 SHIPPED**, V5 pending · **Owner:** ERP / Product (CMO + SVP-IT review)
+> **Date:** 2026-07-02 · **Status:** v1.5 — **DELIVERED (V1–V5 SHIPPED)** · **Owner:** ERP / Product (CMO + SVP-IT review)
 > **Scope:** The five follow-ups after docs/27 (Loyalty World-Class, DELIVERED): **V1 member-app completion**
 > (ship the consumer UI the W1–W3 APIs already have), **V2 NPS → service-recovery cases** (a detractor
 > becomes an owned, SLA-tracked task — not just a notification), **V3 statistical rigor for A/B + holdout**
@@ -114,7 +114,7 @@ restarts from `main` after each merge; migrations take the next free 4-digit id 
   compliance +1 (LYL-21 ToE). **Docs:** narrative 19 (new step + matrix row), manual 13 (§VIP), UAT +2,
   RCM regen (175).
 
-## 5. Phase V5 — Digital wallet passes (Apple/Google) 📲 the visible "เหนือกว่า" — external certs, mock-first
+## 5. Phase V5 — Digital wallet passes (Apple/Google) 📲 ✅ SHIPPED — mock-first; real activation = ops sets WALLET_* creds
 
 **Goal:** บัตรสมาชิกอยู่ใน Apple/Google Wallet และแต้ม/ระดับบนบัตรอัปเดตเองหลังสะสม-แลก.
 
@@ -157,6 +157,7 @@ riding the service module — not a generic helpdesk).
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.5 | 2026-07-02 | Platform | **V5 SHIPPED — docs/29 DELIVERED.** `wallet_pass_registrations` (migration `0226`, unique member×platform); `modules/wallet-pass` provider seam (tenant creds via `tenant_messaging_config` channels `wallet-apple`/`wallet-google` → `WALLET_*` env → deterministic mock; Apple PassKit pass.json — .pkpass signing is delivery-time ops; Google Wallet object + RS256 Save-link JWT via node:crypto). `POST /api/member/wallet-pass` (self-scoped, idempotent) + staff `GET /api/loyalty/members/:id/wallet-pass`; BiLive loyalty-tick subscriber bumps updates_count/last_points best-effort. PDPA-minimal payload (shop/code/name/tier/points). No new control (presentation layer, flagged for audit sign-off). loyalty +3 → 37/37; narrative 19 rev 1.40, manual 13 rev 1.36, UAT 64→65. |
 | 1.4 | 2026-07-02 | Platform | **V4 SHIPPED.** `membership_plans`+`member_memberships` (migration `0225`, one-active partial unique); sell Dr 1000 / Cr **2410** (deviation from the plan's illustrative 2260 — 2410 is the existing TFRS-15 contract-liability account; no new COA entry) + tier grant 'vip'; straight-line recognition 2410→4300 per 30-day month (idempotent; endpoint + BI job `membership_revenue_recognize`); sweep lapse before recompute → tier falls back ('vip-expired'). Control **LYL-21** → RCM **175**. loyalty +4 → 34/34, compliance +1 → 120/120; narrative 19 rev 1.39, manual 13 rev 1.35, UAT 62→64. |
 | 1.3 | 2026-07-02 | Platform | **V3 SHIPPED.** `compareProportions` (pooled two-proportion z via A&S erfc + Newcombe/Wilson 95% CI; `AB_STATS` constants, `AB_STATS_VERSION v1`; new `docs/ops/ab-significance.md`); report gains `ab.ab_significance` + `organic_lift.significance` with the real/underpowered/no-effect verdict; significance gated on p<.05 AND groups ≥30. line-automation +2 → 15/15; narrative 19 rev 1.38, manual 13 rev 1.34, UAT 61→62. |
 | 1.2 | 2026-07-02 | Platform | **V2 SHIPPED.** `recovery_cases` (migration `0224`); auto-open per detractor (non-best-effort, idempotent unique source_ref); actor-stamped contact/resolve (note required); overdue on worklist + `GET /api/nps/summary` + member 360; web `/loyalty/recovery`. Control **LYL-20** → RCM **174** (census tags bumped). crm +3 → 56/56, compliance +1 → 119/119; narrative 19 rev 1.37, manual 13 rev 1.33, UAT 59→61. |

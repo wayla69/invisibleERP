@@ -236,7 +236,15 @@ function Home({ onLogout, on401 }: { onLogout: () => void; on401: () => void }) 
       </div>
       <div className="flex justify-between px-1">
         <p className="text-xs text-muted-foreground">แต้มสะสมตลอดชีพ {Number(me.lifetime ?? 0).toLocaleString()}</p>
-        <button className="flex items-center gap-1 text-xs text-muted-foreground" onClick={onLogout}><LogOut className="size-3" /> ออกจากระบบ</button>
+        <div className="flex items-center gap-3">
+          {/* V5 (docs/29): the card in the phone wallet — idempotent; mock install link until ops sets WALLET_* creds */}
+          <button className="text-xs text-muted-foreground" disabled={busy}
+            onClick={() => act(async () => {
+              const w: any = await mapi('/api/member/wallet-pass', { method: 'POST', body: JSON.stringify({}) });
+              if (w.install_url) window.open(w.install_url, '_blank', 'noopener');
+            }, '📲 บัตรถูกเพิ่มลงใน Wallet แล้ว — แต้มบนบัตรอัปเดตอัตโนมัติ')}>📲 เพิ่มลงใน Wallet</button>
+          <button className="flex items-center gap-1 text-xs text-muted-foreground" onClick={onLogout}><LogOut className="size-3" /> ออกจากระบบ</button>
+        </div>
       </div>
 
       {/* V1 (docs/29): expiring-points warning chip (reads the W1 look-ahead register) */}

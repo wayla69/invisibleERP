@@ -1583,6 +1583,13 @@
       "when": 2023820000052,
       "tag": "0225_vip_membership",
       "breakpoints": true
+    },
+    {
+      "idx": 226,
+      "version": "7",
+      "when": 2023820000053,
+      "tag": "0226_wallet_pass",
+      "breakpoints": true
     }
   ]
 }

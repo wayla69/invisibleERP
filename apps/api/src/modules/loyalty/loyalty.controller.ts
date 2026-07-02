@@ -6,6 +6,7 @@ import { LoyaltyService, type LoyaltyConfigDto, type RedeemDto } from './loyalty
 import { MemberService } from './member.service';
 import { MembershipService } from './membership.service';
 import { ReceiptSubmissionsService } from './receipt-submissions.service';
+import { WalletPassService } from '../wallet-pass/wallet-pass.service';
 
 const ConfigBody = z.object({
   enabled: z.boolean().optional(),
@@ -48,7 +49,7 @@ const RejectReceiptBody = z.preprocess((v) => v ?? {}, z.object({ reason: z.stri
 
 @Controller('api/loyalty')
 export class LoyaltyController {
-  constructor(private readonly svc: LoyaltyService, private readonly member: MemberService, private readonly membership: MembershipService, private readonly receipts: ReceiptSubmissionsService) {}
+  constructor(private readonly svc: LoyaltyService, private readonly member: MemberService, private readonly membership: MembershipService, private readonly receipts: ReceiptSubmissionsService, private readonly walletPasses: WalletPassService) {}
 
   @Get('config') @Permissions('loyalty', 'marketing')
   getConfig() { return this.svc.getConfig(); }
@@ -85,6 +86,9 @@ export class LoyaltyController {
   // ── Tiers (CRM Phase 3): journey view + auto-recompute (also run by the maintenance sweep) ──
   @Get('members/:id/tier') @Permissions('loyalty', 'marketing', 'crm', 'pos')
   tierJourney(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.member.tierJourney(u, +id); }
+  // V5 (docs/29) — staff view of a member's wallet-pass registrations (issue itself is member-self-scoped).
+  @Get('members/:id/wallet-pass') @Permissions('loyalty', 'marketing', 'crm')
+  memberWalletPass(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.walletPasses.forMember(u, +id); }
   @Post('tiers/recompute') @Permissions('loyalty', 'marketing', 'exec')
   recomputeTiers(@Body(new ZodValidationPipe(LiabilityPostBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.recomputeTiers(u, b?.tenant_id ?? null); }
 
