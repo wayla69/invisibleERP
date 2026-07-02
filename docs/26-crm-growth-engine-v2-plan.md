@@ -112,4 +112,5 @@ human judges; a proper test is a future refinement).
 
 | Ver | Date | Author | Change |
 |---|---|---|---|
+| 1.1 | 2026-07-02 | Platform | **H1 SHIPPED** — branch_rule/branch_to_step on journey_steps (migration 0215), forward-only enforced (BAD_BRANCH), runner one decision point, web ทางแยก row. H2/H3 pending. |
 | 1.0 | 2026-07-02 | Platform | Initial v2 plan: H1 rule-based forward-jump branching (termination by construction), H2 organic-purchase holdout baseline (true incremental lift on the G2 closed loop), H3 explainable per-member send-hour (histogram mode; journeys snap forward). Bandits/ML/canvas stay out. |

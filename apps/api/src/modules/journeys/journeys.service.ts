@@ -51,9 +51,17 @@ export class JourneysService {
     const db = this.db as any; const tenantId = this.tid(user);
     const stepsIn: any[] = Array.isArray(dto.steps) ? dto.steps : [];
     if (!stepsIn.length) throw new BadRequestException({ code: 'NO_STEPS', message: 'at least one step required', messageTh: 'ต้องมีอย่างน้อย 1 ขั้นตอน' });
-    for (const s of stepsIn) {
+    for (let i = 0; i < stepsIn.length; i++) {
+      const s = stepsIn[i];
       if (!s.body || !String(s.body).trim()) throw new BadRequestException({ code: 'NO_BODY', message: 'every step needs a body', messageTh: 'ทุกขั้นตอนต้องมีข้อความ' });
       if (s.skip_rule) await this.segments.memberMatchesRule(db, tenantId, -1, s.skip_rule as SegmentRule); // whitelist-validate (member -1 never matches)
+      // H1 branch: FORWARD-ONLY (> this step, within the journey) so every path terminates by construction.
+      if (s.branch_to_step != null) {
+        const target = Number(s.branch_to_step);
+        if (!s.branch_rule) throw new BadRequestException({ code: 'BAD_BRANCH', message: 'branch_to_step requires a branch_rule', messageTh: 'การข้ามขั้นต้องมีเงื่อนไข' });
+        if (!Number.isInteger(target) || target <= i + 1 || target > stepsIn.length) throw new BadRequestException({ code: 'BAD_BRANCH', message: `branch_to_step must be a later step (got ${target} from step ${i + 1} of ${stepsIn.length})`, messageTh: 'ข้ามได้เฉพาะขั้นถัด ๆ ไปเท่านั้น' });
+        await this.segments.memberMatchesRule(db, tenantId, -1, s.branch_rule as SegmentRule);
+      }
     }
     if (dto.trigger === 'segment') {
       if (!dto.segment_id) throw new BadRequestException({ code: 'NO_SEGMENT', message: 'segment_id required for a segment-triggered journey', messageTh: 'ต้องระบุเซกเมนต์' });
@@ -79,6 +87,8 @@ export class JourneysService {
     await db.insert(journeySteps).values(stepsIn.map((s: any, i: number) => ({
       tenantId, journeyId: jid, stepNo: i + 1, waitDays: Math.max(0, Number(s.wait_days ?? 0)),
       channel: ['sms', 'email', 'line'].includes(s.channel) ? s.channel : 'sms', body: String(s.body), skipRule: s.skip_rule ?? null,
+      branchRule: s.branch_to_step != null ? (s.branch_rule ?? null) : null,
+      branchToStep: s.branch_to_step != null ? Number(s.branch_to_step) : null,
     })));
     return { ...shape(row), steps: stepsIn.length };
   }
@@ -163,10 +173,17 @@ export class JourneysService {
         if (r === 'sent') sent++; else if (r === 'completed') completed++; else skipped++;
       } catch { skipped++; }
       // Advance (or complete) — even after a skip, so a capped/skipped member still moves through.
-      const [next] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(e.journeyId)), eq(journeySteps.stepNo, Number(claimed.currentStep) + 1))).limit(1);
+      // H1 branch decision: if the just-executed step has a matching branch_rule, jump FORWARD to its
+      // target instead of step+1 (forward-only is enforced at create, so this always progresses).
+      let nextNo = Number(claimed.currentStep) + 1;
+      const [curStep] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(e.journeyId)), eq(journeySteps.stepNo, Number(claimed.currentStep)))).limit(1);
+      if (curStep?.branchRule && curStep?.branchToStep != null && Number(curStep.branchToStep) > Number(claimed.currentStep)) {
+        try { if (await this.segments.memberMatchesRule(db, tenantId, Number(claimed.memberId), curStep.branchRule)) nextNo = Number(curStep.branchToStep); } catch { /* bad rule ⇒ linear path */ }
+      }
+      const [next] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(e.journeyId)), eq(journeySteps.stepNo, nextNo))).limit(1);
       if (next) {
         await db.update(journeyEnrollments).set({
-          currentStep: Number(claimed.currentStep) + 1, lastStepAt: new Date(),
+          currentStep: nextNo, lastStepAt: new Date(),
           nextRunAt: new Date(Date.now() + Number(next.waitDays) * 86400_000),
         }).where(and(eq(journeyEnrollments.id, Number(e.id)), eq(journeyEnrollments.tenantId, tenantId)));
       } else {
@@ -212,5 +229,5 @@ function shape(r: any) {
   };
 }
 function shapeStep(s: any) {
-  return { step_no: s.stepNo, wait_days: Number(s.waitDays), channel: s.channel, body: s.body, skip_rule: s.skipRule ?? null };
+  return { step_no: s.stepNo, wait_days: Number(s.waitDays), channel: s.channel, body: s.body, skip_rule: s.skipRule ?? null, branch_rule: s.branchRule ?? null, branch_to_step: s.branchToStep != null ? Number(s.branchToStep) : null };
 }

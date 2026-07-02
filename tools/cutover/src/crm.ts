@@ -296,6 +296,38 @@ async function main() {
       && segMix2.json.at_risk_value.members >= 1 && segMix2.json.at_risk_value.predicted_ltv >= 0,
     JSON.stringify(segMix2.json.at_risk_value));
 
+  // ── 7k. Branching journeys (Phase H1) — forward-only rule jumps; matching member takes the branch ──
+  // Step 1 sends, then: if recency ≤ 5 (came back recently) jump to step 3 (thank-you); else walk to step 2
+  // (escalate). memberId bought today (recency 0) → branch; the G3 decay member (recency 90) → linear.
+  const jnyBr = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'Win-back branch', trigger: 'manual', cap_messages: 0, steps: [
+      { wait_days: 0, channel: 'sms', body: 'คิดถึงคุณ รับคูปอง', branch_rule: { field: 'recency', op: 'lte', value: 5 }, branch_to_step: 3 },
+      { wait_days: 0, channel: 'sms', body: 'ข้อเสนอพิเศษขึ้น (escalate)' },
+      { wait_days: 0, channel: 'sms', body: 'ขอบคุณที่กลับมา!' },
+    ],
+  });
+  await inj('POST', `/api/loyalty/journeys/${jnyBr.json.id}/activate`, mgr1);
+  await inj('POST', `/api/loyalty/journeys/${jnyBr.json.id}/enroll`, mgr1, { member_id: memberId });
+  await inj('POST', `/api/loyalty/journeys/${jnyBr.json.id}/enroll`, mgr1, { member_id: decay.json.id });
+  await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // step 1 for both → branch decision
+  await inj('POST', '/api/loyalty/journeys/run-due', mgr1); // each executes its chosen next step
+  const brCode = jnyBr.json.code;
+  const logStep = async (mid: number, no: number) => (await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.memberId, mid), eq(s.messageLog.campaign, `journey:${brCode}:${no}`)))).length;
+  ok('Branch taken: recency-matching member jumps 1 → 3 (thank-you) and NEVER receives step 2',
+    (await logStep(memberId, 1)) === 1 && (await logStep(memberId, 3)) === 1 && (await logStep(memberId, 2)) === 0,
+    JSON.stringify({ s1: await logStep(memberId, 1), s2: await logStep(memberId, 2), s3: await logStep(memberId, 3) }));
+  ok('Branch not taken: non-matching member walks linearly 1 → 2 (escalate)',
+    (await logStep(decay.json.id, 1)) === 1 && (await logStep(decay.json.id, 2)) === 1,
+    JSON.stringify({ s1: await logStep(decay.json.id, 1), s2: await logStep(decay.json.id, 2) }));
+  const badBr = await inj('POST', '/api/loyalty/journeys', mgr1, {
+    name: 'loop attempt', trigger: 'manual', steps: [
+      { wait_days: 0, channel: 'sms', body: 'a', branch_rule: { field: 'recency', op: 'gte', value: 0 }, branch_to_step: 1 },
+      { wait_days: 0, channel: 'sms', body: 'b' },
+    ],
+  });
+  ok('Backward/self jump rejected at create (BAD_BRANCH) — termination is structural, no loops possible',
+    badBr.status === 400 && badBr.json.error?.code === 'BAD_BRANCH', JSON.stringify({ s: badBr.status, code: badBr.json.error?.code }));
+
   // ── 8. Personalized promos ──
   // Seed a promo + audience rule directly (no promo creation API in test scope)
   const [promo] = await db.insert(s.promotions).values({ tenantId: t1, promoId: 'NEWMEMBER10', promoName: 'ส่วนลดสมาชิกใหม่ 10%', promoType: 'percent', discountPct: '10', active: true }).returning({ id: s.promotions.id });
