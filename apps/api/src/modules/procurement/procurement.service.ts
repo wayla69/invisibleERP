@@ -7,6 +7,7 @@ import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
 import { CostingService } from '../costing/costing.service';
 import { WebhookService } from '../platform/webhook.service';
+import { LineNotifyService } from '../messaging/line-notify.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -27,7 +28,26 @@ export class ProcurementService {
     @Optional() private readonly workflow?: WorkflowService,
     @Optional() private readonly costing?: CostingService, // Phase 17A — inventory costing (opt-in per item)
     @Optional() private readonly webhooks?: WebhookService, // Phase 8 — outbound webhook fan-out (best-effort)
+    @Optional() private readonly lineNotify?: LineNotifyService, // D2 — close-the-loop LINE pushes to the PR requester
   ) {}
+
+  // D2 — best-effort LINE push to the requester(s) of every PR linked to a PO (pr_items.po_no), closing
+  // the loop when their requisition is bought/received. No-op for unlinked users; never blocks the flow.
+  private async notifyPoPrRequesters(poNo: string, text: string): Promise<void> {
+    if (!this.lineNotify) return;
+    try {
+      // purchase_requests is a company-wide doc (no tenant_id) — notifyUser resolves each user's own tenant.
+      const rows = await this.db.select({ requestedBy: purchaseRequests.requestedBy })
+        .from(prItems).innerJoin(purchaseRequests, eq(prItems.prId, purchaseRequests.id)).where(eq(prItems.poNo, poNo));
+      const seen = new Set<string>();
+      for (const r of rows) {
+        const who = String(r.requestedBy ?? '');
+        if (!who || seen.has(who)) continue;
+        seen.add(who);
+        await this.lineNotify.notifyUser(who, null, text);
+      }
+    } catch { /* best-effort — a push failure never blocks buying/receiving */ }
+  }
 
   // ── PR ──────────────────────────────────────────────────────────────
   async createPr(dto: CreatePrDto, user: JwtUser) {
@@ -223,6 +243,10 @@ export class ProcurementService {
     await db.update(prItems).set({ poNo: po.po_no }).where(eq(prItems.prId, Number(head.id)));
     await db.update(purchaseRequests).set({ status: 'Converted' }).where(eq(purchaseRequests.id, head.id));
     await this.statusLog.log('PR', pr, 'Approved', 'Converted', user.username);
+    // D2 — tell the requester their requisition is now on a purchase order (best-effort LINE push).
+    if (head.requestedBy && head.requestedBy !== user.username) {
+      await this.lineNotify?.notifyUser(String(head.requestedBy), null, `🛒 คำขอซื้อ ${pr} ของคุณออกใบสั่งซื้อแล้ว → ${po.po_no} (สถานะ ${po.status === 'Approved' ? 'อนุมัติแล้ว' : 'รออนุมัติ'})`);
+    }
     return { pr_no: pr, po_no: po.po_no, po_status: po.status, total_amount: po.total_amount, created_items: created };
   }
 
@@ -467,6 +491,9 @@ export class ProcurementService {
     const event = newStatus === 'Approved' ? 'po.approved' : (newStatus === 'Cancelled' ? 'po.rejected' : null);
     if (!event) return;
     await this.webhooks?.emit(event, { po_no: poNo, vendor: po.vendorName ?? po.vendorCode ?? null, total_amount: Number(po.total ?? 0), status: newStatus, reason: reason ?? null, decided_by: user.username }, user);
+    // D2 — close the loop: tell the requester(s) of any PR linked to this PO that it's approved / rejected.
+    if (newStatus === 'Approved') await this.notifyPoPrRequesters(poNo, `✅ ใบสั่งซื้อ ${poNo} (จากคำขอซื้อของคุณ) อนุมัติแล้ว — กำลังสั่งซื้อ`);
+    else if (newStatus === 'Cancelled') await this.notifyPoPrRequesters(poNo, `❌ ใบสั่งซื้อ ${poNo} (จากคำขอซื้อของคุณ) ถูกยกเลิก${reason ? ` — ${reason}` : ''}`);
   }
 
   async cancelPo(poNo: string, reason: string, user: JwtUser) {
@@ -558,6 +585,9 @@ export class ProcurementService {
 
     // Phase 17A — capitalize inventory for configured items (after the GR tx; idempotent on GRV/grNo)
     if (this.costing && costingLines.length) await this.costing.postReceiptGl({ tenantId: user.tenantId as number, grNo, date: today, lines: costingLines, createdBy: user.username });
+
+    // D2 — close the loop: tell the requester(s) of any PR linked to this PO that their goods arrived.
+    await this.notifyPoPrRequesters(dto.po_no, `📦 สินค้าตามใบสั่งซื้อ ${dto.po_no} (จากคำขอซื้อของคุณ) รับเข้าคลังแล้ว ${newStatus === 'Closed' ? '(รับครบ)' : '(รับบางส่วน)'} · ใบรับของ ${grNo}`);
 
     return { gr_no: grNo, po_no: dto.po_no, po_status: newStatus, lines: lines.length, costed: costingLines.length > 0 };
   }

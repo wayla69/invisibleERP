@@ -612,6 +612,33 @@ async function main() {
     reorderNoPerm.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีสิทธิ์'),
     JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
 
+  // 17L. D2 — close-the-loop LINE notifications: the PR requester is pushed when their requisition is
+  //      converted to a PO, when that PO is approved, and when the goods are received (GR). Best-effort;
+  //      unlinked requesters get nothing. Uses a fresh PR raised + approved + bought + received end to end.
+  await db.update(s.users).set({ lineUserId: 'Usomchai' }).where(eq(s.users.username, 'somchai')); // ensure the requester is linked
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17l0', source: { userId: 'Usomchai' }, message: { id: 'mid-17l0', type: 'text', text: 'pr A4-PAPER 2 ปิดลูปทดสอบ' } }] });
+  const prD2 = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17l1', source: { userId: 'Uprayut' }, message: { id: 'mid-17l1', type: 'text', text: `approve ${prD2}` } }] }); // procurement approves → Approved
+
+  const pushesBeforeConv = linePushes.length;
+  const convD2 = await inj('POST', `/api/procurement/prs/${prD2}/to-po`, token, { vendor_name: 'ACME Foods', lines: [{ item_id: 'A4-PAPER', order_qty: 2, unit_price: 100 }] });
+  const poD2 = convD2.json.po_no ?? '';
+  const convPush = linePushes.slice(pushesBeforeConv).find((p) => p.to === 'Usomchai' && p.text.includes('ออกใบสั่งซื้อ'));
+  ok('D2: PR→PO conversion → requester pushed (คำขอซื้อออก PO แล้ว)',
+    !!poD2 && !!convPush && convPush.text.includes(poD2), JSON.stringify({ po: poD2, push: convPush?.text.slice(0, 60) }));
+
+  const pushesBeforeApr = linePushes.length;
+  await inj('PATCH', `/api/procurement/pos/${poD2}/approve`, token, { approve: true });
+  const aprPush = linePushes.slice(pushesBeforeApr).find((p) => p.to === 'Usomchai' && p.text.includes('อนุมัติแล้ว') && p.text.includes(poD2));
+  ok('D2: PO approved → requester pushed (ใบสั่งซื้ออนุมัติแล้ว)',
+    !!aprPush, JSON.stringify({ push: aprPush?.text.slice(0, 60) }));
+
+  const pushesBeforeGr = linePushes.length;
+  const grD2 = await inj('POST', `/api/procurement/pos/${poD2}/receive-all`, token);
+  const grPush = linePushes.slice(pushesBeforeGr).find((p) => p.to === 'Usomchai' && p.text.includes('รับเข้าคลัง'));
+  ok('D2: goods received → requester pushed (สินค้ารับเข้าคลังแล้ว)',
+    (grD2.status === 200 || grD2.status === 201) && !!grPush && grPush.text.includes(poD2), JSON.stringify({ push: grPush?.text.slice(0, 60) }));
+
   // ── 18. Attachments (0228): invoice/receipt photo onto a PO — web API + LINE chat `attach` flow. ──
   const poRes = await inj('POST', '/api/procurement/pos', token, { vendor_name: 'ผู้ขายทดสอบแนบ', items: [{ item_id: 'A4-PAPER', order_qty: 5, unit_price: 100 }] });
   const poNo = poRes.json.po_no as string;
