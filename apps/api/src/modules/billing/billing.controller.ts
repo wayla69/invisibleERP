@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Body, Query, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
-import { Public, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { Public, Permissions, PlatformAdmin, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BillingService, type SignupDto } from './billing.service';
 import { SaasMetricsService } from './saas-metrics.service';
@@ -38,6 +38,14 @@ export class BillingController {
   @Post('auth/signup') @Public()
   signup(@Body(new ZodValidationPipe(SignupBody)) b: SignupDto) {
     return this.svc.signup(b);
+  }
+
+  // Platform-admin create-company (ITGC-AC-18) — an authenticated PLATFORM owner
+  // (PLATFORM_ADMIN_USERNAMES) provisions a new tenant + its Admin WITHOUT toggling public signup.
+  // PlatformAdminGuard gates it + grants the RLS bypass; the action is audit-logged (cross-tenant write).
+  @Post('admin/tenants') @PlatformAdmin() @HttpCode(201)
+  createTenant(@Body(new ZodValidationPipe(SignupBody)) b: SignupDto) {
+    return this.svc.provisionTenant(b);
   }
 
   // PUBLIC plan catalogue

@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { timingSafeEqual } from 'node:crypto';
 import { eq, and, gt } from 'drizzle-orm';
-import { IS_PUBLIC_KEY, PERMISSIONS_KEY, type JwtUser } from './decorators';
+import { IS_PUBLIC_KEY, PERMISSIONS_KEY, PLATFORM_ADMIN_KEY, isPlatformAdmin, type JwtUser } from './decorators';
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { users, revokedTokens, posMembers } from '../database/schema';
@@ -169,6 +169,28 @@ export class PermissionsGuard implements CanActivate {
     if (!ok) {
       throw new ForbiddenException({ code: 'FORBIDDEN', message: `Access denied: ${required.join(',')}`, messageTh: 'คุณไม่มีสิทธิ์เข้าถึงส่วนนี้' });
     }
+    return true;
+  }
+}
+
+// Restricts @PlatformAdmin() routes to a configured PLATFORM owner (PLATFORM_ADMIN_USERNAMES) — a
+// cross-tenant operator distinct from a per-tenant 'Admin'. Runs AFTER JwtAuthGuard (so req.user is set)
+// and BEFORE the TenantTxInterceptor, so on success it sets the server-only req.__platformBypass flag the
+// interceptor honours to grant an RLS bypass (needed to provision a brand-new tenant). Empty config ⇒ every
+// such route 403s (secure by default). The flag is set server-side here, never read from client input.
+@Injectable()
+export class PlatformAdminGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+
+  canActivate(ctx: ExecutionContext): boolean {
+    const needs = this.reflector.getAllAndOverride<boolean>(PLATFORM_ADMIN_KEY, [ctx.getHandler(), ctx.getClass()]);
+    if (!needs) return true;
+    const req = ctx.switchToHttp().getRequest();
+    const user: JwtUser | undefined = req.user;
+    if (!isPlatformAdmin(user?.username)) {
+      throw new ForbiddenException({ code: 'PLATFORM_ADMIN_REQUIRED', message: 'Platform-admin access required', messageTh: 'ต้องเป็นผู้ดูแลแพลตฟอร์มเท่านั้น' });
+    }
+    req.__platformBypass = true; // honoured by TenantTxInterceptor to bypass RLS for tenant provisioning
     return true;
   }
 }

@@ -51,13 +51,16 @@ export class TenantTxInterceptor implements NestInterceptor {
     const multiCompany = (process.env.TENANCY_MODE ?? 'single-company') === 'multi-company';
     const isAdmin = user?.role === 'Admin';
     const preAuth = !user;
+    // Platform-admin bypass — set server-side by PlatformAdminGuard (never from client input) on a verified
+    // @PlatformAdmin route, so it can provision a brand-new tenant regardless of tenancy mode.
+    const platformBypass = req.__platformBypass === true;
     let bypass: boolean;
     let orgScope: number | null = null;
     if (!multiCompany) {
-      bypass = preAuth || isAdmin; // legacy global HQ bypass
+      bypass = preAuth || isAdmin || platformBypass; // legacy global HQ bypass
     } else {
-      bypass = preAuth; // login/signup still need it to read users / create tenants
-      if (isAdmin) orgScope = user?.orgId != null ? Number(user.orgId) : null; // org-scoped Admin
+      bypass = preAuth || platformBypass; // login/signup + platform provisioning need it to read users / create tenants
+      if (isAdmin && !platformBypass) orgScope = user?.orgId != null ? Number(user.orgId) : null; // org-scoped Admin
     }
     // Expose the effective scope to the audit interceptor (records cross-tenant access on mutations).
     req.__rlsBypass = bypass;
