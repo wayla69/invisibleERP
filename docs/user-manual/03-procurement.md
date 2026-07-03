@@ -57,7 +57,7 @@ handy on the floor or in the stockroom. One-time setup first:
 
 | Command | What it does |
 |---|---|
-| `pr <item> <qty> [reason]` — several items separated by `,` (also `ขอซื้อ …`) | Raises a PR, e.g. `pr A4-PAPER 10 กระดาษหมด, TONER-85A 2` |
+| `pr <item> <qty>` — reason **optional**; several items separated by `,` (also `ขอซื้อ …`) | Raises a PR, e.g. `pr A4-PAPER 10` (no reason needed — most storefront orders are just "ran out"), or `pr A4-PAPER 10, TONER-85A 2`. Add a reason only if you want one: `pr A4-PAPER 10 ด่วน` |
 | `status <PR no>` (also `สถานะ <PR no>`) | Replies the PR's current approval state |
 | `my prs` (also `รายการของฉัน`) | Lists your 5 most recent PRs with statuses |
 | `find <keyword>` (also `ค้นหา`) | Searches the item master so you can use real item ids |

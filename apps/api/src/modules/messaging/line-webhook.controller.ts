@@ -152,7 +152,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -801,7 +801,7 @@ export class LineWebhookService {
   // with an accent-coloured header per group + separators — readable on a phone instead of a text wall.
   private static readonly CMD_GROUPS: Array<{ icon: string; title: string; color: string; items: Array<[string, string]> }> = [
     { icon: '🛒', title: 'คำขอซื้อ (PR)', color: '#2563eb', items: [
-      ['pr <รหัสสินค้า> <จำนวน> [เหตุผล]', 'สร้างคำขอซื้อ (หลายรายการคั่นด้วย ,)'],
+      ['pr <รหัสสินค้า> <จำนวน>', 'สร้างคำขอซื้อ — เหตุผลใส่หรือไม่ก็ได้ (หลายรายการคั่นด้วย ,)'],
       ['status <เลขที่ PR>', 'เช็คสถานะ'],
       ['my prs', 'คำขอล่าสุดของฉัน'],
       ['cancel <เลขที่ PR>', 'ถอนคำขอ'],
@@ -849,7 +849,7 @@ export class LineWebhookService {
       body: { type: 'box', layout: 'vertical', spacing: 'none', paddingAll: 'lg', contents: groups },
       footer: {
         type: 'box', layout: 'vertical', paddingAll: 'md', contents: [
-          { type: 'text', text: 'ตัวอย่าง:  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2', size: 'xs', color: '#9ca3af', wrap: true },
+          { type: 'text', text: 'ตัวอย่าง:  pr A4-PAPER 10  (ไม่ต้องใส่เหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2', size: 'xs', color: '#9ca3af', wrap: true },
           { type: 'text', text: 'พิมพ์ "help" เพื่อเปิดเมนูนี้อีกครั้ง', size: 'xs', color: '#c0c4cc', margin: 'sm' },
         ],
       },
