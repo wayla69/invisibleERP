@@ -456,6 +456,13 @@ queue above. See `docs/ops/tenancy-model.md`.
 
 ---
 
+### 14.2 Suspend or reactivate a company
+
+A platform owner can **suspend** a company — `POST /api/admin/tenants/:id/suspend` (with an optional
+`reason`). Its users are then blocked everywhere with **`403 TENANT_SUSPENDED`** until you **reactivate** it
+(`POST /api/admin/tenants/:id/reactivate`). Platform owners themselves are never blocked (so you can always
+reactivate). Both actions are recorded in the [Audit trail](#11-audit-trail-who-changed-what-and-when).
+
 ### 14.1 First-run setup checklist & starter
 
 A brand-new company can see exactly what's left to set up: **`GET /api/tenant/onboarding-status`** returns a
