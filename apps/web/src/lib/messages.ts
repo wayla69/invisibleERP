@@ -167,15 +167,22 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Finance / AR-AP ───────────────────────────────────────────────────────
   'nav.finance': { th: 'การเงิน', en: 'Finance' },
   'nav.disbursements': { th: 'จ่ายเงินเจ้าหนี้ (Disbursements)', en: 'AP Disbursements' },
+  'nav.customer_cards': { th: 'การ์ดลูกหนี้', en: 'Customer Cards (AR)' },
+  'nav.vendor_cards': { th: 'การ์ดเจ้าหนี้', en: 'Vendor Cards (AP)' },
   'nav.credit_hold': { th: 'จัดการเครดิต & ระงับบัญชี', en: 'Credit & Hold Management' },
   'nav.advances': { th: 'เงินทดรองจ่าย (Petty cash)', en: 'Petty Cash Advances' },
   'nav.petty_cash': { th: 'กองทุนเงินสดย่อย & ค่าใช้จ่าย', en: 'Petty Cash & Expenses' },
 
   // ── Finance / Ledger & GL ─────────────────────────────────────────────────
+  'nav.chart_of_accounts': { th: 'ผังบัญชี', en: 'Chart of Accounts' },
+  'nav.financial_statements': { th: 'งบการเงิน', en: 'Financial Statements' },
   'nav.accounting': { th: 'บัญชีแยกประเภท', en: 'General Ledger' },
   'nav.revenue': { th: 'รับรู้รายได้', en: 'Revenue Recognition' },
   'nav.assets': { th: 'สินทรัพย์ถาวร', en: 'Fixed Assets' },
   'nav.leases': { th: 'สัญญาเช่า (IFRS 16)', en: 'Leases (IFRS 16)' },
+  'nav.deferred_tax': { th: 'ภาษีเงินได้รอตัดบัญชี', en: 'Deferred Tax' },
+  'nav.cost_centers': { th: 'ศูนย์ต้นทุน & กำไรตามมิติ', en: 'Cost Centres & P&L' },
+  'nav.gl_schedules': { th: 'รายการบัญชีตั้งเวลา', en: 'Recurring & Prepaid' },
   'nav.period_close': { th: 'ปิดงวดบัญชี (Period-close)', en: 'Period Close' },
 
   // ── Finance / Banking ─────────────────────────────────────────────────────

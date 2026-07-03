@@ -8,6 +8,10 @@
  * Controls covered (see compliance/Oshinei_ERP_SOX_RCM_v1.xlsx):
  *   GL-05  — Manual journal-entry maker-checker: a manual JE posts as Draft (excluded from balances)
  *            and only a DIFFERENT user may approve it; preparer self-approval is blocked even for Admin.
+ *   GL-11  — Chart-of-Accounts change control: canonical (`accounts`, shared universe) writes are a platform
+ *            Admin/HQ duty (a tenant gl_coa holder is blocked, COA_ADMIN_ONLY); per-tenant chart curation
+ *            (`tenant_accounts` overlay) is a gl_coa duty scoped to the caller's own tenant (RLS); duplicate
+ *            code (DUPLICATE_ACCOUNT) + deactivate-with-balance (ACCOUNT_HAS_BALANCE) are refused.
  *   EXP-01/EXP-09 — 3-way match HARD-GATES AP payment: a PO-based invoice failing match (price/qty variance)
  *            is blocked from payment (MATCH_BLOCKED) until a DIFFERENT user overrides the variance (SoD).
  *            (PwC panel called this "EXP-03"; see compliance/CONTROL_STATUS_HONEST.md for the ID crosswalk.)
@@ -962,6 +966,79 @@ async function main() {
   ok('GL-10: overlay never gates posting — ?all=true still exposes the full canonical universe (4300 present)',
     restcAll.source === 'canonical' && restcAll.accounts?.some((a: any) => a.code === '4300') && restcAll.count > restcAcc.count,
     `all=${restcAll.count} overlay=${restcAcc.count}`);
+
+  // ════════════════════════ GL-11 — Chart-of-Accounts change control ════════════════════════
+  // Two write surfaces, two duties: the GLOBAL canonical universe (`accounts`, shared by every tenant) is a
+  // PLATFORM/HQ duty (role Admin + gl_coa); per-tenant chart curation (`tenant_accounts` overlay) is a tenant
+  // duty (gl_coa, RLS-scoped). Exercises the CoaController now that it is reachable at /api/ledger/accounts.
+
+  // 1. A platform Admin/HQ operator creates a canonical account (auto-defaulted normal balance + postable).
+  const mkAcct = await inj('POST', '/api/ledger/accounts', admin, { code: '9990', name: 'ToE Custom Expense', type: 'Expense' });
+  ok('GL-11: platform Admin/HQ creates a canonical account → 201 (D-normal, postable)',
+    (mkAcct.status === 200 || mkAcct.status === 201) && mkAcct.json.code === '9990' && mkAcct.json.normalBalance === 'D' && mkAcct.json.isPostable === true,
+    `${mkAcct.status} ${JSON.stringify(mkAcct.json)}`);
+
+  // 2. Duplicate code is refused.
+  const dupAcct = await inj('POST', '/api/ledger/accounts', admin, { code: '9990', name: 'dup', type: 'Expense' });
+  ok('GL-11: duplicate account code → 400 DUPLICATE_ACCOUNT',
+    dupAcct.status === 400 && dupAcct.json.error?.code === 'DUPLICATE_ACCOUNT', `${dupAcct.status} ${dupAcct.json.error?.code}`);
+
+  // 3. A tenant gl_coa holder (FinancialController) is BLOCKED from mutating the SHARED canonical universe —
+  //    it must not silently change the chart other tenants post against (the flagged cross-tenant risk).
+  const fcMk = await inj('POST', '/api/ledger/accounts', fincon, { code: '9991', name: 'x', type: 'Expense' });
+  ok('GL-11: a tenant gl_coa holder (non-Admin) is BLOCKED from canonical CoA writes → 403 COA_ADMIN_ONLY',
+    fcMk.status === 403 && fcMk.json.error?.code === 'COA_ADMIN_ONLY', `${fcMk.status} ${fcMk.json.error?.code}`);
+
+  // 4. A role without gl_coa (GlAccountant — SoD-separated from CoA maintenance) is blocked outright.
+  const gaMk = await inj('POST', '/api/ledger/accounts', glacct, { code: '9992', name: 'x', type: 'Expense' });
+  ok('GL-11: a role without gl_coa (GlAccountant) is BLOCKED from CoA writes → 403',
+    gaMk.status === 403 && gaMk.json.error?.code === 'FORBIDDEN', `${gaMk.status} ${gaMk.json.error?.code}`);
+
+  // 5. Deactivating an account that carries a balance is refused (no orphaned balance in a "closed" account).
+  //    Give 9990 activity via a JE, then attempt to deactivate it.
+  await inj('POST', '/api/ledger/journal', glacct, { date: today, source: 'Manual', memo: 'GL-11 balance', lines: [{ account_code: '9990', debit: 500 }, { account_code: '4000', credit: 500 }] });
+  const deac = await inj('POST', '/api/ledger/accounts/9990/deactivate', admin);
+  ok('GL-11: deactivating an account with a non-zero balance → 400 ACCOUNT_HAS_BALANCE',
+    deac.status === 400 && deac.json.error?.code === 'ACCOUNT_HAS_BALANCE', `${deac.status} ${deac.json.error?.code}`);
+
+  // 6. Per-tenant overlay curation (gl_coa): a tenant's FinancialController shapes its OWN chart (rename 4000)
+  //    without touching the canonical universe. Isolated on the freshly-provisioned RESTC restaurant tenant.
+  const restcTid = await tid('RESTC');
+  await db.insert(s.users).values({ username: 'restc_fc', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: restcTid }).onConflictDoNothing();
+  const restcFc = await login('restc_fc', 'pw');
+  const cur = await inj('PATCH', '/api/ledger/accounts/4000/overlay', restcFc, { display_name: 'Curated F&B Sales', sort_order: 3 });
+  ok('GL-11: a tenant gl_coa holder curates its OWN chart via the overlay → 200',
+    (cur.status === 200 || cur.status === 201) && cur.json.accountCode === '4000' && cur.json.displayName === 'Curated F&B Sales', `${cur.status} ${JSON.stringify(cur.json)}`);
+
+  // 6a. The curation is reflected on THIS tenant's chart.
+  const restcAfter = (await inj('GET', '/api/ledger/accounts', restcTok)).json;
+  ok('GL-11: overlay curation is reflected on the tenant\'s own chart',
+    restcAfter.accounts?.find((a: any) => a.code === '4000')?.name === 'Curated F&B Sales',
+    `4000=${restcAfter.accounts?.find((a: any) => a.code === '4000')?.name}`);
+
+  // 6b. …and NEVER leaks cross-tenant: another tenant's chart still shows 4000's canonical name (RLS-scoped).
+  const t1Acc = (await inj('GET', '/api/ledger/accounts', execu)).json;
+  ok('GL-11: overlay curation is RLS-scoped — another tenant\'s chart is unaffected',
+    t1Acc.accounts?.find((a: any) => a.code === '4000')?.name !== 'Curated F&B Sales',
+    `t1 4000=${t1Acc.accounts?.find((a: any) => a.code === '4000')?.name}`);
+
+  // 6c. Overlay curation is a gl_coa duty — a role without gl_coa is blocked (SoD).
+  const curBlocked = await inj('PATCH', '/api/ledger/accounts/5100/overlay', glacct, { active: false });
+  ok('GL-11: overlay curation requires gl_coa — a non-gl_coa role is BLOCKED → 403',
+    curBlocked.status === 403, `${curBlocked.status} ${curBlocked.json.error?.code}`);
+
+  // 6d. A curated-off account is hidden from the default chart but stays visible under `?include_inactive=true`
+  //     so the gl_coa curator can re-activate it (the management surface behind the /accounting ผังบัญชี edit UI).
+  await inj('PATCH', '/api/ledger/accounts/5100/overlay', restcFc, { active: false });
+  const iaHidden = (await inj('GET', '/api/ledger/accounts', restcFc)).json;
+  const iaMgmt = (await inj('GET', '/api/ledger/accounts?include_inactive=true', restcFc)).json;
+  ok('GL-11: curated-off account hidden from the default chart, still listed under include_inactive=true (active=false, re-activatable)',
+    !iaHidden.accounts?.some((a: any) => a.code === '5100') && iaMgmt.accounts?.some((a: any) => a.code === '5100' && a.active === false),
+    `hidden=${!iaHidden.accounts?.some((a: any) => a.code === '5100')} inMgmt=${iaMgmt.accounts?.some((a: any) => a.code === '5100')}`);
+  await inj('PATCH', '/api/ledger/accounts/5100/overlay', restcFc, { active: true });
+  const iaBack = (await inj('GET', '/api/ledger/accounts', restcFc)).json;
+  ok('GL-11: re-activating (active=true) restores the account to the default chart',
+    iaBack.accounts?.some((a: any) => a.code === '5100'), `back=${iaBack.accounts?.some((a: any) => a.code === '5100')}`);
 
   // ════════════════════════ EXP-01/EXP-09 — 3-way match HARD-GATES AP payment (PO↔GR↔Invoice) ════════════════════════
   // (The PwC panel referenced this as "EXP-03"; in the RCM the 3-way-match gate is EXP-01 and the AP-pay-

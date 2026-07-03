@@ -50,6 +50,7 @@ import {
   Goal,
   Landmark,
   Layers,
+  ListTree,
   LayoutDashboard,
   Lock,
   LayoutTemplate,
@@ -329,6 +330,8 @@ export const INTERNAL_NAV: NavGroup[] = [
         title: 'nav.sub.ar_ap',
         items: [
           { label: 'nav.finance', href: '/finance', icon: Banknote, perms: ['ar', 'creditors', 'exec'] },
+          { label: 'nav.customer_cards', href: '/finance/customers', icon: Users, perms: ['ar', 'exec'] },
+          { label: 'nav.vendor_cards', href: '/finance/vendors', icon: Truck, perms: ['creditors', 'exec'] },
           // AP (book bills, request payment) = accounting/creditors on /finance; releasing the cash
           // (approve disbursement) = finance, on its own page (SoD R07 — approver ≠ requester).
           { label: 'nav.disbursements', href: '/disbursements', icon: Wallet, perms: ['approvals', 'gl_close', 'exec'] },
@@ -342,10 +345,14 @@ export const INTERNAL_NAV: NavGroup[] = [
         items: [
           // SoD R05: gl_post (GlAccountant) can reach the journal/posting tabs;
           // gl_close (FinancialController) also reaches the JE-approval tab (guarded in-page).
+          { label: 'nav.chart_of_accounts', href: '/chart-of-accounts', icon: ListTree, perms: ['gl_post', 'gl_close', 'gl_coa', 'approvals', 'exec', 'creditors', 'ar'] },
           { label: 'nav.accounting', href: '/accounting', icon: BookText, perms: ['gl_post', 'gl_close', 'approvals', 'exec', 'creditors', 'ar'] },
           { label: 'nav.revenue', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'nav.assets', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
           { label: 'nav.leases', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
+          { label: 'nav.deferred_tax', href: '/deferred-tax', icon: Calculator, perms: ['gl_close', 'gl_post', 'exec'] },
+          { label: 'nav.cost_centers', href: '/cost-centers', icon: PieChart, perms: ['exec', 'masterdata'] },
+          { label: 'nav.gl_schedules', href: '/gl-schedules', icon: CalendarClock, perms: ['gl_post', 'gl_close', 'exec'] },
           { label: 'nav.period_close', href: '/finance/period-close', icon: CalendarClock, perms: ['gl_close', 'exec'] },
         ],
       },
@@ -362,8 +369,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       },
       {
         title: 'nav.sub.fin_reports',
-        defaultOpen: false, // reporting/health — opened on demand
         items: [
+          { label: 'nav.financial_statements', href: '/financial-statements', icon: FileText, perms: ['exec', 'fin_report', 'creditors', 'ar'] },
           { label: 'nav.financial_health', href: '/financial-health', icon: CircleDollarSign, perms: ['exec', 'dashboard', 'ar', 'creditors'] },
           { label: 'nav.consolidation', href: '/consolidation', icon: Layers, perms: ['exec'] },
         ],

@@ -360,8 +360,9 @@ export function AppShell({
   }, [filterByPerm, wsNav, groupOrder]);
   const paletteGroups = React.useMemo(() => {
     const filtered = filterByPerm(nav);
-    return filtered.length ? filtered : nav;
-  }, [filterByPerm, nav]);
+    const base = filtered.length ? filtered : nav;
+    return orderGroups(base, groupOrder); // keep the ⌘K palette in the same admin-curated order as the sidebar
+  }, [filterByPerm, nav, groupOrder]);
 
   const isActive = (href: string) =>
     pathname === href || (href !== '/dashboard' && href !== '/portal/dashboard' && pathname.startsWith(href + '/'));

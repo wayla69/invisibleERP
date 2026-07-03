@@ -87,8 +87,18 @@ export class LedgerController {
   constructor(private readonly svc: LedgerService) {}
 
   // Tenant's curated industry chart by default; `?all=true` returns the full canonical universe.
+  // `gl_coa` is added to the class perms so a CoA maintainer (e.g. FinancialController) can read the chart
+  // they curate via `PATCH /api/ledger/accounts/:code/overlay` (CoaController owns the write surfaces).
+  // `?include_inactive=true` also keeps curated-off (active=false) overlay rows so a curator can see and
+  // re-activate them (the default read hides them, as before).
   @Get('accounts')
-  accounts(@Query('all') all?: string) { return this.svc.listAccounts({ all: all === 'true' || all === '1' }); }
+  @Permissions('exec', 'creditors', 'ar', 'gl_coa')
+  accounts(@Query('all') all?: string, @Query('include_inactive') includeInactive?: string) {
+    return this.svc.listAccounts({
+      all: all === 'true' || all === '1',
+      includeInactive: includeInactive === 'true' || includeInactive === '1',
+    });
+  }
 
   // ── multi-ledger / multi-GAAP ──
   @Get('ledgers')
@@ -109,6 +119,14 @@ export class LedgerController {
 
   @Get('trial-balance')
   trialBalance(@Query('period') period?: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.trialBalance(period, costCenter, ledger || undefined); }
+
+  // GL detail / account ledger — every posted line for ONE account with a running balance (drill-down
+  // behind the trial balance). `account` required; `from`/`to`/`ledger` optional.
+  @Get('account-ledger')
+  @Permissions('exec', 'creditors', 'ar', 'gl_post', 'gl_close', 'fin_report')
+  accountLedger(@Query('account') account: string, @Query('from') from?: string, @Query('to') to?: string, @Query('ledger') ledger?: string) {
+    return this.svc.accountLedger(account, from || undefined, to || undefined, ledger || undefined);
+  }
 
   @Get('journal')
   journal(@Query('limit') limit?: string) { return this.svc.listJournal(qint('limit', limit, 50)); }

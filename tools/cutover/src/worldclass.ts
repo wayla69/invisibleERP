@@ -134,6 +134,14 @@ async function main() {
   ok('Year-end: FY2025 P&L zeroed after close (net≈0)', near(is2025.json.net_income, 0), `net=${is2025.json.net_income}`);
   const bs2025 = await inj('GET', '/api/ledger/balance-sheet?as_of=2025-12-31', admin);
   ok('Year-end: balance sheet balanced + retained earnings 1000', bs2025.json.balanced === true && near(bs2025.json.retained_earnings, 1000), `bal=${bs2025.json.balanced} re=${bs2025.json.retained_earnings}`);
+  // Balance sheet exposes per-account section lines (Asset/Liability/Equity + signed balance) for the
+  // detailed /financial-statements screen — 3100 Retained Earnings must appear in equity after the close.
+  ok('Year-end: balance sheet exposes per-account section lines (incl. 3100 RE)',
+    Array.isArray(bs2025.json.lines)
+      && bs2025.json.lines.length > 0
+      && bs2025.json.lines.every((l: any) => ['Asset', 'Liability', 'Equity'].includes(l.account_type) && typeof l.balance === 'number')
+      && bs2025.json.lines.some((l: any) => l.account_code === '3100' && near(l.balance, 1000)),
+    `lines=${bs2025.json.lines?.length}`);
   const cy2 = await inj('POST', `/api/ledger/close-year?fiscal_year=2025&tenant_id=${t1}`, admin, {});
   ok('Year-end close idempotent (2nd run no-op)', cy2.json.already === true, JSON.stringify(cy2.json).slice(0, 40));
   ok('Finance: sub-ledger ↔ GL reconciliation endpoint', (await inj('GET', '/api/finance/reconciliation', admin)).json.ar?.reconciled === true);

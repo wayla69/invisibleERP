@@ -107,7 +107,7 @@ export class LedgerService {
   // Tenant-aware Chart of Accounts. Default = the tenant's curated industry chart (active overlay rows,
   // industry names/order). `all=true` (or a tenant with no overlay, e.g. legacy/HQ) ⇒ the full canonical
   // universe (so a user can still post to any account outside their template). NEVER used to gate postings.
-  async listAccounts(opts?: { all?: boolean; tenantId?: number | null }) {
+  async listAccounts(opts?: { all?: boolean; tenantId?: number | null; includeInactive?: boolean }) {
     const db = this.db;
     const tid = resolveTenantId(opts?.tenantId ?? null);
     const canon = await db.select().from(accounts).orderBy(accounts.code);
@@ -115,8 +115,10 @@ export class LedgerService {
     const overlay = await db.select().from(tenantAccounts).where(eq(tenantAccounts.tenantId, tid));
     if (!overlay.length) return { accounts: canon, count: canon.length, source: 'canonical' };
     const byCode = new Map<string, any>(canon.map((a: any) => [a.code, a]));
+    // The default read hides curated-off rows (presentation); `includeInactive` keeps them so a gl_coa
+    // manager can see and re-activate an account they previously toggled off (GL-11 curation UI).
     const merged = overlay
-      .filter((o: any) => o.active !== false)
+      .filter((o: any) => opts?.includeInactive || o.active !== false)
       .map((o: any) => {
         const a = byCode.get(o.accountCode);
         return {
@@ -127,7 +129,7 @@ export class LedgerService {
           parentCode: a?.parentCode ?? null,
           group_label: o.groupLabel ?? a?.type ?? null,
           currency: a?.currency ?? 'THB',
-          active: 'true',
+          active: o.active !== false,
           sort_order: Number(o.sortOrder ?? 0),
         };
       })
@@ -630,6 +632,61 @@ export class LedgerService {
     return { period: period ?? null, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING, rows: out, totals: { debit: minorToNumber4(totalDebitM), credit: minorToNumber4(totalCreditM), balanced: totalDebitM === totalCreditM } };
   }
 
+  // ───────────────────── Account ledger (GL detail / บัญชีแยกประเภทรายบัญชี) ─────────────────────
+  // Every POSTED journal line for ONE account over [from,to], in date order, with a running balance struck
+  // from the opening balance (Σ debit−credit strictly before `from`). Debit-positive running balance — the
+  // classic GL-detail drill-down behind the trial balance. Reads the raw ledger (RLS scopes the tenant).
+  async accountLedger(accountCode: string, from?: string | null, to?: string | null, ledgerCode?: string | null) {
+    const db = this.db;
+    const [account] = await db.select({ code: accounts.code, name: accounts.name, type: accounts.type })
+      .from(accounts).where(eq(accounts.code, accountCode)).limit(1);
+    if (!account) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${accountCode} not found`, messageTh: `ไม่พบบัญชี ${accountCode}` });
+
+    // Opening balance = Σ(debit − credit) of POSTED lines on this account strictly before `from`.
+    let opening = 0;
+    if (from) {
+      const [o] = await db
+        .select({ net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)` })
+        .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+        .where(and(eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode), this.ledgerCond(ledgerCode), sql`${journalEntries.entryDate} < ${from}`));
+      opening = round4(n(o?.net));
+    }
+
+    const conds: any[] = [eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode), this.ledgerCond(ledgerCode)];
+    if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
+    if (to) conds.push(sql`${journalEntries.entryDate} <= ${to}`);
+    const rows = await db
+      .select({
+        line_id: journalLines.id,
+        date: journalEntries.entryDate,
+        entry_no: journalEntries.entryNo,
+        source: journalEntries.source,
+        source_ref: journalEntries.sourceRef,
+        memo: sql<string>`coalesce(${journalLines.memo}, ${journalEntries.memo})`,
+        cost_center: journalLines.costCenterCode,
+        debit: journalLines.debit,
+        credit: journalLines.credit,
+      })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(...conds))
+      .orderBy(journalEntries.entryDate, journalLines.id);
+
+    let bal = opening, totalDebit = 0, totalCredit = 0;
+    const lines = rows.map((r: any) => {
+      const debit = round4(n(r.debit)), credit = round4(n(r.credit));
+      bal = round4(bal + debit - credit);
+      totalDebit = round4(totalDebit + debit);
+      totalCredit = round4(totalCredit + credit);
+      return { date: r.date, entry_no: r.entry_no, source: r.source, source_ref: r.source_ref, memo: r.memo, cost_center: r.cost_center, debit, credit, balance: bal };
+    });
+    return {
+      account_code: account.code, account_name: account.name, account_type: account.type,
+      from: from ?? null, to: to ?? null, ledger: ledgerCode ?? LEADING,
+      opening_balance: opening, total_debit: totalDebit, total_credit: totalCredit, closing_balance: bal,
+      count: lines.length, lines,
+    };
+  }
+
   // ───────────────────── Income Statement ─────────────────────
   // Revenue − Expense = net income, over [from,to] (entry_date inclusive)
   async incomeStatement(from: string, to: string, costCenter?: string | null, ledgerCode?: string | null) {
@@ -707,12 +764,25 @@ export class LedgerService {
     // retained_earnings is a DISPLAY sub-total of equity (the 3100 balance) — not added again
     const retainedEarningsM = rows.filter((r: any) => r.account_code === '3100').reduce((a: bigint, r: any) => a + (toMinor4(r.credit) - toMinor4(r.debit)), 0n);
     const liabilitiesEquityM = liabilitiesM + equityM + netIncomeM;
+    // Per-account section lines (additive — existing callers read only the totals). Signed by normal balance:
+    // Assets are debit-positive; Liabilities/Equity are credit-positive. Current-period P&L stays out of the
+    // lines (it is surfaced as the `net_income` sub-total, conventionally shown under equity by the client).
+    const lines = rows
+      .filter((r: any) => r.account_type === 'Asset' || r.account_type === 'Liability' || r.account_type === 'Equity')
+      .map((r: any) => ({
+        account_code: r.account_code,
+        account_name: r.account_name,
+        account_type: r.account_type,
+        balance: round4(r.account_type === 'Asset' ? r.debit - r.credit : r.credit - r.debit),
+      }))
+      .filter((r: any) => Math.abs(r.balance) > 1e-9);
     return {
       as_of: asOf, ledger: ledgerCode ?? LEADING,
       assets: minorToNumber4(assetsM), liabilities: minorToNumber4(liabilitiesM), equity: minorToNumber4(equityM),
       retained_earnings: minorToNumber4(retainedEarningsM), net_income: minorToNumber4(netIncomeM),
       liabilities_plus_equity: minorToNumber4(liabilitiesEquityM),
       balanced: assetsM === liabilitiesEquityM,
+      lines,
     };
   }
 

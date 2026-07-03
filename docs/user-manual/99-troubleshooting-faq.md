@@ -100,6 +100,12 @@ your code below.
 | `Cash flow shows reconciled: false` | The statement of cash flows didn't tie out to the change in cash — an account isn't classified. | Note the `unclassified_accounts` in the response and raise it with finance / engineering; the figure may be mis-stated until fixed. |
 | `BAD_TRANSITION` | A maintenance work order was moved out of order (e.g. `open → completed` skipping `in_progress`, or changed after it was completed/cancelled). | Follow the lifecycle **open → in_progress → completed** (or **cancelled**). See [General Ledger → Asset maintenance](./06-general-ledger.md). |
 | `ASSET_NOT_FOUND` | A work order or maintenance action referenced an asset that isn't in the register. | Capitalise the asset first (`POST /api/assets`), then raise the work order against its asset number. |
+| `COA_ADMIN_ONLY` | You tried to change a **master (canonical) account** — create / rename / deactivate — but the master chart is shared across all companies, so only the **platform administrator (HQ)** may change it. | To tailor **your own** chart (turn an account on/off, rename, reorder) use the curation options with permission `gl_coa`; for a genuinely new master code, ask your platform administrator. See [General Ledger → Managing the chart](./06-general-ledger.md). |
+| `DUPLICATE_ACCOUNT` | You tried to create a master account whose code already exists. | Use a different code, or edit the existing account. |
+| `ACCOUNT_HAS_BALANCE` | You tried to deactivate an account that still carries a non-zero balance. | Clear the balance with a correcting journal entry first, then deactivate. |
+| `CODE_HAS_POSTINGS` | You tried to turn off postability on an account that already has posted entries. | Leave it postable; use an *effective-to* date to date-fence it instead. |
+| `ACCOUNT_NOT_FOUND` | You curated a chart entry for a code that isn't in the master chart. | Curate an **existing** master code; a brand-new code is added by the platform administrator. |
+| `TENANT_REQUIRED` | Chart curation was attempted without a company context (e.g. a head-office/global session). | Sign in to the specific company whose chart you're curating. |
 
 ### Consolidation
 
