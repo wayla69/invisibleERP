@@ -152,7 +152,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> — รับของครบตาม PO\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> — รับของครบตาม PO\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้) · subscribe lowstock — แจ้งเตือนของใกล้หมดทุกเช้า\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -188,12 +188,14 @@ export class LineWebhookService {
     const isLeave = (cmd === 'leave' || cmd === 'ลา') && parts.length >= 3;
     const isAsk = (cmd === 'ask' || cmd === 'ถาม') && parts.length >= 2;
     const isCopilot = cmd === 'bot' || text.startsWith('บอท');
-    const isSubscribe = (cmd === 'subscribe' || cmd === 'รับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'รับสรุป');
-    const isUnsubscribe = (cmd === 'unsubscribe' || cmd === 'เลิกรับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'เลิกรับสรุป');
+    const isSubLow = (cmd === 'subscribe' && arg1.toLowerCase() === 'lowstock') || cmd === 'รับแจ้งของใกล้หมด';
+    const isUnsubLow = (cmd === 'unsubscribe' && arg1.toLowerCase() === 'lowstock') || cmd === 'เลิกแจ้งของใกล้หมด';
+    const isSubscribe = !isSubLow && (cmd === 'subscribe' || cmd === 'รับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'รับสรุป');
+    const isUnsubscribe = !isUnsubLow && (cmd === 'unsubscribe' || cmd === 'เลิกรับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'เลิกรับสรุป');
     const isDigestKpis = cmd === 'digest' && arg1.toLowerCase() === 'kpis';
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
     const isHelp = cmd === 'help' || cmd === 'เมนู' || cmd === 'ช่วยเหลือ' || cmd === 'คำสั่ง';
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isReceive && !isLow && !isReorder && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isReceive && !isLow && !isReorder && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isSubLow && !isUnsubLow && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
 
     // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
     // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
@@ -240,6 +242,7 @@ export class LineWebhookService {
       else if (isExpense || isAdvance) { reply = await this.chatPettyCash(staff, isAdvance ? 'advance' : 'expense', arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_pettycash'; }
       else if (isLeave) { reply = await this.chatLeave(staff, arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_leave'; }
       else if (isSubscribe || isUnsubscribe) { reply = await this.chatDigest(tenantId, staff, isSubscribe, isSubscribe ? parts.slice(2).join(',') : ''); campaign = 'chat_digest'; }
+      else if (isSubLow || isUnsubLow) { reply = await this.chatLowStockAlert(tenantId, staff, isSubLow); campaign = 'chat_lowstock_alert'; }
       else if (isDigestKpis) { reply = await this.chatDigestKpis(staff); campaign = 'chat_digest'; }
       else if (isAsk) { reply = await this.chatAsk(staff, parts.slice(1).join(' ')); campaign = 'chat_ask'; }
       else if (isCopilot) {
@@ -366,6 +369,10 @@ export class LineWebhookService {
         else if (p.action === 'copilot-cmd' && p.kind === 'leave' && a.length >= 2) text = await this.chatLeave(staff, a[0]!, a[1]!, a[2] ?? '');
         else text = await this.chatDecision(staff, p.docNo!, p.action === 'approve');
       }
+    } else if (data.a === 'reorder') {
+      // D1: the morning low-stock alert's [🛒 สั่งเติมทั้งหมด] button → raise the top-up PR in one tap
+      // (same createPr path + pr_raise check as the typed `reorder`; event-id dedupe blocks double-act).
+      text = await this.chatReorder(staff);
     } else {
       return false;
     }
@@ -655,6 +662,29 @@ export class LineWebhookService {
     return 'ยกเลิกการรับสรุปประจำวันแล้ว ✔';
   }
 
+  // D1 — subscribe/unsubscribe the morning low-stock reorder alert (report type `low_stock_reorder_alert`).
+  // Gated on pr_raise, since the whole point is to reorder; the scheduler delivers it (with a one-tap
+  // [สั่งเติมทั้งหมด] button) once per day and only when something is actually low. Force-unlink silences it.
+  private async chatLowStockAlert(tenantId: number, u: any, on: boolean): Promise<string> {
+    const perms = await this.effectivePerms(u);
+    if (on && !perms.includes('pr_raise') && !perms.includes('procurement') && !perms.includes('planner')) {
+      return 'บัญชีของคุณไม่มีสิทธิ์รับแจ้งเตือนสินค้าใกล้หมด (ต้องมี pr_raise)';
+    }
+    const [sub] = await this.db.select().from(reportSubscriptions)
+      .where(and(eq(reportSubscriptions.tenantId, tenantId), eq(reportSubscriptions.reportType, 'low_stock_reorder_alert'))).limit(1);
+    const recipients: Array<{ line_user?: string; email?: string }> = Array.isArray(sub?.recipients) ? [...(sub!.recipients as Array<{ line_user?: string; email?: string }>)] : [];
+    const idx = recipients.findIndex((r: any) => r?.line_user === u.username);
+    if (on) {
+      if (idx < 0) recipients.push({ line_user: u.username });
+      if (sub) await this.db.update(reportSubscriptions).set({ recipients, isActive: true }).where(eq(reportSubscriptions.id, sub.id));
+      else await this.db.insert(reportSubscriptions).values({ tenantId, name: 'LINE Low-stock Reorder Alert', reportType: 'low_stock_reorder_alert', filters: {}, frequency: 'daily', recipients, isActive: true, nextRunAt: new Date(), createdBy: 'system:line-chat' });
+      return 'รับแจ้งเตือนสินค้าใกล้หมดทาง LINE แล้ว ✔ (ส่งทุกเช้าเมื่อมีของถึงจุดสั่งซื้อ พร้อมปุ่มสั่งเติม) — พิมพ์ "unsubscribe lowstock" เพื่อยกเลิก';
+    }
+    if (!sub || idx < 0) return 'คุณยังไม่ได้รับแจ้งเตือนสินค้าใกล้หมดอยู่แล้ว';
+    await this.db.update(reportSubscriptions).set({ recipients: recipients.filter((r: any) => r?.line_user !== u.username) }).where(eq(reportSubscriptions.id, sub.id));
+    return 'ยกเลิกการรับแจ้งเตือนสินค้าใกล้หมดแล้ว ✔';
+  }
+
   // LP-3 — `digest kpis`: list the catalog keys THIS user's permissions may see (permission-aware menu).
   // Gated like `subscribe digest` — the baseline trio is permissionless, so the menu (not the KPI list)
   // carries the subscriber gate.
@@ -886,6 +916,7 @@ export class LineWebhookService {
     ] },
     { icon: '📊', title: 'รายงาน & AI', color: '#d97706', items: [
       ['subscribe digest [kpi,…]', 'รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)'],
+      ['subscribe lowstock', 'รับแจ้งเตือนสินค้าใกล้หมดทุกเช้า + ปุ่มสั่งเติม'],
       ['ask <คำถาม>', 'ถามยอดขาย เช่น ask ยอดขายตามสาขา'],
       ['บอท <ข้อความ>', 'ให้ AI ช่วยร่าง (ยืนยันก่อนสร้างเสมอ)'],
     ] },
