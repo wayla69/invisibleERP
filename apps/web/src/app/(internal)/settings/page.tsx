@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, ListTree, Lock, Plus, Power, RotateCcw, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, KeyRound, ListTree, Lock, Plus, Power, RotateCcw, Search, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
@@ -13,7 +13,7 @@ import {
   MODULE_CATEGORIES,
   type ModuleFlag,
 } from '@/lib/modules';
-import { INTERNAL_NAV, allGroupItems, navForWorkspace, orderGroups, type NavGroup, type NavItem, type Workspace } from '@/lib/nav';
+import { INTERNAL_NAV, allGroupItems, navForWorkspace, orderGroups, orderItems, type NavGroup, type NavItem, type Workspace } from '@/lib/nav';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -49,7 +49,7 @@ export default function SettingsPage() {
 //     everyone's nav. Chrome only (permissions still apply). Mirrors the sidebar (nav.ts) so names match.
 //   • Section B — System modules: the permission feature-flags — disabling one also blocks its API routes.
 //     Grouped + Thai-named + shows exactly which menus each module controls.
-type ModulesResp = { modules: ModuleFlag[]; navDisabled?: string[]; groupOrder?: string[] };
+type ModulesResp = { modules: ModuleFlag[]; navDisabled?: string[]; groupOrder?: string[]; itemOrder?: Record<string, string[]> };
 const NAV_ALWAYS_VISIBLE = ['/settings', '/admin/users']; // never hidable (admin lockout guard)
 
 function Modules() {
@@ -88,6 +88,12 @@ function Modules() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  const reorderItems = useMutation({
+    mutationFn: (v: { scope: string; order: string[] }) => api('/api/admin/modules/nav-item-order', { method: 'POST', body: JSON.stringify(v) }),
+    onSuccess: () => { notifySuccess('อัปเดตลำดับเมนูแล้ว'); invalidate(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const resetNav = useMutation({
     mutationFn: () => api('/api/admin/modules/nav-reset', { method: 'POST' }),
     onSuccess: () => { notifySuccess('รีเซ็ตการจัดเมนูเป็นค่าเริ่มต้นแล้ว'); invalidate(); },
@@ -97,6 +103,7 @@ function Modules() {
   const mods = list.data?.modules ?? [];
   const navDisabled = useMemo(() => new Set(list.data?.navDisabled ?? []), [list.data]);
   const groupOrder = list.data?.groupOrder;
+  const itemOrder = list.data?.itemOrder;
   const disabledCount = mods.filter((m) => !m.enabled).length;
 
   return (
@@ -122,7 +129,9 @@ function Modules() {
       <StateView q={list}>
         <div className="space-y-6">
           <MenuVisibility navDisabled={navDisabled} onToggle={(hrefs, enabled) => toggleNav.mutate({ hrefs, enabled })}
-            groupOrder={groupOrder} onReorder={(order) => reorder.mutate(order)} pending={toggleNav.isPending || reorder.isPending} t={t} />
+            groupOrder={groupOrder} itemOrder={itemOrder} onReorder={(order) => reorder.mutate(order)}
+            onReorderItems={(scope, order) => reorderItems.mutate({ scope, order })}
+            pending={toggleNav.isPending || reorder.isPending || reorderItems.isPending} t={t} />
           <SystemModules mods={mods} onToggle={(keys, enabled) => toggleModule.mutate({ keys, enabled })} pending={toggleModule.isPending} lang={lang} t={t} />
         </div>
       </StateView>
@@ -147,14 +156,18 @@ function hiddenStats(hrefs: string[], hidden: Set<string>) {
   return { total: toggleable.length, off, allOff: toggleable.length > 0 && off === toggleable.length };
 }
 
-// ── Section A: Menu visibility — a collapsible tree mirroring the sidebar ─────────
+// ── Section A: Menu visibility — a collapsible tree mirroring the sidebar. Hide/show, reorder (▲▼ or drag
+//    the ⋮⋮ handle), and search — all system-wide (chrome only). ─────────
+type DragState = { kind: 'group'; key: string } | { kind: 'item'; key: string; scope: string } | null;
 function MenuVisibility({
-  navDisabled, onToggle, groupOrder, onReorder, pending, t,
+  navDisabled, onToggle, groupOrder, itemOrder, onReorder, onReorderItems, pending, t,
 }: {
   navDisabled: Set<string>;
   onToggle: (hrefs: string[], enabled: boolean) => void;
   groupOrder?: string[];
+  itemOrder?: Record<string, string[]>;
   onReorder: (order: string[]) => void;
+  onReorderItems: (scope: string, order: string[]) => void;
   pending: boolean;
   t: (k: string) => string;
 }) {
@@ -162,37 +175,89 @@ function MenuVisibility({
   // Mirror the sidebar's ERP/POS split so the tree lines up with what staff actually see. "All" merges both
   // surfaces (with a per-group workspace chip); ERP/POS use the SAME filter the sidebar uses (navForWorkspace).
   const [ws, setWs] = useState<'all' | Workspace>('all');
+  const [q, setQ] = useState('');
+  const [drag, setDrag] = useState<DragState>(null);
+  const query = q.trim().toLowerCase();
+  const searching = query.length > 0;
+  const canReorder = !searching; // reordering is disabled while filtering (order would be relative to matches)
   const wsChip = (g: NavGroup) => (!g.workspace || g.workspace.length === 2 ? 'ทั้งสอง' : g.workspace[0] === 'pos' ? 'POS' : 'ERP');
 
-  // Show categories in the admin-curated order (same as the sidebar). Reorder writes the FULL global order.
   const wsGroups = orderGroups(ws === 'all' ? INTERNAL_NAV : navForWorkspace(INTERNAL_NAV, ws), groupOrder);
+  const itemsOf = (items: NavItem[], scope: string) => orderItems(items, itemOrder?.[scope]);
+  const itMatch = (it: NavItem) => !searching || t(it.label).toLowerCase().includes(query) || it.href.toLowerCase().includes(query);
+  const grpTitleMatch = (g: NavGroup) => t(g.title).toLowerCase().includes(query);
+
+  // Category order (▲▼ swaps the adjacent visible category; drag moves before the drop target). Both write
+  // the FULL global order so the stored list stays complete across ERP/POS filtering.
   const moveGroup = (title: string, dir: -1 | 1) => {
-    const visible = wsGroups.map((g) => g.title);
-    const neighbour = visible[visible.indexOf(title) + dir]; // swap with the adjacent VISIBLE category
-    if (!neighbour) return;
+    const vis = wsGroups.map((g) => g.title);
+    const nb = vis[vis.indexOf(title) + dir];
+    if (!nb) return;
     const full = orderGroups(INTERNAL_NAV, groupOrder).map((g) => g.title);
-    const ia = full.indexOf(title);
-    const ib = full.indexOf(neighbour);
+    const ia = full.indexOf(title); const ib = full.indexOf(nb);
     if (ia < 0 || ib < 0) return;
     [full[ia], full[ib]] = [full[ib], full[ia]];
     onReorder(full);
   };
+  const dropGroup = (targetTitle: string) => {
+    if (!drag || drag.kind !== 'group' || drag.key === targetTitle) return;
+    const full = orderGroups(INTERNAL_NAV, groupOrder).map((g) => g.title);
+    const from = full.indexOf(drag.key); if (from < 0) return;
+    full.splice(from, 1);
+    const to = full.indexOf(targetTitle);
+    full.splice(to < 0 ? full.length : to, 0, drag.key);
+    onReorder(full);
+  };
 
-  const renderItem = (it: NavItem) => {
+  // Item order within one container (scope = a group / sub-section title).
+  const moveItem = (scope: string, list: NavItem[], href: string, dir: -1 | 1) => {
+    const vis = itemsOf(list, scope).map((i) => i.href);
+    const j = vis.indexOf(href) + dir;
+    if (j < 0 || j >= vis.length) return;
+    const full = vis.slice();
+    [full[j - dir], full[j]] = [full[j], full[j - dir]];
+    onReorderItems(scope, full);
+  };
+  const dropItem = (scope: string, list: NavItem[], targetHref: string) => {
+    if (!drag || drag.kind !== 'item' || drag.scope !== scope || drag.key === targetHref) return;
+    const full = itemsOf(list, scope).map((i) => i.href);
+    const from = full.indexOf(drag.key); if (from < 0) return;
+    full.splice(from, 1);
+    const to = full.indexOf(targetHref);
+    full.splice(to < 0 ? full.length : to, 0, drag.key);
+    onReorderItems(scope, full);
+  };
+
+  const renderItem = (it: NavItem, scope: string, list: NavItem[], idx: number, count: number) => {
     const protectedItem = NAV_ALWAYS_VISIBLE.includes(it.href);
     const hidden = navDisabled.has(it.href);
     return (
-      <div key={it.href} className={cn('flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent/50', hidden && 'opacity-60')}>
+      <div key={it.href}
+        onDragOver={canReorder && drag?.kind === 'item' && drag.scope === scope ? (e) => e.preventDefault() : undefined}
+        onDrop={canReorder ? () => { dropItem(scope, list, it.href); setDrag(null); } : undefined}
+        className={cn('flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/50', hidden && 'opacity-60', drag?.kind === 'item' && drag.key === it.href && 'opacity-40')}>
+        {canReorder && (
+          <span draggable={!pending} onDragStart={!pending ? () => setDrag({ kind: 'item', key: it.href, scope }) : undefined} onDragEnd={() => setDrag(null)}
+            title="ลากเพื่อจัดลำดับ" className="shrink-0 cursor-grab text-muted-foreground/40 hover:text-muted-foreground"><GripVertical className="size-3.5" /></span>
+        )}
         <it.icon className="size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{t(it.label)}</div>
           <code className="text-[11px] text-muted-foreground">{it.href}</code>
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+        <div className="hidden shrink-0 flex-wrap justify-end gap-1 sm:flex">
           {(it.perms ?? []).slice(0, 3).map((p) => (
             <code key={p} className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{p}</code>
           ))}
         </div>
+        {canReorder && (
+          <div className="flex shrink-0 items-center">
+            <button type="button" disabled={pending || idx === 0} onClick={() => moveItem(scope, list, it.href, -1)}
+              aria-label={`เลื่อน ${t(it.label)} ขึ้น`} title="เลื่อนขึ้น" className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-25"><ArrowUp className="size-3" /></button>
+            <button type="button" disabled={pending || idx === count - 1} onClick={() => moveItem(scope, list, it.href, 1)}
+              aria-label={`เลื่อน ${t(it.label)} ลง`} title="เลื่อนลง" className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-25"><ArrowDown className="size-3" /></button>
+          </div>
+        )}
         {protectedItem ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><Lock className="size-3.5" /> ล็อก</span>
         ) : (
@@ -202,13 +267,22 @@ function MenuVisibility({
     );
   };
 
+  // Build the (optionally search-filtered) group list once, with each group's ordered flat items + subs.
+  const visibleGroups = wsGroups
+    .map((g) => ({
+      g,
+      flat: itemsOf(g.items ?? [], g.title).filter(itMatch),
+      subs: (g.subgroups ?? []).map((sub) => ({ sub, items: itemsOf(sub.items, sub.title).filter(itMatch) })),
+    }))
+    .filter(({ g, flat, subs }) => !searching || grpTitleMatch(g) || flat.length > 0 || subs.some((s) => s.items.length > 0));
+
   return (
     <Card className="gap-0 p-0">
       <div className="flex flex-wrap items-center gap-2 border-b p-4">
         <ListTree className="size-4 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <h3 className="text-base font-semibold">จัดการเมนู (แสดง/ซ่อน)</h3>
-          <p className="text-sm text-muted-foreground">ซ่อนได้ทั้งหมวด หมวดย่อย หรือเมนูรายตัว · จัดลำดับหมวดด้วยปุ่ม ▲▼ (มีผลกับทุกคน) — แยกตาม ERP/POS ให้ตรงกับแถบเมนูซ้าย</p>
+          <h3 className="text-base font-semibold">จัดการเมนู (แสดง/ซ่อน · จัดลำดับ)</h3>
+          <p className="text-sm text-muted-foreground">ซ่อน/แสดง และ<b>จัดลำดับ</b>ได้ทั้งหมวดและเมนู — ลากที่จับ <GripVertical className="inline size-3 align-text-bottom" /> หรือใช้ปุ่ม ▲▼ (มีผลกับทุกคน)</p>
         </div>
         <div className="flex shrink-0 gap-0.5 rounded-md bg-muted p-0.5 text-xs">
           {([['all', 'ทั้งหมด'], ['erp', 'ERP'], ['pos', 'POS']] as const).map(([id, label]) => (
@@ -218,15 +292,27 @@ function MenuVisibility({
             </button>
           ))}
         </div>
+        <div className="relative w-full">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาเมนู…" className="pl-8" />
+        </div>
       </div>
       <div className="divide-y">
-        {wsGroups.map((g: NavGroup, gi: number) => {
+        {visibleGroups.map(({ g, flat, subs }, gi) => {
           const allHrefs = allGroupItems(g).map((i) => i.href);
           const st = hiddenStats(allHrefs, navDisabled);
-          const isOpen = open[g.title] ?? false;
+          const isOpen = searching || (open[g.title] ?? false);
+          const groupDragging = drag?.kind === 'group';
           return (
-            <div key={g.title}>
+            <div key={g.title}
+              onDragOver={canReorder && groupDragging ? (e) => e.preventDefault() : undefined}
+              onDrop={canReorder ? () => { dropGroup(g.title); setDrag(null); } : undefined}
+              className={cn(groupDragging && drag.key === g.title && 'opacity-40')}>
               <div className="flex items-center gap-2 px-3 py-2">
+                {canReorder && (
+                  <span draggable={!pending} onDragStart={!pending ? () => setDrag({ kind: 'group', key: g.title }) : undefined} onDragEnd={() => setDrag(null)}
+                    title="ลากเพื่อจัดลำดับหมวด" className="shrink-0 cursor-grab text-muted-foreground/40 hover:text-muted-foreground"><GripVertical className="size-4" /></span>
+                )}
                 <button type="button" onClick={() => setOpen((o) => ({ ...o, [g.title]: !isOpen }))}
                   className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
                   {isOpen ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
@@ -238,18 +324,16 @@ function MenuVisibility({
                     {st.off > 0 ? `ซ่อน ${st.off}/${st.total}` : `${st.total} เมนู`}
                   </span>
                 </button>
-                <div className="flex shrink-0 items-center">
-                  <button type="button" disabled={pending || gi === 0} onClick={() => moveGroup(g.title, -1)}
-                    aria-label={`เลื่อน ${t(g.title)} ขึ้น`} title="เลื่อนหมวดขึ้น"
-                    className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-25">
-                    <ArrowUp className="size-3.5" />
-                  </button>
-                  <button type="button" disabled={pending || gi === wsGroups.length - 1} onClick={() => moveGroup(g.title, 1)}
-                    aria-label={`เลื่อน ${t(g.title)} ลง`} title="เลื่อนหมวดลง"
-                    className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-25">
-                    <ArrowDown className="size-3.5" />
-                  </button>
-                </div>
+                {canReorder && (
+                  <div className="flex shrink-0 items-center">
+                    <button type="button" disabled={pending || gi === 0} onClick={() => moveGroup(g.title, -1)}
+                      aria-label={`เลื่อน ${t(g.title)} ขึ้น`} title="เลื่อนหมวดขึ้น"
+                      className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-25"><ArrowUp className="size-3.5" /></button>
+                    <button type="button" disabled={pending || gi === visibleGroups.length - 1} onClick={() => moveGroup(g.title, 1)}
+                      aria-label={`เลื่อน ${t(g.title)} ลง`} title="เลื่อนหมวดลง"
+                      className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-25"><ArrowDown className="size-3.5" /></button>
+                  </div>
+                )}
                 {st.total > 0 && (
                   <VisBtn hidden={st.allOff} disabled={pending}
                     onClick={() => onToggle(allHrefs.filter((h) => !NAV_ALWAYS_VISIBLE.includes(h)), st.allOff)} />
@@ -257,8 +341,9 @@ function MenuVisibility({
               </div>
               {isOpen && (
                 <div className="space-y-0.5 px-3 pb-3">
-                  {g.items?.map(renderItem)}
-                  {g.subgroups?.map((sub) => {
+                  {flat.map((it, i) => renderItem(it, g.title, flat, i, flat.length))}
+                  {subs.map(({ sub, items }) => {
+                    if (searching && items.length === 0) return null;
                     const subHrefs = sub.items.map((i) => i.href);
                     const subSt = hiddenStats(subHrefs, navDisabled);
                     return (
@@ -269,7 +354,7 @@ function MenuVisibility({
                           <VisBtn hidden={subSt.allOff} disabled={pending} size="xs"
                             onClick={() => onToggle(subHrefs.filter((h) => !NAV_ALWAYS_VISIBLE.includes(h)), subSt.allOff)} />
                         </div>
-                        {sub.items.map(renderItem)}
+                        {items.map((it, i) => renderItem(it, sub.title, items, i, items.length))}
                       </div>
                     );
                   })}
@@ -278,6 +363,9 @@ function MenuVisibility({
             </div>
           );
         })}
+        {searching && visibleGroups.length === 0 && (
+          <div className="px-4 py-6 text-center text-sm text-muted-foreground">ไม่พบเมนูที่ตรงกับ “{q}”</div>
+        )}
       </div>
     </Card>
   );

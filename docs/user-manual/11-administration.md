@@ -88,14 +88,17 @@ switcher, so the list lines up one-to-one with what staff see on that surface (i
    the menus currently inside it in one click.
 2. Hidden menus disappear from **everyone's** sidebar, command palette (⌘K) and
    favourites, and the page redirects to the workspace home if opened directly.
-3. **Reorder categories by importance** with the **▲ / ▼** buttons on each category
-   header — put the ones your team uses most at the top. The order is **system-wide**
-   (applies to every user's sidebar **and** the ⌘K search palette) and is saved
-   instantly. New categories shipped in a later release appear at the bottom until you
-   place them.
-4. **Reset the arrangement** with **รีเซ็ตการจัดเมนู** (top-right) to show every menu
-   again and restore the default category order. This affects **menu arrangement only**
-   — it does **not** re-enable any module you turned off in §3.2.
+3. **Reorder categories and menus** by dragging the **⋮⋮ handle** or using the
+   **▲ / ▼** buttons — on a category header to move the whole category, or on a menu
+   row to move it within its category/sub-section. Put what your team uses most at the
+   top. The order is **system-wide** (applies to every user's sidebar **and** the ⌘K
+   search palette) and is saved instantly. New categories/menus shipped in a later
+   release appear at the bottom until you place them.
+4. **Find a menu fast** with the **ค้นหาเมนู** box — the tree filters as you type
+   (reordering is paused while a search is active).
+5. **Reset the arrangement** with **รีเซ็ตการจัดเมนู** (top-right) to show every menu
+   again and restore the default category **and** menu order. This affects **menu
+   arrangement only** — it does **not** re-enable any module you turned off in §3.2.
 
 > **Hiding a menu is presentation only** — it declutters the sidebar but does **not**
 > change anyone's permissions. To actually *block access* to a capability (including

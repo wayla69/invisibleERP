@@ -14,6 +14,7 @@ import {
   allGroupItems,
   navForWorkspace,
   orderGroups,
+  orderItems,
   defaultWorkspace,
   workspaceHome,
   WORKSPACES,
@@ -353,6 +354,7 @@ export function AppShell({
   // Sidebar = permission-filtered within the active workspace; ⌘K palette stays global (all workspaces).
   const wsNav = React.useMemo(() => (enableWorkspaces ? navForWorkspace(nav, workspace) : nav), [enableWorkspaces, nav, workspace]);
   const groupOrder = moduleFlags.data?.groupOrder;
+  const itemOrder = moduleFlags.data?.itemOrder;
   const groups = React.useMemo(() => {
     const filtered = filterByPerm(wsNav);
     const base = filtered.length ? filtered : wsNav; // fall back while loading
@@ -578,7 +580,7 @@ export function AppShell({
               <SidebarGroupLabel>{t(group.title)}</SidebarGroupLabel>
               <SidebarGroupContent>
                 {group.items && group.items.length > 0 && (
-                  <SidebarMenu>{group.items.map(renderItem)}</SidebarMenu>
+                  <SidebarMenu>{orderItems(group.items, itemOrder?.[group.title]).map(renderItem)}</SidebarMenu>
                 )}
                 {group.subgroups?.map((sub) => {
                   const open = navFold[sub.title] ?? sub.defaultOpen ?? true;
@@ -589,7 +591,7 @@ export function AppShell({
                       open={open}
                       onToggle={() => toggleFold(sub.title, sub.defaultOpen ?? true)}
                     >
-                      <SidebarMenu>{sub.items.map(renderItem)}</SidebarMenu>
+                      <SidebarMenu>{orderItems(sub.items, itemOrder?.[sub.title]).map(renderItem)}</SidebarMenu>
                     </NavSubSection>
                   );
                 })}

@@ -122,14 +122,17 @@ Each entry: **what it does · endpoint(s) · permission · storage/migration · 
     of the sidebar, the ⌘K palette and favourites, and a client-side redirect bounces a directly-opened
     hidden route to the workspace home. **Two hrefs (`/settings`, `/admin/users`) can never be hidden** so an
     admin can't lock themselves out. The same screen also **reorders the sidebar categories** (หมวด)
-    system-wide by importance (▲/▼ per category) — persisted in a small global `nav_group_order` table
-    (`group_key`→`sort_order`, migration `0230`, no RLS); every user's sidebar and the ⌘K palette render
-    groups by ascending `sort_order`, and groups absent from the table fall back to their code order.
-    `GET /api/admin/modules` (adds `navDisabled[]` + `groupOrder[]`), `POST /api/admin/modules/nav
-    {hrefs[], enabled}` (bulk = a category/sub-section toggle), `POST /api/admin/modules/nav-order {order[]}`
-    (full-replace of the category order), and `POST /api/admin/modules/nav-reset` (clears all visibility
-    overrides + the category order back to defaults — leaves the module on/off flags untouched); `GET
-    /api/modules/effective` returns `navDisabled` + `groupOrder` so every client hides/orders consistently.
+    system-wide by importance — categories (▲/▼ or drag) **and** the menu items **within** a category /
+    sub-section — persisted in a small global `nav_group_order` table (migration `0230`, no RLS): a bare
+    `group_key`→`sort_order` row orders categories, and an `item:<scope>|<href>` row orders items inside the
+    container named `scope`. Every user's sidebar and the ⌘K palette render groups + items by ascending
+    `sort_order`; anything absent falls back to code order. A search box filters the admin tree.
+    `GET /api/admin/modules` (adds `navDisabled[]` + `groupOrder[]` + `itemOrder{}`), `POST
+    /api/admin/modules/nav {hrefs[], enabled}` (bulk = a category/sub-section toggle), `POST
+    /api/admin/modules/nav-order {order[]}` (category order), `POST /api/admin/modules/nav-item-order
+    {scope, order[]}` (item order within one container), and `POST /api/admin/modules/nav-reset` (clears all
+    visibility overrides + all ordering back to defaults — leaves the module on/off flags untouched); `GET
+    /api/modules/effective` returns `navDisabled` + `groupOrder` + `itemOrder` so every client hides/orders consistently.
     Perm `users`. Presentation-only — **no GL**, changes **no** data-access path. *This is the softer sibling of the
     code-governed **module on/off** flags (§3 / user manual §11.3): menu-hide only declutters, module-off is
     the enforced control that also blocks the API. Verified by the `module-qr` cutover harness (+7: hide →
@@ -220,3 +223,4 @@ Per-feature validation codes are consolidated here (all `400` unless noted): UDF
 | 1.2 DRAFT | 2026-07-03 | Web | Added capability #24 — **menu visibility overrides**: a tenant admin hides individual sidebar entries / sub-sections / whole categories from everyone's nav (Settings→Modules, perm `users`). Stored in the existing global `module_configs` under a `nav:<href>` namespace (**no migration**); chrome-only — the permission guard ignores `nav:` rows, so it never blocks an API (softer sibling of the module on/off flags). The same screen renames + groups the module flags in Thai and shows, per module, which menus it controls (computed from `nav.ts`). `/settings` + `/admin/users` are un-hidable (lockout guard). New endpoint `POST /api/admin/modules/nav`; `list`/`effective` add `navDisabled[]`. New §7.24; no new RCM control (UI customization). ToE: `module-qr` cutover harness +7 (29 total). User manual §11.3 + UAT `08-admin-sod-uat.md` (UAT-ADM-105/106) updated. |
 | 1.3 DRAFT | 2026-07-03 | Web | Extended capability #24 — **system-wide sidebar category ordering**: an admin arranges nav groups (หมวด) by importance (▲/▼) in Settings→Menu; the order applies to **everyone's** sidebar + ⌘K palette (groups render by ascending `sort_order`; unknown/new groups fall back to code order). New global table `nav_group_order` (migration **0230**, no RLS — presentation-only, no GL). New endpoint `POST /api/admin/modules/nav-order {order[]}` (full-replace); `list`/`effective` add `groupOrder[]`. §7.24 updated; no new RCM control (UI customization). ToE: `module-qr` +4 (33 total). User manual §3.1 + UAT `08-admin-sod-uat.md` (UAT-ADM-108) updated. |
 | 1.4 DRAFT | 2026-07-03 | Web | Capability #24 polish: (a) the **⌘K command palette now follows the same admin-curated category order** as the sidebar (previously only the sidebar was ordered — code now matches the §7.24 narrative); (b) a **“รีเซ็ตการจัดเมนู” reset** (`POST /api/admin/modules/nav-reset`) clears all visibility overrides + the category order back to defaults, **leaving the module on/off flags untouched** (menu arrangement only). No schema change; no new RCM control. ToE: `module-qr` +3 (36 total). User manual §3.1 (steps 3–4) updated + UAT `08-admin-sod-uat.md` (UAT-ADM-109). |
+| 1.5 DRAFT | 2026-07-03 | Web | Capability #24 depth: (a) **item-level ordering** — reorder the menus **within** a category/sub-section, not just the categories; stored in the same `nav_group_order` table under an `item:<scope>\|<href>` namespace (no migration), returned as `itemOrder` from `list`/`effective` and applied by the sidebar + ⌘K palette. (b) **drag-and-drop** (⋮⋮ handle) for both categories and menu items, alongside the ▲/▼ buttons. (c) a **search box** filters the tree. New endpoint `POST /api/admin/modules/nav-item-order {scope, order[]}`; group-order and item-order are independent namespaces in one table. No schema change; no new RCM control. ToE: `module-qr` +3 (39 total). User manual §3.1 (steps 3–5) + UAT `08-admin-sod-uat.md` (UAT-ADM-110). |
