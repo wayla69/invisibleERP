@@ -708,6 +708,39 @@ async function main() {
   ok('LC-4: unsubscribe digest → recipient removed',
     digOff.json.chat === 1 && !(digSub2.recipients as any[]).some((r: any) => r.line_user === 'somsri'), JSON.stringify({ recips: digSub2?.recipients }));
 
+  // ── 23. LC-5 (docs/30): `ask` governed NL analytics + confirm-first Thai copilot (key-less rules). ──
+  // 23a. ask — permission gate (exec/dashboard/masterdata); somchai (ess+pr_raise) refused.
+  const askDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23a', source: { userId: 'Usomchai' }, message: { id: 'mid-23a', type: 'text', text: 'ask ยอดขายตามสาขา' } }] });
+  ok('LC-5: ask without dashboard/exec/masterdata → refused', askDenied.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 23b. ask — governed keyword-mapped query (no LLM key in CI); empty data answers honestly.
+  const askOk = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23b', source: { userId: 'Usomsri' }, message: { id: 'mid-23b', type: 'text', text: 'ask ยอดขายตามสาขา' } }] });
+  const askText = lineReplies.at(-1)?.text ?? '';
+  ok('LC-5: ask → governed NL query answers (dimension resolved; no raw SQL surface)',
+    askOk.json.chat === 1 && (askText.includes('branch') || askText.includes('ยอดขาย') || askText.includes('ไม่มีข้อมูล')),
+    JSON.stringify({ reply: askText.slice(0, 60) }));
+
+  // 23c. copilot — free Thai text drafts a PR; NOTHING is created before [ยืนยัน].
+  const prCountAI = (await db.select().from(s.purchaseRequests)).length;
+  const aiDraft = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23c', source: { userId: 'Usomchai' }, message: { id: 'mid-23c', type: 'text', text: 'บอท ขอซื้อ A4-PAPER 4 ใกล้หมดแล้วนะ' } }] });
+  const aiConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  const prCountAfterDraft = (await db.select().from(s.purchaseRequests)).length;
+  ok('LC-5: copilot draft → confirm card only (no PR before confirm)',
+    aiDraft.json.chat === 1 && lineReplies.at(-1)?.type === 'flex' && !!aiConfirmData && JSON.parse(aiConfirmData).d === 'AI-DRAFT' && prCountAfterDraft === prCountAI,
+    JSON.stringify({ draft: lineReplies.at(-1)?.text.slice(0, 50), created: prCountAfterDraft - prCountAI }));
+
+  // 23d. confirming the draft replays the ordinary pr path (pr_raise + same numbering + workflow).
+  const aiConf = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-23d', replyToken: 'rt-23d', source: { userId: 'Usomchai' }, postback: { data: aiConfirmData } }] });
+  const aiPrNo = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [aiPrRow] = aiPrNo ? await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, aiPrNo)) : [];
+  ok('LC-5: confirm → PR created through the normal path (requested_by = linked staff)',
+    aiConf.json.chat === 1 && !!aiPrRow && aiPrRow.requestedBy === 'somchai' && aiPrRow.status === 'Pending',
+    JSON.stringify({ pr: aiPrNo, by: aiPrRow?.requestedBy }));
+
+  // 23e. unknown free text → honest "don't understand" + usage (no guessing, no action).
+  const aiUnknown = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23e', source: { userId: 'Usomchai' }, message: { id: 'mid-23e', type: 'text', text: 'bot วันนี้อากาศดีจัง' } }] });
+  ok('LC-5: copilot unknown intent → usage reply, nothing acted', aiUnknown.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 40) }));
+
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

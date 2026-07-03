@@ -65,6 +65,8 @@ handy on the floor or in the stockroom. One-time setup first:
 | `expense <fund> <amount> [เหตุผล]` / `advance …` (also `เบิก`/`ยืมเงิน`) | Raises a petty-cash request — see [Finance](./05-finance-ar-ap.md) |
 | `leave <from YYYY-MM-DD> <days> [เหตุผล]` (also `ลา`) | Raises an ESS leave request (needs `ess` + employee record) |
 | `subscribe digest` / `unsubscribe digest` (also `รับสรุป`/`เลิกรับสรุป`) | Morning summary on LINE — see [Reports](./09-reports-and-analytics.md) |
+| `ask <คำถาม>` (also `ถาม`) | Sales analytics answer (needs `dashboard`/`exec`/`masterdata`) |
+| `บอท <ข้อความ>` (also `bot …`) | AI drafts a PR from free text — **always asks you to confirm before creating anything** |
 | `approve <PR no>` / `reject <PR no> <reason>` (also `อนุมัติ`/`ปฏิเสธ`) | **Procurement only** — decides a pending PR through the normal approval engine |
 
 **LINE notifications:** if you've linked your account, the system messages you
