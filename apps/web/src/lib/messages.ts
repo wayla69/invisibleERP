@@ -167,6 +167,8 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Finance / AR-AP ───────────────────────────────────────────────────────
   'nav.finance': { th: 'การเงิน', en: 'Finance' },
   'nav.disbursements': { th: 'จ่ายเงินเจ้าหนี้ (Disbursements)', en: 'AP Disbursements' },
+  'nav.customer_cards': { th: 'การ์ดลูกหนี้', en: 'Customer Cards (AR)' },
+  'nav.vendor_cards': { th: 'การ์ดเจ้าหนี้', en: 'Vendor Cards (AP)' },
   'nav.credit_hold': { th: 'จัดการเครดิต & ระงับบัญชี', en: 'Credit & Hold Management' },
   'nav.advances': { th: 'เงินทดรองจ่าย (Petty cash)', en: 'Petty Cash Advances' },
   'nav.petty_cash': { th: 'กองทุนเงินสดย่อย & ค่าใช้จ่าย', en: 'Petty Cash & Expenses' },

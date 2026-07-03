@@ -330,6 +330,8 @@ export const INTERNAL_NAV: NavGroup[] = [
         title: 'nav.sub.ar_ap',
         items: [
           { label: 'nav.finance', href: '/finance', icon: Banknote, perms: ['ar', 'creditors', 'exec'] },
+          { label: 'nav.customer_cards', href: '/finance/customers', icon: Users, perms: ['ar', 'exec'] },
+          { label: 'nav.vendor_cards', href: '/finance/vendors', icon: Truck, perms: ['creditors', 'exec'] },
           // AP (book bills, request payment) = accounting/creditors on /finance; releasing the cash
           // (approve disbursement) = finance, on its own page (SoD R07 — approver ≠ requester).
           { label: 'nav.disbursements', href: '/disbursements', icon: Wallet, perms: ['approvals', 'gl_close', 'exec'] },
