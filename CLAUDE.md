@@ -79,6 +79,12 @@ For every such change, review and update as needed:
   number is taken, **renumber your `.sql` + journal entry to the next free id** and bump the comment header.
   A few pre-existing historical collisions (`0085/0088/0104/0105`) are grandfathered in the gate. Full
   context + the snapshot-resync remediation plan: `docs/ops/drizzle-migration-debt.md`.
+- **Journal `when` must be strictly greater than the current max.** `drizzle-kit migrate` only applies
+  entries with `when` **>** the last applied timestamp, so a non-monotonic `when` is **silently skipped in
+  prod forever** while fresh-DB CI stays green (root cause of the 2026-07-03 deploy outage: 0145/0146 were
+  never applied in prod, and 0218's index on the missing `tip_distribution_lines` failed every deploy). The
+  `migrations-journaled` gate now fails on non-monotonic `when` (0145/0146 grandfathered — their objects are
+  re-created idempotently inside 0218). See `docs/ops/drizzle-migration-debt.md` §3bis.
 - **CI runner pnpm version comes from `package.json` `packageManager` (pnpm@11.8.0).** Do **not** also pin
   `version:` in `pnpm/action-setup` — the two conflict (`ERR_PNPM_BAD_PM_VERSION`) and break every job.
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the

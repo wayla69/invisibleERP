@@ -7,6 +7,84 @@
 -- deliberate — current data volumes make the lock window trivial; revisit if a large tenant lands first.
 -- The 'tenant-idx' cutover harness re-runs this introspection in CI and fails on ANY uncovered table,
 -- so a new tenant-scoped table cannot ship without a tenant-leading index (no grandfathering).
+--
+-- PROD HOTFIX (2026-07-03): this file also re-creates the objects of 0145_table_reservations and
+-- 0146_tip_distribution. Their journal `when` values are NON-MONOTONIC (0145 = 2023610000004 < 0144's
+-- 2023620000004; 0146 == 0144's), and drizzle-kit migrate only applies entries whose `when` is strictly
+-- greater than the last applied timestamp — so prod (migrated at 0144 before 0145/0146 merged) silently
+-- skipped BOTH forever. Fresh DBs (CI PGlite) apply everything in one pass, hiding the gap until this
+-- file's idx_tip_distribution_lines_tenant hit the missing table and blocked every prod deploy (42P01).
+-- Everything below is idempotent, so environments that DID apply 0145/0146 are unaffected.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reservation_status') THEN
+    CREATE TYPE reservation_status AS ENUM ('booked', 'waiting', 'ready', 'seated', 'cancelled', 'no_show');
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS table_reservations (
+  id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  kind text NOT NULL DEFAULT 'reservation',           -- 'reservation' | 'waitlist'
+  table_id bigint REFERENCES dining_tables(id),        -- optional assigned table
+  reserved_for timestamptz,                            -- booking time (null for walk-in waitlist)
+  party_size integer NOT NULL DEFAULT 2,
+  customer_name text,
+  customer_phone text,
+  member_id bigint REFERENCES pos_members(id),         -- optional loyalty link
+  status reservation_status NOT NULL DEFAULT 'booked',
+  quoted_wait_min integer,
+  notes text,
+  notified_at timestamptz,
+  seated_at timestamptz,
+  created_by text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_table_reservations_status ON table_reservations (tenant_id, status, kind);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS tip_distributions (
+  id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  dist_no text NOT NULL,
+  period_from text NOT NULL,
+  period_to text NOT NULL,
+  method text NOT NULL DEFAULT 'equal',
+  pool_amount numeric(18,4) NOT NULL,
+  pay_account text NOT NULL DEFAULT '1000',
+  journal_no text,
+  created_by text,
+  created_at timestamptz DEFAULT now()
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS tip_distribution_lines (
+  id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  dist_id bigint NOT NULL REFERENCES tip_distributions(id),
+  staff text NOT NULL,
+  basis numeric(18,4) NOT NULL DEFAULT 0,
+  share numeric(9,6) NOT NULL DEFAULT 0,
+  amount numeric(18,4) NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_tip_dist_period ON tip_distributions (tenant_id, period_from, period_to);
+--> statement-breakpoint
+-- Re-run the RLS loop so the backfilled tenant_id tables are isolation-scoped (idempotent — DROP POLICY IF EXISTS).
+DO $$ DECLARE r record; BEGIN
+  EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user';
+  EXECUTE 'GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO app_user';
+  FOR r IN SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='tenant_id' LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.table_name);
+    EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', r.table_name);
+    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON public.%I', r.table_name);
+    EXECUTE format('CREATE POLICY tenant_isolation ON public.%I'
+      || ' USING (coalesce(current_setting(''app.bypass_rls'',true),'''')=''on'''
+      || '   OR tenant_id = nullif(current_setting(''app.tenant_id'',true),'''')::bigint)'
+      || ' WITH CHECK (coalesce(current_setting(''app.bypass_rls'',true),'''')=''on'''
+      || '   OR tenant_id = nullif(current_setting(''app.tenant_id'',true),'''')::bigint)', r.table_name);
+  END LOOP;
+END $$;
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_abandoned_carts_tenant" ON "abandoned_carts" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_access_reviews_tenant" ON "access_reviews" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_account_groups_tenant" ON "account_groups" (tenant_id);
