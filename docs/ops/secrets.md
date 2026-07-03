@@ -33,6 +33,7 @@ webhook in the webhook handler).
 | `REQUIRE_OBSERVABILITY_BACKENDS` | optional | `=1` **mandates** the two above as a fail-closed boot gate (audited envs); overridable with `ALLOW_NO_OBSERVABILITY=1`. Not a secret. | n/a |
 | `TENANCY_MODE` | recommended (`multi-company` if outsiders can sign up) | `single-company` (default, HQ sees all branches) \| `multi-company` (Admin org-scoped — isolates independent companies). Set on **every** API service on the DB. Not a secret. See `tenancy-model.md`. | n/a |
 | `PUBLIC_SIGNUP_ENABLED` | optional (prod default = **disabled**) | Gates the public `POST /api/auth/signup` in production (`SIGNUP_DISABLED` when off). Flip truthy to onboard a company, off after. Non-prod always allows signup. Not a secret. | n/a |
+| `PLATFORM_ADMIN_USERNAMES` | recommended (to onboard without opening signup) | Comma list of usernames allowed to provision companies via `POST /api/admin/tenants` (`@PlatformAdmin`). Empty ⇒ nobody (secure default). Case-insensitive. Not a secret. See `tenancy-model.md`. | on operator change |
 | `TABLE_TOKEN_SECRET` | optional (falls back to `APP_ENC_KEY`) | HMAC for QR table-session tokens | with APP_ENC_KEY |
 | `STRIPE_SECRET_KEY` / acquirer keys | if that PSP is enabled | Payment gateway | per PSP policy |
 | `ANTHROPIC_API_KEY` | optional | AI assistant/analytics (rule-based fallback if unset) | per provider |

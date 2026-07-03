@@ -74,6 +74,9 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   // alert breaches over the last 24h. Delivery rides the normal recipient loop; scheduler dueness
   // (frequency 'daily') makes it once-per-day.
   line_daily_digest: { label: 'สรุปประจำวันทาง LINE', labelEn: 'LINE daily digest' },
+  // D1 — proactive morning low-stock alert: pushes the reorder list (feature-C source: items.min_stock vs
+  // inv_balances) to {line_user} recipients with a one-tap [สั่งเติมทั้งหมด] button. Read-only aggregate.
+  low_stock_reorder_alert: { label: 'แจ้งเตือนสินค้าใกล้หมด (LINE)', labelEn: 'LINE low-stock reorder alert' },
   // Likewise: each run amortizes one period of every due prepaid schedule (Dr expense / Cr 1280, idempotent).
   gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
@@ -643,6 +646,18 @@ export class BiService implements OnModuleInit {
         summaryTh: `สรุปเช้านี้: รออนุมัติ ${data.pending_approvals} รายการ · PR ค้าง ${data.open_prs} · แจ้งเตือนใน 24 ชม. ${data.alerts_24h}`,
       };
     }
+    if (reportType === 'low_stock_reorder_alert') {
+      // D1 — read-only: reuse feature-C's low-stock computation (items.min_stock vs summed inv_balances)
+      // so the alert matches exactly what `reorder`/เปิด PR เติมของ will order. Delivery + one-tap button
+      // are formatted per recipient in executeSubscription; here we just carry the list + a count.
+      if (!this.procurement) throw new BadRequestException({ code: 'PROCUREMENT_UNAVAILABLE', message: 'Procurement service not available', messageTh: 'ระบบจัดซื้อไม่พร้อมใช้งาน' });
+      const { items: low, count } = await this.procurement.lowStock(user, { limit: 20 });
+      return {
+        data: { count, items: low },
+        summary: `Low-stock reorder alert: ${count} item(s) at/below reorder point`,
+        summaryTh: count ? `สินค้าใกล้หมด ${count} รายการ (ถึง/ต่ำกว่าจุดสั่งซื้อ)` : 'สินค้าใกล้หมด: ไม่มี',
+      };
+    }
     if (reportType === 'gl_recurring_journals') {
       if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger service not available', messageTh: 'ระบบบัญชีแยกประเภทไม่พร้อมใช้งาน' });
       const r = await this.ledger.runDueRecurring(user); // idempotent: next_run_date advanced + ux_je_idem
@@ -819,6 +834,31 @@ export class BiService implements OnModuleInit {
                     { type: 'text', text: x.val, size: 'sm', weight: 'bold', align: 'end', flex: 4 },
                   ] })),
                   { type: 'text', text: 'ดูรายงานเต็มที่หน้า /bi', size: 'xs', color: '#888888' },
+                ] },
+              };
+              await this.lineNotify.notifyUser(String(r.line_user), tenantIdN, text, flex);
+            } else if (sub.reportType === 'low_stock_reorder_alert') {
+              // D1 — list the low-stock items + a one-tap [สั่งเติมทั้งหมด] postback ({a:'reorder'}). Only
+              // pushed when something is actually low, so quiet mornings stay silent (no noise).
+              const d = (report.data ?? {}) as { count?: number; items?: Array<{ item_id: string; on_hand: number; min_stock: number; uom: string | null; suggested_qty: number }> };
+              const low = d.items ?? [];
+              if (!low.length) { continue; }
+              const total = d.count ?? low.length;
+              const rows = low.slice(0, 10).map((x) => `• ${x.item_id} — เหลือ ${x.on_hand}${x.uom ? ` ${x.uom}` : ''} (จุดสั่งซื้อ ${x.min_stock}) → แนะนำ ${x.suggested_qty}`);
+              const more = low.length > 10 ? `\n…และอีก ${low.length - 10} รายการ` : '';
+              const text = `🛒 สินค้าใกล้หมด ${total} รายการ\n${rows.join('\n')}${more}\nพิมพ์ reorder หรือกดปุ่มเพื่อเปิด PR เติมทั้งหมด`;
+              const flex = {
+                type: 'bubble',
+                body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+                  { type: 'text', text: `🛒 สินค้าใกล้หมด (${total})`, weight: 'bold', size: 'md', wrap: true },
+                  ...low.slice(0, 10).map((x) => ({ type: 'box', layout: 'horizontal', contents: [
+                    { type: 'text', text: x.item_id, size: 'sm', color: '#666666', flex: 6, wrap: true },
+                    { type: 'text', text: `เหลือ ${x.on_hand}`, size: 'sm', weight: 'bold', align: 'end', flex: 4 },
+                  ] })),
+                  ...(low.length > 10 ? [{ type: 'text', text: `…และอีก ${low.length - 10} รายการ`, size: 'xs', color: '#888888' }] : []),
+                ] },
+                footer: { type: 'box', layout: 'vertical', contents: [
+                  { type: 'button', style: 'primary', height: 'sm', action: { type: 'postback', label: '🛒 สั่งเติมทั้งหมด', data: JSON.stringify({ a: 'reorder' }), displayText: 'reorder' } },
                 ] },
               };
               await this.lineNotify.notifyUser(String(r.line_user), tenantIdN, text, flex);

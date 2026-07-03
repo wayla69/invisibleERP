@@ -856,6 +856,35 @@ async function main() {
   ok('LC-4: unsubscribe digest → recipient removed',
     digOff.json.chat === 1 && !(digSub2.recipients as any[]).some((r: any) => r.line_user === 'somsri'), JSON.stringify({ recips: digSub2?.recipients }));
 
+  // 22f. D1 — proactive low-stock reorder alert: subscribe → the scheduler pushes the reorder list (same
+  //      feature-C source, NAPKIN-L on-hand 5 ≤ reorder 20) with a one-tap [สั่งเติมทั้งหมด] postback that
+  //      raises the top-up PR. A linked user without pr_raise cannot subscribe.
+  await db.update(s.users).set({ lineUserId: 'Uauditor' }).where(eq(s.users.username, 'auditor')); // re-link (LC-3 force-unlinked it)
+  const lowSubDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-22f0', source: { userId: 'Uauditor' }, message: { id: 'mid-22f0', type: 'text', text: 'subscribe lowstock' } }] });
+  ok('D1: subscribe lowstock without pr_raise → refused',
+    lowSubDenied.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  const lowSub = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-22f1', source: { userId: 'Usomchai' }, message: { id: 'mid-22f1', type: 'text', text: 'subscribe lowstock' } }] });
+  const [lowAlertSub] = await db.select().from(reportSubscriptions).where(and(eq(reportSubscriptions.tenantId, t1), eq(reportSubscriptions.reportType, 'low_stock_reorder_alert')));
+  ok('D1: subscribe lowstock → low_stock_reorder_alert subscription with {line_user} recipient',
+    lowSub.json.chat === 1 && lineReplies.at(-1)!.text.includes('✔') && !!lowAlertSub && (lowAlertSub.recipients as any[]).some((r: any) => r.line_user === 'somchai'),
+    JSON.stringify({ recips: lowAlertSub?.recipients }));
+
+  await db.update(reportSubscriptions).set({ nextRunAt: new Date() }).where(eq(reportSubscriptions.id, Number(lowAlertSub.id)));
+  const pushesBefore22f = linePushes.length;
+  await inj('POST', '/api/bi/subscriptions/run', token);
+  const lowPush = linePushes.slice(pushesBefore22f).find((p) => p.to === 'Usomchai' && p.text.includes('สินค้าใกล้หมด'));
+  ok('D1: run-due → low-stock alert pushed to the linked LINE (lists NAPKIN-L + one-tap button)',
+    !!lowPush && lowPush.text.includes('NAPKIN-L') && lowPush.type === 'flex',
+    JSON.stringify({ pushed: !!lowPush, head: lowPush?.text.slice(0, 70) }));
+
+  const prCountD1 = (await db.select().from(s.purchaseRequests)).length;
+  const reorderTap = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-22f', replyToken: 'rt-22f2', source: { userId: 'Usomchai' }, postback: { data: JSON.stringify({ a: 'reorder' }) } }] });
+  ok('D1: [สั่งเติมทั้งหมด] postback → raises the reorder PR in one tap (createPr path, requester = linked staff)',
+    reorderTap.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('เปิดคำขอซื้อเติมสต็อก')
+      && (await db.select().from(s.purchaseRequests)).length === prCountD1 + 1,
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
   // ── 23. LC-5 (docs/30): `ask` governed NL analytics + confirm-first Thai copilot (key-less rules). ──
   // 23a. ask — permission gate (exec/dashboard/masterdata); somchai (ess+pr_raise) refused.
   const askDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23a', source: { userId: 'Usomchai' }, message: { id: 'mid-23a', type: 'text', text: 'ask ยอดขายตามสาขา' } }] });
