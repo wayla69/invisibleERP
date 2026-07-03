@@ -167,6 +167,9 @@ export const purchaseRequests = pgTable('purchase_requests', {
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   remarks: text('remarks'),
   priority: text('priority').default('Normal'),
+  // Project dimension (M0, docs/32) — a requisition can be raised against a project so material spend is
+  // committed/received against that project's BoQ. Nullable → non-project buys are unaffected.
+  projectId: bigint('project_id', { mode: 'number' }),
 });
 
 export const prItems = pgTable('pr_items', {
@@ -180,6 +183,7 @@ export const prItems = pgTable('pr_items', {
   reason: text('reason'),
   poNo: text('po_no'),
   status: text('status').default('Open'),
+  boqLineId: bigint('boq_line_id', { mode: 'number' }), // → project_boq_lines.id (M0, docs/32)
 }, (t) => ({ byPr: index('idx_pr_items_pr').on(t.prId) }));
 
 export const purchaseOrders = pgTable('purchase_orders', {
@@ -199,6 +203,8 @@ export const purchaseOrders = pgTable('purchase_orders', {
   // C1: transaction currency (ISO-4217) + booked exchange rate vs functional currency (migration 0175)
   currency: text('currency').notNull().default('THB'),
   fxRate: numeric('fx_rate', { precision: 14, scale: 6 }).notNull().default('1.000000'),
+  // Project dimension (M0, docs/32) — nullable; a project PO commits material against the project's BoQ.
+  projectId: bigint('project_id', { mode: 'number' }),
 });
 
 export const poItems = pgTable('po_items', {
@@ -213,6 +219,9 @@ export const poItems = pgTable('po_items', {
   receivedQty: numeric('received_qty').default('0'),
   isCapital: boolean('is_capital').notNull().default(false), // FA-10: capitalise on receipt (per-line override of item master)
   status: text('status').default('Open'),
+  // Project/BoQ dimension (M0, docs/32) — a PO line draws a specific BoQ line's budget. Nullable.
+  projectId: bigint('project_id', { mode: 'number' }),
+  boqLineId: bigint('boq_line_id', { mode: 'number' }),
 }, (t) => ({ byPo: index('idx_po_items_po').on(t.poId) }));
 
 export const poDeliveries = pgTable('po_deliveries', {
@@ -238,6 +247,8 @@ export const goodsReceipts = pgTable('goods_receipts', {
   // C1: inherits the PO's transaction currency + rate at receipt date (migration 0175)
   currency: text('currency').notNull().default('THB'),
   fxRate: numeric('fx_rate', { precision: 14, scale: 6 }).notNull().default('1.000000'),
+  // Project dimension (M0, docs/32) — inherited from the PO so a receipt carries its project. Nullable.
+  projectId: bigint('project_id', { mode: 'number' }),
 }, (t) => ({ byPo: index('idx_gr_pono').on(t.poNo) }));
 
 export const grItems = pgTable('gr_items', {

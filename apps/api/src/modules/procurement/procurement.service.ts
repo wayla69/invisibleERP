@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, invBalances } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, invBalances, projects } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -13,8 +13,10 @@ import type { JwtUser } from '../../common/decorators';
 
 const n = (v: unknown) => Number(v ?? 0);
 
-export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string }[]; remarks?: string; priority?: string; amount?: number }
-export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean }[] }
+// project_code / boq_line_id (M0, docs/32) — optionally raise a requisition/PO against a project's BoQ so
+// material spend is dimensioned to the project. Nullable throughout → non-project buys are unaffected.
+export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string; boq_line_id?: number }[]; remarks?: string; priority?: string; amount?: number; project_code?: string }
+export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; project_code?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean; boq_line_id?: number }[] }
 export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
 export interface UpsertSupplierPriceDto { vendor_id: number; item_id: string; item_description?: string; uom?: string; currency?: string; unit_price: number; min_qty?: number; effective_from: string; effective_to?: string; notes?: string }
 
@@ -49,19 +51,30 @@ export class ProcurementService {
     } catch { /* best-effort — a push failure never blocks buying/receiving */ }
   }
 
+  // Resolve a project_code to its id (M0, docs/32). Unknown code → 404 so a typo can't silently drop the
+  // project dimension. Returns null when no code is supplied (a non-project buy).
+  private async resolveProjectId(code?: string): Promise<number | null> {
+    const c = code?.trim();
+    if (!c) return null;
+    const [p] = await this.db.select({ id: projects.id }).from(projects).where(eq(projects.projectCode, c)).limit(1);
+    if (!p) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${c} not found`, messageTh: 'ไม่พบโครงการ' });
+    return Number(p.id);
+  }
+
   // ── PR ──────────────────────────────────────────────────────────────
   async createPr(dto: CreatePrDto, user: JwtUser) {
     const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการ' });
+    const projectId = await this.resolveProjectId(dto.project_code); // M0 — project dimension (nullable)
     const prNo = await this.docNo.nextDaily('PR');
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(purchaseRequests).values({
-        prNo, prDate: ymd(), requestedBy: user.username, status: 'Pending', remarks: dto.remarks ?? null, priority: dto.priority ?? 'Normal',
+        prNo, prDate: ymd(), requestedBy: user.username, status: 'Pending', remarks: dto.remarks ?? null, priority: dto.priority ?? 'Normal', projectId,
       }).returning({ id: purchaseRequests.id });
       await tx.insert(prItems).values(dto.items.map((it) => ({
         prId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null,
         requestQty: String(n(it.request_qty)), uom: it.uom ?? null, requiredDate: it.required_date ?? null,
-        reason: it.reason ?? null, status: 'Open',
+        reason: it.reason ?? null, status: 'Open', boqLineId: it.boq_line_id ?? null,
       })));
     });
     await this.statusLog.log('PR', prNo, '', 'Pending', user.username);
@@ -468,18 +481,20 @@ export class ProcurementService {
       vendorName = v?.name ?? null;
     }
     await this.assertSupplierAllowed(vendorId, vendorName); // Phase 16 — blocklisted/unapproved vendor → 422
+    const projectId = await this.resolveProjectId(dto.project_code); // M0 — project dimension (nullable)
     const total = dto.items.reduce((a, it) => a + n(it.order_qty) * n(it.unit_price), 0);
     const poNo = await this.docNo.nextDaily('PO');
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(purchaseOrders).values({
         poNo, poDate: ymd(), vendorId, vendorName, status: 'Pending', totalAmount: String(total),
         createdBy: user.username, expectedDate: dto.expected_date ?? null, remarks: dto.remarks ?? null,
-        currency: dto.currency ?? 'THB', fxRate: String(dto.fx_rate ?? 1),
+        currency: dto.currency ?? 'THB', fxRate: String(dto.fx_rate ?? 1), projectId,
       }).returning({ id: purchaseOrders.id });
       await tx.insert(poItems).values(dto.items.map((it) => ({
         poId: Number(h.id), itemId: it.item_id, itemDescription: it.item_description ?? null,
         orderQty: String(n(it.order_qty)), unitPrice: String(n(it.unit_price)), uom: it.uom ?? null,
         amount: String(n(it.order_qty) * n(it.unit_price)), receivedQty: '0', isCapital: it.is_capital === true, status: 'Open',
+        projectId, boqLineId: it.boq_line_id ?? null,
       })));
     });
     await this.statusLog.log('PO', poNo, '', 'Pending', user.username);
@@ -562,7 +577,7 @@ export class ProcurementService {
     await db.transaction(async (tx: any) => {
       const [gh] = await tx.insert(goodsReceipts).values({
         grNo, grDate: today, poNo: dto.po_no, vendorId: po.vendorId, vendorName: po.vendorName, receivedBy: user.username, remarks: dto.remarks ?? null,
-        currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000',
+        currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000', projectId: (po as any).projectId ?? null, // M0 — inherit the PO's project dimension
       }).returning({ id: goodsReceipts.id });
 
       for (const it of lines) {

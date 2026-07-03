@@ -21,6 +21,12 @@ This is deliberate separation of duties (the person who *orders* must not also
 > Turning it into a real order (PO), and confirming receipt (GR), are restricted to
 > the procurement and warehouse teams respectively.
 
+> **Buying for a project (docs/32).** A requisition or PO can be raised **against a
+> project** (and a specific **BoQ line**) so material spend is traceable to that
+> project's budget — supply the project code on the PR/PO; an unknown code is
+> rejected. The goods receipt inherits the PO's project. See
+> [Project Management → BoQ](./14-project-management.md#bill-of-quantities-boq--materialworks-budget-docs32-m0).
+
 ---
 
 ## 1. Raise a purchase requisition (PR)

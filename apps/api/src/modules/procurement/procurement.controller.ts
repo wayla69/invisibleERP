@@ -13,11 +13,13 @@ const AttachmentBody = z.object({
 const PrBody = z.object({
   remarks: z.string().optional(), priority: z.string().optional(),
   amount: z.number().nonnegative().optional(), // estimated value → drives approval-threshold routing
-  items: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), request_qty: z.number().positive(), uom: z.string().optional(), required_date: z.string().optional(), reason: z.string().optional() })).min(1),
+  project_code: z.string().optional(), // M0 (docs/32) — raise the requisition against a project's BoQ
+  items: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), request_qty: z.number().positive(), uom: z.string().optional(), required_date: z.string().optional(), reason: z.string().optional(), boq_line_id: z.number().int().positive().optional() })).min(1),
 });
 const PoBody = z.object({
   vendor_id: z.number().optional(), vendor_name: z.string().optional(), expected_date: z.string().optional(), remarks: z.string().optional(),
-  items: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional(), is_capital: z.boolean().optional() })).min(1),
+  project_code: z.string().optional(), // M0 (docs/32) — project PO commits material against the project's BoQ
+  items: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional(), is_capital: z.boolean().optional(), boq_line_id: z.number().int().positive().optional() })).min(1),
 });
 const GrBody = z.object({
   po_no: z.string().min(1), remarks: z.string().optional(),

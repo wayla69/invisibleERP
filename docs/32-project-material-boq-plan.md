@@ -1,6 +1,6 @@
 # 32 — Project Material Control: BoQ, Commitment Budget & Requisition-to-Purchase — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v0.1 DRAFT — planning-phase design & roadmap (no code yet) · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v0.2 — **M0 DELIVERED**; M1–M4 planned · **Owner:** ERP / Product
 > **Scope:** Give the PPM suite a **construction/contractor-grade material control loop** on top of the
 > existing project spine: a **Bill of Quantities (BoQ)** as the project's requirement & budget baseline;
 > a **material budget** enforced by **commitment/encumbrance** accounting (staff cannot draw more than the
@@ -229,15 +229,20 @@ one merged PR before the next starts. Each migration uses the **next free 4-digi
 draft) with a journal entry (ascending `when`), and appends the **`0232`-form** RLS loop for new tenant
 tables.
 
-### M0 — BoQ + project-dimensioned procurement & inventory *(foundation — do first)*
+### M0 — BoQ + project-dimensioned procurement & inventory *(foundation — do first)* — ✅ DELIVERED
+> Shipped: `project_boq` / `project_boq_lines` (migration 0236, tenant-scoped RLS via the canonical 0232
+> org-clause loop); `POST|GET /api/projects/:code/boq`, `POST /api/projects/boq/:boqId/lines|approve|lock`,
+> `POST /api/projects/boq/lines/:lineId/remeasure` (maker-checker approve syncs `projects.budget_amount` to
+> the BoQ total; draft-only line guard `BOQ_NOT_DRAFT`; `BOQ_LOCKED`). Procurement PR/PO/GR gained nullable
+> `project_id` (header) + `boq_line_id` (line), resolved from `project_code` (`PROJECT_NOT_FOUND`); GR inherits
+> the PO's project. Docs: PN-16 steps 23–24 / rev 0.27, user-manual 14 rev 2.4 + 03, UAT-O2C-229 + traceability.
+> Harness: `projects` 126 checks (was 114). **No new control** (structure only; M1 adds PROJ-12).
 - `project_boq` + `project_boq_lines`; CRUD, approve/lock, re-measurement; sum-of-lines reconciliation to
-  `projects.budget_amount`. Endpoints under `POST|GET /api/projects/:code/boq[/lines]`, `.../boq/approve`.
-- Add nullable `project_id` / `boq_line_id` (+ `wbs_code`) to `purchase_requests`/`pr_items`,
-  `purchase_orders`/`po_items`, `goods_receipts`/`gr_items`; thread the dimension into the existing
-  `createPr`/`createPo`/`createGr` and into `postEntry` lines so project-tagged spend hits WIP.
-- Docs: PN-16 + PN-02, user-manual `14` + `03`, UAT + traceability, extend `projects` (BoQ shape,
-  project-tagged PR/PO/GR → WIP) and `basics` harness. **No new control yet** (structure only) — or a light
-  PROJ-12 stub finalised in M1.
+  `projects.budget_amount` on approve.
+- Nullable `project_id` (header) / `boq_line_id` (line) on `purchase_requests`/`pr_items`,
+  `purchase_orders`/`po_items`, `goods_receipts`; threaded through `createPr`/`createPo`/`createGr`. The
+  dimension is **recorded** in M0 (traceability); budget **enforcement** (commitment ledger) is M1 and
+  costing material to project **WIP on issue** is M3 — M0 introduces no GL change.
 
 ### M1 — Commitment ledger + budget enforcement
 - `project_commitments`; atomic remaining-budget check (`budget − actual − open`) at draw/PR/PO time;
@@ -262,7 +267,7 @@ tables.
 ### Delivery status (planned)
 | Phase | Status | Migration | Control(s) | Harness ToE |
 |---|---|---|---|---|
-| **M0** BoQ + project-dim P2P/inventory | ⬜ Planned | 0236 | (structure) | `projects`/`basics` (BoQ shape, project-tagged PR/PO/GR → WIP) |
+| **M0** BoQ + project-dim P2P/inventory | ✅ Delivered | 0236 | (structure; maker-checker BoQ approve) | `projects` 126 (BoQ draft→approve→lock→remeasure, budget sync, SoD; project-tagged PR persists `project_id`+`boq_line_id`) |
 | **M1** Commitment ledger + enforcement | ⬜ Planned | next free | PROJ-12 | `projects` (atomic overrun block, remaining calc) |
 | **M2** Material requisition + LINE approval | ⬜ Planned | next free | PROJ-13 | `projects` (route tree, over-budget → workflow → PO draft) |
 | **M3** Reservation + issue-to-project | ⬜ Planned | next free | INV-13 | `basics`/`projects` (reserve, on-hand−held, issue→WIP) |
@@ -316,4 +321,5 @@ tables.
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 0.2 | 2026-07-03 | ERP / Product | **M0 delivered** — BoQ (`project_boq`/`project_boq_lines`, migration 0236) with maker-checker approve→budget-sync, lock, re-measurement; nullable project dimension (`project_id`/`boq_line_id`) on PR/PO/GR. Docs-synced (PN-16 rev 0.27, user-manual 14 rev 2.4 + 03, UAT-O2C-229). `projects` harness 126 checks; `basics`/`compliance` regression-clean; typecheck + API/web build green. No new control (structure only). |
 | 0.1 DRAFT | 2026-07-03 | ERP / Product | Initial planning-phase design & roadmap for project material control — BoQ, commitment-budget enforcement, requisition-to-purchase with LINE over-budget approval, reservation/issue-to-project, and project-linked advances/reimbursements. Built on the existing inventory/procurement/workflow/messaging/PPM spine. No code yet. |

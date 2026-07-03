@@ -312,6 +312,60 @@ export const projectHealthSnapshots = pgTable(
   (t) => ({ byProject: index('idx_phs_project').on(t.projectId) }),
 );
 
+// Bill of Quantities (BoQ) — M0, docs/32. The project's measured-works requirement & budget baseline for
+// construction/contractor work. A BoQ header owns a set of rate-built lines (qty × rate = line budget); the
+// sum of line budgets is the project's material/works budget. Maker-checker: a draft is authored, an
+// independent approver (SoD: approver ≠ author) approves it — on approval the project's budget_amount is
+// synced to the sum of lines (the enforceable baseline that M1's commitment ledger draws against). A locked
+// BoQ is frozen (no further line edits); re-measurement records the actual measured qty vs the budget qty.
+export const projectBoq = pgTable(
+  'project_boq',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    boqNo: text('boq_no').notNull(),                          // business key (BOQ-YYYYMMDD-NNN)
+    version: integer('version').notNull().default(1),
+    title: text('title'),
+    status: text('status').notNull().default('draft'),        // draft | approved | locked
+    budgetTotal: numeric('budget_total', { precision: 16, scale: 2 }).notNull().default('0'), // Σ line budgets (snapshot on approve)
+    approvedBy: text('approved_by'),                          // checker — must differ from created_by (SoD)
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_boq_project').on(t.projectId) }),
+);
+
+// A single BoQ line — a measured requirement (material/labor/subcon/other). budget_amount = budget_qty × rate.
+// A material line optionally references the item master (item_no) so a requisition/PO can draw against it, and
+// a WBS task (task_id/wbs_code) so schedule and cost reconcile. remeasured_qty is the actual measured qty (vs
+// the budgeted qty) captured after works are done — the basis for re-measurement variance.
+export const projectBoqLines = pgTable(
+  'project_boq_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    boqId: bigint('boq_id', { mode: 'number' }).notNull().references(() => projectBoq.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id), // denormalized for line-scoped queries
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    lineNo: integer('line_no').notNull().default(0),
+    category: text('category').notNull().default('material'), // material | labor | subcon | other
+    itemNo: text('item_no'),                                   // → items.item_id (material lines; nullable)
+    taskId: bigint('task_id', { mode: 'number' }),            // → project_tasks.id (nullable)
+    wbsCode: text('wbs_code'),
+    description: text('description'),
+    uom: text('uom'),
+    budgetQty: numeric('budget_qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    rate: numeric('rate', { precision: 16, scale: 2 }).notNull().default('0'),
+    budgetAmount: numeric('budget_amount', { precision: 16, scale: 2 }).notNull().default('0'), // = budget_qty × rate
+    remeasuredQty: numeric('remeasured_qty', { precision: 18, scale: 4 }),                       // actual measured qty (nullable)
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byBoq: index('idx_boq_line_boq').on(t.boqId), byProject: index('idx_boq_line_project').on(t.projectId) }),
+);
+export type ProjectBoq = typeof projectBoq.$inferSelect;
+export type ProjectBoqLine = typeof projectBoqLines.$inferSelect;
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
 export type ProjectHealthSnapshot = typeof projectHealthSnapshots.$inferSelect;

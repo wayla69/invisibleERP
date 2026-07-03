@@ -120,6 +120,61 @@ async function main() {
   ok('Budget overrun: total 6000 vs budget 5000 → over_budget, variance −1000, used 120%',
     bg.json.over_budget === true && near(bg.json.budget_variance, -1000) && near(bg.json.budget_used_pct, 120), JSON.stringify({ ob: bg.json.over_budget, v: bg.json.budget_variance, u: bg.json.budget_used_pct }));
 
+  // ── 9b. Bill of Quantities (BoQ) — M0 (docs/32): rate-built lines → maker-checker approve → budget baseline ──
+  const boqCreate = await inj('POST', '/api/projects/PRJ-A/boq', admin, {
+    title: 'BoQ งานติดตั้ง', lines: [
+      { category: 'material', item_no: 'CEMENT', description: 'ปูนซีเมนต์', uom: 'ถุง', budget_qty: 100, rate: 150 }, // 15000
+      { category: 'labor', description: 'ค่าแรงติดตั้ง', budget_qty: 20, rate: 500 },                                 // 10000
+    ],
+  });
+  ok('BoQ create → draft, 2 lines, budget_total 25000',
+    boqCreate.status < 300 && boqCreate.json.boq?.status === 'draft' && boqCreate.json.count === 2 && near(boqCreate.json.budget_total, 25000),
+    JSON.stringify({ s: boqCreate.status, st: boqCreate.json.boq?.status, t: boqCreate.json.budget_total }));
+  const boqId = boqCreate.json.boq?.id;
+  const matLineId = (boqCreate.json.lines ?? []).find((l: any) => l.item_no === 'CEMENT')?.id;
+
+  const boqAdd = await inj('POST', `/api/projects/boq/${boqId}/lines`, admin, { category: 'subcon', description: 'งานรับเหมาช่วง', budget_amount: 5000 });
+  ok('BoQ add line to draft → 3 lines, budget_total 30000', boqAdd.json.count === 3 && near(boqAdd.json.budget_total, 30000), JSON.stringify({ c: boqAdd.json.count, t: boqAdd.json.budget_total }));
+
+  const boqSelf = await inj('POST', `/api/projects/boq/${boqId}/approve`, admin); // author = admin
+  ok('BoQ self-approve by author → 400 SOD_SELF_APPROVAL', boqSelf.status === 400 && boqSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${boqSelf.status} ${boqSelf.json.error?.code}`);
+
+  const boqAppr = await inj('POST', `/api/projects/boq/${boqId}/approve`, mgr); // independent checker
+  ok('BoQ approve by independent checker → approved, project budget synced 30000',
+    boqAppr.status < 300 && boqAppr.json.boq?.status === 'approved' && near(boqAppr.json.budget_synced, 30000),
+    JSON.stringify({ s: boqAppr.status, st: boqAppr.json.boq?.status, sync: boqAppr.json.budget_synced }));
+  const boqProjGet = await inj('GET', '/api/projects/PRJ-A', admin);
+  ok('Project budget_amount reflects approved BoQ total (30000) + boq summary present',
+    near(boqProjGet.json.budget_amount, 30000) && boqProjGet.json.boq?.status === 'approved' && near(boqProjGet.json.boq?.budget_total, 30000),
+    JSON.stringify({ b: boqProjGet.json.budget_amount, boq: boqProjGet.json.boq?.budget_total }));
+
+  const boqAddLocked = await inj('POST', `/api/projects/boq/${boqId}/lines`, admin, { description: 'x', budget_amount: 1 });
+  ok('Add line to an approved BoQ → 400 BOQ_NOT_DRAFT', boqAddLocked.status === 400 && boqAddLocked.json.error?.code === 'BOQ_NOT_DRAFT', `${boqAddLocked.status} ${boqAddLocked.json.error?.code}`);
+
+  const boqRe = await inj('POST', `/api/projects/boq/lines/${matLineId}/remeasure`, admin, { remeasured_qty: 110 });
+  const reLine = (boqRe.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('Re-measure material line 100→110 → variance +10', boqRe.status < 300 && near(reLine?.remeasured_qty, 110) && near(reLine?.remeasure_variance_qty, 10), JSON.stringify({ rq: reLine?.remeasured_qty, v: reLine?.remeasure_variance_qty }));
+
+  const boqLock = await inj('POST', `/api/projects/boq/${boqId}/lock`, mgr);
+  ok('BoQ lock (approved→locked)', boqLock.status < 300 && boqLock.json.boq?.status === 'locked', JSON.stringify({ st: boqLock.json.boq?.status }));
+  const boqReLocked = await inj('POST', `/api/projects/boq/lines/${matLineId}/remeasure`, admin, { remeasured_qty: 120 });
+  ok('Re-measure a locked BoQ → 400 BOQ_LOCKED', boqReLocked.status === 400 && boqReLocked.json.error?.code === 'BOQ_LOCKED', `${boqReLocked.status} ${boqReLocked.json.error?.code}`);
+
+  // ── 9c. project-dimensioned procurement (M0): a PR tagged to a project + BoQ line persists the dimension ──
+  const prTagged = await inj('POST', '/api/procurement/prs', admin, {
+    project_code: 'PRJ-A', remarks: 'ขอวัสดุเข้าโครงการ',
+    items: [{ item_id: 'CEMENT', request_qty: 50, uom: 'ถุง', boq_line_id: matLineId }],
+  });
+  ok('PR raised against project + BoQ line → 2xx', prTagged.status < 300 && !!prTagged.json.pr_no, JSON.stringify({ s: prTagged.status, pr: prTagged.json.pr_no }));
+  const prRow = (await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prTagged.json.pr_no)))[0];
+  const prjRow = (await db.select().from(s.projects).where(eq(s.projects.projectCode, 'PRJ-A')))[0];
+  const prLineRow = prRow ? (await db.select().from(s.prItems).where(eq(s.prItems.prId, prRow.id)))[0] : null;
+  ok('PR carries project_id (PRJ-A) + line carries boq_line_id',
+    !!prRow && Number(prRow.projectId) === Number(prjRow?.id) && Number(prLineRow?.boqLineId) === Number(matLineId),
+    JSON.stringify({ prj: prRow?.projectId, boq: prLineRow?.boqLineId }));
+  const prBadProj = await inj('POST', '/api/procurement/prs', admin, { project_code: 'PRJ-NOPE', items: [{ item_id: 'X', request_qty: 1 }] });
+  ok('PR with unknown project_code → 404 PROJECT_NOT_FOUND', prBadProj.status === 404 && prBadProj.json.error?.code === 'PROJECT_NOT_FOUND', `${prBadProj.status} ${prBadProj.json.error?.code}`);
+
   // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
   const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
   const oppNo = opp.json.opp_no;
