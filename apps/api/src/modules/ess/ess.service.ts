@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, payslips } from '../../database/schema/payroll';
@@ -6,6 +6,7 @@ import { timesheets, leaveRequests, leaveBalances, expenseClaims } from '../../d
 import { FinanceService } from '../finance/finance.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { LineNotifyService } from '../messaging/line-notify.service';
 
 export interface LeaveSelfDto { leave_type?: string; from_date: string; to_date: string; days: number; paid?: boolean; reason?: string }
 export interface ExpenseDto { claim_date?: string; category?: string; amount: number; description?: string }
@@ -18,6 +19,9 @@ export class EssService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly finance: FinanceService,
+    // LC-3 (docs/30) — LINE notify: leave-approvers (holders of the /api/hcm gate perms) hear about a
+    // new self-service leave request; the maker is excluded. Best-effort — never blocks the request.
+    @Optional() private readonly lineNotify?: LineNotifyService,
   ) {}
 
   // Resolve the logged-in user → their employee row (by user_name link, emp_code fallback). RLS scopes
@@ -56,6 +60,9 @@ export class EssService {
     const db = this.db;
     const emp = await this.me(user);
     const [r] = await db.insert(leaveRequests).values({ tenantId: emp.tenantId, employeeId: Number(emp.id), leaveType: dto.leave_type ?? 'annual', fromDate: dto.from_date, toDate: dto.to_date, days: String(n(dto.days)), paid: dto.paid ?? true, status: 'Pending', reason: dto.reason ?? null, createdBy: user.username }).returning({ id: leaveRequests.id });
+    await this.lineNotify?.notifyPermissionHolders(['exec', 'users', 'creditors'], emp.tenantId ?? user.tenantId ?? null,
+      `🔔 ใบลารออนุมัติ: ${emp.name ?? emp.empCode} ลา ${n(dto.days)} วัน (${dto.from_date} → ${dto.to_date})${dto.reason ? ` — ${dto.reason}` : ''}\nอนุมัติที่หน้า /hcm`,
+      user.username);
     return { id: Number(r!.id), status: 'Pending', emp_code: emp.empCode, days: n(dto.days) };
   }
 

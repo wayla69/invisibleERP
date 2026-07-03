@@ -1,8 +1,8 @@
-import { Controller, Post, Get, Delete, Param, Req, Headers, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Param, Req, Headers, Inject, Injectable, Logger, UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
 import { createHmac, randomInt } from 'node:crypto';
-import { eq, and, or, desc, ilike } from 'drizzle-orm';
+import { eq, and, or, desc, ilike, isNotNull } from 'drizzle-orm';
 import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { tenants, posMembers, messageLog, users, userPermissions, purchaseRequests, items, invBalances, lineChatStates } from '../../database/schema';
@@ -14,6 +14,7 @@ import { replyLine, replyLineFlex, fetchLineContent, type SendResult } from './g
 import { ProcurementService } from '../procurement/procurement.service';
 import { AttachmentsService } from '../procurement/attachments.service';
 import { PettyCashService } from '../petty-cash/petty-cash.service';
+import { EssService } from '../ess/ess.service';
 
 // LINE Messaging API webhook (follow / unfollow / message …). Public + no JWT: authenticity is the LINE
 // signature (`X-Line-Signature` = base64 HMAC-SHA256 of the RAW body under the tenant's Channel Secret).
@@ -47,6 +48,9 @@ export class LineWebhookService {
   }
   private pettyCashSvc(): PettyCashService | null {
     try { return this.moduleRef.get(PettyCashService, { strict: false }); } catch { return null; }
+  }
+  private essSvc(): EssService | null {
+    try { return this.moduleRef.get(EssService, { strict: false }); } catch { return null; }
   }
 
   async handle(tenantCode: string, rawBody: Buffer | undefined, signature: string | undefined, parsed: any) {
@@ -126,7 +130,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -156,8 +160,15 @@ export class LineWebhookService {
     const isAttach = (cmd === 'attach' || cmd === 'แนบ') && !!arg1;
     const isExpense = (cmd === 'expense' || cmd === 'เบิก') && parts.length >= 3;
     const isAdvance = (cmd === 'advance' || cmd === 'ยืมเงิน') && parts.length >= 3;
+    const isLeave = (cmd === 'leave' || cmd === 'ลา') && parts.length >= 3;
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isPr) return false;
+
+    // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
+    // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
+    const th = this.throttle(tenantId, lineUserId);
+    if (th === 'reply') { await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, 'คำสั่งถี่เกินไป — กรุณารอสักครู่แล้วลองใหม่', 'chat_throttled'); return true; }
+    if (th === 'drop') return true;
 
     // LINE may redeliver a webhook — the reply log row carries the inbound message id, so a duplicate
     // delivery of the same message is dropped instead of acting twice (e.g. raising a duplicate PR).
@@ -187,6 +198,7 @@ export class LineWebhookService {
       else if (isStock) { reply = await this.chatStock(staff, arg1); campaign = 'chat_stock'; }
       else if (isAttach) { reply = await this.chatAttachStart(tenantId, lineUserId, staff, arg1, (parts[2] ?? '').toLowerCase()); campaign = 'chat_attach'; }
       else if (isExpense || isAdvance) { reply = await this.chatPettyCash(staff, isAdvance ? 'advance' : 'expense', arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_pettycash'; }
+      else if (isLeave) { reply = await this.chatLeave(staff, arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_leave'; }
       else reply = await this.chatCreatePr(staff, text);
     }
     await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, campaign);
@@ -426,6 +438,71 @@ export class LineWebhookService {
     }
   }
 
+  // ── LC-3 (docs/30) — `leave <from YYYY-MM-DD> <days> [เหตุผล]` → ESS self-service leave request ──
+  // Same path as the web (/ess): requires the `ess` permission and a linked employee record
+  // (ESS_NO_EMPLOYEE binds unchanged); to_date is derived from <from>+<days>. The ESS hook notifies the
+  // leave approvers; approval stays on /hcm.
+  private async chatLeave(u: any, fromDate: string, daysStr: string, reason: string): Promise<string> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) return 'รูปแบบวันที่ไม่ถูกต้อง — leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล]';
+    const days = Number(daysStr);
+    if (!Number.isFinite(days) || days <= 0 || days > 60) return 'จำนวนวันลาไม่ถูกต้อง (1–60) — leave <จากวันที่> <จำนวนวัน> [เหตุผล]';
+    const perms = await this.effectivePerms(u);
+    if (!perms.includes('ess')) return 'บัญชีของคุณไม่มีสิทธิ์ลางานผ่านระบบ (ess)';
+    const ess = this.essSvc();
+    if (!ess) return 'ระบบลางานยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const to = new Date(`${fromDate}T00:00:00Z`);
+    to.setUTCDate(to.getUTCDate() + Math.ceil(days) - 1);
+    const toDate = to.toISOString().slice(0, 10);
+    const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    try {
+      const res = await ess.requestLeave({ from_date: fromDate, to_date: toDate, days, reason: reason || undefined }, jwtUser);
+      return `ส่งใบลาแล้ว ✔ #${res.id} — ${days} วัน (${fromDate} → ${toDate}) สถานะรออนุมัติ — จะแจ้งเตือนเมื่ออนุมัติ`;
+    } catch (e: any) {
+      const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+      return `ส่งใบลาไม่สำเร็จ: ${String(msg).slice(0, 200)}`;
+    }
+  }
+
+  // ── LC-3 governance: per-LINE-user rate limit (env-tunable; in-memory per instance) ──────────────
+  private readonly rate = new Map<string, { n: number; start: number }>();
+  private throttle(tenantId: number, lineUserId: string): 'ok' | 'reply' | 'drop' {
+    const limit = Number(process.env.LINE_CHAT_RATE_LIMIT ?? 30);
+    const windowMs = Number(process.env.LINE_CHAT_RATE_WINDOW_MS ?? 5 * 60_000);
+    const now = Date.now();
+    if (this.rate.size > 2000) for (const [k, v] of this.rate) { if (now - v.start > windowMs) this.rate.delete(k); }
+    const key = `${tenantId}:${lineUserId}`;
+    const e = this.rate.get(key);
+    if (!e || now - e.start > windowMs) { this.rate.set(key, { n: 1, start: now }); return 'ok'; }
+    e.n++;
+    if (e.n <= limit) return 'ok';
+    if (e.n === limit + 1) { void this.audit(tenantId, lineUserId, `[chat:throttled] > ${limit}/${Math.round(windowMs / 1000)}s`); return 'reply'; }
+    return 'drop';
+  }
+
+  // ── LC-3 governance: admin link registry (ITGC-AC — offboarding evidence) ─────────────────────────
+  async listLinks() {
+    const rows = await this.db.select({ username: users.username, role: users.role, tenantId: users.tenantId, lineUserId: users.lineUserId, isActive: users.isActive })
+      .from(users).where(isNotNull(users.lineUserId)).orderBy(users.username);
+    return {
+      links: rows.map((r: any) => ({
+        username: r.username, role: r.role, tenant_id: r.tenantId != null ? Number(r.tenantId) : null,
+        line_user_id_masked: `${String(r.lineUserId).slice(0, 5)}…`, active: r.isActive !== false,
+      })),
+      count: rows.length,
+    };
+  }
+
+  // Force-unlink for offboarding: clears the binding + any pending chat state, audit-logged. The chat
+  // channel dies immediately even if the account was left active by mistake.
+  async adminUnlink(username: string, actor: JwtUser) {
+    const [u] = await this.db.select({ id: users.id, lineUserId: users.lineUserId, tenantId: users.tenantId }).from(users).where(eq(users.username, username)).limit(1);
+    if (!u?.lineUserId) throw new NotFoundException({ code: 'NOT_LINKED', message: 'User has no linked LINE account', messageTh: 'ผู้ใช้นี้ไม่ได้เชื่อม LINE' });
+    await this.db.update(users).set({ lineUserId: null, lineLinkCode: null, lineLinkExpiresAt: null }).where(eq(users.id, u.id));
+    await this.db.delete(lineChatStates).where(eq(lineChatStates.lineUserId, String(u.lineUserId)));
+    await this.audit(u.tenantId != null ? Number(u.tenantId) : actor.tenantId ?? null, String(u.lineUserId), `[chat:admin-unlink] ${username} by ${actor.username}`);
+    return { username, unlinked: true };
+  }
+
   // stock <item id> — read-only on-hand lookup from inv_balances (tenant-scoped to the linked user's shop).
   private async chatStock(u: any, itemId: string): Promise<string> {
     const conds: any[] = [ilike(invBalances.itemId, itemId)]; // ilike w/o wildcards = case-insensitive equality
@@ -528,7 +605,7 @@ export class LineWebhookService {
     } catch { /* audit best-effort */ }
   }
 
-  private async audit(tenantId: number, recipient: string, body: string) {
+  private async audit(tenantId: number | null, recipient: string, body: string) {
     try {
       await this.db.insert(messageLog).values({ tenantId, memberId: null, channel: 'line', recipient, body, campaign: 'chat_link_audit', status: 'received', provider: 'line', createdBy: 'system:line-chat' });
     } catch { /* audit best-effort */ }
@@ -598,4 +675,11 @@ export class LineWebhookController {
 
   @Delete('link') @Permissions('pr_raise', 'procurement', 'planner')
   unlink(@CurrentUser() u: JwtUser) { return this.svc.unlink(u); }
+
+  // LC-3 governance — admin link registry + force-unlink (offboarding). Perm `users` (AccessAdmin).
+  @Get('links') @Permissions('users')
+  listLinks() { return this.svc.listLinks(); }
+
+  @Delete('links/:username') @Permissions('users')
+  adminUnlink(@Param('username') username: string, @CurrentUser() u: JwtUser) { return this.svc.adminUnlink(username, u); }
 }

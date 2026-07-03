@@ -1,10 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, timesheets, leaveRequests, leaveBalances, projects } from '../../database/schema';
 import { ProjectsService } from '../projects/projects.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { LineNotifyService } from '../messaging/line-notify.service';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -14,7 +15,12 @@ export interface LeaveDto { emp_code: string; leave_type?: string; from_date: st
 // HCM — attendance/timesheets (feeds overtime to payroll) + leave (unpaid reduces pay).
 @Injectable()
 export class HcmService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, private readonly projects: ProjectsService) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    private readonly projects: ProjectsService,
+    // LC-3 (docs/30) — LINE notify: the requester hears the leave decision. Best-effort.
+    @Optional() private readonly lineNotify?: LineNotifyService,
+  ) {}
 
   private async emp(code: string) {
     const [e] = await this.db.select().from(employees).where(eq(employees.empCode, code)).limit(1);
@@ -108,6 +114,7 @@ export class HcmService {
       if (bal) await db.update(leaveBalances).set({ used: fx(n(bal.used) + n(lr.days), 2) }).where(eq(leaveBalances.id, Number(bal.id)));
       else await db.insert(leaveBalances).values({ tenantId: lr.tenantId, employeeId: Number(lr.employeeId), leaveType: lr.leaveType, year, entitled: fx(0, 2), used: fx(n(lr.days), 2) });
     }
+    if (lr.createdBy) await this.lineNotify?.notifyUser(lr.createdBy, lr.tenantId ?? user.tenantId ?? null, `✅ ใบลา #${id} อนุมัติแล้ว (โดย ${user.username}) — ${n(lr.days)} วัน (${lr.fromDate} → ${lr.toDate})`);
     return { id, status: 'Approved', paid: lr.paid !== false, days: n(lr.days) };
   }
 
