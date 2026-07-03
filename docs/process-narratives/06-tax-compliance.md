@@ -115,6 +115,11 @@ alongside FX revaluation GL-18, is in `04-general-ledger-close.md` §3.2).
 
 New COA accounts: **1700** Deferred Tax Asset, **2700** Deferred Tax Liability, **5950** Deferred Tax Expense.
 
+**Web UI:** the workflow is operable from **`/deferred-tax`** (Ledger nav, perms `gl_close`/`gl_post`/`exec`)
+— a "คำนวณงวดใหม่" tab runs the computation (period / as-of / tax-rate / dep-factor, showing the DTA/DTL
+split + temporary-difference breakdown) and a "รายการที่คำนวณ / โพสต์" tab lists runs with a **โพสต์เข้า GL**
+button; maker-checker (`SELF_POST`) is enforced server-side.
+
 ### Control TAX-06 — Deferred tax recognition (maker-checker)
 | Control ID | TAX-06 |
 |------------|--------|
@@ -159,6 +164,7 @@ New COA accounts: **1700** Deferred Tax Asset, **2700** Deferred Tax Liability, 
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.8 | 2026-07-03 | Platform | **Web UI for deferred tax (TAX-06).** New `/deferred-tax` screen (Ledger nav) operates the existing run→review→post endpoints — no backend/control change. §9a documents the screen; UAT `06-tax-uat.md` gains a UI walkthrough. |
 | 0.6 | 2026-06-28 | Platform | **C2 — Pluggable tax + e-invoicing (SG/MY/EU).** `SgTaxProvider` (GST 9%), `MyTaxProvider` (SST 6%, food exempt), `EuTaxProvider` (20% generic EU placeholder) added to `tax-providers.ts` and registered in `TaxService` constructor. `MYR` (Malaysian Ringgit, 2dp) added to the ISO-4217 currency catalogue (`money.ts`). `EInvoiceService` gains `buildMyInvoisXml` (LHDN MyInvois UBL 2.1) and `buildSgPeppolXml` (Peppol BIS3 InvoiceNow) document-builder stubs — `submit` routes to the appropriate builder when the active provider is MY/SG. Controller Zod schema updated to accept optional `currency` field in the invoice doc. Basics harness extended: 8 new C2 checks (TC-C2-01..08). §3 scope, §7 narrative and §8 flow updated. |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 DRAFT | 2026-06-24 | `<<author>>` | e-Tax invoices: added XAdES digital signing (`etax-sign.ts`, configurable cert) and idempotent provider submission (mock + generic `http` SP). Updated step 4, control TAX-02 matrix, and code refs. New harness `tools/cutover/src/etax-sign.ts`; `etax.ts` extended (submit + signed-fallback). |

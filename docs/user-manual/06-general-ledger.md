@@ -654,22 +654,48 @@ rate first), `SELF_POST` (you ran it — ask a colleague to post), `ALREADY_POST
 
 ## Deferred tax (TAS 12) — control TAX-06
 
-**Who:** Tax / Financial Controller (`gl_close`/`gl_post`); a *different* user posts.
+**Where:** **Ledger & GL → ภาษีเงินได้รอตัดบัญชี** (`/deferred-tax`).
+**Who:** Tax / Financial Controller (`gl_close`/`gl_post`/`exec`); a *different* user posts.
 
 Recognise **deferred tax** on book-vs-tax **temporary** differences (the AR allowance
 and accelerated depreciation) at the Thai CIT rate (20%).
 
-1. **Run** — `POST /api/ledger/deferred-tax/run` with the period. It computes a deferred
-   tax **asset** from the posted AR allowance and a deferred tax **liability** from
-   accelerated depreciation, nets them, and shows the **delta** vs the last posted run.
-2. **Post** — a **different** user calls `POST /api/ledger/deferred-tax/{id}/post`. An
-   increase in the net asset posts **Dr 1700 Deferred Tax Asset / Cr 5950 Deferred Tax
-   Expense** (a deferred tax benefit). You **cannot post a run you ran**.
+1. **Run** — on the **คำนวณงวดใหม่** tab, enter the period (`YYYY-MM`; optionally an
+   as-of date, tax rate, and tax-depreciation factor) and press **คำนวณ**. It computes a
+   deferred tax **asset** from the posted AR allowance and a deferred tax **liability**
+   from accelerated depreciation, nets them, and shows the **delta** vs the last posted
+   run, with the temporary-difference breakdown. This stages an **Open** run.
+2. **Post** — on the **รายการที่คำนวณ / โพสต์** tab, a *different* user presses **โพสต์เข้า GL**
+   on the Open run. An increase in the net asset posts **Dr 1700 Deferred Tax Asset /
+   Cr 5950 Deferred Tax Expense** (a deferred tax benefit). You **cannot post a run you
+   ran** (segregation of duties). *(APIs: `POST /api/ledger/deferred-tax/run` and
+   `POST /api/ledger/deferred-tax/{id}/post`.)*
 
 **Expected result:** 1700 (and 5950) move by the period delta; income tax expense
 reflects the deferred portion. Re-posting a posted period is blocked (`ALREADY_POSTED`).
 
 **Errors:** `SELF_POST`, `ALREADY_POSTED`, `DT_RUN_NOT_FOUND`.
+
+## Cost centres & dimensional P&L
+
+**Where:** **Ledger & GL → ศูนย์ต้นทุน & กำไรตามมิติ** (`/cost-centers`).
+**Who:** `exec` / `masterdata`.
+
+Cost centres are a reporting **dimension** (department, branch, or project) you can attach
+to journal lines to see profit & loss *sliced* by that dimension — without opening a
+separate ledger book.
+
+1. **Create a cost centre** — on the **ศูนย์ต้นทุน (Master)** tab, enter a **code** and
+   **name**, pick the **type** (department / branch / project), and optionally a parent
+   code, then press **เพิ่มศูนย์ต้นทุน**. Codes are unique per company.
+2. **View a dimensional P&L** — on the **กำไร-ขาดทุนตามมิติ** tab, pick a cost centre and a
+   **from/to** date range. The screen shows **revenue**, **expense**, and **net income**
+   plus a per-account breakdown for lines tagged with that cost centre.
+
+*(APIs: `POST` / `GET /api/ledger/cost-centers`, and
+`GET /api/ledger/cost-centers/{code}/pl?from=&to=`; the income-statement endpoint also
+accepts `?cost_center=` for the same filter.)* This is a **read/compute** view — it posts
+nothing and carries no control of its own.
 
 ---
 
