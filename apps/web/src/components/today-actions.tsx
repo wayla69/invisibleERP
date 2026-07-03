@@ -8,6 +8,7 @@ import { AlarmClock, ArrowRight, BellRing, HandCoins, Package } from 'lucide-rea
 
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
+import { useLang } from '@/lib/i18n';
 import { StatCard } from '@/components/stat-card';
 
 type Tone = 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
@@ -57,6 +58,7 @@ function ActionCard({
 
 /** `lowStock` comes from the dashboard's existing `/api/dashboard` payload (`low_stock_count`). */
 export function TodayActions({ lowStock }: { lowStock?: number }) {
+  const { t } = useLang();
   const approvals = useQuery<{ items: { overdue: boolean }[] }>({
     queryKey: ['ta-approvals'],
     queryFn: () => api('/api/workflow/my-approvals'),
@@ -83,10 +85,10 @@ export function TodayActions({ lowStock }: { lowStock?: number }) {
         key="appr"
         href="/workflow"
         icon={AlarmClock}
-        label="รออนุมัติของฉัน"
+        label={t('today.approvals')}
         value={num(items.length)}
         tone={overdue > 0 ? 'danger' : items.length > 0 ? 'warning' : 'success'}
-        hint={overdue > 0 ? `${num(overdue)} เกินกำหนด` : items.length > 0 ? 'รอดำเนินการ' : 'ไม่มีค้าง'}
+        hint={overdue > 0 ? t('today.n_overdue', { n: num(overdue) }) : items.length > 0 ? t('today.pending') : t('today.none')}
       />,
     );
   }
@@ -97,10 +99,10 @@ export function TodayActions({ lowStock }: { lowStock?: number }) {
         key="appay"
         href="/finance?tab=payables"
         icon={HandCoins}
-        label="คำขอจ่ายรออนุมัติ"
+        label={t('today.ap_pending')}
         value={num(n)}
         tone={n > 0 ? 'warning' : 'success'}
-        hint={n > 0 ? 'รออนุมัติจ่าย' : 'ไม่มีค้าง'}
+        hint={n > 0 ? t('today.approve_pay') : t('today.none')}
       />,
     );
   }
@@ -111,10 +113,10 @@ export function TodayActions({ lowStock }: { lowStock?: number }) {
         key="arov"
         href="/finance?tab=receivables"
         icon={BellRing}
-        label="ลูกหนี้เกินกำหนด"
+        label={t('today.ar_overdue')}
         value={num(n)}
         tone={n > 0 ? 'danger' : 'success'}
-        hint={n > 0 ? 'ต้องติดตามทวงถาม' : 'ไม่มีค้าง'}
+        hint={n > 0 ? t('today.follow_up') : t('today.none')}
       />,
     );
   }
@@ -124,10 +126,10 @@ export function TodayActions({ lowStock }: { lowStock?: number }) {
         key="low"
         href="/inventory"
         icon={Package}
-        label="สต๊อกต่ำ (≤0)"
+        label={t('today.low_stock')}
         value={num(lowStock)}
         tone={lowStock > 0 ? 'warning' : 'success'}
-        hint={lowStock > 0 ? 'ต้องเติมสินค้า' : 'เพียงพอ'}
+        hint={lowStock > 0 ? t('today.need_restock') : t('today.enough')}
       />,
     );
   }
@@ -136,7 +138,7 @@ export function TodayActions({ lowStock }: { lowStock?: number }) {
 
   return (
     <div className="mb-6">
-      <h3 className="mb-3 text-sm font-semibold text-muted-foreground">สิ่งที่ต้องทำวันนี้ (Today&apos;s actions)</h3>
+      <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('today.title')}</h3>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards}</div>
     </div>
   );

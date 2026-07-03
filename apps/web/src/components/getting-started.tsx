@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, Rocket } from 'lucide-react';
 
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 type Step = { key: string; label: string; label_en: string; done: boolean };
@@ -35,6 +36,7 @@ const STEP_HREF: Record<string, string> = {
 
 export function GettingStarted() {
   const qc = useQueryClient();
+  const { t, lang } = useLang();
   const status = useQuery<Status>({ queryKey: ['onboarding'], queryFn: () => api('/api/onboarding'), retry: false });
   const complete = useMutation({
     mutationFn: (key: string) => api(`/api/onboarding/steps/${key}/complete`, { method: 'POST' }),
@@ -45,15 +47,16 @@ export function GettingStarted() {
   if (!data || data.percent >= 100) return null; // no access / loading / already done
   const pending = data.steps.filter((s) => !s.done);
   if (pending.length === 0) return null;
+  const stepLabel = (s: Step) => (lang === 'th' ? s.label : s.label_en || s.label);
 
   return (
     <Card className="mb-6 border-primary/30 bg-primary/5">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center justify-between text-base">
           <span className="flex items-center gap-2">
-            <Rocket className="size-4 text-primary" /> เริ่มต้นใช้งาน (Getting started)
+            <Rocket className="size-4 text-primary" /> {t('getstarted.title')}
           </span>
-          <span className="text-xs font-normal text-muted-foreground">{data.percent}% เสร็จแล้ว</span>
+          <span className="text-xs font-normal text-muted-foreground">{t('getstarted.percent_done', { p: data.percent })}</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -67,15 +70,15 @@ export function GettingStarted() {
                 type="button"
                 onClick={() => complete.mutate(s.key)}
                 disabled={complete.isPending}
-                aria-label={`ทำเครื่องหมายว่าเสร็จ: ${s.label}`}
-                title="ทำเครื่องหมายว่าเสร็จ"
+                aria-label={t('getstarted.mark_done_x', { label: stepLabel(s) })}
+                title={t('getstarted.mark_done')}
                 className="size-5 shrink-0 rounded border outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
               />
               <Link
                 href={STEP_HREF[s.key] ?? '/onboarding'}
                 className="group flex flex-1 items-center justify-between gap-2 rounded text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <span>{s.label}</span>
+                <span>{stepLabel(s)}</span>
                 <ArrowRight className="size-3.5 text-muted-foreground group-hover:text-primary" />
               </Link>
             </li>
@@ -83,7 +86,7 @@ export function GettingStarted() {
         </ul>
         <div className="mt-3 text-right">
           <Link href="/onboarding" className="text-xs text-primary hover:underline">
-            ดูขั้นตอนทั้งหมด →
+            {t('getstarted.see_all')}
           </Link>
         </div>
       </CardContent>
