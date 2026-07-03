@@ -123,6 +123,9 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
     subscription (`ar_collections_dunning`, `gl_recurring_journals`, `gl_prepaid_amortize`,
     `lease_periodic_run`, `eam_pm_generate`, `ap_automatch_rerun`, …). Create a `daily` subscription of a
     type to opt that tenant in; nothing fires otherwise.
+  - `ops-create-ap-rematch-sub.yml` (manual dispatch) — one-shot helper that creates the `ap_automatch_rerun`
+    daily subscription via the API from a runner (idempotent), for when the in-app **Scheduled Reports** UI
+    isn't convenient. Uses the same `SWEEP_USER`/`SWEEP_PASS` service account.
 
 ## 6. Revision history
 | Version | Date | Author | Notes |
