@@ -229,6 +229,14 @@ sales, finance and other modules.
 > **Note:** The assistant answers from your own tenant's data only and respects
 > your permissions.
 
+> **LINE copilot governance (LP-2):** the chat copilot (`บอท …` in the shop's LINE OA)
+> uses a cost-routed model dedicated to chat drafting (`chat_copilot`), validates every
+> AI answer against a strict schema (a malformed answer becomes an honest "ยังไม่เข้าใจ"),
+> and is capped per shop per day (`LINE_COPILOT_DAILY_CAP`, default 200 calls — excess
+> falls back to the deterministic rules). In production the model is never called until
+> the Data Processing Addendum is acknowledged (`AI_DPA_ACKNOWLEDGED`); without a key the
+> copilot still works on its built-in Thai rules. Drafts execute only after your confirm tap.
+
 [screenshot: AI assistant chat with quick prompts]
 
 ---

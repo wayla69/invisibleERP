@@ -358,6 +358,12 @@ balance is refused (`INSUFFICIENT_FLOAT`). Other approvers get a LINE 🔔 when 
 lands, and you get a ✅/❌ push when it's decided — but **approval itself always happens on
 `/petty-cash`** (money decisions are deliberately not available in chat).
 
+You can also let the **AI copilot draft** the request from free Thai — e.g.
+`บอท ขอเบิก 250 จาก PCF-01 ค่าน้ำแข็ง` (LP-2). The bot replies with a draft card and a
+**confirm button**; nothing is raised until you tap it, and the confirmed draft runs the
+ordinary `expense`/`advance` command under your own permissions — same maker-checker,
+same float guards. If the bot isn't sure, it says so instead of guessing.
+
 **You cannot approve your own request** (`SOD_VIOLATION`, binds **everyone, including
 Admin**). **ปฏิเสธ (Reject)** discards it. Pending requests also show up in the
 **Approvals** dashboard (`/finance` → approvals) so nothing sits unseen.
