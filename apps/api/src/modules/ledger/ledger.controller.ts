@@ -113,6 +113,14 @@ export class LedgerController {
   @Get('trial-balance')
   trialBalance(@Query('period') period?: string, @Query('cost_center') costCenter?: string, @Query('ledger') ledger?: string) { return this.svc.trialBalance(period, costCenter, ledger || undefined); }
 
+  // GL detail / account ledger — every posted line for ONE account with a running balance (drill-down
+  // behind the trial balance). `account` required; `from`/`to`/`ledger` optional.
+  @Get('account-ledger')
+  @Permissions('exec', 'creditors', 'ar', 'gl_post', 'gl_close', 'fin_report')
+  accountLedger(@Query('account') account: string, @Query('from') from?: string, @Query('to') to?: string, @Query('ledger') ledger?: string) {
+    return this.svc.accountLedger(account, from || undefined, to || undefined, ledger || undefined);
+  }
+
   @Get('journal')
   journal(@Query('limit') limit?: string) { return this.svc.listJournal(qint('limit', limit, 50)); }
 

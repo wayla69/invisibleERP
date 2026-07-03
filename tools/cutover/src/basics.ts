@@ -905,6 +905,18 @@ async function main() {
   // Net effect on 1280 is zero (original 777 Dr + reversal 777 Cr).
   const tb1280Post = await (async () => { const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json; return (tb.rows ?? []).find((r: any) => r.account_code === '1280')?.balance ?? 0; })();
   ok('GL-17: original + reversal net to zero on 1280', near(tb1280Post, tb1280Pre - 777), `pre=${tb1280Pre} post=${tb1280Post}`);
+  // GL-detail: the account-ledger drill-down (GET /api/ledger/account-ledger) reconstructs 1280's posted
+  // movements with a running balance that ties to the trial balance (the closing = Σ debit−credit all-time).
+  const gl1280 = (await inj('GET', '/api/ledger/account-ledger?account=1280', admin)).json;
+  ok('GL-detail: account-ledger returns 1280 movements + running balance that ties to the trial balance',
+    gl1280.account_code === '1280'
+      && Array.isArray(gl1280.lines) && gl1280.lines.length >= 2
+      && typeof gl1280.opening_balance === 'number'
+      && near(gl1280.closing_balance, tb1280Post)
+      && near(gl1280.lines[gl1280.lines.length - 1].balance, gl1280.closing_balance),
+    `lines=${gl1280.lines?.length} closing=${gl1280.closing_balance} tb=${tb1280Post}`);
+  const glDetailUnknown = await inj('GET', '/api/ledger/account-ledger?account=ZZZZ', admin);
+  ok('GL-detail: unknown account → ACCOUNT_NOT_FOUND', glDetailUnknown.status === 404 && glDetailUnknown.json?.error?.code === 'ACCOUNT_NOT_FOUND', `st=${glDetailUnknown.status} code=${glDetailUnknown.json?.error?.code}`);
   const aud2 = (await inj('GET', `/api/ledger/audit?entryId=${glId}`, admin)).json;
   ok('GL-17: REVERSE recorded in the audit trail', (aud2.audit ?? []).some((a: any) => a.action === 'REVERSE'), `actions=${JSON.stringify((aud2.audit ?? []).map((a: any) => a.action))}`);
 
