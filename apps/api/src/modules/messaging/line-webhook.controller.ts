@@ -13,6 +13,7 @@ import { Public, NoTx, Permissions, CurrentUser, type JwtUser } from '../../comm
 import { TenantMessagingService } from './tenant-messaging.service';
 import { replyLine, replyLineFlex, fetchLineContent, type SendResult } from './gateways';
 import { ProcurementService } from '../procurement/procurement.service';
+import { ClaimsService } from '../claims/claims.service';
 import { AttachmentsService } from '../procurement/attachments.service';
 import { PettyCashService } from '../petty-cash/petty-cash.service';
 import { EssService } from '../ess/ess.service';
@@ -55,6 +56,10 @@ export class LineWebhookService {
   }
   private attachmentsSvc(): AttachmentsService | null {
     try { return this.moduleRef.get(AttachmentsService, { strict: false }); } catch { return null; }
+  }
+  // D4 — ClaimsService resolved lazily (same reason as ProcurementService: avoid a circular module graph).
+  private claimsSvc(): ClaimsService | null {
+    try { return this.moduleRef.get(ClaimsService, { strict: false }); } catch { return null; }
   }
   private pettyCashSvc(): PettyCashService | null {
     try { return this.moduleRef.get(PettyCashService, { strict: false }); } catch { return null; }
@@ -152,7 +157,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> — รับของครบตาม PO\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้) · subscribe lowstock — แจ้งเตือนของใกล้หมดทุกเช้า\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ) · spend [YYYY-MM] — สรุปยอดซื้อ\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> [<รหัสสินค้า> <จำนวน>] — รับครบ/รับบางส่วน · claim <PO/GR> <จำนวน> [เหตุผล] — แจ้งของขาด/เสีย\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้) · subscribe lowstock — แจ้งเตือนของใกล้หมดทุกเช้า\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ) · spend [YYYY-MM] — สรุปยอดซื้อ\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -181,6 +186,7 @@ export class LineWebhookService {
     const isStock = (cmd === 'stock' || cmd === 'สต็อก') && !!arg1;
     const isAttach = (cmd === 'attach' || cmd === 'แนบ') && !!arg1;
     const isReceive = (cmd === 'receive' || cmd === 'รับของ' || cmd === 'รับ') && !!arg1;
+    const isClaim = (cmd === 'claim' || cmd === 'เคลม' || cmd === 'แจ้งของเสีย') && parts.length >= 3;
     const isLow = cmd === 'low' || cmd === 'ใกล้หมด' || cmd === 'สต็อกต่ำ';
     const isReorder = cmd === 'reorder' || cmd === 'เติมของ' || cmd === 'เติมสต็อก' || cmd === 'สั่งเติม';
     const isSpend = cmd === 'spend' || cmd === 'ยอดซื้อ' || cmd === 'สรุปซื้อ' || cmd === 'ค่าใช้จ่าย';
@@ -196,7 +202,7 @@ export class LineWebhookService {
     const isDigestKpis = cmd === 'digest' && arg1.toLowerCase() === 'kpis';
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
     const isHelp = cmd === 'help' || cmd === 'เมนู' || cmd === 'ช่วยเหลือ' || cmd === 'คำสั่ง';
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isReceive && !isLow && !isReorder && !isSpend && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isSubLow && !isUnsubLow && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isReceive && !isClaim && !isLow && !isReorder && !isSpend && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isSubLow && !isUnsubLow && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
 
     // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
     // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
@@ -237,7 +243,8 @@ export class LineWebhookService {
       else if (isCancel) { reply = await this.chatCancel(staff, arg1); campaign = 'chat_cancel'; }
       else if (isStock) { reply = await this.chatStock(staff, arg1); campaign = 'chat_stock'; }
       else if (isAttach) { reply = await this.chatAttachStart(tenantId, lineUserId, staff, arg1, (parts[2] ?? '').toLowerCase()); campaign = 'chat_attach'; }
-      else if (isReceive) { reply = await this.chatReceive(staff, arg1); campaign = 'chat_receive'; }
+      else if (isReceive) { reply = await this.chatReceive(staff, arg1, parts.slice(2)); campaign = 'chat_receive'; }
+      else if (isClaim) { reply = await this.chatClaim(staff, arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_claim'; }
       else if (isLow) { reply = await this.chatLowStock(staff); campaign = 'chat_lowstock'; }
       else if (isReorder) { reply = await this.chatReorder(staff); campaign = 'chat_reorder'; }
       else if (isSpend) { reply = await this.chatSpend(staff, arg1); campaign = 'chat_spend'; }
@@ -382,10 +389,11 @@ export class LineWebhookService {
     return true;
   }
 
-  // receive <PO no> — warehouse receives ALL outstanding qty on an approved PO from chat. Perm wh_receive
+  // receive <PO no> [<item> <qty>] — warehouse receives goods on an approved PO from chat. Perm wh_receive
   // (or warehouse/procurement), re-resolved per command; the service enforces the EXP-03 approval gate,
   // posts stock + lot movements and auto-closes the PO — the chat only triggers the ordinary GR path.
-  private async chatReceive(u: any, docNo: string): Promise<string> {
+  // With a trailing item + qty (D4) it receives a PARTIAL quantity of that one line; otherwise all of it.
+  private async chatReceive(u: any, docNo: string, rest: string[] = []): Promise<string> {
     const poNo = docNo.toUpperCase();
     if (!poNo.startsWith('PO-')) return 'รับของผ่านแชทได้เฉพาะใบสั่งซื้อ (เลขที่ขึ้นต้น PO-)';
     const perms = await this.effectivePerms(u);
@@ -395,13 +403,45 @@ export class LineWebhookService {
     const procurement = this.procurementSvc();
     if (!procurement) return 'ระบบจัดซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
     const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    // D4 — partial: `receive <PO> <item id…> <qty>` (qty is the LAST token; the item id is everything before it).
+    const qtyMaybe = rest.length >= 2 ? Number(rest[rest.length - 1]) : NaN;
+    const itemId = rest.slice(0, -1).join(' ').trim();
     try {
+      if (Number.isFinite(qtyMaybe) && qtyMaybe > 0 && itemId) {
+        const res = await procurement.receiveItem(poNo, itemId.toUpperCase(), qtyMaybe, jwtUser);
+        const th = res.po_status === 'Closed' ? 'รับครบแล้ว ✅ (ปิด PO)' : 'รับบางส่วนแล้ว';
+        return `${poNo}: ${th}\nรับ ${itemId.toUpperCase()} × ${qtyMaybe} · ใบรับของ ${res.gr_no}`;
+      }
       const res = await procurement.receiveAllRemaining(poNo, jwtUser);
       const th = res.po_status === 'Closed' ? 'รับครบแล้ว ✅ (ปิด PO)' : 'รับบางส่วนแล้ว';
       return `${poNo}: ${th}\nใบรับของ ${res.gr_no} · ${res.lines} รายการ`;
     } catch (e: any) {
       const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
       return `${poNo}: รับของไม่ได้ — ${String(msg).slice(0, 200)}`;
+    }
+  }
+
+  // claim <PO/GR no> <qty> [เหตุผล] — open a goods-receipt claim (short/damaged delivery) from chat. Perm
+  // procurement/wh_receive. Opens a GRC- via ClaimsService; procurement finishes the detail on /claims.
+  private async chatClaim(u: any, docNo: string, qtyStr: string, reason: string): Promise<string> {
+    const doc = docNo.toUpperCase();
+    if (!doc.startsWith('PO-') && !doc.startsWith('GR-')) return 'เปิดเคลมได้เฉพาะใบสั่งซื้อ/ใบรับของ (เลขที่ขึ้นต้น PO- หรือ GR-)';
+    const qty = Number(qtyStr);
+    if (!Number.isFinite(qty) || qty <= 0) return 'ระบุจำนวนที่เคลม เช่น claim GR-20260101-001 2 ของแตก';
+    const perms = await this.effectivePerms(u);
+    if (!perms.includes('procurement') && !perms.includes('wh_receive') && !perms.includes('warehouse')) {
+      return 'บัญชีของคุณไม่มีสิทธิ์เปิดเคลม (ต้องมี procurement / wh_receive)';
+    }
+    const claims = this.claimsSvc();
+    if (!claims) return 'ระบบเคลมยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    try {
+      const dto = doc.startsWith('GR-') ? { gr_no: doc, claim_qty: qty, reason: reason || 'แจ้งของขาด/เสียผ่านแชท' } : { po_no: doc, claim_qty: qty, reason: reason || 'แจ้งของขาด/เสียผ่านแชท' };
+      const res = await claims.createGrClaim(dto, jwtUser);
+      return `เปิดเคลมแล้ว ✅ ${res.claim_no} (${doc} × ${qty})\nทีมจัดซื้อจะติดตามกับผู้ขายที่หน้าเคลม (/claims)`;
+    } catch (e: any) {
+      const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+      return `เปิดเคลมไม่ได้ — ${String(msg).slice(0, 200)}`;
     }
   }
 
@@ -935,6 +975,8 @@ export class LineWebhookService {
       ['expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล]', 'เบิกเงินสดย่อย'],
       ['attach <เลขที่ PO>', 'แนบรูปใบแจ้งหนี้/ใบเสร็จ'],
       ['receive <เลขที่ PO>', 'รับของครบตาม PO'],
+      ['receive <PO> <รหัสสินค้า> <จำนวน>', 'รับบางส่วน (เฉพาะรายการ/จำนวนที่ระบุ)'],
+      ['claim <PO/GR> <จำนวน> [เหตุผล]', 'แจ้งของขาด/เสีย (เปิดเคลมกับผู้ขาย)'],
     ] },
     { icon: '📅', title: 'ลางาน', color: '#7c3aed', items: [
       ['leave <YYYY-MM-DD> <จำนวนวัน> [เหตุผล]', 'ส่งใบลา'],

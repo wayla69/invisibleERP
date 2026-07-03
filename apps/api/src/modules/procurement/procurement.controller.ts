@@ -31,6 +31,8 @@ const PrToPoBody = z.object({
   lines: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), create_item: z.boolean().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional(), is_capital: z.boolean().optional() })).min(1),
 });
 const CancelBody = z.object({ reason: z.string().min(1) });
+// D4 — receive a partial qty of one PO line.
+const ReceiveItemBody = z.object({ item_id: z.string().min(1), qty: z.number().positive() });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
 const ScorecardBody = z.object({ period: z.string().min(1) });
 // T2-D: Supplier price-list versioning — create/version a purchase price; list active; history.
@@ -115,6 +117,12 @@ export class ProcurementController {
   // Receive ALL outstanding qty on an approved PO in one shot (LINE chat `receive` + web "รับครบ").
   @Post('pos/:poNo/receive-all') @Permissions('wh_receive', 'warehouse', 'procurement')
   receiveAll(@Param('poNo') poNo: string, @CurrentUser() u: JwtUser) { return this.svc.receiveAllRemaining(poNo, u); }
+
+  // D4 — receive a partial qty of ONE item on an approved PO (LINE chat `receive <PO> <item> <qty>`).
+  @Post('pos/:poNo/receive-item') @Permissions('wh_receive', 'warehouse', 'procurement')
+  receiveItem(@Param('poNo') poNo: string, @Body(new ZodValidationPipe(ReceiveItemBody)) b: z.infer<typeof ReceiveItemBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.receiveItem(poNo, b.item_id, b.qty, u);
+  }
 
   // ── supplier screening (Phase 16) ── vendor-master duty = md_vendor (segregated from AP payment).
   // Legacy 'masterdata' holders still pass (it implies md_vendor/md_item/md_config).
