@@ -1,6 +1,6 @@
 # 30 — LINE Chat Workbench: Rich Interactions, Money Self-Service & Governance — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v0.4 — **LC-1, LC-2 DELIVERED**; LC-3..5 planned · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v0.5 — **LC-1..LC-3 DELIVERED**; LC-4..5 planned · **Owner:** ERP / Product
 > **Scope:** Take the delivered LINE staff-chat channel (0227 `link`/`pr`/`status` → PR, merged #333;
 > 0228 workflow notifications + `approve`/`reject` + `my prs`/`find`/`cancel`/`stock`, merged #335)
 > from a *text command line* to a **chat workbench**: one-tap rich interactions (flex cards + postback
@@ -66,7 +66,7 @@ channel over flows the modules already own:
   matrix. **Harness:** line-crm — expense raise happy, over-float negative (`INSUFFICIENT_FLOAT`),
   no-`creditors` negative, approver notification.
 
-### LC-3 — ESS leave + channel governance (ITGC-AC)
+### LC-3 — ESS leave + channel governance (ITGC-AC) ✅ DELIVERED
 - **`leave <from YYYY-MM-DD> <days> <เหตุผล>`** raises an ESS leave request through the existing
   HCM/ESS flow (verify the exact service entry point before build; PN-25). Approver notification +
   decision push reuse `LineNotifyService`.
@@ -145,6 +145,7 @@ concludes chat money-approval needs one.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.5 | 2026-07-03 | Platform | **LC-3 delivered** — `leave` chat raise via `EssService.requestLeave` (ess perm + employee link; approver push on the /api/hcm gate perms, requester ✅ on approve); admin link registry `GET /api/line/links` + force-unlink `DELETE /api/line/links/:username` (perm `users`, masked ids, audit rows); per-LINE-user rate limit (env-tunable, one throttle reply then silent drop, audited). `line-crm` 75 ✓; PN-08 rev 1.7 + PN-25 rev 0.9; UAT-SEC-048 + UAT-PAY-038. |
 | 0.4 | 2026-07-03 | Platform | **LC-2 delivered** — `expense`/`advance` chat raise via the same `PettyCashService.createRequest` path (creditors/exec re-checked per command; FUND_CLOSED/INSUFFICIENT_FLOAT unchanged); `LineNotifyService.notifyPermissionHolders` pushes creditors/exec holders (maker excluded) on request + requester on decision; chat money-decisions stay deferred. `line-crm` 69 ✓; PN-07 rev 1.0; UAT-P2P-084. |
 | 0.3 | 2026-07-02 | Platform | **LC-1 delivered** — flex queue card (`buildApproveCard`) with postback [อนุมัติ]/[ปฏิเสธ], nonce'd 5-min confirm state consumed before acting (replay-safe), same `chatDecision`→engine path (SoD verified over buttons), `my prs` carousel, `replyLineFlex`. `line-crm` 64 ✓; PN-02 rev 1.9; UAT-P2P-083. |
 | 0.2 | 2026-07-02 | Platform | Added LC-4 (alert/BI-report subscriptions + daily digest over the existing alerts `line` channel and BI scheduler) and LC-5 (confirm-first Thai NL copilot + `ask` analytics over `modules/ai` + `nl-analytics`). |

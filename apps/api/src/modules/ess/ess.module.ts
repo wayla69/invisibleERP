@@ -4,6 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { FinanceModule } from '../finance/finance.module';
 import { EssService } from './ess.service';
+import { MessagingModule } from '../messaging/messaging.module';
 
 const LeaveBody = z.object({ leave_type: z.string().optional(), from_date: z.string(), to_date: z.string(), days: z.number().positive(), paid: z.boolean().optional(), reason: z.string().optional() });
 const ExpenseBody = z.object({ claim_date: z.string().optional(), category: z.string().optional(), amount: z.number().positive(), description: z.string().optional() });
@@ -28,5 +29,5 @@ export class EssController {
   @Post('expenses/:id/decide') @Permissions('approvals') decide(@Param('id') id: string, @Body(new ZodValidationPipe(DecideBody)) b: z.infer<typeof DecideBody>, @CurrentUser() u: JwtUser) { return this.ess.approveExpense(+id, b.approve, u); }
 }
 
-@Module({ imports: [FinanceModule], controllers: [EssController], providers: [EssService] })
+@Module({ imports: [FinanceModule, MessagingModule], controllers: [EssController], providers: [EssService] })
 export class EssModule {}
