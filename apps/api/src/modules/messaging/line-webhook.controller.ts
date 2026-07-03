@@ -68,7 +68,16 @@ export class LineWebhookService {
 
     const creds = await this.tenantMsg.resolveCreds(tenantId, 'line');
     const secret = creds?.secret as string | undefined;
-    const body = this.verify(secret, rawBody, signature, parsed);
+    // LP-1 (docs/31): record receipt health (verified / bad_signature / unverified_dev) so the settings
+    // readiness view can answer "has LINE ever actually reached this webhook?". Best-effort, never blocks.
+    let body: any;
+    try {
+      body = this.verify(secret, rawBody, signature, parsed);
+    } catch (e) {
+      if (secret) await this.tenantMsg.recordWebhookReceipt(tenantId, 'bad_signature');
+      throw e;
+    }
+    await this.tenantMsg.recordWebhookReceipt(tenantId, secret ? 'verified' : 'unverified_dev');
     const token = (creds?.token as string | undefined) ?? process.env.LINE_CHANNEL_TOKEN;
 
     let followed = 0, unfollowed = 0, chat = 0;

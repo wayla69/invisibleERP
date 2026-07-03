@@ -1,6 +1,6 @@
 # 31 — LINE Channel: Production Go-Live, Copilot Uplift & Digest KPIs — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v0.1 — PLANNED (LP-1..LP-3) · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v0.2 — LP-1 DELIVERED · LP-2/LP-3 planned · **Owner:** ERP / Product
 > **Scope:** The docs/30 LINE Chat Workbench is **fully delivered** (LC-1..LC-5, merged #333–#343).
 > This plan takes the channel from "feature-complete in CI" to **production-grade and smarter**, along
 > the three follow-up tracks identified at LC-5 close-out: **(LP-1)** a per-tenant production go-live
@@ -47,7 +47,7 @@ second LLM seam.**
 
 ## 1. Phases (one PR each, sequential)
 
-### LP-1 — Production go-live pack: LINE OA readiness + webhook diagnostics + runbook
+### LP-1 — Production go-live pack: LINE OA readiness + webhook diagnostics + runbook ✅ DELIVERED
 - **Close the silent-secret gap:** `validate('line')` additionally requires `secret` (Channel
   Secret) whenever `token` is set — a tenant can no longer save prod-broken creds. Readiness view
   gains `webhook_secret_set` (boolean only; secret stays write-only).
@@ -134,3 +134,4 @@ digest channel extensions (PN-26). If build reveals a genuine control change, ad
 | Version | Date | Change |
 | --- | --- | --- |
 | v0.1 | 2026-07-03 | Initial plan — LP-1 go-live pack, LP-2 copilot uplift, LP-3 digest 2.0 (follow-ups from docs/30 close-out). |
+| v0.2 | 2026-07-03 | LP-1 delivered as planned (no migration): required Channel Secret, `line_webhook` receipt-health row + readiness fields (`webhook_secret_set`/`webhook_path`/`last_webhook_at`/`last_webhook_status`), settings go-live panel + `POST /api/messaging/providers/line/test-self`, runbook `docs/ops/line-oa-golive.md`; `line-crm` 91 ✓ (every harness webhook delivery now HMAC-signed). |

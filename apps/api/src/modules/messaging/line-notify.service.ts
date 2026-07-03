@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { eq, and, isNotNull, or, isNull } from 'drizzle-orm';
 import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -99,17 +99,32 @@ export class LineNotifyService {
     }
   }
 
-  private async push(tenantId: number | null, lineUserId: string, text: string, flex?: any): Promise<void> {
+  // LP-1 (docs/31) — the settings console's [ส่งข้อความทดสอบถึงฉัน] button: an explicit-feedback variant
+  // of notifyUser for go-live verification. Unlike the best-effort notify paths, this ERRORS when the
+  // caller has no linked LINE account (the admin needs to know why nothing arrived).
+  async testSelf(user: { username?: string | null; tenantId?: number | null }): Promise<{ status: string; provider: string; to: string }> {
+    const [u] = await this.db.select({ lineUserId: users.lineUserId })
+      .from(users).where(eq(users.username, String(user.username ?? ''))).limit(1);
+    if (!u?.lineUserId) {
+      throw new BadRequestException({ code: 'NOT_LINKED', message: 'Your ERP account has no linked LINE — link it first (requisitions page → เชื่อมต่อ LINE)', messageTh: 'บัญชีของคุณยังไม่ได้เชื่อม LINE — เชื่อมต่อได้ที่หน้า "คำขอซื้อ (PR)"' });
+    }
+    const to = String(u.lineUserId);
+    const result = await this.push(user.tenantId ?? null, to, 'ทดสอบการแจ้งเตือน LINE ✅ — ช่องทางของร้านพร้อมใช้งาน', undefined, 'line_test');
+    return { status: result.status, provider: result.provider, to: `${to.slice(0, 6)}…` };
+  }
+
+  private async push(tenantId: number | null, lineUserId: string, text: string, flex?: any, campaign = 'wf_notify'): Promise<{ status: string; provider: string }> {
     const token = await this.token(tenantId);
     const result = flex && token
       ? await pushLineFlex(token, lineUserId, text, flex)
       : await resolveMessageGateway('line', token ? { token } : undefined).send(lineUserId, text);
     try {
       await this.db.insert(messageLog).values({
-        tenantId, memberId: null, channel: 'line', recipient: lineUserId, body: text, campaign: 'wf_notify',
+        tenantId, memberId: null, channel: 'line', recipient: lineUserId, body: text, campaign,
         status: result.status, provider: result.provider, providerRef: result.ref ?? null, error: result.error ?? null,
         createdBy: 'system:line-notify',
       });
     } catch { /* audit best-effort */ }
+    return { status: result.status, provider: result.provider };
   }
 }

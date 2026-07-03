@@ -17,6 +17,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { reportSubscriptions } from '../../../apps/api/dist/database/schema/bi';
 import { AppModule } from '../../../apps/api/dist/app.module';
@@ -82,12 +83,24 @@ async function main() {
   await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1', bahtPerPoint: '1', minRedeem: '0' }).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  // rawBody:true mirrors production main.ts — LP-1 requires T1's line creds to carry a Channel Secret,
+  // so the webhook verifies the HMAC over the exact raw bytes on every delivery below.
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { rawBody: true });
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
+  const LINE_WH_SECRET = 'whsec-t1-line';
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
-    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
+    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+    let body: any = payload;
+    // Sign LINE webhook deliveries centrally (over the exact serialized bytes) so every call site
+    // stays a plain object literal while T1's channel secret enforces fail-closed verification.
+    if (m === 'POST' && url.startsWith('/api/line/webhook/') && payload && typeof payload === 'object') {
+      body = JSON.stringify(payload);
+      headers['content-type'] = 'application/json';
+      headers['x-line-signature'] = createHmac('sha256', LINE_WH_SECRET).update(body).digest('base64');
+    }
+    const res = await app.inject({ method: m as any, url, headers, payload: body });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
     return { status: res.statusCode, json };
   };
@@ -149,7 +162,12 @@ async function main() {
     JSON.stringify({ n: (logRows.json.messages ?? []).length }));
 
   // ── 10. Per-tenant messaging provider: the tenant's own LINE token overrides the platform env token ──
-  const setProv = await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999' }, enabled: true });
+  // LP-1 (docs/31): token-only line creds are rejected — the Channel Secret is required, because the
+  // webhook fail-closes without it in production (token-only would save fine and silently break go-live).
+  const noSecret = await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999' }, enabled: true });
+  ok('set line provider without Channel secret → 400 MISSING_FIELD (LP-1 go-live guard)',
+    noSecret.status === 400 && noSecret.json.error?.code === 'MISSING_FIELD', JSON.stringify({ s: noSecret.status, code: noSecret.json.error?.code }));
+  const setProv = await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999', secret: LINE_WH_SECRET }, enabled: true });
   ok('set per-tenant LINE provider → configured', setProv.status === 200 && setProv.json.configured === true, JSON.stringify({ s: setProv.status }));
   const provs = await inj('GET', '/api/messaging/providers', token);
   const lineProv = (provs.json.channels ?? []).find((c: any) => c.channel === 'line');
@@ -201,7 +219,7 @@ async function main() {
   // ── 14. Delivery-status callback (E2) — a provider POSTs the final state of a message it accepted; we
   //        correlate by provider_ref and flip the message_log row's status. Token-guarded, tenant-scoped. ──
   // Configure the tenant's LINE provider with a callbackToken (creds are replaced wholesale, so re-supply token).
-  await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999', callbackToken: 'cb-secret-line' }, enabled: true });
+  await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999', secret: LINE_WH_SECRET, callbackToken: 'cb-secret-line' }, enabled: true });
   // Send a fresh LINE push → captures a unique provider_ref (x-line-request-id) on the message_log row.
   const dcSend = await inj('POST', '/api/messaging/send', token, { member_id: bob.json.id, channel: 'line', body: 'ยืนยันการจัดส่ง' });
   const dcRef = dcSend.json.provider_ref as string;
@@ -740,6 +758,47 @@ async function main() {
   // 23e. unknown free text → honest "don't understand" + usage (no guessing, no action).
   const aiUnknown = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23e', source: { userId: 'Usomchai' }, message: { id: 'mid-23e', type: 'text', text: 'bot วันนี้อากาศดีจัง' } }] });
   ok('LC-5: copilot unknown intent → usage reply, nothing acted', aiUnknown.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 40) }));
+
+  // ── 24. LP-1 (docs/31): production go-live pack — webhook receipt health + test-self push. ──
+  // (The required-secret guard is 24-adjacent but asserted up in section 10 where creds are first saved;
+  //  every signed webhook above also exercised the fail-closed HMAC verify.)
+  // 24a. readiness: secret flag + exact webhook path + last receipt recorded as 'verified'.
+  const glProv = await inj('GET', '/api/messaging/providers', token);
+  const glLine = (glProv.json.channels ?? []).find((c: any) => c.channel === 'line');
+  ok('LP-1: readiness → webhook_secret_set, webhook_path=/api/line/webhook/T1, last receipt verified (secret never returned)',
+    glLine?.webhook_secret_set === true && glLine?.webhook_path === '/api/line/webhook/T1'
+      && glLine?.last_webhook_status === 'verified' && !!glLine?.last_webhook_at
+      && !JSON.stringify(glProv.json).includes(LINE_WH_SECRET),
+    JSON.stringify({ set: glLine?.webhook_secret_set, path: glLine?.webhook_path, st: glLine?.last_webhook_status }));
+
+  // 24b. a tampered delivery → 401 BAD_WEBHOOK_SIGNATURE and the receipt health flips to bad_signature.
+  const badSig = await app.inject({ method: 'POST', url: '/api/line/webhook/T1', headers: { 'content-type': 'application/json', 'x-line-signature': 'AAAA/tampered=' }, payload: JSON.stringify({ events: [] }) });
+  let badSigJson: any = {}; try { badSigJson = badSig.json(); } catch { /* */ }
+  const glAfterBad = ((await inj('GET', '/api/messaging/providers', token)).json.channels ?? []).find((c: any) => c.channel === 'line');
+  ok('LP-1: bad webhook signature → 401 fail-closed + receipt health shows bad_signature',
+    badSig.statusCode === 401 && badSigJson.error?.code === 'BAD_WEBHOOK_SIGNATURE' && glAfterBad?.last_webhook_status === 'bad_signature',
+    JSON.stringify({ s: badSig.statusCode, code: badSigJson.error?.code, st: glAfterBad?.last_webhook_status }));
+
+  // 24c. the next good delivery flips receipt health back to verified.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [] });
+  const glAfterGood = ((await inj('GET', '/api/messaging/providers', token)).json.channels ?? []).find((c: any) => c.channel === 'line');
+  ok('LP-1: next verified delivery → receipt health back to verified', glAfterGood?.last_webhook_status === 'verified', JSON.stringify({ st: glAfterGood?.last_webhook_status }));
+
+  // 24d. test-self: an admin with no linked LINE gets an explicit NOT_LINKED (silence explained)…
+  const tsUnlinked = await inj('POST', '/api/messaging/providers/line/test-self', token, {});
+  ok('LP-1: test-self while unlinked → 400 NOT_LINKED', tsUnlinked.status === 400 && tsUnlinked.json.error?.code === 'NOT_LINKED', JSON.stringify({ s: tsUnlinked.status, code: tsUnlinked.json.error?.code }));
+
+  // 24e. …and after linking, the button pushes to the admin's own LINE (audit campaign line_test).
+  const bossCode = (await inj('POST', '/api/line/link-code', token)).json.code as string;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-24e', source: { userId: 'Uboss' }, message: { id: 'mid-24e', type: 'text', text: `link ${bossCode}` } }] });
+  const tsBefore = linePushes.length;
+  const tsLinked = await inj('POST', '/api/messaging/providers/line/test-self', token, {});
+  const tsLog = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.campaign, 'line_test')));
+  ok('LP-1: test-self after linking → push lands on the admin\'s own LINE (campaign line_test logged)',
+    tsLinked.status === 201 || tsLinked.status === 200
+      ? tsLinked.json.status === 'sent' && linePushes.length === tsBefore + 1 && linePushes.at(-1)!.to === 'Uboss' && tsLog.length >= 1
+      : false,
+    JSON.stringify({ s: tsLinked.status, to: linePushes.at(-1)?.to, logged: tsLog.length }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
