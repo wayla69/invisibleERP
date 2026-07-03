@@ -278,8 +278,39 @@ two independent companies.
 
 ---
 
+## Appendix B — Isolation verified (Test of Effectiveness, 2026-07-03)
+
+"A user won't see another company's data" was **exercised end-to-end**, on **real Postgres 16** (not just
+PGlite), booting the actual Nest app and driving HTTP. Results:
+
+| Harness | Backend | Result | What it proves |
+|---|---|---|---|
+| `pg-core` | **real Postgres** | **10/10 ✅** | Over HTTP: a `Sales` user of tenant T1 sees exactly its own row (`t1=1`), T2 the same (`t2=1`) — under `FORCE ROW LEVEL SECURITY` as the non-owner `app_user` role. Multi-company: a fresh-signup Admin (`org_id=NULL`) and a single-company Admin each see **only** their own company (`newco=1`, `org2=1`); an org-scoped Admin sees its own org's two tenants and **no** other company (`org1=2`). Contrast: single-company Admin sees all four (`org1Single=4`). |
+| `pg-smoke` | **real Postgres** | **6/6 ✅** | Raw RLS: `FORCE-RLS isolates tenant rows`; `org-scoped Admin sees own org only`; `audit_log is append-only (DELETE rejected)`. |
+| `tenant-isolation` | PGlite | **7/7 ✅** | One tenant closing its fiscal year does not affect another tenant's calendar or aggregates. |
+| `onboarding` | PGlite | **59/59 ✅** | Provisioning, suspend/reactivate block, must-change-password, per-tenant feature-flag isolation. |
+
+**Verdict:** isolation holds and is DB-enforced. **Non-admin staff are *always* scoped to their own tenant
+in both modes** — that guarantee needs no configuration. **The only way one user sees another company's data
+is an `Admin` under the default `single-company` mode** (global HQ bypass, `org1Single=4` above) — which is
+by design for a single company's own branches. To onboard a *second independent company* safely you therefore
+either use the silo (Model B — no shared DB, nothing to see) **or** set `TENANCY_MODE=multi-company` on the
+shared deployment (Model A, §A.1). Both were verified above.
+
+**One residual, code-enforced (not RLS-enforced) path to keep in mind:** the public consumer/member app
+(`/m`, `@Public` OTP routes) bypasses RLS and filters by `tenant_code` **in application code**
+(`multi-tenant-subdomain-runbook.md` §2). It's correct today, but any change there isn't caught by the RLS
+backstop — treat those routes as a manual-review surface.
+
+*Reproduce:* `HARNESS_PG_URL=postgres://…/db NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover pg-core`
+and `DATABASE_URL=postgres://…/freshdb … pg-smoke` (fresh DB per `pg-smoke` run). These are CI gates
+(`.github/workflows/ci.yml` `pg-core`/`pg-smoke` jobs on a `postgres:16` service).
+
+---
+
 ## 7. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-07-03 | Platform / Security | Initial design — dedicated single-tenant silo (Model B) for a government customer: target architecture, six-phase runbook (infra → config/secrets → deploy → tenant bootstrap → verify → ops), per-silo must-differ secret matrix, confirm-before-build decisions, doc-sync targets, and a go-live checklist. Records the isolation-tier decision (fully-dedicated deployment) and the Model A off-ramp. |
 | 1.1 | 2026-07-03 | Platform / Security | Added Appendix A — concrete Model A onboarding (shared deployment, new tenant) as the cheaper side-by-side alternative: the make-or-break `TENANCY_MODE=multi-company` flip + its impact on the existing customer, five onboarding steps, and an A-vs-B decision table. |
+| 1.2 | 2026-07-03 | Platform / Security | Added Appendix B — cross-tenant isolation verified as a Test of Effectiveness on real Postgres 16: `pg-core` 10/10 + `pg-smoke` 6/6 (FORCE-RLS under `app_user`, org-scoping, append-only audit) + `tenant-isolation` 7/7 + `onboarding` 59/59. Records the verdict (non-admin always tenant-scoped; the only cross-company view is an Admin under default `single-company`) and the one code-enforced `/m` residual path. |
