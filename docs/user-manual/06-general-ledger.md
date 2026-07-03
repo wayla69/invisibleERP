@@ -1,6 +1,6 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.5 · 2026-07-03**
+**Status: DRAFT v0.6 · 2026-07-03**
 
 This chapter is for **accountants** — *GlAccountant*, *FinancialController* and
 *Admin*. It covers the chart of accounts, manual journal entries with
@@ -213,14 +213,18 @@ Notes:
 
 ### Recurring / template journal entries
 
+**Screen:** รายการบัญชีตั้งเวลา (`/gl-schedules` → **รายการตั้งเวลา** tab, ERP nav → *Ledger & GL*) ·
+**Required permission:** `gl_post`, `gl_close` or `exec`.
+
 For entries you post every period — **monthly rent or insurance accruals**,
 **prepaid amortization**, standing inter-company charges — set up a **template**
 once instead of re-keying it each time.
 
-1. Go to **Accounting** → **Recurring** and click **New template**
+1. Open **รายการบัญชีตั้งเวลา** → **รายการตั้งเวลา** and fill in the **create** form
    (`POST /api/ledger/recurring`). Give it a **name**, pick a **cadence**
-   (**daily / weekly / monthly**), a **first run date**, and enter the journal
-   **lines** (the same Dr/Cr lines as a manual entry).
+   (**daily / weekly / monthly**), an optional memo, and enter the journal
+   **lines** (the same Dr/Cr lines as a manual entry). Use **ลงรายการที่ถึงกำหนด** to post
+   due templates now.
 2. The template must **balance** (total debits = total credits) — an unbalanced
    template is rejected (`UNBALANCED`) so it can't fail silently later.
 3. Leave it to run automatically, or schedule the **Post due recurring journals**
@@ -237,13 +241,18 @@ history.
 
 ### Prepaid expense amortization
 
+**Screen:** รายการบัญชีตั้งเวลา (`/gl-schedules` → **ค่าใช้จ่ายจ่ายล่วงหน้า** tab) ·
+**Required permission:** `gl_post`, `gl_close` or `exec`.
+
 When you pay for something **up front** that covers several months (annual
 insurance, rent), set up a **prepaid schedule** so the cost is spread over its term
-instead of hitting one month.
+instead of hitting one month. The tab shows each schedule's **progress bar**
+(amortized vs remaining, periods posted / total).
 
-1. **Accounting → Prepaid → New** (`POST /api/ledger/prepaid`): enter the **total**,
-   the **number of months**, and the **expense account**. Tick **capitalize** if you
-   also want to record the up-front payment now (**Dr Prepaid 1280 / Cr Cash**).
+1. **รายการบัญชีตั้งเวลา → ค่าใช้จ่ายจ่ายล่วงหน้า → create** (`POST /api/ledger/prepaid`): enter
+   the **total**, the **number of months**, and the **expense account**. Tick **capitalize** if you
+   also want to record the up-front payment now (**Dr Prepaid 1280 / Cr Cash**). Use **ตัดจ่ายงวดที่ถึงกำหนด**
+   to amortize due schedules now.
 2. Schedule the **Amortize due prepaid expenses** (`gl_prepaid_amortize`) job, or run
    it with `POST /api/ledger/prepaid/run`.
 
