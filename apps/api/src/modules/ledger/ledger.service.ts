@@ -709,12 +709,25 @@ export class LedgerService {
     // retained_earnings is a DISPLAY sub-total of equity (the 3100 balance) — not added again
     const retainedEarningsM = rows.filter((r: any) => r.account_code === '3100').reduce((a: bigint, r: any) => a + (toMinor4(r.credit) - toMinor4(r.debit)), 0n);
     const liabilitiesEquityM = liabilitiesM + equityM + netIncomeM;
+    // Per-account section lines (additive — existing callers read only the totals). Signed by normal balance:
+    // Assets are debit-positive; Liabilities/Equity are credit-positive. Current-period P&L stays out of the
+    // lines (it is surfaced as the `net_income` sub-total, conventionally shown under equity by the client).
+    const lines = rows
+      .filter((r: any) => r.account_type === 'Asset' || r.account_type === 'Liability' || r.account_type === 'Equity')
+      .map((r: any) => ({
+        account_code: r.account_code,
+        account_name: r.account_name,
+        account_type: r.account_type,
+        balance: round4(r.account_type === 'Asset' ? r.debit - r.credit : r.credit - r.debit),
+      }))
+      .filter((r: any) => Math.abs(r.balance) > 1e-9);
     return {
       as_of: asOf, ledger: ledgerCode ?? LEADING,
       assets: minorToNumber4(assetsM), liabilities: minorToNumber4(liabilitiesM), equity: minorToNumber4(equityM),
       retained_earnings: minorToNumber4(retainedEarningsM), net_income: minorToNumber4(netIncomeM),
       liabilities_plus_equity: minorToNumber4(liabilitiesEquityM),
       balanced: assetsM === liabilitiesEquityM,
+      lines,
     };
   }
 
