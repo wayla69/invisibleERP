@@ -474,6 +474,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | TC-GL-18-02 | FX revaluation post maker-checker + idempotent (5400/1100/2000) | GL-18, R05 | 04 §3.2 |
 | TC-GL-19-01 | Pre-lock validation of a clean period → ready | GL-19 | 04 §2.1 |
 | TC-GL-19-02 | Unposted Draft JE blocks pre-lock readiness | GL-19 | 04 §2.1 |
+| TC-GL-13-04 | Cost-centre master — create & list (web `/cost-centers`) | GL-13 | 04 §1.3 |
+| TC-GL-13-05 | Dimensional P&L view per cost centre (web `/cost-centers`) | GL-13 | 04 §1.3 |
 | TC-CON-02-01 | Consolidation eliminates IC + keeps group TB balanced | CON-03 | 11 §7.8 |
 | TC-CON-02-02 | Consolidation run→post maker-checker (SELF_POST/ALREADY_POSTED) | CON-03, R07 | 11 §7.9 |
 | TC-CON-02-03 | Unbalanced eliminations → CONSOL_UNBALANCED (rolled back) | CON-03 | 11 §7.8 |
@@ -508,6 +510,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-013 | WHT on payroll | PAY-02 | 05 §7, 06 §7 |
 | UAT-TAX-017 | Deferred tax run → DTA from AR allowance (×CIT) | TAX-06 | 06 §9a, 04 §3.2 |
 | UAT-TAX-018 | Deferred tax post maker-checker + idempotent (Dr 1700/Cr 5950) | TAX-06, R05 | 06 §9a, 04 §3.2 |
+| UAT-TAX-018a | Deferred tax web screen — run → maker-checker post (`/deferred-tax`) | TAX-06, R05 | 06 §9a, 04 §3.2 |
 
 ## 07 — Payroll → `05-payroll.md`
 

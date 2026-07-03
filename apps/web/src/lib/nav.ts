@@ -346,6 +346,8 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'nav.revenue', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'nav.assets', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
           { label: 'nav.leases', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
+          { label: 'nav.deferred_tax', href: '/deferred-tax', icon: Calculator, perms: ['gl_close', 'gl_post', 'exec'] },
+          { label: 'nav.cost_centers', href: '/cost-centers', icon: PieChart, perms: ['exec', 'masterdata'] },
           { label: 'nav.period_close', href: '/finance/period-close', icon: CalendarClock, perms: ['gl_close', 'exec'] },
         ],
       },

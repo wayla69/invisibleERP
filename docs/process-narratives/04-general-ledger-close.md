@@ -175,6 +175,7 @@ flowchart TD
 |---|---|---|---|
 | 1.7 | 2026-07-02 | Platform | **GL-01 precision hardening (docs/27 R1-4 / AUD-ARC-04).** The balanced-by-construction checks (`postEntry`, recurring-template validation) and the trial-balance / balance-sheet `balanced` flags now compare **exact bigint minor units** (`common/money.ts` `toMinor4`, scale 4 — pg numeric strings parsed with no float hop; JS inputs clamped once) instead of independently-rounded float sums. Same error codes (`UNBALANCED`), same response shapes/4-dp values — a correctness-of-invariant hardening, no control-statement change, no migration. ToE: `basics` 212 / `compliance` 114 / `worldclass` 58 green; new unit suite `apps/api/test/money.test.ts` (7) incl. beyond-2^53 exactness + order-independence; vitest coverage scope ratcheted to include `common/money.ts`. |
 | 1.8 | 2026-07-02 | Platform | **GL-20 + R1-2 — GL period-balance snapshots (docs/27 / AUD-ARC-02).** The trial balance now reads a maintained `gl_period_balances` snapshot (Σdebit/Σcredit per tenant/ledger/period/cost-center/account, POSTED only) instead of aggregating the full `journal_lines` table per request. The snapshot is written **in the same transaction** as the two balance-affecting transitions (`postEntry`→Posted, `approveEntry` Draft→Posted; Posted entries stay DB-immutable per GL-17/0165, corrections are contra reversals that post normally). Migration `0218` creates the table (RLS loop re-run, unique key, tenant index) and backfills from the existing Posted ledger. New **detective control GL-20**: the GL-19 pre-lock validator re-aggregates the period's raw lines per account and any snapshot mismatch is a HARD blocker `gl_snapshot_drift` (out-of-band writers are exactly what it catches; resync = re-run the 0212 backfill recompute). P&L/BS/cash-flow statements still read the raw ledger (date-ranged; a later optimization). RCM **170** (xlsx regenerated; census tags updated + CI-guarded). ToE: `basics` TC-GL-20 (clean ok → induced drift blocks & names the account → rebuild clears; 215 checks) + every existing TB assertion now exercises the snapshot path (worldclass 58, compliance 114, multiledger 17, costcenter 10, fxreval 15, giftcards 27, payroll 22, opening-balances 5, financial-health 4, parity writeflow 36 all green). UAT `05-general-ledger-close-uat.md` gains TC-GL-20. |
+| 1.9 | 2026-07-03 | Platform | **Web UI for deferred tax (TAX-06, §3.2) + cost-centre master & dimensional P&L (§1.3).** No backend/control change — operator-facing screens over existing read/compute endpoints. New route **`/deferred-tax`** (Ledger nav): a run→review→post workspace mirroring `/fx` — a "คำนวณงวดใหม่" tab calls `POST /api/ledger/deferred-tax/run` (period/as-of/tax-rate/dep-factor → staged **Open** run with a temporary-difference breakdown) and a "รายการที่คำนวณ / โพสต์" tab lists runs (`GET /api/ledger/deferred-tax`) with a **โพสต์เข้า GL** button gated to a different user (server enforces `SELF_POST`). New route **`/cost-centers`** (Ledger nav): a master tab (create/list via `POST`/`GET /api/ledger/cost-centers`) + a "กำไร-ขาดทุนตามมิติ" tab (pick a cost centre + date range → `GET /api/ledger/cost-centers/:code/pl`, revenue/expense/net + per-account lines). Nav entries under the Ledger subgroup + i18n keys added. No migration, no RCM change (read/compute only). UAT `05-general-ledger-close-uat.md` + `06-tax-uat.md` gain UI walkthroughs; user manual `06-general-ledger.md` documents both screens. |
 | 1.6 | 2026-06-30 | Platform | **GL-19 — programmatic pre-lock validation (Track-D RG-4, `docs/21`).** Read-only `GET /api/ledger/close/validate?period=YYYY-MM` (`close.service.ts validate`, perm `gl_close`/`gl_post`/`exec`) asserts the books-are-clean conditions the checklist sign-off can't: no unposted Draft JEs in the period, Posted entries balance in aggregate, every posted entry is individually balanced, and suspense/clearing (2380/2390/1999/9999) net ~zero (advisory) → `ready` + `blockers`/`warnings` + a per-check breakdown, surfaced before the GL-16 lock. Posts nothing; the hard lock still runs GL-15 + GL-16. New **detective** control **GL-19** in `build_rcm.py` → RCM **143**. No migration (read-only; reuses `journal_entries`/`journal_lines`). §2.1 control matrix gains a GL-19 block; Related-RCM list updated. ToE: `basics` harness (TC-GL-19-01 clean period ready; TC-GL-19-02 a Draft JE → `ready=false` + `unposted_drafts` blocker). UAT `05-general-ledger-close-uat.md` (TC-GL-19-01/02). |
 | 0.1 DRAFT | 2026-06-22 | `<<author>>` | Initial draft. |
 | 0.2 | 2026-06-24 | Platform | Steps 8–9: period close and year-end close now auto-accrue the loyalty points liability before locking (year-end `5700` swept to RE). Cross-ref `19-marketing-pricing-loyalty.md` §7 (CRM Phase 1.5). |
@@ -229,6 +230,15 @@ Lines without a `branch_id` are grouped under `"unassigned"`.
 ### Departments master table
 The `departments` table holds a tenant-scoped department registry (code, name, active flag).
 RLS policy `tenant_isolation_departments` restricts reads to the caller's tenant.
+
+### Cost centres + dimensional P&L
+`cost_centers` is a tenant-scoped master (code, name, `type` = department/branch/project, optional
+`parent_code`). Endpoints (perm `exec`/`masterdata`): `POST /api/ledger/cost-centers` (create),
+`GET /api/ledger/cost-centers` (list), `GET /api/ledger/cost-centers/:code/pl?from&to` (per-cost-centre
+income statement — revenue/expense/net + per-account lines, filtered on `journal_lines.cost_center_code`).
+The income-statement endpoint also accepts `?cost_center=` for the same dimensional filter. **Web UI:**
+**`/cost-centers`** (Ledger nav) — a master tab (create/list) + a "กำไร-ขาดทุนตามมิติ" tab that renders the
+per-cost-centre P&L for a chosen centre and date range. Read/compute only — no new control.
 
 ### Control GL-13 — Dimension Completeness
 | Control ID | GL-13 |
@@ -472,6 +482,10 @@ Recognises deferred tax from book-vs-tax **temporary** differences at the CIT ra
   **benefit** → **Dr 1700 DTA / Cr 5950** (a credit to 5950 reduces tax expense); a **decrease**
   (`delta < 0`) → **Dr 5950 / Cr 1700**. The net is carried on **1700** for simplicity (account **2700**
   exists for split DTL presentation/disclosure; the P&L and net effect are identical). Marks the run Posted.
+- **Web UI** — **`/deferred-tax`** (Ledger nav, perms `gl_close`/`gl_post`/`exec`). A "คำนวณงวดใหม่" tab
+  runs the computation (showing the DTA/DTL split + temporary-difference breakdown) and a "รายการที่คำนวณ /
+  โพสต์" tab lists staged/posted runs with a **โพสต์เข้า GL** button; the maker-checker rule is enforced
+  server-side (`SELF_POST`), and the screen shows the runner/poster per row.
 
 ### COA accounts (added WS3.2)
 | Code | Name | Type | Normal balance |
