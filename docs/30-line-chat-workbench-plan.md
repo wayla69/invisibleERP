@@ -1,6 +1,6 @@
 # 30 — LINE Chat Workbench: Rich Interactions, Money Self-Service & Governance — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v0.5 — **LC-1..LC-3 DELIVERED**; LC-4..5 planned · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v0.6 — **LC-1..LC-4 DELIVERED**; LC-5 planned · **Owner:** ERP / Product
 > **Scope:** Take the delivered LINE staff-chat channel (0227 `link`/`pr`/`status` → PR, merged #333;
 > 0228 workflow notifications + `approve`/`reject` + `my prs`/`find`/`cancel`/`stock`, merged #335)
 > from a *text command line* to a **chat workbench**: one-tap rich interactions (flex cards + postback
@@ -80,7 +80,7 @@ channel over flows the modules already own:
   UAT 01/07 cases + matrix. **Harness:** line-crm — leave raise, force-unlink kills the channel,
   rate-limit negative.
 
-### LC-4 — Ops & insights push: alert / report subscriptions in chat
+### LC-4 — Ops & insights push: alert / report subscriptions in chat ✅ DELIVERED
 - **`subscribe` / `unsubscribe` commands** bind the linked staff user's LINE as a delivery target for
   surfaces the platform already produces: threshold **alerts** (`modules/alerts` already supports a
   `line` channel with an explicit `target_to` — this phase resolves the target from the *linked
@@ -145,6 +145,7 @@ concludes chat money-approval needs one.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.6 | 2026-07-03 | Platform | **LC-4 delivered** — report-subscription recipients accept `{line_user}` (LINE summary delivery via LineNotifyService); new `line_daily_digest` action report (approvals/PRs/alerts counts) with chat `subscribe digest`/`unsubscribe digest` opt-in (permission-at-subscribe dashboard/fin_report/exec); alert rules resolve `target_to:'user:<name>'` to the linked LINE at send time. Deviation noted: opt-in rides the tenant's digest subscription recipients (no user_prefs change needed). `line-crm` 80 ✓; PN-26 rev 1.6; UAT-RPT-046. |
 | 0.5 | 2026-07-03 | Platform | **LC-3 delivered** — `leave` chat raise via `EssService.requestLeave` (ess perm + employee link; approver push on the /api/hcm gate perms, requester ✅ on approve); admin link registry `GET /api/line/links` + force-unlink `DELETE /api/line/links/:username` (perm `users`, masked ids, audit rows); per-LINE-user rate limit (env-tunable, one throttle reply then silent drop, audited). `line-crm` 75 ✓; PN-08 rev 1.7 + PN-25 rev 0.9; UAT-SEC-048 + UAT-PAY-038. |
 | 0.4 | 2026-07-03 | Platform | **LC-2 delivered** — `expense`/`advance` chat raise via the same `PettyCashService.createRequest` path (creditors/exec re-checked per command; FUND_CLOSED/INSUFFICIENT_FLOAT unchanged); `LineNotifyService.notifyPermissionHolders` pushes creditors/exec holders (maker excluded) on request + requester on decision; chat money-decisions stay deferred. `line-crm` 69 ✓; PN-07 rev 1.0; UAT-P2P-084. |
 | 0.3 | 2026-07-02 | Platform | **LC-1 delivered** — flex queue card (`buildApproveCard`) with postback [อนุมัติ]/[ปฏิเสธ], nonce'd 5-min confirm state consumed before acting (replay-safe), same `chatDecision`→engine path (SoD verified over buttons), `my prs` carousel, `replyLineFlex`. `line-crm` 64 ✓; PN-02 rev 1.9; UAT-P2P-083. |

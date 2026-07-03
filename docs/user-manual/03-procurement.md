@@ -64,6 +64,7 @@ handy on the floor or in the stockroom. One-time setup first:
 | `stock <item id>` (also `สต็อก`) | Read-only on-hand balance by location |
 | `expense <fund> <amount> [เหตุผล]` / `advance …` (also `เบิก`/`ยืมเงิน`) | Raises a petty-cash request — see [Finance](./05-finance-ar-ap.md) |
 | `leave <from YYYY-MM-DD> <days> [เหตุผล]` (also `ลา`) | Raises an ESS leave request (needs `ess` + employee record) |
+| `subscribe digest` / `unsubscribe digest` (also `รับสรุป`/`เลิกรับสรุป`) | Morning summary on LINE — see [Reports](./09-reports-and-analytics.md) |
 | `approve <PR no>` / `reject <PR no> <reason>` (also `อนุมัติ`/`ปฏิเสธ`) | **Procurement only** — decides a pending PR through the normal approval engine |
 
 **LINE notifications:** if you've linked your account, the system messages you

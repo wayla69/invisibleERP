@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { alertRules, alertEvents, notifications, customerInventory, workflowInstances, purchaseRequests } from '../../database/schema';
+import { users, alertRules, alertEvents, notifications, customerInventory, workflowInstances, purchaseRequests } from '../../database/schema';
 import { custPosSales } from '../../database/schema/sales';
 import { arInvoices } from '../../database/schema/finance';
 import { opportunities } from '../../database/schema/pipeline';
@@ -141,7 +141,15 @@ export class AlertsService {
       if (rule.channel === 'notification') {
         await db.insert(notifications).values({ targetTenantId: rule.tenantId, targetRole: (rule.targetRole ?? undefined) as typeof notifications.$inferInsert.targetRole, message: messageTh, messageEn: message });
       } else {
-        try { await this.messaging.send({ to: rule.targetTo ?? undefined, channel: rule.channel as Parameters<typeof this.messaging.send>[0]['channel'], body: messageTh, campaign: 'alert' }, user); } catch { /* delivery best-effort; the event is still logged */ }
+        let to = rule.targetTo ?? undefined;
+        // LC-4 (docs/30): 'user:<username>' resolves to that staff user's LINKED LINE at send time — the
+        // recipient follows the link registry (offboarding force-unlink silences it) instead of a
+        // hand-typed id. Unresolved/unlinked → skip the send; the event is still logged.
+        if (rule.channel === 'line' && to?.startsWith('user:')) {
+          const [lu] = await db.select({ lineUserId: users.lineUserId, isActive: users.isActive }).from(users).where(eq(users.username, to.slice(5))).limit(1);
+          to = lu?.lineUserId && lu.isActive !== false ? String(lu.lineUserId) : undefined;
+        }
+        if (to) { try { await this.messaging.send({ to, channel: rule.channel as Parameters<typeof this.messaging.send>[0]['channel'], body: messageTh, campaign: 'alert' }, user); } catch { /* delivery best-effort; the event is still logged */ } }
       }
       await db.insert(alertEvents).values({ tenantId: rule.tenantId, ruleId: Number(rule.id), name: rule.name, metric: rule.metric, value: String(value), threshold: String(n(rule.threshold)), severity: rule.severity, channel: rule.channel, message });
       await db.update(alertRules).set({ lastFiredAt: new Date() }).where(eq(alertRules.id, rule.id));
