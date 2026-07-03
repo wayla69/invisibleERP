@@ -1618,6 +1618,13 @@
       "when": 2023820000057,
       "tag": "0230_nav_group_order",
       "breakpoints": true
+    },
+    {
+      "idx": 231,
+      "version": "7",
+      "when": 2023820000058,
+      "tag": "0231_tenant_ui_config",
+      "breakpoints": true
     }
   ]
 }

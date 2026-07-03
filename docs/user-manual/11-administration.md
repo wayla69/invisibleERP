@@ -72,7 +72,9 @@ their role requires it — to enrol in MFA.
 
 **Screen:** `/settings` → **Modules** tab (**จัดการเมนู & โมดูล**) · **Required permission:** `users`
 
-The tab gives you **two independent controls**, applied system-wide:
+The tab gives you **two independent controls**. Both are **per company (tenant)** — what you hide, order,
+or turn off here applies to **every user in your organisation**, and **never** affects any other company on
+the platform.
 
 ### 3.1 Hide menus (**จัดการเมนู — แสดง/ซ่อน**)
 

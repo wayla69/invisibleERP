@@ -36,6 +36,10 @@ async function seed(db: any) {
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
   await db.insert(s.users).values({ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq.id }).onConflictDoNothing();
+  // A second tenant + its admin — for the per-tenant menu/module isolation checks.
+  await db.insert(s.tenants).values([{ code: 'T2', name: 'Tenant Two' }]).onConflictDoNothing();
+  const t2 = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'T2')))[0];
+  await db.insert(s.users).values({ username: 'admin2', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: t2.id }).onConflictDoNothing();
   await db.insert(s.items).values({ itemId: 'A', itemDescription: 'Apple', uom: 'EA', unitPrice: '10' }).onConflictDoNothing();
   // Seed an asset directly (bypass GL — this harness verifies QR, not depreciation posting).
   await db.insert(s.fixedAssets).values({
@@ -69,6 +73,8 @@ async function main() {
   const login = await inj('POST', '/api/login', undefined, { username: 'admin', password: 'admin123' });
   ok('login 200 + token', login.status === 200 && !!login.json.token, `status=${login.status}`);
   const token = login.json.token;
+  const login2 = await inj('POST', '/api/login', undefined, { username: 'admin2', password: 'admin123' });
+  const token2 = login2.json.token; // a DIFFERENT tenant's admin (for isolation checks)
 
   // ── 1. MODULE FLAGS ─────────────────────────────────────────────────────
   const mods = await inj('GET', '/api/admin/modules', token);
@@ -157,6 +163,28 @@ async function main() {
   const effReset = await inj('GET', '/api/modules/effective', token);
   ok('reset clears navDisabled + groupOrder + itemOrder', (effReset.json.navDisabled ?? []).length === 0 && (effReset.json.groupOrder ?? []).length === 0 && Object.keys(effReset.json.itemOrder ?? {}).length === 0, `nav=${JSON.stringify(effReset.json?.navDisabled)} order=${JSON.stringify(effReset.json?.groupOrder)} item=${JSON.stringify(effReset.json?.itemOrder)}`);
   ok('reset leaves module flags intact (marketing still enabled)', effReset.json.modules?.find((m: any) => m.key === 'marketing')?.enabled === true);
+
+  // ── 1e. PER-TENANT ISOLATION (migration 0231 — each tenant configures its OWN menu + modules) ──
+  // HQ disables marketing and hides /reservations; tenant T2 must be completely unaffected.
+  await inj('POST', '/api/admin/modules', token, { key: 'marketing', enabled: false });
+  await inj('POST', '/api/admin/modules/nav', token, { hrefs: ['/reservations'], enabled: false });
+
+  const hqBlocked = await inj('GET', '/api/marketing/campaigns', token);
+  ok('per-tenant module: HQ disabled → HQ 403', hqBlocked.status === 403 && hqBlocked.json?.error?.code === 'MODULE_DISABLED', `hq=${hqBlocked.status}`);
+  const t2Ok = await inj('GET', '/api/marketing/campaigns', token2);
+  ok('per-tenant module ISOLATION: T2 unaffected → 200', t2Ok.status === 200, `t2=${t2Ok.status}`);
+
+  const effHQ = await inj('GET', '/api/modules/effective', token);
+  const effT2 = await inj('GET', '/api/modules/effective', token2);
+  ok('per-tenant nav ISOLATION: HQ hides /reservations, T2 does not',
+    (effHQ.json.navDisabled ?? []).includes('/reservations') && !((effT2.json.navDisabled ?? []).includes('/reservations')),
+    `hq=${JSON.stringify(effHQ.json?.navDisabled)} t2=${JSON.stringify(effT2.json?.navDisabled)}`);
+  ok('per-tenant module ISOLATION (list): HQ marketing off, T2 on',
+    effHQ.json.modules?.find((m: any) => m.key === 'marketing')?.enabled === false && effT2.json.modules?.find((m: any) => m.key === 'marketing')?.enabled === true);
+
+  // Restore HQ so the master-data/QR sections below run clean.
+  await inj('POST', '/api/admin/modules', token, { key: 'marketing', enabled: true });
+  await inj('POST', '/api/admin/modules/nav-reset', token, {});
 
   // ── 2. MASTER-DATA IMPORT/EXPORT ────────────────────────────────────────
   const ents = await inj('GET', '/api/admin/master-data/entities', token);
