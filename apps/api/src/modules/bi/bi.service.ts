@@ -77,6 +77,8 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   // D1 — proactive morning low-stock alert: pushes the reorder list (feature-C source: items.min_stock vs
   // inv_balances) to {line_user} recipients with a one-tap [สั่งเติมทั้งหมด] button. Read-only aggregate.
   low_stock_reorder_alert: { label: 'แจ้งเตือนสินค้าใกล้หมด (LINE)', labelEn: 'LINE low-stock reorder alert' },
+  // D3 — purchase spend insights for a business month (total + top vendors + most-bought items). Read-only.
+  purchase_spend: { label: 'สรุปยอดซื้อประจำเดือน', labelEn: 'Monthly purchase spend' },
   // Likewise: each run amortizes one period of every due prepaid schedule (Dr expense / Cr 1280, idempotent).
   gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
@@ -656,6 +658,17 @@ export class BiService implements OnModuleInit {
         data: { count, items: low },
         summary: `Low-stock reorder alert: ${count} item(s) at/below reorder point`,
         summaryTh: count ? `สินค้าใกล้หมด ${count} รายการ (ถึง/ต่ำกว่าจุดสั่งซื้อ)` : 'สินค้าใกล้หมด: ไม่มี',
+      };
+    }
+    if (reportType === 'purchase_spend') {
+      // D3 — read-only: reuse ProcurementService.purchaseSpend (total + top vendors + most-bought items).
+      if (!this.procurement) throw new BadRequestException({ code: 'PROCUREMENT_UNAVAILABLE', message: 'Procurement service not available', messageTh: 'ระบบจัดซื้อไม่พร้อมใช้งาน' });
+      const sp = await this.procurement.purchaseSpend(user, { period: f.period || undefined });
+      const topV = sp.by_vendor[0];
+      return {
+        data: sp,
+        summary: `Purchase spend ${sp.period}: ${sp.total.toLocaleString()} across ${sp.po_count} PO(s)${topV ? `; top vendor ${topV.vendor} ${topV.total.toLocaleString()}` : ''}`,
+        summaryTh: `ยอดซื้อเดือน ${sp.period}: ฿${sp.total.toLocaleString('th-TH', { maximumFractionDigits: 2 })} · ${sp.po_count} ใบสั่งซื้อ${topV ? ` · ผู้ขายสูงสุด ${topV.vendor}` : ''}`,
       };
     }
     if (reportType === 'gl_recurring_journals') {

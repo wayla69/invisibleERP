@@ -152,7 +152,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> — รับของครบตาม PO\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้) · subscribe lowstock — แจ้งเตือนของใกล้หมดทุกเช้า\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล — ไม่ใส่ก็ได้] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ · low — สินค้าใกล้หมด · reorder — เปิด PR เติมของทั้งหมด\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · receive <เลขที่ PO> — รับของครบตาม PO\n• expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้) · subscribe lowstock — แจ้งเตือนของใกล้หมดทุกเช้า\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ) · spend [YYYY-MM] — สรุปยอดซื้อ\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10  (สั่งเฉย ๆ ไม่ต้องมีเหตุผล) · หลายรายการ  pr A4-PAPER 10, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -183,6 +183,7 @@ export class LineWebhookService {
     const isReceive = (cmd === 'receive' || cmd === 'รับของ' || cmd === 'รับ') && !!arg1;
     const isLow = cmd === 'low' || cmd === 'ใกล้หมด' || cmd === 'สต็อกต่ำ';
     const isReorder = cmd === 'reorder' || cmd === 'เติมของ' || cmd === 'เติมสต็อก' || cmd === 'สั่งเติม';
+    const isSpend = cmd === 'spend' || cmd === 'ยอดซื้อ' || cmd === 'สรุปซื้อ' || cmd === 'ค่าใช้จ่าย';
     const isExpense = (cmd === 'expense' || cmd === 'เบิก') && parts.length >= 3;
     const isAdvance = (cmd === 'advance' || cmd === 'ยืมเงิน') && parts.length >= 3;
     const isLeave = (cmd === 'leave' || cmd === 'ลา') && parts.length >= 3;
@@ -195,7 +196,7 @@ export class LineWebhookService {
     const isDigestKpis = cmd === 'digest' && arg1.toLowerCase() === 'kpis';
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
     const isHelp = cmd === 'help' || cmd === 'เมนู' || cmd === 'ช่วยเหลือ' || cmd === 'คำสั่ง';
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isReceive && !isLow && !isReorder && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isSubLow && !isUnsubLow && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isReceive && !isLow && !isReorder && !isSpend && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isSubLow && !isUnsubLow && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
 
     // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
     // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
@@ -239,6 +240,7 @@ export class LineWebhookService {
       else if (isReceive) { reply = await this.chatReceive(staff, arg1); campaign = 'chat_receive'; }
       else if (isLow) { reply = await this.chatLowStock(staff); campaign = 'chat_lowstock'; }
       else if (isReorder) { reply = await this.chatReorder(staff); campaign = 'chat_reorder'; }
+      else if (isSpend) { reply = await this.chatSpend(staff, arg1); campaign = 'chat_spend'; }
       else if (isExpense || isAdvance) { reply = await this.chatPettyCash(staff, isAdvance ? 'advance' : 'expense', arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_pettycash'; }
       else if (isLeave) { reply = await this.chatLeave(staff, arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_leave'; }
       else if (isSubscribe || isUnsubscribe) { reply = await this.chatDigest(tenantId, staff, isSubscribe, isSubscribe ? parts.slice(2).join(',') : ''); campaign = 'chat_digest'; }
@@ -435,6 +437,29 @@ export class LineWebhookService {
     } catch (e: any) {
       const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
       return `เปิด PR เติมสต็อกไม่ได้ — ${String(msg).slice(0, 200)}`;
+    }
+  }
+
+  // D3 — `spend [YYYY-MM]` (`ยอดซื้อ`/`สรุปซื้อ`): purchase spend for a business month — total, top vendors,
+  // most-bought items. Read-only; gated on a buyer/analytics permission (procurement/planner/exec/dashboard).
+  private async chatSpend(u: any, arg: string): Promise<string> {
+    const procurement = this.procurementSvc();
+    if (!procurement) return 'ระบบจัดซื้อยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const perms = await this.effectivePerms(u);
+    if (!['procurement', 'planner', 'exec', 'dashboard'].some((p) => perms.includes(p))) {
+      return 'บัญชีของคุณไม่มีสิทธิ์ดูยอดซื้อ (ต้องมี procurement / exec / dashboard)';
+    }
+    const period = /^\d{4}-\d{2}$/.test(arg) ? arg : undefined;
+    const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    try {
+      const s = await procurement.purchaseSpend(jwtUser, { period });
+      const money = (v: number) => v.toLocaleString('th-TH', { maximumFractionDigits: 2 });
+      if (!s.po_count) return `💰 ยอดซื้อเดือน ${s.period}: ยังไม่มีใบสั่งซื้อ`;
+      const vendors = s.by_vendor.slice(0, 5).map((v: any) => `• ${v.vendor} — ฿${money(v.total)} (${v.po_count} ใบ)`).join('\n');
+      const items = s.top_items.slice(0, 5).map((i: any) => `• ${i.item_id} — ${money(i.qty)} หน่วย (฿${money(i.value)})`).join('\n');
+      return `💰 ยอดซื้อเดือน ${s.period}: ฿${money(s.total)} · ${s.po_count} ใบสั่งซื้อ\nผู้ขายสูงสุด:\n${vendors}\nสินค้าซื้อมากสุด:\n${items}`;
+    } catch (e: any) {
+      return `ดูยอดซื้อไม่ได้ — ${String(e?.response?.messageTh ?? e?.message ?? 'ไม่ทราบสาเหตุ').slice(0, 200)}`;
     }
   }
 
@@ -918,6 +943,7 @@ export class LineWebhookService {
       ['subscribe digest [kpi,…]', 'รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)'],
       ['subscribe lowstock', 'รับแจ้งเตือนสินค้าใกล้หมดทุกเช้า + ปุ่มสั่งเติม'],
       ['ask <คำถาม>', 'ถามยอดขาย เช่น ask ยอดขายตามสาขา'],
+      ['spend [YYYY-MM]', 'สรุปยอดซื้อเดือนนี้ — ผู้ขาย/สินค้าสูงสุด'],
       ['บอท <ข้อความ>', 'ให้ AI ช่วยร่าง (ยืนยันก่อนสร้างเสมอ)'],
     ] },
     { icon: '✅', title: 'อนุมัติ (เฉพาะทีมจัดซื้อ)', color: '#b45309', items: [

@@ -101,6 +101,10 @@ export class ProcurementController {
   @Post('reorder-pr') @Permissions('pr_raise', 'procurement', 'planner')
   reorderPr(@CurrentUser() u: JwtUser) { return this.svc.reorderPr(u); }
 
+  // D3 — purchase spend insights for a business month: total + top vendors + most-bought items.
+  @Get('spend-summary') @Permissions('procurement', 'planner', 'exec', 'dashboard')
+  spendSummary(@CurrentUser() u: JwtUser, @Query('period') period?: string) { return this.svc.purchaseSpend(u, { period }); }
+
   // Convert an approved PR → PO (procurement duty). Lines arrive reconciled (existing item_id or a new
   // code to open); the PO routes through the normal createPo path and the PR is linked + marked Converted.
   @Post('prs/:prNo/to-po') @Permissions('procurement')

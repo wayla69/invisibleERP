@@ -639,6 +639,27 @@ async function main() {
   ok('D2: goods received → requester pushed (สินค้ารับเข้าคลังแล้ว)',
     (grD2.status === 200 || grD2.status === 201) && !!grPush && grPush.text.includes(poD2), JSON.stringify({ push: grPush?.text.slice(0, 60) }));
 
+  // 17M. D3 — purchase spend insights (`spend`/`ยอดซื้อ`): a business-month total + top vendors + most-
+  //      bought items from purchase_orders/po_items. A dominant PO makes the ranking deterministic. Gated
+  //      on a buyer/analytics permission; a linked user without it is refused.
+  await inj('POST', '/api/procurement/pos', token, { vendor_name: 'SPENDTEST', items: [{ item_id: 'SPEND-ITEM', order_qty: 50, unit_price: 1000 }] }); // 50,000
+  const spendApi = await inj('GET', '/api/procurement/spend-summary', token);
+  ok('D3: GET /spend-summary → month total + top vendors + most-bought items',
+    spendApi.status === 200 && Number(spendApi.json.total) >= 50000 && spendApi.json.po_count >= 1
+      && (spendApi.json.by_vendor ?? []).some((v: any) => v.vendor === 'SPENDTEST' && Number(v.total) >= 50000)
+      && (spendApi.json.top_items ?? []).some((i: any) => i.item_id === 'SPEND-ITEM'),
+    JSON.stringify({ total: spendApi.json.total, vendors: (spendApi.json.by_vendor ?? []).length }));
+
+  const spendChat = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17m', source: { userId: 'Uprayut' }, message: { id: 'mid-17m', type: 'text', text: 'spend' } }] });
+  ok('chat-D3: spend → Thai purchase summary (ยอดซื้อเดือน · ผู้ขายสูงสุด · สินค้าซื้อมากสุด)',
+    spendChat.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยอดซื้อเดือน') && lineReplies.at(-1)!.text.includes('ผู้ขายสูงสุด') && lineReplies.at(-1)!.text.includes('SPENDTEST'),
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 70) }));
+
+  const spendDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17m2', source: { userId: 'Uauditor' }, message: { id: 'mid-17m2', type: 'text', text: 'spend' } }] });
+  ok('chat-D3: spend without procurement/exec/dashboard → refused',
+    spendDenied.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีสิทธิ์'),
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
   // ── 18. Attachments (0228): invoice/receipt photo onto a PO — web API + LINE chat `attach` flow. ──
   const poRes = await inj('POST', '/api/procurement/pos', token, { vendor_name: 'ผู้ขายทดสอบแนบ', items: [{ item_id: 'A4-PAPER', order_qty: 5, unit_price: 100 }] });
   const poNo = poRes.json.po_no as string;
