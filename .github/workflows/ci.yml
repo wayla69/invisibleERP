@@ -298,8 +298,8 @@ jobs:
             // Root cause of the 2026-07-03 deploy outage: 0145/0146 (when <= 0144) never applied in prod,
             // and 0218 exploded on the missing tip_distribution_lines. They stay grandfathered — their
             // objects are re-created idempotently inside 0218 (renumbering applied journal entries is the
-            // dangerous move); any NEW non-monotonic entry fails here. Fix by bumping the new entry's when
-            // above the current maximum.
+            // dangerous move); any NEW non-monotonic entry fails here. Fix by bumping the when of the new
+            // entry above the current maximum. (NB: this script is single-quoted bash — no apostrophes.)
             const GRANDFATHERED_NONMONO = ["0145_table_reservations", "0146_tip_distribution"];
             let maxWhen = 0; const nonMono = [];
             for (const e of journal) {
