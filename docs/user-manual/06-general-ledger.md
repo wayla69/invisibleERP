@@ -1,13 +1,13 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.4 · 2026-07-03**
+**Status: DRAFT v0.5 · 2026-07-03**
 
 This chapter is for **accountants** — *GlAccountant*, *FinancialController* and
 *Admin*. It covers the chart of accounts, manual journal entries with
 **maker-checker approval**, the trial balance and financial statements, period and
 year-end close, multi-ledger reporting, and fixed assets.
 
-**Main screen:** `/accounting` (perm: `gl_post`, `gl_close`, `approvals`, `exec`, `creditors`, `ar`) — tabs include Trial Balance, Journal, Pending journal entries (visible to `approvals`/`gl_close`/`exec` only — SoD R05), Income Statement, Balance Sheet, Cash Flow and Opening Balances.
+**Main screen:** `/accounting` (perm: `gl_post`, `gl_close`, `approvals`, `exec`, `creditors`, `ar`) — tabs include Trial Balance, **Account Ledger (แยกประเภทรายบัญชี)**, **Sub-ledger tie-out (กระทบยอดบัญชีย่อย)**, Chart of Accounts, Journal, Pending journal entries (visible to `approvals`/`gl_close`/`exec` only — SoD R05), Income Statement, Balance Sheet, Cash Flow and Opening Balances.
 
 > **SoD R05 — posting vs. JE approval:** The "รออนุมัติ (JE)" tab on `/accounting` is only visible to users who hold the **approval** duty (`approvals`, `gl_close`, or `exec`). A *GlAccountant* (`gl_post` only) sees the journal/posting tabs but not the approval queue, preventing a preparer from approving their own entries. The **period close** screen (`/finance/period-close`, perm: `gl_close`) is a separate screen — a GL Accountant cannot access it.
 
@@ -317,6 +317,31 @@ centre or ledger if needed), and view or export it.
 
 **Expected result:** The statement is produced from all **posted** entries (drafts
 are excluded).
+
+### Account ledger (GL detail — แยกประเภทรายบัญชี)
+
+**Screen:** บัญชีแยกประเภท (`/accounting`) → **แยกประเภทรายบัญชี** tab · **Required permission:**
+`gl_post`, `gl_close`, `exec`, `creditors`, `ar` or `fin_report`.
+
+To see the individual postings behind a trial-balance figure, open the **แยกประเภทรายบัญชี** tab,
+pick an **account** and a **date range** (`GET /api/ledger/account-ledger?account=&from=&to=`). It
+lists the **opening balance** (everything posted before the *from* date), then every posted line in
+date order — date, entry no., source, memo, debit, credit — with a **running balance**, and the
+**closing balance**. The closing balance equals that account's trial-balance balance (Σ debit − credit),
+so the drill-down always reconciles to the trial balance.
+
+### Sub-ledger tie-out (กระทบยอดบัญชีย่อย — GL-14)
+
+**Screen:** บัญชีแยกประเภท (`/accounting`) → **กระทบยอดบัญชีย่อย** tab · **Run:** `gl_post`/`gl_close`;
+**Certify:** `gl_close` (certifier ≠ runner — SoD).
+
+Reconciles each **control account** to its sub-ledger of record. Pick a sub-ledger — **AR** (1100 ↔ open
+customer invoices), **AP** (2000 ↔ open vendor bills), **INV** (1200 ↔ perpetual inventory valuation) or
+**FA** (fixed-asset net book value) — and press **กระทบยอด** (`POST /api/ledger/tie-out/run`). The run
+records the GL balance, the sub-ledger balance, the **variance** and a **Matched / Variance** status. A
+**different** user then presses **รับรอง** (`POST /api/ledger/tie-out/:id/certify`) to certify it (a
+variance may be certified with a note explaining the reconciling items); certifying your own run is blocked
+(`SELF_CERTIFY`).
 
 ### Dedicated Financial Statements screen
 
