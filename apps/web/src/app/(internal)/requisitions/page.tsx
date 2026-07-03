@@ -147,20 +147,20 @@ function PrListCard() {
 // PR → PO conversion. Each PR line (a free-text name from chat) is reconciled to a real item: search the
 // master and pick a match, OR tick "สินค้าใหม่" to open a new code. Procurement adds vendor + unit prices,
 // then submits — the API raises the PO through the normal path and links/closes the PR.
-type ConvLine = { name: string; item_id: string; item_description: string; create_item: boolean; order_qty: number; unit_price: number; uom: string; matches: ItemMatch[]; searching: boolean };
+type ConvLine = { name: string; item_id: string; item_description: string; create_item: boolean; order_qty: number; unit_price: number; uom: string; matches: ItemMatch[]; searching: boolean; searched: boolean };
 
 function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCancel: () => void }) {
   const [vendor, setVendor] = useState('');
   const [lines, setLines] = useState<ConvLine[]>(() => pr.lines.map((l) => ({
     name: l.item_id, item_id: l.item_id, item_description: '', create_item: false,
-    order_qty: l.request_qty, unit_price: 0, uom: l.uom ?? '', matches: [], searching: false,
+    order_qty: l.request_qty, unit_price: 0, uom: l.uom ?? '', matches: [], searching: false, searched: false,
   })));
   const setLine = (i: number, patch: Partial<ConvLine>) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const search = async (i: number) => {
     setLine(i, { searching: true });
     try {
       const r = await api<{ items: ItemMatch[] }>(`/api/procurement/items/search?q=${encodeURIComponent(lines[i]!.item_id || lines[i]!.name)}`);
-      setLine(i, { matches: r.items });
+      setLine(i, { matches: r.items, searched: true });
     } catch (e: any) { notifyError(e.message); } finally { setLine(i, { searching: false }); }
   };
   const submit = useMutation({
@@ -194,18 +194,24 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
               <div className="space-y-1">
                 <Label className="text-xs">รหัสสินค้า {l.create_item ? '(เปิดใหม่)' : '(เทียบทะเบียน)'}</Label>
                 <div className="flex gap-2">
-                  <Input value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} placeholder="รหัสสินค้า" />
+                  <Input value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value, searched: false, matches: [] })} placeholder="รหัสสินค้า" />
                   <Button type="button" variant="outline" size="sm" disabled={l.searching} onClick={() => search(i)}>{l.searching ? '…' : 'ค้นหา/เทียบ'}</Button>
                 </div>
                 {l.matches.length > 0 && !l.create_item && (
                   <div className="flex flex-wrap gap-1 pt-1">
+                    <span className="text-xs text-muted-foreground">เลือกรหัสที่ตรง:</span>
                     {l.matches.map((m) => (
-                      <button key={m.item_id} type="button" onClick={() => setLine(i, { item_id: m.item_id, uom: m.uom ?? l.uom, unit_price: m.unit_price || l.unit_price, matches: [] })}
+                      <button key={m.item_id} type="button" onClick={() => setLine(i, { item_id: m.item_id, uom: m.uom ?? l.uom, unit_price: m.unit_price || l.unit_price, matches: [], searched: false })}
                         className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">
                         {m.item_id}{m.item_description ? ` — ${m.item_description}` : ''}
                       </button>
                     ))}
                   </div>
+                )}
+                {l.searched && l.matches.length === 0 && !l.create_item && (
+                  <p className="pt-1 text-xs text-warning">
+                    ไม่พบ &quot;{l.item_id}&quot; ในทะเบียนสินค้า — ติ๊ก &quot;เปิดเป็นสินค้าใหม่&quot; ด้านล่างเพื่อเปิดรหัสนี้เป็นสินค้าใหม่ หรือแก้ชื่อแล้วค้นหาอีกครั้ง
+                  </p>
                 )}
                 <label className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
                   <input type="checkbox" checked={l.create_item} onChange={(e) => setLine(i, { create_item: e.target.checked })} />
