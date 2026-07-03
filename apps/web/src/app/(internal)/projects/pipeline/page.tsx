@@ -1,24 +1,25 @@
-'use client';
-
-import { useQuery } from '@tanstack/react-query';
+// Server component (docs/28 §4 / docs/27 R5-2 — RSC conversion). A read-only Win/Loss analytics
+// dashboard: one fetch, no client interactivity, so it prefetches on the server (cookie-forwarded, see
+// lib/server-api.ts) and renders directly. The recharts visuals are client islands composed from here.
 import { Trophy, TrendingDown, Target, Wallet } from 'lucide-react';
-import { api } from '@/lib/api';
+import { serverApi } from '@/lib/server-api';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
-import { StateView } from '@/components/state-view';
 import { SimpleBarChart, TrendAreaChart } from '@/components/charts';
 import { Card } from '@/components/ui/card';
+
+// cookies() (via serverApi) already opts this route out of prerendering; explicit for clarity.
+export const dynamic = 'force-dynamic';
 
 const STAGE_LABEL: Record<string, string> = {
   prospecting: 'ค้นหา', qualification: 'คัดกรอง', proposal: 'เสนอราคา', negotiation: 'เจรจา', won: 'ชนะ', lost: 'แพ้',
 };
 const STAGE_ORDER = ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'];
 
-export default function PipelineDashboardPage() {
-  const q = useQuery<any>({ queryKey: ['crm', 'winloss'], queryFn: () => api('/api/crm/pipeline/win-loss?months=12') });
-  const d = q.data;
+export default async function PipelineDashboardPage() {
+  const d = await serverApi<any>('/api/crm/pipeline/win-loss?months=12');
   const s = d?.summary;
   const winRatePct = s?.win_rate != null ? Math.round(s.win_rate * 1000) / 10 : 0;
 
@@ -32,7 +33,11 @@ export default function PipelineDashboardPage() {
     <div>
       <PageHeader title="ไปป์ไลน์การขาย — Win / Loss" description="วิเคราะห์อัตราชนะ มูลค่าถ่วงน้ำหนัก เหตุผลที่แพ้ และผลงานรายเซลส์ — ดีลที่ชนะแปลงเป็นโครงการได้" />
 
-      <StateView q={q}>
+      {!d ? (
+        <Card className="p-8 text-center text-sm text-muted-foreground">
+          ไม่สามารถโหลดข้อมูลไปป์ไลน์ได้ในขณะนี้ — โปรดรีเฟรชหน้าอีกครั้ง
+        </Card>
+      ) : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="อัตราชนะ (Win rate)" value={`${winRatePct}%`} icon={Target} tone="primary" hint="ชนะ ÷ (ชนะ+แพ้)" />
@@ -78,7 +83,7 @@ export default function PipelineDashboardPage() {
             />
           </div>
         </div>
-      </StateView>
+      )}
     </div>
   );
 }

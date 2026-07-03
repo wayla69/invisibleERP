@@ -523,6 +523,16 @@ async function main() {
   ok('PR→PO: converting a non-existent/non-approved PR → refused (404/422)',
     convBad.status === 404 || convBad.status === 422, JSON.stringify({ s: convBad.status }));
 
+  // 17g-iii. vendor search + last-price (feature A): the PO above priced A4-PAPER at 120, so item search
+  //          now surfaces last_price 120; vendor search matches the supplier master by name.
+  await db.insert(s.vendors).values({ tenantId: t1, vendorCode: 'V-ACME', name: 'ACME Foods', isSupplier: true }).onConflictDoNothing();
+  const vend = await inj('GET', `/api/procurement/vendors/search?q=${encodeURIComponent('ACME')}`, token);
+  ok('PR→PO: vendor search matches the supplier master by name', vend.status === 200 && (vend.json.vendors ?? []).some((v: any) => v.name === 'ACME Foods'), JSON.stringify({ n: (vend.json.vendors ?? []).length }));
+  const itemSearch2 = await inj('GET', `/api/procurement/items/search?q=A4-PAPER`, token);
+  const a4 = (itemSearch2.json.items ?? []).find((it: any) => it.item_id === 'A4-PAPER');
+  ok('PR→PO: item search returns last purchase price (A4-PAPER last_price = 120 from the PO above)',
+    itemSearch2.status === 200 && !!a4 && Number(a4.last_price) === 120, JSON.stringify({ last: a4?.last_price }));
+
   // 17h. cancel — own pending PR withdrawn (workflow instance closed); someone else's PR is refused.
   await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17h1', source: { userId: 'Usomchai' }, message: { id: 'mid-17h1', type: 'text', text: 'pr STAPLER 2' } }] });
   const prCxl = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';

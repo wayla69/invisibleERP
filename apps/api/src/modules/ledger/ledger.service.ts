@@ -104,66 +104,6 @@ export class LedgerService {
     return { tenant_id: tenantId, industry: key, accounts: values.length };
   }
 
-  // GL-11 — per-tenant chart CURATION (the overlay write-path). A `gl_coa` holder renames (EN/TH),
-  // re-groups, re-orders, or toggles active on the accounts of THEIR tenant's chart — writing the
-  // `tenant_accounts` overlay only (RLS-scoped to the caller's tenant). It NEVER touches the canonical
-  // master universe: the overlay curates presentation, so `?all=true` still exposes every canonical code
-  // and postings are unaffected (mirrors GL-10). Minting or recoding a *master* account is a platform-admin
-  // (HQ) operation — attempting to curate a code that does not exist canonically is rejected COA_ADMIN_ONLY.
-  async updateAccountOverlay(
-    code: string,
-    dto: { active?: boolean; display_name?: string; display_name_th?: string; group_label?: string; sort_order?: number },
-    tenantId?: number | null,
-  ) {
-    const db = this.db;
-    const tid = resolveTenantId(tenantId ?? null);
-    if (tid == null) throw new BadRequestException({
-      code: 'OVERLAY_NO_TENANT',
-      message: 'Chart curation requires a tenant context',
-      messageTh: 'การจัดผังบัญชีต้องอยู่ในบริบทของบริษัท (tenant)',
-    });
-    // The overlay may only curate an EXISTING canonical account — it cannot create a new master code.
-    const [canon] = await db.select({ name: accounts.name, type: accounts.type })
-      .from(accounts).where(eq(accounts.code, code)).limit(1);
-    if (!canon) throw new ForbiddenException({
-      code: 'COA_ADMIN_ONLY',
-      message: `Account ${code} is not in the master chart; creating or recoding master accounts is restricted to platform administrators (HQ)`,
-      messageTh: `บัญชี ${code} ไม่มีในผังบัญชีกลาง — การสร้างหรือแก้รหัสบัญชีหลักทำได้เฉพาะผู้ดูแลระบบ (HQ)`,
-    });
-    // Only the fields actually supplied are written (partial curation); an empty string clears back to the
-    // canonical default (null).
-    const patch: Partial<typeof tenantAccounts.$inferInsert> = {};
-    if (dto.active !== undefined) patch.active = dto.active;
-    if (dto.display_name !== undefined) patch.displayName = dto.display_name.trim() || null;
-    if (dto.display_name_th !== undefined) patch.displayNameTh = dto.display_name_th.trim() || null;
-    if (dto.group_label !== undefined) patch.groupLabel = dto.group_label.trim() || null;
-    if (dto.sort_order !== undefined) patch.sortOrder = dto.sort_order;
-    if (Object.keys(patch).length === 0) throw new BadRequestException({
-      code: 'OVERLAY_NO_CHANGE', message: 'No curation fields supplied', messageTh: 'ไม่มีข้อมูลที่จะแก้ไข',
-    });
-    // Upsert: curate the existing overlay row, or seed one from the canonical account (defaults keep the
-    // row well-formed if the tenant is adopting curation for a code it had not curated before).
-    await db.insert(tenantAccounts).values({
-      tenantId: tid,
-      accountCode: code,
-      displayName: patch.displayName ?? canon.name,
-      displayNameTh: patch.displayNameTh ?? null,
-      groupLabel: patch.groupLabel ?? (canon.type as string),
-      active: patch.active ?? true,
-      sortOrder: patch.sortOrder ?? 0,
-    }).onConflictDoUpdate({ target: [tenantAccounts.tenantId, tenantAccounts.accountCode], set: patch });
-    const [row] = await db.select().from(tenantAccounts)
-      .where(and(eq(tenantAccounts.tenantId, tid), eq(tenantAccounts.accountCode, code))).limit(1);
-    return {
-      code,
-      active: row?.active !== false,
-      display_name: row?.displayName ?? null,
-      display_name_th: row?.displayNameTh ?? null,
-      group_label: row?.groupLabel ?? null,
-      sort_order: Number(row?.sortOrder ?? 0),
-    };
-  }
-
   // Tenant-aware Chart of Accounts. Default = the tenant's curated industry chart (active overlay rows,
   // industry names/order). `all=true` (or a tenant with no overlay, e.g. legacy/HQ) ⇒ the full canonical
   // universe (so a user can still post to any account outside their template). NEVER used to gate postings.

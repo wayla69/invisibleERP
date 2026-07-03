@@ -429,7 +429,13 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-050 | Industry template can't drift from the engine's codes | GL-10 | 04 §7 (step 14) |
 | UAT-UI-COA-01 | Pick business type at signup (industry selector) | GL-10 | 04 §7 (step 14) |
 | UAT-UI-COA-02 | View the industry chart of accounts (ผังบัญชี tab) | GL-10 | 04 §7 (step 14) |
-| UAT-UI-COA-03 | Curate the chart of accounts — rename/group/active/re-order (overlay) | GL-11 | 04 §7 (step 14) |
+| UAT-UI-COA-03 | Curate the chart in the UI — rename/group/active/re-order (overlay) | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-01 | Create a canonical account as platform Admin/HQ (+ duplicate → DUPLICATE_ACCOUNT) | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-02 | Deactivate an account with a non-zero balance → ACCOUNT_HAS_BALANCE | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-03 | Direct JE to an AR control account (1100) → CONTROL_ACCOUNT | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-04 | Tenant gl_coa holder blocked from a canonical CoA change → COA_ADMIN_ONLY | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-05 | Per-tenant overlay curation reflected + RLS-scoped (no cross-tenant leak) | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-06 | Overlay curation requires gl_coa (non-gl_coa → 403) | GL-11 | 04 §7 (step 14) |
 | UAT-GL-017 | Reconciliation prepare→certify | REC-02/03 | 04 §9 |
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
@@ -475,6 +481,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | TC-GL-18-02 | FX revaluation post maker-checker + idempotent (5400/1100/2000) | GL-18, R05 | 04 §3.2 |
 | TC-GL-19-01 | Pre-lock validation of a clean period → ready | GL-19 | 04 §2.1 |
 | TC-GL-19-02 | Unposted Draft JE blocks pre-lock readiness | GL-19 | 04 §2.1 |
+| TC-GL-13-04 | Cost-centre master — create & list (web `/cost-centers`) | GL-13 | 04 §1.3 |
+| TC-GL-13-05 | Dimensional P&L view per cost centre (web `/cost-centers`) | GL-13 | 04 §1.3 |
 | TC-CON-02-01 | Consolidation eliminates IC + keeps group TB balanced | CON-03 | 11 §7.8 |
 | TC-CON-02-02 | Consolidation run→post maker-checker (SELF_POST/ALREADY_POSTED) | CON-03, R07 | 11 §7.9 |
 | TC-CON-02-03 | Unbalanced eliminations → CONSOL_UNBALANCED (rolled back) | CON-03 | 11 §7.8 |
@@ -509,6 +517,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-TAX-013 | WHT on payroll | PAY-02 | 05 §7, 06 §7 |
 | UAT-TAX-017 | Deferred tax run → DTA from AR allowance (×CIT) | TAX-06 | 06 §9a, 04 §3.2 |
 | UAT-TAX-018 | Deferred tax post maker-checker + idempotent (Dr 1700/Cr 5950) | TAX-06, R05 | 06 §9a, 04 §3.2 |
+| UAT-TAX-018a | Deferred tax web screen — run → maker-checker post (`/deferred-tax`) | TAX-06, R05 | 06 §9a, 04 §3.2 |
 
 ## 07 — Payroll → `05-payroll.md`
 

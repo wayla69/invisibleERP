@@ -15,7 +15,8 @@ import { PrForm } from '@/components/procurement-forms';
 
 type PrLine = { item_id: string; request_qty: number; uom: string | null; reason: string | null };
 type Pr = { pr_no: string; pr_date: string | null; requested_by: string | null; status: string; priority: string | null; approved_by: string | null; lines: PrLine[] };
-type ItemMatch = { item_id: string; item_description: string | null; uom: string | null; unit_price: number };
+type ItemMatch = { item_id: string; item_description: string | null; uom: string | null; unit_price: number; last_price: number | null };
+type VendorMatch = { id: number; name: string; vendor_code: string | null };
 
 // Company-wide requisition surface (perm: pr_raise) — anyone in the company can raise a purchase
 // requisition. A PR is only a request: it is routed to Procurement for approval and conversion to a PO.
@@ -151,6 +152,15 @@ type ConvLine = { name: string; item_id: string; item_description: string; creat
 
 function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCancel: () => void }) {
   const [vendor, setVendor] = useState('');
+  const [vendorId, setVendorId] = useState<number | null>(null);
+  const [vendorMatches, setVendorMatches] = useState<VendorMatch[]>([]);
+  const [vendorSearching, setVendorSearching] = useState(false);
+  const searchVendor = async () => {
+    if (!vendor.trim()) return;
+    setVendorSearching(true);
+    try { const r = await api<{ vendors: VendorMatch[] }>(`/api/procurement/vendors/search?q=${encodeURIComponent(vendor)}`); setVendorMatches(r.vendors); }
+    catch (e: any) { notifyError(e.message); } finally { setVendorSearching(false); }
+  };
   const [lines, setLines] = useState<ConvLine[]>(() => pr.lines.map((l) => ({
     name: l.item_id, item_id: l.item_id, item_description: '', create_item: false,
     order_qty: l.request_qty, unit_price: 0, uom: l.uom ?? '', matches: [], searching: false, searched: false,
@@ -167,6 +177,7 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
     mutationFn: () => api<{ po_no: string; created_items: string[] }>(`/api/procurement/prs/${pr.pr_no}/to-po`, {
       method: 'POST',
       body: JSON.stringify({
+        vendor_id: vendorId ?? undefined,
         vendor_name: vendor.trim() || undefined,
         lines: lines.map((l) => ({ item_id: l.item_id.trim(), item_description: l.item_description.trim() || undefined, create_item: l.create_item, order_qty: Number(l.order_qty), unit_price: Number(l.unit_price) || 0, uom: l.uom.trim() || undefined })),
       }),
@@ -182,9 +193,22 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
         <div className="font-semibold">สร้าง PO จาก {pr.pr_no}</div>
         <Button variant="ghost" size="sm" onClick={onCancel}>ปิด</Button>
       </div>
-      <div className="mb-3 max-w-sm space-y-1">
-        <Label className="text-xs">ผู้ขาย (Vendor)</Label>
-        <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="ชื่อผู้ขาย / ซัพพลายเออร์" />
+      <div className="mb-3 max-w-lg space-y-1">
+        <Label className="text-xs">ผู้ขาย (Vendor){vendorId ? ' ✓ เลือกจากทะเบียนแล้ว' : ''}</Label>
+        <div className="flex gap-2">
+          <Input value={vendor} onChange={(e) => { setVendor(e.target.value); setVendorId(null); setVendorMatches([]); }} placeholder="ชื่อผู้ขาย / ซัพพลายเออร์" />
+          <Button type="button" variant="outline" size="sm" disabled={vendorSearching || !vendor.trim()} onClick={searchVendor}>{vendorSearching ? '…' : 'ค้นหาผู้ขาย'}</Button>
+        </div>
+        {vendorMatches.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            <span className="text-xs text-muted-foreground">เลือก:</span>
+            {vendorMatches.map((v) => (
+              <button key={v.id} type="button" onClick={() => { setVendor(v.name); setVendorId(v.id); setVendorMatches([]); }}
+                className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">{v.name}{v.vendor_code ? ` (${v.vendor_code})` : ''}</button>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">เลือกจากทะเบียนเพื่อผูกการคัดกรอง/สกอร์การ์ด หรือพิมพ์ชื่อใหม่ก็ได้</p>
       </div>
       <div className="space-y-3">
         {lines.map((l, i) => (
@@ -201,9 +225,9 @@ function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCa
                   <div className="flex flex-wrap gap-1 pt-1">
                     <span className="text-xs text-muted-foreground">เลือกรหัสที่ตรง:</span>
                     {l.matches.map((m) => (
-                      <button key={m.item_id} type="button" onClick={() => setLine(i, { item_id: m.item_id, uom: m.uom ?? l.uom, unit_price: m.unit_price || l.unit_price, matches: [], searched: false })}
+                      <button key={m.item_id} type="button" onClick={() => setLine(i, { item_id: m.item_id, uom: m.uom ?? l.uom, unit_price: (m.last_price ?? m.unit_price) || l.unit_price, matches: [], searched: false })}
                         className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">
-                        {m.item_id}{m.item_description ? ` — ${m.item_description}` : ''}
+                        {m.item_id}{m.item_description ? ` — ${m.item_description}` : ''}{m.last_price ? ` · ล่าสุด ฿${m.last_price}` : ''}
                       </button>
                     ))}
                   </div>

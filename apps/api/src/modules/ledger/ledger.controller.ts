@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Query, Body, Param, HttpCode, Res } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param, HttpCode, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
@@ -69,19 +69,6 @@ type RecurringBodyT = z.infer<typeof RecurringBody>;
 
 const ActiveBody = z.object({ active: z.boolean() });
 
-// GL-11 overlay curation. At least one field must be supplied (a no-op PATCH is rejected). display_* /
-// group_label as an empty string clears the curation back to the canonical default.
-const OverlayBody = z
-  .object({
-    active: z.boolean().optional(),
-    display_name: z.string().max(120).optional(),
-    display_name_th: z.string().max(120).optional(),
-    group_label: z.string().max(80).optional(),
-    sort_order: z.number().int().optional(),
-  })
-  .refine((b) => Object.keys(b).length > 0, { message: 'At least one field is required' });
-type OverlayBodyT = z.infer<typeof OverlayBody>;
-
 const PrepaidBody = z.object({
   name: z.string().min(1),
   total_amount: z.number().positive(),
@@ -100,23 +87,17 @@ export class LedgerController {
   constructor(private readonly svc: LedgerService) {}
 
   // Tenant's curated industry chart by default; `?all=true` returns the full canonical universe.
-  // `?include_inactive=true` keeps curated-off (active=false) overlay rows in the list so a `gl_coa`
-  // manager can see and re-activate them (the default read hides them, as before).
+  // `gl_coa` is added to the class perms so a CoA maintainer (e.g. FinancialController) can read the chart
+  // they curate via `PATCH /api/ledger/accounts/:code/overlay` (CoaController owns the write surfaces).
+  // `?include_inactive=true` also keeps curated-off (active=false) overlay rows so a curator can see and
+  // re-activate them (the default read hides them, as before).
   @Get('accounts')
+  @Permissions('exec', 'creditors', 'ar', 'gl_coa')
   accounts(@Query('all') all?: string, @Query('include_inactive') includeInactive?: string) {
     return this.svc.listAccounts({
       all: all === 'true' || all === '1',
       includeInactive: includeInactive === 'true' || includeInactive === '1',
     });
-  }
-
-  // GL-11 — per-tenant chart curation (overlay write). Rename (EN/TH), re-group, re-order, or toggle
-  // active on the caller's own tenant chart. Permission `gl_coa`; RLS pins the write to the caller's tenant.
-  // Curating a code that is not in the canonical master chart → COA_ADMIN_ONLY (master-code changes are HQ).
-  @Patch('accounts/:code/overlay')
-  @Permissions('gl_coa')
-  patchOverlay(@Param('code') code: string, @Body(new ZodValidationPipe(OverlayBody)) b: OverlayBodyT) {
-    return this.svc.updateAccountOverlay(code, b);
   }
 
   // ── multi-ledger / multi-GAAP ──

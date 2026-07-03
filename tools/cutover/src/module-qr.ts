@@ -120,6 +120,31 @@ async function main() {
   const effShow = await inj('GET', '/api/modules/effective', token);
   ok('effective navDisabled cleared after re-show', !((effShow.json.navDisabled ?? []).includes('/reservations')));
 
+  // ── 1c. CATEGORY ORDER (system-wide sidebar group ordering, migration 0230) ──
+  const order1 = ['nav.group.finance', 'nav.group.overview', 'nav.group.crm'];
+  const setOrd = await inj('POST', '/api/admin/modules/nav-order', token, { order: order1 });
+  ok('POST nav-order → echoes order', (setOrd.status === 200 || setOrd.status === 201) && JSON.stringify(setOrd.json.groupOrder) === JSON.stringify(order1), `groupOrder=${JSON.stringify(setOrd.json?.groupOrder)}`);
+
+  const modsOrd = await inj('GET', '/api/admin/modules', token);
+  ok('admin/modules returns groupOrder', JSON.stringify(modsOrd.json.groupOrder) === JSON.stringify(order1), `groupOrder=${JSON.stringify(modsOrd.json?.groupOrder)}`);
+
+  const effOrd = await inj('GET', '/api/modules/effective', token);
+  ok('effective returns groupOrder (order applies for all)', JSON.stringify(effOrd.json.groupOrder) === JSON.stringify(order1));
+
+  // Full-replace semantics: a new order supersedes the old and drops keys no longer present.
+  const order2 = ['nav.group.crm', 'nav.group.finance'];
+  await inj('POST', '/api/admin/modules/nav-order', token, { order: order2 });
+  const effOrd2 = await inj('GET', '/api/modules/effective', token);
+  ok('nav-order full-replaces (stale keys dropped)', JSON.stringify(effOrd2.json.groupOrder) === JSON.stringify(order2), `groupOrder=${JSON.stringify(effOrd2.json?.groupOrder)}`);
+
+  // ── 1d. RESET menu arrangement (clears visibility + order; leaves module flags) ──
+  await inj('POST', '/api/admin/modules/nav', token, { hrefs: ['/tips'], enabled: false }); // hide something first
+  const reset = await inj('POST', '/api/admin/modules/nav-reset', token, {});
+  ok('POST nav-reset → reset:true', (reset.status === 200 || reset.status === 201) && reset.json.reset === true, `status=${reset.status}`);
+  const effReset = await inj('GET', '/api/modules/effective', token);
+  ok('reset clears navDisabled + groupOrder', (effReset.json.navDisabled ?? []).length === 0 && (effReset.json.groupOrder ?? []).length === 0, `nav=${JSON.stringify(effReset.json?.navDisabled)} order=${JSON.stringify(effReset.json?.groupOrder)}`);
+  ok('reset leaves module flags intact (marketing still enabled)', effReset.json.modules?.find((m: any) => m.key === 'marketing')?.enabled === true);
+
   // ── 2. MASTER-DATA IMPORT/EXPORT ────────────────────────────────────────
   const ents = await inj('GET', '/api/admin/master-data/entities', token);
   const keys = (ents.json.entities ?? []).map((e: any) => e.key);

@@ -1,6 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { asc, like } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { moduleConfigs } from '../../database/schema';
+import { moduleConfigs, navGroupOrder } from '../../database/schema';
 import { MODULE_KEYS, ALWAYS_ON_MODULES, type Permission } from '@ierp/shared';
 
 // System-wide module enable/disable (mirrors legacy tbl_module_config). module_key == permission key.
@@ -49,7 +50,39 @@ export class ModuleConfigService {
         if (!NAV_ALWAYS_VISIBLE.includes(href)) navDisabled.push(href);
       }
     }
-    return { modules, disabled: modules.filter((x) => !x.enabled).map((x) => x.key), navDisabled };
+    const groupOrder = await this.loadGroupOrder();
+    return { modules, disabled: modules.filter((x) => !x.enabled).map((x) => x.key), navDisabled, groupOrder };
+  }
+
+  // Admin-curated sidebar category order (ascending). Empty ⇒ every client falls back to nav.ts code order.
+  private async loadGroupOrder(): Promise<string[]> {
+    const rows = await this.db.select().from(navGroupOrder).orderBy(asc(navGroupOrder.sortOrder));
+    return rows.map((r) => String(r.groupKey));
+  }
+
+  // Replace the whole category order with `order` (an ordered list of nav-group i18n keys). Full-replace
+  // keeps it idempotent and drops stale keys; presentation-only, never touches permissions/modules.
+  async setGroupOrder(order: string[], user: { username?: string }) {
+    const clean = [...new Set(order.filter((k) => typeof k === 'string' && k.length > 0))];
+    const db = this.db;
+    const now = new Date();
+    await db.delete(navGroupOrder);
+    if (clean.length > 0) {
+      await db.insert(navGroupOrder).values(
+        clean.map((groupKey, i) => ({ groupKey, sortOrder: i, updatedAt: now, updatedBy: user.username ?? null })),
+      );
+    }
+    return { groupOrder: clean };
+  }
+
+  // Reset menu CHROME to defaults: clear all visibility overrides (nav:<href> rows) and the category order,
+  // so every menu shows and groups fall back to code order. Deliberately leaves the module on/off flags
+  // (real MODULE_KEYS) untouched — those are a separate, API-enforced control, not "menu arrangement".
+  async resetNav(_user: { username?: string }) {
+    const db = this.db;
+    await db.delete(moduleConfigs).where(like(moduleConfigs.moduleKey, `${NAV_PREFIX}%`));
+    await db.delete(navGroupOrder);
+    return { reset: true };
   }
 
   // Show/hide one or more sidebar entries by href (bulk = a category/sub-section toggle). Only affects nav

@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { Inject } from '@nestjs/common';
 import { eq, and, isNull, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { accounts, accountGroups, journalLines } from '../../database/schema';
+import { accounts, accountGroups, journalLines, tenantAccounts } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 
 @Injectable()
@@ -85,5 +85,32 @@ export class CoaService {
       messageTh: `บัญชี ${code} มียอดคงเหลือ ไม่สามารถปิดได้`,
     });
     return this.updateAccount(code, { active: 'false', isPostable: false });
+  }
+
+  // GL-11 — per-tenant chart curation. Upserts the caller tenant's `tenant_accounts` overlay row for a
+  // canonical account: toggle whether it is active on this tenant's chart, override its display name(s),
+  // group label, and sort order. RLS-scoped (tenant_id is sourced from the request context, never the
+  // caller) so a tenant can only ever shape its OWN chart — it can neither read nor mutate another
+  // tenant's overlay. The overlay may only reference an EXISTING canonical code (it does not mint new
+  // accounts — that is the Admin/HQ canonical duty) and NEVER gates postings (see LedgerService.listAccounts).
+  async curateOverlay(code: string, dto: {
+    active?: boolean; displayName?: string | null; displayNameTh?: string | null;
+    groupLabel?: string | null; sortOrder?: number;
+  }) {
+    const tenantId = this.tenantId();
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'A tenant context is required to curate the chart of accounts', messageTh: 'ต้องมีบริบทกิจการเพื่อปรับแต่งผังบัญชี' });
+    const [canon] = await this.db.select({ code: accounts.code }).from(accounts).where(eq(accounts.code, code)).limit(1);
+    if (!canon) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${code} not found in the canonical chart`, messageTh: `ไม่พบบัญชี ${code} ในผังบัญชีกลาง` });
+    const set: Record<string, unknown> = {};
+    if (dto.active !== undefined) set.active = dto.active;
+    if (dto.displayName !== undefined) set.displayName = dto.displayName;
+    if (dto.displayNameTh !== undefined) set.displayNameTh = dto.displayNameTh;
+    if (dto.groupLabel !== undefined) set.groupLabel = dto.groupLabel;
+    if (dto.sortOrder !== undefined) set.sortOrder = dto.sortOrder;
+    const [row] = await this.db.insert(tenantAccounts)
+      .values({ tenantId, accountCode: code, ...set })
+      .onConflictDoUpdate({ target: [tenantAccounts.tenantId, tenantAccounts.accountCode], set })
+      .returning();
+    return row;
   }
 }

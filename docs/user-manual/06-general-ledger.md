@@ -57,28 +57,60 @@ account count. Each journal-entry account picker uses this same curated list.
 > picker. You can switch or extend your industry chart later from **Onboarding → Industry
 > packs**.
 
-### Managing the chart
+### Managing the chart (GL-11)
 
-**Screen:** บัญชีแยกประเภท (`/accounting`) → **ผังบัญชี** tab. **Required permission:** `gl_coa`
-(held by *FinancialController* and *Admin*; a *GlAccountant*, who only posts journals, does **not**
-have it — this keeps posting separate from re-classifying the chart).
+The chart has **two levels**, and who may change each level differs:
 
-If you hold `gl_coa`, the **ผังบัญชี** tab shows editing controls on your industry chart. These
-tune only **how each account is presented on your company's chart** — they never change the
-underlying master code or affect any posting. A blue note on the tab reminds you of this. Each
-change saves immediately and the list refreshes.
+**1 · Curate your own chart — permission `gl_coa` (e.g. *Financial Controller*).**
+You can tailor how the shared accounts appear *on your company's chart* — switch an
+account **on/off**, rename it (English + Thai), change its section heading, and reorder it —
+without affecting any other company. This is done per account via
+`PATCH /api/ledger/accounts/<code>/overlay` (any of `active`, `display_name`,
+`display_name_th`, `group_label`, `sort_order`). Your edits are **scoped to your company
+only** — you can never see or change another company's chart, and curating **never blocks a
+posting** (the account still exists in the engine). You may only curate an account **that
+already exists** in the master chart.
+
+**In the app.** On the **ผังบัญชี** tab of `/accounting`, a `gl_coa` user sees per-row editing
+controls (a blue note reminds you these tune presentation only — they never change the master
+code or a posting). Each change saves immediately and the list refreshes; a user without
+`gl_coa` sees the same tab **read-only**.
 
 | Action | How | Effect |
 |---|---|---|
-| **Rename (EN / TH)** | Click the **pencil** on a row → edit **ชื่อบัญชี (อังกฤษ)** and/or **ชื่อบัญชี (ไทย)** → **บันทึก**. Leave a field blank to fall back to the standard name. | The account's display name on your chart and in every account picker. |
-| **Set group** | In the same dialog, set **กลุ่ม (หัวข้อในผัง)**. Blank = use the account type as the group. | The section heading the account is grouped under. |
-| **Turn on / off** | Click the **power** icon. | Off = hidden from the default chart and pickers (it still shows here, struck through with a *ปิดใช้งาน* badge, so you can turn it back on). An account with activity always stays on your reports. |
-| **Re-order** | Use the **↑ / ↓** arrows on a row. | Moves the account up or down within the chart order. |
+| **Rename (EN / TH)** | Row **pencil** → edit **ชื่อบัญชี (อังกฤษ)** / **ชื่อบัญชี (ไทย)** → **บันทึก**. Blank = fall back to the standard name. | The display name on your chart and every account picker. |
+| **Set group** | Same dialog → **กลุ่ม (หัวข้อในผัง)**. Blank = use the account type. | The section heading the account is grouped under. |
+| **Turn on / off** | Row **power** icon. | Off = hidden from the default chart and pickers; it stays visible here (struck through, *ปิดใช้งาน* badge) so you can turn it back on. An account with activity always stays on your reports. |
+| **Re-order** | Row **↑ / ↓** arrows. | Moves the account up or down the chart order. |
 
-> **Master-code changes are HQ-only.** Creating a brand-new account code, or changing/removing a
-> master code, is a **platform-administrator (HQ)** operation — not offered here. If you try to
-> curate a code that isn't in the master chart you'll see *"การเปลี่ยนรหัสบัญชีหลักทำได้เฉพาะผู้ดูแลระบบ (HQ)"*.
-> Company-level curation covers names, grouping, ordering and on/off only.
+Creating or removing a **master code** is not offered here — see level 2 below.
+
+**2 · Add or change a master account — permission `gl_coa` **and** the platform *Admin* (HQ) role.**
+The master account list (the *code · type · normal balance*) is a **single shared list** used
+by every company on the platform, so creating a brand-new code, renaming the master account,
+changing its postability, or retiring it is a **head-office (Admin/HQ)** action:
+
+| Action | Endpoint | Notes |
+|--------|----------|-------|
+| Create account | `POST /api/ledger/accounts` | Auto-sets normal balance (*C* for Liability/Equity/Revenue, *D* for Asset/Expense). |
+| Update account | `PATCH /api/ledger/accounts/<code>` | Name, group, postability, dimension requirements, effective dates. |
+| Deactivate account | `POST /api/ledger/accounts/<code>/deactivate` | Sets the account inactive + non-postable. |
+
+> **Why the split?** A *Financial Controller* shapes their own company's chart freely, but the
+> underlying master codes are shared — so **only the platform administrator** can add or alter
+> them. If you try a master change without the Admin/HQ role you'll get **`COA_ADMIN_ONLY`** —
+> use the curation options above (level 1) instead, or ask your platform administrator.
+
+**Common messages**
+
+| Message | Meaning | What to do |
+|---------|---------|-----------|
+| `COA_ADMIN_ONLY` | You tried a master-account change without the Admin/HQ role | Curate your own chart (level 1), or ask the platform admin |
+| `DUPLICATE_ACCOUNT` | The code already exists | Use a new code, or edit the existing account |
+| `ACCOUNT_HAS_BALANCE` | You tried to deactivate an account that still has a balance | Clear the balance with a correcting entry first |
+| `CODE_HAS_POSTINGS` | You tried to turn off postability on an account that already has entries | Leave it postable; use an *effective-to* date instead |
+| `ACCOUNT_NOT_FOUND` | You curated a code that isn't in the master chart | Use an existing code (a new code is an Admin/HQ add) |
+| `TENANT_REQUIRED` | Curation attempted without a company context | Sign in to the company whose chart you're curating |
 
 ---
 
@@ -636,22 +668,48 @@ rate first), `SELF_POST` (you ran it — ask a colleague to post), `ALREADY_POST
 
 ## Deferred tax (TAS 12) — control TAX-06
 
-**Who:** Tax / Financial Controller (`gl_close`/`gl_post`); a *different* user posts.
+**Where:** **Ledger & GL → ภาษีเงินได้รอตัดบัญชี** (`/deferred-tax`).
+**Who:** Tax / Financial Controller (`gl_close`/`gl_post`/`exec`); a *different* user posts.
 
 Recognise **deferred tax** on book-vs-tax **temporary** differences (the AR allowance
 and accelerated depreciation) at the Thai CIT rate (20%).
 
-1. **Run** — `POST /api/ledger/deferred-tax/run` with the period. It computes a deferred
-   tax **asset** from the posted AR allowance and a deferred tax **liability** from
-   accelerated depreciation, nets them, and shows the **delta** vs the last posted run.
-2. **Post** — a **different** user calls `POST /api/ledger/deferred-tax/{id}/post`. An
-   increase in the net asset posts **Dr 1700 Deferred Tax Asset / Cr 5950 Deferred Tax
-   Expense** (a deferred tax benefit). You **cannot post a run you ran**.
+1. **Run** — on the **คำนวณงวดใหม่** tab, enter the period (`YYYY-MM`; optionally an
+   as-of date, tax rate, and tax-depreciation factor) and press **คำนวณ**. It computes a
+   deferred tax **asset** from the posted AR allowance and a deferred tax **liability**
+   from accelerated depreciation, nets them, and shows the **delta** vs the last posted
+   run, with the temporary-difference breakdown. This stages an **Open** run.
+2. **Post** — on the **รายการที่คำนวณ / โพสต์** tab, a *different* user presses **โพสต์เข้า GL**
+   on the Open run. An increase in the net asset posts **Dr 1700 Deferred Tax Asset /
+   Cr 5950 Deferred Tax Expense** (a deferred tax benefit). You **cannot post a run you
+   ran** (segregation of duties). *(APIs: `POST /api/ledger/deferred-tax/run` and
+   `POST /api/ledger/deferred-tax/{id}/post`.)*
 
 **Expected result:** 1700 (and 5950) move by the period delta; income tax expense
 reflects the deferred portion. Re-posting a posted period is blocked (`ALREADY_POSTED`).
 
 **Errors:** `SELF_POST`, `ALREADY_POSTED`, `DT_RUN_NOT_FOUND`.
+
+## Cost centres & dimensional P&L
+
+**Where:** **Ledger & GL → ศูนย์ต้นทุน & กำไรตามมิติ** (`/cost-centers`).
+**Who:** `exec` / `masterdata`.
+
+Cost centres are a reporting **dimension** (department, branch, or project) you can attach
+to journal lines to see profit & loss *sliced* by that dimension — without opening a
+separate ledger book.
+
+1. **Create a cost centre** — on the **ศูนย์ต้นทุน (Master)** tab, enter a **code** and
+   **name**, pick the **type** (department / branch / project), and optionally a parent
+   code, then press **เพิ่มศูนย์ต้นทุน**. Codes are unique per company.
+2. **View a dimensional P&L** — on the **กำไร-ขาดทุนตามมิติ** tab, pick a cost centre and a
+   **from/to** date range. The screen shows **revenue**, **expense**, and **net income**
+   plus a per-account breakdown for lines tagged with that cost centre.
+
+*(APIs: `POST` / `GET /api/ledger/cost-centers`, and
+`GET /api/ledger/cost-centers/{code}/pl?from=&to=`; the income-statement endpoint also
+accepts `?cost_center=` for the same filter.)* This is a **read/compute** view — it posts
+nothing and carries no control of its own.
 
 ---
 

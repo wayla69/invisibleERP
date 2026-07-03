@@ -346,6 +346,8 @@ export const INTERNAL_NAV: NavGroup[] = [
           { label: 'nav.revenue', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'nav.assets', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
           { label: 'nav.leases', href: '/leases', icon: Scale, perms: ['exec', 'gl_post'] },
+          { label: 'nav.deferred_tax', href: '/deferred-tax', icon: Calculator, perms: ['gl_close', 'gl_post', 'exec'] },
+          { label: 'nav.cost_centers', href: '/cost-centers', icon: PieChart, perms: ['exec', 'masterdata'] },
           { label: 'nav.period_close', href: '/finance/period-close', icon: CalendarClock, perms: ['gl_close', 'exec'] },
         ],
       },
@@ -514,6 +516,25 @@ export const INTERNAL_NAV: NavGroup[] = [
  *  group needs to be treated as one list (command palette, active-label lookup). */
 export function allGroupItems(g: NavGroup): NavItem[] {
   return [...(g.items ?? []), ...(g.subgroups?.flatMap((s) => s.items) ?? [])];
+}
+
+/** Order groups by an admin-curated list of group `title`s (system-wide sidebar category order). Groups
+ *  present in `order` sort by its index; groups absent (e.g. newly shipped) keep their code order, after the
+ *  ordered ones. Stable, non-mutating. Empty/undefined `order` ⇒ unchanged. */
+export function orderGroups<T extends { title: string }>(groups: T[], order?: string[]): T[] {
+  if (!order || order.length === 0) return groups;
+  const rank = new Map(order.map((k, i) => [k, i]));
+  return groups
+    .map((g, i) => ({ g, i }))
+    .sort((a, b) => {
+      const ra = rank.get(a.g.title);
+      const rb = rank.get(b.g.title);
+      if (ra != null && rb != null) return ra - rb;
+      if (ra != null) return -1;
+      if (rb != null) return 1;
+      return a.i - b.i;
+    })
+    .map((x) => x.g);
 }
 
 /** Total visible-item count of a group across flat items + subgroups. */
