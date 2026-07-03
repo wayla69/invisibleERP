@@ -198,8 +198,9 @@ an unknown project code is rejected (`PROJECT_NOT_FOUND`). A goods receipt inher
 **Material requisition (PMR) — the draw-and-approve flow (docs/32, M2).** Staff request material against BoQ
 lines via `POST /api/pmr` (project + line + qty + unit cost). The system checks each line's **remaining
 budget**:
-- **Within budget** → the requisition is *routed* and a **project-tagged purchase requisition (PR)** is raised
-  for procurement to buy.
+- **Within budget** → the requisition is *routed*. If the material is **already on hand** it is **reserved and
+  issued straight to the project** from stock (no purchase needed); otherwise a **project-tagged purchase
+  requisition (PR)** is raised for procurement to buy (docs/32 FU2).
 - **Over budget** → the requisition is **held for approval** and a **LINE approval card** (อนุมัติ / ปฏิเสธ) is
   pushed to the authoriser(s). The authoriser (≠ the requester) approves — from the app or **one-tap in LINE** —
   and an **over-budget project PO is auto-drafted** (status *Draft*) for procurement to complete the purchase.
@@ -260,6 +261,7 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 | 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |
 | 2.1 | 2026-06-30 | **Program (cross-project) critical path** (PMO-4) — group projects into a *program* (`program_code`) with cross-project finish-to-start dependencies; the new `/projects/program/{code}` view runs a CPM over the program (each row a whole project) and highlights the program critical chain + per-project slack. A *โปรแกรม (Programs)* card on the Portfolio command center lists them. |
 | 2.2 | 2026-06-30 | **Pipeline → FTE forecast** (PMO-5) — the Portfolio billings forecast now also projects **กำลังคน (FTE)** demand per month: committed allocation + the pipeline's projected staffing draw (weighted value ÷ a configurable revenue-per-FTE-month rate), with a peak-FTE badge — "if we win the pipeline, how many people would each month need?". |
+| 2.10 | 2026-07-03 | **Requisition prefers stock** (docs/32, FU2) — a within-budget requisition now issues the material straight to the project **from on-hand stock** when available, and only raises a PR to buy when it isn't. |
 | 2.9 | 2026-07-03 | **Budget policy** (docs/32, FU1) — a per-project **over-budget tolerance %** (small overages auto-proceed before approval; 0 = strict), and **site cash consumes budget** (an advance/petty-cash tagged to a BoQ line reduces its remaining). |
 | 2.8 | 2026-07-03 | **Project-linked advances & reimbursements** (docs/32, M4, PROJ-14) — advances, expense-reimbursement claims and petty-cash can be raised **against a project** (`project_code`; unknown → `PROJECT_NOT_FOUND`); the spend posts tagged to the project, and `GET /api/projects/{code}/site-cash` rolls up all site cash (advances + reimbursements + petty-cash + totals) on the project. |
 | 2.7 | 2026-07-03 | **Stock reservation → issue-to-project** (docs/32, M3, INV-13) — reserve on-hand stock for a project (`POST /api/reservations`; available = on hand − held, no double-allocation → `INSUFFICIENT_STOCK`), then **issue it to the project** (`…/{id}/issue`) which moves the value from inventory (1200) into project WIP (1260); **release** frees an unused hold. |
