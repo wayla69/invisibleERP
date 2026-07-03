@@ -296,6 +296,12 @@ export class ProjectsController {
     return this.svc.listCommitments(code);
   }
 
+  // Site cash (M4, PROJ-14): advances + expense reimbursements + petty-cash raised against this project.
+  @Get(':code/site-cash')
+  siteCash(@Param('code') code: string) {
+    return this.svc.siteCash(code);
+  }
+
   // RACI accountability matrix (B3): per-task A/R/C/I + per-person rollup + accountability gaps.
   @Get(':code/raci')
   raci(@Param('code') code: string) {

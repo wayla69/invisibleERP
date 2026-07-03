@@ -3,13 +3,14 @@ import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, payslips } from '../../database/schema/payroll';
 import { timesheets, leaveRequests, leaveBalances, expenseClaims } from '../../database/schema/hcm';
+import { projects } from '../../database/schema';
 import { FinanceService } from '../finance/finance.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { LineNotifyService } from '../messaging/line-notify.service';
 
 export interface LeaveSelfDto { leave_type?: string; from_date: string; to_date: string; days: number; paid?: boolean; reason?: string }
-export interface ExpenseDto { claim_date?: string; category?: string; amount: number; description?: string }
+export interface ExpenseDto { claim_date?: string; category?: string; amount: number; description?: string; project_code?: string }
 
 // Phase D3 — Employee Self-Service. Every method resolves the employee from the JWT username (NEVER a
 // body param) and scopes strictly to that employee's own rows — an employee can only see/act on their
@@ -84,8 +85,14 @@ export class EssService {
     if (!(n(dto.amount) > 0)) throw new BadRequestException({ code: 'BAD_PAYLOAD', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่า 0' });
     const db = this.db;
     const emp = await this.me(user);
-    const [r] = await db.insert(expenseClaims).values({ tenantId: emp.tenantId, employeeId: Number(emp.id), claimDate: dto.claim_date ?? ymd(), category: dto.category ?? 'general', amount: String(n(dto.amount)), description: dto.description ?? null, status: 'Pending', createdBy: user.username }).returning({ id: expenseClaims.id });
-    return { id: Number(r!.id), status: 'Pending', amount: n(dto.amount) };
+    let projectId: number | null = null; // M4 (docs/32) — reimbursement against a project (nullable; 404 on bad code)
+    if (dto.project_code?.trim()) {
+      const [p] = await db.select({ id: projects.id }).from(projects).where(eq(projects.projectCode, dto.project_code.trim())).limit(1);
+      if (!p) throw new BadRequestException({ code: 'PROJECT_NOT_FOUND', message: `Project ${dto.project_code} not found`, messageTh: 'ไม่พบโครงการ' });
+      projectId = Number(p.id);
+    }
+    const [r] = await db.insert(expenseClaims).values({ tenantId: emp.tenantId, employeeId: Number(emp.id), claimDate: dto.claim_date ?? ymd(), category: dto.category ?? 'general', amount: String(n(dto.amount)), description: dto.description ?? null, projectId, status: 'Pending', createdBy: user.username }).returning({ id: expenseClaims.id });
+    return { id: Number(r!.id), status: 'Pending', amount: n(dto.amount), project_id: projectId };
   }
 
   // Approver inbox — every PENDING expense claim awaiting a decision, with the claimant's name/code so a

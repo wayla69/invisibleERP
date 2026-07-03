@@ -76,6 +76,7 @@ export const expenseClaims = pgTable(
     category: text('category'),
     amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
     description: text('description'),
+    projectId: bigint('project_id', { mode: 'number' }), // M4 (docs/32) — reimbursement against a project (nullable)
     status: text('status').notNull().default('Pending'), // Pending | Approved | Rejected
     decidedBy: text('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),

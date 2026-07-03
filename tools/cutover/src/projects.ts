@@ -272,6 +272,22 @@ async function main() {
   const availRel = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
   ok('Released reservation restores availability → available 70', near(availRel.json.available, 70), JSON.stringify(availRel.json));
 
+  // ── 9g. Project-linked advances & reimbursements (M4, PROJ-14): site cash managed on the project ──
+  const adv = await inj('POST', '/api/finance/advances', admin, { payee: 'ช่างสมชาย', amount: 2000, purpose: 'ค่าเดินทางหน้างาน', project_code: 'PRJ-A' });
+  ok('Issue project-tagged advance → 2xx + project_id set', adv.status < 300 && !!adv.json.advance_no && Number(adv.json.project_id) === Number(prjRow?.id), JSON.stringify({ s: adv.status, prj: adv.json.project_id }));
+  const projLines1 = await db.select().from(s.journalLines).where(eq(s.journalLines.projectId, Number(prjRow?.id)));
+  const advLine = projLines1.find((l: any) => l.accountCode === '1180');
+  ok('Advance GL: Dr 1180 line carries the project dimension', !!advLine && near(advLine.debit, 2000), JSON.stringify({ acct: '1180', dr: advLine?.debit }));
+  const stl = await inj('POST', `/api/finance/advances/${adv.json.advance_no}/settle`, admin, { settled_expense: 2000 });
+  ok('Settle advance → settled', stl.status < 300 && stl.json.status === 'settled', JSON.stringify({ s: stl.status }));
+  const projLines2 = await db.select().from(s.journalLines).where(eq(s.journalLines.projectId, Number(prjRow?.id)));
+  const expLine = projLines2.find((l: any) => l.accountCode === '5100');
+  ok('Settled spend GL: Dr 5100 expense line carries the project dimension', !!expLine && near(expLine.debit, 2000), JSON.stringify({ dr: expLine?.debit }));
+  const sc = await inj('GET', '/api/projects/PRJ-A/site-cash', admin);
+  ok('Project site-cash rollup: advance listed, advances total 2000', (sc.json.advances ?? []).some((a: any) => a.advance_no === adv.json.advance_no) && near(sc.json.totals?.advances, 2000), JSON.stringify({ n: sc.json.advances?.length, t: sc.json.totals?.advances }));
+  const advBad = await inj('POST', '/api/finance/advances', admin, { payee: 'x', amount: 100, project_code: 'PRJ-NOPE' });
+  ok('Advance with unknown project_code → 404 PROJECT_NOT_FOUND', advBad.status === 404 && advBad.json.error?.code === 'PROJECT_NOT_FOUND', `${advBad.status} ${advBad.json.error?.code}`);
+
   // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
   const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
   const oppNo = opp.json.opp_no;
