@@ -67,7 +67,7 @@ async function main() {
   const VA = Number(va.id), VB = Number(vb.id);
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ bodyLimit: 16 * 1024 * 1024 })); // upload-channel bodies (base64 image/PDF), mirrors main.ts
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
@@ -329,6 +329,58 @@ async function main() {
   ok('Intake worklist: HQ sees all intakes; tenant T2 sees none (RLS); re-post is idempotent (same txn)',
     (wlI.json.intakes ?? []).length >= 6 && (wlIT2.json.intakes ?? []).length === 0 && repost.json.txn_no === postB.json.txn_no,
     JSON.stringify({ hq: wlI.json.count, t2: wlIT2.json.count, same: repost.json.txn_no === postB.json.txn_no }));
+
+  // ── Q. AP intake UPLOAD channel (EXP-10): direct image/PDF → extract → auto-map → matched-at-posting ──
+  // A minimal single-page PDF with a real TEXT LAYER (uncompressed content stream) — the deterministic
+  // no-API-key path CI relies on. latin1 keeps byte offsets exact.
+  const miniPdf = (lines: string[], flate = false) => {
+    const content = `BT /F1 12 Tf 72 720 Td ${lines.map((l, i) => `${i ? '0 -16 Td ' : ''}(${l.replace(/([\\()])/g, '\\$1')}) Tj `).join('')}ET`;
+    const stream = flate ? require('node:zlib').deflateSync(Buffer.from(content, 'latin1')) : Buffer.from(content, 'latin1');
+    const head = `4 0 obj << ${flate ? '/Filter /FlateDecode ' : ''}/Length ${stream.length} >> stream\n`;
+    const parts = [
+      Buffer.from('%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >> endobj\n' + head, 'latin1'),
+      stream,
+      Buffer.from('\nendstream endobj\n5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF', 'latin1'),
+    ];
+    return Buffer.concat(parts);
+  };
+  const pdfDataUrl = (b: Buffer) => `data:application/pdf;base64,${b.toString('base64')}`;
+
+  // (a) PDF with an explicit PO number → upload/auto books + matches in one call; the file is stored.
+  const poQ = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 25, unit_price: 40 }] });
+  const poQNo = poQ.json.po_no as string;
+  await inj('PATCH', `/api/procurement/pos/${poQNo}/approve`, admin, { approve: true });
+  await inj('POST', '/api/procurement/grs', admin, { po_no: poQNo, items: [{ item_id: 'X', received_qty: 25 }] });
+  const pdfA = miniPdf(['V1 Supplies Co Ltd', 'Invoice# IV-9100', 'Date: 2026-07-01', `PO Number: ${poQNo}`, 'Total 1,000.00']);
+  const upA = await inj('POST', '/api/procurement/ap-intake/upload/auto', admin, { file_name: 'inv-9100.pdf', data_url: pdfDataUrl(pdfA) });
+  ok('Upload PDF (text layer, no API key): extracted via rules → auto-mapped + posted + matched, file stored',
+    upA.json.status === 'Posted' && upA.json.po_no === poQNo && upA.json.match_status === 'matched' && truthy(upA.json.payable) && upA.json.invoice_no === 'IV-9100' && upA.json.extract_source === 'rules' && upA.json.has_file === true,
+    JSON.stringify({ st: upA.json.status, po: upA.json.po_no, inv: upA.json.invoice_no, src: upA.json.extract_source }));
+  const fileA = await inj('GET', `/api/procurement/ap-intake/${upA.json.intake_no}/file`, admin);
+  ok('Stored source document retrievable (inline data: URL fallback — no object store in harness)',
+    fileA.json.file_name === 'inv-9100.pdf' && String(fileA.json.data_url ?? '').startsWith('data:application/pdf;base64,') && fileA.json.mime === 'application/pdf',
+    JSON.stringify({ name: fileA.json.file_name, mime: fileA.json.mime, inline: !!fileA.json.data_url }));
+
+  // (b) FlateDecode text layer inflates correctly (direct extractor check on dist).
+  const { pdfExtractText } = require('../../../apps/api/dist/common/pdf-text');
+  const flateText = pdfExtractText(miniPdf(['Invoice# IV-9200', 'Total 555.00'], true));
+  ok('PDF text-layer extractor handles FlateDecode streams', /IV-9200/.test(flateText) && /555\.00/.test(flateText), JSON.stringify(flateText).slice(0, 60));
+
+  // (c) image without an API key → honestly EMPTY extraction: NeedsReview with the file kept for a human;
+  // posting is refused (no amount) rather than booking a blank bill.
+  const png1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const upC = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'photo.png', data_url: png1x1 });
+  const postC2 = await inj('POST', `/api/procurement/ap-intake/${upC.json.intake_no}/post`, admin, {});
+  ok('Upload image with no AI key → NeedsReview (source none, file stored); post refused INTAKE_AMOUNT_REQUIRED',
+    upC.json.status === 'NeedsReview' && upC.json.extract_source === 'none' && upC.json.has_file === true && postC2.status === 400 && postC2.json.error?.code === 'INTAKE_AMOUNT_REQUIRED',
+    JSON.stringify({ st: upC.json.status, src: upC.json.extract_source, post: postC2.json.error?.code }));
+
+  // (d) type/size gates: only PNG/JPEG/WebP/PDF, bounded size.
+  const upBadType = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'x.txt', data_url: `data:text/plain;base64,${Buffer.from('hello').toString('base64')}` });
+  const upTooBig = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'big.png', data_url: `data:image/png;base64,${'A'.repeat(6_600_000)}` });
+  ok('Upload gates: text/plain → 400 UNSUPPORTED_FILE_TYPE; oversized image → 400 FILE_TOO_LARGE',
+    upBadType.status === 400 && upBadType.json.error?.code === 'UNSUPPORTED_FILE_TYPE' && upTooBig.status === 400 && upTooBig.json.error?.code === 'FILE_TOO_LARGE',
+    JSON.stringify({ type: upBadType.json.error?.code, size: upTooBig.json.error?.code }));
 
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

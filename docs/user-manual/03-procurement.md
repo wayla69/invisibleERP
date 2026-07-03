@@ -227,7 +227,12 @@ scanned text of the invoice and let the system do the mapping (control **EXP-10*
 payable is an accounting act).
 
 1. Go to **Procurement** → **สแกนใบแจ้งหนี้จับคู่ PO** (`/procurement/ap-intake`).
-2. Paste the invoice text (from your scanner/OCR) into the box.
+2. Either **attach the invoice file directly** — press **แนบรูป / PDF** and pick a
+   photo (PNG/JPEG/WebP) or a PDF — or paste the invoice text into the box.
+   A digital PDF is read from its text layer immediately; a photo/scan is read by
+   AI (if AI is not configured, the intake queues for review with the file attached
+   so you can map and key it manually). The uploaded file is kept on the intake —
+   open it any time from the **เอกสารต้นฉบับ** link on the result card.
 3. Choose one of two buttons:
    - **ดึงข้อมูล + จับคู่ PO** — extracts the vendor, tax ID, invoice number, date,
      amount and any **PO number printed on the document**, then auto-maps the PO.

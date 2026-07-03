@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { CheckCheck, FileScan, ListChecks, Loader2, ScanLine, Send, ShieldAlert, ShieldCheck, Link2 } from 'lucide-react';
+import { CheckCheck, FileScan, FileText, ListChecks, Loader2, Paperclip, ScanLine, Send, ShieldAlert, ShieldCheck, Link2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -23,8 +23,20 @@ type Intake = {
   vendor_name: string | null; vendor_tax_id: string | null; invoice_no: string | null; invoice_date: string | null;
   amount: number | null; currency: string | null; po_no: string | null; map_method: string | null;
   map_confidence: number; candidates: Candidate[]; dup_of: string | null;
+  file_name: string | null; has_file: boolean;
   txn_no: string | null; match_status: string | null; payable: boolean | null; auto_posted?: boolean;
 };
+
+// Open the stored source document (object-store URL, or the inline data: URL via a blob URL).
+async function openIntakeFile(intakeNo: string) {
+  const f = await api<{ url: string | null; data_url: string | null }>(`/api/procurement/ap-intake/${encodeURIComponent(intakeNo)}/file`);
+  const src = f.url ?? f.data_url;
+  if (!src) return;
+  if (src.startsWith('data:')) {
+    const blob = await (await fetch(src)).blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  } else window.open(src, '_blank');
+}
 
 const statusVariant = (s: string) => (s === 'Posted' ? 'success' : s === 'Mapped' ? 'info' : 'warning');
 const matchVariant = (s: string | null) => (s === 'matched' ? 'success' : s == null ? 'muted' : 'destructive');
@@ -51,6 +63,7 @@ export default function ApIntakePage() {
 function ScanTab() {
   const qc = useQueryClient();
   const [text, setText] = useState('');
+  const [file, setFile] = useState<{ name: string; dataUrl: string } | null>(null);
   const [res, setRes] = useState<Intake | null>(null);
 
   const done = (r: Intake, msg: string) => {
@@ -58,32 +71,53 @@ function ScanTab() {
     notifySuccess(`${msg} · ${r.intake_no}`);
     qc.invalidateQueries({ queryKey: ['ap-intake-list'] });
   };
+  // With a file attached the upload endpoints take over; otherwise the pasted text is used.
+  const body = () => (file ? { url: '/api/procurement/ap-intake/upload', payload: { file_name: file.name, data_url: file.dataUrl } } : { url: '/api/procurement/ap-intake', payload: { text } });
   const scan = useMutation({
-    mutationFn: () => api<Intake>('/api/procurement/ap-intake', { method: 'POST', body: JSON.stringify({ text }) }),
+    mutationFn: () => { const b = body(); return api<Intake>(b.url, { method: 'POST', body: JSON.stringify(b.payload) }); },
     onSuccess: (r) => done(r, r.po_no ? `จับคู่ ${r.po_no} แล้ว` : 'รอตรวจสอบ'),
     onError: (e) => notifyError((e as Error).message),
   });
   const auto = useMutation({
-    mutationFn: () => api<Intake>('/api/procurement/ap-intake/auto', { method: 'POST', body: JSON.stringify({ text }) }),
+    mutationFn: () => { const b = body(); return api<Intake>(`${b.url}/auto`, { method: 'POST', body: JSON.stringify(b.payload) }); },
     onSuccess: (r) => done(r, r.auto_posted ? `บันทึกบิล ${r.txn_no} + จับคู่แล้ว` : 'ยังไม่บันทึก — รอตรวจสอบ'),
     onError: (e) => notifyError((e as Error).message),
   });
+  const pickFile = (f: File | undefined) => {
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setFile({ name: f.name, dataUrl: String(reader.result) });
+    reader.readAsDataURL(f);
+  };
+  const ready = file != null || !!text.trim();
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card className="gap-4">
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ScanLine className="size-4 text-primary" /> ข้อความใบแจ้งหนี้ (จากสแกน/OCR)</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ScanLine className="size-4 text-primary" /> เอกสารใบแจ้งหนี้ (ไฟล์ หรือข้อความ)</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <textarea className="min-h-56 w-full rounded-md border bg-transparent p-3 text-sm" placeholder="วางข้อความใบแจ้งหนี้ที่นี่…" value={text} onChange={(e) => setText(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent">
+              <Paperclip className="size-4" /> แนบรูป / PDF
+              <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp,application/pdf" onChange={(e) => pickFile(e.target.files?.[0])} />
+            </label>
+            {file && (
+              <span className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs">
+                <FileText className="size-3" /> {file.name}
+                <button aria-label="เอาไฟล์ออก" onClick={() => setFile(null)}><X className="size-3" /></button>
+              </span>
+            )}
+          </div>
+          <textarea className="min-h-44 w-full rounded-md border bg-transparent p-3 text-sm disabled:opacity-50" placeholder="…หรือวางข้อความใบแจ้งหนี้ที่นี่" value={text} onChange={(e) => setText(e.target.value)} disabled={file != null} />
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" disabled={scan.isPending || !text.trim()} onClick={() => scan.mutate()}>
+            <Button variant="outline" disabled={scan.isPending || !ready} onClick={() => scan.mutate()}>
               {scan.isPending ? <Loader2 className="size-4 animate-spin" /> : <FileScan className="size-4" />} ดึงข้อมูล + จับคู่ PO
             </Button>
-            <Button disabled={auto.isPending || !text.trim()} onClick={() => auto.mutate()}>
+            <Button disabled={auto.isPending || !ready} onClick={() => auto.mutate()}>
               {auto.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} อัตโนมัติทั้งหมด (บันทึกบิล + จับคู่ 3 ทาง)
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">"อัตโนมัติทั้งหมด" ต้องมีสิทธิ์เจ้าหนี้ (creditors) และจะบันทึกเฉพาะเอกสารที่จับคู่ได้ชัดเจนและไม่ซ้ำเท่านั้น</p>
+          <p className="text-xs text-muted-foreground">"อัตโนมัติทั้งหมด" ต้องมีสิทธิ์เจ้าหนี้ (creditors) และจะบันทึกเฉพาะเอกสารที่จับคู่ได้ชัดเจนและไม่ซ้ำเท่านั้น · PDF ที่มีชั้นข้อความอ่านได้ทันที ส่วนรูปถ่าย/สแกนใช้ AI (ถ้าไม่ได้ตั้งค่า AI จะเข้าคิวตรวจสอบพร้อมไฟล์แนบ)</p>
         </CardContent>
       </Card>
       {res ? <IntakeDetail intake={res} onChanged={setRes} /> : (
@@ -112,6 +146,11 @@ function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r:
 
   const rows: [string, any][] = [
     ['สถานะ', <Badge key="s" variant={statusVariant(r.status)}>{r.status}</Badge>],
+    ['เอกสารต้นฉบับ', r.has_file ? (
+      <button key="f" className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline" onClick={() => openIntakeFile(r.intake_no)}>
+        <FileText className="size-3.5" /> {r.file_name ?? 'เปิดไฟล์'}
+      </button>
+    ) : null],
     ['ผู้ขาย', r.vendor_name], ['เลขผู้เสียภาษี', r.vendor_tax_id],
     ['เลขที่ใบแจ้งหนี้', r.invoice_no], ['วันที่', r.invoice_date],
     ['จำนวนเงิน', r.amount != null ? num(r.amount) : null],

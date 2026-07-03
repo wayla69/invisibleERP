@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { llmClient } from '../../common/llm-client';
 import type { JwtUser } from '../../common/decorators';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { pdfExtractText } from '../../common/pdf-text';
+
+const EXTRACT_SYSTEM = 'You extract vendor-invoice fields. Return ONLY JSON: {vendor_name, vendor_tax_id, invoice_no, invoice_date (YYYY-MM-DD), amount (number), currency, po_no (the referenced purchase-order number, null if absent)}. No prose.';
 
 // Document-AI intake (Platform Phase 16 — B2). Extracts a structured AP-invoice draft from pasted text.
 // With an Anthropic key it uses Claude; with NO key it falls back to deterministic regex heuristics (so CI
@@ -33,21 +36,55 @@ export class DocAiService {
     return { vendor_name: firstLine || null, vendor_tax_id: taxId, invoice_no, invoice_date, amount, currency: 'THB', po_no };
   }
 
+  private emptyFields() {
+    return { vendor_name: null, vendor_tax_id: null, invoice_no: null, invoice_date: null, amount: null, currency: 'THB', po_no: null };
+  }
+
   async extractInvoice(text: string, _user: JwtUser) {
     const t = (text ?? '').trim();
-    if (!t) return { fields: { vendor_name: null, vendor_tax_id: null, invoice_no: null, invoice_date: null, amount: null, currency: 'THB', po_no: null }, source: 'none' };
+    if (!t) return { fields: this.emptyFields(), source: 'none' };
     if (!this.apiKey) return { fields: this.ruleExtract(t), source: 'rules' };
     try {
       const client = llmClient(this.apiKey); // provider seam (docs/27 R4-4) — retries/backoff live inside
       const res: any = await client.create({
         model: this.model, max_tokens: 1024,
-        system: 'You extract vendor-invoice fields. Return ONLY JSON: {vendor_name, vendor_tax_id, invoice_no, invoice_date (YYYY-MM-DD), amount (number), currency, po_no (the referenced purchase-order number, null if absent)}. No prose.',
+        system: EXTRACT_SYSTEM,
         messages: [{ role: 'user', content: `Extract from this invoice:\n${t}` }],
       });
       const out = (res.content as any[]).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
       try { return { fields: JSON.parse(out), source: 'ai' }; } catch { return { fields: this.ruleExtract(t), source: 'rules-fallback' }; }
     } catch {
       return { fields: this.ruleExtract(t), source: 'rules-fallback' };
+    }
+  }
+
+  // Binary document intake (AP-intake upload channel, EXP-10): a PDF with a usable TEXT LAYER routes
+  // through the normal text path (AI when keyed, else deterministic rules — CI relies on this); a
+  // scanned PDF or an image goes to Claude vision when a key is set. With NO key and no text layer the
+  // result is honestly EMPTY (source 'none') so the intake queues for human review — never a guess.
+  async extractInvoiceDocument(input: { media_type: string; data: string }, user: JwtUser) {
+    const isPdf = input.media_type === 'application/pdf';
+    let textLayer = '';
+    if (isPdf) { try { textLayer = pdfExtractText(Buffer.from(input.data, 'base64')); } catch { textLayer = ''; } }
+    if (textLayer.trim().length >= 20) {
+      const r = await this.extractInvoice(textLayer, user);
+      return { ...r, text: textLayer };
+    }
+    if (!this.apiKey) return { fields: this.emptyFields(), source: 'none', text: '' };
+    try {
+      const client = llmClient(this.apiKey);
+      const block = isPdf
+        ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: input.data } }
+        : { type: 'image', source: { type: 'base64', media_type: input.media_type, data: input.data } };
+      const res: any = await client.create({
+        model: this.model, max_tokens: 1024,
+        system: EXTRACT_SYSTEM,
+        messages: [{ role: 'user', content: [block, { type: 'text', text: 'Extract the invoice fields from this document.' }] }],
+      });
+      const out = (res.content as any[]).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      try { return { fields: JSON.parse(out), source: 'ai', text: '' }; } catch { return { fields: this.emptyFields(), source: 'none', text: '' }; }
+    } catch {
+      return { fields: this.emptyFields(), source: 'none', text: '' };
     }
   }
 }

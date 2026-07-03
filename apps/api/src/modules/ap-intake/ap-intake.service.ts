@@ -9,6 +9,7 @@ import type { JwtUser } from '../../common/decorators';
 import { DocAiService } from '../doc-ai/doc-ai.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { FinanceService } from '../finance/finance.service';
+import { putObject, objectUrl, isObjectRef } from '../../common/object-storage';
 
 // AP invoice intake (EXP-10): scanned/pasted vendor invoice → doc-ai extraction → PO auto-map →
 // post AP bill → automated 3-way match. Automates the path TO payment-ready only — the disbursement
@@ -16,6 +17,12 @@ import { FinanceService } from '../finance/finance.service';
 // cannot resolve unambiguously queues as NeedsReview for a human instead of guessing.
 const AUTO_MAP_MIN = 85;   // vendor + amount must both agree before we map without a human
 const RUNNER_UP_GAP = 15;  // and no near-tie with the second-best PO
+
+// Upload channel: accepted document types + data-URL size caps (chars ≈ bytes × 4/3). The image cap
+// stays under Claude's 5 MB per-image limit; the PDF cap keeps an inline-in-DB fallback row sane.
+const UPLOAD_MIME = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
+const MAX_DATAURL: Record<string, number> = { 'application/pdf': 12_000_000 }; // default (images) below
+const MAX_DATAURL_DEFAULT = 6_500_000;
 
 type PoCandidate = { po_no: string; vendor_name: string | null; total_amount: number; score: number };
 
@@ -37,21 +44,48 @@ export class ApIntakeService {
 
   // ── Step 1: extract + auto-map. Creates the intake row (Mapped or NeedsReview). ──
   async create(text: string, user: JwtUser) {
-    const db = this.db;
     const { fields, source } = await this.docAi.extractInvoice(text, user);
-    const amount = n((fields as any).amount);
-    const map = await this.mapToPo({ poNo: (fields as any).po_no ?? null, vendorName: (fields as any).vendor_name ?? null, vendorTaxId: (fields as any).vendor_tax_id ?? null, amount });
+    return this.receive({ fields, source, rawText: text }, user);
+  }
+
+  // ── Step 1, upload channel: an image or PDF (base64 data: URL, per the object-storage convention).
+  // A digital PDF extracts via its text layer (deterministic); a scan/image extracts via Claude vision
+  // when a key is set, else it queues as NeedsReview with the document stored for a human. ──
+  async createFromFile(dto: { file_name?: string; data_url: string }, user: JwtUser) {
+    const m = /^data:([^;,]+);base64,(.*)$/s.exec(dto.data_url ?? '');
+    if (!m) throw new BadRequestException({ code: 'BAD_DATA_URL', message: 'data_url must be a base64 data: URL', messageTh: 'รูปแบบไฟล์ไม่ถูกต้อง' });
+    const mime = m[1]!.toLowerCase();
+    if (!UPLOAD_MIME.includes(mime)) {
+      throw new BadRequestException({ code: 'UNSUPPORTED_FILE_TYPE', message: `Unsupported type ${mime} — use PNG/JPEG/WebP or PDF`, messageTh: 'รองรับเฉพาะรูปภาพ (PNG/JPEG/WebP) และ PDF' });
+    }
+    if (dto.data_url.length > (MAX_DATAURL[mime] ?? MAX_DATAURL_DEFAULT)) {
+      throw new BadRequestException({ code: 'FILE_TOO_LARGE', message: 'File too large', messageTh: 'ไฟล์ใหญ่เกินไป' });
+    }
+    const ext = await this.docAi.extractInvoiceDocument({ media_type: mime, data: m[2]! }, user);
+    return this.receive({
+      fields: ext.fields, source: ext.source, rawText: (ext as any).text || null,
+      file: { name: (dto.file_name ?? 'document').slice(0, 200), mime, dataUrl: dto.data_url },
+    }, user);
+  }
+
+  private async receive(inp: { fields: any; source: string; rawText: string | null; file?: { name: string; mime: string; dataUrl: string } }, user: JwtUser) {
+    const db = this.db;
+    const { fields, source } = inp;
+    const amount = n(fields.amount);
+    const map = await this.mapToPo({ poNo: fields.po_no ?? null, vendorName: fields.vendor_name ?? null, vendorTaxId: fields.vendor_tax_id ?? null, amount });
     // Duplicate-payment guard: the same vendor invoice number scanned twice must not become two bills.
-    const dupOf = await this.findDuplicate((fields as any).invoice_no ?? null, map.vendorName, user.tenantId ?? null, null);
+    const dupOf = await this.findDuplicate(fields.invoice_no ?? null, map.vendorName, user.tenantId ?? null, null);
     const status = map.poNo && !dupOf ? 'Mapped' : 'NeedsReview';
     const intakeNo = await this.docNo.nextDaily('AINV');
+    // Source document: object store when configured, else keep the data: URL inline (audit trail either way).
+    const fileRef = inp.file ? ((await putObject(`ap-intake/${intakeNo}`, inp.file.dataUrl)) ?? inp.file.dataUrl) : null;
     await db.insert(apInvoiceIntakes).values({
-      intakeNo, tenantId: user.tenantId ?? null, rawText: text,
-      vendorId: map.vendorId ?? null, vendorName: map.vendorName, vendorTaxId: (fields as any).vendor_tax_id ?? null,
-      invoiceNo: (fields as any).invoice_no ?? null, invoiceDate: (fields as any).invoice_date ?? null,
-      amount: amount > 0 ? String(amount) : null, currency: (fields as any).currency ?? 'THB', extractSource: source,
+      intakeNo, tenantId: user.tenantId ?? null, rawText: inp.rawText,
+      vendorId: map.vendorId ?? null, vendorName: map.vendorName, vendorTaxId: fields.vendor_tax_id ?? null,
+      invoiceNo: fields.invoice_no ?? null, invoiceDate: fields.invoice_date ?? null,
+      amount: amount > 0 ? String(amount) : null, currency: fields.currency ?? 'THB', extractSource: source,
       poNo: map.poNo, mapMethod: map.method, mapConfidence: String(map.confidence), candidates: map.candidates,
-      dupOf, status, createdBy: user.username,
+      dupOf, fileName: inp.file?.name ?? null, fileMime: inp.file?.mime ?? null, fileRef, status, createdBy: user.username,
     });
     await this.statusLog.log('AINV', intakeNo, '', status, user.username, map.poNo ? `Auto-mapped ${map.poNo} (${map.method})` : 'Needs review');
     return this.get(intakeNo);
@@ -61,10 +95,23 @@ export class ApIntakeService {
   // Falls back to a NeedsReview intake (no bill, no GL) when the mapper is not confident or a duplicate
   // is suspected — automation never books an ambiguous document. ──
   async createAuto(text: string, user: JwtUser) {
-    const created: any = await this.create(text, user);
+    return this.autoFinish(await this.create(text, user), user);
+  }
+  async createFileAuto(dto: { file_name?: string; data_url: string }, user: JwtUser) {
+    return this.autoFinish(await this.createFromFile(dto, user), user);
+  }
+  private async autoFinish(created: any, user: JwtUser) {
     if (created.status !== 'Mapped') return { ...created, auto_posted: false };
     const posted = await this.post(created.intake_no, {}, user);
     return { ...posted, auto_posted: true };
+  }
+
+  // The stored source document. Inline fallback returns the data: URL; an object-store ref returns its URL.
+  async getFile(intakeNo: string) {
+    const it = await this.load(intakeNo);
+    if (!it.fileRef) throw new NotFoundException({ code: 'NO_FILE', message: 'Intake has no source document', messageTh: 'เอกสารรับเข้านี้ไม่มีไฟล์แนบ' });
+    const stored = isObjectRef(it.fileRef);
+    return { intake_no: it.intakeNo, file_name: it.fileName, mime: it.fileMime, url: stored ? objectUrl(it.fileRef) : null, data_url: stored ? null : it.fileRef };
   }
 
   // ── Manual (re)map from the review worklist. On an already-posted intake this re-runs the match
@@ -207,7 +254,8 @@ export class ApIntakeService {
       vendor_id: r.vendorId != null ? Number(r.vendorId) : null, vendor_name: r.vendorName, vendor_tax_id: r.vendorTaxId,
       invoice_no: r.invoiceNo, invoice_date: r.invoiceDate, amount: r.amount != null ? n(r.amount) : null, currency: r.currency,
       po_no: r.poNo, map_method: r.mapMethod, map_confidence: n(r.mapConfidence), candidates: r.candidates ?? [],
-      dup_of: r.dupOf, txn_no: r.txnNo, match_status: r.matchStatus, payable: r.payable,
+      dup_of: r.dupOf, file_name: r.fileName, file_mime: r.fileMime, has_file: r.fileRef != null,
+      txn_no: r.txnNo, match_status: r.matchStatus, payable: r.payable,
       created_by: r.createdBy, created_at: r.createdAt, posted_by: r.postedBy, posted_at: r.postedAt,
     };
   }

@@ -66,7 +66,9 @@ your code below.
 | `AP_OVERPAY` (ยอดจ่ายเกินยอดคงค้าง) | The payment amount exceeds the bill's outstanding balance (including requests already awaiting approval). | Reduce the amount to the remaining balance. |
 | `DUPLICATE_INVOICE` (409) | The scanned invoice's number was already received or booked (another intake or AP bill carries it). | Check the earlier document shown in the error. If this really is a separate bill, an accountant can post it deliberately with the *allow duplicate* option. See [Procurement — AP intake](./03-procurement.md). |
 | `PO_NOT_APPROVED` (on intake map) | You tried to map a scanned invoice to a PO that is still Draft/Pending or was cancelled. | Have Procurement approve the PO first (or pick the correct approved PO). |
-| `INTAKE_AMOUNT_REQUIRED` | The scan didn't yield an invoice amount, so the bill can't be booked. | Re-scan or correct the document text, then post again. |
+| `INTAKE_AMOUNT_REQUIRED` | The scan didn't yield an invoice amount, so the bill can't be booked. | Re-scan or correct the document text, then post again. For an uploaded photo with AI not configured, map the PO manually and re-key the fields via the text box. |
+| `UNSUPPORTED_FILE_TYPE` | The uploaded invoice file isn't a supported type. | Upload a PNG/JPEG/WebP image or a PDF. |
+| `FILE_TOO_LARGE` | The uploaded invoice file exceeds the size cap (≈5 MB image / ≈9 MB PDF). | Re-export the scan at a lower resolution or split the PDF. |
 
 ### Finance & General Ledger
 

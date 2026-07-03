@@ -122,6 +122,11 @@ export const apInvoiceIntakes = pgTable('ap_invoice_intakes', {
   mapConfidence: numeric('map_confidence', { precision: 5, scale: 2 }), // 0–100
   candidates: jsonb('candidates'), // scored PO candidates surfaced for human review
   dupOf: text('dup_of'), // earlier intake carrying the same vendor invoice no (duplicate-payment guard)
+  // upload channel: the scanned source document (image/PDF). file_ref is `objstore:<key>` when the
+  // object store is configured, else the inline data: URL (object-storage.ts fallback pattern).
+  fileName: text('file_name'),
+  fileMime: text('file_mime'),
+  fileRef: text('file_ref'),
   status: text('status').notNull().default('NeedsReview'), // NeedsReview | Mapped | Posted
   txnNo: text('txn_no'), // ap_transactions.txn_no once posted
   matchStatus: text('match_status'), // verdict copied from the auto-run 3-way match

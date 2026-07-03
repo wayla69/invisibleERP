@@ -6,6 +6,7 @@ import { ApIntakeService } from './ap-intake.service';
 import { qint } from '../../common/query';
 
 const CreateBody = z.object({ text: z.string().min(1) });
+const UploadBody = z.object({ file_name: z.string().max(200).optional(), data_url: z.string().min(1).max(13_000_000) });
 const MapBody = z.object({ po_no: z.string().min(1) });
 const PostBody = z.object({ po_no: z.string().min(1).optional(), allow_duplicate: z.boolean().optional() });
 
@@ -23,6 +24,17 @@ export class ApIntakeController {
   // when the mapper is not confident or the invoice looks like a duplicate.
   @Post('auto') @Permissions('creditors')
   auto(@Body(new ZodValidationPipe(CreateBody)) b: { text: string }, @CurrentUser() u: JwtUser) { return this.svc.createAuto(b.text, u); }
+
+  // Upload channel: an image or PDF as a base64 data: URL (the codebase's object-storage convention —
+  // no multipart). Same pipeline as text; the source document is stored on the intake for audit.
+  @Post('upload') @Permissions('procurement', 'creditors')
+  upload(@Body(new ZodValidationPipe(UploadBody)) b: { file_name?: string; data_url: string }, @CurrentUser() u: JwtUser) { return this.svc.createFromFile(b, u); }
+
+  @Post('upload/auto') @Permissions('creditors')
+  uploadAuto(@Body(new ZodValidationPipe(UploadBody)) b: { file_name?: string; data_url: string }, @CurrentUser() u: JwtUser) { return this.svc.createFileAuto(b, u); }
+
+  @Get(':intakeNo/file') @Permissions('procurement', 'creditors')
+  file(@Param('intakeNo') intakeNo: string) { return this.svc.getFile(intakeNo); }
 
   @Get() @Permissions('procurement', 'creditors')
   list(@CurrentUser() u: JwtUser, @Query('status') status?: string, @Query('limit') limit?: string) {
