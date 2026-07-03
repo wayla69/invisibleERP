@@ -402,6 +402,12 @@ receipts — and where you **brand** your customer-facing documents.
 
 - **Company info & address:** legal name, tax ID, branch, VAT registration/rate,
   address, PromptPay ID, and the default language for receipts.
+  - **The form checks formats as you go.** Fields that print on official documents
+    are validated inline before you can save — **tax ID** (13 digits), **branch
+    code** (5 digits), **postal code** (5 digits), **PromptPay** (10-digit mobile
+    or 13-digit ID), **email**, and **VAT rate** (between 0 and 1, e.g. `0.07`).
+    A wrong entry shows a red hint under the field; **Save** is blocked until it is
+    fixed, and a green toast confirms a successful save.
 - **Branding (ตราสินค้า):**
   - **Logo** — paste an **`https://` image URL** (or a small image *data URI*). A
     preview shows what you entered.

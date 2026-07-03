@@ -139,6 +139,16 @@ there's one implementation. The widget is mounted + **permission-gated** by `app
 via `hasPerm`) so it self-hides for users who can't use the assistant, and an ⤢ button opens the full page.
 Reuses the existing `GET /api/chat/stream` — no API/route/permission/GL/control change.
 
+### 1.9 Lighter data entry — inline validation on the company-profile form (`apps/web/src/app/(internal)/setup/page.tsx`)
+The §1.5 friendliness pass moved *result* feedback to toasts but left several long field-grids on raw
+`<Label>+<Input>` with **post-save** error strings. This starts closing that gap on a representative
+high-value form (`/setup`): every field now uses the shared **`FormField`** (label + hint + inline error),
+formats are **validated as you type** (tax ID 13 digits, branch/postal 5 digits, PromptPay 10/13, email,
+VAT rate 0–1), **Save is blocked** until valid, and success/failure are **toasts** (`notify`) instead of the
+inline `<Msg>` banner. Same `PATCH /api/tenant/profile` call and payload — pure client validation + a11y
+(`aria-invalid`, `role="alert"`). No API/route/permission/GL/control change. (The same `FormField`+validate
+pattern is the template for the remaining raw forms.)
+
 ---
 
 ## 2. Control / compliance impact — **none**
@@ -186,5 +196,6 @@ and `00-getting-started.md` (Finance cycle sub-sections + action center).
 | 2026-06-25 | v1.5 (IMPLEMENTED) | Web / Product | **Fifth friendliness sweep** (§1.5): same toasts + guided empty states extended to 14 more screens (settings/custom-fields/pos-ops/pos-control/peripherals/pos-fiscal/print/loyalty-missions/loyalty-campaigns/tax-wht/profitability/consolidation/intercompany/bom) — **~57 screens** total. Independently review-verified behavior-preserving (14/14, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-06-25 | v1.6 (IMPLEMENTED) | Web / Product | **Final mop-up sweep** (§1.5): guided empty states on the remaining read-only report/viewer screens (restaurant-analytics/sod/lots/food-cost/tax-reports/bi/audit/pos-home/loyalty-members/inventory-item/pos) + toasts & empty states on the rest (production-plan/menu/goods-issue/cpq/costing/buffet/branches/saved-views/images/campaigns/ai-actions) — 22 screens, **~79 total** (essentially the whole internal app). Independently review-verified behavior-preserving (22/22, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-07-03 | v1.7 (IMPLEMENTED) | Web / Product | **First-run guidance** (§1.6): new `getting-started.tsx` panel on the ERP dashboard surfacing the existing onboarding checklist (`GET /api/onboarding`) with per-step deep-links + in-place tick-off — closes the "guided first-run" gap for the Paypers-style usability pass. Self-hides on 403 / 100% / no pending step; reuses existing endpoints only. No API/route/permission/GL/control change. Docs synced (this file, user-manual 00). Verified: web typecheck ✅ + build ✅. |
+| 2026-07-03 | v1.10 (IMPLEMENTED) | Web / Product | **Lighter data entry** (§1.9): company-profile form (`/setup`) migrated to shared `FormField` + **inline format validation** (tax ID / branch / postal / PromptPay / email / VAT rate), Save gated on validity, and `notify` toasts replacing the inline `<Msg>` banner. Same API call/payload; pure client validation + a11y. Establishes the `FormField`+validate template for the remaining raw forms. No API/route/permission/GL/control change. Docs synced (this file, user-manual 11). Verified: web typecheck ✅ + build ✅. |
 | 2026-07-03 | v1.9 (IMPLEMENTED) | Web / Product | **Global floating AI helper** (§1.8): extracted the assistant chat/SSE into a shared `useAssistantChat` hook and added an always-available floating `assistant-widget.tsx` (permission-gated in `app-shell`, ⤢ to full page). `/assistant` page refactored to the hook (behaviour-preserving). Reuses `GET /api/chat/stream` — no API/route/permission/GL/control change. Docs synced (this file, user-manual 00). Verified: web typecheck ✅ + build ✅. |
 | 2026-07-03 | v1.8 (IMPLEMENTED) | Web / Platform | **Global spotlight search** (§1.7): new read-only `GET /api/search?q=` (`modules/search/search.module.ts`) over customer/vendor/item masters, wired into the ⌘K palette as a **ข้อมูล (Records)** group (debounced, controlled input, deep-links). RLS tenant-scoped; per-entity results gated in-service by the caller's expanded permissions (no new perm/SoD/GL/control). Docs synced (this file incl. §2, API spec, user-manual 00). Verified: shared+API+web typecheck ✅, web build ✅, **`e2e` cutover harness ✅ (19/19, +3 search checks — real Nest app + PGlite + RLS)**. |
