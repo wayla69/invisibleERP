@@ -425,3 +425,6 @@ If you've linked your LINE account (see [Procurement — LINE chat](./03-procure
 - **Alerts** — an alert rule can target `user:<username>` instead of a hand-typed LINE id;
   the notification follows your linked account, and an admin force-unlink silences it
   immediately.
+- **Ask in chat** — `ask ยอดขายตามสาขา` answers from the same governed query engine as
+  `/query` (same permissions, top-5 summary only). The bot never invents numbers: no data
+  → "ไม่มีข้อมูล".

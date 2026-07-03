@@ -16,6 +16,9 @@ import { ProcurementService } from '../procurement/procurement.service';
 import { AttachmentsService } from '../procurement/attachments.service';
 import { PettyCashService } from '../petty-cash/petty-cash.service';
 import { EssService } from '../ess/ess.service';
+import { NlAnalyticsService } from '../nl-analytics/nl-analytics.service';
+import { llmClient } from '../../common/llm-client';
+import { modelFor, aiDpaBlocked } from '../../common/ai-models';
 
 // LINE Messaging API webhook (follow / unfollow / message …). Public + no JWT: authenticity is the LINE
 // signature (`X-Line-Signature` = base64 HMAC-SHA256 of the RAW body under the tenant's Channel Secret).
@@ -52,6 +55,9 @@ export class LineWebhookService {
   }
   private essSvc(): EssService | null {
     try { return this.moduleRef.get(EssService, { strict: false }); } catch { return null; }
+  }
+  private nlSvc(): NlAnalyticsService | null {
+    try { return this.moduleRef.get(NlAnalyticsService, { strict: false }); } catch { return null; }
   }
 
   async handle(tenantCode: string, rawBody: Buffer | undefined, signature: string | undefined, parsed: any) {
@@ -131,7 +137,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest — รับสรุปประจำวัน\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest — รับสรุปประจำวัน\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -162,10 +168,12 @@ export class LineWebhookService {
     const isExpense = (cmd === 'expense' || cmd === 'เบิก') && parts.length >= 3;
     const isAdvance = (cmd === 'advance' || cmd === 'ยืมเงิน') && parts.length >= 3;
     const isLeave = (cmd === 'leave' || cmd === 'ลา') && parts.length >= 3;
+    const isAsk = (cmd === 'ask' || cmd === 'ถาม') && parts.length >= 2;
+    const isCopilot = cmd === 'bot' || text.startsWith('บอท');
     const isSubscribe = (cmd === 'subscribe' || cmd === 'รับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'รับสรุป');
     const isUnsubscribe = (cmd === 'unsubscribe' || cmd === 'เลิกรับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'เลิกรับสรุป');
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isAsk && !isCopilot && !isPr) return false;
 
     // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
     // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
@@ -203,6 +211,12 @@ export class LineWebhookService {
       else if (isExpense || isAdvance) { reply = await this.chatPettyCash(staff, isAdvance ? 'advance' : 'expense', arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_pettycash'; }
       else if (isLeave) { reply = await this.chatLeave(staff, arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_leave'; }
       else if (isSubscribe || isUnsubscribe) { reply = await this.chatDigest(tenantId, staff, isSubscribe); campaign = 'chat_digest'; }
+      else if (isAsk) { reply = await this.chatAsk(staff, parts.slice(1).join(' ')); campaign = 'chat_ask'; }
+      else if (isCopilot) {
+        const out = await this.chatCopilot(tenantId, lineUserId, staff, text.replace(/^(?:bot\s+|บอท\s*)/i, ''));
+        await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, out.text, 'chat_ai', out.flex);
+        return true;
+      }
       else reply = await this.chatCreatePr(staff, text);
     }
     await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, campaign);
@@ -308,13 +322,15 @@ export class LineWebhookService {
     } else if (data.a === 'confirm' && typeof data.d === 'string' && typeof data.n === 'string') {
       const [state] = await this.db.select().from(lineChatStates)
         .where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId), eq(lineChatStates.kind, 'confirm'))).limit(1);
-      const p = (state?.payload ?? {}) as { action?: string; docNo?: string; nonce?: string };
+      const p = (state?.payload ?? {}) as { action?: string; docNo?: string; nonce?: string; prText?: string };
       if (!state || new Date(state.expiresAt).getTime() < Date.now() || p.docNo !== String(data.d).toUpperCase() || p.nonce !== data.n) {
         text = 'คำขอยืนยันหมดอายุหรือไม่ถูกต้อง — กดปุ่มอนุมัติ/ปฏิเสธใหม่อีกครั้ง';
       } else {
         // consume the state BEFORE acting so a redelivered confirm can never act twice
         await this.db.delete(lineChatStates).where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId)));
-        text = await this.chatDecision(staff, p.docNo!, p.action === 'approve');
+        // LC-5: a confirmed AI draft replays the ordinary command path (same pr_raise + SoD checks)
+        if (p.action === 'copilot-pr' && p.prText) text = await this.chatCreatePr(staff, p.prText);
+        else text = await this.chatDecision(staff, p.docNo!, p.action === 'approve');
       }
     } else {
       return false;
@@ -530,6 +546,85 @@ export class LineWebhookService {
     if (!sub || !has) return 'คุณยังไม่ได้รับสรุปประจำวันอยู่แล้ว';
     await this.db.update(reportSubscriptions).set({ recipients: recipients.filter((r: any) => r?.line_user !== u.username) }).where(eq(reportSubscriptions.id, sub.id));
     return 'ยกเลิกการรับสรุปประจำวันแล้ว ✔';
+  }
+
+  // ── LC-5 (docs/30) — read-only NL analytics: `ask <คำถาม>` via the governed nl-analytics engine ──
+  // Same permission gate as POST /api/nl/ask (exec/dashboard/masterdata) — chat is no data bypass. The
+  // query engine is whitelist-only + RLS-scoped; NL never produces raw SQL.
+  private async chatAsk(u: any, question: string): Promise<string> {
+    const perms = await this.effectivePerms(u);
+    if (!perms.includes('exec') && !perms.includes('dashboard') && !perms.includes('masterdata')) {
+      return 'บัญชีของคุณไม่มีสิทธิ์ถามข้อมูลวิเคราะห์ (ต้องมี dashboard / exec / masterdata)';
+    }
+    const nl = this.nlSvc();
+    if (!nl) return 'ระบบวิเคราะห์ยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    try {
+      const res: any = await nl.ask(question, jwtUser);
+      const rows: any[] = res?.result?.rows ?? [];
+      if (!rows.length) return `ไม่มีข้อมูลสำหรับ "${question}" (มิติ: ${res?.resolved?.dimension ?? '-'})`;
+      const top = rows.slice(0, 5).map((r: any) => `• ${r.dim}: ${Number(r.sales_total).toLocaleString('th-TH')} บาท (${r.orders} บิล)`).join('\n');
+      return `ยอดขายตาม ${res.resolved?.dimension ?? '-'}:\n${top}\nดูเต็มที่หน้า /query`;
+    } catch (e: any) {
+      const msg = e?.response?.messageTh ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+      return `ถามไม่สำเร็จ: ${String(msg).slice(0, 200)}`;
+    }
+  }
+
+  // ── LC-5 (docs/30) — confirm-first Thai copilot: wake word `bot`/`บอท` + free text ──────────────
+  // The model (or the deterministic key-less rules — same pattern as doc-ai/nl-analytics, so CI is
+  // deterministic) only DRAFTS a structured command. Nothing executes without the LC-1 [ยืนยัน] postback,
+  // and the confirmed draft replays the ordinary command path (same permission + SoD checks). Read-only
+  // intents (stock) answer immediately. Draft/exec replies are campaign-tagged chat_ai/chat_ai_confirm —
+  // the AI-origin audit marker.
+  private async chatCopilot(tenantId: number, lineUserId: string, u: any, text: string): Promise<{ text: string; flex?: any }> {
+    const t = text.trim();
+    if (!t) return { text: LineWebhookService.CHAT_USAGE };
+    // read-only stock intent answers immediately (no confirm needed)
+    const stockM = /(?:สต็อก|คงเหลือ|เหลือเท่าไหร่|เหลือกี่)\s*(?:ของ\s*)?([A-Za-z0-9-]+)/.exec(t);
+    if (stockM) return { text: await this.chatStock(u, stockM[1]!) };
+    // draft a PR from "ขอซื้อ/อยากได้/สั่งซื้อ <item> <qty> [เหตุผล]" — LLM refines when a key is present
+    let draft = this.copilotRules(t);
+    if (!draft && !aiDpaBlocked() && process.env.ANTHROPIC_API_KEY) {
+      try {
+        const res: any = await llmClient(process.env.ANTHROPIC_API_KEY).create({
+          model: modelFor('doc_extract'), max_tokens: 300,
+          system: 'You draft ERP purchase requisitions from Thai/English chat. Return ONLY JSON {"intent":"pr","item_id":"...","qty":<number>,"reason":"..."} or {"intent":"unknown"}.',
+          messages: [{ role: 'user', content: t }],
+        });
+        const out = JSON.parse((res.content as Array<{ type: string; text?: string }>).filter((b) => b.type === 'text').map((b) => b.text ?? '').join(''));
+        if (out?.intent === 'pr' && out.item_id && Number(out.qty) > 0) draft = { itemId: String(out.item_id).toUpperCase(), qty: Number(out.qty), reason: out.reason ? String(out.reason) : '' };
+      } catch { /* fall through to unknown */ }
+    }
+    if (!draft) return { text: `ยังไม่เข้าใจคำขอ — ลองพิมพ์คำสั่งโดยตรง:\n${LineWebhookService.CHAT_USAGE}` };
+    const prText = `pr ${draft.itemId} ${draft.qty}${draft.reason ? ` ${draft.reason}` : ''}`;
+    const nonce = this.genCode();
+    const expiresAt = new Date(Date.now() + 5 * 60_000);
+    await this.db.insert(lineChatStates)
+      .values({ tenantId, lineUserId, kind: 'confirm', payload: { action: 'copilot-pr', docNo: 'AI-DRAFT', prText, nonce }, expiresAt })
+      .onConflictDoUpdate({ target: [lineChatStates.tenantId, lineChatStates.lineUserId], set: { kind: 'confirm', payload: { action: 'copilot-pr', docNo: 'AI-DRAFT', prText, nonce }, expiresAt, createdAt: new Date() } });
+    const summary = `ร่างคำขอซื้อ: ${draft.itemId} × ${draft.qty}${draft.reason ? ` (${draft.reason})` : ''}`;
+    return {
+      text: `${summary}\nกด "ยืนยันสร้าง PR" ภายใน 5 นาที (ไม่ยืนยัน = ไม่สร้าง)`,
+      flex: {
+        type: 'bubble',
+        body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+          { type: 'text', text: '🤖 ร่างจากข้อความของคุณ', size: 'sm', color: '#8a6d1d' },
+          { type: 'text', text: `${draft.itemId} × ${draft.qty}`, weight: 'bold', size: 'lg' },
+          ...(draft.reason ? [{ type: 'text', text: draft.reason, size: 'sm', color: '#888888', wrap: true }] : []),
+        ] },
+        footer: { type: 'box', layout: 'horizontal', contents: [
+          { type: 'button', style: 'primary', height: 'sm', action: { type: 'postback', label: 'ยืนยันสร้าง PR', data: JSON.stringify({ a: 'confirm', d: 'AI-DRAFT', n: nonce }), displayText: 'ยืนยันสร้าง PR' } },
+        ] },
+      },
+    };
+  }
+
+  // Deterministic key-less draft rules (CI-stable; the LLM path refines when configured).
+  private copilotRules(t: string): { itemId: string; qty: number; reason: string } | null {
+    const m = /(?:ขอซื้อ|อยากได้|สั่งซื้อ|ซื้อ)\s+([A-Za-z0-9-]+)\s+(?:จำนวน\s*)?(\d+(?:\.\d+)?)\s*(?:ชิ้น|อัน|กล่อง|รีม|แพ็ค)?\s*(.*)$/.exec(t);
+    if (!m || !(Number(m[2]) > 0)) return null;
+    return { itemId: m[1]!.toUpperCase(), qty: Number(m[2]), reason: (m[3] ?? '').trim() };
   }
 
   // stock <item id> — read-only on-hand lookup from inv_balances (tenant-scoped to the linked user's shop).
