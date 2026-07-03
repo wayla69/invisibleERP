@@ -290,6 +290,12 @@ export class ProjectsController {
     return this.svc.getBoq(code);
   }
 
+  // Commitment / encumbrance ledger for a project (M1, PROJ-12): open/consumed/released draws vs the BoQ budget.
+  @Get(':code/commitments')
+  commitments(@Param('code') code: string) {
+    return this.svc.listCommitments(code);
+  }
+
   // RACI accountability matrix (B3): per-task A/R/C/I + per-person rollup + accountability gaps.
   @Get(':code/raci')
   raci(@Param('code') code: string) {

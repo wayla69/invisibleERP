@@ -175,6 +175,49 @@ async function main() {
   const prBadProj = await inj('POST', '/api/procurement/prs', admin, { project_code: 'PRJ-NOPE', items: [{ item_id: 'X', request_qty: 1 }] });
   ok('PR with unknown project_code → 404 PROJECT_NOT_FOUND', prBadProj.status === 404 && prBadProj.json.error?.code === 'PROJECT_NOT_FOUND', `${prBadProj.status} ${prBadProj.json.error?.code}`);
 
+  // ── 9d. Commitment ledger + budget enforcement (M1, PROJ-12): a project PO encumbers its BoQ line budget ──
+  // matLineId (CEMENT) budget = 100×150 = 15000; no commitments yet (the M0 PR does not reserve).
+  const po1 = await inj('POST', '/api/procurement/pos', admin, {
+    project_code: 'PRJ-A', vendor_name: 'ACME Supply',
+    items: [{ item_id: 'CEMENT', order_qty: 50, unit_price: 150, boq_line_id: matLineId }], // 7500
+  });
+  ok('Project PO within BoQ line budget → created (7500 of 15000)', po1.status < 300 && !!po1.json.po_no, JSON.stringify({ s: po1.status, po: po1.json.po_no }));
+  const boqAfterPo1 = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const ml1 = (boqAfterPo1.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('BoQ line shows committed 7500 / remaining 7500 after the PO', near(ml1?.committed, 7500) && near(ml1?.remaining, 7500), JSON.stringify({ c: ml1?.committed, r: ml1?.remaining }));
+
+  // a second PO that would push the line past its budget → BUDGET_EXCEEDED, and the PO is NOT created (atomic).
+  const poCountBefore = (await db.select().from(s.purchaseOrders)).length;
+  const po2 = await inj('POST', '/api/procurement/pos', admin, {
+    project_code: 'PRJ-A', vendor_name: 'ACME Supply',
+    items: [{ item_id: 'CEMENT', order_qty: 60, unit_price: 150, boq_line_id: matLineId }], // 9000 > 7500 remaining
+  });
+  ok('Over-budget project PO → 400 BUDGET_EXCEEDED', po2.status === 400 && po2.json.error?.code === 'BUDGET_EXCEEDED', `${po2.status} ${po2.json.error?.code}`);
+  const poCountAfter = (await db.select().from(s.purchaseOrders)).length;
+  ok('Rejected over-budget PO rolled back atomically (no PO row created)', poCountAfter === poCountBefore, JSON.stringify({ b: poCountBefore, a: poCountAfter }));
+
+  // a PO that exactly fills the remaining budget → created; line now fully committed.
+  const po3 = await inj('POST', '/api/procurement/pos', admin, {
+    project_code: 'PRJ-A', vendor_name: 'ACME Supply',
+    items: [{ item_id: 'CEMENT', order_qty: 50, unit_price: 150, boq_line_id: matLineId }], // 7500
+  });
+  ok('PO filling the remaining budget → created (line fully committed)', po3.status < 300 && !!po3.json.po_no, JSON.stringify({ s: po3.status }));
+  const boqFull = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const mlFull = (boqFull.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('BoQ line committed 15000 / remaining 0', near(mlFull?.committed, 15000) && near(mlFull?.remaining, 0), JSON.stringify({ c: mlFull?.committed, r: mlFull?.remaining }));
+
+  // cancelling PO1 releases its encumbrance → the line's remaining is restored.
+  const cancel1 = await inj('PATCH', `/api/procurement/pos/${po1.json.po_no}/cancel`, admin, { reason: 'ทดสอบคืนงบ' });
+  ok('Cancel PO1 → 2xx', cancel1.status < 300, JSON.stringify({ s: cancel1.status }));
+  const boqRel = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const mlRel = (boqRel.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('Cancelled PO releases budget → committed 7500 / remaining 7500 restored', near(mlRel?.committed, 7500) && near(mlRel?.remaining, 7500), JSON.stringify({ c: mlRel?.committed, r: mlRel?.remaining }));
+
+  const commits = await inj('GET', '/api/projects/PRJ-A/commitments', admin);
+  ok('Commitments ledger: open 7500 (PO3) + released 7500 (PO1) → committed 7500',
+    near(commits.json.summary?.open, 7500) && near(commits.json.summary?.released, 7500) && near(commits.json.summary?.committed, 7500),
+    JSON.stringify(commits.json.summary));
+
   // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
   const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
   const oppNo = opp.json.opp_no;

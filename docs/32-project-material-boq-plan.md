@@ -1,6 +1,6 @@
 # 32 — Project Material Control: BoQ, Commitment Budget & Requisition-to-Purchase — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v0.2 — **M0 DELIVERED**; M1–M4 planned · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v0.3 — **M0–M1 DELIVERED**; M2–M4 planned · **Owner:** ERP / Product
 > **Scope:** Give the PPM suite a **construction/contractor-grade material control loop** on top of the
 > existing project spine: a **Bill of Quantities (BoQ)** as the project's requirement & budget baseline;
 > a **material budget** enforced by **commitment/encumbrance** accounting (staff cannot draw more than the
@@ -244,10 +244,21 @@ tables.
   dimension is **recorded** in M0 (traceability); budget **enforcement** (commitment ledger) is M1 and
   costing material to project **WIP on issue** is M3 — M0 introduces no GL change.
 
-### M1 — Commitment ledger + budget enforcement
-- `project_commitments`; atomic remaining-budget check (`budget − actual − open`) at draw/PR/PO time;
-  reserve on commit, relieve on GR/issue/cancel. Per-line budget/committed/actual/remaining read model.
-- Control **PROJ-12** (commitment/budget preventive). UI: budget & commitments tab.
+### M1 — Commitment ledger + budget enforcement — ✅ DELIVERED
+> Shipped: `project_commitments` encumbrance ledger (migration 0237, canonical org-clause RLS; migration 0238
+> backfills the AUD-ARC-01 tenant-leading indexes on `project_boq`/`project_boq_lines`/`project_commitments`); standalone
+> `CommitmentsService` (`modules/commitments`, DRIZZLE-only → no module cycle) with `reserve` (FOR UPDATE lock
+> on the BoQ line + `committed ≤ budget` → `BUDGET_EXCEEDED`), `release`, `consume`, per-line `committedByLine`,
+> `listForProject`. Wired into procurement `createPo` (reserve inside the PO tx → over-budget rolls the PO back),
+> `cancelPo` (release), `createGr` (consume on full receipt). `getBoq` now returns per-line + total
+> budget/committed/remaining; `GET /api/projects/:code/commitments` is the ledger. **Control PROJ-12** in
+> `build_rcm.py` → RCM **177** (xlsx regenerated, census reconciled). Docs: PN-16 step 25 / rev 0.28,
+> user-manual 14 rev 2.5, UAT-O2C-230. Harness: `projects` 135 checks (was 126).
+- `project_commitments`; atomic remaining-budget check (`budget − Σ(open+consumed)`) at PO-draw time under a
+  BoQ-line row-lock; reserve on PO create, release on cancel, consume on full receipt. Per-line
+  budget/committed/remaining read model on `getBoq`.
+- Control **PROJ-12** (commitment/budget preventive). *(Enforcement is at the project PO in M1 — the firm
+  encumbrance; M2's PMR adds the request-time pre-check + the over-budget → LINE approval → PO-draft path.)*
 
 ### M2 — Project Material Requisition + over-budget LINE approval  ⭐ core of req #3 & #4
 - `project_material_requisitions` + `pmr_lines`; decision tree (within-budget issue vs PR vs over-budget).
@@ -268,7 +279,7 @@ tables.
 | Phase | Status | Migration | Control(s) | Harness ToE |
 |---|---|---|---|---|
 | **M0** BoQ + project-dim P2P/inventory | ✅ Delivered | 0236 | (structure; maker-checker BoQ approve) | `projects` 126 (BoQ draft→approve→lock→remeasure, budget sync, SoD; project-tagged PR persists `project_id`+`boq_line_id`) |
-| **M1** Commitment ledger + enforcement | ⬜ Planned | next free | PROJ-12 | `projects` (atomic overrun block, remaining calc) |
+| **M1** Commitment ledger + enforcement | ✅ Delivered | 0237 | PROJ-12 | `projects` 135 (PO encumbers line; over-budget → BUDGET_EXCEEDED + PO rolled back; cancel releases; remaining calc) |
 | **M2** Material requisition + LINE approval | ⬜ Planned | next free | PROJ-13 | `projects` (route tree, over-budget → workflow → PO draft) |
 | **M3** Reservation + issue-to-project | ⬜ Planned | next free | INV-13 | `basics`/`projects` (reserve, on-hand−held, issue→WIP) |
 | **M4** Project-linked advances/reimbursement | ⬜ Planned | next free | PROJ-14 | `basics` (project-tagged advance/reimbursement → WIP) |
@@ -321,5 +332,6 @@ tables.
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 0.3 | 2026-07-03 | ERP / Product | **M1 delivered** — `project_commitments` encumbrance ledger (migration 0237) + `CommitmentsService` (reserve under a BoQ-line FOR UPDATE lock → `BUDGET_EXCEEDED`; release on PO cancel; consume on full receipt) wired into procurement; per-line budget/committed/remaining on `getBoq`; `GET :code/commitments`. Control **PROJ-12** (RCM 177, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.28, user-manual 14 rev 2.5, UAT-O2C-230). `projects` harness 135; basics/compliance/migration-parity/ts-debt/typecheck green. |
 | 0.2 | 2026-07-03 | ERP / Product | **M0 delivered** — BoQ (`project_boq`/`project_boq_lines`, migration 0236) with maker-checker approve→budget-sync, lock, re-measurement; nullable project dimension (`project_id`/`boq_line_id`) on PR/PO/GR. Docs-synced (PN-16 rev 0.27, user-manual 14 rev 2.4 + 03, UAT-O2C-229). `projects` harness 126 checks; `basics`/`compliance` regression-clean; typecheck + API/web build green. No new control (structure only). |
 | 0.1 DRAFT | 2026-07-03 | ERP / Product | Initial planning-phase design & roadmap for project material control — BoQ, commitment-budget enforcement, requisition-to-purchase with LINE over-budget approval, reservation/issue-to-project, and project-linked advances/reimbursements. Built on the existing inventory/procurement/workflow/messaging/PPM spine. No code yet. |

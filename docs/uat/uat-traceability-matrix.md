@@ -251,6 +251,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-226 | Project period-end close review — maker-checker (`/projects/close`) | PROJ-03 | 16 §7, §9 |
 | UAT-O2C-227 | Timesheet project allocation + approval surfaced in list (`/hcm`) | PROJ-04 | 16 §7 (10), §9 |
 | UAT-O2C-229 | Bill of Quantities (BoQ) + project-dimensioned procurement (M0) | maker-checker (BoQ approve); PROJ-12 (M1) | 16 §7 (23–24) |
+| UAT-O2C-230 | Material-budget commitment enforcement (M1) | PROJ-12 | 16 §7 (25) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

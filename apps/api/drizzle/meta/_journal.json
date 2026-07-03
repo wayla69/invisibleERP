@@ -1660,6 +1660,20 @@
       "when": 2023820000063,
       "tag": "0236_project_boq",
       "breakpoints": true
+    },
+    {
+      "idx": 237,
+      "version": "7",
+      "when": 2023820000064,
+      "tag": "0237_project_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 238,
+      "version": "7",
+      "when": 2023820000065,
+      "tag": "0238_tenant_idx_boq_commit",
+      "breakpoints": true
     }
   ]
 }
