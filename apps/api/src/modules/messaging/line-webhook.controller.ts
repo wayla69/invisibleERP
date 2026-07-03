@@ -189,7 +189,8 @@ export class LineWebhookService {
     const isUnsubscribe = (cmd === 'unsubscribe' || cmd === 'เลิกรับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'เลิกรับสรุป');
     const isDigestKpis = cmd === 'digest' && arg1.toLowerCase() === 'kpis';
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isDigestKpis && !isAsk && !isCopilot && !isPr) return false;
+    const isHelp = cmd === 'help' || cmd === 'เมนู' || cmd === 'ช่วยเหลือ' || cmd === 'คำสั่ง';
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isDigestKpis && !isAsk && !isCopilot && !isHelp && !isPr) return false;
 
     // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
     // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
@@ -206,10 +207,16 @@ export class LineWebhookService {
     }
 
     let reply: string;
+    let replyFlex: any;
     let campaign = 'chat_pr';
     if (isLink) {
-      reply = await this.linkStaff(tenantId, lineUserId, arg1.toUpperCase());
+      const res = await this.linkStaff(tenantId, lineUserId, arg1.toUpperCase());
+      reply = res.text; replyFlex = res.flex;
       campaign = 'chat_link';
+    } else if (isHelp) {
+      reply = LineWebhookService.CHAT_USAGE; // altText / non-flex fallback
+      replyFlex = LineWebhookService.helpCard('เมนูคำสั่ง', 'พิมพ์คำสั่งด้านล่างได้เลย');
+      campaign = 'chat_help';
     } else {
       const staff = await this.staffByLine(tenantId, lineUserId);
       if (!staff) reply = LineWebhookService.NOT_LINKED;
@@ -236,7 +243,7 @@ export class LineWebhookService {
       }
       else reply = await this.chatCreatePr(staff, text);
     }
-    await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, campaign);
+    await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, campaign, replyFlex);
     return true;
   }
 
@@ -768,21 +775,85 @@ export class LineWebhookService {
   // Bind the LINE account to the staff user holding this (unexpired) one-time code. The code was issued to
   // an authenticated pr_raise holder on /requisitions, so possession of it proves the ERP identity; the
   // user must belong to this OA's tenant (HQ users with no tenant may link on any of their shops' OAs).
-  private async linkStaff(tenantId: number, lineUserId: string, code: string): Promise<string> {
+  private async linkStaff(tenantId: number, lineUserId: string, code: string): Promise<{ text: string; flex?: any }> {
     const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.lineLinkCode, code)).limit(1);
     const expired = !u?.lineLinkExpiresAt || new Date(u.lineLinkExpiresAt).getTime() < Date.now();
     if (!u || u.isActive === false || expired || (u.tenantId != null && Number(u.tenantId) !== tenantId)) {
-      return 'รหัสเชื่อมไม่ถูกต้องหรือหมดอายุ — สร้างรหัสใหม่ได้ที่หน้า "คำขอซื้อ (PR)" ในระบบ ERP';
+      return { text: 'รหัสเชื่อมไม่ถูกต้องหรือหมดอายุ — สร้างรหัสใหม่ได้ที่หน้า "คำขอซื้อ (PR)" ในระบบ ERP' };
     }
     try {
       await db.update(users).set({ lineUserId, lineLinkCode: null, lineLinkExpiresAt: null }).where(eq(users.id, u.id));
     } catch (e: any) {
-      if (isUniqueViolation(e)) return 'บัญชี LINE นี้ถูกเชื่อมกับผู้ใช้อื่นแล้ว — ยกเลิกการเชื่อมเดิมก่อนจากหน้า "คำขอซื้อ (PR)"';
+      if (isUniqueViolation(e)) return { text: 'บัญชี LINE นี้ถูกเชื่อมกับผู้ใช้อื่นแล้ว — ยกเลิกการเชื่อมเดิมก่อนจากหน้า "คำขอซื้อ (PR)"' };
       throw e;
     }
     await this.audit(tenantId, lineUserId, `[chat:link] ${u.username}`);
-    return `เชื่อมบัญชีสำเร็จ ✔ (${u.username})\n${LineWebhookService.CHAT_USAGE}`;
+    // altText MUST keep the phrase "เชื่อมบัญชีสำเร็จ" — notification previews + the line-crm assertion read it.
+    return {
+      text: `เชื่อมบัญชีสำเร็จ ✔ (${u.username}) — พิมพ์ "help" เพื่อดูคำสั่งทั้งหมด`,
+      flex: LineWebhookService.helpCard(`🎉 เชื่อมบัญชีสำเร็จ`, `ยินดีต้อนรับคุณ ${u.username}`),
+    };
+  }
+
+  // ── The command menu as a flex bubble (used by the link-welcome + the `help`/`เมนู` command). One data
+  // list drives both the flex card and CHAT_USAGE stays the plain-text altText/fallback. Grouped by cycle
+  // with an accent-coloured header per group + separators — readable on a phone instead of a text wall.
+  private static readonly CMD_GROUPS: Array<{ icon: string; title: string; color: string; items: Array<[string, string]> }> = [
+    { icon: '🛒', title: 'คำขอซื้อ (PR)', color: '#2563eb', items: [
+      ['pr <รหัสสินค้า> <จำนวน> [เหตุผล]', 'สร้างคำขอซื้อ (หลายรายการคั่นด้วย ,)'],
+      ['status <เลขที่ PR>', 'เช็คสถานะ'],
+      ['my prs', 'คำขอล่าสุดของฉัน'],
+      ['cancel <เลขที่ PR>', 'ถอนคำขอ'],
+    ] },
+    { icon: '🔎', title: 'ค้นหา & สต็อก', color: '#0891b2', items: [
+      ['find <คำค้น>', 'ค้นหารหัสสินค้า'],
+      ['stock <รหัสสินค้า>', 'ดูยอดคงเหลือ'],
+    ] },
+    { icon: '💸', title: 'การเงิน & เอกสาร', color: '#059669', items: [
+      ['expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล]', 'เบิกเงินสดย่อย'],
+      ['attach <เลขที่ PO>', 'แนบรูปใบแจ้งหนี้/ใบเสร็จ'],
+    ] },
+    { icon: '📅', title: 'ลางาน', color: '#7c3aed', items: [
+      ['leave <YYYY-MM-DD> <จำนวนวัน> [เหตุผล]', 'ส่งใบลา'],
+    ] },
+    { icon: '📊', title: 'รายงาน & AI', color: '#d97706', items: [
+      ['subscribe digest [kpi,…]', 'รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)'],
+      ['ask <คำถาม>', 'ถามยอดขาย เช่น ask ยอดขายตามสาขา'],
+      ['บอท <ข้อความ>', 'ให้ AI ช่วยร่าง (ยืนยันก่อนสร้างเสมอ)'],
+    ] },
+    { icon: '✅', title: 'อนุมัติ (เฉพาะทีมจัดซื้อ)', color: '#b45309', items: [
+      ['approve/reject <เลขที่ PR>', 'อนุมัติ/ปฏิเสธ'],
+    ] },
+  ];
+
+  private static helpCard(headerTitle: string, subtitle: string): any {
+    const groups = LineWebhookService.CMD_GROUPS.flatMap((g, gi) => [
+      ...(gi > 0 ? [{ type: 'separator', margin: 'md' }] : []),
+      { type: 'text', text: `${g.icon}  ${g.title}`, weight: 'bold', size: 'sm', color: g.color, margin: gi > 0 ? 'md' : 'none' },
+      ...g.items.map(([cmd, desc]) => ({
+        type: 'box', layout: 'vertical', spacing: 'none', margin: 'sm', contents: [
+          { type: 'text', text: cmd, size: 'sm', weight: 'bold', color: '#1f2937', wrap: true },
+          { type: 'text', text: desc, size: 'xs', color: '#9ca3af', wrap: true },
+        ],
+      })),
+    ]);
+    return {
+      type: 'bubble',
+      header: {
+        type: 'box', layout: 'vertical', paddingAll: 'lg', backgroundColor: '#f0f7ff', contents: [
+          { type: 'text', text: headerTitle, weight: 'bold', size: 'lg', color: '#1e3a8a', wrap: true },
+          { type: 'text', text: subtitle, size: 'xs', color: '#6b7280', margin: 'xs', wrap: true },
+        ],
+      },
+      body: { type: 'box', layout: 'vertical', spacing: 'none', paddingAll: 'lg', contents: groups },
+      footer: {
+        type: 'box', layout: 'vertical', paddingAll: 'md', contents: [
+          { type: 'text', text: 'ตัวอย่าง:  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2', size: 'xs', color: '#9ca3af', wrap: true },
+          { type: 'text', text: 'พิมพ์ "help" เพื่อเปิดเมนูนี้อีกครั้ง', size: 'xs', color: '#c0c4cc', margin: 'sm' },
+        ],
+      },
+    };
   }
 
   // Resolve the STAFF user linked to this LINE account (active + same tenant; HQ users pass on any tenant).

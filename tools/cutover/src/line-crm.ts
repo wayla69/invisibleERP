@@ -333,9 +333,18 @@ async function main() {
   // 16d. `link <code>` binds the LINE account to the staff user; the reply rides the TENANT LINE token.
   const doLink = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-1', source: { userId: 'Usomchai' }, message: { id: 'mid-1', type: 'text', text: `link ${linkCode}` } }] });
   const linked1 = await inj('GET', '/api/line/link', somchaiTok);
-  ok('chat-PR: link <code> → LINE account bound to staff user; confirmation replied via tenant token',
-    doLink.json.chat === 1 && linked1.json.linked === true && lineReplies.at(-1)!.text.includes('เชื่อมบัญชีสำเร็จ') && lineReplies.at(-1)!.auth.includes('tenant-line-tok-999'),
-    JSON.stringify({ linked: linked1.json.linked, auth: lineReplies.at(-1)?.auth.includes('tenant-line-tok-999') }));
+  ok('chat-PR: link <code> → LINE account bound to staff user; welcome flex card replied via tenant token',
+    doLink.json.chat === 1 && linked1.json.linked === true && lineReplies.at(-1)!.type === 'flex'
+      && lineReplies.at(-1)!.text.includes('เชื่อมบัญชีสำเร็จ') && lineReplies.at(-1)!.auth.includes('tenant-line-tok-999'),
+    JSON.stringify({ linked: linked1.json.linked, type: lineReplies.at(-1)?.type, auth: lineReplies.at(-1)?.auth.includes('tenant-line-tok-999') }));
+
+  // 16d-ii. `help` → the command menu as a flex bubble (altText keeps the plain command list).
+  const helpRes = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-1help', source: { userId: 'Usomchai' }, message: { id: 'mid-1help', type: 'text', text: 'help' } }] });
+  const helpReply = lineReplies.at(-1);
+  const helpHeader = helpReply?.contents?.header?.contents?.[0]?.text ?? '';
+  ok('chat-PR: help → flex command menu (grouped card; altText carries the plain list)',
+    helpRes.json.chat === 1 && helpReply?.type === 'flex' && helpHeader.includes('เมนูคำสั่ง') && helpReply?.text.includes('รูปแบบคำสั่ง'),
+    JSON.stringify({ type: helpReply?.type, header: helpHeader.slice(0, 20) }));
 
   // 16e. `pr <item> <qty> [reason], …` → a real PR: Pending, requested_by the linked staff, 2 lines.
   const chatPr = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-2', source: { userId: 'Usomchai' }, message: { id: 'mid-2', type: 'text', text: 'pr A4-PAPER 10 กระดาษหมด, TONER-85A 2' } }] });
