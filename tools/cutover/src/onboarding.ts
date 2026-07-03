@@ -88,6 +88,22 @@ async function main() {
   const patch = await inj('PATCH', '/api/tenant/profile', owner, { address_line1: '1 ถนนหลัก', province: 'กรุงเทพมหานคร', postal_code: '10110', vat_rate: 0.07 });
   ok('Profile PATCH → setup_complete=true after address', patch.status === 200 && patch.json.setup_complete === true && patch.json.province === 'กรุงเทพมหานคร', JSON.stringify({ st: patch.status, c: patch.json.setup_complete }));
 
+  // ── 3b. Platform-admin create-company (ITGC-AC-18): only a PLATFORM_ADMIN_USERNAMES user can
+  //        POST /api/admin/tenants to provision a new company — the authenticated alternative to toggling
+  //        public signup. Guard is enforced regardless of tenancy mode. ──
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // owner1 is NOT a platform admin yet
+  const createBody = { company_name: 'PlatCo', tenant_code: 'platco1', admin_username: 'platco_admin', admin_password: 'platco12345', email: 'p@c.com' };
+  const denied = await inj('POST', '/api/admin/tenants', owner, createBody);
+  ok('Create-company blocked for a non-platform-admin (403 PLATFORM_ADMIN_REQUIRED)', denied.status === 403 && denied.json.error?.code === 'PLATFORM_ADMIN_REQUIRED', `${denied.status} ${denied.json.error?.code}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1'; // now owner1 is a platform owner
+  const created = await inj('POST', '/api/admin/tenants', owner, createBody);
+  ok('Platform-admin creates a new company via POST /api/admin/tenants (201)', created.status === 201 && !!created.json.tenant_id, `${created.status} tid=${created.json.tenant_id}`);
+  const pcRows = (await pg.query(`SELECT (SELECT org_id FROM tenants WHERE id=${created.json.tenant_id}) AS t_org, (SELECT org_id FROM users WHERE username='platco_admin') AS u_org, (SELECT count(*)::int FROM fiscal_periods WHERE tenant_id=${created.json.tenant_id}) AS periods`)).rows as any[];
+  ok('Platform-created company is org-isolated + fully provisioned (org_id=tenant id, 12 periods)', Number(pcRows[0].t_org) === Number(created.json.tenant_id) && Number(pcRows[0].u_org) === Number(created.json.tenant_id) && pcRows[0].periods === 12, JSON.stringify(pcRows[0]));
+  const platLogin = await login('platco_admin', 'platco12345');
+  ok('The newly platform-created Admin can log in', !!platLogin.json.token, `st=${platLogin.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
+
   // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;
   //        a free plan is rejected (nothing to charge). Real Stripe is exercised only with a key set. ──
   const coPro = await inj('POST', '/api/billing/checkout', owner, { plan_code: 'pro' });

@@ -12,6 +12,23 @@ export const NO_TX_KEY = 'noTx';
 // (static config/health) — applying this to a tenant-reading handler reintroduces cross-tenant leaks.
 export const NoTx = () => SetMetadata(NO_TX_KEY, true);
 
+export const PLATFORM_ADMIN_KEY = 'platformAdmin';
+// Restrict a route to a PLATFORM owner (cross-tenant operator, not a per-tenant Admin) and grant it an RLS
+// bypass so it can provision a brand-new tenant. PlatformAdminGuard verifies the caller's username is in
+// PLATFORM_ADMIN_USERNAMES; the TenantTxInterceptor then honours the server-set req.__platformBypass flag.
+export const PlatformAdmin = () => SetMetadata(PLATFORM_ADMIN_KEY, true);
+
+// The configured platform owners — usernames allowed to create/manage companies across tenants. Empty =
+// no platform admin (every @PlatformAdmin route 403s) — secure by default. Case-insensitive, trimmed.
+export function platformAdminUsernames(env: NodeJS.ProcessEnv = process.env): string[] {
+  return String(env.PLATFORM_ADMIN_USERNAMES ?? '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+export function isPlatformAdmin(username: string | undefined | null, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!username) return false;
+  return platformAdminUsernames(env).includes(username.trim().toLowerCase());
+}
+
 export interface JwtUser {
   username: string;
   role: string;

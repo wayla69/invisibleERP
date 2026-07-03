@@ -423,6 +423,26 @@ brands its own documents independently.
 
 ---
 
+## 14. Onboarding a new company (platform owner)
+
+Each **company is one account (tenant)**; its branches live inside it. Companies are isolated from each
+other (a company's Admin never sees another company's data) when the platform runs in `multi-company` mode.
+
+**To add a new company (recommended — no config toggling):** an operator listed in the
+`PLATFORM_ADMIN_USERNAMES` setting can create a company from an authenticated session by calling
+**`POST /api/admin/tenants`** with the company name, a unique tenant code, the first Admin's username +
+password, email, and (optionally) the industry template. The new company is provisioned end-to-end — its
+own org (so it's isolated by default), an Admin login, a trial subscription, the fiscal-year periods, and
+the industry Chart of Accounts — and the action is recorded in the [Audit trail](#11-audit-trail-who-changed-what-and-when).
+Anyone not on the platform-owner list gets **`403 PLATFORM_ADMIN_REQUIRED`**; if the list is empty, nobody
+can (secure default) — set `PLATFORM_ADMIN_USERNAMES` first.
+
+**Public self-service signup** (`POST /api/auth/signup`) is **disabled in production by default**
+(`403 SIGNUP_DISABLED`). Only enable it (`PUBLIC_SIGNUP_ENABLED=true`) if you genuinely want outsiders to
+open their own accounts; otherwise prefer the platform-owner endpoint above. See `docs/ops/tenancy-model.md`.
+
+---
+
 ## LINE chat channel governance (LC-3)
 
 Staff can link their LINE accounts to raise requisitions, expenses, and leave from the

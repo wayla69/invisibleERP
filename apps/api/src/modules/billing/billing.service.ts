@@ -110,6 +110,15 @@ export class BillingService {
         messageTh: 'ปิดรับสมัครบัญชีใหม่แบบสาธารณะ — โปรดติดต่อผู้ดูแลระบบเพื่อเปิดบัญชี',
       });
     }
+    return this.provisionTenant(dto);
+  }
+
+  // Core provisioning — tenant + its OWN org + an Admin + a trialing subscription + fiscal year + industry
+  // CoA — shared by the PUBLIC signup path (gated above) and the AUTHENTICATED platform-admin create-company
+  // endpoint (POST /api/admin/tenants). No public-signup gate here; each caller gates as appropriate. Runs
+  // under whatever RLS scope the request carries: public signup is pre-auth (bypass); the admin endpoint
+  // runs with the platform-admin bypass granted by PlatformAdminGuard (both can write a brand-new tenant_id).
+  async provisionTenant(dto: SignupDto) {
     const db = this.db;
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);

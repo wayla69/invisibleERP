@@ -4,7 +4,7 @@ import { validateEnv } from './common/env.validation';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { DatabaseModule } from './database/database.module';
 import { CommonModule } from './common/common.module';
-import { JwtAuthGuard, PermissionsGuard } from './common/guards';
+import { JwtAuthGuard, PermissionsGuard, PlatformAdminGuard } from './common/guards';
 import { ModuleEnabledGuard } from './modules/admin-config/module.guard';
 import { PlanGuard } from './modules/billing/plan.guard';
 import { TenantTxInterceptor } from './common/tenant-tx.interceptor';
@@ -238,6 +238,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     // Guard order: auth → permission → module-enabled → plan-feature.
     // Each layer is narrower: PlanGuard only fires when the route carries @RequiresPlanFeature.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PlatformAdminGuard }, // after auth (needs req.user), before the tenant-tx interceptor
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: ModuleEnabledGuard },
     { provide: APP_GUARD, useClass: PlanGuard },
