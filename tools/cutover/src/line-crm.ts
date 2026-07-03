@@ -333,9 +333,18 @@ async function main() {
   // 16d. `link <code>` binds the LINE account to the staff user; the reply rides the TENANT LINE token.
   const doLink = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-1', source: { userId: 'Usomchai' }, message: { id: 'mid-1', type: 'text', text: `link ${linkCode}` } }] });
   const linked1 = await inj('GET', '/api/line/link', somchaiTok);
-  ok('chat-PR: link <code> → LINE account bound to staff user; confirmation replied via tenant token',
-    doLink.json.chat === 1 && linked1.json.linked === true && lineReplies.at(-1)!.text.includes('เชื่อมบัญชีสำเร็จ') && lineReplies.at(-1)!.auth.includes('tenant-line-tok-999'),
-    JSON.stringify({ linked: linked1.json.linked, auth: lineReplies.at(-1)?.auth.includes('tenant-line-tok-999') }));
+  ok('chat-PR: link <code> → LINE account bound to staff user; welcome flex card replied via tenant token',
+    doLink.json.chat === 1 && linked1.json.linked === true && lineReplies.at(-1)!.type === 'flex'
+      && lineReplies.at(-1)!.text.includes('เชื่อมบัญชีสำเร็จ') && lineReplies.at(-1)!.auth.includes('tenant-line-tok-999'),
+    JSON.stringify({ linked: linked1.json.linked, type: lineReplies.at(-1)?.type, auth: lineReplies.at(-1)?.auth.includes('tenant-line-tok-999') }));
+
+  // 16d-ii. `help` → the command menu as a flex bubble (altText keeps the plain command list).
+  const helpRes = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-1help', source: { userId: 'Usomchai' }, message: { id: 'mid-1help', type: 'text', text: 'help' } }] });
+  const helpReply = lineReplies.at(-1);
+  const helpHeader = helpReply?.contents?.header?.contents?.[0]?.text ?? '';
+  ok('chat-PR: help → flex command menu (grouped card; altText carries the plain list)',
+    helpRes.json.chat === 1 && helpReply?.type === 'flex' && helpHeader.includes('เมนูคำสั่ง') && helpReply?.text.includes('รูปแบบคำสั่ง'),
+    JSON.stringify({ type: helpReply?.type, header: helpHeader.slice(0, 20) }));
 
   // 16e. `pr <item> <qty> [reason], …` → a real PR: Pending, requested_by the linked staff, 2 lines.
   const chatPr = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-2', source: { userId: 'Usomchai' }, message: { id: 'mid-2', type: 'text', text: 'pr A4-PAPER 10 กระดาษหมด, TONER-85A 2' } }] });
@@ -347,6 +356,16 @@ async function main() {
     chatPr.json.chat === 1 && !!prRow && prRow.status === 'Pending' && prRow.requestedBy === 'somchai' && prLines.length === 2
       && prLines.some((l: any) => l.itemId === 'A4-PAPER' && Number(l.requestQty) === 10 && l.reason === 'กระดาษหมด'),
     JSON.stringify({ prNo, status: prRow?.status, by: prRow?.requestedBy, lines: prLines.length }));
+
+  // 16e-ii. multi-word / un-coded item name → qty is the LAST number, name is everything before it.
+  const chatPrName = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-2m', source: { userId: 'Usomchai' }, message: { id: 'mid-2m', type: 'text', text: 'pr Iberico ham 2' } }] });
+  const prNameNo = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [prNameRow] = prNameNo ? await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prNameNo)) : [];
+  const prNameLines = prNameRow ? await db.select().from(s.prItems).where(eq(s.prItems.prId, Number(prNameRow.id))) : [];
+  ok('chat-PR: multi-word item name → id="Iberico ham", qty=2 (last number), no reason required',
+    chatPrName.json.chat === 1 && prNameLines.length === 1 && prNameLines[0]!.itemId === 'Iberico ham'
+      && Number(prNameLines[0]!.requestQty) === 2 && (prNameLines[0]!.reason == null),
+    JSON.stringify({ id: prNameLines[0]?.itemId, qty: prNameLines[0]?.requestQty, reason: prNameLines[0]?.reason }));
 
   // 16f. webhook redelivery of the SAME message id is dropped (no duplicate PR).
   const prCountBefore = (await db.select().from(s.purchaseRequests)).length;

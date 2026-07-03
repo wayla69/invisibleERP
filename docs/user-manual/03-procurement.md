@@ -57,7 +57,7 @@ handy on the floor or in the stockroom. One-time setup first:
 
 | Command | What it does |
 |---|---|
-| `pr <item> <qty> [reason]` — several items separated by `,` (also `ขอซื้อ …`) | Raises a PR, e.g. `pr A4-PAPER 10 กระดาษหมด, TONER-85A 2` |
+| `pr <item> <qty>` — reason **optional**; several items separated by `,` (also `ขอซื้อ …`) | Raises a PR, e.g. `pr A4-PAPER 10` (no reason needed — most storefront orders are just "ran out"), or `pr A4-PAPER 10, TONER-85A 2`. **Multi-word names work** — `pr Iberico ham 2` (the quantity is the last number; everything before it is the item name). Add a reason only if you want: `pr A4-PAPER 10 ด่วน` |
 | `status <PR no>` (also `สถานะ <PR no>`) | Replies the PR's current approval state |
 | `my prs` (also `รายการของฉัน`) | Lists your 5 most recent PRs with statuses |
 | `find <keyword>` (also `ค้นหา`) | Searches the item master so you can use real item ids |
@@ -69,6 +69,14 @@ handy on the floor or in the stockroom. One-time setup first:
 | `ask <คำถาม>` (also `ถาม`) | Sales analytics answer (needs `dashboard`/`exec`/`masterdata`) |
 | `บอท <ข้อความ>` (also `bot …`) | AI drafts a **PR, petty-cash expense/advance, or leave request** from free Thai (e.g. `บอท ขอเบิก 250 จาก PCF-01 ค่าน้ำแข็ง`, `บอท ขอลา 2 วัน ตั้งแต่ 2026-08-03`) — **always asks you to confirm before creating anything**; the confirmed draft runs the ordinary command with your own permissions |
 | `approve <PR no>` / `reject <PR no> <reason>` (also `อนุมัติ`/`ปฏิเสธ`) | **Procurement only** — decides a pending PR through the normal approval engine |
+| `help` (also `เมนู` / `ช่วยเหลือ` / `คำสั่ง`) | Shows the full command menu as a tidy grouped card |
+
+> **Items without a code yet?** The `item id` in `pr` is free text — the PR line
+> accepts anything, so you can order an un-coded item by its **name, spaces and all**
+> (`pr Iberico ham 2`, `pr เก้าอี้บุนวมสำนักงาน 5`). The parser takes the **last number**
+> as the quantity and everything before it as the item name (and anything after the
+> number as an optional reason). Purchasing assigns the real item code when the PR
+> becomes a PO.
 
 **LINE notifications:** if you've linked your account, the system messages you
 automatically — approvers get a 🔔 when a PR enters their queue (with the
@@ -83,6 +91,11 @@ No setup beyond linking; if you unlink, the messages stop.
 **[อนุมัติ] [ปฏิเสธ]** buttons. Tapping one asks for a **[ยืนยัน]** tap (valid
 5 minutes) before anything happens — same permission and self-approval rules
 as typing the command. `my prs` also replies as swipeable cards now.
+
+**Welcome & help card:** linking your account now replies with a **grouped
+command card** (icons per cycle: PR · search & stock · finance · leave · reports
+& AI · approvals) instead of a wall of text, and you can reopen that menu any time
+by typing **`help`** (or `เมนู`).
 
 **Expected result:** The bot replies the new PR number (e.g. `PR-20260702-001`).
 The PR is **identical** to one raised on the web — same numbering, same status log,
