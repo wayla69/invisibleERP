@@ -717,7 +717,7 @@ async function main() {
   // 22d. the scheduler delivers the digest to the linked LINE (counts summary).
   const pushesBefore22d = linePushes.length;
   const digRun = await inj('POST', '/api/bi/subscriptions/run', token);
-  const digPush = linePushes.slice(pushesBefore22d).find((p) => p.to === 'Usomsri' && p.text.includes('สรุปเช้านี้'));
+  const digPush = linePushes.slice(pushesBefore22d).find((p) => p.to === 'Usomsri' && p.text.includes('รออนุมัติ')); // LP-3: KPI-row format
   ok('LC-4: run-due → digest pushed to the linked LINE (pending approvals / open PRs / alerts 24h)',
     digRun.json.ran_count >= 1 && !!digPush && digPush.text.includes('LINE Daily Digest'),
     JSON.stringify({ ran: digRun.json.ran_count, pushed: !!digPush, head: digPush?.text.slice(0, 60) }));
@@ -884,6 +884,64 @@ async function main() {
   setLlmClientForTests(null);
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.LINE_COPILOT_DAILY_CAP;
+
+  // ── 26. LP-3 (docs/31): digest 2.0 — KPI catalog, per-subscriber selection, per-recipient permission
+  //        filter at send time, flex layout. ──
+  // Seed KPI data: yesterday's sale, an overdue AR balance, cash in the GL, one low-stock row.
+  const bkk26 = new Date(Date.now() + 7 * 3600_000);
+  const yest26 = new Date(bkk26.getTime() - 24 * 3600_000).toISOString().slice(0, 10);
+  const past26 = new Date(bkk26.getTime() - 10 * 24 * 3600_000).toISOString().slice(0, 10);
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-LP3-Y1', invoiceDate: yest26, dueDate: '2099-01-01', tenantId: t1, amount: '1234.50', paidAmount: '0', status: 'Unpaid' },
+    { invoiceNo: 'INV-LP3-OD', invoiceDate: past26, dueDate: past26, tenantId: t1, amount: '800.00', paidAmount: '300.00', status: 'Unpaid' },
+  ]);
+  const [je26] = await db.insert(s.journalEntries).values({ entryNo: 'JE-LP3-CASH', entryDate: yest26, tenantId: t1, status: 'Posted', source: 'Manual', memo: 'LP-3 cash seed' }).returning();
+  await db.insert(s.journalLines).values([
+    { entryId: Number(je26.id), accountCode: '1000', debit: '900', credit: '0', tenantId: t1 },
+    { entryId: Number(je26.id), accountCode: '3100', debit: '0', credit: '900', tenantId: t1 },
+  ]);
+  await db.insert(s.branchStock).values({ tenantId: t1, branchId: 1, itemId: 'LOW-1', itemDescription: 'ของใกล้หมด', onHand: '1', reorderPoint: '5' });
+
+  // 26a. `digest kpis` is permission-aware: somchai (no dashboard) refused; boss (Admin) sees fin KPIs.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26a1', source: { userId: 'Usomchai' }, message: { id: 'mid-26a1', type: 'text', text: 'digest kpis' } }] });
+  const kpiDenied = lineReplies.at(-1)!.text;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26a2', source: { userId: 'Uboss' }, message: { id: 'mid-26a2', type: 'text', text: 'digest kpis' } }] });
+  const kpiList = lineReplies.at(-1)!.text;
+  ok('LP-3: digest kpis → permission-aware menu (no-perm refused; Admin sees the fin KPIs)',
+    kpiDenied.includes('ไม่มีสิทธิ์') && kpiList.includes('cash_position') && kpiList.includes('sales_yesterday') && kpiList.includes('ค่าเริ่มต้น'),
+    JSON.stringify({ denied: kpiDenied.slice(0, 30), listed: kpiList.includes('cash_position') }));
+
+  // 26b. selection is validated: unknown key refused; a key the caller cannot SEE refused at subscribe.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26b1', source: { userId: 'Usomsri' }, message: { id: 'mid-26b1', type: 'text', text: 'subscribe digest nonsense_kpi' } }] });
+  const badKey = lineReplies.at(-1)!.text;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26b2', source: { userId: 'Usomsri' }, message: { id: 'mid-26b2', type: 'text', text: 'subscribe digest cash_position' } }] });
+  const deniedKey = lineReplies.at(-1)!.text;
+  ok('LP-3: KPI selection validated — unknown key + un-seeable key both refused at subscribe',
+    badKey.includes('ไม่รู้จัก KPI') && deniedKey.includes('ไม่มีสิทธิ์เห็น'),
+    JSON.stringify({ bad: badKey.slice(0, 30), denied: deniedKey.slice(0, 40) }));
+
+  // 26c. boss picks fin KPIs; somsri (dashboard) takes the default trio — both stored on the recipients.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26c1', source: { userId: 'Uboss' }, message: { id: 'mid-26c1', type: 'text', text: 'subscribe digest sales_yesterday,cash_position,ar_overdue,low_stock' } }] });
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26c2', source: { userId: 'Usomsri' }, message: { id: 'mid-26c2', type: 'text', text: 'subscribe digest' } }] });
+  const [digSub26] = await db.select().from(reportSubscriptions).where(and(eq(reportSubscriptions.tenantId, t1), eq(reportSubscriptions.reportType, 'line_daily_digest')));
+  const bossRecip = (digSub26.recipients as any[]).find((r: any) => r.line_user === 'boss');
+  ok('LP-3: per-subscriber KPI selection stored on the recipient (no migration — jsonb)',
+    !!bossRecip && Array.isArray(bossRecip.kpis) && bossRecip.kpis.includes('cash_position') && (digSub26.recipients as any[]).some((r: any) => r.line_user === 'somsri' && !r.kpis),
+    JSON.stringify({ boss: bossRecip?.kpis, n: (digSub26.recipients as any[]).length }));
+
+  // 26d. delivery: same tenant run, two subscribers, two DIFFERENT payloads (permission + selection);
+  //      flex bubble with the text as altText; money formatted; boss sees cash, somsri never does.
+  await db.update(reportSubscriptions).set({ nextRunAt: new Date() }).where(eq(reportSubscriptions.id, Number(digSub26.id)));
+  const pushesBefore26 = linePushes.length;
+  const run26 = await inj('POST', '/api/bi/subscriptions/run', token);
+  const bossPush26 = linePushes.slice(pushesBefore26).find((p) => p.to === 'Uboss');
+  const somsriPush26 = linePushes.slice(pushesBefore26).find((p) => p.to === 'Usomsri');
+  ok('LP-3: one run, per-recipient payloads — boss gets fin KPIs (flex), somsri gets the trio without cash',
+    run26.json.ran_count >= 1 && !!bossPush26 && bossPush26.type === 'flex'
+      && bossPush26.text.includes('เงินสดคงเหลือ') && bossPush26.text.includes('600') /* 900 seed − 300 LC-2 petty-cash expense (1015 is a cash account) */ && bossPush26.text.includes('ยอดขายเมื่อวาน') && bossPush26.text.includes('1,234.5')
+      && bossPush26.text.includes('ลูกหนี้เกินกำหนด') && bossPush26.text.includes('500') && bossPush26.text.includes('สินค้าใกล้หมด')
+      && !!somsriPush26 && somsriPush26.text.includes('รออนุมัติ') && !somsriPush26.text.includes('เงินสดคงเหลือ'),
+    JSON.stringify({ boss: bossPush26?.text.slice(0, 120), somsri: somsriPush26?.text.slice(0, 60) }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

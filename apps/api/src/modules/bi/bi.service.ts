@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, type OnModuleInit } from '@nestjs/common';
-import { eq, and, sql, gte, lt, desc, lte } from 'drizzle-orm';
+import { eq, and, sql, gte, lt, desc, lte, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { biDailySnapshots, reportSubscriptions, reportRuns } from '../../database/schema/bi';
 import { workflowInstances, purchaseRequests, alertEvents } from '../../database/schema';
@@ -9,6 +9,9 @@ import { journalEntries, journalLines, accounts } from '../../database/schema/le
 import { arInvoices } from '../../database/schema/finance';
 import { apTransactions } from '../../database/schema/finance';
 import { opportunities, pipelineStages } from '../../database/schema/pipeline';
+import { branchStock } from '../../database/schema/portal';
+import { CASH_ACCOUNTS } from '../ledger/ledger-constants';
+import { DIGEST_KPIS, DEFAULT_DIGEST_KPIS, allowedDigestKpis } from './digest-kpis';
 import { n, fx } from '../../database/queries';
 import { TtlCache } from '../../common/ttl-cache';
 import { MessagingService } from '../messaging/messaging.service';
@@ -614,7 +617,26 @@ export class BiService implements OnModuleInit {
       const [wf] = await db.select({ c: sql<number>`count(*)` }).from(workflowInstances).where(and(eq(workflowInstances.status, 'pending'), tenantCond));
       const [pr] = await db.select({ c: sql<number>`count(*)` }).from(purchaseRequests).where(eq(purchaseRequests.status, 'Pending'));
       const [ae] = await db.select({ c: sql<number>`count(*)` }).from(alertEvents).where(and(user.tenantId != null ? eq(alertEvents.tenantId, user.tenantId) : sql`true`, sql`${alertEvents.firedAt} > now() - interval '24 hours'`));
-      const data = { pending_approvals: Number(wf?.c ?? 0), open_prs: Number(pr?.c ?? 0), alerts_24h: Number(ae?.c ?? 0) };
+      // LP-3 (docs/31) — the wider KPI catalog (Asia/Bangkok business day). Computed ONCE per tenant here;
+      // delivery filters per recipient by effective permissions (see runSubscription). Read-only aggregates.
+      const bkkNow = new Date(Date.now() + 7 * 3600_000);
+      const today = bkkNow.toISOString().slice(0, 10);
+      const yesterday = new Date(bkkNow.getTime() - 24 * 3600_000).toISOString().slice(0, 10);
+      const [sy] = await db.select({ v: sql<string>`coalesce(sum(${arInvoices.amount}), 0)` }).from(arInvoices)
+        .where(and(user.tenantId != null ? eq(arInvoices.tenantId, user.tenantId) : sql`true`, eq(arInvoices.invoiceDate, yesterday)));
+      const [ao] = await db.select({ v: sql<string>`coalesce(sum(${arInvoices.amount} - coalesce(${arInvoices.paidAmount}, 0)), 0)` }).from(arInvoices)
+        .where(and(user.tenantId != null ? eq(arInvoices.tenantId, user.tenantId) : sql`true`, sql`${arInvoices.status} <> 'Paid'`, sql`${arInvoices.dueDate} < ${today}`));
+      const [cp] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}), 0)` })
+        .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+        .where(and(eq(journalEntries.status, 'Posted'), inArray(journalLines.accountCode, [...CASH_ACCOUNTS]),
+          user.tenantId != null ? eq(journalEntries.tenantId, user.tenantId) : sql`true`));
+      const [ls] = await db.select({ c: sql<number>`count(*)` }).from(branchStock)
+        .where(and(user.tenantId != null ? eq(branchStock.tenantId, user.tenantId) : sql`true`,
+          sql`${branchStock.reorderPoint} > 0 and ${branchStock.onHand} <= ${branchStock.reorderPoint}`));
+      const data = {
+        pending_approvals: Number(wf?.c ?? 0), open_prs: Number(pr?.c ?? 0), alerts_24h: Number(ae?.c ?? 0),
+        sales_yesterday: Number(sy?.v ?? 0), cash_position: Number(cp?.v ?? 0), ar_overdue: Number(ao?.v ?? 0), low_stock: Number(ls?.c ?? 0),
+      };
       return {
         data,
         summary: `Daily digest: ${data.pending_approvals} pending approvals · ${data.open_prs} open PRs · ${data.alerts_24h} alerts (24h)`,
@@ -773,7 +795,38 @@ export class BiService implements OnModuleInit {
         // LC-4: {line_user:'<username>'} delivers a compact summary to that staff user's LINKED LINE
         // (resolution follows the link registry; unlinked users silently receive nothing).
         if (r?.line_user && this.lineNotify) {
-          try { await this.lineNotify.notifyUser(String(r.line_user), sub.tenantId != null ? Number(sub.tenantId) : null, `📊 ${sub.name}: ${report.summaryTh ?? report.summary}\nดูรายงานเต็มที่หน้า /bi`); delivered++; } catch { /* best-effort */ }
+          try {
+            const tenantIdN = sub.tenantId != null ? Number(sub.tenantId) : null;
+            if (sub.reportType === 'line_daily_digest') {
+              // LP-3: per-recipient KPI selection ∩ effective permissions AT SEND TIME — a perm revoked
+              // after subscribing silently drops that KPI from this person's message. Flex card + altText.
+              const perms = await this.lineNotify.effectivePermsOf(String(r.line_user));
+              const chosen: string[] = Array.isArray(r?.kpis) && r.kpis.length ? r.kpis.map(String) : DEFAULT_DIGEST_KPIS;
+              const visible = chosen.filter((k) => allowedDigestKpis(perms).includes(k));
+              const fmt = (k: string) => {
+                const v = (report.data as Record<string, unknown> | undefined)?.[k];
+                if (v == null) return '—'; // zero-data honesty: missing ≠ 0
+                return DIGEST_KPIS[k]?.money ? Number(v).toLocaleString('th-TH', { maximumFractionDigits: 2 }) : String(v);
+              };
+              const rows = visible.map((k) => ({ th: DIGEST_KPIS[k]!.th, val: fmt(k) }));
+              const text = `📊 ${sub.name}: ` + (rows.length ? rows.map((x) => `${x.th} ${x.val}`).join(' · ') : 'ไม่มีรายการที่คุณมีสิทธิ์เห็น') + '\nดูรายงานเต็มที่หน้า /bi';
+              const flex = {
+                type: 'bubble',
+                body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+                  { type: 'text', text: `📊 ${sub.name}`, weight: 'bold', size: 'md' },
+                  ...rows.map((x) => ({ type: 'box', layout: 'horizontal', contents: [
+                    { type: 'text', text: x.th, size: 'sm', color: '#666666', flex: 5 },
+                    { type: 'text', text: x.val, size: 'sm', weight: 'bold', align: 'end', flex: 4 },
+                  ] })),
+                  { type: 'text', text: 'ดูรายงานเต็มที่หน้า /bi', size: 'xs', color: '#888888' },
+                ] },
+              };
+              await this.lineNotify.notifyUser(String(r.line_user), tenantIdN, text, flex);
+            } else {
+              await this.lineNotify.notifyUser(String(r.line_user), tenantIdN, `📊 ${sub.name}: ${report.summaryTh ?? report.summary}\nดูรายงานเต็มที่หน้า /bi`);
+            }
+            delivered++;
+          } catch { /* best-effort */ }
           continue;
         }
         const to = r?.email;
