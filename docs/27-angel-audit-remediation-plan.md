@@ -614,6 +614,7 @@ merged only on a fully green CI matrix, and if a change has no doc impact, the P
 | 1.3 | 2026-07-02 | ERP/Product | R3-1 + R3-2 delivered (census 169/166/3/0 tagged + CI-guarded across 5 compliance docs; docs/09 SUPERSEDED banner; PRE_PRODUCTION audit banner-marked historical) |
 | 1.4 | 2026-07-02 | ERP/Product | R1-4 delivered (bigint minor-unit balance invariants in the ledger; common/money.ts + money.test.ts; GL narrative rev 1.7) |
 | 1.5 | 2026-07-02 | ERP/Product | R0-3 delivered (must-change hard gate + random seed credential + prod-seed refusal); R2-3 found already-implemented (sod_reason ToE exists) |
+| 1.6 | 2026-07-03 | ERP/Product | R0-3 rollout gap closed: the Railway `preDeployCommand` still ran the now-guarded `db:seed` per deploy → every prod deploy failed post-R0-3. Split the release-time permission-catalog sync into guardless `db:sync-catalog` (pipeline); full `db:seed` stays first-boot-only behind the gate. Also restored the `idx_tip_distribution_lines_tenant` line in 0218 (R1-1) that hotfix PR #353 deleted while the real 0145/0146 backfill fix was in flight. |
 | 1.6 | 2026-07-02 | ERP/Product | R2-1 delivered (throttled fail-open ops alert on the lockout store; AC-15 RCM text drift fixed; runbook rev 1.2) |
 | 1.7 | 2026-07-02 | ERP/Product | R2-2 delivered (authz change bumps tokens_valid_from → immediate revocation instead of per-request re-resolution) |
 | 1.8 | 2026-07-02 | ERP/Product | R2-4 delivered (cookie Max-Age defaults to the JWT TTL; stale 8h/12h comments + .env.example aligned) |

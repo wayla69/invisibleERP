@@ -7,8 +7,8 @@ import { resolve } from 'node:path';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
-import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS, type Role } from '@ierp/shared';
 import * as schema from './schema';
+import { syncCatalog } from './catalog';
 import { PasswordService } from '../modules/auth/password.service';
 
 for (const p of ['.env', resolve(process.cwd(), '../../.env')]) {
@@ -31,22 +31,8 @@ async function main() {
   const db = drizzle(client, { schema });
   const pw = new PasswordService();
 
-  const grpOf = (key: string) =>
-    Object.entries(PERM_GROUPS).find(([, ks]) => (ks as string[]).includes(key))?.[0] ?? null;
-
-  // 1. permissions
-  await db
-    .insert(schema.permissions)
-    .values(PERMISSIONS.map((key) => ({ key, grp: grpOf(key) })))
-    .onConflictDoNothing();
-
-  // 2. role_permissions
-  for (const [role, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-    await db
-      .insert(schema.rolePermissions)
-      .values((perms as string[]).map((perm) => ({ role: role as Role, perm })))
-      .onConflictDoNothing();
-  }
+  // 1+2. permissions + role_permissions — shared with the guardless release-time db:sync-catalog
+  await syncCatalog(db);
 
   // 3. tenant HQ
   await db.insert(schema.tenants).values({ code: 'HQ', name: 'Head Office' }).onConflictDoNothing();

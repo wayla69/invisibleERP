@@ -22,10 +22,15 @@
 ## 2. Two supported substrates
 
 ### A. Railway (primary) — `apps/api/railway.json`, `apps/web/railway.json`
-**RAILPACK** build (Railway's current default); `api` runs **migrate + seed** via **`preDeployCommand`**
-(`db:migrate && db:seed` — the seed additionally requires `SEED_ADMIN_PASSWORD`, docs/27 R0-3) so the schema applies and the baseline rows (permissions, HQ tenant, the
-`admin` user with a forced first-login password change) exist **once per release**, not per replica. The
-seed is idempotent (`onConflictDoNothing`) — it never resets a changed admin password. Health checks: api `/`
+**RAILPACK** build (Railway's current default); `api` runs **migrate + catalog-sync** via
+**`preDeployCommand`** (`db:migrate && db:sync-catalog`) so the schema and the **permission catalog**
+(permission keys + default role grants — idempotent `onConflictDoNothing`, nothing credential- or
+tenant-creating, hence guardless) apply **once per release**, not per replica. The **full seed**
+(`db:seed`: catalog + HQ tenant + the `admin` user with a forced first-login password change) is a
+**deliberate first-boot step only**: it refuses `NODE_ENV=production` unless `ALLOW_PROD_SEED=1` and
+requires `SEED_ADMIN_PASSWORD` when creating the admin (docs/27 R0-3) — run it once, manually, when
+standing up a new environment. (History: the pipeline originally ran `db:seed` per deploy; after R0-3
+landed its guard, every prod deploy failed at pre-deploy until the 2026-07-03 catalog-sync split.) Health checks: api `/`
 (and now `/healthz`/`/readyz`), web `/login`. Node is pinned to **22** via `.node-version` / `.nvmrc` /
 `engines.node`. **Do not use the NIXPACKS builder** — it bundles Corepack 0.24.1, which is incompatible
 with pnpm 11.8.0 and crashes (`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`) before install. Each service must
@@ -106,4 +111,5 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 | 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
 | 1.3 | 2026-07-02 | Platform | §4: `REALTIME_REDIS_URL` requirement for multi-replica deploys — shared `realtime-bus.ts` (Redis pub/sub) behind both SSE buses (docs/27 R1-3). |
+| 1.4 | 2026-07-03 | Platform | §2A: `preDeployCommand` split — `db:sync-catalog` (guardless idempotent permission-catalog sync, new `src/database/sync-catalog.ts`) replaces `db:seed` per release; full `db:seed` is now a gated **first-boot-only** manual step (R0-3 `ALLOW_PROD_SEED=1` + `SEED_ADMIN_PASSWORD`). Root cause of the post-R0-3 prod-deploy failures (seed guard fired inside the pipeline). |
 | 1.3 | 2026-07-01 | Platform | Link the multi-tenant "link-per-customer" onboarding runbook (`multi-tenant-subdomain-runbook.md`) — shared-deployment subdomain model (RLS-isolated) vs dedicated, tenant provisioning, wildcard DNS/TLS + cookie/CORS, and per-customer cost model. |
