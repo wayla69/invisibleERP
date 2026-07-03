@@ -632,6 +632,61 @@ export class LedgerService {
     return { period: period ?? null, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING, rows: out, totals: { debit: minorToNumber4(totalDebitM), credit: minorToNumber4(totalCreditM), balanced: totalDebitM === totalCreditM } };
   }
 
+  // ───────────────────── Account ledger (GL detail / บัญชีแยกประเภทรายบัญชี) ─────────────────────
+  // Every POSTED journal line for ONE account over [from,to], in date order, with a running balance struck
+  // from the opening balance (Σ debit−credit strictly before `from`). Debit-positive running balance — the
+  // classic GL-detail drill-down behind the trial balance. Reads the raw ledger (RLS scopes the tenant).
+  async accountLedger(accountCode: string, from?: string | null, to?: string | null, ledgerCode?: string | null) {
+    const db = this.db;
+    const [account] = await db.select({ code: accounts.code, name: accounts.name, type: accounts.type })
+      .from(accounts).where(eq(accounts.code, accountCode)).limit(1);
+    if (!account) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${accountCode} not found`, messageTh: `ไม่พบบัญชี ${accountCode}` });
+
+    // Opening balance = Σ(debit − credit) of POSTED lines on this account strictly before `from`.
+    let opening = 0;
+    if (from) {
+      const [o] = await db
+        .select({ net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)` })
+        .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+        .where(and(eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode), this.ledgerCond(ledgerCode), sql`${journalEntries.entryDate} < ${from}`));
+      opening = round4(n(o?.net));
+    }
+
+    const conds: any[] = [eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode), this.ledgerCond(ledgerCode)];
+    if (from) conds.push(sql`${journalEntries.entryDate} >= ${from}`);
+    if (to) conds.push(sql`${journalEntries.entryDate} <= ${to}`);
+    const rows = await db
+      .select({
+        line_id: journalLines.id,
+        date: journalEntries.entryDate,
+        entry_no: journalEntries.entryNo,
+        source: journalEntries.source,
+        source_ref: journalEntries.sourceRef,
+        memo: sql<string>`coalesce(${journalLines.memo}, ${journalEntries.memo})`,
+        cost_center: journalLines.costCenterCode,
+        debit: journalLines.debit,
+        credit: journalLines.credit,
+      })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(...conds))
+      .orderBy(journalEntries.entryDate, journalLines.id);
+
+    let bal = opening, totalDebit = 0, totalCredit = 0;
+    const lines = rows.map((r: any) => {
+      const debit = round4(n(r.debit)), credit = round4(n(r.credit));
+      bal = round4(bal + debit - credit);
+      totalDebit = round4(totalDebit + debit);
+      totalCredit = round4(totalCredit + credit);
+      return { date: r.date, entry_no: r.entry_no, source: r.source, source_ref: r.source_ref, memo: r.memo, cost_center: r.cost_center, debit, credit, balance: bal };
+    });
+    return {
+      account_code: account.code, account_name: account.name, account_type: account.type,
+      from: from ?? null, to: to ?? null, ledger: ledgerCode ?? LEADING,
+      opening_balance: opening, total_debit: totalDebit, total_credit: totalCredit, closing_balance: bal,
+      count: lines.length, lines,
+    };
+  }
+
   // ───────────────────── Income Statement ─────────────────────
   // Revenue − Expense = net income, over [from,to] (entry_date inclusive)
   async incomeStatement(from: string, to: string, costCenter?: string | null, ledgerCode?: string | null) {
