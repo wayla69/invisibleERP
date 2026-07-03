@@ -10,11 +10,13 @@
 
 - **Hand-write** the `.sql` in `apps/api/drizzle/` using the **next free 4-digit number**, and **add a
   matching entry** to `apps/api/drizzle/meta/_journal.json` (idx = last + 1, a new `when`, `tag` =
-  filename without `.sql`). New tenant-scoped tables must re-run the RLS loop (copy from `0081`/`0121`).
+  filename without `.sql`). New tenant-scoped tables must re-run the RLS loop — copy the **org-clause form
+  from `0232`** (NOT the plain `0081`/`0121` form: that omits the `app.org_id` multi-company clause and
+  silently breaks ITGC-AC-18 org sharing — see `docs/ops/tenancy-model.md` §4).
 - **`drizzle-kit generate` is usable again** for drafting a normal change — the snapshot baseline was
   resynced (migration `0129_baseline_resync`, §3), so generate now emits a **minimal** diff for your change
   instead of a ~2,500-line full-schema catch-up. Two caveats remain, so review its output: it does **not**
-  emit the RLS loop for a new tenant-scoped table (hand-append it, copy from `0081`/`0121`), and the
+  emit the RLS loop for a new tenant-scoped table (hand-append it, copy the org-clause form from `0232`), and the
   filename it picks (`last idx + 1`) can still collide with a concurrent PR — see §2.
 - The **`migrations-journaled` CI gate** enforces: every `.sql` is journaled, every journal tag has a
   `.sql`, **no duplicate migration numbers**, and no duplicate journal tag/idx.

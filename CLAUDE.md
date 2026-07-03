@@ -67,13 +67,18 @@ For every such change, review and update as needed:
   (sees ALL tenants) — so any deploy where outsiders can sign up MUST set **`TENANCY_MODE=multi-company` on
   every API service on that DB**. Per-company isolation (`org_id=NULL` ⇒ own tenant only) then holds; branches
   are **intra-tenant** (`branches.tenant_id`) so a company is one tenant (no `org_id` backfill needed unless
-  several separate accounts must share). Gotcha: **cross-account org `sharing` (an org-scoped Admin seeing a
-  SIBLING tenant's DATA rows) is currently NOT effective on data tables — on real Postgres AND PGlite** —
-  the mode fails **closed** (over-isolates to own tenant; `pg-core` observes `org1=1`). Safe (no leak) and
-  unneeded for one-tenant-per-company, but a **tracked AC-18 limitation**: 0196's per-table org clause (a
-  `DO $$…EXECUTE…$$` loop) doesn't resolve, though its *direct* DDL — the `tenants` self-policy, hence org
-  **isolation** + `pg-smoke` — works. Per-company `tenant_id` isolation works everywhere. Full model +
-  follow-up: `docs/ops/tenancy-model.md` §6.
+  several separate accounts must share). Gotcha (**fixed in 0232, keep it that way**): cross-account org
+  `sharing` (an org-scoped Admin seeing a SIBLING tenant's DATA rows in its own org) **works** — but it broke
+  once and can silently regress. `0196` added the per-table org clause via a `DO $$…EXECUTE…$$` loop; `0218`'s
+  index-backfill then re-ran the generic RLS loop and recreated `tenant_isolation` with the PLAIN body,
+  silently dropping the org clause on **every data table** (`pg-core` saw `org1=1`, fail-**closed**, no leak);
+  `0232` re-applies it. **The org-clause body is CANONICAL** — any new tenant table's hand-appended RLS loop,
+  or any migration that DROP/CREATEs `tenant_isolation`, MUST copy `0232`'s form (not the plain
+  `0081`/`0121`/`0002` one), or the bug returns. The `tenants` self-policy is set by *direct* DDL (not the
+  loop; `tenants` has no `tenant_id` column) so tenants-level org isolation + `pg-smoke` can look green while
+  data-table sharing is broken — `pg-core` now **hard-asserts** data-table sharing (`org1===2`). **NB PGlite
+  DOES execute the `DO`-loop** (verified 0.2.17) — a DO-loop migration needs no parallel statement list. Full
+  model: `docs/ops/tenancy-model.md`.
 - **drizzle-orm is on `^0.45.2`** (bumped from 0.36.4 in W4, 2026-06-30 — the SQLi advisory is remediated).
   **0.45 wraps every driver error in a `DrizzleQueryError` with the original pg/PGlite error (SQLSTATE
   `code`/`constraint`/`detail`) nested under `.cause`** — so never read `e.code`/`e.constraint` directly on a

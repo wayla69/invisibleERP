@@ -100,12 +100,12 @@ async function main() {
   // autocommit DELETE → P0001). It is intentionally NOT re-tested here: a failing query inside a
   // postgres-js transaction poisons that transaction, so it can't be caught-and-continued mid-tx.
 
-  // 5. Multi-company org-scoped Admin ISOLATION (ITGC-AC-18 / hybrid org-tenancy, migration 0196). The
-  //    TenantTxInterceptor reads process.env.TENANCY_MODE per-request, so we flip it live (no reboot) and
-  //    prove what a self-service-signup SaaS needs: an Admin is ISOLATED from other companies — a fresh
-  //    signup (org_id=NULL) and a single-tenant company Admin each see ONLY their own tenant, and an
-  //    org-scoped Admin never sees another company. (Cross-account org SHARING — an Admin seeing a SIBLING
-  //    tenant in its own org — is a separate capability that currently fails CLOSED; see the note below.)
+  // 5. Multi-company org-scoped Admin ISOLATION + SHARING (ITGC-AC-18 / hybrid org-tenancy, migrations 0196
+  //    + 0232). The TenantTxInterceptor reads process.env.TENANCY_MODE per-request, so we flip it live (no
+  //    reboot) and prove what a self-service-signup SaaS needs: an Admin is ISOLATED from other companies —
+  //    a fresh signup (org_id=NULL) and a single-tenant company Admin each see ONLY their own tenant, and an
+  //    org-scoped Admin never sees another company — AND cross-account org SHARING works: an org-scoped Admin
+  //    DOES see a SIBLING tenant's data in its own org (org1===2; see the hard assertion below).
   //    A distinct jobType keeps the single-company cohort above from skewing the counts. Seeded via a
   //    bypass context (FORCE-RLS rejects a bare insert).
   let mA1 = 0, mA2 = 0, mB = 0, mC = 0;
@@ -151,17 +151,13 @@ async function main() {
   ok('single-company (contrast): the SAME Admin sees ALL companies — the risky global-bypass default multi-company fixes', org1Single === 4, `org1Single=${org1Single}`);
   process.env.TENANCY_MODE = 'multi-company';
 
-  // Org-scoped ISOLATION from OTHER companies is the security guarantee: org1 Admin (org_id=1, whose org
-  // spans mA1+mA2) must see NONE of the other two companies (org2 mB, org-null mC) → it sees a subset of its
-  // OWN org's 2 tenants, so 1 ≤ org1 ≤ 2, never 3–4. Holds on both backends.
-  ok('multi-company: org Admin is isolated from OTHER companies (≤ its own org, never the other 2)', org1 >= 1 && org1 <= 2, `org1=${org1}`);
-  // Whether it ALSO sees its org SIBLING's DATA (cross-account SHARE: org1===2) needs 0196's per-tenant-table
-  // org clause. That clause is currently NOT effective on data tables — observed org1=1 on REAL Postgres too,
-  // not just PGlite — so the mode fails CLOSED: an org-scoped Admin over-isolates to its OWN tenant. This is
-  // SAFE (no cross-account leak) and most deployments are one-tenant-per-company (branches are intra-tenant)
-  // so they never need it, but cross-account org SHARING is a KNOWN AC-18 limitation (tracked follow-up).
-  // See docs/ops/tenancy-model.md §Known-limitation.
-  console.log(`  ℹ  cross-account org SHARE (Admin sees org SIBLING's data) — ${org1 === 2 ? 'ACTIVE' : 'NOT effective; mode over-isolates to own tenant (fail-closed) — tracked AC-18 follow-up'} [org1=${org1}]`);
+  // Org-scoped ISOLATION + SHARING in one count: org1 Admin (org_id=1, whose org spans mA1+mA2) must see
+  // BOTH of its own org's tenants (cross-account SHARING — it reads its sibling's DATA rows) and NEITHER of
+  // the other two companies (org2 mB, org-null mC) → org1 === 2 exactly: never 1 (over-isolated) nor 3–4
+  // (leak). This needs 0196's per-tenant-table org clause, which 0218's plain RLS re-loop had dropped on the
+  // data tables and 0232 re-applies — so it now holds on BOTH PGlite and real Postgres. (Was org1=1 before
+  // the 0232 fix: the mode over-isolated to the Admin's own tenant — fail-closed, no leak.)
+  ok('multi-company: org-scoped Admin sees BOTH its org tenants and NO other company — cross-account SHARING active (org1===2)', org1 === 2, `org1=${org1}`);
   delete process.env.TENANCY_MODE; // restore harness default
 
   await app.close();
