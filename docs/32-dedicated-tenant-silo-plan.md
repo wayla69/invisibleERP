@@ -216,7 +216,70 @@ permits Model A. Everything downstream is reuse of infrastructure the platform a
 
 ---
 
+## Appendix A — Model A onboarding (the cheaper alternative), for side-by-side
+
+If §4.1 concludes the contract does **not** require dedicated infra, the government customer can be onboarded
+onto the **existing deployment** as a second, fully-isolated tenant — same DB-enforced isolation, in an
+afternoon, at no new infra cost. This is the honest comparison to the six-phase silo above.
+
+### A.1 The one make-or-break step: `TENANCY_MODE=multi-company`
+Today the deployment runs the **default `single-company`**, in which an **Admin sees ALL tenants** (a global
+RLS bypass — designed for one company whose other tenants are its own branches/outlets). If you add a
+**second independent company** under that default, **the original customer's Admin would see the government
+data and vice-versa** — the exact mixing you want to avoid.
+
+So Model A's first action is to set **`TENANCY_MODE=multi-company` on every API service on that database**
+(`invisibleERP` **and** `invisiblePOSERP` — a single service left on the default reopens the hole), then
+redeploy. In this mode an Admin is **org-scoped**: it sees only tenants sharing its `org_id`, and
+`org_id = NULL` ⇒ **its own tenant only** (fail-closed).
+
+- **Impact on the existing customer (verify before flipping):** its Admin changes from "sees everything" to
+  "sees only its own org/tenant." If that customer is one company with **branches** (intra-tenant,
+  `branches.tenant_id`), nothing is lost — branches already share one `tenant_id`. If instead its HQ relied
+  on seeing **several separate tenant rows**, backfill a shared `org_id` on those `tenants` rows **and** their
+  Admin `users` rows so they keep sharing (see `docs/ops/tenancy-model.md` §3). Confirm this on staging or a
+  DB snapshot first.
+
+### A.2 Concrete steps
+1. **Flip the mode.** `TENANCY_MODE=multi-company` on both API services; redeploy; confirm the boot log warns
+   `TENANCY_MODE=multi-company — Admin RLS bypass is org-scoped …`.
+2. **Provision the gov tenant** via `POST /api/admin/tenants` (`@PlatformAdmin`; set `PLATFORM_ADMIN_USERNAMES`
+   to the operator). Provisioning sets the new tenant's **`org_id = its own tenant id`**, so it is **isolated
+   by default** — it shares an org with nobody. Keep `PUBLIC_SIGNUP_ENABLED` **off**.
+3. **Give them a link.** Add the gov subdomain to the existing wildcard DNS/TLS (`*.app.example.com`), set
+   `AUTH_COOKIE_DOMAIN` to the shared parent and add the origin to `CORS_ORIGINS` (already in place for the
+   current customer — see `multi-tenant-subdomain-runbook.md` §4).
+4. **Configure the tenant:** industry CoA + fiscal year (auto on provision), branding/theme (`/theme`), tax
+   profile (`PATCH /api/tenant/profile`), HQ branch (`POST /api/tenant/starter-pack`), per-tenant messaging
+   creds if they use their own LINE/SMS/SMTP (`PUT /api/messaging/providers/:channel`, encrypted at rest).
+5. **Prove isolation** on the shared DB: run `tools/cutover/src/pg-core.ts` / `onboarding.ts`, and manually
+   confirm the gov Admin sees only gov data **and** the original Admin cannot see gov data (and vice-versa).
+
+### A.3 Model A vs Model B — decision table
+
+| Dimension | **A — shared deployment, new tenant** | **B — dedicated silo** (this plan) |
+|---|---|---|
+| Isolation mechanism | Postgres RLS (`tenant_id`), policy-enforced | Separate database + processes, **physical** |
+| Cross-mixing risk | None **if** `multi-company` + own `org_id` (verify the flip) | Structurally impossible (no shared data) |
+| New infra cost | **฿0** (amortised) | ~฿3,000–8,000/mo per customer (runbook §7) |
+| Onboarding time | Hours | Days (provision infra + domain + verify) |
+| Upgrades | Automatic (one deployment) | Redeploy same commit to the silo too |
+| Blast radius / noisy-neighbour | Shared DB & compute | Fully isolated |
+| Data residency / bespoke SLA | Not separable | Selectable per silo |
+| Exit / data handover | Extract one tenant's rows (harder) | DB dump + teardown (clean) |
+| Reversibility | Trivial (suspend/delete tenant) | Decommission a deployment |
+| **Pick when** | Standard commercial onboarding, no infra mandate | Contract requires physical isolation / residency / gov optics |
+
+**Bottom line:** Model A is the right default for "standard commercial onboarding" and is what the platform
+was built for; Model B is worth its recurring cost only when a contract (or the government-logo optic) demands
+physical separation. The recorded decision is B — but A.1's mode flip is the *fastest* way to make the
+current deployment safe for more than one company regardless, so do it either way if this DB will ever hold
+two independent companies.
+
+---
+
 ## 7. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-07-03 | Platform / Security | Initial design — dedicated single-tenant silo (Model B) for a government customer: target architecture, six-phase runbook (infra → config/secrets → deploy → tenant bootstrap → verify → ops), per-silo must-differ secret matrix, confirm-before-build decisions, doc-sync targets, and a go-live checklist. Records the isolation-tier decision (fully-dedicated deployment) and the Model A off-ramp. |
+| 1.1 | 2026-07-03 | Platform / Security | Added Appendix A — concrete Model A onboarding (shared deployment, new tenant) as the cheaper side-by-side alternative: the make-or-break `TENANCY_MODE=multi-company` flip + its impact on the existing customer, five onboarding steps, and an A-vs-B decision table. |
