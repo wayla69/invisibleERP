@@ -577,6 +577,41 @@ async function main() {
     stk.json.chat === 1 && stkText.includes('A4-PAPER') && stkText.includes('42') && stkText.includes('WH-MAIN'),
     JSON.stringify({ reply: stkText.slice(0, 60) }));
 
+  // 17k. low / reorder (feature C) — a low-stock item (on-hand ≤ reorder point) surfaces via `low`; the
+  //      `reorder` command raises ONE PR that tops every low-stock item up to its suggested qty (2× the
+  //      reorder point here: min_stock 20, on-hand 5 → 35). A linked user without pr_raise is refused.
+  await db.insert(s.items).values({ itemId: 'NAPKIN-L', itemDescription: 'กระดาษเช็ดปาก', uom: 'PACK', minStock: '20', maxStock: '9999' }).onConflictDoNothing();
+  await db.insert(s.invBalances).values({ tenantId: t1, itemId: 'NAPKIN-L', itemDescription: 'กระดาษเช็ดปาก', locationId: 'WH-MAIN', onHandQty: '5', avgCost: '10', totalValue: '50' }).onConflictDoNothing();
+  const low = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17k1', source: { userId: 'Usomchai' }, message: { id: 'mid-17k1', type: 'text', text: 'low' } }] });
+  const lowText = lineReplies.at(-1)?.text ?? '';
+  ok('chat-C: low → lists items at/below reorder point (NAPKIN-L เหลือ 5, จุดสั่งซื้อ 20)',
+    low.json.chat === 1 && lowText.includes('NAPKIN-L') && lowText.includes('5') && lowText.includes('reorder'),
+    JSON.stringify({ reply: lowText.slice(0, 80) }));
+
+  const lowApi = await inj('GET', '/api/procurement/low-stock', token);
+  const napkin = (lowApi.json.items ?? []).find((x: any) => x.item_id === 'NAPKIN-L');
+  ok('C: GET /low-stock returns the low item with a suggested top-up qty (min_stock 20, on_hand 5 → 35)',
+    lowApi.status === 200 && !!napkin && Number(napkin.on_hand) === 5 && Number(napkin.min_stock) === 20 && Number(napkin.suggested_qty) === 35,
+    JSON.stringify({ n: (lowApi.json.items ?? []).length, sug: napkin?.suggested_qty }));
+
+  const prCountC = (await db.select().from(s.purchaseRequests)).length;
+  const reorder = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17k2', source: { userId: 'Usomchai' }, message: { id: 'mid-17k2', type: 'text', text: 'reorder' } }] });
+  const reorderText = lineReplies.at(-1)?.text ?? '';
+  const prNoC = /PR-\d{8}-\d{3}/.exec(reorderText)?.[0] ?? '';
+  const [prCHead] = prNoC ? await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prNoC)) : [];
+  const prCLines = prCHead ? await db.select().from(s.prItems).where(eq(s.prItems.prId, Number(prCHead.id))) : [];
+  const napkinLine = prCLines.find((l: any) => l.itemId === 'NAPKIN-L');
+  ok('chat-C: reorder → ONE PR covering every low-stock item at its suggested qty (NAPKIN-L × 35), requester = linked staff',
+    reorder.json.chat === 1 && !!prCHead && prCHead.requestedBy === 'somchai' && prCHead.status === 'Pending'
+      && !!napkinLine && Number(napkinLine.requestQty) === 35
+      && (await db.select().from(s.purchaseRequests)).length === prCountC + 1,
+    JSON.stringify({ pr: prNoC, qty: napkinLine?.requestQty }));
+
+  const reorderNoPerm = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17k3', source: { userId: 'Uauditor' }, message: { id: 'mid-17k3', type: 'text', text: 'reorder' } }] });
+  ok('chat-C: reorder from a linked user without pr_raise → refused (no PR)',
+    reorderNoPerm.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีสิทธิ์'),
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
   // ── 18. Attachments (0228): invoice/receipt photo onto a PO — web API + LINE chat `attach` flow. ──
   const poRes = await inj('POST', '/api/procurement/pos', token, { vendor_name: 'ผู้ขายทดสอบแนบ', items: [{ item_id: 'A4-PAPER', order_qty: 5, unit_price: 100 }] });
   const poNo = poRes.json.po_no as string;
