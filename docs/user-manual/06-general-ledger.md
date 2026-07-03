@@ -50,6 +50,29 @@ data entry clean.
 The **ผังบัญชี** tab shows your chart with a *ผังบัญชีตามประเภทธุรกิจ* badge and the
 account count. Each journal-entry account picker uses this same curated list.
 
+### Dedicated Chart-of-Accounts reference
+
+**Screen:** ผังบัญชี (`/chart-of-accounts`) · **Required permission:** `gl_coa`, `gl_post`,
+`gl_close`, `approvals`, `creditors`, `ar` or `exec` (read-only).
+
+For a full, reference-quality view of the chart, open **ผังบัญชี** from the *Ledger & GL*
+menu. Unlike the quick-glance tab inside `/accounting`, this page **groups accounts by type**
+(สินทรัพย์ · หนี้สิน · ส่วนของเจ้าของ · รายได้ · ค่าใช้จ่าย, in financial-statement order) and
+enriches your curated chart with each account's full accounting attributes drawn from the
+canonical universe:
+
+- **ดุลปกติ (normal balance)** — เดบิต (Dr) or เครดิต (Cr).
+- **บัญชีคุมยอด (control)** — flags accounts that reconcile to a subledger (AR / AP / INV / FA).
+- **หัวข้อ (ห้ามลงรายการ)** — non-postable header/roll-up accounts.
+- **มิติที่ต้องระบุ** — accounts that require a dimension (branch / project / department / cost
+  centre) on every posting.
+
+Use the **search box** (code or name), the **type filter** chips, and the **แสดงบัญชีทั้งหมด /
+เฉพาะบัญชีของธุรกิจ** toggle (canonical universe ↔ your industry chart). **ส่งออก CSV** downloads
+the currently-filtered list. This screen is **read-only** — the canonical chart is the global,
+immutable posting universe, so accounts are created/curated only via **Onboarding → Industry
+packs**, never edited here.
+
 > **Nothing is ever removed.** The accounting engine always has the full set of accounts
 > available, so a posting is never blocked. Press **แสดงบัญชีทั้งหมด** on the ผังบัญชี tab
 > to reveal **every** account (for an unusual entry); the badge switches to *ผังบัญชีเต็ม*.

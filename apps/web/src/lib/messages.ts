@@ -172,6 +172,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.petty_cash': { th: 'กองทุนเงินสดย่อย & ค่าใช้จ่าย', en: 'Petty Cash & Expenses' },
 
   // ── Finance / Ledger & GL ─────────────────────────────────────────────────
+  'nav.chart_of_accounts': { th: 'ผังบัญชี', en: 'Chart of Accounts' },
   'nav.accounting': { th: 'บัญชีแยกประเภท', en: 'General Ledger' },
   'nav.revenue': { th: 'รับรู้รายได้', en: 'Revenue Recognition' },
   'nav.assets': { th: 'สินทรัพย์ถาวร', en: 'Fixed Assets' },
