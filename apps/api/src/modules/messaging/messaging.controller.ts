@@ -4,6 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { MessagingService } from './messaging.service';
 import { TenantMessagingService } from './tenant-messaging.service';
+import { LineNotifyService } from './line-notify.service';
 
 const channel = z.enum(['line', 'sms', 'email']);
 // Per-tenant provider credentials (write-only). Shapes are loose (per-channel fields validated server-side).
@@ -25,6 +26,7 @@ export class MessagingController {
   constructor(
     private readonly svc: MessagingService,
     private readonly tenantMsg: TenantMessagingService,
+    private readonly lineNotify: LineNotifyService,
   ) {}
 
   @Post('send') @Permissions('marketing', 'crm')
@@ -58,6 +60,11 @@ export class MessagingController {
   testProvider(@Param('channel') ch: string, @Body(new ZodValidationPipe(TestBody)) b: any, @CurrentUser() u: JwtUser) {
     return this.svc.sendTest(ch as any, b.to, u);
   }
+
+  // LP-1 (docs/31) — go-live console: push a test message to the CALLING admin's own linked LINE (no
+  // userId to look up/typo). Errors NOT_LINKED when the admin hasn't linked, so silence is explained.
+  @Post('providers/line/test-self') @Permissions('users', 'exec')
+  testLineSelf(@CurrentUser() u: JwtUser) { return this.lineNotify.testSelf(u); }
 
   // ── W3 (docs/27) — messaging governance: quiet hours + global weekly marketing cap (MKT-04/12) ──
   @Get('governance') @Permissions('marketing', 'users', 'exec')

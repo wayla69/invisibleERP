@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { tenantMessagingConfig, messageLog } from '../../database/schema';
+import { tenantMessagingConfig, messageLog, tenants } from '../../database/schema';
 import { encrypt, decrypt } from '../../common/crypto';
 import type { MessageChannel } from './gateways';
 import type { JwtUser } from '../../common/decorators';
@@ -39,11 +39,21 @@ export class TenantMessagingService {
       const [last] = await db.select({ at: messageLog.createdAt, status: messageLog.status, provider: messageLog.provider })
         .from(messageLog).where(and(eq(messageLog.tenantId, user.tenantId as number), eq(messageLog.channel, ch)))
         .orderBy(desc(messageLog.id)).limit(1);
+      // LP-1 (docs/31) — LINE go-live readiness: is the webhook authenticable (secret saved), has LINE
+      // actually delivered to it (last receipt + verify outcome), and the exact webhook path to paste
+      // into the LINE Developers console. Booleans/timestamps/path only, never the secret.
+      const lineExtras = ch === 'line'
+        ? {
+            webhook_secret_set: !!creds?.secret,
+            webhook_path: await this.webhookPath(user.tenantId),
+            ...(await this.webhookReceipt(user.tenantId).then((w) => ({ last_webhook_at: w?.last_at ?? null, last_webhook_status: w?.status ?? null }))),
+          }
+        : {};
       channels.push({
         channel: ch, configured: !!r?.configEnc, enabled: r ? r.enabled === true : false,
         resolved_provider: resolved, callback_token_set: !!creds?.callbackToken,
         last_send_at: last?.at ?? null, last_status: last?.status ?? null, last_provider: last?.provider ?? null,
-        updated_at: r?.updatedAt ?? null, updated_by: r?.updatedBy ?? null,
+        updated_at: r?.updatedAt ?? null, updated_by: r?.updatedBy ?? null, ...lineExtras,
       });
     }
     return { channels };
@@ -64,9 +74,46 @@ export class TenantMessagingService {
 
   private validate(channel: MessageChannel, c: Record<string, any>) {
     const need = (k: string) => { if (!c?.[k]) throw new BadRequestException({ code: 'MISSING_FIELD', message: `${channel}: ${k} required`, messageTh: `ต้องระบุ ${k}` }); };
-    if (channel === 'line') need('token');
+    // LP-1 (docs/31): the Channel Secret is REQUIRED with the token — the webhook fail-closes without it
+    // in production, so token-only creds would save fine and then silently break chat/webhook go-live.
+    if (channel === 'line') { need('token'); need('secret'); }
     else if (channel === 'sms') { need('apiKey'); need('apiUrl'); }
     else if (channel === 'email') need('host');
+  }
+
+  // ── LP-1 (docs/31) — LINE webhook receipt health ("has LINE ever actually reached this webhook?") ──
+  // Stored as a synthetic 'line_webhook' row in tenant_messaging_config (same pattern as 'governance' —
+  // no new table); one row per tenant, updated in place, so webhook traffic never grows a log. Not a
+  // secret, but rides the encrypted column for storage consistency. Best-effort by design: recording
+  // must never break (or slow-fail) webhook processing itself.
+  async recordWebhookReceipt(tenantId: number | null | undefined, status: 'verified' | 'bad_signature' | 'unverified_dev'): Promise<void> {
+    if (tenantId == null) return;
+    try {
+      const db = this.db;
+      const now = new Date();
+      const configEnc = encrypt(JSON.stringify({ last_at: now.toISOString(), status }));
+      await db.insert(tenantMessagingConfig)
+        .values({ tenantId, channel: 'line_webhook', configEnc, enabled: true, updatedAt: now, updatedBy: 'system:line-webhook' })
+        .onConflictDoUpdate({ target: [tenantMessagingConfig.tenantId, tenantMessagingConfig.channel], set: { configEnc, updatedAt: now, updatedBy: 'system:line-webhook' } });
+    } catch { /* health telemetry is best-effort */ }
+  }
+
+  private async webhookPath(tenantId: number | null | undefined): Promise<string | null> {
+    if (tenantId == null) return null; // HQ has no shop OA of its own
+    const [t] = await this.db.select({ code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    return t?.code ? `/api/line/webhook/${t.code}` : null;
+  }
+
+  private async webhookReceipt(tenantId: number | null | undefined): Promise<{ last_at: string; status: string } | null> {
+    if (tenantId == null) return null;
+    const db = this.db;
+    const [r] = await db.select().from(tenantMessagingConfig)
+      .where(and(eq(tenantMessagingConfig.tenantId, tenantId), eq(tenantMessagingConfig.channel, 'line_webhook'))).limit(1);
+    if (!r?.configEnc) return null;
+    try {
+      const w = JSON.parse(decrypt(r.configEnc));
+      return typeof w?.last_at === 'string' && typeof w?.status === 'string' ? { last_at: w.last_at, status: w.status } : null;
+    } catch { return null; }
   }
 
   // ── W3 (docs/27) — tenant-wide messaging governance ──────────────────────

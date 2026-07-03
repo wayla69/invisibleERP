@@ -383,3 +383,20 @@ the governance of that channel:
 - **Rate limiting** — each LINE account gets a command budget (default 30 commands / 5
   minutes). The first excess command gets one "slow down" reply; further excess is dropped
   silently and audit-logged.
+
+## LINE OA go-live (LP-1)
+
+Connect the shop's own LINE Official Account in **Settings → ผู้ให้บริการข้อความ** — the LINE card
+now carries a go-live panel (full runbook: `docs/ops/line-oa-golive.md`):
+
+1. **Save both credentials.** Channel access token **and Channel secret** are required together —
+   the system refuses token-only creds (error `MISSING_FIELD`), because the chat webhook cannot be
+   authenticated (and fail-closes in production) without the secret.
+2. **Copy the webhook URL** shown in the panel (`…/api/line/webhook/<shop-code>`) into the LINE
+   Developers console (Messaging API → Webhook URL → Verify → Use webhook on).
+3. **Read the receipt health.** The panel shows whether LINE has ever reached the webhook and how
+   the last delivery verified: 🟢 verified · 🔴 ลายเซ็นไม่ถูกต้อง (saved secret doesn't match the
+   channel — re-copy it) · never received (check the URL / Verify).
+4. **[ส่งข้อความทดสอบถึง LINE ของฉัน]** pushes a test message to *your own* linked LINE
+   (permission `users`/`exec`; audit campaign `line_test`). If you get "ยังไม่ได้เชื่อม LINE"
+   (`NOT_LINKED`), link first on the Requisitions page — that's your account, not the channel.

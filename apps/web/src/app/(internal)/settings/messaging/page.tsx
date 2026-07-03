@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessageSquare, CheckCircle2, XCircle } from 'lucide-react';
-import { api } from '@/lib/api';
+import { MessageSquare, CheckCircle2, XCircle, Copy, Send } from 'lucide-react';
+import { api, API_BASE } from '@/lib/api';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
@@ -12,13 +12,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-type Channel = { channel: 'line' | 'sms' | 'email'; configured: boolean; enabled: boolean; resolved_provider: 'tenant' | 'env' | 'mock'; callback_token_set: boolean; last_send_at: string | null; last_status: string | null; last_provider: string | null; updated_at: string | null; updated_by: string | null };
+type Channel = { channel: 'line' | 'sms' | 'email'; configured: boolean; enabled: boolean; resolved_provider: 'tenant' | 'env' | 'mock'; callback_token_set: boolean; last_send_at: string | null; last_status: string | null; last_provider: string | null; updated_at: string | null; updated_by: string | null;
+  // LP-1 (docs/31) — LINE go-live readiness (line channel only)
+  webhook_secret_set?: boolean; webhook_path?: string | null; last_webhook_at?: string | null; last_webhook_status?: string | null };
 
 // The credential fields we collect per channel (write-only — never returned by the API).
 const FIELDS: Record<string, { key: string; label: string; placeholder?: string; type?: string }[]> = {
   line: [
     { key: 'token', label: 'Channel access token (LINE OA)', type: 'password' },
-    { key: 'secret', label: 'Channel secret (สำหรับ webhook follow/unfollow) — ถ้ามี', type: 'password' },
+    { key: 'secret', label: 'Channel secret (จำเป็น — ใช้ยืนยัน webhook/แชท)', type: 'password' },
     { key: 'callbackToken', label: 'Callback token (สำหรับ delivery-status callback) — ถ้ามี', type: 'password' },
   ],
   sms: [
@@ -44,6 +46,53 @@ const READINESS: Record<Channel['resolved_provider'], { dot: string; label: stri
   env: { dot: '🟡', label: 'ใช้ผู้ให้บริการกลางของแพลตฟอร์ม', variant: 'info' },
   mock: { dot: '⚪', label: 'โหมดเดโม — ข้อความไม่ออกจริง', variant: 'muted' },
 };
+
+// LP-1 (docs/31) — LINE OA go-live panel: the exact webhook URL to paste into the LINE Developers
+// console, webhook receipt health (has LINE actually reached us + verify outcome), and a one-tap test
+// push to the clicking admin's own linked LINE. See docs/ops/line-oa-golive.md for the full runbook.
+const WEBHOOK_STATUS_TH: Record<string, string> = {
+  verified: '🟢 รับ webhook ล่าสุดสำเร็จ (ยืนยันลายเซ็นแล้ว)',
+  bad_signature: '🔴 webhook ล่าสุดลายเซ็นไม่ถูกต้อง — ตรวจ Channel secret ให้ตรงกับ LINE console',
+  unverified_dev: '🟡 รับ webhook แบบไม่ยืนยัน (โหมด dev/test เท่านั้น)',
+};
+
+function LineGoLivePanel({ ch }: { ch: Channel }) {
+  const webhookUrl = ch.webhook_path ? `${API_BASE}${ch.webhook_path}` : null;
+  const testSelf = useMutation({
+    mutationFn: () => api<{ status: string; provider: string; to: string }>(`/api/messaging/providers/line/test-self`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (r) => r.status === 'sent' ? notifySuccess(`ส่งทดสอบไปที่ LINE ของคุณแล้ว (${r.to})`) : notifyError(`ส่งไม่สำเร็จ: ${r.status}`),
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed p-3">
+      <div className="text-xs font-semibold">เชื่อม LINE Official Account ของร้าน (go-live)</div>
+      {webhookUrl ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="rounded bg-muted px-2 py-1 text-xs">{webhookUrl}</code>
+          <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" onClick={() => { navigator.clipboard?.writeText(webhookUrl); notifySuccess('คัดลอก webhook URL แล้ว'); }}>
+            <Copy className="size-3" /> คัดลอก
+          </Button>
+          <span className="text-xs text-muted-foreground">วางเป็น Webhook URL ใน LINE Developers console (เปิด Use webhook)</span>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">บัญชีสำนักงานใหญ่ไม่มี OA ของร้าน — เข้าสู่ระบบด้วยบัญชีของสาขาเพื่อดู webhook URL</p>
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Badge variant={ch.webhook_secret_set ? 'success' : 'muted'} className="text-[10px]">
+          {ch.webhook_secret_set ? '🟢 ยืนยันลายเซ็น webhook ได้' : '⚪ ยังไม่ได้บันทึก Channel secret'}
+        </Badge>
+        <span className="text-muted-foreground">
+          {ch.last_webhook_at
+            ? `${WEBHOOK_STATUS_TH[ch.last_webhook_status ?? ''] ?? ch.last_webhook_status} · ${new Date(ch.last_webhook_at).toLocaleString('th-TH')}`
+            : 'ยังไม่เคยได้รับ webhook จาก LINE — กด Verify ใน LINE console หรือทักแชท OA เพื่อทดสอบ'}
+        </span>
+      </div>
+      <Button size="sm" variant="outline" className="gap-1" disabled={testSelf.isPending} onClick={() => testSelf.mutate()}>
+        <Send className="size-3" /> ส่งข้อความทดสอบถึง LINE ของฉัน
+      </Button>
+    </div>
+  );
+}
 
 function ChannelCard({ ch, onSaved }: { ch: Channel; onSaved: () => void }) {
   const [creds, setCreds] = useState<Record<string, string>>({});
@@ -86,6 +135,7 @@ function ChannelCard({ ch, onSaved }: { ch: Channel; onSaved: () => void }) {
             </div>
           ))}
         </div>
+        {ch.channel === 'line' && <LineGoLivePanel ch={ch} />}
         {ch.resolved_provider === 'mock' && ch.last_send_at && (
           <p className="text-xs text-warning">⚠ ช่องทางนี้อยู่ในโหมดเดโม — ข้อความที่ผ่านมาถูกบันทึกว่า "ส่ง" แต่ไม่ได้ออกไปถึงลูกค้าจริง เชื่อมต่อผู้ให้บริการเพื่อส่งจริง</p>
         )}
