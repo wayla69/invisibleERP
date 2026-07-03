@@ -1,0 +1,27 @@
+# Ops utility (manual dispatch): sync CORS_ORIGINS on the invisibleERP API service to the
+# invisiblePOSERP web service's actual public domain (source of truth: RAILWAY_PUBLIC_DOMAIN),
+# then redeploy the API. Idempotent — safe to re-run whenever the web domain changes. Lives in CI
+# because dev sandboxes cannot reach Railway's API; uses the same repo RAILWAY_TOKEN as deploy.yml.
+# NOTE: sets the Railway-domain origin only — after attaching a CUSTOM web domain, append it to
+# CORS_ORIGINS by hand (comma-separated) or extend this job.
+name: Ops — sync CORS_ORIGINS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  set-cors:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve web domain, set CORS_ORIGINS, redeploy API
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -e
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then echo "::error::RAILWAY_TOKEN not configured"; exit 1; fi
+          dom=$(npx -y @railway/cli variables --service invisiblePOSERP --kv | grep '^RAILWAY_PUBLIC_DOMAIN=' | cut -d= -f2- | tr -d '\r')
+          if [ -z "$dom" ]; then echo "::error::could not resolve invisiblePOSERP public domain"; exit 1; fi
+          echo "Web origin resolved: https://$dom"
+          npx -y @railway/cli variables --set "CORS_ORIGINS=https://$dom" --service invisibleERP --skip-deploys
+          npx -y @railway/cli redeploy --service invisibleERP -y
+          echo "CORS_ORIGINS=https://$dom set on invisibleERP and redeploy triggered ✅"
