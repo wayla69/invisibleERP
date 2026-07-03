@@ -68,6 +68,8 @@ handy on the floor or in the stockroom. One-time setup first:
 | `subscribe lowstock` / `unsubscribe lowstock` (also `รับแจ้งของใกล้หมด`) | Get a morning LINE alert whenever something is at/below its reorder point, with a one-tap **สั่งเติมทั้งหมด** button (needs `pr_raise`) |
 | `spend [YYYY-MM]` (also `ยอดซื้อ`/`สรุปซื้อ`) | This-month purchase summary — total spend, top vendors, most-bought items (defaults to this month; add a month to look back). Needs `procurement`/`exec`/`dashboard` |
 | `receive <PO no>` (also `รับของ`/`รับ`) | Receives **all** outstanding qty on an approved PO in one tap → creates the GR and closes the PO when fully received (needs `wh_receive`/`warehouse`/`procurement`; the PO must be Approved — EXP-03) |
+| `receive <PO no> <item id> <qty>` | Receives a **partial** quantity of one item (qty is capped at what's still outstanding) — the rest stays open |
+| `claim <PO/GR no> <qty> [เหตุผล]` (also `เคลม`) | Opens a **short/damaged goods claim** against the supplier (needs `procurement`/`wh_receive`); finish it on `/claims` |
 | `expense <fund> <amount> [เหตุผล]` / `advance …` (also `เบิก`/`ยืมเงิน`) | Raises a petty-cash request — see [Finance](./05-finance-ar-ap.md) |
 | `leave <from YYYY-MM-DD> <days> [เหตุผล]` (also `ลา`) | Raises an ESS leave request (needs `ess` + employee record) |
 | `subscribe digest` / `unsubscribe digest` (also `รับสรุป`/`เลิกรับสรุป`) | Morning summary on LINE — see [Reports](./09-reports-and-analytics.md) |
@@ -263,7 +265,14 @@ typing `receive <PO no>` — see the [chat commands](#raise-a-pr-from-line-chat)
 > **Note — short / damaged delivery:** Raise a **goods-receipt claim** against
 > the supplier under **Claims** (`/claims` → GR Claims tab): enter the GR number,
 > item, claim quantity and reason. Resolve or reject it once the supplier
-> responds.
+> responds. **From LINE chat** you can open one on the spot: `claim <PO/GR no>
+> <qty> [เหตุผล]` (e.g. `claim GR-20260101-001 2 ของแตก`) — procurement then
+> follows up on `/claims`.
+
+**Receiving only part of a delivery:** if only some of the order arrived, enter the
+actual quantity per line in the GR form (leave the rest — the PO stays open for the
+balance). From LINE chat, `receive <PO no> <item id> <qty>` does the same for one
+item in a tap; the quantity is capped at what's still outstanding.
 
 ---
 

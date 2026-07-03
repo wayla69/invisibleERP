@@ -636,4 +636,20 @@ export class ProcurementService {
     if (!items.length) throw new UnprocessableEntityException({ code: 'NOTHING_TO_RECEIVE', message: 'PO already fully received', messageTh: 'รับของครบแล้ว ไม่มีรายการค้างรับ' });
     return this.createGr({ po_no: poNo, remarks: 'รับครบผ่านแชท/ปุ่มรับครบ', items }, user);
   }
+
+  // D4 — receive a PARTIAL quantity of ONE item on an approved PO (LINE chat `receive <PO> <item> <qty>`).
+  // The item must be a line on the PO; qty is capped at the outstanding amount so a fat-finger can't
+  // over-receive. Runs the ordinary createGr path (EXP-03 approval gate + stock/lot + auto-close all bind).
+  async receiveItem(poNo: string, itemId: string, qty: number, user: JwtUser) {
+    const db = this.db;
+    const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
+    if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
+    const [poi] = await db.select().from(poItems).where(and(eq(poItems.poId, po.id), eq(poItems.itemId, itemId))).limit(1);
+    if (!poi) throw new UnprocessableEntityException({ code: 'ITEM_NOT_ON_PO', message: `Item ${itemId} is not on ${poNo}`, messageTh: `ไม่มีสินค้า ${itemId} ในใบสั่งซื้อ ${poNo}` });
+    const remaining = n(poi.orderQty) - n(poi.receivedQty);
+    if (!(remaining > 0)) throw new UnprocessableEntityException({ code: 'NOTHING_TO_RECEIVE', message: `Item ${itemId} already fully received`, messageTh: `สินค้า ${itemId} รับครบแล้ว` });
+    const recv = Math.min(n(qty), remaining); // cap at outstanding — no accidental over-receipt
+    if (!(recv > 0)) throw new BadRequestException({ code: 'BAD_QTY', message: 'Received qty must be > 0', messageTh: 'จำนวนรับต้องมากกว่า 0' });
+    return this.createGr({ po_no: poNo, remarks: 'รับบางส่วนผ่านแชท', items: [{ item_id: itemId, received_qty: recv, uom: poi.uom ?? undefined }] }, user);
+  }
 }

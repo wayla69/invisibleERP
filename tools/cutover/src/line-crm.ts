@@ -660,6 +660,31 @@ async function main() {
     spendDenied.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีสิทธิ์'),
     JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
 
+  // 17N. D4 — partial receive (`receive <PO> <item> <qty>`) + short/damaged claim (`claim <PO/GR> <qty>`).
+  const poD4 = (await inj('POST', '/api/procurement/pos', token, { vendor_name: 'ACME Foods', items: [{ item_id: 'A4-PAPER', order_qty: 10, unit_price: 100 }, { item_id: 'TONER-85A', order_qty: 5, unit_price: 200 }] })).json.po_no as string;
+  await inj('PATCH', `/api/procurement/pos/${poD4}/approve`, token, { approve: true }); // Approved (EXP-03)
+  const partRecv = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17n1', source: { userId: 'Uprayut' }, message: { id: 'mid-17n1', type: 'text', text: `receive ${poD4} A4-PAPER 4` } }] });
+  const [poD4Row] = await db.select().from(s.purchaseOrders).where(eq(s.purchaseOrders.poNo, poD4));
+  const d4Lines = await db.select().from(s.poItems).where(eq(s.poItems.poId, Number(poD4Row.id)));
+  const a4Line = d4Lines.find((l: any) => l.itemId === 'A4-PAPER');
+  const tonerLine = d4Lines.find((l: any) => l.itemId === 'TONER-85A');
+  ok('chat-D4: receive <PO> <item> <qty> → partial GR (only that item received; PO stays Received)',
+    partRecv.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('รับบางส่วน')
+      && Number(a4Line?.receivedQty) === 4 && Number(tonerLine?.receivedQty) === 0 && poD4Row.status === 'Received',
+    JSON.stringify({ a4: a4Line?.receivedQty, toner: tonerLine?.receivedQty, status: poD4Row?.status }));
+
+  const claim = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17n2', source: { userId: 'Uprayut' }, message: { id: 'mid-17n2', type: 'text', text: `claim ${poD4} 2 ของแตกระหว่างขนส่ง` } }] });
+  const claimNo = /GRC-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [claimRow] = claimNo ? await db.select().from(s.grClaims).where(eq(s.grClaims.claimNo, claimNo)) : [];
+  ok('chat-D4: claim <PO> <qty> <reason> → GR claim opened (GRC-, Open)',
+    claim.json.chat === 1 && !!claimRow && Number(claimRow.claimQty) === 2 && claimRow.poNo === poD4 && claimRow.status === 'Open' && (claimRow.reason ?? '').includes('ของแตก'),
+    JSON.stringify({ claim: claimNo, qty: claimRow?.claimQty }));
+
+  const claimDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17n3', source: { userId: 'Uauditor' }, message: { id: 'mid-17n3', type: 'text', text: `claim ${poD4} 1 ทดสอบ` } }] });
+  ok('chat-D4: claim without procurement/wh_receive → refused',
+    claimDenied.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีสิทธิ์'),
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
   // ── 18. Attachments (0228): invoice/receipt photo onto a PO — web API + LINE chat `attach` flow. ──
   const poRes = await inj('POST', '/api/procurement/pos', token, { vendor_name: 'ผู้ขายทดสอบแนบ', items: [{ item_id: 'A4-PAPER', order_qty: 5, unit_price: 100 }] });
   const poNo = poRes.json.po_no as string;
