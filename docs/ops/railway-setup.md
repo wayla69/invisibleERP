@@ -104,9 +104,16 @@ password (first-login control). Then provision your real tenant via signup or ad
 2. Add required reviewers to that Environment.
 3. The workflow runs `railway up --service api` then `--service web`. Service names must be exactly
    `api` and `web`.
+4. **(Optional) Authenticated post-deploy smoke.** The deploy job always runs a liveness+readiness smoke
+   against the API (it self-resolves the URL from the invisibleERP `RAILWAY_PUBLIC_DOMAIN`, so nothing is
+   required for that floor). To also exercise authenticated endpoints, add on the `production` Environment:
+   `secrets.SMOKE_USER` / `secrets.SMOKE_PASS` — a **dedicated low-privilege `pos` account** (never an admin;
+   create it once in the running app), and optionally `vars.PROD_API_URL` to pin the API base URL explicitly.
+   Absent these, only the authed layer is skipped (warning), not the whole smoke.
 
 ## 7. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-06-23 | Platform | Initial Railway first-deploy runbook (monorepo config paths, env matrix, CORS/NEXT_PUBLIC build-order, CI deploy). |
 | 1.1 | 2026-06-25 | Platform | §4 step 3 — make the session cookie usable across the two origins (else login bounces back to `/login`). On `*.up.railway.app` auto-URLs (public-suffix ⇒ can't share a cookie): serve **same-origin** via `API_PROXY_TARGET` + `NEXT_PUBLIC_API_URL`=web URL. With a **shared custom domain**: set api `AUTH_COOKIE_DOMAIN` (+ `AUTH_COOKIE_SAMESITE=None` for cross-registrable-domain). |
+| 1.2 | 2026-07-03 | Platform | §6 step 4 — optional authenticated post-deploy smoke (`SMOKE_USER`/`SMOKE_PASS` low-priv `pos` account, optional `PROD_API_URL`); the liveness+readiness floor already runs unattended (self-resolves the API domain). |

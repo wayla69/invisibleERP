@@ -68,22 +68,38 @@ jobs:
           deploy_service invisibleERP
           deploy_service invisiblePOSERP
       - name: Smoke test (production)
-        # Post-deploy guard: assert the app is up and key endpoints return 200 (not 500) — catches a
-        # "deployed but broken" state such as a migration that never ran. Set vars.PROD_API_URL and
-        # secrets.SMOKE_USER / SMOKE_PASS (a low-privilege `pos` account) on the production Environment
-        # to enable the authenticated checks; without them only a health check runs (warns, non-blocking).
+        # Post-deploy guard (ITGC-OP-04): assert the app is up, the DB is reachable, and key endpoints
+        # return 200 (not 500) — catches a "deployed but broken" state such as a migration that never ran.
+        # PROD_API_URL is resolved from the invisibleERP service's public domain (via RAILWAY_TOKEN, the same
+        # curl/CLI path as ops-set-cors.yml) when vars.PROD_API_URL is unset, so the liveness+readiness floor
+        # ALWAYS runs — no more silent skip. Set secrets.SMOKE_USER / SMOKE_PASS (a low-privilege `pos`
+        # account) on the production Environment to add authenticated endpoint coverage on top.
         env:
           PROD_API_URL: ${{ vars.PROD_API_URL }}
           SMOKE_USER: ${{ secrets.SMOKE_USER }}
           SMOKE_PASS: ${{ secrets.SMOKE_PASS }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           set -e
-          if [ -z "${PROD_API_URL:-}" ]; then echo "::warning::PROD_API_URL not set — skipping smoke test"; exit 0; fi
-          echo "Health check: $PROD_API_URL/healthz"
+          # Resolve the API base URL: an explicit vars.PROD_API_URL override wins; otherwise read the
+          # invisibleERP service's own public domain from Railway (no hard-coded host to drift).
+          if [ -z "${PROD_API_URL:-}" ] && [ -n "${RAILWAY_TOKEN:-}" ]; then
+            dom=$(npx -y @railway/cli variables --service invisibleERP --kv 2>/dev/null | grep '^RAILWAY_PUBLIC_DOMAIN=' | cut -d= -f2- | tr -d '\r' || true)
+            [ -n "$dom" ] && { PROD_API_URL="https://$dom"; echo "Resolved PROD_API_URL from Railway: $PROD_API_URL"; }
+          fi
+          if [ -z "${PROD_API_URL:-}" ]; then echo "::warning::PROD_API_URL unset and invisibleERP domain could not be resolved — skipping smoke test"; exit 0; fi
+          # Liveness — is the process up? Retry across the rollout window.
+          echo "Liveness: $PROD_API_URL/healthz"
           code=000
-          for i in $(seq 1 12); do code=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_API_URL/healthz" || true); [ "$code" = "200" ] && break; echo "  health=$code ($i)"; sleep 5; done
-          [ "$code" = "200" ] || { echo "::error::API health check failed (last=$code)"; exit 1; }
-          if [ -z "${SMOKE_USER:-}" ] || [ -z "${SMOKE_PASS:-}" ]; then echo "::warning::SMOKE_USER/SMOKE_PASS not set — authenticated smoke skipped (set them to catch schema/migration breakage)"; exit 0; fi
+          for i in $(seq 1 24); do code=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_API_URL/healthz" || true); [ "$code" = "200" ] && break; echo "  health=$code ($i)"; sleep 5; done
+          [ "$code" = "200" ] || { echo "::error::API liveness check failed (last=$code)"; exit 1; }
+          # Readiness — is the DB reachable? A 503 here is exactly the migration/schema-broken signal that
+          # the 2026-07-03 outage produced but no gate caught.
+          echo "Readiness: $PROD_API_URL/readyz"
+          rc=000
+          for i in $(seq 1 12); do rc=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_API_URL/readyz" || true); [ "$rc" = "200" ] && break; echo "  ready=$rc ($i)"; sleep 5; done
+          [ "$rc" = "200" ] || { echo "::error::API readiness check failed (last=$rc) — DB unreachable or schema broken"; exit 1; }
+          if [ -z "${SMOKE_USER:-}" ] || [ -z "${SMOKE_PASS:-}" ]; then echo "::warning::SMOKE_USER/SMOKE_PASS not set — authenticated smoke skipped (set them to catch schema/permission breakage on authed routes)"; echo "Liveness+readiness smoke passed ✅"; exit 0; fi
           TOK=$(curl -s -X POST "$PROD_API_URL/api/login" -H 'Content-Type: application/json' -d "{\"username\":\"$SMOKE_USER\",\"password\":\"$SMOKE_PASS\"}" | jq -r '.token // empty')
           [ -n "$TOK" ] || { echo "::error::smoke login failed"; exit 1; }
           fail=""
