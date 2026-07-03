@@ -221,6 +221,31 @@ export const invCostLayers = pgTable('inv_cost_layers', {
   byFefo: index('idx_inv_layers_fefo').on(t.tenantId, t.itemId, t.locationId, t.expiryDate),
 }));
 
+// Stock reservation (M3, docs/32, INV-13) — a soft allocation of on-hand stock to a project. Reserving holds
+// qty against an item+location so available-to-issue = on_hand − Σ(held). A reservation is `held`, then either
+// `released` (freed) or `consumed` (issued to the project → the value moves from inventory 1200 to project WIP
+// 1260). Prevents double-allocation of the same stock to two projects.
+export const stockReservations = pgTable('stock_reservations', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }),
+  itemId: text('item_id').notNull(),
+  locationId: text('location_id').notNull().default('WH-MAIN'),
+  projectId: bigint('project_id', { mode: 'number' }).notNull(),
+  boqLineId: bigint('boq_line_id', { mode: 'number' }),
+  sourceDocType: text('source_doc_type').notNull().default('RES'), // RES | PMR
+  sourceDocNo: text('source_doc_no'),
+  qtyReserved: numeric('qty_reserved', { precision: 18, scale: 4 }).notNull().default('0'),
+  status: text('status').notNull().default('held'),                 // held | released | consumed
+  issueNo: text('issue_no'),                                        // the INV move / JE that consumed it
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byItemLoc: index('idx_stock_res_item').on(t.tenantId, t.itemId, t.locationId),
+  byProject: index('idx_stock_res_project').on(t.projectId),
+}));
+export type StockReservation = typeof stockReservations.$inferSelect;
+
 export const scanSessions = pgTable('scan_sessions', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   sessionNo: text('session_no').unique(),

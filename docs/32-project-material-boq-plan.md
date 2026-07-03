@@ -1,6 +1,6 @@
 # 32 — Project Material Control: BoQ, Commitment Budget & Requisition-to-Purchase — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v0.4 — **M0–M2 DELIVERED**; M3–M4 planned · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v0.5 — **M0–M3 DELIVERED**; M4 planned · **Owner:** ERP / Product
 > **Scope:** Give the PPM suite a **construction/contractor-grade material control loop** on top of the
 > existing project spine: a **Bill of Quantities (BoQ)** as the project's requirement & budget baseline;
 > a **material budget** enforced by **commitment/encumbrance** accounting (staff cannot draw more than the
@@ -276,10 +276,18 @@ tables.
 - `LineNotifyService` Flex card + webhook postback → `approve` → **auto-draft project-tagged PO** (`createPo`
   as `Draft`, authorised over budget). Control **PROJ-13**. New `pmr_over_budget` action-center exception.
 
-### M3 — Stock reservation & issue/transfer-to-project
-- `stock_reservations`; reserve on within-budget PMR, `available = on_hand − held`; new
-  request→approve→issue path in `stock-ops` that transfers/issues reserved stock **to the project** and
-  costs it into WIP (relieve 1200 → 1260 with `project_id`). Control **INV-13**.
+### M3 — Stock reservation & issue/transfer-to-project — ✅ DELIVERED
+> Shipped: `stock_reservations` (migration 0240, tenant-scoped RLS + tenant-leading index); new
+> `ReservationsModule`/`ReservationsService` + `/api/reservations`. `available = on_hand(inv_balances) −
+> Σ(held)`; `reserve` is atomic under a `FOR UPDATE` lock on the item+location holds (`INSUFFICIENT_STOCK` on
+> over-allocation — no double-allocation); `release` frees, `issueToProject` consumes. New
+> `InventoryLedgerService.issueToProject` relieves inventory at moving-avg/consumed-layer cost and posts **Dr
+> 1260 project WIP (`project_id`) / Cr 1200 Inventory** (capitalised into WIP, not COGS) + books a consumed
+> BoQ-line commitment. **Control INV-13** → RCM **179**. Docs: PN-16 step 27 / rev 0.30, PN-03 rev 0.4,
+> user-manual 14 rev 2.7, UAT-O2C-232. Harness: `projects` 152 (was 143). *(Direct reserve→issue path; wiring
+> the PMR within-budget route to prefer stock-on-hand is a fast-follow.)*
+- `stock_reservations`; `available = on_hand − held`; request→issue-to-project path relieving 1200 → project
+  WIP 1260 with `project_id`. Control **INV-13**.
 
 ### M4 — Project-linked advances & reimbursements *(smallest, high value)*
 - `project_id` (+ optional `boq_line_id`) on `employee_advances`, `expense_claims`, `expense_requests`;
@@ -291,7 +299,7 @@ tables.
 | **M0** BoQ + project-dim P2P/inventory | ✅ Delivered | 0236 | (structure; maker-checker BoQ approve) | `projects` 126 (BoQ draft→approve→lock→remeasure, budget sync, SoD; project-tagged PR persists `project_id`+`boq_line_id`) |
 | **M1** Commitment ledger + enforcement | ✅ Delivered | 0237 | PROJ-12 | `projects` 135 (PO encumbers line; over-budget → BUDGET_EXCEEDED + PO rolled back; cancel releases; remaining calc) |
 | **M2** Material requisition + LINE approval | ✅ Delivered | 0239 | PROJ-13 | `projects` 143 (within→PR; over→pending+action-center; self-approve→SoD; authorise→Draft PO + line remaining −2500) |
-| **M3** Reservation + issue-to-project | ⬜ Planned | next free | INV-13 | `basics`/`projects` (reserve, on-hand−held, issue→WIP) |
+| **M3** Reservation + issue-to-project | ✅ Delivered | 0240 | INV-13 | `projects` 152 (available=on_hand−held; over→INSUFFICIENT_STOCK; issue→1260 WIP +1500/1200 −1500; release restores) |
 | **M4** Project-linked advances/reimbursement | ⬜ Planned | next free | PROJ-14 | `basics` (project-tagged advance/reimbursement → WIP) |
 
 ---
@@ -342,6 +350,7 @@ tables.
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 0.5 | 2026-07-03 | ERP / Product | **M3 delivered** — stock reservation → issue-to-project (`stock_reservations`, migration 0240) + `ReservationsModule`/`/api/reservations`: `available = on_hand − Σ(held)` with an atomic `FOR UPDATE` reserve (`INSUFFICIENT_STOCK`, no double-allocation), `release`/`issueToProject`; new `InventoryLedgerService.issueToProject` posts **Dr 1260 project WIP (`project_id`) / Cr 1200** + a consumed BoQ-line commitment. Control **INV-13** (RCM 179, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.30, PN-03 rev 0.4, user-manual 14 rev 2.7, UAT-O2C-232). `projects` harness 152; basics/compliance/tenant-idx/migration-parity/stock-ops/wms/ts-debt/typecheck green. |
 | 0.4 | 2026-07-03 | ERP / Product | **M2 delivered** — Project Material Requisition (`project_material_requisitions`/`pmr_lines`, migration 0239) + `PmrModule`/`PmrService`/`/api/pmr`: within-budget → project-tagged PR; over-budget → maker-checker + one-tap **LINE** approval (`buildApproveCard`; `chatDecidePmr` webhook route) → auto-drafted authorised over-budget project **Draft PO** (`createPo` `draft`+`authorized_over_budget`; `reserve` `allowOver`). `pmr_over_budget` action-center exception. Control **PROJ-13** (RCM 178, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.29, user-manual 14 rev 2.6, UAT-O2C-231). `projects` harness 143; basics/compliance/tenant-idx/migration-parity/ts-debt/typecheck green. **Decision:** over-budget always routes to approval (no tolerance band). |
 | 0.3 | 2026-07-03 | ERP / Product | **M1 delivered** — `project_commitments` encumbrance ledger (migration 0237) + `CommitmentsService` (reserve under a BoQ-line FOR UPDATE lock → `BUDGET_EXCEEDED`; release on PO cancel; consume on full receipt) wired into procurement; per-line budget/committed/remaining on `getBoq`; `GET :code/commitments`. Control **PROJ-12** (RCM 177, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.28, user-manual 14 rev 2.5, UAT-O2C-230). `projects` harness 135; basics/compliance/migration-parity/ts-debt/typecheck green. |
 | 0.2 | 2026-07-03 | ERP / Product | **M0 delivered** — BoQ (`project_boq`/`project_boq_lines`, migration 0236) with maker-checker approve→budget-sync, lock, re-measurement; nullable project dimension (`project_id`/`boq_line_id`) on PR/PO/GR. Docs-synced (PN-16 rev 0.27, user-manual 14 rev 2.4 + 03, UAT-O2C-229). `projects` harness 126 checks; `basics`/`compliance` regression-clean; typecheck + API/web build green. No new control (structure only). |

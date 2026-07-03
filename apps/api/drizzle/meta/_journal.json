@@ -1681,6 +1681,13 @@
       "when": 2023820000066,
       "tag": "0239_project_material_requisitions",
       "breakpoints": true
+    },
+    {
+      "idx": 240,
+      "version": "7",
+      "when": 2023820000067,
+      "tag": "0240_stock_reservations",
+      "breakpoints": true
     }
   ]
 }

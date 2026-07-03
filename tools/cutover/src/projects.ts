@@ -244,6 +244,34 @@ async function main() {
   const acAfter = await inj('GET', '/api/projects/action-center', admin);
   ok('Action center clears pmr_over_budget after approval', !(acAfter.json.items ?? []).some((i: any) => i.kind === 'pmr_over_budget' && i.ref === pmrNo), 'cleared');
 
+  // ── 9f. Stock reservation → issue-to-project (M3, INV-13): reserve on-hand stock, issue into project WIP ──
+  await db.insert(s.invBalances).values({ tenantId: hq, itemId: 'STEEL', itemDescription: 'เหล็ก', locationId: 'WH-MAIN', onHandQty: '100', avgCost: '50', totalValue: '5000', costingMethod: 'moving_avg' });
+  const avail0 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('Reservation available = on_hand 100, held 0, available 100', near(avail0.json.on_hand, 100) && near(avail0.json.available, 100), JSON.stringify(avail0.json));
+  const res1 = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 30, boq_line_id: matLineId });
+  ok('Reserve 30 to project → held, available_after 70', res1.status < 300 && res1.json.status === 'held' && near(res1.json.available_after, 70), JSON.stringify({ s: res1.status, aa: res1.json.available_after }));
+  const availHeld = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('Available reflects the hold: on_hand 100, held 30, available 70', near(availHeld.json.held, 30) && near(availHeld.json.available, 70), JSON.stringify(availHeld.json));
+  const resOver = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 80 }); // > 70 available
+  ok('Reserve beyond available → 400 INSUFFICIENT_STOCK', resOver.status === 400 && resOver.json.error?.code === 'INSUFFICIENT_STOCK', `${resOver.status} ${resOver.json.error?.code}`);
+
+  const bal = (tb: any, c: string) => (tb.json.rows ?? []).find((x: any) => x.account_code === c);
+  const tbBefore = await inj('GET', '/api/ledger/trial-balance', admin);
+  const wipBefore = Number(bal(tbBefore, '1260')?.balance ?? 0), invBefore = Number(bal(tbBefore, '1200')?.balance ?? 0);
+  const issue1 = await inj('POST', `/api/reservations/${res1.json.reservation_id}/issue`, admin);
+  ok('Issue reservation to project → consumed + WIP posting (value 1500)', issue1.status < 300 && issue1.json.status === 'consumed' && near(issue1.json.value, 1500), JSON.stringify({ s: issue1.status, v: issue1.json.value }));
+  const tbAfter = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('Issue-to-project GL: 1260 WIP +1500, 1200 Inventory −1500, TB balanced',
+    tbAfter.json.totals?.balanced === true && near(Number(bal(tbAfter, '1260')?.balance ?? 0) - wipBefore, 1500) && near(invBefore - Number(bal(tbAfter, '1200')?.balance ?? 0), 1500),
+    JSON.stringify({ bal: tbAfter.json.totals?.balanced, dWip: Number(bal(tbAfter, '1260')?.balance ?? 0) - wipBefore }));
+  const availPost = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('After issue: on_hand 70, available 70', near(availPost.json.on_hand, 70) && near(availPost.json.available, 70), JSON.stringify(availPost.json));
+  const res2 = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 20 });
+  const relRes = await inj('POST', `/api/reservations/${res2.json.reservation_id}/release`, admin);
+  ok('Release a held reservation → freed', relRes.status < 300 && relRes.json.status === 'released', JSON.stringify({ s: relRes.status }));
+  const availRel = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('Released reservation restores availability → available 70', near(availRel.json.available, 70), JSON.stringify(availRel.json));
+
   // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
   const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
   const oppNo = opp.json.opp_no;

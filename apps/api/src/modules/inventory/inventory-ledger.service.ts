@@ -26,6 +26,7 @@ interface LayerSlice { qty: number; unitCost: number; lotNo: string | null; expi
 
 export interface ReceiveDto { item_id: string; item_description?: string; uom?: string; location_id?: string; qty: number; unit_cost: number; ref_type?: string; ref_id?: string; costing_method?: CostingMethod; lot_no?: string; expiry_date?: string }
 export interface IssueDto { item_id: string; location_id?: string; qty: number; ref_type?: string; ref_id?: string }
+export interface IssueToProjectDto { item_id: string; location_id?: string; qty: number; project_id: number; ref_type?: string; ref_id?: string }
 export interface AdjustDto { item_id: string; location_id?: string; qty_delta: number; reason?: string }
 
 /**
@@ -211,6 +212,43 @@ export class InventoryLedgerService {
     });
     await this.upsertBalance(tenantId, dto.item_id, cur?.itemDescription, loc, newQty, newAvg, newVal, method);
     return { move_no: moveNo, move_type: 'issue', item_id: dto.item_id, qty, unit_cost: issueUnit, value, balance_qty: newQty, avg_cost: newAvg, costing_method: method, gl_entry_no: je?.entry_no ?? null };
+  }
+
+  // ── Issue stock TO A PROJECT (M3, docs/32) → relieve inventory into project WIP + GL (Dr 1260 project WIP /
+  // Cr 1200 Inventory) at moving-average / consumed-layer cost. Unlike a plain goods issue (Dr 5000 COGS), the
+  // value is CAPITALISED into project WIP carrying the project_id dimension — it becomes project cost, relieved
+  // to COGS only when the project bills. Same negative-stock guard and sub-ledger update as issue().
+  async issueToProject(dto: IssueToProjectDto, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const qty = round4(dto.qty);
+    if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
+    const loc = dto.location_id ?? 'WH-MAIN';
+    if (dto.ref_type && dto.ref_id) {
+      const dup = await this.findByRef(tenantId, dto.ref_type, dto.ref_id);
+      if (dup) return { move_no: dup.moveNo, move_type: 'issue', deduped: true, balance_qty: n(dup.balanceQty), avg_cost: n(dup.avgCost) };
+    }
+    const cur = await this.balanceRow(tenantId, dto.item_id, loc);
+    const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue), avg = n(cur?.avgCost);
+    const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? 'moving_avg';
+    if (qty > oldQty + EPS) throw bad('NEG_STOCK', `Cannot issue ${qty} of ${dto.item_id}; only ${oldQty} on hand`, 'สต๊อกไม่พอสำหรับการเบิก');
+    const value = isLayered(method) ? (await this.consumeLayers(tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
+    const issueUnit = qty > EPS ? round4(value / qty) : avg;
+    const newQty = round4(oldQty - qty);
+    const newVal = round4(oldVal - value);
+    const newAvg = newQty > EPS ? round4(newVal / newQty) : avg;
+    const moveNo = this.mkNo('INV-PRJ');
+    const je = value > EPS ? await this.ledger.postEntry({
+      date: ymd(), source: 'INV-ISS', sourceRef: dto.ref_type && dto.ref_id ? `${dto.ref_type}:${dto.ref_id}` : moveNo,
+      tenantId, memo: `Issue to project ${moveNo} — ${dto.item_id}`, createdBy: user.username,
+      lines: [{ account_code: '1260', debit: value, project_id: dto.project_id, memo: `WIP ${dto.item_id}` }, { account_code: ACCT_INVENTORY, credit: value }],
+    }) : null;
+    await this.writeMove({
+      tenantId, moveNo, moveType: 'issue', itemId: dto.item_id, locationId: loc,
+      qtySigned: -qty, unitCost: issueUnit, valueSigned: -value, balanceQty: newQty, avgCost: newAvg,
+      refType: dto.ref_type, refId: dto.ref_id, glNo: je?.entry_no ?? null, by: user.username,
+    });
+    await this.upsertBalance(tenantId, dto.item_id, cur?.itemDescription, loc, newQty, newAvg, newVal, method);
+    return { move_no: moveNo, move_type: 'issue_to_project', item_id: dto.item_id, qty, unit_cost: issueUnit, value, balance_qty: newQty, avg_cost: newAvg, gl_entry_no: je?.entry_no ?? null };
   }
 
   // ── Stock adjustment (count variance / shrinkage) + GL (loss Dr 5810 / Cr 1200; gain reversed) ──

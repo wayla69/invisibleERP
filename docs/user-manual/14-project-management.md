@@ -213,6 +213,16 @@ tab shows each line's **budget / committed / remaining**; **cancelling** a PO fr
 **receiving** it in full turns the reservation into actual spend. The full ledger is at
 `GET /api/projects/{code}/commitments` (open / consumed / released).
 
+## Reserving stock for a project (docs/32, M3)
+When the material is **already in the warehouse**, staff reserve it for the project instead of buying:
+- **Check availability** — `GET /api/reservations/available?item_id=…` shows **on hand / held / available**
+  (available = on hand − what's already reserved).
+- **Reserve** — `POST /api/reservations` holds a quantity for the project. Two people can't reserve the same
+  stock twice: a reservation that exceeds what's available is rejected (`INSUFFICIENT_STOCK`).
+- **Issue to the project** — `POST /api/reservations/{id}/issue` moves the reserved stock **out of inventory
+  and into the project's cost (WIP)** at its stock cost (Dr project WIP 1260 / Cr Inventory 1200), and books
+  it against the BoQ line. **Release** (`…/{id}/release`) frees a reservation you no longer need.
+
 ## Control callouts
 - Billing (incl. milestone billing) is segregated from cost initiation (**R07**) and capped at the contract
   value — see the troubleshooting list for `BILL_EXCEEDS_CONTRACT`, `OPP_NOT_WON`, `SOD_SELF_APPROVAL`,
@@ -235,6 +245,7 @@ tab shows each line's **budget / committed / remaining**; **cancelling** a PO fr
 | 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |
 | 2.1 | 2026-06-30 | **Program (cross-project) critical path** (PMO-4) — group projects into a *program* (`program_code`) with cross-project finish-to-start dependencies; the new `/projects/program/{code}` view runs a CPM over the program (each row a whole project) and highlights the program critical chain + per-project slack. A *โปรแกรม (Programs)* card on the Portfolio command center lists them. |
 | 2.2 | 2026-06-30 | **Pipeline → FTE forecast** (PMO-5) — the Portfolio billings forecast now also projects **กำลังคน (FTE)** demand per month: committed allocation + the pipeline's projected staffing draw (weighted value ÷ a configurable revenue-per-FTE-month rate), with a peak-FTE badge — "if we win the pipeline, how many people would each month need?". |
+| 2.7 | 2026-07-03 | **Stock reservation → issue-to-project** (docs/32, M3, INV-13) — reserve on-hand stock for a project (`POST /api/reservations`; available = on hand − held, no double-allocation → `INSUFFICIENT_STOCK`), then **issue it to the project** (`…/{id}/issue`) which moves the value from inventory (1200) into project WIP (1260); **release** frees an unused hold. |
 | 2.6 | 2026-07-03 | **Material requisition + over-budget LINE approval** (docs/32, M2, PROJ-13) — staff raise a **PMR** against BoQ lines (`POST /api/pmr`): within budget it routes to a project-tagged PR; over budget it holds for an authoriser who approves from the app **or one-tap in LINE** (maker-checker, ≠ requester), which **auto-drafts an over-budget project PO** (Draft) for procurement. Pending over-budget requisitions show on the Action Center (`pmr_over_budget`). |
 | 2.5 | 2026-07-03 | **Material-budget enforcement** (docs/32, M1, PROJ-12) — a project **PO** tagged to a BoQ line now **reserves** that line's budget; a PO that would exceed it is **blocked** (`BUDGET_EXCEEDED`) and not created, so staff can't over-commit a line (and concurrent orders can't jointly overrun). The BoQ tab shows **budget / committed / remaining** per line; cancelling a PO frees the reservation, full receipt makes it actual. Ledger at `GET /api/projects/{code}/commitments`. |
 | 2.4 | 2026-07-03 | **Bill of Quantities (BoQ)** (docs/32, M0) — a **BoQ** tab on the project workspace: rate-built material/works budget lines (จำนวน × ราคา = งบรายการ), draft → maker-checker approve (which **syncs the project budget** to the BoQ total) → lock, with per-line **re-measurement**. Purchase requisitions/POs can be raised **against a project + BoQ line** (unknown project → rejected); a goods receipt inherits the PO's project. Structure/traceability only in M0 — budget enforcement arrives with the commitment ledger (M1). |
