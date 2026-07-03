@@ -92,6 +92,15 @@ export class ProcurementController {
   @Get('vendors/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
   searchVendors(@Query('q') q: string, @Query('limit') limit?: string) { return this.svc.searchVendors(q ?? '', limit ? Number(limit) : undefined); }
 
+  // Low-stock reorder list — items at/below their reorder point (on-hand vs items.min_stock), with a
+  // suggested top-up qty. Feeds the "สินค้าใกล้หมด" web card + the LINE chat `low` command.
+  @Get('low-stock') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  lowStock(@CurrentUser() u: JwtUser, @Query('limit') limit?: string) { return this.svc.lowStock(u, { limit: limit ? Number(limit) : undefined }); }
+
+  // One-tap reorder — raise a single PR covering all low-stock items (chat `reorder` + web button).
+  @Post('reorder-pr') @Permissions('pr_raise', 'procurement', 'planner')
+  reorderPr(@CurrentUser() u: JwtUser) { return this.svc.reorderPr(u); }
+
   // Convert an approved PR → PO (procurement duty). Lines arrive reconciled (existing item_id or a new
   // code to open); the PO routes through the normal createPo path and the PR is linked + marked Converted.
   @Post('prs/:prNo/to-po') @Permissions('procurement')

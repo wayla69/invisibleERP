@@ -38,9 +38,78 @@ export default function RequisitionsPage() {
         </CardContent>
       </Card>
 
+      <LowStockCard />
       <PrListCard />
       <LineLinkCard />
     </div>
+  );
+}
+
+type LowStockItem = { item_id: string; item_description: string | null; uom: string | null; on_hand: number; min_stock: number; suggested_qty: number; unit_price: number };
+
+// "สินค้าใกล้หมด" — items whose on-hand has fallen to/below their reorder point (items.min_stock). Each row
+// carries a suggested top-up qty (editable); ticking items and pressing "เปิด PR เติมของ" raises ONE PR for
+// the selection through the ordinary createPr path. Mirrors the LINE chat `low`/`reorder` commands.
+function LowStockCard() {
+  const qc = useQueryClient();
+  const q = useQuery<{ items: LowStockItem[]; count: number }>({
+    queryKey: ['low-stock'], queryFn: () => api('/api/procurement/low-stock?limit=100'), refetchInterval: 30_000,
+  });
+  const [qty, setQty] = useState<Record<string, number>>({});
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const rows = q.data?.items ?? [];
+  const qtyOf = (it: LowStockItem) => qty[it.item_id] ?? it.suggested_qty;
+  const isPicked = (it: LowStockItem) => picked[it.item_id] ?? true; // default: all selected
+  const chosen = rows.filter(isPicked);
+
+  const raise = useMutation({
+    mutationFn: () => api('/api/procurement/prs', {
+      method: 'POST',
+      body: JSON.stringify({
+        remarks: 'เติมสต็อกสินค้าใกล้หมด', priority: 'Normal',
+        items: chosen.map((it) => ({ item_id: it.item_id, item_description: it.item_description ?? undefined, request_qty: qtyOf(it), uom: it.uom ?? undefined, reason: 'ต่ำกว่าจุดสั่งซื้อ' })),
+      }),
+    }),
+    onSuccess: (r: any) => {
+      notifySuccess(`เปิดคำขอซื้อเติมสต็อกแล้ว ${r?.pr_no ?? ''} (${chosen.length} รายการ)`);
+      qc.invalidateQueries({ queryKey: ['prs'] });
+      qc.invalidateQueries({ queryKey: ['low-stock'] });
+    },
+    onError: (e: any) => notifyError(e?.message ?? 'เปิด PR ไม่สำเร็จ'),
+  });
+
+  if (!q.isLoading && rows.length === 0) return null; // nothing low → hide the card entirely
+
+  return (
+    <Card className="mt-6 gap-4 border-amber-300/60">
+      <CardHeader className="flex-row items-center justify-between gap-2">
+        <CardTitle className="text-base">สินค้าใกล้หมด{q.data ? ` (${q.data.count})` : ''}</CardTitle>
+        <Button size="sm" disabled={raise.isPending || chosen.length === 0} onClick={() => raise.mutate()}>
+          {raise.isPending ? 'กำลังเปิด…' : `เปิด PR เติมของ (${chosen.length})`}
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {q.isLoading ? (
+          <p className="text-sm text-muted-foreground">กำลังโหลด…</p>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">รายการที่ยอดคงเหลือถึง/ต่ำกว่าจุดสั่งซื้อ — ปรับจำนวนได้ก่อนเปิดคำขอซื้อ (จะเปิดเป็น PR ใบเดียว)</p>
+            {rows.map((it) => (
+              <div key={it.item_id} className="flex flex-wrap items-center gap-2 rounded-md border p-2 text-sm">
+                <input type="checkbox" checked={isPicked(it)} onChange={(e) => setPicked((p) => ({ ...p, [it.item_id]: e.target.checked }))} aria-label={`เลือก ${it.item_id}`} />
+                <span className="min-w-40 flex-1 font-medium">{it.item_id}{it.item_description ? <span className="ml-1 font-normal text-muted-foreground">— {it.item_description}</span> : null}</span>
+                <Badge variant="destructive">เหลือ {it.on_hand}{it.uom ? ` ${it.uom}` : ''}</Badge>
+                <span className="text-xs text-muted-foreground">จุดสั่งซื้อ {it.min_stock}</span>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor={`q-${it.item_id}`} className="text-xs">สั่ง</Label>
+                  <Input id={`q-${it.item_id}`} type="number" min={1} className="w-24" value={qtyOf(it)} onChange={(e) => setQty((s) => ({ ...s, [it.item_id]: Math.max(1, Number(e.target.value) || 1) }))} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
