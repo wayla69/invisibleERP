@@ -1,0 +1,44 @@
+# Ops utility (manual dispatch): Railway failed-deployment diagnostics for the invisibleERP service.
+# The CLI's `railway logs` only returns the ACTIVE deployment's logs — a deployment that dies at boot
+# never becomes active, so its crash line is invisible from CI. This job hits Railway's GraphQL API
+# (unreachable from dev sandboxes) to: list recent deployments with status, dump the newest FAILED/
+# CRASHED deployment's runtime+build logs by ID, and print the service's variable NAMES (never values)
+# to verify required prod env (env.validation.ts) actually landed on the service.
+name: Ops — Railway failed-deploy diagnostics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN is an environment secret (same binding as deploy.yml)
+    steps:
+      - name: Dump failed deployment logs + variable names (invisibleERP)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -e
+          gq() { curl -s --max-time 30 -X POST https://backboard.railway.app/graphql/v2 -H "Project-Access-Token: $RAILWAY_TOKEN" -H "Content-Type: application/json" -d "$1"; }
+          PT=$(gq '{"query":"query{projectToken{projectId environmentId}}"}')
+          PID=$(echo "$PT" | jq -r '.data.projectToken.projectId // empty')
+          EID=$(echo "$PT" | jq -r '.data.projectToken.environmentId // empty')
+          if [ -z "$PID" ]; then echo "::error::token introspection failed"; echo "$PT" | jq -c '.errors // .' ; exit 1; fi
+          echo "project=$PID environment=$EID"
+          SVCS=$(gq "{\"query\":\"query{project(id:\\\"$PID\\\"){services{edges{node{id name}}}}}\"}")
+          echo "services:"; echo "$SVCS" | jq -r '.data.project.services.edges[].node | "  "+.name+"  "+.id'
+          SID=$(echo "$SVCS" | jq -r '.data.project.services.edges[].node | select(.name=="invisibleERP") | .id')
+          if [ -z "$SID" ]; then echo "::error::service invisibleERP not found in project"; exit 1; fi
+          echo "::group::variable NAMES on invisibleERP (values never printed)"
+          gq "{\"query\":\"query{variables(projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\")}\"}" | jq -r '.data.variables | keys[]' | sort
+          echo "::endgroup::"
+          DEPS=$(gq "{\"query\":\"query{deployments(first:8,input:{projectId:\\\"$PID\\\",environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\"}){edges{node{id status createdAt}}}}\"}")
+          echo "recent deployments:"; echo "$DEPS" | jq -r '.data.deployments.edges[].node | "  "+.createdAt+"  "+.status+"  "+.id'
+          DID=$(echo "$DEPS" | jq -r '[.data.deployments.edges[].node | select(.status=="FAILED" or .status=="CRASHED")][0].id // empty')
+          if [ -z "$DID" ]; then echo "no FAILED/CRASHED deployment in the last 8 — nothing to dump"; exit 0; fi
+          echo "::group::runtime logs of failed deployment $DID"
+          gq "{\"query\":\"query{deploymentLogs(deploymentId:\\\"$DID\\\",limit:150){timestamp severity message}}\"}" | jq -r '.data.deploymentLogs[]? | .timestamp+" ["+(.severity // "-")+"] "+.message'
+          echo "::endgroup::"
+          echo "::group::build logs of failed deployment $DID (tail)"
+          gq "{\"query\":\"query{buildLogs(deploymentId:\\\"$DID\\\",limit:400){timestamp message}}\"}" | jq -r '.data.buildLogs[]? | .timestamp+" "+.message' | tail -50
+          echo "::endgroup::"
