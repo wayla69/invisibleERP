@@ -181,6 +181,12 @@ appear in **both** workspaces.
   PEAK-style **cycle** sub-sections — *รายรับ–รายจ่าย*, *สมุดบัญชี & แยกประเภท*, *ธนาคาร & กระทบยอด*,
   *งบ & วิเคราะห์การเงิน*, *ระหว่างบริษัท & สกุลเงิน* (the last two start collapsed). Click a sub-section heading
   to fold/unfold it; your choice is remembered.
+- **"เริ่มต้นใช้งาน" (Getting started) on the dashboard:** while your company is still being set up, the ERP
+  home (*แดชบอร์ด*) shows a **first-run panel** at the top with your onboarding checklist and a completion
+  bar. Each unfinished step (*set up branding*, *pick a theme*, *choose your language*, *add your first
+  product*, *record your first sale*, *invite a teammate*) **deep-links to the screen where it gets done**,
+  and you can tick it off in place. The panel **disappears automatically** once every step is complete (or
+  for users without onboarding access) — the full checklist and industry packs stay at `/onboarding`.
 - **"สิ่งที่ต้องทำวันนี้" on the dashboard:** the ERP home (*แดชบอร์ด*) leads with an **action launcher** — live,
   clickable cards for *pending approvals*, *AP payment requests awaiting approval*, *overdue receivables*,
   and *low stock* — each opening the exact screen (and finance tab) where the work is done. Cards you have

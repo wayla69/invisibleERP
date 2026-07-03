@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TrendAreaChart, SimpleBarChart } from '@/components/charts';
 import { TodayActions } from '@/components/today-actions';
+import { GettingStarted } from '@/components/getting-started';
 import { statusVariant } from '@/components/ui';
 
 interface Dash {
@@ -71,6 +72,10 @@ export default function DashboardPage() {
           </div>
         }
       />
+
+      {/* First-run guidance: surfaces the onboarding checklist right on the landing page for a new tenant,
+          deep-linking each pending step. Self-hides once setup is complete or for users without access. */}
+      <GettingStarted />
 
       {/* Action launcher (PEAK-Board style): live, clickable "what needs doing today" counts. Sits above
           the metrics so the landing page leads with tasks, not just numbers. Cards self-hide by permission. */}

@@ -100,6 +100,21 @@ saved-views/images/campaigns/AI-actions also got toasts (22/22, 0 flagged) — b
 screens**, essentially the whole internal app. Inline `<Msg>` is kept for **in-dialog field validation**;
 only action *result* feedback moved to toasts.
 
+### 1.6 First-run guidance on the dashboard (`apps/web/src/components/getting-started.tsx`)
+A **"เริ่มต้นใช้งาน" (Getting started)** panel at the top of the ERP home (`dashboard/page.tsx`), above the
+action launcher. It surfaces the **already-existing** onboarding checklist (`GET /api/onboarding`) right
+where a new tenant lands — a completion bar plus each *incomplete* step as a row that **deep-links to the
+screen where it gets done** (`branding→/setup`, `theme→/theme`, `locale→/localization`,
+`first_product→/master-data`, `first_sale→/pos/register`, `invite_user→/admin/users`) and can be ticked
+off in place (`POST /api/onboarding/steps/:key/complete`). This unifies the previously-buried `/onboarding`
++ per-task screens into the landing page (the "guided first-run" gap called out for the Paypers-style
+usability pass).
+
+**Self-hiding, no new perms:** the query runs `retry:false`, so a user without onboarding access (403 →
+`data` undefined) sees nothing — same pattern as `today-actions`. The panel also renders nothing once
+`percent >= 100` or no step is pending, so it never nags an established tenant. **Reuses existing endpoints
+only** — no API/route/permission/GL/control change.
+
 ---
 
 ## 2. Control / compliance impact — **none**
@@ -139,3 +154,4 @@ and `00-getting-started.md` (Finance cycle sub-sections + action center).
 | 2026-06-25 | v1.4 (IMPLEMENTED) | Web / Product | **Fourth friendliness sweep** (§1.5): same toasts + guided empty states extended to 12 more screens (payroll/fx/pipeline/manufacturing/stocktake/mobile-scan/claims/delivery/payments-accounts/payments-terminals/loyalty-member-detail/loyalty-rewards) — **~43 screens** total. Independently review-verified behavior-preserving (12/12, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-06-25 | v1.5 (IMPLEMENTED) | Web / Product | **Fifth friendliness sweep** (§1.5): same toasts + guided empty states extended to 14 more screens (settings/custom-fields/pos-ops/pos-control/peripherals/pos-fiscal/print/loyalty-missions/loyalty-campaigns/tax-wht/profitability/consolidation/intercompany/bom) — **~57 screens** total. Independently review-verified behavior-preserving (14/14, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-06-25 | v1.6 (IMPLEMENTED) | Web / Product | **Final mop-up sweep** (§1.5): guided empty states on the remaining read-only report/viewer screens (restaurant-analytics/sod/lots/food-cost/tax-reports/bi/audit/pos-home/loyalty-members/inventory-item/pos) + toasts & empty states on the rest (production-plan/menu/goods-issue/cpq/costing/buffet/branches/saved-views/images/campaigns/ai-actions) — 22 screens, **~79 total** (essentially the whole internal app). Independently review-verified behavior-preserving (22/22, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
+| 2026-07-03 | v1.7 (IMPLEMENTED) | Web / Product | **First-run guidance** (§1.6): new `getting-started.tsx` panel on the ERP dashboard surfacing the existing onboarding checklist (`GET /api/onboarding`) with per-step deep-links + in-place tick-off — closes the "guided first-run" gap for the Paypers-style usability pass. Self-hides on 403 / 100% / no pending step; reuses existing endpoints only. No API/route/permission/GL/control change. Docs synced (this file, user-manual 00). Verified: web typecheck ✅ + build ✅. |
