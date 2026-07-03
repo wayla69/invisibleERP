@@ -85,6 +85,20 @@ still-Pending one); a procurement/planner/exec holder sees **all** PRs and gets
 **อนุมัติ / ปฏิเสธ** buttons on the Pending ones (self-approval is still blocked by the
 engine). The table auto-refreshes; use **รีเฟรช** to pull the latest immediately.
 
+**Turning an approved PR into a PO (➡️ สร้าง PO):** on an **Approved** PR, procurement
+presses **➡️ สร้าง PO** to open a conversion panel. Because a PR line may be a free-text
+name (e.g. typed in LINE chat, possibly misspelt or not yet coded), each line is
+**reconciled to a real item** before the PO is raised:
+- **เทียบทะเบียน** — type/adjust the name and press **ค้นหา/เทียบ** to search the item
+  master; click a match to lock in its code (and pull its default UoM/price).
+- **สินค้าใหม่** — tick this to **open a new item code** on the spot (enter the code +
+  description) when the item isn't in the master yet.
+
+Add the **vendor** and a **unit price** per line, then **สร้างใบสั่งซื้อ (PO)**. The system
+opens any new item codes, raises the PO through the normal path (vendor screening +
+approval), and **links the PR to the PO** (the PR is marked **ออก PO แล้ว / Converted**).
+Requires the `procurement` permission.
+
 **LINE notifications:** if you've linked your account, the system messages you
 automatically — approvers get a 🔔 when a PR enters their queue (with the
 `approve <PR no>` hint), and the requester gets ✅/❌ when their PR is decided.

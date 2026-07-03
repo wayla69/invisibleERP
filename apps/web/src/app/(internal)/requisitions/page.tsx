@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MessageCircle, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -7,11 +8,14 @@ import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PrForm } from '@/components/procurement-forms';
 
 type PrLine = { item_id: string; request_qty: number; uom: string | null; reason: string | null };
 type Pr = { pr_no: string; pr_date: string | null; requested_by: string | null; status: string; priority: string | null; approved_by: string | null; lines: PrLine[] };
+type ItemMatch = { item_id: string; item_description: string | null; uom: string | null; unit_price: number };
 
 // Company-wide requisition surface (perm: pr_raise) — anyone in the company can raise a purchase
 // requisition. A PR is only a request: it is routed to Procurement for approval and conversion to a PO.
@@ -44,6 +48,7 @@ export default function RequisitionsPage() {
 // still blocks self-approval); a plain requester sees their own and can cancel a still-Pending PR.
 const STATUS_BADGE: Record<string, { th: string; variant: 'success' | 'info' | 'muted' | 'destructive' }> = {
   Approved: { th: 'อนุมัติแล้ว', variant: 'success' },
+  Converted: { th: 'ออก PO แล้ว', variant: 'success' },
   Pending: { th: 'รออนุมัติ', variant: 'info' },
   Rejected: { th: 'ไม่อนุมัติ', variant: 'destructive' },
   Cancelled: { th: 'ยกเลิกแล้ว', variant: 'muted' },
@@ -52,6 +57,7 @@ const STATUS_BADGE: Record<string, { th: string; variant: 'success' | 'info' | '
 
 function PrListCard() {
   const qc = useQueryClient();
+  const [converting, setConverting] = useState<Pr | null>(null);
   const q = useQuery<{ prs: Pr[]; can_approve: boolean }>({
     queryKey: ['prs'], queryFn: () => api('/api/procurement/prs?limit=50'), refetchInterval: 20_000,
   });
@@ -117,6 +123,9 @@ function PrListCard() {
                               <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ prNo: pr.pr_no, approve: false })}>ปฏิเสธ</Button>
                             </>
                           )}
+                          {q.data?.can_approve && pr.status === 'Approved' && (
+                            <Button size="sm" onClick={() => setConverting(pr)}>➡️ สร้าง PO</Button>
+                          )}
                           {!q.data?.can_approve && isPending && (
                             <Button size="sm" variant="outline" disabled={cancel.isPending} onClick={() => cancel.mutate(pr.pr_no)}>ยกเลิก</Button>
                           )}
@@ -129,8 +138,97 @@ function PrListCard() {
             </table>
           </div>
         )}
+        {converting && <PrToPoForm pr={converting} onDone={() => { setConverting(null); refresh(); }} onCancel={() => setConverting(null)} />}
       </CardContent>
     </Card>
+  );
+}
+
+// PR → PO conversion. Each PR line (a free-text name from chat) is reconciled to a real item: search the
+// master and pick a match, OR tick "สินค้าใหม่" to open a new code. Procurement adds vendor + unit prices,
+// then submits — the API raises the PO through the normal path and links/closes the PR.
+type ConvLine = { name: string; item_id: string; item_description: string; create_item: boolean; order_qty: number; unit_price: number; uom: string; matches: ItemMatch[]; searching: boolean };
+
+function PrToPoForm({ pr, onDone, onCancel }: { pr: Pr; onDone: () => void; onCancel: () => void }) {
+  const [vendor, setVendor] = useState('');
+  const [lines, setLines] = useState<ConvLine[]>(() => pr.lines.map((l) => ({
+    name: l.item_id, item_id: l.item_id, item_description: '', create_item: false,
+    order_qty: l.request_qty, unit_price: 0, uom: l.uom ?? '', matches: [], searching: false,
+  })));
+  const setLine = (i: number, patch: Partial<ConvLine>) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const search = async (i: number) => {
+    setLine(i, { searching: true });
+    try {
+      const r = await api<{ items: ItemMatch[] }>(`/api/procurement/items/search?q=${encodeURIComponent(lines[i]!.item_id || lines[i]!.name)}`);
+      setLine(i, { matches: r.items });
+    } catch (e: any) { notifyError(e.message); } finally { setLine(i, { searching: false }); }
+  };
+  const submit = useMutation({
+    mutationFn: () => api<{ po_no: string; created_items: string[] }>(`/api/procurement/prs/${pr.pr_no}/to-po`, {
+      method: 'POST',
+      body: JSON.stringify({
+        vendor_name: vendor.trim() || undefined,
+        lines: lines.map((l) => ({ item_id: l.item_id.trim(), item_description: l.item_description.trim() || undefined, create_item: l.create_item, order_qty: Number(l.order_qty), unit_price: Number(l.unit_price) || 0, uom: l.uom.trim() || undefined })),
+      }),
+    }),
+    onSuccess: (r) => { notifySuccess(`สร้าง PO ${r.po_no} แล้ว${r.created_items?.length ? ` · เปิดรหัสใหม่ ${r.created_items.length} รายการ` : ''}`); onDone(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const canSubmit = lines.every((l) => l.item_id.trim() && Number(l.order_qty) > 0);
+
+  return (
+    <div className="mt-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="font-semibold">สร้าง PO จาก {pr.pr_no}</div>
+        <Button variant="ghost" size="sm" onClick={onCancel}>ปิด</Button>
+      </div>
+      <div className="mb-3 max-w-sm space-y-1">
+        <Label className="text-xs">ผู้ขาย (Vendor)</Label>
+        <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="ชื่อผู้ขาย / ซัพพลายเออร์" />
+      </div>
+      <div className="space-y-3">
+        {lines.map((l, i) => (
+          <div key={i} className="rounded-md border bg-card p-3">
+            <div className="mb-2 text-xs text-muted-foreground">จากคำขอ: <span className="font-medium text-foreground">{l.name}</span></div>
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <div className="space-y-1">
+                <Label className="text-xs">รหัสสินค้า {l.create_item ? '(เปิดใหม่)' : '(เทียบทะเบียน)'}</Label>
+                <div className="flex gap-2">
+                  <Input value={l.item_id} onChange={(e) => setLine(i, { item_id: e.target.value })} placeholder="รหัสสินค้า" />
+                  <Button type="button" variant="outline" size="sm" disabled={l.searching} onClick={() => search(i)}>{l.searching ? '…' : 'ค้นหา/เทียบ'}</Button>
+                </div>
+                {l.matches.length > 0 && !l.create_item && (
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {l.matches.map((m) => (
+                      <button key={m.item_id} type="button" onClick={() => setLine(i, { item_id: m.item_id, uom: m.uom ?? l.uom, unit_price: m.unit_price || l.unit_price, matches: [] })}
+                        className="rounded border bg-muted px-2 py-0.5 text-xs hover:bg-accent">
+                        {m.item_id}{m.item_description ? ` — ${m.item_description}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <label className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={l.create_item} onChange={(e) => setLine(i, { create_item: e.target.checked })} />
+                  เปิดเป็นสินค้าใหม่ (ไม่มีในทะเบียน)
+                </label>
+                {l.create_item && (
+                  <Input className="mt-1" value={l.item_description} onChange={(e) => setLine(i, { item_description: e.target.value })} placeholder="ชื่อ/รายละเอียดสินค้าใหม่" />
+                )}
+              </div>
+              <div className="flex items-end gap-2">
+                <div className="w-20 space-y-1"><Label className="text-xs">จำนวน</Label><Input type="number" value={l.order_qty} onChange={(e) => setLine(i, { order_qty: Number(e.target.value) })} /></div>
+                <div className="w-20 space-y-1"><Label className="text-xs">หน่วย</Label><Input value={l.uom} onChange={(e) => setLine(i, { uom: e.target.value })} /></div>
+                <div className="w-24 space-y-1"><Label className="text-xs">ราคา/หน่วย</Label><Input type="number" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: Number(e.target.value) })} /></div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <Button size="sm" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>{submit.isPending ? 'กำลังสร้าง…' : 'สร้างใบสั่งซื้อ (PO)'}</Button>
+        <span className="text-xs text-muted-foreground">ระบบจะเปิดรหัสใหม่ (ถ้าติ๊ก) · สร้าง PO · เชื่อมกลับ PR ให้อัตโนมัติ</span>
+      </div>
+    </div>
   );
 }
 

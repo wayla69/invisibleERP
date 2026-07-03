@@ -24,6 +24,12 @@ const GrBody = z.object({
   items: z.array(z.object({ item_id: z.string().min(1), received_qty: z.number().positive(), lot_no: z.string().optional(), expiry_date: z.string().optional(), unit_cost: z.number().optional(), uom: z.string().optional() })).min(1),
 });
 const ApproveBody = z.object({ approve: z.boolean().default(true), reason: z.string().optional() });
+// PR → PO conversion: each line is reconciled to a real item (existing code, or create_item:true to open a new one) + priced.
+const PrToPoBody = z.object({
+  vendor_id: z.number().optional(), vendor_name: z.string().optional(), expected_date: z.string().optional(), remarks: z.string().optional(),
+  currency: z.string().optional(), fx_rate: z.number().optional(),
+  lines: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), create_item: z.boolean().optional(), order_qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional(), is_capital: z.boolean().optional() })).min(1),
+});
 const CancelBody = z.object({ reason: z.string().min(1) });
 const SupplierStatusBody = z.object({ approval_status: z.enum(['approved', 'pending', 'blocked']).optional(), blocklisted: z.boolean().optional(), reason: z.string().optional() });
 const ScorecardBody = z.object({ period: z.string().min(1) });
@@ -77,6 +83,17 @@ export class ProcurementController {
   // Requester withdraws their own still-Pending PR (own-doc only; Admin may cancel any) — 0228.
   @Patch('prs/:prNo/cancel') @Permissions('pr_raise', 'procurement', 'planner')
   cancelPr(@Param('prNo') prNo: string, @CurrentUser() u: JwtUser) { return this.svc.cancelPr(prNo, u); }
+
+  // Item-master search for the PR→PO reconcile step (match a free-text PR name to a real item).
+  @Get('items/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  searchItems(@Query('q') q: string, @Query('limit') limit?: string) { return this.svc.searchItems(q ?? '', limit ? Number(limit) : undefined); }
+
+  // Convert an approved PR → PO (procurement duty). Lines arrive reconciled (existing item_id or a new
+  // code to open); the PO routes through the normal createPo path and the PR is linked + marked Converted.
+  @Post('prs/:prNo/to-po') @Permissions('procurement')
+  convertPrToPo(@Param('prNo') prNo: string, @Body(new ZodValidationPipe(PrToPoBody)) b: any, @CurrentUser() u: JwtUser) {
+    return this.svc.convertPrToPo(prNo, b, u);
+  }
 
   // ── supplier screening (Phase 16) ── vendor-master duty = md_vendor (segregated from AP payment).
   // Legacy 'masterdata' holders still pass (it implies md_vendor/md_item/md_config).
