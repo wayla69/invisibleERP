@@ -1,9 +1,34 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq, and, isNotNull, or, isNull } from 'drizzle-orm';
+import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { users, messageLog } from '../../database/schema';
+import { users, userPermissions, messageLog } from '../../database/schema';
 import { TenantMessagingService } from './tenant-messaging.service';
-import { resolveMessageGateway } from './gateways';
+import { resolveMessageGateway, pushLineFlex } from './gateways';
+
+// LC-1 (docs/30) — the approver queue-entry card: a flex bubble with one-tap [อนุมัติ]/[ปฏิเสธ] postback
+// buttons. The postback routes into the SAME chatDecision → approvePr → workflow-engine path as the typed
+// command (with a confirm step), so the buttons change UX, not controls. Kept beside LineNotifyService so
+// the workflow engine never needs to know LINE flex JSON.
+export function buildApproveCard(docType: string, docNo: string, createdBy: string | null): any {
+  const pb = (x: 'approve' | 'reject') => JSON.stringify({ a: 'decide', x, d: docNo });
+  return {
+    type: 'bubble',
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+        { type: 'text', text: `🔔 รออนุมัติ: ${docType}`, weight: 'bold', size: 'sm', color: '#8a6d1d' },
+        { type: 'text', text: docNo, weight: 'bold', size: 'lg' },
+        { type: 'text', text: `โดย ${createdBy ?? '-'}`, size: 'sm', color: '#888888' },
+      ],
+    },
+    footer: {
+      type: 'box', layout: 'horizontal', spacing: 'sm', contents: [
+        { type: 'button', style: 'primary', height: 'sm', action: { type: 'postback', label: 'อนุมัติ', data: pb('approve'), displayText: `อนุมัติ ${docNo}` } },
+        { type: 'button', style: 'secondary', height: 'sm', action: { type: 'postback', label: 'ปฏิเสธ', data: pb('reject'), displayText: `ปฏิเสธ ${docNo}` } },
+      ],
+    },
+  };
+}
 
 // STAFF LINE notifications (0228 — LINE chat → PR phase 2). Pushes a message to the LINE account a staff
 // user linked for the chat-PR flow (users.line_user_id). Transactional workflow signal, not marketing —
@@ -23,13 +48,14 @@ export class LineNotifyService {
     return (creds?.token as string | undefined) ?? process.env.LINE_CHANNEL_TOKEN;
   }
 
-  // Push to one linked staff user (no-op when the user has no linked LINE account).
-  async notifyUser(username: string, tenantId: number | null | undefined, text: string): Promise<void> {
+  // Push to one linked staff user (no-op when the user has no linked LINE account). With `flex`, sends a
+  // rich card (text becomes the altText); without, a plain text push.
+  async notifyUser(username: string, tenantId: number | null | undefined, text: string, flex?: any): Promise<void> {
     try {
       const [u] = await this.db.select({ lineUserId: users.lineUserId, isActive: users.isActive, tenantId: users.tenantId })
         .from(users).where(eq(users.username, username)).limit(1);
       if (!u?.lineUserId || u.isActive === false) return;
-      await this.push(tenantId ?? (u.tenantId != null ? Number(u.tenantId) : null), String(u.lineUserId), text);
+      await this.push(tenantId ?? (u.tenantId != null ? Number(u.tenantId) : null), String(u.lineUserId), text, flex);
     } catch (e: any) {
       this.logger.warn(`notifyUser(${username}) failed: ${e?.message ?? e}`);
     }
@@ -37,21 +63,47 @@ export class LineNotifyService {
 
   // Push to every linked, active staff user holding a role (approver-queue fan-out). Tenant-scoped: users of
   // the doc's tenant plus HQ users (tenant NULL). Capped to keep a misconfigured role from blasting.
-  async notifyRole(role: string, tenantId: number | null | undefined, text: string, cap = 20): Promise<void> {
+  async notifyRole(role: string, tenantId: number | null | undefined, text: string, cap = 20, flex?: any): Promise<void> {
     try {
       const conds = [eq(users.role, role as typeof users.$inferSelect.role), eq(users.isActive, true), isNotNull(users.lineUserId)];
       if (tenantId != null) conds.push(or(eq(users.tenantId, tenantId), isNull(users.tenantId))!);
       const rows = await this.db.select({ lineUserId: users.lineUserId, tenantId: users.tenantId })
         .from(users).where(and(...conds)).limit(cap);
-      for (const r of rows) await this.push(tenantId ?? (r.tenantId != null ? Number(r.tenantId) : null), String(r.lineUserId), text);
+      for (const r of rows) await this.push(tenantId ?? (r.tenantId != null ? Number(r.tenantId) : null), String(r.lineUserId), text, flex);
     } catch (e: any) {
       this.logger.warn(`notifyRole(${role}) failed: ${e?.message ?? e}`);
     }
   }
 
-  private async push(tenantId: number | null, lineUserId: string, text: string): Promise<void> {
+  // Push to every linked, active staff user holding ANY of the required permissions (effective set —
+  // per-user override else role default, expanded; same precedence as login). Used where the approver
+  // population is defined by permission rather than a single role (e.g. petty-cash EXP-08:
+  // creditors/exec). The maker is excluded so a requester is never "notified" of their own request.
+  async notifyPermissionHolders(required: string[], tenantId: number | null | undefined, text: string, excludeUsername?: string | null, cap = 20): Promise<void> {
+    try {
+      const conds = [eq(users.isActive, true), isNotNull(users.lineUserId)];
+      if (tenantId != null) conds.push(or(eq(users.tenantId, tenantId), isNull(users.tenantId))!);
+      const rows = await this.db.select().from(users).where(and(...conds)).limit(50);
+      let sent = 0;
+      for (const u of rows) {
+        if (sent >= cap) break;
+        if (excludeUsername && u.username === excludeUsername) continue;
+        const ov = await this.db.select({ perm: userPermissions.perm }).from(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
+        const eff = resolvePermissions(u.role as Role, ov.length ? ov.map((r: any) => r.perm as Permission) : null);
+        if (!required.some((p) => eff.includes(p as Permission))) continue;
+        await this.push(tenantId ?? (u.tenantId != null ? Number(u.tenantId) : null), String(u.lineUserId), text);
+        sent++;
+      }
+    } catch (e: any) {
+      this.logger.warn(`notifyPermissionHolders(${required.join(',')}) failed: ${e?.message ?? e}`);
+    }
+  }
+
+  private async push(tenantId: number | null, lineUserId: string, text: string, flex?: any): Promise<void> {
     const token = await this.token(tenantId);
-    const result = await resolveMessageGateway('line', token ? { token } : undefined).send(lineUserId, text);
+    const result = flex && token
+      ? await pushLineFlex(token, lineUserId, text, flex)
+      : await resolveMessageGateway('line', token ? { token } : undefined).send(lineUserId, text);
     try {
       await this.db.insert(messageLog).values({
         tenantId, memberId: null, channel: 'line', recipient: lineUserId, body: text, campaign: 'wf_notify',

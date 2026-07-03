@@ -27,9 +27,10 @@ const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 
-const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string; ref?: string }[] = [];
+const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string; contents?: any; ref?: string }[] = [];
 const lineBroadcasts: { auth: string; text: string; type?: string; altText?: string }[] = [];
-const lineReplies: { replyToken: string; auth: string; text: string }[] = [];
+const lineReplies: { replyToken: string; auth: string; text: string; type?: string; contents?: any }[] = [];
+const lineContentFetches: { url: string; auth: string }[] = [];
 let pushSeq = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
@@ -38,14 +39,21 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
     const body = JSON.parse(init?.body ?? '{}');
     const m = body.messages?.[0] ?? {};
     const reqId = `req-${++pushSeq}`; // unique x-line-request-id per push → the provider_ref we store
-    linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '', type: m.type, altText: m.altText, ref: reqId });
+    linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? m.altText ?? '', type: m.type, altText: m.altText, contents: m.contents, ref: reqId });
     return { ok: true, status: 200, headers: { get: () => reqId }, text: async () => '' } as any;
   }
   if (url.includes('api.line.me/v2/bot/message/reply')) {
     const body = JSON.parse(init?.body ?? '{}');
     const m = body.messages?.[0] ?? {};
-    lineReplies.push({ replyToken: body.replyToken, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '' });
+    // flex replies carry the human copy in altText — surface it as `text` so assertions read one field
+    lineReplies.push({ replyToken: body.replyToken, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? m.altText ?? '', type: m.type, contents: m.contents });
     return { ok: true, status: 200, headers: { get: () => `req-r-${lineReplies.length}` }, text: async () => '' } as any;
+  }
+  if (url.includes('api-data.line.me/v2/bot/message/')) {
+    // LINE content API — return a tiny deterministic "photo" so the chat attach flow can be exercised
+    lineContentFetches.push({ url, auth: String(init?.headers?.Authorization ?? '') });
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    return { ok: true, status: 200, headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'image/png' : null) }, arrayBuffer: async () => bytes.buffer, text: async () => '' } as any;
   }
   if (url.includes('api.line.me/v2/bot/message/broadcast')) {
     const body = JSON.parse(init?.body ?? '{}');
@@ -453,6 +461,155 @@ async function main() {
   ok('chat-PR2: stock <item> → on-hand total + per-location breakdown (case-insensitive item id)',
     stk.json.chat === 1 && stkText.includes('A4-PAPER') && stkText.includes('42') && stkText.includes('WH-MAIN'),
     JSON.stringify({ reply: stkText.slice(0, 60) }));
+
+  // ── 18. Attachments (0228): invoice/receipt photo onto a PO — web API + LINE chat `attach` flow. ──
+  const poRes = await inj('POST', '/api/procurement/pos', token, { vendor_name: 'ผู้ขายทดสอบแนบ', items: [{ item_id: 'A4-PAPER', order_qty: 5, unit_price: 100 }] });
+  const poNo = poRes.json.po_no as string;
+  ok('attach: seed PO created', !!poNo, JSON.stringify({ po: poNo }));
+
+  // 18a. attach at an unknown doc → immediate "not found" reply (no pending state parked).
+  const badDoc = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18a', source: { userId: 'Uprayut' }, message: { id: 'mid-18a', type: 'text', text: 'attach PO-19990101-999' } }] });
+  ok('attach: unknown PO → ไม่พบเอกสาร reply', badDoc.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่พบเอกสาร'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 40) }));
+
+  // 18b. permission: a linked user without procurement/creditors/wh_receive cannot start an attach.
+  await db.update(s.users).set({ lineUserId: 'Usomchai' }).where(eq(s.users.username, 'somchai'));
+  const noPermAtt = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18b', source: { userId: 'Usomchai' }, message: { id: 'mid-18b', type: 'text', text: `attach ${poNo}` } }] });
+  ok('attach: linked user without paper-handling perms → refused', noPermAtt.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 18c. happy path: attach command parks the state; the next photo is fetched from the LINE content API
+  //      and lands as a doc_attachments row (source line, kind receipt, uploader = the linked staff).
+  const attStart = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18c1', source: { userId: 'Uprayut' }, message: { id: 'mid-18c1', type: 'text', text: `attach ${poNo} receipt` } }] });
+  const photo = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18c2', source: { userId: 'Uprayut' }, message: { id: 'mid-18c2', type: 'image' } }] });
+  const attRows = await db.select().from(s.docAttachments).where(and(eq(s.docAttachments.docType, 'PO'), eq(s.docAttachments.docNo, poNo)));
+  ok('attach: command + photo → attachment stored from the LINE content API (source line, kind receipt)',
+    attStart.json.chat === 1 && photo.json.chat === 1 && lineReplies.at(-1)!.text.includes('แนบรูปกับ') && attRows.length === 1
+      && attRows[0].source === 'line' && attRows[0].kind === 'receipt' && attRows[0].createdBy === 'prayut'
+      && String(attRows[0].dataUrl).startsWith('data:image/png;base64,') && lineContentFetches.length >= 1,
+    JSON.stringify({ rows: attRows.length, kind: attRows[0]?.kind, by: attRows[0]?.createdBy }));
+
+  // 18d. replayed photo webhook (same message id) → deduped, no second attachment; a photo with NO pending
+  //      state (somchai) is ignored entirely (customers send images all day).
+  const replayPhoto = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18d1', source: { userId: 'Uprayut' }, message: { id: 'mid-18c2', type: 'image' } }] });
+  const strayPhoto = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-18d2', source: { userId: 'Usomchai' }, message: { id: 'mid-18d2', type: 'image' } }] });
+  const attRows2 = await db.select().from(s.docAttachments).where(and(eq(s.docAttachments.docType, 'PO'), eq(s.docAttachments.docNo, poNo)));
+  ok('attach: replayed photo cannot double-attach (state consumed → ignored); stateless photo ignored silently',
+    replayPhoto.json.chat === 0 && strayPhoto.json.chat === 0 && attRows2.length === 1, JSON.stringify({ rows: attRows2.length, replay: replayPhoto.json.chat, stray: strayPhoto.json.chat }));
+
+  // 18e. web API round-trip + evidence-integrity delete rules (uploader-or-Admin only).
+  const prayutTok = (await inj('POST', '/api/login', undefined, { username: 'prayut', password: 'pw' })).json.token as string;
+  await db.insert(s.users).values([{ username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 }]).onConflictDoNothing();
+  const apTok = (await inj('POST', '/api/login', undefined, { username: 'apclerk', password: 'pw' })).json.token as string;
+  const webUp = await inj('POST', '/api/procurement/attachments', apTok, { doc_type: 'PO', doc_no: poNo, kind: 'invoice', filename: 'inv.png', data_url: 'data:image/png;base64,aGk=' });
+  const listAtt = await inj('GET', `/api/procurement/attachments?doc_type=PO&doc_no=${poNo}`, token);
+  const getOne = await inj('GET', `/api/procurement/attachments/${webUp.json.id}`, prayutTok);
+  const delWrongUser = await inj('DELETE', `/api/procurement/attachments/${webUp.json.id}`, prayutTok); // procurement perm but NOT the uploader
+  const delUploader = await inj('DELETE', `/api/procurement/attachments/${webUp.json.id}`, apTok);
+  ok('attach: web upload + list (metadata only) + fetch; delete refused for non-uploader (NOT_UPLOADER), allowed for uploader',
+    (webUp.status === 200 || webUp.status === 201) && listAtt.json.count === 2 && !JSON.stringify(listAtt.json).includes('base64')
+      && getOne.json.data_url === 'data:image/png;base64,aGk=' && delWrongUser.status === 403 && delWrongUser.json.error?.code === 'NOT_UPLOADER'
+      && delUploader.json.deleted === true,
+    JSON.stringify({ up: webUp.status, count: listAtt.json.count, delWrong: delWrongUser.status }));
+
+  // 18f. unknown doc on web upload → 404; bad payload → 400.
+  const web404 = await inj('POST', '/api/procurement/attachments', apTok, { doc_type: 'PO', doc_no: 'PO-19990101-999', data_url: 'data:image/png;base64,aGk=' });
+  const web400 = await inj('POST', '/api/procurement/attachments', apTok, { doc_type: 'PO', doc_no: poNo, data_url: 'https://not-a-data-url' });
+  ok('attach: web negatives — unknown PO 404, non-data-URL 400 BAD_IMAGE',
+    web404.status === 404 && web400.status === 400 && web400.json.error?.code === 'BAD_IMAGE', JSON.stringify({ s404: web404.status, s400: web400.status }));
+
+  // ── 19. LC-1 (docs/30): flex queue card + one-tap postback approve with confirm step. ──
+  // 19a. a fresh chat PR → the approver queue push is now a FLEX card carrying [อนุมัติ]/[ปฏิเสธ] postbacks.
+  const pushesBefore19 = linePushes.length;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-19a', source: { userId: 'Usomchai' }, message: { id: 'mid-19a', type: 'text', text: 'pr BINDER-A4 6 แฟ้มใหม่' } }] });
+  const pr19 = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const card = linePushes.slice(pushesBefore19).find((p) => p.to === 'Uprayut');
+  const approveBtn = card?.contents?.footer?.contents?.find((b: any) => b.action?.label === 'อนุมัติ');
+  const approveData = approveBtn?.action?.data ?? '';
+  ok('LC-1: queue push is a flex card with approve/reject postback buttons (altText keeps the typed hint)',
+    card?.type === 'flex' && !!card?.altText?.includes(pr19) && !!approveData && JSON.parse(approveData).a === 'decide' && JSON.parse(approveData).d === pr19,
+    JSON.stringify({ type: card?.type, data: approveData }));
+
+  // 19b. tapping [อนุมัติ] → confirm card parked with a nonce (no action yet — PR still Pending).
+  const tap = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19b', replyToken: 'rt-19b', source: { userId: 'Uprayut' }, postback: { data: approveData } }] });
+  const confirmBtn = lineReplies.at(-1)?.contents?.footer?.contents?.[0];
+  const confirmData = confirmBtn?.action?.data ?? '';
+  const [pr19RowMid] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, pr19));
+  ok('LC-1: first tap → flex confirm card with nonce; nothing acted yet (PR still Pending)',
+    tap.json.chat === 1 && lineReplies.at(-1)?.type === 'flex' && !!confirmData && JSON.parse(confirmData).a === 'confirm' && pr19RowMid?.status === 'Pending',
+    JSON.stringify({ confirm: !!confirmData, status: pr19RowMid?.status }));
+
+  // 19c. tapping [ยืนยัน] → the SAME engine path approves; requester notified.
+  const pushesBefore19c = linePushes.length;
+  const conf = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19c', replyToken: 'rt-19c', source: { userId: 'Uprayut' }, postback: { data: confirmData } }] });
+  const [pr19Row] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, pr19));
+  const decidedPush = linePushes.slice(pushesBefore19c).find((p) => p.to === 'Usomchai');
+  ok('LC-1: confirm tap → PR Approved via the engine (maker≠checker) + requester ✅ push',
+    conf.json.chat === 1 && lineReplies.at(-1)!.text.includes('อนุมัติแล้ว') && pr19Row?.status === 'Approved' && pr19Row?.approvedBy === 'prayut' && !!decidedPush,
+    JSON.stringify({ status: pr19Row?.status, by: pr19Row?.approvedBy }));
+
+  // 19d. replaying the confirm postback (state already consumed) → expiry reply, no double-acting.
+  const replayConf = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19d', replyToken: 'rt-19d', source: { userId: 'Uprayut' }, postback: { data: confirmData } }] });
+  ok('LC-1: replayed confirm → state consumed, expiry reply (no second action)',
+    replayConf.json.chat === 1 && lineReplies.at(-1)!.text.includes('หมดอายุ'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 19e. SoD binds on buttons exactly as typed: approver taps approve on their OWN PR → SOD_VIOLATION.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-19e1', source: { userId: 'Uprayut' }, message: { id: 'mid-19e1', type: 'text', text: 'pr LABEL-ROLL 4' } }] });
+  const prOwn19 = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19e2', replyToken: 'rt-19e2', source: { userId: 'Uprayut' }, postback: { data: JSON.stringify({ a: 'decide', x: 'approve', d: prOwn19 }) } }] });
+  const ownConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19e3', replyToken: 'rt-19e3', source: { userId: 'Uprayut' }, postback: { data: ownConfirmData } }] });
+  const [prOwn19Row] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prOwn19));
+  ok('LC-1: one-tap approve of own PR → SOD_VIOLATION at confirm (stays Pending)',
+    lineReplies.at(-1)!.text.includes('SOD_VIOLATION') && prOwn19Row?.status === 'Pending', JSON.stringify({ status: prOwn19Row?.status }));
+
+  // 19f. my prs is now a flex carousel (altText keeps the text list).
+  const mine19 = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-19f', source: { userId: 'Usomchai' }, message: { id: 'mid-19f', type: 'text', text: 'my prs' } }] });
+  const mineReply = lineReplies.at(-1);
+  ok('LC-1: my prs → flex carousel of PR cards (altText lists them for non-flex clients)',
+    mine19.json.chat === 1 && mineReply?.type === 'flex' && mineReply?.contents?.type === 'carousel' && (mineReply?.contents?.contents?.length ?? 0) >= 2 && mineReply!.text.includes(pr19),
+    JSON.stringify({ type: mineReply?.type, cards: mineReply?.contents?.contents?.length }));
+
+  // ── 20. LC-2 (docs/30): petty-cash self-service — expense/advance RAISE via chat + EXP-08 notifications.
+  await db.update(s.users).set({ lineUserId: 'Uapclerk' }).where(eq(s.users.username, 'apclerk'));
+  await db.insert(s.users).values([{ username: 'apboss', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 }]).onConflictDoNothing();
+  await db.update(s.users).set({ lineUserId: 'Uapboss' }).where(eq(s.users.username, 'apboss'));
+  const fund = await inj('POST', '/api/finance/petty-cash/funds', token, { fund_code: 'PCF-LINE', name: 'LINE test fund', float_limit: 5000, initial_amount: 2000 });
+  ok('LC-2: seed petty-cash fund created', fund.status === 200 || fund.status === 201, JSON.stringify({ s: fund.status }));
+
+  // 20a. permission — a linked user without creditors/exec cannot raise.
+  const pexDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20a', source: { userId: 'Usomchai' }, message: { id: 'mid-20a', type: 'text', text: 'expense PCF-LINE 100 น้ำแข็ง' } }] });
+  ok('LC-2: expense without creditors/exec → refused', pexDenied.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 20b. happy path — AP clerk raises an expense in chat: PEX- Pending, NO GL, approvers (creditors/exec,
+  //      maker excluded) pushed; the maker gets no self-notification.
+  const pushesBefore20 = linePushes.length;
+  const pex = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20b', source: { userId: 'Uapclerk' }, message: { id: 'mid-20b', type: 'text', text: 'expense PCF-LINE 300 ค่าน้ำแข็งหน้าร้าน' } }] });
+  const pexNo = /PEX-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [pexRow] = pexNo ? await db.select().from(s.expenseRequests).where(eq(s.expenseRequests.reqNo, pexNo)) : [];
+  const newPushes = linePushes.slice(pushesBefore20);
+  const bossPush = newPushes.find((p) => p.to === 'Uapboss');
+  const makerPush = newPushes.find((p) => p.to === 'Uapclerk');
+  ok('LC-2: chat expense → PEX PendingApproval (no GL), approver pushed (maker excluded)',
+    pex.json.chat === 1 && !!pexRow && pexRow.status === 'PendingApproval' && pexRow.requestedBy === 'apclerk' && pexRow.glRef == null
+      && !!bossPush && bossPush.text.includes(pexNo) && !makerPush,
+    JSON.stringify({ pex: pexNo, status: pexRow?.status, bossPushed: !!bossPush, makerPushed: !!makerPush }));
+
+  // 20c. service guards bind in chat — over-float refused.
+  const overFloat = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20c', source: { userId: 'Uapclerk' }, message: { id: 'mid-20c', type: 'text', text: 'expense PCF-LINE 99999 ทดสอบเกินวงเงิน' } }] });
+  ok('LC-2: over-float expense → INSUFFICIENT_FLOAT reply, no request', overFloat.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่สำเร็จ'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 60) }));
+
+  // 20d. advance raise + web approve (checker ≠ maker) → requester ✅ push; web reject → ❌ push.
+  const adv = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20d', source: { userId: 'Uapclerk' }, message: { id: 'mid-20d', type: 'text', text: 'advance PCF-LINE 200 ยืมซื้อของหน้างาน' } }] });
+  const advNo = /PEX-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const apbossTok = (await inj('POST', '/api/login', undefined, { username: 'apboss', password: 'pw' })).json.token as string;
+  const pushesBefore20d = linePushes.length;
+  const appr = await inj('POST', `/api/finance/petty-cash/requests/${pexNo}/approve`, apbossTok);
+  const okPush = linePushes.slice(pushesBefore20d).find((p) => p.to === 'Uapclerk' && p.text.includes('อนุมัติแล้ว'));
+  const rejAdv = await inj('POST', `/api/finance/petty-cash/requests/${advNo}/reject`, apbossTok, { reason: 'แนบใบเสร็จก่อน' });
+  const rejPexPush = linePushes.slice(pushesBefore20d).find((p) => p.to === 'Uapclerk' && p.text.includes('ไม่ได้รับอนุมัติ'));
+  ok('LC-2: web approve → requester ✅ push (with amount); reject → ❌ push (with reason)',
+    adv.json.chat === 1 && appr.json.status === 'Approved' && !!okPush && okPush.text.includes(pexNo)
+      && rejAdv.json.status === 'Rejected' && !!rejPexPush && rejPexPush.text.includes(advNo) && rejPexPush.text.includes('แนบใบเสร็จก่อน'),
+    JSON.stringify({ appr: appr.json.status, okPush: !!okPush, rej: rejAdv.json.status, rejPush: !!rejPexPush }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

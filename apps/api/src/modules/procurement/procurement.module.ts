@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ProcurementController } from './procurement.controller';
 import { ProcurementService } from './procurement.service';
+import { AttachmentsService } from './attachments.service';
 import { WorkflowModule } from '../workflow/workflow.module';
 import { CostingModule } from '../costing/costing.module';
 import { PlatformModule } from '../platform/platform.module';
 
-@Module({ imports: [WorkflowModule, CostingModule, PlatformModule], controllers: [ProcurementController], providers: [ProcurementService], exports: [ProcurementService] })
+@Module({ imports: [WorkflowModule, CostingModule, PlatformModule], controllers: [ProcurementController], providers: [ProcurementService, AttachmentsService], exports: [ProcurementService, AttachmentsService] })
 export class ProcurementModule {}

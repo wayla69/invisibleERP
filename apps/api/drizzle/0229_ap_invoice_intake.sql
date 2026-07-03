@@ -1,4 +1,4 @@
--- 0228_ap_invoice_intake — scanned-invoice intake → PO auto-map → automated 3-way match (EXP-10).
+-- 0229_ap_invoice_intake — scanned-invoice intake → PO auto-map → automated 3-way match (EXP-10).
 -- A scanned/pasted vendor invoice is extracted (doc-ai), auto-mapped to an approved PO (explicit PO number
 -- in the document, else vendor + amount scoring), then posted as an AP bill and 3-way matched in one flow.
 -- Unmappable documents queue as NeedsReview; payment itself stays behind the AP-PAY maker-checker (EXP-06)

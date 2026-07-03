@@ -101,7 +101,7 @@ export const invoiceMatchLines = pgTable('invoice_match_lines', {
   lineStatus: text('line_status').notNull(),
 });
 
-// Scanned-invoice intake → PO auto-map → automated 3-way match (EXP-10, migration 0228). Holds the
+// Scanned-invoice intake → PO auto-map → automated 3-way match (EXP-10, migration 0229). Holds the
 // extracted draft + the mapping decision; posting creates the AP bill and runs the EXP-01 match. Payment
 // stays behind the AP-PAY maker-checker — this automates the path TO payment-ready, not the disbursement.
 export const apInvoiceIntakes = pgTable('ap_invoice_intakes', {

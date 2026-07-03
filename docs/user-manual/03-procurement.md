@@ -74,6 +74,11 @@ No setup beyond linking; if you unlink, the messages stop.
 > `procurement` permission, you can never approve a PR you raised yourself
 > (`SOD_VIOLATION`), and multi-level chains still require every step.
 
+**One-tap approve (LC-1):** when a PR enters your queue, the LINE card now has
+**[อนุมัติ] [ปฏิเสธ]** buttons. Tapping one asks for a **[ยืนยัน]** tap (valid
+5 minutes) before anything happens — same permission and self-approval rules
+as typing the command. `my prs` also replies as swipeable cards now.
+
 **Expected result:** The bot replies the new PR number (e.g. `PR-20260702-001`).
 The PR is **identical** to one raised on the web — same numbering, same status log,
 and it enters the same Procurement approval workflow. The chat can only *raise*
@@ -117,6 +122,23 @@ requisitions; approval always happens in the ERP (and never by the requester —
 5. Submit.
 
 **Expected result:** A purchase order is created with a PO number.
+
+### Attach the invoice / receipt photo to a PO
+
+Pin the paper evidence to the order so the 3-way match has its documentation in one place.
+
+**From the web:** on **ใบสั่งซื้อ (PO)** (`/procurement`), open the **ไฟล์แนบใบสั่งซื้อ** card,
+enter the PO number, and click **แนบรูป/ไฟล์** (photo or PDF, max ~2MB). Anyone who handles the
+paper can upload — Procurement (`procurement`), AP (`creditors`), or Receiving (`wh_receive`).
+Click a filename to preview. **Deleting** an attachment is restricted to the person who uploaded
+it (or an Admin) — it is match evidence.
+
+**From LINE chat (after linking):** type `attach <PO no>` (or `attach <PO no> receipt` for a
+receipt), then send the photo within 10 minutes. The bot confirms with the attachment count; the
+file appears on the web card immediately.
+
+> If the bot replies "ไม่พบเอกสาร", check the PO number; if it replies about permissions, you need
+> one of the three roles above.
 
 ### Approve (or cancel) a PO
 
