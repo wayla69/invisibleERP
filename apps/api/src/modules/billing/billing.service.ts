@@ -9,6 +9,7 @@ import { isIndustryKey } from '../ledger/coa-templates';
 import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
 import { isUniqueViolation } from '../../common/db-error';
+import { logger } from '../../observability/logger';
 import type { JwtUser } from '../../common/decorators';
 
 // Public self-serve signup gate (ITGC-AC-18). Always allowed outside production (dev + harnesses run
@@ -228,6 +229,26 @@ export class BillingService {
     return { request_id: id, status: 'rejected' };
   }
 
+  // ── #5 tenant lifecycle — a platform owner suspends/reactivates a company. Suspending sets suspended_at,
+  // which the auth guard reads to block the tenant's users (403 TENANT_SUSPENDED); platform owners are exempt.
+  // The mutation is audit-logged (AuditInterceptor). Runs under the platform-admin bypass (writes another
+  // tenant's row). ──
+  async suspendTenant(id: number, by: string, reason?: string) {
+    const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    await this.db.update(tenants).set({ suspendedAt: new Date(), suspendedBy: by, suspendReason: reason ?? null }).where(eq(tenants.id, id));
+    logger.warn({ event: 'tenant_suspended', tenant_id: id, by, reason: reason ?? null }, 'company suspended');
+    return { tenant_id: id, status: 'suspended' };
+  }
+
+  async reactivateTenant(id: number, by: string) {
+    const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, id)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    await this.db.update(tenants).set({ suspendedAt: null, suspendedBy: null, suspendReason: null }).where(eq(tenants.id, id));
+    logger.info({ event: 'tenant_reactivated', tenant_id: id, by }, 'company reactivated');
+    return { tenant_id: id, status: 'active' };
+  }
+
   // Core provisioning — tenant + its OWN org + an Admin + a trialing subscription + fiscal year + industry
   // CoA — shared by the PUBLIC signup path (gated above) and the AUTHENTICATED platform-admin create-company
   // endpoint (POST /api/admin/tenants). No public-signup gate here; each caller gates as appropriate. Runs
@@ -290,6 +311,10 @@ export class BillingService {
       await this.ledger.provisionTenantCoA(Number(tenant.id), industry);
     }
 
+    // Onboarding #5 — operator-visible provisioning signal (the audit_log already records the mutation +
+    // actor; this is the ops "a new company was created" notification). A user-facing welcome email/LINE to
+    // the new admin is a follow-on — it needs the admin's channel, which isn't set up yet at provision time.
+    logger.info({ event: 'tenant_provisioned', tenant_id: Number(tenant.id), code: tenant.code, admin: username, industry }, 'company provisioned');
     return {
       tenant_id: Number(tenant.id),
       tenant_code: tenant.code,

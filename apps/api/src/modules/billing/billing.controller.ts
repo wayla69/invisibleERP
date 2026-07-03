@@ -95,6 +95,18 @@ export class BillingController {
     return this.svc.rejectSignupRequest(Number(id), u.username, b.reason);
   }
 
+  // Tenant lifecycle (#5) — a platform owner suspends a company (its users are then blocked,
+  // TENANT_SUSPENDED) or reactivates it. Audit-logged; platform owners are exempt from the block.
+  @Post('admin/tenants/:id/suspend') @PlatformAdmin() @HttpCode(200)
+  suspendTenant(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: RejectDto, @CurrentUser() u: JwtUser) {
+    return this.svc.suspendTenant(Number(id), u.username, b.reason);
+  }
+
+  @Post('admin/tenants/:id/reactivate') @PlatformAdmin() @HttpCode(200)
+  reactivateTenant(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.svc.reactivateTenant(Number(id), u.username);
+  }
+
   // PUBLIC plan catalogue
   @Get('billing/plans') @Public()
   plans() {

@@ -162,6 +162,28 @@ async function main() {
   ok('Reject → status rejected (no tenant created)', rej.status === 200 && rej.json.status === 'rejected', `${rej.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
+  // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked
+  //        (TENANT_SUSPENDED); reactivate restores access. Platform owners are exempt from the block. ──
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+  const lc = await inj('POST', '/api/admin/tenants', owner, { company_name: 'LifeCo', tenant_code: 'lifeco1', admin_username: 'lifeco_admin', admin_password: 'lifeco12345', email: 'l@c.com' });
+  const lcTid = lc.json.tenant_id;
+  const lcTok = (await login('lifeco_admin', 'lifeco12345')).json.token;
+  const before = await inj('GET', '/api/tenant/onboarding-status', lcTok);
+  ok('Before suspend: the new company Admin can access (200)', before.status === 200, `${before.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // owner1 not a platform admin for the denial check
+  const suspDenied = await inj('POST', `/api/admin/tenants/${lcTid}/suspend`, owner, { reason: 'x' });
+  ok('Suspend blocked for a non-platform-admin (403)', suspDenied.status === 403, `${suspDenied.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+  const susp = await inj('POST', `/api/admin/tenants/${lcTid}/suspend`, owner, { reason: 'non-payment' });
+  ok('Platform-admin suspends the company (200)', susp.status === 200 && susp.json.status === 'suspended', `${susp.status}`);
+  const blocked = await inj('GET', '/api/tenant/onboarding-status', lcTok);
+  ok('A suspended company Admin is BLOCKED (403 TENANT_SUSPENDED)', blocked.status === 403 && blocked.json.error?.code === 'TENANT_SUSPENDED', `${blocked.status} ${blocked.json.error?.code}`);
+  const react = await inj('POST', `/api/admin/tenants/${lcTid}/reactivate`, owner, {});
+  ok('Platform-admin reactivates the company (200)', react.status === 200 && react.json.status === 'active', `${react.status}`);
+  const after = await inj('GET', '/api/tenant/onboarding-status', lcTok);
+  ok('A reactivated company Admin can access again (200)', after.status === 200, `${after.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
+
   // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;
   //        a free plan is rejected (nothing to charge). Real Stripe is exercised only with a key set. ──
   const coPro = await inj('POST', '/api/billing/checkout', owner, { plan_code: 'pro' });

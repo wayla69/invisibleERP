@@ -43,6 +43,11 @@ export const tenants = pgTable('tenants', {
   // ── C1: Functional currency (ISO-4217) for this tenant's reporting/GL (migration 0175) ──
   // Default 'THB'. Change only at entity setup — all historical GL remains in the prior currency.
   functionalCurrency: text('functional_currency').notNull().default('THB'),
+  // ── #5 tenant lifecycle (migration 0235) — suspended_at != null ⇒ the company is suspended; its users are
+  // blocked at the auth guard (TENANT_SUSPENDED). Platform owners are exempt so they can reactivate. ──
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+  suspendedBy: text('suspended_by'),
+  suspendReason: text('suspend_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

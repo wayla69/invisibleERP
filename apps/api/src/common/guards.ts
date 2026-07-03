@@ -6,7 +6,7 @@ import { eq, and, gt } from 'drizzle-orm';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, PLATFORM_ADMIN_KEY, isPlatformAdmin, type JwtUser } from './decorators';
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
-import { users, revokedTokens, posMembers } from '../database/schema';
+import { users, revokedTokens, posMembers, tenants } from '../database/schema';
 import { resolvePermissions } from '@ierp/shared';
 import { AUTH_COOKIE, CSRF_COOKIE, readCookie } from './cookies';
 
@@ -111,9 +111,14 @@ export class JwtAuthGuard implements CanActivate {
         if (m && m.active === false) throw new UnauthorizedException({ code: 'MEMBER_DEACTIVATED', message: 'This membership is no longer active', messageTh: 'สมาชิกนี้ถูกปิดใช้งาน' });
       }
     } else if (payload.sub) {
-      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, mcp: users.mustChangePassword }).from(users).where(eq(users.username, payload.sub)).limit(1);
+      const [u] = await db.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, mcp: users.mustChangePassword, tenantSuspended: tenants.suspendedAt })
+        .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).where(eq(users.username, payload.sub)).limit(1);
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
+        // #5 tenant lifecycle — a suspended company's users are blocked. Platform owners are exempt so they
+        // can always reactivate (and never lock themselves out). Rides the same per-request read (join, no
+        // extra round-trip).
+        if (u.tenantSuspended && !isPlatformAdmin(payload.sub)) throw new ForbiddenException({ code: 'TENANT_SUSPENDED', message: 'This company is suspended — contact the administrator', messageTh: 'บริษัทนี้ถูกระงับการใช้งาน — โปรดติดต่อผู้ดูแลระบบ' });
         if (u.tvf && payload.iat && payload.iat * 1000 < new Date(u.tvf).getTime()) throw revoked;
         // ITGC-AC-02/03 — trust the LIVE DB role, not the role baked into the (possibly stale or forged)
         // token. The RLS bypass decision (TenantTxInterceptor) and PermissionsGuard both read req.user.role;
