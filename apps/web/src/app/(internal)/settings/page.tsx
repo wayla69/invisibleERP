@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, ListTree, Lock, Plus, Power, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, ListTree, Lock, Plus, Power, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
@@ -13,7 +13,7 @@ import {
   MODULE_CATEGORIES,
   type ModuleFlag,
 } from '@/lib/modules';
-import { INTERNAL_NAV, allGroupItems, navForWorkspace, type NavGroup, type NavItem, type Workspace } from '@/lib/nav';
+import { INTERNAL_NAV, allGroupItems, navForWorkspace, orderGroups, type NavGroup, type NavItem, type Workspace } from '@/lib/nav';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -49,7 +49,7 @@ export default function SettingsPage() {
 //     everyone's nav. Chrome only (permissions still apply). Mirrors the sidebar (nav.ts) so names match.
 //   • Section B — System modules: the permission feature-flags — disabling one also blocks its API routes.
 //     Grouped + Thai-named + shows exactly which menus each module controls.
-type ModulesResp = { modules: ModuleFlag[]; navDisabled?: string[] };
+type ModulesResp = { modules: ModuleFlag[]; navDisabled?: string[]; groupOrder?: string[] };
 const NAV_ALWAYS_VISIBLE = ['/settings', '/admin/users']; // never hidable (admin lockout guard)
 
 function Modules() {
@@ -82,8 +82,15 @@ function Modules() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  const reorder = useMutation({
+    mutationFn: (order: string[]) => api('/api/admin/modules/nav-order', { method: 'POST', body: JSON.stringify({ order }) }),
+    onSuccess: () => { notifySuccess('อัปเดตลำดับหมวดเมนูแล้ว'); invalidate(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const mods = list.data?.modules ?? [];
   const navDisabled = useMemo(() => new Set(list.data?.navDisabled ?? []), [list.data]);
+  const groupOrder = list.data?.groupOrder;
   const disabledCount = mods.filter((m) => !m.enabled).length;
 
   return (
@@ -102,7 +109,8 @@ function Modules() {
 
       <StateView q={list}>
         <div className="space-y-6">
-          <MenuVisibility navDisabled={navDisabled} onToggle={(hrefs, enabled) => toggleNav.mutate({ hrefs, enabled })} pending={toggleNav.isPending} t={t} />
+          <MenuVisibility navDisabled={navDisabled} onToggle={(hrefs, enabled) => toggleNav.mutate({ hrefs, enabled })}
+            groupOrder={groupOrder} onReorder={(order) => reorder.mutate(order)} pending={toggleNav.isPending || reorder.isPending} t={t} />
           <SystemModules mods={mods} onToggle={(keys, enabled) => toggleModule.mutate({ keys, enabled })} pending={toggleModule.isPending} lang={lang} t={t} />
         </div>
       </StateView>
@@ -129,10 +137,12 @@ function hiddenStats(hrefs: string[], hidden: Set<string>) {
 
 // ── Section A: Menu visibility — a collapsible tree mirroring the sidebar ─────────
 function MenuVisibility({
-  navDisabled, onToggle, pending, t,
+  navDisabled, onToggle, groupOrder, onReorder, pending, t,
 }: {
   navDisabled: Set<string>;
   onToggle: (hrefs: string[], enabled: boolean) => void;
+  groupOrder?: string[];
+  onReorder: (order: string[]) => void;
   pending: boolean;
   t: (k: string) => string;
 }) {
@@ -140,8 +150,21 @@ function MenuVisibility({
   // Mirror the sidebar's ERP/POS split so the tree lines up with what staff actually see. "All" merges both
   // surfaces (with a per-group workspace chip); ERP/POS use the SAME filter the sidebar uses (navForWorkspace).
   const [ws, setWs] = useState<'all' | Workspace>('all');
-  const wsGroups = ws === 'all' ? INTERNAL_NAV : navForWorkspace(INTERNAL_NAV, ws);
   const wsChip = (g: NavGroup) => (!g.workspace || g.workspace.length === 2 ? 'ทั้งสอง' : g.workspace[0] === 'pos' ? 'POS' : 'ERP');
+
+  // Show categories in the admin-curated order (same as the sidebar). Reorder writes the FULL global order.
+  const wsGroups = orderGroups(ws === 'all' ? INTERNAL_NAV : navForWorkspace(INTERNAL_NAV, ws), groupOrder);
+  const moveGroup = (title: string, dir: -1 | 1) => {
+    const visible = wsGroups.map((g) => g.title);
+    const neighbour = visible[visible.indexOf(title) + dir]; // swap with the adjacent VISIBLE category
+    if (!neighbour) return;
+    const full = orderGroups(INTERNAL_NAV, groupOrder).map((g) => g.title);
+    const ia = full.indexOf(title);
+    const ib = full.indexOf(neighbour);
+    if (ia < 0 || ib < 0) return;
+    [full[ia], full[ib]] = [full[ib], full[ia]];
+    onReorder(full);
+  };
 
   const renderItem = (it: NavItem) => {
     const protectedItem = NAV_ALWAYS_VISIBLE.includes(it.href);
@@ -173,7 +196,7 @@ function MenuVisibility({
         <ListTree className="size-4 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
           <h3 className="text-base font-semibold">จัดการเมนู (แสดง/ซ่อน)</h3>
-          <p className="text-sm text-muted-foreground">เลือกซ่อนได้ทั้งหมวด หมวดย่อย หรือเมนูรายตัว — แยกตาม ERP/POS ให้ตรงกับแถบเมนูด้านซ้าย</p>
+          <p className="text-sm text-muted-foreground">ซ่อนได้ทั้งหมวด หมวดย่อย หรือเมนูรายตัว · จัดลำดับหมวดด้วยปุ่ม ▲▼ (มีผลกับทุกคน) — แยกตาม ERP/POS ให้ตรงกับแถบเมนูซ้าย</p>
         </div>
         <div className="flex shrink-0 gap-0.5 rounded-md bg-muted p-0.5 text-xs">
           {([['all', 'ทั้งหมด'], ['erp', 'ERP'], ['pos', 'POS']] as const).map(([id, label]) => (
@@ -185,7 +208,7 @@ function MenuVisibility({
         </div>
       </div>
       <div className="divide-y">
-        {wsGroups.map((g: NavGroup) => {
+        {wsGroups.map((g: NavGroup, gi: number) => {
           const allHrefs = allGroupItems(g).map((i) => i.href);
           const st = hiddenStats(allHrefs, navDisabled);
           const isOpen = open[g.title] ?? false;
@@ -203,6 +226,18 @@ function MenuVisibility({
                     {st.off > 0 ? `ซ่อน ${st.off}/${st.total}` : `${st.total} เมนู`}
                   </span>
                 </button>
+                <div className="flex shrink-0 items-center">
+                  <button type="button" disabled={pending || gi === 0} onClick={() => moveGroup(g.title, -1)}
+                    aria-label={`เลื่อน ${t(g.title)} ขึ้น`} title="เลื่อนหมวดขึ้น"
+                    className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-25">
+                    <ArrowUp className="size-3.5" />
+                  </button>
+                  <button type="button" disabled={pending || gi === wsGroups.length - 1} onClick={() => moveGroup(g.title, 1)}
+                    aria-label={`เลื่อน ${t(g.title)} ลง`} title="เลื่อนหมวดลง"
+                    className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-25">
+                    <ArrowDown className="size-3.5" />
+                  </button>
+                </div>
                 {st.total > 0 && (
                   <VisBtn hidden={st.allOff} disabled={pending}
                     onClick={() => onToggle(allHrefs.filter((h) => !NAV_ALWAYS_VISIBLE.includes(h)), st.allOff)} />

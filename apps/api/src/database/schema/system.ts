@@ -168,6 +168,16 @@ export const moduleConfigs = pgTable('module_configs', {
   updatedBy: text('updated_by'),
 });
 
+// System-wide sidebar CATEGORY ordering (admin-curated). Global (no tenant_id → no RLS), like
+// module_configs: an admin arranges nav groups by importance and every user's sidebar renders groups by
+// ascending sort_order. Groups absent here fall back to their code order. Presentation-only (migration 0230).
+export const navGroupOrder = pgTable('nav_group_order', {
+  groupKey: text('group_key').primaryKey(),
+  sortOrder: integer('sort_order').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  updatedBy: text('updated_by'),
+});
+
 // Per-tenant enterprise identity config (Platform #4): OIDC SSO + SCIM 2.0 provisioning.
 // tenant_id → RLS-scoped (0088 re-runs the loop). Secrets are never returned in plaintext after write.
 export const tenantIdentity = pgTable('tenant_identity', {

@@ -516,6 +516,25 @@ export function allGroupItems(g: NavGroup): NavItem[] {
   return [...(g.items ?? []), ...(g.subgroups?.flatMap((s) => s.items) ?? [])];
 }
 
+/** Order groups by an admin-curated list of group `title`s (system-wide sidebar category order). Groups
+ *  present in `order` sort by its index; groups absent (e.g. newly shipped) keep their code order, after the
+ *  ordered ones. Stable, non-mutating. Empty/undefined `order` ⇒ unchanged. */
+export function orderGroups<T extends { title: string }>(groups: T[], order?: string[]): T[] {
+  if (!order || order.length === 0) return groups;
+  const rank = new Map(order.map((k, i) => [k, i]));
+  return groups
+    .map((g, i) => ({ g, i }))
+    .sort((a, b) => {
+      const ra = rank.get(a.g.title);
+      const rb = rank.get(b.g.title);
+      if (ra != null && rb != null) return ra - rb;
+      if (ra != null) return -1;
+      if (rb != null) return 1;
+      return a.i - b.i;
+    })
+    .map((x) => x.g);
+}
+
 /** Total visible-item count of a group across flat items + subgroups. */
 function groupItemCount(g: NavGroup): number {
   return (g.items?.length ?? 0) + (g.subgroups?.reduce((n, s) => n + s.items.length, 0) ?? 0);
