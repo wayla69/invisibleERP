@@ -7,7 +7,8 @@ import type { Lang } from './messages';
 
 export interface ModuleFlag { key: string; enabled: boolean; always_on: boolean }
 // `navDisabled` = hrefs of sidebar entries an admin has hidden (menu visibility, distinct from module flags).
-export interface ModuleFlags { modules: ModuleFlag[]; disabled: string[]; navDisabled?: string[] }
+// `groupOrder` = admin-curated system-wide order of nav-group titles (empty ⇒ code order).
+export interface ModuleFlags { modules: ModuleFlag[]; disabled: string[]; navDisabled?: string[]; groupOrder?: string[] }
 
 // Effective module flags for the CURRENT user (any role) — used to hide disabled
 // modules from the nav. Read-only endpoint; the admin write endpoint is gated.

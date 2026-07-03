@@ -13,6 +13,7 @@ import { useModuleFlags } from '@/lib/modules';
 import {
   allGroupItems,
   navForWorkspace,
+  orderGroups,
   defaultWorkspace,
   workspaceHome,
   WORKSPACES,
@@ -351,10 +352,12 @@ export function AppShell({
 
   // Sidebar = permission-filtered within the active workspace; ⌘K palette stays global (all workspaces).
   const wsNav = React.useMemo(() => (enableWorkspaces ? navForWorkspace(nav, workspace) : nav), [enableWorkspaces, nav, workspace]);
+  const groupOrder = moduleFlags.data?.groupOrder;
   const groups = React.useMemo(() => {
     const filtered = filterByPerm(wsNav);
-    return filtered.length ? filtered : wsNav; // fall back while loading
-  }, [filterByPerm, wsNav]);
+    const base = filtered.length ? filtered : wsNav; // fall back while loading
+    return orderGroups(base, groupOrder); // admin-curated system-wide category order
+  }, [filterByPerm, wsNav, groupOrder]);
   const paletteGroups = React.useMemo(() => {
     const filtered = filterByPerm(nav);
     return filtered.length ? filtered : nav;
