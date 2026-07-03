@@ -254,6 +254,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-230 | Material-budget commitment enforcement (M1) | PROJ-12 | 16 §7 (25) |
 | UAT-O2C-231 | Material requisition + over-budget LINE approval (M2) | PROJ-13 | 16 §7 (26) |
 | UAT-O2C-232 | Stock reservation → issue-to-project (M3) | INV-13 | 16 §7 (27) |
+| UAT-O2C-233 | Project-linked advances & reimbursements — site cash (M4) | PROJ-14 | 16 §7 (28) |
 | UAT-O2C-194 | AR allowance: aging compute | REV-18 | 01 §7 (8d) |
 | UAT-O2C-195 | AR allowance: computer cannot post own (SoD) | REV-18 | 01 §7 (8d) |
 | UAT-O2C-196 | AR allowance: independent post books the delta (Dr 5720 / Cr 1190) | REV-18 | 01 §7 (8d) |

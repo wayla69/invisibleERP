@@ -1,6 +1,6 @@
 # 32 — Project Material Control: BoQ, Commitment Budget & Requisition-to-Purchase — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v0.5 — **M0–M3 DELIVERED**; M4 planned · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v1.0 — **ALL DELIVERED (M0–M4)** · **Owner:** ERP / Product
 > **Scope:** Give the PPM suite a **construction/contractor-grade material control loop** on top of the
 > existing project spine: a **Bill of Quantities (BoQ)** as the project's requirement & budget baseline;
 > a **material budget** enforced by **commitment/encumbrance** accounting (staff cannot draw more than the
@@ -289,9 +289,16 @@ tables.
 - `stock_reservations`; `available = on_hand − held`; request→issue-to-project path relieving 1200 → project
   WIP 1260 with `project_id`. Control **INV-13**.
 
-### M4 — Project-linked advances & reimbursements *(smallest, high value)*
-- `project_id` (+ optional `boq_line_id`) on `employee_advances`, `expense_claims`, `expense_requests`;
-  pass through `postEntry` dimensions; optionally register as project commitments. Control **PROJ-14**.
+### M4 — Project-linked advances & reimbursements *(smallest, high value)* — ✅ DELIVERED
+> Shipped: nullable `project_id` on `employee_advances` / `expense_claims` / `expense_requests` (migration
+> 0241, column-add only). Advances (`finance.issueAdvance`/`settleAdvance`), ESS reimbursement claims
+> (`ess.submitExpense`) and petty-cash (`petty-cash.createRequest`/`approveRequest`) accept `project_code` →
+> `project_id` (`PROJECT_NOT_FOUND` on a bad code), store it, and **tag the GL expense/advance lines** with
+> `project_id`. New `GET /api/projects/:code/site-cash` (`ProjectsService.siteCash`) rolls up all site cash on
+> the project. **Control PROJ-14** → RCM **180**. Docs: PN-16 step 28 / rev 0.31, user-manual 14 rev 2.8,
+> UAT-O2C-233. Harness: `projects` 158 (was 152).
+- `project_id` on `employee_advances`/`expense_claims`/`expense_requests`; passed through `postEntry`
+  dimensions; `GET :code/site-cash` rollup. Control **PROJ-14**.
 
 ### Delivery status (planned)
 | Phase | Status | Migration | Control(s) | Harness ToE |
@@ -300,7 +307,7 @@ tables.
 | **M1** Commitment ledger + enforcement | ✅ Delivered | 0237 | PROJ-12 | `projects` 135 (PO encumbers line; over-budget → BUDGET_EXCEEDED + PO rolled back; cancel releases; remaining calc) |
 | **M2** Material requisition + LINE approval | ✅ Delivered | 0239 | PROJ-13 | `projects` 143 (within→PR; over→pending+action-center; self-approve→SoD; authorise→Draft PO + line remaining −2500) |
 | **M3** Reservation + issue-to-project | ✅ Delivered | 0240 | INV-13 | `projects` 152 (available=on_hand−held; over→INSUFFICIENT_STOCK; issue→1260 WIP +1500/1200 −1500; release restores) |
-| **M4** Project-linked advances/reimbursement | ⬜ Planned | next free | PROJ-14 | `basics` (project-tagged advance/reimbursement → WIP) |
+| **M4** Project-linked advances/reimbursement | ✅ Delivered | 0241 | PROJ-14 | `projects` 158 (project-tagged advance → Dr 1180 `project_id`; settle → Dr 5100 `project_id`; site-cash rollup; unknown code → PROJECT_NOT_FOUND) |
 
 ---
 
@@ -350,6 +357,7 @@ tables.
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.0 | 2026-07-03 | ERP / Product | **M4 delivered — docs/32 COMPLETE (M0–M4).** Project-linked site cash: nullable `project_id` on `employee_advances`/`expense_claims`/`expense_requests` (migration 0241); advances/reimbursements/petty-cash accept `project_code` → `project_id`, tag the GL expense/advance lines, and roll up on `GET /api/projects/:code/site-cash`. Control **PROJ-14** (RCM 180, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.31, user-manual 14 rev 2.8, UAT-O2C-233). `projects` harness 158; basics/compliance/tenant-idx/migration-parity/ess/ts-debt/typecheck green. **All five client requirements delivered:** BoQ (M0) · enforced material budget PROJ-12 (M1) · requisition + LINE over-budget approval PROJ-13 (M2) · inventory→project reservation/issue INV-13 (M3) · project-linked advances/reimbursements PROJ-14 (M4). |
 | 0.5 | 2026-07-03 | ERP / Product | **M3 delivered** — stock reservation → issue-to-project (`stock_reservations`, migration 0240) + `ReservationsModule`/`/api/reservations`: `available = on_hand − Σ(held)` with an atomic `FOR UPDATE` reserve (`INSUFFICIENT_STOCK`, no double-allocation), `release`/`issueToProject`; new `InventoryLedgerService.issueToProject` posts **Dr 1260 project WIP (`project_id`) / Cr 1200** + a consumed BoQ-line commitment. Control **INV-13** (RCM 179, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.30, PN-03 rev 0.4, user-manual 14 rev 2.7, UAT-O2C-232). `projects` harness 152; basics/compliance/tenant-idx/migration-parity/stock-ops/wms/ts-debt/typecheck green. |
 | 0.4 | 2026-07-03 | ERP / Product | **M2 delivered** — Project Material Requisition (`project_material_requisitions`/`pmr_lines`, migration 0239) + `PmrModule`/`PmrService`/`/api/pmr`: within-budget → project-tagged PR; over-budget → maker-checker + one-tap **LINE** approval (`buildApproveCard`; `chatDecidePmr` webhook route) → auto-drafted authorised over-budget project **Draft PO** (`createPo` `draft`+`authorized_over_budget`; `reserve` `allowOver`). `pmr_over_budget` action-center exception. Control **PROJ-13** (RCM 178, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.29, user-manual 14 rev 2.6, UAT-O2C-231). `projects` harness 143; basics/compliance/tenant-idx/migration-parity/ts-debt/typecheck green. **Decision:** over-budget always routes to approval (no tolerance band). |
 | 0.3 | 2026-07-03 | ERP / Product | **M1 delivered** — `project_commitments` encumbrance ledger (migration 0237) + `CommitmentsService` (reserve under a BoQ-line FOR UPDATE lock → `BUDGET_EXCEEDED`; release on PO cancel; consume on full receipt) wired into procurement; per-line budget/committed/remaining on `getBoq`; `GET :code/commitments`. Control **PROJ-12** (RCM 177, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.28, user-manual 14 rev 2.5, UAT-O2C-230). `projects` harness 135; basics/compliance/migration-parity/ts-debt/typecheck green. |

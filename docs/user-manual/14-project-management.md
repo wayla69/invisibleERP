@@ -223,6 +223,15 @@ When the material is **already in the warehouse**, staff reserve it for the proj
   and into the project's cost (WIP)** at its stock cost (Dr project WIP 1260 / Cr Inventory 1200), and books
   it against the BoQ line. **Release** (`…/{id}/release`) frees a reservation you no longer need.
 
+## Site cash on the project — advances & reimbursements (docs/32, M4)
+Cash spent at site can be booked **against the project** so it shows up in the project's cost:
+- **Advances** (`POST /api/finance/advances` with `project_code`), **reimbursement claims**
+  (`ess.submitExpense` with `project_code`) and **petty-cash** (`POST /api/petty-cash/requests` with
+  `project_code`) all accept a project — an unknown code is rejected (`PROJECT_NOT_FOUND`). The expense/advance
+  posts to the ledger **tagged with the project**.
+- **See it on the project** — `GET /api/projects/{code}/site-cash` lists every advance, reimbursement and
+  petty-cash request raised against the project, with per-category and grand totals.
+
 ## Control callouts
 - Billing (incl. milestone billing) is segregated from cost initiation (**R07**) and capped at the contract
   value — see the troubleshooting list for `BILL_EXCEEDS_CONTRACT`, `OPP_NOT_WON`, `SOD_SELF_APPROVAL`,
@@ -245,6 +254,7 @@ When the material is **already in the warehouse**, staff reserve it for the proj
 | 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |
 | 2.1 | 2026-06-30 | **Program (cross-project) critical path** (PMO-4) — group projects into a *program* (`program_code`) with cross-project finish-to-start dependencies; the new `/projects/program/{code}` view runs a CPM over the program (each row a whole project) and highlights the program critical chain + per-project slack. A *โปรแกรม (Programs)* card on the Portfolio command center lists them. |
 | 2.2 | 2026-06-30 | **Pipeline → FTE forecast** (PMO-5) — the Portfolio billings forecast now also projects **กำลังคน (FTE)** demand per month: committed allocation + the pipeline's projected staffing draw (weighted value ÷ a configurable revenue-per-FTE-month rate), with a peak-FTE badge — "if we win the pipeline, how many people would each month need?". |
+| 2.8 | 2026-07-03 | **Project-linked advances & reimbursements** (docs/32, M4, PROJ-14) — advances, expense-reimbursement claims and petty-cash can be raised **against a project** (`project_code`; unknown → `PROJECT_NOT_FOUND`); the spend posts tagged to the project, and `GET /api/projects/{code}/site-cash` rolls up all site cash (advances + reimbursements + petty-cash + totals) on the project. |
 | 2.7 | 2026-07-03 | **Stock reservation → issue-to-project** (docs/32, M3, INV-13) — reserve on-hand stock for a project (`POST /api/reservations`; available = on hand − held, no double-allocation → `INSUFFICIENT_STOCK`), then **issue it to the project** (`…/{id}/issue`) which moves the value from inventory (1200) into project WIP (1260); **release** frees an unused hold. |
 | 2.6 | 2026-07-03 | **Material requisition + over-budget LINE approval** (docs/32, M2, PROJ-13) — staff raise a **PMR** against BoQ lines (`POST /api/pmr`): within budget it routes to a project-tagged PR; over budget it holds for an authoriser who approves from the app **or one-tap in LINE** (maker-checker, ≠ requester), which **auto-drafts an over-budget project PO** (Draft) for procurement. Pending over-budget requisitions show on the Action Center (`pmr_over_budget`). |
 | 2.5 | 2026-07-03 | **Material-budget enforcement** (docs/32, M1, PROJ-12) — a project **PO** tagged to a BoQ line now **reserves** that line's budget; a PO that would exceed it is **blocked** (`BUDGET_EXCEEDED`) and not created, so staff can't over-commit a line (and concurrent orders can't jointly overrun). The BoQ tab shows **budget / committed / remaining** per line; cancelling a PO frees the reservation, full receipt makes it actual. Ledger at `GET /api/projects/{code}/commitments`. |

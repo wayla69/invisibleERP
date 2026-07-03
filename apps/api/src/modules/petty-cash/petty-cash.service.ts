@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { pettyCashFunds, expenseRequests } from '../../database/schema';
+import { pettyCashFunds, expenseRequests, projects } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -85,9 +85,15 @@ export class PettyCashService {
     if (!(amount > 0)) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be > 0', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     if (amount > n(fund.balance) + 1e-9) throw new UnprocessableEntityException({ code: 'INSUFFICIENT_FLOAT', message: `Amount ${amount} exceeds the fund balance ${n(fund.balance)}`, messageTh: `จำนวนเงินเกินยอดคงเหลือในกองทุน (${n(fund.balance)})` });
     const reqNo = await this.docNo.nextDaily('PEX');
+    let projectId: number | null = null; // M4 — resolve the optional project (404 on a bad code)
+    if (dto.project_code?.trim()) {
+      const [p] = await db.select({ id: projects.id }).from(projects).where(eq(projects.projectCode, dto.project_code.trim())).limit(1);
+      if (!p) throw new BadRequestException({ code: 'PROJECT_NOT_FOUND', message: `Project ${dto.project_code} not found`, messageTh: 'ไม่พบโครงการ' });
+      projectId = Number(p.id);
+    }
     await db.insert(expenseRequests).values({
       tenantId: user.tenantId ?? null, reqNo, fundId: Number(fund.id), kind: dto.kind, payee: dto.payee ?? null, purpose: dto.purpose ?? null,
-      amount: String(amount), expenseAccount: dto.expense_account ?? '5100', docRef: dto.doc_ref ?? null, receiptKey: dto.receipt_key ?? null,
+      amount: String(amount), projectId, expenseAccount: dto.expense_account ?? '5100', docRef: dto.doc_ref ?? null, receiptKey: dto.receipt_key ?? null,
       status: 'PendingApproval', requestedBy: user.username,
     });
     await this.statusLog?.log('PEX', reqNo, '', 'PendingApproval', user.username);
@@ -109,9 +115,10 @@ export class PettyCashService {
     const amount = round2(n(req.amount));
     if (amount > n(fund.balance) + 1e-9) throw new UnprocessableEntityException({ code: 'INSUFFICIENT_FLOAT', message: `Fund balance ${n(fund.balance)} is now below the request ${amount}`, messageTh: 'ยอดคงเหลือในกองทุนไม่พอ' });
     const tenantId = req.tenantId ?? user.tenantId ?? null;
+    const projectId = req.projectId ?? null; // M4 — the debit (advance/expense) carries the project dimension
     const lines = req.kind === 'advance'
-      ? [{ account_code: '1180', debit: amount }, { account_code: fund.glAccount, credit: amount }]
-      : [{ account_code: req.expenseAccount ?? '5100', debit: amount }, { account_code: fund.glAccount, credit: amount }];
+      ? [{ account_code: '1180', debit: amount, project_id: projectId }, { account_code: fund.glAccount, credit: amount }]
+      : [{ account_code: req.expenseAccount ?? '5100', debit: amount, project_id: projectId }, { account_code: fund.glAccount, credit: amount }];
     let glRef: string | null = null;
     if (this.ledger) { const je: any = await this.ledger.postEntry({ date: ymd(), source: 'PEX', sourceRef: reqNo, tenantId, memo: `${req.kind === 'advance' ? 'Advance' : 'Expense'} ${reqNo} — ${req.payee ?? ''}`, createdBy: user.username, lines }); glRef = je?.entry_no ?? null; }
     await db.update(pettyCashFunds).set({ balance: String(round2(n(fund.balance) - amount)) }).where(eq(pettyCashFunds.id, Number(fund.id)));

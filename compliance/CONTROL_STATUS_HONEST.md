@@ -28,10 +28,10 @@ evidenced over an audit period or tested by an independent firm. Those are separ
 
 | Status | Count | Share | Meaning |
 |--------|-------|-------|---------|
-| Implemented | **<!-- rcm-implemented -->176<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
+| Implemented | **<!-- rcm-implemented -->177<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
 | Partial | **<!-- rcm-partial -->3<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
 | Gap | **<!-- rcm-gap -->0<!-- /rcm-gap -->** | 0% | — every control now has at least system scaffolding |
-| **Total** | **<!-- rcm-total -->179<!-- /rcm-total -->** | | |
+| **Total** | **<!-- rcm-total -->180<!-- /rcm-total -->** | | |
 
 > The counts above carry machine-readable census tags: `python3 compliance/build_rcm.py --counts` is the
 > **only source of truth**, and `tools/ci/check-rcm-census.mjs` (CI) fails when any tagged claim drifts

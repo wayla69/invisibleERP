@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
 import { CommitmentsService } from '../commitments/commitments.service';
@@ -1106,6 +1106,27 @@ export class ProjectsService {
       lines: shaped, count: lines.length, budget_total: budgetTotal,
       committed_total: committedTotal, remaining_total: r2(budgetTotal - committedTotal),
       by_category: byCategory,
+    };
+  }
+
+  // Project site-cash (M4, docs/32, PROJ-14) — the advances, expense-reimbursement claims and petty-cash
+  // requests raised AGAINST this project, so site cash is managed on the project. Read-only rollup.
+  async siteCash(code: string) {
+    const db = this.db;
+    const p = await this.row(code);
+    const pid = Number(p.id);
+    const advances = await db.select().from(employeeAdvances).where(eq(employeeAdvances.projectId, pid)).orderBy(desc(employeeAdvances.id));
+    const claims = await db.select().from(expenseClaims).where(eq(expenseClaims.projectId, pid)).orderBy(desc(expenseClaims.id));
+    const petty = await db.select().from(expenseRequests).where(eq(expenseRequests.projectId, pid)).orderBy(desc(expenseRequests.id));
+    const sum = (rows: any[]) => r2(rows.reduce((s: number, r: any) => s + n(r.amount), 0));
+    const advTotal = sum(advances), claimTotal = sum(claims), pettyTotal = sum(petty);
+    return {
+      project_code: code,
+      advances: advances.map((a: any) => ({ advance_no: a.advanceNo, payee: a.payee, amount: n(a.amount), status: a.status, settled_expense: n(a.settledExpense), issued_date: a.issuedDate })),
+      reimbursements: claims.map((c: any) => ({ id: Number(c.id), category: c.category, amount: n(c.amount), status: c.status, entry_no: c.entryNo, ap_txn_no: c.apTxnNo, claim_date: c.claimDate })),
+      petty_cash: petty.map((r: any) => ({ req_no: r.reqNo, kind: r.kind, payee: r.payee, amount: n(r.amount), status: r.status, gl_ref: r.glRef })),
+      totals: { advances: advTotal, reimbursements: claimTotal, petty_cash: pettyTotal, total: r2(advTotal + claimTotal + pettyTotal) },
+      count: advances.length + claims.length + petty.length,
     };
   }
 
