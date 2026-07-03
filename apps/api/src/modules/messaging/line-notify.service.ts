@@ -99,6 +99,15 @@ export class LineNotifyService {
     }
   }
 
+  // LP-3 (docs/31) — effective permission set of a staff user (per-user override else role default,
+  // same precedence as login). Used by the digest delivery loop to filter KPIs per recipient AT SEND TIME.
+  async effectivePermsOf(username: string): Promise<string[]> {
+    const [u] = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
+    if (!u) return [];
+    const ov = await this.db.select({ perm: userPermissions.perm }).from(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
+    return resolvePermissions(u.role as Role, ov.length ? ov.map((r: any) => r.perm as Permission) : null) as string[];
+  }
+
   // LP-1 (docs/31) — the settings console's [ส่งข้อความทดสอบถึงฉัน] button: an explicit-feedback variant
   // of notifyUser for go-live verification. Unlike the best-effort notify paths, this ERRORS when the
   // caller has no linked LINE account (the admin needs to know why nothing arrived).

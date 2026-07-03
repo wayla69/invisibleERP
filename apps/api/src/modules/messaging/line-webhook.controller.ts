@@ -19,6 +19,7 @@ import { EssService } from '../ess/ess.service';
 import { NlAnalyticsService } from '../nl-analytics/nl-analytics.service';
 import { llmClient } from '../../common/llm-client';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { DIGEST_KPIS, DEFAULT_DIGEST_KPIS, allowedDigestKpis } from '../bi/digest-kpis';
 import { z } from 'zod';
 
 // LP-2 (docs/31) — a copilot DRAFT: which text-command handler to replay on confirm + its args.
@@ -151,7 +152,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest — รับสรุปประจำวัน\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -186,8 +187,9 @@ export class LineWebhookService {
     const isCopilot = cmd === 'bot' || text.startsWith('บอท');
     const isSubscribe = (cmd === 'subscribe' || cmd === 'รับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'รับสรุป');
     const isUnsubscribe = (cmd === 'unsubscribe' || cmd === 'เลิกรับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'เลิกรับสรุป');
+    const isDigestKpis = cmd === 'digest' && arg1.toLowerCase() === 'kpis';
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isAsk && !isCopilot && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isDigestKpis && !isAsk && !isCopilot && !isPr) return false;
 
     // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
     // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
@@ -224,7 +226,8 @@ export class LineWebhookService {
       else if (isAttach) { reply = await this.chatAttachStart(tenantId, lineUserId, staff, arg1, (parts[2] ?? '').toLowerCase()); campaign = 'chat_attach'; }
       else if (isExpense || isAdvance) { reply = await this.chatPettyCash(staff, isAdvance ? 'advance' : 'expense', arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_pettycash'; }
       else if (isLeave) { reply = await this.chatLeave(staff, arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_leave'; }
-      else if (isSubscribe || isUnsubscribe) { reply = await this.chatDigest(tenantId, staff, isSubscribe); campaign = 'chat_digest'; }
+      else if (isSubscribe || isUnsubscribe) { reply = await this.chatDigest(tenantId, staff, isSubscribe, isSubscribe ? parts.slice(2).join(',') : ''); campaign = 'chat_digest'; }
+      else if (isDigestKpis) { reply = await this.chatDigestKpis(staff); campaign = 'chat_digest'; }
       else if (isAsk) { reply = await this.chatAsk(staff, parts.slice(1).join(' ')); campaign = 'chat_ask'; }
       else if (isCopilot) {
         const out = await this.chatCopilot(tenantId, lineUserId, staff, text.replace(/^(?:bot\s+|บอท\s*)/i, ''));
@@ -546,24 +549,54 @@ export class LineWebhookService {
   // counts → requires dashboard/fin_report/exec). The opt-in rides the tenant's single
   // `line_daily_digest` report subscription as a {line_user} recipient — the BI scheduler delivers it
   // daily; force-unlink (LC-3) silences it automatically because delivery resolves the link registry.
-  private async chatDigest(tenantId: number, u: any, on: boolean): Promise<string> {
+  private async chatDigest(tenantId: number, u: any, on: boolean, kpiList = ''): Promise<string> {
     const perms = await this.effectivePerms(u);
     if (on && !perms.includes('dashboard') && !perms.includes('fin_report') && !perms.includes('exec')) {
       return 'บัญชีของคุณไม่มีสิทธิ์รับสรุปประจำวัน (ต้องมี dashboard / fin_report / exec)';
     }
+    // LP-3: optional per-subscriber KPI selection — `subscribe digest sales_yesterday,cash_position`.
+    // Keys are validated against the catalog AND the caller's current permissions (delivery re-filters
+    // at send time anyway, but refusing an un-seeable key here beats a silently thinner digest later).
+    let kpis: string[] | null = null;
+    if (on && kpiList.trim()) {
+      const wanted = kpiList.split(/[,\s]+/).map((k) => k.trim().toLowerCase()).filter(Boolean);
+      const mine = allowedDigestKpis(perms);
+      const bad = wanted.filter((k) => !DIGEST_KPIS[k]);
+      if (bad.length) return `ไม่รู้จัก KPI: ${bad.join(', ')} — พิมพ์ "digest kpis" เพื่อดูรายการที่เลือกได้`;
+      const denied = wanted.filter((k) => !mine.includes(k));
+      if (denied.length) return `บัญชีของคุณไม่มีสิทธิ์เห็น: ${denied.join(', ')} — พิมพ์ "digest kpis" เพื่อดูรายการของคุณ`;
+      kpis = wanted;
+    }
     const [sub] = await this.db.select().from(reportSubscriptions)
       .where(and(eq(reportSubscriptions.tenantId, tenantId), eq(reportSubscriptions.reportType, 'line_daily_digest'))).limit(1);
-    const recipients: Array<{ line_user?: string; email?: string }> = Array.isArray(sub?.recipients) ? [...(sub!.recipients as Array<{ line_user?: string; email?: string }>)] : [];
-    const has = recipients.some((r: any) => r?.line_user === u.username);
+    const recipients: Array<{ line_user?: string; email?: string; kpis?: string[] }> = Array.isArray(sub?.recipients) ? [...(sub!.recipients as Array<{ line_user?: string; email?: string; kpis?: string[] }>)] : [];
+    const idx = recipients.findIndex((r: any) => r?.line_user === u.username);
     if (on) {
-      if (!has) recipients.push({ line_user: u.username });
+      const entry: { line_user: string; kpis?: string[] } = { line_user: u.username, ...(kpis ? { kpis } : {}) };
+      if (idx >= 0) recipients[idx] = entry; else recipients.push(entry);
       if (sub) await this.db.update(reportSubscriptions).set({ recipients, isActive: true }).where(eq(reportSubscriptions.id, sub.id));
       else await this.db.insert(reportSubscriptions).values({ tenantId, name: 'LINE Daily Digest', reportType: 'line_daily_digest', filters: {}, frequency: 'daily', recipients, isActive: true, nextRunAt: new Date(), createdBy: 'system:line-chat' });
-      return 'รับสรุปประจำวันทาง LINE แล้ว ✔ (ส่งทุกเช้าตามรอบรายงาน) — พิมพ์ "unsubscribe digest" เพื่อยกเลิก';
+      const picked = kpis ? ` (${kpis.map((k) => DIGEST_KPIS[k]!.th).join(' · ')})` : '';
+      return `รับสรุปประจำวันทาง LINE แล้ว ✔${picked} (ส่งทุกเช้าตามรอบรายงาน) — พิมพ์ "unsubscribe digest" เพื่อยกเลิก`;
     }
-    if (!sub || !has) return 'คุณยังไม่ได้รับสรุปประจำวันอยู่แล้ว';
+    if (!sub || idx < 0) return 'คุณยังไม่ได้รับสรุปประจำวันอยู่แล้ว';
     await this.db.update(reportSubscriptions).set({ recipients: recipients.filter((r: any) => r?.line_user !== u.username) }).where(eq(reportSubscriptions.id, sub.id));
     return 'ยกเลิกการรับสรุปประจำวันแล้ว ✔';
+  }
+
+  // LP-3 — `digest kpis`: list the catalog keys THIS user's permissions may see (permission-aware menu).
+  // Gated like `subscribe digest` — the baseline trio is permissionless, so the menu (not the KPI list)
+  // carries the subscriber gate.
+  private async chatDigestKpis(u: any): Promise<string> {
+    const perms = await this.effectivePerms(u);
+    if (!perms.includes('dashboard') && !perms.includes('fin_report') && !perms.includes('exec')) {
+      return 'บัญชีของคุณไม่มีสิทธิ์รับสรุปประจำวัน (ต้องมี dashboard / fin_report / exec)';
+    }
+    const mine = allowedDigestKpis(perms);
+    const dflt = new Set(DEFAULT_DIGEST_KPIS);
+    return 'KPI ที่เลือกได้สำหรับสรุปประจำวันของคุณ:\n'
+      + mine.map((k) => `• ${k} — ${DIGEST_KPIS[k]!.th}${dflt.has(k) ? ' (ค่าเริ่มต้น)' : ''}`).join('\n')
+      + '\nเลือกโดยพิมพ์: subscribe digest <kpi,kpi,…>';
   }
 
   // ── LC-5 (docs/30) — read-only NL analytics: `ask <คำถาม>` via the governed nl-analytics engine ──
