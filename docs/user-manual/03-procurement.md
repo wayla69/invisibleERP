@@ -124,7 +124,11 @@ the `/bi` page.)
 **LINE notifications:** if you've linked your account, the system messages you
 automatically — approvers get a 🔔 when a PR enters their queue (with the
 `approve <PR no>` hint), and the requester gets ✅/❌ when their PR is decided.
-No setup beyond linking; if you unlink, the messages stop.
+**You're also kept in the loop afterwards:** whoever raised the PR gets a LINE
+message when it's turned into a **PO** (🛒 ออกใบสั่งซื้อแล้ว), when that PO is
+**approved** (✅), and when the **goods arrive** (📦 รับเข้าคลังแล้ว) — so you know
+your order is moving without having to ask. No setup beyond linking; if you unlink,
+the messages stop.
 
 > **Approving from chat is exactly as strict as the web:** you need the
 > `procurement` permission, you can never approve a PR you raised yourself
