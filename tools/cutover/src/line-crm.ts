@@ -8,6 +8,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'line-secret';
 process.env.NODE_ENV = 'test';
 process.env.LINE_CHANNEL_TOKEN = 'test-line-push-token'; // makes the LINE push gateway "configured" → real(stubbed) fetch
 process.env.LINE_CHAT_RATE_LIMIT = '1000'; // LC-3 governance — keep the per-user budget out of the way until section 21 tests it
+process.env.APP_ENC_KEY = 'ierp-dev-enc-key'; // same derived key as the dev fallback — keeps decrypt working when 25g flips NODE_ENV=production (prod fail-closes without it)
 // LINE_LOGIN_CHANNEL_ID intentionally unset → verifyLineIdToken uses the dev mock:<userId>[:<name>] path
 
 import { Test } from '@nestjs/testing';
@@ -20,6 +21,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { reportSubscriptions } from '../../../apps/api/dist/database/schema/bi';
+import { setLlmClientForTests } from '../../../apps/api/dist/common/llm-client';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -799,6 +801,89 @@ async function main() {
       ? tsLinked.json.status === 'sent' && linePushes.length === tsBefore + 1 && linePushes.at(-1)!.to === 'Uboss' && tsLog.length >= 1
       : false,
     JSON.stringify({ s: tsLinked.status, to: linePushes.at(-1)?.to, logged: tsLog.length }));
+
+  // ── 25. LP-2 (docs/31): copilot uplift — wider intents (expense/leave), scripted-LLM evals, daily cap. ──
+  // 25a. deterministic expense draft (key-less) → confirm card only, no request row before confirm.
+  const pexCount25 = (await db.select().from(s.expenseRequests)).length;
+  const draftExp = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25a', source: { userId: 'Uapclerk' }, message: { id: 'mid-25a', type: 'text', text: 'บอท ขอเบิก 250 จาก PCF-LINE ค่าน้ำแข็งหน้าร้าน' } }] });
+  const expConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  const expBtn = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.label ?? '';
+  ok('LP-2: copilot expense draft (Thai free text) → confirm card only, nothing raised',
+    draftExp.json.chat === 1 && expBtn === 'ยืนยันเบิกเงิน' && (await db.select().from(s.expenseRequests)).length === pexCount25,
+    JSON.stringify({ btn: expBtn, created: (await db.select().from(s.expenseRequests)).length - pexCount25 }));
+
+  // 25b. confirm → PEX raised through the ordinary chat expense path (same perms + service guards).
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-25b', replyToken: 'rt-25b', source: { userId: 'Uapclerk' }, postback: { data: expConfirmData } }] });
+  const pex25No = /PEX-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [pex25] = pex25No ? await db.select().from(s.expenseRequests).where(eq(s.expenseRequests.reqNo, pex25No)) : [];
+  ok('LP-2: confirm expense draft → PEX PendingApproval via the normal path (maker = linked staff)',
+    !!pex25 && pex25.status === 'PendingApproval' && pex25.requestedBy === 'apclerk' && Number(pex25.amount) === 250,
+    JSON.stringify({ pex: pex25No, by: pex25?.requestedBy, amt: pex25?.amount }));
+
+  // 25c. deterministic leave draft ("ลา <n> วัน ตั้งแต่ <date>") → confirm → leave via the ESS path.
+  const draftLv = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25c1', source: { userId: 'Usomchai' }, message: { id: 'mid-25c1', type: 'text', text: 'บอท ขอลา 2 วัน ตั้งแต่ 2026-08-03 ไปงานบวช' } }] });
+  const lvConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-25c2', replyToken: 'rt-25c2', source: { userId: 'Usomchai' }, postback: { data: lvConfirmData } }] });
+  const lv25Id = Number(/#(\d+)/.exec(lineReplies.at(-1)?.text ?? '')?.[1] ?? 0);
+  const [lv25] = lv25Id ? await db.select().from(s.leaveRequests).where(eq(s.leaveRequests.id, lv25Id)) : [];
+  ok('LP-2: copilot leave draft (days-first Thai) → confirm → Pending leave via ESS path (to_date derived)',
+    draftLv.json.chat === 1 && !!lv25 && lv25.status === 'Pending' && String(lv25.fromDate) === '2026-08-03' && String(lv25.toDate) === '2026-08-04',
+    JSON.stringify({ id: lv25Id, from: lv25?.fromDate, to: lv25?.toDate }));
+
+  // 25d. scripted-LLM eval (docs/31 — the ai-eval seam): rules can't parse it, the (fake) model drafts,
+  //      the confirm replays the ordinary pr path. Daily cap 1 → this is the tenant's one allowed call.
+  process.env.ANTHROPIC_API_KEY = 'fake-line-copilot-key';
+  process.env.LINE_COPILOT_DAILY_CAP = '1';
+  let llmCalls = 0;
+  setLlmClientForTests({
+    create: async (params: any) => {
+      llmCalls++;
+      const userText = String(params?.messages?.[0]?.content ?? '');
+      const reply = userText.includes('เมาส์ไร้สาย')
+        ? { intent: 'pr', item_id: 'MOUSE-WL', qty: 1, reason: 'เมาส์ไร้สาย' }
+        : null;
+      return { content: [{ type: 'text', text: reply ? JSON.stringify(reply) : 'ขออภัย ไม่ใช่ JSON นะ' }] };
+    },
+    stream: () => { throw new Error('not used'); },
+  } as any);
+  const prCount25 = (await db.select().from(s.purchaseRequests)).length;
+  const draftLlm = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25d1', source: { userId: 'Usomchai' }, message: { id: 'mid-25d1', type: 'text', text: 'บอท อยากได้เมาส์ไร้สายสักตัวครับ' } }] });
+  const llmConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-25d2', replyToken: 'rt-25d2', source: { userId: 'Usomchai' }, postback: { data: llmConfirmData } }] });
+  const llmPrNo = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [llmPr] = llmPrNo ? await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, llmPrNo)) : [];
+  ok('LP-2: scripted-LLM draft (rules miss) → schema-validated → confirm → PR via the normal path',
+    draftLlm.json.chat === 1 && llmCalls === 1 && !!llmPr && llmPr.requestedBy === 'somchai' && (await db.select().from(s.purchaseRequests)).length === prCount25 + 1,
+    JSON.stringify({ calls: llmCalls, pr: llmPrNo, by: llmPr?.requestedBy }));
+
+  // 25e. daily LLM cap trips: the next LLM-needed text is answered WITHOUT calling the model (+ audit row).
+  const capTry = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25e', source: { userId: 'Usomchai' }, message: { id: 'mid-25e', type: 'text', text: 'บอท อยากได้อะไรสักอย่างที่กฎไม่เข้าใจ' } }] });
+  const capAudit = (await db.select().from(s.messageLog).where(eq(s.messageLog.tenantId, t1))).some((r: any) => String(r.body ?? '').includes('[chat:ai-cap]'));
+  ok('LP-2: per-tenant daily LLM cap → model NOT called, honest refusal + [chat:ai-cap] audit',
+    capTry.json.chat === 1 && llmCalls === 1 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ') && capAudit,
+    JSON.stringify({ calls: llmCalls, audited: capAudit }));
+  process.env.LINE_COPILOT_DAILY_CAP = '0'; // 0 = uncapped for the remaining checks
+
+  // 25f. malformed LLM output → schema validation rejects → honest refusal, nothing created or parked.
+  const prCount25f = (await db.select().from(s.purchaseRequests)).length;
+  const badLlm = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25f', source: { userId: 'Usomchai' }, message: { id: 'mid-25f', type: 'text', text: 'บอท ช่วยจัดการอะไรก็ได้' } }] });
+  const [state25f] = await db.select().from(s.lineChatStates).where(and(eq(s.lineChatStates.tenantId, t1), eq(s.lineChatStates.lineUserId, 'Usomchai')));
+  ok('LP-2: malformed LLM JSON → refusal, no draft state, nothing created',
+    badLlm.json.chat === 1 && llmCalls === 2 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ')
+      && (await db.select().from(s.purchaseRequests)).length === prCount25f && (!state25f || (state25f.payload as any)?.action !== 'copilot-cmd'),
+    JSON.stringify({ calls: llmCalls, reply: lineReplies.at(-1)?.text.slice(0, 30) }));
+
+  // 25g. DPA gate (fail closed): key present + NODE_ENV=production + no AI_DPA_ACKNOWLEDGED → the model
+  //      is never called; the copilot degrades to the deterministic rules only.
+  process.env.NODE_ENV = 'production';
+  const dpaTry = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25g', source: { userId: 'Usomchai' }, message: { id: 'mid-25g', type: 'text', text: 'บอท อยากได้จอใหม่สวย ๆ' } }] });
+  process.env.NODE_ENV = 'test';
+  ok('LP-2: AI_DPA gate → LLM not called in prod without DPA ack (deterministic refusal)',
+    dpaTry.json.chat === 1 && llmCalls === 2 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ'),
+    JSON.stringify({ calls: llmCalls }));
+  setLlmClientForTests(null);
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.LINE_COPILOT_DAILY_CAP;
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

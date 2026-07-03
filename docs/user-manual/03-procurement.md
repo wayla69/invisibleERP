@@ -67,7 +67,7 @@ handy on the floor or in the stockroom. One-time setup first:
 | `leave <from YYYY-MM-DD> <days> [เหตุผล]` (also `ลา`) | Raises an ESS leave request (needs `ess` + employee record) |
 | `subscribe digest` / `unsubscribe digest` (also `รับสรุป`/`เลิกรับสรุป`) | Morning summary on LINE — see [Reports](./09-reports-and-analytics.md) |
 | `ask <คำถาม>` (also `ถาม`) | Sales analytics answer (needs `dashboard`/`exec`/`masterdata`) |
-| `บอท <ข้อความ>` (also `bot …`) | AI drafts a PR from free text — **always asks you to confirm before creating anything** |
+| `บอท <ข้อความ>` (also `bot …`) | AI drafts a **PR, petty-cash expense/advance, or leave request** from free Thai (e.g. `บอท ขอเบิก 250 จาก PCF-01 ค่าน้ำแข็ง`, `บอท ขอลา 2 วัน ตั้งแต่ 2026-08-03`) — **always asks you to confirm before creating anything**; the confirmed draft runs the ordinary command with your own permissions |
 | `approve <PR no>` / `reject <PR no> <reason>` (also `อนุมัติ`/`ปฏิเสธ`) | **Procurement only** — decides a pending PR through the normal approval engine |
 
 **LINE notifications:** if you've linked your account, the system messages you
