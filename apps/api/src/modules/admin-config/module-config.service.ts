@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { asc, like } from 'drizzle-orm';
+import { asc, like, notLike } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { moduleConfigs, navGroupOrder } from '../../database/schema';
 import { MODULE_KEYS, ALWAYS_ON_MODULES, type Permission } from '@ierp/shared';
@@ -15,6 +15,11 @@ import { MODULE_KEYS, ALWAYS_ON_MODULES, type Permission } from '@ierp/shared';
 // the enforced control). Two hrefs can never be hidden, so an admin can't lock themselves out.
 const NAV_PREFIX = 'nav:';
 const NAV_ALWAYS_VISIBLE = ['/settings', '/admin/users'];
+// `nav_group_order` doubles as the menu-ITEM order store: a row keyed `item:<scope>|<href>` (scope = the
+// container's i18n title — a group or sub-section) orders items WITHIN that container. Group-order rows use
+// the bare group title. The `item:`/bare split keeps both in one table (no extra migration).
+const ITEM_PREFIX = 'item:';
+const ITEM_SEP = '|';
 
 @Injectable()
 export class ModuleConfigService {
@@ -50,29 +55,64 @@ export class ModuleConfigService {
         if (!NAV_ALWAYS_VISIBLE.includes(href)) navDisabled.push(href);
       }
     }
-    const groupOrder = await this.loadGroupOrder();
-    return { modules, disabled: modules.filter((x) => !x.enabled).map((x) => x.key), navDisabled, groupOrder };
+    const { groupOrder, itemOrder } = await this.loadOrder();
+    return { modules, disabled: modules.filter((x) => !x.enabled).map((x) => x.key), navDisabled, groupOrder, itemOrder };
   }
 
-  // Admin-curated sidebar category order (ascending). Empty ⇒ every client falls back to nav.ts code order.
-  private async loadGroupOrder(): Promise<string[]> {
+  // Admin-curated sidebar ordering: `groupOrder` = category order (bare group titles); `itemOrder` = per
+  // container (group/sub-section title → ordered hrefs). Empty ⇒ clients fall back to nav.ts code order.
+  private async loadOrder(): Promise<{ groupOrder: string[]; itemOrder: Record<string, string[]> }> {
     const rows = await this.db.select().from(navGroupOrder).orderBy(asc(navGroupOrder.sortOrder));
-    return rows.map((r) => String(r.groupKey));
+    const groupOrder: string[] = [];
+    const itemOrder: Record<string, string[]> = {};
+    for (const r of rows) {
+      const k = String(r.groupKey);
+      if (k.startsWith(ITEM_PREFIX)) {
+        const rest = k.slice(ITEM_PREFIX.length);
+        const sep = rest.indexOf(ITEM_SEP);
+        if (sep < 0) continue;
+        const scope = rest.slice(0, sep);
+        const href = rest.slice(sep + 1);
+        (itemOrder[scope] ??= []).push(href);
+      } else {
+        groupOrder.push(k);
+      }
+    }
+    return { groupOrder, itemOrder };
   }
 
   // Replace the whole category order with `order` (an ordered list of nav-group i18n keys). Full-replace
-  // keeps it idempotent and drops stale keys; presentation-only, never touches permissions/modules.
+  // keeps it idempotent and drops stale keys; presentation-only, never touches permissions/modules. Only
+  // the group-order rows are touched — item-order rows (`item:*`) are preserved.
   async setGroupOrder(order: string[], user: { username?: string }) {
-    const clean = [...new Set(order.filter((k) => typeof k === 'string' && k.length > 0))];
+    const clean = [...new Set(order.filter((k) => typeof k === 'string' && k.length > 0 && !k.startsWith(ITEM_PREFIX)))];
     const db = this.db;
     const now = new Date();
-    await db.delete(navGroupOrder);
+    await db.delete(navGroupOrder).where(notLike(navGroupOrder.groupKey, `${ITEM_PREFIX}%`));
     if (clean.length > 0) {
       await db.insert(navGroupOrder).values(
         clean.map((groupKey, i) => ({ groupKey, sortOrder: i, updatedAt: now, updatedBy: user.username ?? null })),
       );
     }
     return { groupOrder: clean };
+  }
+
+  // Order the menu items WITHIN one container (`scope` = a group or sub-section i18n title); `order` is that
+  // container's full list of hrefs. Full-replace for the scope; other scopes + the group order are untouched.
+  async setItemOrder(scope: string, order: string[], user: { username?: string }) {
+    if (!scope || scope.includes(ITEM_SEP)) return { scope, itemOrder: [] };
+    const clean = [...new Set(order.filter((h) => typeof h === 'string' && h.startsWith('/')))];
+    const db = this.db;
+    const now = new Date();
+    // Escape LIKE wildcards in the scope (some sub-section titles contain `_`, e.g. nav.sub.ar_ap).
+    const escScope = scope.replace(/([\\%_])/g, '\\$1');
+    await db.delete(navGroupOrder).where(like(navGroupOrder.groupKey, `${ITEM_PREFIX}${escScope}${ITEM_SEP}%`));
+    if (clean.length > 0) {
+      await db.insert(navGroupOrder).values(
+        clean.map((href, i) => ({ groupKey: `${ITEM_PREFIX}${scope}${ITEM_SEP}${href}`, sortOrder: i, updatedAt: now, updatedBy: user.username ?? null })),
+      );
+    }
+    return { scope, itemOrder: clean };
   }
 
   // Reset menu CHROME to defaults: clear all visibility overrides (nav:<href> rows) and the category order,

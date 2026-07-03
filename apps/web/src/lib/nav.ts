@@ -537,6 +537,24 @@ export function orderGroups<T extends { title: string }>(groups: T[], order?: st
     .map((x) => x.g);
 }
 
+/** Order nav items within a container by an admin-curated list of `href`s (same fallback rules as
+ *  orderGroups: known-order first, unknown keep code order). Stable, non-mutating. */
+export function orderItems(items: NavItem[], order?: string[]): NavItem[] {
+  if (!order || order.length === 0) return items;
+  const rank = new Map(order.map((h, i) => [h, i]));
+  return items
+    .map((it, i) => ({ it, i }))
+    .sort((a, b) => {
+      const ra = rank.get(a.it.href);
+      const rb = rank.get(b.it.href);
+      if (ra != null && rb != null) return ra - rb;
+      if (ra != null) return -1;
+      if (rb != null) return 1;
+      return a.i - b.i;
+    })
+    .map((x) => x.it);
+}
+
 /** Total visible-item count of a group across flat items + subgroups. */
 function groupItemCount(g: NavGroup): number {
   return (g.items?.length ?? 0) + (g.subgroups?.reduce((n, s) => n + s.items.length, 0) ?? 0);

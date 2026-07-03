@@ -16,6 +16,10 @@ type SetNavBodyT = z.infer<typeof SetNavBody>;
 const SetNavOrderBody = z.object({ order: z.array(z.string().min(1).max(120)).max(100) });
 type SetNavOrderBodyT = z.infer<typeof SetNavOrderBody>;
 
+// Order the menu items within one container (`scope` = a group/sub-section title) — the full href list.
+const SetNavItemOrderBody = z.object({ scope: z.string().min(1).max(120), order: z.array(z.string().min(1).max(200)).max(100) });
+type SetNavItemOrderBodyT = z.infer<typeof SetNavItemOrderBody>;
+
 // Admin-only. 'users' is ALWAYS_ON, so this page is always reachable.
 @Controller('api/admin/modules')
 @Permissions('users')
@@ -42,6 +46,12 @@ export class ModuleConfigController {
   @Post('nav-order')
   setNavOrder(@Body(new ZodValidationPipe(SetNavOrderBody)) b: SetNavOrderBodyT, @CurrentUser() u: JwtUser) {
     return this.svc.setGroupOrder(b.order, u);
+  }
+
+  // Reorder the menu items within one category / sub-section (presentation only).
+  @Post('nav-item-order')
+  setNavItemOrder(@Body(new ZodValidationPipe(SetNavItemOrderBody)) b: SetNavItemOrderBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.setItemOrder(b.scope, b.order, u);
   }
 
   // Reset menu arrangement (show all menus + default category order). Leaves module on/off flags untouched.
