@@ -65,6 +65,7 @@ handy on the floor or in the stockroom. One-time setup first:
 | `stock <item id>` (also `สต็อก`) | Read-only on-hand balance by location |
 | `low` (also `ใกล้หมด`/`สต็อกต่ำ`) | Lists items at/below their reorder point (on-hand vs `min_stock`) with a suggested top-up qty |
 | `reorder` (also `เติมของ`/`เติมสต็อก`) | Raises **one** PR that tops up **all** low-stock items in a single tap (needs `pr_raise`) |
+| `subscribe lowstock` / `unsubscribe lowstock` (also `รับแจ้งของใกล้หมด`) | Get a morning LINE alert whenever something is at/below its reorder point, with a one-tap **สั่งเติมทั้งหมด** button (needs `pr_raise`) |
 | `receive <PO no>` (also `รับของ`/`รับ`) | Receives **all** outstanding qty on an approved PO in one tap → creates the GR and closes the PO when fully received (needs `wh_receive`/`warehouse`/`procurement`; the PO must be Approved — EXP-03) |
 | `expense <fund> <amount> [เหตุผล]` / `advance …` (also `เบิก`/`ยืมเงิน`) | Raises a petty-cash request — see [Finance](./05-finance-ar-ap.md) |
 | `leave <from YYYY-MM-DD> <days> [เหตุผล]` (also `ลา`) | Raises an ESS leave request (needs `ess` + employee record) |
@@ -112,6 +113,13 @@ the ones you want, adjust any quantity, and press **เปิด PR เติม
 requisition for the whole selection (which then goes through the normal approval flow). The
 card hides itself when nothing is low. The same thing works from LINE chat: `low` lists the
 low-stock items, and `reorder` raises the top-up PR for all of them in one tap.
+
+**Get told before you run out (แจ้งเตือนอัตโนมัติ):** type `subscribe lowstock` in the
+LINE chat and the bot will message you **every morning** whenever any item has hit its
+reorder point — with the item list and a one-tap **สั่งเติมทั้งหมด** button that raises the
+top-up PR right there. Quiet mornings (nothing low) stay silent. `unsubscribe lowstock`
+turns it off. (You can also set it up as the `low_stock_reorder_alert` scheduled report on
+the `/bi` page.)
 
 **LINE notifications:** if you've linked your account, the system messages you
 automatically — approvers get a 🔔 when a PR enters their queue (with the
