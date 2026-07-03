@@ -7,6 +7,7 @@ import 'reflect-metadata';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'line-secret';
 process.env.NODE_ENV = 'test';
 process.env.LINE_CHANNEL_TOKEN = 'test-line-push-token'; // makes the LINE push gateway "configured" → real(stubbed) fetch
+process.env.LINE_CHAT_RATE_LIMIT = '1000'; // LC-3 governance — keep the per-user budget out of the way until section 21 tests it
 // LINE_LOGIN_CHANNEL_ID intentionally unset → verifyLineIdToken uses the dev mock:<userId>[:<name>] path
 
 import { Test } from '@nestjs/testing';
@@ -17,6 +18,7 @@ import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { reportSubscriptions } from '../../../apps/api/dist/database/schema/bi';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -610,6 +612,134 @@ async function main() {
     adv.json.chat === 1 && appr.json.status === 'Approved' && !!okPush && okPush.text.includes(pexNo)
       && rejAdv.json.status === 'Rejected' && !!rejPexPush && rejPexPush.text.includes(advNo) && rejPexPush.text.includes('แนบใบเสร็จก่อน'),
     JSON.stringify({ appr: appr.json.status, okPush: !!okPush, rej: rejAdv.json.status, rejPush: !!rejPexPush }));
+
+  // ── 21. LC-3 (docs/30): ESS leave via chat + channel governance (link registry, force-unlink, rate limit).
+  const [somchaiRow] = await db.select().from(s.users).where(eq(s.users.username, 'somchai'));
+  await db.insert(s.employees).values({ tenantId: t1, empCode: 'E-SOM', name: 'สมชาย ใจดี', userName: 'somchai' }).onConflictDoNothing();
+  await db.insert(s.userPermissions).values([{ userId: Number(somchaiRow.id), perm: 'ess' }, { userId: Number(somchaiRow.id), perm: 'pr_raise' }]).onConflictDoNothing();
+
+  // 21a. leave raise via chat → Pending request (to_date derived), approver (exec/users/creditors holder) pushed.
+  const pushesBefore21 = linePushes.length;
+  const lv = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-21a', source: { userId: 'Usomchai' }, message: { id: 'mid-21a', type: 'text', text: 'leave 2026-07-10 3 พาแม่ไปหาหมอ' } }] });
+  const lvId = Number(/#(\d+)/.exec(lineReplies.at(-1)?.text ?? '')?.[1] ?? 0);
+  const [lvRow] = lvId ? await db.select().from(s.leaveRequests).where(eq(s.leaveRequests.id, lvId)) : [];
+  const lvPush = linePushes.slice(pushesBefore21).find((p) => p.to === 'Uapboss' && p.text.includes('ใบลา'));
+  ok('LC-3: chat leave → Pending request (to_date derived) + approver push',
+    lv.json.chat === 1 && !!lvRow && lvRow.status === 'Pending' && String(lvRow.toDate) === '2026-07-12' && Number(lvRow.days) === 3 && !!lvPush,
+    JSON.stringify({ id: lvId, to: lvRow?.toDate, pushed: !!lvPush }));
+
+  // 21b. permission — a linked user without `ess` cannot raise leave.
+  const lvDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-21b', source: { userId: 'Uprayut' }, message: { id: 'mid-21b', type: 'text', text: 'leave 2026-07-10 2' } }] });
+  ok('LC-3: leave without ess permission → refused', lvDenied.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 21c. web approve (Admin holds exec) → requester ✅ push.
+  const pushesBefore21c = linePushes.length;
+  const lvAppr = await inj('POST', `/api/hcm/leave/${lvId}/approve`, token);
+  const lvOkPush = linePushes.slice(pushesBefore21c).find((p) => p.to === 'Usomchai' && p.text.includes('อนุมัติแล้ว'));
+  ok('LC-3: leave approve → requester ✅ push', lvAppr.json.status === 'Approved' && !!lvOkPush && lvOkPush.text.includes(`#${lvId}`), JSON.stringify({ s: lvAppr.json.status, pushed: !!lvOkPush }));
+
+  // 21d. admin link registry — `users` perm only; masked LINE ids.
+  const links = await inj('GET', '/api/line/links', token);
+  const somchaiLink = (links.json.links ?? []).find((l: any) => l.username === 'somchai');
+  const linksDenied = await inj('GET', '/api/line/links', somchaiTok);
+  ok('LC-3: link registry lists linked users (masked id); non-`users` caller refused',
+    links.json.count >= 4 && !!somchaiLink && String(somchaiLink.line_user_id_masked).endsWith('…') && !JSON.stringify(links.json).includes('Usomchai"') && linksDenied.status === 403,
+    JSON.stringify({ count: links.json.count, masked: somchaiLink?.line_user_id_masked, denied: linksDenied.status }));
+
+  // 21e. force-unlink (offboarding) — the channel dies immediately; audit row written.
+  const fu = await inj('DELETE', '/api/line/links/auditor', token);
+  const fuChat = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-21e', source: { userId: 'Uauditor' }, message: { id: 'mid-21e', type: 'text', text: 'my prs' } }] });
+  const fuAudit = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.recipient, 'Uauditor')));
+  ok('LC-3: admin force-unlink → subsequent chat is unlinked; audit row recorded',
+    fu.json.unlinked === true && fuChat.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยังไม่ได้เชื่อมบัญชี') && fuAudit.some((r: any) => String(r.body).startsWith('[chat:admin-unlink]')),
+    JSON.stringify({ unlinked: fu.json.unlinked, audited: fuAudit.some((r: any) => String(r.body).startsWith('[chat:admin-unlink]')) }));
+
+  // 21f. rate limit — budget of 3: first 3 commands answered, 4th gets ONE throttle reply, 5th dropped silently.
+  await db.update(s.users).set({ lineUserId: 'Usomsri' }).where(eq(s.users.username, 'somsri'));
+  process.env.LINE_CHAT_RATE_LIMIT = '3';
+  const rateReplies: number[] = [];
+  for (let i = 1; i <= 5; i++) {
+    const before = lineReplies.length;
+    await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: `rt-21f${i}`, source: { userId: 'Usomsri' }, message: { id: `mid-21f${i}`, type: 'text', text: 'stock A4-PAPER' } }] });
+    rateReplies.push(lineReplies.length - before);
+  }
+  const throttleAudit = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.recipient, 'Usomsri')));
+  process.env.LINE_CHAT_RATE_LIMIT = '1000';
+  ok('LC-3: rate limit — 3 answered, 4th throttle-replied once, 5th silent; throttle audit row',
+    rateReplies.join(',') === '1,1,1,1,0' && lineReplies.at(-1)!.text.includes('ถี่เกินไป')
+      && throttleAudit.some((r: any) => String(r.body).startsWith('[chat:throttled]')),
+    JSON.stringify({ pattern: rateReplies.join(','), audited: throttleAudit.some((r: any) => String(r.body).startsWith('[chat:throttled]')) }));
+
+  // ── 22. LC-4 (docs/30): alert delivery to linked identity + LINE daily digest subscriptions. ──
+  // 22a. an alert rule targeting 'user:<username>' resolves to that user's LINKED LINE at send time.
+  const rule = await inj('POST', '/api/alerts/rules', token, { name: 'PR ค้างเยอะ', metric: 'open_pr_count', operator: 'gt', threshold: 0, channel: 'line', target_to: 'user:apboss', cooldown_hours: 0 });
+  const pushesBefore22 = linePushes.length;
+  const alertRun = await inj('POST', '/api/alerts/run', token);
+  const alertPush = linePushes.slice(pushesBefore22).find((p) => p.to === 'Uapboss' && p.text.includes('PR ค้างเยอะ'));
+  ok('LC-4: alert rule target user:<name> → fired push lands on the LINKED LINE (registry-resolved)',
+    (rule.status === 200 || rule.status === 201) && alertRun.json.fired_count >= 1 && !!alertPush,
+    JSON.stringify({ fired: alertRun.json.fired_count, pushed: !!alertPush }));
+
+  // 22b. digest opt-in is permission-gated (dashboard/fin_report/exec) — somchai (ess+pr_raise) refused.
+  const digDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-22b', source: { userId: 'Usomchai' }, message: { id: 'mid-22b', type: 'text', text: 'subscribe digest' } }] });
+  ok('LC-4: subscribe digest without dashboard/fin_report/exec → refused',
+    digDenied.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 22c. opt-in creates/joins the tenant's line_daily_digest subscription as a {line_user} recipient.
+  const [somsriRow] = await db.select().from(s.users).where(eq(s.users.username, 'somsri'));
+  await db.insert(s.userPermissions).values([{ userId: Number(somsriRow.id), perm: 'dashboard' }, { userId: Number(somsriRow.id), perm: 'pr_raise' }]).onConflictDoNothing();
+  const digOn = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-22c', source: { userId: 'Usomsri' }, message: { id: 'mid-22c', type: 'text', text: 'subscribe digest' } }] });
+  const [digSub] = await db.select().from(reportSubscriptions).where(and(eq(reportSubscriptions.tenantId, t1), eq(reportSubscriptions.reportType, 'line_daily_digest')));
+  ok('LC-4: subscribe digest → line_daily_digest subscription with {line_user} recipient',
+    digOn.json.chat === 1 && lineReplies.at(-1)!.text.includes('✔') && !!digSub && (digSub.recipients as any[]).some((r: any) => r.line_user === 'somsri'),
+    JSON.stringify({ recips: digSub?.recipients }));
+
+  // 22d. the scheduler delivers the digest to the linked LINE (counts summary).
+  const pushesBefore22d = linePushes.length;
+  const digRun = await inj('POST', '/api/bi/subscriptions/run', token);
+  const digPush = linePushes.slice(pushesBefore22d).find((p) => p.to === 'Usomsri' && p.text.includes('สรุปเช้านี้'));
+  ok('LC-4: run-due → digest pushed to the linked LINE (pending approvals / open PRs / alerts 24h)',
+    digRun.json.ran_count >= 1 && !!digPush && digPush.text.includes('LINE Daily Digest'),
+    JSON.stringify({ ran: digRun.json.ran_count, pushed: !!digPush, head: digPush?.text.slice(0, 60) }));
+
+  // 22e. unsubscribe removes the recipient.
+  const digOff = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-22e', source: { userId: 'Usomsri' }, message: { id: 'mid-22e', type: 'text', text: 'unsubscribe digest' } }] });
+  const [digSub2] = await db.select().from(reportSubscriptions).where(eq(reportSubscriptions.id, Number(digSub.id)));
+  ok('LC-4: unsubscribe digest → recipient removed',
+    digOff.json.chat === 1 && !(digSub2.recipients as any[]).some((r: any) => r.line_user === 'somsri'), JSON.stringify({ recips: digSub2?.recipients }));
+
+  // ── 23. LC-5 (docs/30): `ask` governed NL analytics + confirm-first Thai copilot (key-less rules). ──
+  // 23a. ask — permission gate (exec/dashboard/masterdata); somchai (ess+pr_raise) refused.
+  const askDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23a', source: { userId: 'Usomchai' }, message: { id: 'mid-23a', type: 'text', text: 'ask ยอดขายตามสาขา' } }] });
+  ok('LC-5: ask without dashboard/exec/masterdata → refused', askDenied.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 23b. ask — governed keyword-mapped query (no LLM key in CI); empty data answers honestly.
+  const askOk = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23b', source: { userId: 'Usomsri' }, message: { id: 'mid-23b', type: 'text', text: 'ask ยอดขายตามสาขา' } }] });
+  const askText = lineReplies.at(-1)?.text ?? '';
+  ok('LC-5: ask → governed NL query answers (dimension resolved; no raw SQL surface)',
+    askOk.json.chat === 1 && (askText.includes('branch') || askText.includes('ยอดขาย') || askText.includes('ไม่มีข้อมูล')),
+    JSON.stringify({ reply: askText.slice(0, 60) }));
+
+  // 23c. copilot — free Thai text drafts a PR; NOTHING is created before [ยืนยัน].
+  const prCountAI = (await db.select().from(s.purchaseRequests)).length;
+  const aiDraft = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23c', source: { userId: 'Usomchai' }, message: { id: 'mid-23c', type: 'text', text: 'บอท ขอซื้อ A4-PAPER 4 ใกล้หมดแล้วนะ' } }] });
+  const aiConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  const prCountAfterDraft = (await db.select().from(s.purchaseRequests)).length;
+  ok('LC-5: copilot draft → confirm card only (no PR before confirm)',
+    aiDraft.json.chat === 1 && lineReplies.at(-1)?.type === 'flex' && !!aiConfirmData && JSON.parse(aiConfirmData).d === 'AI-DRAFT' && prCountAfterDraft === prCountAI,
+    JSON.stringify({ draft: lineReplies.at(-1)?.text.slice(0, 50), created: prCountAfterDraft - prCountAI }));
+
+  // 23d. confirming the draft replays the ordinary pr path (pr_raise + same numbering + workflow).
+  const aiConf = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-23d', replyToken: 'rt-23d', source: { userId: 'Usomchai' }, postback: { data: aiConfirmData } }] });
+  const aiPrNo = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [aiPrRow] = aiPrNo ? await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, aiPrNo)) : [];
+  ok('LC-5: confirm → PR created through the normal path (requested_by = linked staff)',
+    aiConf.json.chat === 1 && !!aiPrRow && aiPrRow.requestedBy === 'somchai' && aiPrRow.status === 'Pending',
+    JSON.stringify({ pr: aiPrNo, by: aiPrRow?.requestedBy }));
+
+  // 23e. unknown free text → honest "don't understand" + usage (no guessing, no action).
+  const aiUnknown = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23e', source: { userId: 'Usomchai' }, message: { id: 'mid-23e', type: 'text', text: 'bot วันนี้อากาศดีจัง' } }] });
+  ok('LC-5: copilot unknown intent → usage reply, nothing acted', aiUnknown.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 40) }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

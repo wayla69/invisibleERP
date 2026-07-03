@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional, BadRequestException, NotFoundException, t
 import { eq, and, sql, gte, lt, desc, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { biDailySnapshots, reportSubscriptions, reportRuns } from '../../database/schema/bi';
+import { workflowInstances, purchaseRequests, alertEvents } from '../../database/schema';
 import { notifications } from '../../database/schema/system';
 import { custPosSales, custPosItems } from '../../database/schema/sales';
 import { journalEntries, journalLines, accounts } from '../../database/schema/ledger';
@@ -11,6 +12,7 @@ import { opportunities, pipelineStages } from '../../database/schema/pipeline';
 import { n, fx } from '../../database/queries';
 import { TtlCache } from '../../common/ttl-cache';
 import { MessagingService } from '../messaging/messaging.service';
+import { LineNotifyService } from '../messaging/line-notify.service';
 import { CollectionsService } from '../finance/collections.service';
 import { EamService } from '../eam/eam.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -65,6 +67,10 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   ap_automatch_rerun: { label: 'จับคู่ 3 ทางซ้ำอัตโนมัติ (ปลดล็อกใบแจ้งหนี้)', labelEn: 'Auto re-match blocked AP invoices' },
   // Likewise: each run posts every due recurring/template journal as a Draft JE (maker-checker, idempotent).
   gl_recurring_journals: { label: 'ลงรายการบัญชีตั้งเวลาอัตโนมัติ', labelEn: 'Post due recurring journals' },
+  // LC-4 (docs/30) — LINE morning digest for {line_user} recipients: pending approvals + open PRs +
+  // alert breaches over the last 24h. Delivery rides the normal recipient loop; scheduler dueness
+  // (frequency 'daily') makes it once-per-day.
+  line_daily_digest: { label: 'สรุปประจำวันทาง LINE', labelEn: 'LINE daily digest' },
   // Likewise: each run amortizes one period of every due prepaid schedule (Dr expense / Cr 1280, idempotent).
   gl_prepaid_amortize: { label: 'ตัดจ่ายค่าใช้จ่ายล่วงหน้า', labelEn: 'Amortize due prepaid expenses' },
   // Likewise: each run posts one period of every due lease (interest + payment + ROU depreciation, idempotent).
@@ -101,6 +107,9 @@ export class BiService implements OnModuleInit {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly messaging: MessagingService,
+    // LC-4 (docs/30) — LINE delivery for {line_user} recipients + the line_daily_digest job. Optional so
+    // partial harnesses still construct BiService.
+    @Optional() private readonly lineNotify?: LineNotifyService,
     // Optional so a partially-wired test harness can construct BiService without the finance graph;
     // the full app always provides it (FinanceModule), enabling the scheduled ar_collections_dunning job.
     @Optional() private readonly collections?: CollectionsService,
@@ -599,6 +608,19 @@ export class BiService implements OnModuleInit {
       const r = await this.eam.runPmDue(user); // idempotent: a schedule with an open WO is skipped
       return { data: r, summary: `PM generation: raised ${r.generated} of ${r.scanned} schedules`, summaryTh: `สร้างใบสั่งงานซ่อมตามแผน: ${r.generated} จาก ${r.scanned} แผน` };
     }
+    if (reportType === 'line_daily_digest') {
+      const db = this.db;
+      const tenantCond = user.tenantId != null ? eq(workflowInstances.tenantId, user.tenantId) : sql`true`;
+      const [wf] = await db.select({ c: sql<number>`count(*)` }).from(workflowInstances).where(and(eq(workflowInstances.status, 'pending'), tenantCond));
+      const [pr] = await db.select({ c: sql<number>`count(*)` }).from(purchaseRequests).where(eq(purchaseRequests.status, 'Pending'));
+      const [ae] = await db.select({ c: sql<number>`count(*)` }).from(alertEvents).where(and(user.tenantId != null ? eq(alertEvents.tenantId, user.tenantId) : sql`true`, sql`${alertEvents.firedAt} > now() - interval '24 hours'`));
+      const data = { pending_approvals: Number(wf?.c ?? 0), open_prs: Number(pr?.c ?? 0), alerts_24h: Number(ae?.c ?? 0) };
+      return {
+        data,
+        summary: `Daily digest: ${data.pending_approvals} pending approvals · ${data.open_prs} open PRs · ${data.alerts_24h} alerts (24h)`,
+        summaryTh: `สรุปเช้านี้: รออนุมัติ ${data.pending_approvals} รายการ · PR ค้าง ${data.open_prs} · แจ้งเตือนใน 24 ชม. ${data.alerts_24h}`,
+      };
+    }
     if (reportType === 'gl_recurring_journals') {
       if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger service not available', messageTh: 'ระบบบัญชีแยกประเภทไม่พร้อมใช้งาน' });
       const r = await this.ledger.runDueRecurring(user); // idempotent: next_run_date advanced + ux_je_idem
@@ -748,6 +770,12 @@ export class BiService implements OnModuleInit {
       const recipients = Array.isArray(sub.recipients) ? sub.recipients : [];
       let delivered = 0;
       for (const r of recipients) {
+        // LC-4: {line_user:'<username>'} delivers a compact summary to that staff user's LINKED LINE
+        // (resolution follows the link registry; unlinked users silently receive nothing).
+        if (r?.line_user && this.lineNotify) {
+          try { await this.lineNotify.notifyUser(String(r.line_user), sub.tenantId != null ? Number(sub.tenantId) : null, `📊 ${sub.name}: ${report.summaryTh ?? report.summary}\nดูรายงานเต็มที่หน้า /bi`); delivered++; } catch { /* best-effort */ }
+          continue;
+        }
         const to = r?.email;
         if (!to) continue;
         try { const res: any = await this.messaging.send({ to, channel: 'email', body: `${sub.name}: ${report.summary}`, campaign: 'report' }, user); if (res?.status === 'sent') delivered++; } catch { /* best-effort */ }

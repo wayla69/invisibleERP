@@ -365,3 +365,21 @@ brands its own documents independently.
 
 **Next:** [Approvals](./10-approvals.md) ·
 [Troubleshooting & FAQ](./99-troubleshooting-faq.md)
+
+---
+
+## LINE chat channel governance (LC-3)
+
+Staff can link their LINE accounts to raise requisitions, expenses, and leave from the
+shop's LINE OA (see [Procurement — LINE chat](./03-procurement.md)). Administration owns
+the governance of that channel:
+
+- **Link registry** — `GET /api/line/links` (permission `users`) lists every linked staff
+  account (username, role, tenant, LINE id **masked**). Review it as part of access
+  recertification.
+- **Force-unlink on offboarding** — `DELETE /api/line/links/<username>` clears the LINE
+  binding and any pending chat state immediately and writes an audit row; do this alongside
+  deactivating the account so a departed employee's phone loses the channel at once.
+- **Rate limiting** — each LINE account gets a command budget (default 30 commands / 5
+  minutes). The first excess command gets one "slow down" reply; further excess is dropped
+  silently and audit-logged.
