@@ -99,6 +99,10 @@ export class ProcurementController {
     return this.svc.convertPrToPo(prNo, b, u);
   }
 
+  // Receive ALL outstanding qty on an approved PO in one shot (LINE chat `receive` + web "รับครบ").
+  @Post('pos/:poNo/receive-all') @Permissions('wh_receive', 'warehouse', 'procurement')
+  receiveAll(@Param('poNo') poNo: string, @CurrentUser() u: JwtUser) { return this.svc.receiveAllRemaining(poNo, u); }
+
   // ── supplier screening (Phase 16) ── vendor-master duty = md_vendor (segregated from AP payment).
   // Legacy 'masterdata' holders still pass (it implies md_vendor/md_item/md_config).
   @Patch('suppliers/:id/status') @Permissions('md_vendor')

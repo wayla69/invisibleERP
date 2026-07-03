@@ -518,4 +518,19 @@ export class ProcurementService {
 
     return { gr_no: grNo, po_no: dto.po_no, po_status: newStatus, lines: lines.length, costed: costingLines.length > 0 };
   }
+
+  // Receive ALL still-outstanding qty on an approved PO in one shot — the LINE chat `receive <PO>` path
+  // and the web "รับครบ" button. Builds the GR lines from each PO line's remaining (order − received) and
+  // runs the ordinary createGr (EXP-03 approval gate + stock/lot + auto-close all bind). No remaining → 422.
+  async receiveAllRemaining(poNo: string, user: JwtUser) {
+    const db = this.db;
+    const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
+    if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
+    const poLines = await db.select().from(poItems).where(eq(poItems.poId, po.id));
+    const items = poLines
+      .map((l: any) => ({ item_id: String(l.itemId), received_qty: n(l.orderQty) - n(l.receivedQty), uom: l.uom ?? undefined }))
+      .filter((x) => x.received_qty > 0);
+    if (!items.length) throw new UnprocessableEntityException({ code: 'NOTHING_TO_RECEIVE', message: 'PO already fully received', messageTh: 'รับของครบแล้ว ไม่มีรายการค้างรับ' });
+    return this.createGr({ po_no: poNo, remarks: 'รับครบผ่านแชท/ปุ่มรับครบ', items }, user);
+  }
 }

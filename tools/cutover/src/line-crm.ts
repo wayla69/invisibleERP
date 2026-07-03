@@ -533,6 +533,30 @@ async function main() {
   ok('PR→PO: item search returns last purchase price (A4-PAPER last_price = 120 from the PO above)',
     itemSearch2.status === 200 && !!a4 && Number(a4.last_price) === 120, JSON.stringify({ last: a4?.last_price }));
 
+  // 17g-iv. receive <PO> via chat (feature B) — receive ALL outstanding qty in one tap.
+  //         Guard: an un-approved PO is refused (EXP-03); once approved a linked wh_receive/procurement
+  //         user receives everything → GR created, PO auto-closes; a second receive finds nothing left.
+  const recvUnappr = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17j0', source: { userId: 'Uprayut' }, message: { id: 'mid-17j0', type: 'text', text: `receive ${convPoNo}` } }] });
+  ok('chat-receive: receiving an un-approved PO is refused (EXP-03 approval gate)',
+    recvUnappr.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ต้องได้รับอนุมัติก่อน'),
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 80) }));
+
+  await inj('PATCH', `/api/procurement/pos/${convPoNo}/approve`, token, { approve: true });
+  const recv = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17j1', source: { userId: 'Uprayut' }, message: { id: 'mid-17j1', type: 'text', text: `receive ${convPoNo}` } }] });
+  const [poAfterRecv] = await db.select().from(s.purchaseOrders).where(eq(s.purchaseOrders.poNo, convPoNo));
+  const grRows = await db.select().from(s.goodsReceipts).where(eq(s.goodsReceipts.poNo, convPoNo));
+  const recvLines = await db.select().from(s.poItems).where(eq(s.poItems.poId, Number(poAfterRecv.id)));
+  ok('chat-receive: approved PO → receive all → GR created, PO Closed, every line fully received',
+    recv.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('รับครบ')
+      && grRows.length === 1 && poAfterRecv.status === 'Closed'
+      && recvLines.every((l: any) => Number(l.receivedQty) >= Number(l.orderQty)),
+    JSON.stringify({ status: poAfterRecv?.status, grs: grRows.length, reply: lineReplies.at(-1)?.text.slice(0, 60) }));
+
+  const recvAgain = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17j2', source: { userId: 'Uprayut' }, message: { id: 'mid-17j2', type: 'text', text: `receive ${convPoNo}` } }] });
+  ok('chat-receive: receiving an already-closed PO → nothing left to receive',
+    recvAgain.json.chat === 1 && (lineReplies.at(-1)?.text ?? '').includes('ไม่มีรายการค้างรับ'),
+    JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 60) }));
+
   // 17h. cancel — own pending PR withdrawn (workflow instance closed); someone else's PR is refused.
   await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17h1', source: { userId: 'Usomchai' }, message: { id: 'mid-17h1', type: 'text', text: 'pr STAPLER 2' } }] });
   const prCxl = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
