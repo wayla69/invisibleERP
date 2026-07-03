@@ -40,8 +40,24 @@ jobs:
             echo "RAILWAY_TOKEN not configured on the production environment — aborting." >&2
             exit 1
           fi
-          npx -y @railway/cli up --service invisibleERP
-          npx -y @railway/cli up --service invisiblePOSERP
+          # On failure, pull the service's runtime logs into THIS job log before exiting — the bare
+          # "Deploy failed" line from `railway up` carries no cause (a container that dies at boot, e.g.
+          # the API's fail-closed env validation or an OOM, is only visible in Railway's own logs, which
+          # CI never showed). Diagnosis aid for the intermittent deploy failures of 2026-07-02/03.
+          deploy_service() {
+            svc="$1"
+            if npx -y @railway/cli up --service "$svc" --ci; then
+              echo "✅ $svc deployed"
+            else
+              echo "::group::Railway runtime logs for $svc (boot-failure detail)"
+              timeout 45 npx -y @railway/cli logs --service "$svc" 2>&1 | tail -120 || true
+              echo "::endgroup::"
+              echo "::error::Railway deploy failed for $svc — runtime/boot logs above (common causes: missing prod env per apps/api/src/common/env.validation.ts — DATABASE_URL / JWT_SECRET / APP_ENC_KEY / PSP_WEBHOOK_SECRET / observability or ALLOW_NO_OBSERVABILITY=1 — or an OOM/DB race at boot)"
+              return 1
+            fi
+          }
+          deploy_service invisibleERP
+          deploy_service invisiblePOSERP
       - name: Smoke test (production)
         # Post-deploy guard: assert the app is up and key endpoints return 200 (not 500) — catches a
         # "deployed but broken" state such as a migration that never ran. Set vars.PROD_API_URL and
