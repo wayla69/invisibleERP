@@ -884,9 +884,17 @@ export class LineWebhookService {
       if (!line) continue;
       // token split (linear) instead of a backtracking regex — the text is uncontrolled chat input
       const parts = line.split(/\s+/);
-      const qty = Number(parts[1]);
-      if (parts.length < 2 || !Number.isFinite(qty) || qty <= 0) return `อ่านรายการนี้ไม่ได้: "${line}"\n${LineWebhookService.CHAT_USAGE}`;
-      items.push({ item_id: parts[0]!, request_qty: qty, reason: parts.slice(2).join(' ') || undefined });
+      // Quantity = the LAST pure-number token; everything before it is the item name (so multi-word,
+      // un-coded names work — "Iberico ham 2"), everything after is an optional reason. Storefronts
+      // order by product name, not a single-token code, so we don't assume the id is one word.
+      let qi = -1;
+      for (let i = parts.length - 1; i >= 1; i--) { if (/^\d+(?:\.\d+)?$/.test(parts[i]!)) { qi = i; break; } }
+      const qty = qi >= 0 ? Number(parts[qi]!) : NaN;
+      const name = qi >= 1 ? parts.slice(0, qi).join(' ').trim() : '';
+      if (qi < 1 || !name || !Number.isFinite(qty) || qty <= 0) {
+        return `อ่านรายการนี้ไม่ได้: "${line}" — พิมพ์ <ชื่อสินค้า> <จำนวน> เช่น  pr Iberico ham 2\n${LineWebhookService.CHAT_USAGE}`;
+      }
+      items.push({ item_id: name, request_qty: qty, reason: parts.slice(qi + 1).join(' ') || undefined });
     }
     if (!items.length) return LineWebhookService.CHAT_USAGE;
 

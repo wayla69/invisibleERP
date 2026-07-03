@@ -57,7 +57,7 @@ handy on the floor or in the stockroom. One-time setup first:
 
 | Command | What it does |
 |---|---|
-| `pr <item> <qty>` — reason **optional**; several items separated by `,` (also `ขอซื้อ …`) | Raises a PR, e.g. `pr A4-PAPER 10` (no reason needed — most storefront orders are just "ran out"), or `pr A4-PAPER 10, TONER-85A 2`. Add a reason only if you want one: `pr A4-PAPER 10 ด่วน` |
+| `pr <item> <qty>` — reason **optional**; several items separated by `,` (also `ขอซื้อ …`) | Raises a PR, e.g. `pr A4-PAPER 10` (no reason needed — most storefront orders are just "ran out"), or `pr A4-PAPER 10, TONER-85A 2`. **Multi-word names work** — `pr Iberico ham 2` (the quantity is the last number; everything before it is the item name). Add a reason only if you want: `pr A4-PAPER 10 ด่วน` |
 | `status <PR no>` (also `สถานะ <PR no>`) | Replies the PR's current approval state |
 | `my prs` (also `รายการของฉัน`) | Lists your 5 most recent PRs with statuses |
 | `find <keyword>` (also `ค้นหา`) | Searches the item master so you can use real item ids |
@@ -72,11 +72,11 @@ handy on the floor or in the stockroom. One-time setup first:
 | `help` (also `เมนู` / `ช่วยเหลือ` / `คำสั่ง`) | Shows the full command menu as a tidy grouped card |
 
 > **Items without a code yet?** The `item id` in `pr` is free text — the PR line
-> accepts anything, so you can order an un-coded item. Two rules: the id must be a
-> **single token (no spaces)** — the first word is the id, the second the quantity,
-> the rest the reason — so use a placeholder like `NEW-CHAIR` and put the full name
-> in the reason (`pr NEW-CHAIR 5 เก้าอี้บุนวมสำนักงาน`). Purchasing assigns the real
-> item code when the PR becomes a PO.
+> accepts anything, so you can order an un-coded item by its **name, spaces and all**
+> (`pr Iberico ham 2`, `pr เก้าอี้บุนวมสำนักงาน 5`). The parser takes the **last number**
+> as the quantity and everything before it as the item name (and anything after the
+> number as an optional reason). Purchasing assigns the real item code when the PR
+> becomes a PO.
 
 **LINE notifications:** if you've linked your account, the system messages you
 automatically — approvers get a 🔔 when a PR enters their queue (with the

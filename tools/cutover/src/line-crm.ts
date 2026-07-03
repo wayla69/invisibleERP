@@ -357,6 +357,16 @@ async function main() {
       && prLines.some((l: any) => l.itemId === 'A4-PAPER' && Number(l.requestQty) === 10 && l.reason === 'กระดาษหมด'),
     JSON.stringify({ prNo, status: prRow?.status, by: prRow?.requestedBy, lines: prLines.length }));
 
+  // 16e-ii. multi-word / un-coded item name → qty is the LAST number, name is everything before it.
+  const chatPrName = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-2m', source: { userId: 'Usomchai' }, message: { id: 'mid-2m', type: 'text', text: 'pr Iberico ham 2' } }] });
+  const prNameNo = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [prNameRow] = prNameNo ? await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prNameNo)) : [];
+  const prNameLines = prNameRow ? await db.select().from(s.prItems).where(eq(s.prItems.prId, Number(prNameRow.id))) : [];
+  ok('chat-PR: multi-word item name → id="Iberico ham", qty=2 (last number), no reason required',
+    chatPrName.json.chat === 1 && prNameLines.length === 1 && prNameLines[0]!.itemId === 'Iberico ham'
+      && Number(prNameLines[0]!.requestQty) === 2 && (prNameLines[0]!.reason == null),
+    JSON.stringify({ id: prNameLines[0]?.itemId, qty: prNameLines[0]?.requestQty, reason: prNameLines[0]?.reason }));
+
   // 16f. webhook redelivery of the SAME message id is dropped (no duplicate PR).
   const prCountBefore = (await db.select().from(s.purchaseRequests)).length;
   const redeliver = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-2b', source: { userId: 'Usomchai' }, message: { id: 'mid-2', type: 'text', text: 'pr A4-PAPER 10 กระดาษหมด, TONER-85A 2' } }] });
