@@ -218,6 +218,32 @@ async function main() {
     near(commits.json.summary?.open, 7500) && near(commits.json.summary?.released, 7500) && near(commits.json.summary?.committed, 7500),
     JSON.stringify(commits.json.summary));
 
+  // ── 9e. Project Material Requisition (PMR) — M2 (PROJ-13): within-budget → PR; over-budget → LINE approval → Draft PO ──
+  // matLineId (CEMENT) budget 15000, committed 7500 (PO3), remaining 7500.
+  const pmrIn = await inj('POST', '/api/pmr', admin, { project_code: 'PRJ-A', items: [{ boq_line_id: matLineId, item_no: 'CEMENT', qty: 10, unit_cost: 100 }] }); // 1000 ≤ 7500
+  ok('PMR within budget → routed, project-tagged PR raised', pmrIn.status < 300 && pmrIn.json.status === 'routed' && pmrIn.json.over_budget === false && /^PR-/.test(pmrIn.json.linked_doc_no ?? ''), JSON.stringify({ s: pmrIn.status, st: pmrIn.json.status, doc: pmrIn.json.linked_doc_no }));
+
+  const pmrOver = await inj('POST', '/api/pmr', admin, { project_code: 'PRJ-A', items: [{ boq_line_id: matLineId, item_no: 'CEMENT', qty: 100, unit_cost: 100 }] }); // 10000 > 7500 remaining → over by 2500
+  const pmrNo = pmrOver.json.pmr_no;
+  ok('PMR over budget → pending, over_amount 2500, no PO yet', pmrOver.json.status === 'pending' && pmrOver.json.over_budget === true && near(pmrOver.json.over_amount, 2500) && !pmrOver.json.linked_doc_no, JSON.stringify({ st: pmrOver.json.status, over: pmrOver.json.over_amount }));
+
+  const acPmr = await inj('GET', '/api/projects/action-center', admin);
+  const pmrItem = (acPmr.json.items ?? []).find((i: any) => i.kind === 'pmr_over_budget' && i.ref === pmrNo);
+  ok('Action center surfaces pmr_over_budget (high) for the pending PMR', !!pmrItem && pmrItem.severity === 'high', JSON.stringify({ found: !!pmrItem, sev: pmrItem?.severity }));
+
+  const pmrSelf = await inj('POST', `/api/pmr/${pmrNo}/approve`, admin); // requester = admin
+  ok('PMR self-approve by requester → 400 SOD_SELF_APPROVAL', pmrSelf.status === 400 && pmrSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${pmrSelf.status} ${pmrSelf.json.error?.code}`);
+
+  const pmrAppr = await inj('POST', `/api/pmr/${pmrNo}/approve`, mgr); // independent authoriser
+  ok('PMR approve by authoriser → approved + Draft PO auto-drafted', pmrAppr.status < 300 && pmrAppr.json.status === 'approved' && /^PO-/.test(pmrAppr.json.linked_doc_no ?? ''), JSON.stringify({ s: pmrAppr.status, st: pmrAppr.json.status, doc: pmrAppr.json.linked_doc_no }));
+  const draftPo = (await db.select().from(s.purchaseOrders).where(eq(s.purchaseOrders.poNo, pmrAppr.json.linked_doc_no)))[0];
+  ok('Auto-drafted PO is Draft + project-tagged', draftPo?.status === 'Draft' && Number(draftPo?.projectId) === Number(prjRow?.id), JSON.stringify({ st: draftPo?.status, prj: draftPo?.projectId }));
+  const boqOver = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const mlOver = (boqOver.json.lines ?? []).find((l: any) => l.id === matLineId);
+  ok('Authorised overage booked: BoQ line committed 17500 / remaining −2500', near(mlOver?.committed, 17500) && near(mlOver?.remaining, -2500), JSON.stringify({ c: mlOver?.committed, r: mlOver?.remaining }));
+  const acAfter = await inj('GET', '/api/projects/action-center', admin);
+  ok('Action center clears pmr_over_budget after approval', !(acAfter.json.items ?? []).some((i: any) => i.kind === 'pmr_over_budget' && i.ref === pmrNo), 'cleared');
+
   // ── 10. opportunity → project conversion (CRM-WL): a WON deal seeds a project with customer + contract ──
   const opp = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลใหญ่ ACME', customer_no: 'CUS-X', amount: 250000 });
   const oppNo = opp.json.opp_no;

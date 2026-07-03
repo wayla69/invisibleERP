@@ -16,6 +16,10 @@ export interface ReserveDto {
   sourceDocNo: string;
   createdBy?: string;
   tenantId?: number | null;
+  // When true (an AUTHORISED over-budget draw — e.g. a PMR the authoriser approved), record the commitment
+  // WITHOUT the budget check, so an approved overage is allowed to exceed the line (remaining goes negative,
+  // visibly over but authorised). Default false → the ordinary BUDGET_EXCEEDED enforcement applies.
+  allowOver?: boolean;
 }
 
 // Commitment / encumbrance ledger (M1, docs/32, PROJ-12). The primitive that turns the BoQ-line material
@@ -46,7 +50,7 @@ export class CommitmentsService {
     const budget = r2(n(line.budgetAmount));
     const committed = await this.committedFor(runner, Number(dto.boqLineId));
     const amount = r2(dto.amount);
-    if (committed + amount > budget + EPS) {
+    if (!dto.allowOver && committed + amount > budget + EPS) {
       const remaining = r2(Math.max(0, budget - committed));
       throw new BadRequestException({
         code: 'BUDGET_EXCEEDED',

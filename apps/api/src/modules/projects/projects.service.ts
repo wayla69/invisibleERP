@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
 import { CommitmentsService } from '../commitments/commitments.service';
@@ -806,6 +806,14 @@ export class ProjectsService {
       const pid = Number(c.projectId); if (!ids.has(pid)) continue;
       const code = codeById.get(pid) ?? null;
       push('change_order_pending', 'medium', pid, code, `ใบสั่งเปลี่ยนแปลงรออนุมัติ (${c.coNo})`, `Change order awaiting approval (${c.coNo})`, c.coNo, 'overview', { co_no: c.coNo, requested_by: c.requestedBy, contract_delta: n(c.contractDelta) });
+    }
+
+    // Over-budget material requisitions awaiting an authoriser (maker-checker, PROJ-13 — M2).
+    const pmrRows = await db.select().from(projectMaterialRequisitions).where(eq(projectMaterialRequisitions.status, 'pending'));
+    for (const m of pmrRows) {
+      const pid = Number(m.projectId); if (!ids.has(pid)) continue;
+      const code = codeById.get(pid) ?? null;
+      push('pmr_over_budget', 'high', pid, code, `ใบขอเบิกวัสดุเกินงบรออนุมัติ (${m.pmrNo})`, `Over-budget material requisition awaiting approval (${m.pmrNo})`, m.pmrNo, 'boq', { pmr_no: m.pmrNo, requested_by: m.requestedBy, over_amount: n(m.overAmount) });
     }
 
     // Pending project timesheets awaiting independent approval (maker-checker labor, PROJ-04).

@@ -392,6 +392,53 @@ export const projectCommitments = pgTable(
 );
 export type ProjectCommitment = typeof projectCommitments.$inferSelect;
 
+// Project Material Requisition (PMR) — M2, docs/32, PROJ-13. The single request document by which site staff
+// draw material against a project's BoQ. On submit the system checks each line against its BoQ-line remaining
+// budget: WITHIN budget → routed to procurement (a project-tagged PR is raised); OVER budget → parked
+// `pending` and sent to an authoriser (maker-checker + a one-tap LINE approval card). On approval the
+// over-budget draw is authorised and a project-tagged PO is auto-drafted (status Draft) for procurement to buy.
+export const projectMaterialRequisitions = pgTable(
+  'project_material_requisitions',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    pmrNo: text('pmr_no').notNull(),                          // PMR-YYYYMMDD-NNN
+    status: text('status').notNull().default('pending'),      // routed | pending | approved | rejected
+    route: text('route'),                                     // pr (within budget) | po (over budget → draft PO)
+    overBudget: boolean('over_budget').notNull().default(false),
+    estCost: numeric('est_cost', { precision: 16, scale: 2 }).notNull().default('0'), // total estimated cost
+    overAmount: numeric('over_amount', { precision: 16, scale: 2 }).notNull().default('0'), // Σ per-line overage
+    linkedDocNo: text('linked_doc_no'),                       // the raised PR / drafted PO number
+    requestedBy: text('requested_by'),
+    approvedBy: text('approved_by'),                          // checker — must differ from requested_by (SoD)
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectionReason: text('rejection_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byProject: index('idx_pmr_project').on(t.projectId), byTenant: index('idx_pmr_tenant').on(t.tenantId, t.status) }),
+);
+
+export const pmrLines = pgTable(
+  'pmr_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    pmrId: bigint('pmr_id', { mode: 'number' }).notNull().references(() => projectMaterialRequisitions.id),
+    boqLineId: bigint('boq_line_id', { mode: 'number' }).notNull().references(() => projectBoqLines.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    itemNo: text('item_no'),
+    qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    unitCost: numeric('unit_cost', { precision: 16, scale: 2 }).notNull().default('0'),
+    estCost: numeric('est_cost', { precision: 16, scale: 2 }).notNull().default('0'), // qty × unit_cost
+    remaining: numeric('remaining', { precision: 16, scale: 2 }).notNull().default('0'), // BoQ-line remaining at submit
+    overBudget: boolean('over_budget').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byPmr: index('idx_pmr_line_pmr').on(t.pmrId), byTenant: index('idx_pmr_line_tenant').on(t.tenantId, t.pmrId) }),
+);
+export type ProjectMaterialRequisition = typeof projectMaterialRequisitions.$inferSelect;
+export type PmrLine = typeof pmrLines.$inferSelect;
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
 export type ProjectHealthSnapshot = typeof projectHealthSnapshots.$inferSelect;
