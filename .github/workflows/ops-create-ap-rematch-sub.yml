@@ -45,8 +45,11 @@ jobs:
           SUBNAME: ${{ inputs.name }}
         run: |
           set -e
-          if [ -z "${PROD_API_URL:-}" ] || [ -z "${SWEEP_USER:-}" ] || [ -z "${SWEEP_PASS:-}" ]; then
-            echo "::error::PROD_API_URL / SWEEP_USER / SWEEP_PASS not set — configure them at the repository level first"; exit 1
+          # PROD_API_URL falls back to the invisibleERP public domain when the repo variable is unset, so
+          # the job doesn't depend on a correctly-scoped Actions variable. Override by setting vars.PROD_API_URL.
+          PROD_API_URL="${PROD_API_URL:-https://invisibleerp-production.up.railway.app}"
+          if [ -z "${SWEEP_USER:-}" ] || [ -z "${SWEEP_PASS:-}" ]; then
+            echo "::error::SWEEP_USER / SWEEP_PASS not set — add them as repository secrets (a service account holding the exec permission)"; exit 1
           fi
           echo "Health check: $PROD_API_URL/healthz"
           code=000
