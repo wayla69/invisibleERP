@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { sql, eq, and, desc, asc, isNull, or, ilike, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items } from '../../database/schema';
+import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, invBalances } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { WorkflowService } from '../workflow/workflow.service';
@@ -143,6 +143,49 @@ export class ProcurementService {
     const rows = await this.db.select({ id: vendors.id, name: vendors.name, vendor_code: vendors.vendorCode })
       .from(vendors).where(and(ilike(vendors.name, `%${kw}%`), eq(vendors.isSupplier, true))).limit(Math.min(Math.max(limit, 1), 25));
     return { vendors: rows.map((r: any) => ({ id: Number(r.id), name: r.name, vendor_code: r.vendor_code ?? null })) };
+  }
+
+  // Low-stock reorder list — items whose total on-hand has fallen to/below their reorder point
+  // (`items.min_stock`). On-hand is summed from `inv_balances` across the caller's tenant locations.
+  // The suggested reorder qty tops the item back up to its order-up-to level: `max_stock` when it is a
+  // real configured ceiling (set below the 9999 default and above the reorder point), otherwise twice the
+  // reorder point — a sane "order a lot" default the buyer can still edit before the PR is raised.
+  async lowStock(user: JwtUser, opts?: { limit?: number }) {
+    const db = this.db;
+    const limit = Math.min(Math.max(opts?.limit ?? 100, 1), 500);
+    const bal = await db.select({ itemId: invBalances.itemId, onHand: sql<string>`sum(${invBalances.onHandQty})` })
+      .from(invBalances)
+      .where(user.tenantId != null ? eq(invBalances.tenantId, user.tenantId) : sql`true`)
+      .groupBy(invBalances.itemId);
+    const onHandMap = new Map<string, number>(bal.map((b: any) => [String(b.itemId), n(b.onHand)]));
+    // reorder point is on the (company-wide) item master; only items that actually carry one qualify.
+    const its = await db.select({ itemId: items.itemId, description: items.itemDescription, uom: items.uom, minStock: items.minStock, maxStock: items.maxStock, unitPrice: items.unitPrice })
+      .from(items).where(sql`${items.minStock} > 0`);
+    const low = its
+      .map((it: any) => {
+        const onHand = onHandMap.get(String(it.itemId)) ?? 0;
+        const minStock = n(it.minStock);
+        const maxStock = n(it.maxStock);
+        const target = maxStock > minStock && maxStock < 9999 ? maxStock : minStock * 2;
+        const suggested = Math.max(Math.ceil(target - onHand), 1);
+        return { item_id: it.itemId, item_description: it.description ?? null, uom: it.uom ?? null, on_hand: onHand, min_stock: minStock, suggested_qty: suggested, unit_price: n(it.unitPrice) };
+      })
+      .filter((x) => x.on_hand <= x.min_stock)
+      .sort((a, b) => (a.on_hand - a.min_stock) - (b.on_hand - b.min_stock)); // most-depleted first
+    return { items: low.slice(0, limit), count: low.length };
+  }
+
+  // One-tap reorder — raise a SINGLE PR covering every low-stock item at its suggested top-up qty (the
+  // LINE chat `reorder` command + the web "เปิด PR เติมของ" button both land here). Runs the ordinary
+  // createPr path, so numbering / status-log / approval workflow are unchanged. No low-stock item → 422.
+  async reorderPr(user: JwtUser) {
+    const low = (await this.lowStock(user)).items;
+    if (!low.length) throw new UnprocessableEntityException({ code: 'NOTHING_LOW', message: 'No item is at/below its reorder point', messageTh: 'ไม่มีสินค้าที่ถึงจุดสั่งซื้อ' });
+    const res = await this.createPr({
+      remarks: 'เติมสต็อกสินค้าใกล้หมด (อัตโนมัติ)', priority: 'Normal',
+      items: low.map((x) => ({ item_id: x.item_id, item_description: x.item_description ?? undefined, request_qty: x.suggested_qty, uom: x.uom ?? undefined, reason: 'ต่ำกว่าจุดสั่งซื้อ' })),
+    }, user);
+    return { pr_no: res.pr_no, status: res.status, lines: res.lines, items: low.map((x) => ({ item_id: x.item_id, qty: x.suggested_qty })) };
   }
 
   // Convert an APPROVED PR into a PO. Each line arrives already reconciled by procurement: an existing
@@ -517,5 +560,20 @@ export class ProcurementService {
     if (this.costing && costingLines.length) await this.costing.postReceiptGl({ tenantId: user.tenantId as number, grNo, date: today, lines: costingLines, createdBy: user.username });
 
     return { gr_no: grNo, po_no: dto.po_no, po_status: newStatus, lines: lines.length, costed: costingLines.length > 0 };
+  }
+
+  // Receive ALL still-outstanding qty on an approved PO in one shot — the LINE chat `receive <PO>` path
+  // and the web "รับครบ" button. Builds the GR lines from each PO line's remaining (order − received) and
+  // runs the ordinary createGr (EXP-03 approval gate + stock/lot + auto-close all bind). No remaining → 422.
+  async receiveAllRemaining(poNo: string, user: JwtUser) {
+    const db = this.db;
+    const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
+    if (!po) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
+    const poLines = await db.select().from(poItems).where(eq(poItems.poId, po.id));
+    const items = poLines
+      .map((l: any) => ({ item_id: String(l.itemId), received_qty: n(l.orderQty) - n(l.receivedQty), uom: l.uom ?? undefined }))
+      .filter((x) => x.received_qty > 0);
+    if (!items.length) throw new UnprocessableEntityException({ code: 'NOTHING_TO_RECEIVE', message: 'PO already fully received', messageTh: 'รับของครบแล้ว ไม่มีรายการค้างรับ' });
+    return this.createGr({ po_no: poNo, remarks: 'รับครบผ่านแชท/ปุ่มรับครบ', items }, user);
   }
 }

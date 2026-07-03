@@ -68,6 +68,11 @@ async function main() {
   const periodRows = (await pg.query(`SELECT count(*)::int n FROM fiscal_periods WHERE tenant_id=${newTid}`)).rows as any[];
   ok('Signup provisioned 12 periods for the new tenant', periodRows[0].n === 12, `periods=${periodRows[0].n}`);
 
+  // Multi-company tenancy (ITGC-AC-18): the new company gets its OWN org (org_id = its tenant id) on both
+  // the tenant row and the created Admin, so under TENANCY_MODE=multi-company it's isolated by default.
+  const orgRows = (await pg.query(`SELECT (SELECT org_id FROM tenants WHERE id=${newTid}) AS t_org, (SELECT org_id FROM users WHERE username='owner1') AS u_org`)).rows as any[];
+  ok('Signup assigns org_id = tenant id on the new tenant AND its Admin (multi-company isolation)', Number(orgRows[0].t_org) === Number(newTid) && Number(orgRows[0].u_org) === Number(newTid), JSON.stringify({ t_org: orgRows[0].t_org, u_org: orgRows[0].u_org, tid: newTid }));
+
   // ── 2. new owner can log in + post a journal into a current-year period ──
   const ownerLogin = await login('owner1', 'ownerpass1');
   ok('New owner login → not forced to change password', ownerLogin.json.must_change_password === false, JSON.stringify({ mcp: ownerLogin.json.must_change_password }));

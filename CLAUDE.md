@@ -62,6 +62,23 @@ For every such change, review and update as needed:
 - **GL-05:** a manual JE via `POST /api/ledger/journal` posts as **Draft** and is excluded from balances
   until a *different* user approves it; `closeYear`/aggregations scope to the caller's tenant (HQ/Admin
   ⇒ pass an explicit `tenant_id`). These bit the `worldclass` year-end harness when its setup went stale.
+- **Tenancy / `TENANCY_MODE` (AC-18):** self-service `POST /api/auth/signup` mints a **new tenant + an
+  `Admin`** per signup, and the **default `single-company`** mode gives every Admin a **global RLS bypass**
+  (sees ALL tenants) — so any deploy where outsiders can sign up MUST set **`TENANCY_MODE=multi-company` on
+  every API service on that DB**. Per-company isolation (`org_id=NULL` ⇒ own tenant only) then holds; branches
+  are **intra-tenant** (`branches.tenant_id`) so a company is one tenant (no `org_id` backfill needed unless
+  several separate accounts must share). Gotcha (**fixed in 0232, keep it that way**): cross-account org
+  `sharing` (an org-scoped Admin seeing a SIBLING tenant's DATA rows in its own org) **works** — but it broke
+  once and can silently regress. `0196` added the per-table org clause via a `DO $$…EXECUTE…$$` loop; `0218`'s
+  index-backfill then re-ran the generic RLS loop and recreated `tenant_isolation` with the PLAIN body,
+  silently dropping the org clause on **every data table** (`pg-core` saw `org1=1`, fail-**closed**, no leak);
+  `0232` re-applies it. **The org-clause body is CANONICAL** — any new tenant table's hand-appended RLS loop,
+  or any migration that DROP/CREATEs `tenant_isolation`, MUST copy `0232`'s form (not the plain
+  `0081`/`0121`/`0002` one), or the bug returns. The `tenants` self-policy is set by *direct* DDL (not the
+  loop; `tenants` has no `tenant_id` column) so tenants-level org isolation + `pg-smoke` can look green while
+  data-table sharing is broken — `pg-core` now **hard-asserts** data-table sharing (`org1===2`). **NB PGlite
+  DOES execute the `DO`-loop** (verified 0.2.17) — a DO-loop migration needs no parallel statement list. Full
+  model: `docs/ops/tenancy-model.md`.
 - **drizzle-orm is on `^0.45.2`** (bumped from 0.36.4 in W4, 2026-06-30 — the SQLi advisory is remediated).
   **0.45 wraps every driver error in a `DrizzleQueryError` with the original pg/PGlite error (SQLSTATE
   `code`/`constraint`/`detail`) nested under `.cause`** — so never read `e.code`/`e.constraint` directly on a
@@ -110,23 +127,6 @@ For every such change, review and update as needed:
   value interpolated into a `sql\`${col} >= ${param}\`` template even though Drizzle **binds** `${param}`.
   Use the typed builders (`gte`/`lte`/`eq`/`and`) instead of a raw `sql` template at user-input sites —
   same parameterized SQL, no sink. (Bit `cashFlowDirect`'s date filter.)
-- **Drizzle migrations MUST be journaled.** Every new `apps/api/drizzle/NNNN_*.sql` needs a matching entry
-  appended to `apps/api/drizzle/meta/_journal.json` (sequential `idx`, ascending `when`), or the CI
-  `migrations-journaled` gate fails and prod `drizzle-kit migrate` skips it. Verify no duplicate `idx`.
-  Sequence is at `0121` / idx 126 as of the gap-pack work.
-- **Org-scoped RLS (`app.org_id`, ITGC-AC-18) lives ONLY on the org-clause form of `tenant_isolation` — a
-  broad plain RLS re-loop silently reverts it.** The multi-company org clause (`… OR (app.org_id set AND
-  tenant_id IN (SELECT id FROM tenants WHERE org_id = app.org_id))`) was added to every `tenant_id` table by
-  `0196_hybrid_org_tenancy` and **re-applied by `0232_reapply_org_rls`** — because `0218`'s index-backfill
-  re-ran the generic RLS loop and recreated `tenant_isolation` with the PLAIN body (`bypass OR tenant_id =
-  app.tenant_id`), silently dropping the org clause on all DATA tables (org sharing broke; isolation held —
-  fail-closed). **Rule:** the org-clause body is the CANONICAL policy — any new tenant table's hand-appended
-  RLS loop, and any future migration that DROP/CREATEs `tenant_isolation`, MUST use the org-clause form
-  (copy 0232's loop), or it re-introduces the bug. The `tenants` self-policy is set by DIRECT DDL (0196) and
-  is NOT in the loop (no `tenant_id` column) — so tenants-level org isolation can look green while data-table
-  org sharing is broken; the `pg-core` gate now hard-asserts data-table org sharing (`org1===2`) to catch it.
-  NB: **PGlite executes plpgsql DO-loops + `information_schema` + `EXECUTE format()` just like real Postgres**
-  (verified on 0.2.17) — a DO-loop migration does NOT need a parallel hand-written statement list.
 - **Drizzle migrations MUST be journaled.** Every new `apps/api/drizzle/NNNN_*.sql` needs a matching entry
   appended to `apps/api/drizzle/meta/_journal.json` (sequential `idx`, ascending `when`), or the CI
   `migrations-journaled` gate fails and prod `drizzle-kit migrate` skips it. Verify no duplicate `idx`.

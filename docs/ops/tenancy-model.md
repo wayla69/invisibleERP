@@ -1,112 +1,102 @@
-# Ops — Multi-tenancy & RLS model (single-company vs multi-company org scope)
+# Ops — Multi-tenancy model & TENANCY_MODE (ITGC-AC-18)
 
-> **Status:** v1.0 · **Date:** 2026-07-03 · **Owner:** Platform / Security
-> The authoritative reference for how tenant isolation is enforced (Row-Level Security), how an Admin's
-> bypass is scoped under `TENANCY_MODE`, and the control that guards it (**ITGC-AC-18**). Read this before
-> touching any `tenant_isolation` policy or the `TenantTxInterceptor`.
+> **Status:** v1.2 · **Date:** 2026-07-03 · **Owner:** Platform / Security
+> How tenant data is isolated, what `TENANCY_MODE` does, and how to choose it for your deployment.
 
----
+## 1. The two isolation layers
 
-## 1. TL;DR
+Every tenant-scoped table has a Postgres **row-level-security (RLS)** policy keyed on `tenant_id`, forced
+on with `FORCE ROW LEVEL SECURITY` (so even the table owner is subject to it). Each request runs under
+`SET ROLE app_user` with three transaction-local GUCs set by `common/tenant-tx.interceptor.ts`:
+`app.tenant_id`, `app.org_id`, `app.bypass_rls`. The policy is:
 
-- Every tenant-scoped table has a `tenant_id` column, `ENABLE`+`FORCE ROW LEVEL SECURITY`, and a
-  `tenant_isolation` RLS policy. The app connects and `SET LOCAL ROLE app_user` (a **non-superuser** — so
-  FORCE-RLS actually applies) then sets per-request GUCs. A forgotten `WHERE tenant_id = …` cannot leak.
-- **`TENANCY_MODE` (env) selects the Admin bypass scope:**
-  - `single-company` (default): HQ/Admin gets a **global** RLS bypass (`app.bypass_rls='on'`) — the legacy
-    "HQ sees all branches" model, correct for one company with many outlets. Every bypassed request is
-    audit-logged (`rls_bypass` meta).
-  - `multi-company`: an Admin is **org-scoped** via `app.org_id` — it sees its own tenant **plus every
-    sibling tenant sharing its `org_id`**, but never another org's data. A missing `org_id` **fails closed**
-    (sees only its own tenant). Only pre-auth (login/signup) keeps a global bypass.
-- The multi-company org clause lives on the `tenant_isolation` policy of **every `tenant_id` table** and on
-  the `tenants` self-policy. Both must carry it, or org **sharing** silently breaks (see §4).
-
-## 2. Per-request scope decision (`common/tenant-tx.interceptor.ts`)
-
-Each non-SSE, non-`@NoTx` request runs inside a tenant transaction that sets four GUCs in one round-trip:
-`app.bypass_rls`, `app.tenant_id`, `app.org_id`, `app.actor`. The decision:
-
-| Mode | Pre-auth (no user) | Admin | Other roles (staff/customer) |
-|---|---|---|---|
-| `single-company` | global bypass | global bypass | scoped to own `tenant_id` |
-| `multi-company` | global bypass | org-scoped (`app.org_id = user.orgId`; **null ⇒ own tenant only**) | scoped to own `tenant_id` |
-
-`req.user.orgId` is sourced live from the `users` row each request (`common/guards.ts`, AC-15) — so an Admin
-whose org changes takes effect immediately, and a forged JWT claim cannot widen scope. `TENANCY_MODE` is
-validated in `common/env.validation.ts`.
-
-## 3. The RLS policies
-
-**Every `tenant_id` table** — `tenant_isolation` (the *canonical* org-clause form; installed by 0196,
-re-applied by 0232):
-
-```sql
-USING (
-  coalesce(current_setting('app.bypass_rls', true), '') = 'on'
-  OR tenant_id = nullif(current_setting('app.tenant_id', true), '')::bigint
-  OR (nullif(current_setting('app.org_id', true), '') IS NOT NULL
-      AND tenant_id IN (SELECT id FROM tenants
-                        WHERE org_id = nullif(current_setting('app.org_id', true), '')::bigint))
-)  -- WITH CHECK identical
+```
+bypass_rls='on'  OR  tenant_id = app.tenant_id  OR  (app.org_id set AND tenant_id IN <tenants sharing app.org_id>)
 ```
 
-The org subquery depends only on the `app.org_id` GUC (not the row), so Postgres evaluates it once per query
-(InitPlan) — per-row cost is unchanged, and the single-company path (`bypass`/`tenant_id`) is byte-for-byte
-the legacy behaviour. The subquery reads `tenants` under RLS; the `tenants` self-policy (below) lets it see
-the org's siblings, so the `IN (…)` set resolves correctly.
+- **Non-Admin staff** (Sales/Warehouse/Customer/…) are always scoped to their own `tenant_id`. Unchanged by
+  `TENANCY_MODE`.
+- **Admin** scope is what `TENANCY_MODE` selects.
+- **Pre-auth** (login/signup) gets a temporary bypass to read `users` / create the tenant.
 
-**`tenants` table** — `tenant_self_isolation` (0196, **direct DDL**; `tenants` has no `tenant_id` column so
-it is *not* covered by the generic RLS loop):
+## 2. `TENANCY_MODE`
 
-```sql
-USING (
-  coalesce(current_setting('app.bypass_rls', true), '') = 'on'
-  OR id = nullif(current_setting('app.tenant_id', true), '')::bigint
-  OR (nullif(current_setting('app.org_id', true), '') IS NOT NULL
-      AND org_id = nullif(current_setting('app.org_id', true), '')::bigint)
-)
-```
-
-## 4. Migration history (why 0232 exists)
-
-1. **`0196_hybrid_org_tenancy`** — added `org_id` to `tenants`/`users`; added the org clause to
-   `tenant_isolation` on every `tenant_id` table (via a `DO`-loop over `information_schema`) and to the
-   `tenants` self-policy (direct DDL).
-2. **`0218_tenant_indexes_backfill`** (2026-07-03 hotfix) — re-ran the generic RLS loop to (re)enable RLS on
-   backfilled tables, but its loop recreated `tenant_isolation` with the **PLAIN** body
-   (`bypass OR tenant_id = app.tenant_id`), **silently dropping 0196's org clause on every data table**.
-   Effect in `multi-company`: an org-scoped Admin saw only its own tenant's rows — org **sharing** stopped
-   working. Isolation was never weakened (fail-**closed**, no leak). The `tenants` self-policy was untouched
-   (not in the loop), so tenants-level org isolation kept working — masking the data-table regression.
-3. **`0232_reapply_org_rls`** — re-applies the org-clause policy to every `tenant_id` table (runs after 0218
-   → wins). The `DO`-loop executes identically on PGlite and real Postgres.
-
-**Forward rule:** the org-clause body is canonical. Any new tenant table's hand-appended RLS loop, or any
-future migration that `DROP`/`CREATE`s `tenant_isolation`, **must copy 0232's loop** (not the plain
-`0081`/`0121`/`0002` form), or it re-introduces this bug.
-
-## 5. Verification / Test of Effectiveness
-
-- **`cutover/pg-smoke`** (real Postgres only): an org-scoped Admin sees only its own org's **tenants** row,
-  a tenant-scoped user is FORCE-RLS isolated, and single-company global bypass sees all.
-- **`cutover/pg-core`** (real Postgres in CI, PGlite locally — same code both backends): the **data-table**
-  org-sharing check — an org-A Admin sees **both** org-A sibling tenants' `background_jobs` rows
-  (`org1===2`) and **never** org-B's, while per-company staff isolation (`t1=1`, `t2=1`) and single-company
-  HQ bypass stay green. This is the regression guard for §4.
-
-## 6. Status & known issues
-
-**No known limitation.** Cross-account org **sharing** on data tables works as designed and is proven on both
-PGlite and real Postgres (§5). The historical gap — an org-scoped Admin over-isolating to its own tenant on
-data tables — was root-caused (0218 clobbered 0196) and fixed (0232), with a hard `pg-core` assertion added
-so it cannot recur silently. `multi-company` remains **opt-in**; default `single-company` installs are
-unaffected.
-
----
-
-### Revision history
-
-| Date | Version | Change |
+| Mode | Admin sees | Use when |
 |---|---|---|
-| 2026-07-03 | v1.0 | Initial version. Documents the as-built hybrid tenancy model and the ITGC-AC-18 data-table org-clause fix (0218 clobber → 0232 re-apply; `pg-core` `org1===2` guard). |
+| **`single-company`** (default) | **ALL tenants** (global `bypass_rls='on'`) | ONE company; other tenants are your own branches/outlets you want HQ to see. |
+| **`multi-company`** | Only tenants sharing the Admin's **`org_id`**; `org_id=NULL` ⇒ **own tenant only** (fail-closed) | Outsiders can **self-signup** (each signup = an independent company that must NOT see others). |
+
+> ⚠️ **Self-service signup mints a tenant + an `Admin`.** `POST /api/auth/signup`
+> (`modules/billing/billing.service.ts`) creates a **new tenant + an `Admin` user** for every signup. Under
+> the **default** `single-company` mode that new Admin gets the **global bypass** and can read **every**
+> other company's data — so any deployment reachable by outsiders MUST run `TENANCY_MODE=multi-company`.
+>
+> Two hardenings are now built in (ITGC-AC-18):
+> - **Signup is fail-closed in production** — `POST /api/auth/signup` returns `403 SIGNUP_DISABLED` unless
+>   the operator sets **`PUBLIC_SIGNUP_ENABLED`** truthy. Dev + harnesses (`NODE_ENV=test`) are unaffected.
+>   To onboard a company: flip `PUBLIC_SIGNUP_ENABLED=true`, create the account, flip it back off. (There is
+>   no separate admin create-tenant path — signup is the provisioning path, now gated.)
+> - **Each new company gets its OWN org** — signup sets `org_id = the new tenant's id` on both the tenant
+>   and its Admin, so under `multi-company` the new Admin is isolated to just that company by default (and
+>   never needs the org_id backfill the boot warning mentions).
+
+### Set it
+Set `TENANCY_MODE=multi-company` on **every API service that connects to the same database** (e.g. both
+`invisibleERP` and `invisiblePOSERP` on Railway) — a service left on the default keeps the isolation hole
+open through that instance. Env-var change ⇒ redeploy. Verify in the boot log: `EnvValidation` warns
+`TENANCY_MODE=multi-company — Admin RLS bypass is org-scoped …`.
+
+## 3. `org_id` — grouping tenants (only needed for cross-account SHARING)
+
+`org_id` is a plain grouping number on `tenants` and `users` (no separate `orgs` table). It matters **only**
+when one company legitimately owns **multiple separate tenant-accounts** that should see each other:
+
+- **Branches inside one company are intra-tenant** (`branches.tenant_id`) — they already share via a single
+  `tenant_id`. **No `org_id` needed**; the company is one tenant and multi-company mode isolates it from
+  others automatically.
+- To let several **separate** tenant-accounts share, backfill the **same `org_id`** on those `tenants` rows
+  **and** their Admin `users` rows. A signup does not set `org_id` (stays NULL ⇒ self-only), so no existing
+  single-account tenant loses visibility when you switch modes.
+
+## 4. Choosing & rolling out
+
+1. **SaaS / outsiders can sign up** → `TENANCY_MODE=multi-company`. No backfill if each company is one
+   account (the common case). Done.
+2. **Only your own company (many branches)** → either mode is safe (branches are intra-tenant); prefer
+   **not exposing public signup**, or `multi-company` for defence-in-depth.
+3. **Mixed** (a main account with several sibling accounts that must share, isolated from customers) →
+   `multi-company` **and** backfill a shared `org_id` on the sibling `tenants` + their Admin `users`.
+
+## 5. Test of effectiveness (ToE)
+- **`cutover/pg-smoke.ts`** (real Postgres, CI): raw-RLS org-scoping — an org-A Admin sees only org-A
+  tenants; FORCE-RLS under `app_user`.
+- **`cutover/pg-core.ts`** (both backends): **full HTTP stack** — login → guard reads live `org_id` →
+  interceptor → RLS → `GET /api/jobs`. Asserts a fresh-signup Admin (`org_id=NULL`) sees only its own
+  tenant, a single-tenant company Admin sees only itself, an org-scoped Admin is **isolated from other
+  companies**, and the single-company contrast (same Admin sees ALL). It also **hard-asserts cross-account
+  org sharing** — an org-scoped Admin sees BOTH of its org's tenants' data rows (`org1===2`; see §6).
+
+## 6. Cross-account org SHARING — works (resolved AC-18 follow-up)
+`org_id` **isolation** (an Admin never sees a *different* org/company) **and** `org_id` **sharing** — an
+org-scoped Admin seeing a **sibling tenant's DATA** (rows in tenant-scoped tables like `background_jobs`,
+`journal_entries`, …) when several separate accounts share one `org_id` — both hold, on real Postgres **and**
+PGlite. `pg-core` asserts an org-scoped Admin sees exactly its own org's tenants (`org1===2`) and none of the
+other companies (no leak).
+
+History (the AC-18 follow-up, now closed): `0196` installed the per-table `org_id` clause on every
+`tenant_id` table via a `DO $$ … EXECUTE format() … $$` loop, but `0218_tenant_indexes_backfill` later
+re-ran the generic RLS loop and recreated `tenant_isolation` with the **PLAIN** body — silently dropping the
+org clause on every DATA table (sharing broke; isolation held — fail-closed, no leak). The `tenants`
+self-policy survived (0196 set it via **direct** DDL; `tenants` has no `tenant_id` column so neither loop
+touches it), which is why tenants-level org isolation stayed green (`pg-smoke`) while data-table sharing
+broke. `0232_reapply_org_rls` re-applies the org-clause policy to every `tenant_id` table (runs after 0218 →
+wins). **NB:** PGlite *does* execute the dynamic `DO`-loop (verified on 0.2.17) — the earlier "PGlite doesn't
+apply the loop" note was mistaken; the sole cause was 0218's clobber. **Forward rule:** any new tenant
+table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy **0232**'s org-clause form.
+
+## 7. Revision history
+| Version | Date | Author | Notes |
+|---|---|---|---|
+| 1.0 | 2026-07-03 | Platform / Security | Initial tenancy-model doc: TENANCY_MODE modes, signup exposure, org_id grouping, rollout guidance, ToE (pg-smoke + new pg-core HTTP-stack checks), and the PGlite per-table-org-clause fidelity note. |
+| 1.1 | 2026-07-03 | Platform / Security | Signup hardening (ITGC-AC-18): public `POST /api/auth/signup` is now **fail-closed in production** (`PUBLIC_SIGNUP_ENABLED`, `403 SIGNUP_DISABLED` when off; dev/harnesses unaffected), and each signup gives the new company its **own org** (`org_id = tenant id` on the tenant + Admin) so it is isolated by default under multi-company. ToE: `apps/api/test/signup-gate.test.ts` (gate matrix) + `cutover/onboarding.ts` (org_id assertion). |
+| 1.2 | 2026-07-03 | Platform / Security | **Cross-account org SHARING fixed** (closes the §6 tracked limitation). Root cause: `0218_tenant_indexes_backfill`'s generic RLS re-loop recreated `tenant_isolation` with the plain body, silently dropping 0196's org clause on data tables. Fix: `0232_reapply_org_rls` re-applies the org-clause policy to every `tenant_id` table. `pg-core` now hard-asserts `org1===2` (org sharing active + isolated) on both backends. Corrected the mistaken "PGlite doesn't run the DO-loop" note — it does. |

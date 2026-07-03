@@ -63,6 +63,9 @@ handy on the floor or in the stockroom. One-time setup first:
 | `find <keyword>` (also `ค้นหา`) | Searches the item master so you can use real item ids |
 | `cancel <PR no>` (also `ยกเลิก`) | Withdraws **your own** still-Pending PR |
 | `stock <item id>` (also `สต็อก`) | Read-only on-hand balance by location |
+| `low` (also `ใกล้หมด`/`สต็อกต่ำ`) | Lists items at/below their reorder point (on-hand vs `min_stock`) with a suggested top-up qty |
+| `reorder` (also `เติมของ`/`เติมสต็อก`) | Raises **one** PR that tops up **all** low-stock items in a single tap (needs `pr_raise`) |
+| `receive <PO no>` (also `รับของ`/`รับ`) | Receives **all** outstanding qty on an approved PO in one tap → creates the GR and closes the PO when fully received (needs `wh_receive`/`warehouse`/`procurement`; the PO must be Approved — EXP-03) |
 | `expense <fund> <amount> [เหตุผล]` / `advance …` (also `เบิก`/`ยืมเงิน`) | Raises a petty-cash request — see [Finance](./05-finance-ar-ap.md) |
 | `leave <from YYYY-MM-DD> <days> [เหตุผล]` (also `ลา`) | Raises an ESS leave request (needs `ess` + employee record) |
 | `subscribe digest` / `unsubscribe digest` (also `รับสรุป`/`เลิกรับสรุป`) | Morning summary on LINE — see [Reports](./09-reports-and-analytics.md) |
@@ -100,6 +103,15 @@ item prefills its **last purchase price** (`· ล่าสุด ฿…`). Then
 opens any new item codes, raises the PO through the normal path (vendor screening +
 approval), and **links the PR to the PO** (the PR is marked **ออก PO แล้ว / Converted**).
 Requires the `procurement` permission.
+
+**Reorder what's running out (สินค้าใกล้หมด):** when any item's on-hand has dropped
+to/below its **reorder point** (`min_stock` on the item master), a **สินค้าใกล้หมด** card
+appears on `/requisitions` listing those items with a **suggested order qty** (topping the
+item back up to its `max_stock` level, or twice the reorder point when no max is set). Tick
+the ones you want, adjust any quantity, and press **เปิด PR เติมของ** — it raises a **single**
+requisition for the whole selection (which then goes through the normal approval flow). The
+card hides itself when nothing is low. The same thing works from LINE chat: `low` lists the
+low-stock items, and `reorder` raises the top-up PR for all of them in one tap.
 
 **LINE notifications:** if you've linked your account, the system messages you
 automatically — approvers get a 🔔 when a PR enters their queue (with the
@@ -227,6 +239,13 @@ duties **R04** — it protects the 3-way match.)
 
 **Expected result:** A GR is created, stock is increased, and the receipt is
 available for matching.
+
+**One-tap รับครบ (receive all):** for a normal "everything arrived" delivery you don't
+need the form — every receivable PO in the list carries a **รับครบ** button that
+receives *all* outstanding quantity in one click (order − already received on each line)
+and closes the PO once nothing is left. It only shows for Approved / part-received POs
+(never for Pending, Closed or Cancelled). The same action is available from LINE chat by
+typing `receive <PO no>` — see the [chat commands](#raise-a-pr-from-line-chat) above.
 
 > **Note — short / damaged delivery:** Raise a **goods-receipt claim** against
 > the supplier under **Claims** (`/claims` → GR Claims tab): enter the GR number,
