@@ -580,6 +580,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-032 | Bulk import — dry-run validates every row | Feature (bulk import), MDM-02 | 17 §7.3a |
 | UAT-ADM-033 | Bulk import — checked commit (block vs skip) | Feature (bulk import) | 17 §7.3a |
 | UAT-ADM-034 | Bulk import — tenant-scoped entity stamped | Feature (bulk import), MDM-01 | 17 §7.3a |
+| UAT-ADM-037 | Bulk import — menu catalog (new-company load) | Feature (bulk import — menu_items), MDM-02 | 17 §7.3a |
 | UAT-ADM-035 | Webhook — register + secret-once + isolation | ITGC-AC-04/03 | 08 §7.A.9 |
 | UAT-ADM-036 | Webhook — event emits a signed delivery (logged) | Feature (webhooks), ITGC-AC-04 | 08 §7.A.9 |
 | UAT-ADM-037 | Webhook — redeliver / dispatch / revoke | Feature (webhooks) | 08 §7.A.9 |
