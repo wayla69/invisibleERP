@@ -114,6 +114,23 @@ For every such change, review and update as needed:
   appended to `apps/api/drizzle/meta/_journal.json` (sequential `idx`, ascending `when`), or the CI
   `migrations-journaled` gate fails and prod `drizzle-kit migrate` skips it. Verify no duplicate `idx`.
   Sequence is at `0121` / idx 126 as of the gap-pack work.
+- **Org-scoped RLS (`app.org_id`, ITGC-AC-18) lives ONLY on the org-clause form of `tenant_isolation` — a
+  broad plain RLS re-loop silently reverts it.** The multi-company org clause (`… OR (app.org_id set AND
+  tenant_id IN (SELECT id FROM tenants WHERE org_id = app.org_id))`) was added to every `tenant_id` table by
+  `0196_hybrid_org_tenancy` and **re-applied by `0232_reapply_org_rls`** — because `0218`'s index-backfill
+  re-ran the generic RLS loop and recreated `tenant_isolation` with the PLAIN body (`bypass OR tenant_id =
+  app.tenant_id`), silently dropping the org clause on all DATA tables (org sharing broke; isolation held —
+  fail-closed). **Rule:** the org-clause body is the CANONICAL policy — any new tenant table's hand-appended
+  RLS loop, and any future migration that DROP/CREATEs `tenant_isolation`, MUST use the org-clause form
+  (copy 0232's loop), or it re-introduces the bug. The `tenants` self-policy is set by DIRECT DDL (0196) and
+  is NOT in the loop (no `tenant_id` column) — so tenants-level org isolation can look green while data-table
+  org sharing is broken; the `pg-core` gate now hard-asserts data-table org sharing (`org1===2`) to catch it.
+  NB: **PGlite executes plpgsql DO-loops + `information_schema` + `EXECUTE format()` just like real Postgres**
+  (verified on 0.2.17) — a DO-loop migration does NOT need a parallel hand-written statement list.
+- **Drizzle migrations MUST be journaled.** Every new `apps/api/drizzle/NNNN_*.sql` needs a matching entry
+  appended to `apps/api/drizzle/meta/_journal.json` (sequential `idx`, ascending `when`), or the CI
+  `migrations-journaled` gate fails and prod `drizzle-kit migrate` skips it. Verify no duplicate `idx`.
+  Sequence is at `0121` / idx 126 as of the gap-pack work.
 - **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`
   conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
   doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage

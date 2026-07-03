@@ -1625,6 +1625,13 @@
       "when": 2023820000058,
       "tag": "0231_tenant_ui_config",
       "breakpoints": true
+    },
+    {
+      "idx": 232,
+      "version": "7",
+      "when": 2023820000059,
+      "tag": "0232_reapply_org_rls",
+      "breakpoints": true
     }
   ]
 }
