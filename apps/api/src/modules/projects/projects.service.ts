@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
+import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -65,6 +66,9 @@ export class ProjectsService {
     // Optional so partial harnesses (and any consumer that constructs the service without the bus) still
     // build; when present, the action center pushes a `project_action` SSE event on red/unmitigated-high.
     @Optional() private readonly live?: BiLiveService,
+    // M1 (PROJ-12) — the BoQ-line encumbrance ledger; when present, getBoq shows budget/committed/remaining
+    // per line and listCommitments exposes the project commitments. @Optional so partial harnesses still build.
+    @Optional() private readonly commitments?: CommitmentsService,
   ) {}
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
@@ -1081,11 +1085,27 @@ export class ProjectsService {
     const budgetTotal = r2(lines.reduce((s: number, l: any) => s + n(l.budgetAmount), 0));
     const byCategory: Record<string, number> = {};
     for (const l of lines) byCategory[l.category] = r2((byCategory[l.category] ?? 0) + n(l.budgetAmount));
+    // M1 (PROJ-12) — per-line committed (open+consumed encumbrance) and remaining = budget − committed.
+    const committedByLine = this.commitments ? await this.commitments.committedByLine(lines.map((l: any) => Number(l.id))) : new Map<number, number>();
+    const shaped = lines.map((l: any) => {
+      const committed = committedByLine.get(Number(l.id)) ?? 0;
+      return { ...shapeBoqLine(l), committed, remaining: r2(n(l.budgetAmount) - committed) };
+    });
+    const committedTotal = r2(shaped.reduce((s: number, l: any) => s + n(l.committed), 0));
     return {
       project_code: code,
       boq: { id: Number(boq.id), boq_no: boq.boqNo, version: boq.version, title: boq.title, status: boq.status, budget_total: n(boq.budgetTotal), approved_by: boq.approvedBy, approved_at: boq.approvedAt, created_by: boq.createdBy },
-      lines: lines.map(shapeBoqLine), count: lines.length, budget_total: budgetTotal, by_category: byCategory,
+      lines: shaped, count: lines.length, budget_total: budgetTotal,
+      committed_total: committedTotal, remaining_total: r2(budgetTotal - committedTotal),
+      by_category: byCategory,
     };
+  }
+
+  // Project commitments read model (M1, PROJ-12) — the encumbrance ledger for a project + a status summary.
+  async listCommitments(code: string) {
+    const p = await this.row(code);
+    if (!this.commitments) return { project_code: code, commitments: [], count: 0, summary: { open: 0, consumed: 0, released: 0, committed: 0 } };
+    return { project_code: code, ...(await this.commitments.listForProject(Number(p.id))) };
   }
 
   private async boqRow(boqId: number) {

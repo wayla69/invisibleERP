@@ -334,7 +334,7 @@ export const projectBoq = pgTable(
     createdBy: text('created_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ byProject: index('idx_boq_project').on(t.projectId) }),
+  (t) => ({ byProject: index('idx_boq_project').on(t.projectId), byTenant: index('idx_boq_tenant').on(t.tenantId, t.projectId) }),
 );
 
 // A single BoQ line — a measured requirement (material/labor/subcon/other). budget_amount = budget_qty × rate.
@@ -361,10 +361,36 @@ export const projectBoqLines = pgTable(
     remeasuredQty: numeric('remeasured_qty', { precision: 18, scale: 4 }),                       // actual measured qty (nullable)
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
-  (t) => ({ byBoq: index('idx_boq_line_boq').on(t.boqId), byProject: index('idx_boq_line_project').on(t.projectId) }),
+  (t) => ({ byBoq: index('idx_boq_line_boq').on(t.boqId), byProject: index('idx_boq_line_project').on(t.projectId), byTenant: index('idx_boq_line_tenant').on(t.tenantId, t.boqId) }),
 );
 export type ProjectBoq = typeof projectBoq.$inferSelect;
 export type ProjectBoqLine = typeof projectBoqLines.$inferSelect;
+
+// Commitment / encumbrance ledger (M1, docs/32, PROJ-12). Each row reserves part of a BoQ line's budget for a
+// source document (a project PO today; a PMR/advance/reimbursement in later phases). `open` + `consumed`
+// commitments both count against the line budget; `released` (e.g. a cancelled PO) frees it. The remaining a
+// new draw may take is `line.budget_amount − Σ(open+consumed)` — checked atomically under a row-lock on the
+// BoQ line so two concurrent draws cannot jointly overrun. This is what makes the material budget *enforced*
+// rather than merely observed.
+export const projectCommitments = pgTable(
+  'project_commitments',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    boqLineId: bigint('boq_line_id', { mode: 'number' }).notNull().references(() => projectBoqLines.id),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    sourceDocType: text('source_doc_type').notNull(),        // PO | PMR | PR | ADV | REIMB
+    sourceDocNo: text('source_doc_no').notNull(),
+    qty: numeric('qty', { precision: 18, scale: 4 }).notNull().default('0'),
+    amount: numeric('amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    status: text('status').notNull().default('open'),        // open | consumed | released
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byBoqLine: index('idx_commit_boq_line').on(t.boqLineId), byProject: index('idx_commit_project').on(t.projectId), bySource: index('idx_commit_source').on(t.sourceDocType, t.sourceDocNo), byTenant: index('idx_commit_tenant').on(t.tenantId, t.boqLineId) }),
+);
+export type ProjectCommitment = typeof projectCommitments.$inferSelect;
 
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;

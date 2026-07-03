@@ -8,6 +8,7 @@ import { WorkflowService } from '../workflow/workflow.service';
 import { CostingService } from '../costing/costing.service';
 import { WebhookService } from '../platform/webhook.service';
 import { LineNotifyService } from '../messaging/line-notify.service';
+import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -31,6 +32,7 @@ export class ProcurementService {
     @Optional() private readonly costing?: CostingService, // Phase 17A — inventory costing (opt-in per item)
     @Optional() private readonly webhooks?: WebhookService, // Phase 8 — outbound webhook fan-out (best-effort)
     @Optional() private readonly lineNotify?: LineNotifyService, // D2 — close-the-loop LINE pushes to the PR requester
+    @Optional() private readonly commitments?: CommitmentsService, // M1 (PROJ-12) — BoQ-line budget encumbrance
   ) {}
 
   // D2 — best-effort LINE push to the requester(s) of every PR linked to a PO (pr_items.po_no), closing
@@ -496,6 +498,18 @@ export class ProcurementService {
         amount: String(n(it.order_qty) * n(it.unit_price)), receivedQty: '0', isCapital: it.is_capital === true, status: 'Open',
         projectId, boqLineId: it.boq_line_id ?? null,
       })));
+      // M1 (PROJ-12) — a project PO line tagged to a BoQ line ENCUMBERS that line's budget. reserve() locks the
+      // BoQ line (FOR UPDATE) and throws BUDGET_EXCEEDED if the line's open+consumed commitments would exceed
+      // its budget — inside this tx, so an over-budget line rolls the whole PO back (nothing is created).
+      if (this.commitments && projectId != null) {
+        for (const it of dto.items) {
+          if (it.boq_line_id == null) continue;
+          await this.commitments.reserve(tx, {
+            projectId, boqLineId: it.boq_line_id, amount: n(it.order_qty) * n(it.unit_price), qty: n(it.order_qty),
+            sourceDocType: 'PO', sourceDocNo: poNo, createdBy: user.username, tenantId: user.tenantId ?? null,
+          });
+        }
+      }
     });
     await this.statusLog.log('PO', poNo, '', 'Pending', user.username);
     // route into the approval engine (no active PO definition → autoApproved, legacy passthrough). The vendor
@@ -551,6 +565,8 @@ export class ProcurementService {
     if (!reason) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Cancel reason required', messageTh: 'ต้องระบุเหตุผล' });
     await db.update(purchaseOrders).set({ status: 'Cancelled', remarks: reason }).where(eq(purchaseOrders.id, po.id));
     await this.statusLog.log('PO', poNo, po.status ?? '', 'Cancelled', user.username, reason);
+    // M1 (PROJ-12) — a cancelled PO releases the BoQ-line budget it encumbered (frees it for other draws).
+    if (this.commitments) await this.commitments.release(db, 'PO', poNo);
     return { po_no: poNo, status: 'Cancelled' };
   }
 
@@ -625,6 +641,9 @@ export class ProcurementService {
     const fullyReceived = allItems.every((i: any) => n(i.receivedQty) >= n(i.orderQty));
     const newStatus = fullyReceived ? 'Closed' : 'Received';
     await db.update(purchaseOrders).set({ status: newStatus }).where(eq(purchaseOrders.id, po.id));
+    // M1 (PROJ-12) — once a project PO is fully received, its BoQ-line commitments become consumed (open →
+    // consumed; still counts against the budget — the spend is now actual, no longer just an open encumbrance).
+    if (this.commitments && fullyReceived) await this.commitments.consume(db, 'PO', dto.po_no);
     await this.statusLog.log('GR', grNo, '', 'Open', user.username);
     await this.statusLog.log('PO', dto.po_no, po.status ?? '', newStatus, user.username, `GR ${grNo}`);
 

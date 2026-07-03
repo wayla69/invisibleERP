@@ -195,6 +195,14 @@ material against.
 **BoQ line**) so material spend is traceable to the project's budget — pick the project on the requisition/PO;
 an unknown project code is rejected (`PROJECT_NOT_FOUND`). A goods receipt inherits the PO's project.
 
+**Budget enforcement (docs/32, M1).** Once a BoQ is approved, a project **PO** tagged to a BoQ line
+**reserves (encumbers)** that line's budget. A PO that would push the line past its budget is **blocked**
+(`เกินงบรายการ BoQ` / `BUDGET_EXCEEDED`) — the order is not created — so staff cannot commit more material than
+the line allows, and two orders raised at the same time can't jointly overrun (the check is atomic). The BoQ
+tab shows each line's **budget / committed / remaining**; **cancelling** a PO frees its reservation, and
+**receiving** it in full turns the reservation into actual spend. The full ledger is at
+`GET /api/projects/{code}/commitments` (open / consumed / released).
+
 ## Control callouts
 - Billing (incl. milestone billing) is segregated from cost initiation (**R07**) and capped at the contract
   value — see the troubleshooting list for `BILL_EXCEEDS_CONTRACT`, `OPP_NOT_WON`, `SOD_SELF_APPROVAL`,
@@ -217,5 +225,6 @@ an unknown project code is rejected (`PROJECT_NOT_FOUND`). A goods receipt inher
 | 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |
 | 2.1 | 2026-06-30 | **Program (cross-project) critical path** (PMO-4) — group projects into a *program* (`program_code`) with cross-project finish-to-start dependencies; the new `/projects/program/{code}` view runs a CPM over the program (each row a whole project) and highlights the program critical chain + per-project slack. A *โปรแกรม (Programs)* card on the Portfolio command center lists them. |
 | 2.2 | 2026-06-30 | **Pipeline → FTE forecast** (PMO-5) — the Portfolio billings forecast now also projects **กำลังคน (FTE)** demand per month: committed allocation + the pipeline's projected staffing draw (weighted value ÷ a configurable revenue-per-FTE-month rate), with a peak-FTE badge — "if we win the pipeline, how many people would each month need?". |
+| 2.5 | 2026-07-03 | **Material-budget enforcement** (docs/32, M1, PROJ-12) — a project **PO** tagged to a BoQ line now **reserves** that line's budget; a PO that would exceed it is **blocked** (`BUDGET_EXCEEDED`) and not created, so staff can't over-commit a line (and concurrent orders can't jointly overrun). The BoQ tab shows **budget / committed / remaining** per line; cancelling a PO frees the reservation, full receipt makes it actual. Ledger at `GET /api/projects/{code}/commitments`. |
 | 2.4 | 2026-07-03 | **Bill of Quantities (BoQ)** (docs/32, M0) — a **BoQ** tab on the project workspace: rate-built material/works budget lines (จำนวน × ราคา = งบรายการ), draft → maker-checker approve (which **syncs the project budget** to the BoQ total) → lock, with per-line **re-measurement**. Purchase requisitions/POs can be raised **against a project + BoQ line** (unknown project → rejected); a goods receipt inherits the PO's project. Structure/traceability only in M0 — budget enforcement arrives with the commitment ledger (M1). |
 | 2.3 | 2026-07-01 | **UI coverage build** — screens for previously headless endpoints: **ปิดงวดโครงการ** (`/projects/close`, PROJ-03 close review + maker-checker + PMO-3 period roll-up); **ลีด & โอกาสการขาย** (`/projects/crm`, REV-17 lead/opportunity management + convert-won-deal-to-project CRM-WL); **แม่แบบ & อัตราค่าแรง** (`/projects/settings`, PROJ-05 rate cards, B2 template builder, cross-project utilization); a **กำกับดูแล (Governance)** workspace tab (PROJ-07 baseline capture + variance, B3 RACI matrix, PMO-4 program membership); a **top-risks** card on the Portfolio (PROJ-08); and project/task allocation + maker-checker approval on the **`/hcm` timesheet** screen (PROJ-04). |
