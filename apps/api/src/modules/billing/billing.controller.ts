@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Public, Permissions, PlatformAdmin, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -27,6 +27,9 @@ const InviteBody = z.object({
   ttl_hours: z.number().int().min(1).max(24 * 30).optional(),
 });
 type InviteDto = z.infer<typeof InviteBody>;
+
+const RejectBody = z.object({ reason: z.string().max(500).optional() });
+type RejectDto = z.infer<typeof RejectBody>;
 
 const CheckoutBody = z.object({ plan_code: z.string().min(1) });
 const ChangePlanBody = z.object({ plan_code: z.string().min(1) });
@@ -68,6 +71,28 @@ export class BillingController {
   @Get('admin/signup-invites') @PlatformAdmin()
   listInvites() {
     return this.svc.listSignupInvites();
+  }
+
+  // Approval-queue onboarding (#3) — a PUBLIC "request access" form creates a PENDING request (no tenant is
+  // provisioned); a platform owner then approves (→ provisions) or rejects it.
+  @Post('auth/signup-requests') @Public() @HttpCode(201)
+  requestSignup(@Body(new ZodValidationPipe(SignupBody)) b: SignupDto) {
+    return this.svc.createSignupRequest(b);
+  }
+
+  @Get('admin/signup-requests') @PlatformAdmin()
+  listRequests(@Query('status') status: string | undefined) {
+    return this.svc.listSignupRequests(status);
+  }
+
+  @Post('admin/signup-requests/:id/approve') @PlatformAdmin() @HttpCode(201)
+  approveRequest(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.svc.approveSignupRequest(Number(id), u.username);
+  }
+
+  @Post('admin/signup-requests/:id/reject') @PlatformAdmin() @HttpCode(200)
+  rejectRequest(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: RejectDto, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectSignupRequest(Number(id), u.username, b.reason);
   }
 
   // PUBLIC plan catalogue

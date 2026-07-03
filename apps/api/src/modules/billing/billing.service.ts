@@ -2,12 +2,13 @@ import { Inject, Injectable, ConflictException, NotFoundException, BadRequestExc
 import { eq, sql, and, desc, gt, isNull } from 'drizzle-orm';
 import { randomBytes, createHash } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { plans, subscriptions, tenants, users, aiTokenUsage, aiOverageBillingRuns, signupInvites } from '../../database/schema';
+import { plans, subscriptions, tenants, users, aiTokenUsage, aiOverageBillingRuns, signupInvites, signupRequests } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
 import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
+import { isUniqueViolation } from '../../common/db-error';
 import type { JwtUser } from '../../common/decorators';
 
 // Public self-serve signup gate (ITGC-AC-18). Always allowed outside production (dev + harnesses run
@@ -165,12 +166,74 @@ export class BillingService {
       .where(and(eq(signupInvites.id, id), isNull(signupInvites.usedAt)));
   }
 
+  // ── Approval-queue onboarding (#3) — a PUBLIC request creates a PENDING row (no tenant); a platform
+  // owner approves (→ provisions) or rejects. The requester's password is stored HASHED here. ──
+  async createSignupRequest(dto: SignupDto) {
+    const code = dto.tenant_code.trim();
+    const username = normalizeUsername(dto.admin_username);
+    // fail fast on collisions with an existing LIVE tenant/user (the partial unique indexes block dup PENDING)
+    const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, code)).limit(1);
+    if (t) throw new ConflictException({ code: 'CONFLICT', message: 'Tenant code already taken', messageTh: 'รหัสร้านนี้ถูกใช้แล้ว' });
+    const [u] = await this.db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
+    if (u) throw new ConflictException({ code: 'CONFLICT', message: 'Username already taken', messageTh: 'ชื่อผู้ใช้นี้ถูกใช้แล้ว' });
+    const industry = isIndustryKey(dto.industry) ? dto.industry : 'general';
+    try {
+      const [row] = await this.db.insert(signupRequests).values({
+        companyName: dto.company_name, tenantCode: code, adminUsername: username,
+        passwordHash: await this.password.hash(dto.admin_password), email: dto.email, industry, status: 'pending',
+      }).returning({ id: signupRequests.id });
+      return { request_id: Number(row!.id), status: 'pending' };
+    } catch (e) {
+      if (isUniqueViolation(e)) throw new ConflictException({ code: 'REQUEST_PENDING', message: 'A pending request already exists for this company/username', messageTh: 'มีคำขอเปิดบัญชีนี้รออนุมัติอยู่แล้ว' });
+      throw e;
+    }
+  }
+
+  async listSignupRequests(status?: string) {
+    const rows = await this.db.select().from(signupRequests)
+      .where(status ? eq(signupRequests.status, status) : undefined)
+      .orderBy(desc(signupRequests.id)).limit(200);
+    return {
+      requests: rows.map((r: any) => ({
+        id: Number(r.id), company_name: r.companyName, tenant_code: r.tenantCode, admin_username: r.adminUsername,
+        email: r.email, industry: r.industry, status: r.status, reject_reason: r.rejectReason,
+        reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt, requested_at: r.requestedAt,
+        created_tenant_id: r.createdTenantId != null ? Number(r.createdTenantId) : null,
+      })),
+    };
+  }
+
+  // Approve a pending request → provision the company with the stored (already-hashed) password. Marks the
+  // row approved atomically (only if still pending) to avoid a double-provision race.
+  async approveSignupRequest(id: number, reviewedBy: string) {
+    const [req] = await this.db.select().from(signupRequests).where(eq(signupRequests.id, id)).limit(1);
+    if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Request not found', messageTh: 'ไม่พบคำขอ' });
+    if (req.status !== 'pending') throw new ConflictException({ code: 'REQUEST_NOT_PENDING', message: `Request already ${req.status}`, messageTh: 'คำขอนี้ถูกดำเนินการไปแล้ว' });
+    // claim the row first (pending → approved); if 0 rows updated, someone else took it.
+    const claimed = await this.db.update(signupRequests).set({ status: 'approved', reviewedBy, reviewedAt: new Date() })
+      .where(and(eq(signupRequests.id, id), eq(signupRequests.status, 'pending'))).returning({ id: signupRequests.id });
+    if (!claimed.length) throw new ConflictException({ code: 'REQUEST_NOT_PENDING', message: 'Request already handled', messageTh: 'คำขอนี้ถูกดำเนินการไปแล้ว' });
+    const result = await this.provisionTenant(
+      { company_name: req.companyName, tenant_code: req.tenantCode, admin_username: req.adminUsername, admin_password: '', email: req.email, industry: req.industry ?? undefined },
+      { passwordHash: req.passwordHash },
+    );
+    await this.db.update(signupRequests).set({ createdTenantId: result.tenant_id }).where(eq(signupRequests.id, id));
+    return { ...result, request_id: id, status: 'approved' };
+  }
+
+  async rejectSignupRequest(id: number, reviewedBy: string, reason?: string) {
+    const claimed = await this.db.update(signupRequests).set({ status: 'rejected', reviewedBy, reviewedAt: new Date(), rejectReason: reason ?? null })
+      .where(and(eq(signupRequests.id, id), eq(signupRequests.status, 'pending'))).returning({ id: signupRequests.id });
+    if (!claimed.length) throw new ConflictException({ code: 'REQUEST_NOT_PENDING', message: 'Request not pending', messageTh: 'คำขอนี้ไม่อยู่ในสถานะรออนุมัติ' });
+    return { request_id: id, status: 'rejected' };
+  }
+
   // Core provisioning — tenant + its OWN org + an Admin + a trialing subscription + fiscal year + industry
   // CoA — shared by the PUBLIC signup path (gated above) and the AUTHENTICATED platform-admin create-company
   // endpoint (POST /api/admin/tenants). No public-signup gate here; each caller gates as appropriate. Runs
   // under whatever RLS scope the request carries: public signup is pre-auth (bypass); the admin endpoint
   // runs with the platform-admin bypass granted by PlatformAdminGuard (both can write a brand-new tenant_id).
-  async provisionTenant(dto: SignupDto) {
+  async provisionTenant(dto: SignupDto, opts?: { passwordHash?: string }) {
     const db = this.db;
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);
@@ -188,7 +251,7 @@ export class BillingService {
     const [plan] = await db.select().from(plans).where(eq(plans.code, planCode)).limit(1);
     if (!plan) throw new BadRequestException({ code: 'BAD_REQUEST', message: `Unknown plan: ${planCode}`, messageTh: 'ไม่พบแพ็กเกจที่เลือก' });
 
-    const passwordHash = await this.password.hash(dto.admin_password);
+    const passwordHash = opts?.passwordHash ?? await this.password.hash(dto.admin_password);
     const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
     const industry = isIndustryKey(dto.industry) ? dto.industry : 'general';
 

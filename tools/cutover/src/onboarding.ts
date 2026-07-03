@@ -124,6 +124,32 @@ async function main() {
   ok('Invite list shows the consumed invite as used', invList.status === 200 && (invList.json.invites ?? []).some((x: any) => x.status === 'used'), `${invList.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
+  // ── 3d. Approval-queue onboarding (ITGC-AC-18 #3): a PUBLIC request → PENDING (no tenant); the platform
+  //        owner approves (→ provisions) or rejects. ──
+  const reqBody = { company_name: 'QueueCo', tenant_code: 'queueco1', admin_username: 'queueco_admin', admin_password: 'queueco12345', email: 'q@c.com' };
+  const sreq = await inj('POST', '/api/auth/signup-requests', undefined, reqBody);
+  ok('Public "request access" → 201 pending (no tenant provisioned yet)', sreq.status === 201 && sreq.json.status === 'pending' && !!sreq.json.request_id, `${sreq.status}`);
+  const reqId = sreq.json.request_id;
+  const noTenantYet = (await pg.query(`SELECT count(*)::int n FROM tenants WHERE code='queueco1'`)).rows as any[];
+  ok('A pending request does NOT create a tenant', noTenantYet[0].n === 0, `tenants=${noTenantYet[0].n}`);
+  const dup = await inj('POST', '/api/auth/signup-requests', undefined, reqBody);
+  ok('Duplicate pending request → 409 REQUEST_PENDING', dup.status === 409 && dup.json.error?.code === 'REQUEST_PENDING', `${dup.status} ${dup.json.error?.code}`);
+  const listDenied = await inj('GET', '/api/admin/signup-requests', owner);
+  ok('The request queue is platform-admin only (403 for a non-owner)', listDenied.status === 403, `${listDenied.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+  const rlist = await inj('GET', '/api/admin/signup-requests?status=pending', owner);
+  ok('Platform-admin sees the pending request in the queue', rlist.status === 200 && (rlist.json.requests ?? []).some((r: any) => r.id === reqId), `${rlist.status}`);
+  const approve = await inj('POST', `/api/admin/signup-requests/${reqId}/approve`, owner, {});
+  ok('Approve → provisions the company (201) + status approved', approve.status === 201 && !!approve.json.tenant_id && approve.json.status === 'approved', `${approve.status} tid=${approve.json.tenant_id}`);
+  const qLogin = await login('queueco_admin', 'queueco12345');
+  ok('The approved company Admin logs in with the REQUESTED password', !!qLogin.json.token, `st=${qLogin.status}`);
+  const reApprove = await inj('POST', `/api/admin/signup-requests/${reqId}/approve`, owner, {});
+  ok('Re-approving a handled request → 409 REQUEST_NOT_PENDING', reApprove.status === 409 && reApprove.json.error?.code === 'REQUEST_NOT_PENDING', `${reApprove.status} ${reApprove.json.error?.code}`);
+  const req2 = await inj('POST', '/api/auth/signup-requests', undefined, { company_name: 'RejectCo', tenant_code: 'rejectco1', admin_username: 'rejectco_admin', admin_password: 'rejectco12345', email: 'r@c.com' });
+  const rej = await inj('POST', `/api/admin/signup-requests/${req2.json.request_id}/reject`, owner, { reason: 'not a fit' });
+  ok('Reject → status rejected (no tenant created)', rej.status === 200 && rej.json.status === 'rejected', `${rej.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
+
   // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;
   //        a free plan is rejected (nothing to charge). Real Stripe is exercised only with a key set. ──
   const coPro = await inj('POST', '/api/billing/checkout', owner, { plan_code: 'pro' });

@@ -48,6 +48,13 @@ bypass_rls='on'  OR  tenant_id = app.tenant_id  OR  (app.org_id set AND tenant_i
 >   when public signup is disabled**. Invalid/used/expired → `400 INVALID_INVITE`; consumed (single-use) on
 >   success. Only the token **hash** is stored (`signup_invites`, migration 0233 — platform-level, no
 >   tenant_id/RLS).
+> - **Approval-queue onboarding.** A public "request access" form (**`POST /api/auth/signup-requests`**)
+>   creates a **pending request** — it does **not** provision a tenant. A platform owner reviews the queue
+>   (**`GET /api/admin/signup-requests`**) and **approves** (`…/:id/approve` → provisions the company with the
+>   requester's chosen password, stored hashed) or **rejects** (`…/:id/reject`). Good for inbound leads
+>   without auto-creating tenants. Duplicate pending → `409 REQUEST_PENDING`; already-handled → `409
+>   REQUEST_NOT_PENDING`. Table `signup_requests` (migration 0234, platform-level; the resolved tenant is
+>   `created_tenant_id`, not `tenant_id`, so it stays out of RLS).
 > - **Each new company gets its OWN org** — signup sets `org_id = the new tenant's id` on both the tenant
 >   and its Admin, so under `multi-company` the new Admin is isolated to just that company by default (and
 >   never needs the org_id backfill the boot warning mentions).
@@ -114,3 +121,4 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 | 1.2 | 2026-07-03 | Platform / Security | Controlled onboarding (ITGC-AC-18, onboarding-flow #1): new **`POST /api/admin/tenants`** (`@PlatformAdmin`) lets a configured platform owner (`PLATFORM_ADMIN_USERNAMES`) provision a company from an authenticated session — the alternative to toggling public signup. `PlatformAdminGuard` authorises + grants a server-set one-shot RLS bypass (honoured by the tenant-tx interceptor); non-owners get `403 PLATFORM_ADMIN_REQUIRED`; empty list ⇒ nobody (secure default); audit-logged. ToE: `apps/api/test/platform-admin.test.ts` + `cutover/onboarding.ts` (403 gate + 201 provision + org-isolation). |
 | 1.3 | 2026-07-03 | Platform / Security | **Cross-account org SHARING fixed** (closes the §6 tracked limitation). Root cause: `0218_tenant_indexes_backfill`'s generic RLS re-loop recreated `tenant_isolation` with the plain body, silently dropping 0196's org clause on data tables. Fix: `0232_reapply_org_rls` re-applies the org-clause policy to every `tenant_id` table. `pg-core` now hard-asserts `org1===2` (org sharing active + isolated) on both backends. Corrected the mistaken "PGlite doesn't run the DO-loop" note — it does. |
 | 1.4 | 2026-07-03 | Platform / Security | **Invite-link onboarding** (ITGC-AC-18, onboarding-flow #2): platform owners issue single-use, expiring invites (`POST`/`GET /api/admin/signup-invites`, `@PlatformAdmin`); the invitee signs up with `invite_token` even when public signup is disabled (`400 INVALID_INVITE` if invalid/used/expired; single-use). Platform-level `signup_invites` table (migration 0233, hash-only, no tenant_id/RLS). ToE: `cutover/onboarding.ts` (issue-auth 403, bogus/valid/reuse, used-list). |
+| 1.5 | 2026-07-03 | Platform / Security | **Approval-queue onboarding** (ITGC-AC-18, onboarding-flow #3): public `POST /api/auth/signup-requests` creates a PENDING request (no tenant); a platform owner reviews (`GET /api/admin/signup-requests`) and approves (`…/:id/approve` → provisions with the requester's hashed password) or rejects (`…/:id/reject`). Dup pending → 409 REQUEST_PENDING; handled → 409 REQUEST_NOT_PENDING. Table `signup_requests` (migration 0234, platform-level; `created_tenant_id` not `tenant_id`). ToE: `cutover/onboarding.ts` (request→pending→approve→login, dup, reject, non-owner 403, re-approve 409). |
