@@ -347,6 +347,17 @@ A **different** person opens the **อนุมัติ (Maker-checker)** tab a
 - **direct expense →** Dr the expense account / Cr Petty Cash (1015);
 - **advance →** Dr Employee Advances (1180) / Cr Petty Cash (1015).
 
+### Raise a request from LINE chat (LC-2)
+
+If you've linked your LINE account (see [Procurement — LINE chat](./03-procurement.md)),
+you can **raise** a request without opening the ERP: type
+`expense <รหัสกองทุน> <จำนวนเงิน> [เหตุผล]` (e.g. `expense PCF-01 300 ค่าน้ำแข็งหน้าร้าน`)
+or `advance <รหัสกองทุน> <จำนวนเงิน> [เหตุผล]` in the shop's LINE OA chat. Same rules as
+the screen: you need `creditors`/`exec`, the fund must be active, and a draw beyond the
+balance is refused (`INSUFFICIENT_FLOAT`). Other approvers get a LINE 🔔 when your request
+lands, and you get a ✅/❌ push when it's decided — but **approval itself always happens on
+`/petty-cash`** (money decisions are deliberately not available in chat).
+
 **You cannot approve your own request** (`SOD_VIOLATION`, binds **everyone, including
 Admin**). **ปฏิเสธ (Reject)** discards it. Pending requests also show up in the
 **Approvals** dashboard (`/finance` → approvals) so nothing sits unseen.

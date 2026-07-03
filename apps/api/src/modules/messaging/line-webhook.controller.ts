@@ -13,6 +13,7 @@ import { TenantMessagingService } from './tenant-messaging.service';
 import { replyLine, replyLineFlex, fetchLineContent, type SendResult } from './gateways';
 import { ProcurementService } from '../procurement/procurement.service';
 import { AttachmentsService } from '../procurement/attachments.service';
+import { PettyCashService } from '../petty-cash/petty-cash.service';
 
 // LINE Messaging API webhook (follow / unfollow / message …). Public + no JWT: authenticity is the LINE
 // signature (`X-Line-Signature` = base64 HMAC-SHA256 of the RAW body under the tenant's Channel Secret).
@@ -43,6 +44,9 @@ export class LineWebhookService {
   }
   private attachmentsSvc(): AttachmentsService | null {
     try { return this.moduleRef.get(AttachmentsService, { strict: false }); } catch { return null; }
+  }
+  private pettyCashSvc(): PettyCashService | null {
+    try { return this.moduleRef.get(PettyCashService, { strict: false }); } catch { return null; }
   }
 
   async handle(tenantCode: string, rawBody: Buffer | undefined, signature: string | undefined, parsed: any) {
@@ -122,7 +126,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -150,8 +154,10 @@ export class LineWebhookService {
     const isCancel = (cmd === 'cancel' || cmd === 'ยกเลิก') && !!arg1;
     const isStock = (cmd === 'stock' || cmd === 'สต็อก') && !!arg1;
     const isAttach = (cmd === 'attach' || cmd === 'แนบ') && !!arg1;
+    const isExpense = (cmd === 'expense' || cmd === 'เบิก') && parts.length >= 3;
+    const isAdvance = (cmd === 'advance' || cmd === 'ยืมเงิน') && parts.length >= 3;
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isPr) return false;
 
     // LINE may redeliver a webhook — the reply log row carries the inbound message id, so a duplicate
     // delivery of the same message is dropped instead of acting twice (e.g. raising a duplicate PR).
@@ -180,6 +186,7 @@ export class LineWebhookService {
       else if (isCancel) { reply = await this.chatCancel(staff, arg1); campaign = 'chat_cancel'; }
       else if (isStock) { reply = await this.chatStock(staff, arg1); campaign = 'chat_stock'; }
       else if (isAttach) { reply = await this.chatAttachStart(tenantId, lineUserId, staff, arg1, (parts[2] ?? '').toLowerCase()); campaign = 'chat_attach'; }
+      else if (isExpense || isAdvance) { reply = await this.chatPettyCash(staff, isAdvance ? 'advance' : 'expense', arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_pettycash'; }
       else reply = await this.chatCreatePr(staff, text);
     }
     await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, campaign);
@@ -395,6 +402,28 @@ export class LineWebhookService {
     }
     await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, reply, 'chat_attach');
     return true;
+  }
+
+  // ── LC-2 (docs/30) — petty-cash self-service: `expense <fund> <amount> [purpose]` / `advance …` ──
+  // RAISE-only, exactly like the web maker: creates a PEX- request (PendingApproval, NO GL) through the
+  // same PettyCashService path; approval stays on /petty-cash (chat money-DECISIONS deferred per plan).
+  // Permission mirrors the web endpoint (`creditors`/`exec`); the service's own guards (fund existence,
+  // FUND_CLOSED, INSUFFICIENT_FLOAT) apply unchanged, and its LC-2 hooks notify the approvers.
+  private async chatPettyCash(u: any, kind: 'expense' | 'advance', fundCode: string, amountStr: string, purpose: string): Promise<string> {
+    const amount = Number(amountStr);
+    if (!Number.isFinite(amount) || amount <= 0) return `จำนวนเงินไม่ถูกต้อง — รูปแบบ: ${kind} <รหัสกองทุน> <จำนวนเงิน> [เหตุผล]`;
+    const perms = await this.effectivePerms(u);
+    if (!perms.includes('creditors') && !perms.includes('exec')) return 'บัญชีของคุณไม่มีสิทธิ์เบิกเงินสดย่อย (ต้องมี creditors หรือ exec)';
+    const pettyCash = this.pettyCashSvc();
+    if (!pettyCash) return 'ระบบเงินสดย่อยยังไม่พร้อมใช้งาน กรุณาลองใหม่ภายหลัง';
+    const jwtUser: JwtUser = { username: u.username, role: u.role, customerName: null, tenantId: u.tenantId != null ? Number(u.tenantId) : null, permissions: perms };
+    try {
+      const res = await pettyCash.createRequest({ fund_code: fundCode.toUpperCase(), kind, amount, purpose: purpose || undefined }, jwtUser);
+      return `สร้างคำขอ${kind === 'advance' ? 'เงินยืม' : 'เบิกค่าใช้จ่าย'}แล้ว ✔ เลขที่ ${res.req_no} (${res.amount} บาท, รออนุมัติ) — จะแจ้งเตือนเมื่อมีการอนุมัติ`;
+    } catch (e: any) {
+      const msg = e?.response?.messageTh ?? e?.response?.message ?? e?.message ?? 'ไม่ทราบสาเหตุ';
+      return `สร้างคำขอไม่สำเร็จ: ${String(msg).slice(0, 200)}`;
+    }
   }
 
   // stock <item id> — read-only on-hand lookup from inv_balances (tenant-scoped to the linked user's shop).

@@ -568,6 +568,49 @@ async function main() {
     mine19.json.chat === 1 && mineReply?.type === 'flex' && mineReply?.contents?.type === 'carousel' && (mineReply?.contents?.contents?.length ?? 0) >= 2 && mineReply!.text.includes(pr19),
     JSON.stringify({ type: mineReply?.type, cards: mineReply?.contents?.contents?.length }));
 
+  // ── 20. LC-2 (docs/30): petty-cash self-service — expense/advance RAISE via chat + EXP-08 notifications.
+  await db.update(s.users).set({ lineUserId: 'Uapclerk' }).where(eq(s.users.username, 'apclerk'));
+  await db.insert(s.users).values([{ username: 'apboss', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 }]).onConflictDoNothing();
+  await db.update(s.users).set({ lineUserId: 'Uapboss' }).where(eq(s.users.username, 'apboss'));
+  const fund = await inj('POST', '/api/finance/petty-cash/funds', token, { fund_code: 'PCF-LINE', name: 'LINE test fund', float_limit: 5000, initial_amount: 2000 });
+  ok('LC-2: seed petty-cash fund created', fund.status === 200 || fund.status === 201, JSON.stringify({ s: fund.status }));
+
+  // 20a. permission — a linked user without creditors/exec cannot raise.
+  const pexDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20a', source: { userId: 'Usomchai' }, message: { id: 'mid-20a', type: 'text', text: 'expense PCF-LINE 100 น้ำแข็ง' } }] });
+  ok('LC-2: expense without creditors/exec → refused', pexDenied.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 20b. happy path — AP clerk raises an expense in chat: PEX- Pending, NO GL, approvers (creditors/exec,
+  //      maker excluded) pushed; the maker gets no self-notification.
+  const pushesBefore20 = linePushes.length;
+  const pex = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20b', source: { userId: 'Uapclerk' }, message: { id: 'mid-20b', type: 'text', text: 'expense PCF-LINE 300 ค่าน้ำแข็งหน้าร้าน' } }] });
+  const pexNo = /PEX-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [pexRow] = pexNo ? await db.select().from(s.expenseRequests).where(eq(s.expenseRequests.reqNo, pexNo)) : [];
+  const newPushes = linePushes.slice(pushesBefore20);
+  const bossPush = newPushes.find((p) => p.to === 'Uapboss');
+  const makerPush = newPushes.find((p) => p.to === 'Uapclerk');
+  ok('LC-2: chat expense → PEX PendingApproval (no GL), approver pushed (maker excluded)',
+    pex.json.chat === 1 && !!pexRow && pexRow.status === 'PendingApproval' && pexRow.requestedBy === 'apclerk' && pexRow.glRef == null
+      && !!bossPush && bossPush.text.includes(pexNo) && !makerPush,
+    JSON.stringify({ pex: pexNo, status: pexRow?.status, bossPushed: !!bossPush, makerPushed: !!makerPush }));
+
+  // 20c. service guards bind in chat — over-float refused.
+  const overFloat = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20c', source: { userId: 'Uapclerk' }, message: { id: 'mid-20c', type: 'text', text: 'expense PCF-LINE 99999 ทดสอบเกินวงเงิน' } }] });
+  ok('LC-2: over-float expense → INSUFFICIENT_FLOAT reply, no request', overFloat.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่สำเร็จ'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 60) }));
+
+  // 20d. advance raise + web approve (checker ≠ maker) → requester ✅ push; web reject → ❌ push.
+  const adv = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-20d', source: { userId: 'Uapclerk' }, message: { id: 'mid-20d', type: 'text', text: 'advance PCF-LINE 200 ยืมซื้อของหน้างาน' } }] });
+  const advNo = /PEX-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const apbossTok = (await inj('POST', '/api/login', undefined, { username: 'apboss', password: 'pw' })).json.token as string;
+  const pushesBefore20d = linePushes.length;
+  const appr = await inj('POST', `/api/finance/petty-cash/requests/${pexNo}/approve`, apbossTok);
+  const okPush = linePushes.slice(pushesBefore20d).find((p) => p.to === 'Uapclerk' && p.text.includes('อนุมัติแล้ว'));
+  const rejAdv = await inj('POST', `/api/finance/petty-cash/requests/${advNo}/reject`, apbossTok, { reason: 'แนบใบเสร็จก่อน' });
+  const rejPexPush = linePushes.slice(pushesBefore20d).find((p) => p.to === 'Uapclerk' && p.text.includes('ไม่ได้รับอนุมัติ'));
+  ok('LC-2: web approve → requester ✅ push (with amount); reject → ❌ push (with reason)',
+    adv.json.chat === 1 && appr.json.status === 'Approved' && !!okPush && okPush.text.includes(pexNo)
+      && rejAdv.json.status === 'Rejected' && !!rejPexPush && rejPexPush.text.includes(advNo) && rejPexPush.text.includes('แนบใบเสร็จก่อน'),
+    JSON.stringify({ appr: appr.json.status, okPush: !!okPush, rej: rejAdv.json.status, rejPush: !!rejPexPush }));
+
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
