@@ -292,13 +292,28 @@ jobs:
             // Duplicate journal tag/idx → a botched merge resolution of meta/_journal.json.
             const seenTag = {}, dupTag = [], seenIdx = {}, dupIdx = [];
             for (const e of journal) { if (seenTag[e.tag]) dupTag.push(e.tag); seenTag[e.tag] = 1; if (seenIdx[e.idx]) dupIdx.push(e.idx); seenIdx[e.idx] = 1; }
+            // Non-monotonic `when` → prod drizzle-kit migrate SILENTLY SKIPS the entry forever: it only
+            // applies entries whose when is STRICTLY GREATER than the last applied timestamp, so an entry
+            // whose when is <= an earlier entry never qualifies once prod has migrated past the earlier one.
+            // Root cause of the 2026-07-03 deploy outage: 0145/0146 (when <= 0144) never applied in prod,
+            // and 0218 exploded on the missing tip_distribution_lines. They stay grandfathered — their
+            // objects are re-created idempotently inside 0218 (renumbering applied journal entries is the
+            // dangerous move); any NEW non-monotonic entry fails here. Fix by bumping the when of the new
+            // entry above the current maximum. (NB: this script is single-quoted bash — no apostrophes.)
+            const GRANDFATHERED_NONMONO = ["0145_table_reservations", "0146_tip_distribution"];
+            let maxWhen = 0; const nonMono = [];
+            for (const e of journal) {
+              if (e.when <= maxWhen && GRANDFATHERED_NONMONO.indexOf(e.tag) < 0) nonMono.push(e.tag + " (when=" + e.when + " <= prior max " + maxWhen + ")");
+              if (e.when > maxWhen) maxWhen = e.when;
+            }
             if (unjournaled.length) console.error("Unjournaled .sql (prod drizzle-kit migrate SKIPS these): " + unjournaled.join(", "));
             if (orphan.length) console.error("Journal tags with no .sql file: " + orphan.join(", "));
             if (dupNum.length) console.error("Duplicate migration numbers (renumber the newer one to the next free id): " + dupNum.join("; "));
             if (dupTag.length) console.error("Duplicate journal tags: " + dupTag.join(", "));
             if (dupIdx.length) console.error("Duplicate journal idx: " + dupIdx.join(", "));
-            if (unjournaled.length || orphan.length || dupNum.length || dupTag.length || dupIdx.length) { console.error("::error::drizzle migration journal/numbering problem — hand-write the NEXT FREE 4-digit number and journal it (or run db:generate)"); process.exit(1); }
-            console.log("OK: " + sqls.length + " migrations registered (" + GRANDFATHERED.length + " grandfathered), no duplicate numbers/tags/idx.");
+            if (nonMono.length) console.error("Non-monotonic journal when (prod drizzle-kit migrate SILENTLY SKIPS these — bump when above the current max): " + nonMono.join("; "));
+            if (unjournaled.length || orphan.length || dupNum.length || dupTag.length || dupIdx.length || nonMono.length) { console.error("::error::drizzle migration journal/numbering problem — hand-write the NEXT FREE 4-digit number and journal it (or run db:generate)"); process.exit(1); }
+            console.log("OK: " + sqls.length + " migrations registered (" + GRANDFATHERED.length + " grandfathered), no duplicate numbers/tags/idx, when strictly increasing (" + GRANDFATHERED_NONMONO.length + " grandfathered).");
           '
 
       - name: RCM census reconciles (docs may not misquote the control population)
