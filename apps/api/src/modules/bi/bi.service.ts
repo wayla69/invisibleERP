@@ -62,6 +62,9 @@ const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = {
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
   // Likewise: each run raises preventive-maintenance work orders for every due PM schedule (idempotent).
   eam_pm_generate: { label: 'สร้างใบสั่งงานซ่อมตามแผน (PM)', labelEn: 'Generate due preventive maintenance' },
+  // Likewise: each run re-runs the 3-way match for every BLOCKED AP invoice (EXP-10) — a hold typically
+  // clears itself once the outstanding GR posts, releasing the invoice to payment without a manual re-run.
+  ap_automatch_rerun: { label: 'จับคู่ 3 ทางซ้ำอัตโนมัติ (ปลดล็อกใบแจ้งหนี้)', labelEn: 'Auto re-match blocked AP invoices' },
   // Likewise: each run posts every due recurring/template journal as a Draft JE (maker-checker, idempotent).
   gl_recurring_journals: { label: 'ลงรายการบัญชีตั้งเวลาอัตโนมัติ', labelEn: 'Post due recurring journals' },
   // LC-4 (docs/30) — LINE morning digest for {line_user} recipients: pending approvals + open PRs +
@@ -594,6 +597,11 @@ export class BiService implements OnModuleInit {
         if (exp.members.length < BATCH) break;
       }
       return { data: { pushed, total, target, ok }, summary: `CDP sync: pushed ${pushed}/${total} members to ${target}${ok ? '' : ' (stopped on error)'}`, summaryTh: `ซิงก์ CDP: ส่ง ${pushed}/${total} สมาชิกไปยัง ${target}${ok ? '' : ' (หยุดเพราะข้อผิดพลาด)'}` };
+    }
+    if (reportType === 'ap_automatch_rerun') {
+      if (!this.match) throw new BadRequestException({ code: 'MATCH_UNAVAILABLE', message: 'Match service not available', messageTh: 'ระบบจับคู่ 3 ทางไม่พร้อมใช้งาน' });
+      const r = await this.match.rematchBlocked(user); // idempotent: re-verdicts from current PO/GR state; overrides untouched
+      return { data: r, summary: `Auto re-match: released ${r.released} of ${r.swept} blocked invoice(s)`, summaryTh: `จับคู่ซ้ำอัตโนมัติ: ปลดล็อก ${r.released} จาก ${r.swept} ใบที่ถูกระงับ` };
     }
     if (reportType === 'eam_pm_generate') {
       if (!this.eam) throw new BadRequestException({ code: 'EAM_UNAVAILABLE', message: 'EAM service not available', messageTh: 'ระบบบำรุงรักษาไม่พร้อมใช้งาน' });

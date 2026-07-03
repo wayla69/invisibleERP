@@ -1,5 +1,6 @@
-'use client';
-
+// Pure presentational (no hooks/state/browser APIs) — deliberately NOT 'use client' (same rationale as
+// page-header.tsx): server pages can render it on the server; client pages that import it still bundle
+// it client-side. Keeps the RSC ratchet honest.
 import type { ReactNode } from 'react';
 import { TrendingDown, TrendingUp } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';

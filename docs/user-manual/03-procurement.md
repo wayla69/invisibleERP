@@ -15,6 +15,7 @@ This is deliberate separation of duties (the person who *orders* must not also
 | Create / approve a PO | `/procurement` | **Procurement** — `procurement` |
 | Receive goods (GR) | `/receiving` | **Warehouse** — `wh_receive` |
 | 3-way match | `/procurement/match` | **Procurement / Accounting** — `procurement` |
+| Scan invoice → PO match (AP intake) | `/procurement/ap-intake` | scan/map: `procurement`/`creditors`; **book the bill**: `creditors` |
 
 > A PR only *requests* a purchase — it commits nothing, so anyone may raise one.
 > Turning it into a real order (PO), and confirming receipt (GR), are restricted to
@@ -242,6 +243,57 @@ invoice / PO number. Use it to triage what needs investigation or an override be
 AP can pay. The list is **store-scoped** (you see only your own).
 
 [screenshot: 3-way match result with variances]
+
+### Scan an invoice and let the system match it (AP intake)
+
+Instead of keying a supplier invoice and running the match by hand, paste the
+scanned text of the invoice and let the system do the mapping (control **EXP-10**).
+
+**Screen:** `/procurement/ap-intake` · **Required permission:** `procurement` /
+`creditors` to scan and map; **`creditors` only** to book the bill (posting a
+payable is an accounting act).
+
+1. Go to **Procurement** → **สแกนใบแจ้งหนี้จับคู่ PO** (`/procurement/ap-intake`).
+2. Either **attach the invoice file directly** — press **แนบรูป / PDF** and pick a
+   photo (PNG/JPEG/WebP) or a PDF — or paste the invoice text into the box.
+   A digital PDF is read from its text layer immediately; a photo/scan is read by
+   AI (if AI is not configured, the intake queues for review with the file attached
+   so you can map and key it manually). The uploaded file is kept on the intake —
+   open it any time from the **เอกสารต้นฉบับ** link on the result card.
+3. Choose one of two buttons:
+   - **ดึงข้อมูล + จับคู่ PO** — extracts the vendor, tax ID, invoice number, date,
+     amount and any **PO number printed on the document**, then auto-maps the PO.
+     You review the result before booking.
+   - **อัตโนมัติทั้งหมด** — does all of the above **and** books the AP bill and runs
+     the 3-way match in one step (needs `creditors`). It only auto-books a document
+     whose PO mapping is **unambiguous** and which is **not a duplicate** — anything
+     doubtful lands in the review worklist instead, unbooked.
+4. If the document had no usable PO reference, the screen shows **scored PO
+   candidates** (by vendor + amount). Click one, or type a PO number, to map it —
+   then press **บันทึกบิล + จับคู่ 3 ทาง**.
+5. Check the result: the intake shows the booked bill number (AP-), the match
+   verdict and **พร้อมจ่าย / ระงับ** (payable / blocked).
+
+**Expected result:** a *matched* intake is immediately **payment-ready** — AP can
+request payment as usual. Payment itself is **never** automated: it still goes
+through request → independent approval (see [Finance — AR & AP](./05-finance-ar-ap.md)).
+
+> **Note — duplicates:** an invoice number that was already scanned or already
+> booked is refused with `DUPLICATE_INVOICE` and is never auto-booked. If it is a
+> genuine re-bill, an accountant can post it deliberately with the
+> *allow duplicate* option (API `allow_duplicate`).
+
+> **Note — invoice arrived before the goods:** the bill books but the match comes
+> back *over_invoiced* and payment is **blocked**. You don't need to chase it: the
+> scheduled **auto re-match** job (`ap_automatch_rerun` on the report scheduler)
+> re-checks every blocked invoice and releases it automatically once the goods
+> receipt catches up. (Or a different user can override, per EXP-01.)
+
+> **Note — one PO, one bill:** invoices matched to a PO **consume** its received
+> value. A second invoice against an already-fully-invoiced PO is blocked
+> (*over_invoiced*) — one PO cannot be paid twice under two invoice numbers.
+
+[screenshot: AP intake — scan, candidates and match verdict]
 
 ---
 

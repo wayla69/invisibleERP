@@ -20,7 +20,10 @@ async function bootstrap() {
   // maxParamLength 500 (default 100) — QR table-session tokens carry an HMAC and exceed 100 chars.
   // rawBody: true — retain the exact request bytes so signed webhooks (PSP callbacks) can verify their
   // HMAC over the raw payload, not a re-serialized object (key reordering would break the signature).
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ maxParamLength: 500 }), { rawBody: true });
+  // bodyLimit 16 MB (default 1 MB) — the AP-intake upload channel (EXP-10) carries an image/PDF as a
+  // base64 data: URL in the JSON body (object-storage convention, no multipart); per-type size caps
+  // are enforced in ap-intake.service (FILE_TOO_LARGE) below this transport ceiling.
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ maxParamLength: 500, bodyLimit: 16 * 1024 * 1024 }), { rawBody: true });
 
   // CORS = explicit origins (เลิก wildcard "*" ของ V1)
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((s) => s.trim());
