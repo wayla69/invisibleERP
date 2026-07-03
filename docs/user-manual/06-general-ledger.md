@@ -318,6 +318,27 @@ centre or ledger if needed), and view or export it.
 **Expected result:** The statement is produced from all **posted** entries (drafts
 are excluded).
 
+### Dedicated Financial Statements screen
+
+**Screen:** งบการเงิน (`/financial-statements`) · **Required permission:** `fin_report`,
+`exec`, `creditors` or `ar` (read-only).
+
+For a **full, statement-formatted** view — account-level line items with section subtotals,
+not just the summary KPIs on the `/accounting` tabs — open **งบการเงิน** from the *Financial
+Reports* menu. It has three tabs (deep-linkable via `?tab=`):
+
+- **งบดุล (Balance Sheet)** — pick an **as-of date**; assets, liabilities and equity are listed
+  per account with section subtotals, the current-period profit/loss shown under equity, and an
+  Assets = Liabilities + Equity **balance check**.
+- **งบกำไรขาดทุน (Income Statement)** — pick a **from / to** range (or *ตั้งแต่ต้นปี*); revenue and
+  expense lines with subtotals and net profit. **แยกตามสาขา** switches to a per-branch breakdown.
+- **งบกระแสเงินสด (Cash Flow)** — toggle **ทางอ้อม (indirect)** / **ทางตรง (direct)** / **พยากรณ์
+  (8-week forecast from open AR/AP)**.
+
+A **multi-GAAP ledger** selector (TFRS / TAX / IFRS) in the header re-runs every statement against
+the chosen ledger, and **ส่งออก CSV** exports the balance sheet or income statement. All figures are
+read straight from **posted** GL entries (drafts and year-end CLOSE reclassifications excluded).
+
 ### Statement of Cash Flows (indirect method)
 
 The cash flow statement is the **third primary financial statement** (alongside the

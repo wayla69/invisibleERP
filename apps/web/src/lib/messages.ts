@@ -173,6 +173,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
 
   // ── Finance / Ledger & GL ─────────────────────────────────────────────────
   'nav.chart_of_accounts': { th: 'ผังบัญชี', en: 'Chart of Accounts' },
+  'nav.financial_statements': { th: 'งบการเงิน', en: 'Financial Statements' },
   'nav.accounting': { th: 'บัญชีแยกประเภท', en: 'General Ledger' },
   'nav.revenue': { th: 'รับรู้รายได้', en: 'Revenue Recognition' },
   'nav.assets': { th: 'สินทรัพย์ถาวร', en: 'Fixed Assets' },
