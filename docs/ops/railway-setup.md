@@ -38,7 +38,11 @@ the web origin via `CORS_ORIGINS`.
    | `CORS_ORIGINS` | the **web** public URL (fill in after §4) |
    | `PORT` | `8000` |
 
-   Recommended (warned-if-missing): `SENTRY_DSN`, `OTEL_EXPORTER_OTLP_ENDPOINT`. Optional:
+   Recommended (external APM — Sentry errors + OTel tracing): `SENTRY_DSN`, `OTEL_EXPORTER_OTLP_ENDPOINT`.
+   These are **not required to boot** — the API always emits built-in signals (structured logs, `audit_log`,
+   `/healthz`+`/readyz`, `ops-metrics`); their absence is a silent default. To **mandate** them as a
+   fail-closed boot gate in an audited environment, set `REQUIRE_OBSERVABILITY_BACKENDS=1` (then boot refuses
+   to start unless both are set or `ALLOW_NO_OBSERVABILITY=1` is set consciously). Optional:
    `ANTHROPIC_API_KEY` (AI falls back to rule-based if unset). Full matrix: `secrets.md`.
 
    **PDF rendering (optional, recommended for prod).** HTML→PDF (tax invoices/receipts/statements, tax

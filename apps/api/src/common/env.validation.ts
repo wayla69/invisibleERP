@@ -13,8 +13,11 @@ import { Logger } from '@nestjs/common';
 // Secrets with no safe default — production MUST provide them.
 const REQUIRED_IN_PROD = ['DATABASE_URL', 'JWT_SECRET', 'APP_ENC_KEY'] as const;
 
-// Observability is strongly recommended in prod but must not block boot (the orchestrator may inject
-// it late). We warn rather than throw so a transient gap doesn't take the service down.
+// External observability backends — error-aggregation (Sentry) + distributed tracing (OTel). RECOMMENDED
+// in prod but NOT required to boot: the API always emits built-in signals (structured pino logs,
+// append-only audit_log, /healthz + /readyz, per-request slow-tx logging, ops-metrics), so it is never
+// "silently blind". Operators who need to MANDATE these external backends (e.g. an audited environment)
+// opt in with REQUIRE_OBSERVABILITY_BACKENDS=1, which restores the fail-closed boot gate (see below).
 const RECOMMENDED_IN_PROD = ['SENTRY_DSN', 'OTEL_EXPORTER_OTLP_ENDPOINT'] as const;
 
 function has(v: unknown): boolean {
@@ -62,22 +65,30 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   if (has(config.ANTHROPIC_API_KEY) && !has(config.AI_DPA_ACKNOWLEDGED)) {
     logger.warn('ANTHROPIC_API_KEY is set but AI_DPA_ACKNOWLEDGED is not — AI endpoints will fail closed (AI_DPA_REQUIRED) until the signed Anthropic DPA is acknowledged. See docs/legal/data-processing-agreement.md.');
   }
-  // Observability is now FAIL-CLOSED in production (operational maturity): you cannot operate what you
-  // cannot see, so a prod deploy must wire error reporting (Sentry) + tracing (OTel) — OR consciously opt
-  // out with ALLOW_NO_OBSERVABILITY=1 (which downgrades to a loud warning). This turns "silently blind in
-  // prod" into an explicit, auditable decision rather than an accident.
+  // Observability posture (ITGC-OP-03). The API ALWAYS emits monitorable signals — structured pino logs
+  // (requestId + tenant), the append-only audit_log, /healthz + /readyz probes, per-request slow-tx
+  // logging (SLOW_TX_MS), and the admin ops-metrics endpoint — so prod is never "silently blind". External
+  // error-aggregation (Sentry) + distributed tracing (OTel) are RECOMMENDED enhancements layered on top,
+  // not a boot requirement: a lean deployment can run on the built-in signals alone (no external SaaS).
+  //
+  // Operators who need to MANDATE the external backends (e.g. an audited environment) opt in with
+  // REQUIRE_OBSERVABILITY_BACKENDS=1 → the boot gate then REFUSES to start when Sentry/OTel are unset,
+  // still overridable with ALLOW_NO_OBSERVABILITY=1 as a loud, auditable opt-out. Without that flag the
+  // absence of external APM is a silent, documented default (no scary boot WARN). See
+  // docs/ops/observability-incident.md.
   const lacking = RECOMMENDED_IN_PROD.filter((k) => !has(config[k]));
-  if (lacking.length) {
+  if (lacking.length && has(config.REQUIRE_OBSERVABILITY_BACKENDS)) {
     if (has(config.ALLOW_NO_OBSERVABILITY)) {
       logger.warn(
-        `Observability not fully configured in production (${lacking.join(', ')} unset) and explicitly ` +
-          `allowed via ALLOW_NO_OBSERVABILITY — running with reduced visibility. See docs/ops/observability-incident.md.`,
+        `Observability backends mandated (REQUIRE_OBSERVABILITY_BACKENDS) but ${lacking.join(', ')} unset — ` +
+          `explicitly allowed via ALLOW_NO_OBSERVABILITY. Running on built-in signals ` +
+          `(logs / audit_log / healthz+readyz / ops-metrics) only. See docs/ops/observability-incident.md.`,
       );
     } else {
       throw new Error(
-        `Refusing to boot: observability not configured in production (${lacking.join(', ')} unset). ` +
-          `Wire Sentry + OpenTelemetry, or set ALLOW_NO_OBSERVABILITY=1 to opt out consciously. ` +
-          `See docs/ops/observability-incident.md.`,
+        `Refusing to boot: external observability backends are mandated (REQUIRE_OBSERVABILITY_BACKENDS) but ` +
+          `${lacking.join(', ')} unset. Wire Sentry + OpenTelemetry, or set ALLOW_NO_OBSERVABILITY=1 to opt ` +
+          `out consciously. See docs/ops/observability-incident.md.`,
       );
     }
   }

@@ -1027,6 +1027,19 @@ async function main() {
   ok('GL-11: overlay curation requires gl_coa — a non-gl_coa role is BLOCKED → 403',
     curBlocked.status === 403, `${curBlocked.status} ${curBlocked.json.error?.code}`);
 
+  // 6d. A curated-off account is hidden from the default chart but stays visible under `?include_inactive=true`
+  //     so the gl_coa curator can re-activate it (the management surface behind the /accounting ผังบัญชี edit UI).
+  await inj('PATCH', '/api/ledger/accounts/5100/overlay', restcFc, { active: false });
+  const iaHidden = (await inj('GET', '/api/ledger/accounts', restcFc)).json;
+  const iaMgmt = (await inj('GET', '/api/ledger/accounts?include_inactive=true', restcFc)).json;
+  ok('GL-11: curated-off account hidden from the default chart, still listed under include_inactive=true (active=false, re-activatable)',
+    !iaHidden.accounts?.some((a: any) => a.code === '5100') && iaMgmt.accounts?.some((a: any) => a.code === '5100' && a.active === false),
+    `hidden=${!iaHidden.accounts?.some((a: any) => a.code === '5100')} inMgmt=${iaMgmt.accounts?.some((a: any) => a.code === '5100')}`);
+  await inj('PATCH', '/api/ledger/accounts/5100/overlay', restcFc, { active: true });
+  const iaBack = (await inj('GET', '/api/ledger/accounts', restcFc)).json;
+  ok('GL-11: re-activating (active=true) restores the account to the default chart',
+    iaBack.accounts?.some((a: any) => a.code === '5100'), `back=${iaBack.accounts?.some((a: any) => a.code === '5100')}`);
+
   // ════════════════════════ EXP-01/EXP-09 — 3-way match HARD-GATES AP payment (PO↔GR↔Invoice) ════════════════════════
   // (The PwC panel referenced this as "EXP-03"; in the RCM the 3-way-match gate is EXP-01 and the AP-pay-
   //  consults-match control is EXP-09 — RCM EXP-03 is a different control, PR/PO authorization. See

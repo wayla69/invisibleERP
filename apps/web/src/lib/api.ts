@@ -110,7 +110,12 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   if (!res.ok) {
     if (handleUnauthorized(res.status)) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
     const msg = body?.error?.messageTh ?? body?.error?.message ?? `HTTP ${res.status}`;
-    throw new Error(msg);
+    // Preserve the machine-readable error `code` and HTTP status on the thrown Error so callers can branch
+    // on a specific failure (e.g. map COA_ADMIN_ONLY to a tailored toast) instead of matching message text.
+    const err = new Error(msg) as Error & { code?: string; status?: number };
+    err.code = body?.error?.code;
+    err.status = res.status;
+    throw err;
   }
   return body as T;
 }

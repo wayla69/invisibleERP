@@ -1,6 +1,6 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2 · 2026-07-03**
 
 This chapter is for **AR Clerks**, **AP Clerks** and **Procurement / finance**
 staff. It covers customer invoices and receipts (AR), supplier bills and payments
@@ -59,10 +59,15 @@ moves **Unpaid → Partial → Paid**, and the cash / AR entries post to the led
 
 **Expected result:** You can see which customers are overdue and by how much.
 
-### A3a. Customer statement of account
+### A3a. Customer statement of account (การ์ดลูกหนี้)
 
-To send a customer a statement of what they owe, open **AR → Statement** and pick
-the customer and a date range (`GET /api/finance/ar/statement?tenant_id=&from=&to=`).
+**Screen:** การ์ดลูกหนี้ (`/finance/customers`, ERP nav → การเงิน → AR/AP) ·
+**Required permission:** `ar` or `exec`.
+
+Open **การ์ดลูกหนี้** to see the list of customers with an open balance (their outstanding
+exposure, worst days-overdue, and a *ระงับเครดิต* badge for anyone on hold). **Click a customer**
+to drill into their statement of account; set the **date range** and export it as CSV
+(`GET /api/finance/ar/statement?tenant_id=&from=&to=`).
 
 **Expected result:** A statement showing the **opening balance** (as of the start
 date), every **invoice** (charge) and **receipt** (payment) in date order with a
@@ -275,10 +280,14 @@ cash-disbursement entry posts to the ledger. On rejection nothing posts.
 
 [screenshot: AP list with Pay action and aging]
 
-### B4. Vendor statement of account
+### B4. Vendor statement of account (การ์ดเจ้าหนี้)
 
-Open **AP → Statement**, pick the vendor and a date range
-(`GET /api/finance/ap/statement?vendor=&from=&to=`).
+**Screen:** การ์ดเจ้าหนี้ (`/finance/vendors`, ERP nav → การเงิน → AR/AP) ·
+**Required permission:** `creditors` or `exec`.
+
+Open **การ์ดเจ้าหนี้** to see the list of vendors with an open balance (outstanding, worst
+days-overdue, open-bill count). **Click a vendor** to drill into their statement, set the **date
+range**, and export CSV (`GET /api/finance/ap/statement?vendor=&from=&to=`).
 
 **Expected result:** A statement with the **opening balance**, every **bill**
 (charge) and approved **payment** in date order with a **running balance**, and the

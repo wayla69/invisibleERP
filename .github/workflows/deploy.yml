@@ -61,7 +61,7 @@ jobs:
               echo "::group::Railway build logs for $svc (failed deploy)"
               timeout 45 npx -y @railway/cli logs --service "$svc" -b 2>&1 | tail -60 || true
               echo "::endgroup::"
-              echo "::error::Railway deploy failed for $svc — runtime/boot logs above (common causes: missing prod env per apps/api/src/common/env.validation.ts — DATABASE_URL / JWT_SECRET / APP_ENC_KEY / PSP_WEBHOOK_SECRET / observability or ALLOW_NO_OBSERVABILITY=1 — or an OOM/DB race at boot)"
+              echo "::error::Railway deploy failed for $svc — runtime/boot logs above (common causes: missing prod env per apps/api/src/common/env.validation.ts — DATABASE_URL / JWT_SECRET / APP_ENC_KEY / PSP_WEBHOOK_SECRET; or observability backends unset while REQUIRE_OBSERVABILITY_BACKENDS=1 is enforced (set ALLOW_NO_OBSERVABILITY=1 to opt out); or an OOM/DB race at boot)"
               return 1
             fi
           }

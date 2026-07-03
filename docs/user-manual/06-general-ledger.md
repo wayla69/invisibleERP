@@ -1,13 +1,13 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.4 · 2026-07-03**
+**Status: DRAFT v0.6 · 2026-07-03**
 
 This chapter is for **accountants** — *GlAccountant*, *FinancialController* and
 *Admin*. It covers the chart of accounts, manual journal entries with
 **maker-checker approval**, the trial balance and financial statements, period and
 year-end close, multi-ledger reporting, and fixed assets.
 
-**Main screen:** `/accounting` (perm: `gl_post`, `gl_close`, `approvals`, `exec`, `creditors`, `ar`) — tabs include Trial Balance, Journal, Pending journal entries (visible to `approvals`/`gl_close`/`exec` only — SoD R05), Income Statement, Balance Sheet, Cash Flow and Opening Balances.
+**Main screen:** `/accounting` (perm: `gl_post`, `gl_close`, `approvals`, `exec`, `creditors`, `ar`) — tabs include Trial Balance, **Account Ledger (แยกประเภทรายบัญชี)**, **Sub-ledger tie-out (กระทบยอดบัญชีย่อย)**, Chart of Accounts, Journal, Pending journal entries (visible to `approvals`/`gl_close`/`exec` only — SoD R05), Income Statement, Balance Sheet, Cash Flow and Opening Balances.
 
 > **SoD R05 — posting vs. JE approval:** The "รออนุมัติ (JE)" tab on `/accounting` is only visible to users who hold the **approval** duty (`approvals`, `gl_close`, or `exec`). A *GlAccountant* (`gl_post` only) sees the journal/posting tabs but not the approval queue, preventing a preparer from approving their own entries. The **period close** screen (`/finance/period-close`, perm: `gl_close`) is a separate screen — a GL Accountant cannot access it.
 
@@ -50,6 +50,29 @@ data entry clean.
 The **ผังบัญชี** tab shows your chart with a *ผังบัญชีตามประเภทธุรกิจ* badge and the
 account count. Each journal-entry account picker uses this same curated list.
 
+### Dedicated Chart-of-Accounts reference
+
+**Screen:** ผังบัญชี (`/chart-of-accounts`) · **Required permission:** `gl_coa`, `gl_post`,
+`gl_close`, `approvals`, `creditors`, `ar` or `exec` (read-only).
+
+For a full, reference-quality view of the chart, open **ผังบัญชี** from the *Ledger & GL*
+menu. Unlike the quick-glance tab inside `/accounting`, this page **groups accounts by type**
+(สินทรัพย์ · หนี้สิน · ส่วนของเจ้าของ · รายได้ · ค่าใช้จ่าย, in financial-statement order) and
+enriches your curated chart with each account's full accounting attributes drawn from the
+canonical universe:
+
+- **ดุลปกติ (normal balance)** — เดบิต (Dr) or เครดิต (Cr).
+- **บัญชีคุมยอด (control)** — flags accounts that reconcile to a subledger (AR / AP / INV / FA).
+- **หัวข้อ (ห้ามลงรายการ)** — non-postable header/roll-up accounts.
+- **มิติที่ต้องระบุ** — accounts that require a dimension (branch / project / department / cost
+  centre) on every posting.
+
+Use the **search box** (code or name), the **type filter** chips, and the **แสดงบัญชีทั้งหมด /
+เฉพาะบัญชีของธุรกิจ** toggle (canonical universe ↔ your industry chart). **ส่งออก CSV** downloads
+the currently-filtered list. This screen is **read-only** — the canonical chart is the global,
+immutable posting universe, so accounts are created/curated only via **Onboarding → Industry
+packs**, never edited here.
+
 > **Nothing is ever removed.** The accounting engine always has the full set of accounts
 > available, so a posting is never blocked. Press **แสดงบัญชีทั้งหมด** on the ผังบัญชี tab
 > to reveal **every** account (for an unusual entry); the badge switches to *ผังบัญชีเต็ม*.
@@ -70,6 +93,20 @@ without affecting any other company. This is done per account via
 only** — you can never see or change another company's chart, and curating **never blocks a
 posting** (the account still exists in the engine). You may only curate an account **that
 already exists** in the master chart.
+
+**In the app.** On the **ผังบัญชี** tab of `/accounting`, a `gl_coa` user sees per-row editing
+controls (a blue note reminds you these tune presentation only — they never change the master
+code or a posting). Each change saves immediately and the list refreshes; a user without
+`gl_coa` sees the same tab **read-only**.
+
+| Action | How | Effect |
+|---|---|---|
+| **Rename (EN / TH)** | Row **pencil** → edit **ชื่อบัญชี (อังกฤษ)** / **ชื่อบัญชี (ไทย)** → **บันทึก**. Blank = fall back to the standard name. | The display name on your chart and every account picker. |
+| **Set group** | Same dialog → **กลุ่ม (หัวข้อในผัง)**. Blank = use the account type. | The section heading the account is grouped under. |
+| **Turn on / off** | Row **power** icon. | Off = hidden from the default chart and pickers; it stays visible here (struck through, *ปิดใช้งาน* badge) so you can turn it back on. An account with activity always stays on your reports. |
+| **Re-order** | Row **↑ / ↓** arrows. | Moves the account up or down the chart order. |
+
+Creating or removing a **master code** is not offered here — see level 2 below.
 
 **2 · Add or change a master account — permission `gl_coa` **and** the platform *Admin* (HQ) role.**
 The master account list (the *code · type · normal balance*) is a **single shared list** used
@@ -176,14 +213,18 @@ Notes:
 
 ### Recurring / template journal entries
 
+**Screen:** รายการบัญชีตั้งเวลา (`/gl-schedules` → **รายการตั้งเวลา** tab, ERP nav → *Ledger & GL*) ·
+**Required permission:** `gl_post`, `gl_close` or `exec`.
+
 For entries you post every period — **monthly rent or insurance accruals**,
 **prepaid amortization**, standing inter-company charges — set up a **template**
 once instead of re-keying it each time.
 
-1. Go to **Accounting** → **Recurring** and click **New template**
+1. Open **รายการบัญชีตั้งเวลา** → **รายการตั้งเวลา** and fill in the **create** form
    (`POST /api/ledger/recurring`). Give it a **name**, pick a **cadence**
-   (**daily / weekly / monthly**), a **first run date**, and enter the journal
-   **lines** (the same Dr/Cr lines as a manual entry).
+   (**daily / weekly / monthly**), an optional memo, and enter the journal
+   **lines** (the same Dr/Cr lines as a manual entry). Use **ลงรายการที่ถึงกำหนด** to post
+   due templates now.
 2. The template must **balance** (total debits = total credits) — an unbalanced
    template is rejected (`UNBALANCED`) so it can't fail silently later.
 3. Leave it to run automatically, or schedule the **Post due recurring journals**
@@ -200,13 +241,18 @@ history.
 
 ### Prepaid expense amortization
 
+**Screen:** รายการบัญชีตั้งเวลา (`/gl-schedules` → **ค่าใช้จ่ายจ่ายล่วงหน้า** tab) ·
+**Required permission:** `gl_post`, `gl_close` or `exec`.
+
 When you pay for something **up front** that covers several months (annual
 insurance, rent), set up a **prepaid schedule** so the cost is spread over its term
-instead of hitting one month.
+instead of hitting one month. The tab shows each schedule's **progress bar**
+(amortized vs remaining, periods posted / total).
 
-1. **Accounting → Prepaid → New** (`POST /api/ledger/prepaid`): enter the **total**,
-   the **number of months**, and the **expense account**. Tick **capitalize** if you
-   also want to record the up-front payment now (**Dr Prepaid 1280 / Cr Cash**).
+1. **รายการบัญชีตั้งเวลา → ค่าใช้จ่ายจ่ายล่วงหน้า → create** (`POST /api/ledger/prepaid`): enter
+   the **total**, the **number of months**, and the **expense account**. Tick **capitalize** if you
+   also want to record the up-front payment now (**Dr Prepaid 1280 / Cr Cash**). Use **ตัดจ่ายงวดที่ถึงกำหนด**
+   to amortize due schedules now.
 2. Schedule the **Amortize due prepaid expenses** (`gl_prepaid_amortize`) job, or run
    it with `POST /api/ledger/prepaid/run`.
 
@@ -294,6 +340,52 @@ centre or ledger if needed), and view or export it.
 
 **Expected result:** The statement is produced from all **posted** entries (drafts
 are excluded).
+
+### Account ledger (GL detail — แยกประเภทรายบัญชี)
+
+**Screen:** บัญชีแยกประเภท (`/accounting`) → **แยกประเภทรายบัญชี** tab · **Required permission:**
+`gl_post`, `gl_close`, `exec`, `creditors`, `ar` or `fin_report`.
+
+To see the individual postings behind a trial-balance figure, open the **แยกประเภทรายบัญชี** tab,
+pick an **account** and a **date range** (`GET /api/ledger/account-ledger?account=&from=&to=`). It
+lists the **opening balance** (everything posted before the *from* date), then every posted line in
+date order — date, entry no., source, memo, debit, credit — with a **running balance**, and the
+**closing balance**. The closing balance equals that account's trial-balance balance (Σ debit − credit),
+so the drill-down always reconciles to the trial balance.
+
+### Sub-ledger tie-out (กระทบยอดบัญชีย่อย — GL-14)
+
+**Screen:** บัญชีแยกประเภท (`/accounting`) → **กระทบยอดบัญชีย่อย** tab · **Run:** `gl_post`/`gl_close`;
+**Certify:** `gl_close` (certifier ≠ runner — SoD).
+
+Reconciles each **control account** to its sub-ledger of record. Pick a sub-ledger — **AR** (1100 ↔ open
+customer invoices), **AP** (2000 ↔ open vendor bills), **INV** (1200 ↔ perpetual inventory valuation) or
+**FA** (fixed-asset net book value) — and press **กระทบยอด** (`POST /api/ledger/tie-out/run`). The run
+records the GL balance, the sub-ledger balance, the **variance** and a **Matched / Variance** status. A
+**different** user then presses **รับรอง** (`POST /api/ledger/tie-out/:id/certify`) to certify it (a
+variance may be certified with a note explaining the reconciling items); certifying your own run is blocked
+(`SELF_CERTIFY`).
+
+### Dedicated Financial Statements screen
+
+**Screen:** งบการเงิน (`/financial-statements`) · **Required permission:** `fin_report`,
+`exec`, `creditors` or `ar` (read-only).
+
+For a **full, statement-formatted** view — account-level line items with section subtotals,
+not just the summary KPIs on the `/accounting` tabs — open **งบการเงิน** from the *Financial
+Reports* menu. It has three tabs (deep-linkable via `?tab=`):
+
+- **งบดุล (Balance Sheet)** — pick an **as-of date**; assets, liabilities and equity are listed
+  per account with section subtotals, the current-period profit/loss shown under equity, and an
+  Assets = Liabilities + Equity **balance check**.
+- **งบกำไรขาดทุน (Income Statement)** — pick a **from / to** range (or *ตั้งแต่ต้นปี*); revenue and
+  expense lines with subtotals and net profit. **แยกตามสาขา** switches to a per-branch breakdown.
+- **งบกระแสเงินสด (Cash Flow)** — toggle **ทางอ้อม (indirect)** / **ทางตรง (direct)** / **พยากรณ์
+  (8-week forecast from open AR/AP)**.
+
+A **multi-GAAP ledger** selector (TFRS / TAX / IFRS) in the header re-runs every statement against
+the chosen ledger, and **ส่งออก CSV** exports the balance sheet or income statement. All figures are
+read straight from **posted** GL entries (drafts and year-end CLOSE reclassifications excluded).
 
 ### Statement of Cash Flows (indirect method)
 

@@ -50,7 +50,7 @@ async function main() {
 
   const ref = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ maxParamLength: 500 }));
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ routerOptions: { maxParamLength: 500 } }));
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();

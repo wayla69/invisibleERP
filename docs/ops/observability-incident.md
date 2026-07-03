@@ -19,9 +19,15 @@
   `DB_POOL_MAX`, peak), slow-request counts, and the job backlog (`queued/running/failed/stuck`).
 - **Health** — `/healthz` (liveness) and `/readyz` (readiness, DB ping) — see `deployment.md`.
 
-In **production**, observability is **fail-closed**: the boot env gate (`env.validation.ts`) **refuses to
-start** when `SENTRY_DSN`/`OTEL_EXPORTER_OTLP_ENDPOINT` are unset — set both, or opt out consciously with
-`ALLOW_NO_OBSERVABILITY=1` (downgrades to a loud warning). "Silently blind in prod" is no longer possible.
+In **production**, the API is **never silently blind**: the built-in signals above (structured logs +
+`audit_log` + `/healthz`/`/readyz` + slow-tx logging + `ops-metrics`) are **always on** and require no
+external service. The external backends — **Sentry** (`SENTRY_DSN`) for error-aggregation and **OTel**
+(`OTEL_EXPORTER_OTLP_ENDPOINT`) for distributed tracing — are **recommended enhancements, not a boot
+requirement**: a lean deployment can run on the built-in signals alone. An operator who needs to **mandate**
+the external backends (e.g. an audited environment) sets **`REQUIRE_OBSERVABILITY_BACKENDS=1`**, which
+restores a **fail-closed** boot gate (`env.validation.ts`) — boot then **refuses to start** when either is
+unset, still overridable with a conscious `ALLOW_NO_OBSERVABILITY=1` (loud, auditable warning). Without that
+flag, running without external APM is a **silent, documented default** (no boot warning).
 
 ## 2. Required alerts (configure in your APM/uptime tool)
 
@@ -73,3 +79,4 @@ routing in the paging tool.
 | 1.1 | 2026-06-30 | Platform / SRE | Observability **fail-closed** in prod (`ALLOW_NO_OBSERVABILITY` opt-out); ops-alert sink (`captureOpsAlert`); slow-request logging (`SLOW_TX_MS`); `GET /api/jobs/ops-metrics`; background-job dead-letter alert + stuck-job reaper (OP-04 now Implemented). |
 | 1.2 | 2026-07-02 | Platform / SRE | New ops alert **`login_lockout_store_unavailable`** (docs/27 R2-1 / AUD-SEC-01): the per-account login lockout store fails OPEN on infra error by design — this alert (throttled to 1/min) is the pager signal that per-account brute-force protection is degraded to the per-IP edge limiter only. Respond: restore `login_attempts` DB connectivity; watch `login_lockout` alerts for stuffing attempts during the window. |
 | 1.3 | 2026-07-02 | Platform / SRE | New ops alert **`realtime_redis_publish_failed`** (docs/27 R1-3): Redis pub/sub behind the SSE buses failed a publish — the event was delivered to same-node clients only; other replicas missed it. Respond: check `REALTIME_REDIS_URL` connectivity / the Redis add-on; alert is throttled to 1/min. |
+| 1.4 | 2026-07-03 | Platform / SRE | **Observability posture refined (ITGC-OP-03).** External backends (Sentry `SENTRY_DSN` / OTel `OTEL_EXPORTER_OTLP_ENDPOINT`) are now **recommended, not required** to boot — the always-on built-in signals (structured logs / `audit_log` / `/healthz`+`/readyz` / slow-tx / `ops-metrics`) mean prod is never "silently blind" without an external SaaS. The fail-closed boot gate is now **opt-in** via **`REQUIRE_OBSERVABILITY_BACKENDS=1`** (still overridable with `ALLOW_NO_OBSERVABILITY=1`); without it, the absence of external APM is a silent, documented default (removes the alarming boot WARN on lean deployments). Reverses the v1.1 default-fail-closed stance while preserving its enforce path. Code `env.validation.ts`; ToE `apps/api/test/ops-observability.test.ts`. |

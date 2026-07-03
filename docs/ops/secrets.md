@@ -28,8 +28,9 @@ webhook in the webhook handler).
 | `AUTH_COOKIE_DOMAIN` | **required when web & api are on different hosts** (else login bounces) | Scopes the session cookies (`ierp_token`/`ierp_csrf`) to a shared parent domain (e.g. `.example.com`) so both origins share them. Unset ⇒ host-only (single-origin / same-origin proxy). Not a secret. | on domain change |
 | `AUTH_COOKIE_SAMESITE` | only for **cross-registrable-domain** web/api | `Lax` (default) \| `None` \| `Strict`. `None` (true cross-site) auto-adds `Secure` (HTTPS required). Not a secret. | on topology change |
 | `AUTH_COOKIE_MAX_AGE` | optional | Session cookie lifetime in seconds (default `43200` = 12h). Not a secret. | n/a |
-| `SENTRY_DSN` | recommended (warns) | Error reporting | n/a |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended (warns) | Trace export | n/a |
+| `SENTRY_DSN` | recommended | External error-aggregation (Sentry). Not boot-blocking — built-in signals (logs/audit/health/ops-metrics) are always on. | n/a |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | recommended | External distributed tracing (OTel/OTLP export). Not boot-blocking. | n/a |
+| `REQUIRE_OBSERVABILITY_BACKENDS` | optional | `=1` **mandates** the two above as a fail-closed boot gate (audited envs); overridable with `ALLOW_NO_OBSERVABILITY=1`. Not a secret. | n/a |
 | `TABLE_TOKEN_SECRET` | optional (falls back to `APP_ENC_KEY`) | HMAC for QR table-session tokens | with APP_ENC_KEY |
 | `STRIPE_SECRET_KEY` / acquirer keys | if that PSP is enabled | Payment gateway | per PSP policy |
 | `ANTHROPIC_API_KEY` | optional | AI assistant/analytics (rule-based fallback if unset) | per provider |

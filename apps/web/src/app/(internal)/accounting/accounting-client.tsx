@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, ClipboardPaste, Plus, Save, Scale, ShieldCheck, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, ClipboardPaste, Info, Pencil, Plus, Power, Save, Scale, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -10,11 +10,13 @@ import { useMe, hasPerm } from '@/lib/auth';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
+import { FormField } from '@/components/form-field';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
@@ -34,6 +36,8 @@ export default function AccountingWorkspace({ initialTb }: { initialTb?: unknown
 
   const tabs = [
     { key: 'tb', label: 'งบทดลอง', content: <TrialBalance initialData={initialTb} /> },
+    { key: 'gldetail', label: 'แยกประเภทรายบัญชี', content: <GLDetail /> },
+    { key: 'tieout', label: 'กระทบยอดบัญชีย่อย', content: <SubledgerTieout /> },
     { key: 'coa', label: 'ผังบัญชี', content: <ChartOfAccounts /> },
     { key: 'journal', label: 'สมุดรายวัน', content: <Journal /> },
     ...(canApproveJE ? [{ key: 'approve', label: 'รออนุมัติ (JE)', content: <PendingJournal /> }] : []),
@@ -57,13 +61,99 @@ export default function AccountingWorkspace({ initialTb }: { initialTb?: unknown
 // ───────────────────────── ผังบัญชี (Chart of Accounts) ─────────────────────────
 // Shows the tenant's industry-curated chart by default; the toggle reveals the full canonical universe
 // (?all=true) for unusual postings. Account names follow the industry template set at company creation.
-type CoaAccount = Account & { name_th?: string | null; group_label?: string | null };
+//
+// GL-11 curation (a `gl_coa` holder only): rename (EN/TH), set group label, toggle active, and re-order —
+// each PATCHes the per-tenant overlay (`/api/ledger/accounts/:code/overlay`) and refetches the ['coa']
+// query. This edits ONLY the presentation overlay, never the canonical master universe: creating or
+// recoding a master account is HQ-only (`COA_ADMIN_ONLY`), surfaced as a hint + a tailored toast. Curation
+// applies to the industry-scoped chart only (`source === 'overlay'`); the "all accounts" view is read-only.
+type CoaAccount = Account & { name_th?: string | null; group_label?: string | null; active?: boolean; sort_order?: number };
 function ChartOfAccounts() {
+  const me = useMe();
+  const qc = useQueryClient();
+  const canEdit = hasPerm(me.data, 'gl_coa');
   const [showAll, setShowAll] = useState(false);
+  // A gl_coa manager also loads curated-off rows so they can be re-activated; everyone else gets the
+  // default active-only presentation.
+  const params = showAll ? '?all=true' : canEdit ? '?include_inactive=true' : '';
   const q = useQuery<{ accounts: CoaAccount[]; count: number; source?: string; industry_scoped?: boolean }>({
-    queryKey: ['coa', showAll],
-    queryFn: () => api(`/api/ledger/accounts${showAll ? '?all=true' : ''}`),
+    queryKey: ['coa', showAll, canEdit],
+    queryFn: () => api(`/api/ledger/accounts${params}`),
   });
+  const rows = q.data?.accounts ?? [];
+  const editable = canEdit && !showAll && q.data?.source === 'overlay';
+
+  const [edit, setEdit] = useState<CoaAccount | null>(null);
+  const [busy, setBusy] = useState<string | null>(null); // code currently mutating → disables its row controls
+
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['coa'] }); qc.invalidateQueries({ queryKey: ['accounts'] }); };
+  // Map the backend's machine code to a friendly toast; COA_ADMIN_ONLY = a master-code change was attempted.
+  const onErr = (e: any) =>
+    e?.code === 'COA_ADMIN_ONLY'
+      ? notifyError('การเปลี่ยนรหัสบัญชีหลักทำได้เฉพาะผู้ดูแลระบบ (HQ)', 'ระดับบริษัทปรับได้เฉพาะชื่อ/กลุ่ม/การแสดงผล — การสร้างหรือแก้รหัสบัญชีหลักเป็นสิทธิ์ของ HQ')
+      : notifyError(e?.message ?? 'เกิดข้อผิดพลาด');
+
+  const patchOverlay = (code: string, body: Record<string, unknown>) =>
+    api(`/api/ledger/accounts/${code}/overlay`, { method: 'PATCH', body: JSON.stringify(body) });
+
+  const toggleActive = async (a: CoaAccount) => {
+    const next = !(a.active !== false);
+    setBusy(a.code);
+    try { await patchOverlay(a.code, { active: next }); notifySuccess(next ? `เปิดใช้งานบัญชี ${a.code}` : `ปิดการใช้งานบัญชี ${a.code}`); refresh(); }
+    catch (e) { onErr(e); }
+    finally { setBusy(null); }
+  };
+
+  // Re-order by swapping this row's sort_order with its neighbour (each a PATCH). Rows arrive pre-sorted by
+  // sort_order, so the two writes are enough; equal orders (rare) nudge past the neighbour.
+  const move = async (a: CoaAccount, dir: 'up' | 'down') => {
+    const i = rows.findIndex((r) => r.code === a.code);
+    const j = dir === 'up' ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= rows.length) return;
+    const b = rows[j];
+    const aOrder = a.sort_order ?? 0, bOrder = b.sort_order ?? 0;
+    const newA = aOrder === bOrder ? (dir === 'up' ? bOrder - 1 : bOrder + 1) : bOrder;
+    setBusy(a.code);
+    try { await Promise.all([patchOverlay(a.code, { sort_order: newA }), patchOverlay(b.code, { sort_order: aOrder })]); refresh(); }
+    catch (e) { onErr(e); }
+    finally { setBusy(null); }
+  };
+
+  const columns = [
+    { key: 'code', label: 'รหัส', sortable: !editable },
+    {
+      key: 'name', label: 'ชื่อบัญชี', sortable: !editable,
+      render: (r: CoaAccount) => (
+        <span className="inline-flex items-center gap-2">
+          <span className={r.active === false ? 'text-muted-foreground line-through' : ''}>{r.name}</span>
+          {r.active === false && <Badge variant="secondary">ปิดใช้งาน</Badge>}
+        </span>
+      ),
+    },
+    { key: 'name_th', label: 'ชื่อ (ไทย)', sortable: !editable, render: (r: CoaAccount) => r.name_th || <span className="text-muted-foreground">—</span> },
+    { key: 'group_label', label: 'กลุ่ม', sortable: !editable, render: (r: CoaAccount) => r.group_label || <span className="text-muted-foreground">—</span> },
+    { key: 'type', label: 'ประเภท', sortable: !editable },
+    ...(editable
+      ? [{
+          key: 'actions', label: '', sortable: false, align: 'right' as const,
+          render: (r: CoaAccount) => {
+            const i = rows.findIndex((x) => x.code === r.code);
+            const rowBusy = busy === r.code;
+            return (
+              <div className="flex items-center justify-end gap-0.5">
+                <Button variant="ghost" size="icon" title="เลื่อนขึ้น" disabled={rowBusy || i <= 0} onClick={() => move(r, 'up')}><ChevronUp className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title="เลื่อนลง" disabled={rowBusy || i >= rows.length - 1} onClick={() => move(r, 'down')}><ChevronDown className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title="แก้ไขชื่อ/กลุ่ม" disabled={rowBusy} onClick={() => setEdit(r)}><Pencil className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title={r.active === false ? 'เปิดใช้งาน' : 'ปิดการใช้งาน'} disabled={rowBusy} onClick={() => toggleActive(r)}>
+                  <Power className={`size-4 ${r.active === false ? 'text-muted-foreground' : 'text-emerald-600'}`} />
+                </Button>
+              </div>
+            );
+          },
+        }]
+      : []),
+  ];
+
   return (
     <StateView q={q}>
       {q.data && (
@@ -81,19 +171,72 @@ function ChartOfAccounts() {
               {showAll ? 'แสดงเฉพาะบัญชีของธุรกิจ' : 'แสดงบัญชีทั้งหมด'}
             </Button>
           </div>
+          {editable && (
+            <Card className="flex-row flex-wrap items-center gap-2 p-3 text-sm text-muted-foreground">
+              <Info className="size-4 shrink-0" />
+              <span>
+                จัดผังบัญชีของบริษัท: เปลี่ยนชื่อ (อังกฤษ/ไทย) · ตั้งกลุ่ม · เปิด/ปิดการใช้งาน · จัดลำดับ —
+                ทั้งหมดปรับที่ <strong>การแสดงผลระดับบริษัท</strong> ไม่กระทบการลงบัญชี. การสร้างหรือแก้ <strong>รหัสบัญชีหลัก</strong> เป็นสิทธิ์ของผู้ดูแลระบบ (HQ).
+              </span>
+            </Card>
+          )}
           <DataTable
-            rows={q.data.accounts}
+            rows={rows}
+            pageSize={editable ? 0 : 50}
+            rowKey={(r: CoaAccount) => r.code}
             emptyState={{ icon: Scale, title: 'ยังไม่มีผังบัญชี', description: 'ผังบัญชีจะถูกตั้งค่าตามประเภทธุรกิจที่เลือกตอนเปิดบริษัท' }}
-            columns={[
-              { key: 'code', label: 'รหัส' },
-              { key: 'name', label: 'ชื่อบัญชี' },
-              { key: 'name_th', label: 'ชื่อ (ไทย)', render: (r: CoaAccount) => r.name_th || <span className="text-muted-foreground">—</span> },
-              { key: 'type', label: 'ประเภท' },
-            ]}
+            columns={columns}
           />
         </div>
       )}
+      {edit && <EditAccountDialog account={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); refresh(); }} onError={onErr} />}
     </StateView>
+  );
+}
+
+// GL-11 rename/re-group dialog — writes display_name (EN), display_name_th (TH), and group_label to the
+// per-tenant overlay for one account. Clearing a field resets it to the canonical default.
+function EditAccountDialog({ account, onClose, onSaved, onError }: {
+  account: CoaAccount; onClose: () => void; onSaved: () => void; onError: (e: unknown) => void;
+}) {
+  const [nameEn, setNameEn] = useState(account.name ?? '');
+  const [nameTh, setNameTh] = useState(account.name_th ?? '');
+  const [group, setGroup] = useState(account.group_label ?? '');
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/api/ledger/accounts/${account.code}/overlay`, {
+        method: 'PATCH',
+        body: JSON.stringify({ display_name: nameEn, display_name_th: nameTh, group_label: group }),
+      }),
+    onSuccess: () => { notifySuccess(`บันทึกบัญชี ${account.code} แล้ว`); onSaved(); },
+    onError,
+  });
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>แก้ไขบัญชี {account.code}</DialogTitle>
+          <DialogDescription>ปรับการแสดงผลของบัญชีในผังบัญชีบริษัท — ไม่กระทบรหัสบัญชีหลักหรือการลงบัญชี</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <FormField label="ชื่อบัญชี (อังกฤษ)" htmlFor="coa-name-en" hint="เว้นว่างเพื่อใช้ชื่อมาตรฐาน">
+            <Input id="coa-name-en" value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
+          </FormField>
+          <FormField label="ชื่อบัญชี (ไทย)" htmlFor="coa-name-th">
+            <Input id="coa-name-th" value={nameTh} onChange={(e) => setNameTh(e.target.value)} />
+          </FormField>
+          <FormField label="กลุ่ม (หัวข้อในผัง)" htmlFor="coa-group" hint="เว้นว่างเพื่อใช้ประเภทบัญชีเป็นกลุ่ม">
+            <Input id="coa-group" value={group} onChange={(e) => setGroup(e.target.value)} />
+          </FormField>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={save.isPending}>ยกเลิก</Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+            <Save className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -618,6 +761,140 @@ function CashFlow() {
               <Badge variant={d.reconciled ? 'success' : 'destructive'}>{d.reconciled ? 'กระทบยอดเงินสดตรง' : 'ไม่ตรง'}</Badge>
             </Card>
           </div>
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// ───────────────────── แยกประเภทรายบัญชี (GL detail / account ledger) ─────────────────────
+// Every posted line for ONE account over a date range, with a running balance struck from the opening
+// balance — the classic GL-detail drill-down behind the trial balance (GET /api/ledger/account-ledger).
+function GLDetail() {
+  const accountsQ = useQuery<{ accounts: Account[] }>({ queryKey: ['accounts'], queryFn: () => api('/api/ledger/accounts') });
+  const [account, setAccount] = useState('');
+  const [from, setFrom] = useState(monthStart());
+  const [to, setTo] = useState(today());
+  const q = useQuery<any>({ queryKey: ['gldetail', account, from, to], queryFn: () => api(`/api/ledger/account-ledger?account=${account}&from=${from}&to=${to}`), enabled: !!account });
+  const d = q.data;
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="gl-acct">บัญชี</Label>
+          <select id="gl-acct" className={`${selectCls} min-w-[260px]`} value={account} onChange={(e) => setAccount(e.target.value)}>
+            <option value="">— เลือกบัญชี —</option>
+            {accountsQ.data?.accounts.map((a) => <option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}
+          </select>
+        </div>
+        <div className="grid gap-1.5"><Label htmlFor="gl-from">ตั้งแต่</Label><Input id="gl-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+        <div className="grid gap-1.5"><Label htmlFor="gl-to">ถึง</Label><Input id="gl-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+      </div>
+      {!account ? (
+        <Card className="p-8 text-center text-sm text-muted-foreground">เลือกบัญชีเพื่อดูรายการเคลื่อนไหวและยอดคงเหลือสะสม</Card>
+      ) : (
+        <StateView q={q}>
+          {d && (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <StatCard label="ยอดยกมา" value={baht(d.opening_balance)} />
+                <StatCard label="เดบิตรวม" value={baht(d.total_debit)} tone="primary" />
+                <StatCard label="เครดิตรวม" value={baht(d.total_credit)} tone="primary" />
+                <StatCard label="ยอดคงเหลือ" value={baht(d.closing_balance)} tone="success" />
+              </div>
+              <Card className="gap-2 p-5">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="pb-2 font-medium">วันที่</th>
+                        <th className="pb-2 font-medium">เลขที่</th>
+                        <th className="pb-2 font-medium">แหล่ง</th>
+                        <th className="pb-2 font-medium">คำอธิบาย</th>
+                        <th className="pb-2 text-right font-medium">เดบิต</th>
+                        <th className="pb-2 text-right font-medium">เครดิต</th>
+                        <th className="pb-2 text-right font-medium">คงเหลือ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-t text-muted-foreground"><td className="py-1.5" colSpan={6}>ยอดยกมา (opening)</td><td className="py-1.5 text-right tabular">{baht(d.opening_balance)}</td></tr>
+                      {d.lines.map((l: any, i: number) => (
+                        <tr key={i} className="border-t">
+                          <td className="py-1.5 tabular">{thaiDate(l.date)}</td>
+                          <td className="py-1.5 tabular">{l.entry_no}</td>
+                          <td className="py-1.5">{l.source}{l.source_ref ? ` · ${l.source_ref}` : ''}</td>
+                          <td className="py-1.5">{l.memo || <span className="text-muted-foreground">—</span>}</td>
+                          <td className="py-1.5 text-right tabular">{l.debit ? baht(l.debit) : ''}</td>
+                          <td className="py-1.5 text-right tabular">{l.credit ? baht(l.credit) : ''}</td>
+                          <td className="py-1.5 text-right tabular font-medium">{baht(l.balance)}</td>
+                        </tr>
+                      ))}
+                      {d.lines.length === 0 && <tr className="border-t"><td colSpan={7} className="py-4 text-center text-muted-foreground">ไม่มีรายการในช่วงนี้</td></tr>}
+                      <tr className="border-t-2 font-semibold"><td className="py-1.5" colSpan={4}>ยอดคงเหลือปลายงวด (closing)</td><td className="py-1.5 text-right tabular">{baht(d.total_debit)}</td><td className="py-1.5 text-right tabular">{baht(d.total_credit)}</td><td className="py-1.5 text-right tabular">{baht(d.closing_balance)}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          )}
+        </StateView>
+      )}
+    </div>
+  );
+}
+
+// ───────────────────── กระทบยอดบัญชีย่อย (Subledger tie-out, GL-14) ─────────────────────
+// Run reconciles a control account's GL balance vs its sub-ledger detail (AR/AP/INV/FA); certify is
+// maker-checker (certifier ≠ runner). Backend: GET/POST /api/ledger/tie-out{,/run,/:id/certify}.
+function SubledgerTieout() {
+  const me = useMe();
+  const canRun = hasPerm(me.data, 'gl_close', 'gl_post', 'exec');
+  const canCertify = hasPerm(me.data, 'gl_close', 'exec');
+  const qc = useQueryClient();
+  const [subledger, setSubledger] = useState<'AR' | 'AP' | 'INV' | 'FA'>('AR');
+  const q = useQuery<any>({ queryKey: ['tieout'], queryFn: () => api('/api/ledger/tie-out') });
+  const refresh = () => qc.invalidateQueries({ queryKey: ['tieout'] });
+  const run = useMutation({ mutationFn: () => api('/api/ledger/tie-out/run', { method: 'POST', body: JSON.stringify({ subledger }) }), onSuccess: () => { notifySuccess(`กระทบยอด ${subledger} แล้ว`); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const certify = useMutation({ mutationFn: (id: number) => { const note = prompt('หมายเหตุการรับรอง (ถ้ามี)') ?? undefined; return api(`/api/ledger/tie-out/${id}/certify`, { method: 'POST', body: JSON.stringify({ note }) }); }, onSuccess: () => { notifySuccess('รับรองการกระทบยอดแล้ว'); refresh(); }, onError: (e: any) => notifyError(e.message) });
+  const runs: any[] = q.data?.runs ?? [];
+  const SUB_TH: Record<string, string> = { AR: 'ลูกหนี้ (AR)', AP: 'เจ้าหนี้ (AP)', INV: 'สินค้าคงคลัง (INV)', FA: 'สินทรัพย์ถาวร (FA)' };
+  return (
+    <div className="space-y-5">
+      <Card className="flex-row flex-wrap items-center gap-2 p-4 text-sm">
+        <ShieldCheck className="size-4 text-muted-foreground" />
+        กระทบยอดบัญชีคุม (control) กับบัญชีย่อย (GL-14) — ผู้รับรองต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่).
+      </Card>
+      {canRun && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="tie-sub">ระบบบัญชีย่อย</Label>
+            <select id="tie-sub" className={`${selectCls} min-w-[200px]`} value={subledger} onChange={(e) => setSubledger(e.target.value as 'AR' | 'AP' | 'INV' | 'FA')}>
+              {(['AR', 'AP', 'INV', 'FA'] as const).map((s) => <option key={s} value={s}>{SUB_TH[s]}</option>)}
+            </select>
+          </div>
+          <Button disabled={run.isPending} onClick={() => run.mutate()}><Scale className="size-4" /> {run.isPending ? 'กำลังกระทบยอด…' : 'กระทบยอด'}</Button>
+        </div>
+      )}
+      <StateView q={q}>
+        {runs.length === 0 ? (
+          <Card className="gap-0 p-5"><span className="text-sm text-muted-foreground">ยังไม่มีการกระทบยอด</span></Card>
+        ) : (
+          <DataTable
+            rows={runs}
+            rowKey={(r: any) => r.id}
+            columns={[
+              { key: 'subledger', label: 'บัญชีย่อย', render: (r: any) => SUB_TH[r.subledger] ?? r.subledger },
+              { key: 'control_account', label: 'บัญชีคุม' },
+              { key: 'as_of_date', label: 'ณ วันที่', render: (r: any) => thaiDate(r.as_of_date) },
+              { key: 'glBalance', label: 'ยอด GL', align: 'right', render: (r: any) => <span className="tabular">{baht(r.glBalance)}</span> },
+              { key: 'subledgerBalance', label: 'ยอดบัญชีย่อย', align: 'right', render: (r: any) => <span className="tabular">{baht(r.subledgerBalance)}</span> },
+              { key: 'variance', label: 'ผลต่าง', align: 'right', render: (r: any) => <span className={`tabular ${Math.abs(r.variance) >= 0.01 ? 'text-destructive' : ''}`}>{baht(r.variance)}</span> },
+              { key: 'status', label: 'สถานะ', render: (r: any) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+              { key: 'run_by', label: 'จัดทำโดย' },
+              { key: 'certified_by', label: 'รับรองโดย', render: (r: any) => r.certified_by || <span className="text-muted-foreground">—</span> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => (canCertify && r.status !== 'Certified' && r.run_by !== me.data?.username) ? <Button size="sm" variant="outline" disabled={certify.isPending} onClick={() => certify.mutate(r.id)}><Check className="size-4" /> รับรอง</Button> : null },
+            ]}
+          />
         )}
       </StateView>
     </div>
