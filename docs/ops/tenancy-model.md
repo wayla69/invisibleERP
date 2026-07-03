@@ -26,10 +26,19 @@ bypass_rls='on'  OR  tenant_id = app.tenant_id  OR  (app.org_id set AND tenant_i
 | **`single-company`** (default) | **ALL tenants** (global `bypass_rls='on'`) | ONE company; other tenants are your own branches/outlets you want HQ to see. |
 | **`multi-company`** | Only tenants sharing the Admin's **`org_id`**; `org_id=NULL` ⇒ **own tenant only** (fail-closed) | Outsiders can **self-signup** (each signup = an independent company that must NOT see others). |
 
-> ⚠️ **Self-service signup is public.** `POST /api/auth/signup` creates a **new tenant + an `Admin` user**
-> (`org_id=NULL`) for every signup (`modules/billing/billing.service.ts`). Under the **default**
-> `single-company` mode that new Admin gets the **global bypass** and can read **every** other company's
-> data. **Any deployment that lets outsiders sign up MUST run `TENANCY_MODE=multi-company`.**
+> ⚠️ **Self-service signup mints a tenant + an `Admin`.** `POST /api/auth/signup`
+> (`modules/billing/billing.service.ts`) creates a **new tenant + an `Admin` user** for every signup. Under
+> the **default** `single-company` mode that new Admin gets the **global bypass** and can read **every**
+> other company's data — so any deployment reachable by outsiders MUST run `TENANCY_MODE=multi-company`.
+>
+> Two hardenings are now built in (ITGC-AC-18):
+> - **Signup is fail-closed in production** — `POST /api/auth/signup` returns `403 SIGNUP_DISABLED` unless
+>   the operator sets **`PUBLIC_SIGNUP_ENABLED`** truthy. Dev + harnesses (`NODE_ENV=test`) are unaffected.
+>   To onboard a company: flip `PUBLIC_SIGNUP_ENABLED=true`, create the account, flip it back off. (There is
+>   no separate admin create-tenant path — signup is the provisioning path, now gated.)
+> - **Each new company gets its OWN org** — signup sets `org_id = the new tenant's id` on both the tenant
+>   and its Admin, so under `multi-company` the new Admin is isolated to just that company by default (and
+>   never needs the org_id backfill the boot warning mentions).
 
 ### Set it
 Set `TENANCY_MODE=multi-company` on **every API service that connects to the same database** (e.g. both
@@ -87,3 +96,4 @@ shared org.
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | 1.0 | 2026-07-03 | Platform / Security | Initial tenancy-model doc: TENANCY_MODE modes, signup exposure, org_id grouping, rollout guidance, ToE (pg-smoke + new pg-core HTTP-stack checks), and the PGlite per-table-org-clause fidelity note. |
+| 1.1 | 2026-07-03 | Platform / Security | Signup hardening (ITGC-AC-18): public `POST /api/auth/signup` is now **fail-closed in production** (`PUBLIC_SIGNUP_ENABLED`, `403 SIGNUP_DISABLED` when off; dev/harnesses unaffected), and each signup gives the new company its **own org** (`org_id = tenant id` on the tenant + Admin) so it is isolated by default under multi-company. ToE: `apps/api/test/signup-gate.test.ts` (gate matrix) + `cutover/onboarding.ts` (org_id assertion). |
