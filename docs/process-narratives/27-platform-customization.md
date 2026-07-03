@@ -111,6 +111,25 @@ Each entry: **what it does · endpoint(s) · permission · storage/migration · 
     table is covered by the `tenant-isolation` RLS harness and the behaviour by the `web-e2e`
     `workspace-split` Playwright suite.*
 
+24. **Menu visibility overrides — sidebar declutter.** A tenant admin can **hide individual sidebar entries**
+    — a single menu, a whole sub-section (หมวดย่อย), or a whole category (หมวด) — from **everyone's** nav,
+    to tailor the app to the business without touching anyone's permissions. The admin screen is a tree that
+    **mirrors `nav.ts` exactly** (names come from the same i18n catalog, so they match the live sidebar), and
+    the same screen renames + groups the **module feature-flags** and shows, per module, **which menus it
+    controls** (computed live from `nav.ts`). Overrides are stored in the existing global `module_configs`
+    table under a **`nav:<href>` namespace** (no new migration); the permission guard only iterates
+    `MODULE_KEYS`, so a `nav:` row is **pure chrome** and never blocks an API route. Hidden entries drop out
+    of the sidebar, the ⌘K palette and favourites, and a client-side redirect bounces a directly-opened
+    hidden route to the workspace home. **Two hrefs (`/settings`, `/admin/users`) can never be hidden** so an
+    admin can't lock themselves out. `GET /api/admin/modules` (adds `navDisabled[]`), `POST
+    /api/admin/modules/nav {hrefs[], enabled}` (bulk = a category/sub-section toggle); `GET
+    /api/modules/effective` returns `navDisabled` so every client hides consistently. Perm `users`.
+    Presentation-only — **no GL**, changes **no** data-access path. *This is the softer sibling of the
+    code-governed **module on/off** flags (§3 / user manual §11.3): menu-hide only declutters, module-off is
+    the enforced control that also blocks the API. Verified by the `module-qr` cutover harness (+7: hide →
+    `navDisabled`, hides-for-all via `effective`, visibility-≠-permission, lockout-critical skip, re-show).
+    No new RCM control (UI customization).*
+
 ## 8. Process flow
 
 ```mermaid
@@ -192,3 +211,4 @@ Per-feature validation codes are consolidated here (all `400` unless noted): UDF
 | 1.0 DRAFT | 2026-06-24 | Platform | Added **Pillar B (AI-native) — Platform Phases 15–19**: embedded copilot (§7.18, KB cite-or-refuse), document-AI intake (§7.19, extract-only AP draft), NL analytics (§7.20, over the A5 semantic layer), AI configuration assistant (§7.21, suggestion-only), continuous controls monitoring (§7.22, detective scans → findings; migration `0092`). All read-only / suggestion-only / human-in-the-loop, RLS-scoped, **no GL**; AI features degrade deterministically with no API key (CI offline-safe). New §7.18–7.22, five RACI + control-matrix rows, `BAD_TARGET`/`FINDING_NOT_FOUND`; `ext` +15 checks (208). B5 is a detective-control aid (formal RCM control-ID assignment is a planned follow-up). |
 | 1.1 DRAFT | 2026-06-25 | Platform | Housekeeping — removed the **dead `platform/oidc.service.ts` scaffold** (unused; threw `NOT_CONFIGURED`/TODO and duplicated the live per-tenant SSO in `modules/identity/sso.service.ts`, §12). No behaviour/endpoint/control change — the live SSO path (`/api/auth/sso/*`, ITGC-AC-01/02/09) is unchanged. Also added `docs/ops/integration-providers-status.md` documenting the **env-gated mock providers** (billing/PSP/terminal/e-invoice/e-tax/LINE/messaging/connectors/channel adapters) — working-as-designed defaults + the variables to set for go-live (no RCM change). |
 | 1.1 DRAFT | 2026-06-25 | Web | Added capability #23 — **synced UI preferences**: per-user sidebar favourites + nav fold-state follow the user across devices via `GET`/`PUT /api/user-prefs` (no `@Permissions`; owner-scoped + RLS); recents stay per-device. Table `user_prefs` (migration `0119`), presentation-only, **no GL**, no data-access change. New §7.23; no RACI/control-matrix change and no new RCM control (personal preference store). Covered by the `tenant-isolation` RLS harness + `web-e2e` `workspace-split` suite. See `docs/15-ui-ux-menu-restructure-plan.md`. |
+| 1.2 DRAFT | 2026-07-03 | Web | Added capability #24 — **menu visibility overrides**: a tenant admin hides individual sidebar entries / sub-sections / whole categories from everyone's nav (Settings→Modules, perm `users`). Stored in the existing global `module_configs` under a `nav:<href>` namespace (**no migration**); chrome-only — the permission guard ignores `nav:` rows, so it never blocks an API (softer sibling of the module on/off flags). The same screen renames + groups the module flags in Thai and shows, per module, which menus it controls (computed from `nav.ts`). `/settings` + `/admin/users` are un-hidable (lockout guard). New endpoint `POST /api/admin/modules/nav`; `list`/`effective` add `navDisabled[]`. New §7.24; no new RCM control (UI customization). ToE: `module-qr` cutover harness +7 (29 total). User manual §11.3 + UAT `08-admin-sod-uat.md` (UAT-ADM-105/106) updated. |

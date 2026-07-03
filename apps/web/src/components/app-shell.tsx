@@ -312,10 +312,13 @@ export function AppShell({
   // Filter groups/items by permission AND module enable/disable (back-office); drop empty groups.
   // A disabled module hides for EVERYONE (incl. Admin) — faithful to the legacy "hides for all".
   const disabledModules = React.useMemo(() => new Set(moduleFlags.data?.disabled ?? []), [moduleFlags.data]);
+  // Individually hidden menu entries (admin "menu visibility" overrides) — chrome only, not a permission.
+  const hiddenNav = React.useMemo(() => new Set(moduleFlags.data?.navDisabled ?? []), [moduleFlags.data]);
   const filterByPerm = React.useCallback(
     (groupsIn: NavGroup[]) => {
       if (!filterPerms) return groupsIn;
       const visible = (it: NavItem) => {
+        if (hiddenNav.has(it.href)) return false; // admin-hidden menu entry
         if (!hasPerm(me.data, ...(it.perms ?? []))) return false;
         const perms = it.perms ?? [];
         if (perms.length && perms.every((p) => disabledModules.has(p))) return false; // all its modules off
@@ -331,8 +334,20 @@ export function AppShell({
         }))
         .filter((g) => (g.items?.length ?? 0) + (g.subgroups?.reduce((n, s) => n + s.items.length, 0) ?? 0) > 0);
     },
-    [filterPerms, me.data, disabledModules],
+    [filterPerms, me.data, disabledModules, hiddenNav],
   );
+
+  // If the current page is an admin-hidden menu entry, bounce to the workspace home (menu visibility is
+  // enforced client-side; it's chrome, not a security boundary — permissions/modules remain the real guard).
+  // Never redirect off the home route itself, to avoid a loop if someone hides their own landing page.
+  React.useEffect(() => {
+    if (!filterPerms || !moduleFlags.data || hiddenNav.size === 0) return;
+    const home = workspaceHome(enableWorkspaces ? workspace : 'erp');
+    const hit = nav
+      .flatMap((g) => allGroupItems(g))
+      .find((it) => hiddenNav.has(it.href) && it.href !== home && (pathname === it.href || pathname.startsWith(it.href + '/')));
+    if (hit) router.replace(home);
+  }, [filterPerms, moduleFlags.data, hiddenNav, pathname, nav, router, enableWorkspaces, workspace]);
 
   // Sidebar = permission-filtered within the active workspace; ⌘K palette stays global (all workspaces).
   const wsNav = React.useMemo(() => (enableWorkspaces ? navForWorkspace(nav, workspace) : nav), [enableWorkspaces, nav, workspace]);

@@ -68,16 +68,50 @@ their role requires it — to enrol in MFA.
 
 ---
 
-## 3. Turning modules on or off
+## 3. Menus & modules — hide menus / turn modules on or off
 
-**Screen:** `/settings` → **Modules** tab · **Required permission:** `users`
+**Screen:** `/settings` → **Modules** tab (**จัดการเมนู & โมดูล**) · **Required permission:** `users`
 
-1. Go to **Settings** (`/settings`) → **Modules** (**เปิด / ปิด การใช้งานโมดูล**).
-2. Toggle a module **on** or **off** for the whole organisation.
+The tab gives you **two independent controls**, applied system-wide:
 
-**Expected result:** A module turned **off** disappears from every user's menu and
-is blocked in the system. (Core access — user management — can never be turned
-off.)
+### 3.1 Hide menus (**จัดการเมนู — แสดง/ซ่อน**)
+
+A tree that **mirrors your left sidebar** — category (หมวด) → sub-section (หมวดย่อย)
+→ individual menu (เมนู) — with a **Show / Hide** button at every level. Menu names
+match the sidebar exactly. Use the **ทั้งหมด / ERP / POS** filter at the top-right to
+view one surface at a time; **ERP** and **POS** use the same split as the sidebar
+switcher, so the list lines up one-to-one with what staff see on that surface (in
+**ทั้งหมด** each category carries an ERP/POS/ทั้งสอง chip).
+
+1. Expand a category and click **ซ่อน** on a whole category, a sub-section, or a
+   single menu; or **แสดง** to bring it back. Hiding a category/sub-section hides all
+   the menus currently inside it in one click.
+2. Hidden menus disappear from **everyone's** sidebar, command palette (⌘K) and
+   favourites, and the page redirects to the workspace home if opened directly.
+
+> **Hiding a menu is presentation only** — it declutters the sidebar but does **not**
+> change anyone's permissions. To actually *block access* to a capability (including
+> its API), turn off its **module** (§3.2). The **Settings** and **Users** menus can
+> never be hidden, so an administrator can always return here.
+
+### 3.2 Turn modules on or off (**โมดูลระบบ — สิทธิ์การใช้งาน**)
+
+The system-wide feature flags, now **grouped by category and named in Thai**. Each
+module shows its technical **code** (e.g. `pos`, `pr_raise`) and, under **“คุมเมนู”**,
+exactly **which menus that module controls** — so you can see the link between a code
+and the sidebar. Use the per-module **ปิด/เปิด** button, or **ปิดทั้งหมวด/เปิดทั้งหมวด**
+to switch a whole category at once.
+
+**Expected result:** A module turned **off** disappears from every user's menu **and
+is blocked at the API** (`403 MODULE_DISABLED`). Core access (the **Users &
+Permissions** module) is *always-on* and can never be turned off.
+
+**Menu-hide vs module-off — which to use:**
+
+| Goal | Use |
+|---|---|
+| Simplify the sidebar; the feature is still allowed | **Hide menu** (§3.1) |
+| Stop the feature entirely, including its API | **Turn module off** (§3.2) |
 
 ---
 

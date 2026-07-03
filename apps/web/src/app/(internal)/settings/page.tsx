@@ -1,11 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, Lock, Plus, Power, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
+import { ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, ListTree, Lock, Plus, Power, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { humanizeModule } from '@/lib/modules';
+import {
+  moduleLabel,
+  moduleCategoryKey,
+  categoryLabel,
+  menusForPerm,
+  MODULE_CATEGORIES,
+  type ModuleFlag,
+} from '@/lib/modules';
+import { INTERNAL_NAV, allGroupItems, navForWorkspace, type NavGroup, type NavItem, type Workspace } from '@/lib/nav';
+import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -34,63 +43,284 @@ export default function SettingsPage() {
   );
 }
 
-// ───────────────────────── Modules (system-wide on/off) ─────────────────────────
+// ───────────────────────── Menu & Modules ─────────────────────────
+// Two axes of control, on one screen:
+//   • Section A — Menu visibility: hide individual sidebar entries / sub-sections / whole categories from
+//     everyone's nav. Chrome only (permissions still apply). Mirrors the sidebar (nav.ts) so names match.
+//   • Section B — System modules: the permission feature-flags — disabling one also blocks its API routes.
+//     Grouped + Thai-named + shows exactly which menus each module controls.
+type ModulesResp = { modules: ModuleFlag[]; navDisabled?: string[] };
+const NAV_ALWAYS_VISIBLE = ['/settings', '/admin/users']; // never hidable (admin lockout guard)
+
 function Modules() {
   const qc = useQueryClient();
-  const list = useQuery<{ modules: { key: string; enabled: boolean; always_on: boolean }[] }>({
-    queryKey: ['admin-modules'],
-    queryFn: () => api('/api/admin/modules'),
+  const { t, lang } = useLang();
+  const list = useQuery<ModulesResp>({ queryKey: ['admin-modules'], queryFn: () => api('/api/admin/modules') });
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['admin-modules'] });
+    qc.invalidateQueries({ queryKey: ['module-flags'] }); // refresh the sidebar nav
+  };
+
+  // One mutation drives both single-row and category-bulk toggles (keys[] fanned out in parallel).
+  const toggleModule = useMutation({
+    mutationFn: (v: { keys: string[]; enabled: boolean }) =>
+      Promise.all(v.keys.map((key) => api('/api/admin/modules', { method: 'POST', body: JSON.stringify({ key, enabled: v.enabled }) }))),
+    onSuccess: (_r, v) => {
+      notifySuccess(v.keys.length === 1 ? `${moduleLabel(v.keys[0], lang)} → ${v.enabled ? 'เปิด' : 'ปิด'}` : `${v.keys.length} โมดูล → ${v.enabled ? 'เปิด' : 'ปิด'}`);
+      invalidate();
+    },
+    onError: (e: any) => notifyError(e.message),
   });
 
-  const toggle = useMutation({
-    mutationFn: (v: { key: string; enabled: boolean }) => api('/api/admin/modules', { method: 'POST', body: JSON.stringify(v) }),
+  const toggleNav = useMutation({
+    mutationFn: (v: { hrefs: string[]; enabled: boolean }) => api('/api/admin/modules/nav', { method: 'POST', body: JSON.stringify(v) }),
     onSuccess: (_r, v) => {
-      notifySuccess(`${humanizeModule(v.key)} → ${v.enabled ? 'เปิด' : 'ปิด'}`);
-      qc.invalidateQueries({ queryKey: ['admin-modules'] });
-      qc.invalidateQueries({ queryKey: ['module-flags'] }); // refresh the sidebar nav
+      notifySuccess(v.hrefs.length === 1 ? `เมนู → ${v.enabled ? 'แสดง' : 'ซ่อน'}` : `${v.hrefs.length} เมนู → ${v.enabled ? 'แสดง' : 'ซ่อน'}`);
+      invalidate();
     },
     onError: (e: any) => notifyError(e.message),
   });
 
   const mods = list.data?.modules ?? [];
+  const navDisabled = useMemo(() => new Set(list.data?.navDisabled ?? []), [list.data]);
   const disabledCount = mods.filter((m) => !m.enabled).length;
 
   return (
     <div className="space-y-4">
       <Card className="gap-2 p-5">
-        <h3 className="text-base font-semibold">เปิด / ปิด การใช้งานโมดูล (ทั้งระบบ)</h3>
+        <h3 className="text-base font-semibold">จัดการเมนู & โมดูล (ทั้งระบบ)</h3>
         <p className="text-sm text-muted-foreground">
-          เมื่อปิดโมดูล จะถูกซ่อนจากเมนูของผู้ใช้ทุกคนและเข้าใช้งานไม่ได้ — โมดูล “Users” ปิดไม่ได้เพื่อให้ผู้ดูแลเข้าถึงได้เสมอ
+          <b>ซ่อนเมนู</b> = เอาออกจากแถบเมนูของทุกคน (สิทธิ์ยังเหมือนเดิม) · <b>ปิดโมดูล</b> = ปิดความสามารถทั้งชุดและปิดกั้นที่ API ด้วย —
+          โมดูล “ผู้ใช้ & สิทธิ์” และเมนูตั้งค่า/ผู้ใช้ ปิดไม่ได้เพื่อไม่ให้ผู้ดูแลถูกล็อกออก
         </p>
-        {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>ปิดอยู่ {disabledCount} โมดูล</Badge>}
+        <div className="flex flex-wrap gap-1.5">
+          {navDisabled.size > 0 && <Badge variant={statusVariant('Cancelled')}>ซ่อน {navDisabled.size} เมนู</Badge>}
+          {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>ปิด {disabledCount} โมดูล</Badge>}
+        </div>
       </Card>
 
       <StateView q={list}>
-        <DataTable
-          rows={mods}
-          emptyState={{ icon: ToggleLeft, title: 'ยังไม่มีโมดูลให้แสดง', description: 'รายการโมดูลของระบบจะปรากฏที่นี่' }}
-          columns={[
-            { key: 'key', label: 'โมดูล', render: (r: any) => <span className="font-medium">{humanizeModule(r.key)}</span> },
-            { key: 'code', label: 'รหัส', render: (r: any) => <code className="text-xs text-muted-foreground">{r.key}</code> },
-            {
-              key: 'enabled', label: 'สถานะ',
-              render: (r: any) => <Badge variant={statusVariant(r.enabled ? 'Open' : 'Cancelled')}>{r.enabled ? 'เปิดอยู่' : 'ปิดอยู่'}</Badge>,
-            },
-            {
-              key: 'act', label: '',
-              render: (r: any) => r.always_on ? (
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Lock className="size-3.5" /> always-on</span>
-              ) : (
-                <Button variant={r.enabled ? 'destructive' : 'default'} size="sm" disabled={toggle.isPending}
-                  onClick={() => toggle.mutate({ key: r.key, enabled: !r.enabled })}>
-                  <Power className="size-4" /> {r.enabled ? 'ปิด' : 'เปิด'}
-                </Button>
-              ),
-            },
-          ]}
-        />
+        <div className="space-y-6">
+          <MenuVisibility navDisabled={navDisabled} onToggle={(hrefs, enabled) => toggleNav.mutate({ hrefs, enabled })} pending={toggleNav.isPending} t={t} />
+          <SystemModules mods={mods} onToggle={(keys, enabled) => toggleModule.mutate({ keys, enabled })} pending={toggleModule.isPending} lang={lang} t={t} />
+        </div>
       </StateView>
     </div>
+  );
+}
+
+// ── shared bits ────────────────────────────────────────────────────────────────
+function VisBtn({ hidden, onClick, disabled, size = 'sm' }: { hidden: boolean; onClick: () => void; disabled?: boolean; size?: 'sm' | 'xs' }) {
+  return (
+    <Button variant={hidden ? 'default' : 'outline'} size="sm" disabled={disabled} onClick={onClick}
+      className={cn('shrink-0', size === 'xs' && 'h-7 px-2 text-xs')}>
+      {hidden ? <><Eye className="size-3.5" /> แสดง</> : <><EyeOff className="size-3.5" /> ซ่อน</>}
+    </Button>
+  );
+}
+
+// Count how many of these hrefs are hidden (protected ones don't count — they can't be hidden).
+function hiddenStats(hrefs: string[], hidden: Set<string>) {
+  const toggleable = hrefs.filter((h) => !NAV_ALWAYS_VISIBLE.includes(h));
+  const off = toggleable.filter((h) => hidden.has(h)).length;
+  return { total: toggleable.length, off, allOff: toggleable.length > 0 && off === toggleable.length };
+}
+
+// ── Section A: Menu visibility — a collapsible tree mirroring the sidebar ─────────
+function MenuVisibility({
+  navDisabled, onToggle, pending, t,
+}: {
+  navDisabled: Set<string>;
+  onToggle: (hrefs: string[], enabled: boolean) => void;
+  pending: boolean;
+  t: (k: string) => string;
+}) {
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  // Mirror the sidebar's ERP/POS split so the tree lines up with what staff actually see. "All" merges both
+  // surfaces (with a per-group workspace chip); ERP/POS use the SAME filter the sidebar uses (navForWorkspace).
+  const [ws, setWs] = useState<'all' | Workspace>('all');
+  const wsGroups = ws === 'all' ? INTERNAL_NAV : navForWorkspace(INTERNAL_NAV, ws);
+  const wsChip = (g: NavGroup) => (!g.workspace || g.workspace.length === 2 ? 'ทั้งสอง' : g.workspace[0] === 'pos' ? 'POS' : 'ERP');
+
+  const renderItem = (it: NavItem) => {
+    const protectedItem = NAV_ALWAYS_VISIBLE.includes(it.href);
+    const hidden = navDisabled.has(it.href);
+    return (
+      <div key={it.href} className={cn('flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent/50', hidden && 'opacity-60')}>
+        <it.icon className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{t(it.label)}</div>
+          <code className="text-[11px] text-muted-foreground">{it.href}</code>
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          {(it.perms ?? []).slice(0, 3).map((p) => (
+            <code key={p} className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{p}</code>
+          ))}
+        </div>
+        {protectedItem ? (
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><Lock className="size-3.5" /> ล็อก</span>
+        ) : (
+          <VisBtn hidden={hidden} disabled={pending} size="xs" onClick={() => onToggle([it.href], hidden)} />
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <Card className="gap-0 p-0">
+      <div className="flex flex-wrap items-center gap-2 border-b p-4">
+        <ListTree className="size-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base font-semibold">จัดการเมนู (แสดง/ซ่อน)</h3>
+          <p className="text-sm text-muted-foreground">เลือกซ่อนได้ทั้งหมวด หมวดย่อย หรือเมนูรายตัว — แยกตาม ERP/POS ให้ตรงกับแถบเมนูด้านซ้าย</p>
+        </div>
+        <div className="flex shrink-0 gap-0.5 rounded-md bg-muted p-0.5 text-xs">
+          {([['all', 'ทั้งหมด'], ['erp', 'ERP'], ['pos', 'POS']] as const).map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setWs(id)}
+              className={cn('rounded px-2.5 py-1 font-medium transition-colors', ws === id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="divide-y">
+        {wsGroups.map((g: NavGroup) => {
+          const allHrefs = allGroupItems(g).map((i) => i.href);
+          const st = hiddenStats(allHrefs, navDisabled);
+          const isOpen = open[g.title] ?? false;
+          return (
+            <div key={g.title}>
+              <div className="flex items-center gap-2 px-3 py-2">
+                <button type="button" onClick={() => setOpen((o) => ({ ...o, [g.title]: !isOpen }))}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+                  {isOpen ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+                  <span className="truncate text-sm font-semibold">{t(g.title)}</span>
+                  {ws === 'all' && (
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{wsChip(g)}</span>
+                  )}
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {st.off > 0 ? `ซ่อน ${st.off}/${st.total}` : `${st.total} เมนู`}
+                  </span>
+                </button>
+                {st.total > 0 && (
+                  <VisBtn hidden={st.allOff} disabled={pending}
+                    onClick={() => onToggle(allHrefs.filter((h) => !NAV_ALWAYS_VISIBLE.includes(h)), st.allOff)} />
+                )}
+              </div>
+              {isOpen && (
+                <div className="space-y-0.5 px-3 pb-3">
+                  {g.items?.map(renderItem)}
+                  {g.subgroups?.map((sub) => {
+                    const subHrefs = sub.items.map((i) => i.href);
+                    const subSt = hiddenStats(subHrefs, navDisabled);
+                    return (
+                      <div key={sub.title} className="mt-1 rounded-md border border-dashed border-border/70 p-1.5">
+                        <div className="flex items-center gap-2 px-1 pb-1">
+                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-muted-foreground">{t(sub.title)}</span>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">{subSt.off > 0 ? `ซ่อน ${subSt.off}/${subSt.total}` : `${subSt.total} เมนู`}</span>
+                          <VisBtn hidden={subSt.allOff} disabled={pending} size="xs"
+                            onClick={() => onToggle(subHrefs.filter((h) => !NAV_ALWAYS_VISIBLE.includes(h)), subSt.allOff)} />
+                        </div>
+                        {sub.items.map(renderItem)}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+// ── Section B: System modules — permission feature-flags, grouped + named + cross-referenced ─────────
+function SystemModules({
+  mods, onToggle, pending, lang, t,
+}: {
+  mods: ModuleFlag[];
+  onToggle: (keys: string[], enabled: boolean) => void;
+  pending: boolean;
+  lang: any;
+  t: (k: string) => string;
+}) {
+  const byCat = useMemo(() => {
+    const m = new Map<string, ModuleFlag[]>();
+    for (const mod of mods) {
+      const c = moduleCategoryKey(mod.key);
+      (m.get(c) ?? m.set(c, []).get(c)!).push(mod);
+    }
+    return m;
+  }, [mods]);
+
+  return (
+    <Card className="gap-0 p-0">
+      <div className="flex items-center gap-2 border-b p-4">
+        <ToggleLeft className="size-4 text-primary" />
+        <div>
+          <h3 className="text-base font-semibold">โมดูลระบบ (สิทธิ์การใช้งาน)</h3>
+          <p className="text-sm text-muted-foreground">ปิดโมดูลจะปิดกั้นการเข้าถึงที่ API ด้วย — คอลัมน์ “คุมเมนู” แสดงว่าโมดูลนี้ควบคุมเมนูใดบ้าง</p>
+        </div>
+      </div>
+      <div className="divide-y">
+        {MODULE_CATEGORIES.map((cat) => {
+          const rows = byCat.get(cat.key) ?? [];
+          if (rows.length === 0) return null;
+          const toggleable = rows.filter((r) => !r.always_on);
+          const anyOn = toggleable.some((r) => r.enabled);
+          const offCount = rows.filter((r) => !r.enabled).length;
+          return (
+            <div key={cat.key} className="p-3">
+              <div className="mb-1.5 flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">{categoryLabel(cat.key, lang)}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{offCount > 0 ? `ปิด ${offCount}/${rows.length}` : `${rows.length} โมดูล`}</span>
+                {toggleable.length > 0 && (
+                  <Button variant={anyOn ? 'destructive' : 'default'} size="sm" disabled={pending} className="h-7 px-2 text-xs"
+                    onClick={() => onToggle(toggleable.map((r) => r.key), !anyOn)}>
+                    <Power className="size-3.5" /> {anyOn ? 'ปิดทั้งหมวด' : 'เปิดทั้งหมวด'}
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-0.5">
+                {rows.map((r) => {
+                  const menus = menusForPerm(r.key);
+                  return (
+                    <div key={r.key} className={cn('flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/50', !r.enabled && 'opacity-60')}>
+                      <div className="min-w-0 flex-1 basis-40">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-medium">{moduleLabel(r.key, lang)}</span>
+                          <code className="shrink-0 text-[11px] text-muted-foreground">{r.key}</code>
+                        </div>
+                        {menus.length > 0 && (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                            <span className="text-[11px] text-muted-foreground">คุมเมนู:</span>
+                            {menus.slice(0, 5).map((mn) => (
+                              <span key={mn.href} className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{t(mn.label)}</span>
+                            ))}
+                            {menus.length > 5 && <span className="text-[10px] text-muted-foreground">+{menus.length - 5}</span>}
+                          </div>
+                        )}
+                      </div>
+                      <Badge variant={statusVariant(r.enabled ? 'Open' : 'Cancelled')} className="shrink-0">{r.enabled ? 'เปิดอยู่' : 'ปิดอยู่'}</Badge>
+                      {r.always_on ? (
+                        <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><Lock className="size-3.5" /> always-on</span>
+                      ) : (
+                        <Button variant={r.enabled ? 'destructive' : 'default'} size="sm" disabled={pending} className="h-7 shrink-0 px-2 text-xs"
+                          onClick={() => onToggle([r.key], !r.enabled)}>
+                          <Power className="size-3.5" /> {r.enabled ? 'ปิด' : 'เปิด'}
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 

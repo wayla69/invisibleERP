@@ -97,6 +97,29 @@ async function main() {
   ok("'users' module cannot be disabled", lockUsers.json?.note === 'always_on');
   ok('admin/modules still reachable (users always on)', (await inj('GET', '/api/admin/modules', token)).status === 200);
 
+  // ── 1b. MENU VISIBILITY (nav:<href> overrides — chrome only, distinct from module flags) ──
+  const hideNav = await inj('POST', '/api/admin/modules/nav', token, { hrefs: ['/reservations'], enabled: false });
+  ok('POST hide menu /reservations → updated 1', (hideNav.status === 200 || hideNav.status === 201) && hideNav.json.updated === 1, `status=${hideNav.status} updated=${hideNav.json?.updated}`);
+
+  const modsAfterHide = await inj('GET', '/api/admin/modules', token);
+  ok('admin/modules navDisabled includes /reservations', Array.isArray(modsAfterHide.json.navDisabled) && modsAfterHide.json.navDisabled.includes('/reservations'), `navDisabled=${JSON.stringify(modsAfterHide.json.navDisabled)}`);
+
+  const effHide = await inj('GET', '/api/modules/effective', token);
+  ok('effective navDisabled includes /reservations (nav hides for all)', Array.isArray(effHide.json.navDisabled) && effHide.json.navDisabled.includes('/reservations'));
+
+  // Hiding a menu is visibility only — a nav:<href> row must NOT enter the permission guard's disabled set,
+  // so gated APIs keep working (contrast with a disabled module, asserted above to return 403).
+  const apiStillOk = await inj('GET', '/api/marketing/campaigns', token);
+  ok('hidden menu does NOT block APIs (visibility ≠ permission)', apiStillOk.status === 200, `status=${apiStillOk.status}`);
+
+  const lockNav = await inj('POST', '/api/admin/modules/nav', token, { hrefs: ['/settings', '/admin/users'], enabled: false });
+  ok('lockout-critical menus cannot be hidden', lockNav.json?.updated === 0 && lockNav.json?.skipped === 2, `updated=${lockNav.json?.updated} skipped=${lockNav.json?.skipped}`);
+
+  const showNav = await inj('POST', '/api/admin/modules/nav', token, { hrefs: ['/reservations'], enabled: true });
+  ok('re-show menu /reservations', (showNav.status === 200 || showNav.status === 201) && showNav.json.updated === 1);
+  const effShow = await inj('GET', '/api/modules/effective', token);
+  ok('effective navDisabled cleared after re-show', !((effShow.json.navDisabled ?? []).includes('/reservations')));
+
   // ── 2. MASTER-DATA IMPORT/EXPORT ────────────────────────────────────────
   const ents = await inj('GET', '/api/admin/master-data/entities', token);
   const keys = (ents.json.entities ?? []).map((e: any) => e.key);
