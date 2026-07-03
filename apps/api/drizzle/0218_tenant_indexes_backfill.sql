@@ -208,6 +208,9 @@ CREATE INDEX IF NOT EXISTS "idx_table_sessions_tenant" ON "table_sessions" (tena
 CREATE INDEX IF NOT EXISTS "idx_tax_invoice_lines_tenant" ON "tax_invoice_lines" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_till_sessions_tenant" ON "till_sessions" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_time_clock_tenant" ON "time_clock" (tenant_id);
+-- Restored (was briefly deleted by the hotfix PR #353 while the real fix — the 0145/0146 backfill above —
+-- was in flight): the table is tenant-scoped and the tenant-idx harness fails on ANY uncovered table.
+CREATE INDEX IF NOT EXISTS "idx_tip_distribution_lines_tenant" ON "tip_distribution_lines" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_users_tenant" ON "users" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_whistleblower_cases_tenant" ON "whistleblower_cases" (tenant_id);
 CREATE INDEX IF NOT EXISTS "idx_wht_cert_lines_tenant" ON "wht_cert_lines" (tenant_id);

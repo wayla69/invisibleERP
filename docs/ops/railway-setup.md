@@ -50,8 +50,12 @@ the web origin via `CORS_ORIGINS`.
    If neither a service nor Chromium is available the API returns the document as **HTML** (graceful
    fallback) rather than failing.
 3. **Settings → Networking → Generate Domain.** Note the api URL (e.g. `https://api-xxxx.up.railway.app`).
-   Migrations run automatically on each deploy via the railway.json `preDeployCommand` (`db:migrate`).
+   Migrations + the permission-catalog sync run automatically on each deploy via the railway.json
+   `preDeployCommand` (`db:migrate && db:sync-catalog`).
    Health checks hit `/` (also `/healthz` liveness, `/readyz` DB-readiness).
+   **First boot only:** the full seed (HQ tenant + initial `admin`) is deliberate and gated (docs/27
+   R0-3) — run it once against the new environment with `ALLOW_PROD_SEED=1` and `SEED_ADMIN_PASSWORD`
+   set (e.g. a one-off `railway ssh`/run), then remove those variables. It never runs per deploy.
 
 ## 3. The `web` service
 1. Add a second service from the **same** repo. **Settings → Build:**
