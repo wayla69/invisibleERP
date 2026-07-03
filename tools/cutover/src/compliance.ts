@@ -963,6 +963,37 @@ async function main() {
     restcAll.source === 'canonical' && restcAll.accounts?.some((a: any) => a.code === '4300') && restcAll.count > restcAcc.count,
     `all=${restcAll.count} overlay=${restcAcc.count}`);
 
+  // ════════════════════════ GL-11 — per-tenant Chart-of-Accounts CURATION (overlay write) ════════════════════════
+  // A gl_coa holder renames / re-groups / re-orders / toggles-active on their OWN tenant chart (the overlay,
+  // `PATCH /api/ledger/accounts/:code/overlay`), never the canonical master universe. Minting or recoding a
+  // master code is platform-admin (HQ) only → COA_ADMIN_ONLY. Curation is presentation-only: the ?all=true
+  // canonical universe and postings are unaffected. RLS pins the write to the caller's tenant.
+  const covCode = restcAcc.accounts?.find((a: any) => a.code !== '4000')?.code as string;
+  const covRename = await inj('PATCH', '/api/ledger/accounts/4000/overlay', restcTok, { display_name_th: 'รายได้ อาหารและเครื่องดื่ม', group_label: 'รายได้จากการขาย' });
+  const covAfter = (await inj('GET', '/api/ledger/accounts', restcTok)).json.accounts?.find((a: any) => a.code === '4000');
+  ok('GL-11: gl_coa curates the tenant overlay — rename (TH) + group label persist on the tenant chart',
+    covRename.status === 200 && covAfter?.name_th === 'รายได้ อาหารและเครื่องดื่ม' && covAfter?.group_label === 'รายได้จากการขาย',
+    `st=${covRename.status} th=${covAfter?.name_th} grp=${covAfter?.group_label}`);
+  // Toggle active off → hidden from the default read; still listed under include_inactive=true (re-activatable).
+  await inj('PATCH', `/api/ledger/accounts/${covCode}/overlay`, restcTok, { active: false });
+  const covHidden = (await inj('GET', '/api/ledger/accounts', restcTok)).json;
+  const covMgmt = (await inj('GET', '/api/ledger/accounts?include_inactive=true', restcTok)).json;
+  ok('GL-11: toggle active=false hides the account from the default chart but include_inactive=true still lists it (re-activatable)',
+    !covHidden.accounts?.some((a: any) => a.code === covCode) && covMgmt.accounts?.some((a: any) => a.code === covCode && a.active === false),
+    `code=${covCode} hidden=${!covHidden.accounts?.some((a: any) => a.code === covCode)}`);
+  await inj('PATCH', `/api/ledger/accounts/${covCode}/overlay`, restcTok, { active: true });
+  const covOn = (await inj('GET', '/api/ledger/accounts', restcTok)).json;
+  ok('GL-11: re-activating (active=true) restores the account to the default chart',
+    covOn.accounts?.some((a: any) => a.code === covCode), `code=${covCode}`);
+  // The overlay cannot mint a master code — curating a code not in the canonical universe is HQ-only.
+  const covMaster = await inj('PATCH', '/api/ledger/accounts/9999/overlay', restcTok, { display_name: 'Ghost account' });
+  ok('GL-11: overlay cannot create a master code — curating a non-canonical code → 403 COA_ADMIN_ONLY (HQ-only)',
+    covMaster.status === 403 && covMaster.json?.error?.code === 'COA_ADMIN_ONLY', `st=${covMaster.status}/${covMaster.json?.error?.code}`);
+  // Curation requires the gl_coa duty — a GlAccountant (gl_post preparer, no gl_coa) is denied.
+  const covPerm = await inj('PATCH', '/api/ledger/accounts/4000/overlay', glacct, { display_name: 'unauthorized' });
+  ok('GL-11: chart curation requires gl_coa — a GlAccountant (gl_post only) is denied → 403 FORBIDDEN (SoD: post ≠ curate)',
+    covPerm.status === 403 && covPerm.json?.error?.code === 'FORBIDDEN', `st=${covPerm.status}/${covPerm.json?.error?.code}`);
+
   // ════════════════════════ EXP-01/EXP-09 — 3-way match HARD-GATES AP payment (PO↔GR↔Invoice) ════════════════════════
   // (The PwC panel referenced this as "EXP-03"; in the RCM the 3-way-match gate is EXP-01 and the AP-pay-
   //  consults-match control is EXP-09 — RCM EXP-03 is a different control, PR/PO authorization. See

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, ClipboardPaste, Plus, Save, Scale, ShieldCheck, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, ClipboardPaste, Info, Pencil, Plus, Power, Save, Scale, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -10,11 +10,13 @@ import { useMe, hasPerm } from '@/lib/auth';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
+import { FormField } from '@/components/form-field';
 import { StateView } from '@/components/state-view';
 import { Tabs } from '@/components/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { statusVariant } from '@/components/ui';
@@ -57,13 +59,99 @@ export default function AccountingWorkspace({ initialTb }: { initialTb?: unknown
 // ───────────────────────── ผังบัญชี (Chart of Accounts) ─────────────────────────
 // Shows the tenant's industry-curated chart by default; the toggle reveals the full canonical universe
 // (?all=true) for unusual postings. Account names follow the industry template set at company creation.
-type CoaAccount = Account & { name_th?: string | null; group_label?: string | null };
+//
+// GL-11 curation (a `gl_coa` holder only): rename (EN/TH), set group label, toggle active, and re-order —
+// each PATCHes the per-tenant overlay (`/api/ledger/accounts/:code/overlay`) and refetches the ['coa']
+// query. This edits ONLY the presentation overlay, never the canonical master universe: creating or
+// recoding a master account is HQ-only (`COA_ADMIN_ONLY`), surfaced as a hint + a tailored toast. Curation
+// applies to the industry-scoped chart only (`source === 'overlay'`); the "all accounts" view is read-only.
+type CoaAccount = Account & { name_th?: string | null; group_label?: string | null; active?: boolean; sort_order?: number };
 function ChartOfAccounts() {
+  const me = useMe();
+  const qc = useQueryClient();
+  const canEdit = hasPerm(me.data, 'gl_coa');
   const [showAll, setShowAll] = useState(false);
+  // A gl_coa manager also loads curated-off rows so they can be re-activated; everyone else gets the
+  // default active-only presentation.
+  const params = showAll ? '?all=true' : canEdit ? '?include_inactive=true' : '';
   const q = useQuery<{ accounts: CoaAccount[]; count: number; source?: string; industry_scoped?: boolean }>({
-    queryKey: ['coa', showAll],
-    queryFn: () => api(`/api/ledger/accounts${showAll ? '?all=true' : ''}`),
+    queryKey: ['coa', showAll, canEdit],
+    queryFn: () => api(`/api/ledger/accounts${params}`),
   });
+  const rows = q.data?.accounts ?? [];
+  const editable = canEdit && !showAll && q.data?.source === 'overlay';
+
+  const [edit, setEdit] = useState<CoaAccount | null>(null);
+  const [busy, setBusy] = useState<string | null>(null); // code currently mutating → disables its row controls
+
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['coa'] }); qc.invalidateQueries({ queryKey: ['accounts'] }); };
+  // Map the backend's machine code to a friendly toast; COA_ADMIN_ONLY = a master-code change was attempted.
+  const onErr = (e: any) =>
+    e?.code === 'COA_ADMIN_ONLY'
+      ? notifyError('การเปลี่ยนรหัสบัญชีหลักทำได้เฉพาะผู้ดูแลระบบ (HQ)', 'ระดับบริษัทปรับได้เฉพาะชื่อ/กลุ่ม/การแสดงผล — การสร้างหรือแก้รหัสบัญชีหลักเป็นสิทธิ์ของ HQ')
+      : notifyError(e?.message ?? 'เกิดข้อผิดพลาด');
+
+  const patchOverlay = (code: string, body: Record<string, unknown>) =>
+    api(`/api/ledger/accounts/${code}/overlay`, { method: 'PATCH', body: JSON.stringify(body) });
+
+  const toggleActive = async (a: CoaAccount) => {
+    const next = !(a.active !== false);
+    setBusy(a.code);
+    try { await patchOverlay(a.code, { active: next }); notifySuccess(next ? `เปิดใช้งานบัญชี ${a.code}` : `ปิดการใช้งานบัญชี ${a.code}`); refresh(); }
+    catch (e) { onErr(e); }
+    finally { setBusy(null); }
+  };
+
+  // Re-order by swapping this row's sort_order with its neighbour (each a PATCH). Rows arrive pre-sorted by
+  // sort_order, so the two writes are enough; equal orders (rare) nudge past the neighbour.
+  const move = async (a: CoaAccount, dir: 'up' | 'down') => {
+    const i = rows.findIndex((r) => r.code === a.code);
+    const j = dir === 'up' ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= rows.length) return;
+    const b = rows[j];
+    const aOrder = a.sort_order ?? 0, bOrder = b.sort_order ?? 0;
+    const newA = aOrder === bOrder ? (dir === 'up' ? bOrder - 1 : bOrder + 1) : bOrder;
+    setBusy(a.code);
+    try { await Promise.all([patchOverlay(a.code, { sort_order: newA }), patchOverlay(b.code, { sort_order: aOrder })]); refresh(); }
+    catch (e) { onErr(e); }
+    finally { setBusy(null); }
+  };
+
+  const columns = [
+    { key: 'code', label: 'รหัส', sortable: !editable },
+    {
+      key: 'name', label: 'ชื่อบัญชี', sortable: !editable,
+      render: (r: CoaAccount) => (
+        <span className="inline-flex items-center gap-2">
+          <span className={r.active === false ? 'text-muted-foreground line-through' : ''}>{r.name}</span>
+          {r.active === false && <Badge variant="secondary">ปิดใช้งาน</Badge>}
+        </span>
+      ),
+    },
+    { key: 'name_th', label: 'ชื่อ (ไทย)', sortable: !editable, render: (r: CoaAccount) => r.name_th || <span className="text-muted-foreground">—</span> },
+    { key: 'group_label', label: 'กลุ่ม', sortable: !editable, render: (r: CoaAccount) => r.group_label || <span className="text-muted-foreground">—</span> },
+    { key: 'type', label: 'ประเภท', sortable: !editable },
+    ...(editable
+      ? [{
+          key: 'actions', label: '', sortable: false, align: 'right' as const,
+          render: (r: CoaAccount) => {
+            const i = rows.findIndex((x) => x.code === r.code);
+            const rowBusy = busy === r.code;
+            return (
+              <div className="flex items-center justify-end gap-0.5">
+                <Button variant="ghost" size="icon" title="เลื่อนขึ้น" disabled={rowBusy || i <= 0} onClick={() => move(r, 'up')}><ChevronUp className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title="เลื่อนลง" disabled={rowBusy || i >= rows.length - 1} onClick={() => move(r, 'down')}><ChevronDown className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title="แก้ไขชื่อ/กลุ่ม" disabled={rowBusy} onClick={() => setEdit(r)}><Pencil className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title={r.active === false ? 'เปิดใช้งาน' : 'ปิดการใช้งาน'} disabled={rowBusy} onClick={() => toggleActive(r)}>
+                  <Power className={`size-4 ${r.active === false ? 'text-muted-foreground' : 'text-emerald-600'}`} />
+                </Button>
+              </div>
+            );
+          },
+        }]
+      : []),
+  ];
+
   return (
     <StateView q={q}>
       {q.data && (
@@ -81,19 +169,72 @@ function ChartOfAccounts() {
               {showAll ? 'แสดงเฉพาะบัญชีของธุรกิจ' : 'แสดงบัญชีทั้งหมด'}
             </Button>
           </div>
+          {editable && (
+            <Card className="flex-row flex-wrap items-center gap-2 p-3 text-sm text-muted-foreground">
+              <Info className="size-4 shrink-0" />
+              <span>
+                จัดผังบัญชีของบริษัท: เปลี่ยนชื่อ (อังกฤษ/ไทย) · ตั้งกลุ่ม · เปิด/ปิดการใช้งาน · จัดลำดับ —
+                ทั้งหมดปรับที่ <strong>การแสดงผลระดับบริษัท</strong> ไม่กระทบการลงบัญชี. การสร้างหรือแก้ <strong>รหัสบัญชีหลัก</strong> เป็นสิทธิ์ของผู้ดูแลระบบ (HQ).
+              </span>
+            </Card>
+          )}
           <DataTable
-            rows={q.data.accounts}
+            rows={rows}
+            pageSize={editable ? 0 : 50}
+            rowKey={(r: CoaAccount) => r.code}
             emptyState={{ icon: Scale, title: 'ยังไม่มีผังบัญชี', description: 'ผังบัญชีจะถูกตั้งค่าตามประเภทธุรกิจที่เลือกตอนเปิดบริษัท' }}
-            columns={[
-              { key: 'code', label: 'รหัส' },
-              { key: 'name', label: 'ชื่อบัญชี' },
-              { key: 'name_th', label: 'ชื่อ (ไทย)', render: (r: CoaAccount) => r.name_th || <span className="text-muted-foreground">—</span> },
-              { key: 'type', label: 'ประเภท' },
-            ]}
+            columns={columns}
           />
         </div>
       )}
+      {edit && <EditAccountDialog account={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); refresh(); }} onError={onErr} />}
     </StateView>
+  );
+}
+
+// GL-11 rename/re-group dialog — writes display_name (EN), display_name_th (TH), and group_label to the
+// per-tenant overlay for one account. Clearing a field resets it to the canonical default.
+function EditAccountDialog({ account, onClose, onSaved, onError }: {
+  account: CoaAccount; onClose: () => void; onSaved: () => void; onError: (e: unknown) => void;
+}) {
+  const [nameEn, setNameEn] = useState(account.name ?? '');
+  const [nameTh, setNameTh] = useState(account.name_th ?? '');
+  const [group, setGroup] = useState(account.group_label ?? '');
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/api/ledger/accounts/${account.code}/overlay`, {
+        method: 'PATCH',
+        body: JSON.stringify({ display_name: nameEn, display_name_th: nameTh, group_label: group }),
+      }),
+    onSuccess: () => { notifySuccess(`บันทึกบัญชี ${account.code} แล้ว`); onSaved(); },
+    onError,
+  });
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>แก้ไขบัญชี {account.code}</DialogTitle>
+          <DialogDescription>ปรับการแสดงผลของบัญชีในผังบัญชีบริษัท — ไม่กระทบรหัสบัญชีหลักหรือการลงบัญชี</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <FormField label="ชื่อบัญชี (อังกฤษ)" htmlFor="coa-name-en" hint="เว้นว่างเพื่อใช้ชื่อมาตรฐาน">
+            <Input id="coa-name-en" value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
+          </FormField>
+          <FormField label="ชื่อบัญชี (ไทย)" htmlFor="coa-name-th">
+            <Input id="coa-name-th" value={nameTh} onChange={(e) => setNameTh(e.target.value)} />
+          </FormField>
+          <FormField label="กลุ่ม (หัวข้อในผัง)" htmlFor="coa-group" hint="เว้นว่างเพื่อใช้ประเภทบัญชีเป็นกลุ่ม">
+            <Input id="coa-group" value={group} onChange={(e) => setGroup(e.target.value)} />
+          </FormField>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={save.isPending}>ยกเลิก</Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+            <Save className="size-4" /> {save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

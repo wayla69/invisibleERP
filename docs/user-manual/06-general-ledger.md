@@ -1,6 +1,6 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.3 · 2026-06-28**
+**Status: DRAFT v0.4 · 2026-07-03**
 
 This chapter is for **accountants** — *GlAccountant*, *FinancialController* and
 *Admin*. It covers the chart of accounts, manual journal entries with
@@ -56,6 +56,29 @@ account count. Each journal-entry account picker uses this same curated list.
 > Any account that has activity always appears on your reports even if it's hidden from the
 > picker. You can switch or extend your industry chart later from **Onboarding → Industry
 > packs**.
+
+### Managing the chart
+
+**Screen:** บัญชีแยกประเภท (`/accounting`) → **ผังบัญชี** tab. **Required permission:** `gl_coa`
+(held by *FinancialController* and *Admin*; a *GlAccountant*, who only posts journals, does **not**
+have it — this keeps posting separate from re-classifying the chart).
+
+If you hold `gl_coa`, the **ผังบัญชี** tab shows editing controls on your industry chart. These
+tune only **how each account is presented on your company's chart** — they never change the
+underlying master code or affect any posting. A blue note on the tab reminds you of this. Each
+change saves immediately and the list refreshes.
+
+| Action | How | Effect |
+|---|---|---|
+| **Rename (EN / TH)** | Click the **pencil** on a row → edit **ชื่อบัญชี (อังกฤษ)** and/or **ชื่อบัญชี (ไทย)** → **บันทึก**. Leave a field blank to fall back to the standard name. | The account's display name on your chart and in every account picker. |
+| **Set group** | In the same dialog, set **กลุ่ม (หัวข้อในผัง)**. Blank = use the account type as the group. | The section heading the account is grouped under. |
+| **Turn on / off** | Click the **power** icon. | Off = hidden from the default chart and pickers (it still shows here, struck through with a *ปิดใช้งาน* badge, so you can turn it back on). An account with activity always stays on your reports. |
+| **Re-order** | Use the **↑ / ↓** arrows on a row. | Moves the account up or down within the chart order. |
+
+> **Master-code changes are HQ-only.** Creating a brand-new account code, or changing/removing a
+> master code, is a **platform-administrator (HQ)** operation — not offered here. If you try to
+> curate a code that isn't in the master chart you'll see *"การเปลี่ยนรหัสบัญชีหลักทำได้เฉพาะผู้ดูแลระบบ (HQ)"*.
+> Company-level curation covers names, grouping, ordering and on/off only.
 
 ---
 
