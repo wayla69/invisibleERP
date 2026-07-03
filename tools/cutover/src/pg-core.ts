@@ -1,7 +1,8 @@
 /**
  * Real-Postgres core harness (operational maturity — Step 3). Boots the ACTUAL Nest app over the swappable
- * harness DB and drives a representative cross-section through HTTP: auth, RLS tenant isolation, the async
- * job round-trip, audit-log immutability, and the ops-metrics endpoint. With HARNESS_PG_URL set (CI
+ * harness DB and drives a representative cross-section through HTTP: auth, RLS tenant isolation (both the
+ * single-company global-HQ bypass AND the multi-company org-scoped Admin path — ITGC-AC-18 / migration
+ * 0196), the async job round-trip, audit-log immutability, and the ops-metrics endpoint. With HARNESS_PG_URL set (CI
  * pg-core job) it runs on REAL Postgres — so FORCE ROW LEVEL SECURITY under app_user, postgres-js
  * date/numeric handling, and the append-only audit trigger are exercised for real, not on PGlite. Without
  * the env it runs on PGlite (local), so it's part of the normal suite too.
@@ -98,6 +99,67 @@ async function main() {
   // NB: audit_log append-only immutability on real Postgres is covered by the `pg-smoke` job (a raw,
   // autocommit DELETE → P0001). It is intentionally NOT re-tested here: a failing query inside a
   // postgres-js transaction poisons that transaction, so it can't be caught-and-continued mid-tx.
+
+  // 5. Multi-company org-scoped Admin isolation (ITGC-AC-18 / hybrid org-tenancy, migration 0196). The
+  //    TenantTxInterceptor reads process.env.TENANCY_MODE per-request, so we flip it live (no reboot) and
+  //    prove the two guarantees a self-service-signup SaaS needs: (a) an Admin is scoped to its OWN org's
+  //    tenants — it sees a sibling tenant sharing its org_id but NOT other companies; and (b) a fresh
+  //    signup (org_id=NULL) sees ONLY its own tenant. A distinct jobType keeps the single-company cohort
+  //    above from skewing the counts. Seeded via a bypass context (FORCE-RLS rejects a bare insert).
+  let mA1 = 0, mA2 = 0, mB = 0, mC = 0;
+  await runInTenantContext(db, { tenantId: null, bypass: true, actor: 'seed' }, async () => {
+    await db.insert(s.tenants).values([
+      { code: 'ORG1HQ', name: 'กลุ่มหนึ่ง สนญ.', orgId: 1 },
+      { code: 'ORG1BR', name: 'กลุ่มหนึ่ง สาขา', orgId: 1 },
+      { code: 'ORG2CO', name: 'บริษัทสอง', orgId: 2 },
+      { code: 'NEWCO', name: 'สมัครใหม่ (org ว่าง)', orgId: null },
+    ]).onConflictDoNothing();
+    const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
+    mA1 = await tid('ORG1HQ'); mA2 = await tid('ORG1BR'); mB = await tid('ORG2CO'); mC = await tid('NEWCO');
+    await db.insert(s.users).values([
+      { username: 'org1admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: mA1, orgId: 1 },
+      { username: 'org2admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: mB, orgId: 2 },
+      { username: 'newcoadmin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: mC, orgId: null },
+    ]).onConflictDoNothing();
+    await db.insert(s.backgroundJobs).values([
+      { tenantId: mA1, jobType: 'mc_seed', status: 'done', payload: {} },
+      { tenantId: mA2, jobType: 'mc_seed', status: 'done', payload: {} },
+      { tenantId: mB, jobType: 'mc_seed', status: 'done', payload: {} },
+      { tenantId: mC, jobType: 'mc_seed', status: 'done', payload: {} },
+    ]);
+  });
+
+  process.env.TENANCY_MODE = 'multi-company'; // flip live — the interceptor reads it per request
+  const mcTok = async (u: string) => (await inj('POST', '/api/login', undefined, { username: u, password: 'admin123' })).json.token;
+  const mcCnt = async (tok: string) => (await inj('GET', '/api/jobs?type=mc_seed', tok)).json.count;
+  const org1Tok = await mcTok('org1admin');
+  const org1 = await mcCnt(org1Tok);
+  const org2 = await mcCnt(await mcTok('org2admin'));
+  const newco = await mcCnt(await mcTok('newcoadmin'));
+
+  // The two guarantees a self-service-signup SaaS needs — and BOTH hold on PGlite AND real Postgres, since
+  // they rely only on the tenant_id clause of the RLS policy (present on every tenant table since 0002):
+  ok('multi-company: fresh-signup Admin (org_id=NULL) sees ONLY its own tenant (1) — the reported case', newco === 1, `newco=${newco}`);
+  ok('multi-company: a single-tenant company Admin sees only its own company (1)', org2 === 1, `org2=${org2}`);
+
+  // Contrast — flip BACK to single-company: the SAME Admin now sees ALL 4 companies (global HQ bypass). The
+  // exact behaviour the TENANCY_MODE fix changes, asserted in both directions; holds on both backends.
+  process.env.TENANCY_MODE = 'single-company';
+  const org1Single = await mcCnt(org1Tok);
+  ok('single-company (contrast): the SAME Admin sees ALL companies — the risky global-bypass default multi-company fixes', org1Single === 4, `org1Single=${org1Single}`);
+  process.env.TENANCY_MODE = 'multi-company';
+
+  // Org-scoped SHARING (an Admin sees a SIBLING tenant sharing its org_id) exercises the per-tenant-table
+  // org clause that migration 0196 installs via a `DO $$ … EXECUTE format() … $$` loop over every tenant_id
+  // table. PGlite does NOT apply that dynamic loop (it runs 0196's DIRECT DDL, e.g. the `tenants`
+  // self-policy, but not the loop) — so this end-to-end share is asserted ONLY on real Postgres (the pg-core
+  // CI job); on PGlite it is logged as skipped. See docs/ops/tenancy-model.md §PGlite-fidelity.
+  if (kind === 'pg') {
+    ok('multi-company: org Admin ALSO sees its org sibling tenant (2 of 4) — org-scoped share [real-PG]', org1 === 2, `org1=${org1}`);
+  } else {
+    console.log(`  ⏭  multi-company org-scoped SHARE (org sibling visibility) — skipped on PGlite: 0196's per-table org-clause DO-loop is not applied by PGlite; verified on the real-Postgres pg-core CI job (observed org1=${org1})`);
+  }
+  delete process.env.TENANCY_MODE; // restore harness default
 
   await app.close();
   await cleanup();

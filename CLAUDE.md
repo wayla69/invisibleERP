@@ -62,6 +62,15 @@ For every such change, review and update as needed:
 - **GL-05:** a manual JE via `POST /api/ledger/journal` posts as **Draft** and is excluded from balances
   until a *different* user approves it; `closeYear`/aggregations scope to the caller's tenant (HQ/Admin
   ⇒ pass an explicit `tenant_id`). These bit the `worldclass` year-end harness when its setup went stale.
+- **Tenancy / `TENANCY_MODE` (AC-18):** self-service `POST /api/auth/signup` mints a **new tenant + an
+  `Admin`** per signup, and the **default `single-company`** mode gives every Admin a **global RLS bypass**
+  (sees ALL tenants) — so any deploy where outsiders can sign up MUST set **`TENANCY_MODE=multi-company` on
+  every API service on that DB**. Per-company isolation (`org_id=NULL` ⇒ own tenant only) then holds; branches
+  are **intra-tenant** (`branches.tenant_id`) so a company is one tenant (no `org_id` backfill needed unless
+  several separate accounts must share). Gotcha: **PGlite does NOT apply migration 0196's per-tenant-table
+  org-clause `DO $$…EXECUTE…$$` loop** (it does run the *direct* DDL, e.g. the `tenants` self-policy), so
+  org-scoped **sharing** across tenants is only observable on **real Postgres** (`pg-smoke`/`pg-core` CI) —
+  `tenant_id` isolation works on both. Full model: `docs/ops/tenancy-model.md`.
 - **drizzle-orm is on `^0.45.2`** (bumped from 0.36.4 in W4, 2026-06-30 — the SQLi advisory is remediated).
   **0.45 wraps every driver error in a `DrizzleQueryError` with the original pg/PGlite error (SQLSTATE
   `code`/`constraint`/`detail`) nested under `.cause`** — so never read `e.code`/`e.constraint` directly on a
