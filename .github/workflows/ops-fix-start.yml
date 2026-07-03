@@ -1,0 +1,54 @@
+# Ops utility (manual dispatch): remove the db:seed step from the invisibleERP service's custom start
+# command on Railway. The 2026-07-03 outage postmortem found the boot chain runs migrate → seed → app,
+# and seed.ts fail-closes in production BY DESIGN (docs/27 R0-3: "seeding a production database is
+# opt-in only") — so every boot died after migrations were fixed. Prod has live data; the seed step
+# must not run at boot at all. Prints old/new commands, refuses to act if no db:seed segment is found.
+# Follow with a normal deploy (deploy.yml dispatch) to boot with the corrected command.
+name: Ops — remove db:seed from start command
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-start:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN is an environment secret (same binding as deploy.yml)
+    steps:
+      - name: Strip db:seed from invisibleERP start command
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, sys, urllib.request
+
+          def gq(query, variables=None):
+              body = json.dumps({"query": query, "variables": variables or {}}).encode()
+              req = urllib.request.Request(
+                  "https://backboard.railway.app/graphql/v2", data=body,
+                  headers={"Project-Access-Token": os.environ["RAILWAY_TOKEN"], "Content-Type": "application/json"})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  out = json.load(r)
+              if out.get("errors"):
+                  print("GraphQL errors:", json.dumps(out["errors"])); sys.exit(1)
+              return out["data"]
+
+          tok = gq("query{projectToken{projectId environmentId}}")["projectToken"]
+          pid, eid = tok["projectId"], tok["environmentId"]
+          svcs = gq("query($id:String!){project(id:$id){services{edges{node{id name}}}}}", {"id": pid})
+          sid = next(n["node"]["id"] for n in svcs["project"]["services"]["edges"] if n["node"]["name"] == "invisibleERP")
+          inst = gq("query($s:String!,$e:String!){serviceInstance(serviceId:$s,environmentId:$e){startCommand}}",
+                    {"s": sid, "e": eid})["serviceInstance"]
+          cur = inst.get("startCommand") or ""
+          print("current start command:", repr(cur))
+          if "db:seed" not in cur:
+              print("no db:seed segment found — nothing to change (maybe already fixed?)"); sys.exit(1)
+          parts = [p.strip() for p in cur.split("&&")]
+          kept = [p for p in parts if "db:seed" not in p]
+          new = " && ".join(kept)
+          print("new start command:    ", repr(new))
+          if not new:
+              print("refusing: stripped command is empty"); sys.exit(1)
+          gq("mutation($s:String!,$e:String!,$in:ServiceInstanceUpdateInput!){serviceInstanceUpdate(serviceId:$s,environmentId:$e,input:$in)}",
+             {"s": sid, "e": eid, "in": {"startCommand": new}})
+          print("start command updated ✅ — dispatch deploy.yml to boot with it")
+          PYEOF
