@@ -1,6 +1,6 @@
 # 06 · General Ledger
 
-**Status: DRAFT v0.3 · 2026-06-28**
+**Status: DRAFT v0.4 · 2026-07-03**
 
 This chapter is for **accountants** — *GlAccountant*, *FinancialController* and
 *Admin*. It covers the chart of accounts, manual journal entries with
@@ -56,6 +56,47 @@ account count. Each journal-entry account picker uses this same curated list.
 > Any account that has activity always appears on your reports even if it's hidden from the
 > picker. You can switch or extend your industry chart later from **Onboarding → Industry
 > packs**.
+
+### Managing the chart (GL-11)
+
+The chart has **two levels**, and who may change each level differs:
+
+**1 · Curate your own chart — permission `gl_coa` (e.g. *Financial Controller*).**
+You can tailor how the shared accounts appear *on your company's chart* — switch an
+account **on/off**, rename it (English + Thai), change its section heading, and reorder it —
+without affecting any other company. This is done per account via
+`PATCH /api/ledger/accounts/<code>/overlay` (any of `active`, `display_name`,
+`display_name_th`, `group_label`, `sort_order`). Your edits are **scoped to your company
+only** — you can never see or change another company's chart, and curating **never blocks a
+posting** (the account still exists in the engine). You may only curate an account **that
+already exists** in the master chart.
+
+**2 · Add or change a master account — permission `gl_coa` **and** the platform *Admin* (HQ) role.**
+The master account list (the *code · type · normal balance*) is a **single shared list** used
+by every company on the platform, so creating a brand-new code, renaming the master account,
+changing its postability, or retiring it is a **head-office (Admin/HQ)** action:
+
+| Action | Endpoint | Notes |
+|--------|----------|-------|
+| Create account | `POST /api/ledger/accounts` | Auto-sets normal balance (*C* for Liability/Equity/Revenue, *D* for Asset/Expense). |
+| Update account | `PATCH /api/ledger/accounts/<code>` | Name, group, postability, dimension requirements, effective dates. |
+| Deactivate account | `POST /api/ledger/accounts/<code>/deactivate` | Sets the account inactive + non-postable. |
+
+> **Why the split?** A *Financial Controller* shapes their own company's chart freely, but the
+> underlying master codes are shared — so **only the platform administrator** can add or alter
+> them. If you try a master change without the Admin/HQ role you'll get **`COA_ADMIN_ONLY`** —
+> use the curation options above (level 1) instead, or ask your platform administrator.
+
+**Common messages**
+
+| Message | Meaning | What to do |
+|---------|---------|-----------|
+| `COA_ADMIN_ONLY` | You tried a master-account change without the Admin/HQ role | Curate your own chart (level 1), or ask the platform admin |
+| `DUPLICATE_ACCOUNT` | The code already exists | Use a new code, or edit the existing account |
+| `ACCOUNT_HAS_BALANCE` | You tried to deactivate an account that still has a balance | Clear the balance with a correcting entry first |
+| `CODE_HAS_POSTINGS` | You tried to turn off postability on an account that already has entries | Leave it postable; use an *effective-to* date instead |
+| `ACCOUNT_NOT_FOUND` | You curated a code that isn't in the master chart | Use an existing code (a new code is an Admin/HQ add) |
+| `TENANT_REQUIRED` | Curation attempted without a company context | Sign in to the company whose chart you're curating |
 
 ---
 
