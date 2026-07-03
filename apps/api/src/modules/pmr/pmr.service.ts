@@ -60,19 +60,24 @@ export class PmrService {
       if (!l || Number(l.projectId) !== projectId) throw new BadRequestException({ code: 'BOQ_LINE_NOT_IN_PROJECT', message: `BoQ line ${id} is not on project ${dto.project_code}`, messageTh: 'รายการ BoQ ไม่ได้อยู่ในโครงการนี้' });
     }
     const committedByLine = await this.commitments.committedByLine(lineIds);
-    const remainingByLine = new Map<number, number>();
-    for (const id of lineIds) remainingByLine.set(id, r2(n(boqById.get(id).budgetAmount) - (committedByLine.get(id) ?? 0)));
+    const committedRun = new Map<number, number>(lineIds.map((id) => [id, committedByLine.get(id) ?? 0]));
+    // FU1 (docs/32) — a draw is "over budget" (needs approval) only if it exceeds the BoQ line's TOLERANCE
+    // ceiling (budget × (1 + project tolerance %)); a small overage within tolerance auto-proceeds.
+    const tolPct = Math.max(0, n(p.budgetTolerancePct));
 
-    // Evaluate each requested line against the remaining budget of its BoQ line.
+    // Evaluate each requested line against the remaining budget (+ tolerance headroom) of its BoQ line.
     let estTotal = 0, overAmount = 0, anyOver = false;
     const evaluated = dto.items.map((it) => {
       const est = r2(n(it.qty) * n(it.unit_cost));
-      const remaining = remainingByLine.get(Number(it.boq_line_id)) ?? 0;
-      const over = est > remaining + EPS;
-      const lineOver = over ? r2(est - Math.max(0, remaining)) : 0;
+      const id = Number(it.boq_line_id);
+      const budget = r2(n(boqById.get(id).budgetAmount));
+      const committed = committedRun.get(id) ?? 0;
+      const remaining = r2(budget - committed);                 // vs budget (reported on the line)
+      const headroom = r2(budget * (1 + tolPct / 100) - committed); // vs the tolerance ceiling
+      const over = est > headroom + EPS;
+      const lineOver = over ? r2(est - Math.max(0, headroom)) : 0;
       estTotal = r2(estTotal + est); overAmount = r2(overAmount + lineOver); anyOver = anyOver || over;
-      // reduce the running remaining so two lines against the SAME BoQ line are evaluated cumulatively
-      remainingByLine.set(Number(it.boq_line_id), r2(remaining - est));
+      committedRun.set(id, r2(committed + est));                // cumulative for repeated lines
       return { it, est, remaining, over };
     });
 

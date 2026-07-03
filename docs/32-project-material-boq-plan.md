@@ -1,6 +1,6 @@
 # 32 — Project Material Control: BoQ, Commitment Budget & Requisition-to-Purchase — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v1.0 — **ALL DELIVERED (M0–M4)** · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v1.1 — **ALL DELIVERED (M0–M4)** + follow-ups in progress (FU1 budget policy delivered) · **Owner:** ERP / Product
 > **Scope:** Give the PPM suite a **construction/contractor-grade material control loop** on top of the
 > existing project spine: a **Bill of Quantities (BoQ)** as the project's requirement & budget baseline;
 > a **material budget** enforced by **commitment/encumbrance** accounting (staff cannot draw more than the
@@ -344,12 +344,12 @@ tables.
   measurement-book photo evidence.
 - **Assumptions:** BoQ line is the budget unit of control; WIP 1260 remains the project cost sink; the
   existing `workflow`/`messaging` engines are the approval + LINE transport (no new infra).
-- **Open questions for sign-off:** (a) Should the BoQ line budget be a **hard block** or a **block-with-
-  override** (over-budget always routes to LINE approval — recommended) for *every* over-line draw, or only
-  above a configurable tolerance? (b) Do advances/reimbursements **consume BoQ line budget** (count as
-  commitments) or only tag the project for reporting? (c) On PMR approval, **auto-draft the PO** immediately,
-  or propose it for procurement to confirm? (d) Is re-measurement (actual vs BoQ qty) in scope for M0 or a
-  fast-follow?
+- **Open questions — RESOLVED (FU1, 2026-07-03):** (a) **Tolerance** — the BoQ line budget is block-with-
+  override, and a configurable per-project **tolerance %** (`projects.budget_tolerance_pct`) lets a small
+  overage auto-proceed before approval is required (0 = strict). (b) **Consume** — advances/reimbursements/
+  petty-cash tagged to a `boq_line_id` **consume** that line's budget (a consumed commitment), so material +
+  site cash share one ceiling. (c) **Auto-draft** — on PMR approval the PO is **auto-drafted** (Draft) for
+  procurement. (d) Re-measurement shipped in M0.
 
 ---
 
@@ -357,6 +357,7 @@ tables.
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.1 | 2026-07-03 | ERP / Product | **FU1 (follow-up) delivered — budget policy.** Resolves plan §10 open questions: (a) per-project **over-budget tolerance** `projects.budget_tolerance_pct` honored in `CommitmentsService.reserve` (ceiling = budget × (1+tol%)) + PMR routing; (b) advances/petty-cash/claims gain `boq_line_id` and **consume** the BoQ line budget when tagged (consumed commitment on settle/approve); (c) auto-draft confirmed. Migration 0242 (column-adds). Amends PROJ-12/PROJ-14 text (RCM stays 180, xlsx regenerated + census reconciled). Docs: PN-16 rev 0.32. `projects` harness 162; basics/compliance/tenant-idx/migration-parity/ess/ts-debt/typecheck green. |
 | 1.0 | 2026-07-03 | ERP / Product | **M4 delivered — docs/32 COMPLETE (M0–M4).** Project-linked site cash: nullable `project_id` on `employee_advances`/`expense_claims`/`expense_requests` (migration 0241); advances/reimbursements/petty-cash accept `project_code` → `project_id`, tag the GL expense/advance lines, and roll up on `GET /api/projects/:code/site-cash`. Control **PROJ-14** (RCM 180, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.31, user-manual 14 rev 2.8, UAT-O2C-233). `projects` harness 158; basics/compliance/tenant-idx/migration-parity/ess/ts-debt/typecheck green. **All five client requirements delivered:** BoQ (M0) · enforced material budget PROJ-12 (M1) · requisition + LINE over-budget approval PROJ-13 (M2) · inventory→project reservation/issue INV-13 (M3) · project-linked advances/reimbursements PROJ-14 (M4). |
 | 0.5 | 2026-07-03 | ERP / Product | **M3 delivered** — stock reservation → issue-to-project (`stock_reservations`, migration 0240) + `ReservationsModule`/`/api/reservations`: `available = on_hand − Σ(held)` with an atomic `FOR UPDATE` reserve (`INSUFFICIENT_STOCK`, no double-allocation), `release`/`issueToProject`; new `InventoryLedgerService.issueToProject` posts **Dr 1260 project WIP (`project_id`) / Cr 1200** + a consumed BoQ-line commitment. Control **INV-13** (RCM 179, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.30, PN-03 rev 0.4, user-manual 14 rev 2.7, UAT-O2C-232). `projects` harness 152; basics/compliance/tenant-idx/migration-parity/stock-ops/wms/ts-debt/typecheck green. |
 | 0.4 | 2026-07-03 | ERP / Product | **M2 delivered** — Project Material Requisition (`project_material_requisitions`/`pmr_lines`, migration 0239) + `PmrModule`/`PmrService`/`/api/pmr`: within-budget → project-tagged PR; over-budget → maker-checker + one-tap **LINE** approval (`buildApproveCard`; `chatDecidePmr` webhook route) → auto-drafted authorised over-budget project **Draft PO** (`createPo` `draft`+`authorized_over_budget`; `reserve` `allowOver`). `pmr_over_budget` action-center exception. Control **PROJ-13** (RCM 178, xlsx regenerated + census reconciled). Docs-synced (PN-16 rev 0.29, user-manual 14 rev 2.6, UAT-O2C-231). `projects` harness 143; basics/compliance/tenant-idx/migration-parity/ts-debt/typecheck green. **Decision:** over-budget always routes to approval (no tolerance band). |

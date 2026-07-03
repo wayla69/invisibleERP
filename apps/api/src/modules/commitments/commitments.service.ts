@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projectBoqLines, projectCommitments } from '../../database/schema';
+import { projectBoqLines, projectCommitments, projects } from '../../database/schema';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const n = (x: unknown) => Number(x ?? 0);
@@ -31,6 +31,24 @@ export interface ReserveDto {
 export class CommitmentsService {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
+  // The project's over-budget tolerance % (FU1). Defaults to 0 (strict) when the project is missing.
+  private async tolerancePct(runner: any, projectId: number): Promise<number> {
+    const [p] = await runner.select({ v: projects.budgetTolerancePct }).from(projects).where(eq(projects.id, Number(projectId))).limit(1);
+    return Math.max(0, n(p?.v));
+  }
+
+  // BoQ-line budget picture including the tolerance ceiling (FU1) — used by the PMR routing to decide whether
+  // a draw is within tolerance (auto-proceed) or over budget (needs approval). Returns budget / committed /
+  // remaining (vs budget) / ceiling (budget × (1+tol%)) / headroom (ceiling − committed).
+  async lineBudget(boqLineId: number, projectId: number, tolPctOverride?: number) {
+    const [line] = await this.db.select().from(projectBoqLines).where(eq(projectBoqLines.id, Number(boqLineId))).limit(1);
+    const budget = r2(n(line?.budgetAmount));
+    const committed = await this.committedFor(this.db, Number(boqLineId));
+    const tolPct = tolPctOverride != null ? Math.max(0, tolPctOverride) : await this.tolerancePct(this.db, Number(projectId));
+    const ceiling = r2(budget * (1 + tolPct / 100));
+    return { budget, committed, remaining: r2(budget - committed), tolerance_pct: tolPct, ceiling, headroom: r2(ceiling - committed) };
+  }
+
   // Sum of amounts that count against a BoQ line's budget (open + consumed; released is freed).
   private async committedFor(runner: any, boqLineId: number): Promise<number> {
     const [row] = await runner.select({ v: sql<string>`coalesce(sum(${projectCommitments.amount}),0)` })
@@ -50,13 +68,17 @@ export class CommitmentsService {
     const budget = r2(n(line.budgetAmount));
     const committed = await this.committedFor(runner, Number(dto.boqLineId));
     const amount = r2(dto.amount);
-    if (!dto.allowOver && committed + amount > budget + EPS) {
+    // FU1 (docs/32) — over-budget TOLERANCE: a draw may exceed the line budget by up to the project's
+    // budget_tolerance_pct % of the line budget before it's blocked. Ceiling = budget × (1 + pct/100).
+    const tolPct = await this.tolerancePct(runner, Number(line.projectId));
+    const ceiling = r2(budget * (1 + tolPct / 100));
+    if (!dto.allowOver && committed + amount > ceiling + EPS) {
       const remaining = r2(Math.max(0, budget - committed));
       throw new BadRequestException({
         code: 'BUDGET_EXCEEDED',
-        message: `Draw ${amount} exceeds the BoQ line remaining budget ${remaining} (budget ${budget}, already committed ${committed})`,
-        messageTh: `เกินงบรายการ BoQ: ขอเบิก ${amount} แต่คงเหลือ ${remaining} (งบ ${budget} ผูกพันแล้ว ${committed})`,
-        remaining, budget, committed,
+        message: `Draw ${amount} exceeds the BoQ line budget${tolPct > 0 ? ` (incl. ${tolPct}% tolerance → ${ceiling})` : ''}: remaining ${remaining} (budget ${budget}, committed ${committed})`,
+        messageTh: `เกินงบรายการ BoQ: ขอเบิก ${amount} แต่คงเหลือ ${remaining} (งบ ${budget} ผูกพันแล้ว ${committed}${tolPct > 0 ? ` เผื่อ ${tolPct}%` : ''})`,
+        remaining, budget, committed, tolerance_pct: tolPct, ceiling,
       });
     }
     const [ins] = await runner.insert(projectCommitments).values({

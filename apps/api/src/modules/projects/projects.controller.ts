@@ -26,6 +26,7 @@ const CreateBody = z.object({
   customer_no: z.string().optional(),
   billing_type: z.enum(['TM', 'Fixed']).optional(),
   budget_amount: z.number().nonnegative().optional(),
+  budget_tolerance_pct: z.number().nonnegative().max(100).optional(),
   contract_amount: z.number().nonnegative().optional(),
   rev_method: z.enum(['billing', 'poc']).optional(),
   estimated_cost: z.number().nonnegative().optional(),

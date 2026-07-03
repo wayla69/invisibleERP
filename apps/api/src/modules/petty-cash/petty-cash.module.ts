@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { LedgerModule } from '../ledger/ledger.module';
 import { MessagingModule } from '../messaging/messaging.module';
+import { CommitmentsModule } from '../commitments/commitments.module';
 import { PettyCashService } from './petty-cash.service';
 import { PettyCashController } from './petty-cash.controller';
 
@@ -9,7 +10,7 @@ import { PettyCashController } from './petty-cash.controller';
 // MessagingModule supplies LineNotifyService (LC-2): linked approvers hear about new requests, the
 // requester hears the decision. Messaging imports no modules, so this edge cannot form a cycle.
 @Module({
-  imports: [LedgerModule, MessagingModule],
+  imports: [LedgerModule, MessagingModule, CommitmentsModule],
   controllers: [PettyCashController],
   providers: [PettyCashService],
   exports: [PettyCashService],

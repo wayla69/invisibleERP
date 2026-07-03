@@ -7,13 +7,14 @@ import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { TaxService } from '../tax/tax.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
+import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd, monthStart, n, fx } from '../../database/queries';
 import { roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
 export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero'; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
-export interface AdvanceDto { payee: string; amount: number; purpose?: string; expense_account?: string; tenant_id?: number | null; project_code?: string }
+export interface AdvanceDto { payee: string; amount: number; purpose?: string; expense_account?: string; tenant_id?: number | null; project_code?: string; boq_line_id?: number }
 export interface SettleAdvanceDto { settled_expense: number; returned_cash?: number; expense_account?: string }
 // project_code (M4, docs/32) — an advance can be raised against a project so site cash is managed on it.
 
@@ -28,6 +29,7 @@ export class FinanceService {
     @Optional() private readonly ledger?: LedgerService,
     @Optional() private readonly tax?: TaxService,
     @Optional() private readonly matchSvc?: ThreeWayMatchService, // Phase 16 — gates AP pay on 3-way match
+    @Optional() private readonly commitments?: CommitmentsService, // FU1 (docs/32) — site cash consumes BoQ budget
   ) {}
 
   // VAT back-out (7/107) — prefer TaxService.calcInclusive when injected
@@ -202,7 +204,7 @@ export class FinanceService {
     const today = ymd();
     await db.insert(employeeAdvances).values({
       advanceNo, tenantId, payee: dto.payee, purpose: dto.purpose ?? null, amount: String(amount), status: 'open',
-      projectId, expenseAccount: dto.expense_account ?? '5100', issuedBy: user.username, issuedDate: today,
+      projectId, boqLineId: dto.boq_line_id ?? null, expenseAccount: dto.expense_account ?? '5100', issuedBy: user.username, issuedDate: today,
     });
     if (this.ledger) await this.ledger.postEntry({ date: today, source: 'ADV', sourceRef: advanceNo, tenantId, memo: `Cash advance ${advanceNo} — ${dto.payee}`, createdBy: user.username, lines: [{ account_code: '1180', debit: amount, project_id: projectId }, { account_code: '1000', credit: amount }] });
     return { advance_no: advanceNo, payee: dto.payee, amount, status: 'open', project_id: projectId };
@@ -226,6 +228,17 @@ export class FinanceService {
     lines.push({ account_code: '1180', credit: round2(n(a.amount)), project_id: projectId });
     if (this.ledger) await this.ledger.postEntry({ date: ymd(), source: 'ADV-STL', sourceRef: advanceNo, tenantId: a.tenantId ?? null, memo: `Settle advance ${advanceNo}`, createdBy: user.username, lines });
     await db.update(employeeAdvances).set({ status: 'settled', settledExpense: String(spent), returnedCash: String(returned), settledBy: user.username, settledDate: ymd() }).where(eq(employeeAdvances.id, a.id));
+    // FU1 (docs/32) — when the advance is tagged to a project + BoQ line, the settled spend CONSUMES that
+    // line's budget (a consumed commitment, allowOver so site cash never blocks — it records against remaining).
+    if (this.commitments && projectId != null && a.boqLineId != null && spent > 0) {
+      try {
+        await db.transaction(async (tx: any) => {
+          const c = await this.commitments!.reserve(tx, { projectId, boqLineId: Number(a.boqLineId), amount: spent, qty: 0, sourceDocType: 'ADV', sourceDocNo: advanceNo, createdBy: user.username, tenantId: a.tenantId ?? null, allowOver: true });
+          await this.commitments!.consume(tx, 'ADV', advanceNo);
+          void c;
+        });
+      } catch { /* best-effort — the settlement already posted */ }
+    }
     return { advance_no: advanceNo, status: 'settled', settled_expense: spent, returned_cash: returned };
   }
 
