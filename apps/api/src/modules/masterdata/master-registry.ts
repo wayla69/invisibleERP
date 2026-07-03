@@ -1,9 +1,20 @@
 import { items, locations, bomMaster, vendors, priceList, promotions } from '../../database/schema';
 import { tenants } from '../../database/schema';
 import { fixedAssets } from '../../database/schema';
+import { menuItems } from '../../database/schema';
 
 export type MdType = 'str' | 'num' | 'int' | 'bool' | 'date';
-export interface MdCol { header: string; prop: string; type: MdType }
+export interface MdCol {
+  header: string;
+  prop: string;
+  type: MdType;
+  // Value substituted when the cell is blank/omitted — lets a bulk import target a NOT-NULL column that
+  // has a DB default (an explicit null would violate the constraint; DEFAULT only fires when omitted).
+  def?: string | number | boolean;
+  // Allowed values for an enum column. Matched case-insensitively and stored lower-cased; a value outside
+  // the set is a per-row BAD_ENUM error instead of a hard DB failure inside the import transaction.
+  enumVals?: string[];
+}
 export interface MdEntity {
   key: string;
   labelEn: string;
@@ -15,7 +26,7 @@ export interface MdEntity {
   allowReplace: boolean; // permit destructive "replace all" import
 }
 
-const C = (header: string, prop: string, type: MdType = 'str'): MdCol => ({ header, prop, type });
+const C = (header: string, prop: string, type: MdType = 'str', extra?: Partial<MdCol>): MdCol => ({ header, prop, type, ...extra });
 
 // Generic master-data registry (mirrors the legacy ERPPOS MASTER_REGISTRY).
 // Import upserts by natural key (onConflictDoNothing) or appends; export/template via exceljs.
@@ -94,6 +105,25 @@ export const MASTER_REGISTRY: MdEntity[] = [
       C('BoM_Code', 'bomCode'), C('Product_Name', 'productName'), C('Yield_Qty', 'yieldQty', 'num'),
       C('Yield_UOM', 'yieldUom'), C('Labor_Cost', 'laborCost', 'num'),
       C('Overhead_Cost', 'overheadCost', 'num'), C('Selling_Price', 'sellingPrice', 'num'),
+    ],
+  },
+  {
+    // POS menu catalog. Natural key (tenant_id, sku) → uq_menu_sku dedups on re-import (onConflictDoNothing).
+    // Category_ID / Station_Code are optional — items load without a category and can be grouped later on
+    // the Menu screen. Type / Tax_Type carry DB defaults so blank cells fall back rather than fail.
+    key: 'menu_items', labelEn: 'Menu Items (POS)', labelTh: 'เมนูอาหาร (POS)',
+    table: menuItems, tenantScoped: true, allowReplace: false,
+    required: ['SKU', 'Name', 'Price'],
+    cols: [
+      C('SKU', 'sku'), C('Name', 'name'), C('Name_En', 'nameEn'),
+      C('Category_ID', 'categoryId', 'int'),
+      C('Type', 'type', 'str', { def: 'food', enumVals: ['food', 'drink', 'retail', 'combo'] }),
+      C('Price', 'price', 'num'), C('Cost', 'cost', 'num'),
+      C('Station_Code', 'stationCode', 'str', { def: 'main' }),
+      C('Prep_Minutes', 'prepMinutes', 'int', { def: 10 }),
+      C('Tax_Type', 'taxType', 'str', { def: 'standard', enumVals: ['standard', 'exempt', 'zero'] }),
+      C('Track_Stock', 'trackStock', 'bool', { def: false }),
+      C('Description', 'description'), C('Sort', 'sort', 'int', { def: 0 }),
     ],
   },
   {

@@ -203,6 +203,40 @@ term. (A change that leaves the lease unchanged is rejected with `NO_CHANGE`.)
 
 ---
 
+### Opening balances (cutover from a prior system)
+
+**Screen:** บัญชีแยกประเภท (`/accounting`) → **ยอดยกมา** tab · **Required permission:**
+`gl_post` (or `creditors` / `ar`).
+
+When you switch to Invisible ERP from another system, enter your **closing balances**
+from the old books as your **opening balances** here. The system posts them as **one
+balanced journal entry** (source **OPENING**) so every account starts at the right
+figure.
+
+1. Set an **อ้างอิงชุด (batch ref)** — e.g. `OB-2026`. This makes the import
+   **idempotent**: re-submitting the same batch ref never double-posts.
+2. Enter one row per account: pick the **account** and type its **debit** *or*
+   **credit** balance.
+3. Any net difference between total debits and credits is **posted automatically to
+   account 3000 (Opening Balance Equity)** — the badge shows how much will go there.
+   Once you've entered every account it should read **สมดุล (balanced)**.
+4. Click **ลงยอดยกมา**.
+
+> **Loading a lot of accounts — วางจาก Excel/CSV.** Rather than keying every account,
+> click **วางจาก Excel/CSV**, then copy the rows from your prior-system **trial
+> balance** (Excel / Google Sheets) and paste them in. The columns are **account
+> code · debit · credit** (an account-name column in between is fine, and a header
+> row is skipped automatically); a single signed-amount column also works (a negative
+> value is read as a credit). The pasted rows drop straight into the table for you to
+> review before posting. Any row that can't post (unknown account, no amount) is
+> reported back with its **row number** — nothing is silently dropped (**ONB-04**).
+
+**Expected result:** A balanced opening journal, dated today, that shows on the trial
+balance. Reconcile it to your prior-system closing trial balance before you rely on the
+new books.
+
+---
+
 ## 3. Trial balance & financial statements
 
 **Required permission:** finance read (e.g. `fin_report`).

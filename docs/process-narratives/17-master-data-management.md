@@ -34,7 +34,7 @@ To define and control the maintenance of master data — items, customers, vendo
 
 | Term | Meaning |
 |---|---|
-| Master-data entity | A registered table type: items, customers, vendors, locations, price_list, promotions, bom_master, assets |
+| Master-data entity | A registered table type: items, customers, vendors, locations, price_list, promotions, bom_master, menu_items, assets |
 | Append mode | Import via `onConflictDoNothing` — inserts new, skips existing by natural key |
 | Replace mode | Wipe (RLS-scoped delete) + insert — full table refresh, higher risk |
 | `allowReplace` | Per-entity flag gating whether replace mode is permitted |
@@ -62,7 +62,7 @@ Single-duty roles enforce SoD: **vendor master** maintenance is segregated from 
 
 ## 7. Process narrative
 
-1. **Entity catalogue.** MasterDataSteward reads the registry via `GET /api/admin/master-data/entities` (permission `masterdata`), which lists each registered entity, its required columns, and its `allowReplace` flag. Entities: **items** (`md_item`), **customers** (Code, Credit_Term, Credit_Limit), **vendors** (`md_vendor`; Is_Supplier / Is_Creditor / Payment_Terms; `allowReplace = true`), **locations**, **price_list**, **promotions**, **bom_master**, **assets**.
+1. **Entity catalogue.** MasterDataSteward reads the registry via `GET /api/admin/master-data/entities` (permission `masterdata`), which lists each registered entity, its required columns, and its `allowReplace` flag. Entities: **items** (`md_item`), **customers** (Code, Credit_Term, Credit_Limit), **vendors** (`md_vendor`; Is_Supplier / Is_Creditor / Payment_Terms; `allowReplace = true`), **locations**, **price_list**, **promotions**, **bom_master**, **menu_items** (POS catalog; SKU / Name / Price required, tenant-scoped, dedup on `(tenant_id, sku)`), **assets**.
 2. **Export & template.** `GET /api/admin/master-data/:entity/export` returns the current data as **csv** or **xlsx**; `GET /api/admin/master-data/:entity/template` returns a blank, header-annotated template (required vs optional columns visually distinguished). An unknown entity is rejected `BAD_ENTITY` (`400`).
 3. **Import — validation (decision point).** `POST /api/admin/master-data/:entity/import` first validates structure: a missing required column is rejected `MISSING_COLUMNS` (`400`); an empty file is rejected `NO_ROWS` (`400`); and any row with an empty required field is rejected `REQUIRED_EMPTY` (`400`) identifying the offending row and column. Each accepted cell is type-cast (str / num / int / bool / date) (**MDM-02**). *(This strict, fail-fast endpoint is retained for back-compatibility.)*
 
@@ -146,6 +146,7 @@ flowchart TD
 | `MISSING_COLUMNS` (400) | Required column absent from file | Use the template; add the column; resubmit |
 | `REQUIRED_EMPTY` (400) | Required field empty in a row | Correct the identified row + column; resubmit |
 | `BAD_NUMBER` / `BAD_DATE` (dry-run/checked) | A numeric/date cell can't be parsed | Fix the cell; re-validate (reported per row, not fatal) |
+| `BAD_ENUM` (dry-run/checked) | An enum cell (e.g. menu_items `Type` / `Tax_Type`) is outside the allowed set | Use one of the listed values (case-insensitive); a blank cell falls back to the column default |
 | `DUP_IN_FILE` (dry-run/checked) | Natural key repeated within the import file | Remove the duplicate row; re-validate |
 | `EXISTS` (checked, append) | Row's natural key already in the table — skipped | Informational; use the existing record or replace mode |
 | `SOD_VIOLATION` / SoD conflict | Master maintenance conflicts with transacting (R02 / R09 / R13) | AccessAdmin remediates (see `08-itgc.md`) |
@@ -158,3 +159,4 @@ flowchart TD
 | 0.2 | 2026-06-23 | Platform | **Custom fields (UDFs):** §7 step 9 — tenant-defined fields on any entity via `/api/custom-fields` (typed + server-validated values, tenant-scoped, audit-logged); migration `0078_custom_fields`. Descriptive metadata — no GL, no new control. |
 | 0.3 | 2026-06-24 | Platform | **Alert/notification rules (Platform Phase 3):** §7 step 10 — no-code rules over a built-in metric catalog (`/api/alerts`); cron-callable sweep fires in-app/LINE/SMS/email notifications on threshold breach with cooldown + an `alert_events` log; tenant-isolated. Migration `0080_alert_rules`. Operational alerting — no GL, no control. |
 | 0.4 | 2026-06-24 | Platform | **Validated bulk import (Platform Phase 7):** §7 step 3a — dry-run `…/import/validate` + `…/import/checked` accumulate per-row errors (`BAD_NUMBER`/`BAD_DATE`/`DUP_IN_FILE`) instead of failing fast, with a `skip_errors` partial-commit and `EXISTS` reporting; §13 error codes updated. Web master-data screen gains a validate→preview→commit flow. No schema change, no GL, no new control — a data-quality usability layer over the existing import; verified by the `ext` harness. |
+| 0.5 | 2026-07-03 | Platform | **menu_items importable (new-company setup):** registered the POS catalog as a bulk-import entity (SKU / Name / Price required, tenant-scoped, dedup on `(tenant_id, sku)`), so a new company can load its whole menu from Excel/CSV via the existing importer rather than keying items one by one. Registry gains generic `def` (blank cell → column default, so a NOT-NULL column with a DB default isn't handed an explicit null) and `enumVals` (case-insensitive enum match → new `BAD_ENUM` per-row error) support; §7 catalogue, §3 glossary and §13 error codes updated. No schema change, no GL, no new control — a master-data usability extension; verified by the `ext` harness. |

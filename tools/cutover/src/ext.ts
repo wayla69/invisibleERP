@@ -338,6 +338,20 @@ async function main() {
   const vrow = (await db.select().from(s.vendors).where(eq(s.vendors.vendorCode, 'V-BULK')))[0];
   ok('Bulk import: tenant-scoped entity (vendors) is stamped with the importer’s tenant', vend.json.status === 'success' && vend.json.imported === 1 && Number(vrow?.tenantId) === Number(hq.id), `tenant=${vrow?.tenantId} hq=${hq.id}`);
 
+  // menu_items (POS catalog) — a new-company bulk load. Exercises the registry's def/enumVals support:
+  // blank Type/Tax_Type cells fall back to the DB default (not an explicit null → NOT-NULL violation),
+  // enum matching is case-insensitive, and re-import dedups on (tenant, sku) via uq_menu_sku.
+  const menuCsv = 'SKU,Name,Price,Type,Tax_Type\nM-100,ชาเขียว,45,DRINK,\nM-101,ข้าวหน้าปลาไหล,180,,';
+  const menuImp = await inj('POST', '/api/admin/master-data/menu_items/import/checked', token, { format: 'csv', mode: 'append', csv: menuCsv });
+  const m100 = (await db.select().from(s.menuItems).where(eq(s.menuItems.sku, 'M-100')))[0];
+  const m101 = (await db.select().from(s.menuItems).where(eq(s.menuItems.sku, 'M-101')))[0];
+  ok('Bulk import: menu_items commits; blank enum cells fall back to the column default', menuImp.json.status === 'success' && menuImp.json.imported === 2 && m101?.type === 'food' && m101?.taxType === 'standard' && m101?.stationCode === 'main', `${JSON.stringify({ status: menuImp.json.status, imported: menuImp.json.imported, m101type: m101?.type, tax: m101?.taxType, station: m101?.stationCode })}`);
+  ok('Bulk import: menu_items enum is case-insensitive (DRINK → drink) and tenant-stamped', m100?.type === 'drink' && Number(m100?.tenantId) === Number(hq.id), `type=${m100?.type} tenant=${m100?.tenantId}`);
+  const badEnum = await inj('POST', '/api/admin/master-data/menu_items/import/validate', token, { format: 'csv', mode: 'append', csv: 'SKU,Name,Price,Type\nM-200,X,10,beverage' });
+  ok('Bulk import: menu_items rejects an out-of-set enum value (BAD_ENUM), not a hard DB failure', badEnum.json.valid === 0 && (badEnum.json.errors ?? []).some((e: any) => e.code === 'BAD_ENUM'), `${JSON.stringify(badEnum.json.errors ?? [])}`);
+  const menuRe = await inj('POST', '/api/admin/master-data/menu_items/import/checked', token, { format: 'csv', mode: 'append', csv: menuCsv });
+  ok('Bulk import: menu_items re-import dedups on (tenant, sku) → 0 new, all EXISTS', menuRe.json.imported === 0 && (menuRe.json.errors ?? []).length === 2 && (menuRe.json.errors ?? []).every((e: any) => e.code === 'EXISTS'), `${JSON.stringify({ imported: menuRe.json.imported, errs: (menuRe.json.errors ?? []).map((e: any) => e.code) })}`);
+
   // ── outbound webhooks (Phase 8) ──
   // cf2aa / hqaa are AccessAdmin (hold `users`, non-Admin → tenant-scoped). Deliveries go to an unreachable
   // URL, so they're logged 'failed' — that still exercises registration, signed delivery, retry and isolation.

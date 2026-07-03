@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, Plus, Save, Scale, ShieldCheck, X } from 'lucide-react';
+import { Check, ClipboardPaste, Plus, Save, Scale, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -333,6 +333,50 @@ function IncomeStatement() {
 type ObLine = { account_code: string; debit: string; credit: string };
 const emptyObLine = (): ObLine => ({ account_code: '', debit: '', credit: '' });
 
+// Parse rows pasted from Excel/Google Sheets/CSV into opening-balance lines. Resilient to the common
+// shapes of an exported trial balance: an optional header row; an account-name column between the code
+// and the amounts; thousands separators; a debit AND credit column (blanks kept so the column position
+// isn't lost); or a single signed-amount column (positive ⇒ debit, negative ⇒ credit).
+// A cell is numeric only if it actually contains a digit (an account name reads as NaN, not 0).
+const num = (s: string) => {
+  const t = String(s).replace(/,/g, '').trim();
+  if (t === '' || !/\d/.test(t)) return NaN;
+  const v = Number(t.replace(/[^\d.-]/g, ''));
+  return Number.isFinite(v) ? v : NaN;
+};
+function parseObPaste(text: string): ObLine[] {
+  const out: ObLine[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    // Pick ONE delimiter — a spreadsheet paste is tab-delimited, so splitting on comma too would shred a
+    // "50,000" thousands separator. Prefer tab, then semicolon, then comma (plain CSV).
+    const sep = raw.includes('\t') ? '\t' : raw.includes(';') ? ';' : ',';
+    const cells = raw.split(sep).map((c) => c.trim());
+    const code = cells[0];
+    if (!code) continue;
+    // Collect the trailing amount cells (numeric or blank), stopping at the first text cell (the account
+    // name / the code). Blanks are retained so a debit-vs-credit column position is preserved.
+    const amounts: string[] = [];
+    for (let i = cells.length - 1; i >= 1; i--) {
+      const cell = cells[i];
+      if (cell === '' || !Number.isNaN(num(cell))) amounts.unshift(cell);
+      else break;
+    }
+    let debit = '', credit = '';
+    if (amounts.length >= 2) {
+      const d = num(amounts[0]!), c = num(amounts[1]!);
+      if (!Number.isNaN(d) && d !== 0) debit = String(d);
+      if (!Number.isNaN(c) && c !== 0) credit = String(c);
+    } else if (amounts.length === 1) {
+      const v = num(amounts[0]!);
+      if (!Number.isNaN(v) && v !== 0) { if (v < 0) credit = String(-v); else debit = String(v); }
+    }
+    if (!debit && !credit) continue; // header / blank / a zero-only line — nothing to post
+    out.push({ account_code: code, debit, credit });
+  }
+  return out;
+}
+
 function OpeningBalances() {
   const qc = useQueryClient();
   const accounts = useQuery<{ accounts: Account[] }>({ queryKey: ['accounts'], queryFn: () => api('/api/ledger/accounts') });
@@ -340,6 +384,17 @@ function OpeningBalances() {
   const [batchRef, setBatchRef] = useState('');
   const [lines, setLines] = useState<ObLine[]>([emptyObLine(), emptyObLine()]);
   const [errs, setErrs] = useState<{ row: number; error: string }[]>([]);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+
+  const applyPaste = () => {
+    const parsed = parseObPaste(pasteText);
+    if (!parsed.length) { notifyError('ไม่พบรายการที่อ่านได้ — วางคอลัมน์ รหัสบัญชี / เดบิต / เครดิต'); return; }
+    // Append onto any rows the user already keyed; drop the two blank starter rows.
+    setLines((ls) => { const kept = ls.filter((l) => l.account_code || l.debit || l.credit); return [...kept, ...parsed]; });
+    setPasteText(''); setPasteOpen(false);
+    notifySuccess(`นำเข้า ${parsed.length} รายการ — ตรวจทานก่อนลงยอด`);
+  };
 
   const sumDebit = lines.reduce((a, l) => a + (Number(l.debit) || 0), 0);
   const sumCredit = lines.reduce((a, l) => a + (Number(l.credit) || 0), 0);
@@ -385,10 +440,33 @@ function OpeningBalances() {
       <Card className="gap-3 p-5">
         <h3 className="text-base font-semibold">ลงยอดยกมา (Opening Balances)</h3>
         <p className="text-sm text-muted-foreground">ผลต่างเดบิต/เครดิตจะลงบัญชี 3000 (ส่วนทุนยอดยกมา) อัตโนมัติ</p>
-        <div className="grid max-w-sm gap-1.5">
-          <Label htmlFor="ob-batch">อ้างอิงชุด (batch ref)</Label>
-          <Input id="ob-batch" placeholder="เช่น OB-2026 (กันลงซ้ำ)" value={batchRef} onChange={(e) => setBatchRef(e.target.value)} />
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div className="grid max-w-sm gap-1.5">
+            <Label htmlFor="ob-batch">อ้างอิงชุด (batch ref)</Label>
+            <Input id="ob-batch" placeholder="เช่น OB-2026 (กันลงซ้ำ)" value={batchRef} onChange={(e) => setBatchRef(e.target.value)} />
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setPasteOpen((v) => !v)}>
+            <ClipboardPaste className="size-4" /> วางจาก Excel/CSV
+          </Button>
         </div>
+        {pasteOpen && (
+          <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
+            <p className="text-sm text-muted-foreground">
+              คัดลอกจากงบทดลองเดิม (Excel/Google Sheets) แล้ววางที่นี่ — คอลัมน์ <strong>รหัสบัญชี</strong> ·{' '}
+              <strong>เดบิต</strong> · <strong>เครดิต</strong> (มีคอลัมน์ชื่อบัญชีคั่นได้ และตัดหัวตารางให้อัตโนมัติ)
+            </p>
+            <textarea
+              className="min-h-[120px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              placeholder={'1010\tเงินสด\t50000\t0\n2100\tเจ้าหนี้การค้า\t0\t30000'}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => { setPasteText(''); setPasteOpen(false); }}>ยกเลิก</Button>
+              <Button size="sm" disabled={!pasteText.trim()} onClick={applyPaste}>นำเข้ารายการ</Button>
+            </div>
+          </div>
+        )}
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-muted-foreground">

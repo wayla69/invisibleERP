@@ -183,7 +183,15 @@ configuration and bills of materials.
 **Screen:** `/master-data` · **Required permission:** `masterdata`.
 
 You can load many records at once from a spreadsheet — items, customers, vendors,
-locations, prices, promotions, BoMs and assets.
+locations, prices, promotions, BoMs, **menu items (POS)** and assets. Loading your
+whole **menu** this way is the fastest way to set up a new restaurant: export the
+template for **เมนูอาหาร (Menu Items)**, fill in **SKU**, **Name** and **Price** (the
+only required columns), and import. Optional columns — **Type** (food / drink / retail
+/ combo), **Tax_Type** (standard / exempt / zero), **Cost**, **Station_Code**,
+**Prep_Minutes**, **Track_Stock**, **Category_ID**, **Sort** — can be left blank and
+fall back to sensible defaults (Type = *food*, Tax_Type = *standard*, station = *main*).
+Re-importing the same file is safe: rows whose **SKU** already exists are skipped, not
+duplicated.
 
 1. **Download the template** (or **export** the current data) for the record type,
    fill it in, and save as **CSV**.

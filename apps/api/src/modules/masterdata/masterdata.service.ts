@@ -3,7 +3,7 @@ import * as ExcelJS from 'exceljs';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
-import { MASTER_REGISTRY, findEntity, type MdEntity, type MdType } from './master-registry';
+import { MASTER_REGISTRY, findEntity, type MdEntity, type MdCol, type MdType } from './master-registry';
 
 const HEADER_FILL = 'FF1E3A5F';
 const HEADER_FONT = 'FFFFFFFF';
@@ -107,7 +107,9 @@ export class MasterDataService {
       const o: Record<string, any> = {};
       for (const c of e.cols) {
         if (raw[c.header] === undefined) continue;
-        o[c.prop] = castIn(raw[c.header], c.type);
+        const r = coerceCell(c, raw[c.header]);
+        if (!r.ok) throw new BadRequestException({ code: r.code, message: `Row ${i + 1}: ${r.message}`, messageTh: `แถวที่ ${i + 1}: ${r.messageTh}` });
+        o[c.prop] = r.value;
       }
       if (e.tenantScoped && 'tenantId' in e.table) o.tenantId = user.tenantId ?? null;
       if (e.key === 'assets') {
@@ -161,18 +163,9 @@ export class MasterDataService {
       for (const c of e.cols) {
         const cell = raw[c.header];
         if (cell === undefined) continue;
-        if (cell == null || String(cell).trim() === '') { o[c.prop] = null; continue; }
-        const s = String(cell).trim();
-        if (c.type === 'num' || c.type === 'int') {
-          if (!Number.isFinite(Number(s))) { errors.push({ row: rowNo, column: c.header, code: 'BAD_NUMBER', message: `'${c.header}' must be a number (got "${s}")`, messageTh: `'${c.header}' ต้องเป็นตัวเลข` }); rowBad = true; continue; }
-          o[c.prop] = c.type === 'int' ? Math.trunc(Number(s)) : fx(Number(s), 4);
-        } else if (c.type === 'date') {
-          const d = new Date(s);
-          if (isNaN(d.getTime())) { errors.push({ row: rowNo, column: c.header, code: 'BAD_DATE', message: `'${c.header}' is not a valid date (got "${s}")`, messageTh: `'${c.header}' รูปแบบวันที่ไม่ถูกต้อง` }); rowBad = true; continue; }
-          o[c.prop] = d.toISOString().slice(0, 10);
-        } else if (c.type === 'bool') {
-          o[c.prop] = ['1', 'true', 'yes', 'y', 't'].includes(s.toLowerCase());
-        } else o[c.prop] = s;
+        const r = coerceCell(c, cell);
+        if (!r.ok) { errors.push({ row: rowNo, column: c.header, code: r.code, message: r.message, messageTh: r.messageTh }); rowBad = true; continue; }
+        o[c.prop] = r.value;
       }
       const k = String(raw[keyHeader!] ?? '').trim();
       if (k) {
@@ -230,17 +223,30 @@ function castOut(v: unknown, t: MdType): any {
   return String(v);
 }
 
-function castIn(v: unknown, t: MdType): any {
-  if (v == null || String(v).trim() === '') return null;
-  const s = String(v).trim();
-  if (t === 'num') return fx(Number(s), 4);
-  if (t === 'int') return Math.trunc(Number(s));
-  if (t === 'bool') return ['1', 'true', 'yes', 'y', 't'].includes(s.toLowerCase());
-  if (t === 'date') {
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? s.slice(0, 10) : d.toISOString().slice(0, 10);
+type CoerceOk = { ok: true; value: any };
+type CoerceErr = { ok: false; code: string; message: string; messageTh: string };
+// Single source of truth for turning one import cell into a typed insert value. Honors `def` (blank cell →
+// column default, so a NOT-NULL column isn't handed an explicit null) and `enumVals` (case-insensitive
+// match, stored lower-cased). Used by both the validated path (accumulates errors) and the plain path (throws).
+function coerceCell(c: MdCol, cell: unknown): CoerceOk | CoerceErr {
+  if (cell == null || String(cell).trim() === '') return { ok: true, value: c.def !== undefined ? c.def : null };
+  const s = String(cell).trim();
+  if (c.enumVals) {
+    const v = s.toLowerCase();
+    if (!c.enumVals.includes(v)) return { ok: false, code: 'BAD_ENUM', message: `'${c.header}' must be one of ${c.enumVals.join(' / ')} (got "${s}")`, messageTh: `'${c.header}' ต้องเป็นค่า ${c.enumVals.join(' / ')}` };
+    return { ok: true, value: v };
   }
-  return s;
+  if (c.type === 'num' || c.type === 'int') {
+    if (!Number.isFinite(Number(s))) return { ok: false, code: 'BAD_NUMBER', message: `'${c.header}' must be a number (got "${s}")`, messageTh: `'${c.header}' ต้องเป็นตัวเลข` };
+    return { ok: true, value: c.type === 'int' ? Math.trunc(Number(s)) : fx(Number(s), 4) };
+  }
+  if (c.type === 'date') {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return { ok: false, code: 'BAD_DATE', message: `'${c.header}' is not a valid date (got "${s}")`, messageTh: `'${c.header}' รูปแบบวันที่ไม่ถูกต้อง` };
+    return { ok: true, value: d.toISOString().slice(0, 10) };
+  }
+  if (c.type === 'bool') return { ok: true, value: ['1', 'true', 'yes', 'y', 't'].includes(s.toLowerCase()) };
+  return { ok: true, value: s };
 }
 
 // Minimal RFC4180-ish CSV parser (handles quotes, commas, CRLF). Returns header-keyed rows.

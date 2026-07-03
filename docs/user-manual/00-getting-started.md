@@ -33,6 +33,19 @@ finding your way around, and logging out.
 > accounts switched on and named in your industry's language — so your books are
 > meaningful from day one. You can change or extend it later under **Onboarding →
 > Industry packs**. See *General Ledger → Your industry chart* for details.
+>
+> **Getting your data in — the quick path.** After signing up (and completing the
+> **Onboarding** checklist at `/onboarding`), you don't have to key everything by hand:
+> - **Fill in your company profile** (legal name, tax ID, address, VAT) so it prints on
+>   receipts and tax documents — see [Administration](./11-administration.md).
+> - **Bulk-load your master data** from a spreadsheet at `/master-data` — your **menu
+>   (POS)**, inventory items, vendors, customers and price lists. Download the template,
+>   fill in the required columns, and import (see *Administration → Bulk import*). For a
+>   restaurant, importing the **เมนูอาหาร (Menu Items)** sheet is the fastest way to load
+>   your whole menu at once.
+> - **Enter your opening balances** (if you're moving from another system) at
+>   `/accounting → ยอดยกมา` — you can paste your prior trial balance straight from Excel
+>   (see [General Ledger → Opening balances](./06-general-ledger.md)).
 
 ---
 
