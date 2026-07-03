@@ -63,17 +63,25 @@ when one company legitimately owns **multiple separate tenant-accounts** that sh
   tenants; FORCE-RLS under `app_user`.
 - **`cutover/pg-core.ts`** (both backends): **full HTTP stack** — login → guard reads live `org_id` →
   interceptor → RLS → `GET /api/jobs`. Asserts a fresh-signup Admin (`org_id=NULL`) sees only its own
-  tenant, a single-tenant company Admin sees only itself, and the single-company contrast (same Admin sees
-  ALL). The org-SHARING assertion (Admin sees a sibling tenant sharing its `org_id`) runs on **real
-  Postgres only** — see §PGlite-fidelity.
+  tenant, a single-tenant company Admin sees only itself, an org-scoped Admin is **isolated from other
+  companies**, and the single-company contrast (same Admin sees ALL). It also logs whether cross-account
+  org **sharing** is active — see §7 (currently fail-closed).
 
-## 6. §PGlite-fidelity — the per-table org clause is real-Postgres-only
-Migration `0196` installs the `org_id` RLS clause on **every** tenant_id table via a
-`DO $$ … EXECUTE format() … $$` loop. **PGlite does not apply that dynamic DDL loop** (it does run 0196's
-**direct** statements, e.g. the `tenants` self-policy). Net effect on the PGlite harness backend: data
-tables keep only the `tenant_id` clause, so **org-scoped SHARING across tenants is not observable on
-PGlite** — it is exercised only on the real-Postgres `pg-smoke` / `pg-core` CI jobs. The `tenant_id`
-isolation (the guarantee a per-company SaaS relies on) **is** enforced on both backends.
+## 6. Known limitation — cross-account org SHARING is fail-closed (not a security risk)
+`org_id` **isolation** (an Admin never sees a *different* org/company) holds on both backends. But `org_id`
+**sharing** — an org-scoped Admin seeing a **sibling tenant's DATA** (rows in tenant-scoped tables like
+`background_jobs`, `journal_entries`, …) when several separate accounts share one `org_id` — is **currently
+NOT effective on data tables**, on real Postgres **and** PGlite (verified: `pg-core` sees an org-scoped Admin
+reading only its **own** tenant's rows, `org1=1`). The mode therefore **fails CLOSED**: an org Admin
+over-isolates to its own tenant rather than leaking. This is **safe** (no cross-account data exposure), and
+most deployments are **one-tenant-per-company** (branches are intra-tenant, §3) so they never need sharing.
+
+Mechanism: `0196` installs the per-table `org_id` clause via a `DO $$ … EXECUTE format() … $$` loop over
+every `tenant_id` table; its **direct** DDL (e.g. the `tenants` self-policy) takes effect — so org isolation
+at the `tenants` level works and `pg-smoke` is green — but the per-**data-table** org clause does not resolve
+as intended (PGlite additionally does not apply the dynamic loop at all). **Tracked AC-18 follow-up** to
+root-cause + enable cross-account sharing; until then, model each company as its own org (isolation), not a
+shared org.
 
 ## 7. Revision history
 | Version | Date | Author | Notes |
