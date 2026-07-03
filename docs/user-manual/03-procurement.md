@@ -94,7 +94,9 @@ name (e.g. typed in LINE chat, possibly misspelt or not yet coded), each line is
 - **สินค้าใหม่** — tick this to **open a new item code** on the spot (enter the code +
   description) when the item isn't in the master yet.
 
-Add the **vendor** and a **unit price** per line, then **สร้างใบสั่งซื้อ (PO)**. The system
+Pick the **vendor** with **ค้นหาผู้ขาย** (from the supplier master — ties the PO to vendor
+screening/scorecards; or type a new name), and a **unit price** per line — picking a matched
+item prefills its **last purchase price** (`· ล่าสุด ฿…`). Then **สร้างใบสั่งซื้อ (PO)**. The system
 opens any new item codes, raises the PO through the normal path (vendor screening +
 approval), and **links the PR to the PO** (the PR is marked **ออก PO แล้ว / Converted**).
 Requires the `procurement` permission.

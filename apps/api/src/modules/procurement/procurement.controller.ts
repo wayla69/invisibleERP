@@ -84,9 +84,13 @@ export class ProcurementController {
   @Patch('prs/:prNo/cancel') @Permissions('pr_raise', 'procurement', 'planner')
   cancelPr(@Param('prNo') prNo: string, @CurrentUser() u: JwtUser) { return this.svc.cancelPr(prNo, u); }
 
-  // Item-master search for the PR→PO reconcile step (match a free-text PR name to a real item).
+  // Item-master search for the PR→PO reconcile step (match a free-text PR name to a real item + last price).
   @Get('items/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
   searchItems(@Query('q') q: string, @Query('limit') limit?: string) { return this.svc.searchItems(q ?? '', limit ? Number(limit) : undefined); }
+
+  // Vendor search for the PR→PO panel (pick a real supplier from the master).
+  @Get('vendors/search') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  searchVendors(@Query('q') q: string, @Query('limit') limit?: string) { return this.svc.searchVendors(q ?? '', limit ? Number(limit) : undefined); }
 
   // Convert an approved PR → PO (procurement duty). Lines arrive reconciled (existing item_id or a new
   // code to open); the PO routes through the normal createPo path and the PR is linked + marked Converted.
