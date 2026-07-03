@@ -491,6 +491,38 @@ async function main() {
   const found = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17g', source: { userId: 'Usomchai' }, message: { id: 'mid-17g', type: 'text', text: 'find กระดาษ' } }] });
   ok('chat-PR2: find <keyword> → returns matching item ids', found.json.chat === 1 && lineReplies.at(-1)!.text.includes('A4-PAPER'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 60) }));
 
+  // 17g-ii. PR → PO conversion (procurement) — item-master search (match a free-text PR name), open a NEW
+  //         code, raise the PO through the normal path, link the PR (pr_items.po_no) + mark it Converted.
+  //         (Runs after the A4-PAPER master seed above, and after 17f my-prs saw pr17 Approved.)
+  const itemSearch = await inj('GET', `/api/procurement/items/search?q=${encodeURIComponent('กระดาษ')}`, token);
+  ok('PR→PO: item search matches the master by name/description (A4-PAPER for "กระดาษ")',
+    itemSearch.status === 200 && (itemSearch.json.items ?? []).some((it: any) => it.item_id === 'A4-PAPER'),
+    JSON.stringify({ n: (itemSearch.json.items ?? []).length }));
+
+  // pr17 (Approved, line A4-PAPER) → PO: reuse existing code A4-PAPER + open a brand-new code NI-CHATTEST.
+  const conv = await inj('POST', `/api/procurement/prs/${pr17}/to-po`, token, {
+    vendor_name: 'ACME Foods',
+    lines: [
+      { item_id: 'A4-PAPER', order_qty: 3, unit_price: 120 },
+      { item_id: 'NI-CHATTEST', item_description: 'สินค้าใหม่จากแชท', create_item: true, order_qty: 2, unit_price: 50 },
+    ],
+  });
+  const convPoNo = conv.json.po_no ?? '';
+  const [convPoRow] = convPoNo ? await db.select().from(s.purchaseOrders).where(eq(s.purchaseOrders.poNo, convPoNo)) : [];
+  const [newItemRow] = await db.select().from(s.items).where(eq(s.items.itemId, 'NI-CHATTEST'));
+  const [pr17After] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, pr17));
+  const pr17Lines = await db.select().from(s.prItems).where(eq(s.prItems.prId, Number(pr17After.id)));
+  ok('PR→PO: convert approved PR → PO created (normal path), new code opened, PR linked + Converted',
+    (conv.status === 200 || conv.status === 201) && !!convPoRow && convPoRow.vendorName === 'ACME Foods'
+      && !!newItemRow && (conv.json.created_items ?? []).includes('NI-CHATTEST')
+      && pr17After.status === 'Converted' && pr17Lines.length > 0 && pr17Lines.every((l: any) => l.poNo === convPoNo),
+    JSON.stringify({ po: convPoNo, newItem: !!newItemRow, prStatus: pr17After?.status, linked: pr17Lines.map((l: any) => l.poNo) }));
+
+  // a non-existent / non-Approved PR cannot be converted (guard).
+  const convBad = await inj('POST', '/api/procurement/prs/PR-19990101-999/to-po', token, { lines: [{ item_id: 'X', order_qty: 1, unit_price: 1 }] });
+  ok('PR→PO: converting a non-existent/non-approved PR → refused (404/422)',
+    convBad.status === 404 || convBad.status === 422, JSON.stringify({ s: convBad.status }));
+
   // 17h. cancel — own pending PR withdrawn (workflow instance closed); someone else's PR is refused.
   await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-17h1', source: { userId: 'Usomchai' }, message: { id: 'mid-17h1', type: 'text', text: 'pr STAPLER 2' } }] });
   const prCxl = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';

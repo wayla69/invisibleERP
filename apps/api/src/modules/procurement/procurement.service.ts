@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
-import { sql, eq, and, desc, asc, isNull, or } from 'drizzle-orm';
+import { sql, eq, and, desc, asc, isNull, or, ilike } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -115,6 +115,54 @@ export class ProcurementService {
         lines: (byPr.get(Number(h.id)) ?? []).map((l: any) => ({ item_id: l.itemId, request_qty: n(l.requestQty), uom: l.uom ?? null, reason: l.reason ?? null })),
       })),
     };
+  }
+
+  // Item-master search — for the PR→PO reconcile step (a free-text PR line name may be misspelt or new).
+  // ILIKE on code + description; returns the best candidates so procurement can pick the real item.
+  async searchItems(q: string, limit = 8) {
+    const kw = (q ?? '').trim().slice(0, 100);
+    if (!kw) return { items: [] };
+    const rows = await this.db.select({ item_id: items.itemId, item_description: items.itemDescription, uom: items.uom, unit_price: items.unitPrice })
+      .from(items).where(or(ilike(items.itemId, `%${kw}%`), ilike(items.itemDescription, `%${kw}%`))).limit(Math.min(Math.max(limit, 1), 25));
+    return { items: rows.map((r: any) => ({ item_id: r.item_id, item_description: r.item_description ?? null, uom: r.uom ?? null, unit_price: n(r.unit_price) })) };
+  }
+
+  // Convert an APPROVED PR into a PO. Each line arrives already reconciled by procurement: an existing
+  // item_id (picked from searchItems) OR a brand-new code to open (create_item:true → an items-master row
+  // is created). The PO is raised through the normal createPo path (vendor screening + approval engine),
+  // then every line of the source PR is stamped with the new PO number and the PR is marked Converted —
+  // closing the PR → PO link (pr_items.po_no) end to end. PR must be Approved (a Pending/Rejected PR 422s).
+  async convertPrToPo(prNo: string, dto: { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; lines: { item_id: string; item_description?: string; create_item?: boolean; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean }[] }, user: JwtUser) {
+    const db = this.db;
+    const pr = prNo.toUpperCase();
+    const [head] = await db.select().from(purchaseRequests).where(eq(purchaseRequests.prNo, pr)).limit(1);
+    if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PR not found', messageTh: 'ไม่พบคำขอซื้อ' });
+    if (head.status !== 'Approved') throw new UnprocessableEntityException({ code: 'PR_NOT_APPROVED', message: `PR must be Approved to convert (is '${head.status}')`, messageTh: `ต้องอนุมัติ PR ก่อนแปลงเป็น PO (สถานะปัจจุบัน '${head.status}')` });
+    if (!dto.lines?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No lines', messageTh: 'ไม่มีรายการ' });
+    for (const l of dto.lines) {
+      if (!l.item_id?.trim()) throw new BadRequestException({ code: 'ITEM_REQUIRED', message: 'Each line needs a resolved item id', messageTh: 'ทุกบรรทัดต้องเลือกหรือเปิดรหัสสินค้า' });
+      if (!(n(l.order_qty) > 0)) throw new BadRequestException({ code: 'BAD_QTY', message: `Bad qty for ${l.item_id}`, messageTh: `จำนวนไม่ถูกต้อง: ${l.item_id}` });
+    }
+    // Open any brand-new item codes first (idempotent — a code that already exists is left as-is).
+    const created: string[] = [];
+    for (const l of dto.lines.filter((x) => x.create_item)) {
+      const code = l.item_id.trim();
+      const [exists] = await db.select({ id: items.id }).from(items).where(eq(items.itemId, code)).limit(1);
+      if (!exists) {
+        await db.insert(items).values({ itemId: code, itemDescription: l.item_description ?? code, uom: l.uom ?? null, unitPrice: String(n(l.unit_price)) }).onConflictDoNothing();
+        created.push(code);
+      }
+    }
+    // Raise the PO through the normal path (vendor screening + workflow), then link the PR.
+    const po = await this.createPo({
+      vendor_id: dto.vendor_id, vendor_name: dto.vendor_name, expected_date: dto.expected_date,
+      remarks: dto.remarks ?? `จาก ${pr}`, currency: dto.currency, fx_rate: dto.fx_rate,
+      items: dto.lines.map((l) => ({ item_id: l.item_id.trim(), item_description: l.item_description, order_qty: n(l.order_qty), unit_price: n(l.unit_price), uom: l.uom, is_capital: l.is_capital })),
+    }, user);
+    await db.update(prItems).set({ poNo: po.po_no }).where(eq(prItems.prId, Number(head.id)));
+    await db.update(purchaseRequests).set({ status: 'Converted' }).where(eq(purchaseRequests.id, head.id));
+    await this.statusLog.log('PR', pr, 'Approved', 'Converted', user.username);
+    return { pr_no: pr, po_no: po.po_no, po_status: po.status, total_amount: po.total_amount, created_items: created };
   }
 
   // ── Supplier screening (Phase 16) ───────────────────────────────────
