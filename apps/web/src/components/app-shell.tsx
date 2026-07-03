@@ -53,6 +53,7 @@ import {
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { CommandPalette } from '@/components/command-palette';
+import { AssistantWidget } from '@/components/assistant-widget';
 import { NotificationBell } from '@/components/notification-bell';
 
 function initials(name?: string | null) {
@@ -683,6 +684,10 @@ export function AppShell({
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
       />
+
+      {/* Global floating AI helper — contextual assistance from any screen, for users who can use the
+          assistant (self-hides otherwise). Shares chat logic with the full /assistant page. */}
+      {hasPerm(me.data, 'ai_chat', 'dashboard') && <AssistantWidget />}
     </SidebarProvider>
   );
 }

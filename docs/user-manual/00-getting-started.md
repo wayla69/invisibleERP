@@ -137,6 +137,11 @@ main content area.
   you already have permission for.
 - Each screen address in this manual (e.g. `/orders`) is what appears at the end
   of your browser address bar.
+- A **floating AI helper** (the round **🤖 button** in the bottom-right corner)
+  is available on every screen: click it to ask about sales, stock, finance or
+  purchasing and get answers from live data, without leaving the page. Use the
+  **⤢ expand** icon to open the full assistant at `/assistant`. The button only
+  appears if your account may use the assistant.
 
 Common starting points by role:
 

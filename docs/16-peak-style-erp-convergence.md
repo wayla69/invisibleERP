@@ -130,6 +130,15 @@ result types they could already open — the endpoint never widens access. Addit
 migration, no GL, no new control. Verified end-to-end by the `e2e` cutover harness (real Nest app + PGlite +
 RLS proxy): item search returns the seeded item and deep-links `/inventory/A`, the `q<2` guard returns empty.
 
+### 1.8 Global floating AI helper (`apps/web/src/components/assistant-widget.tsx` + `hooks/use-assistant-chat.ts`)
+The AI assistant was a **page you had to navigate to** (`/assistant`). It's now also an **always-available
+floating button** in the corner of the internal shell — contextual help from any screen, the friendly-SaaS
+"help is always one click away" pattern. The chat state + SSE streaming was extracted verbatim into a shared
+`useAssistantChat` hook consumed by **both** the full page (now a thin UI over the hook) and the widget, so
+there's one implementation. The widget is mounted + **permission-gated** by `app-shell` (`ai_chat|dashboard`,
+via `hasPerm`) so it self-hides for users who can't use the assistant, and an ⤢ button opens the full page.
+Reuses the existing `GET /api/chat/stream` — no API/route/permission/GL/control change.
+
 ---
 
 ## 2. Control / compliance impact — **none**
@@ -177,4 +186,5 @@ and `00-getting-started.md` (Finance cycle sub-sections + action center).
 | 2026-06-25 | v1.5 (IMPLEMENTED) | Web / Product | **Fifth friendliness sweep** (§1.5): same toasts + guided empty states extended to 14 more screens (settings/custom-fields/pos-ops/pos-control/peripherals/pos-fiscal/print/loyalty-missions/loyalty-campaigns/tax-wht/profitability/consolidation/intercompany/bom) — **~57 screens** total. Independently review-verified behavior-preserving (14/14, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-06-25 | v1.6 (IMPLEMENTED) | Web / Product | **Final mop-up sweep** (§1.5): guided empty states on the remaining read-only report/viewer screens (restaurant-analytics/sod/lots/food-cost/tax-reports/bi/audit/pos-home/loyalty-members/inventory-item/pos) + toasts & empty states on the rest (production-plan/menu/goods-issue/cpq/costing/buffet/branches/saved-views/images/campaigns/ai-actions) — 22 screens, **~79 total** (essentially the whole internal app). Independently review-verified behavior-preserving (22/22, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-07-03 | v1.7 (IMPLEMENTED) | Web / Product | **First-run guidance** (§1.6): new `getting-started.tsx` panel on the ERP dashboard surfacing the existing onboarding checklist (`GET /api/onboarding`) with per-step deep-links + in-place tick-off — closes the "guided first-run" gap for the Paypers-style usability pass. Self-hides on 403 / 100% / no pending step; reuses existing endpoints only. No API/route/permission/GL/control change. Docs synced (this file, user-manual 00). Verified: web typecheck ✅ + build ✅. |
+| 2026-07-03 | v1.9 (IMPLEMENTED) | Web / Product | **Global floating AI helper** (§1.8): extracted the assistant chat/SSE into a shared `useAssistantChat` hook and added an always-available floating `assistant-widget.tsx` (permission-gated in `app-shell`, ⤢ to full page). `/assistant` page refactored to the hook (behaviour-preserving). Reuses `GET /api/chat/stream` — no API/route/permission/GL/control change. Docs synced (this file, user-manual 00). Verified: web typecheck ✅ + build ✅. |
 | 2026-07-03 | v1.8 (IMPLEMENTED) | Web / Platform | **Global spotlight search** (§1.7): new read-only `GET /api/search?q=` (`modules/search/search.module.ts`) over customer/vendor/item masters, wired into the ⌘K palette as a **ข้อมูล (Records)** group (debounced, controlled input, deep-links). RLS tenant-scoped; per-entity results gated in-service by the caller's expanded permissions (no new perm/SoD/GL/control). Docs synced (this file incl. §2, API spec, user-manual 00). Verified: shared+API+web typecheck ✅, web build ✅, **`e2e` cutover harness ✅ (19/19, +3 search checks — real Nest app + PGlite + RLS)**. |
