@@ -443,10 +443,16 @@ expiry once; review them at `GET /api/admin/signup-invites`). Send the invitee t
 signup with the token — which works **even while public signup is disabled**. The token is single-use and
 expires; a reused/expired/wrong token is rejected (`400 INVALID_INVITE`).
 
+**Let people request an account, then approve them (queue).** For inbound interest, keep a public
+"request access" form (`POST /api/auth/signup-requests`) — it creates a **pending request**, it does **not**
+create a company. Review the queue at `GET /api/admin/signup-requests` and **approve** (provisions the
+company using the details they submitted) or **reject** each one. No account exists until you approve, so
+nobody self-provisions.
+
 **Public self-service signup** (`POST /api/auth/signup` with no invite) is **disabled in production by
 default** (`403 SIGNUP_DISABLED`). Only enable it (`PUBLIC_SIGNUP_ENABLED=true`) if you genuinely want
-outsiders to open their own accounts; otherwise prefer the platform-owner endpoint or invite above. See
-`docs/ops/tenancy-model.md`.
+outsiders to open their own accounts; otherwise prefer the platform-owner endpoint, invite, or request
+queue above. See `docs/ops/tenancy-model.md`.
 
 ---
 
