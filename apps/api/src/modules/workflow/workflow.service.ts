@@ -5,7 +5,7 @@ import { workflowDefinitions, workflowSteps, workflowInstances, approvalActions,
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { SodService } from './sod.service';
-import { LineNotifyService } from '../messaging/line-notify.service';
+import { LineNotifyService, buildApproveCard } from '../messaging/line-notify.service';
 
 export interface StartWorkflowArgs { docType: string; docNo: string; amount: number; createdBy: string; tenantId: number | null; context?: Record<string, string>; }
 export interface StepDto { step_no: number; approver_role?: string; approver_user?: string; min_amount?: number; all_of_n?: number; name?: string; sla_hours?: number; escalate_to_role?: string; escalate_to_user?: string; match_key?: string; match_value?: string; }
@@ -24,12 +24,16 @@ export class WorkflowService {
   ) {}
 
   // Push a LINE notification to the step's approver (user or role fan-out) that a doc awaits them.
+  // For PRs the push is a flex card with one-tap [อนุมัติ]/[ปฏิเสธ] postback buttons (LC-1) — the postback
+  // routes through the same chat decision path (permission + engine SoD + a confirm step); the text below
+  // doubles as the card's altText and keeps the typed-command hint for clients without flex rendering.
   private async notifyStepApprovers(inst: { docType: string; docNo: string; createdBy: string | null; tenantId: number | null }, step: any) {
     if (!this.lineNotify || !step) return;
     const chatHint = inst.docType === 'PR' ? `\nอนุมัติจากแชทนี้ได้: พิมพ์ "approve ${inst.docNo}" หรือ "reject ${inst.docNo} <เหตุผล>"` : '';
     const text = `🔔 รออนุมัติ: ${inst.docType} ${inst.docNo} (โดย ${inst.createdBy ?? '-'})${chatHint}`;
-    if (step.approverUser) await this.lineNotify.notifyUser(step.approverUser, inst.tenantId, text);
-    else if (step.approverRole) await this.lineNotify.notifyRole(step.approverRole, inst.tenantId, text);
+    const flex = inst.docType === 'PR' ? buildApproveCard(inst.docType, inst.docNo, inst.createdBy) : undefined;
+    if (step.approverUser) await this.lineNotify.notifyUser(step.approverUser, inst.tenantId, text, flex);
+    else if (step.approverRole) await this.lineNotify.notifyRole(step.approverRole, inst.tenantId, text, 20, flex);
   }
 
   // ── Definitions ──

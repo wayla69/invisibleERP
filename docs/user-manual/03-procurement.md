@@ -73,6 +73,11 @@ No setup beyond linking; if you unlink, the messages stop.
 > `procurement` permission, you can never approve a PR you raised yourself
 > (`SOD_VIOLATION`), and multi-level chains still require every step.
 
+**One-tap approve (LC-1):** when a PR enters your queue, the LINE card now has
+**[อนุมัติ] [ปฏิเสธ]** buttons. Tapping one asks for a **[ยืนยัน]** tap (valid
+5 minutes) before anything happens — same permission and self-approval rules
+as typing the command. `my prs` also replies as swipeable cards now.
+
 **Expected result:** The bot replies the new PR number (e.g. `PR-20260702-001`).
 The PR is **identical** to one raised on the web — same numbering, same status log,
 and it enters the same Procurement approval workflow. The chat can only *raise*

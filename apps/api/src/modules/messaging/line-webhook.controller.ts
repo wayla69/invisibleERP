@@ -10,7 +10,7 @@ import { safeEqualStr } from '../../common/crypto';
 import { isUniqueViolation } from '../../common/db-error';
 import { Public, NoTx, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { TenantMessagingService } from './tenant-messaging.service';
-import { replyLine, fetchLineContent, type SendResult } from './gateways';
+import { replyLine, replyLineFlex, fetchLineContent, type SendResult } from './gateways';
 import { ProcurementService } from '../procurement/procurement.service';
 import { AttachmentsService } from '../procurement/attachments.service';
 
@@ -64,6 +64,7 @@ export class LineWebhookService {
       else if (ev.type === 'unfollow') { await this.onUnfollow(tenantId, userId); unfollowed++; }
       else if (ev.type === 'message' && ev.message?.type === 'text') { if (await this.onChatMessage(tenantId, token, ev)) chat++; }
       else if (ev.type === 'message' && ev.message?.type === 'image') { if (await this.onChatImage(tenantId, token, ev)) chat++; }
+      else if (ev.type === 'postback') { if (await this.onPostback(tenantId, token, ev)) chat++; }
     }
     return { received: true, followed, unfollowed, chat };
   }
@@ -170,7 +171,11 @@ export class LineWebhookService {
       if (!staff) reply = LineWebhookService.NOT_LINKED;
       else if (isStatus) { reply = await this.prStatus(cmd === 'pr' ? parts[2]! : arg1); campaign = 'chat_pr_status'; }
       else if (isApprove || isReject) { reply = await this.chatDecision(staff, arg1, isApprove); campaign = 'chat_approve'; }
-      else if (isMyPrs) { reply = await this.chatMyPrs(staff); campaign = 'chat_myprs'; }
+      else if (isMyPrs) {
+        const mine = await this.chatMyPrs(staff);
+        await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, msgId, mine.text, 'chat_myprs', mine.flex);
+        return true;
+      }
       else if (isFind) { reply = await this.chatFind(parts.slice(1).join(' ')); campaign = 'chat_find'; }
       else if (isCancel) { reply = await this.chatCancel(staff, arg1); campaign = 'chat_cancel'; }
       else if (isStock) { reply = await this.chatStock(staff, arg1); campaign = 'chat_stock'; }
@@ -203,11 +208,96 @@ export class LineWebhookService {
     }
   }
 
-  // my prs — the caller's 5 most recent requisitions with status.
-  private async chatMyPrs(u: any): Promise<string> {
+  // my prs — the caller's 5 most recent requisitions. Replies a flex CAROUSEL (one card per PR, status
+  // colour-coded); the text doubles as the altText so clients without flex rendering lose nothing.
+  private async chatMyPrs(u: any): Promise<{ text: string; flex?: any }> {
     const rows = await this.db.select().from(purchaseRequests).where(eq(purchaseRequests.requestedBy, u.username)).orderBy(desc(purchaseRequests.id)).limit(5);
-    if (!rows.length) return 'คุณยังไม่มีคำขอซื้อ — พิมพ์ "pr <รหัสสินค้า> <จำนวน>" เพื่อสร้าง';
-    return 'คำขอซื้อล่าสุดของคุณ:\n' + rows.map((r: any) => `• ${r.prNo} — ${LineWebhookService.STATUS_TH[String(r.status)] ?? r.status}${r.prDate ? ` (${r.prDate})` : ''}`).join('\n');
+    if (!rows.length) return { text: 'คุณยังไม่มีคำขอซื้อ — พิมพ์ "pr <รหัสสินค้า> <จำนวน>" เพื่อสร้าง' };
+    const text = 'คำขอซื้อล่าสุดของคุณ:\n' + rows.map((r: any) => `• ${r.prNo} — ${LineWebhookService.STATUS_TH[String(r.status)] ?? r.status}${r.prDate ? ` (${r.prDate})` : ''}`).join('\n');
+    const colour: Record<string, string> = { Approved: '#1b7f3b', Rejected: '#b3261e', Cancelled: '#777777', Pending: '#8a6d1d' };
+    const flex = {
+      type: 'carousel',
+      contents: rows.map((r: any) => ({
+        type: 'bubble', size: 'micro',
+        body: {
+          type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+            { type: 'text', text: String(r.prNo), weight: 'bold', size: 'sm', wrap: true },
+            { type: 'text', text: LineWebhookService.STATUS_TH[String(r.status)] ?? String(r.status), size: 'sm', color: colour[String(r.status)] ?? '#333333' },
+            ...(r.prDate ? [{ type: 'text', text: String(r.prDate), size: 'xs', color: '#888888' }] : []),
+          ],
+        },
+      })),
+    };
+    return { text, flex };
+  }
+
+  // ── LC-1 (docs/30) — one-tap postback approve/reject with a confirm step ─────────────────────────
+  // The queue-entry card's [อนุมัติ]/[ปฏิเสธ] buttons post {a:'decide', x, d}. The first tap parks a
+  // short-lived confirm state (nonce) and replies a confirm card; tapping [ยืนยัน] posts {a:'confirm',
+  // d, n} which consumes the state BEFORE acting (replay-safe) and runs the SAME chatDecision path as the
+  // typed command — permission + engine maker-checker/SoD bind identically. No confirm = no action.
+  private confirmCard(action: 'approve' | 'reject', docNo: string, nonce: string): any {
+    return {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+          { type: 'text', text: action === 'approve' ? 'ยืนยันการอนุมัติ?' : 'ยืนยันการปฏิเสธ?', weight: 'bold', size: 'md' },
+          { type: 'text', text: docNo, weight: 'bold', size: 'lg' },
+          { type: 'text', text: 'กดยืนยันภายใน 5 นาที', size: 'xs', color: '#888888' },
+        ],
+      },
+      footer: {
+        type: 'box', layout: 'horizontal', contents: [
+          { type: 'button', style: action === 'approve' ? 'primary' : 'secondary', height: 'sm', action: { type: 'postback', label: 'ยืนยัน', data: JSON.stringify({ a: 'confirm', d: docNo, n: nonce }), displayText: `ยืนยัน ${docNo}` } },
+        ],
+      },
+    };
+  }
+
+  private async onPostback(tenantId: number, token: string | undefined, ev: any): Promise<boolean> {
+    const lineUserId = String(ev?.source?.userId ?? '');
+    let data: any = null;
+    try { data = JSON.parse(String(ev?.postback?.data ?? '')); } catch { return false; }
+    if (!lineUserId || !data || typeof data.a !== 'string') return false;
+
+    // webhook-redelivery dedupe on the event id (postbacks have no message id)
+    const evtId = String(ev?.webhookEventId ?? '');
+    if (evtId) {
+      const [dup] = await this.db.select({ id: messageLog.id }).from(messageLog)
+        .where(and(eq(messageLog.tenantId, tenantId), eq(messageLog.providerRef, `line:evt:${evtId}`))).limit(1);
+      if (dup) return true;
+    }
+
+    const staff = await this.staffByLine(tenantId, lineUserId);
+    let text: string;
+    let flex: any;
+    if (!staff) {
+      text = LineWebhookService.NOT_LINKED;
+    } else if (data.a === 'decide' && (data.x === 'approve' || data.x === 'reject') && typeof data.d === 'string') {
+      const docNo = String(data.d).toUpperCase();
+      const nonce = this.genCode();
+      const expiresAt = new Date(Date.now() + 5 * 60_000);
+      await this.db.insert(lineChatStates)
+        .values({ tenantId, lineUserId, kind: 'confirm', payload: { action: data.x, docNo, nonce }, expiresAt })
+        .onConflictDoUpdate({ target: [lineChatStates.tenantId, lineChatStates.lineUserId], set: { kind: 'confirm', payload: { action: data.x, docNo, nonce }, expiresAt, createdAt: new Date() } });
+      text = `ยืนยันการ${data.x === 'approve' ? 'อนุมัติ' : 'ปฏิเสธ'} ${docNo} — กดปุ่มยืนยันภายใน 5 นาที`;
+      flex = this.confirmCard(data.x, docNo, nonce);
+    } else if (data.a === 'confirm' && typeof data.d === 'string' && typeof data.n === 'string') {
+      const [state] = await this.db.select().from(lineChatStates)
+        .where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId), eq(lineChatStates.kind, 'confirm'))).limit(1);
+      const p = (state?.payload ?? {}) as { action?: string; docNo?: string; nonce?: string };
+      if (!state || new Date(state.expiresAt).getTime() < Date.now() || p.docNo !== String(data.d).toUpperCase() || p.nonce !== data.n) {
+        text = 'คำขอยืนยันหมดอายุหรือไม่ถูกต้อง — กดปุ่มอนุมัติ/ปฏิเสธใหม่อีกครั้ง';
+      } else {
+        // consume the state BEFORE acting so a redelivered confirm can never act twice
+        await this.db.delete(lineChatStates).where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId)));
+        text = await this.chatDecision(staff, p.docNo!, p.action === 'approve');
+      }
+    } else {
+      return false;
+    }
+    await this.replyChat(tenantId, token, ev?.replyToken, lineUserId, '', text, 'chat_postback', flex, evtId ? `line:evt:${evtId}` : null);
+    return true;
   }
 
   // find <keyword> — item-master search so people can discover real item ids before raising a PR.
@@ -393,15 +483,17 @@ export class LineWebhookService {
   }
 
   // Reply over the one-time replyToken (no push quota); without a configured token (dev mock) the network
-  // call is skipped. The reply is audit-logged in message_log carrying the INBOUND message id as
-  // provider_ref — that row doubles as the webhook-redelivery dedup marker.
-  private async replyChat(tenantId: number, token: string | undefined, replyToken: string | undefined, lineUserId: string, msgId: string, text: string, campaign: string) {
+  // call is skipped. With `flex`, replies a rich card (text = altText). The reply is audit-logged in
+  // message_log carrying the INBOUND message/event id as provider_ref — that row doubles as the
+  // webhook-redelivery dedup marker (refOverride lets postbacks use their event id instead).
+  private async replyChat(tenantId: number, token: string | undefined, replyToken: string | undefined, lineUserId: string, msgId: string, text: string, campaign: string, flex?: any, refOverride?: string | null) {
     let result: SendResult = { status: 'sent', provider: 'mock' };
-    if (token && replyToken) result = await replyLine(token, replyToken, text);
+    if (token && replyToken) result = flex ? await replyLineFlex(token, replyToken, text, flex) : await replyLine(token, replyToken, text);
     try {
       await this.db.insert(messageLog).values({
         tenantId, memberId: null, channel: 'line', recipient: lineUserId, body: text, campaign,
-        status: result.status, provider: result.provider, providerRef: msgId ? `line:msg:${msgId}` : null,
+        status: result.status, provider: result.provider,
+        providerRef: refOverride !== undefined ? refOverride : (msgId ? `line:msg:${msgId}` : null),
         error: result.error ?? null, createdBy: 'system:line-chat',
       });
     } catch { /* audit best-effort */ }
