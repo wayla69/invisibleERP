@@ -78,6 +78,13 @@ handy on the floor or in the stockroom. One-time setup first:
 > number as an optional reason). Purchasing assigns the real item code when the PR
 > becomes a PO.
 
+**Seeing your PRs on the web:** the requisitions page (`/requisitions`) now shows a
+**คำขอซื้อล่าสุด** table listing every PR — raised here *or* from LINE chat — with its
+lines and status. A plain requester sees their own PRs (with a **ยกเลิก** button for a
+still-Pending one); a procurement/planner/exec holder sees **all** PRs and gets
+**อนุมัติ / ปฏิเสธ** buttons on the Pending ones (self-approval is still blocked by the
+engine). The table auto-refreshes; use **รีเฟรช** to pull the latest immediately.
+
 **LINE notifications:** if you've linked your account, the system messages you
 automatically — approvers get a 🔔 when a PR enters their queue (with the
 `approve <PR no>` hint), and the requester gets ✅/❌ when their PR is decided.

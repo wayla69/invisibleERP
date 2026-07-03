@@ -367,6 +367,14 @@ async function main() {
       && Number(prNameLines[0]!.requestQty) === 2 && (prNameLines[0]!.reason == null),
     JSON.stringify({ id: prNameLines[0]?.itemId, qty: prNameLines[0]?.requestQty, reason: prNameLines[0]?.reason }));
 
+  // 16e-iii. the web PR register lists what chat raised — GET /api/procurement/prs (boss = can_approve).
+  const prList = await inj('GET', '/api/procurement/prs?limit=50', token);
+  const listedNames = (prList.json.prs ?? []).flatMap((p: any) => (p.lines ?? []).map((l: any) => l.item_id));
+  ok('web PR register: GET /procurement/prs lists chat-raised PRs (incl. multi-word name) + can_approve',
+    prList.status === 200 && prList.json.can_approve === true
+      && (prList.json.prs ?? []).some((p: any) => p.pr_no === prNo) && listedNames.includes('Iberico ham'),
+    JSON.stringify({ n: (prList.json.prs ?? []).length, canApprove: prList.json.can_approve, hasName: listedNames.includes('Iberico ham') }));
+
   // 16f. webhook redelivery of the SAME message id is dropped (no duplicate PR).
   const prCountBefore = (await db.select().from(s.purchaseRequests)).length;
   const redeliver = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-2b', source: { userId: 'Usomchai' }, message: { id: 'mid-2', type: 'text', text: 'pr A4-PAPER 10 กระดาษหมด, TONER-85A 2' } }] });

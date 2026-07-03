@@ -62,6 +62,13 @@ export class ProcurementController {
   @Post('prs') @Permissions('pr_raise', 'procurement', 'planner')
   createPr(@Body(new ZodValidationPipe(PrBody)) b: CreatePrDto, @CurrentUser() u: JwtUser) { return this.svc.createPr(b, u); }
 
+  // List recent PRs (header + lines) for the requisitions screen. pr_raise holders see their own; a
+  // procurement/planner/exec holder sees every PR (can_approve:true) so they can decide from the table.
+  @Get('prs') @Permissions('pr_raise', 'procurement', 'planner', 'exec')
+  listPrs(@CurrentUser() u: JwtUser, @Query('limit') limit?: string, @Query('mine') mine?: string) {
+    return this.svc.listPrs(u, { limit: limit ? Number(limit) : undefined, mine: mine === 'true' ? true : mine === 'false' ? false : undefined });
+  }
+
   @Patch('prs/:prNo/approve') @Permissions('procurement')
   approvePr(@Param('prNo') prNo: string, @Body(new ZodValidationPipe(ApproveBody)) b: { approve: boolean }, @CurrentUser() u: JwtUser) {
     return this.svc.approvePr(prNo, b.approve, u);

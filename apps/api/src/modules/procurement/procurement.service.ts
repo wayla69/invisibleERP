@@ -91,6 +91,32 @@ export class ProcurementService {
     return { pr_no: prNo, status: 'Cancelled' };
   }
 
+  // List recent PRs (header + lines) for the web requisitions screen. `mine` scopes to the caller's own
+  // requests (the default for a plain pr_raise holder); procurement/planner/exec see every PR so they can
+  // approve. Newest first. purchase_requests has no tenant_id (company-wide document), so no tenant filter.
+  async listPrs(user: JwtUser, opts?: { limit?: number; mine?: boolean }) {
+    const db = this.db;
+    const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
+    const canSeeAll = (user.permissions ?? []).some((p) => ['procurement', 'planner', 'exec'].includes(p)) || user.role === 'Admin';
+    const scopeMine = opts?.mine ?? !canSeeAll;
+    const heads = await db.select().from(purchaseRequests)
+      .where(scopeMine ? eq(purchaseRequests.requestedBy, user.username ?? '') : sql`true`)
+      .orderBy(desc(purchaseRequests.id)).limit(limit);
+    if (!heads.length) return { prs: [], can_approve: canSeeAll };
+    const ids = heads.map((h: any) => Number(h.id));
+    const lines = await db.select().from(prItems).where(sql`${prItems.prId} in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})`);
+    const byPr = new Map<number, any[]>();
+    for (const l of lines) { const k = Number(l.prId); (byPr.get(k) ?? byPr.set(k, []).get(k)!).push(l); }
+    return {
+      can_approve: canSeeAll,
+      prs: heads.map((h: any) => ({
+        pr_no: h.prNo, pr_date: h.prDate, requested_by: h.requestedBy, status: h.status, priority: h.priority,
+        approved_by: h.approvedBy ?? null,
+        lines: (byPr.get(Number(h.id)) ?? []).map((l: any) => ({ item_id: l.itemId, request_qty: n(l.requestQty), uom: l.uom ?? null, reason: l.reason ?? null })),
+      })),
+    };
+  }
+
   // ── Supplier screening (Phase 16) ───────────────────────────────────
   // blocklisted or non-approved vendor → 422; unknown/freeform vendor (no master row) → allowed.
   async assertSupplierAllowed(vendorId: number | null, vendorName: string | null) {
