@@ -182,6 +182,7 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.leases': { th: 'สัญญาเช่า (IFRS 16)', en: 'Leases (IFRS 16)' },
   'nav.deferred_tax': { th: 'ภาษีเงินได้รอตัดบัญชี', en: 'Deferred Tax' },
   'nav.cost_centers': { th: 'ศูนย์ต้นทุน & กำไรตามมิติ', en: 'Cost Centres & P&L' },
+  'nav.gl_schedules': { th: 'รายการบัญชีตั้งเวลา', en: 'Recurring & Prepaid' },
   'nav.period_close': { th: 'ปิดงวดบัญชี (Period-close)', en: 'Period Close' },
 
   // ── Finance / Banking ─────────────────────────────────────────────────────
