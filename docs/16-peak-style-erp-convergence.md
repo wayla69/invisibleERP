@@ -115,17 +115,39 @@ usability pass).
 `percent >= 100` or no step is pending, so it never nags an established tenant. **Reuses existing endpoints
 only** — no API/route/permission/GL/control change.
 
+### 1.7 Global "spotlight" search in the ⌘K palette (`apps/api/src/modules/search/search.module.ts` + `command-palette.tsx`)
+The command palette was **navigation-only** (jump to a screen). It now also **finds records** — the
+Paypers/PEAK "type a name, open the thing" experience. A new read-only `GET /api/search?q=` searches the
+**customer / vendor / item** masters (ILIKE over name/code/contact/phone/email/description, ≤6 per type) and
+returns `{type, id, label, sublabel, href}` rows; the palette fetches them (debounced 250 ms, controlled
+`CommandInput`) and renders a **ข้อมูล (Records)** group above the nav groups, each row deep-linking to the
+record (items → `/inventory/{itemId}` detail; customers/vendors → their list screen).
+
+**Security:** tenant isolation is the automatic per-request RLS tx (no manual `tenant_id`). **Per-entity
+permission is enforced in-service** against the caller's *expanded* permissions (customer→`crm|exec|ar`,
+vendor→`procurement|warehouse|creditors|exec`, item→`warehouse|dashboard|planner`), so a user only sees
+result types they could already open — the endpoint never widens access. Additive + read-only ⇒ no
+migration, no GL, no new control. Verified end-to-end by the `e2e` cutover harness (real Nest app + PGlite +
+RLS proxy): item search returns the seeded item and deep-links `/inventory/A`, the `q<2` guard returns empty.
+
 ---
 
 ## 2. Control / compliance impact — **none**
 
-This pass changes **no** API endpoint, route `href`, permission/SoD rule, GL posting, validation/error code,
-or workflow. The finance maker-checker (**EXP-06**), collections/dunning (**REV-08/REV-12**), reconciliation
-SoD, and all postings are byte-for-byte the same logic, only re-laid-out in the client. Therefore the
-**RCM, control matrices, process narratives, and the `tools/cutover` control harnesses are unaffected** and
-were intentionally not modified (per the doc-sync policy's "say so explicitly" clause). The API-level **UAT**
-cases (`docs/uat/02-order-to-cash`, `03-procure-to-pay`, `05-general-ledger-close`, `09-reports-analytics`)
-drive `/api/finance/*` endpoints directly, not the screen, so they remain valid as-is.
+The original convergence pass (§1.1–1.6) changed **no** API endpoint, route `href`, permission/SoD rule, GL
+posting, validation/error code, or workflow. The finance maker-checker (**EXP-06**), collections/dunning
+(**REV-08/REV-12**), reconciliation SoD, and all postings are byte-for-byte the same logic, only re-laid-out
+in the client.
+
+The only API surface added is §1.7's **read-only `GET /api/search`** (a convenience spotlight over existing
+master data). It performs **no** write, GL posting, or state change; it **reuses existing per-entity read
+permissions** (no new permission/SoD rule) and the standard RLS tenant isolation. It is therefore **not a
+control** and creates no new control objective — so the **RCM, control matrices, and process narratives are
+unaffected** and were intentionally not modified (per the doc-sync policy's "say so explicitly" clause). It
+is, however, covered by an automated check in the **`e2e` cutover harness** (permission-scoped result,
+deep-link, min-length guard). The API-level **UAT** cases (`docs/uat/02-order-to-cash`,
+`03-procure-to-pay`, `05-general-ledger-close`, `09-reports-analytics`) drive `/api/finance/*` endpoints
+directly, not the screen, so they remain valid as-is.
 
 **Docs updated:** this file; `docs/15-…` revision row; user-manual `05-finance-ar-ap.md` (tab navigation)
 and `00-getting-started.md` (Finance cycle sub-sections + action center).
@@ -155,3 +177,4 @@ and `00-getting-started.md` (Finance cycle sub-sections + action center).
 | 2026-06-25 | v1.5 (IMPLEMENTED) | Web / Product | **Fifth friendliness sweep** (§1.5): same toasts + guided empty states extended to 14 more screens (settings/custom-fields/pos-ops/pos-control/peripherals/pos-fiscal/print/loyalty-missions/loyalty-campaigns/tax-wht/profitability/consolidation/intercompany/bom) — **~57 screens** total. Independently review-verified behavior-preserving (14/14, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-06-25 | v1.6 (IMPLEMENTED) | Web / Product | **Final mop-up sweep** (§1.5): guided empty states on the remaining read-only report/viewer screens (restaurant-analytics/sod/lots/food-cost/tax-reports/bi/audit/pos-home/loyalty-members/inventory-item/pos) + toasts & empty states on the rest (production-plan/menu/goods-issue/cpq/costing/buffet/branches/saved-views/images/campaigns/ai-actions) — 22 screens, **~79 total** (essentially the whole internal app). Independently review-verified behavior-preserving (22/22, 0 flagged). No API/route/permission/control change. Verified: web typecheck ✅ + build ✅ (127/127). |
 | 2026-07-03 | v1.7 (IMPLEMENTED) | Web / Product | **First-run guidance** (§1.6): new `getting-started.tsx` panel on the ERP dashboard surfacing the existing onboarding checklist (`GET /api/onboarding`) with per-step deep-links + in-place tick-off — closes the "guided first-run" gap for the Paypers-style usability pass. Self-hides on 403 / 100% / no pending step; reuses existing endpoints only. No API/route/permission/GL/control change. Docs synced (this file, user-manual 00). Verified: web typecheck ✅ + build ✅. |
+| 2026-07-03 | v1.8 (IMPLEMENTED) | Web / Platform | **Global spotlight search** (§1.7): new read-only `GET /api/search?q=` (`modules/search/search.module.ts`) over customer/vendor/item masters, wired into the ⌘K palette as a **ข้อมูล (Records)** group (debounced, controlled input, deep-links). RLS tenant-scoped; per-entity results gated in-service by the caller's expanded permissions (no new perm/SoD/GL/control). Docs synced (this file incl. §2, API spec, user-manual 00). Verified: shared+API+web typecheck ✅, web build ✅, **`e2e` cutover harness ✅ (19/19, +3 search checks — real Nest app + PGlite + RLS)**. |

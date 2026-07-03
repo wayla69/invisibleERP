@@ -95,6 +95,14 @@ async function main() {
   ok('notifications counts.low_stock = 2', (await inj('GET', '/api/notifications', token)).json.counts?.low_stock === 2);
   ok('analytics/replenishment 200', (await inj('GET', '/api/analytics/replenishment', token)).status === 200);
 
+  // global omni-search (⌘K records): the item master is reachable and deep-links to its detail page
+  const searchApp = await inj('GET', '/api/search?q=App', token);
+  ok('GET /api/search?q=App → item A deep-links /inventory/A',
+    searchApp.status === 200 && (searchApp.json.results ?? []).some((r: any) => r.type === 'item' && r.id === 'A' && r.href === '/inventory/A'),
+    `count=${searchApp.json.results?.length}`);
+  ok('GET /api/search min-length guard (1 char → empty)', (await inj('GET', '/api/search?q=A', token)).json.results?.length === 0);
+  ok('GET /api/search no-match → 200 empty', (await inj('GET', '/api/search?q=zzzznope', token)).json.results?.length === 0);
+
   // write over HTTP (transaction + doc number + loyalty)
   const create = await inj('POST', '/api/pos/orders', token, { customer_name: 'T1', items: [{ item_id: 'A', order_qty: 2, unit_price: 10 }] });
   ok('POST /api/pos/orders 201 + SO-', (create.status === 200 || create.status === 201) && /^SO-\d{8}-\d{4}$/.test(create.json.order_no), `status=${create.status} no=${create.json.order_no}`);

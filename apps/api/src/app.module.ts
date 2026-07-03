@@ -108,6 +108,7 @@ import { IdentityModule } from './modules/identity/identity.module';
 import { I18nModule } from './modules/i18n/i18n.module';
 import { ThemeModule } from './modules/theme/theme.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
+import { SearchModule } from './modules/search/search.module';
 import { DeveloperModule } from './modules/developer/developer.module';
 import { ConnectorsModule } from './modules/connectors/connectors.module';
 import { MigrationModule } from './modules/migration/migration.module';
@@ -225,6 +226,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     I18nModule,
     ThemeModule,
     OnboardingModule,
+    SearchModule,
     DeveloperModule,
     ConnectorsModule,
     MigrationModule,

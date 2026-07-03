@@ -131,7 +131,10 @@ main content area.
 - The **side menu** lists only the modules **you have permission for**. If you
   cannot see a menu item, you do not have access to it — this is normal.
 - The **command palette** (press the search/keyboard shortcut, or click the
-  search box) lets you jump straight to any screen by name.
+  search box) lets you jump straight to any screen by name — and now also **finds
+  records**: type a customer, vendor or product name/code and pick the matching
+  **ข้อมูล (Records)** result to open it directly. You only ever see record types
+  you already have permission for.
 - Each screen address in this manual (e.g. `/orders`) is what appears at the end
   of your browser address bar.
 
@@ -169,8 +172,8 @@ appear in **both** workspaces.
 - **Each workspace has its own home dashboard:** **ERP → `/dashboard`** (business/finance overview) and
   **POS → `/pos-home`** (store overview — today's sales, bill count, average ticket, top items, sales by
   payment method, open tills, and recent bills). Switching workspace takes you to its home.
-- **Search is global:** the command palette searches every screen you can access, regardless of the
-  active workspace.
+- **Search is global:** the command palette searches every screen you can access (regardless of the
+  active workspace) **and** your customer/vendor/product records — type a name or code and open the match.
 - **Menus are grouped by area:** within each workspace the side menu is organised into focused groups —
   e.g. POS shows *ขายหน้าร้าน*, *ร้าน & การจัดส่ง*, *อุปกรณ์ & การชำระเงิน*, *วิเคราะห์ร้านอาหาร*; ERP shows
   *ลูกค้า & CRM*, *ลอยัลตี้*, *สินค้าคงคลัง*, *จัดซื้อ*, *การผลิต*, *การเงิน*, *ภาษี*, *บุคลากร*, *วางแผน & BI*. Shared

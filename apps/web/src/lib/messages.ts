@@ -28,10 +28,11 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.move_down_short': { th: 'ย้ายลง', en: 'Move down', ms: 'Ke bawah', vi: 'Xuống dưới', id: 'Ke bawah' },
 
   // ── Command palette ───────────────────────────────────────────────────────
-  'palette.title': { th: 'ค้นหาเมนู', en: 'Search menu' },
-  'palette.description': { th: 'ไปยังหน้าใดก็ได้', en: 'Go to any page' },
-  'palette.placeholder': { th: 'พิมพ์เพื่อค้นหาเมนู…', en: 'Search menu…' },
-  'palette.empty': { th: 'ไม่พบเมนู', en: 'No menu found' },
+  'palette.title': { th: 'ค้นหา', en: 'Search' },
+  'palette.description': { th: 'ไปยังหน้าใดก็ได้ หรือค้นหาลูกค้า ผู้ขาย สินค้า', en: 'Go to any page, or find a customer, vendor or product' },
+  'palette.placeholder': { th: 'พิมพ์เพื่อค้นหาเมนู หรือ ลูกค้า/ผู้ขาย/สินค้า…', en: 'Search menu, or a customer / vendor / product…' },
+  'palette.empty': { th: 'ไม่พบรายการ', en: 'No results' },
+  'palette.records': { th: 'ข้อมูล (ลูกค้า · ผู้ขาย · สินค้า)', en: 'Records (customers · vendors · products)' },
 
   // ── Nav group titles ──────────────────────────────────────────────────────
   'nav.group.overview': { th: 'ภาพรวม', en: 'Overview' },
