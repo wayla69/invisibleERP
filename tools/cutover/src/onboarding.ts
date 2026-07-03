@@ -104,6 +104,26 @@ async function main() {
   ok('The newly platform-created Admin can log in', !!platLogin.json.token, `st=${platLogin.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
+  // ── 3c. Invite-link onboarding (ITGC-AC-18 #2): a platform owner issues a SINGLE-USE, expiring invite;
+  //        the invitee signs up with the token (works even when public signup is disabled). ──
+  const inviteDenied = await inj('POST', '/api/admin/signup-invites', owner, { company_name: 'InviteCo' });
+  ok('Issue-invite blocked for a non-platform-admin (403 PLATFORM_ADMIN_REQUIRED)', inviteDenied.status === 403 && inviteDenied.json.error?.code === 'PLATFORM_ADMIN_REQUIRED', `${inviteDenied.status} ${inviteDenied.json.error?.code}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+  const inviteRes = await inj('POST', '/api/admin/signup-invites', owner, { company_name: 'InviteCo', email: 'i@c.com', ttl_hours: 24 });
+  ok('Platform-admin issues a signup invite (201 + raw token returned once)', inviteRes.status === 201 && !!inviteRes.json.invite_token && !!inviteRes.json.expires_at, `${inviteRes.status}`);
+  const inviteTok = inviteRes.json.invite_token;
+  process.env.PLATFORM_ADMIN_USERNAMES = '';
+  const bogus = await inj('POST', '/api/auth/signup', undefined, { company_name: 'X', tenant_code: 'inv-bogus', admin_username: 'invbogus', admin_password: 'invbogus12', email: 'x@y.com', invite_token: 'deadbeefcafe' });
+  ok('Signup with a bogus invite token → 400 INVALID_INVITE', bogus.status === 400 && bogus.json.error?.code === 'INVALID_INVITE', `${bogus.status} ${bogus.json.error?.code}`);
+  const invSignup = await inj('POST', '/api/auth/signup', undefined, { company_name: 'InviteCo', tenant_code: 'inviteco1', admin_username: 'inviteco_admin', admin_password: 'inviteco12', email: 'i@c.com', invite_token: inviteTok });
+  ok('Signup with a VALID invite token → provisions the company (201)', invSignup.status === 201 && !!invSignup.json.tenant_id, `${invSignup.status} tid=${invSignup.json.tenant_id}`);
+  const reuse = await inj('POST', '/api/auth/signup', undefined, { company_name: 'InviteCo2', tenant_code: 'inviteco2', admin_username: 'inviteco_admin2', admin_password: 'inviteco12', email: 'i@c.com', invite_token: inviteTok });
+  ok('Re-using a consumed invite token → 400 INVALID_INVITE (single-use)', reuse.status === 400 && reuse.json.error?.code === 'INVALID_INVITE', `${reuse.status} ${reuse.json.error?.code}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+  const invList = await inj('GET', '/api/admin/signup-invites', owner);
+  ok('Invite list shows the consumed invite as used', invList.status === 200 && (invList.json.invites ?? []).some((x: any) => x.status === 'used'), `${invList.status}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
+
   // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;
   //        a free plan is rejected (nothing to charge). Real Stripe is exercised only with a key set. ──
   const coPro = await inj('POST', '/api/billing/checkout', owner, { plan_code: 'pro' });
