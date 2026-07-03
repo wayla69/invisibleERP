@@ -18,6 +18,7 @@ import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
+import { reportSubscriptions } from '../../../apps/api/dist/database/schema/bi';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -668,6 +669,44 @@ async function main() {
     rateReplies.join(',') === '1,1,1,1,0' && lineReplies.at(-1)!.text.includes('ถี่เกินไป')
       && throttleAudit.some((r: any) => String(r.body).startsWith('[chat:throttled]')),
     JSON.stringify({ pattern: rateReplies.join(','), audited: throttleAudit.some((r: any) => String(r.body).startsWith('[chat:throttled]')) }));
+
+  // ── 22. LC-4 (docs/30): alert delivery to linked identity + LINE daily digest subscriptions. ──
+  // 22a. an alert rule targeting 'user:<username>' resolves to that user's LINKED LINE at send time.
+  const rule = await inj('POST', '/api/alerts/rules', token, { name: 'PR ค้างเยอะ', metric: 'open_pr_count', operator: 'gt', threshold: 0, channel: 'line', target_to: 'user:apboss', cooldown_hours: 0 });
+  const pushesBefore22 = linePushes.length;
+  const alertRun = await inj('POST', '/api/alerts/run', token);
+  const alertPush = linePushes.slice(pushesBefore22).find((p) => p.to === 'Uapboss' && p.text.includes('PR ค้างเยอะ'));
+  ok('LC-4: alert rule target user:<name> → fired push lands on the LINKED LINE (registry-resolved)',
+    (rule.status === 200 || rule.status === 201) && alertRun.json.fired_count >= 1 && !!alertPush,
+    JSON.stringify({ fired: alertRun.json.fired_count, pushed: !!alertPush }));
+
+  // 22b. digest opt-in is permission-gated (dashboard/fin_report/exec) — somchai (ess+pr_raise) refused.
+  const digDenied = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-22b', source: { userId: 'Usomchai' }, message: { id: 'mid-22b', type: 'text', text: 'subscribe digest' } }] });
+  ok('LC-4: subscribe digest without dashboard/fin_report/exec → refused',
+    digDenied.json.chat === 1 && lineReplies.at(-1)!.text.includes('ไม่มีสิทธิ์'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 22c. opt-in creates/joins the tenant's line_daily_digest subscription as a {line_user} recipient.
+  const [somsriRow] = await db.select().from(s.users).where(eq(s.users.username, 'somsri'));
+  await db.insert(s.userPermissions).values([{ userId: Number(somsriRow.id), perm: 'dashboard' }, { userId: Number(somsriRow.id), perm: 'pr_raise' }]).onConflictDoNothing();
+  const digOn = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-22c', source: { userId: 'Usomsri' }, message: { id: 'mid-22c', type: 'text', text: 'subscribe digest' } }] });
+  const [digSub] = await db.select().from(reportSubscriptions).where(and(eq(reportSubscriptions.tenantId, t1), eq(reportSubscriptions.reportType, 'line_daily_digest')));
+  ok('LC-4: subscribe digest → line_daily_digest subscription with {line_user} recipient',
+    digOn.json.chat === 1 && lineReplies.at(-1)!.text.includes('✔') && !!digSub && (digSub.recipients as any[]).some((r: any) => r.line_user === 'somsri'),
+    JSON.stringify({ recips: digSub?.recipients }));
+
+  // 22d. the scheduler delivers the digest to the linked LINE (counts summary).
+  const pushesBefore22d = linePushes.length;
+  const digRun = await inj('POST', '/api/bi/subscriptions/run', token);
+  const digPush = linePushes.slice(pushesBefore22d).find((p) => p.to === 'Usomsri' && p.text.includes('สรุปเช้านี้'));
+  ok('LC-4: run-due → digest pushed to the linked LINE (pending approvals / open PRs / alerts 24h)',
+    digRun.json.ran_count >= 1 && !!digPush && digPush.text.includes('LINE Daily Digest'),
+    JSON.stringify({ ran: digRun.json.ran_count, pushed: !!digPush, head: digPush?.text.slice(0, 60) }));
+
+  // 22e. unsubscribe removes the recipient.
+  const digOff = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-22e', source: { userId: 'Usomsri' }, message: { id: 'mid-22e', type: 'text', text: 'unsubscribe digest' } }] });
+  const [digSub2] = await db.select().from(reportSubscriptions).where(eq(reportSubscriptions.id, Number(digSub.id)));
+  ok('LC-4: unsubscribe digest → recipient removed',
+    digOff.json.chat === 1 && !(digSub2.recipients as any[]).some((r: any) => r.line_user === 'somsri'), JSON.stringify({ recips: digSub2?.recipients }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
