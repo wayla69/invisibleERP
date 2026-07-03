@@ -66,6 +66,7 @@ handy on the floor or in the stockroom. One-time setup first:
 | `low` (also `ใกล้หมด`/`สต็อกต่ำ`) | Lists items at/below their reorder point (on-hand vs `min_stock`) with a suggested top-up qty |
 | `reorder` (also `เติมของ`/`เติมสต็อก`) | Raises **one** PR that tops up **all** low-stock items in a single tap (needs `pr_raise`) |
 | `subscribe lowstock` / `unsubscribe lowstock` (also `รับแจ้งของใกล้หมด`) | Get a morning LINE alert whenever something is at/below its reorder point, with a one-tap **สั่งเติมทั้งหมด** button (needs `pr_raise`) |
+| `spend [YYYY-MM]` (also `ยอดซื้อ`/`สรุปซื้อ`) | This-month purchase summary — total spend, top vendors, most-bought items (defaults to this month; add a month to look back). Needs `procurement`/`exec`/`dashboard` |
 | `receive <PO no>` (also `รับของ`/`รับ`) | Receives **all** outstanding qty on an approved PO in one tap → creates the GR and closes the PO when fully received (needs `wh_receive`/`warehouse`/`procurement`; the PO must be Approved — EXP-03) |
 | `expense <fund> <amount> [เหตุผล]` / `advance …` (also `เบิก`/`ยืมเงิน`) | Raises a petty-cash request — see [Finance](./05-finance-ar-ap.md) |
 | `leave <from YYYY-MM-DD> <days> [เหตุผล]` (also `ลา`) | Raises an ESS leave request (needs `ess` + employee record) |

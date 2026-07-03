@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
-import { sql, eq, and, desc, asc, isNull, or, ilike, inArray } from 'drizzle-orm';
+import { sql, eq, and, desc, asc, isNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items, invBalances } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -163,6 +163,33 @@ export class ProcurementService {
     const rows = await this.db.select({ id: vendors.id, name: vendors.name, vendor_code: vendors.vendorCode })
       .from(vendors).where(and(ilike(vendors.name, `%${kw}%`), eq(vendors.isSupplier, true))).limit(Math.min(Math.max(limit, 1), 25));
     return { vendors: rows.map((r: any) => ({ id: Number(r.id), name: r.name, vendor_code: r.vendor_code ?? null })) };
+  }
+
+  // D3 — purchase spend insights for a business month (Asia/Bangkok): total committed spend, the top
+  // vendors by spend, and the most-bought items. Sourced from purchase_orders / po_items excluding
+  // Draft/Cancelled (a committed-buy view). Read-only aggregate; purchase_orders is company-wide.
+  async purchaseSpend(_user: JwtUser, opts?: { period?: string }) {
+    const db = this.db;
+    const period = /^\d{4}-\d{2}$/.test(opts?.period ?? '') ? opts!.period! : new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 7);
+    // [firstDay, nextMonthFirst) window on po_date (typed date-string bounds — portable across pg/PGlite,
+    // no enum-in-text or cast/like). notInArray keeps only committed buys (excludes Draft/Cancelled).
+    const y = Number(period.slice(0, 4)), m = Number(period.slice(5, 7));
+    const firstDay = `${period}-01`;
+    const nextMonthFirst = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    const inPeriod = and(gte(purchaseOrders.poDate, firstDay), lt(purchaseOrders.poDate, nextMonthFirst), notInArray(purchaseOrders.status, ['Draft', 'Cancelled']));
+    const spendExpr = sql<string>`coalesce(sum(${purchaseOrders.totalAmount}),0)`;
+    const [tot] = await db.select({ total: spendExpr, cnt: sql<number>`count(*)` }).from(purchaseOrders).where(inPeriod);
+    const byVendor = await db.select({ vendor: purchaseOrders.vendorName, total: spendExpr, cnt: sql<number>`count(*)` })
+      .from(purchaseOrders).where(inPeriod).groupBy(purchaseOrders.vendorName).orderBy(desc(spendExpr)).limit(5);
+    const itemValue = sql<string>`coalesce(sum(coalesce(${poItems.amount}, ${poItems.orderQty} * ${poItems.unitPrice})),0)`;
+    const topItems = await db.select({ itemId: poItems.itemId, qty: sql<string>`coalesce(sum(${poItems.orderQty}),0)`, value: itemValue })
+      .from(poItems).innerJoin(purchaseOrders, eq(poItems.poId, purchaseOrders.id)).where(inPeriod)
+      .groupBy(poItems.itemId).orderBy(desc(itemValue)).limit(5);
+    return {
+      period, total: n(tot?.total), po_count: Number(tot?.cnt ?? 0),
+      by_vendor: byVendor.map((v: any) => ({ vendor: v.vendor ?? '(ไม่ระบุผู้ขาย)', total: n(v.total), po_count: Number(v.cnt) })),
+      top_items: topItems.map((i: any) => ({ item_id: i.itemId ?? '(ไม่ระบุ)', qty: n(i.qty), value: n(i.value) })),
+    };
   }
 
   // Low-stock reorder list — items whose total on-hand has fallen to/below their reorder point
