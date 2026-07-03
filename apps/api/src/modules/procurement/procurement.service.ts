@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
-import { sql, eq, and, desc, asc, isNull, or, ilike } from 'drizzle-orm';
+import { sql, eq, and, desc, asc, isNull, or, ilike, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { purchaseRequests, prItems, purchaseOrders, poItems, goodsReceipts, grItems, lotLedger, stockMovements, vendors, supplierScorecards, supplierPriceLists, items } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -124,7 +124,25 @@ export class ProcurementService {
     if (!kw) return { items: [] };
     const rows = await this.db.select({ item_id: items.itemId, item_description: items.itemDescription, uom: items.uom, unit_price: items.unitPrice })
       .from(items).where(or(ilike(items.itemId, `%${kw}%`), ilike(items.itemDescription, `%${kw}%`))).limit(Math.min(Math.max(limit, 1), 25));
-    return { items: rows.map((r: any) => ({ item_id: r.item_id, item_description: r.item_description ?? null, uom: r.uom ?? null, unit_price: n(r.unit_price) })) };
+    // last purchase price per matched item — the most recent PO line's unit price (buyers reuse it).
+    const ids = rows.map((r: any) => r.item_id).filter(Boolean);
+    const lastPrice = new Map<string, number>();
+    if (ids.length) {
+      const pr = await this.db.select({ itemId: poItems.itemId, unitPrice: poItems.unitPrice, id: poItems.id })
+        .from(poItems).where(inArray(poItems.itemId, ids)).orderBy(desc(poItems.id));
+      for (const p of pr) if (!lastPrice.has(String(p.itemId))) lastPrice.set(String(p.itemId), n(p.unitPrice));
+    }
+    return { items: rows.map((r: any) => ({ item_id: r.item_id, item_description: r.item_description ?? null, uom: r.uom ?? null, unit_price: n(r.unit_price), last_price: lastPrice.has(r.item_id) ? lastPrice.get(r.item_id)! : null })) };
+  }
+
+  // Vendor search for the PR→PO panel — pick a real supplier (ties the PO to the vendor master, so
+  // screening + scorecards apply) instead of free-typing a name. RLS scopes to the caller's tenant.
+  async searchVendors(q: string, limit = 8) {
+    const kw = (q ?? '').trim().slice(0, 100);
+    if (!kw) return { vendors: [] };
+    const rows = await this.db.select({ id: vendors.id, name: vendors.name, vendor_code: vendors.vendorCode })
+      .from(vendors).where(and(ilike(vendors.name, `%${kw}%`), eq(vendors.isSupplier, true))).limit(Math.min(Math.max(limit, 1), 25));
+    return { vendors: rows.map((r: any) => ({ id: Number(r.id), name: r.name, vendor_code: r.vendor_code ?? null })) };
   }
 
   // Convert an APPROVED PR into a PO. Each line arrives already reconciled by procurement: an existing
