@@ -1,0 +1,73 @@
+# Ops utility (manual dispatch): create the daily `ap_automatch_rerun` report-subscription so the BI
+# scheduler (bi-scheduler.yml) re-runs the AP three-way auto-match nightly and unblocks matchable invoices
+# (EXP-10). The API has no in-process scheduler, so this one-time subscription + the daily bi-scheduler cron
+# together are what make the job recur. Runs on a GitHub runner (which CAN reach Railway, unlike a dev
+# sandbox); authenticates as the same `exec` service account the scheduler uses. Idempotent — it checks for
+# an existing subscription of the same report type on the account's tenant and no-ops instead of duplicating.
+#
+# Prereqs (repository level — Settings → Secrets and variables → Actions):
+#   vars.PROD_API_URL  — base URL of the deployed API (already set)
+#   secrets.SWEEP_USER — the `exec` service account (same one bi-scheduler.yml uses)
+#   secrets.SWEEP_PASS — its password
+# The subscription is created on the SERVICE ACCOUNT'S tenant; run once per tenant that uses AP intake (with
+# that tenant's account). Re-running is safe.
+name: "Ops - create ap_automatch_rerun subscription"
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: BI report/action type to subscribe
+        default: ap_automatch_rerun
+        required: true
+      frequency:
+        description: Cadence (daily | weekly | monthly)
+        default: daily
+        required: true
+      name:
+        description: Human-readable subscription name
+        default: AP auto re-match (blocked invoices)
+        required: true
+
+jobs:
+  create-sub:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Create the report subscription (idempotent)
+        env:
+          PROD_API_URL: ${{ vars.PROD_API_URL }}
+          SWEEP_USER: ${{ secrets.SWEEP_USER }}
+          SWEEP_PASS: ${{ secrets.SWEEP_PASS }}
+          RT: ${{ inputs.report_type }}
+          FREQ: ${{ inputs.frequency }}
+          SUBNAME: ${{ inputs.name }}
+        run: |
+          set -e
+          if [ -z "${PROD_API_URL:-}" ] || [ -z "${SWEEP_USER:-}" ] || [ -z "${SWEEP_PASS:-}" ]; then
+            echo "::error::PROD_API_URL / SWEEP_USER / SWEEP_PASS not set — configure them at the repository level first"; exit 1
+          fi
+          echo "Health check: $PROD_API_URL/healthz"
+          code=000
+          for i in $(seq 1 12); do code=$(curl -s -o /dev/null -w "%{http_code}" "$PROD_API_URL/healthz" || true); [ "$code" = "200" ] && break; echo "  health=$code ($i)"; sleep 5; done
+          [ "$code" = "200" ] || { echo "::error::API health check failed (last=$code)"; exit 1; }
+          TOK=$(curl -s -X POST "$PROD_API_URL/api/login" -H 'Content-Type: application/json' -d "$(jq -nc --arg u "$SWEEP_USER" --arg p "$SWEEP_PASS" '{username:$u,password:$p}')" | jq -r '.token // empty')
+          [ -n "$TOK" ] || { echo "::error::login failed (check SWEEP_USER/SWEEP_PASS — needs the exec permission)"; exit 1; }
+          # Idempotency: skip if a subscription of this report type already exists on the caller's tenant.
+          EXIST=$(curl -s -H "Authorization: Bearer $TOK" "$PROD_API_URL/api/bi/subscriptions" | jq -r --arg rt "$RT" '[.[]? | select(.report_type==$rt)] | length' 2>/dev/null || echo 0)
+          if [ "${EXIST:-0}" != "0" ]; then
+            echo "A '$RT' subscription already exists on this tenant ($EXIST) — nothing to create."
+            curl -s -H "Authorization: Bearer $TOK" "$PROD_API_URL/api/bi/subscriptions" | jq -r --arg rt "$RT" '.[]? | select(.report_type==$rt) | "  #\(.id) \(.name) [\(.frequency)] next=\(.next_run_at // "-")"'
+            exit 0
+          fi
+          echo "Creating subscription: name='$SUBNAME' type=$RT freq=$FREQ"
+          BODY=$(jq -nc --arg n "$SUBNAME" --arg rt "$RT" --arg f "$FREQ" '{name:$n,report_type:$rt,frequency:$f}')
+          RESP=$(curl -s -w "\n%{http_code}" -X POST "$PROD_API_URL/api/bi/subscriptions" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d "$BODY")
+          HTTP=$(echo "$RESP" | tail -n1); JSON=$(echo "$RESP" | sed '$d')
+          echo "  -> $HTTP"
+          echo "$JSON" | jq '{id, name, report_type, frequency, next_run_at}' 2>/dev/null || echo "$JSON"
+          { [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; } || { echo "::error::create failed ($HTTP) — $JSON"; exit 1; }
+          ID=$(echo "$JSON" | jq -r '.id // empty')
+          [ -n "$ID" ] || { echo "::error::response had no subscription id"; exit 1; }
+          echo "Created subscription #$ID — the daily bi-scheduler cron will run it. ✅"
