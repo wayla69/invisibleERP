@@ -50,6 +50,7 @@ import {
   Goal,
   Landmark,
   Layers,
+  ListTree,
   LayoutDashboard,
   Lock,
   LayoutTemplate,
@@ -342,6 +343,7 @@ export const INTERNAL_NAV: NavGroup[] = [
         items: [
           // SoD R05: gl_post (GlAccountant) can reach the journal/posting tabs;
           // gl_close (FinancialController) also reaches the JE-approval tab (guarded in-page).
+          { label: 'nav.chart_of_accounts', href: '/chart-of-accounts', icon: ListTree, perms: ['gl_post', 'gl_close', 'gl_coa', 'approvals', 'exec', 'creditors', 'ar'] },
           { label: 'nav.accounting', href: '/accounting', icon: BookText, perms: ['gl_post', 'gl_close', 'approvals', 'exec', 'creditors', 'ar'] },
           { label: 'nav.revenue', href: '/revenue', icon: CircleDollarSign, perms: ['exec', 'ar'] },
           { label: 'nav.assets', href: '/assets', icon: Boxes, perms: ['exec', 'creditors', 'ar'] },
