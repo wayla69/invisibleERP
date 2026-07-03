@@ -88,6 +88,18 @@ async function main() {
   const patch = await inj('PATCH', '/api/tenant/profile', owner, { address_line1: '1 ถนนหลัก', province: 'กรุงเทพมหานคร', postal_code: '10110', vat_rate: 0.07 });
   ok('Profile PATCH → setup_complete=true after address', patch.status === 200 && patch.json.setup_complete === true && patch.json.province === 'กรุงเทพมหานคร', JSON.stringify({ st: patch.status, c: patch.json.setup_complete }));
 
+  // ── 3a2. Onboarding checklist + starter pack (ITGC-AC-18 #4): the setup-wizard backbone + a minimal
+  //         industry starter (default HQ branch). ──
+  const status1 = await inj('GET', '/api/tenant/onboarding-status', owner);
+  const step = (r: any, k: string) => (r.json.steps ?? []).find((s: any) => s.key === k);
+  ok('Onboarding status → profile done, branch not yet, next=branch', status1.status === 200 && step(status1, 'profile')?.done === true && step(status1, 'branch')?.done === false && status1.json.next === 'branch', JSON.stringify({ st: status1.status, done: status1.json.done, total: status1.json.total, next: status1.json.next }));
+  const sp1 = await inj('POST', '/api/tenant/starter-pack', owner, {});
+  ok('Starter-pack creates the HQ branch', sp1.status === 201 && (sp1.json.created ?? []).includes('hq_branch'), JSON.stringify(sp1.json));
+  const status2 = await inj('GET', '/api/tenant/onboarding-status', owner);
+  ok('Onboarding status → branch step done after starter-pack', status2.status === 200 && step(status2, 'branch')?.done === true, JSON.stringify({ done: status2.json.done, next: status2.json.next }));
+  const sp2 = await inj('POST', '/api/tenant/starter-pack', owner, {});
+  ok('Starter-pack is idempotent (2nd call skips HQ)', sp2.status === 201 && (sp2.json.skipped ?? []).includes('hq_branch'), JSON.stringify(sp2.json));
+
   // ── 3b. Platform-admin create-company (ITGC-AC-18): only a PLATFORM_ADMIN_USERNAMES user can
   //        POST /api/admin/tenants to provision a new company — the authenticated alternative to toggling
   //        public signup. Guard is enforced regardless of tenancy mode. ──

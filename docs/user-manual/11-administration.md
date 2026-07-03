@@ -456,6 +456,19 @@ queue above. See `docs/ops/tenancy-model.md`.
 
 ---
 
+### 14.1 First-run setup checklist & starter
+
+A brand-new company can see exactly what's left to set up: **`GET /api/tenant/onboarding-status`** returns a
+short checklist — **company/tax profile**, **a branch (HQ)**, **staff users**, and **a menu/catalog** — each
+marked done/not-done, with an overall percentage and the **next** step to do. A setup wizard can read this to
+guide the new admin to a productive state.
+
+To avoid starting from an empty shell, **`POST /api/tenant/starter-pack`** gives the company a **head-office
+branch** in one click (idempotent — safe to run again; it skips anything already there). More per-industry
+sample data can be layered on later.
+
+---
+
 ## LINE chat channel governance (LC-3)
 
 Staff can link their LINE accounts to raise requisitions, expenses, and leave from the
