@@ -63,6 +63,7 @@ handy on the floor or in the stockroom. One-time setup first:
 | `find <keyword>` (also `ค้นหา`) | Searches the item master so you can use real item ids |
 | `cancel <PR no>` (also `ยกเลิก`) | Withdraws **your own** still-Pending PR |
 | `stock <item id>` (also `สต็อก`) | Read-only on-hand balance by location |
+| `receive <PO no>` (also `รับของ`/`รับ`) | Receives **all** outstanding qty on an approved PO in one tap → creates the GR and closes the PO when fully received (needs `wh_receive`/`warehouse`/`procurement`; the PO must be Approved — EXP-03) |
 | `expense <fund> <amount> [เหตุผล]` / `advance …` (also `เบิก`/`ยืมเงิน`) | Raises a petty-cash request — see [Finance](./05-finance-ar-ap.md) |
 | `leave <from YYYY-MM-DD> <days> [เหตุผล]` (also `ลา`) | Raises an ESS leave request (needs `ess` + employee record) |
 | `subscribe digest` / `unsubscribe digest` (also `รับสรุป`/`เลิกรับสรุป`) | Morning summary on LINE — see [Reports](./09-reports-and-analytics.md) |
@@ -227,6 +228,13 @@ duties **R04** — it protects the 3-way match.)
 
 **Expected result:** A GR is created, stock is increased, and the receipt is
 available for matching.
+
+**One-tap รับครบ (receive all):** for a normal "everything arrived" delivery you don't
+need the form — every receivable PO in the list carries a **รับครบ** button that
+receives *all* outstanding quantity in one click (order − already received on each line)
+and closes the PO once nothing is left. It only shows for Approved / part-received POs
+(never for Pending, Closed or Cancelled). The same action is available from LINE chat by
+typing `receive <PO no>` — see the [chat commands](#raise-a-pr-from-line-chat) above.
 
 > **Note — short / damaged delivery:** Raise a **goods-receipt claim** against
 > the supplier under **Claims** (`/claims` → GR Claims tab): enter the GR number,
