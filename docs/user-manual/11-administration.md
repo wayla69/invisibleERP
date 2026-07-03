@@ -437,9 +437,16 @@ the industry Chart of Accounts — and the action is recorded in the [Audit trai
 Anyone not on the platform-owner list gets **`403 PLATFORM_ADMIN_REQUIRED`**; if the list is empty, nobody
 can (secure default) — set `PLATFORM_ADMIN_USERNAMES` first.
 
-**Public self-service signup** (`POST /api/auth/signup`) is **disabled in production by default**
-(`403 SIGNUP_DISABLED`). Only enable it (`PUBLIC_SIGNUP_ENABLED=true`) if you genuinely want outsiders to
-open their own accounts; otherwise prefer the platform-owner endpoint above. See `docs/ops/tenancy-model.md`.
+**Invite a company to sign up themselves (optional).** If you'd rather the new company fill in their own
+details, issue a **single-use invite link** instead: `POST /api/admin/signup-invites` (returns a token +
+expiry once; review them at `GET /api/admin/signup-invites`). Send the invitee the link; they complete
+signup with the token — which works **even while public signup is disabled**. The token is single-use and
+expires; a reused/expired/wrong token is rejected (`400 INVALID_INVITE`).
+
+**Public self-service signup** (`POST /api/auth/signup` with no invite) is **disabled in production by
+default** (`403 SIGNUP_DISABLED`). Only enable it (`PUBLIC_SIGNUP_ENABLED=true`) if you genuinely want
+outsiders to open their own accounts; otherwise prefer the platform-owner endpoint or invite above. See
+`docs/ops/tenancy-model.md`.
 
 ---
 

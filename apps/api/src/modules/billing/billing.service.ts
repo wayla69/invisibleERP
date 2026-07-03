@@ -1,7 +1,8 @@
 import { Inject, Injectable, ConflictException, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
-import { eq, sql, and, desc } from 'drizzle-orm';
+import { eq, sql, and, desc, gt, isNull } from 'drizzle-orm';
+import { randomBytes, createHash } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { plans, subscriptions, tenants, users, aiTokenUsage, aiOverageBillingRuns } from '../../database/schema';
+import { plans, subscriptions, tenants, users, aiTokenUsage, aiOverageBillingRuns, signupInvites } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
@@ -32,7 +33,12 @@ export interface SignupDto {
   tax_id?: string;
   vat_registered?: boolean;
   vat_rate?: number;
+  // Invite-link onboarding (#2): a valid single-use token lets a company sign up even when public signup
+  // is disabled. Consumed on success. Absent ⇒ normal PUBLIC_SIGNUP_ENABLED gate applies.
+  invite_token?: string;
 }
+
+const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 interface PlanSeed {
   code: string;
@@ -99,18 +105,64 @@ export class BillingService {
   // ───────────────────── PUBLIC self-serve signup ─────────────────────
   // Atomic provisioning: tenant + admin user + trialing subscription.
   async signup(dto: SignupDto) {
-    // Fail-closed in production (ITGC-AC-18): a PUBLIC endpoint that mints a new tenant + an Admin is an
-    // attack surface — every signup is an org-Admin, and each new company must stay isolated. Disabled in
-    // prod unless an operator opts in with PUBLIC_SIGNUP_ENABLED (flip it on to onboard, off afterwards).
-    // dev + harnesses (NODE_ENV=test) are always allowed. See docs/ops/tenancy-model.md.
-    if (!isSignupAllowed()) {
+    // ITGC-AC-18. Two ways in: (a) a valid single-use INVITE token (onboarding #2) lets this company through
+    // even when public signup is disabled; else (b) the PUBLIC_SIGNUP_ENABLED gate applies — fail-closed in
+    // prod (dev + harnesses NODE_ENV=test always allowed). See docs/ops/tenancy-model.md.
+    const invite = dto.invite_token ? await this.validateInvite(dto.invite_token) : null;
+    if (!invite && !isSignupAllowed()) {
       throw new ForbiddenException({
         code: 'SIGNUP_DISABLED',
         message: 'Public self-service signup is disabled — contact the administrator to be onboarded.',
         messageTh: 'ปิดรับสมัครบัญชีใหม่แบบสาธารณะ — โปรดติดต่อผู้ดูแลระบบเพื่อเปิดบัญชี',
       });
     }
-    return this.provisionTenant(dto);
+    const result = await this.provisionTenant({ ...dto, plan_code: dto.plan_code ?? invite?.planCode ?? undefined });
+    if (invite) await this.consumeInvite(invite.id, result.tenant_id);
+    return result;
+  }
+
+  // ── Invite-link onboarding (#2) — platform-owner-issued, single-use, expiring tokens ──
+  // Create an invite (returns the RAW token once — only its hash is stored). ttl_hours default 72.
+  async createSignupInvite(opts: { createdBy: string; company_name?: string; plan_code?: string; email?: string; ttl_hours?: number }) {
+    const rawToken = randomBytes(24).toString('hex'); // 48 hex chars
+    const ttl = Math.min(Math.max(Number(opts.ttl_hours ?? 72), 1), 24 * 30); // 1h..30d
+    const expiresAt = new Date(Date.now() + ttl * 60 * 60 * 1000);
+    const [row] = await this.db.insert(signupInvites).values({
+      tokenHash: sha256(rawToken), createdBy: opts.createdBy,
+      companyName: opts.company_name ?? null, planCode: opts.plan_code ?? null, email: opts.email ?? null,
+      expiresAt,
+    }).returning({ id: signupInvites.id });
+    return { id: Number(row!.id), invite_token: rawToken, expires_at: expiresAt.toISOString(),
+      company_name: opts.company_name ?? null, email: opts.email ?? null };
+  }
+
+  // List invites with a computed status (pending | used | expired) for the console.
+  async listSignupInvites() {
+    const rows = await this.db.select().from(signupInvites).orderBy(desc(signupInvites.id)).limit(200);
+    const now = Date.now();
+    return {
+      invites: rows.map((r: any) => ({
+        id: Number(r.id), created_by: r.createdBy, company_name: r.companyName, email: r.email,
+        expires_at: r.expiresAt, used_at: r.usedAt, used_tenant_id: r.usedTenantId != null ? Number(r.usedTenantId) : null,
+        status: r.usedAt ? 'used' : (new Date(r.expiresAt).getTime() < now ? 'expired' : 'pending'),
+      })),
+    };
+  }
+
+  // Validate an invite token: must exist (by hash), be unused, and unexpired. Throws 400 INVALID_INVITE.
+  private async validateInvite(rawToken: string) {
+    const [inv] = await this.db.select({ id: signupInvites.id, planCode: signupInvites.planCode })
+      .from(signupInvites)
+      .where(and(eq(signupInvites.tokenHash, sha256(rawToken.trim())), isNull(signupInvites.usedAt), gt(signupInvites.expiresAt, new Date())))
+      .limit(1);
+    if (!inv) throw new BadRequestException({ code: 'INVALID_INVITE', message: 'Invite is invalid, already used, or expired', messageTh: 'ลิงก์เชิญไม่ถูกต้อง ถูกใช้ไปแล้ว หรือหมดอายุ' });
+    return { id: Number(inv.id), planCode: inv.planCode as string | null };
+  }
+
+  // Mark an invite consumed (single-use guard: only if still unused).
+  private async consumeInvite(id: number, tenantId: number) {
+    await this.db.update(signupInvites).set({ usedAt: new Date(), usedTenantId: tenantId })
+      .where(and(eq(signupInvites.id, id), isNull(signupInvites.usedAt)));
   }
 
   // Core provisioning — tenant + its OWN org + an Admin + a trialing subscription + fiscal year + industry

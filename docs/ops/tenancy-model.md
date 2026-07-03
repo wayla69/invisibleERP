@@ -41,6 +41,13 @@ bypass_rls='on'  OR  tenant_id = app.tenant_id  OR  (app.org_id set AND tenant_i
 >   exposure window**. Non-platform callers get `403 PLATFORM_ADMIN_REQUIRED`; empty config ⇒ nobody can (secure
 >   default). `PlatformAdminGuard` grants the one-shot RLS bypass needed to write a brand-new tenant. Use
 >   `PUBLIC_SIGNUP_ENABLED` only if you actually want open self-service signup.
+> - **Invite-link onboarding (self-service, gated).** When you want the new company to fill in their own
+>   details, a platform owner issues a **single-use, expiring invite** via **`POST /api/admin/signup-invites`**
+>   (`@PlatformAdmin`; returns the raw token once + expiry — list/status at `GET /api/admin/signup-invites`).
+>   The invitee signs up with it (`POST /api/auth/signup` including `invite_token`), which is accepted **even
+>   when public signup is disabled**. Invalid/used/expired → `400 INVALID_INVITE`; consumed (single-use) on
+>   success. Only the token **hash** is stored (`signup_invites`, migration 0233 — platform-level, no
+>   tenant_id/RLS).
 > - **Each new company gets its OWN org** — signup sets `org_id = the new tenant's id` on both the tenant
 >   and its Admin, so under `multi-company` the new Admin is isolated to just that company by default (and
 >   never needs the org_id backfill the boot warning mentions).
@@ -106,3 +113,4 @@ table's RLS loop, or any migration that re-creates `tenant_isolation`, must copy
 | 1.1 | 2026-07-03 | Platform / Security | Signup hardening (ITGC-AC-18): public `POST /api/auth/signup` is now **fail-closed in production** (`PUBLIC_SIGNUP_ENABLED`, `403 SIGNUP_DISABLED` when off; dev/harnesses unaffected), and each signup gives the new company its **own org** (`org_id = tenant id` on the tenant + Admin) so it is isolated by default under multi-company. ToE: `apps/api/test/signup-gate.test.ts` (gate matrix) + `cutover/onboarding.ts` (org_id assertion). |
 | 1.2 | 2026-07-03 | Platform / Security | Controlled onboarding (ITGC-AC-18, onboarding-flow #1): new **`POST /api/admin/tenants`** (`@PlatformAdmin`) lets a configured platform owner (`PLATFORM_ADMIN_USERNAMES`) provision a company from an authenticated session — the alternative to toggling public signup. `PlatformAdminGuard` authorises + grants a server-set one-shot RLS bypass (honoured by the tenant-tx interceptor); non-owners get `403 PLATFORM_ADMIN_REQUIRED`; empty list ⇒ nobody (secure default); audit-logged. ToE: `apps/api/test/platform-admin.test.ts` + `cutover/onboarding.ts` (403 gate + 201 provision + org-isolation). |
 | 1.3 | 2026-07-03 | Platform / Security | **Cross-account org SHARING fixed** (closes the §6 tracked limitation). Root cause: `0218_tenant_indexes_backfill`'s generic RLS re-loop recreated `tenant_isolation` with the plain body, silently dropping 0196's org clause on data tables. Fix: `0232_reapply_org_rls` re-applies the org-clause policy to every `tenant_id` table. `pg-core` now hard-asserts `org1===2` (org sharing active + isolated) on both backends. Corrected the mistaken "PGlite doesn't run the DO-loop" note — it does. |
+| 1.4 | 2026-07-03 | Platform / Security | **Invite-link onboarding** (ITGC-AC-18, onboarding-flow #2): platform owners issue single-use, expiring invites (`POST`/`GET /api/admin/signup-invites`, `@PlatformAdmin`); the invitee signs up with `invite_token` even when public signup is disabled (`400 INVALID_INVITE` if invalid/used/expired; single-use). Platform-level `signup_invites` table (migration 0233, hash-only, no tenant_id/RLS). ToE: `cutover/onboarding.ts` (issue-auth 403, bogus/valid/reuse, used-list). |

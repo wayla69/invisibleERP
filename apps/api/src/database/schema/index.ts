@@ -38,6 +38,7 @@ export * from './loyalty-partners';
 export * from './member-otp';
 export * from './payments';
 export * from './billing';
+export * from './signup-invites';
 export * from './tax-docs';
 export * from './restaurant';
 export * from './assets';

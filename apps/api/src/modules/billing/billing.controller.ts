@@ -17,7 +17,16 @@ const SignupBody = z.object({
   tax_id: z.string().optional(),
   vat_registered: z.boolean().optional(),
   vat_rate: z.number().optional(),
+  invite_token: z.string().optional(),
 });
+
+const InviteBody = z.object({
+  company_name: z.string().optional(),
+  plan_code: z.string().optional(),
+  email: z.string().email().optional(),
+  ttl_hours: z.number().int().min(1).max(24 * 30).optional(),
+});
+type InviteDto = z.infer<typeof InviteBody>;
 
 const CheckoutBody = z.object({ plan_code: z.string().min(1) });
 const ChangePlanBody = z.object({ plan_code: z.string().min(1) });
@@ -46,6 +55,19 @@ export class BillingController {
   @Post('admin/tenants') @PlatformAdmin() @HttpCode(201)
   createTenant(@Body(new ZodValidationPipe(SignupBody)) b: SignupDto) {
     return this.svc.provisionTenant(b);
+  }
+
+  // Invite-link onboarding (#2) — a platform owner issues a single-use, expiring invite; the raw token is
+  // returned ONCE. The invitee then signs up with it (POST /api/auth/signup { invite_token }) even when
+  // public signup is disabled. List shows pending/used/expired invites.
+  @Post('admin/signup-invites') @PlatformAdmin() @HttpCode(201)
+  createInvite(@Body(new ZodValidationPipe(InviteBody)) b: InviteDto, @CurrentUser() u: JwtUser) {
+    return this.svc.createSignupInvite({ createdBy: u.username, ...b });
+  }
+
+  @Get('admin/signup-invites') @PlatformAdmin()
+  listInvites() {
+    return this.svc.listSignupInvites();
   }
 
   // PUBLIC plan catalogue
