@@ -1,6 +1,6 @@
 # 30 — LINE Chat Workbench: Rich Interactions, Money Self-Service & Governance — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v0.3 — **LC-1 DELIVERED**; LC-2..5 planned · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v0.4 — **LC-1, LC-2 DELIVERED**; LC-3..5 planned · **Owner:** ERP / Product
 > **Scope:** Take the delivered LINE staff-chat channel (0227 `link`/`pr`/`status` → PR, merged #333;
 > 0228 workflow notifications + `approve`/`reject` + `my prs`/`find`/`cancel`/`stock`, merged #335)
 > from a *text command line* to a **chat workbench**: one-tap rich interactions (flex cards + postback
@@ -51,7 +51,7 @@ channel over flows the modules already own:
   (postback approve happy + replayed postback ignored). **Harness:** line-crm — postback approve,
   confirm flow, replay negative, carousel altText.
 
-### LC-2 — Petty-cash & expense self-service (EXP-07/08 channel extension)
+### LC-2 — Petty-cash & expense self-service (EXP-07/08 channel extension) ✅ DELIVERED
 - **`expense <fund> <amount> <เหตุผล/doc-ref>`** raises a petty-cash **expense request** (PEX-,
   maker only) via the existing `finance` petty-cash service — Pending, **no GL**, exactly like the
   web. `advance <fund> <amount> <เหตุผล>` mirrors the advance request. Settlement stays web-only
@@ -145,6 +145,7 @@ concludes chat money-approval needs one.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.4 | 2026-07-03 | Platform | **LC-2 delivered** — `expense`/`advance` chat raise via the same `PettyCashService.createRequest` path (creditors/exec re-checked per command; FUND_CLOSED/INSUFFICIENT_FLOAT unchanged); `LineNotifyService.notifyPermissionHolders` pushes creditors/exec holders (maker excluded) on request + requester on decision; chat money-decisions stay deferred. `line-crm` 69 ✓; PN-07 rev 1.0; UAT-P2P-084. |
 | 0.3 | 2026-07-02 | Platform | **LC-1 delivered** — flex queue card (`buildApproveCard`) with postback [อนุมัติ]/[ปฏิเสธ], nonce'd 5-min confirm state consumed before acting (replay-safe), same `chatDecision`→engine path (SoD verified over buttons), `my prs` carousel, `replyLineFlex`. `line-crm` 64 ✓; PN-02 rev 1.9; UAT-P2P-083. |
 | 0.2 | 2026-07-02 | Platform | Added LC-4 (alert/BI-report subscriptions + daily digest over the existing alerts `line` channel and BI scheduler) and LC-5 (confirm-first Thai NL copilot + `ask` analytics over `modules/ai` + `nl-analytics`). |
 | 0.1 | 2026-07-02 | Platform | Initial plan — follows delivered 0227/0228 LINE chat work (#333, #335). |

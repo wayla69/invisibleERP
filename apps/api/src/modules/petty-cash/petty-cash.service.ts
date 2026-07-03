@@ -5,6 +5,7 @@ import { pettyCashFunds, expenseRequests } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LineNotifyService } from '../messaging/line-notify.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { EstablishFundDto, ReplenishDto, ExpenseRequestDto, SettleExpenseDto } from './dto';
@@ -22,6 +23,9 @@ export class PettyCashService {
     private readonly docNo: DocNumberService,
     @Optional() private readonly statusLog?: StatusLogService,
     @Optional() private readonly ledger?: LedgerService,
+    // LC-2 (docs/30) — LINE notifications on the EXP-08 maker-checker: approvers (creditors/exec holders,
+    // maker excluded) hear about a new request; the requester hears the decision. Best-effort by design.
+    @Optional() private readonly lineNotify?: LineNotifyService,
   ) {}
 
   // ── Fund: establish (fund it Dr 1015 / Cr 1000 up to the float) + replenish (top up to the float) ──
@@ -87,6 +91,9 @@ export class PettyCashService {
       status: 'PendingApproval', requestedBy: user.username,
     });
     await this.statusLog?.log('PEX', reqNo, '', 'PendingApproval', user.username);
+    await this.lineNotify?.notifyPermissionHolders(['creditors', 'exec'], user.tenantId ?? null,
+      `🔔 รออนุมัติเบิกเงินสดย่อย: ${reqNo} (${dto.kind === 'advance' ? 'เงินยืม' : 'ค่าใช้จ่าย'} ${amount} บาท โดย ${user.username})${dto.purpose ? ` — ${dto.purpose}` : ''}\nอนุมัติที่หน้า /petty-cash`,
+      user.username);
     return { req_no: reqNo, fund_code: dto.fund_code, kind: dto.kind, amount, status: 'PendingApproval', doc_ref: dto.doc_ref ?? null };
   }
 
@@ -110,6 +117,7 @@ export class PettyCashService {
     await db.update(pettyCashFunds).set({ balance: String(round2(n(fund.balance) - amount)) }).where(eq(pettyCashFunds.id, Number(fund.id)));
     await db.update(expenseRequests).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date(), glRef }).where(eq(expenseRequests.id, Number(req.id)));
     await this.statusLog?.log('PEX', reqNo, 'PendingApproval', 'Approved', user.username);
+    if (req.requestedBy) await this.lineNotify?.notifyUser(req.requestedBy, tenantId, `✅ ${reqNo} อนุมัติแล้ว (โดย ${user.username}) — ${amount} บาท`);
     return { req_no: reqNo, kind: req.kind, status: 'Approved', amount, journal_no: glRef, approved_by: user.username, prepared_by: req.requestedBy, fund_balance: round2(n(fund.balance) - amount) };
   }
 
@@ -118,6 +126,7 @@ export class PettyCashService {
     const req = await this.pendingRequest(reqNo, user);
     await db.update(expenseRequests).set({ status: 'Rejected', approvedBy: user.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(expenseRequests.id, Number(req.id)));
     await this.statusLog?.log('PEX', reqNo, 'PendingApproval', 'Rejected', user.username, reason);
+    if (req.requestedBy) await this.lineNotify?.notifyUser(req.requestedBy, req.tenantId ?? user.tenantId ?? null, `❌ ${reqNo} ไม่ได้รับอนุมัติ (โดย ${user.username})${reason ? ` — ${reason}` : ''}`);
     return { req_no: reqNo, status: 'Rejected', rejected_by: user.username };
   }
 

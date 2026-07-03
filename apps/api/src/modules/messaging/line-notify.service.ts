@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq, and, isNotNull, or, isNull } from 'drizzle-orm';
+import { resolvePermissions, type Role, type Permission } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { users, messageLog } from '../../database/schema';
+import { users, userPermissions, messageLog } from '../../database/schema';
 import { TenantMessagingService } from './tenant-messaging.service';
 import { resolveMessageGateway, pushLineFlex } from './gateways';
 
@@ -71,6 +72,30 @@ export class LineNotifyService {
       for (const r of rows) await this.push(tenantId ?? (r.tenantId != null ? Number(r.tenantId) : null), String(r.lineUserId), text, flex);
     } catch (e: any) {
       this.logger.warn(`notifyRole(${role}) failed: ${e?.message ?? e}`);
+    }
+  }
+
+  // Push to every linked, active staff user holding ANY of the required permissions (effective set —
+  // per-user override else role default, expanded; same precedence as login). Used where the approver
+  // population is defined by permission rather than a single role (e.g. petty-cash EXP-08:
+  // creditors/exec). The maker is excluded so a requester is never "notified" of their own request.
+  async notifyPermissionHolders(required: string[], tenantId: number | null | undefined, text: string, excludeUsername?: string | null, cap = 20): Promise<void> {
+    try {
+      const conds = [eq(users.isActive, true), isNotNull(users.lineUserId)];
+      if (tenantId != null) conds.push(or(eq(users.tenantId, tenantId), isNull(users.tenantId))!);
+      const rows = await this.db.select().from(users).where(and(...conds)).limit(50);
+      let sent = 0;
+      for (const u of rows) {
+        if (sent >= cap) break;
+        if (excludeUsername && u.username === excludeUsername) continue;
+        const ov = await this.db.select({ perm: userPermissions.perm }).from(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
+        const eff = resolvePermissions(u.role as Role, ov.length ? ov.map((r: any) => r.perm as Permission) : null);
+        if (!required.some((p) => eff.includes(p as Permission))) continue;
+        await this.push(tenantId ?? (u.tenantId != null ? Number(u.tenantId) : null), String(u.lineUserId), text);
+        sent++;
+      }
+    } catch (e: any) {
+      this.logger.warn(`notifyPermissionHolders(${required.join(',')}) failed: ${e?.message ?? e}`);
     }
   }
 
