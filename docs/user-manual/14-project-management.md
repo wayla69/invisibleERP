@@ -117,6 +117,12 @@ deck assembled for you. (It can also be scheduled portfolio-wide via the `projec
     gap warning, so a task with no single owner is caught.
   - **โปรแกรม (Program, PMO-4)** — set this project's **program** and the projects it must follow
     (finish-to-start), feeding the program critical-path view.
+- **BoQ (Bill of Quantities)** — the project's **material/works budget baseline** (for construction/contractor
+  work). Add rate-built lines (จำนวน × ราคาต่อหน่วย = งบรายการ), tagged by category (วัสดุ/ค่าแรง/รับเหมาช่วง/อื่นๆ)
+  and optionally linked to an item and a WBS task. A BoQ is authored as a **draft**, then **approved by a
+  *different* person** (maker-checker) — approval **syncs the project budget** to the BoQ total (the limit that
+  requisitions draw against). An approved BoQ can be **locked** (frozen); before locking you can **re-measure**
+  a line (record the actual measured quantity vs the budgeted one). See the BoQ section below.
 - **ต้นทุน & บิล (Costs & bill)** — the cost-entry ledger with the posting JE, plus *ลงต้นทุน* / *วางบิล* dialogs.
   For a project set to **over-time (POC) revenue recognition**, this tab also shows the % complete (cost-to-cost),
   recognised revenue, and the contract-asset / billings-in-excess position, with a **รับรู้รายได้ (Recognise)**
@@ -169,6 +175,26 @@ When logging a timesheet you can allocate it to a **โครงการ (proje
 WIP once, via the authorized cost path (control **PROJ-04**). The table shows each row's project, billable flag,
 status, and — once approved — the posting JE number.
 
+## Bill of Quantities (BoQ) — material/works budget (docs/32, M0)
+The **BoQ** turns a project budget from a single number into an itemised, rate-built schedule you can track
+material against.
+
+1. **Create** — on the project workspace **BoQ** tab, *สร้าง BoQ* with lines: description, unit (UoM), budget
+   quantity, and rate. The line budget (`งบรายการ = จำนวน × ราคาต่อหน่วย`) and the BoQ total compute automatically.
+   Tag each line by category and, for a material line, pick the stock item and the WBS task it belongs to.
+2. **Edit while draft** — add lines to a **draft** BoQ (*เพิ่มรายการ*). Once approved, lines are frozen
+   (`BOQ_NOT_DRAFT`).
+3. **Approve (maker-checker)** — a **different** person approves it (you cannot approve a BoQ you authored —
+   *แบ่งแยกหน้าที่*). On approval the **project's budget is set to the BoQ total** — this is the material budget
+   that requisitions and POs are checked against (enforced from M1 onward).
+4. **Lock** — freeze an approved BoQ as the definitive baseline of record.
+5. **Re-measure** — before locking, record the **actual measured quantity** on a line; the variance vs the
+   budgeted quantity is shown. Re-measuring a locked BoQ is refused (`BOQ_LOCKED`).
+
+**Raising material against a project.** A purchase requisition or PO can carry a **project** (and a specific
+**BoQ line**) so material spend is traceable to the project's budget — pick the project on the requisition/PO;
+an unknown project code is rejected (`PROJECT_NOT_FOUND`). A goods receipt inherits the PO's project.
+
 ## Control callouts
 - Billing (incl. milestone billing) is segregated from cost initiation (**R07**) and capped at the contract
   value — see the troubleshooting list for `BILL_EXCEEDS_CONTRACT`, `OPP_NOT_WON`, `SOD_SELF_APPROVAL`,
@@ -191,4 +217,5 @@ status, and — once approved — the posting JE number.
 | 2.0 | 2026-06-30 | **Period governance / status pack** (PMO-3) — a print-friendly *รายงานสถานะ* report (`/projects/{code}/status`, opened from the workspace header): RAG + EVM + CPI/SPI health trend + baseline variance + open high risks + milestone status + change-order log, auto-assembled per period. Schedulable portfolio-wide via the `project_governance_pack` report. |
 | 2.1 | 2026-06-30 | **Program (cross-project) critical path** (PMO-4) — group projects into a *program* (`program_code`) with cross-project finish-to-start dependencies; the new `/projects/program/{code}` view runs a CPM over the program (each row a whole project) and highlights the program critical chain + per-project slack. A *โปรแกรม (Programs)* card on the Portfolio command center lists them. |
 | 2.2 | 2026-06-30 | **Pipeline → FTE forecast** (PMO-5) — the Portfolio billings forecast now also projects **กำลังคน (FTE)** demand per month: committed allocation + the pipeline's projected staffing draw (weighted value ÷ a configurable revenue-per-FTE-month rate), with a peak-FTE badge — "if we win the pipeline, how many people would each month need?". |
+| 2.4 | 2026-07-03 | **Bill of Quantities (BoQ)** (docs/32, M0) — a **BoQ** tab on the project workspace: rate-built material/works budget lines (จำนวน × ราคา = งบรายการ), draft → maker-checker approve (which **syncs the project budget** to the BoQ total) → lock, with per-line **re-measurement**. Purchase requisitions/POs can be raised **against a project + BoQ line** (unknown project → rejected); a goods receipt inherits the PO's project. Structure/traceability only in M0 — budget enforcement arrives with the commitment ledger (M1). |
 | 2.3 | 2026-07-01 | **UI coverage build** — screens for previously headless endpoints: **ปิดงวดโครงการ** (`/projects/close`, PROJ-03 close review + maker-checker + PMO-3 period roll-up); **ลีด & โอกาสการขาย** (`/projects/crm`, REV-17 lead/opportunity management + convert-won-deal-to-project CRM-WL); **แม่แบบ & อัตราค่าแรง** (`/projects/settings`, PROJ-05 rate cards, B2 template builder, cross-project utilization); a **กำกับดูแล (Governance)** workspace tab (PROJ-07 baseline capture + variance, B3 RACI matrix, PMO-4 program membership); a **top-risks** card on the Portfolio (PROJ-08); and project/task allocation + maker-checker approval on the **`/hcm` timesheet** screen (PROJ-04). |

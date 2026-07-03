@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectResources, resourceRates, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { BiLiveService } from '../bi/bi-live.service';
 import { ymd, n, fx } from '../../database/queries';
@@ -38,6 +38,9 @@ export interface ProgramDto { program_code?: string | null; depends_on_projects?
 export interface TemplateItemDto { item_type?: 'task' | 'milestone'; seq?: number; name: string; parent_seq?: number; wbs_code?: string; planned_hours?: number; planned_cost?: number; offset_start_days?: number; offset_end_days?: number; depends_on_seq?: number[]; billing_percent?: number; owner?: string; assignee?: string }
 export interface TemplateDto { code?: string; name: string; description?: string; items?: TemplateItemDto[] }
 export interface ApplyTemplateDto { start_date?: string }
+export interface BoqLineDto { category?: 'material' | 'labor' | 'subcon' | 'other'; item_no?: string; task_id?: number; wbs_code?: string; description?: string; uom?: string; budget_qty?: number; rate?: number; budget_amount?: number }
+export interface BoqDto { title?: string; boq_no?: string; lines?: BoqLineDto[] }
+export interface RemeasureDto { remeasured_qty: number }
 export interface RiskDto { kind?: 'risk' | 'issue'; title: string; probability?: number; impact?: number; owner?: string; mitigation?: string; due_date?: string }
 export interface RiskPatchDto { status?: 'open' | 'mitigating' | 'closed'; probability?: number; impact?: number; owner?: string; mitigation?: string; due_date?: string; title?: string }
 
@@ -267,10 +270,13 @@ export class ProjectsService {
     const nonBillable = r2(entries.filter((e: any) => e.billable === false).reduce((s: number, e: any) => s + n(e.amount), 0));
     // P1: schedule progress — overall % complete rolls up from the project's WBS tasks (planned-hours-weighted).
     const tasks = await db.select().from(projectTasks).where(eq(projectTasks.projectId, Number(p.id)));
+    // M0 (docs/32): BoQ budget baseline summary (latest BoQ header) — null when the project has no BoQ.
+    const [boq] = await db.select().from(projectBoq).where(eq(projectBoq.projectId, Number(p.id))).orderBy(desc(projectBoq.id)).limit(1);
     return {
       ...this.fmt(p, nonBillable),
       pct_complete: this.taskRollup(tasks),
       task_count: tasks.length,
+      boq: boq ? { id: Number(boq.id), boq_no: boq.boqNo, status: boq.status, budget_total: n(boq.budgetTotal) } : null,
       entries: entries.map((e: any) => ({ entry_type: e.entryType, description: e.description, qty: n(e.qty), rate: n(e.rate), amount: n(e.amount), billable: e.billable !== false, entry_date: e.entryDate, entry_no: e.entryNo })),
     };
   }
@@ -1035,6 +1041,116 @@ export class ProjectsService {
   // Request a change order — a governed amendment to the contract value / budget / EAC. Posts/applies NOTHING;
   // it stays `pending` until a DIFFERENT user approves it (maker-checker), so a project can't move its
   // contract goalposts unilaterally.
+  // ── Bill of Quantities (BoQ) — M0, docs/32 ────────────────────────────────
+  // The project's measured-works requirement & budget baseline. A draft BoQ is authored with rate-built
+  // lines (budget_amount = budget_qty × rate); an independent approver signs it off (maker-checker) — on
+  // approval the project's budget_amount is synced to the sum of line budgets (the enforceable baseline that
+  // M1's commitment ledger draws against). A locked BoQ is frozen. Line amount computed server-side.
+  private boqLineAmount(dto: BoqLineDto) {
+    return dto.budget_amount != null ? r2(dto.budget_amount) : r2(n(dto.budget_qty) * n(dto.rate));
+  }
+
+  async createBoq(code: string, dto: BoqDto, user: JwtUser) {
+    const db = this.db;
+    const p = await this.row(code);
+    const tenantId = p.tenantId ?? user.tenantId ?? null;
+    const boqNo = dto.boq_no?.trim() || `BOQ${String(Date.now()).slice(-8)}`;
+    const [h] = await db.insert(projectBoq).values({
+      projectId: Number(p.id), tenantId, boqNo, title: dto.title ?? null, status: 'draft', createdBy: user.username,
+    }).returning({ id: projectBoq.id });
+    const lines = dto.lines ?? [];
+    for (let i = 0; i < lines.length; i++) {
+      const it = lines[i]!;
+      await db.insert(projectBoqLines).values({
+        boqId: Number(h!.id), projectId: Number(p.id), tenantId, lineNo: i + 1,
+        category: it.category ?? 'material', itemNo: it.item_no ?? null, taskId: it.task_id ?? null, wbsCode: it.wbs_code ?? null,
+        description: it.description ?? null, uom: it.uom ?? null,
+        budgetQty: fx(it.budget_qty ?? 0, 4), rate: fx(it.rate ?? 0, 2), budgetAmount: fx(this.boqLineAmount(it), 2),
+      });
+    }
+    return this.getBoq(code);
+  }
+
+  // Latest BoQ for a project + its lines + budget rollup (total, by category, count).
+  async getBoq(code: string) {
+    const db = this.db;
+    const p = await this.row(code);
+    const [boq] = await db.select().from(projectBoq).where(eq(projectBoq.projectId, Number(p.id))).orderBy(desc(projectBoq.id)).limit(1);
+    if (!boq) return { project_code: code, boq: null, lines: [], count: 0, budget_total: 0, by_category: {} };
+    const lines = await db.select().from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boq.id))).orderBy(projectBoqLines.lineNo);
+    const budgetTotal = r2(lines.reduce((s: number, l: any) => s + n(l.budgetAmount), 0));
+    const byCategory: Record<string, number> = {};
+    for (const l of lines) byCategory[l.category] = r2((byCategory[l.category] ?? 0) + n(l.budgetAmount));
+    return {
+      project_code: code,
+      boq: { id: Number(boq.id), boq_no: boq.boqNo, version: boq.version, title: boq.title, status: boq.status, budget_total: n(boq.budgetTotal), approved_by: boq.approvedBy, approved_at: boq.approvedAt, created_by: boq.createdBy },
+      lines: lines.map(shapeBoqLine), count: lines.length, budget_total: budgetTotal, by_category: byCategory,
+    };
+  }
+
+  private async boqRow(boqId: number) {
+    const [boq] = await this.db.select().from(projectBoq).where(eq(projectBoq.id, Number(boqId))).limit(1);
+    if (!boq) throw new NotFoundException({ code: 'BOQ_NOT_FOUND', message: `BoQ ${boqId} not found`, messageTh: 'ไม่พบ BoQ' });
+    return boq;
+  }
+
+  // Append a line to a DRAFT BoQ (an approved/locked BoQ is frozen — change it via a change order in M1+).
+  async addBoqLine(boqId: number, dto: BoqLineDto, user: JwtUser) {
+    const db = this.db;
+    const boq = await this.boqRow(boqId);
+    if (boq.status !== 'draft') throw new BadRequestException({ code: 'BOQ_NOT_DRAFT', message: `BoQ is ${boq.status}; only a draft BoQ accepts new lines`, messageTh: 'เพิ่มรายการได้เฉพาะ BoQ สถานะร่าง' });
+    const [mx] = await db.select({ m: sql<string>`coalesce(max(${projectBoqLines.lineNo}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boqId)));
+    await db.insert(projectBoqLines).values({
+      boqId: Number(boqId), projectId: Number(boq.projectId), tenantId: boq.tenantId ?? user.tenantId ?? null, lineNo: Number(mx?.m ?? 0) + 1,
+      category: dto.category ?? 'material', itemNo: dto.item_no ?? null, taskId: dto.task_id ?? null, wbsCode: dto.wbs_code ?? null,
+      description: dto.description ?? null, uom: dto.uom ?? null,
+      budgetQty: fx(dto.budget_qty ?? 0, 4), rate: fx(dto.rate ?? 0, 2), budgetAmount: fx(this.boqLineAmount(dto), 2),
+    });
+    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
+    return this.getBoq(proj!.c);
+  }
+
+  // Approve a BoQ (maker-checker: approver ≠ author, SOD_SELF_APPROVAL). On approval the sum of line budgets
+  // is snapshotted onto the BoQ and synced to the project's budget_amount — the enforceable material budget
+  // baseline (M1's commitment ledger draws remaining = budget − actual − commitments against it).
+  async approveBoq(boqId: number, user: JwtUser) {
+    const db = this.db;
+    const boq = await this.boqRow(boqId);
+    if (boq.status !== 'draft') throw new BadRequestException({ code: 'BOQ_NOT_DRAFT', message: `BoQ is already ${boq.status}`, messageTh: 'BoQ ถูกดำเนินการแล้ว' });
+    if (boq.createdBy && boq.createdBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a BoQ you authored', messageTh: 'ผู้จัดทำ BoQ อนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    const [tot] = await db.select({ v: sql<string>`coalesce(sum(${projectBoqLines.budgetAmount}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boqId)));
+    const budgetTotal = r2(n(tot?.v));
+    await db.update(projectBoq).set({ status: 'approved', budgetTotal: fx(budgetTotal, 2), approvedBy: user.username, approvedAt: new Date() }).where(eq(projectBoq.id, Number(boqId)));
+    // Sync the project's budget baseline to the approved BoQ total (the material/works budget).
+    await db.update(projects).set({ budgetAmount: fx(budgetTotal, 2) }).where(eq(projects.id, Number(boq.projectId)));
+    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
+    return { ...(await this.getBoq(proj!.c)), budget_synced: budgetTotal };
+  }
+
+  // Lock an approved BoQ — freeze it (no further re-measurement edits; the definitive baseline of record).
+  async lockBoq(boqId: number, user: JwtUser) {
+    const db = this.db;
+    const boq = await this.boqRow(boqId);
+    if (boq.status !== 'approved') throw new BadRequestException({ code: 'BOQ_NOT_APPROVED', message: `Only an approved BoQ can be locked (is ${boq.status})`, messageTh: 'ล็อกได้เฉพาะ BoQ ที่อนุมัติแล้ว' });
+    await db.update(projectBoq).set({ status: 'locked' }).where(eq(projectBoq.id, Number(boqId)));
+    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
+    return this.getBoq(proj!.c);
+  }
+
+  // Record the actual measured quantity for a line (re-measurement). Allowed while the BoQ is approved (not
+  // yet locked); records remeasured_qty vs the budgeted qty — the basis for re-measurement variance.
+  async remeasureBoqLine(lineId: number, dto: RemeasureDto, user: JwtUser) {
+    const db = this.db;
+    const [line] = await db.select().from(projectBoqLines).where(eq(projectBoqLines.id, Number(lineId))).limit(1);
+    if (!line) throw new NotFoundException({ code: 'BOQ_LINE_NOT_FOUND', message: `BoQ line ${lineId} not found`, messageTh: 'ไม่พบรายการ BoQ' });
+    const boq = await this.boqRow(Number(line.boqId));
+    if (boq.status === 'draft') throw new BadRequestException({ code: 'BOQ_NOT_APPROVED', message: 'Re-measure an approved BoQ, not a draft', messageTh: 're-measure ได้เมื่อ BoQ อนุมัติแล้ว' });
+    if (boq.status === 'locked') throw new BadRequestException({ code: 'BOQ_LOCKED', message: 'BoQ is locked — re-measurement is frozen', messageTh: 'BoQ ถูกล็อก แก้ไขไม่ได้' });
+    await db.update(projectBoqLines).set({ remeasuredQty: fx(dto.remeasured_qty, 4) }).where(eq(projectBoqLines.id, Number(lineId)));
+    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(line.projectId))).limit(1);
+    return this.getBoq(proj!.c);
+  }
+
   async createChangeOrder(code: string, dto: ChangeOrderDto, user: JwtUser) {
     const db = this.db;
     const p = await this.row(code);
@@ -1463,4 +1579,14 @@ function shapeChangeOrder(c: any) {
 }
 function shapeBaseline(b: any) {
   return { id: Number(b.id), label: b.label, baseline_bac: n(b.baselineBac), baseline_duration_days: Number(b.baselineDurationDays), baseline_end: b.baselineEnd, reason: b.reason, status: b.status, created_by: b.createdBy, captured_at: b.capturedAt };
+}
+// BoQ line (M0, docs/32). remeasure_variance_qty = remeasured − budgeted (null until re-measured).
+function shapeBoqLine(l: any) {
+  const remeasured = l.remeasuredQty != null ? n(l.remeasuredQty) : null;
+  return {
+    id: Number(l.id), line_no: Number(l.lineNo), category: l.category, item_no: l.itemNo ?? null, task_id: l.taskId != null ? Number(l.taskId) : null,
+    wbs_code: l.wbsCode ?? null, description: l.description ?? null, uom: l.uom ?? null,
+    budget_qty: n(l.budgetQty), rate: n(l.rate), budget_amount: n(l.budgetAmount),
+    remeasured_qty: remeasured, remeasure_variance_qty: remeasured != null ? r2(remeasured - n(l.budgetQty)) : null,
+  };
 }
