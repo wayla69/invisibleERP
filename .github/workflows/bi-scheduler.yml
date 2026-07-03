@@ -38,8 +38,11 @@ jobs:
           SWEEP_PASS: ${{ secrets.SWEEP_PASS }}
         run: |
           set -e
-          if [ -z "${PROD_API_URL:-}" ] || [ -z "${SWEEP_USER:-}" ] || [ -z "${SWEEP_PASS:-}" ]; then
-            echo "::warning::PROD_API_URL / SWEEP_USER / SWEEP_PASS not set — skipping BI scheduler"
+          # PROD_API_URL falls back to the invisibleERP public domain when the repo variable is unset, so the
+          # cron doesn't depend on a correctly-scoped Actions variable. Override by setting vars.PROD_API_URL.
+          PROD_API_URL="${PROD_API_URL:-https://invisibleerp-production.up.railway.app}"
+          if [ -z "${SWEEP_USER:-}" ] || [ -z "${SWEEP_PASS:-}" ]; then
+            echo "::warning::SWEEP_USER / SWEEP_PASS not set — skipping BI scheduler"
             exit 0
           fi
           echo "Health check: $PROD_API_URL/healthz"
