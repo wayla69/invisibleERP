@@ -9,6 +9,14 @@ import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
 import type { JwtUser } from '../../common/decorators';
 
+// Public self-serve signup gate (ITGC-AC-18). Always allowed outside production (dev + harnesses run
+// NODE_ENV=test); in production it is FAIL-CLOSED — enabled only when an operator sets PUBLIC_SIGNUP_ENABLED
+// truthy. Pure + env-injectable so it can be unit-tested without booting the app.
+export function isSignupAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.NODE_ENV !== 'production') return true;
+  return ['1', 'true', 'yes', 'on'].includes(String(env.PUBLIC_SIGNUP_ENABLED ?? '').trim().toLowerCase());
+}
+
 export interface SignupDto {
   company_name: string;
   tenant_code: string;
@@ -91,6 +99,17 @@ export class BillingService {
   // ───────────────────── PUBLIC self-serve signup ─────────────────────
   // Atomic provisioning: tenant + admin user + trialing subscription.
   async signup(dto: SignupDto) {
+    // Fail-closed in production (ITGC-AC-18): a PUBLIC endpoint that mints a new tenant + an Admin is an
+    // attack surface — every signup is an org-Admin, and each new company must stay isolated. Disabled in
+    // prod unless an operator opts in with PUBLIC_SIGNUP_ENABLED (flip it on to onboard, off afterwards).
+    // dev + harnesses (NODE_ENV=test) are always allowed. See docs/ops/tenancy-model.md.
+    if (!isSignupAllowed()) {
+      throw new ForbiddenException({
+        code: 'SIGNUP_DISABLED',
+        message: 'Public self-service signup is disabled — contact the administrator to be onboarded.',
+        messageTh: 'ปิดรับสมัครบัญชีใหม่แบบสาธารณะ — โปรดติดต่อผู้ดูแลระบบเพื่อเปิดบัญชี',
+      });
+    }
     const db = this.db;
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);
@@ -122,8 +141,15 @@ export class BillingService {
         vatRate: dto.vat_rate != null ? String(dto.vat_rate) : '0.0700',
       }).returning({ id: tenants.id, code: tenants.code, name: tenants.name });
 
+      // Multi-company tenancy (ITGC-AC-18): give each new company its OWN org — org_id = its own tenant id.
+      // Under TENANCY_MODE=multi-company this keeps the new Admin org-scoped to just this company (isolated
+      // from every other tenant), and lets future sibling accounts join by sharing this org_id. It also
+      // means new signups never need the org_id backfill the multi-company boot warning asks about.
+      const orgId = Number(t.id);
+      await tx.update(tenants).set({ orgId }).where(eq(tenants.id, orgId));
+
       await tx.insert(users).values({
-        username, passwordHash, role: 'Admin', tenantId: Number(t.id),
+        username, passwordHash, role: 'Admin', tenantId: Number(t.id), orgId,
       });
 
       await tx.insert(subscriptions).values({
