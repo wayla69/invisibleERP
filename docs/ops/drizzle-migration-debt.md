@@ -63,10 +63,38 @@ again produces a minimal diff. Verified: `migrations-journaled` gate ✅, `tenan
   filename order (the harness path) vs journal order (the prod `drizzle-kit migrate` path) — and fails on
   any table/column/type/default/index divergence (currently 4,254 columns / 974 indexes, identical).
 
+## 3bis. Non-monotonic journal `when` — the silent-skip class (2026-07-03 deploy outage)
+
+**The failure mode.** `drizzle-kit migrate` only applies journal entries whose `when` is **strictly
+greater** than the `created_at` of the last applied migration. A journal entry whose `when` is **≤ an
+earlier entry's** therefore never qualifies once prod has migrated past that earlier entry — it is
+**silently skipped forever**. Fresh databases (the PGlite harnesses, `migration-parity`) apply everything
+in a single pass where the filter can't bite, so CI stays green while prod silently lacks the objects.
+
+**The incident.** `0145_table_reservations` (`when` 2023610000004 < 0144's 2023620000004) and
+`0146_tip_distribution` (`when` == 0144's) merged after prod had already migrated at `0144` — prod never
+created `table_reservations` / `tip_distributions` / `tip_distribution_lines`. Invisible until
+`0218_tenant_indexes_backfill` became the first migration to reference `tip_distribution_lines`: every
+prod deploy from 2026-07-02 onward failed pre-deploy `db:migrate` with 42P01 and Railway served the stale
+June-30 build.
+
+**The fix (recorded decision).**
+- `0145`/`0146` journal entries stay untouched (same rationale as the dup-number decision: don't rewrite
+  applied-journal history; bumping their `when` would re-fire them on every environment that *did* apply
+  them). Instead **`0218` idempotently re-creates their objects** (guarded `CREATE TYPE`, `CREATE TABLE IF
+  NOT EXISTS`, RLS loop) before its index statements — a no-op where 0145/0146 ran, the backfill where
+  they were skipped. Verified on both paths with a PGlite simulation (prod-like: journal minus 0145/0146,
+  then 0218; fresh: full journal).
+- The **`migrations-journaled` gate now fails on any non-monotonic `when`** (0145/0146 grandfathered).
+  When you renumber a migration after merging `main`, also make sure its `when` is **greater than the
+  current journal maximum** — renumbering the filename alone is not enough.
+
 ## 4. Adding migrations going forward
 
 - Use `db:generate` to draft, **or** hand-write — either way assign the **next free number** and ensure the
   journal entry exists (the CI gate enforces it). Hand-append the RLS loop for new tenant tables.
+- The journal `when` must be **strictly greater than the current maximum** (the CI gate enforces
+  monotonicity — see §3bis for why a lower/equal `when` is silently skipped in prod).
 - The snapshot baseline is current; keep it that way by letting `generate` advance it, or by leaving the
   baseline alone for hand-written no-DDL-snapshot changes (it stays valid).
 - If the snapshot drifts again, repeat the §3 fix: `generate` → keep the new snapshot + journal entry →
@@ -81,3 +109,4 @@ again produces a minimal diff. Verified: `migrations-journaled` gate ✅, `tenan
 | 2026-06-25 | v1.0 | Platform / DB | Initial: documents the migration-number collision pattern (+ the new CI duplicate-number guard), the snapshot drift that makes `db:generate` unusable, the grandfathered orphans/dup-numbers, and a safe remediation procedure for a quiet main. |
 | 2026-06-25 | v1.1 | Platform / DB | **Snapshot drift resolved**: regenerated the baseline (`0129_baseline_resync`, snapshot-only, catch-up neutralised to a no-op). `db:generate` now yields a minimal diff again; zero runtime/prod effect (snapshots are generate-only). Verified by the `migrations-journaled` gate + `tenant-isolation`/`e2e` harnesses. §3/§4 rewritten; orphan-journaling + dup-number grandfathering left as low-priority follow-ups. |
 | 2026-07-02 | v1.2 | Platform / DB | **docs/27 R5-1:** the 'orphans' were found journaled all along (idx 102/103) — stale dead-code `GRANDFATHERED` list removed (now empty); dup-number grandfathering made a recorded decision (cannot renumber applied migrations); new `migration-parity` CI harness proves filename-order ≡ journal-order schema. |
+| 2026-07-03 | v1.3 | Platform / DB | **§3bis — non-monotonic `when` silent-skip (prod deploy outage):** 0145/0146 (`when` ≤ 0144's) were never applied in prod; 0218's tenant-index on the missing `tip_distribution_lines` failed every deploy since 2026-07-02. Fix: 0218 now idempotently re-creates the 0145/0146 objects (PGlite-verified on prod-like + fresh paths); `migrations-journaled` gate extended to fail on any new non-monotonic `when` (0145/0146 grandfathered). |
