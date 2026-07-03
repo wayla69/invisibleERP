@@ -28,7 +28,7 @@ async function bootstrap() {
   // dropped"), which can swallow the real error of a failing boot, and the synchronous log storm slows
   // startup toward the deploy healthcheck window. Keep error/warn (EnvValidation fail-closed warnings
   // still surface); the structured pino ops logger writes to stdout independently and is unaffected.
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ maxParamLength: 500, bodyLimit: 16 * 1024 * 1024 }), {
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ routerOptions: { maxParamLength: 500 }, bodyLimit: 16 * 1024 * 1024 }), {
     rawBody: true,
     logger: process.env.NODE_ENV === 'production' ? ['error', 'warn'] : undefined,
   });

@@ -49,7 +49,7 @@ async function main() {
   ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ maxParamLength: 500 })); // long HMAC tokens in path
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ routerOptions: { maxParamLength: 500 } })); // long HMAC tokens in path
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
