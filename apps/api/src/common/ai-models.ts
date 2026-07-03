@@ -18,7 +18,8 @@ export type AiTask =
   | 'doc_extract'       // doc-ai: pull fields out of pasted invoice text
   | 'nl_query'          // nl-analytics: natural language → query spec
   | 'config_suggest'    // ai-config: describe → propose a Studio config JSON
-  | 'insight';          // analytics insights narrative
+  | 'insight'           // analytics insights narrative
+  | 'chat_copilot';     // LINE chat copilot: Thai free text → structured command DRAFT (confirm-first)
 
 const TASK_MODEL: Record<AiTask, string> = {
   agent_reasoning: MODEL.REASONING,
@@ -27,6 +28,7 @@ const TASK_MODEL: Record<AiTask, string> = {
   nl_query: MODEL.CHEAP,      // was Opus — short NL→query parse
   config_suggest: MODEL.REASONING, // JSON config benefits from stronger structure adherence
   insight: MODEL.REASONING,        // narrative analytics — quality-sensitive
+  chat_copilot: MODEL.CHEAP,       // short NL→draft parse; execution is human-confirmed anyway (LP-2)
 };
 
 // Resolve the model for a task. `ANTHROPIC_MODEL` (when set) pins everything to one model.

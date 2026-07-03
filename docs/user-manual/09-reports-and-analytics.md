@@ -229,6 +229,14 @@ sales, finance and other modules.
 > **Note:** The assistant answers from your own tenant's data only and respects
 > your permissions.
 
+> **LINE copilot governance (LP-2):** the chat copilot (`บอท …` in the shop's LINE OA)
+> uses a cost-routed model dedicated to chat drafting (`chat_copilot`), validates every
+> AI answer against a strict schema (a malformed answer becomes an honest "ยังไม่เข้าใจ"),
+> and is capped per shop per day (`LINE_COPILOT_DAILY_CAP`, default 200 calls — excess
+> falls back to the deterministic rules). In production the model is never called until
+> the Data Processing Addendum is acknowledged (`AI_DPA_ACKNOWLEDGED`); without a key the
+> copilot still works on its built-in Thai rules. Drafts execute only after your confirm tap.
+
 [screenshot: AI assistant chat with quick prompts]
 
 ---
@@ -416,9 +424,15 @@ till you can ask in plain Thai, e.g. *"วันนี้ควรเตรี�
 If you've linked your LINE account (see [Procurement — LINE chat](./03-procurement.md)):
 
 - **Daily digest** — type `subscribe digest` in the shop's LINE OA chat to get a morning
-  summary (pending approvals · open PRs · alert breaches in the last 24 h). Requires
-  `dashboard`, `fin_report`, or `exec` — the same rule as viewing those numbers on screen.
-  `unsubscribe digest` stops it.
+  summary card. Requires `dashboard`, `fin_report`, or `exec` — the same rule as viewing
+  those numbers on screen. `unsubscribe digest` stops it.
+  - **Pick your KPIs (LP-3):** `subscribe digest sales_yesterday,cash_position` chooses what
+    your card shows; bare `subscribe digest` keeps the default trio (pending approvals ·
+    open PRs · alerts 24 h). `digest kpis` lists the keys **you** are allowed to pick —
+    financial KPIs (yesterday's sales, cash position, overdue AR, low-stock count) each
+    require their own permission, and the filter re-applies **every morning at send time**:
+    lose the permission and that KPI silently disappears from your card (nobody else's
+    card changes). A KPI with no data shows `—`, never a made-up zero.
 - **Scheduled reports** — an admin can add you as a report-subscription recipient with
   `{line_user: "<username>"}`; you'll receive the run's summary in LINE with a pointer to
   the full report on `/bi` (the raw data never goes to chat).

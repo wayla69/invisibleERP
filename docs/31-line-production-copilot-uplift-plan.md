@@ -1,6 +1,6 @@
 # 31 — LINE Channel: Production Go-Live, Copilot Uplift & Digest KPIs — Design & Roadmap
 
-> **Date:** 2026-07-03 · **Status:** v0.1 — PLANNED (LP-1..LP-3) · **Owner:** ERP / Product
+> **Date:** 2026-07-03 · **Status:** v1.0 — **DELIVERED (LP-1..LP-3 all shipped)** · **Owner:** ERP / Product
 > **Scope:** The docs/30 LINE Chat Workbench is **fully delivered** (LC-1..LC-5, merged #333–#343).
 > This plan takes the channel from "feature-complete in CI" to **production-grade and smarter**, along
 > the three follow-up tracks identified at LC-5 close-out: **(LP-1)** a per-tenant production go-live
@@ -47,7 +47,7 @@ second LLM seam.**
 
 ## 1. Phases (one PR each, sequential)
 
-### LP-1 — Production go-live pack: LINE OA readiness + webhook diagnostics + runbook
+### LP-1 — Production go-live pack: LINE OA readiness + webhook diagnostics + runbook ✅ DELIVERED
 - **Close the silent-secret gap:** `validate('line')` additionally requires `secret` (Channel
   Secret) whenever `token` is set — a tenant can no longer save prod-broken creds. Readiness view
   gains `webhook_secret_set` (boolean only; secret stays write-only).
@@ -71,7 +71,7 @@ second LLM seam.**
   rejected, readiness shows `webhook_secret_set`/`last_webhook_at` after a verified event, test
   push lands in `message_log`.
 
-### LP-2 — Copilot uplift: chat-scoped model routing, wider Thai intents, scored evals
+### LP-2 — Copilot uplift: chat-scoped model routing, wider Thai intents, scored evals ✅ DELIVERED
 - **Own task key:** add `AiTask 'chat_copilot'` (CHEAP tier) in `ai-models.ts`; the webhook stops
   borrowing `doc_extract`. `ANTHROPIC_MODEL` pin and `aiDpaBlocked()` behavior unchanged.
 - **Wider intent coverage, same confirm-first spine.** The LLM (and parallel deterministic rules,
@@ -93,7 +93,7 @@ second LLM seam.**
   03/05/09, UAT cases (expense-draft confirm, leave-draft confirm, malformed-LLM refusal) + matrix.
   **Harness:** line-crm + ai-eval as above; ts-debt ratchet stays at baseline.
 
-### LP-3 — Digest 2.0: finance/sales/stock KPIs, per-subscriber selection, flex layout
+### LP-3 — Digest 2.0: finance/sales/stock KPIs, per-subscriber selection, flex layout ✅ DELIVERED
 - **KPI catalog (all read-only aggregates, Asia/Bangkok business day):** `pending_approvals`,
   `open_prs`, `alerts_24h` (existing) + `sales_yesterday` (net sales), `cash_position` (cash/bank
   balance), `ar_overdue` (overdue AR total), `low_stock` (items at/under reorder). Each KPI
@@ -134,3 +134,6 @@ digest channel extensions (PN-26). If build reveals a genuine control change, ad
 | Version | Date | Change |
 | --- | --- | --- |
 | v0.1 | 2026-07-03 | Initial plan — LP-1 go-live pack, LP-2 copilot uplift, LP-3 digest 2.0 (follow-ups from docs/30 close-out). |
+| v0.2 | 2026-07-03 | LP-1 delivered as planned (no migration): required Channel Secret, `line_webhook` receipt-health row + readiness fields (`webhook_secret_set`/`webhook_path`/`last_webhook_at`/`last_webhook_status`), settings go-live panel + `POST /api/messaging/providers/line/test-self`, runbook `docs/ops/line-oa-golive.md`; `line-crm` 91 ✓ (every harness webhook delivery now HMAC-signed). |
+| v0.3 | 2026-07-03 | LP-2 delivered (no migration): `chat_copilot` task key, expense/advance/leave drafts replaying the ordinary command paths, zod-validated LLM output, `LINE_COPILOT_DAILY_CAP` (+ `[chat:ai-cap]` audit); **deviation recorded** — the scored scripted-LLM eval set lives in `line-crm` (98 ✓, same `setLlmClientForTests` seam, end-to-end through the webhook) instead of a separate `ai-eval` case block. |
+| v1.0 | 2026-07-03 | LP-3 delivered (no migration) — plan complete: KPI catalog (`bi/digest-kpis.ts`), per-recipient permission filter at send time via `LineNotifyService.effectivePermsOf`, `subscribe digest <kpi,…>` + `digest kpis` (selection on the recipients jsonb), flex digest card with `—` zero-data honesty; `line-crm` 102 ✓. |

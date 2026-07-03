@@ -19,6 +19,12 @@ import { EssService } from '../ess/ess.service';
 import { NlAnalyticsService } from '../nl-analytics/nl-analytics.service';
 import { llmClient } from '../../common/llm-client';
 import { modelFor, aiDpaBlocked } from '../../common/ai-models';
+import { DIGEST_KPIS, DEFAULT_DIGEST_KPIS, allowedDigestKpis } from '../bi/digest-kpis';
+import { z } from 'zod';
+
+// LP-2 (docs/31) — a copilot DRAFT: which text-command handler to replay on confirm + its args.
+// pr: args = [full `pr …` command text] · expense/advance: [fund, amount, reason] · leave: [from, days, reason]
+type CopilotDraft = { kind: 'pr' | 'expense' | 'advance' | 'leave'; args: string[]; summary: string };
 
 // LINE Messaging API webhook (follow / unfollow / message …). Public + no JWT: authenticity is the LINE
 // signature (`X-Line-Signature` = base64 HMAC-SHA256 of the RAW body under the tenant's Channel Secret).
@@ -68,7 +74,16 @@ export class LineWebhookService {
 
     const creds = await this.tenantMsg.resolveCreds(tenantId, 'line');
     const secret = creds?.secret as string | undefined;
-    const body = this.verify(secret, rawBody, signature, parsed);
+    // LP-1 (docs/31): record receipt health (verified / bad_signature / unverified_dev) so the settings
+    // readiness view can answer "has LINE ever actually reached this webhook?". Best-effort, never blocks.
+    let body: any;
+    try {
+      body = this.verify(secret, rawBody, signature, parsed);
+    } catch (e) {
+      if (secret) await this.tenantMsg.recordWebhookReceipt(tenantId, 'bad_signature');
+      throw e;
+    }
+    await this.tenantMsg.recordWebhookReceipt(tenantId, secret ? 'verified' : 'unverified_dev');
     const token = (creds?.token as string | undefined) ?? process.env.LINE_CHANNEL_TOKEN;
 
     let followed = 0, unfollowed = 0, chat = 0;
@@ -137,7 +152,7 @@ export class LineWebhookService {
   // ── LINE chat → PR (0227) ─────────────────────────────────────────────────
 
   private static readonly CHAT_USAGE =
-    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest — รับสรุปประจำวัน\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
+    'รูปแบบคำสั่ง:\n• pr <รหัสสินค้า> <จำนวน> [เหตุผล] — สร้างคำขอซื้อ (หลายรายการคั่นด้วย , หรือขึ้นบรรทัดใหม่)\n• status <เลขที่ PR> — เช็คสถานะ · my prs — คำขอล่าสุดของฉัน · cancel <เลขที่ PR> — ถอนคำขอ\n• find <คำค้น> — ค้นหารหัสสินค้า · stock <รหัสสินค้า> — ดูยอดคงเหลือ\n• attach <เลขที่ PO> — แนบรูปใบแจ้งหนี้/ใบเสร็จ · expense/advance <กองทุน> <จำนวนเงิน> [เหตุผล] — เบิกเงินสดย่อย\n• leave <จากวันที่ YYYY-MM-DD> <จำนวนวัน> [เหตุผล] — ส่งใบลา · subscribe digest [kpi,…] — รับสรุปประจำวัน (digest kpis = ดู KPI ที่เลือกได้)\n• ask <คำถาม> — ถามยอดขาย (เช่น ask ยอดขายตามสาขา) · บอท <ข้อความ> — ให้ AI ร่างคำขอซื้อ (ยืนยันก่อนสร้างเสมอ)\n• approve/reject <เลขที่ PR> — อนุมัติ/ปฏิเสธ (เฉพาะทีมจัดซื้อ)\nเช่น  pr A4-PAPER 10 กระดาษหมด, TONER-85A 2';
 
   private static readonly STATUS_TH: Record<string, string> = { Draft: 'ฉบับร่าง', Pending: 'รออนุมัติ', Approved: 'อนุมัติแล้ว', Rejected: 'ไม่อนุมัติ', Cancelled: 'ยกเลิกแล้ว' };
 
@@ -172,8 +187,9 @@ export class LineWebhookService {
     const isCopilot = cmd === 'bot' || text.startsWith('บอท');
     const isSubscribe = (cmd === 'subscribe' || cmd === 'รับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'รับสรุป');
     const isUnsubscribe = (cmd === 'unsubscribe' || cmd === 'เลิกรับสรุป') && (arg1.toLowerCase() === 'digest' || cmd === 'เลิกรับสรุป');
+    const isDigestKpis = cmd === 'digest' && arg1.toLowerCase() === 'kpis';
     const isPr = cmd === 'pr' && !isStatus || text.startsWith('ขอซื้อ');
-    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isAsk && !isCopilot && !isPr) return false;
+    if (!isLink && !isStatus && !isApprove && !isReject && !isMyPrs && !isFind && !isCancel && !isStock && !isAttach && !isExpense && !isAdvance && !isLeave && !isSubscribe && !isUnsubscribe && !isDigestKpis && !isAsk && !isCopilot && !isPr) return false;
 
     // LC-3 governance: per-LINE-user command budget — a scripted/compromised account cannot hammer the
     // channel. First excess gets one throttle reply; further excess is dropped silently (audit-logged).
@@ -210,7 +226,8 @@ export class LineWebhookService {
       else if (isAttach) { reply = await this.chatAttachStart(tenantId, lineUserId, staff, arg1, (parts[2] ?? '').toLowerCase()); campaign = 'chat_attach'; }
       else if (isExpense || isAdvance) { reply = await this.chatPettyCash(staff, isAdvance ? 'advance' : 'expense', arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_pettycash'; }
       else if (isLeave) { reply = await this.chatLeave(staff, arg1, parts[2]!, parts.slice(3).join(' ')); campaign = 'chat_leave'; }
-      else if (isSubscribe || isUnsubscribe) { reply = await this.chatDigest(tenantId, staff, isSubscribe); campaign = 'chat_digest'; }
+      else if (isSubscribe || isUnsubscribe) { reply = await this.chatDigest(tenantId, staff, isSubscribe, isSubscribe ? parts.slice(2).join(',') : ''); campaign = 'chat_digest'; }
+      else if (isDigestKpis) { reply = await this.chatDigestKpis(staff); campaign = 'chat_digest'; }
       else if (isAsk) { reply = await this.chatAsk(staff, parts.slice(1).join(' ')); campaign = 'chat_ask'; }
       else if (isCopilot) {
         const out = await this.chatCopilot(tenantId, lineUserId, staff, text.replace(/^(?:bot\s+|บอท\s*)/i, ''));
@@ -322,14 +339,18 @@ export class LineWebhookService {
     } else if (data.a === 'confirm' && typeof data.d === 'string' && typeof data.n === 'string') {
       const [state] = await this.db.select().from(lineChatStates)
         .where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId), eq(lineChatStates.kind, 'confirm'))).limit(1);
-      const p = (state?.payload ?? {}) as { action?: string; docNo?: string; nonce?: string; prText?: string };
+      const p = (state?.payload ?? {}) as { action?: string; docNo?: string; nonce?: string; prText?: string; kind?: string; args?: string[] };
       if (!state || new Date(state.expiresAt).getTime() < Date.now() || p.docNo !== String(data.d).toUpperCase() || p.nonce !== data.n) {
         text = 'คำขอยืนยันหมดอายุหรือไม่ถูกต้อง — กดปุ่มอนุมัติ/ปฏิเสธใหม่อีกครั้ง';
       } else {
         // consume the state BEFORE acting so a redelivered confirm can never act twice
         await this.db.delete(lineChatStates).where(and(eq(lineChatStates.tenantId, tenantId), eq(lineChatStates.lineUserId, lineUserId)));
-        // LC-5: a confirmed AI draft replays the ordinary command path (same pr_raise + SoD checks)
-        if (p.action === 'copilot-pr' && p.prText) text = await this.chatCreatePr(staff, p.prText);
+        // LC-5/LP-2: a confirmed AI draft replays the ordinary command path (same perms + SoD checks)
+        const a = p.args ?? [];
+        if (p.action === 'copilot-pr' && p.prText) text = await this.chatCreatePr(staff, p.prText); // pre-LP-2 payload shape
+        else if (p.action === 'copilot-cmd' && p.kind === 'pr' && a[0]) text = await this.chatCreatePr(staff, a[0]);
+        else if (p.action === 'copilot-cmd' && (p.kind === 'expense' || p.kind === 'advance') && a.length >= 2) text = await this.chatPettyCash(staff, p.kind, a[0]!, a[1]!, a[2] ?? '');
+        else if (p.action === 'copilot-cmd' && p.kind === 'leave' && a.length >= 2) text = await this.chatLeave(staff, a[0]!, a[1]!, a[2] ?? '');
         else text = await this.chatDecision(staff, p.docNo!, p.action === 'approve');
       }
     } else {
@@ -528,24 +549,54 @@ export class LineWebhookService {
   // counts → requires dashboard/fin_report/exec). The opt-in rides the tenant's single
   // `line_daily_digest` report subscription as a {line_user} recipient — the BI scheduler delivers it
   // daily; force-unlink (LC-3) silences it automatically because delivery resolves the link registry.
-  private async chatDigest(tenantId: number, u: any, on: boolean): Promise<string> {
+  private async chatDigest(tenantId: number, u: any, on: boolean, kpiList = ''): Promise<string> {
     const perms = await this.effectivePerms(u);
     if (on && !perms.includes('dashboard') && !perms.includes('fin_report') && !perms.includes('exec')) {
       return 'บัญชีของคุณไม่มีสิทธิ์รับสรุปประจำวัน (ต้องมี dashboard / fin_report / exec)';
     }
+    // LP-3: optional per-subscriber KPI selection — `subscribe digest sales_yesterday,cash_position`.
+    // Keys are validated against the catalog AND the caller's current permissions (delivery re-filters
+    // at send time anyway, but refusing an un-seeable key here beats a silently thinner digest later).
+    let kpis: string[] | null = null;
+    if (on && kpiList.trim()) {
+      const wanted = kpiList.split(/[,\s]+/).map((k) => k.trim().toLowerCase()).filter(Boolean);
+      const mine = allowedDigestKpis(perms);
+      const bad = wanted.filter((k) => !DIGEST_KPIS[k]);
+      if (bad.length) return `ไม่รู้จัก KPI: ${bad.join(', ')} — พิมพ์ "digest kpis" เพื่อดูรายการที่เลือกได้`;
+      const denied = wanted.filter((k) => !mine.includes(k));
+      if (denied.length) return `บัญชีของคุณไม่มีสิทธิ์เห็น: ${denied.join(', ')} — พิมพ์ "digest kpis" เพื่อดูรายการของคุณ`;
+      kpis = wanted;
+    }
     const [sub] = await this.db.select().from(reportSubscriptions)
       .where(and(eq(reportSubscriptions.tenantId, tenantId), eq(reportSubscriptions.reportType, 'line_daily_digest'))).limit(1);
-    const recipients: Array<{ line_user?: string; email?: string }> = Array.isArray(sub?.recipients) ? [...(sub!.recipients as Array<{ line_user?: string; email?: string }>)] : [];
-    const has = recipients.some((r: any) => r?.line_user === u.username);
+    const recipients: Array<{ line_user?: string; email?: string; kpis?: string[] }> = Array.isArray(sub?.recipients) ? [...(sub!.recipients as Array<{ line_user?: string; email?: string; kpis?: string[] }>)] : [];
+    const idx = recipients.findIndex((r: any) => r?.line_user === u.username);
     if (on) {
-      if (!has) recipients.push({ line_user: u.username });
+      const entry: { line_user: string; kpis?: string[] } = { line_user: u.username, ...(kpis ? { kpis } : {}) };
+      if (idx >= 0) recipients[idx] = entry; else recipients.push(entry);
       if (sub) await this.db.update(reportSubscriptions).set({ recipients, isActive: true }).where(eq(reportSubscriptions.id, sub.id));
       else await this.db.insert(reportSubscriptions).values({ tenantId, name: 'LINE Daily Digest', reportType: 'line_daily_digest', filters: {}, frequency: 'daily', recipients, isActive: true, nextRunAt: new Date(), createdBy: 'system:line-chat' });
-      return 'รับสรุปประจำวันทาง LINE แล้ว ✔ (ส่งทุกเช้าตามรอบรายงาน) — พิมพ์ "unsubscribe digest" เพื่อยกเลิก';
+      const picked = kpis ? ` (${kpis.map((k) => DIGEST_KPIS[k]!.th).join(' · ')})` : '';
+      return `รับสรุปประจำวันทาง LINE แล้ว ✔${picked} (ส่งทุกเช้าตามรอบรายงาน) — พิมพ์ "unsubscribe digest" เพื่อยกเลิก`;
     }
-    if (!sub || !has) return 'คุณยังไม่ได้รับสรุปประจำวันอยู่แล้ว';
+    if (!sub || idx < 0) return 'คุณยังไม่ได้รับสรุปประจำวันอยู่แล้ว';
     await this.db.update(reportSubscriptions).set({ recipients: recipients.filter((r: any) => r?.line_user !== u.username) }).where(eq(reportSubscriptions.id, sub.id));
     return 'ยกเลิกการรับสรุปประจำวันแล้ว ✔';
+  }
+
+  // LP-3 — `digest kpis`: list the catalog keys THIS user's permissions may see (permission-aware menu).
+  // Gated like `subscribe digest` — the baseline trio is permissionless, so the menu (not the KPI list)
+  // carries the subscriber gate.
+  private async chatDigestKpis(u: any): Promise<string> {
+    const perms = await this.effectivePerms(u);
+    if (!perms.includes('dashboard') && !perms.includes('fin_report') && !perms.includes('exec')) {
+      return 'บัญชีของคุณไม่มีสิทธิ์รับสรุปประจำวัน (ต้องมี dashboard / fin_report / exec)';
+    }
+    const mine = allowedDigestKpis(perms);
+    const dflt = new Set(DEFAULT_DIGEST_KPIS);
+    return 'KPI ที่เลือกได้สำหรับสรุปประจำวันของคุณ:\n'
+      + mine.map((k) => `• ${k} — ${DIGEST_KPIS[k]!.th}${dflt.has(k) ? ' (ค่าเริ่มต้น)' : ''}`).join('\n')
+      + '\nเลือกโดยพิมพ์: subscribe digest <kpi,kpi,…>';
   }
 
   // ── LC-5 (docs/30) — read-only NL analytics: `ask <คำถาม>` via the governed nl-analytics engine ──
@@ -571,60 +622,136 @@ export class LineWebhookService {
     }
   }
 
-  // ── LC-5 (docs/30) — confirm-first Thai copilot: wake word `bot`/`บอท` + free text ──────────────
+  // ── LC-5 (docs/30) + LP-2 (docs/31) — confirm-first Thai copilot: wake word `bot`/`บอท` + free text ──
   // The model (or the deterministic key-less rules — same pattern as doc-ai/nl-analytics, so CI is
   // deterministic) only DRAFTS a structured command. Nothing executes without the LC-1 [ยืนยัน] postback,
   // and the confirmed draft replays the ordinary command path (same permission + SoD checks). Read-only
   // intents (stock) answer immediately. Draft/exec replies are campaign-tagged chat_ai/chat_ai_confirm —
-  // the AI-origin audit marker.
+  // the AI-origin audit marker. LP-2 widens drafts beyond PR to expense/advance (EXP-07/08 raise path)
+  // and leave (ESS path) — every kind replays the SAME text-command handler; the copilot adds zero
+  // execution code, and the LLM output is schema-validated (anything malformed → honest refusal).
+  private static readonly DRAFT_LABEL: Record<CopilotDraft['kind'], { btn: string; title: string }> = {
+    pr: { btn: 'ยืนยันสร้าง PR', title: 'ร่างคำขอซื้อ' },
+    expense: { btn: 'ยืนยันเบิกเงิน', title: 'ร่างคำขอเบิกเงินสดย่อย' },
+    advance: { btn: 'ยืนยันยืมเงิน', title: 'ร่างคำขอยืมเงินสดย่อย' },
+    leave: { btn: 'ยืนยันส่งใบลา', title: 'ร่างใบลา' },
+  };
+
   private async chatCopilot(tenantId: number, lineUserId: string, u: any, text: string): Promise<{ text: string; flex?: any }> {
     const t = text.trim();
     if (!t) return { text: LineWebhookService.CHAT_USAGE };
     // read-only stock intent answers immediately (no confirm needed)
     const stockM = /(?:สต็อก|คงเหลือ|เหลือเท่าไหร่|เหลือกี่)\s*(?:ของ\s*)?([A-Za-z0-9-]+)/.exec(t);
     if (stockM) return { text: await this.chatStock(u, stockM[1]!) };
-    // draft a PR from "ขอซื้อ/อยากได้/สั่งซื้อ <item> <qty> [เหตุผล]" — LLM refines when a key is present
-    let draft = this.copilotRules(t);
-    if (!draft && !aiDpaBlocked() && process.env.ANTHROPIC_API_KEY) {
-      try {
-        const res: any = await llmClient(process.env.ANTHROPIC_API_KEY).create({
-          model: modelFor('doc_extract'), max_tokens: 300,
-          system: 'You draft ERP purchase requisitions from Thai/English chat. Return ONLY JSON {"intent":"pr","item_id":"...","qty":<number>,"reason":"..."} or {"intent":"unknown"}.',
-          messages: [{ role: 'user', content: t }],
-        });
-        const out = JSON.parse((res.content as Array<{ type: string; text?: string }>).filter((b) => b.type === 'text').map((b) => b.text ?? '').join(''));
-        if (out?.intent === 'pr' && out.item_id && Number(out.qty) > 0) draft = { itemId: String(out.item_id).toUpperCase(), qty: Number(out.qty), reason: out.reason ? String(out.reason) : '' };
-      } catch { /* fall through to unknown */ }
-    }
+    const draft = this.copilotRules(t) ?? (await this.copilotLlm(tenantId, t));
     if (!draft) return { text: `ยังไม่เข้าใจคำขอ — ลองพิมพ์คำสั่งโดยตรง:\n${LineWebhookService.CHAT_USAGE}` };
-    const prText = `pr ${draft.itemId} ${draft.qty}${draft.reason ? ` ${draft.reason}` : ''}`;
+    const L = LineWebhookService.DRAFT_LABEL[draft.kind];
     const nonce = this.genCode();
     const expiresAt = new Date(Date.now() + 5 * 60_000);
+    const payload = { action: 'copilot-cmd', docNo: 'AI-DRAFT', kind: draft.kind, args: draft.args, nonce };
     await this.db.insert(lineChatStates)
-      .values({ tenantId, lineUserId, kind: 'confirm', payload: { action: 'copilot-pr', docNo: 'AI-DRAFT', prText, nonce }, expiresAt })
-      .onConflictDoUpdate({ target: [lineChatStates.tenantId, lineChatStates.lineUserId], set: { kind: 'confirm', payload: { action: 'copilot-pr', docNo: 'AI-DRAFT', prText, nonce }, expiresAt, createdAt: new Date() } });
-    const summary = `ร่างคำขอซื้อ: ${draft.itemId} × ${draft.qty}${draft.reason ? ` (${draft.reason})` : ''}`;
+      .values({ tenantId, lineUserId, kind: 'confirm', payload, expiresAt })
+      .onConflictDoUpdate({ target: [lineChatStates.tenantId, lineChatStates.lineUserId], set: { kind: 'confirm', payload, expiresAt, createdAt: new Date() } });
     return {
-      text: `${summary}\nกด "ยืนยันสร้าง PR" ภายใน 5 นาที (ไม่ยืนยัน = ไม่สร้าง)`,
+      text: `${L.title}: ${draft.summary}\nกด "${L.btn}" ภายใน 5 นาที (ไม่ยืนยัน = ไม่ดำเนินการ)`,
       flex: {
         type: 'bubble',
         body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: [
           { type: 'text', text: '🤖 ร่างจากข้อความของคุณ', size: 'sm', color: '#8a6d1d' },
-          { type: 'text', text: `${draft.itemId} × ${draft.qty}`, weight: 'bold', size: 'lg' },
-          ...(draft.reason ? [{ type: 'text', text: draft.reason, size: 'sm', color: '#888888', wrap: true }] : []),
+          { type: 'text', text: L.title, size: 'xs', color: '#888888' },
+          { type: 'text', text: draft.summary, weight: 'bold', size: 'md', wrap: true },
         ] },
         footer: { type: 'box', layout: 'horizontal', contents: [
-          { type: 'button', style: 'primary', height: 'sm', action: { type: 'postback', label: 'ยืนยันสร้าง PR', data: JSON.stringify({ a: 'confirm', d: 'AI-DRAFT', n: nonce }), displayText: 'ยืนยันสร้าง PR' } },
+          { type: 'button', style: 'primary', height: 'sm', action: { type: 'postback', label: L.btn, data: JSON.stringify({ a: 'confirm', d: 'AI-DRAFT', n: nonce }), displayText: L.btn } },
         ] },
       },
     };
   }
 
-  // Deterministic key-less draft rules (CI-stable; the LLM path refines when configured).
-  private copilotRules(t: string): { itemId: string; qty: number; reason: string } | null {
-    const m = /(?:ขอซื้อ|อยากได้|สั่งซื้อ|ซื้อ)\s+([A-Za-z0-9-]+)\s+(?:จำนวน\s*)?(\d+(?:\.\d+)?)\s*(?:ชิ้น|อัน|กล่อง|รีม|แพ็ค)?\s*(.*)$/.exec(t);
-    if (!m || !(Number(m[2]) > 0)) return null;
-    return { itemId: m[1]!.toUpperCase(), qty: Number(m[2]), reason: (m[3] ?? '').trim() };
+  // Deterministic key-less draft rules (CI-stable; the LLM path refines when configured). Linear,
+  // anchored regexes over chat text capped at 2000 chars — no backtracking-prone nesting.
+  private copilotRules(t: string): CopilotDraft | null {
+    const pr = /(?:ขอซื้อ|อยากได้|สั่งซื้อ|ซื้อ)\s+([A-Za-z0-9-]+)\s+(?:จำนวน\s*)?(\d+(?:\.\d+)?)\s*(?:ชิ้น|อัน|กล่อง|รีม|แพ็ค)?\s*(.*)$/.exec(t);
+    if (pr && Number(pr[2]) > 0) return this.mkPrDraft(pr[1]!, pr[2]!, pr[3] ?? '');
+    // expense/advance — "เบิก <กองทุน> <จำนวน> [เหตุผล]" or "เบิก <จำนวน> [บาท] จาก <กองทุน> [เหตุผล]"
+    const expA = /^(?:ขอเบิก|เบิกเงิน|เบิก)\s+([A-Za-z][A-Za-z0-9-]*)\s+(\d+(?:\.\d+)?)\s*(?:บาท)?\s*(.*)$/.exec(t);
+    if (expA) return this.mkMoneyDraft('expense', expA[1]!, expA[2]!, expA[3] ?? '');
+    const expB = /^(?:ขอเบิก|เบิกเงิน|เบิก)\s+(\d+(?:\.\d+)?)\s*(?:บาท)?\s*จาก\s*([A-Za-z0-9-]+)\s*(.*)$/.exec(t);
+    if (expB) return this.mkMoneyDraft('expense', expB[2]!, expB[1]!, expB[3] ?? '');
+    const advA = /^(?:ขอยืมเงิน|ยืมเงิน|ขอยืม)\s+([A-Za-z][A-Za-z0-9-]*)\s+(\d+(?:\.\d+)?)\s*(?:บาท)?\s*(.*)$/.exec(t);
+    if (advA) return this.mkMoneyDraft('advance', advA[1]!, advA[2]!, advA[3] ?? '');
+    const advB = /^(?:ขอยืมเงิน|ยืมเงิน|ขอยืม)\s+(\d+(?:\.\d+)?)\s*(?:บาท)?\s*จาก\s*([A-Za-z0-9-]+)\s*(.*)$/.exec(t);
+    if (advB) return this.mkMoneyDraft('advance', advB[2]!, advB[1]!, advB[3] ?? '');
+    // leave — "ลา <YYYY-MM-DD> <วัน>" or "ลา <n> วัน ตั้งแต่ <YYYY-MM-DD>"
+    const lvA = /^(?:ขอ)?ลา(?:งาน|ป่วย|กิจ|พักร้อน)?\s+(?:วันที่\s*)?(\d{4}-\d{2}-\d{2})\s+(\d+)\s*(?:วัน)?\s*(.*)$/.exec(t);
+    if (lvA) return this.mkLeaveDraft(lvA[1]!, lvA[2]!, lvA[3] ?? '');
+    const lvB = /^(?:ขอ)?ลา(?:งาน|ป่วย|กิจ|พักร้อน)?\s+(\d+)\s*วัน\s*(?:ตั้งแต่|จาก|เริ่ม)?\s*(?:วันที่\s*)?(\d{4}-\d{2}-\d{2})\s*(.*)$/.exec(t);
+    if (lvB) return this.mkLeaveDraft(lvB[2]!, lvB[1]!, lvB[3] ?? '');
+    return null;
+  }
+
+  private mkPrDraft(itemId: string, qty: string, reason: string): CopilotDraft | null {
+    if (!(Number(qty) > 0)) return null;
+    const r = reason.trim();
+    return { kind: 'pr', args: [`pr ${itemId.toUpperCase()} ${qty}${r ? ` ${r}` : ''}`], summary: `${itemId.toUpperCase()} × ${qty}${r ? ` (${r})` : ''}` };
+  }
+  private mkMoneyDraft(kind: 'expense' | 'advance', fund: string, amount: string, reason: string): CopilotDraft | null {
+    if (!(Number(amount) > 0)) return null;
+    const r = reason.trim();
+    return { kind, args: [fund.toUpperCase(), amount, r], summary: `${fund.toUpperCase()} จำนวน ${amount} บาท${r ? ` (${r})` : ''}` };
+  }
+  private mkLeaveDraft(fromDate: string, days: string, reason: string): CopilotDraft | null {
+    const d = Number(days);
+    if (!(d > 0 && d <= 60)) return null;
+    const r = reason.trim();
+    return { kind: 'leave', args: [fromDate, days, r], summary: `ตั้งแต่ ${fromDate} จำนวน ${days} วัน${r ? ` (${r})` : ''}` };
+  }
+
+  // LP-2 — LLM refinement behind the same seam as doc-ai/nl-analytics: DPA-gated, chat-scoped model
+  // (`chat_copilot`), STRICT schema validation (a malformed/unknown answer drafts nothing), and a
+  // per-tenant daily call cap so a chatty OA can't burn the token budget.
+  private static readonly LLM_DRAFT_SCHEMA = z.discriminatedUnion('intent', [
+    z.object({ intent: z.literal('pr'), item_id: z.string().min(1).max(40), qty: z.number().positive(), reason: z.string().max(200).optional() }),
+    z.object({ intent: z.literal('expense'), fund: z.string().min(1).max(40), amount: z.number().positive(), reason: z.string().max(200).optional() }),
+    z.object({ intent: z.literal('advance'), fund: z.string().min(1).max(40), amount: z.number().positive(), reason: z.string().max(200).optional() }),
+    z.object({ intent: z.literal('leave'), from_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), days: z.number().int().positive().max(60), reason: z.string().max(200).optional() }),
+    z.object({ intent: z.literal('unknown') }),
+  ]);
+
+  private readonly llmDaily = new Map<number, { day: string; n: number }>();
+  private llmCapped(tenantId: number): boolean {
+    const cap = Number(process.env.LINE_COPILOT_DAILY_CAP ?? 200);
+    if (!(cap > 0)) return false;
+    const day = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10); // Bangkok business day
+    const e = this.llmDaily.get(tenantId);
+    if (!e || e.day !== day) { this.llmDaily.set(tenantId, { day, n: 1 }); return false; }
+    e.n++;
+    if (e.n === cap + 1) void this.audit(tenantId, 'system', `[chat:ai-cap] copilot LLM daily cap ${cap} reached`);
+    return e.n > cap;
+  }
+
+  private async copilotLlm(tenantId: number, t: string): Promise<CopilotDraft | null> {
+    if (aiDpaBlocked() || !process.env.ANTHROPIC_API_KEY) return null;
+    if (this.llmCapped(tenantId)) return null;
+    try {
+      const res: any = await llmClient(process.env.ANTHROPIC_API_KEY).create({
+        model: modelFor('chat_copilot'), max_tokens: 300,
+        system: 'You draft ERP commands from Thai/English staff chat. Return ONLY one JSON object: '
+          + '{"intent":"pr","item_id":string,"qty":number,"reason":string} | '
+          + '{"intent":"expense","fund":string,"amount":number,"reason":string} | '
+          + '{"intent":"advance","fund":string,"amount":number,"reason":string} | '
+          + '{"intent":"leave","from_date":"YYYY-MM-DD","days":number,"reason":string} | '
+          + '{"intent":"unknown"}. Draft only — never invent item/fund codes or dates that are not in the message; when unsure return unknown.',
+        messages: [{ role: 'user', content: t }],
+      });
+      const rawText = (res.content as Array<{ type: string; text?: string }>).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
+      const parsed = LineWebhookService.LLM_DRAFT_SCHEMA.safeParse(JSON.parse(rawText));
+      if (!parsed.success || parsed.data.intent === 'unknown') return null;
+      const d = parsed.data;
+      if (d.intent === 'pr') return this.mkPrDraft(d.item_id, String(d.qty), d.reason ?? '');
+      if (d.intent === 'expense' || d.intent === 'advance') return this.mkMoneyDraft(d.intent, d.fund, String(d.amount), d.reason ?? '');
+      return this.mkLeaveDraft(d.from_date, String(d.days), d.reason ?? '');
+    } catch { return null; } // malformed JSON / provider error → honest refusal upstream
   }
 
   // stock <item id> — read-only on-hand lookup from inv_balances (tenant-scoped to the linked user's shop).

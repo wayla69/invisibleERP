@@ -8,6 +8,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'line-secret';
 process.env.NODE_ENV = 'test';
 process.env.LINE_CHANNEL_TOKEN = 'test-line-push-token'; // makes the LINE push gateway "configured" → real(stubbed) fetch
 process.env.LINE_CHAT_RATE_LIMIT = '1000'; // LC-3 governance — keep the per-user budget out of the way until section 21 tests it
+process.env.APP_ENC_KEY = 'ierp-dev-enc-key'; // same derived key as the dev fallback — keeps decrypt working when 25g flips NODE_ENV=production (prod fail-closes without it)
 // LINE_LOGIN_CHANNEL_ID intentionally unset → verifyLineIdToken uses the dev mock:<userId>[:<name>] path
 
 import { Test } from '@nestjs/testing';
@@ -17,8 +18,10 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { eq, and } from 'drizzle-orm';
 import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { reportSubscriptions } from '../../../apps/api/dist/database/schema/bi';
+import { setLlmClientForTests } from '../../../apps/api/dist/common/llm-client';
 import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
@@ -82,12 +85,24 @@ async function main() {
   await db.insert(s.loyaltyConfig).values({ id: 1, enabled: true, pointsPerBaht: '1', bahtPerPoint: '1', minRedeem: '0' }).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
-  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  // rawBody:true mirrors production main.ts — LP-1 requires T1's line creds to carry a Channel Secret,
+  // so the webhook verifies the HMAC over the exact raw bytes on every delivery below.
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { rawBody: true });
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
+  const LINE_WH_SECRET = 'whsec-t1-line';
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
-    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
+    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+    let body: any = payload;
+    // Sign LINE webhook deliveries centrally (over the exact serialized bytes) so every call site
+    // stays a plain object literal while T1's channel secret enforces fail-closed verification.
+    if (m === 'POST' && url.startsWith('/api/line/webhook/') && payload && typeof payload === 'object') {
+      body = JSON.stringify(payload);
+      headers['content-type'] = 'application/json';
+      headers['x-line-signature'] = createHmac('sha256', LINE_WH_SECRET).update(body).digest('base64');
+    }
+    const res = await app.inject({ method: m as any, url, headers, payload: body });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
     return { status: res.statusCode, json };
   };
@@ -149,7 +164,12 @@ async function main() {
     JSON.stringify({ n: (logRows.json.messages ?? []).length }));
 
   // ── 10. Per-tenant messaging provider: the tenant's own LINE token overrides the platform env token ──
-  const setProv = await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999' }, enabled: true });
+  // LP-1 (docs/31): token-only line creds are rejected — the Channel Secret is required, because the
+  // webhook fail-closes without it in production (token-only would save fine and silently break go-live).
+  const noSecret = await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999' }, enabled: true });
+  ok('set line provider without Channel secret → 400 MISSING_FIELD (LP-1 go-live guard)',
+    noSecret.status === 400 && noSecret.json.error?.code === 'MISSING_FIELD', JSON.stringify({ s: noSecret.status, code: noSecret.json.error?.code }));
+  const setProv = await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999', secret: LINE_WH_SECRET }, enabled: true });
   ok('set per-tenant LINE provider → configured', setProv.status === 200 && setProv.json.configured === true, JSON.stringify({ s: setProv.status }));
   const provs = await inj('GET', '/api/messaging/providers', token);
   const lineProv = (provs.json.channels ?? []).find((c: any) => c.channel === 'line');
@@ -201,7 +221,7 @@ async function main() {
   // ── 14. Delivery-status callback (E2) — a provider POSTs the final state of a message it accepted; we
   //        correlate by provider_ref and flip the message_log row's status. Token-guarded, tenant-scoped. ──
   // Configure the tenant's LINE provider with a callbackToken (creds are replaced wholesale, so re-supply token).
-  await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999', callbackToken: 'cb-secret-line' }, enabled: true });
+  await inj('PUT', '/api/messaging/providers/line', token, { creds: { token: 'tenant-line-tok-999', secret: LINE_WH_SECRET, callbackToken: 'cb-secret-line' }, enabled: true });
   // Send a fresh LINE push → captures a unique provider_ref (x-line-request-id) on the message_log row.
   const dcSend = await inj('POST', '/api/messaging/send', token, { member_id: bob.json.id, channel: 'line', body: 'ยืนยันการจัดส่ง' });
   const dcRef = dcSend.json.provider_ref as string;
@@ -697,7 +717,7 @@ async function main() {
   // 22d. the scheduler delivers the digest to the linked LINE (counts summary).
   const pushesBefore22d = linePushes.length;
   const digRun = await inj('POST', '/api/bi/subscriptions/run', token);
-  const digPush = linePushes.slice(pushesBefore22d).find((p) => p.to === 'Usomsri' && p.text.includes('สรุปเช้านี้'));
+  const digPush = linePushes.slice(pushesBefore22d).find((p) => p.to === 'Usomsri' && p.text.includes('รออนุมัติ')); // LP-3: KPI-row format
   ok('LC-4: run-due → digest pushed to the linked LINE (pending approvals / open PRs / alerts 24h)',
     digRun.json.ran_count >= 1 && !!digPush && digPush.text.includes('LINE Daily Digest'),
     JSON.stringify({ ran: digRun.json.ran_count, pushed: !!digPush, head: digPush?.text.slice(0, 60) }));
@@ -740,6 +760,188 @@ async function main() {
   // 23e. unknown free text → honest "don't understand" + usage (no guessing, no action).
   const aiUnknown = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-23e', source: { userId: 'Usomchai' }, message: { id: 'mid-23e', type: 'text', text: 'bot วันนี้อากาศดีจัง' } }] });
   ok('LC-5: copilot unknown intent → usage reply, nothing acted', aiUnknown.json.chat === 1 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 40) }));
+
+  // ── 24. LP-1 (docs/31): production go-live pack — webhook receipt health + test-self push. ──
+  // (The required-secret guard is 24-adjacent but asserted up in section 10 where creds are first saved;
+  //  every signed webhook above also exercised the fail-closed HMAC verify.)
+  // 24a. readiness: secret flag + exact webhook path + last receipt recorded as 'verified'.
+  const glProv = await inj('GET', '/api/messaging/providers', token);
+  const glLine = (glProv.json.channels ?? []).find((c: any) => c.channel === 'line');
+  ok('LP-1: readiness → webhook_secret_set, webhook_path=/api/line/webhook/T1, last receipt verified (secret never returned)',
+    glLine?.webhook_secret_set === true && glLine?.webhook_path === '/api/line/webhook/T1'
+      && glLine?.last_webhook_status === 'verified' && !!glLine?.last_webhook_at
+      && !JSON.stringify(glProv.json).includes(LINE_WH_SECRET),
+    JSON.stringify({ set: glLine?.webhook_secret_set, path: glLine?.webhook_path, st: glLine?.last_webhook_status }));
+
+  // 24b. a tampered delivery → 401 BAD_WEBHOOK_SIGNATURE and the receipt health flips to bad_signature.
+  const badSig = await app.inject({ method: 'POST', url: '/api/line/webhook/T1', headers: { 'content-type': 'application/json', 'x-line-signature': 'AAAA/tampered=' }, payload: JSON.stringify({ events: [] }) });
+  let badSigJson: any = {}; try { badSigJson = badSig.json(); } catch { /* */ }
+  const glAfterBad = ((await inj('GET', '/api/messaging/providers', token)).json.channels ?? []).find((c: any) => c.channel === 'line');
+  ok('LP-1: bad webhook signature → 401 fail-closed + receipt health shows bad_signature',
+    badSig.statusCode === 401 && badSigJson.error?.code === 'BAD_WEBHOOK_SIGNATURE' && glAfterBad?.last_webhook_status === 'bad_signature',
+    JSON.stringify({ s: badSig.statusCode, code: badSigJson.error?.code, st: glAfterBad?.last_webhook_status }));
+
+  // 24c. the next good delivery flips receipt health back to verified.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [] });
+  const glAfterGood = ((await inj('GET', '/api/messaging/providers', token)).json.channels ?? []).find((c: any) => c.channel === 'line');
+  ok('LP-1: next verified delivery → receipt health back to verified', glAfterGood?.last_webhook_status === 'verified', JSON.stringify({ st: glAfterGood?.last_webhook_status }));
+
+  // 24d. test-self: an admin with no linked LINE gets an explicit NOT_LINKED (silence explained)…
+  const tsUnlinked = await inj('POST', '/api/messaging/providers/line/test-self', token, {});
+  ok('LP-1: test-self while unlinked → 400 NOT_LINKED', tsUnlinked.status === 400 && tsUnlinked.json.error?.code === 'NOT_LINKED', JSON.stringify({ s: tsUnlinked.status, code: tsUnlinked.json.error?.code }));
+
+  // 24e. …and after linking, the button pushes to the admin's own LINE (audit campaign line_test).
+  const bossCode = (await inj('POST', '/api/line/link-code', token)).json.code as string;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-24e', source: { userId: 'Uboss' }, message: { id: 'mid-24e', type: 'text', text: `link ${bossCode}` } }] });
+  const tsBefore = linePushes.length;
+  const tsLinked = await inj('POST', '/api/messaging/providers/line/test-self', token, {});
+  const tsLog = await db.select().from(s.messageLog).where(and(eq(s.messageLog.tenantId, t1), eq(s.messageLog.campaign, 'line_test')));
+  ok('LP-1: test-self after linking → push lands on the admin\'s own LINE (campaign line_test logged)',
+    tsLinked.status === 201 || tsLinked.status === 200
+      ? tsLinked.json.status === 'sent' && linePushes.length === tsBefore + 1 && linePushes.at(-1)!.to === 'Uboss' && tsLog.length >= 1
+      : false,
+    JSON.stringify({ s: tsLinked.status, to: linePushes.at(-1)?.to, logged: tsLog.length }));
+
+  // ── 25. LP-2 (docs/31): copilot uplift — wider intents (expense/leave), scripted-LLM evals, daily cap. ──
+  // 25a. deterministic expense draft (key-less) → confirm card only, no request row before confirm.
+  const pexCount25 = (await db.select().from(s.expenseRequests)).length;
+  const draftExp = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25a', source: { userId: 'Uapclerk' }, message: { id: 'mid-25a', type: 'text', text: 'บอท ขอเบิก 250 จาก PCF-LINE ค่าน้ำแข็งหน้าร้าน' } }] });
+  const expConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  const expBtn = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.label ?? '';
+  ok('LP-2: copilot expense draft (Thai free text) → confirm card only, nothing raised',
+    draftExp.json.chat === 1 && expBtn === 'ยืนยันเบิกเงิน' && (await db.select().from(s.expenseRequests)).length === pexCount25,
+    JSON.stringify({ btn: expBtn, created: (await db.select().from(s.expenseRequests)).length - pexCount25 }));
+
+  // 25b. confirm → PEX raised through the ordinary chat expense path (same perms + service guards).
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-25b', replyToken: 'rt-25b', source: { userId: 'Uapclerk' }, postback: { data: expConfirmData } }] });
+  const pex25No = /PEX-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [pex25] = pex25No ? await db.select().from(s.expenseRequests).where(eq(s.expenseRequests.reqNo, pex25No)) : [];
+  ok('LP-2: confirm expense draft → PEX PendingApproval via the normal path (maker = linked staff)',
+    !!pex25 && pex25.status === 'PendingApproval' && pex25.requestedBy === 'apclerk' && Number(pex25.amount) === 250,
+    JSON.stringify({ pex: pex25No, by: pex25?.requestedBy, amt: pex25?.amount }));
+
+  // 25c. deterministic leave draft ("ลา <n> วัน ตั้งแต่ <date>") → confirm → leave via the ESS path.
+  const draftLv = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25c1', source: { userId: 'Usomchai' }, message: { id: 'mid-25c1', type: 'text', text: 'บอท ขอลา 2 วัน ตั้งแต่ 2026-08-03 ไปงานบวช' } }] });
+  const lvConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-25c2', replyToken: 'rt-25c2', source: { userId: 'Usomchai' }, postback: { data: lvConfirmData } }] });
+  const lv25Id = Number(/#(\d+)/.exec(lineReplies.at(-1)?.text ?? '')?.[1] ?? 0);
+  const [lv25] = lv25Id ? await db.select().from(s.leaveRequests).where(eq(s.leaveRequests.id, lv25Id)) : [];
+  ok('LP-2: copilot leave draft (days-first Thai) → confirm → Pending leave via ESS path (to_date derived)',
+    draftLv.json.chat === 1 && !!lv25 && lv25.status === 'Pending' && String(lv25.fromDate) === '2026-08-03' && String(lv25.toDate) === '2026-08-04',
+    JSON.stringify({ id: lv25Id, from: lv25?.fromDate, to: lv25?.toDate }));
+
+  // 25d. scripted-LLM eval (docs/31 — the ai-eval seam): rules can't parse it, the (fake) model drafts,
+  //      the confirm replays the ordinary pr path. Daily cap 1 → this is the tenant's one allowed call.
+  process.env.ANTHROPIC_API_KEY = 'fake-line-copilot-key';
+  process.env.LINE_COPILOT_DAILY_CAP = '1';
+  let llmCalls = 0;
+  setLlmClientForTests({
+    create: async (params: any) => {
+      llmCalls++;
+      const userText = String(params?.messages?.[0]?.content ?? '');
+      const reply = userText.includes('เมาส์ไร้สาย')
+        ? { intent: 'pr', item_id: 'MOUSE-WL', qty: 1, reason: 'เมาส์ไร้สาย' }
+        : null;
+      return { content: [{ type: 'text', text: reply ? JSON.stringify(reply) : 'ขออภัย ไม่ใช่ JSON นะ' }] };
+    },
+    stream: () => { throw new Error('not used'); },
+  } as any);
+  const prCount25 = (await db.select().from(s.purchaseRequests)).length;
+  const draftLlm = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25d1', source: { userId: 'Usomchai' }, message: { id: 'mid-25d1', type: 'text', text: 'บอท อยากได้เมาส์ไร้สายสักตัวครับ' } }] });
+  const llmConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-25d2', replyToken: 'rt-25d2', source: { userId: 'Usomchai' }, postback: { data: llmConfirmData } }] });
+  const llmPrNo = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const [llmPr] = llmPrNo ? await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, llmPrNo)) : [];
+  ok('LP-2: scripted-LLM draft (rules miss) → schema-validated → confirm → PR via the normal path',
+    draftLlm.json.chat === 1 && llmCalls === 1 && !!llmPr && llmPr.requestedBy === 'somchai' && (await db.select().from(s.purchaseRequests)).length === prCount25 + 1,
+    JSON.stringify({ calls: llmCalls, pr: llmPrNo, by: llmPr?.requestedBy }));
+
+  // 25e. daily LLM cap trips: the next LLM-needed text is answered WITHOUT calling the model (+ audit row).
+  const capTry = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25e', source: { userId: 'Usomchai' }, message: { id: 'mid-25e', type: 'text', text: 'บอท อยากได้อะไรสักอย่างที่กฎไม่เข้าใจ' } }] });
+  const capAudit = (await db.select().from(s.messageLog).where(eq(s.messageLog.tenantId, t1))).some((r: any) => String(r.body ?? '').includes('[chat:ai-cap]'));
+  ok('LP-2: per-tenant daily LLM cap → model NOT called, honest refusal + [chat:ai-cap] audit',
+    capTry.json.chat === 1 && llmCalls === 1 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ') && capAudit,
+    JSON.stringify({ calls: llmCalls, audited: capAudit }));
+  process.env.LINE_COPILOT_DAILY_CAP = '0'; // 0 = uncapped for the remaining checks
+
+  // 25f. malformed LLM output → schema validation rejects → honest refusal, nothing created or parked.
+  const prCount25f = (await db.select().from(s.purchaseRequests)).length;
+  const badLlm = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25f', source: { userId: 'Usomchai' }, message: { id: 'mid-25f', type: 'text', text: 'บอท ช่วยจัดการอะไรก็ได้' } }] });
+  const [state25f] = await db.select().from(s.lineChatStates).where(and(eq(s.lineChatStates.tenantId, t1), eq(s.lineChatStates.lineUserId, 'Usomchai')));
+  ok('LP-2: malformed LLM JSON → refusal, no draft state, nothing created',
+    badLlm.json.chat === 1 && llmCalls === 2 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ')
+      && (await db.select().from(s.purchaseRequests)).length === prCount25f && (!state25f || (state25f.payload as any)?.action !== 'copilot-cmd'),
+    JSON.stringify({ calls: llmCalls, reply: lineReplies.at(-1)?.text.slice(0, 30) }));
+
+  // 25g. DPA gate (fail closed): key present + NODE_ENV=production + no AI_DPA_ACKNOWLEDGED → the model
+  //      is never called; the copilot degrades to the deterministic rules only.
+  process.env.NODE_ENV = 'production';
+  const dpaTry = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-25g', source: { userId: 'Usomchai' }, message: { id: 'mid-25g', type: 'text', text: 'บอท อยากได้จอใหม่สวย ๆ' } }] });
+  process.env.NODE_ENV = 'test';
+  ok('LP-2: AI_DPA gate → LLM not called in prod without DPA ack (deterministic refusal)',
+    dpaTry.json.chat === 1 && llmCalls === 2 && lineReplies.at(-1)!.text.includes('ยังไม่เข้าใจ'),
+    JSON.stringify({ calls: llmCalls }));
+  setLlmClientForTests(null);
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.LINE_COPILOT_DAILY_CAP;
+
+  // ── 26. LP-3 (docs/31): digest 2.0 — KPI catalog, per-subscriber selection, per-recipient permission
+  //        filter at send time, flex layout. ──
+  // Seed KPI data: yesterday's sale, an overdue AR balance, cash in the GL, one low-stock row.
+  const bkk26 = new Date(Date.now() + 7 * 3600_000);
+  const yest26 = new Date(bkk26.getTime() - 24 * 3600_000).toISOString().slice(0, 10);
+  const past26 = new Date(bkk26.getTime() - 10 * 24 * 3600_000).toISOString().slice(0, 10);
+  await db.insert(s.arInvoices).values([
+    { invoiceNo: 'INV-LP3-Y1', invoiceDate: yest26, dueDate: '2099-01-01', tenantId: t1, amount: '1234.50', paidAmount: '0', status: 'Unpaid' },
+    { invoiceNo: 'INV-LP3-OD', invoiceDate: past26, dueDate: past26, tenantId: t1, amount: '800.00', paidAmount: '300.00', status: 'Unpaid' },
+  ]);
+  const [je26] = await db.insert(s.journalEntries).values({ entryNo: 'JE-LP3-CASH', entryDate: yest26, tenantId: t1, status: 'Posted', source: 'Manual', memo: 'LP-3 cash seed' }).returning();
+  await db.insert(s.journalLines).values([
+    { entryId: Number(je26.id), accountCode: '1000', debit: '900', credit: '0', tenantId: t1 },
+    { entryId: Number(je26.id), accountCode: '3100', debit: '0', credit: '900', tenantId: t1 },
+  ]);
+  await db.insert(s.branchStock).values({ tenantId: t1, branchId: 1, itemId: 'LOW-1', itemDescription: 'ของใกล้หมด', onHand: '1', reorderPoint: '5' });
+
+  // 26a. `digest kpis` is permission-aware: somchai (no dashboard) refused; boss (Admin) sees fin KPIs.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26a1', source: { userId: 'Usomchai' }, message: { id: 'mid-26a1', type: 'text', text: 'digest kpis' } }] });
+  const kpiDenied = lineReplies.at(-1)!.text;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26a2', source: { userId: 'Uboss' }, message: { id: 'mid-26a2', type: 'text', text: 'digest kpis' } }] });
+  const kpiList = lineReplies.at(-1)!.text;
+  ok('LP-3: digest kpis → permission-aware menu (no-perm refused; Admin sees the fin KPIs)',
+    kpiDenied.includes('ไม่มีสิทธิ์') && kpiList.includes('cash_position') && kpiList.includes('sales_yesterday') && kpiList.includes('ค่าเริ่มต้น'),
+    JSON.stringify({ denied: kpiDenied.slice(0, 30), listed: kpiList.includes('cash_position') }));
+
+  // 26b. selection is validated: unknown key refused; a key the caller cannot SEE refused at subscribe.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26b1', source: { userId: 'Usomsri' }, message: { id: 'mid-26b1', type: 'text', text: 'subscribe digest nonsense_kpi' } }] });
+  const badKey = lineReplies.at(-1)!.text;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26b2', source: { userId: 'Usomsri' }, message: { id: 'mid-26b2', type: 'text', text: 'subscribe digest cash_position' } }] });
+  const deniedKey = lineReplies.at(-1)!.text;
+  ok('LP-3: KPI selection validated — unknown key + un-seeable key both refused at subscribe',
+    badKey.includes('ไม่รู้จัก KPI') && deniedKey.includes('ไม่มีสิทธิ์เห็น'),
+    JSON.stringify({ bad: badKey.slice(0, 30), denied: deniedKey.slice(0, 40) }));
+
+  // 26c. boss picks fin KPIs; somsri (dashboard) takes the default trio — both stored on the recipients.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26c1', source: { userId: 'Uboss' }, message: { id: 'mid-26c1', type: 'text', text: 'subscribe digest sales_yesterday,cash_position,ar_overdue,low_stock' } }] });
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-26c2', source: { userId: 'Usomsri' }, message: { id: 'mid-26c2', type: 'text', text: 'subscribe digest' } }] });
+  const [digSub26] = await db.select().from(reportSubscriptions).where(and(eq(reportSubscriptions.tenantId, t1), eq(reportSubscriptions.reportType, 'line_daily_digest')));
+  const bossRecip = (digSub26.recipients as any[]).find((r: any) => r.line_user === 'boss');
+  ok('LP-3: per-subscriber KPI selection stored on the recipient (no migration — jsonb)',
+    !!bossRecip && Array.isArray(bossRecip.kpis) && bossRecip.kpis.includes('cash_position') && (digSub26.recipients as any[]).some((r: any) => r.line_user === 'somsri' && !r.kpis),
+    JSON.stringify({ boss: bossRecip?.kpis, n: (digSub26.recipients as any[]).length }));
+
+  // 26d. delivery: same tenant run, two subscribers, two DIFFERENT payloads (permission + selection);
+  //      flex bubble with the text as altText; money formatted; boss sees cash, somsri never does.
+  await db.update(reportSubscriptions).set({ nextRunAt: new Date() }).where(eq(reportSubscriptions.id, Number(digSub26.id)));
+  const pushesBefore26 = linePushes.length;
+  const run26 = await inj('POST', '/api/bi/subscriptions/run', token);
+  const bossPush26 = linePushes.slice(pushesBefore26).find((p) => p.to === 'Uboss');
+  const somsriPush26 = linePushes.slice(pushesBefore26).find((p) => p.to === 'Usomsri');
+  ok('LP-3: one run, per-recipient payloads — boss gets fin KPIs (flex), somsri gets the trio without cash',
+    run26.json.ran_count >= 1 && !!bossPush26 && bossPush26.type === 'flex'
+      && bossPush26.text.includes('เงินสดคงเหลือ') && bossPush26.text.includes('600') /* 900 seed − 300 LC-2 petty-cash expense (1015 is a cash account) */ && bossPush26.text.includes('ยอดขายเมื่อวาน') && bossPush26.text.includes('1,234.5')
+      && bossPush26.text.includes('ลูกหนี้เกินกำหนด') && bossPush26.text.includes('500') && bossPush26.text.includes('สินค้าใกล้หมด')
+      && !!somsriPush26 && somsriPush26.text.includes('รออนุมัติ') && !somsriPush26.text.includes('เงินสดคงเหลือ'),
+    JSON.stringify({ boss: bossPush26?.text.slice(0, 120), somsri: somsriPush26?.text.slice(0, 60) }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
