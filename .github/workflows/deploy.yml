@@ -49,8 +49,17 @@ jobs:
             if npx -y @railway/cli up --service "$svc" --ci; then
               echo "✅ $svc deployed"
             else
-              echo "::group::Railway runtime logs for $svc (boot-failure detail)"
-              timeout 45 npx -y @railway/cli logs --service "$svc" 2>&1 | tail -120 || true
+              # Plain `logs` returned the still-ACTIVE (old) replica's logs on 2026-07-03 — try the
+              # deployment/build variants too so the FAILED deployment's crash line is captured, plus
+              # `status --json` to identify which deployment/environment the CLI is looking at.
+              echo "::group::Railway status for $svc"
+              timeout 30 npx -y @railway/cli status --json 2>&1 | head -60 || true
+              echo "::endgroup::"
+              echo "::group::Railway deployment logs for $svc (failed deploy)"
+              timeout 45 npx -y @railway/cli logs --service "$svc" -d 2>&1 | tail -120 || true
+              echo "::endgroup::"
+              echo "::group::Railway build logs for $svc (failed deploy)"
+              timeout 45 npx -y @railway/cli logs --service "$svc" -b 2>&1 | tail -60 || true
               echo "::endgroup::"
               echo "::error::Railway deploy failed for $svc — runtime/boot logs above (common causes: missing prod env per apps/api/src/common/env.validation.ts — DATABASE_URL / JWT_SECRET / APP_ENC_KEY / PSP_WEBHOOK_SECRET / observability or ALLOW_NO_OBSERVABILITY=1 — or an OOM/DB race at boot)"
               return 1
