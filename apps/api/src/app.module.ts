@@ -84,6 +84,7 @@ import { AdminUsersModule } from './modules/admin-users/admin-users.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { PmrModule } from './modules/pmr/pmr.module';
 import { MfgDepthModule } from './modules/mfg-depth/mfg-depth.module';
 import { HcmModule } from './modules/hcm/hcm.module';
 import { PricingModule } from './modules/pricing/pricing.module';
@@ -201,6 +202,7 @@ import { PdfModule } from './modules/pdf/pdf.module';
     PayrollModule,
     ManufacturingModule,
     ProjectsModule,
+    PmrModule,
     MfgDepthModule,
     HcmModule,
     PricingModule,

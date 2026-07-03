@@ -1674,6 +1674,13 @@
       "when": 2023820000065,
       "tag": "0238_tenant_idx_boq_commit",
       "breakpoints": true
+    },
+    {
+      "idx": 239,
+      "version": "7",
+      "when": 2023820000066,
+      "tag": "0239_project_material_requisitions",
+      "breakpoints": true
     }
   ]
 }

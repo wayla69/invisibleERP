@@ -17,7 +17,12 @@ const n = (v: unknown) => Number(v ?? 0);
 // project_code / boq_line_id (M0, docs/32) — optionally raise a requisition/PO against a project's BoQ so
 // material spend is dimensioned to the project. Nullable throughout → non-project buys are unaffected.
 export interface CreatePrDto { items: { item_id: string; item_description?: string; request_qty: number; uom?: string; required_date?: string; reason?: string; boq_line_id?: number }[]; remarks?: string; priority?: string; amount?: number; project_code?: string }
-export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; project_code?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean; boq_line_id?: number }[] }
+export interface CreatePoDto { vendor_id?: number; vendor_name?: string; expected_date?: string; remarks?: string; currency?: string; fx_rate?: number; project_code?: string; items: { item_id: string; item_description?: string; order_qty: number; unit_price: number; uom?: string; is_capital?: boolean; boq_line_id?: number }[];
+  // M2 (docs/32) — internal flags set by the PMR auto-draft path (not exposed on the public PO create form):
+  // `draft` opens the PO as Draft (not Pending) and skips the approval workflow so procurement reviews it
+  // before committing; `authorized_over_budget` lets the BoQ-line reservation exceed the budget (the PMR
+  // approval IS the authorisation to overrun). project_id is passed through directly when known.
+  draft?: boolean; authorized_over_budget?: boolean; project_id?: number }
 export interface CreateGrDto { po_no: string; remarks?: string; items: { item_id: string; received_qty: number; lot_no?: string; expiry_date?: string; unit_cost?: number; uom?: string }[] }
 export interface UpsertSupplierPriceDto { vendor_id: number; item_id: string; item_description?: string; uom?: string; currency?: string; unit_price: number; min_qty?: number; effective_from: string; effective_to?: string; notes?: string }
 
@@ -483,12 +488,14 @@ export class ProcurementService {
       vendorName = v?.name ?? null;
     }
     await this.assertSupplierAllowed(vendorId, vendorName); // Phase 16 — blocklisted/unapproved vendor → 422
-    const projectId = await this.resolveProjectId(dto.project_code); // M0 — project dimension (nullable)
+    // M0/M2 — project dimension (nullable). project_id may be passed directly (PMR auto-draft) or resolved from a code.
+    const projectId = dto.project_id ?? await this.resolveProjectId(dto.project_code);
+    const isDraft = dto.draft === true; // M2 — PMR auto-draft opens as Draft (skips the approval workflow)
     const total = dto.items.reduce((a, it) => a + n(it.order_qty) * n(it.unit_price), 0);
     const poNo = await this.docNo.nextDaily('PO');
     await db.transaction(async (tx: any) => {
       const [h] = await tx.insert(purchaseOrders).values({
-        poNo, poDate: ymd(), vendorId, vendorName, status: 'Pending', totalAmount: String(total),
+        poNo, poDate: ymd(), vendorId, vendorName, status: isDraft ? 'Draft' : 'Pending', totalAmount: String(total),
         createdBy: user.username, expectedDate: dto.expected_date ?? null, remarks: dto.remarks ?? null,
         currency: dto.currency ?? 'THB', fxRate: String(dto.fx_rate ?? 1), projectId,
       }).returning({ id: purchaseOrders.id });
@@ -507,15 +514,16 @@ export class ProcurementService {
           await this.commitments.reserve(tx, {
             projectId, boqLineId: it.boq_line_id, amount: n(it.order_qty) * n(it.unit_price), qty: n(it.order_qty),
             sourceDocType: 'PO', sourceDocNo: poNo, createdBy: user.username, tenantId: user.tenantId ?? null,
+            allowOver: dto.authorized_over_budget === true, // M2 — an approved over-budget PMR authorises the overage
           });
         }
       }
     });
-    await this.statusLog.log('PO', poNo, '', 'Pending', user.username);
-    // route into the approval engine (no active PO definition → autoApproved, legacy passthrough). The vendor
-    // is supplied as dimension context so a workflow can route e.g. a specific vendor to a special approver.
-    await this.workflow?.start({ docType: 'PO', docNo: poNo, amount: total, createdBy: user.username, tenantId: user.tenantId ?? null, context: { vendor: vendorName ?? '' } });
-    return { po_no: poNo, status: 'Pending', total_amount: total };
+    // A Draft PO (PMR auto-draft) is not yet committed — it does NOT enter the approval workflow; procurement
+    // reviews and submits it. A normal PO opens Pending and routes into the approval engine.
+    await this.statusLog.log('PO', poNo, '', isDraft ? 'Draft' : 'Pending', user.username);
+    if (!isDraft) await this.workflow?.start({ docType: 'PO', docNo: poNo, amount: total, createdBy: user.username, tenantId: user.tenantId ?? null, context: { vendor: vendorName ?? '' } });
+    return { po_no: poNo, status: isDraft ? 'Draft' : 'Pending', total_amount: total };
   }
 
   async approvePo(poNo: string, approve: boolean, reason: string | undefined, user: JwtUser) {
