@@ -577,7 +577,7 @@ export class ProcurementService {
     await db.transaction(async (tx: any) => {
       const [gh] = await tx.insert(goodsReceipts).values({
         grNo, grDate: today, poNo: dto.po_no, vendorId: po.vendorId, vendorName: po.vendorName, receivedBy: user.username, remarks: dto.remarks ?? null,
-        currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000', projectId: (po as any).projectId ?? null, // M0 — inherit the PO's project dimension
+        currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000', projectId: po.projectId ?? null, // M0 — inherit the PO's project dimension
       }).returning({ id: goodsReceipts.id });
 
       for (const it of lines) {
