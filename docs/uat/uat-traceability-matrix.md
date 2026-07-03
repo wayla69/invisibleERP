@@ -429,6 +429,12 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-GL-050 | Industry template can't drift from the engine's codes | GL-10 | 04 §7 (step 14) |
 | UAT-UI-COA-01 | Pick business type at signup (industry selector) | GL-10 | 04 §7 (step 14) |
 | UAT-UI-COA-02 | View the industry chart of accounts (ผังบัญชี tab) | GL-10 | 04 §7 (step 14) |
+| TC-GL-11-01 | Create a canonical account as platform Admin/HQ (+ duplicate → DUPLICATE_ACCOUNT) | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-02 | Deactivate an account with a non-zero balance → ACCOUNT_HAS_BALANCE | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-03 | Direct JE to an AR control account (1100) → CONTROL_ACCOUNT | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-04 | Tenant gl_coa holder blocked from a canonical CoA change → COA_ADMIN_ONLY | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-05 | Per-tenant overlay curation reflected + RLS-scoped (no cross-tenant leak) | GL-11 | 04 §7 (step 14) |
+| TC-GL-11-06 | Overlay curation requires gl_coa (non-gl_coa → 403) | GL-11 | 04 §7 (step 14) |
 | UAT-GL-017 | Reconciliation prepare→certify | REC-02/03 | 04 §9 |
 | UAT-GL-018 | RLS GL isolation | ITGC-AC (RLS) | 08 §9 |
 | UAT-GL-019 | Revenue recognition tenant-scoped | ITGC-AC-03 / REVREC-03 | 12 §7 |
