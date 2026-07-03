@@ -1,6 +1,6 @@
 # 30 — LINE Chat Workbench: Rich Interactions, Money Self-Service & Governance — Design & Roadmap
 
-> **Date:** 2026-07-02 · **Status:** v0.1 — PLANNED · **Owner:** ERP / Product
+> **Date:** 2026-07-02 · **Status:** v0.3 — **LC-1 DELIVERED**; LC-2..5 planned · **Owner:** ERP / Product
 > **Scope:** Take the delivered LINE staff-chat channel (0227 `link`/`pr`/`status` → PR, merged #333;
 > 0228 workflow notifications + `approve`/`reject` + `my prs`/`find`/`cancel`/`stock`, merged #335)
 > from a *text command line* to a **chat workbench**: one-tap rich interactions (flex cards + postback
@@ -36,7 +36,7 @@ channel over flows the modules already own:
 
 ## 1. Phases (one PR each, sequential)
 
-### LC-1 — Rich interactions: flex cards + one-tap postback approve
+### LC-1 — Rich interactions: flex cards + one-tap postback approve ✅ DELIVERED
 - **Queue-entry notification becomes a flex bubble** (altText keeps the current text for
   notification previews): PR number, requester, line summary, and buttons
   **[อนุมัติ] [ปฏิเสธ] [ดูรายละเอียด]** using LINE *postback* actions.
@@ -145,5 +145,6 @@ concludes chat money-approval needs one.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.3 | 2026-07-02 | Platform | **LC-1 delivered** — flex queue card (`buildApproveCard`) with postback [อนุมัติ]/[ปฏิเสธ], nonce'd 5-min confirm state consumed before acting (replay-safe), same `chatDecision`→engine path (SoD verified over buttons), `my prs` carousel, `replyLineFlex`. `line-crm` 64 ✓; PN-02 rev 1.9; UAT-P2P-083. |
 | 0.2 | 2026-07-02 | Platform | Added LC-4 (alert/BI-report subscriptions + daily digest over the existing alerts `line` channel and BI scheduler) and LC-5 (confirm-first Thai NL copilot + `ask` analytics over `modules/ai` + `nl-analytics`). |
 | 0.1 | 2026-07-02 | Platform | Initial plan — follows delivered 0227/0228 LINE chat work (#333, #335). |

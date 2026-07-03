@@ -27,9 +27,9 @@ const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 
-const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string; ref?: string }[] = [];
+const linePushes: { to: string; auth: string; text: string; type?: string; altText?: string; contents?: any; ref?: string }[] = [];
 const lineBroadcasts: { auth: string; text: string; type?: string; altText?: string }[] = [];
-const lineReplies: { replyToken: string; auth: string; text: string }[] = [];
+const lineReplies: { replyToken: string; auth: string; text: string; type?: string; contents?: any }[] = [];
 const lineContentFetches: { url: string; auth: string }[] = [];
 let pushSeq = 0;
 const realFetch = globalThis.fetch;
@@ -39,13 +39,14 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
     const body = JSON.parse(init?.body ?? '{}');
     const m = body.messages?.[0] ?? {};
     const reqId = `req-${++pushSeq}`; // unique x-line-request-id per push → the provider_ref we store
-    linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '', type: m.type, altText: m.altText, ref: reqId });
+    linePushes.push({ to: body.to, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? m.altText ?? '', type: m.type, altText: m.altText, contents: m.contents, ref: reqId });
     return { ok: true, status: 200, headers: { get: () => reqId }, text: async () => '' } as any;
   }
   if (url.includes('api.line.me/v2/bot/message/reply')) {
     const body = JSON.parse(init?.body ?? '{}');
     const m = body.messages?.[0] ?? {};
-    lineReplies.push({ replyToken: body.replyToken, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? '' });
+    // flex replies carry the human copy in altText — surface it as `text` so assertions read one field
+    lineReplies.push({ replyToken: body.replyToken, auth: String(init?.headers?.Authorization ?? ''), text: m.text ?? m.altText ?? '', type: m.type, contents: m.contents });
     return { ok: true, status: 200, headers: { get: () => `req-r-${lineReplies.length}` }, text: async () => '' } as any;
   }
   if (url.includes('api-data.line.me/v2/bot/message/')) {
@@ -514,6 +515,58 @@ async function main() {
   const web400 = await inj('POST', '/api/procurement/attachments', apTok, { doc_type: 'PO', doc_no: poNo, data_url: 'https://not-a-data-url' });
   ok('attach: web negatives — unknown PO 404, non-data-URL 400 BAD_IMAGE',
     web404.status === 404 && web400.status === 400 && web400.json.error?.code === 'BAD_IMAGE', JSON.stringify({ s404: web404.status, s400: web400.status }));
+
+  // ── 19. LC-1 (docs/30): flex queue card + one-tap postback approve with confirm step. ──
+  // 19a. a fresh chat PR → the approver queue push is now a FLEX card carrying [อนุมัติ]/[ปฏิเสธ] postbacks.
+  const pushesBefore19 = linePushes.length;
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-19a', source: { userId: 'Usomchai' }, message: { id: 'mid-19a', type: 'text', text: 'pr BINDER-A4 6 แฟ้มใหม่' } }] });
+  const pr19 = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  const card = linePushes.slice(pushesBefore19).find((p) => p.to === 'Uprayut');
+  const approveBtn = card?.contents?.footer?.contents?.find((b: any) => b.action?.label === 'อนุมัติ');
+  const approveData = approveBtn?.action?.data ?? '';
+  ok('LC-1: queue push is a flex card with approve/reject postback buttons (altText keeps the typed hint)',
+    card?.type === 'flex' && !!card?.altText?.includes(pr19) && !!approveData && JSON.parse(approveData).a === 'decide' && JSON.parse(approveData).d === pr19,
+    JSON.stringify({ type: card?.type, data: approveData }));
+
+  // 19b. tapping [อนุมัติ] → confirm card parked with a nonce (no action yet — PR still Pending).
+  const tap = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19b', replyToken: 'rt-19b', source: { userId: 'Uprayut' }, postback: { data: approveData } }] });
+  const confirmBtn = lineReplies.at(-1)?.contents?.footer?.contents?.[0];
+  const confirmData = confirmBtn?.action?.data ?? '';
+  const [pr19RowMid] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, pr19));
+  ok('LC-1: first tap → flex confirm card with nonce; nothing acted yet (PR still Pending)',
+    tap.json.chat === 1 && lineReplies.at(-1)?.type === 'flex' && !!confirmData && JSON.parse(confirmData).a === 'confirm' && pr19RowMid?.status === 'Pending',
+    JSON.stringify({ confirm: !!confirmData, status: pr19RowMid?.status }));
+
+  // 19c. tapping [ยืนยัน] → the SAME engine path approves; requester notified.
+  const pushesBefore19c = linePushes.length;
+  const conf = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19c', replyToken: 'rt-19c', source: { userId: 'Uprayut' }, postback: { data: confirmData } }] });
+  const [pr19Row] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, pr19));
+  const decidedPush = linePushes.slice(pushesBefore19c).find((p) => p.to === 'Usomchai');
+  ok('LC-1: confirm tap → PR Approved via the engine (maker≠checker) + requester ✅ push',
+    conf.json.chat === 1 && lineReplies.at(-1)!.text.includes('อนุมัติแล้ว') && pr19Row?.status === 'Approved' && pr19Row?.approvedBy === 'prayut' && !!decidedPush,
+    JSON.stringify({ status: pr19Row?.status, by: pr19Row?.approvedBy }));
+
+  // 19d. replaying the confirm postback (state already consumed) → expiry reply, no double-acting.
+  const replayConf = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19d', replyToken: 'rt-19d', source: { userId: 'Uprayut' }, postback: { data: confirmData } }] });
+  ok('LC-1: replayed confirm → state consumed, expiry reply (no second action)',
+    replayConf.json.chat === 1 && lineReplies.at(-1)!.text.includes('หมดอายุ'), JSON.stringify({ reply: lineReplies.at(-1)?.text.slice(0, 50) }));
+
+  // 19e. SoD binds on buttons exactly as typed: approver taps approve on their OWN PR → SOD_VIOLATION.
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-19e1', source: { userId: 'Uprayut' }, message: { id: 'mid-19e1', type: 'text', text: 'pr LABEL-ROLL 4' } }] });
+  const prOwn19 = /PR-\d{8}-\d{3}/.exec(lineReplies.at(-1)?.text ?? '')?.[0] ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19e2', replyToken: 'rt-19e2', source: { userId: 'Uprayut' }, postback: { data: JSON.stringify({ a: 'decide', x: 'approve', d: prOwn19 }) } }] });
+  const ownConfirmData = lineReplies.at(-1)?.contents?.footer?.contents?.[0]?.action?.data ?? '';
+  await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'postback', webhookEventId: 'evt-19e3', replyToken: 'rt-19e3', source: { userId: 'Uprayut' }, postback: { data: ownConfirmData } }] });
+  const [prOwn19Row] = await db.select().from(s.purchaseRequests).where(eq(s.purchaseRequests.prNo, prOwn19));
+  ok('LC-1: one-tap approve of own PR → SOD_VIOLATION at confirm (stays Pending)',
+    lineReplies.at(-1)!.text.includes('SOD_VIOLATION') && prOwn19Row?.status === 'Pending', JSON.stringify({ status: prOwn19Row?.status }));
+
+  // 19f. my prs is now a flex carousel (altText keeps the text list).
+  const mine19 = await inj('POST', '/api/line/webhook/T1', undefined, { events: [{ type: 'message', replyToken: 'rt-19f', source: { userId: 'Usomchai' }, message: { id: 'mid-19f', type: 'text', text: 'my prs' } }] });
+  const mineReply = lineReplies.at(-1);
+  ok('LC-1: my prs → flex carousel of PR cards (altText lists them for non-flex clients)',
+    mine19.json.chat === 1 && mineReply?.type === 'flex' && mineReply?.contents?.type === 'carousel' && (mineReply?.contents?.contents?.length ?? 0) >= 2 && mineReply!.text.includes(pr19),
+    JSON.stringify({ type: mineReply?.type, cards: mineReply?.contents?.contents?.length }));
 
   console.log('\n── C5 — LINE OA member CRM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

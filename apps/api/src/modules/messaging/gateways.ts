@@ -87,6 +87,11 @@ export async function replyLine(token: string, replyToken: string, text: string)
   return postLine(token, 'reply', { replyToken, messages: [{ type: 'text', text: text.slice(0, 5000) }] });
 }
 
+// Reply with a rich flex message (card/carousel with postback buttons) — LC-1 one-tap chat interactions.
+export async function replyLineFlex(token: string, replyToken: string, altText: string, contents: any): Promise<SendResult> {
+  return postLine(token, 'reply', { replyToken, messages: [flexMessage(altText, contents)] });
+}
+
 // Download a message's binary content (photo/file the user sent) from the LINE content API. Returns the
 // bytes as a data URL, or a typed error ('too-large' / 'fetch-failed') — never throws. Used by the chat
 // attach flow (invoice/receipt photos onto a PO).
