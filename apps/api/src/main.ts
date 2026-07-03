@@ -23,7 +23,15 @@ async function bootstrap() {
   // bodyLimit 16 MB (default 1 MB) — the AP-intake upload channel (EXP-10) carries an image/PDF as a
   // base64 data: URL in the JSON body (object-storage convention, no multipart); per-type size caps
   // are enforced in ap-intake.service (FILE_TOO_LARGE) below this transport ceiling.
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ maxParamLength: 500, bodyLimit: 16 * 1024 * 1024 }), { rawBody: true });
+  // Production logger: 'log'-level Nest bootstrap noise (RouterExplorer maps THOUSANDS of route lines as
+  // the app has grown) floods Railway's 500 logs/sec replica cap — Railway drops the overflow ("Messages
+  // dropped"), which can swallow the real error of a failing boot, and the synchronous log storm slows
+  // startup toward the deploy healthcheck window. Keep error/warn (EnvValidation fail-closed warnings
+  // still surface); the structured pino ops logger writes to stdout independently and is unaffected.
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter({ maxParamLength: 500, bodyLimit: 16 * 1024 * 1024 }), {
+    rawBody: true,
+    logger: process.env.NODE_ENV === 'production' ? ['error', 'warn'] : undefined,
+  });
 
   // CORS = explicit origins (เลิก wildcard "*" ของ V1)
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((s) => s.trim());
