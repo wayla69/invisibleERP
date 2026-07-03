@@ -137,6 +137,14 @@ async function main() {
   const effOrd2 = await inj('GET', '/api/modules/effective', token);
   ok('nav-order full-replaces (stale keys dropped)', JSON.stringify(effOrd2.json.groupOrder) === JSON.stringify(order2), `groupOrder=${JSON.stringify(effOrd2.json?.groupOrder)}`);
 
+  // ── 1d. RESET menu arrangement (clears visibility + order; leaves module flags) ──
+  await inj('POST', '/api/admin/modules/nav', token, { hrefs: ['/tips'], enabled: false }); // hide something first
+  const reset = await inj('POST', '/api/admin/modules/nav-reset', token, {});
+  ok('POST nav-reset → reset:true', (reset.status === 200 || reset.status === 201) && reset.json.reset === true, `status=${reset.status}`);
+  const effReset = await inj('GET', '/api/modules/effective', token);
+  ok('reset clears navDisabled + groupOrder', (effReset.json.navDisabled ?? []).length === 0 && (effReset.json.groupOrder ?? []).length === 0, `nav=${JSON.stringify(effReset.json?.navDisabled)} order=${JSON.stringify(effReset.json?.groupOrder)}`);
+  ok('reset leaves module flags intact (marketing still enabled)', effReset.json.modules?.find((m: any) => m.key === 'marketing')?.enabled === true);
+
   // ── 2. MASTER-DATA IMPORT/EXPORT ────────────────────────────────────────
   const ents = await inj('GET', '/api/admin/master-data/entities', token);
   const keys = (ents.json.entities ?? []).map((e: any) => e.key);

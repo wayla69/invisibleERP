@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { asc } from 'drizzle-orm';
+import { asc, like } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { moduleConfigs, navGroupOrder } from '../../database/schema';
 import { MODULE_KEYS, ALWAYS_ON_MODULES, type Permission } from '@ierp/shared';
@@ -73,6 +73,16 @@ export class ModuleConfigService {
       );
     }
     return { groupOrder: clean };
+  }
+
+  // Reset menu CHROME to defaults: clear all visibility overrides (nav:<href> rows) and the category order,
+  // so every menu shows and groups fall back to code order. Deliberately leaves the module on/off flags
+  // (real MODULE_KEYS) untouched — those are a separate, API-enforced control, not "menu arrangement".
+  async resetNav(_user: { username?: string }) {
+    const db = this.db;
+    await db.delete(moduleConfigs).where(like(moduleConfigs.moduleKey, `${NAV_PREFIX}%`));
+    await db.delete(navGroupOrder);
+    return { reset: true };
   }
 
   // Show/hide one or more sidebar entries by href (bulk = a category/sub-section toggle). Only affects nav

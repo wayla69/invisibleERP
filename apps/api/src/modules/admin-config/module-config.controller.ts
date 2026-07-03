@@ -43,4 +43,10 @@ export class ModuleConfigController {
   setNavOrder(@Body(new ZodValidationPipe(SetNavOrderBody)) b: SetNavOrderBodyT, @CurrentUser() u: JwtUser) {
     return this.svc.setGroupOrder(b.order, u);
   }
+
+  // Reset menu arrangement (show all menus + default category order). Leaves module on/off flags untouched.
+  @Post('nav-reset')
+  resetNav(@CurrentUser() u: JwtUser) {
+    return this.svc.resetNav(u);
+  }
 }

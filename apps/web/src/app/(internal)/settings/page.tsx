@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, ListTree, Lock, Plus, Power, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, ListTree, Lock, Plus, Power, RotateCcw, ShieldCheck, ToggleLeft, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
@@ -88,6 +88,12 @@ function Modules() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  const resetNav = useMutation({
+    mutationFn: () => api('/api/admin/modules/nav-reset', { method: 'POST' }),
+    onSuccess: () => { notifySuccess('รีเซ็ตการจัดเมนูเป็นค่าเริ่มต้นแล้ว'); invalidate(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const mods = list.data?.modules ?? [];
   const navDisabled = useMemo(() => new Set(list.data?.navDisabled ?? []), [list.data]);
   const groupOrder = list.data?.groupOrder;
@@ -101,9 +107,15 @@ function Modules() {
           <b>ซ่อนเมนู</b> = เอาออกจากแถบเมนูของทุกคน (สิทธิ์ยังเหมือนเดิม) · <b>ปิดโมดูล</b> = ปิดความสามารถทั้งชุดและปิดกั้นที่ API ด้วย —
           โมดูล “ผู้ใช้ & สิทธิ์” และเมนูตั้งค่า/ผู้ใช้ ปิดไม่ได้เพื่อไม่ให้ผู้ดูแลถูกล็อกออก
         </p>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {navDisabled.size > 0 && <Badge variant={statusVariant('Cancelled')}>ซ่อน {navDisabled.size} เมนู</Badge>}
           {disabledCount > 0 && <Badge variant={statusVariant('Cancelled')}>ปิด {disabledCount} โมดูล</Badge>}
+          {(navDisabled.size > 0 || (groupOrder?.length ?? 0) > 0) && (
+            <Button variant="outline" size="sm" className="ml-auto" disabled={resetNav.isPending}
+              onClick={() => { if (confirm('คืนค่าการจัดเมนูเป็นค่าเริ่มต้น? จะแสดงทุกเมนูและใช้ลำดับหมวดเดิม (ไม่กระทบการเปิด/ปิดโมดูล) — มีผลกับทุกคน')) resetNav.mutate(); }}>
+              <RotateCcw className="size-4" /> รีเซ็ตการจัดเมนู
+            </Button>
+          )}
         </div>
       </Card>
 
