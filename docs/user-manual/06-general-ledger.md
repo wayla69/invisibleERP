@@ -94,6 +94,20 @@ only** — you can never see or change another company's chart, and curating **n
 posting** (the account still exists in the engine). You may only curate an account **that
 already exists** in the master chart.
 
+**In the app.** On the **ผังบัญชี** tab of `/accounting`, a `gl_coa` user sees per-row editing
+controls (a blue note reminds you these tune presentation only — they never change the master
+code or a posting). Each change saves immediately and the list refreshes; a user without
+`gl_coa` sees the same tab **read-only**.
+
+| Action | How | Effect |
+|---|---|---|
+| **Rename (EN / TH)** | Row **pencil** → edit **ชื่อบัญชี (อังกฤษ)** / **ชื่อบัญชี (ไทย)** → **บันทึก**. Blank = fall back to the standard name. | The display name on your chart and every account picker. |
+| **Set group** | Same dialog → **กลุ่ม (หัวข้อในผัง)**. Blank = use the account type. | The section heading the account is grouped under. |
+| **Turn on / off** | Row **power** icon. | Off = hidden from the default chart and pickers; it stays visible here (struck through, *ปิดใช้งาน* badge) so you can turn it back on. An account with activity always stays on your reports. |
+| **Re-order** | Row **↑ / ↓** arrows. | Moves the account up or down the chart order. |
+
+Creating or removing a **master code** is not offered here — see level 2 below.
+
 **2 · Add or change a master account — permission `gl_coa` **and** the platform *Admin* (HQ) role.**
 The master account list (the *code · type · normal balance*) is a **single shared list** used
 by every company on the platform, so creating a brand-new code, renaming the master account,

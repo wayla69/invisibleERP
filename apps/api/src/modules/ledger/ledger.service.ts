@@ -107,7 +107,7 @@ export class LedgerService {
   // Tenant-aware Chart of Accounts. Default = the tenant's curated industry chart (active overlay rows,
   // industry names/order). `all=true` (or a tenant with no overlay, e.g. legacy/HQ) ⇒ the full canonical
   // universe (so a user can still post to any account outside their template). NEVER used to gate postings.
-  async listAccounts(opts?: { all?: boolean; tenantId?: number | null }) {
+  async listAccounts(opts?: { all?: boolean; tenantId?: number | null; includeInactive?: boolean }) {
     const db = this.db;
     const tid = resolveTenantId(opts?.tenantId ?? null);
     const canon = await db.select().from(accounts).orderBy(accounts.code);
@@ -115,8 +115,10 @@ export class LedgerService {
     const overlay = await db.select().from(tenantAccounts).where(eq(tenantAccounts.tenantId, tid));
     if (!overlay.length) return { accounts: canon, count: canon.length, source: 'canonical' };
     const byCode = new Map<string, any>(canon.map((a: any) => [a.code, a]));
+    // The default read hides curated-off rows (presentation); `includeInactive` keeps them so a gl_coa
+    // manager can see and re-activate an account they previously toggled off (GL-11 curation UI).
     const merged = overlay
-      .filter((o: any) => o.active !== false)
+      .filter((o: any) => opts?.includeInactive || o.active !== false)
       .map((o: any) => {
         const a = byCode.get(o.accountCode);
         return {
@@ -127,7 +129,7 @@ export class LedgerService {
           parentCode: a?.parentCode ?? null,
           group_label: o.groupLabel ?? a?.type ?? null,
           currency: a?.currency ?? 'THB',
-          active: 'true',
+          active: o.active !== false,
           sort_order: Number(o.sortOrder ?? 0),
         };
       })

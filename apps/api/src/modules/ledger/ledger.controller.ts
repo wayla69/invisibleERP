@@ -88,10 +88,17 @@ export class LedgerController {
 
   // Tenant's curated industry chart by default; `?all=true` returns the full canonical universe.
   // `gl_coa` is added to the class perms so a CoA maintainer (e.g. FinancialController) can read the chart
-  // they curate via PATCH /api/ledger/accounts/:code/overlay (CoaController owns only the write surfaces).
+  // they curate via `PATCH /api/ledger/accounts/:code/overlay` (CoaController owns the write surfaces).
+  // `?include_inactive=true` also keeps curated-off (active=false) overlay rows so a curator can see and
+  // re-activate them (the default read hides them, as before).
   @Get('accounts')
   @Permissions('exec', 'creditors', 'ar', 'gl_coa')
-  accounts(@Query('all') all?: string) { return this.svc.listAccounts({ all: all === 'true' || all === '1' }); }
+  accounts(@Query('all') all?: string, @Query('include_inactive') includeInactive?: string) {
+    return this.svc.listAccounts({
+      all: all === 'true' || all === '1',
+      includeInactive: includeInactive === 'true' || includeInactive === '1',
+    });
+  }
 
   // ── multi-ledger / multi-GAAP ──
   @Get('ledgers')
