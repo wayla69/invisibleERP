@@ -81,7 +81,7 @@ export class DocAiService {
         system: EXTRACT_SYSTEM,
         messages: [{ role: 'user', content: [block, { type: 'text', text: 'Extract the invoice fields from this document.' }] }],
       });
-      const out = (res.content as any[]).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      const out = (res.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
       try { return { fields: JSON.parse(out), source: 'ai', text: '' }; } catch { return { fields: this.emptyFields(), source: 'none', text: '' }; }
     } catch {
       return { fields: this.emptyFields(), source: 'none', text: '' };

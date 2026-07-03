@@ -20,7 +20,7 @@ const RUNNER_UP_GAP = 15;  // and no near-tie with the second-best PO
 
 // Upload channel: accepted document types + data-URL size caps (chars ≈ bytes × 4/3). The image cap
 // stays under Claude's 5 MB per-image limit; the PDF cap keeps an inline-in-DB fallback row sane.
-const UPLOAD_MIME = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
+const UPLOAD_MIME: readonly string[] = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
 const MAX_DATAURL: Record<string, number> = { 'application/pdf': 12_000_000 }; // default (images) below
 const MAX_DATAURL_DEFAULT = 6_500_000;
 
@@ -29,7 +29,7 @@ type PoCandidate = { po_no: string; vendor_name: string | null; total_amount: nu
 // A vendor invoice may reference any APPROVED PO regardless of receipt progress — a fully-received PO is
 // auto-'Closed' (procurement.service) and that is exactly when the invoice usually arrives. Only
 // unapproved (Draft/Pending, EXP-03) and Cancelled POs are unmappable.
-const MAPPABLE_PO_STATUS = ['Approved', 'Received', 'Closed'];
+const MAPPABLE_PO_STATUS = ['Approved', 'Received', 'Closed'] as const;
 
 @Injectable()
 export class ApIntakeService {
@@ -63,7 +63,7 @@ export class ApIntakeService {
     }
     const ext = await this.docAi.extractInvoiceDocument({ media_type: mime, data: m[2]! }, user);
     return this.receive({
-      fields: ext.fields, source: ext.source, rawText: (ext as any).text || null,
+      fields: ext.fields, source: ext.source, rawText: ext.text || null,
       file: { name: (dto.file_name ?? 'document').slice(0, 200), mime, dataUrl: dto.data_url },
     }, user);
   }
@@ -121,7 +121,7 @@ export class ApIntakeService {
     const it = await this.load(intakeNo);
     const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
     if (!po) throw new NotFoundException({ code: 'PO_NOT_FOUND', message: `PO ${poNo} not found`, messageTh: 'ไม่พบ PO' });
-    if (!MAPPABLE_PO_STATUS.includes(String(po.status))) {
+    if (!(MAPPABLE_PO_STATUS as readonly string[]).includes(String(po.status))) {
       throw new BadRequestException({ code: 'PO_NOT_APPROVED', message: `PO ${poNo} is ${po.status} — map to an approved PO`, messageTh: 'PO ยังไม่อนุมัติ' });
     }
     const vals: any = { poNo, mapMethod: 'manual', mapConfidence: '100', vendorId: po.vendorId ?? it.vendorId ?? null };
@@ -146,7 +146,7 @@ export class ApIntakeService {
     const poNo = opts.po_no ?? it.poNo ?? null;
     const dupOf = it.dupOf ?? (await this.findDuplicate(it.invoiceNo, it.vendorName, it.tenantId ?? null, it.intakeNo));
     if (dupOf && !opts.allow_duplicate) {
-      throw new ConflictException({ code: 'DUPLICATE_INVOICE', message: `Invoice ${it.invoiceNo} already booked via ${dupOf}`, messageTh: `ใบแจ้งหนี้เลขนี้ถูกบันทึกแล้ว (${dupOf})`, dup_of: dupOf } as any);
+      throw new ConflictException({ code: 'DUPLICATE_INVOICE', message: `Invoice ${it.invoiceNo} already booked via ${dupOf}`, messageTh: `ใบแจ้งหนี้เลขนี้ถูกบันทึกแล้ว (${dupOf})`, dup_of: dupOf });
     }
     const bill = await this.finance.createApTxn({
       vendor_id: it.vendorId != null ? Number(it.vendorId) : undefined, vendor_name: it.vendorName ?? undefined,
@@ -186,7 +186,7 @@ export class ApIntakeService {
     const db = this.db;
     if (inp.poNo) {
       const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.poNo, inp.poNo.trim())).limit(1);
-      if (po && MAPPABLE_PO_STATUS.includes(String(po.status))) {
+      if (po && (MAPPABLE_PO_STATUS as readonly string[]).includes(String(po.status))) {
         return { poNo: po.poNo, method: 'po_number', confidence: 100, vendorId: po.vendorId != null ? Number(po.vendorId) : null, vendorName: inp.vendorName ?? po.vendorName ?? null, candidates: [] as PoCandidate[] };
       }
     }
@@ -199,7 +199,7 @@ export class ApIntakeService {
       const hit = vrows.find((v: any) => String(v.taxId ?? '').replace(/\D/g, '') === want);
       if (hit) { vendorId = Number(hit.id); vendorName = hit.name; }
     }
-    const open = await db.select().from(purchaseOrders).where(inArray(purchaseOrders.status, MAPPABLE_PO_STATUS as any)).orderBy(desc(purchaseOrders.id)).limit(200);
+    const open = await db.select().from(purchaseOrders).where(inArray(purchaseOrders.status, [...MAPPABLE_PO_STATUS])).orderBy(desc(purchaseOrders.id)).limit(200);
     const norm = (s: string | null | undefined) => (s ?? '').toLowerCase().replace(/[^a-z0-9ก-๙]/g, '');
     const iv = norm(vendorName);
     const candidates: PoCandidate[] = open.map((po: any) => {
