@@ -12,6 +12,7 @@ on:
 jobs:
   set-cors:
     runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN is an environment secret (same binding as deploy.yml)
     steps:
       - name: Resolve web domain, set CORS_ORIGINS, redeploy API
         env:
