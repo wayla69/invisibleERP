@@ -170,7 +170,10 @@ export class ProcurementService {
   // Draft/Cancelled (a committed-buy view). Read-only aggregate; purchase_orders is company-wide.
   async purchaseSpend(_user: JwtUser, opts?: { period?: string }) {
     const db = this.db;
-    const period = /^\d{4}-\d{2}$/.test(opts?.period ?? '') ? opts!.period! : new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 7);
+    // Harden against parameter tampering: a query param can arrive as an array (?period=a&period=b), so
+    // coerce to a string BEFORE the regex/slice — only a well-formed 'YYYY-MM' is honoured, else this month.
+    const rawPeriod = typeof opts?.period === 'string' ? opts.period : '';
+    const period = /^\d{4}-\d{2}$/.test(rawPeriod) ? rawPeriod : new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 7);
     // [firstDay, nextMonthFirst) window on po_date (typed date-string bounds — portable across pg/PGlite,
     // no enum-in-text or cast/like). notInArray keeps only committed buys (excludes Draft/Cancelled).
     const y = Number(period.slice(0, 4)), m = Number(period.slice(5, 7));
