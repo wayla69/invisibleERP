@@ -114,6 +114,15 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 - **Railway healthcheck window** is `healthcheckTimeout: 300`s on both `apps/api/railway.json` and
   `apps/web/railway.json` — generous headroom for a cold start / DB-pool warm-up so a slow (not broken)
   boot is not marked failed. Bumped from 60s on 2026-07-03.
+- **Scheduled workflows (external cron — the API has no in-process scheduler).** These run on GitHub's
+  cron and authenticate as a service account, so configure their `vars.PROD_API_URL` + `secrets.SWEEP_USER`
+  / `SWEEP_PASS` at the **repository** level (not the gated `production` Environment, or they'd wait on
+  required reviewers and never run). Each no-ops with a warning until configured.
+  - `loyalty-maintenance.yml` — daily points expiry + liability re-accrual (all tenants).
+  - `bi-scheduler.yml` — daily `POST /api/bi/subscriptions/run-async`, firing every **due** report/action
+    subscription (`ar_collections_dunning`, `gl_recurring_journals`, `gl_prepaid_amortize`,
+    `lease_periodic_run`, `eam_pm_generate`, `ap_automatch_rerun`, …). Create a `daily` subscription of a
+    type to opt that tenant in; nothing fires otherwise.
 
 ## 6. Revision history
 | Version | Date | Author | Notes |
@@ -123,5 +132,5 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
 | 1.3 | 2026-07-02 | Platform | §4: `REALTIME_REDIS_URL` requirement for multi-replica deploys — shared `realtime-bus.ts` (Redis pub/sub) behind both SSE buses (docs/27 R1-3). |
 | 1.4 | 2026-07-03 | Platform | §2A: `preDeployCommand` split — `db:sync-catalog` (guardless idempotent permission-catalog sync, new `src/database/sync-catalog.ts`) replaces `db:seed` per release; full `db:seed` is now a gated **first-boot-only** manual step (R0-3 `ALLOW_PROD_SEED=1` + `SEED_ADMIN_PASSWORD`). Root cause of the post-R0-3 prod-deploy failures (seed guard fired inside the pipeline). |
-| 1.5 | 2026-07-03 | Platform | §5: post-deploy smoke now runs a self-resolving liveness (`/healthz`) + **readiness (`/readyz`, DB-reachable)** floor on every deploy (no silent skip — `PROD_API_URL` falls back to the invisibleERP `RAILWAY_PUBLIC_DOMAIN`), authed coverage optional via `SMOKE_USER`/`SMOKE_PASS`; Railway `healthcheckTimeout` bumped 60s → 300s on both services. |
+| 1.5 | 2026-07-03 | Platform | §5: post-deploy smoke now runs a self-resolving liveness (`/healthz`) + **readiness (`/readyz`, DB-reachable)** floor on every deploy (no silent skip — `PROD_API_URL` falls back to the invisibleERP `RAILWAY_PUBLIC_DOMAIN`), authed coverage optional via `SMOKE_USER`/`SMOKE_PASS`; Railway `healthcheckTimeout` bumped 60s → 300s on both services. New scheduled workflow `bi-scheduler.yml` — the daily external trigger for the report/action subscription scheduler (`ap_automatch_rerun` et al.); the API has no in-process scheduler. |
 | 1.3 | 2026-07-01 | Platform | Link the multi-tenant "link-per-customer" onboarding runbook (`multi-tenant-subdomain-runbook.md`) — shared-deployment subdomain model (RLS-isolated) vs dedicated, tenant provisioning, wildcard DNS/TLS + cookie/CORS, and per-customer cost model. |
