@@ -87,6 +87,15 @@ For every such change, review and update as needed:
   re-created idempotently inside 0218). See `docs/ops/drizzle-migration-debt.md` §3bis.
 - **CI runner pnpm version comes from `package.json` `packageManager` (pnpm@11.8.0).** Do **not** also pin
   `version:` in `pnpm/action-setup` — the two conflict (`ERR_PNPM_BAD_PM_VERSION`) and break every job.
+- **Railway service config comes from the checked-in `apps/api/railway.json`, not the dashboard.** The
+  `fileServiceManifest` re-applies `deploy.preDeployCommand`/`startCommand` on **every** deploy, so patching
+  the service instance via the dashboard or the GraphQL API is overwritten by the next deploy — fix the
+  file. Pre-deploy runs `db:migrate && db:sync-catalog` (catalog upserts are guardless + idempotent);
+  the full `db:seed` (admin/tenant creation) stays a manual, R0-3-gated first-boot step
+  (`ALLOW_PROD_SEED=1`). Root cause of the 2026-07-03 "every deploy FAILED at pre-deploy" phase (#359).
+- **Railway's GraphQL edge 403s the default `python-urllib` User-Agent.** An ops job calling
+  `backboard.railway.app/graphql/v2` from python stdlib gets `HTTP 403` while the same token works via
+  `curl` (see `ops-railway-diag.yml`) and the CLI. Use curl+jq in ops workflows, or set a browser-ish UA.
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
   GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
   Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
