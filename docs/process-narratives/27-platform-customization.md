@@ -20,7 +20,7 @@ This is an **umbrella narrative** for the cross-cutting *platform-customization*
 
 ## 3. Scope
 
-**In scope:** the twenty-two platform-customization capabilities (§7). **Out of scope:** the financially-significant business cycles they extend (see the per-feature cross-references), and the global, code-governed **module on/off** feature flags (`module_configs`, a platform-wide switch — see `08-itgc.md` / user manual §11.3).
+**In scope:** the twenty-two platform-customization capabilities (§7). **Out of scope:** the financially-significant business cycles they extend (see the per-feature cross-references). *(Note: the **module on/off** feature flags, formerly a global `module_configs` switch, became a **per-tenant** control in migration `0231` and are now covered here as part of capability #24 / `tenant_ui_config` — see §7.24.)*
 
 ## 4. References
 
@@ -133,11 +133,19 @@ Each entry: **what it does · endpoint(s) · permission · storage/migration · 
     {scope, order[]}` (item order within one container), and `POST /api/admin/modules/nav-reset` (clears all
     visibility overrides + all ordering back to defaults — leaves the module on/off flags untouched); `GET
     /api/modules/effective` returns `navDisabled` + `groupOrder` + `itemOrder` so every client hides/orders consistently.
-    Perm `users`. Presentation-only — **no GL**, changes **no** data-access path. *This is the softer sibling of the
-    code-governed **module on/off** flags (§3 / user manual §11.3): menu-hide only declutters, module-off is
-    the enforced control that also blocks the API. Verified by the `module-qr` cutover harness (+7: hide →
-    `navDisabled`, hides-for-all via `effective`, visibility-≠-permission, lockout-critical skip, re-show).
-    No new RCM control (UI customization).*
+    Perm `users` (writes); reads are authenticated-only. **Per-tenant since migration `0231`:** everything above —
+    module on/off, hidden menus, and category/item order — is stored **per tenant** in `tenant_ui_config` (one JSON
+    blob per tenant, `{modulesOff, hidden, groupOrder, itemOrder}`), so each company configures its **own** sidebar
+    and module set with **no** effect on other tenants; the earlier global `module_configs`/`nav_group_order` rows
+    were backfilled into every tenant on cutover (nothing reset). `tenant_ui_config` is a **global table filtered
+    explicitly by `tenant_id`** (NOT RLS) — deliberately, because `ModuleEnabledGuard` reads the disabled-module set
+    **before** the per-request RLS transaction (guards precede the tenant-tx interceptor), so an RLS policy would
+    return zero rows there and silently break enforcement; explicit filtering is the same pattern the notification
+    inbox uses for the same reason. The guard now scopes its `403 MODULE_DISABLED` to the **caller's tenant**.
+    Presentation/config only — **no GL**. *Menu-hide/order = usability chrome; module-off is the enforced control that
+    blocks the API (now per tenant). Verified by the `module-qr` cutover harness incl. **cross-tenant isolation**
+    (tenant A disables a module / hides a menu → tenant B is unaffected). No new RCM control (per-tenant UI + access
+    configuration; isolation is code-enforced by explicit tenant filtering + covered by the harness).*
 
 ## 8. Process flow
 
@@ -223,4 +231,5 @@ Per-feature validation codes are consolidated here (all `400` unless noted): UDF
 | 1.2 DRAFT | 2026-07-03 | Web | Added capability #24 — **menu visibility overrides**: a tenant admin hides individual sidebar entries / sub-sections / whole categories from everyone's nav (Settings→Modules, perm `users`). Stored in the existing global `module_configs` under a `nav:<href>` namespace (**no migration**); chrome-only — the permission guard ignores `nav:` rows, so it never blocks an API (softer sibling of the module on/off flags). The same screen renames + groups the module flags in Thai and shows, per module, which menus it controls (computed from `nav.ts`). `/settings` + `/admin/users` are un-hidable (lockout guard). New endpoint `POST /api/admin/modules/nav`; `list`/`effective` add `navDisabled[]`. New §7.24; no new RCM control (UI customization). ToE: `module-qr` cutover harness +7 (29 total). User manual §11.3 + UAT `08-admin-sod-uat.md` (UAT-ADM-105/106) updated. |
 | 1.3 DRAFT | 2026-07-03 | Web | Extended capability #24 — **system-wide sidebar category ordering**: an admin arranges nav groups (หมวด) by importance (▲/▼) in Settings→Menu; the order applies to **everyone's** sidebar + ⌘K palette (groups render by ascending `sort_order`; unknown/new groups fall back to code order). New global table `nav_group_order` (migration **0230**, no RLS — presentation-only, no GL). New endpoint `POST /api/admin/modules/nav-order {order[]}` (full-replace); `list`/`effective` add `groupOrder[]`. §7.24 updated; no new RCM control (UI customization). ToE: `module-qr` +4 (33 total). User manual §3.1 + UAT `08-admin-sod-uat.md` (UAT-ADM-108) updated. |
 | 1.4 DRAFT | 2026-07-03 | Web | Capability #24 polish: (a) the **⌘K command palette now follows the same admin-curated category order** as the sidebar (previously only the sidebar was ordered — code now matches the §7.24 narrative); (b) a **“รีเซ็ตการจัดเมนู” reset** (`POST /api/admin/modules/nav-reset`) clears all visibility overrides + the category order back to defaults, **leaving the module on/off flags untouched** (menu arrangement only). No schema change; no new RCM control. ToE: `module-qr` +3 (36 total). User manual §3.1 (steps 3–4) updated + UAT `08-admin-sod-uat.md` (UAT-ADM-109). |
+| 1.6 DRAFT | 2026-07-03 | Platform | Capability #24 goes **per-tenant (SaaS)**: module on/off + hidden menus + category/item order now live **per tenant** in a new `tenant_ui_config` JSON blob (migration **0231**), so each company configures its own sidebar + module set with no cross-tenant effect; global `module_configs`/`nav_group_order` rows backfilled into every tenant (nothing reset). `tenant_ui_config` is a **global table filtered explicitly by `tenant_id`** (not RLS) because `ModuleEnabledGuard` reads before the per-request RLS tx — RLS would silently break enforcement (notification-inbox pattern). Guard `403`s now scope to the caller's tenant. Backend-only (API shapes unchanged → web untouched). ToE: `module-qr` +4 (43 total) incl. **cross-tenant isolation**. §3 + §7.24 updated, user manual §3, UAT `08-admin-sod-uat.md` (UAT-ADM-111). No new RCM control (isolation code-enforced + harness-covered). |
 | 1.5 DRAFT | 2026-07-03 | Web | Capability #24 depth: (a) **item-level ordering** — reorder the menus **within** a category/sub-section, not just the categories; stored in the same `nav_group_order` table under an `item:<scope>\|<href>` namespace (no migration), returned as `itemOrder` from `list`/`effective` and applied by the sidebar + ⌘K palette. (b) **drag-and-drop** (⋮⋮ handle) for both categories and menu items, alongside the ▲/▼ buttons. (c) a **search box** filters the tree. New endpoint `POST /api/admin/modules/nav-item-order {scope, order[]}`; group-order and item-order are independent namespaces in one table. No schema change; no new RCM control. ToE: `module-qr` +3 (39 total). User manual §3.1 (steps 3–5) + UAT `08-admin-sod-uat.md` (UAT-ADM-110). |

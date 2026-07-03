@@ -27,36 +27,36 @@ export class ModuleConfigController {
   constructor(private readonly svc: ModuleConfigService) {}
 
   @Get()
-  list() {
-    return this.svc.list();
+  list(@CurrentUser() u: JwtUser) {
+    return this.svc.list(u.tenantId);
   }
 
   @Post()
   set(@Body(new ZodValidationPipe(SetModuleBody)) b: SetModuleBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.setFlag(b.key, b.enabled, u);
+    return this.svc.setFlag(u.tenantId, b.key, b.enabled, u);
   }
 
-  // Show/hide sidebar menu entries (does not disable the module/permission — visibility only).
+  // Show/hide sidebar menu entries for this tenant (does not disable the module/permission — visibility only).
   @Post('nav')
   setNav(@Body(new ZodValidationPipe(SetNavBody)) b: SetNavBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.setNavFlags(b.hrefs, b.enabled, u);
+    return this.svc.setNavFlags(u.tenantId, b.hrefs, b.enabled, u);
   }
 
-  // Reorder sidebar categories system-wide (full ordered list of nav-group keys). Visibility/chrome only.
+  // Reorder this tenant's sidebar categories (full ordered list of nav-group keys). Visibility/chrome only.
   @Post('nav-order')
   setNavOrder(@Body(new ZodValidationPipe(SetNavOrderBody)) b: SetNavOrderBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.setGroupOrder(b.order, u);
+    return this.svc.setGroupOrder(u.tenantId, b.order, u);
   }
 
   // Reorder the menu items within one category / sub-section (presentation only).
   @Post('nav-item-order')
   setNavItemOrder(@Body(new ZodValidationPipe(SetNavItemOrderBody)) b: SetNavItemOrderBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.setItemOrder(b.scope, b.order, u);
+    return this.svc.setItemOrder(u.tenantId, b.scope, b.order, u);
   }
 
   // Reset menu arrangement (show all menus + default category order). Leaves module on/off flags untouched.
   @Post('nav-reset')
   resetNav(@CurrentUser() u: JwtUser) {
-    return this.svc.resetNav(u);
+    return this.svc.resetNav(u.tenantId, u);
   }
 }

@@ -171,9 +171,22 @@ export const moduleConfigs = pgTable('module_configs', {
 // System-wide sidebar CATEGORY ordering (admin-curated). Global (no tenant_id → no RLS), like
 // module_configs: an admin arranges nav groups by importance and every user's sidebar renders groups by
 // ascending sort_order. Groups absent here fall back to their code order. Presentation-only (migration 0230).
+// LEGACY as of 0231 — superseded by tenant_ui_config (kept only for the 0231 backfill).
 export const navGroupOrder = pgTable('nav_group_order', {
   groupKey: text('group_key').primaryKey(),
   sortOrder: integer('sort_order').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  updatedBy: text('updated_by'),
+});
+
+// PER-TENANT menu & module customization (migration 0231): each tenant configures its own module on/off,
+// hidden menus, and category/item order. A GLOBAL table (no RLS) that is logically tenant-scoped — like
+// `notifications`, EVERY query filters by tenant_id explicitly, because ModuleEnabledGuard reads the
+// disabled-module set outside the per-request RLS tx (an RLS policy would return nothing there and silently
+// break enforcement). One JSON blob per tenant: {modulesOff, hidden, groupOrder, itemOrder}.
+export const tenantUiConfig = pgTable('tenant_ui_config', {
+  tenantId: bigint('tenant_id', { mode: 'number' }).primaryKey().references(() => tenants.id),
+  config: jsonb('config').notNull().default({}),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   updatedBy: text('updated_by'),
 });
